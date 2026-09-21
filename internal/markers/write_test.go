@@ -150,3 +150,79 @@ func TestCanWriteMarkerUpdatePreservesSourcePriority(t *testing.T) {
 		t.Fatal("manual edits must allow corrections at unchanged confidence")
 	}
 }
+
+// A kind can occur more than once. An update that keeps the first occurrence but
+// changes a later one is a real correction, not a no-op, so the equal-confidence
+// path has to compare the whole range set.
+func TestCanWriteMarkerUpdateComparesEveryOccurrence(t *testing.T) {
+	confidence := new(0.9)
+	ranges := func(bounds ...[2]float64) []models.MarkerSegment {
+		out := make([]models.MarkerSegment, 0, len(bounds))
+		for _, bound := range bounds {
+			out = append(out, models.MarkerSegment{Kind: models.MarkerSegmentIntro, StartSeconds: bound[0], EndSeconds: bound[1]})
+		}
+		return out
+	}
+	payload := func(source string, bounds ...[2]float64) SegmentPayload {
+		segments := ranges(bounds...)
+		return SegmentPayload{Start: new(bounds[0][0]), End: new(bounds[0][1]), Ranges: segments,
+			Source: source, Confidence: confidence, Algorithm: "chapter:v1"}
+	}
+
+	existing := payload(models.MarkerSourceScanner, [2]float64{10, 40}, [2]float64{100, 130})
+
+	movedLaterRange := payload(models.MarkerSourceScanner, [2]float64{10, 40}, [2]float64{500, 540})
+	if !CanWriteMarkerUpdate(existing, movedLaterRange) {
+		t.Error("a corrected second occurrence at unchanged confidence was rejected")
+	}
+
+	withdrawnLaterRange := payload(models.MarkerSourceScanner, [2]float64{10, 40})
+	if !CanWriteMarkerUpdate(existing, withdrawnLaterRange) {
+		t.Error("a withdrawn second occurrence at unchanged confidence was rejected")
+	}
+
+	addedLaterRange := payload(models.MarkerSourceScanner, [2]float64{10, 40}, [2]float64{100, 130}, [2]float64{700, 730})
+	if !CanWriteMarkerUpdate(existing, addedLaterRange) {
+		t.Error("an added third occurrence at unchanged confidence was rejected")
+	}
+
+	identical := payload(models.MarkerSourceScanner, [2]float64{10, 40}, [2]float64{100, 130})
+	if CanWriteMarkerUpdate(existing, identical) {
+		t.Error("an identical equal-confidence update should stay a no-op")
+	}
+
+	withinTolerance := payload(models.MarkerSourceScanner, [2]float64{10.4, 40.4}, [2]float64{100.4, 130.4})
+	if CanWriteMarkerUpdate(existing, withinTolerance) {
+		t.Error("sub-half-second drift should count as the same occurrence")
+	}
+}
+
+// Ranges are compared in source order, so a payload whose ranges arrive
+// unsorted must not read as a change against the same set in order.
+func TestCanWriteMarkerUpdateSortsRangesBeforeComparing(t *testing.T) {
+	confidence := new(0.7)
+	existing := SegmentPayload{
+		Start: new(10.0), End: new(40.0), Source: models.MarkerSourceS3, Confidence: confidence,
+		Ranges: []models.MarkerSegment{
+			{Kind: models.MarkerSegmentCredits, StartSeconds: 10, EndSeconds: 40},
+			{Kind: models.MarkerSegmentCredits, StartSeconds: 900, EndSeconds: 950},
+		},
+	}
+	unsorted := existing
+	unsorted.Ranges = []models.MarkerSegment{
+		{Kind: models.MarkerSegmentCredits, StartSeconds: 900, EndSeconds: 950},
+		{Kind: models.MarkerSegmentCredits, StartSeconds: 10, EndSeconds: 40},
+	}
+	if CanWriteMarkerUpdate(existing, unsorted) {
+		t.Error("the same occurrence set in a different order should stay a no-op")
+	}
+
+	// Equal confidence on an unranked source: only a real range change applies.
+	changed := unsorted
+	changed.Ranges = []models.MarkerSegment{
+		{Kind: models.MarkerSegmentCredits, StartSeconds: 900, EndSeconds: 950},
+	}
+	if !CanWriteMarkerUpdate(existing, changed) {
+		t.Error("an equal-confidence ranged source could not withdraw an occurrence")
+	}
+}

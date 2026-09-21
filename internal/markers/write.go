@@ -58,11 +58,54 @@ func CanWriteMarkerUpdate(existing, incoming SegmentPayload) bool {
 		if incoming.Algorithm != existing.Algorithm {
 			return nextRank == 0
 		}
-		return existing.Start != nil && existing.End != nil && incoming.Start != nil && incoming.End != nil &&
-			(math.Abs(*existing.Start-*incoming.Start) > 0.5 || math.Abs(*existing.End-*incoming.End) > 0.5)
+		return !sameMarkerRanges(existing, incoming)
 	default:
-		return confidenceGreater(incoming.Confidence, existing.Confidence)
+		if confidenceGreater(incoming.Confidence, existing.Confidence) {
+			return true
+		}
+		if confidenceGreater(existing.Confidence, incoming.Confidence) {
+			return false
+		}
+		return !sameMarkerRanges(existing, incoming)
 	}
+}
+
+// markerRangeTolerance is the largest bound difference that still counts as the
+// same occurrence. Provider and detector timestamps are second-resolution but
+// arrive through floats, so sub-half-second noise is not a change.
+const markerRangeTolerance = 0.5
+
+// sameMarkerRanges reports whether two payloads describe the same occurrences.
+// A kind can occur several times, so an equal-confidence update is only
+// redundant when every range matches: comparing just the first occurrence (the
+// pre-multi-occurrence behavior, where the singular bounds were the whole
+// answer) discards corrections to any later range and rejects the withdrawal of
+// a range that no longer starts first.
+//
+// A payload that carries only singular bounds is compared as one range, which
+// keeps rows and callers written before multi-occurrence support comparable.
+func sameMarkerRanges(existing, incoming SegmentPayload) bool {
+	existingRanges := comparableMarkerRanges(existing)
+	incomingRanges := comparableMarkerRanges(incoming)
+	if len(existingRanges) != len(incomingRanges) {
+		return false
+	}
+	for index := range existingRanges {
+		if math.Abs(existingRanges[index].StartSeconds-incomingRanges[index].StartSeconds) > markerRangeTolerance ||
+			math.Abs(existingRanges[index].EndSeconds-incomingRanges[index].EndSeconds) > markerRangeTolerance {
+			return false
+		}
+	}
+	return true
+}
+
+func comparableMarkerRanges(payload SegmentPayload) []models.MarkerSegment {
+	ranges := slices.Clone(payload.Ranges)
+	if len(ranges) == 0 && payload.Start != nil && payload.End != nil {
+		ranges = []models.MarkerSegment{{StartSeconds: *payload.Start, EndSeconds: *payload.End}}
+	}
+	sort.SliceStable(ranges, func(i, j int) bool { return ranges[i].StartSeconds < ranges[j].StartSeconds })
+	return ranges
 }
 
 func scannerAlgorithmPriority(algorithm string) int {
