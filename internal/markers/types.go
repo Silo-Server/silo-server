@@ -13,7 +13,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-const settingEnabled = "true"
+const (
+	settingEnabled  = "true"
+	settingDisabled = "false"
+)
 
 const (
 	SettingMode          = "markers.mode"
@@ -478,7 +481,7 @@ func NormalizeSetting(key, value string) (string, error) {
 		return normalized, nil
 	case SettingLazyPlayback:
 		normalized := strings.ToLower(strings.TrimSpace(value))
-		if normalized != settingEnabled && normalized != "false" {
+		if normalized != settingEnabled && normalized != settingDisabled {
 			return "", fmt.Errorf("%w: %s must be true or false", ErrInvalidSetting, SettingLazyPlayback)
 		}
 		return normalized, nil
