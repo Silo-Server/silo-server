@@ -6,6 +6,38 @@ access policy. Reads require authentication. Writes also require `marker_edit`
 permission and pass the demo and viewer-access gates. Profile context remains
 optional; supplying a profile applies its access restrictions.
 
+## Provider modes and storage
+
+New installations include TheIntroDB and default to online markers with local
+storage. The setup wizard offers an opt-out before any automatic online lookup;
+existing installations retain their configured marker mode. `markers.mode`
+continues to accept `off`, `local`, `online`, and `both`. Local detection requires
+the library's existing opt-in.
+
+`markers.online_storage` chooses how online results are used:
+
+- `stored` persists markers and enables the daily **Sync Online Markers** task.
+  Sync checks unqueried files before refreshing previous results. Successful
+  responses are fresh for seven days; empty results are retried after one day.
+  `markers.lazy_playback` also allows reads and playback to fill missing markers.
+- `on_demand` looks up markers for the selected file and keeps a bounded,
+  fifteen-minute memory cache. It does not persist provider responses or run
+  background synchronization. Request leases, failures, and quota cooldowns are
+  still shared through the database. Previously stored markers remain available.
+
+Both paths honor provider priority, manual edits, and provider quota limits.
+Replicas coordinate fetches with expiring database leases. File replacement or
+rematching invalidates derived markers; a result fetched for the previous file
+identity cannot overwrite the new one. Successful provider refreshes can correct
+or withdraw that provider's existing ranges.
+
+`POST /api/v2/admin/items/{id}/refresh-markers` explicitly refreshes an episode
+from its configured sources. In `both` mode, eligible local detection fills
+missing intro or credits markers. The existing v1 refresh endpoint retains its
+local-only behavior.
+
+## Operations
+
 | Method | Path | Operation |
 | --- | --- | --- |
 | GET | `/api/v2/markers/files/{file_id}` | `getFileMarkers` |
@@ -22,6 +54,19 @@ in source-file seconds. Provenance fields (`source`, `provider`, `confidence`,
 `algorithm`, `detected_at`) are omitted when absent. Timestamps use the shared v2
 instant format.
 
+Responses also include `marker_segments`, an array of every effective marker
+occurrence in source-time order. Each entry has `kind` (`intro`, `credits`,
+`recap`, or `preview`), `start_seconds`, and `end_seconds`. The array is empty
+when no markers exist. Several entries may have the same kind; clients must
+treat them as separate ranges and must not skip the gaps between them. The
+four singular objects remain available as compatibility projections. Files
+with only legacy markers contribute those ranges to the collection.
+
+The playback capability `marker_segments_v1` advertises collection support.
+The same collection appears on each file version in v2 watch detail. Reads may
+populate markers after access checks according to the configured provider mode;
+provider failures preserve the existing readable marker state.
+
 PUT accepts a partial update: omit a segment to leave it unchanged, send `null`
 to clear it, or send an object to set it. For example:
 
@@ -37,6 +82,11 @@ nonfinite boundaries, and an end at or before the start are rejected. Existing
 duration validation retains its one-second tolerance; an unknown duration cannot
 supply a default end.
 
+The existing manual fields address one kind at a time. Setting one replaces
+that kind's occurrences with the supplied range; clearing it removes every
+occurrence of that kind. Other kinds are unchanged. `marker_segments` is a
+read-only projection, not a PUT field.
+
 All supplied segments are validated before the shared writer commits the mixed
 set/clear update and its audit rows in one transaction. Audit identity comes from
 authenticated claims. Failed validation or audit insertion rolls back the update.
@@ -50,7 +100,6 @@ lost. A failed response can therefore follow a successful save. Read the current
 markers before deciding whether another user-directed update is needed.
 
 The legacy v1 adapter shares the manual writer path and retains its wire format.
-Jellyfin does not expose these manual editing routes. Native marker call sites
-were absent from the migration inventory; native playback lifecycle and delivery
-migration are separate work. The generated OpenAPI document is the authoritative
-v2 schema and error contract.
+Jellyfin does not expose these manual editing routes. Its MediaSegments response
+returns each occurrence separately, with credits represented as `Outro`.
+The generated OpenAPI document is the authoritative v2 schema and error contract.

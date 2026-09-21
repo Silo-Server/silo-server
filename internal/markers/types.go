@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -13,8 +14,16 @@ import (
 )
 
 const (
-	SettingMode         = "markers.mode"
-	SettingLazyPlayback = "markers.lazy_playback"
+	SettingMode          = "markers.mode"
+	SettingLazyPlayback  = "markers.lazy_playback"
+	SettingOnlineStorage = "markers.online_storage"
+)
+
+type OnlineStorage string
+
+const (
+	OnlineStorageStored   OnlineStorage = "stored"
+	OnlineStorageOnDemand OnlineStorage = "on_demand"
 )
 
 type Mode string
@@ -100,6 +109,9 @@ type Result struct {
 	ProviderID  string
 	Algorithm   string
 	Markers     []Marker
+	// RefreshedProviders includes successful misses, allowing the writer to
+	// remove obsolete ranges from those providers without clearing failed ones.
+	RefreshedProviders []string
 }
 
 type Marker struct {
@@ -111,7 +123,7 @@ type Marker struct {
 	SourceClass     string
 	// ProviderID and Algorithm identify the source of this individual marker.
 	// They are usually empty for a single-provider Result (the Result-level
-	// SourceClass/ProviderID/Algorithm apply); FetchMerged sets them per marker
+	// SourceClass/ProviderID/Algorithm apply); population sets them per marker
 	// so a merged result records correct per-segment provenance.
 	ProviderID string
 	Algorithm  string
@@ -294,108 +306,66 @@ func (r *Registry) SetProviders(providers []Provider) error {
 	return nil
 }
 
-func (r *Registry) FetchFirstHit(ctx context.Context, req Request) (Result, bool, error) {
-	providers := r.Providers()
-	if len(providers) == 0 {
-		return Result{}, false, nil
-	}
-
-	var lastErr error
-	for _, provider := range providers {
-		result, err := provider.FetchMarkers(ctx, req)
-		if err != nil {
-			lastErr = err
-			r.logProviderError(provider.ID(), req, err)
-			continue
-		}
-		if len(result.Markers) == 0 {
-			continue
-		}
-		if strings.TrimSpace(result.ProviderID) == "" {
-			result.ProviderID = provider.ID()
-		}
-		if strings.TrimSpace(result.SourceClass) == "" {
-			result.SourceClass = models.MarkerSourceOnline
-		}
-		return result, true, nil
-	}
-
-	return Result{}, false, lastErr
-}
-
-// UseConfigStore attaches a per-provider config store so FetchMerged consults
-// fetch_enabled / fetch_priority. Without one, all registered providers
-// participate in registration order.
+// UseConfigStore attaches the settings used for provider selection and priority.
+// Without one, all registered providers participate in registration order.
 func (r *Registry) UseConfigStore(store *ProviderConfigStore) {
 	if r != nil {
 		r.config = store
 	}
 }
 
-// FetchMerged queries every fetch-enabled provider concurrently and keeps, per
-// segment kind, the best candidate — ranked by provider fetch priority (lower
-// preferred), then submission count, then confidence, then provider id for
-// deterministic output. Submission count and confidence are provider-local
-// quality signals; explicit admin priority is the cross-provider winner rule.
-// The winning markers are stamped with source/provider/algorithm so the write
-// path records correct per-segment provenance. With a single enabled provider
-// this returns the same result as FetchFirstHit.
-func (r *Registry) FetchMerged(ctx context.Context, req Request) (Result, bool, error) {
-	if r == nil || len(r.Providers()) == 0 {
-		return Result{}, false, nil
-	}
+type providerResult struct {
+	entry     fetchEntry
+	result    Result
+	refreshed bool
+}
 
-	entries := r.fetchEntries()
-	if len(entries) == 0 {
-		return Result{}, false, nil
+// mergeProviderResults preserves every range from the winning provider for each
+// kind. Priority selects across providers; their quality signals break ties.
+func mergeProviderResults(results []providerResult) Result {
+	type candidate struct {
+		rank   mergeCandidate
+		ranges []Marker
 	}
-
-	type fetched struct {
-		entry  fetchEntry
-		result Result
-		err    error
-	}
-	out := make([]fetched, len(entries))
-	var wg sync.WaitGroup
-	for i, e := range entries {
-		wg.Add(1)
-		go func(i int, e fetchEntry) {
-			defer wg.Done()
-			res, err := e.provider.FetchMarkers(ctx, req)
-			out[i] = fetched{entry: e, result: res, err: err}
-		}(i, e)
-	}
-	wg.Wait()
-
-	best := make(map[MarkerKind]mergeCandidate)
-	var lastErr error
-	for _, f := range out {
-		if f.err != nil {
-			lastErr = f.err
-			r.logProviderError(f.entry.provider.ID(), req, f.err)
-			continue
+	best := make(map[MarkerKind]candidate)
+	merged := Result{SourceClass: models.MarkerSourceOnline}
+	for _, fetched := range results {
+		if fetched.refreshed {
+			merged.RefreshedProviders = append(merged.RefreshedProviders, fetched.entry.provider.ID())
 		}
-		for _, m := range f.result.Markers {
-			m.SourceClass = firstNonEmpty(m.SourceClass, f.result.SourceClass, models.MarkerSourceOnline)
-			m.ProviderID = firstNonEmpty(m.ProviderID, f.result.ProviderID, f.entry.provider.ID())
-			m.Algorithm = firstNonEmpty(m.Algorithm, f.result.Algorithm)
-			cand := mergeCandidate{marker: m, priority: f.entry.priority}
-			if cur, ok := best[m.Kind]; !ok || cand.better(cur) {
-				best[m.Kind] = cand
+		grouped := make(map[MarkerKind]candidate)
+		for _, m := range fetched.result.Markers {
+			if m.Kind < MarkerKindIntro || m.Kind > MarkerKindPreview || m.Start < 0 || m.End <= m.Start {
+				continue
+			}
+			m.SourceClass = firstNonEmpty(m.SourceClass, fetched.result.SourceClass, models.MarkerSourceOnline)
+			m.ProviderID = fetched.entry.provider.ID()
+			m.Algorithm = firstNonEmpty(m.Algorithm, fetched.result.Algorithm)
+			rank := mergeCandidate{marker: m, priority: fetched.entry.priority}
+			group := grouped[m.Kind]
+			if len(group.ranges) == 0 || rank.better(group.rank) {
+				group.rank = rank
+			}
+			group.ranges = append(group.ranges, m)
+			grouped[m.Kind] = group
+		}
+		for kind, group := range grouped {
+			if old, ok := best[kind]; !ok || group.rank.better(old.rank) {
+				best[kind] = group
 			}
 		}
 	}
-	if len(best) == 0 {
-		return Result{}, false, lastErr
-	}
-
-	merged := Result{SourceClass: models.MarkerSourceOnline}
 	for _, kind := range []MarkerKind{MarkerKindIntro, MarkerKindCredits, MarkerKindRecap, MarkerKindPreview} {
-		if cand, ok := best[kind]; ok {
-			merged.Markers = append(merged.Markers, cand.marker)
-		}
+		ranges := best[kind].ranges
+		sort.SliceStable(ranges, func(i, j int) bool {
+			if ranges[i].Start != ranges[j].Start {
+				return ranges[i].Start < ranges[j].Start
+			}
+			return ranges[i].End < ranges[j].End
+		})
+		merged.Markers = append(merged.Markers, ranges...)
 	}
-	return merged, true, nil
+	return merged
 }
 
 type fetchEntry struct {
@@ -425,6 +395,12 @@ func (r *Registry) fetchEntries() []fetchEntry {
 			entries = append(entries, fetchEntry{provider: p, priority: prio})
 		}
 	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].priority != entries[j].priority {
+			return entries[i].priority < entries[j].priority
+		}
+		return entries[i].provider.ID() < entries[j].provider.ID()
+	})
 	return entries
 }
 
@@ -502,6 +478,12 @@ func NormalizeSetting(key, value string) (string, error) {
 		normalized := strings.ToLower(strings.TrimSpace(value))
 		if normalized != "true" && normalized != "false" {
 			return "", fmt.Errorf("%w: %s must be true or false", ErrInvalidSetting, SettingLazyPlayback)
+		}
+		return normalized, nil
+	case SettingOnlineStorage:
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if normalized != string(OnlineStorageStored) && normalized != string(OnlineStorageOnDemand) {
+			return "", fmt.Errorf("%w: %s must be stored or on_demand", ErrInvalidSetting, SettingOnlineStorage)
 		}
 		return normalized, nil
 	default:

@@ -664,7 +664,7 @@ export default function ProvidersSettings() {
       </FieldGroup>
 
       {/*
-        Marker providers are the online half of "Find intros and credits". The
+        Marker providers are the online half of "Find skip markers". The
         detection mode itself stays on Library & Metadata; what each provider
         does — lookup order, whether this server contributes back — is provider
         configuration and belongs beside the other providers.
@@ -684,7 +684,7 @@ export default function ProvidersSettings() {
                   to="/admin/settings/library"
                   className="hover:text-foreground font-medium underline underline-offset-2 transition-colors"
                 >
-                  Find intros and credits
+                  Find skip markers
                 </Link>{" "}
                 is set to {offlineMarkerMode}.
               </>
@@ -695,7 +695,7 @@ export default function ProvidersSettings() {
                   to="/admin/settings/library"
                   className="hover:text-foreground font-medium underline underline-offset-2 transition-colors"
                 >
-                  Find intros and credits
+                  Find skip markers
                 </Link>{" "}
                 looks online.
               </>

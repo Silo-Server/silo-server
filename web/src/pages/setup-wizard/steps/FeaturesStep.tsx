@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import {
   ConnectionCheckAction,
@@ -20,6 +20,8 @@ import { useStepSubmit, useStepSummary } from "../useStep";
 const APPLE_PUSH_KEY = "notifications.apple_push_delivery_enabled";
 const ANDROID_PUSH_KEY = "notifications.android_push_delivery_enabled";
 
+const MARKER_KEYS = ["markers.mode", "markers.lazy_playback", "markers.online_storage"];
+
 const DOWNLOAD_KEYS = [
   "download.enabled",
   "download.server_bandwidth_mbps",
@@ -34,10 +36,10 @@ const RECS_KEYS = [
   "recommendations.embedding_auth_token",
 ];
 
-const KEYS = [APPLE_PUSH_KEY, ANDROID_PUSH_KEY, ...DOWNLOAD_KEYS, ...RECS_KEYS];
+const KEYS = [APPLE_PUSH_KEY, ANDROID_PUSH_KEY, ...MARKER_KEYS, ...DOWNLOAD_KEYS, ...RECS_KEYS];
 
 export function FeaturesStep() {
-  const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
+  const form = useSettingsForm({ keys: KEYS });
   const { handleSubmit, busy } = useStepSubmit("features", form, "Failed to save");
   const recsCheck = useConnectionCheck("recommendations_embedding", form, RECS_KEYS);
   const [showDisclosure, setShowDisclosure] = useState(false);
@@ -50,6 +52,8 @@ export function FeaturesStep() {
     form.getValue(APPLE_PUSH_KEY) === "true" || form.getValue(ANDROID_PUSH_KEY) === "true";
   const downloadsEnabled = form.getValue("download.enabled") === "true";
   const recsEnabled = form.getValue("recommendations.enabled") === "true";
+  const markerMode = form.getValue("markers.mode");
+  const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
 
   const baseUrl = form.getValue("recommendations.embedding_base_url");
   const model = form.getValue("recommendations.embedding_model");
@@ -63,6 +67,7 @@ export function FeaturesStep() {
     (form.getValue("recommendations.embedding_auth_token") !== "" || tokenConfigured);
 
   const enabledFeatures = [
+    onlineMarkersEnabled ? "Skip markers" : null,
     pushEnabled ? "Push" : null,
     downloadsEnabled ? "Downloads" : null,
     recsEnabled ? "Recommendations" : null,
@@ -72,6 +77,14 @@ export function FeaturesStep() {
   function setPush(value: boolean) {
     form.setValue(APPLE_PUSH_KEY, String(value));
     form.setValue(ANDROID_PUSH_KEY, String(value));
+  }
+
+  function setOnlineMarkers(enabled: boolean) {
+    const localDetection = markerMode === "local" || markerMode === "both";
+    let nextMode = enabled ? "online" : "off";
+    if (localDetection) nextMode = enabled ? "both" : "local";
+    form.setValue("markers.mode", nextMode);
+    if (enabled || !localDetection) form.setValue("markers.lazy_playback", String(enabled));
   }
 
   function applyPreset(preset: RecommendationProviderPreset) {
@@ -84,9 +97,7 @@ export function FeaturesStep() {
 
   if (form.isPending) return <StepSkeleton rows={4} />;
 
-  // Without the settings snapshot both push values read as empty and the
-  // switch would show off while the server default is on. Don't let the step
-  // complete on a guess.
+  // Require the snapshot so enabled defaults are reviewed before continuing.
   if (form.loadError) {
     return (
       <StepFrame
@@ -97,7 +108,8 @@ export function FeaturesStep() {
       >
         <StepSection>
           <p className="text-muted-foreground py-3 text-sm">
-            Mobile push is on by default. Reload to review the setting before continuing.
+            Skip markers and mobile push are on by default. Reload to review these settings before
+            continuing.
           </p>
         </StepSection>
       </StepFrame>
@@ -107,12 +119,35 @@ export function FeaturesStep() {
   return (
     <StepFrame
       title="Features"
-      lede="Three things you can switch on now and tune later. Nothing here is required."
+      lede="Choose the features you want to use. You can change these settings later."
       onSubmit={handleSubmit}
       busy={busy}
       footnote="Each of these has its own page under Admin › Settings."
     >
       <StepSection>
+        <SettingField
+          label="Skip markers from TheIntroDB"
+          type="toggle"
+          description="TheIntroDB is installed by default to find intros, credits, recaps, and other segments you can skip. Turn this off to disable online marker lookup."
+          value={onlineMarkersEnabled ? "true" : "false"}
+          onChange={(value) => setOnlineMarkers(value === "true")}
+        />
+        {onlineMarkersEnabled ? (
+          <SettingField
+            label="Online marker storage"
+            type="select"
+            description="Store markers locally to keep your library up to date in the background. On-demand only looks up markers when you play a file, without saving them to your library."
+            options={[
+              { value: "stored", label: "Store markers locally" },
+              { value: "on_demand", label: "On-demand only" },
+            ]}
+            value={form.getValue("markers.online_storage") || "stored"}
+            onChange={(value) => {
+              form.setValue("markers.online_storage", value);
+              if (value === "on_demand") form.setValue("markers.lazy_playback", "true");
+            }}
+          />
+        ) : null}
         <SettingField
           label="Mobile push notifications"
           type="toggle"

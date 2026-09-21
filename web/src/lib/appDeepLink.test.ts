@@ -24,8 +24,8 @@ describe("detectMobilePlatform", () => {
 
 describe("buildInviteDeepLink", () => {
   it("emits the silo://invite contract the Android app registers", () => {
-    expect(buildInviteDeepLink("https://silo.arkyncdn.net", "wIAUTS99-abc")).toBe(
-      "silo://invite?server=https%3A%2F%2Fsilo.arkyncdn.net&token=wIAUTS99-abc",
+    expect(buildInviteDeepLink("https://silo.example.test", "wIAUTS99-abc")).toBe(
+      "silo://invite?server=https%3A%2F%2Fsilo.example.test&token=wIAUTS99-abc",
     );
   });
 

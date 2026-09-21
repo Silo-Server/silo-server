@@ -114,10 +114,11 @@ type Service struct {
 	settings      SettingsReader
 
 	// Offline-manifest dependencies (Phase 2); nil until SetOfflineDeps wires them.
-	manifest       *ManifestBuilder
-	subtitleSource SubtitleSource
-	artworkSource  ManifestSource
-	httpClient     *http.Client
+	manifest         *ManifestBuilder
+	markerPopulation MarkerPopulationService
+	subtitleSource   SubtitleSource
+	artworkSource    ManifestSource
+	httpClient       *http.Client
 
 	// Prepare-to-file pipeline (Phase 3); nil until SetArtifactManager wires it.
 	artifacts *ArtifactManager
@@ -146,10 +147,18 @@ func (s *Service) SetOfflineDeps(detail ManifestSource, subs SubtitleSource, cli
 		}
 		return s.artifacts.repo.GetByID(ctx, id)
 	})
+	s.manifest.MarkerPopulation = s.markerPopulation
 	if client == nil {
 		client = http.DefaultClient
 	}
 	s.httpClient = client
+}
+
+func (s *Service) SetMarkerPopulation(population MarkerPopulationService) {
+	s.markerPopulation = population
+	if s.manifest != nil {
+		s.manifest.MarkerPopulation = population
+	}
 }
 
 // SetArtifactManager wires the prepare-to-file pipeline. When unset, remux/

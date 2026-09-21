@@ -155,6 +155,11 @@ func (c Config) AnalysisConfigHash() string {
 }
 
 type Candidate struct {
+	ContentID              string
+	ExtraID                string
+	SeasonNumber           int
+	EpisodeNumber          int
+	FileModifiedAt         *time.Time
 	FileID                 int
 	EpisodeID              string
 	SeasonID               string
@@ -175,6 +180,23 @@ type Candidate struct {
 	IntroMarkersConfidence *float64
 	IntroMarkersAlgorithm  *string
 	MarkersSource          *string
+}
+
+// expectedFile preserves the identity loaded with the candidate so a completed
+// analysis cannot write markers onto a replacement file.
+func (c Candidate) expectedFile() *models.MediaFile {
+	return &models.MediaFile{
+		ID:             c.FileID,
+		ContentID:      c.ContentID,
+		EpisodeID:      c.EpisodeID,
+		ExtraID:        c.ExtraID,
+		SeasonNumber:   c.SeasonNumber,
+		EpisodeNumber:  c.EpisodeNumber,
+		FileHash:       c.FileHash,
+		FileSize:       c.FileSize,
+		FileModifiedAt: c.FileModifiedAt,
+		Duration:       int(c.DurationSeconds),
+	}
 }
 
 func (c Candidate) AnalysisGroupKey() string {
@@ -218,13 +240,14 @@ type Segment struct {
 }
 
 type IntroMarkerPatch struct {
-	FileID     int
-	Start      float64
-	End        float64
-	Source     string
-	Confidence float64
-	Algorithm  string
-	DetectedAt time.Time
+	ExpectedFile *models.MediaFile
+	FileID       int
+	Start        float64
+	End          float64
+	Source       string
+	Confidence   float64
+	Algorithm    string
+	DetectedAt   time.Time
 }
 
 type Fingerprint struct {

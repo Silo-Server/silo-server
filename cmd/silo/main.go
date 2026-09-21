@@ -1217,22 +1217,21 @@ func main() {
 	if deps.DB != nil {
 		markerRegistry := markers.NewRegistry(slog.Default())
 		markerProviderConfig := markers.NewProviderConfigStore(deps.DB)
+		markerRegistry.UseConfigStore(markerProviderConfig)
 		if err := markerProviderConfig.Reload(appCtx); err != nil {
-			slog.Warn("load marker provider config failed; falling back to registration-order fetch",
+			slog.Warn("load marker provider config failed; online fetching remains disabled until settings load",
 				"error", err)
-		} else {
-			markerRegistry.UseConfigStore(markerProviderConfig)
-			if deps.EventBus != nil {
-				if err := deps.EventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
-					if event.Type != cache.EventMarkerProviderConfigChanged {
-						return
-					}
-					if err := markerProviderConfig.Reload(appCtx); err != nil {
-						slog.Warn("reload marker provider config failed", "provider", event.Payload, "error", err)
-					}
-				}); err != nil {
-					slog.Warn("subscribe marker provider config reload failed", "error", err)
+		}
+		if deps.EventBus != nil {
+			if err := deps.EventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+				if event.Type != cache.EventMarkerProviderConfigChanged {
+					return
 				}
+				if err := markerProviderConfig.Reload(appCtx); err != nil {
+					slog.Warn("reload marker provider config failed", "provider", event.Payload, "error", err)
+				}
+			}); err != nil {
+				slog.Warn("subscribe marker provider config reload failed", "error", err)
 			}
 		}
 		deps.MarkerProviderConfig = markerProviderConfig
@@ -1403,6 +1402,7 @@ func main() {
 	var pluginService *plugins.Service
 	var pluginInstallationStore *plugins.InstallationStore
 	var pluginRuntimeConfigStore *plugins.RuntimeConfigStore
+	var refreshMarkerProviders func(context.Context) error
 	var pluginHTTPProxy *plugins.HTTPProxy
 	pluginAutoUpdateDone := make(chan struct{})
 	var pluginAutoUpdater *plugins.AutoUpdateService
@@ -1580,16 +1580,51 @@ func main() {
 		}
 		if deps.MarkerRegistry != nil && deps.MarkerProviderConfig != nil {
 			markerPluginResolver := markers.NewPluginResolverAdapter(pluginService)
+			var refreshMu sync.Mutex
+			var loadedRevision string
+			refreshMarkerProviders = func(ctx context.Context) (err error) {
+				refreshMu.Lock()
+				defer refreshMu.Unlock()
+				reloading := false
+				defer func() {
+					if err != nil {
+						if reloading || ctx.Err() == nil {
+							loadedRevision = ""
+						}
+						if ctx.Err() == nil {
+							_ = deps.MarkerRegistry.SetProviders(nil)
+						}
+					}
+				}()
+				for range 3 {
+					revision, err := deps.MarkerProviderConfig.RuntimeRevision(ctx)
+					if err != nil {
+						return err
+					}
+					if revision == loadedRevision {
+						return nil
+					}
+					reloading = true
+					if err := deps.MarkerProviderConfig.Reload(ctx); err != nil {
+						return err
+					}
+					if err := reloadMarkerPluginProviders(ctx, deps.MarkerRegistry, deps.MarkerProviderConfig,
+						installationStore, runtimeConfigStore, settingsRepo, markerPluginResolver); err != nil {
+						return err
+					}
+					current, err := deps.MarkerProviderConfig.RuntimeRevision(ctx)
+					if err != nil {
+						return err
+					}
+					if current == revision {
+						loadedRevision = revision
+						return nil
+					}
+				}
+				return fmt.Errorf("marker provider configuration changed repeatedly during reload")
+			}
 			pluginService.AddLifecycleHook(func(ctx context.Context) {
-				if err := reloadMarkerPluginProviders(
-					ctx,
-					deps.MarkerRegistry,
-					deps.MarkerProviderConfig,
-					installationStore,
-					runtimeConfigStore,
-					settingsRepo,
-					markerPluginResolver,
-				); err != nil {
+				if err := refreshMarkerProviders(ctx); err != nil {
 					slog.WarnContext(ctx, "reload marker plugin providers failed", "component", "app", "error", err)
 				}
 			})
@@ -2191,6 +2226,39 @@ func main() {
 	}
 	deps.SessionMgr = sessionMgr
 	deps.PlaybackRealtimeHub = playback.NewRealtimeHub()
+	deps.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(sessionMgr, deps.PlaybackRealtimeHub)
+	if deps.EventBus != nil {
+		publish := func(ctx context.Context, payload string) error {
+			return deps.EventBus.Publish(ctx, cache.ChannelPlayback, cache.Event{Type: cache.EventMarkersUpdated, Payload: payload})
+		}
+		subscribe := func(ctx context.Context, handler func(string)) error {
+			return deps.EventBus.Subscribe(ctx, cache.ChannelPlayback, func(event cache.Event) {
+				if event.Type == cache.EventMarkersUpdated {
+					handler(event.Payload)
+				}
+			})
+		}
+		if err := deps.MarkerUpdateNotifier.UseEventBus(appCtx, publish, subscribe); err != nil {
+			slog.Warn("subscribe marker updates failed", "error", err)
+		}
+	}
+
+	if deps.DB != nil && deps.FileRepo != nil && deps.MarkerRegistry != nil {
+		deps.MarkerPopulation = markers.NewPopulationService(markers.PopulationOptions{
+			RefreshProviders: refreshMarkerProviders,
+			Registry:         deps.MarkerRegistry,
+			Resolver:         deps.MarkerResolver,
+			Settings:         settingsRepo,
+			Store:            markers.NewPopulationStore(deps.DB),
+			LoadFile:         deps.FileRepo.GetByID,
+			Write: func(ctx context.Context, file *models.MediaFile, result markers.Result) (bool, error) {
+				update := scanner.MarkerUpdateFromPayload(markers.BuildUpdatePayload(result))
+				update.ExpectedFile = file
+				return deps.FileRepo.UpsertMarkers(ctx, file.ID, update)
+			},
+			Notify: deps.MarkerUpdateNotifier.MarkersUpdated,
+		})
+	}
 	if chapterThumbService != nil {
 		chapterThumbnailResolver := deps.ArtworkResolver
 		chapterThumbnailURLs := playback.ChapterThumbnailURLResolver(func(ctx context.Context, key string, ttl time.Duration) (string, error) {
@@ -2545,6 +2613,9 @@ func main() {
 		taskMgr.Register(tasks.NewCatalogSearchEventRetentionTask(catalog.NewSearchIndexEventRepository(deps.DB)))
 		if deps.IntroAnalyzer != nil {
 			taskMgr.Register(tasks.NewDetectIntroMarkersTask(deps.IntroAnalyzer, settingsRepo))
+		}
+		if deps.MarkerPopulation != nil {
+			taskMgr.Register(tasks.NewSyncMarkersTask(deps.MarkerPopulation))
 		}
 		if deps.MarkerContributionService != nil && deps.MarkerProviderConfig != nil && deps.MarkerContributionStore != nil && deps.FileRepo != nil {
 			taskMgr.Register(tasks.NewContributeMarkersTask(
@@ -3126,6 +3197,9 @@ func main() {
 			compatDeps.DetailSvc = detailSvc
 			compatDeps.FolderRepo = folderRepo
 			compatDeps.SessionMgr = sessionMgr
+			if deps.MarkerPopulation != nil {
+				compatDeps.MarkerPopulation = deps.MarkerPopulation
+			}
 			compatDeps.UserStoreProvider = userStoreProvider
 			compatDeps.WatchCompletionObserver = deps.WatchCompletionObserver
 			compatDeps.SettingsRepo = settingsRepo
@@ -3880,6 +3954,13 @@ func reloadMarkerPluginProviders(
 	if registry == nil {
 		return nil
 	}
+	previous := make(map[string]string)
+	for _, provider := range registry.Providers() {
+		if revisioned, ok := provider.(interface{ CacheRevision() string }); ok {
+			previous[provider.ID()] = revisioned.CacheRevision()
+		}
+	}
+	refreshedRuntimes := make(map[int]bool)
 	var providers []markers.Provider
 	if store == nil || resolver == nil {
 		return registry.SetProviders(providers)
@@ -3899,6 +3980,13 @@ func reloadMarkerPluginProviders(
 		return installations[i].ID < installations[j].ID
 	})
 
+	var configErr error
+	failClosed := func(err error) {
+		configErr = err
+		// A later reload error must not leave providers using an unknown
+		// configuration revision. Healthy providers are restored below.
+		_ = registry.SetProviders(nil)
+	}
 	nextPriority := 1000
 	for _, installation := range installations {
 		if installation == nil {
@@ -3931,11 +4019,39 @@ func reloadMarkerPluginProviders(
 				return fmt.Errorf("decode marker provider capability %d/%s: %w", installation.ID, capability.ID, err)
 			}
 			metadataMap := markerCapabilityMetadata(descriptor)
+			if err := copyLegacyIntroDBPluginConfig(ctx, runtimeConfigs, legacySettings, installation, capability); err != nil {
+				failClosed(err)
+				continue
+			}
+			var configRevisions []string
+			if runtimeConfigs != nil {
+				configs, err := runtimeConfigs.ListGlobalConfigs(ctx, installation.ID)
+				if err != nil {
+					failClosed(fmt.Errorf("list marker plugin configuration for installation %d: %w", installation.ID, err))
+					continue
+				}
+				for _, config := range configs {
+					if config != nil {
+						configRevisions = append(configRevisions, fmt.Sprintf("%q:%s", config.Key, config.UpdatedAt.UTC().Format(time.RFC3339Nano)))
+					}
+				}
+			}
+			sort.Strings(configRevisions)
+			cacheRevision := fmt.Sprintf("%q\n%s", installation.Version, strings.Join(configRevisions, "\n"))
+			providerID := markers.PluginProviderID(installation.ID, capability.ID)
+			if previous[providerID] != cacheRevision && !refreshedRuntimes[installation.ID] {
+				if err := resolver.RefreshMarkerRuntime(installation.ID); err != nil {
+					failClosed(fmt.Errorf("refresh marker plugin runtime %d: %w", installation.ID, err))
+					continue
+				}
+				refreshedRuntimes[installation.ID] = true
+			}
 			provider, err := markers.NewPluginProvider(markers.PluginProviderOptions{
 				InstallationID:      installation.ID,
 				CapabilityID:        capability.ID,
 				DisplayName:         firstNonEmptyMarkerText(descriptor.GetDisplayName(), capability.ID),
 				PluginID:            installation.PluginID,
+				CacheRevision:       cacheRevision,
 				RequiredExternalIDs: markers.PluginRequiredExternalIDsFromMetadata(metadataMap),
 			}, resolver)
 			if err != nil {
@@ -3964,12 +4080,14 @@ func reloadMarkerPluginProviders(
 					return err
 				}
 			}
-			if err := copyLegacyIntroDBPluginConfig(ctx, runtimeConfigs, legacySettings, installation, capability); err != nil {
-				return err
-			}
 		}
 	}
-	return registry.SetProviders(providers)
+	// Replace the registry even when configuration reads failed, so a provider
+	// cannot continue serving cached lookups with an unknown credential revision.
+	if err := registry.SetProviders(providers); err != nil {
+		return err
+	}
+	return configErr
 }
 
 func legacyIntroDBProviderConfig(

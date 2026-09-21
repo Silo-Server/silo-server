@@ -45,7 +45,14 @@
       "intro": {
         "start_seconds": 0,
         "end_seconds": 90
-      }
+      },
+      "marker_segments": [
+        {
+          "kind": "intro",
+          "start_seconds": 0,
+          "end_seconds": 90
+        }
+      ]
     }
   ],
   "playback_variants": [

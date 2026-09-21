@@ -325,13 +325,14 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 
 		segment = a.refineChapterSegment(ctx, candidate, segment, &summary)
 		applied, patchErr := a.repo.PatchIntroMarker(ctx, IntroMarkerPatch{
-			FileID:     candidate.FileID,
-			Start:      segment.Start,
-			End:        segment.End,
-			Source:     models.MarkerSourceScanner,
-			Confidence: segment.Confidence,
-			Algorithm:  segment.Algorithm,
-			DetectedAt: time.Now().UTC(),
+			ExpectedFile: candidate.expectedFile(),
+			FileID:       candidate.FileID,
+			Start:        segment.Start,
+			End:          segment.End,
+			Source:       models.MarkerSourceScanner,
+			Confidence:   segment.Confidence,
+			Algorithm:    segment.Algorithm,
+			DetectedAt:   time.Now().UTC(),
 		})
 		if patchErr != nil {
 			summary.Errors = append(summary.Errors, patchErr.Error())
@@ -382,13 +383,14 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 			confidence = 0.90
 		}
 		applied, patchErr := a.repo.PatchIntroMarker(ctx, IntroMarkerPatch{
-			FileID:     candidate.FileID,
-			Start:      source.segment.Start,
-			End:        source.segment.End,
-			Source:     models.MarkerSourceScanner,
-			Confidence: confidence,
-			Algorithm:  EpisodeVersionCopyAlgorithm,
-			DetectedAt: time.Now().UTC(),
+			ExpectedFile: candidate.expectedFile(),
+			FileID:       candidate.FileID,
+			Start:        source.segment.Start,
+			End:          source.segment.End,
+			Source:       models.MarkerSourceScanner,
+			Confidence:   confidence,
+			Algorithm:    EpisodeVersionCopyAlgorithm,
+			DetectedAt:   time.Now().UTC(),
 		})
 		if patchErr != nil {
 			msg := fmt.Sprintf("file %d: %v", candidate.FileID, patchErr)
@@ -606,13 +608,14 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		candidate := byFileID[fileID]
 		segment = a.refineChromaprintSegment(ctx, candidate, segment, &summary)
 		applied, patchErr := a.repo.PatchIntroMarker(ctx, IntroMarkerPatch{
-			FileID:     fileID,
-			Start:      segment.Start,
-			End:        segment.End,
-			Source:     models.MarkerSourceScanner,
-			Confidence: segment.Confidence,
-			Algorithm:  segment.Algorithm,
-			DetectedAt: time.Now().UTC(),
+			ExpectedFile: candidate.expectedFile(),
+			FileID:       fileID,
+			Start:        segment.Start,
+			End:          segment.End,
+			Source:       models.MarkerSourceScanner,
+			Confidence:   segment.Confidence,
+			Algorithm:    segment.Algorithm,
+			DetectedAt:   time.Now().UTC(),
 		})
 		if patchErr != nil {
 			msg := fmt.Sprintf("file %d: %v", fileID, patchErr)

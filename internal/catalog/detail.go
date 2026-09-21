@@ -458,6 +458,33 @@ type FileVersion struct {
 	Credits                  *Marker                `json:"credits,omitempty"`
 	Recap                    *Marker                `json:"recap,omitempty"`
 	Preview                  *Marker                `json:"preview,omitempty"`
+	MarkerSegments           []models.MarkerSegment `json:"-"`
+}
+
+// SetMarkers refreshes the marker projection without rebuilding file metadata.
+func (v *FileVersion) SetMarkers(file *models.MediaFile) {
+	v.Intro = markerFromRange(file.IntroStart, file.IntroEnd)
+	v.Credits = markerFromRange(file.CreditsStart, file.CreditsEnd)
+	v.Recap = markerFromRange(file.RecapStart, file.RecapEnd)
+	v.Preview = markerFromRange(file.PreviewStart, file.PreviewEnd)
+	v.MarkerSegments = models.EffectiveMarkerSegments(file)
+}
+
+func (v FileVersion) EffectiveMarkerSegments() []models.MarkerSegment {
+	file := models.MediaFile{MarkerSegments: v.MarkerSegments}
+	if v.Intro != nil {
+		file.IntroStart, file.IntroEnd = &v.Intro.Start, &v.Intro.End
+	}
+	if v.Credits != nil {
+		file.CreditsStart, file.CreditsEnd = &v.Credits.Start, &v.Credits.End
+	}
+	if v.Recap != nil {
+		file.RecapStart, file.RecapEnd = &v.Recap.Start, &v.Recap.End
+	}
+	if v.Preview != nil {
+		file.PreviewStart, file.PreviewEnd = &v.Preview.Start, &v.Preview.End
+	}
+	return models.EffectiveMarkerSegments(&file)
 }
 
 // PlaybackVariant is one logical watch choice, optionally spanning multiple ordered parts.
@@ -3594,6 +3621,7 @@ func (s *DetailService) buildPlaybackInfo(
 			Credits:                  versionCredits,
 			Recap:                    versionRecap,
 			Preview:                  versionPreview,
+			MarkerSegments:           models.EffectiveMarkerSegments(f),
 		})
 
 		for _, sub := range f.SubtitleTracks {

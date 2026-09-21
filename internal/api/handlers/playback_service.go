@@ -191,10 +191,9 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 	return view, nil
 }
 
-// playbackServerFeaturesV2 is the v3 feature set plus the v2 sequenced
-// progress/stop contract.
+// playbackServerFeaturesV2 adds the v2 progress/stop and marker collection contracts.
 func playbackServerFeaturesV2() []string {
-	return append(playback.ServerFeaturesV3(), "sequenced_progress_v1")
+	return append(playback.ServerFeaturesV3(), "sequenced_progress_v1", "marker_segments_v1")
 }
 
 // The application pipeline still uses private request-based routing helpers.

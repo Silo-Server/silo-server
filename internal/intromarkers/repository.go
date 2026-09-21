@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -52,7 +52,12 @@ const baseCandidateSelect = `
 	       mf.intro_markers_source,
 	       mf.intro_markers_confidence,
 	       mf.intro_markers_algorithm,
-	       mf.markers_source
+	       mf.markers_source,
+	       COALESCE(mf.content_id, ''),
+	       COALESCE(mf.extra_id, ''),
+	       COALESCE(mf.season_number, 0),
+	       COALESCE(mf.episode_number, 0),
+	       mf.file_modified_at
 	FROM media_files mf
 	JOIN media_folders folders ON folders.id = mf.media_folder_id
 	JOIN episodes e ON e.content_id = mf.episode_id
@@ -224,6 +229,11 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 			&c.IntroMarkersConfidence,
 			&c.IntroMarkersAlgorithm,
 			&c.MarkersSource,
+			&c.ContentID,
+			&c.ExtraID,
+			&c.SeasonNumber,
+			&c.EpisodeNumber,
+			&c.FileModifiedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning intro marker candidate: %w", err)
 		}
@@ -281,95 +291,15 @@ func (r *Repository) PatchIntroMarker(ctx context.Context, patch IntroMarkerPatc
 	if patch.Start < 0 || patch.End <= patch.Start {
 		return false, fmt.Errorf("invalid intro marker range %.3f-%.3f", patch.Start, patch.End)
 	}
-	if patch.DetectedAt.IsZero() {
-		patch.DetectedAt = time.Now().UTC()
-	}
-
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return false, fmt.Errorf("begin intro marker patch transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	var row markerRow
-	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(duration, 0),
-		       intro_start,
-		       intro_end,
-		       markers_source,
-		       markers_confidence,
-		       intro_markers_source,
-		       intro_markers_confidence,
-		       intro_markers_algorithm
-		FROM media_files
-		WHERE id = $1
-		FOR UPDATE`, patch.FileID).Scan(
-		&row.Duration,
-		&row.IntroStart,
-		&row.IntroEnd,
-		&row.MarkersSource,
-		&row.MarkersConfidence,
-		&row.IntroMarkersSource,
-		&row.IntroMarkersConfidence,
-		&row.IntroMarkersAlgorithm,
-	); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, fmt.Errorf("media file not found")
-		}
-		return false, fmt.Errorf("loading intro marker row: %w", err)
-	}
-	if row.Duration > 0 && patch.End > row.Duration+1 {
-		return false, fmt.Errorf("intro marker end %.3f exceeds duration %.3f", patch.End, row.Duration)
-	}
-	if !shouldApplyIntroPatch(row, patch) {
-		if err := tx.Commit(ctx); err != nil {
-			return false, fmt.Errorf("commit intro marker no-op transaction: %w", err)
-		}
-		return false, nil
-	}
-
-	sharedSource := row.MarkersSource
-	if sharedSource == nil || models.MarkerSourcePriority(patch.Source) > models.MarkerSourcePriority(*sharedSource) {
-		sharedSource = &patch.Source
-	}
-	sharedConfidence := row.MarkersConfidence
-	if sharedSource != row.MarkersSource {
-		sharedConfidence = &patch.Confidence
-	}
-
-	tag, err := tx.Exec(ctx, `
-		UPDATE media_files
-		SET intro_start = $2,
-		    intro_end = $3,
-		    intro_markers_source = $4,
-		    intro_markers_provider = NULL,
-		    intro_markers_confidence = $5,
-		    intro_markers_algorithm = $6,
-		    intro_markers_detected_at = $7,
-		    markers_source = $8,
-		    markers_confidence = $9,
-		    updated_at = NOW()
-		WHERE id = $1`,
-		patch.FileID,
-		patch.Start,
-		patch.End,
-		patch.Source,
-		patch.Confidence,
-		patch.Algorithm,
-		patch.DetectedAt,
-		sharedSource,
-		sharedConfidence,
-	)
-	if err != nil {
-		return false, fmt.Errorf("updating intro marker: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return false, fmt.Errorf("media file not found")
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("commit intro marker patch transaction: %w", err)
-	}
-	return true, nil
+	return scanner.NewFileRepository(r.pool).UpsertMarkers(ctx, patch.FileID, scanner.MarkerUpdate{
+		IntroStart:        &patch.Start,
+		IntroEnd:          &patch.End,
+		MarkersSource:     patch.Source,
+		MarkersConfidence: &patch.Confidence,
+		MarkersAlgorithm:  patch.Algorithm,
+		DetectedAt:        patch.DetectedAt,
+		ExpectedFile:      patch.ExpectedFile,
+	})
 }
 
 func (r *Repository) LoadFingerprint(ctx context.Context, candidate Candidate, cfg Config) (*Fingerprint, error) {
@@ -561,98 +491,6 @@ func (r *Repository) UpsertSeasonState(ctx context.Context, state SeasonState, c
 		return fmt.Errorf("upserting intro season state: %w", err)
 	}
 	return nil
-}
-
-type markerRow struct {
-	Duration               float64
-	IntroStart             *float64
-	IntroEnd               *float64
-	MarkersSource          *string
-	MarkersConfidence      *float64
-	IntroMarkersSource     *string
-	IntroMarkersConfidence *float64
-	IntroMarkersAlgorithm  *string
-}
-
-func shouldApplyIntroPatch(row markerRow, patch IntroMarkerPatch) bool {
-	if row.IntroStart == nil || row.IntroEnd == nil {
-		return true
-	}
-	source := ""
-	if row.IntroMarkersSource != nil {
-		source = *row.IntroMarkersSource
-	} else if row.MarkersSource != nil {
-		source = *row.MarkersSource
-	}
-	if models.MarkerSourcePriority(source) > models.MarkerSourcePriority(patch.Source) {
-		return false
-	}
-	if models.MarkerSourcePriority(source) < models.MarkerSourcePriority(patch.Source) {
-		return true
-	}
-	if row.IntroMarkersConfidence == nil {
-		return true
-	}
-
-	existingAlgorithm := ""
-	if row.IntroMarkersAlgorithm != nil {
-		existingAlgorithm = *row.IntroMarkersAlgorithm
-	}
-	if existingAlgorithm == "" {
-		return true
-	}
-	patchPriority := scannerAlgorithmPriority(patch.Algorithm)
-	existingPriority := scannerAlgorithmPriority(existingAlgorithm)
-	if patchPriority > existingPriority {
-		return true
-	}
-	if patchPriority < existingPriority {
-		return false
-	}
-	if patch.Confidence > *row.IntroMarkersConfidence {
-		return true
-	}
-	if patch.Confidence < *row.IntroMarkersConfidence {
-		return false
-	}
-	if existingAlgorithm != patch.Algorithm && patchPriority == 0 {
-		return true
-	}
-	if existingAlgorithm == patch.Algorithm && introRangeDiffers(row, patch, 0.5) {
-		return true
-	}
-	return false
-}
-
-func scannerAlgorithmPriority(algorithm string) int {
-	switch algorithm {
-	case ChapterSilenceAlgorithm:
-		return 40
-	case ChapterAlgorithm:
-		return 30
-	case EpisodeVersionCopyAlgorithm:
-		return 20
-	case ChromaprintDialogueAlgorithm:
-		return 15
-	case ChromaprintAlgorithm:
-		return 10
-	default:
-		return 0
-	}
-}
-
-func introRangeDiffers(row markerRow, patch IntroMarkerPatch, tolerance float64) bool {
-	if row.IntroStart == nil || row.IntroEnd == nil {
-		return true
-	}
-	return absFloat(*row.IntroStart-patch.Start) > tolerance || absFloat(*row.IntroEnd-patch.End) > tolerance
-}
-
-func absFloat(v float64) float64 {
-	if v < 0 {
-		return -v
-	}
-	return v
 }
 
 func effectiveAudioLanguage(tracks []models.AudioTrack) string {

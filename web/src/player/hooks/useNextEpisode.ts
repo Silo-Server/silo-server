@@ -43,9 +43,24 @@ export function useNextEpisode(
 
   // Detect entry into the configured trigger region.
   useEffect(() => {
-    if (!triggerRegion || !nextEpisode || cancelledRef.current) return;
+    if (
+      !triggerRegion ||
+      currentTime < triggerRegion.start ||
+      currentTime >= triggerRegion.end ||
+      !nextEpisode ||
+      cancelledRef.current
+    ) {
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
+        countdownRef.current = null;
+      }
+      // The playback position ends the timer and its overlay together.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (showCountdown) setShowCountdown(false);
+      return;
+    }
 
-    if (currentTime >= triggerRegion.start && !showCountdown) {
+    if (!showCountdown) {
       setShowCountdown(true);
       setSecondsRemaining(10);
 

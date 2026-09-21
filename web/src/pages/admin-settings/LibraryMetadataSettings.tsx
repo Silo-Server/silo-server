@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { ArrowRight, RotateCcw } from "lucide-react";
 import { Link } from "react-router";
 
@@ -33,7 +33,7 @@ const SCANNER_KEYS = [
   "metadata.image_workers",
 ];
 
-const MARKER_KEYS = ["markers.mode", "markers.lazy_playback"];
+const MARKER_KEYS = ["markers.mode", "markers.lazy_playback", "markers.online_storage"];
 
 const MEILI_URL_KEY = "catalog.search.meilisearch.url";
 const MEILI_API_KEY = "catalog.search.meilisearch.api_key";
@@ -58,7 +58,7 @@ const SEARCH_KEYS = ["catalog.search.provider", ...MEILI_KEYS];
 const KEYS = [...ARTWORK_KEYS, ...BROWSING_KEYS, ...SCANNER_KEYS, ...MARKER_KEYS, ...SEARCH_KEYS];
 
 export default function LibraryMetadataSettings() {
-  const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
+  const form = useSettingsForm({ keys: KEYS });
   const restartKeys = useRestartKeys();
   const checkConnection = useCheckAdminSettingsConnection();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
@@ -101,7 +101,9 @@ export default function LibraryMetadataSettings() {
     }
   }
 
-  const markerMode = form.getValue("markers.mode") || "local";
+  const markerMode = form.getValue("markers.mode") || "online";
+  const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
+  const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
 
   if (form.isLoading) {
     return (
@@ -215,7 +217,7 @@ export default function LibraryMetadataSettings() {
           providers.
         */}
         <FieldGroup
-          label="Intro and credits markers"
+          label="Skip markers"
           restartAll={allRestart(MARKER_KEYS)}
           actions={
             <Link
@@ -228,13 +230,13 @@ export default function LibraryMetadataSettings() {
           }
         >
           <SettingField
-            label="Find intros and credits"
+            label="Find skip markers"
             type="select"
-            description="Detecting on this server utilizes CPU. Looking online uses the marker providers set up on the Subtitles & Metadata page."
+            description="Detecting on this server uses CPU. Looking online uses the marker providers set up on the Subtitles & Metadata page."
             options={[
               { value: "off", label: "Off" },
               { value: "local", label: "Detect on this server" },
-              { value: "both", label: "Detect on this server, then look online" },
+              { value: "both", label: "Detect on this server and look online" },
               { value: "online", label: "Look online only" },
             ]}
             value={markerMode}
@@ -242,14 +244,38 @@ export default function LibraryMetadataSettings() {
             restartRequired={restartKeys.has("markers.mode")}
           />
 
-          <SettingField
-            label="Fetch markers on playback"
-            type="toggle"
-            description="Uses the enabled marker providers to look up missing markers when playback starts. Can delay the first few seconds."
-            value={form.getValue("markers.lazy_playback") || "false"}
-            onChange={(value) => form.setValue("markers.lazy_playback", value)}
-            restartRequired={restartKeys.has("markers.lazy_playback")}
-          />
+          {onlineMarkersEnabled && (
+            <SettingField
+              label="Online marker storage"
+              type="select"
+              description="Store markers locally to keep your library up to date in the background. On-demand only looks up markers when you play a file, without saving them to your library."
+              options={[
+                { value: "stored", label: "Store markers locally" },
+                { value: "on_demand", label: "On-demand only" },
+              ]}
+              value={onlineMarkerStorage}
+              onChange={(value) => {
+                form.setValue("markers.online_storage", value);
+                if (value === "on_demand") form.setValue("markers.lazy_playback", "true");
+              }}
+              restartRequired={restartKeys.has("markers.online_storage")}
+            />
+          )}
+
+          {markerMode !== "off" && (!onlineMarkersEnabled || onlineMarkerStorage === "stored") && (
+            <SettingField
+              label="Find markers on playback"
+              type="toggle"
+              description={
+                onlineMarkersEnabled
+                  ? "Look up missing or outdated markers when playback starts."
+                  : "Detect missing markers when playback starts. Local analysis uses CPU."
+              }
+              value={form.getValue("markers.lazy_playback") || "true"}
+              onChange={(value) => form.setValue("markers.lazy_playback", value)}
+              restartRequired={restartKeys.has("markers.lazy_playback")}
+            />
+          )}
 
           <div className="py-3.5">
             <MarkerTasksCard />

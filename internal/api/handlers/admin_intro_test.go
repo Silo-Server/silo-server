@@ -87,6 +87,42 @@ type fakeAdminIntroMarkerNotifier struct {
 	ch chan *models.MediaFile
 }
 
+type markerRefreshFunc func(context.Context, *models.MediaFile) (*models.MediaFile, bool, error)
+
+func (f markerRefreshFunc) Refresh(ctx context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
+	return f(ctx, file)
+}
+
+func TestAdminMarkerRefreshOnlineDoesNotRequireLocalDetection(t *testing.T) {
+	started := make(chan int, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	handler := NewAdminIntroHandler(nil, nil, ctx, nil)
+	handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeOnline)}}
+	handler.FileResolver = fakeAdminIntroFileResolver{files: []*models.MediaFile{{ID: 42, EpisodeID: "ep1"}}}
+	handler.OnlineMarkers = markerRefreshFunc(func(ctx context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
+		started <- file.ID
+		<-ctx.Done()
+		return file, false, ctx.Err()
+	})
+	status, err := handler.RefreshEpisodeMarkers(t.Context(), "ep1", "refresh-v2")
+	if err != nil || status != "queued" {
+		t.Fatalf("refresh: status=%q err=%v", status, err)
+	}
+	select {
+	case id := <-started:
+		if id != 42 {
+			t.Fatalf("refreshed file %d, want 42", id)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("online refresh did not start")
+	}
+	status, err = handler.RefreshEpisodeMarkers(t.Context(), "ep1", "refresh-v2")
+	if err != nil || status != "already_running" {
+		t.Fatalf("duplicate refresh: status=%q err=%v", status, err)
+	}
+}
+
 func (n fakeAdminIntroMarkerNotifier) MarkersUpdated(_ context.Context, file *models.MediaFile) {
 	if n.ch == nil {
 		return

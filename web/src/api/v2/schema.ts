@@ -1709,7 +1709,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Request local episode marker analysis; duplicate in-process work is coalesced. */
+    /** Refresh episode markers using configured sources, or explicitly rerun local intro detection. */
     post: operations["redetectAdminEpisodeIntro"];
     delete?: never;
     options?: never;
@@ -1726,7 +1726,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Request local episode marker analysis; duplicate in-process work is coalesced. */
+    /** Refresh episode markers using configured sources, or explicitly rerun local intro detection. */
     post: operations["refreshAdminEpisodeMarkers"];
     delete?: never;
     options?: never;
@@ -17480,6 +17480,8 @@ export interface components {
       intro?: components["schemas"]["DownloadMarker"];
       /** Format: int64 */
       manifest_version: number;
+      /** @description All effective marker occurrences in source-time order; empty, never null */
+      marker_segments: components["schemas"]["MarkerOccurrence"][];
       /**
        * @description Opaque identifier
        * @example 1
@@ -18199,6 +18201,8 @@ export interface components {
        */
       file_id: string;
       intro: components["schemas"]["MarkerSegment"];
+      /** @description All effective marker occurrences in source-time order; empty, never null */
+      marker_segments: components["schemas"]["MarkerOccurrence"][];
       preview: components["schemas"]["MarkerSegment"];
       recap: components["schemas"]["MarkerSegment"];
     };
@@ -19483,6 +19487,14 @@ export interface components {
       end: number;
       /** Format: double */
       start: number;
+    };
+    MarkerOccurrence: {
+      /** Format: double */
+      end_seconds: number;
+      /** @enum {string} */
+      kind: "intro" | "credits" | "recap" | "preview";
+      /** Format: double */
+      start_seconds: number;
     };
     MarkerSegment: {
       algorithm?: string;
@@ -24856,6 +24868,8 @@ export interface components {
       file_size: number;
       hdr: boolean;
       intro?: components["schemas"]["WatchMarker"];
+      /** @description All effective marker occurrences for this file in source-time order; empty, never null */
+      marker_segments: components["schemas"]["MarkerOccurrence"][];
       /** Format: int64 */
       multi_episode_end?: number;
       /** Format: int64 */

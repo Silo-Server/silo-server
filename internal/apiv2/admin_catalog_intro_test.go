@@ -28,7 +28,7 @@ func TestAdminEpisodeMarkersTransport(t *testing.T) {
 	f := &fakeAdminIntro{}
 	deps.AdminEpisodeMarkers = f
 	h := newTestHandler(t, deps)
-	for _, tc := range []struct{ path, action string }{{"refresh-markers", "refresh"}, {"redetect-intro", "redetect"}} {
+	for _, tc := range []struct{ path, action string }{{"refresh-markers", "refresh-v2"}, {"redetect-intro", "redetect"}} {
 		path := Prefix + "/admin/items/episode-1/" + tc.path
 		for _, status := range []string{"queued", "already_running"} {
 			f.status = status
@@ -58,7 +58,7 @@ func TestAdminEpisodeMarkersTransport(t *testing.T) {
 }
 func adminCatalogIntroFixtureCases() []fixtureCase {
 	return []fixtureCase{
-		{name: "admin_episode_markers_refresh", operationID: "refreshAdminEpisodeMarkers", method: "POST", path: Prefix + "/admin/items/episode-1/refresh-markers", headers: bearer(adminToken), status: 202, schema: "#/components/schemas/AdminEpisodeMarkersStatus", assertHeaders: []string{"Content-Type"}, scenario: "Marker refresh acknowledges local analysis without a durable job."},
+		{name: "admin_episode_markers_refresh", operationID: "refreshAdminEpisodeMarkers", method: "POST", path: Prefix + "/admin/items/episode-1/refresh-markers", headers: bearer(adminToken), status: 202, schema: "#/components/schemas/AdminEpisodeMarkersStatus", assertHeaders: []string{"Content-Type"}, scenario: "Marker refresh acknowledges configured online or local sources."},
 		{name: "admin_episode_intro_redetect", operationID: "redetectAdminEpisodeIntro", method: "POST", path: Prefix + "/admin/items/episode-1/redetect-intro", headers: bearer(adminToken), status: 202, schema: "#/components/schemas/AdminEpisodeMarkersStatus", assertHeaders: []string{"Content-Type"}, scenario: "Intro re-detection preserves the same local execution service and eligibility checks."},
 	}
 }

@@ -112,6 +112,8 @@ type ItemsHandler struct {
 	EventsHub                *evt.Hub
 	UserRepo                 *auth.UserRepository
 	AccessGroups             access.GroupPolicyProvider // optional; resolves inherited library access when no scope is in context
+	MarkerPopulation         MarkerPopulationService
+	MarkerFileResolver       FilePathResolver
 }
 
 // NewItemsHandler creates a new ItemsHandler.

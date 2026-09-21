@@ -1,5 +1,12 @@
 package scanner
 
+import (
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/markers"
+	"github.com/Silo-Server/silo-server/internal/models"
+)
+
 // ScanResult contains the outcome of scanning a media folder.
 type ScanResult struct {
 	New                int
@@ -144,18 +151,22 @@ type IntroCreditsMarkers struct {
 
 // MarkerUpdate is the narrow marker-only update payload shared by scanner and analyzers.
 type MarkerUpdate struct {
-	IntroStart        *float64
-	IntroEnd          *float64
-	CreditsStart      *float64
-	CreditsEnd        *float64
-	RecapStart        *float64
-	RecapEnd          *float64
-	PreviewStart      *float64
-	PreviewEnd        *float64
-	MarkersSource     string
-	MarkersProvider   *string
-	MarkersConfidence *float64
-	MarkersAlgorithm  string
+	Segments           []models.MarkerSegment
+	ExpectedFile       *models.MediaFile
+	DetectedAt         time.Time
+	RefreshedProviders []string
+	IntroStart         *float64
+	IntroEnd           *float64
+	CreditsStart       *float64
+	CreditsEnd         *float64
+	RecapStart         *float64
+	RecapEnd           *float64
+	PreviewStart       *float64
+	PreviewEnd         *float64
+	MarkersSource      string
+	MarkersProvider    *string
+	MarkersConfidence  *float64
+	MarkersAlgorithm   string
 
 	// Optional per-segment provenance overrides. When set for a segment,
 	// UpsertMarkers writes these source/provider/confidence/algorithm values
@@ -178,11 +189,39 @@ type SegmentProvenance struct {
 	Algorithm  string
 }
 
-// HasAnySegment reports whether the update would write at least one segment.
-// An update with no segment bounds set is a no-op and skipped by UpsertMarkers.
+// HasAnySegment reports whether the update supplies ranges or refreshes a
+// provider whose withdrawn ranges may need removal.
 func (u MarkerUpdate) HasAnySegment() bool {
-	return u.IntroStart != nil || u.IntroEnd != nil ||
+	return len(u.Segments) > 0 || len(u.RefreshedProviders) > 0 || u.IntroStart != nil || u.IntroEnd != nil ||
 		u.CreditsStart != nil || u.CreditsEnd != nil ||
 		u.RecapStart != nil || u.RecapEnd != nil ||
 		u.PreviewStart != nil || u.PreviewEnd != nil
+}
+
+// MarkerUpdateFromPayload adapts provider results to the repository writer.
+func MarkerUpdateFromPayload(p markers.MarkerUpdatePayload) MarkerUpdate {
+	u := MarkerUpdate{
+		IntroStart: p.Intro.Start, IntroEnd: p.Intro.End,
+		CreditsStart: p.Credits.Start, CreditsEnd: p.Credits.End,
+		RecapStart: p.Recap.Start, RecapEnd: p.Recap.End,
+		PreviewStart: p.Preview.Start, PreviewEnd: p.Preview.End,
+		MarkersSource: p.SummarySource(), MarkersConfidence: p.SummaryConfidence(),
+		RefreshedProviders: p.RefreshedProviders,
+	}
+	for _, segment := range []struct {
+		payload markers.SegmentPayload
+		target  **SegmentProvenance
+	}{
+		{p.Intro, &u.IntroProvenance}, {p.Credits, &u.CreditsProvenance},
+		{p.Recap, &u.RecapProvenance}, {p.Preview, &u.PreviewProvenance},
+	} {
+		u.Segments = append(u.Segments, segment.payload.Ranges...)
+		if segment.payload.Present() {
+			*segment.target = &SegmentProvenance{
+				Source: segment.payload.Source, Provider: segment.payload.Provider,
+				Confidence: segment.payload.Confidence, Algorithm: segment.payload.Algorithm,
+			}
+		}
+	}
+	return u
 }

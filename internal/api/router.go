@@ -200,6 +200,8 @@ type Dependencies struct {
 	MarkerProviderConfig      *markers.ProviderConfigStore
 	MarkerContributionStore   *markers.ContributionStore
 	MarkerContributionService *markers.ContributionService
+	MarkerPopulation          *markers.PopulationService
+	MarkerUpdateNotifier      *playback.MarkerUpdateNotifier
 	WatchProviderService      handlers.WatchProviderService
 	// WatchProviderRegistry is the watchsync registry, used by the admin stats
 	// to list every provider — built-in or plugin-contributed — even when none
@@ -768,6 +770,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if catalogSearchService != nil {
 			itemsHandler.SetCatalogSearchProvider(catalogSearchService.Provider())
 		}
+		if deps.MarkerPopulation != nil {
+			itemsHandler.MarkerPopulation = deps.MarkerPopulation
+		}
+		itemsHandler.MarkerFileResolver = deps.FileRepo
 		itemsHandler.EventsHub = deps.EventsHub
 		itemsHandler.UserRepo = userRepo
 		if accessGroupStore != nil {
@@ -1216,14 +1222,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 		playbackHandler.CommandTracker = commandTracker
 		playbackHandler.CommandDispatcher = playback.NewCommandDispatcher(deps.SessionMgr, realtimeHub, commandTracker)
 		playbackCommandDispatcher = playbackHandler.CommandDispatcher
-		playbackHandler.IntroAnalyzer = deps.IntroAnalyzer
-		playbackHandler.IntroRepository = deps.IntroRepository
-		playbackHandler.MarkerRegistry = deps.MarkerRegistry
-		playbackHandler.MarkerResolver = deps.MarkerResolver
-		if deps.FileRepo != nil {
-			playbackHandler.MarkerUpserter = deps.FileRepo
+		if deps.IntroAnalyzer != nil {
+			playbackHandler.IntroAnalyzer = deps.IntroAnalyzer
 		}
-		playbackHandler.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(deps.SessionMgr, realtimeHub)
+		if deps.IntroRepository != nil {
+			playbackHandler.IntroRepository = deps.IntroRepository
+		}
+		playbackHandler.MarkerRegistry = deps.MarkerRegistry
+		if deps.MarkerPopulation != nil {
+			playbackHandler.MarkerPopulation = deps.MarkerPopulation
+		}
+		if deps.MarkerUpdateNotifier != nil {
+			playbackHandler.MarkerUpdateNotifier = deps.MarkerUpdateNotifier
+		} else {
+			playbackHandler.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(deps.SessionMgr, realtimeHub)
+		}
 		// Optimistic remux: a play is never blocked on the H.264 copy-safety
 		// scan, so the scan runs behind the issued plan and the notifier moves
 		// any session that is already stream-copying an unsafe source off that
@@ -1435,6 +1448,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		)
 		adminIntroHandler.Settings = settingsRepo
 		adminIntroHandler.FileResolver = deps.FileRepo
+		if deps.MarkerPopulation != nil {
+			adminIntroHandler.OnlineMarkers = deps.MarkerPopulation
+		}
 		if playbackHandler != nil {
 			adminIntroHandler.MarkerUpdateNotifier = playbackHandler.MarkerUpdateNotifier
 		}
@@ -1458,6 +1474,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.FileRepo, deps.FileRepo, contributor, contributions, notifier, slog.Default(),
 		)
 		markersHandler.BaseContext = deps.AppContext
+		if deps.MarkerPopulation != nil {
+			markersHandler.MarkerPopulation = deps.MarkerPopulation
+		}
 		markersHandler.AuditHistory = deps.FileRepo
 		if itemRepo != nil {
 			markersHandler.Authorizer = &handlers.MediaFileAuthorizer{
@@ -1887,6 +1906,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 				subtitleSource = subtitleManager
 			}
 			downloadSvc.SetOfflineDeps(detailSvc, subtitleSource, nil)
+		}
+		if deps.MarkerPopulation != nil {
+			downloadSvc.SetMarkerPopulation(deps.MarkerPopulation)
 		}
 		if deps.ArtifactManager != nil {
 			// Prepare-to-file pipeline (Phase 3): remux/transcode-to-single-file.

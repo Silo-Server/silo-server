@@ -901,6 +901,11 @@ export interface FileVersion {
   credits?: TimeRange | null;
   recap?: TimeRange | null;
   preview?: TimeRange | null;
+  marker_segments?: {
+    kind: "intro" | "credits" | "recap" | "preview";
+    start_seconds: number;
+    end_seconds: number;
+  }[];
 }
 
 export interface PlaybackVariantPart {

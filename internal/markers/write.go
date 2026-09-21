@@ -1,43 +1,14 @@
 package markers
 
 import (
+	"math"
+	"slices"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-// CanWriteMarker reports whether a new marker write should be accepted given
-// the existing source/confidence. A strictly higher-priority source always
-// wins; an equal-priority source wins only if its confidence is strictly
-// higher than what's already stored. Unknown/empty existing source is treated
-// as priority zero so any defined source can replace it.
-//
-// A manual write is the exception: an explicit human edit is authoritative and
-// always applies at equal-or-higher priority (last-writer-wins). Without this,
-// correcting a previously hand-set marker — whose confidence is fixed at 1.0 —
-// would be silently rejected by the strictly-higher-confidence rule, leaving
-// users unable to fix their own (or each other's) edits.
-func CanWriteMarker(existingSource *string, existingConfidence *float64, newSource string, newConfidence *float64) bool {
-	currentSource := ""
-	if existingSource != nil {
-		currentSource = *existingSource
-	}
-	existingPriority := models.MarkerSourcePriority(currentSource)
-	newPriority := models.MarkerSourcePriority(newSource)
-	if newPriority > existingPriority {
-		return true
-	}
-	if newPriority < existingPriority {
-		return false
-	}
-	if newSource == models.MarkerSourceManual {
-		return true
-	}
-	if existingConfidence != nil && newConfidence != nil {
-		return *newConfidence > *existingConfidence
-	}
-	return false
-}
 
 // SegmentPayload is the storage-agnostic per-segment marker write: its bounds
 // plus the provenance (provider/confidence/algorithm) of the marker that
@@ -45,6 +16,7 @@ func CanWriteMarker(existingSource *string, existingConfidence *float64, newSour
 // segment; a single-source result repeats the same provider across segments.
 type SegmentPayload struct {
 	Start, End *float64
+	Ranges     []models.MarkerSegment
 	Source     string
 	Provider   *string
 	Confidence *float64
@@ -52,7 +24,63 @@ type SegmentPayload struct {
 }
 
 // Present reports whether the segment carries a bound to write.
-func (s SegmentPayload) Present() bool { return s.Start != nil || s.End != nil }
+func (s SegmentPayload) Present() bool { return len(s.Ranges) > 0 || s.Start != nil || s.End != nil }
+
+// CanWriteMarkerUpdate applies source precedence and local detector refinement.
+// Online provider selection has already happened in the registry; a refreshed
+// selection is authoritative even when a provider's confidence has not risen.
+func CanWriteMarkerUpdate(existing, incoming SegmentPayload) bool {
+	if !existing.Present() {
+		return true
+	}
+	existingPriority := models.MarkerSourcePriority(existing.Source)
+	incomingPriority := models.MarkerSourcePriority(incoming.Source)
+	if existingPriority != incomingPriority {
+		return incomingPriority > existingPriority
+	}
+	switch incoming.Source {
+	case models.MarkerSourceManual, models.MarkerSourceOnline, models.MarkerSourcePlugin:
+		return true
+	case models.MarkerSourceScanner:
+		if existing.Confidence == nil || existing.Algorithm == "" {
+			return true
+		}
+		currentRank, nextRank := scannerAlgorithmPriority(existing.Algorithm), scannerAlgorithmPriority(incoming.Algorithm)
+		if currentRank != nextRank {
+			return nextRank > currentRank
+		}
+		if confidenceGreater(incoming.Confidence, existing.Confidence) {
+			return true
+		}
+		if confidenceGreater(existing.Confidence, incoming.Confidence) {
+			return false
+		}
+		if incoming.Algorithm != existing.Algorithm {
+			return nextRank == 0
+		}
+		return existing.Start != nil && existing.End != nil && incoming.Start != nil && incoming.End != nil &&
+			(math.Abs(*existing.Start-*incoming.Start) > 0.5 || math.Abs(*existing.End-*incoming.End) > 0.5)
+	default:
+		return confidenceGreater(incoming.Confidence, existing.Confidence)
+	}
+}
+
+func scannerAlgorithmPriority(algorithm string) int {
+	switch algorithm {
+	case "chapter:silence:v1":
+		return 40
+	case "chapter:v1":
+		return 30
+	case "episode-version-copy:v1":
+		return 20
+	case "chromaprint:dialogue:v1":
+		return 15
+	case "chromaprint:v1":
+		return 10
+	default:
+		return 0
+	}
+}
 
 // MarkerUpdatePayload is the storage-agnostic shape produced from a provider
 // Result. Repositories convert it into their concrete write column set. Source
@@ -60,17 +88,18 @@ func (s SegmentPayload) Present() bool { return s.Start != nil || s.End != nil }
 // carries its own provider/confidence/algorithm so a merged multi-provider
 // result records correct per-segment provenance.
 type MarkerUpdatePayload struct {
-	Intro   SegmentPayload
-	Credits SegmentPayload
-	Recap   SegmentPayload
-	Preview SegmentPayload
-	Source  string
+	Intro              SegmentPayload
+	Credits            SegmentPayload
+	Recap              SegmentPayload
+	Preview            SegmentPayload
+	Source             string
+	RefreshedProviders []string
 }
 
-// HasAnySegment reports whether the payload carries at least one segment
-// range. Callers can short-circuit empty writes without touching the DB.
+// HasAnySegment reports whether the payload can change marker state, including
+// removing ranges withdrawn by a successfully refreshed provider.
 func (p MarkerUpdatePayload) HasAnySegment() bool {
-	return p.Intro.Present() || p.Credits.Present() || p.Recap.Present() || p.Preview.Present()
+	return p.Intro.Present() || p.Credits.Present() || p.Recap.Present() || p.Preview.Present() || len(p.RefreshedProviders) > 0
 }
 
 // SummaryConfidence returns the highest per-segment confidence present, for the
@@ -120,11 +149,12 @@ func (p MarkerUpdatePayload) SummarySource() string {
 // algorithm finally falls back to external:<source> so every write carries an
 // algorithm tag.
 func BuildUpdatePayload(result Result) MarkerUpdatePayload {
-	payload := MarkerUpdatePayload{Source: result.SourceClass}
+	payload := MarkerUpdatePayload{Source: result.SourceClass, RefreshedProviders: result.RefreshedProviders}
 	for _, m := range result.Markers {
 		start := m.Start.Seconds()
 		end := m.End.Seconds()
-		if end <= start {
+		rangeValue := models.MarkerSegment{Kind: markerKindName(m.Kind), StartSeconds: start, EndSeconds: end}
+		if !rangeValue.Valid() {
 			continue
 		}
 		startPtr, endPtr := start, end
@@ -135,23 +165,124 @@ func BuildUpdatePayload(result Result) MarkerUpdatePayload {
 			Source:    source,
 			Provider:  markerProvider(m, result),
 			Algorithm: markerAlgorithm(m, result.Algorithm, source),
+			Ranges:    []models.MarkerSegment{rangeValue},
 		}
 		if m.Confidence > 0 {
 			conf := m.Confidence
 			seg.Confidence = &conf
 		}
+		var target *SegmentPayload
 		switch m.Kind {
 		case MarkerKindIntro:
-			payload.Intro = seg
+			target = &payload.Intro
 		case MarkerKindCredits:
-			payload.Credits = seg
+			target = &payload.Credits
 		case MarkerKindRecap:
-			payload.Recap = seg
+			target = &payload.Recap
 		case MarkerKindPreview:
-			payload.Preview = seg
+			target = &payload.Preview
+		}
+		if target == nil {
+			continue
+		}
+		if !target.Present() {
+			*target = seg
+		} else {
+			target.Ranges = append(target.Ranges, rangeValue)
+		}
+	}
+	for _, segment := range []*SegmentPayload{&payload.Intro, &payload.Credits, &payload.Recap, &payload.Preview} {
+		sort.SliceStable(segment.Ranges, func(i, j int) bool { return segment.Ranges[i].StartSeconds < segment.Ranges[j].StartSeconds })
+		if len(segment.Ranges) > 0 {
+			segment.Start = &segment.Ranges[0].StartSeconds
+			segment.End = &segment.Ranges[0].EndSeconds
 		}
 	}
 	return payload
+}
+
+// ApplyResult projects a provider response onto a copy of the file. On-demand
+// lookups use the same source precedence as persisted writes without changing
+// the stored catalog row.
+func ApplyResult(file *models.MediaFile, result Result) *models.MediaFile {
+	if file == nil {
+		return nil
+	}
+	next := *file
+	byKind := make(map[string][]models.MarkerSegment, 4)
+	for _, segment := range models.EffectiveMarkerSegments(file) {
+		byKind[segment.Kind] = append(byKind[segment.Kind], segment)
+	}
+	payload := BuildUpdatePayload(result)
+	now := time.Now().UTC()
+	targets := []struct {
+		kind                        string
+		incoming                    SegmentPayload
+		start, end                  **float64
+		source, provider, algorithm **string
+		confidence                  **float64
+		detectedAt                  **time.Time
+	}{
+		{"intro", payload.Intro, &next.IntroStart, &next.IntroEnd, &next.IntroMarkersSource, &next.IntroMarkersProvider, &next.IntroMarkersAlgorithm, &next.IntroMarkersConfidence, &next.IntroMarkersDetectedAt},
+		{"credits", payload.Credits, &next.CreditsStart, &next.CreditsEnd, &next.CreditsMarkersSource, &next.CreditsMarkersProvider, &next.CreditsMarkersAlgorithm, &next.CreditsMarkersConfidence, &next.CreditsMarkersDetectedAt},
+		{"recap", payload.Recap, &next.RecapStart, &next.RecapEnd, &next.RecapMarkersSource, &next.RecapMarkersProvider, &next.RecapMarkersAlgorithm, &next.RecapMarkersConfidence, &next.RecapMarkersDetectedAt},
+		{"preview", payload.Preview, &next.PreviewStart, &next.PreviewEnd, &next.PreviewMarkersSource, &next.PreviewMarkersProvider, &next.PreviewMarkersAlgorithm, &next.PreviewMarkersConfidence, &next.PreviewMarkersDetectedAt},
+	}
+	for _, target := range targets {
+		existing := SegmentPayload{Start: *target.start, End: *target.end, Ranges: byKind[target.kind], Provider: *target.provider, Confidence: *target.confidence}
+		if *target.source != nil {
+			existing.Source = **target.source
+		} else if existing.Present() && file.MarkersSource != nil {
+			existing.Source = *file.MarkersSource
+		}
+		if *target.algorithm != nil {
+			existing.Algorithm = **target.algorithm
+		}
+		incoming := target.incoming
+		if !incoming.Present() {
+			if existing.Source != models.MarkerSourceManual && existing.Provider != nil && slices.Contains(result.RefreshedProviders, *existing.Provider) {
+				delete(byKind, target.kind)
+				*target.start, *target.end, *target.source, *target.provider, *target.algorithm, *target.confidence, *target.detectedAt = nil, nil, nil, nil, nil, nil, nil
+			}
+			continue
+		}
+		valid := true
+		for _, segment := range incoming.Ranges {
+			if file.Duration > 0 && segment.EndSeconds > float64(file.Duration)+1 {
+				valid = false
+			}
+		}
+		if !valid || !CanWriteMarkerUpdate(existing, incoming) {
+			continue
+		}
+		byKind[target.kind] = incoming.Ranges
+		*target.start, *target.end = incoming.Start, incoming.End
+		*target.source, *target.provider, *target.algorithm = &incoming.Source, incoming.Provider, &incoming.Algorithm
+		*target.confidence, *target.detectedAt = incoming.Confidence, &now
+	}
+	next.MarkerSegments = make([]models.MarkerSegment, 0)
+	for _, kind := range []string{"intro", "credits", "recap", "preview"} {
+		next.MarkerSegments = append(next.MarkerSegments, byKind[kind]...)
+	}
+	next.MarkerSegments = models.EffectiveMarkerSegments(&next)
+	next.MarkersSource, next.MarkersConfidence = nil, nil
+	for _, target := range targets {
+		if len(byKind[target.kind]) == 0 {
+			continue
+		}
+		source, confidence := *target.source, *target.confidence
+		if source == nil {
+			source, confidence = file.MarkersSource, file.MarkersConfidence
+		}
+		if source == nil {
+			continue
+		}
+		if next.MarkersSource == nil || models.MarkerSourcePriority(*source) > models.MarkerSourcePriority(*next.MarkersSource) ||
+			(models.MarkerSourcePriority(*source) == models.MarkerSourcePriority(*next.MarkersSource) && confidenceGreater(confidence, next.MarkersConfidence)) {
+			next.MarkersSource, next.MarkersConfidence = source, confidence
+		}
+	}
+	return &next
 }
 
 func markerSource(m Marker, result Result) string {

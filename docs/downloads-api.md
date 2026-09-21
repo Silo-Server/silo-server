@@ -475,6 +475,16 @@ entry reaches `ready`, store it beside the media file, and use it for offline
 playback UI. Each encoded manifest is limited to 1 MiB; a larger one returns `413`
 rather than silently truncating fields or arrays.
 
+`marker_segments` contains every effective marker occurrence for the downloaded
+file as `{kind, start_seconds, end_seconds}`, ordered by source time. It is empty
+when no markers exist. Kinds are `intro`, `credits`, `recap`, and `preview`;
+repeated kinds remain separate ranges, so offline players must not skip the gaps
+between them. The existing singular marker fields remain available.
+
+An individual manifest request may populate that file's markers after access
+checks, with a five-second provider budget and existing markers as a fallback.
+Batch manifest requests use stored markers and do not trigger provider lookups.
+
 ### 4.7 Batch manifests
 
 ```http

@@ -87,6 +87,8 @@ func NewRouter(deps Dependencies) chi.Router {
 		subtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 	}
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.SeasonRepo, deps.AccessFilterFn, subtitleRepo)
+	itemsHandler.MarkerPopulation = deps.MarkerPopulation
+	itemsHandler.FileResolver = deps.FileResolver
 	itemsHandler.recommender = deps.Recommender
 	if deps.DB != nil {
 		itemsHandler.collections = catalog.NewLibraryCollectionRepository(deps.DB)

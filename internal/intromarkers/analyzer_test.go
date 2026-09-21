@@ -135,6 +135,7 @@ func TestAnalyzeEpisodeNoCandidatesIsNoOp(t *testing.T) {
 
 func TestAnalyzeEpisodeWritesChapterMarker(t *testing.T) {
 	candidate := Candidate{
+		FileHash:  "original-file",
 		FileID:    10,
 		EpisodeID: "ep1",
 		Chapters: []models.MediaChapter{
@@ -156,6 +157,9 @@ func TestAnalyzeEpisodeWritesChapterMarker(t *testing.T) {
 	}
 	if len(repo.patches) != 1 {
 		t.Fatalf("expected one patch, got %d", len(repo.patches))
+	}
+	if repo.patches[0].ExpectedFile == nil || repo.patches[0].ExpectedFile.FileHash != candidate.FileHash {
+		t.Fatal("marker write must retain the file identity captured before analysis")
 	}
 	if repo.patches[0].Algorithm != ChapterAlgorithm {
 		t.Fatalf("expected chapter algorithm, got %q", repo.patches[0].Algorithm)

@@ -414,11 +414,11 @@ export function SeekBar({
           {duration > 0 &&
             regions.map((region) => {
               const isActive = editing && region.kind === activeEditKind;
-              const isHovered = hoverRegion?.kind === region.kind && !dragging && edgeDrag === null;
+              const isHovered = hoverRegion === region && !dragging && edgeDrag === null;
               return (
                 <div
                   aria-hidden="true"
-                  key={region.kind}
+                  key={`${region.kind}:${region.start}:${region.end}`}
                   className={[
                     "absolute top-1/2 -translate-y-1/2 rounded-full transition-[height,box-shadow] duration-150 ease-out",
                     editing ? (isActive ? "h-2.5" : "h-2") : isHovered ? "h-2" : "h-full",

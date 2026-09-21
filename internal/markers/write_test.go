@@ -89,49 +89,64 @@ func TestBuildUpdatePayloadFallsBackAlgorithmAndProvider(t *testing.T) {
 	}
 }
 
-func TestCanWriteMarkerEqualPriorityRequiresHigherConfidence(t *testing.T) {
-	existing := models.MarkerSourceOnline
-	low, high := 0.5, 0.9
-
-	if CanWriteMarker(&existing, &high, models.MarkerSourceOnline, &low) {
-		t.Error("equal priority with lower new confidence should not write")
+func TestApplyResultKeepsOccurrencesAndManualEdits(t *testing.T) {
+	file := &models.MediaFile{Duration: 1000, IntroStart: new(10.0), IntroEnd: new(50.0),
+		IntroMarkersSource: new(models.MarkerSourceManual)}
+	result := Result{ProviderID: "provider", SourceClass: models.MarkerSourceOnline, RefreshedProviders: []string{"provider"},
+		Markers: []Marker{
+			{Kind: MarkerKindCredits, Start: 900 * time.Second, End: 950 * time.Second, Confidence: 0.9},
+			{Kind: MarkerKindIntro, Start: 20 * time.Second, End: 60 * time.Second, Confidence: 0.9},
+			{Kind: MarkerKindCredits, Start: 800 * time.Second, End: 850 * time.Second, Confidence: 0.9},
+		}}
+	payload := BuildUpdatePayload(result)
+	if len(payload.Credits.Ranges) != 2 || *payload.Credits.Start != 800 || *payload.Credits.End != 850 {
+		t.Fatalf("lost credit occurrences or wrong legacy range: %+v", payload.Credits)
 	}
-	if !CanWriteMarker(&existing, &low, models.MarkerSourceOnline, &high) {
-		t.Error("equal priority with strictly higher new confidence should write")
+	next := ApplyResult(file, result)
+	if *next.IntroStart != 10 || len(next.MarkerSegments) != 3 || *next.CreditsStart != 800 {
+		t.Fatalf("incorrect marker projection: %+v", next.MarkerSegments)
 	}
-	if CanWriteMarker(&existing, &high, models.MarkerSourceOnline, &high) {
-		t.Error("equal priority with equal confidence should not write")
+	if file.CreditsStart != nil || len(file.MarkerSegments) != 0 {
+		t.Fatal("on-demand projection changed the stored file snapshot")
+	}
+	cleared := ApplyResult(next, Result{RefreshedProviders: []string{"provider"}})
+	if cleared.CreditsStart != nil || len(cleared.MarkerSegments) != 1 || *cleared.IntroStart != 10 {
+		t.Fatal("provider miss did not clear only that provider's ranges")
 	}
 }
 
-func TestCanWriteMarkerHigherPriorityWinsRegardless(t *testing.T) {
-	existing := models.MarkerSourceScanner
-	if !CanWriteMarker(&existing, nil, models.MarkerSourceOnline, nil) {
-		t.Error("higher priority should win even without confidence")
+func TestCanWriteMarkerUpdateAcceptsSelectedProviderRefresh(t *testing.T) {
+	existing := SegmentPayload{Start: new(10.0), End: new(20.0), Source: models.MarkerSourceOnline,
+		Provider: new("old"), Confidence: new(0.9)}
+	incoming := existing
+	incoming.Start = new(12.0)
+	if !CanWriteMarkerUpdate(existing, incoming) {
+		t.Fatal("same provider correction at unchanged confidence was rejected")
 	}
-	online := models.MarkerSourceOnline
-	if CanWriteMarker(&online, nil, models.MarkerSourceScanner, nil) {
-		t.Error("lower priority should not overwrite higher")
+	incoming.Provider, incoming.Confidence = new("preferred"), new(0.8)
+	if !CanWriteMarkerUpdate(existing, incoming) {
+		t.Fatal("registry's selected provider was overridden by incomparable confidence")
+	}
+	existing.Source = models.MarkerSourceManual
+	if CanWriteMarkerUpdate(existing, incoming) {
+		t.Fatal("online result replaced a manual edit")
 	}
 }
 
-func TestCanWriteMarkerManualAlwaysWinsLastWriter(t *testing.T) {
-	manual := models.MarkerSourceManual
-	conf := 1.0
-
-	// A manual edit must overwrite an existing manual marker even though both
-	// share priority 4 and confidence 1.0 — otherwise corrections silently fail.
-	if !CanWriteMarker(&manual, &conf, models.MarkerSourceManual, &conf) {
-		t.Error("manual edit should overwrite an existing manual marker (last-writer-wins)")
+func TestCanWriteMarkerUpdatePreservesSourcePriority(t *testing.T) {
+	scanner := SegmentPayload{Start: new(10.0), End: new(20.0), Source: models.MarkerSourceScanner}
+	online := scanner
+	online.Source = models.MarkerSourceOnline
+	manual := scanner
+	manual.Source = models.MarkerSourceManual
+	manual.Confidence = new(1.0)
+	if !CanWriteMarkerUpdate(scanner, online) || CanWriteMarkerUpdate(online, scanner) {
+		t.Fatal("online/scanner priority is incorrect")
 	}
-	// Manual still wins over lower-priority sources.
-	online := models.MarkerSourceOnline
-	highConf := 0.99
-	if !CanWriteMarker(&online, &highConf, models.MarkerSourceManual, &conf) {
-		t.Error("manual edit should overwrite a high-confidence online marker")
+	if !CanWriteMarkerUpdate(online, manual) || CanWriteMarkerUpdate(manual, online) {
+		t.Fatal("manual priority is incorrect")
 	}
-	// A non-manual source still cannot displace a manual marker.
-	if CanWriteMarker(&manual, &conf, models.MarkerSourceOnline, &highConf) {
-		t.Error("online source should never overwrite a manual marker")
+	if !CanWriteMarkerUpdate(manual, manual) {
+		t.Fatal("manual edits must allow corrections at unchanged confidence")
 	}
 }

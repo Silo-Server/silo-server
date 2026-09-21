@@ -235,8 +235,7 @@ type PlaybackHandler struct {
 	IntroAnalyzer          IntroEpisodeAnalyzer
 	IntroRepository        PlaybackIntroEligibilityChecker
 	MarkerRegistry         *markers.Registry
-	MarkerResolver         markers.ExternalIDResolver
-	MarkerUpserter         PlaybackMarkerUpserter
+	MarkerPopulation       MarkerPopulationService
 	MarkerUpdateNotifier   PlaybackMarkerUpdateNotifier
 	MarkerLazyContext      context.Context
 	MarkerLazyInFlight     sync.Map

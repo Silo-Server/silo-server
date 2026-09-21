@@ -942,7 +942,7 @@
     {
       "name": "admin_episode_markers_refresh",
       "operation_id": "refreshAdminEpisodeMarkers",
-      "scenario": "Marker refresh acknowledges local analysis without a durable job.",
+      "scenario": "Marker refresh acknowledges configured online or local sources.",
       "request": {
         "method": "POST",
         "path": "/api/v2/admin/items/episode-1/refresh-markers",

@@ -21087,6 +21087,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "marker_segments": {
+            "description": "All effective marker occurrences in source-time order; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/MarkerOccurrence"
+            },
+            "type": "array"
+          },
           "media_file_id": {
             "description": "Opaque identifier",
             "examples": [
@@ -21178,6 +21185,7 @@
           "resolution",
           "hdr",
           "duration_seconds",
+          "marker_segments",
           "subtitles",
           "stable_identity",
           "integrity",
@@ -22908,6 +22916,13 @@
           "intro": {
             "$ref": "#/components/schemas/MarkerSegment"
           },
+          "marker_segments": {
+            "description": "All effective marker occurrences in source-time order; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/MarkerOccurrence"
+            },
+            "type": "array"
+          },
           "preview": {
             "$ref": "#/components/schemas/MarkerSegment"
           },
@@ -22920,7 +22935,8 @@
           "intro",
           "credits",
           "recap",
-          "preview"
+          "preview",
+          "marker_segments"
         ],
         "type": "object"
       },
@@ -26230,6 +26246,36 @@
         "required": [
           "start",
           "end"
+        ],
+        "type": "object"
+      },
+      "MarkerOccurrence": {
+        "additionalProperties": false,
+        "properties": {
+          "end_seconds": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "kind": {
+            "enum": [
+              "intro",
+              "credits",
+              "recap",
+              "preview"
+            ],
+            "type": "string"
+          },
+          "start_seconds": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "start_seconds",
+          "end_seconds"
         ],
         "type": "object"
       },
@@ -39105,6 +39151,13 @@
           "intro": {
             "$ref": "#/components/schemas/WatchMarker"
           },
+          "marker_segments": {
+            "description": "All effective marker occurrences for this file in source-time order; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/MarkerOccurrence"
+            },
+            "type": "array"
+          },
           "multi_episode_end": {
             "format": "int64",
             "type": "integer"
@@ -39162,7 +39215,8 @@
           "file_size",
           "duration_seconds",
           "bitrate",
-          "added_at"
+          "added_at",
+          "marker_segments"
         ],
         "type": "object"
       },
@@ -66691,7 +66745,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Request local episode marker analysis; duplicate in-process work is coalesced.",
+        "summary": "Refresh episode markers using configured sources, or explicitly rerun local intro detection.",
         "tags": [
           "admin-catalog"
         ],
@@ -66845,7 +66899,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Request local episode marker analysis; duplicate in-process work is coalesced.",
+        "summary": "Refresh episode markers using configured sources, or explicitly rerun local intro detection.",
         "tags": [
           "admin-catalog"
         ],

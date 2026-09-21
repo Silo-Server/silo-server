@@ -77,19 +77,20 @@ type serviceConfigStore interface {
 }
 
 type Service struct {
-	repositories   *RepositoryStore
-	installations  serviceInstallationStore
-	configs        serviceConfigStore
-	catalog        *CatalogService
-	installer      *Installer
-	archiveCache   *ArchiveCache
-	host           Host
-	testConfigSeq  atomic.Int64
-	dispatcher     *EventDispatcher
-	lifecycleMu    sync.RWMutex
-	lifecycleHooks []func(context.Context)
-	launchGroup    singleflight.Group
-	resident       *ResidentSupervisor
+	repositories     *RepositoryStore
+	installations    serviceInstallationStore
+	configs          serviceConfigStore
+	catalog          *CatalogService
+	installer        *Installer
+	archiveCache     *ArchiveCache
+	host             Host
+	testConfigSeq    atomic.Int64
+	dispatcher       *EventDispatcher
+	lifecycleMu      sync.RWMutex
+	lifecycleHooks   []func(context.Context)
+	launchGroup      singleflight.Group
+	runtimeRefreshMu sync.RWMutex
+	resident         *ResidentSupervisor
 	// lifecycleBus, when set by PublishLifecycleChanges, carries every
 	// lifecycle change to the proxy nodes running the same installations.
 	lifecycleBus cache.EventBus
@@ -529,6 +530,8 @@ func (s *Service) PreloadEnabled(ctx context.Context) error {
 }
 
 func (s *Service) Start(ctx context.Context, installationID int) (pluginClient, error) {
+	s.runtimeRefreshMu.RLock()
+	defer s.runtimeRefreshMu.RUnlock()
 	return s.start(ctx, installationID, true)
 }
 
@@ -570,6 +573,27 @@ func (s *Service) Stop(installationID int) error {
 		return nil
 	}
 	return s.host.Stop(installationID)
+}
+
+// RefreshMarkerRuntime discards local state after the marker registry observes
+// a changed database revision, including changes made through another replica.
+// Waiting for concurrent launches prevents an old process from appearing after
+// the stop and being reused with the new revision.
+func (s *Service) RefreshMarkerRuntime(installationID int) error {
+	s.runtimeRefreshMu.Lock()
+	s.invalidateInstallationCache()
+	if err := s.Stop(installationID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
+		s.runtimeRefreshMu.Unlock()
+		return err
+	}
+	s.runtimeRefreshMu.Unlock()
+	// A plugin can expose both marker and resident capabilities. Restart under
+	// supervision so a stopped resident does not wait for another lifecycle
+	// event. Restart waits for a launch, so it must run outside the launch lock.
+	if err := s.resident.Restart(context.Background(), installationID); err != nil && !errors.Is(err, ErrNotResident) {
+		return err
+	}
+	return nil
 }
 
 func (s *Service) MediaAnalyzerClient(
@@ -811,6 +835,8 @@ func (s *Service) ensureClient(ctx context.Context, installationID int) (pluginC
 // Separate flights keep a lazy RPC from joining an accepted resident launch,
 // or making that launch fail because the RPC is forbidden from starting it.
 func (s *Service) ensureClientForStart(ctx context.Context, installationID int, allowResident bool) (pluginClient, error) {
+	s.runtimeRefreshMu.RLock()
+	defer s.runtimeRefreshMu.RUnlock()
 	key := strconv.Itoa(installationID) + ":" + strconv.FormatBool(allowResident)
 	v, err, _ := s.launchGroup.Do(key, func() (any, error) {
 		// Isolate the shared launch from the leader caller's cancellation: other

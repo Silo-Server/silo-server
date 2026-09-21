@@ -37,6 +37,7 @@ type AdminIntroHandler struct {
 	Settings             MarkerSettingsReader
 	FileResolver         AdminIntroFileResolver
 	MarkerUpdateNotifier PlaybackMarkerUpdateNotifier
+	OnlineMarkers        MarkerRefreshService
 	baseContext          context.Context
 	inFlight             sync.Map
 	logger               *slog.Logger
@@ -84,6 +85,9 @@ func (h *AdminIntroHandler) handleEpisodeMarkers(w http.ResponseWriter, r *http.
 }
 
 func (h *AdminIntroHandler) RefreshEpisodeMarkers(ctx context.Context, episodeID, action string) (string, error) {
+	if action == "refresh-v2" {
+		return h.refreshEpisodeMarkersV2(ctx, episodeID)
+	}
 	if h == nil || h.analyzer == nil || h.eligibility == nil {
 		return "", apiError(http.StatusServiceUnavailable, "unavailable", "Intro detection is not configured")
 	}

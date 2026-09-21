@@ -78,17 +78,14 @@ func (r *DBExternalIDResolver) ResolveForFile(ctx context.Context, file *models.
 
 	if episodeID != "" {
 		// TheIntroDB indexes episode markers by show + season/episode, so we
-		// prefer the series-level external IDs and fall back to the episode
-		// row only if the series isn't matched yet. The episode row's
+		// use series-level external IDs only. Episode IDs identify a different
+		// provider object and cannot substitute for an unmatched show. The episode row's
 		// season/episode numbers are authoritative; the media_files copy
 		// can drift during multi-version moves.
-		var epTmdb, epImdb, epTvdb, showTmdb, showImdb, showTvdb string
+		var showTmdb, showImdb, showTvdb string
 		var season, episode int
 		err := r.pool.QueryRow(ctx, `
-			SELECT COALESCE(NULLIF(e.tmdb_id, ''), ''),
-			       COALESCE(NULLIF(e.imdb_id, ''), ''),
-			       COALESCE(NULLIF(e.tvdb_id, ''), ''),
-			       COALESCE(e.season_number, 0),
+			SELECT COALESCE(e.season_number, 0),
 			       COALESCE(e.episode_number, 0),
 			       COALESCE(NULLIF(mi.tmdb_id, ''), ''),
 			       COALESCE(NULLIF(mi.imdb_id, ''), ''),
@@ -96,7 +93,7 @@ func (r *DBExternalIDResolver) ResolveForFile(ctx context.Context, file *models.
 			FROM episodes e
 			LEFT JOIN media_items mi ON mi.content_id = e.series_id
 			WHERE e.content_id = $1`, episodeID).Scan(
-			&epTmdb, &epImdb, &epTvdb, &season, &episode,
+			&season, &episode,
 			&showTmdb, &showImdb, &showTvdb,
 		)
 		if err != nil {
@@ -105,19 +102,7 @@ func (r *DBExternalIDResolver) ResolveForFile(ctx context.Context, file *models.
 			}
 			return ExternalIDs{}, fmt.Errorf("resolve episode external ids: %w", err)
 		}
-		tmdb := showTmdb
-		if tmdb == "" {
-			tmdb = epTmdb
-		}
-		imdb := showImdb
-		if imdb == "" {
-			imdb = epImdb
-		}
-		tvdb := showTvdb
-		if tvdb == "" {
-			tvdb = epTvdb
-		}
-		if season <= 0 {
+		if season < 0 {
 			season = file.SeasonNumber
 		}
 		if episode <= 0 {
@@ -125,9 +110,9 @@ func (r *DBExternalIDResolver) ResolveForFile(ctx context.Context, file *models.
 		}
 		return ExternalIDs{
 			Kind:          ItemKindEpisode,
-			TmdbID:        tmdb,
-			ImdbID:        imdb,
-			TvdbID:        tvdb,
+			TmdbID:        showTmdb,
+			ImdbID:        showImdb,
+			TvdbID:        showTvdb,
 			SeasonNumber:  season,
 			EpisodeNumber: episode,
 		}, nil

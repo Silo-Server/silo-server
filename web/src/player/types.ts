@@ -35,6 +35,7 @@ export interface PlayerFileVersion {
   credits?: PlayerTimeRange | null;
   recap?: PlayerTimeRange | null;
   preview?: PlayerTimeRange | null;
+  marker_segments?: PlayerMarkerSegment[];
 }
 
 export interface PlayerPlaybackVariantPart {
@@ -173,6 +174,13 @@ export interface PlayerTimeRange {
  * Jellyfin-compatible API exposes as "Outro" — there is no separate outro kind.
  */
 export type MarkerKind = "intro" | "recap" | "credits" | "preview";
+
+/** Every occurrence in the v2 marker inventory. An empty array means no markers. */
+export interface PlayerMarkerSegment {
+  kind: MarkerKind;
+  start_seconds: number;
+  end_seconds: number;
+}
 
 /** A full set of editable marker ranges for one file (null = no marker). */
 export interface MarkerDraft {

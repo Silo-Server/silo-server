@@ -51,11 +51,15 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 		CapabilityID:   "markers",
 		DisplayName:    "Markers",
 		PluginID:       "silo.markers",
+		CacheRevision:  "config-revision",
 	}, func(context.Context, int, string) (pluginMarkerClient, error) {
 		return client, nil
 	})
 	if err != nil {
 		t.Fatalf("NewPluginProviderWithClientFactory: %v", err)
+	}
+	if provider.CacheRevision() != "config-revision" {
+		t.Fatalf("cache revision = %q, want configured revision", provider.CacheRevision())
 	}
 
 	res, err := provider.FetchMarkers(context.Background(), Request{

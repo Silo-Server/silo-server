@@ -44,6 +44,7 @@ const (
 	EventMetadataUpdated             = "metadata_updated"
 	EventAdminStatsInvalidated       = "admin_stats_invalidated"
 	EventPlaybackSessionsChanged     = "playback_sessions_changed"
+	EventMarkersUpdated              = "markers_updated"
 	EventUserDisabled                = "user_disabled"
 	EventUserDeleted                 = "user_deleted"
 	EventSettingsChanged             = "settings_changed"

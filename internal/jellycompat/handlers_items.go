@@ -54,14 +54,18 @@ type ItemsHandler struct {
 	queryExecutor   smartCollectionQueryExecutor
 	posterPresigner LibraryPosterPresigner
 	presignTTL      time.Duration
-	// FileResolver is optional; when set, /MediaSegments returns real intro/
-	// credits/recap/preview segments for any file that has them.
-	FileResolver FilePathResolver
+	// FileResolver reloads an authorized version before optional marker population.
+	FileResolver     FilePathResolver
+	MarkerPopulation MarkerPopulationService
 	// sectionsFetcher is optional; when set, the Continue Watching (Resume) path
 	// is served through the capped native continue-watching fetcher instead of an
 	// unbounded progress scan. It is the section subsystem's read-time fetcher and
 	// is independent of any virtual-library/hub-section exposure.
 	sectionsFetcher *sections.Fetcher
+}
+
+type MarkerPopulationService interface {
+	Populate(ctx context.Context, file *models.MediaFile) (*models.MediaFile, bool, error)
 }
 
 // NewItemsHandler creates a new items handler.
@@ -795,6 +799,20 @@ func (h *ItemsHandler) HandleMediaSegments(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusOK, mediaSegmentsResultDTO{Items: []mediaSegmentDTO{}})
 		return
 	}
+	if version.FileID > 0 && h.MarkerPopulation != nil && h.FileResolver != nil {
+		lookupCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		file, err := h.FileResolver.GetByID(lookupCtx, version.FileID)
+		if err == nil && file != nil {
+			file, _, err = h.MarkerPopulation.Populate(lookupCtx, file)
+			if file != nil {
+				version.SetMarkers(file)
+			}
+		}
+		if err != nil {
+			slog.WarnContext(r.Context(), "jellycompat: marker lookup failed", "file_id", version.FileID, "error", err)
+		}
+	}
 
 	segments := buildMediaSegmentDTOs(raw, version)
 	writeJSON(w, http.StatusOK, mediaSegmentsResultDTO{
@@ -804,29 +822,33 @@ func (h *ItemsHandler) HandleMediaSegments(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// buildMediaSegmentDTOs converts the four optional marker ranges on a file
-// version into the flat segment list shape Jellyfin clients expect.
+// buildMediaSegmentDTOs keeps distinct occurrences as separate Jellyfin segments.
 func buildMediaSegmentDTOs(itemUUID string, version *catalog.FileVersion) []mediaSegmentDTO {
 	if version == nil {
 		return nil
 	}
-	segments := make([]mediaSegmentDTO, 0, 4)
-	add := func(kind string, marker *catalog.Marker) {
-		if marker == nil {
-			return
+	ranges := version.EffectiveMarkerSegments()
+	segments := make([]mediaSegmentDTO, 0, len(ranges))
+	occurrences := map[string]int{}
+	kinds := map[string]string{"intro": "Intro", "credits": "Outro", "recap": "Recap", "preview": "Preview"}
+	for _, marker := range ranges {
+		kind := kinds[marker.Kind]
+		if kind == "" {
+			continue
 		}
+		identity := kind
+		if index := occurrences[kind]; index > 0 {
+			identity = fmt.Sprintf("%s:%d", kind, index)
+		}
+		occurrences[kind]++
 		segments = append(segments, mediaSegmentDTO{
-			Id:         deriveSegmentID(itemUUID, kind),
+			Id:         deriveSegmentID(itemUUID, identity),
 			ItemId:     itemUUID,
 			Type:       kind,
-			StartTicks: secondsToTicks(marker.Start),
-			EndTicks:   secondsToTicks(marker.End),
+			StartTicks: secondsToTicks(marker.StartSeconds),
+			EndTicks:   secondsToTicks(marker.EndSeconds),
 		})
 	}
-	add("Intro", version.Intro)
-	add("Outro", version.Credits)
-	add("Recap", version.Recap)
-	add("Preview", version.Preview)
 	return segments
 }
 

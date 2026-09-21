@@ -107,6 +107,7 @@ type Dependencies struct {
 	// the activity dashboard doesn't wait for the periodic reconciler tick.
 	// Optional.
 	SessionSyncer          PlaybackSessionSyncer
+	MarkerPopulation       MarkerPopulationService
 	FileResolver           FilePathResolver
 	UserStoreProvider      userstore.UserStoreProvider
 	WatchScrobbler         PlaybackWatchScrobbler

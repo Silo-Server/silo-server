@@ -93,13 +93,7 @@ describe("LibraryMetadataSettings", () => {
   it("renders every field group heading", () => {
     const rendered = text(render({ "catalog.search.provider": "meilisearch" }));
 
-    for (const heading of [
-      "Artwork",
-      "Browsing",
-      "Scanning",
-      "Intro and credits markers",
-      "Search",
-    ]) {
+    for (const heading of ["Artwork", "Browsing", "Scanning", "Skip markers", "Search"]) {
       expect(rendered).toContain(heading);
     }
   });
@@ -109,14 +103,14 @@ describe("LibraryMetadataSettings", () => {
 
     expect(rendered).toContain("Library & Metadata");
     expect(rendered).toContain("Keep provider artwork");
-    expect(rendered).toContain("Find intros and credits");
+    expect(rendered).toContain("Find skip markers");
     expect(rendered).toContain("Search engine");
   });
 
   it("states the CPU cost of local detection and the search fallback guarantee", () => {
     const rendered = text(render({ "catalog.search.provider": "meilisearch" }));
 
-    expect(rendered).toContain("Detecting on this server utilizes CPU.");
+    expect(rendered).toContain("Detecting on this server uses CPU.");
     expect(rendered).toContain(
       "Meilisearch tolerates typos but runs as its own service. If it goes down, search falls back to the built-in engine automatically.",
     );
@@ -151,6 +145,7 @@ describe("LibraryMetadataSettings", () => {
         "metadata.image_workers",
         "markers.mode",
         "markers.lazy_playback",
+        "markers.online_storage",
         "catalog.search.provider",
         "catalog.search.meilisearch.url",
         "catalog.search.meilisearch.api_key",
@@ -166,7 +161,7 @@ describe("LibraryMetadataSettings", () => {
   it("keeps marker behavior and points provider setup at the providers page", () => {
     const rendered = render({ "catalog.search.provider": "postgres" });
 
-    expect(text(rendered)).toContain("Find intros and credits");
+    expect(text(rendered)).toContain("Find skip markers");
     // Per-provider configuration moved to Subtitles & Metadata; only the link
     // to it is left here.
     expect(text(rendered)).not.toContain("Use for online marker lookup");
@@ -227,7 +222,9 @@ describe("LibraryMetadataSettings", () => {
   });
 
   it("says it once for a group where every field needs a restart", () => {
-    useRestartKeysMock.mockReturnValue(new Set(["markers.mode", "markers.lazy_playback"]));
+    useRestartKeysMock.mockReturnValue(
+      new Set(["markers.mode", "markers.lazy_playback", "markers.online_storage"]),
+    );
 
     const rendered = render({ "catalog.search.provider": "postgres" });
 

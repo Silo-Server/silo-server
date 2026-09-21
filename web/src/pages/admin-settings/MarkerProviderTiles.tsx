@@ -264,7 +264,7 @@ function MarkerProviderTile({
   return (
     <ProviderTile
       name={displayName}
-      tagline="Intro and credits markers"
+      tagline="Skip markers"
       monogram={providerMonogram(displayName)}
       monogramClass="bg-teal-500/20 text-teal-700 dark:text-teal-300"
       state={state}

@@ -108,8 +108,9 @@ var adminSettingDefaults = map[string]string{
 	"metadata.cache_images":                "true",
 	"artwork.storage_backend":              "auto",
 	"artwork.local_path":                   "/var/lib/silo/artwork",
-	"markers.mode":                         "local",
-	"markers.lazy_playback":                "false",
+	"markers.mode":                         "online",
+	"markers.lazy_playback":                "true",
+	"markers.online_storage":               "stored",
 
 	"playback.ffmpeg_path":                           "",
 	playbackTranscodeDirSettingKey:                   DefaultTranscodeDir,
