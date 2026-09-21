@@ -85,8 +85,8 @@ const markerRangeTolerance = 0.5
 // A payload that carries only singular bounds is compared as one range, which
 // keeps rows and callers written before multi-occurrence support comparable.
 func sameMarkerRanges(existing, incoming SegmentPayload) bool {
-	existingRanges := comparableMarkerRanges(existing)
-	incomingRanges := comparableMarkerRanges(incoming)
+	existingRanges := canonicalMarkerRanges(existing)
+	incomingRanges := canonicalMarkerRanges(incoming)
 	if len(existingRanges) != len(incomingRanges) {
 		return false
 	}
@@ -99,12 +99,26 @@ func sameMarkerRanges(existing, incoming SegmentPayload) bool {
 	return true
 }
 
-func comparableMarkerRanges(payload SegmentPayload) []models.MarkerSegment {
+// canonicalMarkerRanges orders a payload's occurrences the way
+// models.EffectiveMarkerSegments canonicalizes them, so two payloads describing
+// the same set compare equal whatever order the caller supplied. Start time
+// alone is not enough: range validation permits two occurrences with the same
+// start and different ends, and a stable sort leaves those in arrival order,
+// which reads as a change and re-writes the row.
+func canonicalMarkerRanges(payload SegmentPayload) []models.MarkerSegment {
 	ranges := slices.Clone(payload.Ranges)
 	if len(ranges) == 0 && payload.Start != nil && payload.End != nil {
 		ranges = []models.MarkerSegment{{StartSeconds: *payload.Start, EndSeconds: *payload.End}}
 	}
-	sort.SliceStable(ranges, func(i, j int) bool { return ranges[i].StartSeconds < ranges[j].StartSeconds })
+	sort.SliceStable(ranges, func(i, j int) bool {
+		if ranges[i].StartSeconds != ranges[j].StartSeconds {
+			return ranges[i].StartSeconds < ranges[j].StartSeconds
+		}
+		if ranges[i].EndSeconds != ranges[j].EndSeconds {
+			return ranges[i].EndSeconds < ranges[j].EndSeconds
+		}
+		return ranges[i].Kind < ranges[j].Kind
+	})
 	return ranges
 }
 

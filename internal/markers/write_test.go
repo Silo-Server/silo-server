@@ -225,4 +225,24 @@ func TestCanWriteMarkerUpdateSortsRangesBeforeComparing(t *testing.T) {
 	if !CanWriteMarkerUpdate(existing, changed) {
 		t.Error("an equal-confidence ranged source could not withdraw an occurrence")
 	}
+
+	// Range validation permits two occurrences with the same start and different
+	// ends, so ordering them by start alone leaves them in arrival order and the
+	// same set reads as a change.
+	tied := SegmentPayload{
+		Start: new(10.0), End: new(20.0), Source: models.MarkerSourceS3, Confidence: confidence,
+		Ranges: []models.MarkerSegment{
+			{Kind: models.MarkerSegmentCredits, StartSeconds: 10, EndSeconds: 20},
+			{Kind: models.MarkerSegmentCredits, StartSeconds: 10, EndSeconds: 40},
+		},
+	}
+	tiedReordered := tied
+	tiedReordered.Start, tiedReordered.End = new(10.0), new(40.0)
+	tiedReordered.Ranges = []models.MarkerSegment{
+		{Kind: models.MarkerSegmentCredits, StartSeconds: 10, EndSeconds: 40},
+		{Kind: models.MarkerSegmentCredits, StartSeconds: 10, EndSeconds: 20},
+	}
+	if CanWriteMarkerUpdate(tied, tiedReordered) {
+		t.Error("two occurrences sharing a start compared as a change when only their order differed")
+	}
 }
