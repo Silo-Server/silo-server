@@ -16,6 +16,12 @@ import (
 )
 
 const (
+	markerFetchHit      = "hit"
+	markerFetchMiss     = "miss"
+	markerFetchError    = "error"
+	markerFetchLimited  = "limited"
+	markerFetchOnDemand = "on_demand"
+
 	markerPositiveTTL  = 7 * 24 * time.Hour
 	markerMissTTL      = 24 * time.Hour
 	markerMemoryTTL    = 15 * time.Minute
@@ -82,7 +88,7 @@ func (s *PopulationService) enabled(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if strings.TrimSpace(complete) != "true" {
+	if strings.TrimSpace(complete) != settingEnabled {
 		return false, nil
 	}
 	raw, err := s.opts.Settings.Get(ctx, SettingMode)
@@ -107,7 +113,7 @@ func (s *PopulationService) Populate(ctx context.Context, file *models.MediaFile
 			if err != nil {
 				return file, false, err
 			}
-			if strings.TrimSpace(lazy) != "true" {
+			if strings.TrimSpace(lazy) != settingEnabled {
 				return file, false, nil
 			}
 		}
@@ -151,7 +157,9 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 	if err != nil || !claimed {
 		return file, false, err
 	}
-	defer func() { _ = s.complete(ctx, fileClaim, FetchCompletion{Outcome: "on_demand", RetryAt: time.Now()}) }()
+	defer func() {
+		_ = s.complete(ctx, fileClaim, FetchCompletion{Outcome: markerFetchOnDemand, RetryAt: time.Now()})
+	}()
 	if s.opts.LoadFile != nil {
 		loaded, err := s.opts.LoadFile(ctx, file.ID)
 		if err != nil {
@@ -241,15 +249,15 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 		result.ProviderID = providerID
 		results = append(results, providerResult{entry: entry, result: result, refreshed: true})
 		ttl := markerPositiveTTL
-		outcome := "hit"
+		outcome := markerFetchHit
 		if len(result.Markers) == 0 {
 			ttl = markerMissTTL
-			outcome = "miss"
+			outcome = markerFetchMiss
 		}
 		completion := FetchCompletion{Outcome: outcome, RetryAt: time.Now().Add(ttl), Result: &result}
 		if storage == OnlineStorageOnDemand {
 			s.remember(key, result)
-			completion = FetchCompletion{Outcome: "on_demand", RetryAt: time.Now()}
+			completion = FetchCompletion{Outcome: markerFetchOnDemand, RetryAt: time.Now()}
 			if err := s.complete(ctx, claim, completion); err != nil {
 				failures = append(failures, err)
 			}
@@ -264,7 +272,7 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 	currentStorage, storageErr := s.OnlineStorage(ctx)
 	if settingsErr != nil || storageErr != nil || !stillEnabled || currentStorage != storage {
 		for _, fetch := range pending {
-			if err := s.complete(ctx, fetch.claim, FetchCompletion{Outcome: "error", RetryAt: time.Now().Add(time.Minute), Error: "marker settings changed"}); err != nil {
+			if err := s.complete(ctx, fetch.claim, FetchCompletion{Outcome: markerFetchError, RetryAt: time.Now().Add(time.Minute), Error: "marker settings changed"}); err != nil {
 				failures = append(failures, err)
 			}
 		}
@@ -297,7 +305,7 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 	for _, fetch := range pending {
 		completion := fetch.completion
 		if err != nil {
-			completion = FetchCompletion{Outcome: "error", RetryAt: time.Now().Add(time.Minute), Error: "marker storage failed"}
+			completion = FetchCompletion{Outcome: markerFetchError, RetryAt: time.Now().Add(time.Minute), Error: "marker storage failed"}
 		}
 		if completeErr := s.complete(ctx, fetch.claim, completion); completeErr != nil {
 			failures = append(failures, completeErr)
@@ -327,12 +335,12 @@ func (s *PopulationService) recordFetchFailure(ctx context.Context, provider Pro
 	}
 	failures := []error{fmt.Errorf("marker provider %s: %w", providerID, fetchErr)}
 	retry := fetchRetry(claim.Failures)
-	outcome := "error"
+	outcome := markerFetchError
 	if limited {
 		if after > 0 {
 			retry = after
 		}
-		outcome = "limited"
+		outcome = markerFetchLimited
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		if err := s.opts.Store.Cooldown(cleanupCtx, providerID, providerRevision(provider), time.Now().Add(retry)); err != nil {
 			failures = append(failures, err)

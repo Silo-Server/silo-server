@@ -329,13 +329,13 @@ func itemTypeName(kind ItemKind) string {
 func markerKindName(kind MarkerKind) string {
 	switch kind {
 	case MarkerKindIntro:
-		return "intro"
+		return models.MarkerSegmentIntro
 	case MarkerKindCredits:
-		return "credits"
+		return models.MarkerSegmentCredits
 	case MarkerKindRecap:
-		return "recap"
+		return models.MarkerSegmentRecap
 	case MarkerKindPreview:
-		return "preview"
+		return models.MarkerSegmentPreview
 	default:
 		return ""
 	}
@@ -343,13 +343,13 @@ func markerKindName(kind MarkerKind) string {
 
 func markerKindFromName(name string) (MarkerKind, bool) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "intro":
+	case models.MarkerSegmentIntro:
 		return MarkerKindIntro, true
-	case "credits":
+	case models.MarkerSegmentCredits:
 		return MarkerKindCredits, true
-	case "recap":
+	case models.MarkerSegmentRecap:
 		return MarkerKindRecap, true
-	case "preview":
+	case models.MarkerSegmentPreview:
 		return MarkerKindPreview, true
 	default:
 		return 0, false

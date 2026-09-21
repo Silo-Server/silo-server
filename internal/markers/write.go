@@ -73,7 +73,7 @@ func scannerAlgorithmPriority(algorithm string) int {
 		return 30
 	case "episode-version-copy:v1":
 		return 20
-	case "chromaprint:dialogue:v1":
+	case "chromaprint:dialogue:v1": //nolint:misspell // Persisted algorithm identifier.
 		return 15
 	case "chromaprint:v1":
 		return 10
@@ -223,10 +223,10 @@ func ApplyResult(file *models.MediaFile, result Result) *models.MediaFile {
 		confidence                  **float64
 		detectedAt                  **time.Time
 	}{
-		{"intro", payload.Intro, &next.IntroStart, &next.IntroEnd, &next.IntroMarkersSource, &next.IntroMarkersProvider, &next.IntroMarkersAlgorithm, &next.IntroMarkersConfidence, &next.IntroMarkersDetectedAt},
-		{"credits", payload.Credits, &next.CreditsStart, &next.CreditsEnd, &next.CreditsMarkersSource, &next.CreditsMarkersProvider, &next.CreditsMarkersAlgorithm, &next.CreditsMarkersConfidence, &next.CreditsMarkersDetectedAt},
-		{"recap", payload.Recap, &next.RecapStart, &next.RecapEnd, &next.RecapMarkersSource, &next.RecapMarkersProvider, &next.RecapMarkersAlgorithm, &next.RecapMarkersConfidence, &next.RecapMarkersDetectedAt},
-		{"preview", payload.Preview, &next.PreviewStart, &next.PreviewEnd, &next.PreviewMarkersSource, &next.PreviewMarkersProvider, &next.PreviewMarkersAlgorithm, &next.PreviewMarkersConfidence, &next.PreviewMarkersDetectedAt},
+		{models.MarkerSegmentIntro, payload.Intro, &next.IntroStart, &next.IntroEnd, &next.IntroMarkersSource, &next.IntroMarkersProvider, &next.IntroMarkersAlgorithm, &next.IntroMarkersConfidence, &next.IntroMarkersDetectedAt},
+		{models.MarkerSegmentCredits, payload.Credits, &next.CreditsStart, &next.CreditsEnd, &next.CreditsMarkersSource, &next.CreditsMarkersProvider, &next.CreditsMarkersAlgorithm, &next.CreditsMarkersConfidence, &next.CreditsMarkersDetectedAt},
+		{models.MarkerSegmentRecap, payload.Recap, &next.RecapStart, &next.RecapEnd, &next.RecapMarkersSource, &next.RecapMarkersProvider, &next.RecapMarkersAlgorithm, &next.RecapMarkersConfidence, &next.RecapMarkersDetectedAt},
+		{models.MarkerSegmentPreview, payload.Preview, &next.PreviewStart, &next.PreviewEnd, &next.PreviewMarkersSource, &next.PreviewMarkersProvider, &next.PreviewMarkersAlgorithm, &next.PreviewMarkersConfidence, &next.PreviewMarkersDetectedAt},
 	}
 	for _, target := range targets {
 		existing := SegmentPayload{Start: *target.start, End: *target.end, Ranges: byKind[target.kind], Provider: *target.provider, Confidence: *target.confidence}
@@ -261,7 +261,7 @@ func ApplyResult(file *models.MediaFile, result Result) *models.MediaFile {
 		*target.confidence, *target.detectedAt = incoming.Confidence, &now
 	}
 	next.MarkerSegments = make([]models.MarkerSegment, 0)
-	for _, kind := range []string{"intro", "credits", "recap", "preview"} {
+	for _, kind := range []string{models.MarkerSegmentIntro, models.MarkerSegmentCredits, models.MarkerSegmentRecap, models.MarkerSegmentPreview} {
 		next.MarkerSegments = append(next.MarkerSegments, byKind[kind]...)
 	}
 	next.MarkerSegments = models.EffectiveMarkerSegments(&next)

@@ -830,7 +830,12 @@ func buildMediaSegmentDTOs(itemUUID string, version *catalog.FileVersion) []medi
 	ranges := version.EffectiveMarkerSegments()
 	segments := make([]mediaSegmentDTO, 0, len(ranges))
 	occurrences := map[string]int{}
-	kinds := map[string]string{"intro": "Intro", "credits": "Outro", "recap": "Recap", "preview": "Preview"}
+	kinds := map[string]string{
+		models.MarkerSegmentIntro:   "Intro",
+		models.MarkerSegmentCredits: "Outro",
+		models.MarkerSegmentRecap:   "Recap",
+		models.MarkerSegmentPreview: "Preview",
+	}
 	for _, marker := range ranges {
 		kind := kinds[marker.Kind]
 		if kind == "" {

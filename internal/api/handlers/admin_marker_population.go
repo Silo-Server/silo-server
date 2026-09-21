@@ -12,6 +12,11 @@ type MarkerRefreshService interface {
 	Refresh(context.Context, *models.MediaFile) (*models.MediaFile, bool, error)
 }
 
+const (
+	markerRefreshQueued         = "queued"
+	markerRefreshAlreadyRunning = "already_running"
+)
+
 func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, episodeID string) (string, error) {
 	if h == nil || h.Settings == nil || h.FileResolver == nil {
 		return "", apiError(http.StatusServiceUnavailable, "unavailable", "Marker refresh is not configured")
@@ -46,7 +51,7 @@ func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, episode
 		local = eligibility.IntroDetectionEnabled
 	}
 	if _, loaded := h.inFlight.LoadOrStore(episodeID, struct{}{}); loaded {
-		return "already_running", nil
+		return markerRefreshAlreadyRunning, nil
 	}
 	go func() {
 		defer h.inFlight.Delete(episodeID)
@@ -72,5 +77,5 @@ func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, episode
 			h.notifyEpisodeMarkerUpdates(ctx, episodeID, "refresh")
 		}
 	}()
-	return "queued", nil
+	return markerRefreshQueued, nil
 }

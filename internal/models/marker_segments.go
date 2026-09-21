@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+const (
+	MarkerSegmentIntro   = "intro"
+	MarkerSegmentCredits = "credits"
+	MarkerSegmentRecap   = "recap"
+	MarkerSegmentPreview = "preview"
+)
+
 // MarkerSegment is one occurrence of a skippable part of a media file.
 type MarkerSegment struct {
 	Kind         string  `json:"kind"`
@@ -17,7 +24,7 @@ type MarkerSegment struct {
 }
 
 func (s MarkerSegment) Valid() bool {
-	return (s.Kind == "intro" || s.Kind == "credits" || s.Kind == "recap" || s.Kind == "preview") &&
+	return (s.Kind == MarkerSegmentIntro || s.Kind == MarkerSegmentCredits || s.Kind == MarkerSegmentRecap || s.Kind == MarkerSegmentPreview) &&
 		!math.IsNaN(s.StartSeconds) && !math.IsInf(s.StartSeconds, 0) &&
 		!math.IsNaN(s.EndSeconds) && !math.IsInf(s.EndSeconds, 0) &&
 		s.StartSeconds >= 0 && s.EndSeconds > s.StartSeconds
@@ -41,10 +48,10 @@ func EffectiveMarkerSegments(file *MediaFile) []MarkerSegment {
 		kind       string
 		start, end *float64
 	}{
-		{"intro", file.IntroStart, file.IntroEnd},
-		{"credits", file.CreditsStart, file.CreditsEnd},
-		{"recap", file.RecapStart, file.RecapEnd},
-		{"preview", file.PreviewStart, file.PreviewEnd},
+		{MarkerSegmentIntro, file.IntroStart, file.IntroEnd},
+		{MarkerSegmentCredits, file.CreditsStart, file.CreditsEnd},
+		{MarkerSegmentRecap, file.RecapStart, file.RecapEnd},
+		{MarkerSegmentPreview, file.PreviewStart, file.PreviewEnd},
 	} {
 		if present[legacy.kind] || legacy.start == nil || legacy.end == nil {
 			continue

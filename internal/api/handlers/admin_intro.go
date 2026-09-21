@@ -131,7 +131,7 @@ func (h *AdminIntroHandler) RefreshEpisodeMarkers(ctx context.Context, episodeID
 	}
 
 	if _, loaded := h.inFlight.LoadOrStore(episodeID, struct{}{}); loaded {
-		return "already_running", nil
+		return markerRefreshAlreadyRunning, nil
 	}
 
 	go func() {
@@ -161,7 +161,7 @@ func (h *AdminIntroHandler) RefreshEpisodeMarkers(ctx context.Context, episodeID
 		h.notifyEpisodeMarkerUpdates(h.baseContext, episodeID, action)
 	}()
 
-	return "queued", nil
+	return markerRefreshQueued, nil
 }
 
 func (h *AdminIntroHandler) notifyEpisodeMarkerUpdates(ctx context.Context, episodeID, action string) {
