@@ -125,7 +125,11 @@ export function markerOccurrenceAtTime(
   currentTime: number,
 ): MarkerRegionView | null {
   const occurrences = regions.filter((region) => region.kind === kind);
-  let occurrence = occurrences[0] ?? null;
+  // Start empty rather than seeded with occurrences[0]: before the first
+  // occurrence begins the answer is "no occurrence", and callers that trusted
+  // the returned region without re-checking the playhead would otherwise be
+  // handed a range that has not started.
+  let occurrence: MarkerRegionView | null = null;
   for (const region of occurrences) {
     if (region.start > currentTime) break;
     occurrence = region;
