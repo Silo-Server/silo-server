@@ -120,7 +120,7 @@ func (h *AutoscanHandler) itemRefreshFiles(ctx context.Context, rawID string) ([
 	}
 	contentID, err := decodeItemID(h.codec, rawID)
 	if err != nil {
-		return nil, false, nil
+		return nil, false, nil //nolint:nilerr // An undecodable id names no item; the caller answers 404.
 	}
 	files, err := h.files.GetByEpisodeID(ctx, contentID)
 	if err != nil {

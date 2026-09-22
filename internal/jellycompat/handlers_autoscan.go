@@ -151,7 +151,7 @@ func (h *AutoscanHandler) HandleMediaUpdated(w http.ResponseWriter, r *http.Requ
 // Sidecars and vanished files fall back to their parent directory (see
 // parentFallbackAutoscanUpdateError). Any other rejection is returned so the
 // caller fails the request instead of quietly scanning less than was asked.
-// event names the request in log messages; logAttrs adds request context.
+// event names the request in log records; logAttrs adds request context.
 func resolveAutoscanPath(
 	ctx context.Context,
 	resolver *scantrigger.Resolver,
@@ -165,24 +165,24 @@ func resolveAutoscanPath(
 	if err == nil {
 		return target, nil
 	}
-	attrs := append([]any{"component", "jellycompat", "path", path}, logAttrs...)
+	attrs := append([]any{"component", "jellycompat", "event", event, "path", path}, logAttrs...) //nolint:goconst // slog attribute key.
 	if parentTarget, handled, fallbackErr := resolveAutoscanParentTarget(ctx, resolver, path, trigger, err); handled {
 		if fallbackErr != nil {
-			slog.WarnContext(ctx, "jellycompat autoscan: "+event+" parent path rejected",
+			slog.WarnContext(ctx, "jellycompat autoscan: parent path rejected",
 				append(attrs, "parent_path", filepath.Dir(filepath.Clean(path)), "error", fallbackErr)...)
 			return nil, fallbackErr
 		}
 		if parentTarget != nil {
-			slog.DebugContext(ctx, "jellycompat autoscan: "+event+" falling back to parent scan",
+			slog.DebugContext(ctx, "jellycompat autoscan: falling back to parent scan",
 				append(attrs, "parent_path", parentTarget.Path, "parent_mode", parentTarget.Mode)...)
 		}
 		return parentTarget, nil
 	}
 	if softAutoscanUpdateError(err) {
-		slog.DebugContext(ctx, "jellycompat autoscan: "+event+" ignored", append(attrs, "error", err)...)
+		slog.DebugContext(ctx, "jellycompat autoscan: path ignored", append(attrs, "error", err)...)
 		return nil, nil
 	}
-	slog.WarnContext(ctx, "jellycompat autoscan: "+event+" path rejected", append(attrs, "error", err)...)
+	slog.WarnContext(ctx, "jellycompat autoscan: path rejected", append(attrs, "error", err)...)
 	return nil, err
 }
 
