@@ -212,6 +212,9 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		{"/tv/Example Show/Season 1/[Group] Example Show - 02 [16x9 1080p].mkv", 1, 2, true},
 		{"/tv/Example Show/Season 1/Example.Show.1920x1080.E02.mkv", 1, 2, true},
 		{"/tv/Example Show/Example Show - 4x3 - Title.mkv", 4, 3, true},
+		{"/tv/Example Show/Season 1/Example.Show.16x9.E02.mkv", 1, 2, true},
+		{"/tv/Example Opus/Season 1/Example Opus - 02.mkv", 1, 2, true},
+		{"/tv/Opus.Example/Season 1/Opus.Example - 02 [1080p FLAC].mkv", 1, 2, true},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
 			hints := ParseFilename(tt.path, "series", "/tv")

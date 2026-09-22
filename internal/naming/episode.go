@@ -20,7 +20,7 @@ var (
 	dashEpisodeRe            = regexp.MustCompile(`^(\d)-(\d{2})(?:$|[ ._-])`)
 	digitRunRe               = regexp.MustCompile(`\d+`)
 	seasonEpisodeDashRe      = regexp.MustCompile(`^\d-\d{2}(?:$|[ ._-])`)
-	resolutionTokenRe        = regexp.MustCompile(`(?:^|[^\p{L}\p{N}])\d{3,4}x\d{3,4}[ ._]*$`)
+	resolutionTokenRe        = regexp.MustCompile(`(?:^|[^\p{L}\p{N}])(?:\d{3,4}x\d{3,4}|4x3|16x9|16x10|21x9)[ ._]*$`)
 	aspectRatioRe            = regexp.MustCompile(`^(?:4x3|16x9|16x10|21x9)$`)
 	titleYearAfterRe         = regexp.MustCompile(`[\(\[](?:19|20)\d{2}[\)\]]|^[ ._]+(?:19|20)\d{2}(?:$|[ ._\-\[(])`)
 	episodeFieldEndRe        = regexp.MustCompile(`^(?:-\d+)?(?:\s*$|\s*[\[(]|\s+-\s)`)
@@ -107,8 +107,8 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 	}
 	// Ignore technical metadata when considering unlabeled numbers. Audio
 	// layouts such as AAC5.1 must not replace the episode preceding them.
-	if match := episodeTechnicalRe.FindStringIndex(name); match != nil {
-		name = name[:match[0]]
+	if cut := technicalMetadataStart(name); cut >= 0 {
+		name = name[:cut]
 	}
 	if match := bracketEpisodeRe.FindStringSubmatchIndex(name); match != nil {
 		return makeToken(match[0], match[1], parseEpisodeNumber(name[match[2]:match[3]])), true
@@ -229,6 +229,18 @@ func startsWithShowTitle(name, showDirectory string) bool {
 	return title != "" && (comparable == title || strings.HasPrefix(comparable, title+" "))
 }
 
+// technicalMetadataStart finds where release details begin. A format word
+// before any number can belong to the show title (Opus.COLORs - 02).
+func technicalMetadataStart(name string) int {
+	for _, match := range episodeTechnicalRe.FindAllStringIndex(name, -1) {
+		term := strings.TrimFunc(name[match[0]:match[1]], func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+		if strings.ContainsAny(name[:match[0]], "0123456789") || !inferTitleWordFormatRe.MatchString(term) {
+			return match[0]
+		}
+	}
+	return -1
+}
+
 // hasExplicitEpisodeToken reports a labeled coordinate such as S01E01 or 1x01.
 // Without series context, unlabeled numbers are not episode evidence.
 func hasExplicitEpisodeToken(name string) bool {
@@ -253,9 +265,15 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 	if insideReleaseTag(name, start) {
 		return false
 	}
-	if aspectRatioRe.MatchString(name[start:match[5]]) && episodeTechnicalRe.MatchString(name[match[5]:]) &&
-		episodeTechnicalRe.FindStringIndex(name[match[5]:])[0] <= 1 {
-		return false
+	if aspectRatioRe.MatchString(name[start:match[5]]) {
+		// An aspect ratio yields to release details or an explicit episode
+		// marker after it: Show.16x9.E02 is episode 2 of its season folder.
+		if technical := episodeTechnicalRe.FindStringIndex(name[match[5]:]); technical != nil && technical[0] <= 1 {
+			return false
+		}
+		if episodeOnlyRe.MatchString(name[match[5]:]) {
+			return false
+		}
 	}
 	// Audio layouts pair a one-digit decimal with a channel count or codec:
 	// 2.0x2, 5.1x264. Show names ending in a digit (Babylon.5.1x01) do not.
