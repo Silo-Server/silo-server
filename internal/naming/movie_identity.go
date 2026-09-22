@@ -16,6 +16,7 @@ var (
 	// Ordinary title words such as "Web" or "Extended" alone do not establish
 	// a release suffix. Only technical terms delimit a yearless movie title.
 	inferTechnicalSuffixRe = regexp.MustCompile(`(?i)(?:^|[ ._\-\[(])(?:[248]k|ultra[ ._-]?hd|uhd|hdr(?:10\+?)?|hdc|sdr|2160p|1080[pi]|720p|576[pi]|480[pi]|\d{3,4}x\d{3,4}|blu[ ._-]?ray|b[dr]rip|dvd[ ._-]?(?:rip|scr)|hdtv|web[ ._-]?(?:dl|rip)|hd[ ._-]?rip|remux|x26[45]|h[ .]?26[45]|hevc|avc|av1|xvid|divx|mpeg[ ._-]?[24]|aac(?:[ .]?\d[ .]?\d)?|e?ac[ ._-]?3|ddp?\d[ .]?\d|dts(?:[ ._-]?hd)?|truehd|flac|opus)(?:$|[^\p{L}\p{N}])`)
+	inferYearBoundaryRe    = regexp.MustCompile(`(?:^|[^\p{L}\p{N}])[\(\[]?(?:19|20)\d{2}[\)\]]?(?:$|[^\p{L}\p{N}])`)
 	inferTitleWordFormatRe = regexp.MustCompile(`(?i)^(?:[248]k|uhd|ultra[ ._-]?hd|hdr(?:10\+?)?|sdr|opus|flac|avc|blu[ ._-]?ray)$`)
 	inferDiscTrackRe       = regexp.MustCompile(`(?i)^(?:(?:title\s*t?|t)\d+|vts\s*\d+\s*\d+)$`)
 	inferMovieBracketRe    = regexp.MustCompile(`\[([^\[\]]+)\]`)
@@ -54,13 +55,13 @@ func parseInferMovieStem(name string, folderTitle string, folderYear int) inferM
 	// "Movie 480p 2001" names an undated movie with release metadata.
 	titleSurface := surface
 	remainder := bracketMetadata
-	// An explicit "Title (Year)" boundary is stronger than a title word that
-	// can also name a format ("Mr. Holland's Opus (1995)", "The UHD Journey").
-	// Resolution, source, and codec terms still end the title.
+	// A release year is a stronger title boundary than a word that can also
+	// name a format ("Mr. Holland's Opus (1995)", "The.UHD.Journey.2014").
+	// Resolution, source, and codec terms before the year still end the title.
 	searchFrom := 0
-	if match := inferBracketTitleYearRe.FindStringSubmatchIndex(surface); match != nil &&
-		!strings.ContainsAny(surface[match[2]:match[3]], "[(") && onlyTitleWordFormats(surface[match[2]:match[3]]) {
-		searchFrom = match[1]
+	if year := inferYearBoundaryRe.FindStringIndex(surface); year != nil && year[0] > 0 &&
+		!strings.Contains(surface[:year[0]], "[") && onlyTitleWordFormats(surface[:year[0]]) {
+		searchFrom = year[1]
 	}
 	if location := movieTechnicalSuffixStart(surface[searchFrom:]); location >= 0 && searchFrom+location > 0 {
 		location += searchFrom

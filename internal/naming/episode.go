@@ -20,8 +20,8 @@ var (
 	dashEpisodeRe            = regexp.MustCompile(`^(\d)-(\d{2})(?:$|[ ._-])`)
 	digitRunRe               = regexp.MustCompile(`\d+`)
 	seasonEpisodeDashRe      = regexp.MustCompile(`^\d-\d{2}(?:$|[ ._-])`)
-	technicalXTokenRe        = regexp.MustCompile(`(?:(?:^|[^\p{L}\p{N}])(?:\d{3,4}x\d{3,4}|4x3|16x9|16x10|21x9)|\d\.\dx(?:\d|26[45]))[ ._]*$`)
-	aspectRatioRe            = regexp.MustCompile(`^(?:4x3|16x9|16x10|21x9)$`)
+	technicalXTokenRe        = regexp.MustCompile(`(?:(?:^|[^\p{L}\p{N}])(?:\d{3,4}x\d{3,4}|3x2|4x3|16x9|16x10|21x9)|\d\.\d+x(?:\d|26[45]))[ ._]*$`)
+	aspectRatioRe            = regexp.MustCompile(`^(?:3x2|4x3|16x9|16x10|21x9)$`)
 	titleYearAfterRe         = regexp.MustCompile(`[\(\[](?:19|20)\d{2}[\)\]]|^[ ._-]+(?:19|20)\d{2}(?:$|[ ._\-\[(])`)
 	episodeFieldEndRe        = regexp.MustCompile(`^(?:-\d+)?(?:\s*$|\s*[\[(]|\s+-\s)`)
 	leadingEpisodeSuffixRe   = regexp.MustCompile(`^\s*(?:$|[\[(]|-\s|-\d+(?:$|[\s\[(]))`)
@@ -276,9 +276,10 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 			return false
 		}
 	}
-	// Audio layouts pair a one-digit decimal with a channel count or codec:
-	// 2.0x2, 5.1x264. Show names ending in a digit (Babylon.5.1x01) do not.
-	if match[3]-start == 1 && start >= 2 && name[start-1] == '.' && isASCIIDigit(name[start-2]) && (start == 2 || !isASCIIDigit(name[start-3])) &&
+	// Audio layouts and aspect ratios put a decimal before a one-digit count
+	// or codec: 2.0x2, 5.1x264, 2.35x1. Show names ending in a digit
+	// (Babylon.5.1x01) do not.
+	if start >= 2 && name[start-1] == '.' && isASCIIDigit(name[start-2]) && (start == 2 || !isASCIIDigit(name[start-3])) &&
 		(len(episode) == 1 || number == 264 || number == 265) {
 		return false
 	}

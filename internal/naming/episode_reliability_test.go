@@ -215,6 +215,8 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		{"/tv/Example Show/Season 1/Example.Show.16x9.E02.mkv", 1, 2, true},
 		{"/tv/Example Show/Season 1/Example.Show.AAC.2.0x2.E03.mkv", 1, 3, true},
 		{"/tv/Example Show/Season 1/Example.Show.DD5.1x264.E03.mkv", 1, 3, true},
+		{"/tv/Example Show/Season 1/Example.Show.2.35x1.E02.mkv", 1, 2, true},
+		{"/tv/Example Show/Season 1/Example.Show.3x2.E02.mkv", 1, 2, true},
 		{"/tv/Example Opus/Season 1/Example Opus - 02.mkv", 1, 2, true},
 		{"/tv/Opus.Example/Season 1/Opus.Example - 02 [1080p FLAC].mkv", 1, 2, true},
 	} {
@@ -300,13 +302,17 @@ func TestExplicitMovieYearKeepsFormatWordsInTitle(t *testing.T) {
 		{"/movies/Mr. Example's Opus (1995).mkv", "Mr. Example's Opus"},
 		{"/movies/The UHD Journey (2014).mkv", "The UHD Journey"},
 		{"/movies/Example 4K Story (2020).mkv", "Example 4K Story"},
+		{"/movies/Mr.Examples.Opus.1995.mkv", "Mr Examples Opus"},
+		{"/movies/The.UHD.Journey.2014.1080p.BluRay.mkv", "The UHD Journey"},
 	} {
 		hints := ParseFilename(tt.path, "movies", "/movies")
 		if hints.Title != tt.title || hints.Year == 0 {
 			t.Fatalf("%s: hints = %+v, want %q with its year", tt.path, hints, tt.title)
 		}
 	}
-	if hints := ParseFilename("/movies/Example.Movie.2019.1080p.BluRay.x264-GRP.mkv", "movies", "/movies"); hints.Title != "Example Movie" || hints.Year != 2019 {
-		t.Fatalf("release name hints = %+v", hints)
+	for _, path := range []string{"/movies/Example.Movie.2019.1080p.BluRay.x264-GRP.mkv", "/movies/Example.Movie.4K.HDR.2160p.2019.mkv"} {
+		if hints := ParseFilename(path, "movies", "/movies"); hints.Title != "Example Movie" {
+			t.Fatalf("%s: release name hints = %+v", path, hints)
+		}
 	}
 }
