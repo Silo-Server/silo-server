@@ -5901,6 +5901,37 @@ func trustedStructuredIDsForSkeleton(filePath, observedRootPath, contentRootPath
 	return mergeFolderIDHints(folderIDs, fileIDs)
 }
 
+// seriesContentIDForGroup returns the series item already linked to another
+// file of the scanned group, preferring a confirmed match.
+func (s *MetadataService) seriesContentIDForGroup(ctx context.Context, folderID, groupKeyVersion int, contentGroupKey string, excludeFileID int) (string, error) {
+	files, err := s.fileRepo.ListByGroupKey(ctx, folderID, groupKeyVersion, contentGroupKey)
+	if err != nil {
+		return "", fmt.Errorf("loading series group files: %w", err)
+	}
+	provisional := ""
+	checked := map[string]bool{}
+	for _, member := range files {
+		if member == nil || member.ID == excludeFileID || member.ContentID == "" || checked[member.ContentID] {
+			continue
+		}
+		checked[member.ContentID] = true
+		item, err := s.itemRepo.GetByID(ctx, member.ContentID)
+		if err != nil {
+			return "", fmt.Errorf("loading series group item: %w", err)
+		}
+		if item == nil || item.Type != matchContentTypeSeries {
+			continue
+		}
+		if isConfirmedOwnershipStatus(item.Status) {
+			return item.ContentID, nil
+		}
+		if provisional == "" {
+			provisional = item.ContentID
+		}
+	}
+	return provisional, nil
+}
+
 // A configured library folder contains many titles. Its own name cannot anchor
 // a media item's provider identity, even when an older scan stored it as the
 // file's observed or canonical content root.
@@ -5914,6 +5945,9 @@ func skeletonFolderAnchorName(rootPath string, libraryRoots []string) string {
 }
 
 const manualIdentityOverrideSource = "manual"
+
+// scannedGroupStateResolved marks a scanner group whose members agree on identity.
+const scannedGroupStateResolved = "resolved"
 
 func scannedGroupIdentityChanged(group *models.ScannedMediaGroup, file *models.MediaFile, currentIDs *naming.FolderIDHints, libraryRoots ...string) bool {
 	if group == nil || file == nil || strings.EqualFold(strings.TrimSpace(group.OverrideSource), manualIdentityOverrideSource) {
@@ -6239,6 +6273,28 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			}
 			if err := s.upsertLibraryMembership(ctx, existingContentID, folderID); err != nil {
 				s.logLibraryMembershipError("upserting existing root item membership", existingContentID, folderID, err)
+			}
+			res.ContentID = existingContentID
+			return res, nil
+		}
+	}
+
+	// Dedup 3b: a file directly in a series library root is its own observed
+	// root, so matching one show cannot relink its neighbors. Its episodes
+	// still form one resolved scanner group; reuse the series item another
+	// episode created instead of adding a provisional item per episode.
+	if res.Type == "series" && contentGroupKey != "" && filepath.Clean(observedRootPath) == filepath.Clean(file.FilePath) &&
+		(hasGroupOverride || (scannedIdentity != nil && scannedIdentity.State == scannedGroupStateResolved)) {
+		existingContentID, err := s.seriesContentIDForGroup(ctx, folderID, groupKeyVersion, contentGroupKey, file.ID)
+		if err != nil {
+			return nil, err
+		}
+		if existingContentID != "" {
+			if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, existingContentID); linkErr != nil {
+				return nil, fmt.Errorf("linking file to existing group item: %w", linkErr)
+			}
+			if err := s.upsertLibraryMembership(ctx, existingContentID, folderID); err != nil {
+				s.logLibraryMembershipError("upserting existing group item membership", existingContentID, folderID, err)
 			}
 			res.ContentID = existingContentID
 			return res, nil

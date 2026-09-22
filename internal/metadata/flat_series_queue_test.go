@@ -62,3 +62,42 @@ func TestStaleFlatSeriesQueueWithAnonymousSiblingRequiresRescan(t *testing.T) {
 		}
 	}
 }
+
+func TestFlatSeriesEpisodesShareOneProvisionalItem(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		groupState string
+		wantShared bool
+	}{
+		{"resolved group", "resolved", true},
+		{"ambiguous group", "ambiguous", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHarness()
+			const groupKey = "v1|series|example show|0000"
+			files := []*models.MediaFile{
+				{ID: 1, MediaFolderID: 10, FilePath: "/tv/Example.Show.S01E01.mkv", BaseTitle: "Example Show", BaseType: "series", GroupKeyVersion: 1, ContentGroupKey: groupKey},
+				{ID: 2, MediaFolderID: 10, FilePath: "/tv/Example.Show.S01E02.mkv", BaseTitle: "Example Show", BaseType: "series", GroupKeyVersion: 1, ContentGroupKey: groupKey},
+			}
+			for _, file := range files {
+				file.ObservedRootPath, file.CanonicalRootPath = file.FilePath, file.FilePath
+			}
+			h.fileRepo.setGroupFiles(10, 1, groupKey, files...)
+			h.scannedGroupRepo.setGroup(&models.ScannedMediaGroup{
+				MediaFolderID: 10, GroupKeyVersion: 1, ContentGroupKey: groupKey,
+				BaseTitle: "Example Show", InferredType: "series", State: tt.groupState,
+			})
+			first, err := h.service.createOrFindSkeleton(t.Context(), files[0], 10, "/tv")
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := h.service.createOrFindSkeleton(t.Context(), files[1], 10, "/tv")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if shared := first.ContentID == second.ContentID; shared != tt.wantShared {
+				t.Fatalf("episodes share item = %v (%q, %q), want %v", shared, first.ContentID, second.ContentID, tt.wantShared)
+			}
+		})
+	}
+}

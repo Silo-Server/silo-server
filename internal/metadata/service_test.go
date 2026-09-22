@@ -580,6 +580,9 @@ func (r *fakeFileRepo) ListByGroupKey(_ context.Context, folderID int, groupKeyV
 			continue
 		}
 		cp := *file
+		if contentID, ok := r.contentIDs[file.ID]; ok {
+			cp.ContentID = contentID
+		}
 		out = append(out, &cp)
 	}
 	return out, nil
