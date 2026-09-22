@@ -248,6 +248,40 @@ func (r *Repository) listMatchCandidateIDs(ctx context.Context, source MatchItem
 	if r == nil || r.pool == nil {
 		return nil, nil, fmt.Errorf("literary works repository requires a database pool")
 	}
+	query, args := buildMatchCandidateQuery(source, limit, after, autoWorkID)
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	var last matchCandidateCursor
+	for rows.Next() {
+		if err := rows.Scan(&last.contentID, &last.title); err != nil {
+			return nil, nil, err
+		}
+		ids = append(ids, last.contentID)
+	}
+	if len(ids) == limit {
+		return ids, &last, rows.Err()
+	}
+	return ids, nil, rows.Err()
+}
+
+// buildMatchCandidateQuery assembles the candidate-selection SQL and its args.
+//
+// Each match predicate (title, provider id, series) is emitted as its own
+// UNION branch so that every branch can ride a base-table index. Joining the
+// predicates with OR instead forces the planner to scan the whole ebook/
+// audiobook partition and filter row by row, which on a large library is
+// ~1000x slower and defeats idx_media_items_books_title_lower.
+//
+// The expensive, low-selectivity predicates that must apply to every candidate
+// (the ignored-decision NOT EXISTS on the source, the optional autoWorkID
+// exclusions, and the keyset pagination bound) are applied once in the outer
+// wrapper over the small UNION-ed id set, together with ORDER BY / LIMIT, so
+// they cannot silently drop from a branch and resurrect ignored pairs.
+func buildMatchCandidateQuery(source MatchItem, limit int, after *matchCandidateCursor, autoWorkID *string) (string, []any) {
 	// Candidates are the opposite format of the source; match their own series table.
 	seriesTable := "ebook_series"
 	if source.Type == "ebook" {
@@ -279,73 +313,75 @@ func (r *Repository) listMatchCandidateIDs(ctx context.Context, source MatchItem
 			len(args),
 		))
 	}
-	matchWhere := ""
-	if len(matchFilters) > 0 {
-		matchWhere = " AND (" + strings.Join(matchFilters, " OR ") + ")"
-	}
-	if autoWorkID != nil {
-		// Reject ineligible anchors before scoring, so an ignored relationship
-		// with a work member cannot hide another valid match on this page.
-		// A nil work filter keeps public candidate suggestions pairwise.
-		args = append(args, *autoWorkID)
-		matchWhere += fmt.Sprintf(`
-			AND NOT EXISTS (
-				SELECT 1 FROM literary_work_items member
-				JOIN literary_work_match_decisions d ON d.decision='ignored' AND (
-					(d.source_content_id=mi.content_id AND d.target_content_id=member.content_id)
-					OR (d.target_content_id=mi.content_id AND d.source_content_id=member.content_id)
-				)
-				WHERE member.work_id=$%d
-			)
-			AND NOT EXISTS (
-				SELECT 1 FROM literary_work_items candidate
-				JOIN literary_work_items member ON member.work_id=candidate.work_id
-				JOIN literary_work_match_decisions d ON d.decision='ignored' AND (
-					(d.source_content_id=$1 AND d.target_content_id=member.content_id)
-					OR (d.target_content_id=$1 AND d.source_content_id=member.content_id)
-				)
-				WHERE candidate.content_id=mi.content_id
-			)
-		`, len(args))
-	}
-	if after != nil {
-		args = append(args, after.title, after.contentID)
-		matchWhere += fmt.Sprintf(" AND (mi.title, mi.content_id) > ($%d, $%d)", len(args)-1, len(args))
-	}
-	args = append(args, limit)
-	rows, err := r.pool.Query(ctx, `
-		SELECT mi.content_id, mi.title
+
+	// Cheap predicates that can ride the index in every branch.
+	const branchBase = `		SELECT mi.content_id, mi.title
 		FROM media_items mi
 		WHERE mi.content_id <> $1
 		  AND mi.type IN ('ebook', 'audiobook')
-		  AND mi.type <> $2
-		  AND NOT EXISTS (
+		  AND mi.type <> $2`
+	branches := make([]string, 0, len(matchFilters))
+	if len(matchFilters) == 0 {
+		// No match predicates: every opposite-format item is a candidate, same
+		// as the pre-UNION query with an empty disjunction.
+		branches = append(branches, branchBase)
+	} else {
+		for _, filter := range matchFilters {
+			branches = append(branches, branchBase+"\n\t\t  AND "+filter)
+		}
+	}
+	candidates := strings.Join(branches, "\n\t\tUNION\n")
+
+	// Outer predicates applied once to the UNION-ed candidate ids. The
+	// ignored-decision NOT EXISTS is always present.
+	outerWhere := `NOT EXISTS (
 			SELECT 1 FROM literary_work_match_decisions d
 			WHERE d.decision = 'ignored'
 			  AND (
 				(d.source_content_id = $1 AND d.target_content_id = mi.content_id)
 				OR (d.source_content_id = mi.content_id AND d.target_content_id = $1)
 			  )
-		  )`+matchWhere+`
-		ORDER BY mi.title ASC, mi.content_id ASC
-		LIMIT $`+fmt.Sprint(len(args))+`
-	`, args...)
-	if err != nil {
-		return nil, nil, err
+		)`
+	if autoWorkID != nil {
+		// Reject ineligible anchors before scoring, so an ignored relationship
+		// with a work member cannot hide another valid match on this page.
+		// A nil work filter keeps public candidate suggestions pairwise.
+		args = append(args, *autoWorkID)
+		outerWhere += fmt.Sprintf(`
+		AND NOT EXISTS (
+			SELECT 1 FROM literary_work_items member
+			JOIN literary_work_match_decisions d ON d.decision='ignored' AND (
+				(d.source_content_id=mi.content_id AND d.target_content_id=member.content_id)
+				OR (d.target_content_id=mi.content_id AND d.source_content_id=member.content_id)
+			)
+			WHERE member.work_id=$%d
+		)
+		AND NOT EXISTS (
+			SELECT 1 FROM literary_work_items candidate
+			JOIN literary_work_items member ON member.work_id=candidate.work_id
+			JOIN literary_work_match_decisions d ON d.decision='ignored' AND (
+				(d.source_content_id=$1 AND d.target_content_id=member.content_id)
+				OR (d.target_content_id=$1 AND d.source_content_id=member.content_id)
+			)
+			WHERE candidate.content_id=mi.content_id
+		)`, len(args))
 	}
-	defer rows.Close()
-	var ids []string
-	var last matchCandidateCursor
-	for rows.Next() {
-		if err := rows.Scan(&last.contentID, &last.title); err != nil {
-			return nil, nil, err
-		}
-		ids = append(ids, last.contentID)
+	if after != nil {
+		args = append(args, after.title, after.contentID)
+		outerWhere += fmt.Sprintf("\n\t\tAND (mi.title, mi.content_id) > ($%d, $%d)", len(args)-1, len(args))
 	}
-	if len(ids) == limit {
-		return ids, &last, rows.Err()
-	}
-	return ids, nil, rows.Err()
+	args = append(args, limit)
+	query := `
+	WITH candidates AS (
+` + candidates + `
+	)
+	SELECT mi.content_id, mi.title
+	FROM candidates mi
+	WHERE ` + outerWhere + `
+	ORDER BY mi.title ASC, mi.content_id ASC
+	LIMIT $` + fmt.Sprint(len(args)) + `
+	`
+	return query, args
 }
 
 func (r *Repository) queryMatchItems(ctx context.Context, suffix string, args ...any) (pgx.Rows, error) {
