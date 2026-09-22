@@ -68,7 +68,7 @@ func ResolvePathContext(filePath string, libraryType string, libraryRoots ...str
 
 	allowNumericSeasonDirs := ctx.HasEpisodePattern || normalizedLibraryType == "series"
 	ctx.HasSeasonStructure, _ = detectSeasonStructure(directories, allowNumericSeasonDirs, libraryRoot != "")
-	ctx.HasMovieFolderEvidence = filepath.Clean(parentDir) != libraryRoot && detectMovieFolderEvidence(parentBase, nameNoExt, ctx.HasSeasonStructure)
+	ctx.HasMovieFolderEvidence = filepath.Clean(parentDir) != libraryRoot && detectInferMovieFolderEvidence(parentBase, nameNoExt, ctx.HasSeasonStructure)
 
 	switch normalizedLibraryType {
 	case "movie":
@@ -282,29 +282,6 @@ func detectSeasonStructure(parts []string, allowNumeric bool, configuredRoot ...
 func firstSeasonNumber(parts []string, allowNumeric bool, configuredRoot ...bool) (int, bool) {
 	found, seasonNum := detectSeasonStructure(parts, allowNumeric, configuredRoot...)
 	return seasonNum, found
-}
-
-func detectMovieFolderEvidence(parentBase string, nameNoExt string, hasSeasonStructure bool) bool {
-	if hasSeasonStructure {
-		return false
-	}
-
-	if hasExplicitFolderIDs(parentBase) {
-		return true
-	}
-
-	parentComparable := normalizeComparableTitle(parentBase)
-	fileComparable := normalizeComparableTitle(nameNoExt)
-	if parentComparable == "" || fileComparable == "" {
-		return false
-	}
-
-	parentTitle, parentYear := parseTitleYearCandidate(parentBase)
-	if parentTitle == "" || parentYear == 0 {
-		return false
-	}
-
-	return comparableTitlesOverlap(fileComparable, parentComparable)
 }
 
 func hasExplicitFolderIDs(name string) bool {

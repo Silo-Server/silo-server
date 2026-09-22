@@ -243,6 +243,9 @@ func TestMixedLibraryDatedShowFolderWithEpisodesIsSeries(t *testing.T) {
 		if got := assignments[path]; got.InferredType != "series" || got.Title != "Example Show" || got.Year != 2005 {
 			t.Fatalf("%s: assignment = %+v; want series Example Show (2005)", path, got)
 		}
+		if hints := ParseFilename(path, "mixed", "/mixed"); hints.Type != "series" || hints.SeasonNum != 1 || hints.EpisodeNum == 0 {
+			t.Fatalf("%s: filename hints = %+v; want a season 1 series episode", path, hints)
+		}
 	}
 }
 
