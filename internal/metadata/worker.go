@@ -424,6 +424,12 @@ func queuedMatchIdentityAlternates(file *models.MediaFile, skeleton *skeletonRes
 		base := strings.TrimSuffix(filepath.Base(file.FilePath), filepath.Ext(file.FilePath))
 		stem := naming.ParseInferMovieStem(base, skeleton.Title, skeleton.Year)
 		add(stem.Title, stem.Year, "filename")
+		// A loose title ending in a number (Blade Runner 2049) parses that
+		// number as a year. Keep the complete, undated title as a fallback.
+		if year := strconv.Itoa(stem.Year); stem.Year != 0 && stem.Remainder == "" &&
+			!strings.Contains(base, "("+year+")") && !strings.Contains(base, "["+year+"]") {
+			add(stem.Title+" "+year, 0, "numeric_title")
+		}
 
 		observedRoot := strings.TrimSpace(skeleton.ObservedRootPath)
 		if observedRoot == "" {
@@ -1212,7 +1218,14 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, truncateSeriesQueueError(err.Error())); updateErr != nil {
 						return 0, updateErr
 					}
-					return 0, err
+					// The queue row records the failure. Returning it would cancel
+					// sibling jobs and fail the scan that the error asks for.
+					slog.WarnContext(ctx, "metadata: series root identity requires rescan", "component", "metadata",
+						"folder_id", job.MediaFolderID,
+						"observed_root_path", job.ObservedRootPath,
+						"error", err,
+					)
+					return 0, nil
 				}
 				req := w.buildProcessRequestForGroup(ctx, representative, skeleton, groupFiles, folder.paths...)
 				result, processErr := w.service.Process(ctx, req)
@@ -1417,16 +1430,19 @@ func seriesRootNeedsIdentityRescan(files []*models.MediaFile, libraryRoots ...st
 			continue
 		}
 		parsed := naming.ResolvePathContext(file.FilePath, "series", libraryRoots...)
-		if parsed.Title == "" {
-			continue
-		}
+		ownRoot := filepath.Clean(parsed.RootPath) == filepath.Clean(file.FilePath)
+		fileRoot = fileRoot || ownRoot
 		key := matchIdentityKey(parsed.Title, parsed.Year)
-		if identity == "" {
+		switch {
+		case key == "":
+			// An anonymous sibling (E02.mkv) cannot share a file-rooted show's
+			// identity: a current scan leaves it outside that file's root.
+			conflict = conflict || !ownRoot
+		case identity == "":
 			identity = key
-		} else if key != identity {
+		case key != identity:
 			conflict = true
 		}
-		fileRoot = fileRoot || filepath.Clean(parsed.RootPath) == filepath.Clean(file.FilePath)
 	}
 	return conflict && fileRoot
 }
@@ -1588,11 +1604,16 @@ func (w *MatchWorker) matchFolderConfig(ctx context.Context, folderID int, cache
 	config := matchFolderConfig{}
 	folder, err := w.service.folderRepo.GetByID(ctx, folderID)
 	if err != nil {
+		// Without the configured roots this work would parse identities
+		// differently, so skip it. Do not cache a transient failure as a
+		// disabled library for the rest of the batch.
 		slog.WarnContext(ctx, "metadata: failed to load folder state during match", "component", "metadata",
 			"folder_id", folderID,
 			"error", err,
 		)
-	} else if folder != nil {
+		return config
+	}
+	if folder != nil {
 		config.enabled = folder.Enabled
 		config.paths = slices.Clone(folder.Paths)
 	}

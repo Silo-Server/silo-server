@@ -13,6 +13,7 @@ func TestUnseasonedEpisodeResolution(t *testing.T) {
 	duplicateTitle := &models.Episode{ContentID: "duplicate", SeasonNumber: 3, EpisodeNumber: 2, Title: "The First Arrival", MetadataSource: "provider"}
 	special := &models.Episode{ContentID: "special", SeasonNumber: 0, EpisodeNumber: 2, Title: "The Second Arrival", MetadataSource: "provider"}
 	fallback := &models.Episode{ContentID: "fallback", SeasonNumber: 1, EpisodeNumber: 2, Title: "The First Arrival", MetadataSource: "scanner_fallback"}
+	laterOnly := &models.Episode{ContentID: "later", SeasonNumber: 2, EpisodeNumber: 13, Title: "The Later Arrival", MetadataSource: "provider"}
 	for _, tt := range []struct {
 		name     string
 		episodes []*models.Episode
@@ -21,6 +22,9 @@ func TestUnseasonedEpisodeResolution(t *testing.T) {
 		wantID   string
 	}{
 		{name: "unique provider number", episodes: []*models.Episode{first}, number: 2, wantID: "first"},
+		{name: "first season number agrees with absolute order", episodes: []*models.Episode{first, laterOnly}, number: 2, wantID: "first"},
+		{name: "later season number can be absolute", episodes: []*models.Episode{first, laterOnly}, number: 13},
+		{name: "later season title stays exact", episodes: []*models.Episode{first, laterOnly}, number: 13, title: "The Later Arrival", wantID: "later"},
 		{name: "repeated number is ambiguous", episodes: []*models.Episode{first, second}, number: 2},
 		{name: "title disambiguates season", episodes: []*models.Episode{first, second}, number: 2, title: "The Second Arrival", wantID: "second"},
 		{name: "absolute number with exact title", episodes: []*models.Episode{first, second}, number: 136, title: "The Second Arrival", wantID: "second"},

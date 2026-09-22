@@ -3132,7 +3132,7 @@ func populateScanIdentity(
 ) {
 	if assignment.RootPath != "" {
 		mf.CanonicalRootPath = filepath.Clean(assignment.RootPath)
-	} else if root, ok := naming.DetectCanonicalRoot(filePath, folderType); ok {
+	} else if root, ok := naming.DetectCanonicalRoot(filePath, folderType, assignment.LibraryRootPath); ok {
 		mf.CanonicalRootPath = filepath.Clean(root.RootPath)
 	}
 	mf.ObservedRootPath = filepath.Clean(groupAssignment.ObservedRootPath)
@@ -3781,7 +3781,7 @@ func scanStateRootAssignmentChanged(existing *scanStateFile, assignment fileRoot
 	}
 	expectedRoot := assignment.RootPath
 	if expectedRoot == "" {
-		if root, ok := naming.DetectCanonicalRoot(existing.FilePath, libraryType); ok {
+		if root, ok := naming.DetectCanonicalRoot(existing.FilePath, libraryType, assignment.LibraryRootPath); ok {
 			expectedRoot = filepath.Clean(root.RootPath)
 		}
 	}
@@ -3789,7 +3789,7 @@ func scanStateRootAssignmentChanged(existing *scanStateFile, assignment fileRoot
 		return true
 	}
 
-	hints := naming.ParseVariantHints(existing.FilePath, libraryType)
+	hints := naming.ParseVariantHints(existing.FilePath, libraryType, assignment.LibraryRootPath)
 	if existing.EditionSource == "import" && existing.EditionKey != "" {
 		hints = &naming.VariantHints{
 			EditionRaw:            existing.EditionRaw,
@@ -3850,7 +3850,7 @@ func rootAssignmentChanged(existing *models.MediaFile, assignment fileRootAssign
 	}
 	expectedRoot := assignment.RootPath
 	if expectedRoot == "" {
-		if root, ok := naming.DetectCanonicalRoot(existing.FilePath, libraryType); ok {
+		if root, ok := naming.DetectCanonicalRoot(existing.FilePath, libraryType, assignment.LibraryRootPath); ok {
 			expectedRoot = filepath.Clean(root.RootPath)
 		}
 	}
@@ -3858,7 +3858,7 @@ func rootAssignmentChanged(existing *models.MediaFile, assignment fileRootAssign
 		return true
 	}
 
-	hints := naming.ParseVariantHints(existing.FilePath, libraryType)
+	hints := naming.ParseVariantHints(existing.FilePath, libraryType, assignment.LibraryRootPath)
 	if existing.EditionSource == "import" && existing.EditionKey != "" {
 		hints = &naming.VariantHints{
 			EditionRaw:            existing.EditionRaw,

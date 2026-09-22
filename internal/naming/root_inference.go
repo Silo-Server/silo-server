@@ -396,15 +396,17 @@ func detectInferSeasonStructure(parts []string, allowNumeric bool) bool {
 // file name AND an explicit season/specials ancestor directory — so legitimate
 // movies that merely carry an episode-like substring in their release name
 // (e.g. "...S01E43..." inside a "Title (Year)/" folder) are never flagged.
-func IsMisplacedSeriesFile(filePath string) bool {
+// Directories at or above a configured library root (such as an /mnt/s3 mount)
+// are not season directories.
+func IsMisplacedSeriesFile(filePath string, libraryRoots ...string) bool {
 	clean := filepath.Clean(filePath)
 	baseName := filepath.Base(clean)
 	nameNoExt := strings.TrimSuffix(baseName, filepath.Ext(baseName))
-	parts := strings.Split(filepath.ToSlash(clean), "/")
-	if _, ok := parseEpisodeToken(nameNoExt, parts[:len(parts)-1], false); !ok {
+	parts := directorySegmentsWithinRoot(clean, deepestContainingLibraryRoot(clean, libraryRoots))
+	if _, ok := parseEpisodeToken(nameNoExt, parts, false); !ok {
 		return false
 	}
-	for i, part := range parts[:max(len(parts)-1, 0)] {
+	for i, part := range parts {
 		parent := ""
 		if i > 0 {
 			parent = parts[i-1]

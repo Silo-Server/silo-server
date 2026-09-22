@@ -150,3 +150,130 @@ func TestXEpisodeRangesDoNotConsumeCodecSuffixes(t *testing.T) {
 		})
 	}
 }
+
+func TestDelimitedEpisodeNumberIgnoresTitleNumbers(t *testing.T) {
+	for _, tt := range []struct {
+		path    string
+		season  int
+		episode int
+		known   bool
+	}{
+		{"/tv/Example Show/Season 1/Example Show - 05 - Part 2.mkv", 1, 5, true},
+		{"/tv/Example Show/Season 4/Example Show - 12 - The Example Part 1.mkv", 4, 12, true},
+		{"/tv/Example Show/Season 1/Example Show - 02 - 24 Hours.mkv", 1, 2, true},
+		{"/tv/Example Show/Season 1/Example Show - 06 - Area 51.mkv", 1, 6, true},
+		{"/tv/90 Day Example/Season 1/90 Day Example - 01 - Title.mkv", 1, 1, true},
+		{"/tv/9-1-1/Season 1/9-1-1 - 01 - Pilot.mkv", 1, 1, true},
+		{"/tv/13 Example Reasons/Season 1/13 Example Reasons - 01.mkv", 1, 1, true},
+		{"/tv/90 Day Example/Season 1/90 Day Example 01.mkv", 1, 1, true},
+		{"/tv/Example Show/Season 1/01 - Title.mkv", 1, 1, true},
+		{"/tv/24/Season 1/24 - 05 - Part 2.mkv", 1, 5, true},
+		{"/tv/24/Season 1/24 - 24 - 11-00 PM.mkv", 1, 24, true},
+		{"/tv/24/Season 1/24 - Title.mkv", 1, 24, true},
+		{"/tv/12 Example Monkeys/Season 1/12 - Title.mkv", 1, 12, true},
+		{"/tv/13 Example Reasons/Season 1/13 - Tape 7 Side A.mkv", 1, 13, true},
+		{"/tv/Mission - 3/Mission - 3 - 05.mkv", 0, 5, false},
+		{"/tv/Example Show/Season 2/Example Show - 2 - 05.mkv", 2, 5, true},
+		{"/tv/24/Season 1/24 - 12-00 AM.mkv", 1, 24, true},
+		{"/tv/24/Season 1/24 - 12 00 AM.mkv", 1, 24, true},
+		{"/tv/24/Season 1/24 - 11-00 PM - 12-00 AM.mkv", 1, 24, true},
+		{"/tv/24/Season 1/24 - 05-06 - Title.mkv", 1, 5, true},
+		{"/tv/24 - 01.mkv", 0, 1, false},
+		{"/tv/Example Show - 05 - Part 2.mkv", 0, 5, false},
+		{"/tv/Example Show/[Group] Example Show - 07v2 [1080p].mkv", 0, 7, false},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			hints := ParseFilename(tt.path, "series", "/tv")
+			if hints.SeasonNum != tt.season || hints.EpisodeNum != tt.episode || hints.SeasonKnown != tt.known {
+				t.Fatalf("hints = %+v, want season %d (known %v) episode %d", hints, tt.season, tt.known, tt.episode)
+			}
+		})
+	}
+	token, ok := parseEpisodeToken("Example Show - 05-06 - Title", []string{"Example Show", "Season 1"}, true, true)
+	if !ok || token.episode != 5 || token.episodeEnd != 6 {
+		t.Fatalf("delimited range = %+v, ok=%v; want episodes 5-6", token, ok)
+	}
+}
+
+func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
+	for _, tt := range []struct {
+		path    string
+		season  int
+		episode int
+		known   bool
+	}{
+		{"/tv/Example Show/Season 1/[Group] Example Show - 05 [1080p AAC 2.0x2].mkv", 1, 5, true},
+		{"/tv/Example Show/Season 1/[Group] Example Show - 05 [DTS 5.1x2].mkv", 1, 5, true},
+		{"/tv/Example Show/[Group] Example Show - 01 [2048x1080].mkv", 0, 1, false},
+		{"/tv/Example Show/Example Show - 2009x03 - Title.mkv", 2009, 3, true},
+		{"/tv/Incoming/Example.Show.2019.1x02.mkv", 1, 2, true},
+		{"/tv/Example 5/Example.5.1x01.Title.mkv", 1, 1, true},
+		{"/tv/Example SG-1/Example.SG-1.2x05.mkv", 2, 5, true},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			hints := ParseFilename(tt.path, "series", "/tv")
+			if hints.SeasonNum != tt.season || hints.EpisodeNum != tt.episode || hints.SeasonKnown != tt.known {
+				t.Fatalf("hints = %+v, want season %d (known %v) episode %d", hints, tt.season, tt.known, tt.episode)
+			}
+		})
+	}
+	for _, path := range []string{
+		"/mixed/Example.Movie.2019.1080p.BluRay.DTS.5.1x2.mkv",
+		"/mixed/Example Movie (2019)/Example.Movie.2019.1080p.BluRay.DD5.1x264-GRP.mkv",
+		"/mixed/Example Movie/Example.Movie.2048x1080.mkv",
+		"/mixed/Example Movie/Example.Movie.1998x1080.mkv",
+	} {
+		t.Run(path, func(t *testing.T) {
+			if ctx := ResolvePathContext(path, "mixed", "/mixed"); ctx.Type != "movie" || ctx.HasEpisodePattern {
+				t.Fatalf("technical token classified a movie as episodic: %+v", ctx)
+			}
+		})
+	}
+}
+
+func TestMixedLibraryDatedShowFolderWithEpisodesIsSeries(t *testing.T) {
+	paths := []string{
+		"/mixed/Example Show (2005)/Example Show (2005) - S01E01 - Pilot.mkv",
+		"/mixed/Example Show (2005)/Example Show (2005) - S01E02 - Second.mkv",
+	}
+	_, assignments := InferRootAssignments(paths, "mixed", 1, nil, "/mixed")
+	for _, path := range paths {
+		if got := assignments[path]; got.InferredType != "series" || got.Title != "Example Show" || got.Year != 2005 {
+			t.Fatalf("%s: assignment = %+v; want series Example Show (2005)", path, got)
+		}
+	}
+}
+
+func TestLibraryRootBoundsSeasonDirectoryLabels(t *testing.T) {
+	const root = "/mnt/s3/movies"
+	if IsMisplacedSeriesFile(root+"/Example Movie (2019)/Example.Movie.2019.S01E43.1080p.mkv", root) {
+		t.Fatal("a mount directory above the library was read as a season folder")
+	}
+	if !IsMisplacedSeriesFile(root+"/Example Pack/Season 01/Example.Show.S01E01.mkv", root) {
+		t.Fatal("a season folder inside the library was not detected")
+	}
+	series, ok := DetectSeriesRoot("/mnt/s3/tv/Example Show/Example Show - S01E01.mkv", "series", "/mnt/s3/tv")
+	if !ok || series.RootPath != "/mnt/s3/tv/Example Show" {
+		t.Fatalf("series root = %+v, %v; want the show folder", series, ok)
+	}
+}
+
+func TestSeasonEpisodeDashFormStaysAtTheStart(t *testing.T) {
+	for _, tt := range []struct {
+		path            string
+		season, episode int
+	}{
+		{"/tv/Example Show/1-05 - Title.mkv", 1, 5},
+		{"/tv/Example Show/Season 1/Example Show - 01 - 7-11 Heist.mkv", 1, 1},
+		{"/tv/Example Show/Season 2/Example Show - 02 - 1-00 A.M.-2-00 A.M..mkv", 2, 2},
+		{"/tv/Example Show/Season 1/01 - 2-00 PM.mkv", 1, 1},
+	} {
+		hints := ParseFilename(tt.path, "series", "/tv")
+		if hints.SeasonNum != tt.season || hints.EpisodeNum != tt.episode || !hints.SeasonKnown {
+			t.Fatalf("%s: hints = %+v, want season %d episode %d", tt.path, hints, tt.season, tt.episode)
+		}
+		if variants := ParseVariantHints(tt.path, "series", "/tv"); variants.PresentationKind == "multi_episode" {
+			t.Fatalf("%s: episode title became a range: %+v", tt.path, variants)
+		}
+	}
+}

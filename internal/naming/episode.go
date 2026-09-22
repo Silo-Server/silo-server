@@ -18,6 +18,10 @@ var (
 	trailingEpisodeRe        = regexp.MustCompile(`(?:[ ._-])(\d{1,5})(?:v\d+)?(?:$|[ ._\[(-])`)
 	compactEpisodeRe         = regexp.MustCompile(`(?:^|[._])(\d{3})(?:$|[ ._-])`)
 	dashEpisodeRe            = regexp.MustCompile(`^(\d)-(\d{2})(?:$|[ ._-])`)
+	digitRunRe               = regexp.MustCompile(`\d+`)
+	seasonEpisodeDashRe      = regexp.MustCompile(`^\d-\d{2}(?:$|[ ._-])`)
+	episodeFieldEndRe        = regexp.MustCompile(`^(?:-\d+)?(?:\s*$|\s*[\[(]|\s+-\s)`)
+	leadingEpisodeSuffixRe   = regexp.MustCompile(`^\s*(?:$|[\[(]|-\s|-\d+(?:$|[\s\[(]))`)
 	dayFirstDateRe           = regexp.MustCompile(`(?:^|[^0-9])\d{1,2}[-._ ]\d{1,2}[-._ ]\d{4}(?:$|[^0-9])`)
 	unhandledEpisodePrefixRe = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(?:s?\d+x\d+|s(?:eason)?[ ._-]*\d+)[ ._-]*$`)
 	episodeTechnicalRe       = regexp.MustCompile(`(?i)(?:^|[ ._[(\-])(?:\d{3,4}[pi]|web[ ._-]?dl|webrip|bluray|blu[ ._-]?ray|bdrip|dvdrip|hdtv|pdtv|x26[45]|h[ .]?26[45]|hevc|av1|aac|eac3|ac3|ddp|dts|truehd|flac|opus|nvenc)(?:$|[ ._\])\-]|[0-9])`)
@@ -41,7 +45,7 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 	for _, pattern := range []*regexp.Regexp{labeledEpisodeRe, xEpisodeRe} {
 		for _, match := range pattern.FindAllStringSubmatchIndex(name, -1) {
 			season, _ := strconv.Atoi(name[match[2]:match[3]])
-			if (pattern == xEpisodeRe && !validXEpisodeSeason(season)) || !episodePartBoundary(name, match[5]) {
+			if (pattern == xEpisodeRe && !validXEpisodeCoordinate(name, match)) || !episodePartBoundary(name, match[5]) {
 				continue
 			}
 			token := episodeToken{season: season, seasonKnown: true, episode: parseEpisodeNumber(name[match[4]:match[5]]), start: match[0], end: match[5]}
@@ -50,6 +54,7 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 	}
 
 	season, hasSeason := 0, false
+	showDirectory := ""
 	if len(directories) > 0 {
 		parent := strings.TrimSpace(directories[len(directories)-1])
 
@@ -61,11 +66,13 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 		if exactExtra || pluralExtra {
 			return episodeToken{}, false
 		}
-		showDirectory := ""
 		if len(directories) > 1 {
 			showDirectory = directories[len(directories)-2]
 		}
 		season, hasSeason = seasonDirectoryNumber(parent, showDirectory, allowNumericSeason)
+		if !hasSeason {
+			showDirectory = parent
+		}
 	}
 	unseasoned := len(allowUnseasoned) > 0 && allowUnseasoned[0]
 	if !hasSeason && !unseasoned {
@@ -108,30 +115,120 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 	if match := compactEpisodeMatch(name); match != nil {
 		return parseCompactEpisode(name, match, season, hasSeason), true
 	}
+	if token, ok := delimitedEpisodeToken(name, showDirectory, makeToken); ok {
+		return token, true
+	}
+	trailing := func() (episodeToken, bool) {
+		// A show title followed by a number is common in anime and disc rips.
+		// Prefer the last candidate so numbers inside a series title are kept.
+		matches := trailingEpisodeRe.FindAllStringSubmatchIndex(name, -1)
+		for i := len(matches) - 1; i >= 0; i-- {
+			match := matches[i]
+			digits := name[match[2]:match[3]]
+			number := parseEpisodeNumber(digits)
+			if insideReleaseTag(name, match[2]) || number == 0 || (number >= 1928 && number <= 2500) || strings.Trim(name[:match[0]], " ._-") == "" {
+				continue
+			}
+			if !episodeNumberBoundary(name, match[3]) {
+				continue
+			}
+			return makeToken(match[0], match[3], number), true
+		}
+		return episodeToken{}, false
+	}
 	if match := leadingEpisodeRe.FindStringSubmatchIndex(name); match != nil {
 		digits := name[match[2]:match[3]]
 		// A leading year is usually a title or a daily episode date. An
 		// explicit E marker remains available for a four-digit episode.
 		if len(digits) < 4 && episodeNumberBoundary(name, match[3]) {
+			// "90 Day Show 01" repeats the show title; its first number is
+			// the episode only when no later number follows ("24 Title").
+			if startsWithShowTitle(name, showDirectory) {
+				if token, ok := trailing(); ok {
+					return token, true
+				}
+			}
 			return makeToken(match[0], match[3], parseEpisodeNumber(digits)), true
 		}
 	}
-	// A show title followed by a number is common in anime and disc rips.
-	// Prefer the last candidate so numbers inside a series title are kept.
-	matches := trailingEpisodeRe.FindAllStringSubmatchIndex(name, -1)
-	for i := len(matches) - 1; i >= 0; i-- {
-		match := matches[i]
-		digits := name[match[2]:match[3]]
-		number := parseEpisodeNumber(digits)
-		if insideReleaseTag(name, match[2]) || number == 0 || (number >= 1928 && number <= 2500) || strings.Trim(name[:match[0]], " ._-") == "" {
+	return trailing()
+}
+
+// delimitedEpisodeToken reads "Show - 05 - Part 2" and "05 - Title", where a
+// spaced dash separates the episode number from the show and episode titles.
+// The first such number wins: later numbers belong to the episode title. See
+// yieldsToLaterEpisode for numbers that belong to the show instead.
+func delimitedEpisodeToken(name, showDirectory string, makeToken func(start, end, episode int) episodeToken) (episodeToken, bool) {
+	var candidates [][2]int
+	for _, run := range digitRunRe.FindAllStringIndex(name, -1) {
+		start, end := run[0], run[1]
+		number := parseEpisodeNumber(name[start:end])
+		after := episodeVersionEnd(name, end)
+		if number == 0 || (number >= 1928 && number <= 2500) || insideReleaseTag(name, start) ||
+			seasonEpisodeDashRe.MatchString(name[start:]) {
 			continue
 		}
-		if !episodeNumberBoundary(name, match[3]) {
+		if start == 0 {
+			// "9-1-1" and "90 Day Show" are titles, and a leading four-digit
+			// number is usually a year.
+			if end-start >= 4 || !leadingEpisodeSuffixRe.MatchString(name[after:]) {
+				continue
+			}
+		} else {
+			before := strings.TrimRight(name[:start], " ")
+			if len(before) < 2 || before[len(before)-1] != '-' || !unicode.IsSpace(rune(before[len(before)-2])) {
+				continue
+			}
+			if after < len(name) && !strings.ContainsRune(" \t-[(", rune(name[after])) {
+				continue
+			}
+		}
+		candidates = append(candidates, [2]int{start, end})
+	}
+	for i, candidate := range candidates {
+		if i+1 < len(candidates) && yieldsToLaterEpisode(name, candidate, candidates[i+1], showDirectory) {
 			continue
 		}
-		return makeToken(match[0], match[3], number), true
+		return makeToken(candidate[0], candidate[1], parseEpisodeNumber(name[candidate[0]:candidate[1]])), true
 	}
 	return episodeToken{}, false
+}
+
+// yieldsToLaterEpisode reports a number that belongs to the show rather than
+// the episode: one completing the show folder's title ("24 - 05",
+// "Mission - 3 - 05"), a leading number at a library root, or a season digit
+// before a zero-padded episode ("Show - 1 - 05"). It yields only to a number
+// that ends the field; "24 - 12-00 AM" is episode 24 with a time as its title.
+func yieldsToLaterEpisode(name string, candidate, later [2]int, showDirectory string) bool {
+	if !episodeFieldEndRe.MatchString(name[episodeVersionEnd(name, later[1]):]) {
+		return false
+	}
+	return (candidate[0] == 0 && showDirectory == "") ||
+		completesShowTitle(name[:candidate[1]], showDirectory) ||
+		(candidate[1]-candidate[0] == 1 && name[later[0]] == '0')
+}
+
+func showFolderTitle(showDirectory string) string {
+	title, _ := parseTitleYearCandidate(filepath.Base(showDirectory))
+	return normalizeInferComparable(title)
+}
+
+func completesShowTitle(prefix, showDirectory string) bool {
+	title := showFolderTitle(showDirectory)
+	return title != "" && normalizeInferComparable(prefix) == title
+}
+
+func startsWithShowTitle(name, showDirectory string) bool {
+	title := showFolderTitle(showDirectory)
+	comparable := normalizeInferComparable(name)
+	return title != "" && (comparable == title || strings.HasPrefix(comparable, title+" "))
+}
+
+// hasExplicitEpisodeToken reports a labeled coordinate such as S01E01 or 1x01.
+// Without series context, unlabeled numbers are not episode evidence.
+func hasExplicitEpisodeToken(name string) bool {
+	_, ok := parseEpisodeToken(name, nil, false)
+	return ok
 }
 
 func insideReleaseTag(name string, index int) bool {
@@ -139,11 +236,30 @@ func insideReleaseTag(name string, index int) bool {
 	return strings.LastIndex(prefix, "[") > strings.LastIndex(prefix, "]") || strings.LastIndex(prefix, "(") > strings.LastIndex(prefix, ")")
 }
 
-func validXEpisodeSeason(season int) bool {
-	// The x form can describe dimensions. Explicit S/E markers have no such
-	// ambiguity and support long-running shows with season numbers above 199.
-	// Year-numbered seasons start with the first year supported by metadata.
-	return season < 200 || (season >= 1928 && season <= 2500)
+func validXEpisodeCoordinate(name string, match []int) bool {
+	// The x form can describe audio layouts (AAC 2.0x2, DD5.1x264) and
+	// dimensions (2048x1080). Explicit S/E markers have no such ambiguity and
+	// support long-running shows with season numbers above 199.
+	start := match[2]
+	episode := name[match[4]:match[5]]
+	number, _ := strconv.Atoi(episode)
+	// Audio layouts pair a one-digit decimal with a channel count or codec:
+	// 2.0x2, 5.1x264. Show names ending in a digit (Babylon.5.1x01) do not.
+	if match[3]-start == 1 && start >= 2 && name[start-1] == '.' && isASCIIDigit(name[start-2]) && (start == 2 || !isASCIIDigit(name[start-3])) &&
+		(len(episode) == 1 || number == 264 || number == 265) {
+		return false
+	}
+	season, _ := strconv.Atoi(name[start:match[3]])
+	if season < 200 {
+		return true
+	}
+	// Year-numbered seasons start with the first year supported by metadata
+	// and hold at most one episode per day.
+	return season >= 1928 && season <= 2500 && len(episode) <= 3 && number <= 366
+}
+
+func isASCIIDigit(b byte) bool {
+	return b >= '0' && b <= '9'
 }
 
 func episodeNumberBoundary(name string, end int) bool {

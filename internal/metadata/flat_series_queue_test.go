@@ -51,3 +51,14 @@ func TestConsistentSeriesQueueDoesNotRequireRescan(t *testing.T) {
 		t.Fatal("established show folder was treated as a mixed-show flat root")
 	}
 }
+
+func TestStaleFlatSeriesQueueWithAnonymousSiblingRequiresRescan(t *testing.T) {
+	for _, files := range [][]*models.MediaFile{
+		{{FilePath: "/tv/Show.One.S01E01.mkv"}, {FilePath: "/tv/E02.mkv"}},
+		{{FilePath: "/tv/E02.mkv"}, {FilePath: "/tv/Show.One.S01E01.mkv"}},
+	} {
+		if !seriesRootNeedsIdentityRescan(files, "/tv") {
+			t.Fatalf("anonymous sibling could be relinked with a file-rooted show: %s, %s", files[0].FilePath, files[1].FilePath)
+		}
+	}
+}

@@ -6147,7 +6147,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// id (the season number, e.g. tmdb="01"), so effectiveExternalIDs must NOT
 	// gate the skip.
 	if (libraryTypeNorm == "movie" || libraryTypeNorm == "movies") &&
-		naming.IsMisplacedSeriesFile(file.FilePath) {
+		naming.IsMisplacedSeriesFile(file.FilePath, libraryRoots...) {
 		s.recordSkippedRoot(ctx, folderID, observedRootPath, skippedReasonSeriesInMovieLibrary, file.FilePath)
 		res.ItemStatus = "skipped"
 		return res, nil

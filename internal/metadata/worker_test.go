@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1762,6 +1763,13 @@ func TestQueuedMatchIdentityAlternatesRecoversMovieFilenameAndReleaseFolder(t *t
 				ObservedRootPath: "/movies/Jurassic.World.2015.1080p.WEB-DL-GROUP"},
 			wantTitle: "Jurassic World", wantYear: 2015, wantSource: "current_path",
 		},
+		{
+			name: "loose numeric title keeps the complete title",
+			file: &models.MediaFile{FilePath: "/movies/Example Runner 2049.mkv"},
+			skeleton: &skeletonResult{Title: "Example Runner", Year: 2049, Type: "movie",
+				ObservedRootPath: "/movies/Example Runner 2049"},
+			wantTitle: "Example Runner 2049", wantYear: 0, wantSource: "numeric_title",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1820,5 +1828,20 @@ func TestSeriesRootRetryFailurePreservesMatchedItem(t *testing.T) {
 				t.Fatal("failed retry must retain its queue entry")
 			}
 		})
+	}
+}
+
+func TestMatchFolderConfigDoesNotCacheLookupFailure(t *testing.T) {
+	h := newTestHarness()
+	folders := &fakeWorkerFolderRepo{folders: map[int]*models.MediaFolder{}}
+	h.service.folderRepo = folders
+	worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
+	cache := &sync.Map{}
+	if config := worker.matchFolderConfig(t.Context(), 10, cache); config.enabled {
+		t.Fatalf("failed lookup matched without library roots: %+v", config)
+	}
+	folders.folders[10] = &models.MediaFolder{ID: 10, Enabled: true, Paths: []string{"/tv"}}
+	if config := worker.matchFolderConfig(t.Context(), 10, cache); !config.enabled || len(config.paths) != 1 {
+		t.Fatalf("transient lookup failure was cached for the batch: %+v", config)
 	}
 }

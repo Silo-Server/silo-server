@@ -10,8 +10,9 @@ import (
 // loaded for the matched series. Episode zero, specials, and scanner fallback
 // rows cannot establish the season of an otherwise unseasoned filename.
 type unseasonedEpisodeIndex struct {
-	byNumber map[int][]*models.Episode
-	byTitle  map[string][]*models.Episode
+	byNumber     map[int][]*models.Episode
+	byTitle      map[string][]*models.Episode
+	lowestSeason int
 }
 
 func newUnseasonedEpisodeIndex(episodes []*models.Episode) unseasonedEpisodeIndex {
@@ -28,6 +29,9 @@ func newUnseasonedEpisodeIndex(episodes []*models.Episode) unseasonedEpisodeInde
 			continue
 		}
 		index.byNumber[episode.EpisodeNumber] = append(index.byNumber[episode.EpisodeNumber], episode)
+		if index.lowestSeason == 0 || episode.SeasonNumber < index.lowestSeason {
+			index.lowestSeason = episode.SeasonNumber
+		}
 		if !isGenericEpisodeMatchTitle(episode.Title) {
 			title := normalizeTitleForScoring(episode.Title)
 			index.byTitle[title] = append(index.byTitle[title], episode)
@@ -53,7 +57,10 @@ func (index unseasonedEpisodeIndex) resolve(number int, title string) (*models.E
 		return matches[0], true
 	}
 	matches := index.byNumber[number]
-	if len(matches) != 1 {
+	// A number found only in a later season exceeds every earlier season's
+	// length, so an absolute reading would place it elsewhere. Only the first
+	// regular season reads the same under absolute and per-season numbering.
+	if len(matches) != 1 || matches[0].SeasonNumber != index.lowestSeason {
 		return nil, false
 	}
 	if !isGenericEpisodeMatchTitle(title) && normalizeTitleForScoring(title) != normalizeTitleForScoring(matches[0].Title) {

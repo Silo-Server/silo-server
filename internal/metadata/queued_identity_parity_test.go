@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -272,8 +273,11 @@ func TestLinkedSeriesQueueRequiresRescanBeforeMatchingStaleGroup(t *testing.T) {
 	queue := newFakeSeriesQueueRepo(job)
 	worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
 	worker.SetSeriesRootClaimer(queue, true)
+	// The row records the rescan requirement without failing the batch: a
+	// returned error would cancel sibling jobs and the scan itself.
 	processed, err := worker.processSeriesRoot(t.Context(), job, &sync.Map{})
-	if err == nil || !strings.Contains(err.Error(), "rescan") || processed != 0 || len(queue.deleted) != 0 {
+	queueErr := queue.errors[fmt.Sprintf("%d:%s", job.MediaFolderID, job.ObservedRootPath)]
+	if err != nil || !strings.Contains(queueErr, "rescan") || processed != 0 || len(queue.deleted) != 0 {
 		t.Fatalf("stale series did not retain rescan error: processed=%d err=%v queue=%+v", processed, err, queue)
 	}
 }

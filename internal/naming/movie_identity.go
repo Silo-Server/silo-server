@@ -61,7 +61,9 @@ func parseInferMovieStem(name string, folderTitle string, folderYear int) inferM
 		remainder = strings.TrimSpace(titleSurface[location[0]:] + " " + remainder)
 		titleSurface = strings.TrimSpace(titleSurface[:location[0]])
 	}
-	if match := inferBracketTitleYearRe.FindStringSubmatchIndex(titleSurface); match != nil {
+	// "Show (2005) - S01E01" dates a show title; the explicit episode after the
+	// year is not a movie release suffix.
+	if match := inferBracketTitleYearRe.FindStringSubmatchIndex(titleSurface); match != nil && !hasExplicitEpisodeToken(surface[match[1]:]) {
 		year, _ := strconv.Atoi(surface[match[4]:match[5]])
 		title := strings.TrimRight(strings.TrimSpace(surface[match[2]:match[3]]), " -_")
 		// Some renamers retain an existing bare year before adding a bracketed
