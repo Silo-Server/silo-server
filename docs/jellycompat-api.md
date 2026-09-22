@@ -103,6 +103,11 @@ starting HLS. The source-aligned playlist uses that origin and actual fragment
 durations; any preceding gap entries represent unavailable media, not playable
 fragments. Client positions and progress remain source-relative Jellyfin ticks.
 Clients that omit the extension retain the existing source-zero HLS bootstrap.
+The server never grants the extension to a webOS user agent. There, Jellyfin
+Web plays HLS through the TV's native player, which LG documents only through
+HLS version 7. After a reanchored resume, whose gap prefix requires version 8,
+that player counted elapsed time from zero. webOS keeps the source-zero
+bootstrap.
 Unmodified clients still cannot seek beyond a growing copied-video playlist
 without renegotiating; this extension does not claim a complete copy-HLS VOD
 index.

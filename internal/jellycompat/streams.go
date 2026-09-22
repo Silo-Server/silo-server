@@ -252,10 +252,23 @@ func compatHLSUsesFMP4(source PlaybackMediaSource) bool {
 	return compatHLSCopiesVideo(source) && !source.HLSRemuxMPEGTS
 }
 
-func compatWebOSDVMPEGTS(userAgent string, source PlaybackMediaSource) bool {
+func compatWebOSUserAgent(userAgent string) bool {
 	ua := strings.ToLower(userAgent)
-	if (!strings.Contains(ua, "web0s") && !strings.Contains(ua, "webos")) ||
-		source.SupportsDirectPlay || !compatHLSCopiesVideo(source) {
+	return strings.Contains(ua, "web0s") || strings.Contains(ua, "webos")
+}
+
+// compatGrantsSeekReanchor decides whether a copied-video source honors the
+// SiloSeekReanchor opt-in. webOS is excluded: Jellyfin Web plays HLS there
+// with the TV's native player, which LG documents only through HLS version 7.
+// After a reanchored resume, whose playlist needs version 8 for its EXT-X-GAP
+// prefix, that player counted elapsed time from zero instead of the source
+// position. webOS keeps the source-zero bootstrap.
+func compatGrantsSeekReanchor(userAgent string, requested bool, source PlaybackMediaSource) bool {
+	return requested && compatHLSCopiesVideo(source) && source.SupportsTranscoding && !compatWebOSUserAgent(userAgent)
+}
+
+func compatWebOSDVMPEGTS(userAgent string, source PlaybackMediaSource) bool {
+	if !compatWebOSUserAgent(userAgent) || source.SupportsDirectPlay || !compatHLSCopiesVideo(source) {
 		return false
 	}
 	video := compatPrimaryVideoTrack(source.Version)

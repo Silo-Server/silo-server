@@ -19,14 +19,17 @@ import (
 
 func TestPlaybackInfoSeekReanchorOptIn(t *testing.T) {
 	for _, tc := range []struct {
-		name, field, query string
-		copy, want         bool
+		name, field, query, userAgent string
+		copy, want                    bool
 	}{
-		{"missing", "", "", true, false},
-		{"false", `,"SiloSeekReanchor":false`, "", true, false},
-		{"body", `,"SiloSeekReanchor":true`, "", true, true},
-		{"query", "", "?siloseekreanchor=true&starttimeticks=9000000000", true, true},
-		{"encoding is not opted in", `,"SiloSeekReanchor":true`, "", false, false},
+		{"missing", "", "", "", true, false},
+		{"false", `,"SiloSeekReanchor":false`, "", "", true, false},
+		{"body", `,"SiloSeekReanchor":true`, "", "", true, true},
+		{"query", "", "?siloseekreanchor=true&starttimeticks=9000000000", "", true, true},
+		{"encoding is not opted in", `,"SiloSeekReanchor":true`, "", "", false, false},
+		// webOS's native HLS player counted a reanchored resume from zero.
+		{"webOS is not opted in", `,"SiloSeekReanchor":true`, "", "Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.270 Safari/537.36 WebAppManager", true, false},
+		{"webOS query is not opted in", "", "?siloseekreanchor=true&starttimeticks=9000000000", "Mozilla/5.0 (Linux; webOS/6.0; LG Browser) SmartTV", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, item := newSubtitleSelectionHandler(t)
@@ -39,6 +42,7 @@ func TestPlaybackInfoSeekReanchorOptIn(t *testing.T) {
 			}
 			body := fmt.Sprintf(`{"StartTimeTicks":9000000000,"EnableDirectPlay":false,"SubtitleStreamIndex":-1,"DeviceProfile":{"TranscodingProfiles":[{"Type":"Video","Protocol":"hls","Container":%q,"VideoCodec":"h264","AudioCodec":"aac"}]}%s}`, container, tc.field)
 			req := httptest.NewRequest("POST", "/Items/"+item+"/PlaybackInfo"+tc.query, strings.NewReader(body))
+			req.Header.Set("User-Agent", tc.userAgent)
 			route := chi.NewRouteContext()
 			route.URLParams.Add("id", item)
 			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, route)
