@@ -58,6 +58,9 @@ func TestInitialSeriesMatchUsesReleaseYearOnlyAfterFullTitleMiss(t *testing.T) {
 			if len(provider.queries) != tt.searches || provider.queries[0].Title != primary.Title {
 				t.Fatalf("searches = %+v; want complete title first and %d searches", provider.queries, tt.searches)
 			}
+			if tt.searches == 2 && (provider.queries[1].Title != tt.title || provider.queries[1].Year != tt.year) {
+				t.Fatalf("fallback search = %+v; want title=%q year=%d", provider.queries[1], tt.title, tt.year)
+			}
 			item, err := h.itemRepo.GetByID(t.Context(), result.ContentID)
 			if err != nil || item == nil || item.Title != tt.title || item.Year != tt.year {
 				t.Fatalf("matched item = %+v; error = %v", item, err)

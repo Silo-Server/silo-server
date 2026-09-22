@@ -52,7 +52,11 @@ func TestSeriesQueueManualIdentityRequiresCompleteGroupCoverage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if ensured != tt.wantProcess || (processed == len(files)) != tt.wantProcess {
+			wantProcessed := 0
+			if tt.wantProcess {
+				wantProcessed = len(files)
+			}
+			if ensured != tt.wantProcess || processed != wantProcessed {
 				t.Fatalf("processed=%d ensured=%t, want processing=%t; queue errors=%v", processed, ensured, tt.wantProcess, queue.errors)
 			}
 			if !tt.wantProcess && len(queue.errors) == 0 {

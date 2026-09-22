@@ -222,6 +222,8 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		"/mixed/Example Movie (2019)/Example.Movie.2019.1080p.BluRay.DD5.1x264-GRP.mkv",
 		"/mixed/Example Movie/Example.Movie.2048x1080.mkv",
 		"/mixed/Example Movie/Example.Movie.1998x1080.mkv",
+		"/mixed/10x10 (2018).mkv",
+		"/mixed/8x10 Example (2009).mkv",
 	} {
 		t.Run(path, func(t *testing.T) {
 			if ctx := ResolvePathContext(path, "mixed", "/mixed"); ctx.Type != "movie" || ctx.HasEpisodePattern {
