@@ -90,15 +90,21 @@ func (h *AutoscanHandler) HandleItemRefresh(w http.ResponseWriter, r *http.Reque
 		}
 		targets = appendAutoscanTarget(targets, seen, target)
 	}
-	h.enqueueItemRefresh(w, r, compactAutoscanTargets(targets))
+	targets = compactAutoscanTargets(targets)
+	if len(targets) == 0 {
+		// Every file was dropped: it lies outside all libraries, or it vanished
+		// from the library root, whose parent fallback would be a library-wide
+		// scan. Answering 204 would claim a refresh that never runs.
+		writeError(w, http.StatusConflict, "Conflict", "Item files cannot be scanned individually; refresh the library instead")
+		return
+	}
+	h.enqueueItemRefresh(w, r, targets)
 }
 
 func (h *AutoscanHandler) enqueueItemRefresh(w http.ResponseWriter, r *http.Request, targets []scantrigger.Target) {
-	if len(targets) > 0 {
-		if err := scantrigger.EnqueueAll(r.Context(), h.queue, targets); err != nil {
-			writeScanTriggerError(w, err)
-			return
-		}
+	if err := scantrigger.EnqueueAll(r.Context(), h.queue, targets); err != nil {
+		writeScanTriggerError(w, err)
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

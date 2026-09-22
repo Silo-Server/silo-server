@@ -205,6 +205,28 @@ func TestItemRefreshFallsBackToParentForVanishedFile(t *testing.T) {
 	assertQueuedScans(t, queue, want)
 }
 
+// TestItemRefreshUnscannableFilesReturnsConflict covers a movie whose file sat
+// directly under the library root and has vanished: its parent fallback is a
+// library-wide scan, which item refresh drops, so the handler must not claim
+// success with nothing queued.
+func TestItemRefreshUnscannableFilesReturnsConflict(t *testing.T) {
+	root := t.TempDir()
+	queue := &fakeAutoscanQueue{}
+	files := &fakeItemRefreshFiles{byContentID: map[string][]*models.MediaFile{
+		"movie-tmdb-100": {{ID: 1, ContentID: "movie-tmdb-100", FilePath: filepath.Join(root, "Movie (2020).mkv")}},
+	}}
+	handler := newItemRefreshHandler(root, "movie", queue, files, nil)
+
+	rec := serveItemRefresh(handler, handler.codec.EncodeStringID(EncodedIDItem, "movie-tmdb-100"))
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(queue.calls) != 0 {
+		t.Fatalf("expected no queued scans, got %#v", queue.calls)
+	}
+}
+
 func TestItemRefreshUnknownItemReturnsNotFound(t *testing.T) {
 	root := t.TempDir()
 	queue := &fakeAutoscanQueue{}

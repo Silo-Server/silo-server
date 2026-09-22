@@ -240,6 +240,8 @@ admin API key. Silo answers `204` after queueing a scoped scan:
 - A movie, series, season, or episode id scans the directories holding its files, so a new
   sidecar such as an external subtitle is picked up without a full library scan.
 - An id with no live media files answers `404`.
+- An item whose files cannot be scanned on their own, such as a vanished file that sat directly
+  under the library root, answers `409`; refresh the library id instead.
 
 The Jellyfin `metadataRefreshMode`, `imageRefreshMode`, `replaceAllMetadata`, and
 `replaceAllImages` parameters are accepted and ignored: every request re-validates files. Use the
