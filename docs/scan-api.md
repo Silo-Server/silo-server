@@ -230,6 +230,21 @@ Use:
 Autoscan discovers library roots from `GET /Library/VirtualFolders` and sends changed paths to
 `POST /Library/Media/Updated`. The paths must be server-side paths as Silo sees them.
 
+### Jellyfin item refresh
+
+Tools that speak the Jellyfin API, such as subtitle managers, can ask Silo to re-read one item
+with `POST /Items/{id}/Refresh` on the Jellyfin compatibility server, authenticated with a Silo
+admin API key. Silo answers `204` after queueing a scoped scan:
+
+- A library (`CollectionFolder`) id scans that library.
+- A movie, series, season, or episode id scans the directories holding its files, so a new
+  sidecar such as an external subtitle is picked up without a full library scan.
+- An id with no live media files answers `404`.
+
+The Jellyfin `metadataRefreshMode`, `imageRefreshMode`, `replaceAllMetadata`, and
+`replaceAllImages` parameters are accepted and ignored: every request re-validates files. Use the
+native admin API to refresh provider metadata.
+
 ### Alternative: Autoscan custom script target
 
 Create a script (for example `silo-scan.sh`) that Autoscan calls with the changed path:

@@ -111,6 +111,12 @@ func NewRouter(deps Dependencies) chi.Router {
 	itemsHandler.posterPresigner = deps.PosterPresigner
 	itemsHandler.presignTTL = deps.PresignTTL
 	autoscanHandler := NewAutoscanHandler(deps.FolderRepo, deps.ScanQueue, deps.IDCodec, itemsHandler)
+	if files, ok := deps.FileResolver.(itemRefreshFileLister); ok {
+		autoscanHandler.files = files
+	}
+	if deps.SeasonRepo != nil {
+		autoscanHandler.seasons = deps.SeasonRepo
+	}
 	adminAPIKeyAuth := NewAdminAPIKeyAuthenticator(deps.APIKeyValidator, deps.APIKeyUserLoader, deps.UserStoreProvider, deps.Now)
 	autoscanVirtualFoldersRegistered := false
 	if deps.Authenticator != nil && adminAPIKeyAuth != nil && autoscanHandler != nil {
@@ -118,6 +124,8 @@ func NewRouter(deps Dependencies) chi.Router {
 			Get("/Library/VirtualFolders", autoscanHandler.HandleVirtualFolders)
 		r.With(adminAPIKeyAuth.RequireAdminAPIKey).
 			Post("/Library/Media/Updated", autoscanHandler.HandleMediaUpdated)
+		r.With(adminAPIKeyAuth.RequireAdminAPIKey).
+			Post("/Items/{id}/Refresh", autoscanHandler.HandleItemRefresh)
 		autoscanVirtualFoldersRegistered = true
 	}
 	userDataHandler := NewUserDataHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config)

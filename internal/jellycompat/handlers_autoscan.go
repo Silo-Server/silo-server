@@ -29,6 +29,11 @@ type AutoscanHandler struct {
 	queue    scantrigger.Queuer
 	codec    *ResourceIDCodec
 	fallback autoscanVirtualFolderFallback
+
+	// files and seasons back POST /Items/{id}/Refresh; without files only
+	// library ids can be refreshed.
+	files   itemRefreshFileLister
+	seasons itemRefreshSeasonLoader
 }
 
 func NewAutoscanHandler(
@@ -121,46 +126,8 @@ func (h *AutoscanHandler) HandleMediaUpdated(w http.ResponseWriter, r *http.Requ
 			return
 		}
 
-		target, err := resolver.Resolve(r.Context(), scantrigger.Request{
-			Path:    path,
-			Trigger: autoscanTrigger,
-		})
+		target, err := resolveAutoscanPath(r.Context(), resolver, path, autoscanTrigger, "media update", "update_type", update.UpdateType)
 		if err != nil {
-			if parentTarget, handled, fallbackErr := resolveAutoscanParentTarget(r.Context(), resolver, path, err); handled {
-				if fallbackErr != nil {
-					slog.WarnContext(r.Context(), "jellycompat autoscan: media update parent path rejected", "component", "jellycompat",
-						"path", path,
-						"parent_path", filepath.Dir(filepath.Clean(path)),
-						"update_type", update.UpdateType,
-						"error", fallbackErr,
-					)
-					writeScanTriggerError(w, fallbackErr)
-					return
-				}
-				if parentTarget != nil {
-					slog.DebugContext(r.Context(), "jellycompat autoscan: media update falling back to parent scan", "component", "jellycompat",
-						"path", path,
-						"parent_path", parentTarget.Path,
-						"parent_mode", parentTarget.Mode,
-						"update_type", update.UpdateType,
-					)
-					targets = appendAutoscanTarget(targets, seenTargets, parentTarget)
-				}
-				continue
-			}
-			if softAutoscanUpdateError(err) {
-				slog.DebugContext(r.Context(), "jellycompat autoscan: media update ignored", "component", "jellycompat",
-					"path", path,
-					"update_type", update.UpdateType,
-					"error", err,
-				)
-				continue
-			}
-			slog.WarnContext(r.Context(), "jellycompat autoscan: media update path rejected", "component", "jellycompat",
-				"path", path,
-				"update_type", update.UpdateType,
-				"error", err,
-			)
 			writeScanTriggerError(w, err)
 			return
 		}
@@ -176,6 +143,47 @@ func (h *AutoscanHandler) HandleMediaUpdated(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// resolveAutoscanPath resolves one path a Jellyfin client asked us to rescan.
+// A nil target with a nil error means the path was dropped: it is outside every
+// library, or it is a sidecar whose directory resolves to a whole-library scan.
+// Sidecars and vanished files fall back to their parent directory (see
+// parentFallbackAutoscanUpdateError). Any other rejection is returned so the
+// caller fails the request instead of quietly scanning less than was asked.
+// event names the request in log messages; logAttrs adds request context.
+func resolveAutoscanPath(
+	ctx context.Context,
+	resolver *scantrigger.Resolver,
+	path, trigger, event string,
+	logAttrs ...any,
+) (*scantrigger.Target, error) {
+	target, err := resolver.Resolve(ctx, scantrigger.Request{
+		Path:    path,
+		Trigger: trigger,
+	})
+	if err == nil {
+		return target, nil
+	}
+	attrs := append([]any{"component", "jellycompat", "path", path}, logAttrs...)
+	if parentTarget, handled, fallbackErr := resolveAutoscanParentTarget(ctx, resolver, path, trigger, err); handled {
+		if fallbackErr != nil {
+			slog.WarnContext(ctx, "jellycompat autoscan: "+event+" parent path rejected",
+				append(attrs, "parent_path", filepath.Dir(filepath.Clean(path)), "error", fallbackErr)...)
+			return nil, fallbackErr
+		}
+		if parentTarget != nil {
+			slog.DebugContext(ctx, "jellycompat autoscan: "+event+" falling back to parent scan",
+				append(attrs, "parent_path", parentTarget.Path, "parent_mode", parentTarget.Mode)...)
+		}
+		return parentTarget, nil
+	}
+	if softAutoscanUpdateError(err) {
+		slog.DebugContext(ctx, "jellycompat autoscan: "+event+" ignored", append(attrs, "error", err)...)
+		return nil, nil
+	}
+	slog.WarnContext(ctx, "jellycompat autoscan: "+event+" path rejected", append(attrs, "error", err)...)
+	return nil, err
 }
 
 type autoscanTargetKey struct {
@@ -247,7 +255,7 @@ func autoscanTargetCoveredByOther(target scantrigger.Target, targets []scantrigg
 func resolveAutoscanParentTarget(
 	ctx context.Context,
 	resolver *scantrigger.Resolver,
-	path string,
+	path, trigger string,
 	err error,
 ) (*scantrigger.Target, bool, error) {
 	if !parentFallbackAutoscanUpdateError(err) {
@@ -260,7 +268,7 @@ func resolveAutoscanParentTarget(
 	}
 	target, parentErr := resolver.Resolve(ctx, scantrigger.Request{
 		Path:    parentPath,
-		Trigger: autoscanTrigger,
+		Trigger: trigger,
 	})
 	if parentErr == nil {
 		if target.Mode == scantrigger.ModeLibrary {
