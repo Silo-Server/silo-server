@@ -795,7 +795,7 @@ func (s *Scanner) scanPaths(
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
 	}
-	rootInference := inferRootAssignments(primaryPaths, folder.Type, folder.ID, rootOverrides)
+	rootInference := inferRootAssignments(primaryPaths, folder.Type, folder.ID, rootOverrides, folder.Paths...)
 	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
 	if err != nil {
 		return nil, fmt.Errorf("loading identity overrides: %w", err)
@@ -1704,7 +1704,7 @@ func (s *Scanner) scanScope(
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
 	}
-	rootInference := inferRootAssignments(primaryPaths, folder.Type, folder.ID, rootOverrides)
+	rootInference := inferRootAssignments(primaryPaths, folder.Type, folder.ID, rootOverrides, folder.Paths...)
 	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
 	if err != nil {
 		return nil, fmt.Errorf("loading identity overrides: %w", err)
@@ -2637,7 +2637,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	if err != nil {
 		return fmt.Errorf("loading item statuses for file: %w", err)
 	}
-	observation, ok := ObserveRoot(filePath, folder.Type)
+	observation, ok := ObserveRoot(filePath, folder.Type, folder.Paths...)
 	if ok {
 		cleared, clearErr := s.clearLegacyLinksForUnmatchableRoots(ctx, folder.ID, []RootObservation{observation})
 		if clearErr != nil {
@@ -2658,7 +2658,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	if err != nil {
 		return fmt.Errorf("loading root overrides for file: %w", err)
 	}
-	rootInference := inferRootAssignments([]string{filePath}, folder.Type, folder.ID, rootOverrides)
+	rootInference := inferRootAssignments([]string{filePath}, folder.Type, folder.ID, rootOverrides, folder.Paths...)
 	s.logRootInferenceDisagreements(rootInference.Assignments)
 
 	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
@@ -3143,12 +3143,12 @@ func populateScanIdentity(
 	mf.BaseType = groupAssignment.BaseType
 	mf.IdentityConfidence = groupAssignment.Confidence
 	mf.IdentityJSON = append([]byte(nil), groupAssignment.EvidenceJSON...)
-	if filenameHints := naming.ParseFilename(filePath, folderType); filenameHints != nil &&
+	if filenameHints := naming.ParseFilename(filePath, folderType, assignment.LibraryRootPath); filenameHints != nil &&
 		filenameHints.Type == "series" && filenameHints.EpisodeNum > 0 {
 		mf.SeasonNumber = filenameHints.SeasonNum
 		mf.EpisodeNumber = filenameHints.EpisodeNum
 	}
-	variantHints := naming.ParseVariantHints(filePath, folderType)
+	variantHints := naming.ParseVariantHints(filePath, folderType, assignment.LibraryRootPath)
 	if existing != nil && existing.EditionSource == "import" && existing.EditionKey != "" {
 		variantHints = &naming.VariantHints{
 			EditionRaw:            existing.EditionRaw,

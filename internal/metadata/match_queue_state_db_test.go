@@ -97,18 +97,17 @@ func TestSeriesMatchQueueFingerprintIncludesEpisodePathShape(t *testing.T) {
 			t.Fatalf("series fingerprint expression %q does not contain %q", expression, required)
 		}
 	}
-	if movieMatcherRevision != 10 {
-		t.Fatalf("movie matcher revision = %d, want shared title-normalization revision 10", movieMatcherRevision)
+	if movieMatcherRevision != 11 {
+		t.Fatalf("movie matcher revision = %d, want flexible filename matching revision 11", movieMatcherRevision)
 	}
-	if seriesMatcherRevision != 10 {
-		t.Fatalf("series matcher revision = %d, want consensus revision 10", seriesMatcherRevision)
+	if seriesMatcherRevision != 11 {
+		t.Fatalf("series matcher revision = %d, want naming parity revision 11", seriesMatcherRevision)
 	}
 }
 
 func TestMatchQueueSharedTitleRevisionWakesMoviesAndSeries(t *testing.T) {
 	pool := chainBuiltinTestPool(t)
-	ctx := context.Background()
-	previousMatcherRevision := movieMatcherRevision - 1
+	ctx := t.Context()
 
 	movieFolderID := insertTestFolder(t, pool, "movie")
 	moviePath := fmt.Sprintf("/test/revision-isolation-%d/Movie.mkv", time.Now().UnixNano())
@@ -128,7 +127,7 @@ func TestMatchQueueSharedTitleRevisionWakesMoviesAndSeries(t *testing.T) {
 		SET state = 'parked', available_at = NOW() + interval '24 hours', parked_at = NOW(),
 			matcher_revision = $2
 		WHERE media_file_id = $1
-	`, movieFileID, previousMatcherRevision); err != nil {
+	`, movieFileID, movieMatcherRevision-1); err != nil {
 		t.Fatalf("park movie row: %v", err)
 	}
 
@@ -151,7 +150,7 @@ func TestMatchQueueSharedTitleRevisionWakesMoviesAndSeries(t *testing.T) {
 		SET state = 'parked', available_at = NOW() + interval '24 hours', parked_at = NOW(),
 			matcher_revision = $3
 		WHERE media_folder_id = $1 AND observed_root_path = $2
-	`, seriesFolderID, seriesRoot, previousMatcherRevision); err != nil {
+	`, seriesFolderID, seriesRoot, seriesMatcherRevision-1); err != nil {
 		t.Fatalf("seed pre-change series revision: %v", err)
 	}
 

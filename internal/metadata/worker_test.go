@@ -1760,7 +1760,7 @@ func TestQueuedMatchIdentityAlternatesRecoversMovieFilenameAndReleaseFolder(t *t
 			file: &models.MediaFile{FilePath: "/movies/Jurassic.World.2015.1080p.WEB-DL-GROUP/291684abcdef012345.mkv"},
 			skeleton: &skeletonResult{Title: "291684abcdef012345", Type: "movie",
 				ObservedRootPath: "/movies/Jurassic.World.2015.1080p.WEB-DL-GROUP"},
-			wantTitle: "Jurassic World", wantYear: 2015, wantSource: "release_folder",
+			wantTitle: "Jurassic World", wantYear: 2015, wantSource: "current_path",
 		},
 	}
 
@@ -1773,6 +1773,52 @@ func TestQueuedMatchIdentityAlternatesRecoversMovieFilenameAndReleaseFolder(t *t
 				}
 			}
 			t.Fatalf("alternate identities = %#v, want %q/%d from %s", got, tt.wantTitle, tt.wantYear, tt.wantSource)
+		})
+	}
+}
+
+func TestSeriesRootRetryFailurePreservesMatchedItem(t *testing.T) {
+	for _, providerError := range []bool{false, true} {
+		t.Run(fmt.Sprint(providerError), func(t *testing.T) {
+			h := newTestHarness()
+			ctx := t.Context()
+			const contentID = "series-existing-match"
+			const root = "/shows/Example Show"
+			h.service.folderRepo = &fakeWorkerFolderRepo{folders: map[int]*models.MediaFolder{10: {ID: 10, Type: "series", Enabled: true}}}
+			if err := h.itemRepo.Upsert(ctx, &models.MediaItem{ContentID: contentID, Status: "matched", Title: "Example Show", Type: "series", TvdbID: "123"}); err != nil {
+				t.Fatal(err)
+			}
+			file := &models.MediaFile{ID: 1, MediaFolderID: 10, FilePath: root + "/Season 01/Example.Show.S01E01.mkv", ObservedRootPath: root, GroupKeyVersion: 1, ContentGroupKey: "v1|series|example_show|0", ContentID: contentID, BaseTitle: "Example Show", BaseType: "series"}
+			h.fileRepo.setGroupFiles(10, 1, file.ContentGroupKey, file)
+			h.fileRepo.contentIDs[file.ID] = contentID
+			called := false
+			h.service.hooks.process = func(context.Context, ProcessRequest) (*ProcessResult, error) {
+				called = true
+				if providerError {
+					return nil, ErrMetadataNotFound
+				}
+				return &ProcessResult{Updated: false}, nil
+			}
+			job := models.SeriesRootMatchJob{MediaFolderID: 10, ObservedRootPath: root, SampleFilePath: file.FilePath, ObservedFileCount: 1, RerunRequested: true}
+			queue := newFakeSeriesQueueRepo(job)
+			worker := NewMatchWorker(h.service, h.fileRepo, 1, 10, 0)
+			worker.SetSeriesRootClaimer(queue, true)
+			if _, err := worker.processSeriesRoot(ctx, job, nil); err != nil {
+				t.Fatal(err)
+			}
+			if !called {
+				t.Fatal("expected provider retry")
+			}
+			item, err := h.itemRepo.GetByID(ctx, contentID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if item.Status != "matched" || item.TvdbID != "123" {
+				t.Fatalf("retry discarded existing match: status=%s provider=%s", item.Status, item.TvdbID)
+			}
+			if _, deleted := queue.deleted["10:"+root]; deleted {
+				t.Fatal("failed retry must retain its queue entry")
+			}
 		})
 	}
 }

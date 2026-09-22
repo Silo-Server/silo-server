@@ -31,8 +31,8 @@ type rootInferenceResult struct {
 }
 
 // ObserveRoot derives the logical content root for a media file path.
-func ObserveRoot(filePath string, libraryType string) (RootObservation, bool) {
-	result := inferRootAssignments([]string{filePath}, libraryType, 0, nil)
+func ObserveRoot(filePath string, libraryType string, libraryRoots ...string) (RootObservation, bool) {
+	result := inferRootAssignments([]string{filePath}, libraryType, 0, nil, libraryRoots...)
 	assignment, ok := result.Assignments[filepath.Clean(filePath)]
 	if !ok {
 		return RootObservation{}, false
@@ -58,8 +58,9 @@ func inferRootAssignments(
 	libraryType string,
 	folderID int,
 	overrides map[string]models.MediaRootOverride,
+	libraryRoots ...string,
 ) rootInferenceResult {
-	snapshots, assignments := naming.InferRootAssignments(filePaths, libraryType, folderID, overrides)
+	snapshots, assignments := naming.InferRootAssignments(filePaths, libraryType, folderID, overrides, libraryRoots...)
 	observations := make([]RootObservation, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		observations = append(observations, observationFromSnapshot(snapshot))
