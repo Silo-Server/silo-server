@@ -207,11 +207,17 @@ func (c *EmbyClient) FetchFavoriteItems(ctx context.Context, auth embyLocalAuth)
 	return c.fetchItems(ctx, auth, "IsFavorite", "Movie,Series")
 }
 
+// embyItemFields are the item fields the importer reads. EnableUserData alone
+// returns only the base UserData block: Emby omits LastPlayedDate and PlayCount
+// unless UserDataLastPlayedDate and UserDataPlayCount are requested by name, and
+// normalizeEmbyItem reads both.
+const embyItemFields = "ProviderIds,UserDataLastPlayedDate,UserDataPlayCount"
+
 func (c *EmbyClient) fetchItems(ctx context.Context, auth embyLocalAuth, filter, includeItemTypes string) ([]embyItem, error) {
 	query := url.Values{}
 	query.Set("Recursive", "true")
 	query.Set("EnableUserData", "true")
-	query.Set("Fields", "ProviderIds")
+	query.Set("Fields", embyItemFields)
 	query.Set("IncludeItemTypes", includeItemTypes)
 	query.Set("Filters", filter)
 	path := fmt.Sprintf("%s/Users/%s/Items?%s", auth.BaseURL, url.PathEscape(auth.UserID), query.Encode())
