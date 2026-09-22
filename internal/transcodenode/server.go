@@ -1796,10 +1796,14 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		opts.SeekSeconds = float64(requestedSegment * card.SegmentDuration)
 	}
 
-	autoRequested := strings.EqualFold(strings.TrimSpace(opts.HWAccel), "auto")
+	var pipeline *playback.AutoTranscodePipeline
+	if strings.EqualFold(strings.TrimSpace(opts.HWAccel), "auto") {
+		pipeline = playback.NewAutoTranscodePipeline(r.Context(), opts)
+	}
+	adaptive := pipeline.Enabled()
 	var session *playback.TranscodeSession
-	if autoRequested {
-		session, err = playback.StartReadyTranscode(r.Context(), opts, playback.ManifestStartupTimeout)
+	if adaptive {
+		session, err = playback.StartReconstructTranscode(r.Context(), pipeline, playback.ManifestStartupTimeout)
 	} else {
 		session, err = playback.StartTranscode(r.Context(), opts)
 	}
@@ -1815,7 +1819,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	// media as permanently missing. Mirror handleStart's software retry for
 	// the accel StartupRetryHWAccel would change; other accels keep the
 	// existing register-immediately behavior.
-	if !autoRequested {
+	if !adaptive {
 		if retryAccel := playback.StartupRetryHWAccel(opts); retryAccel != opts.HWAccel {
 			if _, waitErr := session.WaitForManifest(playback.ManifestStartupTimeout); waitErr != nil {
 				if session.IsRunning() {

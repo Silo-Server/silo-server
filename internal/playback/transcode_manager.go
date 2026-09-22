@@ -889,10 +889,14 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	if startTranscode == nil {
 		startTranscode = StartTranscode
 	}
+	var pipeline *AutoTranscodePipeline
+	if strings.EqualFold(strings.TrimSpace(opts.HWAccel), hwAccelAuto) {
+		pipeline = NewAutoTranscodePipeline(ctx, opts)
+	}
 	var transcodeSession *TranscodeSession
 	var err error
-	if strings.EqualFold(strings.TrimSpace(opts.HWAccel), hwAccelAuto) {
-		transcodeSession, err = startReadyTranscode(ctx, opts, ManifestStartupTimeout, startTranscode)
+	if pipeline.Enabled() {
+		transcodeSession, err = startReconstructTranscodePipeline(ctx, pipeline, ManifestStartupTimeout, startTranscode)
 	} else {
 		transcodeSession, err = startTranscode(ctx, opts)
 	}

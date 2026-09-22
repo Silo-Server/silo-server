@@ -81,3 +81,76 @@ func TestStartReadyTranscodePipelineDoesNotDuplicateSlowProcess(t *testing.T) {
 		t.Fatalf("attempt count = %d, want 1", attempts)
 	}
 }
+
+func TestStartReconstructTranscodePipelineKeepsSlowProcess(t *testing.T) {
+	base := TranscodeOpts{
+		SessionID:        "playback-1",
+		InputPath:        "/media/movie.mkv",
+		HWAccel:          transcodeHWNVENC,
+		SourceVideoCodec: "hevc",
+		TargetCodecVideo: "h264",
+	}
+	pipeline := newAutoTranscodePipeline(base, true, newAutoTranscodePipelineCache())
+	outputDir := t.TempDir()
+	attempts := 0
+	start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		attempts++
+		return &TranscodeSession{opts: opts, outputDir: outputDir, running: true, stderr: newBoundedTailBuffer(stderrTailMaxBytes)}, nil
+	}
+
+	session, err := startReconstructTranscodePipeline(context.Background(), pipeline, time.Millisecond, start)
+	if err != nil {
+		t.Fatalf("startReconstructTranscodePipeline: %v", err)
+	}
+	if !session.IsRunning() {
+		t.Fatal("slow reconstruct was stopped, want it kept running")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempt count = %d, want 1", attempts)
+	}
+	if _, statErr := os.Stat(outputDir); statErr != nil {
+		t.Fatalf("output dir removed: %v", statErr)
+	}
+}
+
+func TestStartReconstructTranscodePipelineKeepsOutputForNextAttempt(t *testing.T) {
+	base := TranscodeOpts{
+		SessionID:        "playback-1",
+		InputPath:        "/media/movie.mkv",
+		HWAccel:          transcodeHWNVENC,
+		SourceVideoCodec: "hevc",
+		TargetCodecVideo: "h264",
+	}
+	pipeline := newAutoTranscodePipeline(base, true, newAutoTranscodePipelineCache())
+	outputDir := t.TempDir()
+	servedSegment := filepath.Join(outputDir, "seg_00010.ts")
+	if err := os.WriteFile(servedSegment, []byte("segment"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	attempts := 0
+	start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		attempts++
+		if attempts == 2 {
+			if _, err := os.Stat(servedSegment); err != nil {
+				t.Fatalf("failed attempt removed the shared output dir: %v", err)
+			}
+			manifest := []byte("#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nseg_00010.ts\n#EXT-X-ENDLIST\n")
+			if err := os.WriteFile(filepath.Join(outputDir, "stream.m3u8"), manifest, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return &TranscodeSession{opts: opts, outputDir: outputDir, stderr: newBoundedTailBuffer(stderrTailMaxBytes)}, nil
+		}
+		return &TranscodeSession{opts: opts, outputDir: outputDir, stderr: newBoundedTailBuffer(stderrTailMaxBytes), waitErr: errors.New("gpu failed")}, nil
+	}
+
+	session, err := startReconstructTranscodePipeline(context.Background(), pipeline, time.Millisecond, start)
+	if err != nil {
+		t.Fatalf("startReconstructTranscodePipeline: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempt count = %d, want 2", attempts)
+	}
+	if !session.Opts().SoftwareVideoDecode {
+		t.Fatalf("second attempt = %+v, want CPU decode with GPU encode", session.Opts())
+	}
+}
