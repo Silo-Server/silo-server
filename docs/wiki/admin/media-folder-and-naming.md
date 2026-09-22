@@ -110,8 +110,8 @@ A season folder can supply the season number for episode-only filenames:
 In a series library, episode-only names also work without a season folder:
 `Show Name/E03.mkv`, `Show Name/03.mkv`, and `[Group] Show Name - 136 [720p].mkv`.
 Silo preserves that missing season information. A number alone links only when it
-identifies a unique episode in the first regular season, where absolute and
-per-season numbering agree. A distinctive episode title that matches exactly one
+identifies a unique episode in season 1, where absolute and per-season
+numbering agree. A distinctive episode title that matches exactly one
 episode can link a later season or an absolute number. Ambiguous numbers remain
 unlinked; they do not become Specials.
 Scanner-generated fallback episodes cannot establish the missing season.

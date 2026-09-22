@@ -20,7 +20,7 @@ var (
 	dashEpisodeRe            = regexp.MustCompile(`^(\d)-(\d{2})(?:$|[ ._-])`)
 	digitRunRe               = regexp.MustCompile(`\d+`)
 	seasonEpisodeDashRe      = regexp.MustCompile(`^\d-\d{2}(?:$|[ ._-])`)
-	bracketedYearRe          = regexp.MustCompile(`[\(\[](?:19|20)\d{2}[\)\]]`)
+	titleYearAfterRe         = regexp.MustCompile(`[\(\[](?:19|20)\d{2}[\)\]]|^[ ._]+(?:19|20)\d{2}(?:$|[ ._\-\[(])`)
 	episodeFieldEndRe        = regexp.MustCompile(`^(?:-\d+)?(?:\s*$|\s*[\[(]|\s+-\s)`)
 	leadingEpisodeSuffixRe   = regexp.MustCompile(`^\s*(?:$|[\[(]|-\s|-\d+(?:$|[\s\[(]))`)
 	dayFirstDateRe           = regexp.MustCompile(`(?:^|[^0-9])\d{1,2}[-._ ]\d{1,2}[-._ ]\d{4}(?:$|[^0-9])`)
@@ -250,8 +250,9 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 		(len(episode) == 1 || number == 264 || number == 265) {
 		return false
 	}
-	// A leading NxM followed by a release year is a title: 10x10 (2018).
-	if strings.Trim(name[:start], " ._-") == "" && bracketedYearRe.MatchString(name[match[5]:]) {
+	// A leading NxM followed by a release year is a title: 10x10 (2018),
+	// 4x4.2019.
+	if strings.Trim(name[:start], " ._-") == "" && titleYearAfterRe.MatchString(name[match[5]:]) {
 		return false
 	}
 	season, _ := strconv.Atoi(name[start:match[3]])

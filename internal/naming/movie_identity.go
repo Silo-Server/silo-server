@@ -16,6 +16,7 @@ var (
 	// Ordinary title words such as "Web" or "Extended" alone do not establish
 	// a release suffix. Only technical terms delimit a yearless movie title.
 	inferTechnicalSuffixRe = regexp.MustCompile(`(?i)(?:^|[ ._\-\[(])(?:[248]k|ultra[ ._-]?hd|uhd|hdr(?:10\+?)?|hdc|sdr|2160p|1080[pi]|720p|576[pi]|480[pi]|\d{3,4}x\d{3,4}|blu[ ._-]?ray|b[dr]rip|dvd[ ._-]?(?:rip|scr)|hdtv|web[ ._-]?(?:dl|rip)|hd[ ._-]?rip|remux|x26[45]|h[ .]?26[45]|hevc|avc|av1|xvid|divx|mpeg[ ._-]?[24]|aac(?:[ .]?\d[ .]?\d)?|e?ac[ ._-]?3|ddp?\d[ .]?\d|dts(?:[ ._-]?hd)?|truehd|flac|opus)(?:$|[^\p{L}\p{N}])`)
+	inferTitleWordFormatRe = regexp.MustCompile(`(?i)^(?:[248]k|uhd|ultra[ ._-]?hd|hdr(?:10\+?)?|sdr|opus|flac|avc|blu[ ._-]?ray)$`)
 	inferDiscTrackRe       = regexp.MustCompile(`(?i)^(?:(?:title\s*t?|t)\d+|vts\s*\d+\s*\d+)$`)
 	inferMovieBracketRe    = regexp.MustCompile(`\[([^\[\]]+)\]`)
 	inferMetadataBracketRe = regexp.MustCompile(`(?i)^(?:(?:multi(?:ple)?|dual)[ ._-]?(?:audio|subs?|subtitles?)?|[a-f0-9]{8}|字)$`)
@@ -53,7 +54,16 @@ func parseInferMovieStem(name string, folderTitle string, folderYear int) inferM
 	// "Movie 480p 2001" names an undated movie with release metadata.
 	titleSurface := surface
 	remainder := bracketMetadata
-	if location := movieTechnicalSuffixStart(surface); location > 0 {
+	// An explicit "Title (Year)" boundary is stronger than a title word that
+	// can also name a format ("Mr. Holland's Opus (1995)", "The UHD Journey").
+	// Resolution, source, and codec terms still end the title.
+	searchFrom := 0
+	if match := inferBracketTitleYearRe.FindStringSubmatchIndex(surface); match != nil &&
+		!strings.ContainsAny(surface[match[2]:match[3]], "[(") && onlyTitleWordFormats(surface[match[2]:match[3]]) {
+		searchFrom = match[1]
+	}
+	if location := movieTechnicalSuffixStart(surface[searchFrom:]); location >= 0 && searchFrom+location > 0 {
+		location += searchFrom
 		titleSurface = strings.TrimSpace(strings.TrimRight(surface[:location], " -_[({"))
 		remainder = strings.TrimSpace(surface[location:] + " " + bracketMetadata)
 	}
@@ -183,6 +193,18 @@ func cleanMovieIdentitySurface(name string, folderTitle string) (string, string)
 		surface = strings.Trim(surface, " ._-")
 	}
 	return normalizeNameSeparators(strings.TrimSpace(surface)), strings.Join(removed, " ")
+}
+
+// onlyTitleWordFormats reports whether every format term in a title is also an
+// ordinary word ("Opus", "4K") rather than a release detail such as "1080p".
+func onlyTitleWordFormats(title string) bool {
+	for _, term := range inferTechnicalSuffixRe.FindAllString(title, -1) {
+		term = strings.TrimFunc(term, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+		if !inferTitleWordFormatRe.MatchString(term) {
+			return false
+		}
+	}
+	return true
 }
 
 func movieTechnicalSuffixStart(surface string) int {

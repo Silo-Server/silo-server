@@ -224,6 +224,7 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		"/mixed/Example Movie/Example.Movie.1998x1080.mkv",
 		"/mixed/10x10 (2018).mkv",
 		"/mixed/8x10 Example (2009).mkv",
+		"/mixed/4x4.2019.1080p.mkv",
 	} {
 		t.Run(path, func(t *testing.T) {
 			if ctx := ResolvePathContext(path, "mixed", "/mixed"); ctx.Type != "movie" || ctx.HasEpisodePattern {
@@ -280,5 +281,21 @@ func TestSeasonEpisodeDashFormStaysAtTheStart(t *testing.T) {
 		if variants := ParseVariantHints(tt.path, "series", "/tv"); variants.PresentationKind == "multi_episode" {
 			t.Fatalf("%s: episode title became a range: %+v", tt.path, variants)
 		}
+	}
+}
+
+func TestExplicitMovieYearKeepsFormatWordsInTitle(t *testing.T) {
+	for _, tt := range []struct{ path, title string }{
+		{"/movies/Mr. Example's Opus (1995).mkv", "Mr. Example's Opus"},
+		{"/movies/The UHD Journey (2014).mkv", "The UHD Journey"},
+		{"/movies/Example 4K Story (2020).mkv", "Example 4K Story"},
+	} {
+		hints := ParseFilename(tt.path, "movies", "/movies")
+		if hints.Title != tt.title || hints.Year == 0 {
+			t.Fatalf("%s: hints = %+v, want %q with its year", tt.path, hints, tt.title)
+		}
+	}
+	if hints := ParseFilename("/movies/Example.Movie.2019.1080p.BluRay.x264-GRP.mkv", "movies", "/movies"); hints.Title != "Example Movie" || hints.Year != 2019 {
+		t.Fatalf("release name hints = %+v", hints)
 	}
 }

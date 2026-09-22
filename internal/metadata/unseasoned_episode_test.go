@@ -25,6 +25,7 @@ func TestUnseasonedEpisodeResolution(t *testing.T) {
 		{name: "first season number agrees with absolute order", episodes: []*models.Episode{first, laterOnly}, number: 2, wantID: "first"},
 		{name: "later season number can be absolute", episodes: []*models.Episode{first, laterOnly}, number: 13},
 		{name: "later season title stays exact", episodes: []*models.Episode{first, laterOnly}, number: 13, title: "The Later Arrival", wantID: "later"},
+		{name: "missing first season defers number links", episodes: []*models.Episode{second}, number: 2},
 		{name: "repeated number is ambiguous", episodes: []*models.Episode{first, second}, number: 2},
 		{name: "title disambiguates season", episodes: []*models.Episode{first, second}, number: 2, title: "The Second Arrival", wantID: "second"},
 		{name: "absolute number with exact title", episodes: []*models.Episode{first, second}, number: 136, title: "The Second Arrival", wantID: "second"},
