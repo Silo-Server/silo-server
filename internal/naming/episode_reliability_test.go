@@ -213,6 +213,8 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		{"/tv/Example Show/Season 1/Example.Show.1920x1080.E02.mkv", 1, 2, true},
 		{"/tv/Example Show/Example Show - 4x3 - Title.mkv", 4, 3, true},
 		{"/tv/Example Show/Season 1/Example.Show.16x9.E02.mkv", 1, 2, true},
+		{"/tv/Example Show/Season 1/Example.Show.AAC.2.0x2.E03.mkv", 1, 3, true},
+		{"/tv/Example Show/Season 1/Example.Show.DD5.1x264.E03.mkv", 1, 3, true},
 		{"/tv/Example Opus/Season 1/Example Opus - 02.mkv", 1, 2, true},
 		{"/tv/Opus.Example/Season 1/Opus.Example - 02 [1080p FLAC].mkv", 1, 2, true},
 	} {
@@ -231,6 +233,7 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		"/mixed/10x10 (2018).mkv",
 		"/mixed/8x10 Example (2009).mkv",
 		"/mixed/4x4.2019.1080p.mkv",
+		"/mixed/10x10 - 2018.mkv",
 		"/mixed/Example.Movie.16x9.1080p.mkv",
 		"/mixed/Example.Movie.4x3.DVDRip.mkv",
 	} {

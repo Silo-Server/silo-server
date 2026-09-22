@@ -20,9 +20,9 @@ var (
 	dashEpisodeRe            = regexp.MustCompile(`^(\d)-(\d{2})(?:$|[ ._-])`)
 	digitRunRe               = regexp.MustCompile(`\d+`)
 	seasonEpisodeDashRe      = regexp.MustCompile(`^\d-\d{2}(?:$|[ ._-])`)
-	resolutionTokenRe        = regexp.MustCompile(`(?:^|[^\p{L}\p{N}])(?:\d{3,4}x\d{3,4}|4x3|16x9|16x10|21x9)[ ._]*$`)
+	technicalXTokenRe        = regexp.MustCompile(`(?:(?:^|[^\p{L}\p{N}])(?:\d{3,4}x\d{3,4}|4x3|16x9|16x10|21x9)|\d\.\dx(?:\d|26[45]))[ ._]*$`)
 	aspectRatioRe            = regexp.MustCompile(`^(?:4x3|16x9|16x10|21x9)$`)
-	titleYearAfterRe         = regexp.MustCompile(`[\(\[](?:19|20)\d{2}[\)\]]|^[ ._]+(?:19|20)\d{2}(?:$|[ ._\-\[(])`)
+	titleYearAfterRe         = regexp.MustCompile(`[\(\[](?:19|20)\d{2}[\)\]]|^[ ._-]+(?:19|20)\d{2}(?:$|[ ._\-\[(])`)
 	episodeFieldEndRe        = regexp.MustCompile(`^(?:-\d+)?(?:\s*$|\s*[\[(]|\s+-\s)`)
 	leadingEpisodeSuffixRe   = regexp.MustCompile(`^\s*(?:$|[\[(]|-\s|-\d+(?:$|[\s\[(]))`)
 	dayFirstDateRe           = regexp.MustCompile(`(?:^|[^0-9])\d{1,2}[-._ ]\d{1,2}[-._ ]\d{4}(?:$|[^0-9])`)
@@ -94,11 +94,12 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 				return parseCompactEpisode(name, compact, season, hasSeason), true
 			}
 		}
-		if unhandledEpisodePrefixRe.MatchString(name[:match[0]]) && (name[match[0]] == '-' || !resolutionTokenRe.MatchString(name[:match[0]])) {
+		if unhandledEpisodePrefixRe.MatchString(name[:match[0]]) && (name[match[0]] == '-' || !technicalXTokenRe.MatchString(name[:match[0]])) {
 			// A rejected strong coordinate cannot acquire a different season
-			// through the weaker episode-only interpretation. A resolution
-			// such as 1920x1080 was never a coordinate, unless a dash attaches
-			// the marker as a range (1920x1080-E15).
+			// through the weaker episode-only interpretation. A resolution,
+			// aspect ratio, or audio layout (1920x1080, 16x9, 2.0x2) was never
+			// a coordinate, unless a dash attaches the marker as a range
+			// (1920x1080-E15).
 			return episodeToken{}, false
 		}
 		if episodePartBoundary(name, match[3]) {
@@ -282,7 +283,7 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 		return false
 	}
 	// A leading NxM followed by a release year is a title: 10x10 (2018),
-	// 4x4.2019.
+	// 4x4.2019, 10x10 - 2018.
 	if strings.Trim(name[:start], " ._-") == "" && titleYearAfterRe.MatchString(name[match[5]:]) {
 		return false
 	}
