@@ -20,6 +20,8 @@ var (
 	dashEpisodeRe            = regexp.MustCompile(`^(\d)-(\d{2})(?:$|[ ._-])`)
 	digitRunRe               = regexp.MustCompile(`\d+`)
 	seasonEpisodeDashRe      = regexp.MustCompile(`^\d-\d{2}(?:$|[ ._-])`)
+	resolutionTokenRe        = regexp.MustCompile(`(?:^|[^\p{L}\p{N}])\d{3,4}x\d{3,4}[ ._]*$`)
+	aspectRatioRe            = regexp.MustCompile(`^(?:4x3|16x9|16x10|21x9)$`)
 	titleYearAfterRe         = regexp.MustCompile(`[\(\[](?:19|20)\d{2}[\)\]]|^[ ._]+(?:19|20)\d{2}(?:$|[ ._\-\[(])`)
 	episodeFieldEndRe        = regexp.MustCompile(`^(?:-\d+)?(?:\s*$|\s*[\[(]|\s+-\s)`)
 	leadingEpisodeSuffixRe   = regexp.MustCompile(`^\s*(?:$|[\[(]|-\s|-\d+(?:$|[\s\[(]))`)
@@ -92,9 +94,11 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 				return parseCompactEpisode(name, compact, season, hasSeason), true
 			}
 		}
-		if unhandledEpisodePrefixRe.MatchString(name[:match[0]]) {
+		if unhandledEpisodePrefixRe.MatchString(name[:match[0]]) && (name[match[0]] == '-' || !resolutionTokenRe.MatchString(name[:match[0]])) {
 			// A rejected strong coordinate cannot acquire a different season
-			// through the weaker episode-only interpretation.
+			// through the weaker episode-only interpretation. A resolution
+			// such as 1920x1080 was never a coordinate, unless a dash attaches
+			// the marker as a range (1920x1080-E15).
 			return episodeToken{}, false
 		}
 		if episodePartBoundary(name, match[3]) {
@@ -244,6 +248,15 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 	start := match[2]
 	episode := name[match[4]:match[5]]
 	number, _ := strconv.Atoi(episode)
+	// Release tags and aspect ratios before release details describe the
+	// video: [16x9 1080p], Movie.4x3.DVDRip.
+	if insideReleaseTag(name, start) {
+		return false
+	}
+	if aspectRatioRe.MatchString(name[start:match[5]]) && episodeTechnicalRe.MatchString(name[match[5]:]) &&
+		episodeTechnicalRe.FindStringIndex(name[match[5]:])[0] <= 1 {
+		return false
+	}
 	// Audio layouts pair a one-digit decimal with a channel count or codec:
 	// 2.0x2, 5.1x264. Show names ending in a digit (Babylon.5.1x01) do not.
 	if match[3]-start == 1 && start >= 2 && name[start-1] == '.' && isASCIIDigit(name[start-2]) && (start == 2 || !isASCIIDigit(name[start-3])) &&

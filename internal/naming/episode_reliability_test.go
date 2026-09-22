@@ -209,6 +209,9 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		{"/tv/Incoming/Example.Show.2019.1x02.mkv", 1, 2, true},
 		{"/tv/Example 5/Example.5.1x01.Title.mkv", 1, 1, true},
 		{"/tv/Example SG-1/Example.SG-1.2x05.mkv", 2, 5, true},
+		{"/tv/Example Show/Season 1/[Group] Example Show - 02 [16x9 1080p].mkv", 1, 2, true},
+		{"/tv/Example Show/Season 1/Example.Show.1920x1080.E02.mkv", 1, 2, true},
+		{"/tv/Example Show/Example Show - 4x3 - Title.mkv", 4, 3, true},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
 			hints := ParseFilename(tt.path, "series", "/tv")
@@ -225,6 +228,8 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		"/mixed/10x10 (2018).mkv",
 		"/mixed/8x10 Example (2009).mkv",
 		"/mixed/4x4.2019.1080p.mkv",
+		"/mixed/Example.Movie.16x9.1080p.mkv",
+		"/mixed/Example.Movie.4x3.DVDRip.mkv",
 	} {
 		t.Run(path, func(t *testing.T) {
 			if ctx := ResolvePathContext(path, "mixed", "/mixed"); ctx.Type != "movie" || ctx.HasEpisodePattern {
