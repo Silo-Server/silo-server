@@ -582,6 +582,17 @@ function StreamRow({
   );
   const logsHref = `/admin/logs?playback_session_id=${encodeURIComponent(session.session_id)}&focus=playback`;
   const ffmpegLogsHref = `${logsHref}&component=ffmpeg`;
+  const ffmpegLogs = useOperationalLogs(
+    {
+      playback_session_id: session.session_id,
+      component: "ffmpeg",
+      limit: 12,
+    },
+    ffmpegOpen,
+  );
+  const ffmpegRows = ffmpegLogs.data?.entries ?? [];
+  // The newest snapshot and throttle events feed the diagnostics panel. They
+  // are fetched separately so the console above keeps its stderr tail.
   const ffmpegDiagnostics = useOperationalLogs(
     {
       playback_session_id: session.session_id,
@@ -600,7 +611,7 @@ function StreamRow({
     },
     ffmpegOpen,
   );
-  const ffmpegRows = [
+  const ffmpegDebugRows = [
     ...(ffmpegThrottle.data?.entries ?? []),
     ...(ffmpegDiagnostics.data?.entries ?? []),
   ].sort((left, right) => {
@@ -990,8 +1001,11 @@ function StreamRow({
           toneMapping={toneMap?.detail ?? null}
           showFFmpeg={ffmpegOpen}
           rows={ffmpegRows}
-          isLoading={ffmpegDiagnostics.isLoading || ffmpegThrottle.isLoading}
-          isFetching={ffmpegDiagnostics.isFetching || ffmpegThrottle.isFetching}
+          debugRows={ffmpegDebugRows}
+          isLoading={ffmpegLogs.isLoading}
+          isFetching={
+            ffmpegLogs.isFetching || ffmpegDiagnostics.isFetching || ffmpegThrottle.isFetching
+          }
           logsHref={`${logsHref}&component=ffmpeg`}
         />
       )}
@@ -1069,6 +1083,7 @@ function PlaybackExpandedPanel({
   toneMapping,
   showFFmpeg,
   rows,
+  debugRows,
   isLoading,
   isFetching,
   logsHref,
@@ -1082,11 +1097,12 @@ function PlaybackExpandedPanel({
   toneMapping: string | null;
   showFFmpeg: boolean;
   rows: OperationalLogEntry[];
+  debugRows: OperationalLogEntry[];
   isLoading: boolean;
   isFetching: boolean;
   logsHref: string;
 }) {
-  const debug = buildTranscodeDebugModel(session, rows);
+  const debug = buildTranscodeDebugModel(session, debugRows);
 
   return (
     <div className="terminal-surface border-border/50 bg-card border-t px-4 py-3">
