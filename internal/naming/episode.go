@@ -288,6 +288,10 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 	if strings.Trim(name[:start], " ._-") == "" && titleYearAfterRe.MatchString(name[match[5]:]) {
 		return false
 	}
+	// Two multi-digit sides describe a picture size (176x144, 720x480).
+	if match[3]-start >= 3 && len(episode) >= 3 {
+		return false
+	}
 	season, _ := strconv.Atoi(name[start:match[3]])
 	if season < 200 {
 		return true
