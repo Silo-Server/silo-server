@@ -368,6 +368,36 @@ Running PostgreSQL on a dedicated VM or managed service simplifies upgrades,
 tuning, and backups. Redis can stay local or move to shared infrastructure if
 you already have it.
 
+### Shared memory for a self-managed PostgreSQL container
+
+The bundled service sets `shm_size` from `POSTGRES_SHM_SIZE` (8gb by default).
+A PostgreSQL container you run yourself does not inherit that: Docker gives
+every container 64 MB of `/dev/shm`, which is too small for PostgreSQL's
+parallel queries. Silo's catalog queries then fail while the server keeps
+running and the disk has plenty of free space:
+
+```text
+ERROR: could not resize shared memory segment "/PostgreSQL.1938557030" to
+8388608 bytes: No space left on device (SQLSTATE 53100)
+```
+
+Size `/dev/shm` when you create the container. In Compose:
+
+```yaml
+services:
+  postgres:
+    shm_size: 2gb
+```
+
+With `docker run`, or in a container manager's extra-arguments field, pass
+`--shm-size=2g`. The value is a ceiling on a tmpfs rather than a reservation,
+so pages count against the container only while a query holds them, and raising
+it costs nothing at idle. Match the bundled 8gb if you have memory to spare and
+run large parallel queries.
+
+PostgreSQL installed directly on a host or VM needs no change, because it uses
+the host's `/dev/shm`.
+
 ## Server roles and distributed deployments
 
 | Mode | Purpose |

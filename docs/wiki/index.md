@@ -39,6 +39,8 @@ rewriting.
   with online providers, and the naming-supplies-structure contract.
 - [Monitoring Stream Nodes](admin/monitoring-nodes.md) - Reading the Nodes page columns, re-probing
   a node's GPU after a driver change, scratch-disk admission, and scraping node metrics.
+- [Chapter Thumbnails](admin/chapter-thumbnails.md) - The public-storage prerequisite, the
+  per-library switch, what queues extraction, and how to read the log lines when none appear.
 
 ## Deployment
 
