@@ -212,8 +212,8 @@ func TestCreateHistoryImportRun(t *testing.T) {
 	// unknown profile 404.
 	fake.createErr = &handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "plex_session_id or source_id is required for Plex imports"}
 	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"plex"}`, bearer(memberToken)), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body" || p.Errors[0].Detail != "plex_session_id or source_id is required for Plex imports" {
-		t.Fatalf("errors = %+v", p.Errors)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body" || p.Errors[0].Detail != "plex_session_id or source_id is required for Plex imports" || p.Detail != p.Errors[0].Detail {
+		t.Fatalf("problem = %+v", p)
 	}
 	fake.createErr = &handlers.APIError{Status: http.StatusConflict, Code: "conflict", Message: historyimport.ErrActiveRunExists.Error()}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"plex"}`, bearer(memberToken)), TypeConflict)
@@ -278,6 +278,10 @@ func TestLoginEmbyConnect(t *testing.T) {
 	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/emby-connect/login", `{"username":"alice","password":"bad"}`, bearer(memberToken)), TypeValidationFailed)
 	if len(p.Errors) != 1 || !strings.HasPrefix(p.Errors[0].Detail, "Couldn't connect to that server") {
 		t.Fatalf("errors = %+v", p.Errors)
+	}
+	// Clients that show only the problem detail still see the reason.
+	if p.Detail != p.Errors[0].Detail {
+		t.Fatalf("detail = %q, want the upstream message", p.Detail)
 	}
 	fake.loginErr = upstreamAPIError(t, http.StatusBadGateway)
 	rec = do(t, h, http.MethodPost, "/api/v2/history-imports/emby-connect/login", `{"username":"alice","password":"pw"}`, bearer(memberToken))

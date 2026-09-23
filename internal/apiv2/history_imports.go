@@ -526,14 +526,16 @@ func historyImportProblem(err error) *Problem {
 	if !ok {
 		return serviceProblem(err)
 	}
+	// The detail repeats the member message so a client that shows only the
+	// problem detail still tells the user what to fix.
 	switch {
 	case handlers.IsHistoryImportUpstreamError(err) && apiErr.Status < 500:
-		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+		return NewProblem(TypeValidationFailed, apiErr.Message).
 			WithErrors(ProblemError{Location: locationBody, Code: codeInvalid, Detail: apiErr.Message})
 	case handlers.IsHistoryImportUpstreamError(err):
 		return NewProblem(TypeDependencyUnavailable, apiErr.Message).WithRetryAfter(30)
 	case apiErr.Status == http.StatusBadRequest:
-		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+		return NewProblem(TypeValidationFailed, apiErr.Message).
 			WithErrors(ProblemError{Location: locationBody, Code: codeInvalid, Detail: apiErr.Message})
 	}
 	return serviceProblem(err)

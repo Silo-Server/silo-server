@@ -1505,6 +1505,11 @@ Session-backed imports consume their login session in that transaction. Password
 exchanged before admission and are never persisted. An uncertain response must not be
 automatically resubmitted; check the account's import list before starting another run.
 
+A rejected request member, a malformed server address, or a source server that refuses the
+credentials returns 422 `validation_failed` whose `detail` states what to fix. A source
+server Silo cannot reach, or one that fails, returns 503 `dependency_unavailable` with
+`Retry-After`.
+
 Poll `GET /api/v2/history-imports/runs/{id}` at its `Location`. The response has a strong
 `ETag`, supports `If-Match` and `If-None-Match`, and returns a bodyless 304 when unchanged.
 The account ownership check runs before evaluating either precondition; another

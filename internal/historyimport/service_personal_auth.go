@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // preparePersonalRun performs upstream exchanges without holding database locks.
@@ -68,6 +69,9 @@ func (s *Service) preparePersonalRun(ctx context.Context, userID int, input Crea
 		if input.JellyfinBaseURL == "" || input.JellyfinUsername == "" || input.JellyfinPassword == "" {
 			return out, fmt.Errorf("%w: Jellyfin address and credentials are required", ErrInvalidInput)
 		}
+		if !validBaseURL(strings.TrimSpace(input.JellyfinBaseURL)) {
+			return out, fmt.Errorf("%w: enter the Jellyfin address with http:// or https:// at the start", ErrInvalidInput)
+		}
 		auth, err := s.jellyfin.AuthenticateServerUser(ctx, input.JellyfinBaseURL, input.JellyfinUsername, input.JellyfinPassword)
 		if err != nil {
 			return out, err
@@ -100,6 +104,9 @@ func (s *Service) preparePersonalRun(ctx context.Context, userID int, input Crea
 		case input.PlexBaseURL != "":
 			if input.PlexToken == "" {
 				return out, fmt.Errorf("%w: Plex token is required", ErrInvalidInput)
+			}
+			if !validBaseURL(strings.TrimSpace(input.PlexBaseURL)) {
+				return out, fmt.Errorf("%w: enter the Plex address with http:// or https:// at the start", ErrInvalidInput)
 			}
 			out.Credentials = personalRunCredentials{BaseURL: input.PlexBaseURL, ServerToken: input.PlexToken, AccountToken: firstNonEmpty(input.PlexAccountToken, input.PlexToken)}
 		case input.SourceID > 0:

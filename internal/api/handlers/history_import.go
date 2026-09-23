@@ -7,7 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -309,8 +313,15 @@ func historyImportAPIError(err error) *APIError {
 		errors.Is(err, historyimport.ErrMappingDuplicate):
 		return &APIError{Status: http.StatusConflict, Code: policyErrorConflict, Message: err.Error(), cause: err}
 	default:
+		if message, ok := historyImportInvalidInputMessage(err); ok {
+			return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: message, cause: err}
+		}
 		if status := historyimport.UpstreamHTTPStatus(err); status > 0 {
 			return HistoryImportUpstreamAPIError(status)
+		}
+		if historyImportSourceUnreachable(err) {
+			slog.Warn("history import: source server unreachable", "error", err)
+			return HistoryImportUnreachableAPIError()
 		}
 		if err != nil && looksLikeValidationError(err) {
 			return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: err.Error(), cause: err}
@@ -334,6 +345,36 @@ func IsHistoryImportUpstreamError(err error) bool { return errors.Is(err, errHis
 func HistoryImportUpstreamAPIError(status int) *APIError {
 	httpStatus, code, message := historyImportUpstreamError(status)
 	return &APIError{Status: httpStatus, Code: code, Message: message, cause: errHistoryImportUpstream}
+}
+
+// HistoryImportUnreachableAPIError reports a source server Silo could not
+// reach at all: DNS, connection, TLS, or timeout failures.
+func HistoryImportUnreachableAPIError() *APIError {
+	status, code, _ := historyImportUpstreamError(http.StatusBadGateway)
+	return &APIError{Status: status, Code: code, Message: "Couldn't reach that server. Check the address and make sure Silo can connect to it.", cause: errHistoryImportUpstream}
+}
+
+// historyImportSourceUnreachable reports that the HTTP client could not reach
+// the source server. Requiring the *url.Error net/http returns keeps Silo's own
+// database failures, which also carry *net.OpError, out of this answer.
+func historyImportSourceUnreachable(err error) bool {
+	var urlErr *url.Error
+	return errors.As(err, &urlErr) && historyimport.IsReachabilityError(err)
+}
+
+// historyImportInvalidInputMessage returns the user-facing sentence of an
+// ErrInvalidInput wrap; every wrap site uses a fixed string. A bare sentinel
+// marks an internal invariant rather than a user mistake, so it is not one.
+func historyImportInvalidInputMessage(err error) (string, bool) {
+	if !errors.Is(err, historyimport.ErrInvalidInput) {
+		return "", false
+	}
+	_, detail, ok := strings.Cut(err.Error(), historyimport.ErrInvalidInput.Error()+": ")
+	if !ok || detail == "" {
+		return "", false
+	}
+	first, size := utf8.DecodeRuneInString(detail)
+	return string(unicode.ToUpper(first)) + detail[size:] + ".", true
 }
 
 func historyImportUpstreamError(status int) (int, string, string) {

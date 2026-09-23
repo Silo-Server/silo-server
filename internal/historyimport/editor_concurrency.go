@@ -34,12 +34,20 @@ func checkEditorRevision(actual, expected int64) error {
 	}
 	return nil
 }
+
+// validBaseURL accepts an http(s) server address with a host and no
+// credentials, query, or fragment.
+func validBaseURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	return err == nil && parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https") &&
+		parsed.User == nil && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == ""
+}
+
 func validateSource(source Source) error {
 	if strings.TrimSpace(source.Name) == "" {
 		return fmt.Errorf("%w: name is required", ErrInvalidInput)
 	}
-	parsed, err := url.Parse(source.BaseURL)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+	if !validBaseURL(source.BaseURL) {
 		return fmt.Errorf("%w: base_url must be an HTTP or HTTPS URL without credentials, a query, or a fragment", ErrInvalidInput)
 	}
 	switch source.SourceType {
