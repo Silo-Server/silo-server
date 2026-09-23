@@ -23,6 +23,7 @@ type upstreamListItem struct {
 	Type              string                  `json:"type"`
 	Title             string                  `json:"title"`
 	SortTitle         string                  `json:"sort_title,omitempty"`
+	OriginalLanguage  string                  `json:"original_language,omitempty"`
 	Year              int                     `json:"year"`
 	Genres            []string                `json:"genres"`
 	ContentRating     string                  `json:"content_rating"`
@@ -79,6 +80,7 @@ type upstreamItemDetail struct {
 	Type              string                  `json:"type"`
 	Title             string                  `json:"title"`
 	SortTitle         string                  `json:"sort_title,omitempty"`
+	OriginalLanguage  string                  `json:"original_language,omitempty"`
 	OriginalTitle     string                  `json:"original_title"`
 	Year              int                     `json:"year"`
 	Overview          string                  `json:"overview"`
@@ -116,6 +118,12 @@ type upstreamItemDetail struct {
 	Crew              []catalog.CrewCredit    `json:"crew,omitempty"`
 	Videos            []catalog.ItemVideoInfo `json:"videos,omitempty"`
 	Extras            []catalog.ItemExtraInfo `json:"extras,omitempty"`
+	// Effective subtitle defaults for this viewer (profile, library and series
+	// scopes). ModeSet is false when no scope stores a subtitle mode.
+	SubtitleLanguage    string `json:"-"`
+	SubtitleMode        string `json:"-"`
+	SubtitleModeSet     bool   `json:"-"`
+	ShowForcedSubtitles bool   `json:"-"`
 }
 
 type upstreamSeason struct {
@@ -182,10 +190,12 @@ type upstreamProgress struct {
 }
 
 type upstreamItemFiltersResponse struct {
-	Genres          []string `json:"genres"`
-	Studios         []string `json:"studios"`
-	OfficialRatings []string `json:"official_ratings"`
-	Years           []int    `json:"years"`
+	Genres            []string `json:"genres"`
+	Studios           []string `json:"studios"`
+	OfficialRatings   []string `json:"official_ratings"`
+	Years             []int    `json:"years"`
+	AudioLanguages    []string `json:"audio_languages"`
+	SubtitleLanguages []string `json:"subtitle_languages"`
 }
 
 // upstreamProfile represents a user profile from the store.

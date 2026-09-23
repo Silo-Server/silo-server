@@ -1154,6 +1154,8 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 	}
 	extra := []string{}
 	filters.Type = browseTypeEpisode
+	// Language predicates count only the episode files this viewer may play.
+	filters.LibraryIDs, filters.DisabledLibraryIDs, filters.MaxPlaybackQuality = access.AllowedLibraryIDs, access.DisabledLibraryIDs, access.MaxPlaybackQuality
 	appendCompatBrowsePredicates(filters, &extra, &args, &index)
 	rewrite := strings.NewReplacer("mi.content_id", "e.content_id", "mi.genres", "s.genres", "mi.year", "EXTRACT(YEAR FROM e.air_date)::int", "mi.title", "e.title")
 	for _, condition := range extra {

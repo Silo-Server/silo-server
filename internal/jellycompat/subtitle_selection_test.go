@@ -278,19 +278,66 @@ func defaultSubtitleStreamFromResponse(t *testing.T, resp playbackInfoResponseDT
 	return index, found
 }
 
-func TestHandlePlaybackInfo_DefaultsToEmbeddedDefaultSubtitle(t *testing.T) {
+// A viewer with no subtitle mode gets Jellyfin's Default mode, which prefers
+// an external subtitle file over the embedded default track.
+func TestHandlePlaybackInfo_DefaultModePrefersExternalSubtitle(t *testing.T) {
 	handler, routeID := newSubtitleSelectionHandler(t)
 	resp := postPlaybackInfo(t, handler, routeID, `{}`)
 
 	if resp.MediaSources[0].DefaultSubtitleStreamIndex == nil {
 		t.Fatal("expected DefaultSubtitleStreamIndex to be set")
 	}
-	if got := *resp.MediaSources[0].DefaultSubtitleStreamIndex; got != 2 {
-		t.Fatalf("DefaultSubtitleStreamIndex = %d, want 2", got)
+	if got := *resp.MediaSources[0].DefaultSubtitleStreamIndex; got != 3 {
+		t.Fatalf("DefaultSubtitleStreamIndex = %d, want the external Spanish track 3", got)
 	}
 	index, found := defaultSubtitleStreamFromResponse(t, resp)
-	if !found || index != 2 {
-		t.Fatalf("default subtitle stream = (%d, %v), want (2, true)", index, found)
+	if !found || index != 3 {
+		t.Fatalf("default subtitle stream = (%d, %v), want (3, true)", index, found)
+	}
+}
+
+// Without external files, Default mode falls to the embedded default track.
+func TestHandlePlaybackInfo_DefaultModeUsesEmbeddedDefaultWithoutExternal(t *testing.T) {
+	handler, routeID := newSubtitleSelectionHandler(t)
+	handler.SubtitleRepo = fakeSubtitleRepository{}
+	detail := handler.content.(*stubContentService).detail
+	detail.Versions[0].SubtitleTracks = []catalog.VersionSubtitleTrack{
+		{Index: 2, Codec: "subrip", Language: "eng", Title: "English", Default: true},
+		{Index: 3, Codec: "subrip", Language: "spa", Title: "Spanish"},
+	}
+	resp := postPlaybackInfo(t, handler, routeID, `{}`)
+	if got := resp.MediaSources[0].DefaultSubtitleStreamIndex; got == nil || *got != 2 {
+		t.Fatalf("DefaultSubtitleStreamIndex = %v, want 2", got)
+	}
+}
+
+// The viewer's canonical subtitle settings select the default the way the
+// matching Jellyfin SubtitleMode does.
+func TestHandlePlaybackInfo_SubtitleModeFollowsViewerSettings(t *testing.T) {
+	cases := []struct {
+		name       string
+		mode       string
+		showForced bool
+		language   string
+		want       *int
+	}{
+		{"None hides every subtitle", "off", false, "fr", nil},
+		{"Always picks the preferred full track", "always", true, "fr", intPtr(4)},
+		{"Smart shows preferred subtitles for foreign audio", "auto", true, "es", intPtr(3)},
+		{"OnlyForced without forced tracks shows none", "off", true, "en", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, routeID := newSubtitleSelectionHandler(t)
+			handler.SubtitleRepo = fakeSubtitleRepository{}
+			detail := handler.content.(*stubContentService).detail
+			detail.SubtitleMode, detail.SubtitleModeSet, detail.ShowForcedSubtitles, detail.SubtitleLanguage = tc.mode, true, tc.showForced, tc.language
+			resp := postPlaybackInfo(t, handler, routeID, `{}`)
+			got := resp.MediaSources[0].DefaultSubtitleStreamIndex
+			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+				t.Fatalf("DefaultSubtitleStreamIndex = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

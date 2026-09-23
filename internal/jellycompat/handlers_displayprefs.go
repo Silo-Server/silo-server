@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -101,6 +102,7 @@ func (h *DisplayPreferencesHandler) HandleGetDisplayPreferences(w http.ResponseW
 	if dto.CustomPrefs == nil {
 		dto.CustomPrefs = map[string]string{}
 	}
+	fillReadCustomPrefs(dto.CustomPrefs)
 	writeJSON(w, http.StatusOK, dto)
 }
 
@@ -127,6 +129,7 @@ func (h *DisplayPreferencesHandler) HandleUpdateDisplayPreferences(w http.Respon
 	if dto.CustomPrefs == nil {
 		dto.CustomPrefs = map[string]string{}
 	}
+	normalizeSavedCustomPrefs(dto.CustomPrefs)
 	if h.storeProvider == nil {
 		writeCompatUpstreamError(w, fmt.Errorf("user store unavailable"))
 		return
@@ -147,6 +150,45 @@ func (h *DisplayPreferencesHandler) HandleUpdateDisplayPreferences(w http.Respon
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Jellyfin client skip-interval preferences. Jellyfin always returns both on
+// read, defaulting to 10 s back and 30 s forward; a write that omits either
+// stores 15 s (Jellyfin 12).
+const (
+	customPrefSkipBackLength     = "skipBackLength"
+	customPrefSkipForwardLength  = "skipForwardLength"
+	jellyfinDefaultSkipBackMS    = "10000"
+	jellyfinDefaultSkipForwardMS = "30000"
+	jellyfinSavedSkipLengthMS    = "15000"
+)
+
+// fillReadCustomPrefs reports the skip intervals the way Jellyfin's read does,
+// so clients that post the whole document back keep 10 s/30 s instead of
+// triggering the save-time 15 s fallback.
+func fillReadCustomPrefs(prefs map[string]string) {
+	if strings.TrimSpace(prefs[customPrefSkipBackLength]) == "" {
+		prefs[customPrefSkipBackLength] = jellyfinDefaultSkipBackMS
+	}
+	if strings.TrimSpace(prefs[customPrefSkipForwardLength]) == "" {
+		prefs[customPrefSkipForwardLength] = jellyfinDefaultSkipForwardMS
+	}
+}
+
+// normalizeSavedCustomPrefs applies Jellyfin 12's save-time rules: a missing
+// or empty skip length is stored as 15 seconds, and an empty landing-* view
+// choice is dropped rather than kept as an invalid value.
+func normalizeSavedCustomPrefs(prefs map[string]string) {
+	for _, key := range []string{customPrefSkipBackLength, customPrefSkipForwardLength} {
+		if strings.TrimSpace(prefs[key]) == "" {
+			prefs[key] = jellyfinSavedSkipLengthMS
+		}
+	}
+	for key, value := range prefs {
+		if strings.HasPrefix(strings.ToLower(key), "landing-") && strings.TrimSpace(value) == "" {
+			delete(prefs, key)
+		}
+	}
 }
 
 func defaultDisplayPreferences(id, client string) displayPreferencesDTO {

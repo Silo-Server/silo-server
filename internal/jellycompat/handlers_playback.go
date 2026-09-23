@@ -2095,6 +2095,11 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 
 	routeItemID := h.codec.EncodeStringID(EncodedIDItem, detail.ContentID)
 	playSessionID := h.codec.EncodeStringID(EncodedIDPlaySession, uuidNewString())
+	subtitleMode := compatJellyfinSubtitleMode(detail.SubtitleMode, detail.SubtitleModeSet, detail.ShowForcedSubtitles, h.savedCompatSubtitleMode(r.Context(), session))
+	var preferredSubtitleLanguages []string
+	if language := strings.TrimSpace(detail.SubtitleLanguage); language != "" {
+		preferredSubtitleLanguages = []string{language}
+	}
 	sources := make([]PlaybackMediaSource, 0, len(detail.Versions))
 	sourceDTOs := make([]mediaSourceDTO, 0, len(detail.Versions))
 	attachmentContext, cancelAttachmentProbe := context.WithTimeout(r.Context(), 2*time.Second)
@@ -2151,6 +2156,14 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 				)
 			}
 		}
+		// As Jellyfin does, the default subtitle follows the viewer's subtitle
+		// mode and language, judged against the audio the client starts with.
+		source.DefaultSubtitleStreamIndex = compatDefaultSubtitleStreamIndex(
+			compatSubtitleCandidates(source.Version, downloaded),
+			preferredSubtitleLanguages,
+			subtitleMode,
+			compatAudioTrack(source.Version, effectiveCompatAudioStreamIndex(source)).Language,
+		)
 		var requestedSubtitleIndex *int
 		if req.SubtitleStreamIndex != nil {
 			requestedSubtitleIndex = intPtr(int(*req.SubtitleStreamIndex))
@@ -2217,6 +2230,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 					Type:                   "Subtitle",
 					Codec:                  string(dl.Format),
 					Language:               dl.Language,
+					LocalizedLanguage:      compatLocalizedLanguage(dl.Language),
 					DisplayTitle:           displayTitle,
 					Title:                  displayTitle,
 					IsDefault:              selectedSubtitleStreamIndex != nil && streamIndex == *selectedSubtitleStreamIndex,
@@ -2441,6 +2455,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		SupportsDirectStream:       supportsDirectStream,
 		SupportsTranscoding:        supportsTranscoding,
 		HLSRemux:                   hlsRemux,
+		DOVIVariant:                hlsRemux && compatDOVIVariantEligible(version) && profile.declaresVideoRangeType(compatPrimaryVideoTrack(version).Codec, compatRangeDOVI),
 		HLSRemuxAudioStreamIndexes: hlsRemuxAudioStreamIndexes,
 		TranscodeAudio:             transcodeAudio,
 		DefaultAudioStreamIndex:    audioIndex,
@@ -2638,6 +2653,8 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			Type:                   "Audio",
 			Codec:                  strings.ToLower(track.Codec),
 			Language:               track.Language,
+			LocalizedLanguage:      compatLocalizedLanguage(track.Language),
+			LocalizedOriginal:      compatLocalizedOriginal,
 			TimeBase:               "1/1000",
 			DisplayTitle:           audioTrackDisplayTitle(track),
 			Title:                  firstNonEmpty(track.Title, track.EmbeddedTitle),
@@ -2670,6 +2687,7 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			Type:                   "Subtitle",
 			Codec:                  strings.ToLower(track.Codec),
 			Language:               track.Language,
+			LocalizedLanguage:      compatLocalizedLanguage(track.Language),
 			TimeBase:               "1/1000",
 			DisplayTitle:           displayTitle,
 			Title:                  displayTitle,
@@ -2727,9 +2745,18 @@ func mediaSourceETag(version catalog.FileVersion) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// defaultAudioStreamIndex is the stream the client should start with: the
+// catalog's per-viewer choice (audio language preference, including the
+// original-language preference, and the series' remembered track) when the
+// detail carries one, otherwise the file's default track. Jellyfin likewise
+// applies the user's audio preferences to DefaultAudioStreamIndex.
 func defaultAudioStreamIndex(version catalog.FileVersion) *int {
 	if len(version.AudioTracks) == 0 {
 		return nil
+	}
+	if effective := version.EffectiveAudioTrackIndex; effective != nil && *effective >= 0 && *effective < len(version.AudioTracks) {
+		value := len(version.VideoTracks) + *effective
+		return &value
 	}
 	for index, track := range version.AudioTracks {
 		if track.Default {
@@ -3151,6 +3178,19 @@ func downloadedSubtitleDisplayTitle(sub subtitles.DownloadedSubtitle) string {
 		tags = append(tags, provider)
 	}
 	return formatSubtitleLabel(base, tags...)
+}
+
+// compatLocalizedOriginal is Jellyfin 12's MediaStream.LocalizedOriginal
+// label, which it sets on every audio stream.
+const compatLocalizedOriginal = "Original"
+
+// compatLocalizedLanguage is Jellyfin 12's MediaStream.LocalizedLanguage: the
+// display name of a stream's language, empty when the stream has none.
+func compatLocalizedLanguage(code string) string {
+	if strings.TrimSpace(code) == "" {
+		return ""
+	}
+	return compatLanguageName(code)
 }
 
 func compatLanguageName(code string) string {
@@ -3629,4 +3669,26 @@ func compatSubtitleProfileFormat(codec string) string {
 	default:
 		return strings.ToLower(strings.TrimSpace(codec))
 	}
+}
+
+// savedCompatSubtitleMode returns the SubtitleMode the viewer's Jellyfin
+// client last saved, or "" when none is stored or it cannot be read. It only
+// tells Jellyfin's Default apart from Smart, which share Silo's "auto".
+func (h *PlaybackHandler) savedCompatSubtitleMode(ctx context.Context, session *Session) string {
+	if h.storeProvider == nil || session == nil || session.ProfileID == "" {
+		return ""
+	}
+	store, err := h.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil || store == nil {
+		return ""
+	}
+	raw, err := store.GetSetting(ctx, configurationKey(session.ProfileID))
+	if err != nil || raw == "" {
+		return ""
+	}
+	var saved struct{ SubtitleMode string }
+	if json.Unmarshal([]byte(raw), &saved) != nil {
+		return ""
+	}
+	return saved.SubtitleMode
 }

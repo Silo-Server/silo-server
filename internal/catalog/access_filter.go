@@ -276,19 +276,25 @@ func MediaFileQualityCeilingSQL(alias string, maxPlaybackQuality string) string 
 // it exists so queries that would otherwise ship every candidate file to Go can
 // filter and reduce inside PostgreSQL instead.
 func MediaFileAccessSQL(alias string, filter AccessFilter, args []any) ([]string, []any) {
-	conditions := make([]string, 0, 3)
+	conditions := mediaFileAccessConditions(alias, filter, func(value any) int {
+		args = append(args, value)
+		return len(args)
+	})
+	return conditions, args
+}
 
+// mediaFileAccessConditions is MediaFileAccessSQL for callers that number
+// placeholders themselves: bind records a value and returns its position.
+func mediaFileAccessConditions(alias string, filter AccessFilter, bind func(any) int) []string {
+	conditions := make([]string, 0, 3)
 	if filter.AllowedLibraryIDs != nil {
-		args = append(args, filter.AllowedLibraryIDs)
-		conditions = append(conditions, fmt.Sprintf("%s.media_folder_id = ANY($%d)", alias, len(args)))
+		conditions = append(conditions, fmt.Sprintf("%s.media_folder_id = ANY($%d)", alias, bind(filter.AllowedLibraryIDs)))
 	}
 	if len(filter.DisabledLibraryIDs) > 0 {
-		args = append(args, filter.DisabledLibraryIDs)
-		conditions = append(conditions, fmt.Sprintf("NOT (%s.media_folder_id = ANY($%d))", alias, len(args)))
+		conditions = append(conditions, fmt.Sprintf("NOT (%s.media_folder_id = ANY($%d))", alias, bind(filter.DisabledLibraryIDs)))
 	}
 	if ceiling := MediaFileQualityCeilingSQL(alias, filter.MaxPlaybackQuality); ceiling != "" {
 		conditions = append(conditions, ceiling)
 	}
-
-	return conditions, args
+	return conditions
 }

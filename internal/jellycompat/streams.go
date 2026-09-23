@@ -3383,6 +3383,33 @@ func generateCompatCopyVideoMasterManifestForVariant(source PlaybackMediaSource,
 	if supplemental := compatMasterSupplementalCodec(video); supplemental != "" {
 		attributes = append(attributes, fmt.Sprintf("SUPPLEMENTAL-CODECS=%q", supplemental))
 	}
+	shape := compatMasterShapeAttributes(video)
+	attributes = append(attributes, shape...)
+
+	manifest := "#EXTM3U\n"
+	if source.DOVIVariant && !source.HLSRemuxMPEGTS {
+		// Jellyfin 12 lists the spec-compliant Dolby Vision variant first so
+		// DV-capable players pick it over the hvc1 fallback at equal bandwidth.
+		dovi := []string{
+			fmt.Sprintf("BANDWIDTH=%d", bandwidth),
+			fmt.Sprintf("AVERAGE-BANDWIDTH=%d", bandwidth),
+			"VIDEO-RANGE=PQ",
+		}
+		codecs := compatDOVICodecString(video)
+		if audioCodec := compatMasterAudioCodec(source, audio); audioCodec != "" {
+			codecs += "," + audioCodec
+		}
+		dovi = append(dovi, fmt.Sprintf("CODECS=%q", codecs))
+		dovi = append(dovi, shape...)
+		manifest += "#EXT-X-STREAM-INF:" + strings.Join(dovi, ",") + "\n" + variantURL + "\n"
+	}
+	return []byte(manifest + "#EXT-X-STREAM-INF:" + strings.Join(attributes, ",") + "\n" + variantURL + "\n")
+}
+
+// compatMasterShapeAttributes returns the RESOLUTION and FRAME-RATE
+// attributes shared by every variant of a copy master playlist.
+func compatMasterShapeAttributes(video models.VideoTrack) []string {
+	var attributes []string
 	if video.Width > 0 && video.Height > 0 {
 		attributes = append(attributes, fmt.Sprintf("RESOLUTION=%dx%d", video.Width, video.Height))
 	}
@@ -3390,8 +3417,18 @@ func generateCompatCopyVideoMasterManifestForVariant(source PlaybackMediaSource,
 		rounded := math.Round(frameRate*1000) / 1000
 		attributes = append(attributes, "FRAME-RATE="+strconv.FormatFloat(rounded, 'f', -1, 64))
 	}
+	return attributes
+}
 
-	return []byte("#EXTM3U\n#EXT-X-STREAM-INF:" + strings.Join(attributes, ",") + "\n" + variantURL + "\n")
+// compatDOVICodecString is Jellyfin 12's Dolby Vision CODECS entry for a
+// stream without a compatible base layer: dvh1.PP.LL for HEVC, dav1.PP.LL for
+// AV1.
+func compatDOVICodecString(video models.VideoTrack) string {
+	fourCC := "dvh1"
+	if strings.EqualFold(strings.TrimSpace(video.Codec), "av1") {
+		fourCC = "dav1"
+	}
+	return fmt.Sprintf("%s.%02d.%02d", fourCC, video.DVProfile, video.DVLevel)
 }
 
 func compatMasterVideoRange(video models.VideoTrack, versionHDR bool) string {
@@ -3433,32 +3470,80 @@ func compatMasterCodecs(source PlaybackMediaSource, video models.VideoTrack, aud
 		}
 	}
 
+	if audioCodec := compatMasterAudioCodec(source, audio); audioCodec != "" {
+		codecs = append(codecs, audioCodec)
+	}
+	return strings.Join(codecs, ",")
+}
+
+// compatMasterAudioCodec returns the RFC 6381 CODECS entry for the audio a
+// copy master playlist carries, or "" when the codec has none.
+func compatMasterAudioCodec(source PlaybackMediaSource, audio models.AudioTrack) string {
 	audioCodec := strings.ToLower(strings.TrimSpace(audio.Codec))
 	if compatHLSTranscodesAudio(source) {
 		audioCodec = compatTargetAudioCodec
 	}
 	switch audioCodec {
 	case compatTargetAudioCodec:
-		if strings.EqualFold(audio.Profile, "HE") && !compatHLSTranscodesAudio(source) {
-			codecs = append(codecs, "mp4a.40.5")
-		} else {
-			codecs = append(codecs, "mp4a.40.2")
-		}
+		return compatAACCodecString(audio.Profile, compatHLSTranscodesAudio(source))
 	case compatAudioCodecMP3:
-		codecs = append(codecs, "mp4a.40.34")
+		return "mp4a.40.34"
 	case compatAudioCodecAC3, "ac-3":
-		codecs = append(codecs, "ac-3")
+		return "ac-3"
 	case compatAudioCodecEAC3, "e-ac-3", "ec-3":
-		codecs = append(codecs, "ec-3")
+		return "ec-3"
 	case compatAudioCodecFLAC:
-		codecs = append(codecs, "fLaC")
+		return "fLaC"
 	case "alac":
-		codecs = append(codecs, "alac")
+		return "alac"
 	case compatAudioCodecOpus:
-		codecs = append(codecs, "Opus")
+		return "Opus"
+	case "truehd", "mlp": //nolint:goconst // probed codec names
+		return "mlpa"
+	case "dts", "dca": //nolint:goconst // probed codec names
+		return compatDTSCodecString(audio.Profile)
+	default:
+		return ""
 	}
-	return strings.Join(codecs, ",")
 }
+
+// compatAACCodecString names a copied AAC track by its probed profile (ffprobe
+// reports "HE-AAC" and "HE-AACv2"); the transcode ladder always encodes AAC-LC.
+func compatAACCodecString(profile string, transcoded bool) string {
+	if transcoded {
+		return hlsCodecAACLC
+	}
+	switch strings.ToUpper(strings.TrimSpace(profile)) {
+	case "HE-AAC", "HE": //nolint:goconst // ffprobe AAC profile names
+		return "mp4a.40.5"
+	case "HE-AACV2":
+		return "mp4a.40.29"
+	default:
+		return hlsCodecAACLC
+	}
+}
+
+// compatDTSCodecString maps a copied DTS track's probed profile to its HLS
+// sample-entry code, matching Jellyfin 12: core DTS (and unknown profiles) is
+// dtsc, the lossless and high-resolution DTS-HD profiles are dtsh, and DTS
+// Express is dtse.
+func compatDTSCodecString(profile string) string {
+	switch strings.ToUpper(strings.TrimSpace(profile)) {
+	case "DTS-HD HRA", "DTS-HD MA", "DTS-HD MA + DTS:X", "DTS-HD MA + DTS:X IMAX": //nolint:goconst // ffprobe DTS profile names
+		return hlsCodecDTSHD
+	case "DTS EXPRESS":
+		return "dtse"
+	default:
+		return hlsCodecDTSCore
+	}
+}
+
+// RFC 6381 sample-entry codes used more than once in copy master playlists.
+const (
+	hlsCodecAACLC   = "mp4a.40.2"
+	hlsCodecDTSCore = "dtsc"
+	hlsCodecDTSHD   = "dtsh"
+)
 
 func compatMasterSupplementalCodec(video models.VideoTrack) string {
 	if playback.VideoSampleEntryForDVCopy(video.DVProfile) != playback.VideoSampleEntryDVH1 || video.DVLevel <= 0 {

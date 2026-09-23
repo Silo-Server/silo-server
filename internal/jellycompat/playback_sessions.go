@@ -104,8 +104,13 @@ type PlaybackMediaSource struct {
 	// independent audio-encode decision, so a compatible audio codec can stay
 	// bit-for-bit copied. HLSRemuxMPEGTS overrides the normal fMP4 packaging for
 	// clients whose Dolby Vision decoder requires MPEG-TS.
-	HLSRemux                    bool
-	HLSRemuxMPEGTS              bool
+	HLSRemux       bool
+	HLSRemuxMPEGTS bool
+	// DOVIVariant marks a copy remux of Dolby Vision without a compatible base
+	// layer (HEVC profile 5, AV1 profile 10) for a client whose device profile
+	// explicitly lists DOVI. As in Jellyfin 12, the fMP4 master playlist then
+	// offers a dvh1/dav1 variant ahead of the hvc1 fallback.
+	DOVIVariant                 bool
 	HLSRemuxAudioStreamIndexes  []int
 	TranscodeAudio              bool
 	DefaultAudioStreamIndex     *int

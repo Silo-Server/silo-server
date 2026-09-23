@@ -3462,7 +3462,7 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 		slog.ErrorContext(ctx, "protocol v3 start: canonical audio preference lookup failed", "component", "api", "profile_id", profileID, "device_id", deviceID, "error", err)
 		return 0, err
 	}
-	if preferredLang == playback.OriginalLanguageSentinel {
+	if playback.IsOriginalLanguagePreference(preferredLang) {
 		preferredLang = h.resolveOriginalLanguage(ctx, file)
 		if preferredLang == "" {
 			preferredLang, err = resolvedPlaybackAudioLanguage(ctx, store, settingsresolve.Context{ProfileID: profileID})
@@ -3470,7 +3470,7 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 				slog.ErrorContext(ctx, "protocol v3 start: profile audio preference fallback failed", "component", "api", "profile_id", profileID, "error", err)
 				return 0, err
 			}
-			if preferredLang == playback.OriginalLanguageSentinel {
+			if playback.IsOriginalLanguagePreference(preferredLang) {
 				preferredLang = h.resolveOriginalLanguage(ctx, file)
 			}
 		}

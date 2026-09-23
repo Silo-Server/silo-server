@@ -1714,3 +1714,61 @@ func TestEnsureUpstreamPlayback_KeepsNegotiatedStreamLocation(t *testing.T) {
 		t.Fatalf("reconstruction location = %q", card.StreamLocation)
 	}
 }
+
+func TestGenerateCompatCopyVideoMasterManifestJellyfin12DolbyVisionVariant(t *testing.T) {
+	source := PlaybackMediaSource{
+		ID: "source-1",
+		Version: catalog.FileVersion{
+			Bitrate: 18_000,
+			VideoTracks: []models.VideoTrack{{
+				Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160,
+				DVProfile: 5, DVLevel: 6, VideoRangeType: compatRangeDOVI,
+			}},
+			AudioTracks: []models.AudioTrack{{Codec: "eac3", Default: true}},
+		},
+		HLSRemux:    true,
+		DOVIVariant: true,
+	}
+
+	got := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", ""))
+	variants := strings.Split(strings.TrimSpace(got), "#EXT-X-STREAM-INF:")
+	if len(variants) != 3 {
+		t.Fatalf("want a Dolby Vision variant plus the hvc1 fallback:\n%s", got)
+	}
+	if !strings.Contains(variants[1], `VIDEO-RANGE=PQ,CODECS="dvh1.05.06,ec-3",RESOLUTION=3840x2160`) {
+		t.Fatalf("first variant must be the spec-compliant dvh1 stream:\n%s", got)
+	}
+	if !strings.Contains(variants[2], `CODECS="hvc1.2.4.L153.B0,ec-3"`) {
+		t.Fatalf("second variant must stay the hvc1 fallback:\n%s", got)
+	}
+
+	source.HLSRemuxMPEGTS = true
+	if ts := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", "")); strings.Contains(ts, "dvh1") {
+		t.Fatalf("MPEG-TS remuxes cannot carry the Dolby Vision variant:\n%s", ts)
+	}
+}
+
+func TestCompatMasterAudioCodecJellyfin12Strings(t *testing.T) {
+	cases := []struct {
+		codec, profile string
+		transcode      bool
+		want           string
+	}{
+		{"aac", "HE-AAC", false, "mp4a.40.5"},
+		{"aac", "HE-AACv2", false, "mp4a.40.29"},
+		{"aac", "LC", false, "mp4a.40.2"},
+		{"aac", "HE-AAC", true, "mp4a.40.2"},
+		{"truehd", "", false, "mlpa"},
+		{"dts", "DTS-HD MA + DTS:X", false, "dtsh"},
+		{"dts", "DTS-HD HRA", false, "dtsh"},
+		{"dts", "DTS Express", false, "dtse"},
+		{"dts", "DTS-ES", false, "dtsc"},
+		{"dts", "", false, "dtsc"},
+	}
+	for _, tc := range cases {
+		source := PlaybackMediaSource{HLSRemux: true, TranscodeAudio: tc.transcode}
+		if got := compatMasterAudioCodec(source, models.AudioTrack{Codec: tc.codec, Profile: tc.profile}); got != tc.want {
+			t.Errorf("%s/%s transcode=%v = %q, want %q", tc.codec, tc.profile, tc.transcode, got, tc.want)
+		}
+	}
+}

@@ -929,9 +929,9 @@ func (h *PlaybackHandler) resolveOriginalLanguage(ctx context.Context, file *mod
 }
 
 // resolvedPlaybackAudioLanguage returns the effective playback.audio_language
-// for one canonical settings context. It may return
-// playback.OriginalLanguageSentinel, which the caller resolves to a concrete
-// language. Returns "" when nothing is stored: the contract default is null,
+// for one canonical settings context. It may return an original-language
+// preference (playback.IsOriginalLanguagePreference), which the caller
+// resolves to a concrete language. Returns "" when nothing is stored: the contract default is null,
 // "no preference". Resolution and decoding failures are returned so playback
 // does not silently substitute a different track.
 func resolvedPlaybackAudioLanguage(ctx context.Context, store userstore.UserStore, rc settingsresolve.Context) (string, error) {

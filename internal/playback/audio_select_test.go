@@ -264,3 +264,14 @@ func TestMatchAudioTrackAcrossVersionsFallsBackToLanguageAcrossCodecs(t *testing
 		t.Fatalf("MatchAudioTrackAcrossVersions() = %d, want English track 0", got)
 	}
 }
+
+func TestIsOriginalLanguagePreference(t *testing.T) {
+	for value, want := range map[string]bool{
+		"original": true, "Original": true, "x-silo-original": true, " X-Silo-Original ": true,
+		"": false, "en": false, "ja": false, "x-silo-other": false,
+	} {
+		if got := playback.IsOriginalLanguagePreference(value); got != want {
+			t.Errorf("IsOriginalLanguagePreference(%q) = %v, want %v", value, got, want)
+		}
+	}
+}

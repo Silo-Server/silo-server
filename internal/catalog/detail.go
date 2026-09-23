@@ -176,9 +176,12 @@ type ItemDetail struct {
 	Title         string `json:"title"`
 	SortTitle     string `json:"sort_title,omitempty"`
 	OriginalTitle string `json:"original_title,omitempty"`
-	Year          int    `json:"year,omitempty"`
-	Overview      string `json:"overview,omitempty"`
-	Tagline       string `json:"tagline,omitempty"`
+	// OriginalLanguage feeds the Jellyfin-compat BaseItemDto field; it is
+	// kept out of the native JSON contract.
+	OriginalLanguage string `json:"-"`
+	Year             int    `json:"year,omitempty"`
+	Overview         string `json:"overview,omitempty"`
+	Tagline          string `json:"tagline,omitempty"`
 	// PendingTranslationLanguage, when set, is the viewer's presentation
 	// language that the description is missing — the on-view AI translation
 	// affordance keys off it.
@@ -1964,6 +1967,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		Title:                      item.Title,
 		SortTitle:                  item.SortTitle,
 		OriginalTitle:              item.OriginalTitle,
+		OriginalLanguage:           item.OriginalLanguage,
 		Year:                       item.Year,
 		Overview:                   item.Overview,
 		Tagline:                    item.Tagline,
@@ -3475,7 +3479,7 @@ func (s *DetailService) effectiveAudioSelectionWith(
 		return originalLanguage
 	}
 
-	usesOriginal := preferredLang == playback.OriginalLanguageSentinel
+	usesOriginal := playback.IsOriginalLanguagePreference(preferredLang)
 	if usesOriginal {
 		preferredLang = resolveOriginalLanguage()
 		if preferredLang == "" {
@@ -3484,7 +3488,7 @@ func (s *DetailService) effectiveAudioSelectionWith(
 			// failure behavior while moving the content-scoped read to canonical
 			// storage.
 			preferredLang = r.profileLanguage(ctx)
-			if preferredLang == playback.OriginalLanguageSentinel {
+			if playback.IsOriginalLanguagePreference(preferredLang) {
 				preferredLang = resolveOriginalLanguage()
 			}
 		}

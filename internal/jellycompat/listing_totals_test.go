@@ -16,6 +16,12 @@ type personTotalsSource struct {
 	includeTotal bool
 	limit        int
 	offset       int
+	opts         catalog.PersonSearchOptions
+}
+
+func (s *personTotalsSource) SearchVisibleWithOptions(ctx context.Context, opts catalog.PersonSearchOptions) ([]models.Person, int, error) {
+	s.opts = opts
+	return s.SearchVisible(ctx, opts.Term, opts.Exact, opts.Limit, opts.Offset, opts.Filter, opts.IncludeTotal)
 }
 
 func (s *personTotalsSource) SearchVisible(_ context.Context, _ string, _ bool, limit, offset int, _ catalog.AccessFilter, includeTotal bool) ([]models.Person, int, error) {
@@ -75,5 +81,47 @@ func TestListingTotalRecordCountControls(t *testing.T) {
 				t.Fatalf("catalog query controls: upcoming=%+v people=%+v", upcoming, people)
 			}
 		})
+	}
+}
+
+// Jellyfin 12 /Persons adds name bounds and ParentId scoping, and pages
+// browse requests (no SearchTerm) beyond the substring-search cap.
+func TestPersonsJellyfin12QueryOptions(t *testing.T) {
+	codec := NewResourceIDCodec()
+	people := &personTotalsSource{}
+	persons := &PersonsHandler{personRepo: people, codec: codec}
+	serve := func(query string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/Persons?"+query, nil)
+		req = req.WithContext(context.WithValue(t.Context(), compatSessionKey, collectionsTestSession()))
+		rec := httptest.NewRecorder()
+		persons.HandleGetPersons(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("response: %d %s", rec.Code, rec.Body.String())
+		}
+		return rec
+	}
+
+	serve("NameStartsWith=Ha&NameLessThan=Hz&NameStartsWithOrGreater=Hb&Limit=60&ParentId=" + codec.EncodeIntID(EncodedIDLibrary, 7))
+	if people.opts.NameStartsWith != "Ha" || people.opts.NameLessThan != "Hz" || people.opts.NameStartsWithOrGreater != "Hb" || people.opts.LibraryID != 7 || people.opts.Limit != 60 {
+		t.Fatalf("browse options = %+v", people.opts)
+	}
+	serve("SearchTerm=hanks&Limit=60")
+	if people.opts.Limit != auxSearchMaxResults || people.opts.LibraryID != 0 {
+		t.Fatalf("search keeps the aux cap: %+v", people.opts)
+	}
+	serve("Limit=5000")
+	if people.opts.Limit != personBrowseMaxResults {
+		t.Fatalf("browse limit = %d, want cap %d", people.opts.Limit, personBrowseMaxResults)
+	}
+	serve("ParentId=" + codec.EncodeStringID(EncodedIDItem, "series-9"))
+	if people.opts.ContentID != "series-9" {
+		t.Fatalf("item parent = %+v", people.opts)
+	}
+
+	people.opts = catalog.PersonSearchOptions{Limit: -1}
+	rec := serve("ParentId=" + codec.EncodeStringID(EncodedIDSeason, "season-1"))
+	if people.opts.Limit != -1 || !json.Valid(rec.Body.Bytes()) {
+		t.Fatalf("an unsupported parent must not query people: %+v", people.opts)
 	}
 }
