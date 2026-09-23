@@ -392,7 +392,10 @@ renaming it into place, and syncing the containing directory, so a crash after
 show.
 
 Intro and credits markers that an external process places under
-`markers/<file hash>.json` are read through the same store.
+`markers/<file hash>.json` are read through the same store. The scanner reads
+them for new and changed files only. It lists the prefix at most once a minute
+per node and skips the per-file read while the prefix is empty, so a
+producer's first markers apply to files scanned after the next check.
 
 Profile avatars live in the operational store, so private S3 keeps existing
 uploads and their presigned delivery even when artwork is local, and a local

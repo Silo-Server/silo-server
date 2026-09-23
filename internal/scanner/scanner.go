@@ -164,6 +164,7 @@ type Scanner struct {
 	// file that reappears (flapping mount, reverted upgrade) restores cheaply.
 	fileRemovalGrace     time.Duration
 	markerFetcher        func(context.Context, string) *IntroCreditsMarkers
+	markerPrefix         markerPrefixCache
 	metadataQueue        MetadataQueueProducer
 	ebookEnrichmentQueue EbookEnrichmentQueue
 	movieQueueSyncer     MovieQueueSyncer
@@ -4090,6 +4091,9 @@ func (s *Scanner) fetchMarkers(ctx context.Context, fileHash string) *IntroCredi
 	if fileHash == "" || s.artworkStore == nil {
 		return nil
 	}
+	if s.markerPrefixEmpty(ctx) {
+		return nil
+	}
 
 	key := fmt.Sprintf("markers/%s.json", fileHash)
 	reader, _, err := s.artworkStore.Get(ctx, key)
@@ -4113,4 +4117,47 @@ func (s *Scanner) fetchMarkers(ctx context.Context, fileHash string) *IntroCredi
 	}
 
 	return &markers
+}
+
+// markerPrefixCheckTTL is how long one LIST of markers/ answers for every
+// file this scanner reads markers for.
+const markerPrefixCheckTTL = time.Minute
+
+// markerPrefixCache remembers whether markers/ held any object at the last
+// check.
+type markerPrefixCache struct {
+	mu        sync.Mutex
+	checkedAt time.Time
+	empty     bool
+}
+
+// markerPrefixEmpty reports whether markers/ holds no objects, so the caller
+// can skip a GET that would miss. Only an optional external process writes
+// markers, so most deployments have none, and on S3 the skipped GET is a
+// round trip per new or changed file.
+//
+// One LIST answers for markerPrefixCheckTTL across concurrent scans and
+// single-file ingests, and every node checks on its own. A producer's first
+// marker is therefore missed only by files scanned within that window after a
+// check, the same outcome as a marker written just after its file was
+// scanned. A failed LIST counts as non-empty, so reads fall back to the
+// per-file GET.
+func (s *Scanner) markerPrefixEmpty(ctx context.Context) bool {
+	c := &s.markerPrefix
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	if !c.checkedAt.IsZero() && now.Sub(c.checkedAt) < markerPrefixCheckTTL {
+		return c.empty
+	}
+	objects, _, err := s.artworkStore.List(ctx, "markers", "", 1)
+	if err != nil {
+		if ctx.Err() != nil {
+			return false
+		}
+		slog.DebugContext(ctx, "scanner: markers prefix check failed", "component", "scanner", "error", err)
+	}
+	c.checkedAt = now
+	c.empty = err == nil && len(objects) == 0
+	return c.empty
 }
