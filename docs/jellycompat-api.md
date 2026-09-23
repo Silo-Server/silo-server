@@ -197,7 +197,9 @@ batches by the existing hourly cleanup.
 Capabilities and `PlaybackInfo` requests accept bodies up to 1 MiB. A stored
 device profile may contain up to 256 KiB of JSON and 1,024 entries total across
 its profile arrays and nested conditions. Larger requests or profiles return
-413. Device IDs longer than 256 bytes return 400.
+413. Device IDs longer than 256 bytes are stored under their SHA-256 hash.
+Jellyfin Web derives its device ID from the browser's user agent, and
+Jellyfin accepts these long IDs.
 
 Each login/API token can register up to 64 active device IDs. Registering a new
 ID at capacity returns 429; an existing ID can still update its profile. Expired

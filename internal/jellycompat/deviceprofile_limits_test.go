@@ -43,13 +43,30 @@ func TestDeviceProfileRequestLimits(t *testing.T) {
 	}
 }
 
-func TestDeviceProfileDeviceIDLimit(t *testing.T) {
+// Jellyfin Web derives DeviceId from the user agent; embedded browsers exceed
+// the storage bound and must still negotiate playback.
+func TestDeviceProfileLongDeviceIDsAreKeyedByHash(t *testing.T) {
 	store := NewDeviceProfileStore(time.Hour, nil)
-	if err := store.PutForDevice(t.Context(), "token", strings.Repeat("x", maxDeviceIDBytes+1), DeviceProfile{Name: "profile"}); err == nil {
-		t.Fatal("oversized device ID was stored")
+	long := strings.Repeat("x", maxDeviceIDBytes+8)
+	otherLong := strings.Repeat("x", maxDeviceIDBytes+7) + "y"
+	if err := store.PutForDevice(t.Context(), "token", long, DeviceProfile{Name: "long"}); err != nil {
+		t.Fatalf("long device ID: %v", err)
 	}
-	if err := store.PutForDevice(t.Context(), "token", strings.Repeat("x", maxDeviceIDBytes), DeviceProfile{Name: "profile"}); err != nil {
-		t.Fatalf("maximum supported device ID: %v", err)
+	if err := store.PutForDevice(t.Context(), "token", otherLong, DeviceProfile{Name: "other"}); err != nil {
+		t.Fatalf("second long device ID: %v", err)
+	}
+	for id, want := range map[string]string{long: "long", otherLong: "other"} {
+		profile, ok, err := store.GetForDevice(t.Context(), "token", id)
+		if err != nil || !ok || profile.Name != want {
+			t.Fatalf("GetForDevice = %+v, %t, %v; want %q", profile, ok, err, want)
+		}
+	}
+	if got := deviceProfileStorageID(long); len(got) > maxDeviceIDBytes || got == deviceProfileStorageID(otherLong) {
+		t.Fatalf("storage ID %q is unbounded or collides", got)
+	}
+	exact := strings.Repeat("x", maxDeviceIDBytes)
+	if got := deviceProfileStorageID(exact); got != exact {
+		t.Fatalf("device ID within the bound was rewritten: %q", got)
 	}
 }
 
