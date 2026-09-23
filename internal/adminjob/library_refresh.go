@@ -3,7 +3,9 @@ package adminjob
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -193,6 +196,26 @@ type LibraryRefreshExecutor struct {
 	realtimeHub    *notifications.Hub
 	unmatchedDelay time.Duration
 	wait           func(ctx context.Context, delay time.Duration) error
+	lockPool       *pgxpool.Pool
+}
+
+// ErrLibraryRefreshInProgress reports that another refresh of the same
+// library holds its lock, on this server or another one.
+var ErrLibraryRefreshInProgress = errors.New("another metadata refresh is already running for this library")
+
+// libraryRefreshAdvisoryLockNamespace ("SILR") fills the high 32 bits of a
+// library's lock key; the library ID fills the low 32 bits.
+const libraryRefreshAdvisoryLockNamespace int64 = 0x53494C52
+
+func libraryRefreshLockKey(libraryID int) int64 {
+	return libraryRefreshAdvisoryLockNamespace<<32 | int64(uint32(libraryID))
+}
+
+// SetLibraryLockPool makes Execute hold a per-library advisory lock, so a
+// library refresh job and the full refresh task never refresh the same library
+// at the same time. Without a pool, Execute takes no lock.
+func (e *LibraryRefreshExecutor) SetLibraryLockPool(pool *pgxpool.Pool) {
+	e.lockPool = pool
 }
 
 func NewLibraryRefreshExecutor(
@@ -233,6 +256,21 @@ func (e *LibraryRefreshExecutor) Execute(
 	}
 	if err := e.ensureLibraryEnabled(ctx, req.LibraryID); err != nil {
 		return nil, err
+	}
+	if e.lockPool != nil {
+		lock, acquired, err := pglock.TryAcquire(ctx, e.lockPool, libraryRefreshLockKey(req.LibraryID))
+		if err != nil {
+			return nil, fmt.Errorf("lock library %d for refresh: %w", req.LibraryID, err)
+		}
+		if !acquired {
+			return nil, ErrLibraryRefreshInProgress
+		}
+		defer func() {
+			if err := lock.Release(ctx); err != nil {
+				slog.WarnContext(ctx, "library refresh: releasing library lock failed", "component", "adminjob",
+					"library_id", req.LibraryID, "error", err)
+			}
+		}()
 	}
 
 	items, err := e.itemLister.ListLibraryItems(ctx, req.LibraryID, req.Mode)

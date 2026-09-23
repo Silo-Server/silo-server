@@ -658,15 +658,24 @@ export function useDeleteLibraryPoster() {
   });
 }
 
+// quick refreshes only stale items; full refreshes every item in the library.
+export type LibraryRefreshMode = "quick" | "full";
+
+export interface RefreshLibraryMetadataVariables {
+  id: number;
+  mode: LibraryRefreshMode;
+}
+
 export function useRefreshLibraryMetadata() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: number): Promise<AdminJob> =>
+    mutationFn: ({ id, mode }: RefreshLibraryMetadataVariables): Promise<AdminJob> =>
       v2("POST /api/v2/libraries/{id}/refresh-metadata", {
         path: { id: String(id) },
+        body: { mode },
       }).then(adminJobFromV2),
-    onSuccess: () => {
-      toast.success("Metadata refresh queued");
+    onSuccess: (_job, { mode }) => {
+      toast.success(mode === "full" ? "Full metadata refresh queued" : "Metadata refresh queued");
       queryClient.invalidateQueries({ queryKey: adminKeys.jobs("library_refresh") });
       queryClient.invalidateQueries({ queryKey: adminKeys.jobs("__all") });
     },

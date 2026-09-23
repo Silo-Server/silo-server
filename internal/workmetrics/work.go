@@ -64,7 +64,7 @@ func Category(key string) string {
 		return "watch_sync"
 	case workloadNotifications, "notification_delivery", "history_import", "recommendations", "ai", "subtitles", workloadPlugin, "admin", "transcode", "remux", "probe":
 		return key
-	case "refresh_metadata", "sync_manga_metadata", "sync_audiobook_metadata", "sync_ebook_metadata", "backfill_ebook_metadata", "sync_podcast_feeds", "metadata":
+	case "refresh_metadata", "refresh_all_library_metadata", "sync_manga_metadata", "sync_audiobook_metadata", "sync_ebook_metadata", "backfill_ebook_metadata", "sync_podcast_feeds", "metadata":
 		return "metadata"
 	case "refresh_trending_discover":
 		return "recommendations"

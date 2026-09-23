@@ -388,6 +388,17 @@ describe("v2 type separation", () => {
       void v2("PATCH /api/v2/profiles/{id}", { body: {} });
       // @ts-expect-error getSetupStatus takes no body.
       void v2("GET /api/v2/system/setup", { body: {} });
+      // An optional body may be sent or left out, but it keeps its shape.
+      void v2("POST /api/v2/libraries/{id}/refresh-metadata", {
+        path: { id: "1" },
+        body: { mode: "full" },
+      });
+      void v2("POST /api/v2/libraries/{id}/refresh-metadata", { path: { id: "1" } });
+      void v2("POST /api/v2/libraries/{id}/refresh-metadata", {
+        path: { id: "1" },
+        // @ts-expect-error mode is quick or full.
+        body: { mode: "everything" },
+      });
       // @ts-expect-error unknown operations do not compile.
       void v2("GET /api/v2/nope");
     }

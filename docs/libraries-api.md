@@ -40,6 +40,15 @@ library. Failed persistence never returns acceptance. Library deletion disables 
 folder and inserts the job in one transaction; repeated acceptance for the same active
 delete conflicts, while deletion of different libraries remains independent.
 
+`POST /api/v2/libraries/{id}/refresh-metadata` takes an optional body with `mode`.
+`quick`, the default when the body or mode is absent, refreshes only matched items that
+need it, such as ones never refreshed, lacking an overview or artwork, with a failed
+refresh, or with incomplete episodes. `full` refreshes every matched item and re-scans
+items that have no provider IDs.
+A refresh holds a per-library PostgreSQL advisory lock, shared with the
+`refresh_all_library_metadata` task; a job that starts while another refresh of the
+same library holds it fails rather than refreshing the library twice.
+
 The job contains `id`, `kind`, `state`, `terminal`, `cancelable`, `created_at`, optional
 `started_at` and `finished_at`, and optional progress measured in items for metadata
 refresh. Deletion stages have no honest shared work denominator and omit progress.

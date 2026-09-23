@@ -18,6 +18,17 @@ Concurrent local starts conflict. Another server has its own worker state.
 `POST /api/v2/admin/tasks/{key}/cancel` requests cancellation of the current local
 execution; completed effects remain. Neither operation automatically retries.
 
+The `refresh_all_library_metadata` task runs a `full` library metadata refresh
+(see [libraries-api.md](libraries-api.md)) for each enabled library in turn,
+inside the task worker, with the same six-hour limit per library as a refresh
+job. It is manual-only: interval schedules are timed per process, so a cluster
+could start a second full refresh right after the first. Unlike a library
+refresh job, it creates no admin job, so it has no retained job record, no
+recovery after a process failure, and cancels as a whole on the server running
+it. A library with a refresh job queued or running, or another refresh holding
+its per-library lock, is skipped. A PostgreSQL advisory lock allows one run
+across all servers; a run that finds it held fails without refreshing anything.
+
 `GET /api/v2/admin/tasks/{key}/triggers` reads persisted schedule configuration
 and a strong caller-bound ETag. `PUT` on that resource requires `If-Match` and a
 `triggers` array, including an empty array to disable scheduling. The database
