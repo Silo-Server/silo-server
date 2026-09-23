@@ -38,7 +38,7 @@ const (
 	embyFavoritesUnavailableSummary = "Emby favorites couldn't be read, so none were imported."
 	embySeriesUnavailableSummary    = "Emby show details couldn't be read, so some episodes may be unmatched."
 
-	jellyfinFavoritesUnavailableSummary      = "Jellyfin favorites couldn't be read, so none were imported."
+	jellyfinFavoritesUnavailableSummary      = "Jellyfin favorites couldn't be read, so some favorites may be missing."
 	jellyfinFavoriteSeriesUnavailableSummary = "Jellyfin show details couldn't be read, so some favorite episodes may be unmatched."
 )
 
