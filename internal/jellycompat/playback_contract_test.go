@@ -344,6 +344,20 @@ func TestJSONSubtitleTimingWindow(t *testing.T) {
 	}
 }
 
+// A windowed SRT response is SRT -> WebVTT -> SRT. The {\an8} placement that
+// the WebVTT step turns into cue settings must come back as the SRT tag.
+func TestWindowedSRTSubtitleKeepsAlignmentTag(t *testing.T) {
+	r := httptest.NewRequest("GET", "/subtitle?StartPositionTicks=30000000", nil)
+	route := chi.NewRouteContext()
+	route.URLParams.Add("routeFormat", "srt")
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
+	rr := httptest.NewRecorder()
+	(&PlaybackHandler{}).deliverSubtitle(rr, r, "srt", []byte("1\n00:00:01,000 --> 00:00:02,000\nEarly\n\n2\n00:00:05,000 --> 00:00:06,000\n{\\an8}Later top\n"))
+	if want := "1\n00:00:02,000 --> 00:00:03,000\n{\\an8}Later top\n\n"; rr.Code != 200 || rr.Body.String() != want {
+		t.Fatalf("status=%d body=%q, want %q", rr.Code, rr.Body.String(), want)
+	}
+}
+
 func TestJSONSubtitleTimingEmptyWindow(t *testing.T) {
 	r := httptest.NewRequest("GET", "/subtitle?StartPositionTicks=90000000", nil)
 	route := chi.NewRouteContext()

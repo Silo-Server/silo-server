@@ -1161,9 +1161,12 @@ The artifact `format` and `mime_type` describe served bytes, independently of th
 An embedded `hdmv_pgs_subtitle`/PGS sidecar is lossless binary PGS at a `.sup`
 URL with `application/octet-stream`; cached full-track responses support `HEAD`
 and byte ranges. Text conversion is always WebVTT at `.vtt`, while lossless
-ASS/SSA uses `.ass`. A suffix that does not match the selected track or a valid
-conversion is rejected with `415` rather than returning bytes of a different
-type under the requested extension.
+ASS/SSA uses `.ass`. Converting an SRT moves each cue's `{\anN}` alignment
+into WebVTT cue settings (`line`, `align`) and drops every `{\…}` override
+block from the cue text; FFmpeg's SubRip decoder drops most of them too. A
+suffix that does not match the selected track or a valid conversion is rejected
+with `415` rather than returning bytes of a different type under the requested
+extension.
 
 Embedded text URLs return the complete track from source time zero by default,
 including when playback starts at a resume position. Consumers that maintain a
