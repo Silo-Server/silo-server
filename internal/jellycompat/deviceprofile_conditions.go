@@ -562,9 +562,9 @@ func compatDOVIVariantEligible(version catalog.FileVersion) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(video.Codec)) {
-	case compatVideoCodecHEVC, "h265":
+	case compatVideoCodecHEVC, compatVideoCodecH265:
 		return video.DVProfile == 5
-	case "av1":
+	case compatVideoCodecAV1:
 		return video.DVProfile == 10
 	default:
 		return false

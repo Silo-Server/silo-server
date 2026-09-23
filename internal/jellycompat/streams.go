@@ -1860,6 +1860,8 @@ const (
 	compatAudioCodecOpus       = "opus"
 	compatContainerMP4         = "mp4"
 	compatVideoCodecHEVC       = "hevc"
+	compatVideoCodecH265       = "h265"
+	compatVideoCodecAV1        = "av1"
 	compatRangeDOVI            = "DOVI"
 	compatRangeDOVIWithHLG     = "DOVIWithHLG"
 	compatRangeDOVIWithHDR     = "DOVIWithHDR10"
