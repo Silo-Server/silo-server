@@ -57,7 +57,7 @@ func (qb *QueryBuilder) WithLibraryScope(libraryIDs []int) *QueryBuilder {
 }
 
 // WithCertificationScope resolves rating rules and ordering in the same
-// library context as the displayed catalogue.
+// library context as the displayed library view.
 func (qb *QueryBuilder) WithCertificationScope(filter AccessFilter) *QueryBuilder {
 	qb.certificationAccess = &filter
 	return qb
