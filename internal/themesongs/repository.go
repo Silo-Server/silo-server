@@ -296,7 +296,7 @@ func (r *Repository) ScanFiles(ctx context.Context, folderID int, scope string, 
 // records until normal scanner cleanup removes the video rows; an offline mount
 // therefore cannot retire cached themes.
 func (r *Repository) PruneOrphans(ctx context.Context, folderID int, scope string, exact bool) error {
-	scopeSQL := `($2='' OR owner_path=$2 OR starts_with(owner_path,$2||'/'))`
+	scopeSQL := `($2='' OR owner_path=$2 OR starts_with(owner_path,$2||'/') OR starts_with($2,owner_path||'/'))`
 	if exact {
 		scopeSQL = `owner_path=$2`
 	}

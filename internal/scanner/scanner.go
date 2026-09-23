@@ -354,7 +354,7 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 
 	result, err := s.scanPaths(watchCtx, folder, folder.Paths, folder.Paths, true)
 	if err == nil && result != nil && !result.EmptyRootGuarded {
-		err = s.scanThemeSongs(watchCtx, folder, "", false)
+		err = s.scanOptionalThemeSongs(watchCtx, folder, "", false)
 	}
 	return result, err
 }
@@ -403,7 +403,7 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 	}
 	result, err := s.scanPaths(watchCtx, folder, []string{cleanSubtree}, []string{cleanSubtree}, false)
 	if err == nil && result != nil && !result.EmptyRootGuarded {
-		err = s.scanThemeSongs(watchCtx, folder, cleanSubtree, false)
+		err = s.scanOptionalThemeSongs(watchCtx, folder, cleanSubtree, false)
 	}
 	return result, err
 }
@@ -2617,9 +2617,8 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		}
 		return s.scanEbookPaths(ctx, folder, []string{cleanFile}, false)
 	}
-
 	// Verify the file extension is recognized.
-	if dir, ok := themesongs.OwnerDirectory(cleanFile); ok {
+	if dir, ok := themesongs.OwnerDirectory(cleanFile); ok && supportsThemeSongs(folder.Type) {
 		if !pathWithinAnyRoot(dir, folder.Paths) {
 			return fmt.Errorf("theme owner is outside the library")
 		}
@@ -2741,7 +2740,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 			"scope", filepath.Clean(filePath),
 		)
 	}
-	return s.scanThemeSongs(ctx, folder, filepath.Dir(filePath), true)
+	return s.scanOptionalThemeSongs(ctx, folder, filepath.Dir(filePath), true)
 }
 
 func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *models.MediaFolder, filePath string) (bool, error) {

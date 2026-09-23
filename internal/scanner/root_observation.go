@@ -35,7 +35,7 @@ type rootInferenceResult struct {
 // ObserveRoot derives the logical content root for a media file path.
 func ObserveRoot(filePath string, libraryType string, libraryRoots ...string) (RootObservation, bool) {
 	kind := librarykind.Of(libraryType)
-	if !kind.Audiobook && !kind.Ebook && !kind.Manga && !kind.Podcast {
+	if kind.Movie || kind.TV || kind.Mixed {
 		if _, theme := themesongs.OwnerDirectory(filePath); theme {
 			return RootObservation{}, false
 		}

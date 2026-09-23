@@ -10,13 +10,35 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
 func (s *Scanner) scanThemeSongs(ctx context.Context, folder *models.MediaFolder, scope string, exact bool) error {
+	if !supportsThemeSongs(folder.Type) {
+		return nil
+	}
 	discovery := themeDiscovery{roots: folder.Paths, ffprobe: s.ffprobePath, ancestors: make(map[themeIgnoreKey]themeIgnoreState), readDir: os.ReadDir}
 	return discovery.scan(ctx, themesongs.NewRepository(s.fileRepo.Pool()), folder.ID, scope, exact)
+}
+
+func supportsThemeSongs(folderType string) bool {
+	kind := librarykind.Of(folderType)
+	return kind.Movie || kind.TV || kind.Mixed
+}
+
+// Theme discovery follows a completed media scan. A theme database failure
+// must not turn that scan into a failed ingest, but cancellation still stops it.
+func (s *Scanner) scanOptionalThemeSongs(ctx context.Context, folder *models.MediaFolder, scope string, exact bool) error {
+	err := s.scanThemeSongs(ctx, folder, scope, exact)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "scanner: optional theme scan failed", "component", "scanner", "folder_id", folder.ID, "scope", scope, "error", err)
+	}
+	return nil
 }
 
 func (d *themeDiscovery) scan(ctx context.Context, repo *themesongs.Repository, folderID int, scope string, exact bool) error {
@@ -148,6 +170,11 @@ func (d *themeDiscovery) discover(ctx context.Context, directory string, cached 
 	files := []themesongs.File{}
 	add := func(path string, entry os.DirEntry, rules []ignoreRules) error {
 		if themesongs.Container(path) == "" || !entry.Type().IsRegular() || ignoreRulesMatch(rules, path, false) {
+			return nil
+		}
+		// A theme.mp3 inside theme-music belongs to its parent directory,
+		// even when this directory also contains a scanned video file.
+		if owner, ok := themesongs.OwnerDirectory(path); !ok || owner != directory {
 			return nil
 		}
 		info, err := entry.Info()

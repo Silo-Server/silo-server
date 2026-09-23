@@ -2,10 +2,12 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -83,6 +85,119 @@ func TestThemeScanAtLibraryRoot(t *testing.T) {
 	}
 	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM item_theme_songs WHERE media_folder_id=$1`, folderID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("removed theme was not reconciled by its file event: count=%d err=%v", count, err)
+	}
+}
+
+func TestThemeScanSkipsPodcastAndUnknownKinds(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe is required")
+	}
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is required")
+	}
+	root := t.TempDir()
+	theme := filepath.Join(root, "theme.mp3")
+	if out, err := exec.Command(ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=1", "-y", theme).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	s := NewScanner(NewFileRepository(pool), ffprobe, nil, 1, false, 0)
+	for _, kind := range []string{"podcasts", "future-audio-kind"} {
+		t.Run(kind, func(t *testing.T) {
+			folderID := seedDeadRootTestFolder(t, pool, kind, "Non-video theme gate")
+			folder := &models.MediaFolder{ID: folderID, Type: kind, Paths: []string{root}}
+			if _, err := pool.Exec(t.Context(), `INSERT INTO media_files(media_folder_id,file_path,canonical_root_path) VALUES($1,$2,$3)`, folderID, filepath.Join(root, "episode.mkv"), root); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.scanThemeSongs(t.Context(), folder, "", false); err != nil {
+				t.Fatal(err)
+			}
+			var themes int
+			if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM item_theme_songs WHERE media_folder_id=$1`, folderID).Scan(&themes); err != nil {
+				t.Fatal(err)
+			}
+			if themes != 0 {
+				t.Errorf("%s library indexed %d themes during discovery", kind, themes)
+			}
+			if err := s.ScanFile(t.Context(), theme, folder); err == nil || !strings.Contains(err.Error(), "unrecognized video extension") {
+				t.Errorf("non-video ScanFile theme route returned %v", err)
+			}
+			if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM item_theme_songs WHERE media_folder_id=$1`, folderID).Scan(&themes); err != nil {
+				t.Fatal(err)
+			}
+			if themes != 0 {
+				t.Errorf("%s library kept %d themes after file event", kind, themes)
+			}
+		})
+	}
+}
+
+func TestOptionalThemeFailurePreservesCompletedMediaScan(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe is required")
+	}
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is required")
+	}
+	root := t.TempDir()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Optional theme failure")
+	folder := &models.MediaFolder{ID: folderID, Type: "movies", Paths: []string{root}}
+	video, err := os.ReadFile("testdata/test.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	videoPath := filepath.Join(root, "movie.mp4")
+	if err := os.WriteFile(videoPath, video, 0600); err != nil {
+		t.Fatal(err)
+	}
+	themePath := filepath.Join(root, "theme.mp3")
+	if out, err := exec.Command(ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=1", "-y", themePath).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	function := fmt.Sprintf("scanner_theme_failure_%d", folderID)
+	trigger := fmt.Sprintf("scanner_theme_failure_trigger_%d", folderID)
+	if _, err := pool.Exec(t.Context(), fmt.Sprintf(`CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.media_folder_id = %d THEN RAISE EXCEPTION 'theme write blocked'; END IF; RETURN NEW; END $$`, function, folderID)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON item_theme_songs", trigger))
+		_, _ = pool.Exec(context.Background(), fmt.Sprintf("DROP FUNCTION IF EXISTS %s()", function))
+	})
+	if _, err := pool.Exec(t.Context(), fmt.Sprintf("CREATE TRIGGER %s BEFORE INSERT ON item_theme_songs FOR EACH ROW EXECUTE FUNCTION %s()", trigger, function)); err != nil {
+		t.Fatal(err)
+	}
+	s := NewScanner(NewFileRepository(pool), ffprobe, nil, 1, false, 0)
+	result, err := s.ScanFolder(t.Context(), folder)
+	if err != nil || result == nil || result.New != 1 {
+		t.Fatalf("completed folder media scan discarded: result=%+v err=%v", result, err)
+	}
+	result, err = s.ScanSubtree(t.Context(), folder, root)
+	if err != nil || result == nil || result.Unchanged != 1 {
+		t.Fatalf("completed subtree media scan discarded: result=%+v err=%v", result, err)
+	}
+	if err := s.ScanFile(t.Context(), videoPath, folder); err != nil {
+		t.Fatalf("video event gated by optional theme failure: %v", err)
+	}
+	if err := s.ScanFile(t.Context(), themePath, folder); err == nil {
+		t.Fatal("theme-only event swallowed its theme write failure")
+	}
+}
+
+func TestOptionalThemeScanPreservesCancellation(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Canceled optional theme")
+	s := NewScanner(NewFileRepository(pool), "ffprobe", nil, 1, false, 0)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	for _, kind := range []string{"movies", "podcasts"} {
+		if err := s.scanOptionalThemeSongs(ctx, &models.MediaFolder{ID: folderID, Type: kind, Paths: []string{t.TempDir()}}, "", false); !errors.Is(err, context.Canceled) {
+			t.Fatalf("%s cancellation = %v, want context.Canceled", kind, err)
+		}
 	}
 }
 
@@ -240,6 +355,39 @@ func TestThemeDiscoveryConventionsAndIgnores(t *testing.T) {
 	files, err = discoverThemeSongs(context.Background(), owner, []string{root}, ffprobe, nil)
 	if err != nil || len(files) != 0 {
 		t.Fatalf("ignored owner: %+v %v", files, err)
+	}
+}
+
+func TestThemeDiscoveryNestedMediaDirectoryKeepsCanonicalOwner(t *testing.T) {
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe is required")
+	}
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is required")
+	}
+	root := t.TempDir()
+	owner := filepath.Join(root, "Show")
+	nested := filepath.Join(owner, "theme-music")
+	if err := os.MkdirAll(nested, 0755); err != nil {
+		t.Fatal(err)
+	}
+	theme := filepath.Join(nested, "theme.mp3")
+	if out, err := exec.Command(ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=1", "-y", theme).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	// A video makes the theme-music directory eligible for its own pass.
+	if err := os.WriteFile(filepath.Join(nested, "episode.mkv"), []byte("video"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	parentFiles, err := discoverThemeSongs(t.Context(), owner, []string{root}, ffprobe, nil)
+	if err != nil || len(parentFiles) != 1 || parentFiles[0].Path != theme || parentFiles[0].OwnerPath != owner {
+		t.Fatalf("parent discovery: files=%+v err=%v", parentFiles, err)
+	}
+	nestedFiles, err := discoverThemeSongs(t.Context(), nested, []string{root}, ffprobe, nil)
+	if err != nil || len(nestedFiles) != 0 {
+		t.Fatalf("nested directory claimed parent's theme: files=%+v err=%v", nestedFiles, err)
 	}
 }
 

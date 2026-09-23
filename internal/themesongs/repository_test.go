@@ -69,6 +69,60 @@ func TestRepositoryDirectoriesCanonicalRootBoundaries(t *testing.T) {
 	}
 }
 
+func TestRepositoryPruneOrphansIncludesAncestorOfSubtree(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	var folder int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,enabled) VALUES('series','Theme ancestor pruning test',true) RETURNING id`).Scan(&folder); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id=$1`, folder) }()
+	root := filepath.Join(t.TempDir(), "Show")
+	scope := filepath.Join(root, "Season 01")
+	repo := NewRepository(pool)
+	file := File{Song: Song{Title: "Series theme", Container: "mp3", DurationSeconds: 4}, OwnerPath: root, Path: filepath.Join(root, "theme.mp3"), Size: 50, Modified: time.Now().Truncate(time.Microsecond)}
+	if err := repo.Replace(ctx, folder, root, []File{file}); err != nil {
+		t.Fatal(err)
+	}
+	// A retained missing video keeps the theme until scanner cleanup removes its row.
+	var video int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_files(media_folder_id,file_path,canonical_root_path,missing_since) VALUES($1,$2,$3,now()) RETURNING id`, folder, filepath.Join(scope, "episode.mkv"), root).Scan(&video); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PruneOrphans(ctx, folder, scope, false); err != nil {
+		t.Fatal(err)
+	}
+	cache, err := repo.ScanFiles(ctx, folder, scope, false)
+	if err != nil || len(cache[root]) != 1 {
+		t.Fatalf("missing video did not retain ancestor theme: cache=%v err=%v", cache, err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM media_files WHERE id=$1`, video); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PruneOrphans(ctx, folder, scope, true); err != nil {
+		t.Fatal(err)
+	}
+	cache, err = repo.ScanFiles(ctx, folder, scope, false)
+	if err != nil || len(cache[root]) != 1 {
+		t.Fatalf("exact subtree prune changed ancestor theme: cache=%v err=%v", cache, err)
+	}
+	if err := repo.PruneOrphans(ctx, folder, scope, false); err != nil {
+		t.Fatal(err)
+	}
+	cache, err = repo.ScanFiles(ctx, folder, scope, false)
+	if err != nil || len(cache[root]) != 0 {
+		t.Fatalf("orphaned ancestor theme survived subtree prune: cache=%v err=%v", cache, err)
+	}
+}
+
 func TestRepositoryInheritanceRematchingAndAccess(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
