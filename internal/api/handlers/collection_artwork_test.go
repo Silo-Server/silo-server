@@ -235,3 +235,78 @@ func testCollectionPosterJPEG(t *testing.T) []byte {
 	}
 	return buf.Bytes()
 }
+
+func TestCollectionImagePathVersion(t *testing.T) {
+	cases := map[string]string{
+		"collection-images/c1/poster/abc123def456abcd/original.webp":    "abc123def456abcd",
+		"user-collection-images/c1/backdrop/deadbeefdeadbeef/w300.webp": "deadbeefdeadbeef",
+		"collection-images/c1/poster/original.webp":                     "poster", // legacy fixed key: no version segment
+		"":     "",
+		"solo": "",
+	}
+	for in, want := range cases {
+		if got := collectionImagePathVersion(in); got != want {
+			t.Errorf("collectionImagePathVersion(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// stubListDeleteStore satisfies blobstore.Store but only implements List and
+// Delete; removeStaleCollectionImageVariants uses no other method.
+type stubListDeleteStore struct {
+	blobstore.Store
+	keys    []string
+	deleted []string
+}
+
+func (s *stubListDeleteStore) List(_ context.Context, prefix, _ string, _ int) ([]blobstore.ObjectInfo, string, error) {
+	var out []blobstore.ObjectInfo
+	for _, k := range s.keys {
+		if strings.HasPrefix(k, prefix) {
+			out = append(out, blobstore.ObjectInfo{Key: k})
+		}
+	}
+	return out, "", nil
+}
+
+func (s *stubListDeleteStore) Delete(_ context.Context, keys []string) (int, error) {
+	s.deleted = append(s.deleted, keys...)
+	return len(keys), nil
+}
+
+func TestRemoveStaleCollectionImageVariants_KeepsNewVersion(t *testing.T) {
+	store := &stubListDeleteStore{keys: []string{
+		"collection-images/c1/poster/oldversion000000/original.webp",
+		"collection-images/c1/poster/oldversion000000/w300.webp",
+		"collection-images/c1/poster/original.webp", // legacy fixed key
+		"collection-images/c1/poster/newversion111111/original.webp",
+		"collection-images/c1/poster/newversion111111/w300.webp",
+		"collection-images/c1/backdrop/other/original.webp", // different imageType, untouched
+	}}
+	if err := removeStaleCollectionImageVariants(context.Background(), store, adminCollectionImagePrefix, "c1", "poster", "newversion111111"); err != nil {
+		t.Fatalf("removeStaleCollectionImageVariants: %v", err)
+	}
+	deleted := map[string]bool{}
+	for _, k := range store.deleted {
+		deleted[k] = true
+	}
+	// Old version and legacy key are removed; the just-written version survives.
+	for _, k := range []string{
+		"collection-images/c1/poster/oldversion000000/original.webp",
+		"collection-images/c1/poster/oldversion000000/w300.webp",
+		"collection-images/c1/poster/original.webp",
+	} {
+		if !deleted[k] {
+			t.Errorf("expected %q to be deleted", k)
+		}
+	}
+	for _, k := range []string{
+		"collection-images/c1/poster/newversion111111/original.webp",
+		"collection-images/c1/poster/newversion111111/w300.webp",
+		"collection-images/c1/backdrop/other/original.webp",
+	} {
+		if deleted[k] {
+			t.Errorf("did not expect %q to be deleted", k)
+		}
+	}
+}

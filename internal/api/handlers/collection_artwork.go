@@ -188,6 +188,56 @@ func collectionImageVersion(data []byte) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// collectionImagePathVersion extracts the content-version segment from a stored
+// original-variant path such as
+// "{prefix}/{id}/{imageType}/{version}/original.webp". It returns "" for paths
+// that do not carry a version (legacy fixed keys, template paths, empty).
+func collectionImagePathVersion(storedPath string) string {
+	parts := strings.Split(storedPath, "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[len(parts)-2]
+}
+
+// removeStaleCollectionImageVariants deletes every stored variant for the
+// collection / imageType except the version just written. It is used after a
+// replacement is committed, so obsolete keys (older content versions and legacy
+// fixed keys) are cleaned without touching the live artwork. A "" keepVersion
+// falls back to removing the whole imageType prefix.
+func removeStaleCollectionImageVariants(
+	ctx context.Context,
+	store blobstore.Store,
+	prefix, collectionID, imageType, keepVersion string,
+) error {
+	if store == nil {
+		return nil
+	}
+	base := fmt.Sprintf("%s/%s/%s/", prefix, collectionID, imageType)
+	keepPrefix := ""
+	if keepVersion != "" {
+		keepPrefix = base + keepVersion + "/"
+	}
+	items, _, err := store.List(ctx, base, "", 0)
+	if err != nil {
+		return fmt.Errorf("listing objects: %w", err)
+	}
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		if keepPrefix != "" && strings.HasPrefix(item.Key, keepPrefix) {
+			continue
+		}
+		keys = append(keys, item.Key)
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	if _, err := store.Delete(ctx, keys); err != nil {
+		return fmt.Errorf("deleting stale collection variants: %w", err)
+	}
+	return nil
+}
+
 // removeCollectionImageVariants deletes every stored variant for the given
 // collection / imageType under the supplied S3 prefix.
 func removeCollectionImageVariants(

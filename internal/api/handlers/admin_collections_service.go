@@ -550,12 +550,10 @@ func (h *LibraryCollectionHandler) UploadAdminCollectionArtwork(ctx context.Cont
 	if _, err := h.repo.GetByID(ctx, id); err != nil {
 		return err
 	}
-	// Content-addressed variant keys mean a replacement uploads to a new path,
-	// so clear the previous variants first to avoid orphaning them (issue
-	// #1258). Every other upload path already does this before processing.
-	if err := h.deleteCollectionImages(ctx, id, kind); err != nil {
-		return err
-	}
+	// Content-addressed variant keys (issue #1258) mean the replacement uploads
+	// to a new path that cannot collide with the current artwork, so upload and
+	// commit it first. A failed upload or update then leaves the last valid
+	// image untouched. Obsolete keys are cleaned up only after the commit.
 	path, hash, err := h.processCollectionImage(ctx, id, kind, data)
 	if err != nil {
 		return err
@@ -570,7 +568,16 @@ func (h *LibraryCollectionHandler) UploadAdminCollectionArtwork(ctx context.Cont
 		input.BackdropURL = &path
 		input.BackdropThumbhash = &hash
 	}
-	return h.repo.Update(ctx, input)
+	if err := h.repo.Update(ctx, input); err != nil {
+		return err
+	}
+	// Best-effort: drop older variants now that the new ones are committed,
+	// keeping the version we just wrote. A cleanup failure leaves harmless
+	// orphans, never a broken image.
+	if err := removeStaleCollectionImageVariants(ctx, h.ArtworkStore, adminCollectionImagePrefix, id, kind, collectionImagePathVersion(path)); err != nil {
+		slog.WarnContext(ctx, "collection artwork: stale variant cleanup failed", "component", "api", "collection_id", id, "kind", kind, "error", err)
+	}
+	return nil
 }
 func (h *LibraryCollectionHandler) SetAdminCollectionArtworkSource(ctx context.Context, id, kind, url string) error {
 	if _, err := h.repo.GetByID(ctx, id); err != nil {
