@@ -140,6 +140,19 @@ describe("AdminAccessGroups", () => {
       expect(putBody).toMatchObject({ max_remote_stream_bitrate_kbps: 0 });
     });
   });
+
+  it("keeps an existing limit when the number input has invalid intermediate text", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    const limit = await screen.findByLabelText("Max remote stream bitrate (kbps)");
+    fireEvent.change(limit, { target: { value: "4000" } });
+    Object.defineProperty(limit, "validity", { value: { badInput: true }, configurable: true });
+    fireEvent.change(limit, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => {
+      expect(putBody).toMatchObject({ max_remote_stream_bitrate_kbps: 4000 });
+    });
+  });
 });
 
 it("keeps a stale draft and requires explicit canonical reload before resubmission", async () => {
