@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -21,7 +22,8 @@ import (
 
 const defaultBaseURL = "https://api.trakt.tv"
 
-const traktMediaShows = "shows"
+// traktExtendedProgress asks watched shows for per-episode season progress.
+const traktExtendedProgress = "progress"
 
 // Trakt rate limits, from its API rate-limiting guide: authenticated users get
 // one POST/PUT/DELETE per second (AUTHED_API_POST_LIMIT) and 500 GETs per
@@ -239,11 +241,12 @@ func (p *Provider) FetchWatched(
 	cfg watchsync.ServerConfig,
 	conn watchsync.Connection,
 ) ([]watchsync.RemoteWatch, error) {
-	movies, err := fetchWatchedPages[traktWatchedMovie](ctx, p, cfg, conn, "movies")
+	movies, err := fetchTraktPages[traktWatchedMovie](ctx, p, cfg, conn, "/sync/watched/movies", nil)
 	if err != nil {
 		return nil, err
 	}
-	shows, err := fetchWatchedPages[traktWatchedShow](ctx, p, cfg, conn, traktMediaShows)
+	// Season and episode watched data is no longer included by default.
+	shows, err := fetchTraktPages[traktWatchedShow](ctx, p, cfg, conn, "/sync/watched/shows", url.Values{"extended": {traktExtendedProgress}})
 	if err != nil {
 		return nil, err
 	}
@@ -288,27 +291,81 @@ func (p *Provider) FetchWatched(
 	return rows, nil
 }
 
-// fetchWatchedPages requests explicit pagination for Trakt's watched endpoints.
-// Stop on an empty page: Trakt may apply a smaller limit than requested,
-// particularly for shows with season progress, so a short page is not the end.
-func fetchWatchedPages[T any](ctx context.Context, p *Provider, cfg watchsync.ServerConfig, conn watchsync.Connection, kind string) ([]T, error) {
-	query := url.Values{"limit": {"250"}}
-	if kind == traktMediaShows {
-		// Season and episode watched data is no longer included by default.
-		query.Set("extended", "progress")
-	}
+const (
+	// traktPageLimit is Trakt's maximum page size. Larger limits are clamped.
+	traktPageLimit = 250
+	// traktMaxPages bounds a listing whose last page is never detected, such
+	// as a server that ignores page and sends no pagination headers.
+	traktMaxPages = 1000
+)
+
+// fetchTraktPages loads every page of a paginated Trakt GET endpoint. Trakt
+// serves only a short first page when page and limit are omitted, so both are
+// always sent; they replace any page or limit in query, and other parameters
+// such as extended are kept. A failure on any page returns an error and no
+// rows, so callers never import a partial listing.
+func fetchTraktPages[T any](
+	ctx context.Context,
+	p *Provider,
+	cfg watchsync.ServerConfig,
+	conn watchsync.Connection,
+	path string,
+	query url.Values,
+) ([]T, error) {
+	params := url.Values{}
+	maps.Copy(params, query)
+	params.Set("limit", strconv.Itoa(traktPageLimit))
 	var rows []T
-	for page := 1; ; page++ {
-		query.Set("page", strconv.Itoa(page))
+	itemCount := 0
+	for page := 1; page <= traktMaxPages; page++ {
+		params.Set("page", strconv.Itoa(page))
 		var batch []T
-		if err := p.do(ctx, http.MethodGet, "/sync/watched/"+kind+"?"+query.Encode(), cfg, conn.AccessToken, nil, &batch); err != nil {
+		header, err := p.doWithHeader(ctx, http.MethodGet, path+"?"+params.Encode(), cfg, conn.AccessToken, nil, &batch)
+		if err != nil {
 			return nil, err
 		}
-		if len(batch) == 0 {
-			return rows, nil
+		// Offset pages shift when the list changes mid-read, which can skip
+		// an item. A changed item count reveals that, and a skipped item
+		// would read as removed, so the read fails and is retried next sync.
+		if count, ok := positiveHeaderInt(header, "X-Pagination-Item-Count"); ok {
+			if itemCount != 0 && count != itemCount {
+				return nil, fmt.Errorf("trakt %s changed while it was read (%d items, then %d)", path, itemCount, count)
+			}
+			itemCount = count
 		}
 		rows = append(rows, batch...)
+		if lastTraktPage(header, page, len(batch)) {
+			return rows, nil
+		}
 	}
+	return nil, fmt.Errorf("trakt %s did not reach its last page within %d pages", path, traktMaxPages)
+}
+
+// lastTraktPage reports whether page, holding items rows, ends the listing.
+// X-Pagination-Page-Count is authoritative when present. Otherwise a page
+// shorter than the applied X-Pagination-Limit is the last one. The requested
+// limit is not a safe comparison: Trakt can apply a smaller one, particularly
+// for shows with season progress, so without headers only an empty page ends
+// the listing.
+func lastTraktPage(header http.Header, page, items int) bool {
+	if items == 0 {
+		return true
+	}
+	if count, ok := positiveHeaderInt(header, "X-Pagination-Page-Count"); ok {
+		return page >= count
+	}
+	if limit, ok := positiveHeaderInt(header, "X-Pagination-Limit"); ok {
+		return items < limit
+	}
+	return false
+}
+
+func positiveHeaderInt(header http.Header, key string) (int, bool) {
+	value, err := strconv.Atoi(strings.TrimSpace(header.Get(key)))
+	if err != nil || value <= 0 {
+		return 0, false
+	}
+	return value, true
 }
 
 func (p *Provider) FetchProgress(
@@ -366,12 +423,12 @@ func (p *Provider) FetchFavorites(
 	cfg watchsync.ServerConfig,
 	conn watchsync.Connection,
 ) ([]watchsync.RemoteFavorite, error) {
-	var movies []traktFavoriteMovie
-	if err := p.do(ctx, http.MethodGet, "/users/me/favorites/movies/added", cfg, conn.AccessToken, nil, &movies); err != nil {
+	movies, err := fetchTraktPages[traktFavoriteMovie](ctx, p, cfg, conn, "/users/me/favorites/movies/added", nil)
+	if err != nil {
 		return nil, err
 	}
-	var shows []traktFavoriteShow
-	if err := p.do(ctx, http.MethodGet, "/users/me/favorites/shows/added", cfg, conn.AccessToken, nil, &shows); err != nil {
+	shows, err := fetchTraktPages[traktFavoriteShow](ctx, p, cfg, conn, "/users/me/favorites/shows/added", nil)
+	if err != nil {
 		return nil, err
 	}
 	return p.remoteListItems(movies, shows), nil
@@ -384,12 +441,12 @@ func (p *Provider) FetchWatchlist(
 	cfg watchsync.ServerConfig,
 	conn watchsync.Connection,
 ) ([]watchsync.RemoteFavorite, error) {
-	var movies []traktFavoriteMovie
-	if err := p.do(ctx, http.MethodGet, "/sync/watchlist/movies", cfg, conn.AccessToken, nil, &movies); err != nil {
+	movies, err := fetchTraktPages[traktFavoriteMovie](ctx, p, cfg, conn, "/sync/watchlist/movies", nil)
+	if err != nil {
 		return nil, err
 	}
-	var shows []traktFavoriteShow
-	if err := p.do(ctx, http.MethodGet, "/sync/watchlist/shows", cfg, conn.AccessToken, nil, &shows); err != nil {
+	shows, err := fetchTraktPages[traktFavoriteShow](ctx, p, cfg, conn, "/sync/watchlist/shows", nil)
+	if err != nil {
 		return nil, err
 	}
 	return p.remoteListItems(movies, shows), nil
@@ -433,8 +490,10 @@ func (p *Provider) FetchHistory(
 	cfg watchsync.ServerConfig,
 	conn watchsync.Connection,
 ) ([]watchsync.RemotePlay, error) {
-	var payload []traktHistoryItem
-	if err := p.do(ctx, http.MethodGet, "/sync/history", cfg, conn.AccessToken, nil, &payload); err != nil {
+	// ExportWatched reconciles against every remote play, so a missing page
+	// would resend plays Trakt already has; Trakt does not deduplicate them.
+	payload, err := fetchTraktPages[traktHistoryItem](ctx, p, cfg, conn, "/sync/history", nil)
+	if err != nil {
 		return nil, err
 	}
 	rows := make([]watchsync.RemotePlay, 0, len(payload))
@@ -632,12 +691,27 @@ func (p *Provider) do(
 	body io.Reader,
 	out any,
 ) error {
+	_, err := p.doWithHeader(ctx, method, path, cfg, token, body, out)
+	return err
+}
+
+// doWithHeader is do that also returns the response headers, which carry
+// Trakt's X-Pagination-* values.
+func (p *Provider) doWithHeader(
+	ctx context.Context,
+	method string,
+	path string,
+	cfg watchsync.ServerConfig,
+	token string,
+	body io.Reader,
+	out any,
+) (http.Header, error) {
 	// Buffer the body so a rate-limited request can be replayed.
 	var payload []byte
 	if body != nil {
 		buffered, err := io.ReadAll(body)
 		if err != nil {
-			return fmt.Errorf("read trakt request body: %w", err)
+			return nil, fmt.Errorf("read trakt request body: %w", err)
 		}
 		payload = buffered
 	}
@@ -647,16 +721,16 @@ func (p *Provider) do(
 	for attempt := 0; ; attempt++ {
 		if paced {
 			if err := p.writes.Wait(ctx, token); err != nil {
-				return fmt.Errorf("wait for trakt write limiter: %w", err)
+				return nil, fmt.Errorf("wait for trakt write limiter: %w", err)
 			}
 		}
-		wait, limited, err := p.doOnce(ctx, method, path, cfg, token, payload, out)
+		header, wait, limited, err := p.doOnce(ctx, method, path, cfg, token, payload, out)
 		if !limited {
-			return err
+			return header, err
 		}
 		if attempt < maxRetryAttempts && wait <= maxInPlaceRetryWait {
 			if err := p.sleep(ctx, wait); err != nil {
-				return err
+				return nil, err
 			}
 			continue
 		}
@@ -665,13 +739,14 @@ func (p *Provider) do(
 		if attempt >= maxRetryAttempts && wait < defaultRetryAfter {
 			wait = defaultRetryAfter
 		}
-		return watchsync.RateLimitedError{Provider: p.Key(), RetryAfter: wait}
+		return nil, watchsync.RateLimitedError{Provider: p.Key(), RetryAfter: wait}
 	}
 }
 
-// doOnce performs a single HTTP attempt. A 429 reports limited with the wait
-// from Retry-After, or defaultRetryAfter when the header is absent or
-// malformed; every other outcome reports its error, if any.
+// doOnce performs a single HTTP attempt and returns the response headers. A
+// 429 reports limited with the wait from Retry-After, or defaultRetryAfter
+// when the header is absent or malformed; every other outcome reports its
+// error, if any.
 func (p *Provider) doOnce(
 	ctx context.Context,
 	method string,
@@ -680,19 +755,19 @@ func (p *Provider) doOnce(
 	token string,
 	payload []byte,
 	out any,
-) (wait time.Duration, limited bool, err error) {
+) (header http.Header, wait time.Duration, limited bool, err error) {
 	var body io.Reader
 	if payload != nil {
 		body = bytes.NewReader(payload)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, p.baseURL+path, body)
 	if err != nil {
-		return 0, false, fmt.Errorf("create trakt request: %w", err)
+		return nil, 0, false, fmt.Errorf("create trakt request: %w", err)
 	}
 	p.addHeaders(req, cfg, token)
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return 0, false, fmt.Errorf("send trakt request: %w", err)
+		return nil, 0, false, fmt.Errorf("send trakt request: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests {
@@ -700,18 +775,18 @@ func (p *Provider) doOnce(
 		if !ok {
 			wait = defaultRetryAfter
 		}
-		return wait, true, nil
+		return nil, wait, true, nil
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return 0, false, fmt.Errorf("trakt request %s %s failed: status %d", method, path, resp.StatusCode)
+		return nil, 0, false, fmt.Errorf("trakt request %s %s failed: status %d", method, path, resp.StatusCode)
 	}
 	if out == nil {
-		return 0, false, nil
+		return resp.Header, 0, false, nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return 0, false, fmt.Errorf("decode trakt response: %w", err)
+		return nil, 0, false, fmt.Errorf("decode trakt response: %w", err)
 	}
-	return 0, false, nil
+	return resp.Header, 0, false, nil
 }
 
 type tokenResponse struct {

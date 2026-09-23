@@ -226,6 +226,7 @@ func TestFetchFavoritesGetsMoviesAndShows(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Pagination-Page-Count", "1")
 		switch r.URL.Path {
 		case "/users/me/favorites/movies/added":
 			_, _ = w.Write([]byte(`[{"listed_at":"2026-05-04T12:00:00Z","movie":{"title":"Movie","year":2026,"ids":{"imdb":"tt123","tmdb":456}}}]`))
