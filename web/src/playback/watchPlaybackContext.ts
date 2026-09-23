@@ -3,9 +3,9 @@ import type { PlaybackStartTrigger, PlayerPictureInPictureChange } from "@/playe
 import type { WatchPlaybackStartInput, WatchRouteRequest } from "@/pages/watchRouteHelpers";
 import type {
   WatchPlaybackHostState,
-  WatchPlaybackSnapshot,
   WatchPlaybackTransportControls,
 } from "./watchPlaybackReducer";
+import type { WatchPlaybackSnapshot } from "./watchPlaybackSnapshotStore";
 
 export interface WatchPlaybackControllerValue {
   state: WatchPlaybackHostState;

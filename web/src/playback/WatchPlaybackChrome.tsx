@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -55,8 +56,14 @@ import { formatTime } from "@/player/components/SeekBar";
 import { storage } from "@/utils/storage";
 import { WatchPlaybackControllerContext } from "./watchPlaybackContext";
 import type { WatchPlaybackControllerValue } from "./watchPlaybackContext";
-import type { WatchPlaybackSnapshot, WatchPlaybackTransportControls } from "./watchPlaybackReducer";
+import type { WatchPlaybackTransportControls } from "./watchPlaybackReducer";
 import { createEmptyPlaybackState, watchPlaybackReducer } from "./watchPlaybackReducer";
+import {
+  createWatchPlaybackSnapshotStore,
+  useWatchPlaybackSnapshot,
+  WatchPlaybackSnapshotStoreContext,
+  type WatchPlaybackSnapshot,
+} from "./watchPlaybackSnapshotStore";
 import {
   buildWatchHref,
   buildWatchItemHref,
@@ -202,6 +209,7 @@ function PlaybackPreparingScreen() {
 export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
   const navigate = useViewTransitionNavigate();
   const [state, dispatch] = useReducer(watchPlaybackReducer, undefined, createEmptyPlaybackState);
+  const [snapshotStore] = useState(createWatchPlaybackSnapshotStore);
   const stateRef = useRef(state);
   const suppressNextPictureInPictureExitRef = useRef<string | null>(null);
   const { profile } = useCurrentProfile();
@@ -397,11 +405,20 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "CLEAR_PENDING_RETURN_NAVIGATION", requestKey });
   }, []);
 
+  // A layout effect, so the store knows a new request before the passive
+  // effects of the commit that starts it. The host can mount an already loaded
+  // title's player in that commit, and the player reports from its first effect.
+  useLayoutEffect(() => {
+    snapshotStore.setRequest(state.request);
+  }, [snapshotStore, state.request]);
+
+  // Time updates go to the snapshot store, not the reducer, so they leave the
+  // controller value (and every component that reads it) untouched.
   const updatePlaybackSnapshot = useCallback(
     (requestKey: string, snapshot: WatchPlaybackSnapshot) => {
-      dispatch({ type: "UPDATE_SNAPSHOT", requestKey, snapshot });
+      snapshotStore.report(requestKey, snapshot);
     },
-    [],
+    [snapshotStore],
   );
 
   const setTransportControls = useCallback(
@@ -449,9 +466,11 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <WatchPlaybackControllerContext.Provider value={value}>
-      {children}
-    </WatchPlaybackControllerContext.Provider>
+    <WatchPlaybackSnapshotStoreContext.Provider value={snapshotStore}>
+      <WatchPlaybackControllerContext.Provider value={value}>
+        {children}
+      </WatchPlaybackControllerContext.Provider>
+    </WatchPlaybackSnapshotStoreContext.Provider>
   );
 }
 
@@ -1058,7 +1077,7 @@ export function WatchPlaybackBar() {
 
   const { state, isBackgroundBarVisible, returnToWatch, stopPlayback } = controller;
   const request = state.request;
-  const snapshot = state.snapshot;
+  const snapshot = useWatchPlaybackSnapshot(isBackgroundBarVisible ? request : null);
   const transport = state.transport;
   const { user } = useAuth();
   const seekPreferences = useSeekPreferences("video", { enabled: user !== null });
