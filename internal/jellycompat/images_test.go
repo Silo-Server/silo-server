@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -780,5 +781,102 @@ func TestPersonImageRechecksViewerBeforeSharedCache(t *testing.T) {
 	}
 	if rr := request("visible", true, ""); rr.Code != http.StatusFound {
 		t.Fatalf("authorized cache hit=%d", rr.Code)
+	}
+}
+
+type countingImageResolver struct {
+	paths []string
+}
+
+func (r *countingImageResolver) ResolveImageURL(_ context.Context, path string, _ string) string {
+	r.paths = append(r.paths, path)
+	return "https://cdn.example.test/" + path
+}
+
+func (r *countingImageResolver) ResolveImageURLs(ctx context.Context, paths []string, variant string) map[string]string {
+	out := make(map[string]string, len(paths))
+	for _, path := range paths {
+		out[path] = r.ResolveImageURL(ctx, path, variant)
+	}
+	return out
+}
+
+// TestHandleItemImagePresignsOnlyRequestedType checks that a tagged image
+// request presigns the requested type, and its fallback only when the
+// requested type has no artwork.
+func TestHandleItemImagePresignsOnlyRequestedType(t *testing.T) {
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	updatedAt := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	const (
+		posterPath   = "tmdb/movies/1/poster/original.abc.webp"
+		backdropPath = "tmdb/movies/1/backdrop/original.def.webp"
+		logoPath     = "tmdb/movies/1/logo/original.ghi.webp"
+	)
+	signer := newImageTagSigner("image-secret")
+
+	tests := []struct {
+		name       string
+		item       models.MediaItem
+		imageType  string
+		tagType    string
+		tagPath    string
+		wantPrefix []string
+	}{
+		{name: "primary", imageType: "Primary", tagType: "Primary", tagPath: posterPath, wantPrefix: []string{"tmdb/movies/1/poster/"}},
+		{name: "backdrop", imageType: "Backdrop", tagType: "Backdrop", tagPath: backdropPath, wantPrefix: []string{"tmdb/movies/1/backdrop/"}},
+		{name: "thumb", imageType: "Thumb", tagType: "Backdrop", tagPath: backdropPath, wantPrefix: []string{"tmdb/movies/1/backdrop/"}},
+		{name: "logo", imageType: "Logo", tagType: "Logo", tagPath: logoPath, wantPrefix: []string{"tmdb/movies/1/logo/"}},
+		{
+			name:       "primary falls back to backdrop",
+			item:       models.MediaItem{PosterPath: "-"},
+			imageType:  "Primary",
+			tagType:    "Primary",
+			tagPath:    "-",
+			wantPrefix: []string{"tmdb/movies/1/backdrop/"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := &models.MediaItem{
+				ContentID:    contentID,
+				PosterPath:   posterPath,
+				BackdropPath: backdropPath,
+				LogoPath:     logoPath,
+				UpdatedAt:    updatedAt,
+			}
+			if tt.item.PosterPath != "" {
+				item.PosterPath = tt.item.PosterPath
+			}
+			resolver := &countingImageResolver{}
+			detailSvc := &catalog.DetailService{}
+			detailSvc.SetImageResolver(resolver)
+			h := &ImagesHandler{
+				codec:     codec,
+				images:    NewImageCache(time.Hour, time.Now),
+				itemRepo:  fakeImageItemRepo{item: item},
+				detailSvc: detailSvc,
+				imageTags: signer,
+			}
+			tag := signer.Tag(imageTagSeed(contentID, tt.tagType, compatCardImageSize, tt.tagPath, "", updatedAt), tt.tagPath)
+
+			req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/"+tt.imageType+"?tag="+tag, nil)
+			req = withImageRouteParams(req, routeID, tt.imageType)
+			rec := httptest.NewRecorder()
+			h.HandleItemImage(rec, req)
+
+			if rec.Code != http.StatusFound {
+				t.Fatalf("status = %d, body = %s; want 302", rec.Code, rec.Body.String())
+			}
+			if len(resolver.paths) != len(tt.wantPrefix) {
+				t.Fatalf("presigned %d paths %v, want %d", len(resolver.paths), resolver.paths, len(tt.wantPrefix))
+			}
+			for i, prefix := range tt.wantPrefix {
+				if !strings.HasPrefix(resolver.paths[i], prefix) {
+					t.Fatalf("presign %d = %q, want prefix %q", i, resolver.paths[i], prefix)
+				}
+			}
+		})
 	}
 }
