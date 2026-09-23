@@ -35,11 +35,14 @@ const (
 )
 
 type PlannerInputV3 struct {
-	Request         StartRequestV3
-	RequestedFile   *models.MediaFile
-	EffectiveFile   *models.MediaFile
-	AudioTrackIndex int
-	Settings        PlannerSettingsV3
+	Request StartRequestV3
+	// ServerBitrateCapKbps is an administrator-owned, per-attempt ceiling.
+	// Unlike a client's bandwidth preference it must fail closed.
+	ServerBitrateCapKbps int
+	RequestedFile        *models.MediaFile
+	EffectiveFile        *models.MediaFile
+	AudioTrackIndex      int
+	Settings             PlannerSettingsV3
 	// Registry holds the transformations the local binary can execute.
 	Registry *TransformationRegistryV3
 	// ProgressiveRemuxRegistry, HLSRemuxRegistry, and HLSVideoRegistry report
@@ -181,7 +184,7 @@ func (input PlannerInputV3) hlsToneMapCapabilities() tonemap.Capabilities {
 }
 
 // PlanPlaybackV3 chooses a playable protocol-v3 route from source and client facts.
-func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
+func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	if input.RequestedFile == nil {
 		return terminalPlannerResultV3("source_unavailable", "The requested media source is unavailable.", false)
 	}
@@ -193,6 +196,29 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		input.Now = time.Now()
 	}
 	source := SourceDescriptorFromFileV3(file, input.AudioTrackIndex)
+	serverBitrateRequiresEncode := false
+	if input.ServerBitrateCapKbps > 0 {
+		if cap := optionalValueV3(input.Request.BandwidthCapKbps); cap == 0 || input.ServerBitrateCapKbps < cap {
+			input.Request.BandwidthCapKbps = &input.ServerBitrateCapKbps
+		}
+		// The video track rate excludes audio and container overhead. Only a
+		// known total rate can establish that a source-preserving route fits.
+		cap := optionalValueV3(input.Request.BandwidthCapKbps)
+		totalBitrateKbps := normalizeBitrateKbpsV3(file.Bitrate)
+		serverBitrateRequiresEncode = totalBitrateKbps <= 0 || totalBitrateKbps > cap || source.BitrateKbps > cap
+		if serverBitrateRequiresEncode {
+			defer func() {
+				compliant := result.Plan != nil &&
+					(result.PlayMethod == PlayTranscode || file.IsAudioOnly() && result.TranscodeAudio)
+				if result.Terminal != nil || !compliant {
+					// Keep a transient blocker (such as a missing toolchain)
+					// retryable after naming the bitrate limit as the refusal.
+					retryable := result.Terminal != nil && result.Terminal.Retryable
+					result = terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "This stream exceeds the server bitrate limit, and no compliant transcoding route is available.", retryable)
+				}
+			}()
+		}
+	}
 	// A source without any video track is audio-only (audiobooks, future
 	// music): the video, HDR, and subtitle-burn gates below have nothing to
 	// gate, and requiring complete video metadata would terminal a perfectly
@@ -226,6 +252,18 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	remuxSubtitleOK := remuxSubtitle.Terminal == nil && !remuxSubtitle.RequiresBurn
 	hlsRemuxSubtitleOK := hlsSubtitle.Terminal == nil && !hlsSubtitle.RequiresBurn
 	quality := ResolveQualityPolicyV3(input.Request, source)
+	if serverBitrateRequiresEncode {
+		// The quality resolver uses the video track rate to choose an encode
+		// target, which can undercount a source-preserving route's total rate.
+		quality.RequiresTranscode = true
+		quality.PreservesSource = false
+		cap := optionalValueV3(input.Request.BandwidthCapKbps)
+		if quality.BitrateKbps <= 0 {
+			quality.BitrateKbps = cap
+		} else {
+			quality.BitrateKbps = min(quality.BitrateKbps, cap)
+		}
+	}
 	videoOK, videoEvidenceInsufficient := videoEligibleV3(source, input.Request)
 	var high10Quirk *AppliedQuirkV3
 	if !videoOK {
@@ -358,7 +396,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	// transcode route entirely), deliver the source at original quality with a
 	// degradation warning instead of refusing playback. Explicit user-selected
 	// rungs keep the existing terminals.
-	if quality.RequiresTranscode && !quality.ExplicitRung && (originalSubtitleOK || remuxSubtitleOK || hlsRemuxSubtitleOK) && videoOK &&
+	if input.ServerBitrateCapKbps == 0 && quality.RequiresTranscode && !quality.ExplicitRung && (originalSubtitleOK || remuxSubtitleOK || hlsRemuxSubtitleOK) && videoOK &&
 		(originalRangeOK || dvStripEligible || clientDV81Eligible || clientHDR10Eligible) &&
 		!videoTranscodeExecutableV3(input, source) {
 		warnings := append(quality.Warnings, DegradationWarningV3{
@@ -562,7 +600,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		}
 		progressiveExecutable := (!progressiveTranscodeAudio || progressiveAudioConvertOK) && (!dvStrip || dvStripEligibleProgressive)
 		tryProgressive := func() (PlannerResultV3, bool) {
-			if !remuxSubtitleOK || !progressiveExecutable {
+			if !remuxSubtitleOK || !progressiveExecutable || input.ServerBitrateCapKbps > 0 && progressiveTranscodeAudio {
 				return PlannerResultV3{}, false
 			}
 			candidate := cloneRemuxPlanCandidateV3(progressivePlan)
@@ -580,7 +618,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 				return result
 			}
 		}
-		if deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK && (!dvStrip || dvStripEligibleHLS) {
+		if deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK && (!dvStrip || dvStripEligibleHLS) && (input.ServerBitrateCapKbps <= 0 || (!hlsTranscodeAudio && !hlsAudioQuirkOK)) {
 			plan := cloneRemuxPlanCandidateV3(remuxBase)
 			plan.Delivery = DeliveryRemuxHLSV3
 			plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: "hls", MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
@@ -642,6 +680,11 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 			if result, ok := tryProgressive(); ok {
 				return result
 			}
+		}
+		if input.ServerBitrateCapKbps > 0 && (progressiveTranscodeAudio || hlsTranscodeAudio || hlsAudioQuirkOK) {
+			// Audio re-encoding can raise a copy remux above a source that only
+			// just fits the cap. Encode both tracks with an explicit budget.
+			return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, "", false)
 		}
 	}
 	if deliveryAvailableV3(input.Request, DeliveryClassHLSV3) {
@@ -753,7 +796,7 @@ func planAudioOnlyV3(input PlannerInputV3, file *models.MediaFile, source Source
 	originalAudioSelectionOK := audioSelectionUsesContainerDefaultV3(file, input.AudioTrackIndex) ||
 		clientSelectsOriginalAudioTrackV3(request)
 	bandwidthCapKbps := optionalValueV3(request.BandwidthCapKbps)
-	bandwidthCapExceeded := bandwidthCapKbps > 0 && source.BitrateKbps > bandwidthCapKbps
+	bandwidthCapExceeded := bandwidthCapKbps > 0 && (source.BitrateKbps > bandwidthCapKbps || input.ServerBitrateCapKbps > 0 && source.BitrateKbps <= 0)
 	if source.AudioCodec == "" {
 		// A file with neither a video track nor a probed audio codec has no
 		// stream the planner can validate a route for.
@@ -813,6 +856,12 @@ func planAudioOnlyV3(input PlannerInputV3, file *models.MediaFile, source Source
 	targetAudioBitrateKbps := 0
 	if transcodeAudio {
 		targetAudioBitrateKbps = audioOnlyAACBitrateKbpsV3(bandwidthCapKbps)
+		if input.ServerBitrateCapKbps > 0 {
+			targetAudioBitrateKbps = min(targetAudioBitrateKbps, input.ServerBitrateCapKbps*95/100)
+			if targetAudioBitrateKbps < 32 {
+				return terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "The server bitrate limit is too low for a playable audio stream.", false)
+			}
+		}
 		applyAudioOnlyAACConversionV3(&plan, targetAudioChannels, targetAudioBitrateKbps, bandwidthCapExceeded)
 	} else if !deliverySupportsPlanV3(request, DeliveryClassProgressiveV3, plan) {
 		progressiveRegistry = input.progressiveRemuxRegistry()
@@ -967,6 +1016,17 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	plan.EffectiveRecipe.AudioCodec = "aac"
 	plan.EffectiveRecipe.Width = intPointerV3(quality.Width)
 	plan.EffectiveRecipe.Height = intPointerV3(quality.Height)
+	targetAudioBitrateKbps := 0
+	if input.ServerBitrateCapKbps > 0 {
+		channels := aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, true)
+		_, defaultAudioBitrateKbps := ResolveAACOutputV3(channels, 0)
+		budget := optionalValueV3(input.Request.BandwidthCapKbps) * 95 / 100
+		targetAudioBitrateKbps = min(defaultAudioBitrateKbps, max(64, budget/4))
+		if budget-targetAudioBitrateKbps < 64 {
+			return terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "The server bitrate limit is too low for a playable video stream.", false)
+		}
+		quality.BitrateKbps = min(quality.BitrateKbps, budget-targetAudioBitrateKbps)
+	}
 	plan.EffectiveRecipe.BitrateKbps = intPointerV3(quality.BitrateKbps)
 	// Surround sources keep 5.1 through the AAC re-encode (universal Media3
 	// decode); only stereo/mono sources — and unknown layouts — downmix to 2.0.
@@ -1022,7 +1082,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 		return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
 	}
-	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: "h264", TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
+	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: "h264", TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
 }
 
 // applySubtitleDecisionV3 changes the delivery-specific subtitle policy without

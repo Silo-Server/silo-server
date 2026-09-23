@@ -4,6 +4,10 @@
 
 Related issue: #NNN
 <!-- Use "Related issue: N/A — narrow fix" only when no prior coordination was needed. -->
+Validation tasks: #NNN C1
+<!-- Until 1.0 ships: v1.0 board tasks and cases this change unblocks or changes
+(see "1.0 validation" in AGENTS.md), e.g. "unblocks #1144 C3; changes #1200 C1".
+Write "none" when no validation task is affected. -->
 
 What user or maintainer problem does this solve?
 

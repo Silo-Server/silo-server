@@ -33,6 +33,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -53,6 +54,8 @@ const (
 )
 
 type playbackInfoRequest struct {
+	serverBitrateCapKbps                int
+	streamLocation                      string
 	SiloSeekReanchor                    bool            `json:"SiloSeekReanchor"`
 	UserID                              string          `json:"UserId"`
 	MediaSourceID                       string          `json:"MediaSourceId"`
@@ -305,6 +308,7 @@ type PlaybackHandler struct {
 	sessionMgr              SessionManagerInterface
 	fileResolver            FilePathResolver
 	storeProvider           userstore.UserStoreProvider
+	ScopeResolver           ScopeResolver
 	NodePlanner             nodepool.SessionPlanner
 	JWTSecret               string
 	profileStaler           profileStaler
@@ -344,6 +348,21 @@ type PlaybackHandler struct {
 	// compatLocalTranscodeReady is a test seam invoked after manifest readiness
 	// and before lifecycle-locked publication. Production leaves it nil.
 	compatLocalTranscodeReady func(*playback.TranscodeSession)
+}
+
+func (h *PlaybackHandler) serverBitrateCap(ctx context.Context, session *Session) (int, error) {
+	if h.ScopeResolver == nil {
+		return 0, nil
+	}
+	scope, err := h.ScopeResolver.Resolve(ctx, access.ResolveInput{
+		UserID:              session.StreamAppUserID,
+		ProfileID:           session.ProfileID,
+		SkipPINVerification: true,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return streamlocation.BitrateCap(ctx, scope.MaxLocalStreamBitrateKbps, scope.MaxRemoteStreamBitrateKbps), nil
 }
 
 // recipeNodePutter persists and removes a remote transcode's reconstruction
@@ -2053,6 +2072,12 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		writeDeviceProfileRequestError(w, err, "Invalid playback request")
 		return
 	}
+	req.serverBitrateCapKbps, err = h.serverBitrateCap(r.Context(), session)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "The server could not resolve the stream bitrate limit")
+		return
+	}
+	req.streamLocation = string(streamlocation.FromContext(r.Context()))
 	// PlaybackInfo is authorized by the token-derived session. Some clients
 	// retain a previous UserId in their request body while moving to the next
 	// item; that advisory value must not turn an otherwise authorized playback
@@ -2218,7 +2243,11 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	if !slices.ContainsFunc(sources, func(source PlaybackMediaSource) bool {
 		return source.SupportsDirectPlay || source.SupportsDirectStream || source.SupportsTranscoding
 	}) {
-		writeError(w, http.StatusBadRequest, "PlaybackUnavailable", "No media source supports the requested playback constraints")
+		message := "No media source supports the requested playback constraints"
+		if req.serverBitrateCapKbps > 0 {
+			message = "This stream exceeds the server bitrate limit, and no compliant transcoding route is available"
+		}
+		writeError(w, http.StatusBadRequest, "PlaybackUnavailable", message)
 		return
 	}
 
@@ -2314,6 +2343,12 @@ func (h *PlaybackHandler) buildPlaybackSource(
 
 	supportsDirectPlay := enableDirectPlay && profile.SupportsDirectPlayForAudioStream(version, selectedAudioIndex)
 	maxBitrate := req.MaxStreamingBitrate
+	if req.serverBitrateCapKbps > 0 {
+		serverMax := int64(req.serverBitrateCapKbps) * 1000
+		if maxBitrate <= 0 || serverMax < maxBitrate {
+			maxBitrate = serverMax
+		}
+	}
 	if profile.MaxStreamingBitrate > 0 && (maxBitrate <= 0 || profile.MaxStreamingBitrate < maxBitrate) {
 		maxBitrate = profile.MaxStreamingBitrate
 	}
@@ -2335,7 +2370,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		allowAudioCopy &&
 		!supportsDirectPlay &&
 		profile.SupportsHLSRemuxForAudioStream(version, selectedAudioIndex)
-	hlsAudioTranscode := !bitrateRequiresEncode && !hlsAudioCopy &&
+	hlsAudioTranscode := req.serverBitrateCapKbps == 0 && !bitrateRequiresEncode && !hlsAudioCopy &&
 		enableTranscoding &&
 		!supportsDirectPlay &&
 		(!allowAudioCopy || !audioSupported) &&
@@ -2393,6 +2428,8 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		supportsTranscoding = false
 	}
 	return PlaybackMediaSource{
+		ServerBitrateCapKbps:       req.serverBitrateCapKbps,
+		StreamLocation:             req.streamLocation,
 		CanBurnSubtitle:            enableTranscoding && (maxBitrate <= 0 || targetBitrateKbps >= 64) && (allow4KTranscode || !is4KResolution(version.Resolution)) && canEncodeOutput,
 		TargetBitrateKbps:          max(targetBitrateKbps, 0),
 		TargetResolution:           targetResolution,

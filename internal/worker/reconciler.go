@@ -27,6 +27,7 @@ type SessionSync struct {
 	PlayMethod           string // current live transport method for admin session views
 	ReportingNode        string
 	ClientIP             string
+	StreamLocation       string
 	ClientName           string
 	ClientVersion        string
 	ClientBuild          string
@@ -203,8 +204,8 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				 routing_workload, routing_execution, routing_execution_node_id, routing_execution_node_url,
 				 routing_egress, routing_egress_node_id, routing_egress_node_url,
 				 position_seconds, is_paused, has_websocket, compat_origin, routing_network_provider,
-				 output_container, output_protocol)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40)
+				 output_container, output_protocol, stream_location)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)
 			ON CONFLICT (session_id) DO UPDATE SET
 				user_id             = EXCLUDED.user_id,
 				profile_id          = EXCLUDED.profile_id,
@@ -245,6 +246,7 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				routing_network_provider = EXCLUDED.routing_network_provider,
 				output_container    = EXCLUDED.output_container,
 				output_protocol     = EXCLUDED.output_protocol,
+				stream_location     = EXCLUDED.stream_location,
 				last_sync_at        = NOW()
 		`, s.SessionID, s.UserID, s.ProfileID, s.MediaFileID, nullableInt(s.RequestedMediaFileID), s.PlayMethod,
 			sessionNode, s.StartedAt, s.UpdatedAt, nullableIP(s.ClientIP),
@@ -258,7 +260,7 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 			nullableString(s.RoutingWorkload), nullableString(s.RoutingExecution), nullableInt(s.RoutingExecutionNodeID), nullableString(s.RoutingExecutionNodeURL),
 			nullableString(s.RoutingEgress), nullableInt(s.RoutingEgressNodeID), nullableString(s.RoutingEgressNodeURL), normalizePositionSeconds(s.PositionSeconds),
 			s.IsPaused, s.HasWebSocket, s.IsJellyfinCompat, s.RoutingNetworkProvider,
-			nullableString(s.OutputContainer), nullableString(s.OutputProtocol))
+			nullableString(s.OutputContainer), nullableString(s.OutputProtocol), s.StreamLocation)
 		if err != nil {
 			return fmt.Errorf("upserting session %s: %w", s.SessionID, err)
 		}
@@ -356,7 +358,8 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			COALESCE(compat_origin, FALSE),
 			routing_network_provider,
 			COALESCE(output_container, ''),
-			COALESCE(output_protocol, '')
+			COALESCE(output_protocol, ''),
+			COALESCE(stream_location, '')
 		FROM playback_sessions_sync
 		WHERE COALESCE(reporting_node, '') = $1
 		ORDER BY session_id
@@ -410,6 +413,7 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			&s.RoutingNetworkProvider,
 			&s.OutputContainer,
 			&s.OutputProtocol,
+			&s.StreamLocation,
 		); err != nil {
 			return nil, err
 		}
@@ -450,6 +454,7 @@ func sessionSnapshotsEqual(left, right []SessionSync) bool {
 			left[i].PlayMethod != right[i].PlayMethod ||
 			left[i].ReportingNode != right[i].ReportingNode ||
 			left[i].ClientIP != right[i].ClientIP ||
+			left[i].StreamLocation != right[i].StreamLocation ||
 			left[i].ClientName != right[i].ClientName ||
 			left[i].ClientVersion != right[i].ClientVersion ||
 			left[i].ClientBuild != right[i].ClientBuild ||

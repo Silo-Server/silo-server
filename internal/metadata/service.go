@@ -2340,6 +2340,11 @@ func (s *MetadataService) mergeAndPersist(
 	item.LastRefreshed = &now
 	item.RefreshFailures = 0
 	item.Status = "matched"
+	// The stored locks decide whether artwork below, and the season and
+	// episode artwork of a series, may be replaced.
+	if existingItem != nil {
+		item.LockedFields = existingItem.LockedFields
+	}
 
 	// Apply best images.
 	if isCanonicalWrite {
@@ -3125,6 +3130,14 @@ func (s *MetadataService) trailerVideosLocked(ctx context.Context, contentID str
 		return false
 	}
 	return isFieldLocked(intSliceToFields(item.LockedFields), FieldVideos)
+}
+
+// artworkLocked reports that the item holds manually selected artwork. An
+// admin image selection locks FieldImages on the item, or on the parent series
+// for a season poster or episode still, so a refresh keeps existing artwork
+// under that lock and only fills empty slots.
+func artworkLocked(item *models.MediaItem) bool {
+	return item != nil && isFieldLocked(intSliceToFields(item.LockedFields), FieldImages)
 }
 
 // releaseTrailersRefreshClaim clears the cooldown slot this request consumed.
@@ -4417,6 +4430,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 	seriesID := series.ContentID
 	seasonIDs := make(map[int]string, len(seasons))
 	isCanonicalWrite := strings.EqualFold(canonicalLanguage, language)
+	imagesLocked := artworkLocked(series)
 	imageJobs := make([]EnqueueImageCacheJobInput, 0, len(seasons)+len(episodes))
 	fallbackProvider := primaryProviderID(providerIDs)
 	keyAttribution := func(sourcePath string) (string, string) {
@@ -4572,6 +4586,11 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				existingSeason.PosterSourcePath,
 				existingSeason.PosterThumbhash,
 			)
+			if imagesLocked && existingSeason.PosterPath != "" {
+				nextPath = existingSeason.PosterPath
+				nextThumbhash = existingSeason.PosterThumbhash
+				nextSourcePath = existingSeason.PosterSourcePath
+			}
 			mergedSeason.PosterPath = nextPath
 			mergedSeason.PosterThumbhash = nextThumbhash
 			mergedSeason.PosterSourcePath = nextSourcePath
@@ -4962,6 +4981,11 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 					existingEpisode.StillSourcePath,
 					existingEpisode.StillThumbhash,
 				)
+				if imagesLocked && existingEpisode.StillPath != "" {
+					nextPath = existingEpisode.StillPath
+					nextThumbhash = existingEpisode.StillThumbhash
+					nextSourcePath = existingEpisode.StillSourcePath
+				}
 				mergedEpisode.StillPath = nextPath
 				mergedEpisode.StillThumbhash = nextThumbhash
 				mergedEpisode.StillSourcePath = nextSourcePath
@@ -7276,8 +7300,13 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 		ImageLogo:     selectBest(ImageLogo, logoFilters),
 	}
 
+	imagesLocked := artworkLocked(item)
 	applyIfBetter := func(current *string, b *best) {
 		if b.url == "" {
+			return
+		}
+		// Locked artwork keeps what the item has; only an empty slot fills.
+		if imagesLocked && *current != "" {
 			return
 		}
 		// Local sidecar candidates always apply: they carry rating 0, so an

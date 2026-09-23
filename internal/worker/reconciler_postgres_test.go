@@ -42,7 +42,7 @@ INSERT INTO users VALUES(1),(2);`); err != nil {
 		t.Fatal(err)
 	}
 	r := NewReconciler(pool, "node", nil)
-	sessions := []SessionSync{{SessionID: "deleted-account", UserID: 1}, {SessionID: "surviving-account", UserID: 2}}
+	sessions := []SessionSync{{SessionID: "deleted-account", UserID: 1}, {SessionID: "surviving-account", UserID: 2, StreamLocation: "remote"}}
 	if err = r.ReconcileNodeSessions(t.Context(), "node", sessions); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ INSERT INTO users VALUES(1),(2);`); err != nil {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(snapshot) != 2 || !equalOptionalString(snapshot[1].RoutingNetworkProvider, provider) {
+		if len(snapshot) != 2 || !equalOptionalString(snapshot[1].RoutingNetworkProvider, provider) || snapshot[1].StreamLocation != "remote" {
 			t.Fatalf("network route round trip: %#v", snapshot)
 		}
 	}

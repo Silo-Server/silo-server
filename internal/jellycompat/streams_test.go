@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -1689,5 +1690,27 @@ func TestEnsureUpstreamPlayback_SyncsOnNewSession(t *testing.T) {
 	}
 	if syncer.calls != 1 {
 		t.Fatalf("SyncNow calls after reuse = %d; want 1", syncer.calls)
+	}
+}
+
+func TestEnsureUpstreamPlayback_KeepsNegotiatedStreamLocation(t *testing.T) {
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{ID: "ps-location", CompatToken: "tok"})
+	manager := playback.NewSessionManager(0, 0)
+	h := &PlaybackHandler{playbackStore: store, sessionMgr: manager}
+	source := PlaybackMediaSource{ID: "source", FileID: 42, StreamLocation: "remote"}
+	// The media request is local, but PlaybackInfo selected the remote policy.
+	ctx := clientip.SetContext(t.Context(), "192.168.1.8")
+	playSession, err := h.ensureUpstreamPlayback(ctx, &Session{Token: "tok", StreamAppUserID: 7, ProfileID: "profile"}, "ps-location", source, "direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream, err := manager.GetSession(playSession.UpstreamSessionID)
+	if err != nil || upstream.StreamLocation != "remote" || upstream.ClientIP != "192.168.1.8" {
+		t.Fatalf("upstream policy location = %v, err = %v", upstream, err)
+	}
+	card := h.upstreamRecipeCard(playSession, &Session{StreamAppUserID: 7, ProfileID: "profile"}, source, "direct")
+	if card.StreamLocation != "remote" {
+		t.Fatalf("reconstruction location = %q", card.StreamLocation)
 	}
 }

@@ -123,6 +123,12 @@ func (h *AdminHandler) CreateAdminAccount(ctx context.Context, input auth.Create
 	if err := validateStreamLimits(input.User.MaxStreams, input.User.MaxTranscodes); err != nil {
 		return 0, fieldError("max_streams", err.Error())
 	}
+	if input.User.MaxRemoteStreamBitrateKbps != nil && *input.User.MaxRemoteStreamBitrateKbps < 0 {
+		return 0, fieldError("max_remote_stream_bitrate_kbps", "Must be 0 (unlimited) or positive")
+	}
+	if input.User.MaxLocalStreamBitrateKbps != nil && *input.User.MaxLocalStreamBitrateKbps < 0 {
+		return 0, fieldError("max_local_stream_bitrate_kbps", "Must be 0 (unlimited) or positive")
+	}
 	if input.User.MaxPlaybackQuality != nil {
 		value, ok := access.ParsePlaybackQualityPreset(*input.User.MaxPlaybackQuality)
 		if !ok {
@@ -183,6 +189,12 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 	}
 	if err := validateStreamLimits(input.MaxStreams.Value, input.MaxTranscodes.Value); err != nil {
 		return 0, fieldError("max_streams", err.Error())
+	}
+	if input.MaxRemoteStreamBitrateKbps.Value != nil && *input.MaxRemoteStreamBitrateKbps.Value < 0 {
+		return 0, fieldError("max_remote_stream_bitrate_kbps", "Must be 0 (unlimited) or positive")
+	}
+	if input.MaxLocalStreamBitrateKbps.Value != nil && *input.MaxLocalStreamBitrateKbps.Value < 0 {
+		return 0, fieldError("max_local_stream_bitrate_kbps", "Must be 0 (unlimited) or positive")
 	}
 	if input.MaxPlaybackQuality.Value != nil {
 		value, ok := access.ParsePlaybackQualityPreset(*input.MaxPlaybackQuality.Value)

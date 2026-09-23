@@ -22,22 +22,24 @@ type AdminAccessGroupService interface {
 // AdminAccessGroup is the revision-tracked editor projection. Member counts
 // are list decorations and do not participate in its validator.
 type AdminAccessGroup struct {
-	ID                       ID       `json:"id"`
-	Name                     string   `json:"name"`
-	Description              string   `json:"description"`
-	LibraryIDs               []ID     `json:"library_ids" nullable:"true"`
-	MaxPlaybackQuality       string   `json:"max_playback_quality"`
-	DownloadAllowed          bool     `json:"download_allowed"`
-	DownloadTranscodeAllowed bool     `json:"download_transcode_allowed"`
-	TranscodeAllowed         bool     `json:"transcode_allowed"`
-	AudioTranscodeAllowed    bool     `json:"audio_transcode_allowed"`
-	MaxStreams               int      `json:"max_streams"`
-	MaxTranscodes            int      `json:"max_transcodes"`
-	AllowedPermissions       []string `json:"allowed_permissions" nullable:"true"`
-	RequestsAllowed          bool     `json:"requests_allowed"`
-	IsDefault                bool     `json:"is_default"`
-	CreatedAt                Instant  `json:"created_at"`
-	UpdatedAt                Instant  `json:"updated_at"`
+	ID                         ID       `json:"id"`
+	Name                       string   `json:"name"`
+	Description                string   `json:"description"`
+	LibraryIDs                 []ID     `json:"library_ids" nullable:"true"`
+	MaxPlaybackQuality         string   `json:"max_playback_quality"`
+	DownloadAllowed            bool     `json:"download_allowed"`
+	DownloadTranscodeAllowed   bool     `json:"download_transcode_allowed"`
+	TranscodeAllowed           bool     `json:"transcode_allowed"`
+	AudioTranscodeAllowed      bool     `json:"audio_transcode_allowed"`
+	MaxStreams                 int      `json:"max_streams"`
+	MaxTranscodes              int      `json:"max_transcodes"`
+	MaxRemoteStreamBitrateKbps int      `json:"max_remote_stream_bitrate_kbps" minimum:"0" doc:"Remote per-stream bitrate ceiling in kbps; 0 means unlimited"`
+	MaxLocalStreamBitrateKbps  int      `json:"max_local_stream_bitrate_kbps" minimum:"0" doc:"Local per-stream bitrate ceiling in kbps; 0 means unlimited"`
+	AllowedPermissions         []string `json:"allowed_permissions" nullable:"true"`
+	RequestsAllowed            bool     `json:"requests_allowed"`
+	IsDefault                  bool     `json:"is_default"`
+	CreatedAt                  Instant  `json:"created_at"`
+	UpdatedAt                  Instant  `json:"updated_at"`
 }
 type AdminAccessGroupListItem struct {
 	AdminAccessGroup
@@ -63,19 +65,21 @@ type AdminAccessGroupIDInput struct {
 
 // Nullable arrays retain the existing unrestricted/default policy semantics.
 type AdminAccessGroupBody struct {
-	Name                     *string   `json:"name,omitempty" minLength:"1"`
-	Description              *string   `json:"description,omitempty"`
-	LibraryIDs               *[]ID     `json:"library_ids,omitempty" nullable:"true"`
-	MaxPlaybackQuality       *string   `json:"max_playback_quality,omitempty"`
-	DownloadAllowed          *bool     `json:"download_allowed,omitempty"`
-	DownloadTranscodeAllowed *bool     `json:"download_transcode_allowed,omitempty"`
-	TranscodeAllowed         *bool     `json:"transcode_allowed,omitempty"`
-	AudioTranscodeAllowed    *bool     `json:"audio_transcode_allowed,omitempty"`
-	MaxStreams               *int      `json:"max_streams,omitempty" minimum:"0"`
-	MaxTranscodes            *int      `json:"max_transcodes,omitempty" minimum:"0"`
-	AllowedPermissions       *[]string `json:"allowed_permissions,omitempty" nullable:"true"`
-	RequestsAllowed          *bool     `json:"requests_allowed,omitempty"`
-	IsDefault                *bool     `json:"is_default,omitempty"`
+	Name                       *string   `json:"name,omitempty" minLength:"1"`
+	Description                *string   `json:"description,omitempty"`
+	LibraryIDs                 *[]ID     `json:"library_ids,omitempty" nullable:"true"`
+	MaxPlaybackQuality         *string   `json:"max_playback_quality,omitempty"`
+	DownloadAllowed            *bool     `json:"download_allowed,omitempty"`
+	DownloadTranscodeAllowed   *bool     `json:"download_transcode_allowed,omitempty"`
+	TranscodeAllowed           *bool     `json:"transcode_allowed,omitempty"`
+	AudioTranscodeAllowed      *bool     `json:"audio_transcode_allowed,omitempty"`
+	MaxStreams                 *int      `json:"max_streams,omitempty" minimum:"0"`
+	MaxTranscodes              *int      `json:"max_transcodes,omitempty" minimum:"0"`
+	MaxRemoteStreamBitrateKbps *int      `json:"max_remote_stream_bitrate_kbps,omitempty" minimum:"0"`
+	MaxLocalStreamBitrateKbps  *int      `json:"max_local_stream_bitrate_kbps,omitempty" minimum:"0"`
+	AllowedPermissions         *[]string `json:"allowed_permissions,omitempty" nullable:"true"`
+	RequestsAllowed            *bool     `json:"requests_allowed,omitempty"`
+	IsDefault                  *bool     `json:"is_default,omitempty"`
 }
 type AdminAccessGroupCreateInput struct {
 	RawBody []byte
@@ -97,7 +101,7 @@ func adminAccessGroupOf(g *access.Group) AdminAccessGroup {
 			ids = append(ids, IDFromInt(int64(id)))
 		}
 	}
-	return AdminAccessGroup{ID: IDFromInt(g.ID), Name: g.Name, Description: g.Description, LibraryIDs: ids, MaxPlaybackQuality: g.MaxPlaybackQuality, DownloadAllowed: g.DownloadAllowed, DownloadTranscodeAllowed: g.DownloadTranscodeAllowed, TranscodeAllowed: g.TranscodeAllowed, AudioTranscodeAllowed: g.AudioTranscodeAllowed, MaxStreams: g.MaxStreams, MaxTranscodes: g.MaxTranscodes, AllowedPermissions: g.AllowedPermissions, RequestsAllowed: g.RequestsAllowed, IsDefault: g.IsDefault, CreatedAt: NewInstant(g.CreatedAt), UpdatedAt: NewInstant(g.UpdatedAt)}
+	return AdminAccessGroup{ID: IDFromInt(g.ID), Name: g.Name, Description: g.Description, LibraryIDs: ids, MaxPlaybackQuality: g.MaxPlaybackQuality, DownloadAllowed: g.DownloadAllowed, DownloadTranscodeAllowed: g.DownloadTranscodeAllowed, TranscodeAllowed: g.TranscodeAllowed, AudioTranscodeAllowed: g.AudioTranscodeAllowed, MaxStreams: g.MaxStreams, MaxTranscodes: g.MaxTranscodes, MaxRemoteStreamBitrateKbps: g.MaxRemoteStreamBitrateKbps, MaxLocalStreamBitrateKbps: g.MaxLocalStreamBitrateKbps, AllowedPermissions: g.AllowedPermissions, RequestsAllowed: g.RequestsAllowed, IsDefault: g.IsDefault, CreatedAt: NewInstant(g.CreatedAt), UpdatedAt: NewInstant(g.UpdatedAt)}
 }
 func groupTag(ctx context.Context, g *access.Group) EntityTag {
 	return RenderETag("admin-access-groups/"+strconv.Itoa(claimsFrom(ctx).UserID)+"/"+profileFrom(ctx), strconv.FormatInt(g.ID, 10), g.Revision)

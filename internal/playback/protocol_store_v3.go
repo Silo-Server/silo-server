@@ -125,6 +125,9 @@ type AttemptRecordV3 struct {
 	CurrentPlan            PlanV3
 	FrozenRecipe           ExecutableRecipeV3
 	NormalizedRequest      StartRequestV3
+	// ServerBitrateCapKbps is fixed when the attempt starts; replans must not
+	// pick up later administrator edits to the account or access group.
+	ServerBitrateCapKbps int
 	// StartResponse is the latest durable decision for this attempt. It begins
 	// as the exact start response and advances atomically with each completed
 	// replan so an idempotent start retry never resurrects a superseded plan.

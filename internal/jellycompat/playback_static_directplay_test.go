@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -106,6 +108,38 @@ func TestHandleVideoStream_UppercaseStaticServesFile(t *testing.T) {
 	}
 	if got := rec.Body.String(); got != body {
 		t.Errorf("expected file content %q; got %q", body, got)
+	}
+}
+
+func TestStaticPlaybackSelectsCompliantVersionUnderServerCap(t *testing.T) {
+	h, item, _ := newStaticDirectPlayHandler(t)
+	h.ScopeResolver = &stubScopeResolver{scope: access.Scope{MaxRemoteStreamBitrateKbps: 4_000}}
+	detail := h.content.(*stubContentService).detail
+	detail.Versions[0].Bitrate = 8_000
+	second := detail.Versions[0]
+	second.FileID = 43
+	second.Bitrate = 3_000
+	detail.Versions = append(detail.Versions, second)
+	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
+
+	firstID := h.codec.EncodeIntID(EncodedIDMediaSource, 42)
+	if _, _, err := h.createStaticPlaySession(t.Context(), session, item, firstID, ""); !errors.Is(err, errServerBitrateDirectUnavailable) {
+		t.Fatalf("explicit over-limit source: err=%v", err)
+	}
+
+	playSession, source, err := h.createStaticPlaySession(t.Context(), session, item, "", "")
+	if err != nil || source == nil || source.FileID != 43 {
+		t.Fatalf("unqualified static source=%+v err=%v", source, err)
+	}
+	for _, mediaSourceID := range []string{"", item} {
+		r := httptest.NewRequest("GET", "/Videos/"+item+"/stream?Static=true", nil)
+		_, reused, err := h.resolvePlaybackRoute(r, session, item, mediaSourceID)
+		if err != nil || reused == nil || reused.FileID != 43 {
+			t.Fatalf("reused static source for %q=%+v err=%v", mediaSourceID, reused, err)
+		}
+	}
+	if playSession.MediaSources[0].FileID != 42 {
+		t.Fatal("source order changed in the stored session")
 	}
 }
 
