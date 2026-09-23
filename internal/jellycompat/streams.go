@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1501,7 +1502,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 
 	// Serve ASS/SSA as raw ASS when requested, preserving styled subtitle data.
 	if requestedFormat == "ass" && playback.IsASS(embeddedTrack.Codec) {
-		data, err := h.extractEmbeddedTextSubtitle(r.Context(), file.FilePath, embeddedOrdinal, "ass")
+		data, err := h.extractEmbeddedTextSubtitle(r.Context(), file, embeddedOrdinal, "ass")
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
 			return
@@ -1510,7 +1511,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	data, subErr := h.extractEmbeddedTextSubtitle(r.Context(), file.FilePath, embeddedOrdinal, "srt")
+	data, subErr := h.extractEmbeddedTextSubtitle(r.Context(), file, embeddedOrdinal, "srt")
 	if subErr != nil {
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
 		return
@@ -1580,9 +1581,72 @@ func writeSubtitleResponse(w http.ResponseWriter, format string, data []byte) {
 	_, _ = w.Write(data)
 }
 
-func (h *PlaybackHandler) extractEmbeddedTextSubtitle(ctx context.Context, filePath string, trackIndex int, format string) ([]byte, error) {
-	return h.SubtitleCache.ExtractText(ctx, filePath, trackIndex, format, func(ctx context.Context) ([]byte, error) {
-		return playback.ExtractSubtitleWithFormat(ctx, filePath, trackIndex, format, h.FFmpegPath)
+// extractEmbeddedTextSubtitle serves one embedded text track. A cache miss
+// extracts every text track of the file in the same demux, so switching to
+// another track later does not read the whole source again.
+func (h *PlaybackHandler) extractEmbeddedTextSubtitle(ctx context.Context, file *models.MediaFile, trackIndex int, format string) ([]byte, error) {
+	want := playback.TextSubtitleTrack{Ordinal: trackIndex, Format: format}
+	return h.SubtitleCache.ExtractTextTracks(ctx, file.FilePath, want, compatTextSubtitleTracks(file), h.extractTextSubtitleBatch,
+		func(ctx context.Context) ([]byte, error) {
+			return playback.ExtractSubtitleWithFormat(ctx, file.FilePath, trackIndex, format, h.FFmpegPath)
+		})
+}
+
+func (h *PlaybackHandler) extractTextSubtitleBatch(ctx context.Context, inputPath string, outputs []playback.TextSubtitleOutput) error {
+	return playback.ExtractTextSubtitlesToFiles(ctx, inputPath, outputs, h.FFmpegPath)
+}
+
+// compatTextSubtitleTracks lists the text renditions of a file's embedded
+// subtitle streams, indexed by their position among its subtitle streams.
+func compatTextSubtitleTracks(file *models.MediaFile) []playback.TextSubtitleTrack {
+	codecs := make([]string, len(file.SubtitleTracks))
+	for i, track := range file.SubtitleTracks {
+		codecs[i] = track.Codec
+	}
+	return playback.TextSubtitleTracks(codecs)
+}
+
+// compatWarmTextSubtitlesTimeout bounds the file lookup that starts a warm.
+const compatWarmTextSubtitlesTimeout = 10 * time.Second
+
+// warmCompatTextSubtitles extracts a file's embedded text subtitles in the
+// background. Jellyfin Web requests a track only when the viewer selects it,
+// and the first extraction reads the whole source, which takes minutes for a
+// large remux on network storage; starting it with playback makes a later
+// switch instant.
+func (h *PlaybackHandler) warmCompatTextSubtitles(fileID int) {
+	if h.SubtitleCache == nil || h.fileResolver == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), compatWarmTextSubtitlesTimeout)
+		file, err := h.fileResolver.GetByID(ctx, fileID)
+		cancel()
+		if err != nil || file == nil {
+			return
+		}
+		h.SubtitleCache.WarmTextTracks(file.FilePath, compatTextSubtitleTracks(file), h.extractTextSubtitleBatch)
+	}()
+}
+
+const (
+	compatStreamTypeSubtitle       = "Subtitle"
+	compatSubtitleDeliveryExternal = "External"
+)
+
+// compatWarmsTextSubtitles reports whether PlaybackInfo should extract a
+// source's embedded text subtitles ahead of time: the client fetches them
+// from the server, and the viewer has not turned subtitles off entirely.
+func compatWarmsTextSubtitles(subtitleMode string, streams []mediaStreamDTO) bool {
+	return subtitleMode != compatSubtitleNone && compatFetchesEmbeddedTextSubtitles(streams)
+}
+
+// compatFetchesEmbeddedTextSubtitles reports whether the client will fetch an
+// embedded text subtitle from the server rather than read it from the stream.
+func compatFetchesEmbeddedTextSubtitles(streams []mediaStreamDTO) bool {
+	return slices.ContainsFunc(streams, func(stream mediaStreamDTO) bool {
+		return stream.Type == compatStreamTypeSubtitle && !stream.IsExternal && stream.IsTextSubtitleStream &&
+			stream.DeliveryMethod == compatSubtitleDeliveryExternal
 	})
 }
 

@@ -2102,6 +2102,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	}
 	sources := make([]PlaybackMediaSource, 0, len(detail.Versions))
 	sourceDTOs := make([]mediaSourceDTO, 0, len(detail.Versions))
+	warmSubtitleFileID := 0
 	attachmentContext, cancelAttachmentProbe := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancelAttachmentProbe()
 
@@ -2212,6 +2213,10 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		source.SiloSeekReanchor = req.SiloSeekReanchor && compatHLSCopiesVideo(source) && source.SupportsTranscoding
 		sources = append(sources, source)
 		dto := h.mediaSourceDTO(routeItemID, playSessionID, session.Token, source)
+		if len(sources) == 1 && compatWarmsTextSubtitles(subtitleMode, dto.MediaStreams) {
+			// Clients play the first offered source unless they asked for one.
+			warmSubtitleFileID = source.FileID
+		}
 		dto.MediaAttachments = h.mediaAttachments(attachmentContext, routeItemID, playSessionID, source)
 
 		// Append downloaded subtitles to the media streams, honoring the selection.
@@ -2286,6 +2291,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		PlaySessionID: playSessionID,
 		MediaSources:  sourceDTOs,
 	})
+	if warmSubtitleFileID != 0 {
+		h.warmCompatTextSubtitles(warmSubtitleFileID)
+	}
 }
 
 // stripCompatNUL removes the only code point PostgreSQL rejects in JSONB text.

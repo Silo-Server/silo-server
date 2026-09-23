@@ -220,7 +220,12 @@ func TestHandleSubtitleStreamUsesConfiguredFFmpegForEmbeddedText(t *testing.T) {
 	counterPath := filepath.Join(t.TempDir(), "ffmpeg-calls")
 	t.Setenv("FFMPEG_COUNTER", counterPath)
 	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf x >> \"$FFMPEG_COUNTER\"\nprintf '1\\n00:00:01,000 --> 00:00:02,000\\nHello\\n'\n"), 0o755); err != nil {
+	// A batch extract names its outputs as file: arguments; a single-track
+	// extract writes to stdout.
+	script := "#!/bin/sh\nprintf x >> \"$FFMPEG_COUNTER\"\nwrote=\n" +
+		"for arg in \"$@\"; do case \"$arg\" in file:*) printf '1\\n00:00:01,000 --> 00:00:02,000\\nHello\\n' > \"${arg#file:}\"; wrote=1;; esac; done\n" +
+		"[ -n \"$wrote\" ] || printf '1\\n00:00:01,000 --> 00:00:02,000\\nHello\\n'\n"
+	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")

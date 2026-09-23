@@ -238,6 +238,26 @@ return 406. There is no fallback-font service, external/downloaded subtitle
 burn-in, or subtitle HLS playlist implementation. Changing a subtitle filter
 requires fresh playback negotiation.
 
+Extracting an embedded text subtitle reads the whole source file, which can
+take minutes for a large remux on network storage. As in Jellyfin, the first
+request for an embedded text track extracts every text track of the file in
+one pass, and the results are cached on the serving node. A request for a
+track that is already being extracted waits for that pass, and a track with no
+cues is remembered so the file is not read again for it. When `PlaybackInfo`
+offers an embedded text subtitle with `DeliveryMethod: External` (Jellyfin Web
+does) and the viewer's `SubtitleMode` is not `None`, the server starts that
+extraction in the background for the source the client will play, so a later
+switch to any text track is served from the cache. Background extractions share
+the subtitle cache's two server-wide warm slots and are skipped when both are
+busy.
+
+Chrome on macOS decodes H.264 with VideoToolbox, which rejects some open-GOP
+Blu-ray encodes whose I-frames carry recovery points instead of IDR frames and
+a new PPS per GOP. Copied video from such a file stops with
+`PIPELINE_ERROR_DECODE` (`-12909`); Jellyfin Web then reloads the stream, which
+shows as periodic stutter. The bitstream is valid, and Jellyfin copies H.264 the
+same way. Turning off hardware video decoding in Chrome avoids it.
+
 ## Sessions and socket
 
 `GET /Sessions` lists started playback mappings owned by the caller's token,
