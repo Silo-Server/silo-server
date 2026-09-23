@@ -89,7 +89,10 @@ func TestListingTotalRecordCountControls(t *testing.T) {
 func TestPersonsJellyfin12QueryOptions(t *testing.T) {
 	codec := NewResourceIDCodec()
 	people := &personTotalsSource{}
-	persons := &PersonsHandler{personRepo: people, codec: codec}
+	allowLibrary7 := &directContentService{accessFilter: func(context.Context, int, string) catalog.AccessFilter {
+		return catalog.AccessFilter{AllowedLibraryIDs: []int{7}}
+	}}
+	persons := &PersonsHandler{personRepo: people, codec: codec, content: allowLibrary7}
 	serve := func(query string) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, "/Persons?"+query, nil)
@@ -123,5 +126,13 @@ func TestPersonsJellyfin12QueryOptions(t *testing.T) {
 	rec := serve("ParentId=" + codec.EncodeStringID(EncodedIDSeason, "season-1"))
 	if people.opts.Limit != -1 || !json.Valid(rec.Body.Bytes()) {
 		t.Fatalf("an unsupported parent must not query people: %+v", people.opts)
+	}
+
+	// Items shared with a visible library must not reveal who is credited in
+	// a library the viewer cannot browse.
+	rec = serve("ParentId=" + codec.EncodeIntID(EncodedIDLibrary, 9))
+	var result queryResultDTO
+	if people.opts.Limit != -1 || json.Unmarshal(rec.Body.Bytes(), &result) != nil || len(result.Items) != 0 {
+		t.Fatalf("a hidden library parent queried people: %+v, %s", people.opts, rec.Body.String())
 	}
 }

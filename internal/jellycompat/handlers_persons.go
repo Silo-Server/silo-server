@@ -79,6 +79,12 @@ func (h *PersonsHandler) HandleGetPersons(w http.ResponseWriter, r *http.Request
 	// any other parent (season, collection) matches nobody.
 	if parentID := strings.TrimSpace(q.Get("ParentId")); parentID != "" {
 		if libraryID, err := h.codec.DecodeIntID(EncodedIDLibrary, parentID); err == nil && libraryID > 0 {
+			// A library the viewer cannot browse lists nobody, even when its
+			// items are shared with a library the viewer can see.
+			if !narrowAccessToLibrary(&opts.Filter, int(libraryID)) {
+				writeJSON(w, http.StatusOK, emptyQueryResult(opts.Offset))
+				return
+			}
 			opts.LibraryID = int(libraryID)
 		} else if contentID, err := decodeItemID(h.codec, parentID); err == nil && contentID != "" {
 			opts.ContentID = contentID

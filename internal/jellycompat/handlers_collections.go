@@ -627,6 +627,7 @@ func (h *ItemsHandler) writeCollectionItemsPage(w http.ResponseWriter, r *http.R
 		dto.ParentID = routeID
 		items = append(items, dto)
 	}
+	h.applyListMediaSourceCounts(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
