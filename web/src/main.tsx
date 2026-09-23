@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { installPreloadErrorReload } from "./lib/reloadOnPreloadError";
 import { initPointerCapability } from "./lib/pointerCapability";
+import "./fonts.css";
 import "./app.css";
 
 installPreloadErrorReload();

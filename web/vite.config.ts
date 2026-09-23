@@ -38,6 +38,50 @@ function precompressStaticAssets(): Plugin {
   };
 }
 
+const THEME_BOOT_SOURCE = "src/themeBoot.js";
+
+/**
+ * Loads src/themeBoot.js as a classic, render-blocking script at the top of
+ * <head>, so <html> carries the cached theme before first paint.
+ *
+ * It cannot be an ordinary entry: Vite bundles only module scripts, and those
+ * run after the document is parsed, by which time the shell may already have
+ * painted. It cannot be inline either, because the server's CSP
+ * (internal/server/frontend.go) allows scripts from 'self' only. So the build
+ * emits it as a content-hashed /assets/ file, cached immutably like every
+ * other asset, and the dev server serves the source file.
+ */
+function themeBootScript(): Plugin {
+  let base = "/";
+  let builtFileName: string | undefined;
+  return {
+    name: "theme-boot-script",
+    configResolved(config) {
+      base = config.base;
+    },
+    generateBundle() {
+      // Runs before vite:build-html's generateBundle, which applies the
+      // transformIndexHtml hook below, so the hashed name is known by then.
+      const referenceId = this.emitFile({
+        type: "asset",
+        name: path.basename(THEME_BOOT_SOURCE),
+        source: readFileSync(path.resolve(__dirname, THEME_BOOT_SOURCE), "utf8"),
+      });
+      builtFileName = this.getFileName(referenceId);
+    },
+    transformIndexHtml: {
+      order: "post",
+      handler: () => [
+        {
+          tag: "script",
+          attrs: { src: base + (builtFileName ?? THEME_BOOT_SOURCE) },
+          injectTo: "head-prepend",
+        },
+      ],
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const apiProxyTarget = env.VITE_API_PROXY_TARGET || "http://localhost:8090";
@@ -67,7 +111,7 @@ export default defineConfig(({ mode }) => {
   ).version;
 
   return {
-    plugins: [react(), tailwindcss(), precompressStaticAssets()],
+    plugins: [react(), tailwindcss(), themeBootScript(), precompressStaticAssets()],
     define: {
       // Reported in X-Silo-Client-Version on every v2 request (src/api/v2/request.ts).
       __SILO_WEB_VERSION__: JSON.stringify(webVersion),
