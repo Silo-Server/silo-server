@@ -578,10 +578,21 @@ func (h *LibraryCollectionHandler) UploadAdminCollectionArtwork(ctx context.Cont
 	}
 	// Best-effort: delete only the version this request replaced. Targeting the
 	// specific superseded version (rather than "everything but mine") means a
-	// concurrent replacement's committed version is never deleted, so the DB
-	// never ends up pointing at a missing object. A cleanup failure leaves a
-	// harmless orphan, never a broken image.
-	if err := removeReplacedCollectionImageVersion(ctx, h.ArtworkStore, adminCollectionImagePrefix, id, kind, oldPath, path); err != nil {
+	// concurrent replacement's committed version is never deleted. Re-read the
+	// row first and skip the cleanup if it now points back at that version (a
+	// concurrent restore of the same content reuses the same key), so the DB
+	// never ends up pointing at a missing object. A cleanup failure, or a failed
+	// re-read, leaves a harmless orphan, never a broken image.
+	current, rerr := h.repo.GetByID(ctx, id)
+	if rerr != nil {
+		slog.WarnContext(ctx, "collection artwork: skipping variant cleanup, re-read failed", "component", "api", "collection_id", id, "kind", kind, "error", rerr)
+		return nil
+	}
+	currentPath := current.PosterURL
+	if kind != collectionImagePoster {
+		currentPath = current.BackdropURL
+	}
+	if err := removeReplacedCollectionImageVersion(ctx, h.ArtworkStore, adminCollectionImagePrefix, id, kind, oldPath, currentPath); err != nil {
 		slog.WarnContext(ctx, "collection artwork: previous variant cleanup failed", "component", "api", "collection_id", id, "kind", kind, "error", err)
 	}
 	return nil

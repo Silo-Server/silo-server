@@ -202,25 +202,28 @@ func collectionImagePathVersion(storedPath string) string {
 
 // removeReplacedCollectionImageVersion deletes the variants of the version that
 // a replacement superseded, identified from the previously stored path. It runs
-// after the new version is committed.
+// after the new version is committed, and currentPath is the path the row holds
+// on a fresh read at cleanup time.
 //
 // Only the specific superseded version's folder is removed, never "everything
 // but the new version", so a concurrent replacement that committed its own new
-// version is never deleted (the DB can never be left pointing at a missing
-// object). When oldPath is not one of our content-versioned keys (a legacy
-// fixed key, a bundled-template path, or empty) there is no versioned folder to
-// remove and this is a no-op; those rare orphans are harmless.
+// version is never deleted. The version is skipped when the row still points at
+// it (currentPath), which guards against a concurrent restore of the same
+// content: content-addressed keys mean re-uploading the old bytes reuses the
+// old key, so deleting it would strip the artwork the row now references. When
+// oldPath is not one of our content-versioned keys (a legacy fixed key, a
+// bundled-template path, or empty) there is no versioned folder to remove and
+// this is a no-op; those rare orphans are harmless.
 func removeReplacedCollectionImageVersion(
 	ctx context.Context,
 	store blobstore.Store,
-	prefix, collectionID, imageType, oldPath, newPath string,
+	prefix, collectionID, imageType, oldPath, currentPath string,
 ) error {
 	if store == nil {
 		return nil
 	}
 	oldVersion := collectionImagePathVersion(oldPath)
-	newVersion := collectionImagePathVersion(newPath)
-	if oldVersion == "" || oldVersion == newVersion {
+	if oldVersion == "" || oldVersion == collectionImagePathVersion(currentPath) {
 		return nil
 	}
 	// Delete exactly the old version's folder. For a non-versioned oldPath this
