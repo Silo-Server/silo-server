@@ -5,7 +5,7 @@
 -- settings hash: forever after a clean no-improvement result, and until
 -- retry_after after a failure.
 CREATE TABLE intro_silence_refinement_attempts (
-    media_file_id integer PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,
+    media_file_id bigint PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,
     config_hash text NOT NULL,
     file_hash text NOT NULL,
     file_size bigint NOT NULL,

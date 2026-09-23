@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"slices"
 	"testing"
@@ -146,6 +147,14 @@ func TestSilenceBackfillSkipsUnchangedAttemptsPostgres(t *testing.T) {
 	if got := ids(backfill(cfg)); !slices.Equal(got, []int{untouched, noImprovement, failing}) {
 		t.Fatalf("backfill after the marker moved = %v, want %d, %d, %d", got, untouched, noImprovement, failing)
 	}
+
+	if untouched <= math.MaxInt32 {
+		t.Fatalf("fixture file %d should be past the int32 range", untouched)
+	}
+	run(only(backfill(cfg), untouched))
+	if got := ids(backfill(cfg)); slices.Contains(got, untouched) {
+		t.Fatalf("backfill after recording file %d = %v, want it skipped", untouched, got)
+	}
 }
 
 // seedSilenceBackfillFixture creates an intro-enabled series library with three
@@ -188,18 +197,25 @@ func seedSilenceBackfillFixture(t *testing.T, pool *pgxpool.Pool) []int {
 	for episode := 1; episode <= 3; episode++ {
 		episodeID := fmt.Sprintf("%sepisode-%d", prefix, episode)
 		exec(`INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number) VALUES ($1, $2, $3, 1, $4)`, episodeID, seriesID, seasonID, episode)
+		// media_files.id is bigint; the last file sits past the int32 range so the
+		// attempts table has to hold it.
+		id := any(nil)
+		if episode == 3 {
+			id = int64(math.MaxInt32) + time.Now().UnixNano()%1_000_000_000 + 1
+		}
 		var fileID int
 		if err := pool.QueryRow(ctx, `
 			INSERT INTO media_files (
-			    media_folder_id, file_path, episode_id, season_number, episode_number,
+			    id, media_folder_id, file_path, episode_id, season_number, episode_number,
 			    file_hash, file_size, duration, chapters,
 			    intro_start, intro_end, intro_markers_source, intro_markers_confidence,
 			    intro_markers_algorithm, intro_markers_detected_at
-			) VALUES ($1, $2, $3, 1, $4, $5, 1000000, 1500, $6::jsonb,
-			          60, 120, 'scanner', 0.95, 'chapter:v1', '2026-08-08T03:30:00Z')
+			) VALUES (COALESCE($7::bigint, nextval(pg_get_serial_sequence('media_files', 'id'))),
+			        $1, $2, $3, 1, $4, $5, 1000000, 1500, $6::jsonb,
+			        60, 120, 'scanner', 0.95, 'chapter:v1', '2026-08-08T03:30:00Z')
 			RETURNING id`,
 			folderID, fmt.Sprintf("/%s/e%d.mkv", prefix, episode), episodeID, episode,
-			fmt.Sprintf("%shash-%d", prefix, episode), chapters,
+			fmt.Sprintf("%shash-%d", prefix, episode), chapters, id,
 		).Scan(&fileID); err != nil {
 			t.Fatal(err)
 		}
