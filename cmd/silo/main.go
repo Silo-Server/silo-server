@@ -2854,7 +2854,7 @@ func main() {
 		if mangaEnricher != nil {
 			taskMgr.Register(tasks.NewSyncMangaMetadataTask(mangaEnricher))
 		}
-		taskMgr.Register(tasks.NewDatabaseMaintenanceTask(maintenanceSteps...))
+		taskMgr.Register(tasks.NewDatabaseMaintenanceTask(deps.DB, maintenanceSteps...))
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
 			pluginTasks, err := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService).Tasks(appCtx)
 			if err != nil {

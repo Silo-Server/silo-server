@@ -54,7 +54,7 @@ func (p *maintenanceProgress) SetResultData(data json.RawMessage) { p.result = d
 
 func TestDatabaseMaintenanceRunsEveryStepDespiteFailures(t *testing.T) {
 	var calls []string
-	task := NewDatabaseMaintenanceTask(
+	task := NewDatabaseMaintenanceTask(nil,
 		maintenanceStepStub{key: "first", calls: &calls, result: `{"deleted":3}`},
 		nil,
 		maintenanceStepStub{key: "second", calls: &calls, err: errors.New("database unavailable")},
@@ -90,7 +90,7 @@ func TestDatabaseMaintenanceStopsBetweenStepsWhenCanceled(t *testing.T) {
 	var calls []string
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	task := NewDatabaseMaintenanceTask(
+	task := NewDatabaseMaintenanceTask(nil,
 		maintenanceStepStub{key: "first", calls: &calls, onStart: cancel},
 		maintenanceStepStub{key: "second", calls: &calls},
 	)
@@ -106,7 +106,7 @@ func TestDatabaseMaintenanceStopsBetweenStepsWhenCanceled(t *testing.T) {
 }
 
 func TestDatabaseMaintenanceSchedule(t *testing.T) {
-	task := NewDatabaseMaintenanceTask()
+	task := NewDatabaseMaintenanceTask(nil)
 	triggers := task.DefaultTriggers()
 	if task.IsHidden() || len(triggers) != 1 || triggers[0].Type != taskmanager.TriggerTypeDaily ||
 		triggers[0].TimeOfDay != databaseMaintenanceTime {
@@ -114,5 +114,64 @@ func TestDatabaseMaintenanceSchedule(t *testing.T) {
 	}
 	if err := task.Execute(context.Background(), &maintenanceProgress{}); err != nil {
 		t.Fatalf("empty maintenance run error = %v", err)
+	}
+}
+
+type maintenanceLockStub struct {
+	acquired bool
+	released bool
+}
+
+func (l *maintenanceLockStub) TryAcquire(context.Context) (func(), bool, error) {
+	if !l.acquired {
+		return nil, false, nil
+	}
+	return func() { l.released = true }, true, nil
+}
+
+func TestDatabaseMaintenanceSkipsWhileAnotherServerHoldsTheLock(t *testing.T) {
+	var calls []string
+	task := NewDatabaseMaintenanceTask(nil, maintenanceStepStub{key: "first", calls: &calls})
+	task.lock = &maintenanceLockStub{acquired: false}
+
+	if err := task.Execute(context.Background(), &maintenanceProgress{}); err != nil {
+		t.Fatalf("Execute() error = %v, want a quiet skip", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("steps ran %v while another server held the lock", calls)
+	}
+
+	lock := &maintenanceLockStub{acquired: true}
+	task.lock = lock
+	if err := task.Execute(context.Background(), &maintenanceProgress{}); err != nil {
+		t.Fatalf("Execute() with the lock error = %v", err)
+	}
+	if !slices.Equal(calls, []string{"first"}) || !lock.released {
+		t.Fatalf("steps ran %v, released=%v; want the step to run and the lock released", calls, lock.released)
+	}
+}
+
+func TestDatabaseMaintenanceOmitsAStepInterruptedByCancellation(t *testing.T) {
+	var calls []string
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	task := NewDatabaseMaintenanceTask(nil,
+		maintenanceStepStub{key: "first", calls: &calls},
+		maintenanceStepStub{key: "second", calls: &calls, onStart: cancel, err: context.Canceled},
+		maintenanceStepStub{key: "third", calls: &calls},
+	)
+	progress := &maintenanceProgress{}
+
+	if err := task.Execute(ctx, progress); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Execute() error = %v, want context.Canceled", err)
+	}
+	var got struct {
+		Steps []databaseMaintenanceStepResult `json:"steps"`
+	}
+	if err := json.Unmarshal(progress.result, &got); err != nil {
+		t.Fatalf("result data: %v", err)
+	}
+	if len(got.Steps) != 1 || got.Steps[0].Key != "first" || got.Steps[0].Status != maintenanceStepCompleted {
+		t.Fatalf("step results = %+v, want only the completed first step", got.Steps)
 	}
 }

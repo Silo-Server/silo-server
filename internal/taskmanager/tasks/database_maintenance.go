@@ -8,15 +8,23 @@ import (
 	"log/slog"
 
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // DatabaseMaintenanceTask runs the routine retention sweeps as one scheduled
 // task. Each step keeps its own retention settings and runs even when an
 // earlier step fails. Steps that must run more often than daily, such as
 // operational log and client diagnostics cleanup, stay separate tasks.
+//
+// Every API process runs the task manager and fires the same daily trigger, so
+// an advisory lock lets one server run the sweeps; the others skip.
 type DatabaseMaintenanceTask struct {
 	steps []taskmanager.Task
+	lock  clusterLock
 }
+
+// databaseMaintenanceAdvisoryLock spells "SILODBMT".
+const databaseMaintenanceAdvisoryLock int64 = 0x53494C4F44424D54
 
 const (
 	maintenanceStepCompleted = "completed"
@@ -35,9 +43,13 @@ type databaseMaintenanceStepResult struct {
 }
 
 // NewDatabaseMaintenanceTask runs steps in the given order. Nil steps are
-// skipped so optional subsystems can pass through unconfigured.
-func NewDatabaseMaintenanceTask(steps ...taskmanager.Task) *DatabaseMaintenanceTask {
+// skipped so optional subsystems can pass through unconfigured. A nil pool
+// runs without the cluster lock.
+func NewDatabaseMaintenanceTask(pool *pgxpool.Pool, steps ...taskmanager.Task) *DatabaseMaintenanceTask {
 	t := &DatabaseMaintenanceTask{}
+	if pool != nil {
+		t.lock = advisoryClusterLock{pool: pool, key: databaseMaintenanceAdvisoryLock}
+	}
 	for _, step := range steps {
 		if step != nil {
 			t.steps = append(t.steps, step)
@@ -64,6 +76,17 @@ func (t *DatabaseMaintenanceTask) DefaultTriggers() []taskmanager.TriggerConfig 
 }
 
 func (t *DatabaseMaintenanceTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
+	if t.lock != nil {
+		release, acquired, err := t.lock.TryAcquire(ctx)
+		if err != nil {
+			return fmt.Errorf("acquiring database maintenance lock: %w", err)
+		}
+		if !acquired {
+			progress.Report(100, "Another server is running database maintenance")
+			return nil
+		}
+		defer release()
+	}
 	results := make([]databaseMaintenanceStepResult, 0, len(t.steps))
 	var errs []error
 	span := 100 / float64(max(len(t.steps), 1))
@@ -74,7 +97,12 @@ func (t *DatabaseMaintenanceTask) Execute(ctx context.Context, progress taskmana
 		stepProgress := &maintenanceStepProgress{parent: progress, base: float64(i) * span, span: span}
 		stepProgress.Report(0, step.Name())
 		result := databaseMaintenanceStepResult{Key: step.Key(), Name: step.Name(), Status: maintenanceStepCompleted}
-		if err := step.Execute(ctx, stepProgress); err != nil {
+		err := step.Execute(ctx, stepProgress)
+		if err != nil && ctx.Err() != nil {
+			// Canceled mid-step: the step was interrupted, not failed.
+			break
+		}
+		if err != nil {
 			// Task history hides error text from the admin API; the log keeps it.
 			slog.WarnContext(ctx, "database maintenance step failed", "step", step.Key(), "error", err)
 			result.Status = maintenanceStepFailed
