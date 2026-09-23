@@ -39,6 +39,7 @@ import {
   policyInheritHints,
   policyStateFromUser,
   policyUpdateFields,
+  savedUserPolicyInheritHints,
 } from "@/components/UserPolicyFields";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1168,10 +1169,11 @@ function EditUserForm({
   // no group, so preview the no-group policy while the picked group is kept for
   // toggling the role back.
   const hintGroupID = effectiveAccessGroupID(role, accessGroupID);
+  const groupInheritHints = policyInheritHints(hintGroupID, accessGroups);
   const inheritHints =
     hintGroupID === user.access_group_id
-      ? user.effective_policy
-      : policyInheritHints(hintGroupID, accessGroups);
+      ? savedUserPolicyInheritHints(user, groupInheritHints)
+      : groupInheritHints;
   const selectedGroupMissing =
     accessGroupID !== null && !accessGroups.some((group) => group.id === accessGroupID);
 
