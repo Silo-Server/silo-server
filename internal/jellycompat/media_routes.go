@@ -8,6 +8,12 @@ import (
 )
 
 var jellycompatMediaRoutes = []streamtelemetry.MediaRoute{
+	compatRoute(http.MethodGet, "/Audio/{itemId}/stream", streamtelemetry.ClassTransfer, false),
+	compatRoute(http.MethodHead, "/Audio/{itemId}/stream", streamtelemetry.ClassTransfer, false),
+	compatRoute(http.MethodGet, "/Audio/{itemId}/stream.{container}", streamtelemetry.ClassTransfer, false),
+	compatRoute(http.MethodHead, "/Audio/{itemId}/stream.{container}", streamtelemetry.ClassTransfer, false),
+	compatRoute(http.MethodGet, "/Audio/{itemId}/universal", streamtelemetry.ClassTransfer, false),
+	compatRoute(http.MethodHead, "/Audio/{itemId}/universal", streamtelemetry.ClassTransfer, false),
 	compatRoute(http.MethodGet, "/Playback/BitrateTest", streamtelemetry.ClassTransfer, false),
 	compatRoute(http.MethodGet, "/Items/{id}/Download", streamtelemetry.ClassTransfer, false),
 	compatRoute(http.MethodHead, "/Items/{id}/Download", streamtelemetry.ClassTransfer, false),

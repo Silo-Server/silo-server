@@ -22,6 +22,7 @@ vi.mock("@/hooks/queries/catalogRead", () => ({
 vi.mock("@/hooks/useShowAdvisoryAge", () => ({
   useShowAdvisoryAge: () => false,
 }));
+vi.mock("./useThemeMusic", () => ({ useThemeMusic: vi.fn() }));
 
 vi.mock("sonner", () => ({
   toast: {

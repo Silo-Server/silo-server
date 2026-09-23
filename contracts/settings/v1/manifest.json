@@ -1113,6 +1113,56 @@
       "notes": "null means the profile has not chosen whether quick actions are enabled, so the server-wide default from the overlay-config endpoint applies. An explicit profile choice overrides the server-wide default in either direction."
     },
     {
+      "key": "ui.theme_music_enabled",
+      "introduced_in": 9,
+      "persistence": "remote",
+      "allowed_scopes": [
+        "profile",
+        "profile_device"
+      ],
+      "resolution_order": [
+        "profile_device",
+        "profile",
+        "default"
+      ],
+      "value_schema": {
+        "type": "boolean"
+      },
+      "default_value": false,
+      "platforms": [
+        "web"
+      ],
+      "category": "playback",
+      "label": "Theme music",
+      "description": "Play local theme music while browsing movie and show detail pages.",
+      "recommended_control": "switch"
+    },
+    {
+      "key": "ui.theme_music_loop",
+      "introduced_in": 9,
+      "persistence": "remote",
+      "allowed_scopes": [
+        "profile",
+        "profile_device"
+      ],
+      "resolution_order": [
+        "profile_device",
+        "profile",
+        "default"
+      ],
+      "value_schema": {
+        "type": "boolean"
+      },
+      "default_value": false,
+      "platforms": [
+        "web"
+      ],
+      "category": "playback",
+      "label": "Loop theme music",
+      "description": "Repeat theme music while the detail page stays open.",
+      "recommended_control": "switch"
+    },
+    {
       "key": "ui.next_up_mode",
       "introduced_in": 1,
       "persistence": "remote",

@@ -135,6 +135,10 @@ const (
 	UiTextWeight = "ui.text_weight"
 	// Theme
 	UiTheme = "ui.theme"
+	// Theme music
+	UiThemeMusicEnabled = "ui.theme_music_enabled"
+	// Loop theme music
+	UiThemeMusicLoop = "ui.theme_music_loop"
 	// Time format
 	UiTimeFormat = "ui.time_format"
 )
@@ -194,6 +198,8 @@ var Remote = []string{
 	UiTextScale,
 	UiTextWeight,
 	UiTheme,
+	UiThemeMusicEnabled,
+	UiThemeMusicLoop,
 	UiTimeFormat,
 }
 

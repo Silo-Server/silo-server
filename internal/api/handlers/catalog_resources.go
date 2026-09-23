@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -236,15 +235,7 @@ func (h *CatalogResourceHandler) syntheticSeasonDetail(ctx context.Context, v It
 }
 
 func parseSyntheticSeasonID(contentID string) (string, int, bool) {
-	seriesID, seasonPart, ok := strings.Cut(contentID, "-S")
-	if !ok || seriesID == "" || seasonPart == "" {
-		return "", 0, false
-	}
-	seasonNum, err := strconv.Atoi(seasonPart)
-	if err != nil {
-		return "", 0, false
-	}
-	return seriesID, seasonNum, true
+	return catalog.ParseSyntheticSeasonID(contentID)
 }
 
 func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemViewer, detail *catalog.ItemDetail) {

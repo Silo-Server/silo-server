@@ -256,6 +256,7 @@ function crewMemberFromV2(credit: CrewCreditV2): CrewMember {
 
 export function catalogItemDetailFromV2(item: CatalogItemDetailV2): ItemDetail {
   return {
+    themes: item.themes,
     content_id: item.content_id,
     play_content_id: item.play_content_id,
     type: item.type as ItemDetail["type"],

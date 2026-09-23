@@ -1,3 +1,4 @@
+import { useThemeMusic } from "./useThemeMusic";
 import { useEffect, useState } from "react";
 import { Navigate, useParams, useSearchParams } from "react-router";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
@@ -175,6 +176,7 @@ export default function ItemDetail() {
   const enteredItemFromHome = useSidebarItemEnteredFromHome();
 
   useDocumentTitle(item?.title ?? "Item");
+  useThemeMusic(item, loading);
 
   useEffect(() => {
     if (itemError) {

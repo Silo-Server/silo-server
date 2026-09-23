@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
 const (
@@ -348,6 +349,13 @@ func mediaFileTarget(cleanPath, matchedRoot, folderType string) (string, string,
 	if !scansVideoFiles(folderType) {
 		return ModeFile, cleanPath, nil
 	}
+	if owner, ok := themesongs.OwnerDirectory(cleanPath); ok {
+		if !PathWithinRoot(owner, matchedRoot) {
+			return "", "", &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Theme owner is outside the library", Reason: ReasonPathOutsideLibrary}
+		}
+		// ScanFile reconciles only the theme owner's audio, even at the root.
+		return ModeFile, cleanPath, nil
+	}
 	dir := filepath.Dir(cleanPath)
 	if filepath.Clean(dir) == filepath.Clean(matchedRoot) {
 		return ModeFile, cleanPath, nil
@@ -482,7 +490,8 @@ func supportsLibraryMediaFile(path, folderType string) bool {
 	case librarykind.IsPodcast(folderType):
 		return false
 	default:
-		return scanner.SupportsVideoFile(path)
+		_, theme := themesongs.OwnerDirectory(path)
+		return scanner.SupportsVideoFile(path) || theme
 	}
 }
 

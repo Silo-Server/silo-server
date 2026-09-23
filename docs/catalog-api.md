@@ -303,3 +303,66 @@ setting decides whether a client renders it. Detect support by reading the
 setting from the settings contract capabilities rather than sniffing versions.
 
 Frozen v1 responses do not expose these fields.
+
+## Local theme songs, V2
+
+Movies, series, and seasons can own local theme audio. Place `theme.mp3`
+(or `.m4a`, `.flac`, `.ogg`, `.opus`, `.wav`, `.aac`) in the item's directory,
+or put audio files in its `theme-music/` directory. Scans honor the library's
+ignore rules. Theme audio is separate from media files, extras, metadata
+matching, and watch progress. Files must contain audio without video tracks.
+Symlinked audio files and symlinked `theme-music` directories are excluded.
+
+Ownership follows current video-file associations. A movie can use its
+canonical directory or the directory containing its video. A series uses its
+canonical root; flat episode files can use their containing directory when every
+video there belongs to that series. A season uses directories below that root whose
+videos belong to that season alone, including season directories above disc subdirectories.
+Ambiguous directories do not grant a theme to multiple movies, series, or seasons.
+Metadata rematching changes ownership without copying theme rows.
+Theme-file update events reconcile the owner's audio without importing the library
+again. Failed audio probes preserve only that file's cached record, and deleted
+videos retain their themes until the scanner removes the missing video rows.
+
+The V2 item detail document includes `themes` with `owner_id` and an ordered
+`items` array. Each theme has `id`, `title`, `duration_seconds`, and `container`.
+Paths are never exposed. A season without themes inherits its series' set;
+an episode uses its season's set, then its series' set. Resolution selects one
+owner's set and applies the viewer's library, rating, and quality restrictions.
+An empty set retains the requested item's ID and an empty array.
+Seasons derived from episode groups use the same ownership and inheritance rules.
+If the optional theme lookup fails, item detail still succeeds and omits `themes`.
+
+| Method and path | Result |
+| --- | --- |
+| `GET /api/v2/catalog/themes/capability` | Shared capability document with `delivery: local_direct_play`, `transcode: false`, `cluster_routing: false`, and `grant_lifetime_seconds` |
+| `POST /api/v2/catalog/items/{owner_id}/themes/{theme_id}/playback` | `url` and `expires_at` for an authenticated login session and verified profile |
+| `GET\|HEAD /api/v2/catalog/items/{owner_id}/themes/{theme_id}/audio?token=...` | Original audio, authorized by the playback grant |
+
+The grant expires after at most five minutes, bounded by the login token's
+remaining lifetime. It binds the account, profile, login session, policy
+revision, owner, theme file ID, size, and modification time. Delivery rechecks
+the current account, login session, profile, permissions, ownership, and file.
+The grant uses a separate signing key derived from the server secret and cannot
+be used as an account or ordinary playback token. Clients must not log or
+persist signed URLs. Grant responses and audio use `Cache-Control: no-store`.
+
+Audio delivery supports byte ranges, HEAD, ETags, and HTTP read preconditions.
+Authorization happens before a conditional response. Missing local files or
+changed bytes require a rescan or another accessible API node; this version
+does not route requests to remote workers, remux, or transcode. A shared-filesystem
+API deployment can serve the same grants on each node that has the files.
+
+The web preferences `ui.theme_music_enabled` and `ui.theme_music_loop` default
+to `false` and support profile and profile-device scope on the web platform.
+The web player fades theme audio, preserves its position across details with
+the same owner, suspends while a navigation destination is unresolved, and
+stops on normal playback, logout, or profile change. It handles browser autoplay
+rejection and retries a failed audio URL once with a fresh grant. Playback
+progress resets that retry budget for a later expiry.
+
+Apple and Android do not advertise this feature initially, as specified in
+issue #937. They need V2 discovery and fixtures, settings, playback, and lifecycle
+support before enabling it. Provider downloads, theme videos, uploads, remote
+URLs, and cluster routing are outside this local-file capability. No V1 route
+or V1 item-detail shape changes.

@@ -83,6 +83,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/subtitles/subsource"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	"github.com/Silo-Server/silo-server/internal/taskmanager/repository"
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
@@ -2169,6 +2170,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		v2deps.Invitations = invitationHandler
 	}
+	if deps.DB != nil && deps.Config != nil && viewerResolver != nil {
+		v2deps.ThemeSongs = &handlers.ThemeSongsHandler{Service: themesongs.NewService(themesongs.NewRepository(deps.DB), deps.Config.Auth.JWTSecret), Sessions: sessionRepo, Users: userRepo, Resolver: viewerResolver}
+	}
+	v2deps.ObserveThemeAudio = func(method string, handler http.Handler) http.Handler {
+		return observeNative(deps.StreamTelemetry, method, "/api/v2/catalog/items/{owner_id}/themes/{theme_id}/audio", handler.ServeHTTP)
+	}
+
 	var themeHandler *handlers.ThemeHandler
 	if settingsRepo != nil {
 		themeHandler = handlers.NewThemeHandler(settingsRepo)
@@ -4310,6 +4318,8 @@ func skipNativeMediaCompression(r *http.Request) bool {
 		return false
 	}
 	switch {
+	case len(p) == 8 && p[1] == "v2" && p[2] == "catalog" && p[3] == "items" && p[4] != "" && p[5] == "themes" && p[6] != "" && p[7] == "audio":
+		return true
 	case len(p) == 4 && p[2] == "stream" && p[3] != "":
 		return true
 	case len(p) == 7 && p[2] == "playback" && p[3] == "transcode" && p[4] != "" && p[5] == "segment" && p[6] != "":

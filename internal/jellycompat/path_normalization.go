@@ -11,6 +11,9 @@ type requestContextKey string
 const originalPathKey requestContextKey = "jellycompat_original_path"
 
 var compatPathSegments = map[string]string{
+	compatThemeAudioLower: compatThemeAudio,
+	compatThemeUniversal:  compatThemeUniversal,
+
 	"system":             "System",
 	"info":               "Info",
 	"public":             "Public",

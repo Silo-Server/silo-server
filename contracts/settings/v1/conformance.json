@@ -1044,6 +1044,26 @@
           "source": "profile"
         }
       ]
+    },
+    {
+      "name": "theme_music_is_opt_in",
+      "keys": ["ui.theme_music_enabled", "ui.theme_music_loop"],
+      "context": {"profile_id": "p1", "device_id": "browser"},
+      "stored": [],
+      "expected": [
+        {"key": "ui.theme_music_enabled", "value": false, "source": "default"},
+        {"key": "ui.theme_music_loop", "value": false, "source": "default"}
+      ]
+    },
+    {
+      "name": "theme_music_device_overrides_profile",
+      "keys": ["ui.theme_music_enabled"],
+      "context": {"profile_id": "p1", "device_id": "browser"},
+      "stored": [
+        {"key": "ui.theme_music_enabled", "scope": "profile", "profile_id": "p1", "value": true},
+        {"key": "ui.theme_music_enabled", "scope": "profile_device", "profile_id": "p1", "device_id": "browser", "value": false}
+      ],
+      "expected": [{"key": "ui.theme_music_enabled", "value": false, "source": "profile_device"}]
     }
   ]
 }

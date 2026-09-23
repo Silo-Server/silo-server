@@ -2,6 +2,12 @@
 GET /	non-media
 HEAD /	non-media
 GET /Artists	non-media
+GET /Audio/{itemId}/stream	media	transfer	viewer_egress	false	true
+HEAD /Audio/{itemId}/stream	media	transfer	viewer_egress	false	true
+GET /Audio/{itemId}/stream.{container}	media	transfer	viewer_egress	false	true
+HEAD /Audio/{itemId}/stream.{container}	media	transfer	viewer_egress	false	true
+GET /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
+HEAD /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 GET /Branding/Configuration	non-media
 POST /ClientLog/Document	non-media
 GET /DisplayPreferences/{displayPreferencesId}	non-media
@@ -142,6 +148,12 @@ TRACE /web/*	non-media
 GET /	non-media
 HEAD /	non-media
 GET /Artists	non-media
+GET /Audio/{itemId}/stream	media	transfer	viewer_egress	false	true
+HEAD /Audio/{itemId}/stream	media	transfer	viewer_egress	false	true
+GET /Audio/{itemId}/stream.{container}	media	transfer	viewer_egress	false	true
+HEAD /Audio/{itemId}/stream.{container}	media	transfer	viewer_egress	false	true
+GET /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
+HEAD /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 GET /Branding/Configuration	non-media
 POST /ClientLog/Document	non-media
 GET /DisplayPreferences/{displayPreferencesId}	non-media

@@ -35,6 +35,7 @@ import (
 
 // ItemsHandler serves Jellyfin browse/search/item endpoints.
 type ItemsHandler struct {
+	themeSongs       themeSongStore
 	content          ContentService
 	userData         UserDataService
 	codec            *ResourceIDCodec
@@ -318,6 +319,10 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rawID := chi.URLParam(r, "id")
+	if themeID, err := h.codec.DecodeIntID(EncodedIDThemeSong, rawID); err == nil {
+		h.handleThemeItem(w, r, session, themeID)
+		return
+	}
 
 	// The synthetic Collections view is a fixed sentinel ID, not a codec-encoded
 	// one; clients fetch the CollectionFolder by ID (e.g. Infuse) before browsing
@@ -3862,14 +3867,14 @@ func (h *ItemsHandler) HandleAncestors(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, items)
 }
 
-// Theme media are not indexed by Silo; return the upstream envelope only after
-// proving the referenced item is visible to this viewer.
+// HandleThemeMedia serves Jellyfin's outer theme collection envelope.
 func (h *ItemsHandler) HandleThemeMedia(w http.ResponseWriter, r *http.Request) {
-	if !h.validateThemeOwner(w, r) {
+	result, ok := h.themeSongsResult(w, r)
+	if !ok {
 		return
 	}
 	empty := themeMediaResultDTO{Items: []baseItemDTO{}, OwnerID: chi.URLParam(r, "id")}
-	writeJSON(w, 200, map[string]themeMediaResultDTO{"ThemeSongsResult": empty, "ThemeVideosResult": empty, "SoundtrackSongsResult": empty})
+	writeJSON(w, 200, map[string]themeMediaResultDTO{"ThemeSongsResult": result, "ThemeVideosResult": empty, "SoundtrackSongsResult": empty})
 }
 func (h *ItemsHandler) validateThemeOwner(w http.ResponseWriter, r *http.Request) bool {
 	if h.content == nil || h.codec == nil {

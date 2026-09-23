@@ -22,6 +22,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
 	"github.com/Silo-Server/silo-server/internal/rootcheck"
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
 // videoExtensions is the set of file extensions recognized as media files.
@@ -351,7 +352,11 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 		return &ScanResult{}, nil
 	}
 
-	return s.scanPaths(watchCtx, folder, folder.Paths, folder.Paths, true)
+	result, err := s.scanPaths(watchCtx, folder, folder.Paths, folder.Paths, true)
+	if err == nil && result != nil && !result.EmptyRootGuarded {
+		err = s.scanThemeSongs(watchCtx, folder, "", false)
+	}
+	return result, err
 }
 
 // ScanSubtree walks a single subtree within a media folder and reconciles only
@@ -396,7 +401,11 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 		}
 		return &ScanResult{}, nil
 	}
-	return s.scanPaths(watchCtx, folder, []string{cleanSubtree}, []string{cleanSubtree}, false)
+	result, err := s.scanPaths(watchCtx, folder, []string{cleanSubtree}, []string{cleanSubtree}, false)
+	if err == nil && result != nil && !result.EmptyRootGuarded {
+		err = s.scanThemeSongs(watchCtx, folder, cleanSubtree, false)
+	}
+	return result, err
 }
 
 func cleanScopedAudiobookScanRoot(path string) (string, error) {
@@ -2610,6 +2619,12 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	}
 
 	// Verify the file extension is recognized.
+	if dir, ok := themesongs.OwnerDirectory(cleanFile); ok {
+		if !pathWithinAnyRoot(dir, folder.Paths) {
+			return fmt.Errorf("theme owner is outside the library")
+		}
+		return s.scanThemeSongs(ctx, folder, dir, true)
+	}
 	ext := strings.ToLower(filepath.Ext(cleanFile))
 	if !videoExtensions[ext] {
 		return fmt.Errorf("unrecognized video extension: %s", ext)
@@ -2726,7 +2741,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 			"scope", filepath.Clean(filePath),
 		)
 	}
-	return nil
+	return s.scanThemeSongs(ctx, folder, filepath.Dir(filePath), true)
 }
 
 func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *models.MediaFolder, filePath string) (bool, error) {

@@ -132,7 +132,7 @@ request disables Primary images.
 | `GET /Studios` | Visible catalog studios with paging. |
 | `GET /Shows/Upcoming` | Scoped episodes dated from yesterday in UTC onward, with paging. |
 | `GET /Items/{id}/ThemeMedia` | `ThemeSongsResult` and `ThemeVideosResult` envelopes after validating the owner. |
-| `GET /Items/{id}/ThemeSongs`, `/ThemeVideos` | Valid empty theme result for a visible owner; theme ingestion is not implemented. |
+| `GET /Items/{id}/ThemeSongs`, `/ThemeVideos` | Local theme songs for a visible owner; theme videos remain empty. |
 | `GET /Persons`, `/Persons/{name}` | People with credits in movies or series visible to the current profile. `/Persons` accepts Jellyfin 12's `StartIndex`, `NameStartsWith`, `NameLessThan`, and `NameStartsWithOrGreater` (lowercased name comparisons) and a library or movie/series `ParentId`; other parents match nobody. Pages without `SearchTerm` hold up to 100 people; searches stay capped at 20. Person photo tags are signed and appear only in responses that passed this visibility check. `GET /Items/{personId}/Images/Primary` accepts a matching signed `tag` without authentication, as Jellyfin Web sends image requests without credentials; otherwise the session must see a credit for the person. Either check runs before cached artwork is used. |
 
 These changes do not implement every advanced query option. Random and compound
@@ -321,3 +321,33 @@ described above.
 
 The compatibility surface does not add audio-library playback, Live TV, IPTV,
 DVR, or `.strm` support. See `docs/non-goals.md` for permanent product boundaries.
+
+## Local theme audio
+
+`GET /Items/{id}/ThemeSongs` and `/Users/{userId}/Items/{id}/ThemeSongs`
+return `Items`, `TotalRecordCount`, `StartIndex`, and the resolved `OwnerId`.
+The corresponding `ThemeMedia` routes wrap that result in `ThemeSongsResult`;
+`ThemeVideosResult` and `SoundtrackSongsResult` remain empty. Both discovery
+forms honor `inheritFromParent` and `sortBy=Random`, and recheck item visibility.
+Omitting `inheritFromParent` defaults to `false`, as in Jellyfin.
+Theme IDs are stable numeric encodings that survive a server restart.
+Theme items include `ServerId` and can be fetched through `GET /Items/{id}`
+or `/Users/{userId}/Items/{id}` before playback. These lookups recheck visibility.
+
+The authenticated `GET|HEAD /Audio/{itemId}/stream`,
+`/Audio/{itemId}/stream.{container}`, and `/Audio/{itemId}/universal` routes
+serve original theme audio with range and conditional-request support.
+Accepted containers, codecs, channel limits, and bitrate limits must permit the
+original file. Selecting a specific audio stream requires demuxing and is
+unsupported. Requests requiring conversion or a time-based seek return
+`400 PlaybackUnavailable`; clients can seek with byte ranges. Transcode fallback
+hints on a universal request do not prevent direct play when the original fits.
+For universal audio, `Container` declares accepted direct-play formats, including
+`container|codec` entries. `AudioCodec`, `AudioBitRate`, and
+`TranscodingAudioChannels` describe the fallback encoder. When the source bitrate
+is unknown, `MaxStreamingBitrate` uses Jellyfin's conservative 40 Mbps estimate. The
+stream routes treat `AudioCodec` as a constraint on the original audio.
+Themes do not create playback sessions or update watched state.
+
+See [local theme songs](catalog-api.md#local-theme-songs-v2) for file conventions,
+ownership, inheritance, and local-node delivery limitations.
