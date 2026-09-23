@@ -101,3 +101,36 @@ func TestFlatSeriesEpisodesShareOneProvisionalItem(t *testing.T) {
 		})
 	}
 }
+
+func TestFlatSeriesProvisionalItemConvergesAcrossNodes(t *testing.T) {
+	h := newTestHarness()
+	const groupKey = "v1|series|example show|0000"
+	files := []*models.MediaFile{
+		{ID: 1, MediaFolderID: 10, FilePath: "/tv/Example.Show.S01E01.mkv", BaseTitle: "Example Show", BaseType: "series", GroupKeyVersion: 1, ContentGroupKey: groupKey},
+		{ID: 2, MediaFolderID: 10, FilePath: "/tv/Example.Show.S01E02.mkv", BaseTitle: "Example Show", BaseType: "series", GroupKeyVersion: 1, ContentGroupKey: groupKey},
+	}
+	for _, file := range files {
+		file.ObservedRootPath, file.CanonicalRootPath = file.FilePath, file.FilePath
+	}
+	h.fileRepo.setGroupFiles(10, 1, groupKey, files...)
+	h.scannedGroupRepo.setGroup(&models.ScannedMediaGroup{
+		MediaFolderID: 10, GroupKeyVersion: 1, ContentGroupKey: groupKey,
+		BaseTitle: "Example Show", InferredType: "series", State: "resolved",
+	})
+	first, err := h.service.createOrFindSkeleton(t.Context(), files[0], 10, "/tv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Another node matching episode 2 concurrently has not seen episode 1's
+	// link yet, so it cannot reuse that item and creates its own skeleton.
+	h.fileRepo.mu.Lock()
+	delete(h.fileRepo.contentIDs, files[0].ID)
+	h.fileRepo.mu.Unlock()
+	second, err := h.service.createOrFindSkeleton(t.Context(), files[1], 10, "/tv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ContentID != second.ContentID {
+		t.Fatalf("concurrent episodes minted separate items %q and %q", first.ContentID, second.ContentID)
+	}
+}

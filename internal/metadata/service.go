@@ -6283,8 +6283,9 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// root, so matching one show cannot relink its neighbors. Its episodes
 	// still form one resolved scanner group; reuse the series item another
 	// episode created instead of adding a provisional item per episode.
-	if res.Type == "series" && contentGroupKey != "" && filepath.Clean(observedRootPath) == filepath.Clean(file.FilePath) &&
-		(hasGroupOverride || (scannedIdentity != nil && scannedIdentity.State == scannedGroupStateResolved)) {
+	flatSeriesGroup := res.Type == "series" && contentGroupKey != "" && filepath.Clean(observedRootPath) == filepath.Clean(file.FilePath) &&
+		(hasGroupOverride || (scannedIdentity != nil && scannedIdentity.State == scannedGroupStateResolved))
+	if flatSeriesGroup {
 		existingContentID, err := s.seriesContentIDForGroup(ctx, folderID, groupKeyVersion, contentGroupKey, file.ID)
 		if err != nil {
 			return nil, err
@@ -6346,6 +6347,12 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// machinery confirms a real shared identity — matching the pre-existing
 	// one-skeleton-per-file behavior while staying stable across rescans.
 	localAnchorPath := firstNonEmpty(file.FilePath, contentRootPath, observedRootPath)
+	if flatSeriesGroup {
+		// The dedup lock is per process. Anchoring a flat show's provisional
+		// item on its group lets episodes matched concurrently on other nodes
+		// converge on one item instead of each minting its own.
+		localAnchorPath = fmt.Sprintf("group:%d:%d:%s", folderID, groupKeyVersion, contentGroupKey)
+	}
 	contentID, err := deriveLogicalContentID(
 		res.Type,
 		contentid.ProviderIDs{Tmdb: res.TmdbID, Imdb: res.ImdbID, Tvdb: res.TvdbID},
