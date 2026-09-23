@@ -80,6 +80,11 @@ type metadataItemDeleteRepo interface {
 	Delete(ctx context.Context, contentID string) ([]string, error)
 }
 
+// metadataItemGuardedDeleteRepo deletes an item only while nothing references it.
+type metadataItemGuardedDeleteRepo interface {
+	DeleteIfUnreferenced(ctx context.Context, contentID string) (bool, error)
+}
+
 // metadataItemInsertRepo creates an item only when its content_id is free.
 type metadataItemInsertRepo interface {
 	InsertIfAbsent(ctx context.Context, item *models.MediaItem) (bool, error)
@@ -6497,6 +6502,13 @@ func (s *MetadataService) recordSkippedRoot(ctx context.Context, folderID int, r
 func (s *MetadataService) deleteCreatedSkeleton(ctx context.Context, contentID string) error {
 	if s == nil || strings.TrimSpace(contentID) == "" {
 		return nil
+	}
+	// A skeleton's content_id can be deterministic, so another node may have
+	// linked the same item since this call created it. Delete it only while
+	// nothing references it.
+	if repo, ok := s.itemRepo.(metadataItemGuardedDeleteRepo); ok {
+		_, err := repo.DeleteIfUnreferenced(ctx, contentID)
+		return err
 	}
 	if repo, ok := s.itemRepo.(metadataItemDeleteRepo); ok {
 		if _, err := repo.Delete(ctx, contentID); err != nil && !errors.Is(err, catalog.ErrItemNotFound) {

@@ -151,6 +151,42 @@ const deleteOrphanedProvisionalBatchSQL = `
 	RETURNING mi.content_id
 `
 
+const deleteUnreferencedMediaItemSQL = `
+	DELETE FROM public.media_items mi
+	WHERE mi.content_id = $1
+	  AND ` + orphanedMediaItemSafetyConditions + `
+	RETURNING mi.content_id
+`
+
+// DeleteIfUnreferenced deletes one media item only while nothing references
+// it: no file, library membership, episode, season, or durable user or sync
+// state. It reports whether the item was deleted. Creators that may share a
+// deterministic content_id use it to undo their own write without removing an
+// item another writer has since linked.
+func (r *ItemRepository) DeleteIfUnreferenced(ctx context.Context, contentID string) (bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin unreferenced item delete tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rows, err := tx.Query(ctx, deleteUnreferencedMediaItemSQL, contentID)
+	if err != nil {
+		return false, fmt.Errorf("deleting unreferenced media item: %w", err)
+	}
+	deletedIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return false, fmt.Errorf("collecting deleted media item: %w", err)
+	}
+	if err := EnqueueSearchIndexDeletes(ctx, tx, deletedIDs); err != nil {
+		return false, fmt.Errorf("enqueueing catalog search delete: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit unreferenced item delete tx: %w", err)
+	}
+	return len(deletedIDs) > 0, nil
+}
+
 type OrphanedProvisionalCleanupStats struct {
 	Candidates int
 	Deleted    int

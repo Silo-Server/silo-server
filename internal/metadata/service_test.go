@@ -43,6 +43,10 @@ type fakeItemRepo struct {
 	trailersReleased       chan struct{}
 	trailersReleaseGate    chan struct{}
 	now                    func() time.Time
+
+	// referenced reports whether something links to an item, for
+	// DeleteIfUnreferenced. Nil treats every item as unreferenced.
+	referenced func(contentID string) bool
 }
 
 // trailersClaimResult forces a fixed answer out of the cooldown gate, for the
@@ -119,6 +123,16 @@ func (r *fakeItemRepo) InsertIfAbsent(_ context.Context, item *models.MediaItem)
 	}
 	cp := *item
 	r.items[item.ContentID] = &cp
+	return true, nil
+}
+
+func (r *fakeItemRepo) DeleteIfUnreferenced(_ context.Context, contentID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[contentID]; !ok || (r.referenced != nil && r.referenced(contentID)) {
+		return false, nil
+	}
+	delete(r.items, contentID)
 	return true, nil
 }
 

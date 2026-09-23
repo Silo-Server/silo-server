@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -144,5 +145,30 @@ func TestFlatSeriesProvisionalItemConvergesAcrossNodes(t *testing.T) {
 	}
 	if item.Title != "Matched Show" || item.Status != "matched" {
 		t.Fatalf("second node reset the matched item: %+v", item)
+	}
+}
+
+func TestFlatSeriesLinkFailureKeepsItemAnotherNodeLinked(t *testing.T) {
+	h := newTestHarness()
+	const groupKey = "v1|series|example show|0000"
+	file := &models.MediaFile{ID: 1, MediaFolderID: 10, FilePath: "/tv/Example.Show.S01E01.mkv", BaseTitle: "Example Show", BaseType: "series", GroupKeyVersion: 1, ContentGroupKey: groupKey}
+	file.ObservedRootPath, file.CanonicalRootPath = file.FilePath, file.FilePath
+	h.fileRepo.setGroupFiles(10, 1, groupKey, file)
+	h.scannedGroupRepo.setGroup(&models.ScannedMediaGroup{
+		MediaFolderID: 10, GroupKeyVersion: 1, ContentGroupKey: groupKey,
+		BaseTitle: "Example Show", InferredType: "series", State: "resolved",
+	})
+	// This node wins the insert, but its link fails after another node has
+	// linked its own episode to the shared item.
+	h.fileRepo.updateErrors[file.ID] = errors.New("link failed")
+	h.itemRepo.referenced = func(string) bool { return true }
+
+	if _, err := h.service.createOrFindSkeleton(t.Context(), file, 10, "/tv"); err == nil {
+		t.Fatal("expected the link failure to surface")
+	}
+	h.itemRepo.mu.Lock()
+	defer h.itemRepo.mu.Unlock()
+	if len(h.itemRepo.items) != 1 {
+		t.Fatalf("cleanup removed the shared item: %d items left", len(h.itemRepo.items))
 	}
 }
