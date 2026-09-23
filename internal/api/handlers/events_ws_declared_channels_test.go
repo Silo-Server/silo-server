@@ -384,7 +384,7 @@ func TestEventsWebSocketRejectsOversizeFrame(t *testing.T) {
 // deadline configureWebSocket installs at connect.
 type slowTaskLister struct{ delay time.Duration }
 
-func (s slowTaskLister) ListTasks(context.Context, bool) []taskmanager.TaskInfo {
+func (s slowTaskLister) ListTasks(bool) []taskmanager.TaskInfo {
 	time.Sleep(s.delay)
 	return []taskmanager.TaskInfo{}
 }

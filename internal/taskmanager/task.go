@@ -56,8 +56,8 @@ type ManualOnlyTask interface {
 }
 
 // LibraryScopedTask marks a task whose work exists only for one kind of
-// library. ListTasks omits it while no library of that kind exists; it still
-// runs on schedule and stays reachable by key and in hidden-inclusive lists.
+// library. ListRelevantTasks omits it while no library of that kind exists; it
+// still runs on schedule and stays in ListTasks and reachable by key.
 type LibraryScopedTask interface {
 	// ServesLibrary reports whether a library with this media_folders.type
 	// gives the task work.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
@@ -27,6 +28,7 @@ const (
 
 type databaseMaintenanceStepResult struct {
 	Key    string          `json:"key"`
+	Name   string          `json:"name"`
 	Status string          `json:"status"`
 	Error  string          `json:"error,omitempty"`
 	Result json.RawMessage `json:"result,omitempty"`
@@ -71,8 +73,10 @@ func (t *DatabaseMaintenanceTask) Execute(ctx context.Context, progress taskmana
 		}
 		stepProgress := &maintenanceStepProgress{parent: progress, base: float64(i) * span, span: span}
 		stepProgress.Report(0, step.Name())
-		result := databaseMaintenanceStepResult{Key: step.Key(), Status: maintenanceStepCompleted}
+		result := databaseMaintenanceStepResult{Key: step.Key(), Name: step.Name(), Status: maintenanceStepCompleted}
 		if err := step.Execute(ctx, stepProgress); err != nil {
+			// Task history hides error text from the admin API; the log keeps it.
+			slog.WarnContext(ctx, "database maintenance step failed", "step", step.Key(), "error", err)
 			result.Status = maintenanceStepFailed
 			result.Error = err.Error()
 			errs = append(errs, fmt.Errorf("%s: %w", step.Name(), err))

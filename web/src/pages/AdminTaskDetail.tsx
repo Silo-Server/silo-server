@@ -547,6 +547,13 @@ function HistoryRow({
   onToggle: () => void;
 }) {
   const hasResultData = result.result_data && Object.keys(result.result_data).length > 0;
+  const failedSteps = (result.steps ?? [])
+    .filter((step) => step.status === "failed")
+    .map((step) => step.name);
+  const errorText =
+    failedSteps.length > 0
+      ? `Failed steps: ${failedSteps.join(", ")}`
+      : result.error_message || "—";
 
   return (
     <>
@@ -571,8 +578,8 @@ function HistoryRow({
         <td className="px-4 py-2">
           <TaskStatusBadge result={result} />
         </td>
-        <td className="text-muted-foreground max-w-xs truncate px-4 py-2">
-          {result.error_message || "—"}
+        <td className="text-muted-foreground max-w-xs truncate px-4 py-2" title={errorText}>
+          {errorText}
         </td>
       </tr>
       {expanded && hasResultData && (

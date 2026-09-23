@@ -77,7 +77,7 @@ func TestDatabaseMaintenanceRunsEveryStepDespiteFailures(t *testing.T) {
 		t.Fatalf("result data: %v", err)
 	}
 	if len(got.Steps) != 3 || got.Steps[1].Status != maintenanceStepFailed || got.Steps[2].Status != maintenanceStepCompleted ||
-		string(got.Steps[0].Result) != `{"deleted":3}` {
+		string(got.Steps[0].Result) != `{"deleted":3}` || got.Steps[1].Name != "Step second" {
 		t.Fatalf("step results = %+v", got.Steps)
 	}
 	// Three steps each own a third of the bar; a step's 50% is its midpoint.

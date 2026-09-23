@@ -49,5 +49,9 @@ describe("ServerActivity task progress", () => {
 
     expect(screen.getByText("Running")).toBeInTheDocument();
     expect(screen.queryByText("0%")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Cache Metadata Images" })).toHaveAttribute(
+      "href",
+      "/admin/tasks/cache_metadata_images",
+    );
   });
 });

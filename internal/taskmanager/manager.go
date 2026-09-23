@@ -50,9 +50,9 @@ func (m *TaskManager) AddObserver(observer Observer) {
 	m.observers = append(m.observers, observer)
 }
 
-// SetLibraryTypes installs the lookup ListTasks uses to omit LibraryScopedTask
-// tasks for library kinds this server does not have. Without it, every task is
-// listed.
+// SetLibraryTypes installs the lookup ListRelevantTasks uses to omit
+// LibraryScopedTask tasks for library kinds this server does not have. Without
+// it, every non-hidden task is listed.
 func (m *TaskManager) SetLibraryTypes(fn LibraryTypesFunc) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -315,16 +315,21 @@ func (m *TaskManager) GetTaskInfo(key string) TaskInfo {
 	return w.info()
 }
 
-// ListTasks returns info for all registered tasks, optionally including hidden
-// ones. The default list also omits library-scoped tasks that no existing
-// library needs; if the library lookup fails, they are listed.
-func (m *TaskManager) ListTasks(ctx context.Context, includeHidden bool) []TaskInfo {
+// ListTasks returns info for all registered tasks, optionally including hidden ones.
+func (m *TaskManager) ListTasks(includeHidden bool) []TaskInfo {
+	return m.listTasks(func(w *taskWorker) bool { return includeHidden || !w.task.IsHidden() })
+}
+
+// ListRelevantTasks returns the non-hidden tasks an administrator can act on:
+// it also omits library-scoped tasks that no existing library needs. If the
+// library lookup fails, those tasks are listed.
+func (m *TaskManager) ListRelevantTasks(ctx context.Context) []TaskInfo {
 	m.mu.RLock()
 	lookup := m.libraryTypes
 	m.mu.RUnlock()
 
+	scoped := lookup != nil
 	var libraryTypes []string
-	scoped := !includeHidden && lookup != nil
 	if scoped {
 		types, err := lookup(ctx)
 		if err != nil {
@@ -333,19 +338,20 @@ func (m *TaskManager) ListTasks(ctx context.Context, includeHidden bool) []TaskI
 		}
 		libraryTypes = types
 	}
+	return m.listTasks(func(w *taskWorker) bool {
+		return !w.task.IsHidden() && (!scoped || servesAnyLibrary(w.task, libraryTypes))
+	})
+}
 
+func (m *TaskManager) listTasks(include func(*taskWorker) bool) []TaskInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	var infos []TaskInfo
 	for _, w := range m.tasks {
-		if !includeHidden && w.task.IsHidden() {
-			continue
+		if include(w) {
+			infos = append(infos, w.info())
 		}
-		if scoped && !servesAnyLibrary(w.task, libraryTypes) {
-			continue
-		}
-		infos = append(infos, w.info())
 	}
 	sort.Slice(infos, func(i, j int) bool { return infos[i].Key < infos[j].Key })
 	return infos

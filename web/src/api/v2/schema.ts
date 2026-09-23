@@ -14864,6 +14864,8 @@ export interface components {
       started_at: string;
       /** @enum {string} */
       status: "completed" | "failed" | "cancelled";
+      /** @description Per-step outcomes for tasks that run several steps, such as database_maintenance. */
+      steps?: components["schemas"]["AdminTaskStepResult"][];
       task_key: string;
     };
     AdminTaskExecutionSummary: {
@@ -14883,6 +14885,8 @@ export interface components {
       started_at: string;
       /** @enum {string} */
       status: "completed" | "failed" | "cancelled";
+      /** @description Per-step outcomes for tasks that run several steps, such as database_maintenance. */
+      steps?: components["schemas"]["AdminTaskStepResult"][];
       task_key: string;
     };
     AdminTaskJob: {
@@ -15052,6 +15056,12 @@ export interface components {
     };
     AdminTaskScheduleInputBody: {
       triggers: components["schemas"]["AdminTaskTrigger"][];
+    };
+    AdminTaskStepResult: {
+      key: string;
+      name: string;
+      /** @enum {string} */
+      status: "completed" | "failed";
     };
     AdminTaskTrigger: {
       /** Format: int64 */

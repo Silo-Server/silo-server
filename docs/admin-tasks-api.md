@@ -12,7 +12,8 @@ By default it omits hidden tasks: queue workers, pollers, and repairs that run
 without an administrator, such as `match_media` or `cache_metadata_images`. It
 also omits tasks that serve one library kind, such as `sync_ebook_metadata`,
 while no library of that kind exists. `include_hidden=true` returns every
-registered task. `GET /api/v2/admin/tasks/{key}` reads runtime state on the
+registered task. The frozen v1 list applies the hidden flags only, not library
+scoping. `GET /api/v2/admin/tasks/{key}` reads runtime state on the
 responding process for any registered task, hidden or not. Both require
 acting-administrator access, as do task mutations and history.
 
@@ -39,7 +40,9 @@ by default: processed search index events, activity log, task history, expired
 login sessions, policy decision log, and notifications. The log steps also
 create upcoming partitions, which startup creates as well. Each step keeps its
 own retention settings. A failing step does not stop the later ones; the run
-fails if any step failed, and its result data lists each step's status.
+fails if any step failed. Its history entries carry a `steps` array with each
+step's `key`, `name`, and `status`; error text stays in the server log, like
+other task failures.
 Operational log and client diagnostics cleanup stay separate tasks because
 their caps need a 15-minute cadence.
 

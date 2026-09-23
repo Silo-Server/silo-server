@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -24,8 +25,11 @@ type fakeAdminTasks struct {
 func newFakeAdminTasks() *fakeAdminTasks {
 	return &fakeAdminTasks{schedule: taskmanager.Schedule{Revision: 2, Triggers: []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeInterval, IntervalMs: 1000}}}}
 }
-func (f *fakeAdminTasks) ListTasks(context.Context, bool) []taskmanager.TaskInfo {
+func (f *fakeAdminTasks) ListTasks(bool) []taskmanager.TaskInfo {
 	return []taskmanager.TaskInfo{f.GetTaskInfo("fixture")}
+}
+func (f *fakeAdminTasks) ListRelevantTasks(context.Context) []taskmanager.TaskInfo {
+	return f.ListTasks(false)
 }
 func (f *fakeAdminTasks) GetTaskInfo(key string) taskmanager.TaskInfo {
 	if key != "fixture" && key != "refresh_metadata" {
@@ -225,5 +229,39 @@ func TestAdminTaskScheduleRejectsNestedNullWithoutWrites(t *testing.T) {
 				t.Fatalf("zero/default changed: %+v", f.schedule)
 			}
 		})
+	}
+}
+
+func TestTaskExecutionExposesMaintenanceStepsWithoutErrors(t *testing.T) {
+	completed := time.Date(2026, 9, 23, 5, 0, 1, 0, time.UTC)
+	result := taskmanager.ExecutionResult{
+		TaskKey:     "database_maintenance",
+		Status:      "failed",
+		StartedAt:   completed.Add(-time.Second),
+		CompletedAt: completed,
+		ResultData: json.RawMessage(`{"steps":[` +
+			`{"key":"cleanup_activity_log","name":"Cleanup Activity Log","status":"completed","result":{"deleted":2}},` +
+			`{"key":"cleanup_policy_decision_log","name":"Cleanup Policy Decision Log","status":"failed","error":"partition exists"}]}`),
+	}
+
+	got := taskExecutionOf(result)
+	want := []AdminTaskStepResult{
+		{Key: "cleanup_activity_log", Name: "Cleanup Activity Log", Status: "completed"},
+		{Key: "cleanup_policy_decision_log", Name: "Cleanup Policy Decision Log", Status: "failed"},
+	}
+	if !reflect.DeepEqual(got.Steps, want) {
+		t.Fatalf("Steps = %+v, want %+v", got.Steps, want)
+	}
+	body, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "partition exists") {
+		t.Fatalf("step error text leaked into the v2 execution: %s", body)
+	}
+
+	other := taskExecutionOf(taskmanager.ExecutionResult{TaskKey: "match_media", ResultData: result.ResultData})
+	if other.Steps != nil {
+		t.Fatalf("Steps for another task = %+v, want none", other.Steps)
 	}
 }

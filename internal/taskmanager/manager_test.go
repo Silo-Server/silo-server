@@ -354,7 +354,7 @@ type hiddenStubTask struct{ stubTask }
 
 func (hiddenStubTask) IsHidden() bool { return true }
 
-func TestTaskManagerListTasksOmitsLibraryScopedTasksWithoutLibrary(t *testing.T) {
+func TestTaskManagerListRelevantTasksOmitsLibraryScopedTasksWithoutLibrary(t *testing.T) {
 	newManager := func(lookup taskmanager.LibraryTypesFunc) *taskmanager.TaskManager {
 		manager := taskmanager.New(
 			&fakeTriggerRepository{triggers: map[string][]taskmanager.TriggerConfig{}},
@@ -381,25 +381,31 @@ func TestTaskManagerListTasksOmitsLibraryScopedTasksWithoutLibrary(t *testing.T)
 		return func(context.Context) ([]string, error) { return types, nil }
 	}
 	failing := func(context.Context) ([]string, error) { return nil, errors.New("database unavailable") }
-	ctx := context.Background()
+	relevant := func(m *taskmanager.TaskManager) []taskmanager.TaskInfo {
+		return m.ListRelevantTasks(context.Background())
+	}
+	visible := func(m *taskmanager.TaskManager) []taskmanager.TaskInfo { return m.ListTasks(false) }
+	all := func(m *taskmanager.TaskManager) []taskmanager.TaskInfo { return m.ListTasks(true) }
 
 	tests := []struct {
-		name          string
-		lookup        taskmanager.LibraryTypesFunc
-		includeHidden bool
-		want          []string
+		name   string
+		lookup taskmanager.LibraryTypesFunc
+		list   func(*taskmanager.TaskManager) []taskmanager.TaskInfo
+		want   []string
 	}{
-		{name: "no matching library", lookup: libraries("movies", "series"), want: []string{"always"}},
-		{name: "matching library", lookup: libraries("movies", "ebooks"), want: []string{"always", "ebooks"}},
-		{name: "hidden-inclusive list", lookup: libraries("movies"), includeHidden: true, want: []string{"always", "ebooks", "hidden"}},
-		{name: "lookup fails open", lookup: failing, want: []string{"always", "ebooks"}},
-		{name: "no lookup installed", want: []string{"always", "ebooks"}},
+		{name: "no matching library", lookup: libraries("movies", "series"), list: relevant, want: []string{"always"}},
+		{name: "matching library", lookup: libraries("movies", "ebooks"), list: relevant, want: []string{"always", "ebooks"}},
+		{name: "lookup fails open", lookup: failing, list: relevant, want: []string{"always", "ebooks"}},
+		{name: "no lookup installed", list: relevant, want: []string{"always", "ebooks"}},
+		// The v1 list keeps its behavior: hidden flags only, no library scoping.
+		{name: "full list ignores library scoping", lookup: libraries("movies"), list: visible, want: []string{"always", "ebooks"}},
+		{name: "hidden-inclusive list", lookup: libraries("movies"), list: all, want: []string{"always", "ebooks", "hidden"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := keys(newManager(tt.lookup).ListTasks(ctx, tt.includeHidden))
+			got := keys(tt.list(newManager(tt.lookup)))
 			if !slices.Equal(got, tt.want) {
-				t.Fatalf("ListTasks() keys = %v, want %v", got, tt.want)
+				t.Fatalf("listed keys = %v, want %v", got, tt.want)
 			}
 		})
 	}
