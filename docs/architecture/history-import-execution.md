@@ -16,6 +16,15 @@ Episodes match through their own identifier or through a series identifier plus 
 episode number. Records without one of these identities remain unmatched; title and year do not
 establish media identity. Watch provider sync and webhook sync use the same matching rule.
 
+Emby list queries omit the production year, play count, and last-played date unless
+`Fields` names `ProductionYear`, `UserDataPlayCount`, and `UserDataLastPlayedDate`. The
+last-played date is what creates history rows and orders imported progress against local
+activity, so a missing date would leave re-imports unable to update anything. Emby lists
+are read in pages and item lookups in batches. Movie, series, and episode favorites are
+imported; Silo has no season favorites, so those are counted in a run warning. A played
+multi-episode file (S01E01-E02) marks each episode in its range watched, up to ten; a
+partly watched one stays on its first episode because its position cannot be split.
+
 A node reserves local capacity before atomically claiming a queued row. Claims use
 `FOR UPDATE SKIP LOCKED` and an incremented generation. Heartbeat, progress, and
 terminal writes require the running status and exact generation. New personal runs

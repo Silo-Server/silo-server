@@ -23746,7 +23746,7 @@
             "type": "string"
           },
           "password": {
-            "description": "Emby: the source server password when importing from a configured source",
+            "description": "Emby: the source server password when importing from a configured source; empty for an account without one",
             "type": "string"
           },
           "plex_account_token": {

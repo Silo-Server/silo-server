@@ -112,11 +112,11 @@ func (s *Service) LoginConnect(ctx context.Context, userID int, input LoginConne
 	}
 	authResp, err := s.emby.ConnectAuthenticate(ctx, input.Username, input.Password)
 	if err != nil {
-		return nil, err
+		return nil, tagUnreachable(err)
 	}
 	servers, err := s.emby.ConnectServers(ctx, authResp.ConnectUserID, authResp.ConnectAccessToken)
 	if err != nil {
-		return nil, err
+		return nil, tagUnreachable(err)
 	}
 
 	session, err := s.repo.CreateConnectSession(ctx, ConnectSession{
@@ -143,7 +143,7 @@ func (s *Service) CreatePlexPin(ctx context.Context, userID int) (*PlexPinRespon
 	}
 	pinID, pinCode, err := s.plex.CreatePin(ctx)
 	if err != nil {
-		return nil, err
+		return nil, tagUnreachable(err)
 	}
 	session, err := s.repo.CreatePlexSession(ctx, PlexSession{
 		ID:        uuid.NewString(),
@@ -187,7 +187,7 @@ func (s *Service) CheckPlexPin(ctx context.Context, userID int, sessionID string
 	}
 	authToken, err := s.plex.CheckPin(ctx, pinID)
 	if err != nil {
-		return nil, err
+		return nil, tagUnreachable(err)
 	}
 	if authToken == "" {
 		return &PlexCheckResponse{Authenticated: false}, nil
@@ -195,7 +195,7 @@ func (s *Service) CheckPlexPin(ctx context.Context, userID int, sessionID string
 
 	servers, err := s.plex.GetResources(ctx, authToken)
 	if err != nil {
-		return nil, fmt.Errorf("discovering Plex servers: %w", err)
+		return nil, tagUnreachable(fmt.Errorf("discovering Plex servers: %w", err))
 	}
 	if err := s.repo.UpdatePlexSessionAuth(ctx, session.ID, authToken, servers); err != nil {
 		return nil, err
@@ -374,7 +374,10 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 				if summary.UnmatchedReasonCounts == nil {
 					summary.UnmatchedReasonCounts = make(map[string]int)
 				}
-				summary.UnmatchedReasonCounts[reason]++
+				// Reasons name the item's IDs; count by cause so one warning
+				// covers every item that failed the same way. Samples and logs
+				// keep the full reason.
+				summary.UnmatchedReasonCounts[PublicUnmatchedReason(reason)]++
 			}
 			if len(summary.UnmatchedSamples) < maxUnmatchedSamples {
 				summary.UnmatchedSamples = append(summary.UnmatchedSamples, UnmatchedSample{
@@ -504,14 +507,21 @@ func (s *Service) applyImportedWatch(ctx context.Context, userID int, profileID,
 	return updated, created, err
 }
 
+// Run failure messages written for users; run monitors show them verbatim.
+const (
+	RunErrorSourceRejected = "Couldn't connect to that server. Check the URL, username, and password and try again."
+	RunErrorStoppedEarly   = "Import stopped early. Some history may already be imported."
+	RunErrorNotCompleted   = "Import couldn't be completed. Please try again."
+)
+
 func userFacingRunError(summary ExecutionSummary, err error) string {
 	if UpstreamHTTPStatus(err) == http.StatusUnauthorized {
-		return "Couldn't connect to that server. Check the URL, username, and password and try again."
+		return RunErrorSourceRejected
 	}
 	if summary.Fetched > 0 || summary.Matched > 0 || summary.ProgressUpdated > 0 || summary.HistoryCreated > 0 || summary.FavoritesImported > 0 {
-		return "Import stopped early. Some history may already be imported."
+		return RunErrorStoppedEarly
 	}
-	return "Import couldn't be completed. Please try again."
+	return RunErrorNotCompleted
 }
 
 func (s *Service) ListRuns(ctx context.Context, userID, limit int) ([]Run, error) {

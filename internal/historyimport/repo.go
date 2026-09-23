@@ -1290,7 +1290,7 @@ func persistedWarnings(summary ExecutionSummary) []string {
 		return reasons[i].reason < reasons[j].reason
 	})
 	for _, reason := range reasons {
-		warnings = append(warnings, fmt.Sprintf("unmatched items (%d): %s", reason.count, reason.reason))
+		warnings = append(warnings, fmt.Sprintf(unmatchedWarningFormat, reason.count, reason.reason))
 	}
 	return warnings
 }

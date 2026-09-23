@@ -160,7 +160,7 @@ type HistoryImportRunCreate struct {
 	ServerID         string `json:"server_id,omitempty" doc:"Emby: the server chosen from the connect session"`
 	SourceID         *ID    `json:"source_id,omitempty" nullable:"false" doc:"Emby or Plex: a configured source from listHistoryImportSources" example:"1"`
 	Username         string `json:"username,omitempty" doc:"Emby: the source server user name when importing from a configured source"`
-	Password         string `json:"password,omitempty" doc:"Emby: the source server password when importing from a configured source"`
+	Password         string `json:"password,omitempty" doc:"Emby: the source server password when importing from a configured source; empty for an account without one"`
 	JellyfinBaseURL  string `json:"jellyfin_base_url,omitempty" doc:"Jellyfin: the server address" example:"https://jellyfin.example.test"`
 	JellyfinUsername string `json:"jellyfin_username,omitempty" doc:"Jellyfin: the user name"`
 	JellyfinPassword string `json:"jellyfin_password,omitempty" doc:"Jellyfin: the password"`
@@ -527,14 +527,13 @@ func historyImportProblem(err error) *Problem {
 		return serviceProblem(err)
 	}
 	switch {
-	case handlers.IsHistoryImportUpstreamError(err) && apiErr.Status < 500:
-		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+	case handlers.IsHistoryImportUpstreamError(err) && apiErr.Status < 500, apiErr.Status == http.StatusBadRequest:
+		// The detail repeats the member error so clients that show only the
+		// problem detail still tell the user what to fix.
+		return NewProblem(TypeValidationFailed, apiErr.Message).
 			WithErrors(ProblemError{Location: locationBody, Code: codeInvalid, Detail: apiErr.Message})
 	case handlers.IsHistoryImportUpstreamError(err):
 		return NewProblem(TypeDependencyUnavailable, apiErr.Message).WithRetryAfter(30)
-	case apiErr.Status == http.StatusBadRequest:
-		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-			WithErrors(ProblemError{Location: locationBody, Code: codeInvalid, Detail: apiErr.Message})
 	}
 	return serviceProblem(err)
 }
@@ -593,16 +592,19 @@ func historyImportRunOf(run *historyimport.Run) HistoryImportRun {
 		out.ErrorMessage = ""
 	}
 	switch out.ErrorMessage {
-	case "", historyimport.ErrRunConfigurationChanged.Error(), historyimport.LegacyDispatchUnavailableMessage, historyimport.StaleRunInterruptedMessage, historyimport.ErrPersonalCredentialsUnavailable.Error():
+	case "", historyimport.ErrRunConfigurationChanged.Error(), historyimport.LegacyDispatchUnavailableMessage, historyimport.StaleRunInterruptedMessage, historyimport.ErrPersonalCredentialsUnavailable.Error(),
+		historyimport.RunErrorSourceRejected, historyimport.RunErrorStoppedEarly, historyimport.RunErrorNotCompleted:
 	default:
 		out.ErrorMessage = "The import failed. Review the source configuration before starting a new run."
 	}
+	// Stored warnings and reasons are diagnostics; only their fixed summaries
+	// leave the server.
 	out.Warnings = make([]string, 0, len(run.Warnings))
-	for range run.Warnings {
-		out.Warnings = append(out.Warnings, "An import item could not be processed.")
+	for _, warning := range run.Warnings {
+		out.Warnings = append(out.Warnings, historyimport.PublicWarning(warning))
 	}
 	for i := range out.UnmatchedSamples {
-		out.UnmatchedSamples[i].Reason = "No matching catalog item was imported."
+		out.UnmatchedSamples[i].Reason = historyimport.PublicUnmatchedReason(out.UnmatchedSamples[i].Reason)
 	}
 	return out
 }

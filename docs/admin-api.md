@@ -1515,7 +1515,9 @@ The personal projection always reports `cancelable: false`: this surface has no 
 command. Existing administrator cancellation can appear as nonterminal `canceling`
 until the worker acknowledges it, then terminal `cancelled`. Both personal and admin
 monitors replace persisted diagnostic errors, warnings, and unmatched reasons with safe
-summaries. Run credentials and private dispatch metadata never appear in these responses.
+summaries. Known diagnostics map to a fixed summary of their cause, such as an item with
+no provider ID or a show missing from the library; anything else reads as a generic
+summary. Run credentials and private dispatch metadata never appear in these responses.
 
 New queued personal imports survive server restart. Source changes invalidate captured
 configuration without retargeting the import; stale running executions fail without replay.

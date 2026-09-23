@@ -18772,7 +18772,7 @@ export interface components {
       jellyfin_password?: string;
       /** @description Jellyfin: the user name */
       jellyfin_username?: string;
-      /** @description Emby: the source server password when importing from a configured source */
+      /** @description Emby: the source server password when importing from a configured source; empty for an account without one */
       password?: string;
       /** @description Plex: the plex.tv account token, for watchlist import alongside a server token */
       plex_account_token?: string;

@@ -11,8 +11,18 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+)
+
+const (
+	embyPageSize    = 500
+	embyIDChunkSize = 100
+	// Emby list queries omit the year, play count, and last-played date unless
+	// Fields names them; without the date no history row or freshness
+	// timestamp can be imported.
+	embyItemFields = "ProviderIds,ProductionYear,UserDataPlayCount,UserDataLastPlayedDate"
 )
 
 type EmbyClient struct {
@@ -54,7 +64,8 @@ type embyExchangeResponse struct {
 }
 
 type embyItemsResponse struct {
-	Items []embyItem `json:"Items"`
+	Items            []embyItem `json:"Items"`
+	TotalRecordCount int        `json:"TotalRecordCount"`
 }
 
 type embyItem struct {
@@ -67,6 +78,7 @@ type embyItem struct {
 	SeriesID          string            `json:"SeriesId"`
 	ProviderIDs       map[string]string `json:"ProviderIds"`
 	IndexNumber       int               `json:"IndexNumber"`
+	IndexNumberEnd    int               `json:"IndexNumberEnd"`
 	ParentIndexNumber int               `json:"ParentIndexNumber"`
 	UserData          struct {
 		PlaybackPositionTicks int64      `json:"PlaybackPositionTicks"`
@@ -203,54 +215,78 @@ func (c *EmbyClient) FetchItems(ctx context.Context, auth embyLocalAuth, filter 
 	return c.fetchItems(ctx, auth, filter, "Movie,Episode")
 }
 
+// FetchFavoriteItems includes seasons so the provider can report the season
+// favorites Silo has no target for, rather than dropping them silently.
 func (c *EmbyClient) FetchFavoriteItems(ctx context.Context, auth embyLocalAuth) ([]embyItem, error) {
-	return c.fetchItems(ctx, auth, "IsFavorite", "Movie,Series")
+	return c.fetchItems(ctx, auth, "IsFavorite", "Movie,Series,Season,Episode")
 }
 
+// fetchItems pages through the user's items so a large library is read in
+// bounded responses instead of one body racing the client timeout.
 func (c *EmbyClient) fetchItems(ctx context.Context, auth embyLocalAuth, filter, includeItemTypes string) ([]embyItem, error) {
-	query := url.Values{}
-	query.Set("Recursive", "true")
-	query.Set("EnableUserData", "true")
-	query.Set("Fields", "ProviderIds")
-	query.Set("IncludeItemTypes", includeItemTypes)
-	query.Set("Filters", filter)
-	path := fmt.Sprintf("%s/Users/%s/Items?%s", auth.BaseURL, url.PathEscape(auth.UserID), query.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
+	var items []embyItem
+	for startIndex := 0; ; {
+		query := url.Values{}
+		query.Set("Recursive", "true")
+		query.Set("EnableUserData", "true")
+		query.Set("Fields", embyItemFields)
+		query.Set("IncludeItemTypes", includeItemTypes)
+		query.Set("Filters", filter)
+		query.Set("StartIndex", strconv.Itoa(startIndex))
+		query.Set("Limit", strconv.Itoa(embyPageSize))
+		payload, err := c.getItems(ctx, auth, query)
+		if err != nil {
+			return nil, fmt.Errorf("fetching Emby items with filter %s: %w", filter, err)
+		}
+		items = append(items, payload.Items...)
+		startIndex += len(payload.Items)
+		if len(payload.Items) == 0 {
+			return items, nil
+		}
+		// Trust the reported total so a server capping page size below the
+		// request is still read to the end; without one, a short page is last.
+		if payload.TotalRecordCount > 0 {
+			if startIndex >= payload.TotalRecordCount {
+				return items, nil
+			}
+		} else if len(payload.Items) < embyPageSize {
+			return items, nil
+		}
 	}
-	req.Header.Set("X-Emby-Token", auth.AccessToken)
-	req.Header.Set("X-Emby-Authorization", embyAuthorizationHeader(auth.UserID, auth.AccessToken))
-	var payload embyItemsResponse
-	if err := c.doJSON(req, &payload); err != nil {
-		return nil, fmt.Errorf("fetching Emby items with filter %s: %w", filter, err)
-	}
-	return payload.Items, nil
 }
 
 func (c *EmbyClient) FetchItemsByIDs(ctx context.Context, auth embyLocalAuth, ids []string, includeItemTypes string) ([]embyItem, error) {
-	if len(ids) == 0 {
-		return nil, nil
+	var items []embyItem
+	for chunk := range slices.Chunk(ids, embyIDChunkSize) {
+		query := url.Values{}
+		query.Set("Recursive", "true")
+		query.Set("Fields", embyItemFields)
+		query.Set("Ids", strings.Join(chunk, ","))
+		if strings.TrimSpace(includeItemTypes) != "" {
+			query.Set("IncludeItemTypes", includeItemTypes)
+		}
+		payload, err := c.getItems(ctx, auth, query)
+		if err != nil {
+			return nil, fmt.Errorf("fetching Emby items by ids: %w", err)
+		}
+		items = append(items, payload.Items...)
 	}
-	query := url.Values{}
-	query.Set("Recursive", "true")
-	query.Set("Fields", "ProviderIds")
-	query.Set("Ids", strings.Join(ids, ","))
-	if strings.TrimSpace(includeItemTypes) != "" {
-		query.Set("IncludeItemTypes", includeItemTypes)
-	}
+	return items, nil
+}
+
+func (c *EmbyClient) getItems(ctx context.Context, auth embyLocalAuth, query url.Values) (embyItemsResponse, error) {
 	path := fmt.Sprintf("%s/Users/%s/Items?%s", auth.BaseURL, url.PathEscape(auth.UserID), query.Encode())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return nil, err
+		return embyItemsResponse{}, err
 	}
 	req.Header.Set("X-Emby-Token", auth.AccessToken)
 	req.Header.Set("X-Emby-Authorization", embyAuthorizationHeader(auth.UserID, auth.AccessToken))
 	var payload embyItemsResponse
 	if err := c.doJSON(req, &payload); err != nil {
-		return nil, fmt.Errorf("fetching Emby items by ids: %w", err)
+		return embyItemsResponse{}, err
 	}
-	return payload.Items, nil
+	return payload, nil
 }
 
 func (c *EmbyClient) doJSON(req *http.Request, out any) error {

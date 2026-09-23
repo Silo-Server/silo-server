@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -215,6 +216,20 @@ func TestCreateHistoryImportRun(t *testing.T) {
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body" || p.Errors[0].Detail != "plex_session_id or source_id is required for Plex imports" {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
+	// Clients that show only the problem detail still say what to fix.
+	if p.Detail != "plex_session_id or source_id is required for Plex imports" {
+		t.Fatalf("detail = %q", p.Detail)
+	}
+	fake.createErr = upstreamAPIError(t, http.StatusUnauthorized)
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"emby","source_id":"1","username":"alice"}`, bearer(memberToken)), TypeValidationFailed)
+	if p.Detail != historyimport.RunErrorSourceRejected {
+		t.Fatalf("rejected credential detail = %q", p.Detail)
+	}
+	fake.createErr = handlers.HistoryImportUnreachableAPIError()
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"emby","source_id":"1","username":"alice"}`, bearer(memberToken)), TypeDependencyUnavailable)
+	if !strings.HasPrefix(p.Detail, "Couldn't reach the source server.") {
+		t.Fatalf("unreachable detail = %q", p.Detail)
+	}
 	fake.createErr = &handlers.APIError{Status: http.StatusConflict, Code: "conflict", Message: historyimport.ErrActiveRunExists.Error()}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"plex"}`, bearer(memberToken)), TypeConflict)
 	fake.createErr = &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: historyimport.ErrProfileNotFound.Error()}
@@ -320,5 +335,33 @@ func TestHistoryImportDemoGuard(t *testing.T) {
 	}
 	if r := do(t, h, http.MethodPost, Prefix+"/history-imports/plex/auth/pin", "", bearer(adminToken)); r.Code != 200 || fake.pinCalls != 1 {
 		t.Fatalf("admin demo write: %d %s", r.Code, r.Body)
+	}
+}
+
+func TestHistoryImportRunShowsSafeSummaries(t *testing.T) {
+	run := historyImportRunOf(&historyimport.Run{
+		ID:           "run-3",
+		Status:       historyimport.RunStatusFailed,
+		ErrorMessage: historyimport.RunErrorStoppedEarly,
+		Warnings: []string{
+			"unmatched items (2): missing tmdb_id, imdb_id, or tvdb_id",
+			"fetching Emby favorites: emby http 500: <html>internal stack</html>",
+			"pq: relation user_favorites does not exist",
+		},
+		UnmatchedSamples: []historyimport.UnmatchedSample{{Kind: "movie", Title: "Blade Runner 2049", Reason: `no tmdb_id match for "335984"`}},
+	})
+	if run.ErrorMessage != historyimport.RunErrorStoppedEarly {
+		t.Fatalf("error message = %q, want the user-facing run error", run.ErrorMessage)
+	}
+	want := []string{
+		"Not matched (2): The source item has no TMDB, IMDb, or TVDB ID.",
+		"Emby favorites couldn't be read, so none were imported.",
+		historyimport.GenericRunWarning,
+	}
+	if !slices.Equal(run.Warnings, want) {
+		t.Fatalf("warnings = %q, want %q", run.Warnings, want)
+	}
+	if got := run.UnmatchedSamples[0].Reason; got != "Nothing in the library has the same TMDB, IMDb, or TVDB ID." {
+		t.Fatalf("unmatched reason = %q", got)
 	}
 }

@@ -7,7 +7,18 @@ import (
 	"time"
 )
 
-const missingProviderIDsReason = "missing tmdb_id, imdb_id, or tvdb_id"
+// Matcher reasons are diagnostics; PublicUnmatchedReason keys its summaries
+// on these constants and prefixes.
+const (
+	missingProviderIDsReason   = "missing tmdb_id, imdb_id, or tvdb_id"
+	missingEpisodeNumberReason = "missing season or episode number"
+	unsupportedKindReason      = "unsupported item kind"
+	seriesMatchFailedPrefix    = "series match failed: "
+	missingEpisodeReasonPrefix = "no matching episode for "
+	ambiguousReasonPrefix      = "ambiguous "
+	noMatchReasonPrefix        = "no "
+	noMatchReasonMarker        = " match for "
+)
 
 type matcherRepository interface {
 	MatchMediaByExternalID(ctx context.Context, kind, column, value string) ([]mediaLookupRow, error)
@@ -34,7 +45,7 @@ func (m *Matcher) Match(ctx context.Context, record Record) (*Match, string, err
 	case KindSeries:
 		return m.matchSeries(ctx, record)
 	default:
-		return nil, "unsupported item kind", nil
+		return nil, unsupportedKindReason, nil
 	}
 }
 
@@ -82,7 +93,7 @@ func (m *Matcher) MatchLeaves(ctx context.Context, record Record) ([]Match, stri
 		}
 		return matches, "", nil
 	default:
-		return nil, "unsupported item kind", nil
+		return nil, unsupportedKindReason, nil
 	}
 }
 
@@ -135,7 +146,7 @@ func (m *Matcher) matchEpisode(ctx context.Context, record Record) (*Match, stri
 	}
 
 	if record.EpisodeNumber <= 0 {
-		attempts = append(attempts, "missing season or episode number")
+		attempts = append(attempts, missingEpisodeNumberReason)
 		return nil, strings.Join(attempts, "; "), nil
 	}
 
@@ -190,7 +201,7 @@ func (m *Matcher) matchEpisode(ctx context.Context, record Record) (*Match, stri
 		return nil, "", err
 	}
 	if seriesMatch == nil {
-		attempts = append(attempts, "series match failed: "+reason)
+		attempts = append(attempts, seriesMatchFailedPrefix+reason)
 		return nil, strings.Join(attempts, "; "), nil
 	}
 
@@ -199,7 +210,7 @@ func (m *Matcher) matchEpisode(ctx context.Context, record Record) (*Match, stri
 		return nil, "", err
 	}
 	if match == nil {
-		attempts = append(attempts, fmt.Sprintf("no matching episode for S%02dE%02d", record.SeasonNumber, record.EpisodeNumber))
+		attempts = append(attempts, fmt.Sprintf(missingEpisodeReasonPrefix+"S%02dE%02d", record.SeasonNumber, record.EpisodeNumber))
 		return nil, strings.Join(attempts, "; "), nil
 	}
 	return match, "", nil

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -308,6 +309,11 @@ func historyImportAPIError(err error) *APIError {
 	case errors.Is(err, historyimport.ErrActiveRunExists),
 		errors.Is(err, historyimport.ErrMappingDuplicate):
 		return &APIError{Status: http.StatusConflict, Code: policyErrorConflict, Message: err.Error(), cause: err}
+	case errors.Is(err, historyimport.ErrSourceUnreachable):
+		slog.Warn("history import: source unreachable", "error", err)
+		return HistoryImportUnreachableAPIError()
+	case errors.Is(err, historyimport.ErrInvalidInput):
+		return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: historyImportInputMessage(err), cause: err}
 	default:
 		if status := historyimport.UpstreamHTTPStatus(err); status > 0 {
 			return HistoryImportUpstreamAPIError(status)
@@ -336,10 +342,36 @@ func HistoryImportUpstreamAPIError(status int) *APIError {
 	return &APIError{Status: httpStatus, Code: code, Message: message, cause: errHistoryImportUpstream}
 }
 
+// HistoryImportUnreachableAPIError is the *APIError for a source server that
+// could not be reached at all: DNS, connection, TLS, or timeout failures.
+func HistoryImportUnreachableAPIError() *APIError {
+	httpStatus, code, _ := historyImportUpstreamError(http.StatusBadGateway)
+	return &APIError{
+		Status:  httpStatus,
+		Code:    code,
+		Message: "Couldn't reach the source server. Check that it's online and reachable from Silo, then try again.",
+		cause:   errHistoryImportUpstream,
+	}
+}
+
+// historyImportInputMessage returns the detail an ErrInvalidInput wraps as a
+// sentence: "invalid history import input: choose a server" becomes
+// "Choose a server.". A leading field name such as base_url keeps its case.
+func historyImportInputMessage(err error) string {
+	_, detail, _ := strings.Cut(err.Error(), historyimport.ErrInvalidInput.Error()+": ")
+	if detail == "" {
+		return "Check the import details and try again."
+	}
+	if first, _, _ := strings.Cut(detail, " "); !strings.Contains(first, "_") {
+		detail = strings.ToUpper(detail[:1]) + detail[1:]
+	}
+	return detail + "."
+}
+
 func historyImportUpstreamError(status int) (int, string, string) {
 	switch {
 	case status == http.StatusUnauthorized:
-		return http.StatusUnauthorized, "unauthorized", "Couldn't connect to that server. Check the URL, username, and password and try again."
+		return http.StatusUnauthorized, policyErrorUnauthorized, historyimport.RunErrorSourceRejected
 	case status >= 400 && status < 500:
 		return http.StatusBadRequest, "bad_request", "Couldn't start the import with those server settings."
 	default:

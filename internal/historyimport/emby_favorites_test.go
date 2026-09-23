@@ -2,6 +2,8 @@ package historyimport
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -121,4 +123,46 @@ func (s *favoriteInsertTestStore) AddFavoriteAt(context.Context, string, string,
 func (s *favoriteInsertTestStore) IsFavorite(context.Context, string, string) (bool, error) {
 	s.isFavoriteCalls++
 	return false, nil
+}
+
+func TestRunCountsUnmatchedItemsByCause(t *testing.T) {
+	ctx := context.Background()
+	pool := newPlexWatchlistImportTestPool(t)
+	repo := NewRepository(pool, nil)
+	service := &Service{
+		repo:         repo,
+		matcher:      NewMatcher(repo),
+		stores:       pgstore.NewPostgresProvider(pool),
+		bgContext:    ctx,
+		runSemaphore: make(chan struct{}, maxConcurrentRuns),
+		runCancels:   make(map[string]context.CancelFunc),
+	}
+	run, err := repo.CreateRun(ctx, Run{
+		ID: "unmatched-causes-run", UserID: 42, ProfileID: "profile-1", SourceType: SourceTypeEmby,
+		ConnectionMode: ConnectionModeCustom, Status: RunStatusQueued, Warnings: []string{}, UnmatchedSamples: []UnmatchedSample{},
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	service.executeRun(run, staticWatchlistProvider{records: []Record{
+		{ExternalID: "1", Kind: KindMovie, Title: "One", TMDBID: "1001", Played: true},
+		{ExternalID: "2", Kind: KindMovie, Title: "Two", TMDBID: "1002", Played: true},
+		{ExternalID: "3", Kind: KindMovie, Title: "Home Video", Played: true},
+	}})
+
+	completed, err := repo.GetRunForUser(ctx, 42, run.ID)
+	if err != nil {
+		t.Fatalf("GetRunForUser: %v", err)
+	}
+	want := []string{
+		fmt.Sprintf(unmatchedWarningFormat, 2, unmatchedNotInLibrary),
+		fmt.Sprintf(unmatchedWarningFormat, 1, unmatchedNoProviderIDs),
+	}
+	if !slices.Equal(completed.Warnings, want) {
+		t.Fatalf("warnings = %q, want %q", completed.Warnings, want)
+	}
+	if completed.UnmatchedSamples[0].Reason != `no tmdb_id match for "1001"` {
+		t.Fatalf("sample reason = %q, want the full diagnostic", completed.UnmatchedSamples[0].Reason)
+	}
 }
