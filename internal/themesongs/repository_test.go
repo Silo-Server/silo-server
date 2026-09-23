@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -13,6 +14,60 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestRepositoryDirectoriesCanonicalRootBoundaries(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	var folder int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,enabled) VALUES('podcast','Theme directory test',true) RETURNING id`).Scan(&folder); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id=$1`, folder) }()
+	const root = "/theme-directory-fixture"
+	const directory = root + "/Season 1"
+	const file = directory + "/episode.mp3"
+	if _, err := pool.Exec(ctx, `INSERT INTO media_files(media_folder_id,file_path,canonical_root_path) VALUES($1,$2,$3)`, folder, file, root); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(pool)
+	for _, tc := range []struct {
+		name string
+		root string
+		want []string
+	}{
+		{"clean", root, []string{root, directory}},
+		{"trailing slash", root + "/", []string{root, directory}},
+		{"dot component", root + "/.", []string{root, directory}},
+		{"parent component", root + "/nested/..", []string{root, directory}},
+		{"filesystem root", "/", []string{"/", root, directory}},
+		{"empty root", "", []string{directory}},
+		{"file root", file, []string{directory}},
+		{"sibling prefix", root + "-other", []string{directory}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, `UPDATE media_files SET canonical_root_path=$1 WHERE media_folder_id=$2`, tc.root, folder); err != nil {
+				t.Fatal(err)
+			}
+			for _, scope := range []string{"", directory} {
+				got, err := repo.Directories(ctx, folder, scope)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Equal(got, tc.want) {
+					t.Errorf("root=%q scope=%q: directories=%q, want %q", tc.root, scope, got, tc.want)
+				}
+			}
+		})
+	}
+}
 
 func TestRepositoryInheritanceRematchingAndAccess(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")

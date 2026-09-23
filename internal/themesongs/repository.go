@@ -214,10 +214,13 @@ func (r *Repository) Directories(ctx context.Context, folderID int, scope string
 			return nil, err
 		}
 		seen[path] = true
+		if root != "" {
+			root = filepath.Clean(root)
+		}
 		if rel, err := filepath.Rel(root, path); root != "" && err == nil && (rel == "." || filepath.IsLocal(rel)) {
 			for dir := path; ; dir = filepath.Dir(dir) {
 				seen[dir] = true
-				if dir == root {
+				if dir == root || filepath.Dir(dir) == dir {
 					break
 				}
 			}
