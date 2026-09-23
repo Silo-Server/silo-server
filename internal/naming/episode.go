@@ -51,6 +51,11 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 			if (pattern == xEpisodeRe && (!validXEpisodeCoordinate(name, match) || inDatedEpisodeTitle(name, match[2]))) || !episodePartBoundary(name, match[5]) {
 				continue
 			}
+			// A bare aspect ratio (Movie.Name.16x9) is a coordinate only in a
+			// season folder or a series library.
+			if pattern == xEpisodeRe && aspectRatioRe.MatchString(name[match[2]:match[5]]) && !hasSeriesContext(directories, allowNumericSeason, allowUnseasoned...) {
+				continue
+			}
 			token := episodeToken{season: season, seasonKnown: true, episode: parseEpisodeNumber(name[match[4]:match[5]]), start: match[0], end: match[5]}
 			return finishEpisodeToken(name, token), true
 		}
@@ -158,6 +163,23 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 		}
 	}
 	return trailing()
+}
+
+// hasSeriesContext reports whether a file sits in a season folder or a
+// declared series library.
+func hasSeriesContext(directories []string, allowNumericSeason bool, allowUnseasoned ...bool) bool {
+	if len(allowUnseasoned) > 0 && allowUnseasoned[0] {
+		return true
+	}
+	if len(directories) == 0 {
+		return false
+	}
+	showDirectory := ""
+	if len(directories) > 1 {
+		showDirectory = directories[len(directories)-2]
+	}
+	_, ok := seasonDirectoryNumber(directories[len(directories)-1], showDirectory, allowNumericSeason)
+	return ok
 }
 
 // inDatedEpisodeTitle reports whether an NxM coordinate starting at index sits

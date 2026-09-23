@@ -93,6 +93,26 @@ func TestYearSeasonCoordinateIsNotPictureSize(t *testing.T) {
 	}
 }
 
+func TestBareAspectRatioNeedsSeriesContext(t *testing.T) {
+	for _, tt := range []struct {
+		path, libraryType string
+		kind              string
+		season, episode   int
+	}{
+		{"/mixed/Movie.Name.16x9.mkv", "mixed", "movie", 0, 0},
+		{"/mixed/Movie Name (2001)/Movie.Name.4x3.mkv", "mixed", "movie", 0, 0},
+		{"/mixed/Movie.Name.21x9.mkv", "mixed", "movie", 0, 0},
+		{"/mixed/Example Show/Season 16/Example.Show.16x9.mkv", "mixed", "series", 16, 9},
+		{"/series/Example Show/Example.Show.16x9.mkv", "series", "series", 16, 9},
+	} {
+		root := "/" + tt.libraryType
+		hints := ParseFilename(tt.path, tt.libraryType, root)
+		if hints.Type != tt.kind || hints.SeasonNum != tt.season || hints.EpisodeNum != tt.episode {
+			t.Fatalf("%s: %+v", tt.path, hints)
+		}
+	}
+}
+
 func TestSeriesFilenameCorroboratesMissingFolderYear(t *testing.T) {
 	for _, filename := range []string{"Example Show (1994) - S01E02", "Another Show (1994) - S01E02"} {
 		hints := ParseFilename("/tv/Example Show {tvdb-12345}/Season 01/"+filename+".mkv", "series", "/tv")
