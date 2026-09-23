@@ -111,6 +111,17 @@ func (r *fakeItemRepo) Upsert(_ context.Context, item *models.MediaItem) error {
 	return nil
 }
 
+func (r *fakeItemRepo) InsertIfAbsent(_ context.Context, item *models.MediaItem) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ContentID]; ok {
+		return false, nil
+	}
+	cp := *item
+	r.items[item.ContentID] = &cp
+	return true, nil
+}
+
 func (r *fakeItemRepo) Delete(_ context.Context, contentID string) ([]string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

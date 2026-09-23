@@ -492,9 +492,40 @@ func (r *ItemRepository) UpsertTx(ctx context.Context, tx pgx.Tx, item *models.M
 	return r.upsert(ctx, tx, item)
 }
 
+// InsertIfAbsent inserts a new media item and leaves an existing row with the
+// same content_id untouched. It reports whether this call inserted the row, so
+// concurrent creators of a deterministic content_id can tell the winner apart
+// without overwriting metadata another writer already stored.
+func (r *ItemRepository) InsertIfAbsent(ctx context.Context, item *models.MediaItem) (bool, error) {
+	if r.searchIndexEvents.disabledByActiveProvider() {
+		return r.writeItem(ctx, r.pool, item, false)
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin media item insert tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	inserted, err := r.writeItem(ctx, tx, item, false)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit media item insert tx: %w", err)
+	}
+	return inserted, nil
+}
+
 func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *models.MediaItem) error {
+	_, err := r.writeItem(ctx, execer, item, true)
+	return err
+}
+
+// writeItem inserts item and, when update is set, overwrites every mutable
+// field of an existing row. It reports whether a row was written.
+func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item *models.MediaItem, update bool) (bool, error) {
 	if item.ContentID == "" {
-		return fmt.Errorf("refusing to upsert media item with empty content_id")
+		return false, fmt.Errorf("refusing to write media item with empty content_id")
 	}
 	studios := nonNilStringSlice(item.Studios)
 	networks := nonNilStringSlice(item.Networks)
@@ -523,7 +554,11 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			$41,
 			$42, $43, $44,
 			$45, $46, $47
-		)
+		)`
+	conflict := `
+		ON CONFLICT (content_id) DO NOTHING`
+	if update {
+		conflict = `
 		ON CONFLICT (content_id) DO UPDATE SET
 			type = EXCLUDED.type,
 			title = EXCLUDED.title,
@@ -572,8 +607,9 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			episode_metadata_last_checked_at = EXCLUDED.episode_metadata_last_checked_at,
 			status = EXCLUDED.status,
 			updated_at = NOW()`
+	}
 
-	_, err := execer.Exec(ctx, query,
+	tag, err := execer.Exec(ctx, query+conflict,
 		item.ContentID,
 		item.Type,
 		item.Title,
@@ -623,14 +659,17 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 		item.Status,
 	)
 	if err != nil {
-		return fmt.Errorf("upserting media item: %w", err)
+		return false, fmt.Errorf("writing media item: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
 	}
 
 	if err := r.searchIndexEvents.EnqueueUpsert(ctx, execer, item.ContentID); err != nil {
-		return fmt.Errorf("enqueueing catalog search upsert: %w", err)
+		return false, fmt.Errorf("enqueueing catalog search upsert: %w", err)
 	}
 
-	return nil
+	return true, nil
 }
 
 func nonNilStringSlice(values []string) []string {

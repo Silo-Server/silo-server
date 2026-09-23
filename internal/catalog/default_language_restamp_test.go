@@ -84,6 +84,52 @@ func TestItemUpsertRestampsDefaultMetadataLanguage(t *testing.T) {
 	}
 }
 
+// TestItemInsertIfAbsentKeepsExistingRow verifies that a second creator of the
+// same content_id neither overwrites the stored row nor reports an insert.
+func TestItemInsertIfAbsentKeepsExistingRow(t *testing.T) {
+	ctx := context.Background()
+	pool := newRestampTestPool(t)
+	repo := NewItemRepository(pool)
+
+	contentID := fmt.Sprintf("insert-if-absent-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, contentID)
+	})
+
+	skeleton := &models.MediaItem{
+		ContentID: contentID,
+		Type:      "series",
+		Title:     "Example Show",
+		Status:    "pending",
+		Studios:   []string{},
+		Networks:  []string{},
+		Countries: []string{},
+		Genres:    []string{},
+	}
+	inserted, err := repo.InsertIfAbsent(ctx, skeleton)
+	if err != nil || !inserted {
+		t.Fatalf("first insert = %v, %v; want inserted", inserted, err)
+	}
+	matched := *skeleton
+	matched.Title = "Matched Show"
+	matched.Status = "matched"
+	if err := repo.Upsert(ctx, &matched); err != nil {
+		t.Fatalf("match upsert: %v", err)
+	}
+
+	inserted, err = repo.InsertIfAbsent(ctx, skeleton)
+	if err != nil || inserted {
+		t.Fatalf("second insert = %v, %v; want not inserted", inserted, err)
+	}
+	got, err := repo.GetByID(ctx, contentID)
+	if err != nil {
+		t.Fatalf("get item: %v", err)
+	}
+	if got.Title != "Matched Show" || got.Status != "matched" {
+		t.Fatalf("second insert overwrote the row: title=%q status=%q", got.Title, got.Status)
+	}
+}
+
 // TestSeasonAndEpisodeUpsertRestampDefaultMetadataLanguage verifies the same
 // restamp-on-upsert semantics for the season and episode tables, which carry
 // their own default_metadata_language pins.

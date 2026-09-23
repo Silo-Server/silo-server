@@ -80,6 +80,11 @@ type metadataItemDeleteRepo interface {
 	Delete(ctx context.Context, contentID string) ([]string, error)
 }
 
+// metadataItemInsertRepo creates an item only when its content_id is free.
+type metadataItemInsertRepo interface {
+	InsertIfAbsent(ctx context.Context, item *models.MediaItem) (bool, error)
+}
+
 // metadataTrailerRefreshRepo is the cooldown gate behind
 // RequestTrailersRefresh. It is a separate optional interface (asserted on
 // itemRepo) because only the viewer-facing trailer action needs it; the
@@ -6361,24 +6366,6 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	if err != nil {
 		return nil, fmt.Errorf("generate content id: %w", err)
 	}
-	if flatSeriesGroup {
-		// Another node may have created, and even matched, this group's item
-		// after the group check above. Upsert would reset it to a skeleton.
-		existing, err := s.itemRepo.GetByID(ctx, contentID)
-		if err != nil && !errors.Is(err, catalog.ErrItemNotFound) {
-			return nil, fmt.Errorf("loading existing group item: %w", err)
-		}
-		if existing != nil {
-			if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, existing.ContentID); linkErr != nil {
-				return nil, fmt.Errorf("linking file to existing group item: %w", linkErr)
-			}
-			if err := s.upsertLibraryMembership(ctx, existing.ContentID, folderID); err != nil {
-				s.logLibraryMembershipError("upserting existing group item membership", existing.ContentID, folderID, err)
-			}
-			res.ContentID = existing.ContentID
-			return res, nil
-		}
-	}
 	item := &models.MediaItem{
 		ContentID: contentID,
 		Status:    res.ItemStatus,
@@ -6395,7 +6382,25 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	item.ImdbID = res.ImdbID
 	item.TvdbID = res.TvdbID
 
-	if err := s.itemRepo.Upsert(ctx, item); err != nil {
+	if inserter, ok := s.itemRepo.(metadataItemInsertRepo); ok && flatSeriesGroup {
+		// Another node may have created, and even matched, this group's item
+		// after the group check above. Upsert would reset it to a skeleton, so
+		// only the first creator writes it and later ones link to it.
+		inserted, err := inserter.InsertIfAbsent(ctx, item)
+		if err != nil {
+			return nil, fmt.Errorf("creating skeleton item: %w", err)
+		}
+		if !inserted {
+			if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, contentID); linkErr != nil {
+				return nil, fmt.Errorf("linking file to existing group item: %w", linkErr)
+			}
+			if err := s.upsertLibraryMembership(ctx, contentID, folderID); err != nil {
+				s.logLibraryMembershipError("upserting existing group item membership", contentID, folderID, err)
+			}
+			res.ContentID = contentID
+			return res, nil
+		}
+	} else if err := s.itemRepo.Upsert(ctx, item); err != nil {
 		return nil, fmt.Errorf("creating skeleton item: %w", err)
 	}
 
