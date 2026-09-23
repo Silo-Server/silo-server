@@ -54,6 +54,45 @@ func TestDatedSeriesFoldersPreserveCoordinateLikeTitles(t *testing.T) {
 	}
 }
 
+func TestDatedEpisodeTitleCoordinateDoesNotReplaceAirDate(t *testing.T) {
+	for _, tt := range []struct {
+		file            string
+		season, episode int
+	}{
+		// An NxM inside the episode title is title text; the air date and
+		// the season folder identify the episode.
+		{"Season 21/Example Court (1996) - 2016-10-25 - Salon Fail!; 2x4 Vandalism Victim - [HDTV-1080p].mkv", 21, 0},
+		{"Season 21/Example Court (1996) - 2016-10-25 - The 3x5 Card.mkv", 21, 0},
+		// A coordinate that directly follows the date is the episode.
+		{"Season 2024/Example Court (1996) - 2024-10-01 - 2024x246 - [WEBDL-1080p].mp4", 2024, 246},
+		{"Season 04/Example Court (1996) - 2024-09-18 - 4x221 - [WEBDL-480p].mkv", 4, 221},
+	} {
+		hints := ParseFilename("/tv/Example Court (1996) {tvdb-12345}/"+tt.file, "series", "/tv")
+		if hints.SeasonNum != tt.season || hints.EpisodeNum != tt.episode || hints.AirDate == "" {
+			t.Fatalf("%s: %+v", tt.file, hints)
+		}
+	}
+}
+
+func TestYearSeasonCoordinateIsNotPictureSize(t *testing.T) {
+	for _, tt := range []struct {
+		name            string
+		season, episode int
+		ok              bool
+	}{
+		{"Example News - 2024x246", 2024, 246, true},
+		{"Example News - 1999x366", 1999, 366, true},
+		{"Example Show 1920x1080", 0, 0, false},
+		{"Example Show 2048x1080", 0, 0, false},
+		{"Example Show 720x480", 0, 0, false},
+	} {
+		token, ok := parseEpisodeToken(tt.name, nil, false)
+		if ok != tt.ok || token.season != tt.season || token.episode != tt.episode {
+			t.Fatalf("%s: ok=%v %+v", tt.name, ok, token)
+		}
+	}
+}
+
 func TestSeriesFilenameCorroboratesMissingFolderYear(t *testing.T) {
 	for _, filename := range []string{"Example Show (1994) - S01E02", "Another Show (1994) - S01E02"} {
 		hints := ParseFilename("/tv/Example Show {tvdb-12345}/Season 01/"+filename+".mkv", "series", "/tv")

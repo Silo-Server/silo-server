@@ -48,7 +48,7 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 	for _, pattern := range []*regexp.Regexp{labeledEpisodeRe, xEpisodeRe} {
 		for _, match := range pattern.FindAllStringSubmatchIndex(name, -1) {
 			season, _ := strconv.Atoi(name[match[2]:match[3]])
-			if (pattern == xEpisodeRe && !validXEpisodeCoordinate(name, match)) || !episodePartBoundary(name, match[5]) {
+			if (pattern == xEpisodeRe && (!validXEpisodeCoordinate(name, match) || inDatedEpisodeTitle(name, match[2]))) || !episodePartBoundary(name, match[5]) {
 				continue
 			}
 			token := episodeToken{season: season, seasonKnown: true, episode: parseEpisodeNumber(name[match[4]:match[5]]), start: match[0], end: match[5]}
@@ -158,6 +158,14 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 		}
 	}
 	return trailing()
+}
+
+// inDatedEpisodeTitle reports whether an NxM coordinate starting at index sits
+// in the episode title of a dated name ("Show - 2016-10-25 - Title 2x4") rather
+// than directly after the date ("Show - 2024-10-01 - 2024x246").
+func inDatedEpisodeTitle(name string, index int) bool {
+	date := airDateRe.FindStringSubmatchIndex(name)
+	return date != nil && index > date[7] && strings.Trim(name[date[7]:index], " ._-") != ""
 }
 
 // delimitedEpisodeToken reads "Show - 05 - Part 2" and "05 - Title", where a
@@ -288,17 +296,23 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 	if strings.Trim(name[:start], " ._-") == "" && titleYearAfterRe.MatchString(name[match[5]:]) {
 		return false
 	}
-	// Two multi-digit sides describe a picture size (176x144, 720x480).
-	if match[3]-start >= 3 && len(episode) >= 3 {
+	season, _ := strconv.Atoi(name[start:match[3]])
+	// Two multi-digit sides describe a picture size (176x144, 720x480), but a
+	// year-numbered season keeps its day count (2024x246); see below.
+	if match[3]-start >= 3 && len(episode) >= 3 && !yearSeasonDay(season, number) {
 		return false
 	}
-	season, _ := strconv.Atoi(name[start:match[3]])
 	if season < 200 {
 		return true
 	}
-	// Year-numbered seasons start with the first year supported by metadata
-	// and hold at most one episode per day.
-	return season >= 1928 && season <= 2500 && len(episode) <= 3 && number <= 366
+	return len(episode) <= 3 && yearSeasonDay(season, number)
+}
+
+// yearSeasonDay reports a year-numbered season coordinate. Such seasons start
+// with the first year supported by metadata and hold at most one episode per
+// day.
+func yearSeasonDay(season, episode int) bool {
+	return season >= 1928 && season <= 2500 && episode <= 366
 }
 
 func isASCIIDigit(b byte) bool {
