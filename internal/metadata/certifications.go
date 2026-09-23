@@ -17,19 +17,45 @@ func (s *MetadataService) SetCertificationProvider(provider CertificationProvide
 	s.certificationProvider = provider
 }
 
+// RefreshItemCertifications only updates the selected item's country snapshot.
+// It does not scan files, match providers, or rewrite other metadata.
+func (s *MetadataService) RefreshItemCertifications(ctx context.Context, contentID string) error {
+	if s.certificationProvider == nil || s.dbPool == nil || s.itemRepo == nil {
+		return fmt.Errorf("certification refresh is not configured")
+	}
+	item, err := s.itemRepo.GetByID(ctx, contentID)
+	if err != nil {
+		return err
+	}
+	if item.Type != matchContentTypeMovie && item.Type != matchContentTypeSeries {
+		return fmt.Errorf("certification refresh supports movies and series")
+	}
+	if isFieldLocked(intSliceToFields(item.LockedFields), FieldContentRating) {
+		return fmt.Errorf("content rating is locked; unlock it before refreshing certifications")
+	}
+	if item.TmdbID == "" {
+		return fmt.Errorf("item has no TMDB match")
+	}
+	return s.fetchAndStoreCertifications(ctx, item)
+}
+
 func (s *MetadataService) refreshCertifications(ctx context.Context, item *models.MediaItem, folderID int, locked []MetadataField) error {
 	if s.certificationProvider == nil || s.dbPool == nil || isFieldLocked(locked, FieldContentRating) || (item.Type != matchContentTypeMovie && item.Type != matchContentTypeSeries) {
 		return nil
 	}
 	var needsCountryRatings bool
 	if err := s.dbPool.QueryRow(ctx, `SELECT EXISTS (
- SELECT 1 FROM media_folders f WHERE f.certification_country = 'AU' AND
+ SELECT 1 FROM media_folders f WHERE f.enabled AND f.certification_country = 'AU' AND
  (f.id = $2 OR EXISTS (SELECT 1 FROM media_item_libraries l WHERE l.content_id = $1 AND l.media_folder_id = f.id)))`, item.ContentID, folderID).Scan(&needsCountryRatings); err != nil {
 		return err
 	}
 	if !needsCountryRatings {
 		return nil
 	}
+	return s.fetchAndStoreCertifications(ctx, item)
+}
+
+func (s *MetadataService) fetchAndStoreCertifications(ctx context.Context, item *models.MediaItem) error {
 	if item.TmdbID == "" {
 		return nil
 	}

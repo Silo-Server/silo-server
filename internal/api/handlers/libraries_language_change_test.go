@@ -111,7 +111,7 @@ func TestHandleUpdateLibraryLanguageChangeQueuesRefresh(t *testing.T) {
 	}
 }
 
-func TestLibraryCertificationCountryChangeQueuesFullRefresh(t *testing.T) {
+func TestLibraryCertificationCountryRefreshIsOptIn(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -135,15 +135,30 @@ func TestLibraryCertificationCountryChangeQueuesFullRefresh(t *testing.T) {
 	if err != nil || view.CertificationCountry != "AU" {
 		t.Fatalf("update: %+v %v", view, err)
 	}
+	if len(jobs.libraryRefreshes()) != 0 {
+		t.Fatal("country change unexpectedly queued a library refresh")
+	}
+	us := "US"
+	if _, err := h.UpdateLibrary(ctx, id, 1, LibraryUpdateRequest{CertificationCountry: &us, RefreshMetadataOnCountryChange: true}); err != nil {
+		t.Fatal(err)
+	}
 	refreshes := jobs.libraryRefreshes()
 	if len(refreshes) != 1 || refreshes[0].Mode != adminjob.LibraryRefreshModeFull {
 		t.Fatalf("refresh: %+v", refreshes)
 	}
-	if _, err := h.UpdateLibrary(ctx, id, 1, LibraryUpdateRequest{CertificationCountry: &au}); err != nil {
+	if _, err := h.UpdateLibrary(ctx, id, 1, LibraryUpdateRequest{CertificationCountry: &us, RefreshMetadataOnCountryChange: true}); err != nil {
 		t.Fatal(err)
 	}
 	if len(jobs.libraryRefreshes()) != 1 {
 		t.Fatal("unchanged country queued another refresh")
+	}
+	language := "fr"
+	if _, err := h.UpdateLibrary(ctx, id, 1, LibraryUpdateRequest{CertificationCountry: &au, MetadataLanguage: &language}); err != nil {
+		t.Fatal(err)
+	}
+	refreshes = jobs.libraryRefreshes()
+	if len(refreshes) != 2 || refreshes[1].Mode != adminjob.LibraryRefreshModeQuick {
+		t.Fatalf("language refresh: %+v", refreshes)
 	}
 	invalid := "GB"
 	if _, err := h.UpdateLibrary(ctx, id, 1, LibraryUpdateRequest{CertificationCountry: &invalid}); err == nil {

@@ -290,6 +290,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
                 : undefined
             }
             isRefreshing={refreshMetadataMutation.isPending}
+            allowCertificationRefresh
             isAdmin={isAdmin}
             canCurateMetadata={canCurateMetadata}
             canEditMarkers={canEditMarkers}

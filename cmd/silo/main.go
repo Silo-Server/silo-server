@@ -951,7 +951,7 @@ func main() {
 
 	eventBus := cache.NewEventBus(cfg.Redis.URL)
 	if err := eventBus.Subscribe(appCtx, cache.ChannelCatalog, func(event cache.Event) {
-		if event.Type == cache.EventScanComplete {
+		if event.Type == cache.EventScanComplete || event.Type == cache.EventMetadataUpdated {
 			sections.InvalidateResolvedListCache()
 		}
 	}); err != nil {

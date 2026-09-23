@@ -137,6 +137,7 @@ export function useLibraryForm({
   const [certificationCountry, setCertificationCountry] = useState<"US" | "AU">(
     library?.certification_country ?? "US",
   );
+  const [refreshMetadataOnCountryChange, setRefreshMetadataOnCountryChange] = useState(false);
   const [metadataLanguage, setMetadataLanguage] = useState(library?.metadata_language ?? "en");
   const [autoTranslateMetadata, setAutoTranslateMetadata] = useState(
     library?.auto_translate_metadata ?? false,
@@ -279,7 +280,10 @@ export function useLibraryForm({
 
     if (library) {
       updateMutation.mutate(
-        { id: library.id, body },
+        {
+          id: library.id,
+          body: { ...body, refresh_metadata_on_country_change: refreshMetadataOnCountryChange },
+        },
         {
           onSuccess: () => {
             if (chainDirty) {
@@ -333,6 +337,8 @@ export function useLibraryForm({
     setEnabled,
     certificationCountry,
     setCertificationCountry,
+    refreshMetadataOnCountryChange,
+    setRefreshMetadataOnCountryChange,
     metadataLanguage,
     setMetadataLanguage,
     autoTranslateMetadata,

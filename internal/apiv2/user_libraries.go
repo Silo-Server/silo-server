@@ -30,8 +30,9 @@ type UserLibraryCapabilitiesOutput struct {
 }
 type UserLibraryCapabilitiesOutputBody struct {
 	Capability
-	CertificationCountries []string `json:"certification_countries"`
-	Available              bool     `json:"available"`
+	CertificationOnlyRefresh bool     `json:"certification_only_refresh"`
+	CertificationCountries   []string `json:"certification_countries"`
+	Available                bool     `json:"available"`
 }
 
 func registerUserLibraries(reg *Registry) {
@@ -40,6 +41,7 @@ func registerUserLibraries(reg *Registry) {
 	}
 	Register(reg, operation("/user/libraries/capabilities", "getUserLibraryCapabilities"), func(_ context.Context, _ *CapabilityInput) (*UserLibraryCapabilitiesOutput, error) {
 		out := new(UserLibraryCapabilitiesOutput)
+		out.Body.CertificationOnlyRefresh = true
 		out.Body.CertificationCountries = []string{"US", "AU"}
 		out.Body.Available = reg.deps.UserLibraries != nil
 		return out, nil

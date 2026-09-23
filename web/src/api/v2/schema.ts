@@ -12441,7 +12441,7 @@ export interface components {
        * @default quick
        * @enum {string}
        */
-      mode: "quick" | "complete";
+      mode: "quick" | "complete" | "certifications";
     };
     AdminItemMetadataUpdate: {
       air_date?: string | null;
@@ -19778,7 +19778,7 @@ export interface components {
       /** @example false */
       auto_translate_metadata?: boolean;
       /**
-       * @description A change queues a metadata refresh
+       * @description Applies immediately without refreshing existing metadata by default
        * @example AU
        */
       certification_country?: string;
@@ -19802,6 +19802,8 @@ export interface components {
        *     ]
        */
       paths?: string[];
+      /** @description When the certification country changes, opt in to a full library metadata refresh */
+      refresh_metadata_on_country_change?: boolean;
       /**
        * @description Replaces the allow-list; empty disables remote videos
        * @example [
@@ -25235,6 +25237,7 @@ export interface components {
       allowed: boolean;
       available: boolean;
       certification_countries: string[];
+      certification_only_refresh: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**

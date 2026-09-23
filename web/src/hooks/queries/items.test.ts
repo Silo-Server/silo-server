@@ -91,7 +91,7 @@ type WatchedMutationOptions = {
 
 type RefreshMetadataVariables = {
   item: { content_id: string; type: string };
-  mode: "quick" | "complete";
+  mode: "quick" | "complete" | "certifications";
 };
 
 type RefreshMetadataContext = { toastID: string | number };
@@ -237,6 +237,24 @@ describe("item query helpers", () => {
     );
     // The refresh still committed, so the caches must be invalidated anyway.
     expect(invalidateQueries).toHaveBeenCalled();
+  });
+
+  it("reports certification-only refresh success without a metadata refresh message", async () => {
+    mocks.useQueryClient.mockReturnValue({
+      invalidateQueries: vi.fn().mockResolvedValue(undefined),
+    });
+    useRefreshItemMetadata();
+    const options = mocks.useMutation.mock.calls.at(-1)?.[0] as RefreshMetadataMutationOptions;
+    const variables: RefreshMetadataVariables = {
+      item: { content_id: "movie-1", type: "movie" },
+      mode: "certifications",
+    };
+    const context = options.onMutate?.(variables);
+    expect(mocks.toastLoading).toHaveBeenCalledWith("Certification refresh running…");
+    await options.onSuccess?.({ job: { result_payload: {} } }, variables, context);
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Certifications refreshed", {
+      id: "refresh-toast",
+    });
   });
 
   it("replaces the spinning refresh notification with a failure", () => {

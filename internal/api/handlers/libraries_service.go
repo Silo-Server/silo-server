@@ -14,6 +14,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/certification"
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -246,9 +247,14 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		h.wakeMetadataMatcher(ctx, folder.ID)
 	}
 	countryChanged := oldFolder.CertificationCountry != folder.CertificationCountry
-	if h.JobRepo != nil && (languageChanged || countryChanged) {
+	if countryChanged {
+		sections.InvalidateResolvedListCache()
+		h.publishCatalogStatsInvalidation(cache.EventMetadataUpdated, "")
+	}
+	refreshCountry := countryChanged && req.RefreshMetadataOnCountryChange
+	if h.JobRepo != nil && (languageChanged || refreshCountry) {
 		refreshMode := adminjob.LibraryRefreshModeQuick
-		if countryChanged {
+		if refreshCountry {
 			refreshMode = adminjob.LibraryRefreshModeFull
 		}
 		job, jobErr := h.JobRepo.CreateLibraryRefresh(ctx, userID, adminjob.LibraryRefreshRequest{

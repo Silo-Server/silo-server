@@ -286,9 +286,28 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
         </Select>
         <p className="text-muted-foreground text-xs">
           Prefer this country's content ratings. Missing Australian ratings use a labelled US-based
-          equivalent for parental controls. Changing this refreshes existing metadata.
+          equivalent for parental controls. The country applies immediately. Existing titles use
+          stored ratings until you refresh them.
         </p>
       </div>
+      {form.library &&
+        form.certificationCountry !== (form.library.certification_country ?? "US") && (
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <Label htmlFor="refresh-country-metadata">Refresh all existing metadata</Label>
+              <p className="text-muted-foreground text-xs">
+                Leave off to apply without refreshing. For a small test, open a movie or series,
+                choose Refresh Metadata, then Certifications only. Changing metadata language still
+                queues its own refresh.
+              </p>
+            </div>
+            <Switch
+              id="refresh-country-metadata"
+              checked={form.refreshMetadataOnCountryChange}
+              onCheckedChange={form.setRefreshMetadataOnCountryChange}
+            />
+          </div>
+        )}
       <div className="space-y-1.5">
         <Label>Metadata Language</Label>
         <Select value={form.metadataLanguage} onValueChange={form.setMetadataLanguage}>

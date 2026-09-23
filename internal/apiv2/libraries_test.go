@@ -750,7 +750,12 @@ func TestLibraryCertificationCountryContract(t *testing.T) {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
 	}
 	rec = do(t, h, http.MethodPatch, "/api/v2/libraries/1", `{"certification_country":"US"}`, bearer(adminToken))
-	if rec.Code != 200 || fake.lastUpdate.CertificationCountry == nil || *fake.lastUpdate.CertificationCountry != "US" {
+	if rec.Code != 200 || fake.lastUpdate.RefreshMetadataOnCountryChange || fake.lastUpdate.CertificationCountry == nil || *fake.lastUpdate.CertificationCountry != "US" {
 		t.Fatalf("update: %d %s", rec.Code, rec.Body.String())
 	}
+	rec = do(t, h, http.MethodPatch, "/api/v2/libraries/1", `{"certification_country":"AU","refresh_metadata_on_country_change":true}`, bearer(adminToken))
+	if rec.Code != 200 || !fake.lastUpdate.RefreshMetadataOnCountryChange {
+		t.Fatalf("refresh opt-in: %d %s", rec.Code, rec.Body.String())
+	}
+
 }

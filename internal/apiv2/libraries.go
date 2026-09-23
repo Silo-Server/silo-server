@@ -59,16 +59,17 @@ type LibraryCreate struct {
 // LibraryUpdate is the updateLibrary body; omitted members are unchanged
 // and no member admits null.
 type LibraryUpdate struct {
-	Paths                    *[]string `json:"paths,omitempty" nullable:"false" minItems:"1" doc:"Replaces every root; a changed set queues a rescan" example:"[\"/media/movies\"]"`
-	Type                     *string   `json:"type,omitempty" nullable:"false" minLength:"1" example:"movies"`
-	Name                     *string   `json:"name,omitempty" nullable:"false" minLength:"1" example:"Movies"`
-	Enabled                  *bool     `json:"enabled,omitempty" nullable:"false" example:"true"`
-	CertificationCountry     *string   `json:"certification_country,omitempty" nullable:"false" doc:"A change queues a metadata refresh" example:"AU"`
-	MetadataLanguage         *string   `json:"metadata_language,omitempty" nullable:"false" doc:"ISO 639-1 code; a change queues a quick metadata refresh" example:"en"`
-	AutoTranslateMetadata    *bool     `json:"auto_translate_metadata,omitempty" nullable:"false" example:"false"`
-	ChapterThumbnailsEnabled *bool     `json:"chapter_thumbnails_enabled,omitempty" nullable:"false" example:"false"`
-	IntroDetectionEnabled    *bool     `json:"intro_detection_enabled,omitempty" nullable:"false" example:"false"`
-	TrailerKinds             *[]string `json:"trailer_kinds,omitempty" nullable:"false" doc:"Replaces the allow-list; empty disables remote videos" example:"[\"trailer\"]"`
+	RefreshMetadataOnCountryChange bool      `json:"refresh_metadata_on_country_change,omitempty" doc:"When the certification country changes, opt in to a full library metadata refresh"`
+	Paths                          *[]string `json:"paths,omitempty" nullable:"false" minItems:"1" doc:"Replaces every root; a changed set queues a rescan" example:"[\"/media/movies\"]"`
+	Type                           *string   `json:"type,omitempty" nullable:"false" minLength:"1" example:"movies"`
+	Name                           *string   `json:"name,omitempty" nullable:"false" minLength:"1" example:"Movies"`
+	Enabled                        *bool     `json:"enabled,omitempty" nullable:"false" example:"true"`
+	CertificationCountry           *string   `json:"certification_country,omitempty" nullable:"false" doc:"Applies immediately without refreshing existing metadata by default" example:"AU"`
+	MetadataLanguage               *string   `json:"metadata_language,omitempty" nullable:"false" doc:"ISO 639-1 code; a change queues a quick metadata refresh" example:"en"`
+	AutoTranslateMetadata          *bool     `json:"auto_translate_metadata,omitempty" nullable:"false" example:"false"`
+	ChapterThumbnailsEnabled       *bool     `json:"chapter_thumbnails_enabled,omitempty" nullable:"false" example:"false"`
+	IntroDetectionEnabled          *bool     `json:"intro_detection_enabled,omitempty" nullable:"false" example:"false"`
+	TrailerKinds                   *[]string `json:"trailer_kinds,omitempty" nullable:"false" doc:"Replaces the allow-list; empty disables remote videos" example:"[\"trailer\"]"`
 }
 
 // LibraryCreateInput is the createLibrary request.
@@ -1085,16 +1086,17 @@ func (reg *Registry) updateLibrary(ctx context.Context, in *LibraryUpdateInput) 
 		return nil, p
 	}
 	view, err := svc.UpdateLibrary(ctx, id, userID, handlers.LibraryUpdateRequest{
-		Paths:                    in.Body.Paths,
-		Type:                     in.Body.Type,
-		Name:                     in.Body.Name,
-		Enabled:                  in.Body.Enabled,
-		CertificationCountry:     in.Body.CertificationCountry,
-		MetadataLanguage:         in.Body.MetadataLanguage,
-		AutoTranslateMetadata:    in.Body.AutoTranslateMetadata,
-		ChapterThumbnailsEnabled: in.Body.ChapterThumbnailsEnabled,
-		IntroDetectionEnabled:    in.Body.IntroDetectionEnabled,
-		TrailerKinds:             in.Body.TrailerKinds,
+		RefreshMetadataOnCountryChange: in.Body.RefreshMetadataOnCountryChange,
+		Paths:                          in.Body.Paths,
+		Type:                           in.Body.Type,
+		Name:                           in.Body.Name,
+		Enabled:                        in.Body.Enabled,
+		CertificationCountry:           in.Body.CertificationCountry,
+		MetadataLanguage:               in.Body.MetadataLanguage,
+		AutoTranslateMetadata:          in.Body.AutoTranslateMetadata,
+		ChapterThumbnailsEnabled:       in.Body.ChapterThumbnailsEnabled,
+		IntroDetectionEnabled:          in.Body.IntroDetectionEnabled,
+		TrailerKinds:                   in.Body.TrailerKinds,
 	})
 	if err != nil {
 		return nil, libraryProblem(err)

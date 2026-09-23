@@ -103,9 +103,22 @@ The v2 library create and update bodies accept `certification_country`: `US`
 (default) or `AU`. Administrator and user library responses report this value.
 `GET /api/v2/user/libraries/capabilities` exposes `certification_countries` for
 feature detection. Metadata language remains independent of certification country.
-Changing country queues a full metadata refresh; until it completes, existing
-recognised US metadata supplies the fallback. Provider failures fail the refresh
-job and preserve the previous certification snapshot.
+Changing country applies immediately without queuing a metadata refresh. Existing
+recognised US metadata supplies the fallback until country ratings are fetched.
+Administrators can opt in to a full library refresh with
+`refresh_metadata_on_country_change: true` on update. This only queues a refresh
+when the country changes. Language changes still queue their own quick refresh.
+
+For a small test, leave **Refresh all existing metadata** off, save Australia,
+and choose **Refresh Metadata > Certifications only** on a few movies or series.
+This uses `POST /api/v2/admin/items/{id}/refresh-metadata` with
+`{"mode":"certifications"}` and the existing persisted admin job. It fetches only
+that title's country ratings, without scanning files, refreshing artwork, or
+changing other metadata. It requires a TMDB match and an unlocked content rating.
+The user-library capability response advertises `certification_only_refresh`.
+Provider failures fail the job and preserve the previous certification snapshot.
+These controls are available in the bundled web client; native clients can keep
+using existing refresh modes until they add the advertised mode.
 
 Australian libraries prefer actual Australian TMDB certifications. When TMDB
 returns several recognised certifications for one country, the strictest is used.

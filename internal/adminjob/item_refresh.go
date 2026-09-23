@@ -28,8 +28,9 @@ const (
 type ItemRefreshMode string
 
 const (
-	ItemRefreshModeQuick    ItemRefreshMode = "quick"
-	ItemRefreshModeComplete ItemRefreshMode = "complete"
+	ItemRefreshModeCertifications ItemRefreshMode = "certifications"
+	ItemRefreshModeQuick          ItemRefreshMode = "quick"
+	ItemRefreshModeComplete       ItemRefreshMode = "complete"
 )
 
 var ErrScopeHasNoFiles = errors.New("cannot determine scan scope because this item has no indexed files")
@@ -155,6 +156,20 @@ func (r *ItemRefreshResolver) ResolveForLibrary(ctx context.Context, contentID s
 }
 
 func (r *ItemRefreshResolver) resolve(ctx context.Context, contentID string, libraryID int, mode ItemRefreshMode) (*ItemRefreshRequest, error) {
+	if mode == ItemRefreshModeCertifications {
+		item, err := r.itemRepo.GetByID(ctx, contentID)
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			return nil, &ScopeResolutionError{StatusCode: 404, Message: "Movie or series not found"}
+		}
+		if err != nil {
+			return nil, err
+		}
+		if item.Type != "movie" && item.Type != "series" {
+			return nil, &ScopeResolutionError{StatusCode: 400, Message: "Certification refresh supports movies and series"}
+		}
+		return &ItemRefreshRequest{RequestedContentID: item.ContentID, RequestedType: item.Type,
+			RefreshContentID: item.ContentID, RefreshTargetType: "item", Mode: mode}, nil
+	}
 	if item, err := r.itemRepo.GetByID(ctx, contentID); err == nil {
 		if item.Type == "series" {
 			return r.resolveSeries(ctx, item, libraryID, mode)
@@ -498,6 +513,9 @@ func (e *ItemRefreshExecutor) SetArtworkCacher(cacher ItemRefreshArtworkCacher) 
 }
 
 func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshRequest, progress func(current, total int, message string)) (*ItemRefreshResult, error) {
+	if req.Mode == ItemRefreshModeCertifications {
+		return e.refreshCertifications(ctx, req, progress)
+	}
 	if e.folderRepo == nil || e.ingester == nil || e.scanRuns == nil || e.refresher == nil {
 		return nil, fmt.Errorf("resolve scan scope: item refresh executor is not fully configured")
 	}
@@ -705,10 +723,33 @@ func (e *ItemRefreshExecutor) resolveCompleteRefreshTargets(ctx context.Context,
 }
 
 func normalizeItemRefreshMode(mode ItemRefreshMode) ItemRefreshMode {
-	if mode == ItemRefreshModeComplete {
-		return ItemRefreshModeComplete
+	if mode == ItemRefreshModeComplete || mode == ItemRefreshModeCertifications {
+		return mode
 	}
 	return ItemRefreshModeQuick
+}
+
+func (e *ItemRefreshExecutor) refreshCertifications(ctx context.Context, req ItemRefreshRequest, progress func(int, int, string)) (*ItemRefreshResult, error) {
+	refresher, ok := e.refresher.(interface {
+		RefreshItemCertifications(context.Context, string) error
+	})
+	if !ok {
+		return nil, fmt.Errorf("certification refresh is not configured")
+	}
+	if progress != nil {
+		progress(0, 1, "Refreshing certifications")
+	}
+	if err := refresher.RefreshItemCertifications(ctx, req.RefreshContentID); err != nil {
+		return nil, err
+	}
+	e.publish(cache.EventMetadataUpdated, req.RefreshContentID)
+	if e.realtimeHub != nil {
+		_ = e.realtimeHub.PublishCatalogItemChanged(ctx, notifications.MetadataUpdateEvent{ContentID: req.RefreshContentID, Change: "metadata_updated"})
+	}
+	if progress != nil {
+		progress(1, 1, "Certifications refreshed")
+	}
+	return &ItemRefreshResult{RequestedContentID: req.RequestedContentID, RefreshContentID: req.RefreshContentID, DetailContentID: req.RequestedContentID}, nil
 }
 
 func (e *ItemRefreshExecutor) publish(eventType, payload string) {

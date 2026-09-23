@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -67,4 +68,21 @@ func TestRefreshCertificationsDB(t *testing.T) {
 	if err := svc.refreshCertifications(ctx, item, folder, nil); err != nil || provider.calls != 2 {
 		t.Fatalf("US-only library fetched: %v", err)
 	}
+	// A manual certification-only refresh also works before switching country.
+	svc.itemRepo = catalog.NewItemRepository(pool)
+	provider.err = nil
+	if err := svc.RefreshItemCertifications(ctx, item.ContentID); err != nil || provider.calls != 3 {
+		t.Fatalf("targeted refresh: %v calls=%d", err, provider.calls)
+	}
+	var title, tmdbID string
+	if err := pool.QueryRow(ctx, `SELECT title,tmdb_id FROM media_items WHERE content_id=$1`, item.ContentID).Scan(&title, &tmdbID); err != nil || title != "Certification test" || tmdbID != "123" {
+		t.Fatalf("other metadata changed: %s %s %v", title, tmdbID, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_items SET locked_fields=ARRAY[9] WHERE content_id=$1`, item.ContentID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RefreshItemCertifications(ctx, item.ContentID); err == nil || provider.calls != 3 {
+		t.Fatalf("locked targeted refresh: %v", err)
+	}
+
 }

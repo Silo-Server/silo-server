@@ -143,5 +143,28 @@ it("saves the selected certification country on an existing library", () => {
   const { result } = renderHook(() => useLibraryForm({ library }));
   act(() => result.current.setCertificationCountry("AU"));
   act(() => result.current.submit());
-  expect(mutate.mock.calls[0]![0]).toMatchObject({ id: 1, body: { certification_country: "AU" } });
+  expect(mutate.mock.calls[0]![0]).toMatchObject({
+    id: 1,
+    body: { certification_country: "AU", refresh_metadata_on_country_change: false },
+  });
+});
+
+it("only requests a whole-library refresh after opting in", () => {
+  const library = {
+    id: 1,
+    name: "Movies",
+    type: "movies",
+    paths: ["/media"],
+    certification_country: "US",
+  } as Library;
+  const { result } = renderHook(() => useLibraryForm({ library }));
+  act(() => {
+    result.current.setCertificationCountry("AU");
+    result.current.setRefreshMetadataOnCountryChange(true);
+  });
+  act(() => result.current.submit());
+  expect(mutate.mock.calls[0]![0]).toMatchObject({
+    id: 1,
+    body: { certification_country: "AU", refresh_metadata_on_country_change: true },
+  });
 });

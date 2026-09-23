@@ -892,3 +892,59 @@ func TestItemRefreshExecutorCompleteRefreshRebuildsAndMapsEpisodeTarget(t *testi
 		t.Fatalf("result detail_content_id = %q, want %q", got, want)
 	}
 }
+
+type certificationRefreshItemRepo struct {
+	item *models.MediaItem
+}
+
+func (r certificationRefreshItemRepo) GetByID(context.Context, string) (*models.MediaItem, error) {
+	return r.item, nil
+}
+
+type certificationOnlyRefresher struct {
+	itemRefreshTestRefresher
+	certificationID string
+}
+
+func (r *certificationOnlyRefresher) RefreshItemCertifications(_ context.Context, id string) error {
+	r.certificationID = id
+	return r.err
+}
+
+func TestCertificationRefreshDoesNotRequireFilesOrScanner(t *testing.T) {
+	for _, kind := range []string{"movie", "series"} {
+		t.Run(kind, func(t *testing.T) {
+			resolver := &ItemRefreshResolver{itemRepo: certificationRefreshItemRepo{item: &models.MediaItem{ContentID: "selected", Type: kind}}}
+			req, err := resolver.ResolveWithMode(t.Context(), "selected", ItemRefreshModeCertifications)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if req.ScanPath != "" || req.ScanFolderID != 0 || req.RefreshContentID != "selected" {
+				t.Fatalf("unexpected scope: %+v", req)
+			}
+			refresher := &certificationOnlyRefresher{}
+			artwork := &itemRefreshTestArtworkCacher{}
+			bus := &libraryRefreshTestEventBus{}
+			executor := &ItemRefreshExecutor{refresher: refresher, artworkCacher: artwork, eventBus: bus}
+			result, err := executor.Execute(t.Context(), *req, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if refresher.certificationID != "selected" || refresher.contentID != "" || artwork.called || result.ScanResult != nil {
+				t.Fatalf("certification refresh ran unrelated processing: %+v %+v", refresher, result)
+			}
+			if len(bus.events) != 1 || bus.events[0].Type != cache.EventMetadataUpdated {
+				t.Fatalf("events: %+v", bus.events)
+			}
+			bus.events = nil
+			refresher.err = errors.New("provider unavailable")
+			if _, err := executor.Execute(t.Context(), *req, nil); err == nil || len(bus.events) != 0 {
+				t.Fatalf("failed refresh published success: %v %+v", err, bus.events)
+			}
+		})
+	}
+	resolver := &ItemRefreshResolver{itemRepo: certificationRefreshItemRepo{item: &models.MediaItem{Type: "ebook"}}}
+	if _, err := resolver.ResolveWithMode(t.Context(), "book", ItemRefreshModeCertifications); err == nil {
+		t.Fatal("unsupported type accepted")
+	}
+}

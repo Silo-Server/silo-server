@@ -6032,7 +6032,8 @@
             "default": "quick",
             "enum": [
               "quick",
-              "complete"
+              "complete",
+              "certifications"
             ],
             "type": "string"
           }
@@ -26076,7 +26077,7 @@
             "type": "boolean"
           },
           "certification_country": {
-            "description": "A change queues a metadata refresh",
+            "description": "Applies immediately without refreshing existing metadata by default",
             "examples": [
               "AU"
             ],
@@ -26126,6 +26127,10 @@
             },
             "minItems": 1,
             "type": "array"
+          },
+          "refresh_metadata_on_country_change": {
+            "description": "When the certification country changes, opt in to a full library metadata refresh",
+            "type": "boolean"
           },
           "trailer_kinds": {
             "description": "Replaces the allow-list; empty disables remote videos",
@@ -39308,6 +39313,9 @@
             },
             "type": "array"
           },
+          "certification_only_refresh": {
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -39324,6 +39332,7 @@
           }
         },
         "required": [
+          "certification_only_refresh",
           "certification_countries",
           "available",
           "revision",

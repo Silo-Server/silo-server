@@ -44,6 +44,10 @@ func TestAdminItemMetadataTransport(t *testing.T) {
 	if rec.Code != 200 || f.update.Overview == nil || *f.update.Overview != "" || f.update.Genres == nil || len(*f.update.Genres) != 0 || f.update.Year == nil || *f.update.Year != 0 || f.update.Title != nil || !strings.Contains(rec.Body.String(), `"title":"Updated"`) {
 		t.Fatalf("update: %d %s %#v", rec.Code, rec.Body, f.update)
 	}
+	rec = do(t, h, "POST", path+"/refresh-metadata", `{"mode":"certifications"}`, bearer(memberToken))
+	if rec.Code != 202 || f.mode != adminjob.ItemRefreshModeCertifications {
+		t.Fatalf("certifications: %d %s", rec.Code, rec.Body)
+	}
 	before := f.calls
 	rec = do(t, h, "POST", path+"/refresh-metadata", `{"mode":"wrong"}`, bearer(memberToken))
 	if rec.Code != 422 || f.calls != before {

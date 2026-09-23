@@ -53,7 +53,7 @@ type AdminItemMetadataUpdateInput struct {
 type AdminItemMetadataRefreshInput struct {
 	ID   string `path:"id" minLength:"1" maxLength:"512"`
 	Body struct {
-		Mode string `json:"mode,omitempty" enum:"quick,complete" default:"quick"`
+		Mode string `json:"mode,omitempty" enum:"quick,complete,certifications" default:"quick"`
 	}
 }
 

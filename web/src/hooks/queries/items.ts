@@ -54,7 +54,7 @@ export function useWatchDetail(id: string | undefined, fileId?: number, libraryI
 }
 
 type RefreshMutationItem = Pick<ItemDetail, "content_id" | "type" | "series_id" | "season_number">;
-export type RefreshItemMetadataMode = "quick" | "complete";
+export type RefreshItemMetadataMode = "quick" | "complete" | "certifications";
 
 interface RefreshItemMetadataVariables {
   item: RefreshMutationItem;
@@ -87,9 +87,11 @@ export function useRefreshItemMetadata() {
     retry: false,
     onMutate: ({ mode }: RefreshItemMetadataVariables): RefreshItemMetadataContext => ({
       toastID: toast.loading(
-        mode === "complete"
-          ? "Complete metadata refresh running…"
-          : "Quick metadata refresh running…",
+        mode === "certifications"
+          ? "Certification refresh running…"
+          : mode === "complete"
+            ? "Complete metadata refresh running…"
+            : "Quick metadata refresh running…",
       ),
     }),
     mutationFn: async ({ item, mode }: RefreshItemMetadataVariables) => {
@@ -115,6 +117,8 @@ export function useRefreshItemMetadata() {
           id: context?.toastID,
           description: artworkWarning,
         });
+      } else if (mode === "certifications") {
+        toast.success("Certifications refreshed", { id: context?.toastID });
       } else if (mode === "complete") {
         toast.success("Complete refresh finished", { id: context?.toastID });
       } else if (newFiles > 0) {

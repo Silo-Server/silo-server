@@ -14,6 +14,7 @@ interface RefreshMetadataDialogProps {
   onOpenChange: (open: boolean) => void;
   onConfirm: (mode: RefreshItemMetadataMode) => void;
   isPending?: boolean;
+  allowCertifications?: boolean;
 }
 
 export default function RefreshMetadataDialog({
@@ -21,6 +22,7 @@ export default function RefreshMetadataDialog({
   onOpenChange,
   onConfirm,
   isPending = false,
+  allowCertifications = false,
 }: RefreshMetadataDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -28,11 +30,28 @@ export default function RefreshMetadataDialog({
         <DialogHeader>
           <DialogTitle>Refresh Metadata</DialogTitle>
           <DialogDescription>
-            Choose whether to refresh the existing item or rebuild it from the files on disk.
+            Choose what to refresh for this title.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
+          {allowCertifications && (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => onConfirm("certifications")}
+              className="border-border bg-surface hover:bg-surface/80 flex w-full items-start gap-3 rounded-xl border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw className="text-muted-foreground mt-0.5 size-5" />
+              <div className="space-y-1">
+                <div className="text-sm font-semibold">Certifications only</div>
+                <div className="text-muted-foreground text-sm">
+                  Fetch country ratings for this title only. No file scanning, artwork changes or
+                  other metadata refresh.
+                </div>
+              </div>
+            </button>
+          )}
           <button
             type="button"
             disabled={isPending}

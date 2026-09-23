@@ -116,6 +116,7 @@ export interface ActionBarProps {
   inWatchlist?: boolean;
   onRefresh?: (mode: RefreshItemMetadataMode) => void;
   isRefreshing?: boolean;
+  allowCertificationRefresh?: boolean;
   onRedetectIntro?: () => void;
   isRedetectingIntro?: boolean;
   onEditMetadata?: () => void;
@@ -170,6 +171,7 @@ export default function ActionBar({
   inWatchlist = false,
   onRefresh,
   isRefreshing = false,
+  allowCertificationRefresh = false,
   onRedetectIntro,
   isRedetectingIntro = false,
   onEditMetadata,
@@ -793,6 +795,7 @@ export default function ActionBar({
           onOpenChange={setRefreshDialogOpen}
           onConfirm={handleRefreshConfirm}
           isPending={isRefreshing}
+          allowCertifications={allowCertificationRefresh}
         />
         {contentId && (
           <AddToCollectionDialog

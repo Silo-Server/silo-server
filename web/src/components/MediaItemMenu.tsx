@@ -27,7 +27,11 @@ import { useOptionalAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
-import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
+import {
+  useRefreshItemMetadata,
+  useWatchedStateMutation,
+  type RefreshItemMetadataMode,
+} from "@/hooks/queries/items";
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
@@ -888,7 +892,7 @@ export default function MediaItemMenu({
     }
   }
 
-  function handleRefreshConfirm(mode: "quick" | "complete") {
+  function handleRefreshConfirm(mode: RefreshItemMetadataMode) {
     setRefreshDialogOpen(false);
     refreshMetadataMutation.mutate({ item: { content_id: contentId, type: mediaType }, mode });
   }
@@ -1051,6 +1055,7 @@ export default function MediaItemMenu({
           onOpenChange={setRefreshDialogOpen}
           onConfirm={handleRefreshConfirm}
           isPending={refreshMetadataMutation.isPending}
+          allowCertifications={mediaType === "movie" || mediaType === "series"}
         />
       )}
       {metadataAction && (

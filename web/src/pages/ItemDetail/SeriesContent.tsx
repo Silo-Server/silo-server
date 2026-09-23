@@ -208,6 +208,7 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
                 : undefined
             }
             isRefreshing={refreshMetadataMutation.isPending}
+            allowCertificationRefresh
             isAdmin={isAdmin}
             canCurateMetadata={canCurateMetadata}
             onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}

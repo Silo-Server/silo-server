@@ -189,15 +189,16 @@ type createLibraryRequest struct {
 
 // updateLibraryRequest represents the JSON body for PUT /libraries/{id}.
 type updateLibraryRequest struct {
-	Paths                    *[]string `json:"paths,omitempty"`
-	Type                     *string   `json:"type,omitempty"`
-	Name                     *string   `json:"name,omitempty"`
-	Enabled                  *bool     `json:"enabled,omitempty"`
-	CertificationCountry     *string   `json:"-"`
-	MetadataLanguage         *string   `json:"metadata_language,omitempty"`
-	AutoTranslateMetadata    *bool     `json:"auto_translate_metadata,omitempty"`
-	ChapterThumbnailsEnabled *bool     `json:"chapter_thumbnails_enabled,omitempty"`
-	IntroDetectionEnabled    *bool     `json:"intro_detection_enabled,omitempty"`
+	Paths                          *[]string `json:"paths,omitempty"`
+	Type                           *string   `json:"type,omitempty"`
+	Name                           *string   `json:"name,omitempty"`
+	Enabled                        *bool     `json:"enabled,omitempty"`
+	CertificationCountry           *string   `json:"-"`
+	RefreshMetadataOnCountryChange bool      `json:"-"`
+	MetadataLanguage               *string   `json:"metadata_language,omitempty"`
+	AutoTranslateMetadata          *bool     `json:"auto_translate_metadata,omitempty"`
+	ChapterThumbnailsEnabled       *bool     `json:"chapter_thumbnails_enabled,omitempty"`
+	IntroDetectionEnabled          *bool     `json:"intro_detection_enabled,omitempty"`
 	// TrailerKinds is the allow-list of remote video kinds fetched during
 	// metadata refresh (ExtraKind values); empty array disables remote videos.
 	TrailerKinds *[]string `json:"trailer_kinds,omitempty"`
