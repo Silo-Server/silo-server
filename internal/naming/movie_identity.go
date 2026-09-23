@@ -51,6 +51,12 @@ func parseInferMovieStem(name string, folderTitle string, folderYear int) inferM
 	if surface == "" {
 		return inferMovieStem{}
 	}
+	// An undated folder with the same title corroborates words that can also
+	// name a format: "Mr Holland's Opus/Mr Holland's Opus", "The UHD Journey".
+	if folderYear == 0 && folderTitle != "" && onlyTitleWordFormats(surface) &&
+		normalizeInferComparable(surface) == normalizeInferComparable(folderTitle) {
+		return inferMovieStem{Title: surface, Remainder: bracketMetadata, Confidence: mediumIdentityConfidence}
+	}
 	// A number in the release suffix is not the movie's year. For example,
 	// "Movie 480p 2001" names an undated movie with release metadata.
 	titleSurface := surface

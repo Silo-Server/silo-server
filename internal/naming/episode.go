@@ -20,7 +20,7 @@ var (
 	dashEpisodeRe            = regexp.MustCompile(`^(\d)-(\d{2})(?:$|[ ._-])`)
 	digitRunRe               = regexp.MustCompile(`\d+`)
 	seasonEpisodeDashRe      = regexp.MustCompile(`^\d-\d{2}(?:$|[ ._-])`)
-	technicalXTokenRe        = regexp.MustCompile(`(?:(?:^|[^\p{L}\p{N}])(?:\d{3,4}x\d{3,4}|3x2|4x3|16x9|16x10|21x9)|\d\.\d+x(?:\d|26[45]))[ ._]*$`)
+	technicalXTokenRe        = regexp.MustCompile(`(?:(?:^|[^\p{L}\p{N}])(?:\d{3,4}x\d{2,4}|3x2|4x3|16x9|16x10|21x9)|\d\.\d+x(?:\d|26[45]))[ ._]*$`)
 	aspectRatioRe            = regexp.MustCompile(`^(?:3x2|4x3|16x9|16x10|21x9)$`)
 	titleYearAfterRe         = regexp.MustCompile(`[\(\[](?:19|20)\d{2}[\)\]]|^[ ._-]+(?:19|20)\d{2}(?:$|[ ._\-\[(])`)
 	episodeFieldEndRe        = regexp.MustCompile(`^(?:-\d+)?(?:\s*$|\s*[\[(]|\s+-\s)`)
@@ -337,9 +337,10 @@ func validXEpisodeCoordinate(name string, match []int) bool {
 		return false
 	}
 	season, _ := strconv.Atoi(name[start:match[3]])
-	// Two multi-digit sides describe a picture size (176x144, 720x480), but a
-	// year-numbered season keeps its day count (2024x246); see below.
-	if match[3]-start >= 3 && len(episode) >= 3 && !yearSeasonDay(season, number) {
+	// A three-digit width with a multi-digit height describes a picture size
+	// (128x96, 176x144, 720x480), but a year-numbered season keeps its day
+	// count (2024x246); see below.
+	if match[3]-start >= 3 && len(episode) >= 2 && !yearSeasonDay(season, number) {
 		return false
 	}
 	if season < 200 {

@@ -85,6 +85,8 @@ func TestYearSeasonCoordinateIsNotPictureSize(t *testing.T) {
 		{"Example Show 1920x1080", 0, 0, false},
 		{"Example Show 2048x1080", 0, 0, false},
 		{"Example Show 720x480", 0, 0, false},
+		{"Example Show 128x96", 0, 0, false},
+		{"Example Show 12x96", 12, 96, true},
 	} {
 		token, ok := parseEpisodeToken(tt.name, nil, false)
 		if ok != tt.ok || token.season != tt.season || token.episode != tt.episode {
@@ -130,6 +132,26 @@ func TestShowTitleNumberIsNotTrailingEpisode(t *testing.T) {
 		if hints.SeasonNum != 1 || hints.EpisodeNum != tt.episode {
 			t.Fatalf("%s: %+v, want episode %d", tt.path, hints, tt.episode)
 		}
+	}
+}
+
+func TestUndatedFolderKeepsFormatWordTitles(t *testing.T) {
+	for _, tt := range []struct{ path, title string }{
+		{"/movies/Mr Holland's Opus/Mr Holland's Opus.mkv", "Mr Holland's Opus"},
+		{"/movies/The UHD Journey/The UHD Journey.mkv", "The UHD Journey"},
+		{"/movies/Example Movie/Example Movie 1080p BluRay.mkv", "Example Movie"},
+	} {
+		hints := ParseFilename(tt.path, "movies", "/movies")
+		if hints.Type != "movie" || hints.Title != tt.title {
+			t.Fatalf("%s: %+v, want title %q", tt.path, hints, tt.title)
+		}
+	}
+	hints := ParseFilename("/tv/Show/Season 1/Show.128x96.E02.mkv", "series", "/tv")
+	if hints.SeasonNum != 1 || hints.EpisodeNum != 2 {
+		t.Fatalf("picture size replaced the episode marker: %+v", hints)
+	}
+	if hints := ParseFilename("/mixed/Movie.Name.128x96.3gp", "mixed", "/mixed"); hints.Type != "movie" {
+		t.Fatalf("picture size classified a movie as a series: %+v", hints)
 	}
 }
 
