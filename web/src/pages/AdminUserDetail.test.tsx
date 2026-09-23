@@ -451,6 +451,23 @@ async function selectGuestsGroup(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("AdminUserDetail inherit hints", () => {
+  it("uses the saved account's resolved policy when the group list is stale", async () => {
+    const user = userEvent.setup();
+    mocks.user = {
+      ...adminUser,
+      access_group_id: 5,
+      effective_policy: {
+        ...adminUser.effective_policy,
+        max_remote_stream_bitrate_kbps: 30_720,
+      },
+    };
+    renderUserDetail();
+
+    await openLimitsTab(user);
+
+    expect(screen.getByText("Inherited: 30720")).toBeInTheDocument();
+  });
+
   it("derives hints from the group selected in the dialog, on both tabs", async () => {
     const user = userEvent.setup();
     renderUserDetail();
