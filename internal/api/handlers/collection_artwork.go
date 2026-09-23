@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -119,9 +121,10 @@ func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL
 }
 
 // uploadCollectionImageVariants generates resized variants for the given
-// image bytes, uploads them under "{prefix}/{collectionID}/{imageType}/", and
-// returns the S3 path of the original variant plus a thumbhash computed from
-// the w300 variant.
+// image bytes, uploads them under
+// "{prefix}/{collectionID}/{imageType}/{contentVersion}/", and returns the S3
+// path of the original variant plus a thumbhash computed from the w300 variant.
+// The content-version segment gives replacement artwork a new URL (issue #1258).
 func uploadCollectionImageVariants(
 	ctx context.Context,
 	store blobstore.Store,
@@ -146,9 +149,16 @@ func uploadCollectionImageVariants(
 		return "", "", fmt.Errorf("generating image variants: %w", err)
 	}
 
+	// Version the key by content so replacement artwork lands on a new path,
+	// and therefore a new public URL, rather than overwriting a fixed key that
+	// stays cached by the CDN and browsers (issue #1258). The version is a path
+	// segment under the imageType prefix, so removeCollectionImageVariants still
+	// clears every old version by that prefix.
+	version := collectionImageVersion(fileData)
+
 	var w300Data []byte
 	for _, v := range result.Variants {
-		key := fmt.Sprintf("%s/%s/%s/%s%s", prefix, collectionID, imageType, v.Key, result.Ext)
+		key := fmt.Sprintf("%s/%s/%s/%s/%s%s", prefix, collectionID, imageType, version, v.Key, result.Ext)
 		if err := store.Put(ctx, key, v.Data); err != nil {
 			return "", "", fmt.Errorf("uploading %s: %w", v.Key, err)
 		}
@@ -167,6 +177,15 @@ func uploadCollectionImageVariants(
 		}
 	}
 	return s3Path, thumbhashStr, nil
+}
+
+// collectionImageVersion derives a short, content-addressed path segment. Two
+// uploads with the same bytes reuse the same segment (idempotent re-upload);
+// different bytes produce a different segment, so a replacement is served from
+// a new URL that no cache holds yet.
+func collectionImageVersion(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:8])
 }
 
 // removeCollectionImageVariants deletes every stored variant for the given

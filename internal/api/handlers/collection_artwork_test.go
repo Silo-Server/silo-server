@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -135,17 +136,21 @@ func TestStoreBundledCollectionPosterIfS3Configured_UploadsTemplatePoster(t *tes
 	if !stored {
 		t.Fatal("stored = false, want true")
 	}
-	if gotPath != "collection-images/collection-1/poster/original.webp" {
-		t.Fatalf("path = %q", gotPath)
+	// Keys are content-addressed by the source bytes (issue #1258), so the
+	// stored path carries the version segment for the template's own bytes.
+	version := collectionImageVersion(testCollectionPosterJPEG(t))
+	base := "collection-images/collection-1/poster/" + version
+	if gotPath != base+"/original.webp" {
+		t.Fatalf("path = %q, want %q", gotPath, base+"/original.webp")
 	}
 	if gotThumbhash == "" {
 		t.Fatal("thumbhash is empty")
 	}
 
 	want := map[string]bool{
-		"/public-assets/collection-images/collection-1/poster/original.webp": true,
-		"/public-assets/collection-images/collection-1/poster/w500.webp":     true,
-		"/public-assets/collection-images/collection-1/poster/w300.webp":     true,
+		"/public-assets/" + base + "/original.webp": true,
+		"/public-assets/" + base + "/w500.webp":     true,
+		"/public-assets/" + base + "/w300.webp":     true,
 	}
 	puts := recorder.putPaths()
 	if len(puts) != len(want) {
@@ -156,6 +161,62 @@ func TestStoreBundledCollectionPosterIfS3Configured_UploadsTemplatePoster(t *tes
 			t.Fatalf("unexpected PUT path %q in %#v", path, puts)
 		}
 	}
+}
+
+// Issue #1258: replacing collection artwork left the original image displayed
+// because every upload wrote the same fixed key, so the public URL never
+// changed and CDN/browser caches kept serving the old bytes. Keys are now
+// content-addressed: different bytes yield a different path (a fresh URL),
+// while identical bytes stay stable.
+func TestUploadCollectionImageVariants_ContentAddressedKeysBustCache(t *testing.T) {
+	recorder := newCollectionArtworkS3Recorder(t)
+	store := blobstore.NewS3(recorder.client())
+
+	first := testCollectionPosterJPEG(t)
+	second := testCollectionSolidJPEG(t)
+
+	pathA, _, err := uploadCollectionImageVariants(context.Background(), store, adminCollectionImagePrefix, "collection-1", "poster", first)
+	if err != nil {
+		t.Fatalf("first upload: %v", err)
+	}
+	pathB, _, err := uploadCollectionImageVariants(context.Background(), store, adminCollectionImagePrefix, "collection-1", "poster", second)
+	if err != nil {
+		t.Fatalf("second upload: %v", err)
+	}
+	pathARepeat, _, err := uploadCollectionImageVariants(context.Background(), store, adminCollectionImagePrefix, "collection-1", "poster", first)
+	if err != nil {
+		t.Fatalf("repeat upload: %v", err)
+	}
+
+	if pathA == pathB {
+		t.Fatalf("replacement reused the key %q; the URL would stay cached", pathA)
+	}
+	if pathA != pathARepeat {
+		t.Fatalf("identical bytes produced different keys %q and %q", pathA, pathARepeat)
+	}
+	// The version is a path segment under .../poster/, so the whole prefix is
+	// still cleanable by removeCollectionImageVariants.
+	if !strings.HasPrefix(pathA, "collection-images/collection-1/poster/") ||
+		!strings.HasSuffix(pathA, "/original.webp") {
+		t.Fatalf("unexpected key shape %q", pathA)
+	}
+}
+
+func testCollectionSolidJPEG(t *testing.T) []byte {
+	t.Helper()
+
+	img := image.NewRGBA(image.Rect(0, 0, 32, 48))
+	for y := 0; y < 48; y++ {
+		for x := 0; x < 32; x++ {
+			img.Set(x, y, color.RGBA{R: 10, G: 200, B: 40, A: 255})
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatalf("encode jpeg: %v", err)
+	}
+	return buf.Bytes()
 }
 
 func testCollectionPosterJPEG(t *testing.T) []byte {

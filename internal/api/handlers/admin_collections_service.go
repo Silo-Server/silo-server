@@ -550,6 +550,12 @@ func (h *LibraryCollectionHandler) UploadAdminCollectionArtwork(ctx context.Cont
 	if _, err := h.repo.GetByID(ctx, id); err != nil {
 		return err
 	}
+	// Content-addressed variant keys mean a replacement uploads to a new path,
+	// so clear the previous variants first to avoid orphaning them (issue
+	// #1258). Every other upload path already does this before processing.
+	if err := h.deleteCollectionImages(ctx, id, kind); err != nil {
+		return err
+	}
 	path, hash, err := h.processCollectionImage(ctx, id, kind, data)
 	if err != nil {
 		return err
