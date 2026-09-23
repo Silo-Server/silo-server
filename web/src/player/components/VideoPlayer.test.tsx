@@ -725,6 +725,83 @@ describe("VideoPlayer room catch-up", () => {
     });
   });
 
+  it("plays a rebuilt stream's pre-roll up to a guest's seek target, then acknowledges", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100);
+    let paused = true;
+    Object.defineProperty(video, "paused", { configurable: true, get: () => paused });
+    Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+    vi.mocked(video.play).mockImplementation(async () => {
+      paused = false;
+    });
+    vi.mocked(video.pause).mockImplementation(() => {
+      paused = true;
+    });
+    const waitingConnection = {
+      ...connection,
+      room: { ...connection.room!, playback_state: "waiting" as const },
+      transportCommand: {
+        ...command,
+        action: "seek" as const,
+        playback_state: "waiting" as const,
+        position_seconds: 1500,
+      },
+    };
+    rerenderPlayer({ watchTogetherConnection: waitingConnection });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+
+    // The copy remux starts at the keyframe 2.5 s before the target, and the
+    // progressive response cannot seek to the plan's player start.
+    rerenderPlayer({
+      watchTogetherConnection: waitingConnection,
+      planRevision: 2,
+      plan: fixturePlanV3({
+        ...directPlan,
+        delivery: "server_remux_progressive",
+        timeline: {
+          ...directPlan.timeline,
+          source_start_seconds: 1500,
+          stream_origin_seconds: 1497.5,
+          timeline_offset_seconds: 1497.5,
+          player_start_seconds: 2.5,
+          can_seek_anywhere: false,
+        },
+      }),
+    });
+    Object.defineProperty(video, "seekable", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => 0 },
+    });
+    video.currentTime = 0.05;
+    vi.mocked(video.play).mockClear();
+    vi.mocked(connection.sendRoomMessage).mockClear();
+
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    expect(video.play).toHaveBeenCalledOnce();
+    expect(video.muted).toBe(true);
+    expect(video.playbackRate).toBe(4);
+
+    // Still in the pre-roll: no acknowledgement yet.
+    video.currentTime = 1.8;
+    fireEvent.timeUpdate(video);
+    expect(paused).toBe(false);
+    expect(connection.sendRoomMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "ready" }),
+    );
+
+    video.currentTime = 2.6;
+    fireEvent.timeUpdate(video);
+    expect(paused).toBe(true);
+    expect(video.muted).toBe(false);
+    expect(video.playbackRate).toBe(1);
+    expect(connection.sendRoomMessage).toHaveBeenCalledWith({
+      type: "ready",
+      session_id: "session-1",
+      command_id: command.command_id,
+      position_seconds: 1500.1,
+      is_paused: true,
+    });
+  });
+
   it("lets the host acknowledge a seek that landed short of the target", async () => {
     const { connection, video, command, rerenderPlayer } = setup(100);
     Object.defineProperty(video, "readyState", { configurable: true, value: 3 });

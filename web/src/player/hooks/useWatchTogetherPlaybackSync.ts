@@ -6,7 +6,8 @@ import {
   type MutableRefObject,
   type RefObject,
 } from "react";
-import { toMediaTime } from "../utils/mediaTimeline";
+import { toMediaTime, toPlayerTime } from "../utils/mediaTimeline";
+import { isNativePositionInRanges } from "../utils/roomSyncCatchup";
 import type { WatchTogetherRoomConnectionResult } from "./useWatchTogetherRoomConnection";
 
 interface UseWatchTogetherPlaybackSyncOptions {
@@ -53,6 +54,13 @@ const hostReadySeekToleranceSeconds = 15;
 // Stalls shorter than the room catch-up band stay local: the viewer converges
 // by playback rate instead of pausing everyone.
 const bufferingGraceMs = 2_000;
+// A rebuilt stream can begin short of a room seek target: a copy remux starts
+// at the preceding keyframe, and a progressive response cannot seek inside
+// itself, so the plan expects the player to play through that pre-roll. Only
+// a pre-roll at the start of the stream, and no longer than this, is played.
+const maxPrerollSeconds = 20;
+// The pre-roll plays muted behind the syncing overlay, so it can run fast.
+const prerollPlaybackRate = 4;
 
 type ReadyCheck =
   | { ok: true; commandId: string; positionSeconds: number; isPaused: boolean }
@@ -89,6 +97,10 @@ export function useWatchTogetherPlaybackSync({
     (room?.self_ignore_wait === true || selfMember?.is_buffering === true);
   const readinessPending =
     (roomPlaybackState === "waiting" || catchingUp) && !readinessAcknowledged;
+  const waitingSeekCommandId =
+    roomPlaybackState === "waiting" && transportCommand?.action === "seek"
+      ? transportCommand.command_id
+      : null;
   const lastReadyRejectReasonRef = useRef<string | null>(null);
   const sendRoomMessage = roomConnection.sendRoomMessage;
   const waitingStateRef = useRef<"idle" | "buffering" | "ready">("idle");
@@ -136,6 +148,102 @@ export function useWatchTogetherPlaybackSync({
     transportCommand?.command_id,
     videoRef,
   ]);
+
+  // A waiting room holds this viewer paused, so a stream that begins in the
+  // pre-roll before the seek target would never reach it and the room would
+  // wait out its deadline. Play the pre-roll through, muted and fast, and stop
+  // at the target; the readiness check then acknowledges the seek.
+  const prerollRef = useRef<{
+    commandId: string;
+    restoreMuted: boolean;
+    restoreRate: number;
+  } | null>(null);
+  const endPreroll = useCallback(
+    (pause: boolean) => {
+      const preroll = prerollRef.current;
+      prerollRef.current = null;
+      const video = videoRef.current;
+      if (!preroll || !video) return;
+      if (pause) video.pause();
+      video.muted = preroll.restoreMuted;
+      video.playbackRate = preroll.restoreRate;
+    },
+    [videoRef],
+  );
+  const advanceThroughPreroll = useCallback(
+    (video: HTMLVideoElement) => {
+      const command = transportCommand;
+      if (
+        prerollRef.current ||
+        !command ||
+        command.command_id !== waitingSeekCommandId ||
+        appliedCommandIdRef.current !== command.command_id ||
+        !video.paused ||
+        video.seeking ||
+        video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
+        video.currentTime > maxPrerollSeconds
+      ) {
+        return;
+      }
+      const origin = streamOriginRef.current;
+      const gap = command.position_seconds - toMediaTime(video.currentTime, origin);
+      const tolerance = isHost ? hostReadySeekToleranceSeconds : readySeekToleranceSeconds;
+      if (gap <= tolerance || gap > maxPrerollSeconds) return;
+      // A target the element can seek to does not need the pre-roll.
+      if (
+        isNativePositionInRanges(video.seekable, toPlayerTime(command.position_seconds, origin))
+      ) {
+        return;
+      }
+      prerollRef.current = {
+        commandId: command.command_id,
+        restoreMuted: video.muted,
+        restoreRate: video.playbackRate,
+      };
+      video.muted = true;
+      video.playbackRate = prerollPlaybackRate;
+      video.play().catch(() => endPreroll(false));
+    },
+    [
+      appliedCommandIdRef,
+      endPreroll,
+      isHost,
+      streamOriginRef,
+      transportCommand,
+      waitingSeekCommandId,
+    ],
+  );
+  useEffect(() => {
+    const video = videoRef.current;
+    const preroll = prerollRef.current;
+    // A new command, or the room leaving the barrier, takes over playback.
+    if (preroll && preroll.commandId !== waitingSeekCommandId) {
+      endPreroll(waitingSeekCommandId !== null);
+    }
+    if (!video || !waitingSeekCommandId) return;
+    const targetSeconds = transportCommand?.position_seconds ?? 0;
+    const onTimeUpdate = () => {
+      if (prerollRef.current?.commandId !== waitingSeekCommandId) return;
+      if (toMediaTime(video.currentTime, streamOriginRef.current) >= targetSeconds) {
+        endPreroll(true);
+      }
+    };
+    // A stream replaced mid-pre-roll starts over from its own position.
+    const onEmptied = () => endPreroll(false);
+    video.addEventListener("timeupdate", onTimeUpdate);
+    video.addEventListener("emptied", onEmptied);
+    return () => {
+      video.removeEventListener("timeupdate", onTimeUpdate);
+      video.removeEventListener("emptied", onEmptied);
+    };
+  }, [
+    endPreroll,
+    streamOriginRef,
+    transportCommand?.position_seconds,
+    videoRef,
+    waitingSeekCommandId,
+  ]);
+  useEffect(() => () => endPreroll(false), [endPreroll]);
 
   // A new stream, room, selection, phase, or connection starts over.
   useEffect(() => {
@@ -197,6 +305,9 @@ export function useWatchTogetherPlaybackSync({
     }
     if (video.seeking) {
       return { ok: false, reason: "element still seeking" };
+    }
+    if (prerollRef.current) {
+      return { ok: false, reason: "playing through the stream pre-roll" };
     }
     if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
       return { ok: false, reason: `element readyState ${video.readyState} < HAVE_FUTURE_DATA` };
@@ -282,6 +393,7 @@ export function useWatchTogetherPlaybackSync({
             return;
           }
           noteReadyReject(check.reason);
+          advanceThroughPreroll(video);
         }
 
         // A stalled element reports where it stopped, not a decision. Stay
@@ -310,6 +422,7 @@ export function useWatchTogetherPlaybackSync({
       window.clearInterval(intervalId);
     };
   }, [
+    advanceThroughPreroll,
     attachedSessionId,
     catchingUp,
     checkReady,
