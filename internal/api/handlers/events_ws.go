@@ -28,7 +28,7 @@ type historyImportActiveLister interface {
 }
 
 type taskInfoLister interface {
-	ListTasks(includeHidden bool) []taskmanager.TaskInfo
+	ListTasks(ctx context.Context, includeHidden bool) []taskmanager.TaskInfo
 }
 
 const maxRealtimeScanSnapshotRuns = 500
@@ -603,7 +603,7 @@ func (h *EventsHandler) snapshotForChannel(
 		if h == nil || h.tasks == nil {
 			return json.RawMessage("[]"), nil
 		}
-		return marshalJSON(h.tasks.ListTasks(false)), nil
+		return marshalJSON(h.tasks.ListTasks(r.Context(), false)), nil
 	case evt.ChannelScans:
 		if h == nil {
 			return json.RawMessage("[]"), nil

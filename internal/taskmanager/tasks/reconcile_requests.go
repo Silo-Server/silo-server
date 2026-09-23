@@ -33,7 +33,7 @@ func (t *ReconcileRequestsTask) Description() string {
 func (t *ReconcileRequestsTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary
 }
-func (t *ReconcileRequestsTask) IsHidden() bool { return false }
+func (t *ReconcileRequestsTask) IsHidden() bool { return true }
 
 func (t *ReconcileRequestsTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{

@@ -23,7 +23,7 @@ vi.mock("@/hooks/queries/admin/stats", () => ({
   useAdminSessions: () => ({ data: [] }),
 }));
 vi.mock("@/hooks/queries/admin/tasks", () => ({
-  useTasks: () => ({ data: mocks.tasks }),
+  useTasksIncludingHidden: () => ({ data: mocks.tasks }),
 }));
 vi.mock("@/hooks/queries/admin/scans", () => ({
   useActiveScans: () => ({ data: [] }),

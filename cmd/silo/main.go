@@ -2598,6 +2598,11 @@ func main() {
 		if deps.EventsHub != nil {
 			taskMgr.AddObserver(evt.NewTaskObserver(deps.EventsHub))
 		}
+		if deps.FolderRepo != nil {
+			taskMgr.SetLibraryTypes(deps.FolderRepo.DistinctTypes)
+		}
+		// Routine retention sweeps run as steps of one Database Maintenance task.
+		var maintenanceSteps []taskmanager.Task
 
 		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil {
 			taskMgr.Register(tasks.NewScanLibrariesTask(deps.FolderRepo, deps.LibraryScanQueue, deps.EventBus))
@@ -2612,7 +2617,7 @@ func main() {
 		catalogSearchIndexer := catalog.NewCatalogSearchIndexerFromSettings(deps.DB, settingsRepo, catalogSearchStartupSettings)
 		taskMgr.Register(tasks.NewSyncCatalogSearchIndexTask(catalogSearchIndexer))
 		taskMgr.Register(tasks.NewRebuildCatalogSearchIndexTask(catalogSearchIndexer))
-		taskMgr.Register(tasks.NewCatalogSearchEventRetentionTask(catalog.NewSearchIndexEventRepository(deps.DB)))
+		maintenanceSteps = append(maintenanceSteps, tasks.NewCatalogSearchEventRetentionTask(catalog.NewSearchIndexEventRepository(deps.DB)))
 		if deps.IntroAnalyzer != nil {
 			taskMgr.Register(tasks.NewDetectIntroMarkersTask(deps.IntroAnalyzer, settingsRepo))
 		}
@@ -2627,10 +2632,12 @@ func main() {
 		if chapterBackfiller, ok := deps.ChapterThumbnailQueuer.(*chapterthumbs.Service); ok {
 			taskMgr.Register(tasks.NewChapterThumbnailBackfillTask(chapterBackfiller, 25))
 		}
-		taskMgr.Register(tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
+		maintenanceSteps = append(maintenanceSteps, tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
-		taskMgr.Register(tasks.NewTaskHistoryCleanupTask(historyRepo, settingsRepo))
-		taskMgr.Register(tasks.NewAuthSessionCleanupTask(auth.NewSessionRepository(deps.DB)))
+		maintenanceSteps = append(maintenanceSteps,
+			tasks.NewTaskHistoryCleanupTask(historyRepo, settingsRepo),
+			tasks.NewAuthSessionCleanupTask(auth.NewSessionRepository(deps.DB)),
+		)
 		var diagnosticsStore diagnostics.ObjectStore
 		if deps.S3Private != nil {
 			diagnosticsStore = diagnostics.NewS3ObjectStore(deps.S3Private)
@@ -2642,7 +2649,7 @@ func main() {
 			settingsRepo,
 			diagnosticsStore,
 		))
-		taskMgr.Register(tasks.NewPolicyDecisionLogCleanupTask(deps.DB, settingsRepo, policyPM))
+		maintenanceSteps = append(maintenanceSteps, tasks.NewPolicyDecisionLogCleanupTask(deps.DB, settingsRepo, policyPM))
 		if deps.FileRepo != nil {
 			// Download prepare-to-file pipeline (Phase 3): a durable, leased encode
 			// queue hosted on the task manager. Built here (before Start) and shared
@@ -2695,7 +2702,7 @@ func main() {
 		if notificationSystem != nil {
 			taskMgr.Register(tasks.NewSeedContentAvailabilityTask(notificationSystem))
 			taskMgr.Register(tasks.NewRebuildReleaseInterestTask(notificationSystem))
-			taskMgr.Register(tasks.NewNotificationsRetentionTask(notificationSystem))
+			maintenanceSteps = append(maintenanceSteps, tasks.NewNotificationsRetentionTask(notificationSystem))
 		}
 		if userStoreProvider != nil {
 			taskMgr.Register(tasks.NewSettingMutationsRetentionTask(userstore.NewSettingMutationSweeper(
@@ -2741,12 +2748,18 @@ func main() {
 			if brandingSvc != nil {
 				brandingReconciler = brandingSvc
 			}
-			taskMgr.Register(tasks.NewReconcileArtworkCacheTask(
+			reconcileArtwork := tasks.NewReconcileArtworkCacheTask(
 				metadata.NewArtworkCacheReconciler(deps.DB, deps.Blobs.Assets),
 				settingsRepo,
 				brandingReconciler,
 				identity,
-			))
+			)
+			taskMgr.Register(reconcileArtwork)
+			go func() {
+				if err := reconcileArtwork.CheckStorageIdentity(appCtx); err != nil {
+					slog.WarnContext(appCtx, "artwork storage preflight failed", "task", reconcileArtwork.Key(), "error", err)
+				}
+			}()
 			// The reconcile above repairs catalog rows whose objects went
 			// missing. This sweeps the other direction: objects no row
 			// references. Only the sweep can reclaim a revision whose GC
@@ -2841,6 +2854,7 @@ func main() {
 		if mangaEnricher != nil {
 			taskMgr.Register(tasks.NewSyncMangaMetadataTask(mangaEnricher))
 		}
+		taskMgr.Register(tasks.NewDatabaseMaintenanceTask(maintenanceSteps...))
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
 			pluginTasks, err := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService).Tasks(appCtx)
 			if err != nil {

@@ -36,7 +36,7 @@ func (t *RefreshTrendingDiscoverTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary
 }
 
-func (t *RefreshTrendingDiscoverTask) IsHidden() bool { return false }
+func (t *RefreshTrendingDiscoverTask) IsHidden() bool { return true }
 
 func (t *RefreshTrendingDiscoverTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{

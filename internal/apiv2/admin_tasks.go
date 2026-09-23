@@ -15,7 +15,7 @@ import (
 )
 
 type AdminTaskService interface {
-	ListTasks(bool) []taskmanager.TaskInfo
+	ListTasks(context.Context, bool) []taskmanager.TaskInfo
 	GetTaskInfo(string) taskmanager.TaskInfo
 	StartTask(string) (taskmanager.TaskInfo, error)
 	CancelTask(string) error
@@ -178,12 +178,12 @@ func taskProblem(err error) error {
 		return serviceProblem(err)
 	}
 }
-func (reg *Registry) listAdminTasks(_ context.Context, in *AdminTasksInput) (*AdminTasksOutput, error) {
+func (reg *Registry) listAdminTasks(ctx context.Context, in *AdminTasksInput) (*AdminTasksOutput, error) {
 	if reg.deps.AdminTasks == nil {
 		return nil, unavailable("admin tasks")
 	}
 	items := []AdminTask{}
-	for _, t := range reg.deps.AdminTasks.ListTasks(in.IncludeHidden) {
+	for _, t := range reg.deps.AdminTasks.ListTasks(ctx, in.IncludeHidden) {
 		items = append(items, taskOf(t))
 	}
 	return &AdminTasksOutput{Body: Collection[AdminTask]{Items: items}}, nil

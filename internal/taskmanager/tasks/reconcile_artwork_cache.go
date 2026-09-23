@@ -95,33 +95,37 @@ func (t *ReconcileArtworkCacheTask) Category() taskmanager.TaskCategory {
 }
 func (t *ReconcileArtworkCacheTask) IsHidden() bool { return false }
 
-func (t *ReconcileArtworkCacheTask) DefaultTriggers() []taskmanager.TriggerConfig {
-	return []taskmanager.TriggerConfig{
-		{Type: taskmanager.TriggerTypeStartup},
-	}
+func (t *ReconcileArtworkCacheTask) DefaultTriggers() []taskmanager.TriggerConfig { return nil }
+
+// ManualOnly keeps the mutating sweep an explicit administrator action.
+func (t *ReconcileArtworkCacheTask) ManualOnly() bool { return true }
+
+// ShouldRun fails closed for every scheduler trigger, including a startup
+// trigger an older installation persisted. Manual RunTask calls bypass this
+// gate and remain the explicit recovery path.
+func (t *ReconcileArtworkCacheTask) ShouldRun(ctx context.Context) (bool, error) {
+	return false, t.CheckStorageIdentity(ctx)
 }
 
-// ShouldRun suppresses scheduled execution in every case. A changed storage
-// identity returns an actionable preflight error so the event is visible in
-// logs, but it must never launch a mutating sweep automatically. Manual
-// RunTask calls bypass this gate and remain the explicit recovery path.
+// CheckStorageIdentity returns an actionable error when the configured artwork
+// storage differs from the one the catalog was last reconciled against. The
+// server calls it once at startup so the move is visible in logs; it never
+// starts a sweep.
 //
-// The startup trigger fires exactly once per process, so a transient settings
-// read failure here would postpone a needed reconcile until the next restart;
-// retry briefly before giving up. (The task manager skips the run on a
-// preflight error rather than failing open into a full sweep.)
-func (t *ReconcileArtworkCacheTask) ShouldRun(ctx context.Context) (bool, error) {
+// It runs once per process, so a transient settings read failure would hide a
+// needed reconcile until the next restart; retry briefly before giving up.
+func (t *ReconcileArtworkCacheTask) CheckStorageIdentity(ctx context.Context) error {
 	if t.runner == nil || t.settings == nil {
-		return false, nil
+		return nil
 	}
 	stored, err := t.readStorageIdentity(ctx)
 	if err != nil {
-		return false, fmt.Errorf("reading artwork storage identity: %w", err)
+		return fmt.Errorf("reading artwork storage identity: %w", err)
 	}
 	if stored == "" || stored == t.identity {
-		return false, nil
+		return nil
 	}
-	return false, fmt.Errorf(
+	return fmt.Errorf(
 		"%w: migrate or copy the existing public artwork objects before running Reconcile Artwork Cache manually; a manual run may reset or clear the full artwork library, and re-downloading requires a separate manual Backfill Metadata Images run",
 		ErrArtworkReconcileManualRunRequired,
 	)

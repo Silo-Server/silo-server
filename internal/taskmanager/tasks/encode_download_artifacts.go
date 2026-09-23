@@ -32,7 +32,7 @@ func (t *EncodeDownloadArtifactsTask) Description() string {
 func (t *EncodeDownloadArtifactsTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategorySystem
 }
-func (t *EncodeDownloadArtifactsTask) IsHidden() bool { return false }
+func (t *EncodeDownloadArtifactsTask) IsHidden() bool { return true }
 
 func (t *EncodeDownloadArtifactsTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	// Startup runs the crash-recovery sweep; the interval is a safety net behind

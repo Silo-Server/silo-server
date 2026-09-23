@@ -122,8 +122,9 @@ precision. There is no `revoked_at` member because every returned session is act
 `DELETE /api/v2/auth/sessions/{id}` revokes a session owned by the caller's account and returns
 `204 No Content`. A missing session or one owned by another account returns `404 not_found`.
 
-The `cleanup_auth_sessions` scheduled task deletes expired login-session rows at startup and
-once every 24 hours by default. Revoked sessions remain stored until their expiry passes. The v1
+The login-session step of the `database_maintenance` scheduled task deletes expired
+login-session rows daily at 05:00 by default. Revoked sessions remain stored until their
+expiry passes. The v1
 session-list response shape and query remain unchanged, but expired rows disappear from that
 listing once cleanup deletes them. Jellyfin-compatible clients continue to use the shared login
 session validity checks; cleanup removes only sessions that have already expired.

@@ -39,7 +39,7 @@ func (t *OperationalLogCleanupTask) Description() string {
 func (t *OperationalLogCleanupTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategorySystem
 }
-func (t *OperationalLogCleanupTask) IsHidden() bool { return false }
+func (t *OperationalLogCleanupTask) IsHidden() bool { return true }
 
 func (t *OperationalLogCleanupTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{

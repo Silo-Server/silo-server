@@ -44,6 +44,10 @@ func (t *BackfillMediaItemAliasesTask) DefaultTriggers() []taskmanager.TriggerCo
 	return nil
 }
 
+// ManualOnly: normal metadata refreshes keep aliases current; this backfill
+// only covers items not refreshed since aliases were introduced.
+func (t *BackfillMediaItemAliasesTask) ManualOnly() bool { return true }
+
 func (t *BackfillMediaItemAliasesTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
 	if t == nil || t.backfiller == nil {
 		progress.Report(100, "Media item alias backfill is not configured")

@@ -24,7 +24,7 @@ type fakeAdminTasks struct {
 func newFakeAdminTasks() *fakeAdminTasks {
 	return &fakeAdminTasks{schedule: taskmanager.Schedule{Revision: 2, Triggers: []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeInterval, IntervalMs: 1000}}}}
 }
-func (f *fakeAdminTasks) ListTasks(bool) []taskmanager.TaskInfo {
+func (f *fakeAdminTasks) ListTasks(context.Context, bool) []taskmanager.TaskInfo {
 	return []taskmanager.TaskInfo{f.GetTaskInfo("fixture")}
 }
 func (f *fakeAdminTasks) GetTaskInfo(key string) taskmanager.TaskInfo {

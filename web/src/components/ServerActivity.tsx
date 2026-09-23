@@ -3,7 +3,7 @@ import { Link, useLocation } from "react-router";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { Activity, ChevronRight, Loader, ScanLine } from "lucide-react";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
-import { useTasks } from "@/hooks/queries/admin/tasks";
+import { useTasksIncludingHidden } from "@/hooks/queries/admin/tasks";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import {
@@ -35,7 +35,7 @@ interface ServerActivityProps {
 // (AdminLayoutEventChannels / AdminEventChannels), not here.
 function useServerActivityData() {
   const { data: sessions = [] } = useAdminSessions();
-  const { data: tasks = [] } = useTasks();
+  const { data: tasks = [] } = useTasksIncludingHidden();
   const { data: scans } = useActiveScans();
   const { data: libraries = [] } = useAdminLibraries();
   const { connectionState } = useRealtimeEvents();

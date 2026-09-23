@@ -339,3 +339,15 @@ func TestReconcileArtworkCacheExecuteIncludesBranding(t *testing.T) {
 		t.Fatalf("completion message %q does not surface the branding failure", failingProgress.lastMessage)
 	}
 }
+
+func TestReconcileArtworkCacheIsManualOnly(t *testing.T) {
+	task := NewReconcileArtworkCacheTask(&fakeReconcileRunner{}, &fakeSettingsStore{values: map[string]string{}}, nil, "endpoint|bucket|prefix")
+	if !task.ManualOnly() || len(task.DefaultTriggers()) != 0 {
+		t.Fatalf("ManualOnly() = %v, DefaultTriggers() = %#v; want manual-only with no schedule", task.ManualOnly(), task.DefaultTriggers())
+	}
+
+	moved := NewReconcileArtworkCacheTask(&fakeReconcileRunner{}, &fakeSettingsStore{values: map[string]string{ArtworkStorageIdentityKey: "old|bucket|prefix"}}, nil, "endpoint|bucket|prefix")
+	if err := moved.CheckStorageIdentity(context.Background()); !errors.Is(err, ErrArtworkReconcileManualRunRequired) {
+		t.Fatalf("CheckStorageIdentity() after a storage move = %v, want manual-run-required", err)
+	}
+}

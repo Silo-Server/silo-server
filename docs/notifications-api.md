@@ -547,7 +547,7 @@ the admission receipt; the intent remains `current` until it expires, is cleared
 verified or replaced, and the client's only remedy is a new intent after the rate
 window. Retired rows use `current=false`.
 
-Retention runs with the notification retention task: the encrypted payload is
+Retention runs with the notification step of the `database_maintenance` task: the encrypted payload is
 dropped from `delivered`/`failed` rows once the link has expired, and the receipt
 row itself is deleted thirty days after expiry. Receipts outlive payloads so an
 exact replay of an old UUID still answers `current=false` rather than admitting

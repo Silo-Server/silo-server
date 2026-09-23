@@ -16,7 +16,7 @@ const refreshMetadataTaskKey = "refresh_metadata"
 
 // TaskManagerAPI is the subset of TaskManager used by the handler.
 type TaskManagerAPI interface {
-	ListTasks(includeHidden bool) []taskmanager.TaskInfo
+	ListTasks(ctx context.Context, includeHidden bool) []taskmanager.TaskInfo
 	GetTaskInfo(key string) taskmanager.TaskInfo
 	RunTask(ctx context.Context, key string) error
 	CancelTask(key string) error
@@ -47,7 +47,7 @@ func NewTaskHandler(mgr TaskManagerAPI, history TaskHistoryLister, metrics TaskM
 // HandleListTasks handles GET /api/v1/admin/tasks
 func (h *TaskHandler) HandleListTasks(w http.ResponseWriter, r *http.Request) {
 	includeHidden := r.URL.Query().Get("include_hidden") == "true"
-	tasks := h.mgr.ListTasks(includeHidden)
+	tasks := h.mgr.ListTasks(r.Context(), includeHidden)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(tasks)
 }
