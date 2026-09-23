@@ -113,6 +113,26 @@ func TestBareAspectRatioNeedsSeriesContext(t *testing.T) {
 	}
 }
 
+func TestShowTitleNumberIsNotTrailingEpisode(t *testing.T) {
+	for _, tt := range []struct {
+		path    string
+		episode int
+	}{
+		{"/tv/The 100/Season 01/The 100.mkv", 0},
+		{"/tv/Room 104/Season 01/Room 104.mkv", 0},
+		{"/tv/The 100/Season 01/The 100 05.mkv", 5},
+		{"/tv/The 100/Season 01/The 100 - 05.mkv", 5},
+		{"/tv/The 100/Season 01/The 100 - 05 - Title.mkv", 5},
+		{"/tv/Example Show/Season 01/Example Show 07.mkv", 7},
+		{"/tv/Area 51/Season 01/Area 51 - 51.mkv", 51},
+	} {
+		hints := ParseFilename(tt.path, "series", "/tv")
+		if hints.SeasonNum != 1 || hints.EpisodeNum != tt.episode {
+			t.Fatalf("%s: %+v, want episode %d", tt.path, hints, tt.episode)
+		}
+	}
+}
+
 func TestSeriesFilenameCorroboratesMissingFolderYear(t *testing.T) {
 	for _, filename := range []string{"Example Show (1994) - S01E02", "Another Show (1994) - S01E02"} {
 		hints := ParseFilename("/tv/Example Show {tvdb-12345}/Season 01/"+filename+".mkv", "series", "/tv")

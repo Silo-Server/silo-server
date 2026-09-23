@@ -132,12 +132,30 @@ func parseEpisodeToken(name string, directories []string, allowNumericSeason boo
 	trailing := func() (episodeToken, bool) {
 		// A show title followed by a number is common in anime and disc rips.
 		// Prefer the last candidate so numbers inside a series title are kept.
-		matches := trailingEpisodeRe.FindAllStringSubmatchIndex(name, -1)
+		// Candidates may share a separator (The 100 05), so each search resumes
+		// after the previous number rather than after its trailing separator.
+		var matches [][]int
+		for offset := 0; offset < len(name); {
+			match := trailingEpisodeRe.FindStringSubmatchIndex(name[offset:])
+			if match == nil {
+				break
+			}
+			for j := range match {
+				match[j] += offset
+			}
+			matches = append(matches, match)
+			offset = match[3]
+		}
 		for i := len(matches) - 1; i >= 0; i-- {
 			match := matches[i]
 			digits := name[match[2]:match[3]]
 			number := parseEpisodeNumber(digits)
 			if insideReleaseTag(name, match[2]) || number == 0 || (number >= 1928 && number <= 2500) || strings.Trim(name[:match[0]], " ._-") == "" {
+				continue
+			}
+			// A number that completes the show folder's title (The 100,
+			// Room 104) names the show, not the episode.
+			if completesShowTitle(name[:match[3]], showDirectory) {
 				continue
 			}
 			if !episodeNumberBoundary(name, match[3]) {
