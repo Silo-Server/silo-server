@@ -141,6 +141,8 @@ func TestBrowseLanguageFiltersDB(t *testing.T) {
 		{"any of several", BrowseFilters{AudioLanguages: []string{"jpn", "en"}}, []string{english, japanese}},
 		{"embedded subtitle", BrowseFilters{SubtitleLanguages: []string{"fre"}}, []string{english}},
 		{"external subtitle", BrowseFilters{SubtitleLanguages: []string{"spa"}}, []string{japanese}},
+		{"canonical code matches an ISO 639-2 external subtitle", BrowseFilters{SubtitleLanguages: []string{"es"}}, []string{japanese}},
+		{"canonical code matches a bibliographic embedded subtitle", BrowseFilters{SubtitleLanguages: []string{"fr"}}, []string{english}},
 		{"both filters intersect", BrowseFilters{AudioLanguages: []string{"en"}, SubtitleLanguages: []string{"es"}}, []string{}},
 	}
 	for _, tc := range cases {

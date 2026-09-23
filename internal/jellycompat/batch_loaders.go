@@ -626,19 +626,25 @@ func (h *ItemsHandler) applyListMediaSourceCounts(ctx context.Context, session *
 			slog.DebugContext(ctx, "jellycompat media source count failed", "component", "jellycompat", "error", err)
 			continue
 		}
+		counts := make(map[string]int, len(ids))
 		for rows.Next() {
 			var contentID string
 			var count int
 			if err := rows.Scan(&contentID, &count); err != nil {
 				break
 			}
-			if count < 1 {
-				continue
-			}
-			for _, i := range indexes[column+"\x00"+contentID] {
-				items[i].MediaSourceCount = count
-			}
+			counts[contentID] = count
 		}
 		rows.Close()
+		if rows.Err() != nil {
+			continue
+		}
+		// An item with no file the viewer may play leaves the count unset
+		// rather than keeping the mapper's single-source assumption.
+		for _, contentID := range ids {
+			for _, i := range indexes[column+"\x00"+contentID] {
+				items[i].MediaSourceCount = counts[contentID]
+			}
+		}
 	}
 }

@@ -102,8 +102,8 @@ func TestBrowseLanguagePredicatesUseStoredCodeArrays(t *testing.T) {
 	if !slices.Equal(audio, []string{"en", "eng", "pt-br"}) {
 		t.Fatalf("audio codes = %v, want canonical and raw lowercase forms", audio)
 	}
-	if !slices.Equal(subtitle, []string{"fr", "fre"}) {
-		t.Fatalf("subtitle codes = %v", subtitle)
+	if !slices.Equal(subtitle, []string{"fr", "fra", "fre"}) {
+		t.Fatalf("subtitle codes = %v, want the canonical code and both ISO 639-2 forms", subtitle)
 	}
 }
 

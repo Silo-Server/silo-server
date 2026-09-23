@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 )
 
 const (
@@ -29,17 +30,21 @@ func readDeviceProfileRequest(r io.Reader) ([]byte, error) {
 	return body, nil
 }
 
+// deviceProfileHashedIDPrefix marks a device identity stored as its digest.
+const deviceProfileHashedIDPrefix = "sha256:"
+
 // deviceProfileStorageID bounds the device identity a registration is stored
 // under. Jellyfin Web derives its DeviceId from the browser's user agent, so a
 // long user agent (embedded browsers, some TVs) exceeds the bound; Jellyfin
 // accepts such IDs, so longer ones are keyed by their SHA-256 instead of being
-// rejected.
+// rejected. An ID that already looks like a stored digest is hashed as well,
+// so it cannot share a key with a hashed long ID.
 func deviceProfileStorageID(deviceID string) string {
-	if len(deviceID) <= maxDeviceIDBytes {
+	if len(deviceID) <= maxDeviceIDBytes && !strings.HasPrefix(deviceID, deviceProfileHashedIDPrefix) {
 		return deviceID
 	}
 	sum := sha256.Sum256([]byte(deviceID))
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return deviceProfileHashedIDPrefix + hex.EncodeToString(sum[:])
 }
 
 func encodeDeviceProfile(profile DeviceProfile) ([]byte, error) {

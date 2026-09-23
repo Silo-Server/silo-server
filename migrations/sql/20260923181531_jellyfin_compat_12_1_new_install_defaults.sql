@@ -15,10 +15,22 @@ WHERE key = 'jellyfin_compat.emulated_server_version'
       WHERE key = 'setup.completed' AND lower(trim(value)) = 'true'
   );
 
--- The managed Jellyfin Web version is not seeded: an unset row follows the
--- built-in default, which is now 12.1. Pin configured servers that never
--- stored one to the previous default, 10.11.6, so their Web install target
--- does not change under them.
+-- The managed Jellyfin Web version is not seeded: a missing or empty row
+-- follows the built-in default, which is now 12.1. Pin configured servers
+-- that never stored one to the previous default, 10.11.6, so their Web
+-- install target does not change under them.
+UPDATE server_settings
+SET value = '10.11.6'
+WHERE key = 'jellyfin_compat.web_version'
+  AND trim(value) = ''
+  AND (
+      EXISTS (SELECT 1 FROM users)
+      OR EXISTS (
+          SELECT 1 FROM server_settings
+          WHERE key = 'setup.completed' AND lower(trim(value)) = 'true'
+      )
+  );
+
 INSERT INTO server_settings (key, value)
 SELECT 'jellyfin_compat.web_version', '10.11.6'
 WHERE NOT EXISTS (

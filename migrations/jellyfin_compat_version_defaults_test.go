@@ -75,21 +75,27 @@ func TestJellyfinCompatWebVersionMigrationPinsConfiguredServersPostgres(t *testi
 	for _, tt := range []struct {
 		name      string
 		stored    string
+		emptyRow  bool
 		hasUser   bool
 		completed bool
 		want      string
 	}{
-		{"fresh database", "", false, false, ""},
-		{"configured without stored version", "", true, true, "10.11.6"},
-		{"setup account created", "", true, false, "10.11.6"},
-		{"completed without account", "", false, true, "10.11.6"},
-		{"configured explicit version", "12.1", true, true, "12.1"},
-		{"fresh explicit version", "10.11.8", false, false, "10.11.8"},
+		{"fresh database", "", false, false, false, ""},
+		{"configured without stored version", "", false, true, true, "10.11.6"},
+		{"configured with an empty stored version", "", true, true, true, "10.11.6"},
+		{"fresh with an empty stored version", "", true, false, false, " "},
+		{"setup account created", "", false, true, false, "10.11.6"},
+		{"completed without account", "", false, false, true, "10.11.6"},
+		{"configured explicit version", "12.1", false, true, true, "12.1"},
+		{"fresh explicit version", "10.11.8", false, false, false, "10.11.8"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			settings := map[string]string{}
 			if tt.stored != "" {
 				settings["jellyfin_compat.web_version"] = tt.stored
+			}
+			if tt.emptyRow {
+				settings["jellyfin_compat.web_version"] = " "
 			}
 			read, run := jellyfinCompatDefaultsFixture(t, tt.hasUser, tt.completed, settings)
 			run(false)

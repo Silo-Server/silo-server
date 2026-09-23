@@ -1808,8 +1808,12 @@ func languageFilterCodes(values []string) []string {
 		seen[code] = struct{}{}
 		out = append(out, code)
 	}
+	// External subtitle tags keep the spelling of their filename ("spa",
+	// "ger"), while facets offer the canonical code, so match every alias.
 	for _, value := range values {
-		addCode(lang.CanonicalTag(value))
+		for _, alias := range lang.CodeAliases(value) {
+			addCode(alias)
+		}
 		addCode(value)
 	}
 	return out

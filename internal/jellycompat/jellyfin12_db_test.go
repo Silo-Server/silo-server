@@ -45,18 +45,20 @@ func TestApplyListMediaSourceCountsDB(t *testing.T) {
 	}
 	multi := fmt.Sprintf("jf12-multi-%d", suffix)
 	single := fmt.Sprintf("jf12-single-%d", suffix)
+	missing := fmt.Sprintf("jf12-missing-%d", suffix)
 	t.Cleanup(func() {
 		ctx := context.Background()
-		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE content_id = ANY($1)`, []string{multi, single})
-		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{multi, single})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE content_id = ANY($1)`, []string{multi, single, missing})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{multi, single, missing})
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
 	})
-	for _, id := range []string{multi, single} {
+	for _, id := range []string{multi, single, missing} {
 		jellyfin12Exec(t, pool, `INSERT INTO media_items (content_id, type, title) VALUES ($1, 'movie', $1)`, id)
 	}
 	jellyfin12Exec(t, pool, `INSERT INTO media_files (content_id, media_folder_id, file_path) VALUES ($1, $2, $1 || '-4k.mkv'), ($1, $2, $1 || '-1080p.mkv')`, multi, folderID)
 	jellyfin12Exec(t, pool, `INSERT INTO media_files (content_id, media_folder_id, file_path, missing_since) VALUES ($1, $2, $1 || '-gone.mkv', now())`, multi, folderID)
 	jellyfin12Exec(t, pool, `INSERT INTO media_files (content_id, media_folder_id, file_path) VALUES ($1, $2, $1 || '.mkv')`, single, folderID)
+	jellyfin12Exec(t, pool, `INSERT INTO media_files (content_id, media_folder_id, file_path, missing_since) VALUES ($1, $2, $1 || '.mkv', now())`, missing, folderID)
 
 	codec := NewResourceIDCodec()
 	h := &ItemsHandler{codec: codec, browseRepo: catalog.NewBrowseRepository(pool), mapper: newMapper(codec, &config.Config{})}
@@ -64,10 +66,13 @@ func TestApplyListMediaSourceCountsDB(t *testing.T) {
 		{ID: codec.EncodeStringID(EncodedIDItem, multi), Type: "Movie", MediaSourceCount: 1},
 		{ID: codec.EncodeStringID(EncodedIDItem, single), Type: "Movie", MediaSourceCount: 1},
 		{ID: codec.EncodeStringID(EncodedIDItem, "series-x"), Type: "Series"},
+		// The list mapper assumes one source for a matched item; with every
+		// file gone the count must be left unset.
+		{ID: codec.EncodeStringID(EncodedIDItem, missing), Type: "Movie", MediaSourceCount: 1},
 	}
 	h.applyListMediaSourceCounts(context.Background(), &Session{}, items, itemsQuery{requestedFields: map[string]bool{"mediasourcecount": true}})
-	if items[0].MediaSourceCount != 2 || items[1].MediaSourceCount != 1 || items[2].MediaSourceCount != 0 {
-		t.Fatalf("MediaSourceCount = %d/%d/%d, want 2/1/0", items[0].MediaSourceCount, items[1].MediaSourceCount, items[2].MediaSourceCount)
+	if items[0].MediaSourceCount != 2 || items[1].MediaSourceCount != 1 || items[2].MediaSourceCount != 0 || items[3].MediaSourceCount != 0 {
+		t.Fatalf("MediaSourceCount = %d/%d/%d/%d, want 2/1/0/0", items[0].MediaSourceCount, items[1].MediaSourceCount, items[2].MediaSourceCount, items[3].MediaSourceCount)
 	}
 
 	items[0].MediaSourceCount = 1

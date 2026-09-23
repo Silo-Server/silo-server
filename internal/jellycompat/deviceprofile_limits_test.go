@@ -68,6 +68,18 @@ func TestDeviceProfileLongDeviceIDsAreKeyedByHash(t *testing.T) {
 	if got := deviceProfileStorageID(exact); got != exact {
 		t.Fatalf("device ID within the bound was rewritten: %q", got)
 	}
+
+	// A short ID spelled like a stored digest must not reach the long ID's key.
+	lookalike := deviceProfileStorageID(long)
+	if err := store.PutForDevice(t.Context(), "token", lookalike, DeviceProfile{Name: "lookalike"}); err != nil {
+		t.Fatalf("digest-shaped device ID: %v", err)
+	}
+	for id, want := range map[string]string{long: "long", lookalike: "lookalike"} {
+		profile, ok, err := store.GetForDevice(t.Context(), "token", id)
+		if err != nil || !ok || profile.Name != want {
+			t.Fatalf("GetForDevice(%q...) = %+v, %t, %v; want %q", id[:12], profile, ok, err, want)
+		}
+	}
 }
 
 func TestDeviceProfileRegistrationQuota(t *testing.T) {
