@@ -378,7 +378,7 @@ export default function AdminDiagnostics() {
                 : "Client diagnostic report details"}
             </SheetDescription>
           </SheetHeader>
-          <div className="overflow-y-auto px-4 pb-8">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-8">
             {selectedReport.isLoading && (
               <p className="text-muted-foreground py-8 text-sm">Loading report details...</p>
             )}

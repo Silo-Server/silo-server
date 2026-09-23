@@ -272,9 +272,12 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-5xl gap-0 overflow-hidden p-0 sm:max-w-5xl" showCloseButton>
+        <DialogContent
+          className="flex max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl"
+          showCloseButton
+        >
           {/* Header */}
-          <DialogHeader className="border-border/10 flex-row items-center justify-between border-b px-5 py-4">
+          <DialogHeader className="border-border/10 shrink-0 flex-row items-center justify-between border-b px-5 py-4">
             <div className="flex items-center gap-2.5">
               <DialogTitle className="text-[15px] font-semibold">Edit Metadata</DialogTitle>
               <span className="bg-muted/50 text-muted-foreground rounded px-2 py-0.5 text-[11px]">
@@ -289,7 +292,10 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
             )}
           </DialogHeader>
 
-          <div className="flex flex-col sm:flex-row" style={{ height: "min(70vh, 580px)" }}>
+          <div
+            className="flex min-h-0 flex-1 flex-col sm:flex-row"
+            style={{ height: "min(70vh, 580px)" }}
+          >
             {/* Sidebar — horizontal tabs on mobile, vertical on sm+ */}
             <nav className="border-border/10 flex flex-shrink-0 overflow-x-auto border-b bg-black/10 sm:w-[160px] sm:flex-col sm:overflow-x-visible sm:border-r sm:border-b-0 sm:py-2">
               {visibleSections.map((section) => (
@@ -310,7 +316,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
             </nav>
 
             {/* Content */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
               {effectiveActiveSection === "general" && (
                 <div className="space-y-4">
                   <FieldRow label="Title" lockIcon={renderLockIcon("title")}>
@@ -661,7 +667,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
           </div>
 
           {/* Footer */}
-          <div className="border-border/10 flex flex-col-reverse gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-3.5">
+          <div className="border-border/10 flex shrink-0 flex-col-reverse gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-3.5">
             <div>
               {isLockable && (
                 <Button

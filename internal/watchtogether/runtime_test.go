@@ -239,6 +239,10 @@ func TestRoomRuntimeRemoteBarrierInvalidatesOldDeadlinePG(t *testing.T) {
 	if f.host.rooms[f.roomID].waitingTimer != nil {
 		t.Fatal("shared room retained a process-local deadline timer")
 	}
+	// The guest is ready and the host is not; the deadline skips the host.
+	if _, err = f.guest.HandleReadyForConnection(t.Context(), f.guestReg, 8, "guest", StateReport{SessionID: "guest-session", PositionSeconds: 900}); err != nil {
+		t.Fatal(err)
+	}
 	f.now = f.now.Add(20 * time.Second)
 	if err = f.host.reconcileRoom(t.Context(), f.roomID); err != nil {
 		t.Fatal(err)
@@ -341,6 +345,17 @@ func TestRoomRuntimeWaitingDeadlineStartsWithAttachmentPG(t *testing.T) {
 	}
 	f.now = f.now.Add(waitingResumeDeadline + time.Second)
 	if err := f.host.reconcileRoom(t.Context(), f.roomID); err != nil {
+		t.Fatal(err)
+	}
+	room, _ = f.repo.GetRoomByID(t.Context(), f.roomID)
+	if room.PlaybackState != RoomPlaybackStateWaiting {
+		t.Fatal("room started without anyone ready to watch")
+	}
+	// Once someone is ready, the attached straggler no longer holds the room.
+	if _, err := f.guest.AttachSessionForConnection(t.Context(), f.guestReg, 8, "guest", "guest-session"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.guest.HandleReadyForConnection(t.Context(), f.guestReg, 8, "guest", StateReport{SessionID: "guest-session", PositionSeconds: 0}); err != nil {
 		t.Fatal(err)
 	}
 	room, _ = f.repo.GetRoomByID(t.Context(), f.roomID)

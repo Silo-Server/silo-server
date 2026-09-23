@@ -211,7 +211,10 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 				compliant := result.Plan != nil &&
 					(result.PlayMethod == PlayTranscode || file.IsAudioOnly() && result.TranscodeAudio)
 				if result.Terminal != nil || !compliant {
-					result = terminalPlannerResultV3("bitrate_policy_unavailable", "This stream exceeds the server bitrate limit, and no compliant transcoding route is available.", false)
+					// Keep a transient blocker (such as a missing toolchain)
+					// retryable after naming the bitrate limit as the refusal.
+					retryable := result.Terminal != nil && result.Terminal.Retryable
+					result = terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "This stream exceeds the server bitrate limit, and no compliant transcoding route is available.", retryable)
 				}
 			}()
 		}
@@ -856,7 +859,7 @@ func planAudioOnlyV3(input PlannerInputV3, file *models.MediaFile, source Source
 		if input.ServerBitrateCapKbps > 0 {
 			targetAudioBitrateKbps = min(targetAudioBitrateKbps, input.ServerBitrateCapKbps*95/100)
 			if targetAudioBitrateKbps < 32 {
-				return terminalPlannerResultV3("bitrate_policy_unavailable", "The server bitrate limit is too low for a playable audio stream.", false)
+				return terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "The server bitrate limit is too low for a playable audio stream.", false)
 			}
 		}
 		applyAudioOnlyAACConversionV3(&plan, targetAudioChannels, targetAudioBitrateKbps, bandwidthCapExceeded)
@@ -1020,7 +1023,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		budget := optionalValueV3(input.Request.BandwidthCapKbps) * 95 / 100
 		targetAudioBitrateKbps = min(defaultAudioBitrateKbps, max(64, budget/4))
 		if budget-targetAudioBitrateKbps < 64 {
-			return terminalPlannerResultV3("bitrate_policy_unavailable", "The server bitrate limit is too low for a playable video stream.", false)
+			return terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "The server bitrate limit is too low for a playable video stream.", false)
 		}
 		quality.BitrateKbps = min(quality.BitrateKbps, budget-targetAudioBitrateKbps)
 	}

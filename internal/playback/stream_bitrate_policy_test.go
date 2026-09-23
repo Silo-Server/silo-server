@@ -128,3 +128,15 @@ func TestServerBitrateCapTooLowFailsClosed(t *testing.T) {
 		t.Fatalf("expected bitrate policy terminal: %s", ExplainPlannerResultV3(result))
 	}
 }
+
+func TestServerBitrateCapKeepsTransientBlockerRetryable(t *testing.T) {
+	input := bitratePolicyFixtureV3()
+	input.ServerBitrateCapKbps = 4_000
+	input.HLSVideoRegistry = func() *TransformationRegistryV3 {
+		return NewTransformationRegistryV3(nil)
+	}
+	result := PlanPlaybackV3(input)
+	if result.Terminal == nil || result.Terminal.Reason != TerminalBitratePolicyUnavailableV3 || !result.Terminal.Retryable {
+		t.Fatalf("expected retryable bitrate policy terminal: %s", ExplainPlannerResultV3(result))
+	}
+}

@@ -5688,6 +5688,7 @@ const (
 	terminalHDRTranscodeUnsupportedV3       = playback.TerminalHDRTranscodeUnsupportedV3
 	terminalSubtitleConversionUnsupportedV3 = "subtitle_conversion_unsupported"
 	terminalSubtitleUnavailableInVersionV3  = "subtitle_unavailable_in_version"
+	terminalBitratePolicyUnavailableV3      = playback.TerminalBitratePolicyUnavailableV3
 )
 
 // terminalAllowsAlternateFileV3 reports whether a refusal is the kind another
@@ -5701,12 +5702,16 @@ const (
 // the exact reason this gate exists — a bitmap subtitle needing burn-in that an
 // HDR source cannot support while an SDR alternate can. Leaving the new reason
 // out silently retired that fallback and refused playback outright.
+//
+// bitrate_policy_unavailable belongs here for the same reason: it replaces the
+// 4K and HDR refusals of a version that exceeds the stream's bitrate limit, and
+// a lower-bitrate version may fit that limit.
 func terminalAllowsAlternateFileV3(terminal *playback.TerminalV3) bool {
 	if terminal == nil {
 		return false
 	}
 	switch terminal.Reason {
-	case terminalNoAlternateVersionV3, terminalHDRTranscodeUnsupportedV3, terminalSubtitleConversionUnsupportedV3:
+	case terminalNoAlternateVersionV3, terminalHDRTranscodeUnsupportedV3, terminalSubtitleConversionUnsupportedV3, terminalBitratePolicyUnavailableV3:
 		return true
 	default:
 		return false

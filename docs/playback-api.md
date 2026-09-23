@@ -90,10 +90,12 @@ When an administrator sets a positive bitrate limit for the stream's location
 bitrate fits. Otherwise the server plans
 a lower-bitrate transcode, including an audio and mux-overhead budget. A
 client's lower bandwidth preference still wins. If no compliant encode route
-exists, the decision is terminal with `bitrate_policy_unavailable`; it never
-falls back to the oversized original. The selected limit is frozen on a new
-playback attempt and reused through replans, so later policy edits do not
-interrupt it. `server_remote_stream_bitrate_policy_v1` and
+exists, the server tries the item's other versions as it does for 4K and HDR
+refusals. When none fits, the decision is terminal with
+`bitrate_policy_unavailable`; it never falls back to the oversized original.
+The selected limit is frozen on a new playback attempt and reused through
+replans, so later policy edits do not interrupt it.
+`server_remote_stream_bitrate_policy_v1` and
 `server_local_stream_bitrate_policy_v1` in `features` advertise this behavior.
 
 The web Watch Party player requires this capability and sends `false`. When a
