@@ -476,13 +476,13 @@
               "null"
             ]
           },
-          "max_playback_quality": {
-            "type": "string"
-          },
           "max_local_stream_bitrate_kbps": {
             "description": "Local per-stream bitrate ceiling in kbps; 0 means unlimited",
             "format": "int64",
             "type": "integer"
+          },
+          "max_playback_quality": {
+            "type": "string"
           },
           "max_remote_stream_bitrate_kbps": {
             "description": "Remote per-stream bitrate ceiling in kbps; 0 means unlimited",
@@ -577,13 +577,13 @@
               "null"
             ]
           },
-          "max_playback_quality": {
-            "type": "string"
-          },
           "max_local_stream_bitrate_kbps": {
             "format": "int64",
             "minimum": 0,
             "type": "integer"
+          },
+          "max_playback_quality": {
+            "type": "string"
           },
           "max_remote_stream_bitrate_kbps": {
             "format": "int64",
@@ -669,13 +669,13 @@
               "null"
             ]
           },
-          "max_playback_quality": {
-            "type": "string"
-          },
           "max_local_stream_bitrate_kbps": {
             "description": "Local per-stream bitrate ceiling in kbps; 0 means unlimited",
             "format": "int64",
             "type": "integer"
+          },
+          "max_playback_quality": {
+            "type": "string"
           },
           "max_remote_stream_bitrate_kbps": {
             "description": "Remote per-stream bitrate ceiling in kbps; 0 means unlimited",
@@ -841,6 +841,14 @@
               "null"
             ]
           },
+          "max_local_stream_bitrate_kbps": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "max_playback_quality": {
             "type": [
               "string",
@@ -851,14 +859,6 @@
             "format": "int64",
             "minimum": 1,
             "type": "integer"
-          },
-          "max_local_stream_bitrate_kbps": {
-            "format": "int64",
-            "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
           },
           "max_remote_stream_bitrate_kbps": {
             "format": "int64",
@@ -1050,6 +1050,14 @@
               "null"
             ]
           },
+          "max_local_stream_bitrate_kbps": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "max_playback_quality": {
             "type": [
               "string",
@@ -1060,14 +1068,6 @@
             "format": "int64",
             "minimum": 1,
             "type": "integer"
-          },
-          "max_local_stream_bitrate_kbps": {
-            "format": "int64",
-            "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
           },
           "max_remote_stream_bitrate_kbps": {
             "format": "int64",
@@ -14720,6 +14720,17 @@
               "null"
             ]
           },
+          "max_local_stream_bitrate_kbps": {
+            "description": "Local per-stream bitrate override in kbps; null inherits, 0 means unlimited",
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "max_playback_quality": {
             "description": "Playback ceiling override; null inherits, empty string means no ceiling",
             "examples": [
@@ -14737,17 +14748,6 @@
             ],
             "format": "int64",
             "type": "integer"
-          },
-          "max_local_stream_bitrate_kbps": {
-            "description": "Local per-stream bitrate override in kbps; null inherits, 0 means unlimited",
-            "examples": [
-              0
-            ],
-            "format": "int64",
-            "type": [
-              "integer",
-              "null"
-            ]
           },
           "max_remote_stream_bitrate_kbps": {
             "description": "Remote per-stream bitrate override in kbps; null inherits, 0 means unlimited",
@@ -22049,13 +22049,6 @@
               "null"
             ]
           },
-          "max_playback_quality": {
-            "description": "Playback ceiling; empty means none",
-            "examples": [
-              "1080p"
-            ],
-            "type": "string"
-          },
           "max_local_stream_bitrate_kbps": {
             "description": "Local per-stream bitrate limit in kbps; 0 means unlimited",
             "examples": [
@@ -22063,6 +22056,13 @@
             ],
             "format": "int64",
             "type": "integer"
+          },
+          "max_playback_quality": {
+            "description": "Playback ceiling; empty means none",
+            "examples": [
+              "1080p"
+            ],
+            "type": "string"
           },
           "max_remote_stream_bitrate_kbps": {
             "description": "Remote per-stream bitrate limit in kbps; 0 means unlimited",
