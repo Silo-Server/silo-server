@@ -6223,38 +6223,37 @@ func TestPlaybackV3ToneMapBudgetsCoverColdNodeWork(t *testing.T) {
 // A RequireReady node start under hw_accel=auto can wait on one manifest per
 // execution path; the API deadline must not cancel a fallback that succeeds.
 func TestRemotePlaybackTransportTimeoutCoversAutoFallbackAttempts(t *testing.T) {
+	// The node resolves auto against live hardware, so neither a missing nor a
+	// software stored report may shorten the budget.
 	const nodeURL = "https://gpu-node.example"
-	hardware := &nodepool.Node{URL: nodeURL, Capabilities: json.RawMessage(`{"resolved":"nvenc"}`)}
-	handler := &PlaybackHandler{NodePlanner: &v3NodeLookupPlanner{node: hardware}}
-	singleWait := playback.ManifestStartupTimeout + 5*time.Second
+	software := &nodepool.Node{URL: nodeURL, Capabilities: json.RawMessage(`{"resolved":"none"}`)}
 	ready := transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: "auto", RequireReady: true}
-	got := handler.remotePlaybackTransportTimeout(nodeURL, ready)
-	if min := time.Duration(playback.MaxAutoTranscodeStartupAttempts) * transcodenode.TranscodeStartReadinessTimeout; got <= min {
-		t.Fatalf("ready start timeout = %s, want more than %s", got, min)
+	min := time.Duration(playback.MaxAutoTranscodeStartupAttempts) * transcodenode.TranscodeStartReadinessTimeout
+	for name, handler := range map[string]*PlaybackHandler{
+		"no planner":      {},
+		"software report": {NodePlanner: &v3NodeLookupPlanner{node: software}},
+	} {
+		if got := handler.remotePlaybackTransportTimeout(nodeURL, ready); got <= min {
+			t.Errorf("%s: ready start timeout = %s, want more than %s", name, got, min)
+		}
 	}
 
 	// Starts that cannot fall back keep the single-wait budget, so an
 	// unresponsive node fails over as quickly as before.
+	singleWait := playback.ManifestStartupTimeout + 5*time.Second
 	unready := ready
 	unready.RequireReady = false
 	explicit := ready
 	explicit.HWAccel = "nvenc"
 	copyVideo := ready
 	copyVideo.TargetCodecVideo = "copy"
-	for name, test := range map[string]struct {
-		nodeURL string
-		request transcodenode.TranscodeStartRequest
-		node    *nodepool.Node
-	}{
-		"unready":          {nodeURL, unready, hardware},
-		"explicit accel":   {nodeURL, explicit, hardware},
-		"copy video":       {nodeURL, copyVideo, hardware},
-		"unknown node":     {"https://unknown.example", ready, hardware},
-		"software node":    {nodeURL, ready, &nodepool.Node{URL: nodeURL, Capabilities: json.RawMessage(`{"resolved":"none"}`)}},
-		"no stored report": {nodeURL, ready, &nodepool.Node{URL: nodeURL}},
+	handler := &PlaybackHandler{}
+	for name, request := range map[string]transcodenode.TranscodeStartRequest{
+		"unready":        unready,
+		"explicit accel": explicit,
+		"copy video":     copyVideo,
 	} {
-		handler := &PlaybackHandler{NodePlanner: &v3NodeLookupPlanner{node: test.node}}
-		if got := handler.remotePlaybackTransportTimeout(test.nodeURL, test.request); got != singleWait {
+		if got := handler.remotePlaybackTransportTimeout(nodeURL, request); got != singleWait {
 			t.Errorf("%s: start timeout = %s, want %s", name, got, singleWait)
 		}
 	}

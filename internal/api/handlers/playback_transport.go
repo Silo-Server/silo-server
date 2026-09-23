@@ -81,7 +81,7 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 
 func (h *PlaybackHandler) remotePlaybackTransportTimeout(nodeURL string, request transcodenode.TranscodeStartRequest) time.Duration {
 	if request.ToneMapMode == "" {
-		if request.RequireReady && h.remoteAutoFallbackPossibleV3(nodeURL, request) {
+		if request.RequireReady && remoteAutoFallbackPossibleV3(request) {
 			// The node answers only after its first manifest, which under
 			// hw_accel=auto can follow an early exit on each safer path.
 			return transcodenode.TranscodeStartReadyMaxDuration + 5*time.Second
@@ -99,21 +99,12 @@ func (h *PlaybackHandler) remotePlaybackTransportTimeout(nodeURL string, request
 }
 
 // remoteAutoFallbackPossibleV3 reports whether a node may walk the hw_accel=auto
-// fallback for this start: a video transcode dispatched as auto to a node whose
-// stored capability report resolves to a hardware backend. Every other start
-// keeps the single-wait budget, so an unresponsive node still fails over as
-// quickly as before.
-func (h *PlaybackHandler) remoteAutoFallbackPossibleV3(nodeURL string, request transcodenode.TranscodeStartRequest) bool {
-	if !strings.EqualFold(strings.TrimSpace(request.HWAccel), "auto") ||
-		strings.EqualFold(strings.TrimSpace(request.TargetCodecVideo), "copy") {
-		return false
-	}
-	lookup, ok := h.NodePlanner.(transcodeNodeLookupV3)
-	if !ok {
-		return false
-	}
-	node, found := lookup.TranscodeNodeByURL(nodeURL)
-	return found && playback.StoredReportResolvesHardware(node.StoredCapabilities())
+// fallback for this start: a video transcode dispatched as auto. The node
+// resolves auto against its live hardware, so the budget follows the request
+// rather than a stored capability report that may be missing or stale.
+func remoteAutoFallbackPossibleV3(request transcodenode.TranscodeStartRequest) bool {
+	return strings.EqualFold(strings.TrimSpace(request.HWAccel), "auto") &&
+		!strings.EqualFold(strings.TrimSpace(request.TargetCodecVideo), "copy")
 }
 
 func fetchRemoteTranscodeCapabilities(ctx context.Context, nodeURL, jwtSecret string) (playback.HWAccelInfo, error) {
