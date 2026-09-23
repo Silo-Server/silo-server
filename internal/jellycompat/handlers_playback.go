@@ -2102,7 +2102,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	}
 	sources := make([]PlaybackMediaSource, 0, len(detail.Versions))
 	sourceDTOs := make([]mediaSourceDTO, 0, len(detail.Versions))
-	warmSubtitleFileID := 0
+	warmSubtitles := make([]bool, 0, len(detail.Versions))
 	attachmentContext, cancelAttachmentProbe := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancelAttachmentProbe()
 
@@ -2217,10 +2217,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		source.SiloSeekReanchor = req.SiloSeekReanchor && compatHLSCopiesVideo(source) && source.SupportsTranscoding
 		sources = append(sources, source)
 		dto := h.mediaSourceDTO(routeItemID, playSessionID, session.Token, source)
-		if len(sources) == 1 && compatWarmsTextSubtitles(subtitleMode, dto.MediaStreams) {
-			// Clients play the first offered source unless they asked for one.
-			warmSubtitleFileID = source.FileID
-		}
+		warmSubtitles = append(warmSubtitles, compatWarmsTextSubtitles(subtitleMode, dto.MediaStreams))
 		dto.MediaAttachments = h.mediaAttachments(attachmentContext, routeItemID, playSessionID, source)
 
 		// Append downloaded subtitles to the media streams, honoring the selection.
@@ -2295,9 +2292,29 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		PlaySessionID: playSessionID,
 		MediaSources:  sourceDTOs,
 	})
-	if warmSubtitleFileID != 0 {
-		h.warmCompatTextSubtitles(warmSubtitleFileID)
+	if played := compatLikelyPlayedSource(sources); played >= 0 && warmSubtitles[played] {
+		h.warmCompatTextSubtitles(sources[played].FileID)
 	}
+}
+
+// compatLikelyPlayedSource returns the index of the source Jellyfin Web plays
+// from a PlaybackInfo response (getOptimalMediaSource): the first that direct
+// plays, then the first that direct streams, then the first that transcodes,
+// and otherwise the first source. It returns -1 for no sources.
+func compatLikelyPlayedSource(sources []PlaybackMediaSource) int {
+	for _, playable := range []func(PlaybackMediaSource) bool{
+		func(s PlaybackMediaSource) bool { return s.SupportsDirectPlay },
+		func(s PlaybackMediaSource) bool { return s.SupportsDirectStream },
+		func(s PlaybackMediaSource) bool { return s.SupportsTranscoding },
+	} {
+		if index := slices.IndexFunc(sources, playable); index >= 0 {
+			return index
+		}
+	}
+	if len(sources) == 0 {
+		return -1
+	}
+	return 0
 }
 
 // stripCompatNUL removes the only code point PostgreSQL rejects in JSONB text.

@@ -626,6 +626,21 @@ func TestHandleItemCollections_ListsVisibleContainingCollectionsByName(t *testin
 	if result.TotalRecordCount != 2 || result.StartIndex != 1 || len(result.Items) != 1 || result.Items[0].Name != "zombie classics" {
 		t.Fatalf("expected second page [zombie classics] of 2, got %+v", result)
 	}
+
+	// Standard item response controls apply as on every other item list.
+	if result.Items[0].UserData == nil {
+		t.Fatal("fixture should carry user data before it is disabled")
+	}
+	rec = performItemCollectionsRequest(t, h, "/Items/"+itemID+"/Collections?EnableUserData=false&EnableImages=false")
+	result = queryResultDTO{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal controls: %v", err)
+	}
+	for _, item := range result.Items {
+		if item.UserData != nil || len(item.ImageTags) != 0 {
+			t.Fatalf("response controls ignored for %q: user data %v, image tags %v", item.Name, item.UserData, item.ImageTags)
+		}
+	}
 }
 
 func TestHandleItemCollections_EmptyAndNotFound(t *testing.T) {

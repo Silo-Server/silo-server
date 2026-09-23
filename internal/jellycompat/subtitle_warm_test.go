@@ -69,3 +69,24 @@ func TestCompatWarmsTextSubtitlesSkipsViewersWithSubtitlesOff(t *testing.T) {
 		}
 	}
 }
+
+// Jellyfin Web plays the first source that direct plays, then direct streams,
+// then transcodes, so that is the source worth warming.
+func TestCompatLikelyPlayedSourceFollowsJellyfinWeb(t *testing.T) {
+	cases := []struct {
+		name    string
+		sources []PlaybackMediaSource
+		want    int
+	}{
+		{"no sources", nil, -1},
+		{"direct play wins over order", []PlaybackMediaSource{{SupportsTranscoding: true}, {SupportsDirectStream: true}, {SupportsDirectPlay: true}}, 2},
+		{"direct stream before transcoding", []PlaybackMediaSource{{SupportsTranscoding: true}, {SupportsDirectStream: true}}, 1},
+		{"first transcodable source", []PlaybackMediaSource{{}, {SupportsTranscoding: true}}, 1},
+		{"nothing playable falls back to the first", []PlaybackMediaSource{{}, {}}, 0},
+	}
+	for _, tc := range cases {
+		if got := compatLikelyPlayedSource(tc.sources); got != tc.want {
+			t.Errorf("%s = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}

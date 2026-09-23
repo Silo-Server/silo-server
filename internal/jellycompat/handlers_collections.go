@@ -485,6 +485,7 @@ func (h *ItemsHandler) HandleItemCollections(w http.ResponseWriter, r *http.Requ
 	for _, c := range page {
 		dtos = append(dtos, h.boxSetFromCollection(r.Context(), c))
 	}
+	applyItemsResponseOptions(dtos, parseItemsQuery(r, h.codec))
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            dtos,
 		TotalRecordCount: len(matched),
