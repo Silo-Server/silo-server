@@ -16,6 +16,23 @@ Episodes match through their own identifier or through a series identifier plus 
 episode number. Records without one of these identities remain unmatched; title and year do not
 establish media identity. Watch provider sync and webhook sync use the same matching rule.
 
+## Source coverage
+
+- Jellyfin: played and resumable movies and episodes, plus favorite movies, shows, and
+  episodes. Requests use `GET /Items?UserId=` and `GET /UserItems/Resume` with only the
+  `Authorization: MediaBrowser` header; Jellyfin 12 rejects the legacy `X-Emby-*` headers
+  and no longer serves the `/emby` route prefix, so Jellyfin sign-in is attempted once at
+  the entered address. Jellyfin stores a whole-show or whole-season "mark played" on each
+  episode, so those markers arrive as episode records. Season favorites are skipped because
+  Silo has no season favorite.
+- Emby: played and resumable movies and episodes, plus favorite movies and shows.
+- Plex: watched movies and episodes and On Deck progress; personal imports also add the
+  account watchlist, and administrator imports read the account's play history.
+
+A Jellyfin or Emby record without a last-played time carries an unknown timestamp, which
+sorts before any local activity: it can create missing progress but never replaces newer
+Silo progress. Favorite-only records add the favorite without creating progress.
+
 A node reserves local capacity before atomically claiming a queued row. Claims use
 `FOR UPDATE SKIP LOCKED` and an incremented generation. Heartbeat, progress, and
 terminal writes require the running status and exact generation. New personal runs

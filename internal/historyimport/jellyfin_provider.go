@@ -2,8 +2,8 @@ package historyimport
 
 import (
 	"context"
+	"slices"
 	"strings"
-	"time"
 )
 
 type JellyfinProvider struct {
@@ -15,8 +15,11 @@ func NewJellyfinProvider(client *JellyfinClient, auth jellyfinLocalAuth) *Jellyf
 	return &JellyfinProvider{client: client, auth: auth}
 }
 
+// Fetch reads played and resumable movies and episodes plus favorite movies,
+// shows, and episodes. Jellyfin records a whole-show or whole-season "mark
+// played" on each episode, so episode leaves carry those markers too.
 func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
-	played, err := p.client.FetchItems(ctx, p.auth, "IsPlayed")
+	played, err := p.client.FetchItems(ctx, p.auth, "IsPlayed", jellyfinPlayableItemTypes)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -24,27 +27,39 @@ func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error
 	if err != nil {
 		return nil, nil, err
 	}
-	seriesMeta, err := p.fetchSeriesMetadata(ctx, append(played, resumable...))
+	var warnings []string
+	favorites, err := p.client.FetchItems(ctx, p.auth, "IsFavorite", jellyfinFavoriteItemTypes)
+	if err != nil {
+		warnings = append(warnings, "fetching Jellyfin favorites: "+err.Error())
+		favorites = nil
+	}
+	watched := slices.Concat(played, resumable)
+	seriesMeta, err := p.fetchSeriesMetadata(ctx, slices.Concat(watched, favorites))
 	if err != nil {
 		return nil, nil, err
 	}
 	merged := map[string]Record{}
-	for _, item := range append(played, resumable...) {
-		record := normalizeJellyfinItem(item, seriesMeta[item.SeriesID])
-		if record.ExternalID == "" {
-			record.ExternalID = item.ID
-		}
+	add := func(record Record) {
 		if existing, ok := merged[record.ExternalID]; ok {
 			merged[record.ExternalID] = mergeRecords(existing, record)
 		} else {
 			merged[record.ExternalID] = record
 		}
 	}
+	for _, item := range watched {
+		add(normalizeJellyfinItem(item, seriesMeta[item.SeriesID]))
+	}
+	for _, item := range favorites {
+		record := normalizeJellyfinItem(item, seriesMeta[item.SeriesID])
+		record.Favorite = true
+		record.FavoriteOnly = true
+		add(record)
+	}
 	records := make([]Record, 0, len(merged))
 	for _, record := range merged {
 		records = append(records, record)
 	}
-	return records, nil, nil
+	return records, warnings, nil
 }
 
 func (p *JellyfinProvider) fetchSeriesMetadata(ctx context.Context, items []jellyfinItem) (map[string]jellyfinItem, error) {
@@ -75,7 +90,9 @@ func (p *JellyfinProvider) fetchSeriesMetadata(ctx context.Context, items []jell
 }
 
 func normalizeJellyfinItem(item jellyfinItem, series jellyfinItem) Record {
-	record := Record{ExternalID: item.ID, Title: item.Name, Year: item.ProductionYear, Played: item.UserData.Played, PlayCount: item.UserData.PlayCount, PositionSeconds: ticksToSeconds(item.UserData.PlaybackPositionTicks), DurationSeconds: ticksToSeconds(item.RunTimeTicks), UpdatedAt: time.Now().UTC()}
+	// A missing LastPlayedDate leaves UpdatedAt zero, which the import treats
+	// as older than any local activity instead of as "now".
+	record := Record{ExternalID: item.ID, Title: item.Name, Year: item.ProductionYear, Played: item.UserData.Played, PlayCount: item.UserData.PlayCount, PositionSeconds: ticksToSeconds(item.UserData.PlaybackPositionTicks), DurationSeconds: ticksToSeconds(item.RunTimeTicks), Favorite: item.UserData.IsFavorite}
 	if item.UserData.LastPlayedDate != nil {
 		record.LastPlayedAt = item.UserData.LastPlayedDate
 		record.UpdatedAt = item.UserData.LastPlayedDate.UTC()
