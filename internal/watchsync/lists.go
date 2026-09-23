@@ -584,14 +584,7 @@ func (s *Service) localItemsFromRows(ctx context.Context, conn Connection, b lis
 			addedAtByID[row.MediaItemID] = addedAt
 		}
 	}
-	type listMediaResolver interface {
-		GetListMediaItems(ctx context.Context, mediaItemIDs []string) (map[string]LocalFavorite, error)
-	}
-	resolver, ok := s.repo.(listMediaResolver)
-	if !ok {
-		return nil, nil, nil, fmt.Errorf("list media resolver is not configured")
-	}
-	resolved, err := resolver.GetListMediaItems(ctx, ids)
+	resolved, err := s.resolveListMediaItems(ctx, ids)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -632,6 +625,20 @@ func (s *Service) localItemsFromRows(ctx context.Context, conn Connection, b lis
 		})
 	}
 	return items, states, warnings, nil
+}
+
+type listMediaResolver interface {
+	GetListMediaItems(ctx context.Context, mediaItemIDs []string) (map[string]LocalFavorite, error)
+}
+
+// resolveListMediaItems loads the identity (kind, title, external ids) of
+// movies and series by media item id. Unknown ids are absent from the result.
+func (s *Service) resolveListMediaItems(ctx context.Context, ids []string) (map[string]LocalFavorite, error) {
+	resolver, ok := s.repo.(listMediaResolver)
+	if !ok {
+		return nil, fmt.Errorf("list media resolver is not configured")
+	}
+	return resolver.GetListMediaItems(ctx, ids)
 }
 
 // HandleLocalListEvent mirrors a real-time local list change (add/remove of a

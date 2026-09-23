@@ -1270,8 +1270,8 @@ paged with `limit` plus an opaque cursor whose cards are the shared `CatalogItem
 (`{item_id, added_at}`, or `{item_id, rating, rated_at}`) or `404`, a bodiless `PUT` add
 (ratings take `{rating}`) answering `204`, and a `DELETE` answering `204` whether or not
 the entry existed. All six mutations are `non_retryable`: the shared seams dispatch provider
-list events and recommendation refresh without change gating, and rating updates replace
-`rated_at` even when unchanged. Their ledger `DEFECT` notes retain the durable-dispatch work
+list and rating events and recommendation refresh without change gating, and rating updates
+replace `rated_at` even when unchanged. Their ledger `DEFECT` notes retain the durable-dispatch work
 required before clients can retry automatically. The mutations are not demo-restricted: v1's demo
 guard only blocks its listed routes, so these writes pass in demo mode and v2 matches. The three
 lists page by keyset, not offset: the cursor is the (`added_at`, `item_id`) — for ratings
@@ -1857,6 +1857,13 @@ separate calls. A process dispatches the run after creation; this is not a durab
 job-dispatch mechanism. Cooldown problems retain their Retry-After header and the
 web settings page displays the delay. No watch-provider consumers were found in
 the Apple and Android source inventory.
+
+Rating sync settings (`import_ratings_enabled`, `export_ratings_enabled`) and the
+rating run counters exist only on v2. The frozen v1 connection and run responses omit
+them, and a v1 settings update ignores them. The `import_ratings` and `export_ratings`
+capability flags are the exception: v1 and v2 share the capabilities object, so v1
+responses gain those two additive fields. See
+[watch-provider-rating-sync.md](watch-provider-rating-sync.md) for the sync rules.
 
 ### Webhook connection management
 

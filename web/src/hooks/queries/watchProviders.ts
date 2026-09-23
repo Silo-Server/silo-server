@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { captureProfileRequestContext } from "@/api/client";
 import { v2, V2ProblemError } from "@/api/v2/request";
-import { favoriteKeys, watchlistKeys, watchProviderKeys } from "./keys";
+import { favoriteKeys, ratingKeys, watchlistKeys, watchProviderKeys } from "./keys";
 import { toast } from "sonner";
 import { storage } from "@/utils/storage";
 import type { PluginConfigSchema } from "@/api/types";
@@ -35,6 +35,8 @@ export interface WatchProviderCapabilities {
   remove_watchlist: boolean;
   provides_watchlist_order: boolean;
   scrobble_playback: boolean;
+  import_ratings: boolean;
+  export_ratings: boolean;
 }
 
 export interface WatchProviderConnection {
@@ -57,6 +59,8 @@ export interface WatchProviderConnection {
   sync_watchlist_removals_enabled: boolean;
   sync_watchlist_order_enabled: boolean;
   scrobble_enabled: boolean;
+  import_ratings_enabled: boolean;
+  export_ratings_enabled: boolean;
   credentials_configured: boolean;
   connection_config_schema?: PluginConfigSchema[];
   last_inbound_sync_at?: string;
@@ -99,6 +103,10 @@ export interface WatchProviderSyncRun {
   outbound_watchlist_found: number;
   outbound_watchlist_sent: number;
   watchlist_removals_sent: number;
+  inbound_ratings_found: number;
+  inbound_ratings_imported: number;
+  outbound_ratings_found: number;
+  outbound_ratings_sent: number;
   warning?: string;
   error?: string;
   started_at: string;
@@ -126,6 +134,8 @@ export type UpdateWatchProviderConnection = Partial<
     | "sync_watchlist_removals_enabled"
     | "sync_watchlist_order_enabled"
     | "scrobble_enabled"
+    | "import_ratings_enabled"
+    | "export_ratings_enabled"
   >
 >;
 
@@ -359,6 +369,7 @@ export function useTriggerWatchProviderSync(provider: string) {
       });
       queryClient.invalidateQueries({ queryKey: favoriteKeys.list() });
       queryClient.invalidateQueries({ queryKey: watchlistKeys.list() });
+      queryClient.invalidateQueries({ queryKey: ratingKeys.all });
       toast.success("Watch provider sync started");
     },
     onError: (err) => {

@@ -46,6 +46,11 @@ type Repository interface {
 	MarkListItemRemoteRemoved(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error
 	MarkListItemLocalRemoved(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error
 	MarkListItemError(ctx context.Context, connectionID string, kind ListKind, mediaItemID, lastError string) error
+	ListRatingEventConnections(ctx context.Context, userID int, profileID string) ([]Connection, error)
+	ListRatingSyncStates(ctx context.Context, connectionID, providerAccountID string, mediaItemIDs []string) ([]RatingSyncState, error)
+	UpsertRatingSyncStates(ctx context.Context, states []RatingSyncState) error
+	DeleteRatingSyncStates(ctx context.Context, connectionID string, mediaItemIDs []string) error
+	ClearRatingSyncStates(ctx context.Context, connectionID string) error
 	ListScrobbleConnections(ctx context.Context, userID int, profileID string) ([]Connection, error)
 	UpsertScrobbleSession(ctx context.Context, event ScrobbleEvent, connectionID string, action string) error
 	PrepareConfirmedScrobbleStop(ctx context.Context, event ScrobbleEvent, connectionID string, staleBefore time.Time) (confirmedStopPreparation, time.Time, error)
@@ -76,7 +81,8 @@ const connectionColumns = `
 	import_progress_enabled, export_watched_enabled, export_unwatched_enabled,
 	import_favorites_enabled, export_favorites_enabled, sync_favorite_removals_enabled,
 	import_watchlist_enabled, export_watchlist_enabled, sync_watchlist_removals_enabled,
-	sync_watchlist_order_enabled, scrobble_enabled, last_inbound_sync_at,
+	sync_watchlist_order_enabled, scrobble_enabled, import_ratings_enabled,
+	export_ratings_enabled, last_inbound_sync_at,
 	last_progress_sync_at, last_outbound_sync_at, last_favorites_sync_at,
 	last_watchlist_sync_at, last_scrobble_error_at, last_error,
 	rate_limited_until, sync_cursors, created_at, updated_at`
@@ -92,6 +98,8 @@ const syncRunColumns = `
 	outbound_favorites_sent, favorite_removals_sent,
 	inbound_watchlist_found, inbound_watchlist_imported,
 	outbound_watchlist_found, outbound_watchlist_sent, watchlist_removals_sent,
+	inbound_ratings_found, inbound_ratings_imported,
+	outbound_ratings_found, outbound_ratings_sent,
 	warning, error, started_at, completed_at, created_at`
 
 // listItemStateColumns is the canonical select column list for
@@ -230,12 +238,13 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 			import_watchlist_enabled, export_watchlist_enabled, sync_watchlist_removals_enabled,
 			sync_watchlist_order_enabled, scrobble_enabled, last_inbound_sync_at, last_progress_sync_at,
 			last_outbound_sync_at, last_favorites_sync_at, last_watchlist_sync_at, last_scrobble_error_at,
-			last_error, rate_limited_until, sync_cursors
+			last_error, rate_limited_until, sync_cursors, import_ratings_enabled, export_ratings_enabled
 		)
 		VALUES (
 			COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()),
 			$2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-			$15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31::jsonb
+			$15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31::jsonb,
+			$32, $33
 		)
 		ON CONFLICT (provider, user_id, profile_id) DO UPDATE SET
 			provider_account_id = EXCLUDED.provider_account_id,
@@ -287,6 +296,8 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 		conn.LastError,
 		conn.RateLimitedUntil,
 		encodeSyncCursors(conn.SyncCursors),
+		conn.ImportRatingsEnabled,
+		conn.ExportRatingsEnabled,
 	)
 	saved, err := r.scanConnection(row)
 	if err != nil {
@@ -369,6 +380,8 @@ func (r *PostgresRepository) ListConnectionsDueForSync(
 				OR export_watchlist_enabled
 				OR sync_watchlist_removals_enabled
 				OR scrobble_enabled
+				OR import_ratings_enabled
+				OR export_ratings_enabled
 			)
 		ORDER BY provider, user_id, profile_id
 	`, now)
@@ -433,12 +446,15 @@ func (r *PostgresRepository) CreateSyncRun(ctx context.Context, run SyncRun) (Sy
 			outbound_favorites_sent, favorite_removals_sent,
 			inbound_watchlist_found, inbound_watchlist_imported,
 			outbound_watchlist_found, outbound_watchlist_sent, watchlist_removals_sent,
-			warning, error, started_at, completed_at
+			warning, error, started_at, completed_at,
+			inbound_ratings_found, inbound_ratings_imported,
+			outbound_ratings_found, outbound_ratings_sent
 		)
 		VALUES (
 			$1::uuid, $2, $3, $4,
 			$5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-			$16, $17, $18, $19, $20, $21, $22, $23, $24
+			$16, $17, $18, $19, $20, $21, $22, $23, $24,
+			$25, $26, $27, $28
 		)
 		RETURNING `+syncRunColumns+`
 	`, run.ConnectionID, run.Trigger, run.Status, run.Provider,
@@ -449,7 +465,9 @@ func (r *PostgresRepository) CreateSyncRun(ctx context.Context, run SyncRun) (Sy
 		run.OutboundFavoritesSent, run.FavoriteRemovalsSent,
 		run.InboundWatchlistFound, run.InboundWatchlistImported,
 		run.OutboundWatchlistFound, run.OutboundWatchlistSent, run.WatchlistRemovalsSent,
-		run.Warning, run.Error, run.StartedAt, run.CompletedAt)
+		run.Warning, run.Error, run.StartedAt, run.CompletedAt,
+		run.InboundRatingsFound, run.InboundRatingsImported,
+		run.OutboundRatingsFound, run.OutboundRatingsSent)
 	created, err := scanSyncRun(row)
 	if err != nil {
 		return SyncRun{}, fmt.Errorf("scan created watch provider sync run: %w", err)
@@ -479,7 +497,11 @@ func (r *PostgresRepository) CompleteSyncRun(ctx context.Context, run SyncRun) (
 			watchlist_removals_sent = $18,
 			warning = $19,
 			error = $20,
-			completed_at = $21
+			completed_at = $21,
+			inbound_ratings_found = $22,
+			inbound_ratings_imported = $23,
+			outbound_ratings_found = $24,
+			outbound_ratings_sent = $25
 		WHERE id = $1::uuid
 		RETURNING `+syncRunColumns+`
 	`, run.ID, run.Status, run.InboundWatchedFound, run.InboundWatchedImported,
@@ -488,7 +510,9 @@ func (r *PostgresRepository) CompleteSyncRun(ctx context.Context, run SyncRun) (
 		run.OutboundFavoritesSent, run.FavoriteRemovalsSent,
 		run.InboundWatchlistFound, run.InboundWatchlistImported, run.OutboundWatchlistFound,
 		run.OutboundWatchlistSent, run.WatchlistRemovalsSent,
-		run.Warning, run.Error, run.CompletedAt)
+		run.Warning, run.Error, run.CompletedAt,
+		run.InboundRatingsFound, run.InboundRatingsImported,
+		run.OutboundRatingsFound, run.OutboundRatingsSent)
 	completed, err := scanSyncRun(row)
 	if err != nil {
 		return SyncRun{}, fmt.Errorf("complete watch provider sync run: %w", err)
@@ -639,6 +663,138 @@ func (r *PostgresRepository) ListListEventConnections(
 		return nil, fmt.Errorf("iterate %s event connections: %w", list, err)
 	}
 	return conns, nil
+}
+
+// ListRatingEventConnections returns the profile's connections that send
+// ratings, i.e. should mirror a local rating change to the provider.
+func (r *PostgresRepository) ListRatingEventConnections(ctx context.Context, userID int, profileID string) ([]Connection, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+connectionColumns+`
+		FROM watch_provider_connections
+		WHERE user_id = $1 AND profile_id = $2 AND export_ratings_enabled = true
+			AND (rate_limited_until IS NULL OR rate_limited_until <= now())
+		ORDER BY provider
+	`, userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("list rating event connections: %w", err)
+	}
+	defer rows.Close()
+
+	var conns []Connection
+	for rows.Next() {
+		conn, scanErr := r.scanConnection(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan rating event connection: %w", scanErr)
+		}
+		conns = append(conns, conn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rating event connections: %w", err)
+	}
+	return conns, nil
+}
+
+// ListRatingSyncStates returns a connection's agreed ratings with the given
+// provider account. Rows agreed with another account are ignored, so a sync
+// still running for an account the connection has since left cannot feed its
+// rows into the new account's merge. A nil mediaItemIDs returns every state;
+// otherwise only the listed items.
+func (r *PostgresRepository) ListRatingSyncStates(ctx context.Context, connectionID, providerAccountID string, mediaItemIDs []string) ([]RatingSyncState, error) {
+	query := `
+		SELECT connection_id::text, provider_account_id, media_item_id, kind, provider_item_key, synced_rating, remote_seen
+		FROM watch_provider_rating_items
+		WHERE connection_id = $1::uuid AND provider_account_id = $2`
+	args := []any{connectionID, providerAccountID}
+	if mediaItemIDs != nil {
+		query += ` AND media_item_id = ANY($3)`
+		args = append(args, mediaItemIDs)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list rating sync states: %w", err)
+	}
+	defer rows.Close()
+	var states []RatingSyncState
+	for rows.Next() {
+		var state RatingSyncState
+		if err := rows.Scan(&state.ConnectionID, &state.ProviderAccountID, &state.MediaItemID, &state.Kind, &state.ProviderItemKey, &state.SyncedRating, &state.RemoteSeen); err != nil {
+			return nil, fmt.Errorf("scan rating sync state: %w", err)
+		}
+		states = append(states, state)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rating sync states: %w", err)
+	}
+	return states, nil
+}
+
+func (r *PostgresRepository) UpsertRatingSyncStates(ctx context.Context, states []RatingSyncState) error {
+	if len(states) == 0 {
+		return nil
+	}
+	connectionIDs := make([]string, len(states))
+	accountIDs := make([]string, len(states))
+	mediaItemIDs := make([]string, len(states))
+	kinds := make([]string, len(states))
+	keys := make([]string, len(states))
+	ratings := make([]int32, len(states))
+	seen := make([]bool, len(states))
+	for i, state := range states {
+		connectionIDs[i] = state.ConnectionID
+		accountIDs[i] = state.ProviderAccountID
+		mediaItemIDs[i] = state.MediaItemID
+		kinds[i] = state.Kind
+		keys[i] = state.ProviderItemKey
+		ratings[i] = int32(state.SyncedRating)
+		seen[i] = state.RemoteSeen
+	}
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO watch_provider_rating_items (
+			connection_id, provider_account_id, media_item_id, kind, provider_item_key, synced_rating, remote_seen
+		)
+		SELECT input.connection_id::uuid, input.provider_account_id, input.media_item_id, input.kind,
+			input.provider_item_key, input.synced_rating, input.remote_seen
+		FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::smallint[], $7::boolean[])
+			AS input(connection_id, provider_account_id, media_item_id, kind, provider_item_key, synced_rating, remote_seen)
+		ON CONFLICT (connection_id, media_item_id) DO UPDATE SET
+			provider_account_id = EXCLUDED.provider_account_id,
+			kind = CASE WHEN EXCLUDED.kind <> '' THEN EXCLUDED.kind ELSE watch_provider_rating_items.kind END,
+			provider_item_key = CASE
+				WHEN EXCLUDED.provider_item_key <> '' THEN EXCLUDED.provider_item_key
+				ELSE watch_provider_rating_items.provider_item_key
+			END,
+			synced_rating = EXCLUDED.synced_rating,
+			remote_seen = EXCLUDED.remote_seen,
+			updated_at = now()
+	`, connectionIDs, accountIDs, mediaItemIDs, kinds, keys, ratings, seen)
+	if err != nil {
+		return fmt.Errorf("upsert rating sync states: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) DeleteRatingSyncStates(ctx context.Context, connectionID string, mediaItemIDs []string) error {
+	if len(mediaItemIDs) == 0 {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM watch_provider_rating_items
+		WHERE connection_id = $1::uuid AND media_item_id = ANY($2)
+	`, connectionID, mediaItemIDs)
+	if err != nil {
+		return fmt.Errorf("delete rating sync states: %w", err)
+	}
+	return nil
+}
+
+// ClearRatingSyncStates forgets every agreed rating of a connection, used when
+// the connection is re-bound to a different provider account.
+func (r *PostgresRepository) ClearRatingSyncStates(ctx context.Context, connectionID string) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM watch_provider_rating_items WHERE connection_id = $1::uuid`, connectionID)
+	if err != nil {
+		return fmt.Errorf("clear rating sync states: %w", err)
+	}
+	return nil
 }
 
 func (r *PostgresRepository) GetMediaDuration(ctx context.Context, mediaItemID string) (float64, error) {
@@ -1339,6 +1495,10 @@ func scanSyncRun(row pgx.Row) (SyncRun, error) {
 		&run.OutboundWatchlistFound,
 		&run.OutboundWatchlistSent,
 		&run.WatchlistRemovalsSent,
+		&run.InboundRatingsFound,
+		&run.InboundRatingsImported,
+		&run.OutboundRatingsFound,
+		&run.OutboundRatingsSent,
 		&run.Warning,
 		&run.Error,
 		&run.StartedAt,
@@ -1378,6 +1538,8 @@ func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 		&conn.SyncWatchlistRemovalsEnabled,
 		&conn.SyncWatchlistOrderEnabled,
 		&conn.ScrobbleEnabled,
+		&conn.ImportRatingsEnabled,
+		&conn.ExportRatingsEnabled,
 		&conn.LastInboundSyncAt,
 		&conn.LastProgressSyncAt,
 		&conn.LastOutboundSyncAt,

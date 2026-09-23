@@ -19798,6 +19798,9 @@
           "export_favorites_enabled": {
             "type": "boolean"
           },
+          "export_ratings_enabled": {
+            "type": "boolean"
+          },
           "export_unwatched_enabled": {
             "type": "boolean"
           },
@@ -19811,6 +19814,9 @@
             "type": "boolean"
           },
           "import_progress_enabled": {
+            "type": "boolean"
+          },
+          "import_ratings_enabled": {
             "type": "boolean"
           },
           "import_watched_enabled": {
@@ -40069,6 +40075,9 @@
           "export_favorites": {
             "type": "boolean"
           },
+          "export_ratings": {
+            "type": "boolean"
+          },
           "export_unwatched": {
             "type": "boolean"
           },
@@ -40082,6 +40091,9 @@
             "type": "boolean"
           },
           "import_progress": {
+            "type": "boolean"
+          },
+          "import_ratings": {
             "type": "boolean"
           },
           "import_watched": {
@@ -40115,7 +40127,9 @@
           "export_watchlist",
           "remove_watchlist",
           "provides_watchlist_order",
-          "scrobble_playback"
+          "scrobble_playback",
+          "import_ratings",
+          "export_ratings"
         ],
         "type": "object"
       },
@@ -40146,6 +40160,9 @@
           "export_favorites_enabled": {
             "type": "boolean"
           },
+          "export_ratings_enabled": {
+            "type": "boolean"
+          },
           "export_unwatched_enabled": {
             "type": "boolean"
           },
@@ -40159,6 +40176,9 @@
             "type": "boolean"
           },
           "import_progress_enabled": {
+            "type": "boolean"
+          },
+          "import_ratings_enabled": {
             "type": "boolean"
           },
           "import_watched_enabled": {
@@ -40249,6 +40269,8 @@
           "sync_watchlist_removals_enabled",
           "sync_watchlist_order_enabled",
           "scrobble_enabled",
+          "import_ratings_enabled",
+          "export_ratings_enabled",
           "credentials_configured"
         ],
         "type": "object"
@@ -40314,6 +40336,10 @@
           "export_favorites_enabled": {
             "type": "boolean"
           },
+          "export_ratings_enabled": {
+            "description": "Send the profile's star ratings to the provider (stars times two) and clear removed ones.",
+            "type": "boolean"
+          },
           "export_unwatched_enabled": {
             "type": "boolean"
           },
@@ -40327,6 +40353,10 @@
             "type": "boolean"
           },
           "import_progress_enabled": {
+            "type": "boolean"
+          },
+          "import_ratings_enabled": {
+            "description": "Import the provider's movie and series ratings as stars (1-2 is 1 star, 9-10 is 5 stars).",
             "type": "boolean"
           },
           "import_watched_enabled": {
@@ -40360,7 +40390,9 @@
           "export_watchlist_enabled",
           "sync_watchlist_removals_enabled",
           "sync_watchlist_order_enabled",
-          "scrobble_enabled"
+          "scrobble_enabled",
+          "import_ratings_enabled",
+          "export_ratings_enabled"
         ],
         "type": "object"
       },
@@ -40463,6 +40495,14 @@
             "format": "int64",
             "type": "integer"
           },
+          "inbound_ratings_found": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "inbound_ratings_imported": {
+            "format": "int64",
+            "type": "integer"
+          },
           "inbound_watched_found": {
             "format": "int64",
             "type": "integer"
@@ -40488,6 +40528,16 @@
             "type": "integer"
           },
           "outbound_found": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "outbound_ratings_found": {
+            "description": "Movie and series ratings the profile holds.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "outbound_ratings_sent": {
+            "description": "Ratings set or cleared on the provider.",
             "format": "int64",
             "type": "integer"
           },
@@ -40549,6 +40599,10 @@
           "outbound_watchlist_found",
           "outbound_watchlist_sent",
           "watchlist_removals_sent",
+          "inbound_ratings_found",
+          "inbound_ratings_imported",
+          "outbound_ratings_found",
+          "outbound_ratings_sent",
           "started_at",
           "created_at"
         ],

@@ -2268,7 +2268,8 @@ func main() {
 		watchProviderService.
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
-			WithUserStoreProvider(userStoreProvider)
+			WithUserStoreProvider(userStoreProvider).
+			WithRatingStore(catalog.NewRatingsRepo(deps.DB), recommendations.NewRepo(deps.DB))
 		backgroundInit = append(backgroundInit, func(ctx context.Context) {
 			if compatTerminalRecoveryReady != nil {
 				select {

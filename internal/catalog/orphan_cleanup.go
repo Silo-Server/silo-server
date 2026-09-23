@@ -111,6 +111,10 @@ const orphanedMediaItemSafetyConditions = `NOT EXISTS (
 	WHERE wpli.media_item_id = mi.content_id
   )
   AND NOT EXISTS (
+	SELECT 1 FROM public.watch_provider_rating_items wpri
+	WHERE wpri.media_item_id = mi.content_id
+  )
+  AND NOT EXISTS (
 	SELECT 1 FROM public.watch_provider_history_exports wphe
 	WHERE wphe.media_item_id = mi.content_id
   )

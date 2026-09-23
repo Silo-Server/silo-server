@@ -281,7 +281,7 @@ func TestWatchProviderMetadataHasNoSettingsValidator(t *testing.T) {
 	if err := json.Unmarshal(after.Body.Bytes(), &fields); err != nil {
 		t.Fatal(err)
 	}
-	if len(fields) != 12 {
+	if len(fields) != 14 {
 		t.Fatalf("settings fields=%v", fields)
 	}
 	for key, value := range fields {
@@ -299,7 +299,7 @@ func TestWatchProviderMetadataHasNoSettingsValidator(t *testing.T) {
 	if err := json.Unmarshal(patched.Body.Bytes(), &fields); err != nil {
 		t.Fatal(err)
 	}
-	if len(fields) != 12 {
+	if len(fields) != 14 {
 		t.Fatalf("PATCH returned metadata: %v", fields)
 	}
 }

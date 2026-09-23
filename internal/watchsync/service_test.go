@@ -50,6 +50,8 @@ type serviceFakeRepo struct {
 	historyLookupIDs       []string
 	historyLookupLimit     int
 	listItemStates         []ListItemState
+	ratingStates           []RatingSyncState
+	listMedia              map[string]LocalFavorite
 	scrobbleConnections    []Connection
 	scrobbleSessions       []ScrobbleSession
 	pendingReconciliations []ScrobbleSession
@@ -511,6 +513,87 @@ func (r *serviceFakeRepo) MarkListItemError(_ context.Context, connectionID stri
 		s.LastError = lastError
 	})
 	return nil
+}
+
+func (r *serviceFakeRepo) ListRatingEventConnections(_ context.Context, userID int, profileID string) ([]Connection, error) {
+	var conns []Connection
+	for _, conn := range r.connections {
+		if conn.UserID == userID && conn.ProfileID == profileID && conn.ExportRatingsEnabled {
+			conns = append(conns, cloneConnectionForTest(conn))
+		}
+	}
+	return conns, nil
+}
+
+func (r *serviceFakeRepo) ListRatingSyncStates(_ context.Context, connectionID, providerAccountID string, mediaItemIDs []string) ([]RatingSyncState, error) {
+	var states []RatingSyncState
+	for _, state := range r.ratingStates {
+		if state.ConnectionID != connectionID || state.ProviderAccountID != providerAccountID {
+			continue
+		}
+		if mediaItemIDs != nil && !containsString(mediaItemIDs, state.MediaItemID) {
+			continue
+		}
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+func (r *serviceFakeRepo) UpsertRatingSyncStates(_ context.Context, states []RatingSyncState) error {
+	for _, state := range states {
+		replaced := false
+		for i := range r.ratingStates {
+			existing := &r.ratingStates[i]
+			if existing.ConnectionID == state.ConnectionID && existing.MediaItemID == state.MediaItemID {
+				if state.Kind == "" {
+					state.Kind = existing.Kind
+				}
+				if state.ProviderItemKey == "" {
+					state.ProviderItemKey = existing.ProviderItemKey
+				}
+				*existing = state
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			r.ratingStates = append(r.ratingStates, state)
+		}
+	}
+	return nil
+}
+
+func (r *serviceFakeRepo) DeleteRatingSyncStates(_ context.Context, connectionID string, mediaItemIDs []string) error {
+	kept := r.ratingStates[:0]
+	for _, state := range r.ratingStates {
+		if state.ConnectionID == connectionID && containsString(mediaItemIDs, state.MediaItemID) {
+			continue
+		}
+		kept = append(kept, state)
+	}
+	r.ratingStates = kept
+	return nil
+}
+
+func (r *serviceFakeRepo) ClearRatingSyncStates(_ context.Context, connectionID string) error {
+	kept := r.ratingStates[:0]
+	for _, state := range r.ratingStates {
+		if state.ConnectionID != connectionID {
+			kept = append(kept, state)
+		}
+	}
+	r.ratingStates = kept
+	return nil
+}
+
+func (r *serviceFakeRepo) GetListMediaItems(_ context.Context, mediaItemIDs []string) (map[string]LocalFavorite, error) {
+	result := make(map[string]LocalFavorite, len(mediaItemIDs))
+	for _, id := range mediaItemIDs {
+		if item, ok := r.listMedia[id]; ok {
+			result[id] = item
+		}
+	}
+	return result, nil
 }
 
 func (r *serviceFakeRepo) ListScrobbleConnections(_ context.Context, _ int, _ string) ([]Connection, error) {

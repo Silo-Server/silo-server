@@ -96,6 +96,8 @@ type WatchProviderSettings struct {
 	SyncWatchlistRemovalsEnabled bool `json:"sync_watchlist_removals_enabled"`
 	SyncWatchlistOrderEnabled    bool `json:"sync_watchlist_order_enabled"`
 	ScrobbleEnabled              bool `json:"scrobble_enabled"`
+	ImportRatingsEnabled         bool `json:"import_ratings_enabled" doc:"Import the provider's movie and series ratings as stars (1-2 is 1 star, 9-10 is 5 stars)."`
+	ExportRatingsEnabled         bool `json:"export_ratings_enabled" doc:"Send the profile's star ratings to the provider (stars times two) and clear removed ones."`
 }
 
 func watchProviderSettingsOf(status watchsync.ConnectionStatus) WatchProviderSettings {
@@ -112,6 +114,8 @@ func watchProviderSettingsOf(status watchsync.ConnectionStatus) WatchProviderSet
 		SyncWatchlistRemovalsEnabled: status.SyncWatchlistRemovalsEnabled,
 		SyncWatchlistOrderEnabled:    status.SyncWatchlistOrderEnabled,
 		ScrobbleEnabled:              status.ScrobbleEnabled,
+		ImportRatingsEnabled:         status.ImportRatingsEnabled,
+		ExportRatingsEnabled:         status.ExportRatingsEnabled,
 	}
 }
 
@@ -401,6 +405,8 @@ type WatchProviderConnection struct {
 	SyncWatchlistRemovalsEnabled bool                      `json:"sync_watchlist_removals_enabled"`
 	SyncWatchlistOrderEnabled    bool                      `json:"sync_watchlist_order_enabled"`
 	ScrobbleEnabled              bool                      `json:"scrobble_enabled"`
+	ImportRatingsEnabled         bool                      `json:"import_ratings_enabled"`
+	ExportRatingsEnabled         bool                      `json:"export_ratings_enabled"`
 	CredentialsConfigured        bool                      `json:"credentials_configured"`
 	ConnectionConfigSchema       []AdminPluginConfigSchema `json:"connection_config_schema,omitempty"`
 	LastInboundSyncAt            *Instant                  `json:"last_inbound_sync_at,omitempty"`
@@ -436,6 +442,8 @@ func watchProviderConnectionOf(s watchsync.ConnectionStatus) (WatchProviderConne
 		SyncWatchlistRemovalsEnabled: s.SyncWatchlistRemovalsEnabled,
 		SyncWatchlistOrderEnabled:    s.SyncWatchlistOrderEnabled,
 		ScrobbleEnabled:              s.ScrobbleEnabled,
+		ImportRatingsEnabled:         s.ImportRatingsEnabled,
+		ExportRatingsEnabled:         s.ExportRatingsEnabled,
 		CredentialsConfigured:        s.CredentialsConfigured,
 		ConnectionConfigSchema:       schemas,
 		LastInboundSyncAt:            instantPtr(s.LastInboundSyncAt),
@@ -470,6 +478,10 @@ type WatchProviderSyncRun struct {
 	OutboundWatchlistFound   int      `json:"outbound_watchlist_found"`
 	OutboundWatchlistSent    int      `json:"outbound_watchlist_sent"`
 	WatchlistRemovalsSent    int      `json:"watchlist_removals_sent"`
+	InboundRatingsFound      int      `json:"inbound_ratings_found"`
+	InboundRatingsImported   int      `json:"inbound_ratings_imported"`
+	OutboundRatingsFound     int      `json:"outbound_ratings_found" doc:"Movie and series ratings the profile holds."`
+	OutboundRatingsSent      int      `json:"outbound_ratings_sent" doc:"Ratings set or cleared on the provider."`
 	Warning                  string   `json:"warning,omitempty"`
 	Error                    string   `json:"error,omitempty"`
 	StartedAt                Instant  `json:"started_at"`
@@ -500,6 +512,10 @@ func watchProviderSyncRunOf(s watchsync.SyncRun) WatchProviderSyncRun {
 		OutboundWatchlistFound:   s.OutboundWatchlistFound,
 		OutboundWatchlistSent:    s.OutboundWatchlistSent,
 		WatchlistRemovalsSent:    s.WatchlistRemovalsSent,
+		InboundRatingsFound:      s.InboundRatingsFound,
+		InboundRatingsImported:   s.InboundRatingsImported,
+		OutboundRatingsFound:     s.OutboundRatingsFound,
+		OutboundRatingsSent:      s.OutboundRatingsSent,
 		Warning:                  s.Warning,
 		Error:                    s.Error,
 		StartedAt:                NewInstant(s.StartedAt),
