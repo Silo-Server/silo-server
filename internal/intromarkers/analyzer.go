@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -18,6 +19,9 @@ type Analyzer struct {
 	chromaprintRefiner chromaprintStartRefiner
 	config             Config
 	logger             *slog.Logger
+	// node names this server in recorded silence refinement failures, which
+	// only defer retries on the server that recorded them.
+	node string
 }
 
 type introRepository interface {
@@ -25,7 +29,7 @@ type introRepository interface {
 	ListEligibleCandidates(ctx context.Context) ([]Candidate, error)
 	ListCandidatesForEpisode(ctx context.Context, episodeID string) ([]Candidate, error)
 	ListCandidatesForGroup(ctx context.Context, mediaFolderID int, seasonID, analysisGroupKey string) ([]Candidate, error)
-	ListChapterSilenceBackfillCandidates(ctx context.Context, limit int, cfg Config) ([]Candidate, error)
+	ListChapterSilenceBackfillCandidates(ctx context.Context, limit int, cfg Config, node string) ([]Candidate, error)
 	LoadSilenceRefinementAttempt(ctx context.Context, fileID int) (*SilenceRefinementAttempt, error)
 	UpsertSilenceRefinementAttempt(ctx context.Context, attempt SilenceRefinementAttempt) error
 	PatchIntroMarker(ctx context.Context, patch IntroMarkerPatch) (bool, error)
@@ -45,6 +49,10 @@ func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer
 	if logger == nil {
 		logger = slog.Default()
 	}
+	node, _ := os.Hostname()
+	if node == "" {
+		node = "silo"
+	}
 	return &Analyzer{
 		repo:               repo,
 		extractor:          NewChromaprintExtractor(config),
@@ -52,6 +60,7 @@ func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer
 		chromaprintRefiner: NewDialogueBoundaryRefiner(config),
 		config:             config,
 		logger:             logger,
+		node:               node,
 	}
 }
 
@@ -451,6 +460,7 @@ func (a *Analyzer) recordSilenceAttempt(ctx context.Context, candidate Candidate
 		IntroStart:      segment.Start,
 		IntroEnd:        segment.End,
 		Status:          silenceAttemptNoImprovement,
+		RecordedBy:      a.node,
 		AttemptedAt:     time.Now().UTC(),
 	}
 	if refineErr != nil {
@@ -464,11 +474,13 @@ func (a *Analyzer) recordSilenceAttempt(ctx context.Context, candidate Candidate
 		attempt.LastError = refineErr.Error()
 		attempt.FailureCount = 1
 		retryAfter := attempt.AttemptedAt.Add(silenceRetryDelay(1))
-		if previous != nil && previous.Status == silenceAttemptFailed && previous.sameInputs(attempt) {
+		// Backoff escalates only for this server's own consecutive failures; a
+		// failure recorded elsewhere may come from that server's environment.
+		if previous != nil && previous.Status == silenceAttemptFailed && previous.RecordedBy == attempt.RecordedBy &&
+			previous.sameInputs(attempt) {
 			if previous.RetryAfter != nil && attempt.AttemptedAt.Before(*previous.RetryAfter) {
-				// Another server running the same schedule, or a forced episode
-				// analysis, failed inside the backoff window. That is not a retry,
-				// so it must not escalate the backoff.
+				// A forced episode analysis failed inside the backoff window. That
+				// is not a retry, so it must not escalate the backoff.
 				attempt.FailureCount = previous.FailureCount
 				retryAfter = *previous.RetryAfter
 			} else {
@@ -543,7 +555,7 @@ func (a *Analyzer) runSilenceBackfill(ctx context.Context) (RunSummary, error) {
 	if !cfg.SilenceRefinementEnabled || cfg.SilenceBackfillLimit <= 0 {
 		return summary, nil
 	}
-	candidates, err := a.repo.ListChapterSilenceBackfillCandidates(ctx, cfg.SilenceBackfillLimit, cfg)
+	candidates, err := a.repo.ListChapterSilenceBackfillCandidates(ctx, cfg.SilenceBackfillLimit, cfg, a.node)
 	if err != nil {
 		return summary, err
 	}

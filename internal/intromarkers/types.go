@@ -312,6 +312,7 @@ type SilenceRefinementAttempt struct {
 	IntroStart      float64
 	IntroEnd        float64
 	Status          string
+	RecordedBy      string
 	FailureCount    int
 	LastError       string
 	AttemptedAt     time.Time

@@ -39,9 +39,9 @@ func TestSilenceBackfillSkipsUnchangedAttemptsPostgres(t *testing.T) {
 
 	repo := NewRepository(pool)
 	cfg := DefaultConfig("ffmpeg")
-	backfill := func(cfg Config) []Candidate {
+	backfillOn := func(node string, cfg Config) []Candidate {
 		t.Helper()
-		all, err := repo.ListChapterSilenceBackfillCandidates(ctx, 1_000_000, cfg)
+		all, err := repo.ListChapterSilenceBackfillCandidates(ctx, 1_000_000, cfg, node)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -52,6 +52,10 @@ func TestSilenceBackfillSkipsUnchangedAttemptsPostgres(t *testing.T) {
 			}
 		}
 		return fixture
+	}
+	backfill := func(cfg Config) []Candidate {
+		t.Helper()
+		return backfillOn("node-a", cfg)
 	}
 	ids := func(candidates []Candidate) []int {
 		out := make([]int, 0, len(candidates))
@@ -70,7 +74,7 @@ func TestSilenceBackfillSkipsUnchangedAttemptsPostgres(t *testing.T) {
 		return out
 	}
 	refiner := &fakeBoundaryRefiner{errors: map[int]error{failing: errors.New("ffmpeg exited 1")}}
-	analyzer := &Analyzer{repo: repo, refiner: refiner, config: cfg, logger: slog.New(slog.DiscardHandler)}
+	analyzer := &Analyzer{repo: repo, refiner: refiner, config: cfg, logger: slog.New(slog.DiscardHandler), node: "node-a"}
 	run := func(candidates []Candidate) RunSummary {
 		t.Helper()
 		_, summary := analyzer.processChapterCandidates(ctx, candidates, chapterProcessingOptions{forceExistingScanner: true})
@@ -119,6 +123,11 @@ func TestSilenceBackfillSkipsUnchangedAttemptsPostgres(t *testing.T) {
 	}
 	if got := ids(backfill(cfg)); !slices.Equal(got, []int{untouched}) {
 		t.Fatalf("backfill after a second failure = %v, want only %d", got, untouched)
+	}
+	// The failure may be local to node-a, so another server still tries the
+	// file; the no-improvement result applies everywhere.
+	if got := ids(backfillOn("node-b", cfg)); !slices.Equal(got, []int{untouched, failing}) {
+		t.Fatalf("backfill on another server = %v, want %d then %d", got, untouched, failing)
 	}
 
 	// A re-probe can rewrite chapters without touching the file identity or the

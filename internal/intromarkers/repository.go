@@ -120,15 +120,17 @@ func (r *Repository) ListCandidatesForGroup(ctx context.Context, mediaFolderID i
 
 // ListChapterSilenceBackfillCandidates skips a file while its recorded attempt
 // still matches the file identity, its chapters, the refined marker range, and
-// the silence settings: indefinitely after a clean no-improvement result, and until
-// retry_after after a failure. Files never attempted come first, so retries
-// cannot crowd them out of the per-run budget.
+// the silence settings: indefinitely after a clean no-improvement result, and
+// until retry_after after a failure recorded by this server. A failure recorded
+// by another server does not defer this one, since the cause may be local to
+// that server. Files never attempted come first, so retries cannot crowd them
+// out of the per-run budget.
 //
 // The attempt lookup is a LEFT JOIN so it runs as a per-file primary-key probe
 // inside the parallel scan. The planner estimates the candidate filter at a
 // handful of rows; as NOT EXISTS it either chose an anti-join that rescans the
 // attempts table once per candidate or lost the parallel scan.
-func (r *Repository) ListChapterSilenceBackfillCandidates(ctx context.Context, limit int, cfg Config) ([]Candidate, error) {
+func (r *Repository) ListChapterSilenceBackfillCandidates(ctx context.Context, limit int, cfg Config, node string) ([]Candidate, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -147,7 +149,7 @@ func (r *Repository) ListChapterSilenceBackfillCandidates(ctx context.Context, l
 		      AND attempts.chapters_hash = encode(sha256(convert_to(COALESCE(mf.chapters::text, ''), 'UTF8')), 'hex')
 		      AND attempts.intro_start = mf.intro_start
 		      AND attempts.intro_end = mf.intro_end
-		      AND (attempts.status = $4 OR attempts.retry_after > NOW()),
+		      AND (attempts.status = $4 OR (attempts.retry_after > NOW() AND attempts.recorded_by = $6)),
 		      false)
 		ORDER BY attempts.attempted_at NULLS FIRST,
 		  mf.intro_markers_detected_at NULLS FIRST,
@@ -158,6 +160,7 @@ func (r *Repository) ListChapterSilenceBackfillCandidates(ctx context.Context, l
 		cfg.SilenceConfigHash(),
 		silenceAttemptNoImprovement,
 		limit,
+		node,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing intro marker silence backfill candidates: %w", err)
@@ -177,6 +180,7 @@ func (r *Repository) LoadSilenceRefinementAttempt(ctx context.Context, fileID in
 		       intro_start,
 		       intro_end,
 		       status,
+		       recorded_by,
 		       failure_count,
 		       COALESCE(last_error, ''),
 		       attempted_at,
@@ -192,6 +196,7 @@ func (r *Repository) LoadSilenceRefinementAttempt(ctx context.Context, fileID in
 		&attempt.IntroStart,
 		&attempt.IntroEnd,
 		&attempt.Status,
+		&attempt.RecordedBy,
 		&attempt.FailureCount,
 		&attempt.LastError,
 		&attempt.AttemptedAt,
@@ -218,12 +223,13 @@ func (r *Repository) UpsertSilenceRefinementAttempt(ctx context.Context, attempt
 		    intro_start,
 		    intro_end,
 		    status,
+		    recorded_by,
 		    failure_count,
 		    last_error,
 		    attempted_at,
 		    retry_after
 		) VALUES (
-		    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''), $12, $13
+		    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULLIF($12, ''), $13, $14
 		)
 		ON CONFLICT (media_file_id) DO UPDATE SET
 		    config_hash = EXCLUDED.config_hash,
@@ -234,6 +240,7 @@ func (r *Repository) UpsertSilenceRefinementAttempt(ctx context.Context, attempt
 		    intro_start = EXCLUDED.intro_start,
 		    intro_end = EXCLUDED.intro_end,
 		    status = EXCLUDED.status,
+		    recorded_by = EXCLUDED.recorded_by,
 		    failure_count = EXCLUDED.failure_count,
 		    last_error = EXCLUDED.last_error,
 		    attempted_at = EXCLUDED.attempted_at,
@@ -247,6 +254,7 @@ func (r *Repository) UpsertSilenceRefinementAttempt(ctx context.Context, attempt
 		attempt.IntroStart,
 		attempt.IntroEnd,
 		attempt.Status,
+		attempt.RecordedBy,
 		attempt.FailureCount,
 		attempt.LastError,
 		attempt.AttemptedAt,

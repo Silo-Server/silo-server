@@ -42,7 +42,7 @@ func (f *fakeIntroRepository) ListCandidatesForGroup(_ context.Context, mediaFol
 	return append([]Candidate(nil), f.groupCandidates[key]...), nil
 }
 
-func (f *fakeIntroRepository) ListChapterSilenceBackfillCandidates(context.Context, int, Config) ([]Candidate, error) {
+func (f *fakeIntroRepository) ListChapterSilenceBackfillCandidates(context.Context, int, Config, string) ([]Candidate, error) {
 	return append([]Candidate(nil), f.backfillCandidates...), nil
 }
 
@@ -600,7 +600,7 @@ func TestRunBackfillRecordsNoImprovementAttempt(t *testing.T) {
 		eligibleCandidates: []Candidate{candidate},
 		backfillCandidates: []Candidate{candidate},
 	}
-	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, refiner: &fakeBoundaryRefiner{}, config: cfg}
+	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, refiner: &fakeBoundaryRefiner{}, config: cfg, node: "node-a"}
 
 	summary, err := analyzer.Run(context.Background(), nil)
 	if err != nil {
@@ -626,7 +626,7 @@ func TestRunBackfillRecordsNoImprovementAttempt(t *testing.T) {
 	if !got.sameInputs(want) {
 		t.Fatalf("recorded inputs = %+v, want %+v", got, want)
 	}
-	if got.Status != silenceAttemptNoImprovement || got.FailureCount != 0 || got.RetryAfter != nil || got.LastError != "" {
+	if got.Status != silenceAttemptNoImprovement || got.RecordedBy != "node-a" || got.FailureCount != 0 || got.RetryAfter != nil || got.LastError != "" {
 		t.Fatalf("expected a final no-improvement attempt, got %+v", got)
 	}
 	if got.AttemptedAt.IsZero() {
@@ -650,6 +650,7 @@ func TestSilenceRefinementFailureBacksOff(t *testing.T) {
 	elapsed := time.Now().Add(-time.Hour)
 	withStatus := func(attempt SilenceRefinementAttempt, status string, failures int) *SilenceRefinementAttempt {
 		attempt.Status = status
+		attempt.RecordedBy = "node-a"
 		attempt.FailureCount = failures
 		if status == silenceAttemptFailed {
 			attempt.RetryAfter = &elapsed
@@ -665,6 +666,9 @@ func TestSilenceRefinementFailureBacksOff(t *testing.T) {
 	pendingRetry := time.Now().Add(10 * time.Hour)
 	stillBackingOff := *withStatus(sameInputs, silenceAttemptFailed, 2)
 	stillBackingOff.RetryAfter = &pendingRetry
+	otherServer := *withStatus(sameInputs, silenceAttemptFailed, 2)
+	otherServer.RecordedBy = "node-b"
+	otherServer.RetryAfter = &pendingRetry
 
 	tests := []struct {
 		name           string
@@ -676,6 +680,7 @@ func TestSilenceRefinementFailureBacksOff(t *testing.T) {
 		{name: "first failure", wantFailures: 1, wantDelay: 12 * time.Hour},
 		{name: "repeated failure doubles", previous: withStatus(sameInputs, silenceAttemptFailed, 2), wantFailures: 3, wantDelay: 48 * time.Hour},
 		{name: "failure inside the backoff window keeps it", previous: &stillBackingOff, wantFailures: 2, wantRetryAfter: &pendingRetry},
+		{name: "another server's failure starts over", previous: &otherServer, wantFailures: 1, wantDelay: 12 * time.Hour},
 		{name: "failure after no improvement starts over", previous: withStatus(sameInputs, silenceAttemptNoImprovement, 0), wantFailures: 1, wantDelay: 12 * time.Hour},
 		{name: "changed settings start over", previous: &otherConfig, wantFailures: 1, wantDelay: 12 * time.Hour},
 		{name: "changed marker range starts over", previous: &movedMarker, wantFailures: 1, wantDelay: 12 * time.Hour},
@@ -688,7 +693,7 @@ func TestSilenceRefinementFailureBacksOff(t *testing.T) {
 				repo.silenceAttempts[10] = *tt.previous
 			}
 			refiner := &fakeBoundaryRefiner{errors: map[int]error{10: errors.New("ffmpeg exited 1")}}
-			analyzer := &Analyzer{repo: repo, refiner: refiner, config: cfg, logger: slog.New(slog.DiscardHandler)}
+			analyzer := &Analyzer{repo: repo, refiner: refiner, config: cfg, logger: slog.New(slog.DiscardHandler), node: "node-a"}
 
 			summary, err := analyzer.runSilenceBackfill(context.Background())
 			if err != nil {
@@ -701,7 +706,7 @@ func TestSilenceRefinementFailureBacksOff(t *testing.T) {
 				t.Fatalf("expected one recorded attempt, got %d", len(repo.upsertedAttempts))
 			}
 			got := repo.upsertedAttempts[0]
-			if got.Status != silenceAttemptFailed || got.LastError != "ffmpeg exited 1" || !got.sameInputs(sameInputs) {
+			if got.Status != silenceAttemptFailed || got.RecordedBy != "node-a" || got.LastError != "ffmpeg exited 1" || !got.sameInputs(sameInputs) {
 				t.Fatalf("unexpected failed attempt: %+v", got)
 			}
 			if got.FailureCount != tt.wantFailures {
