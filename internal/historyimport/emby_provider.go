@@ -3,6 +3,7 @@ package historyimport
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 )
@@ -34,9 +35,12 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 		return nil, nil, err
 	}
 	var warnings []string
+	// Warnings store fixed text: v1 returns them verbatim, and upstream errors
+	// can carry the server's response body. The error itself is logged.
 	favoriteItems, err := p.client.FetchFavoriteItems(ctx, p.auth)
 	if err != nil {
-		warnings = append(warnings, warnEmbyFavoritesUnavailable+err.Error())
+		slog.WarnContext(ctx, "emby history import: favorites unavailable", "component", "historyimport", "error", err)
+		warnings = append(warnings, warnEmbyFavoritesUnavailable)
 		favoriteItems = nil
 	}
 	// Silo has no season favorites, so report them rather than drop them.
@@ -56,7 +60,8 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 	seriesMeta, err := p.fetchSeriesMetadata(ctx, slices.Concat(watchedItems, favoriteItems))
 	if err != nil {
 		// Episodes carrying their own provider IDs still match without it.
-		warnings = append(warnings, warnEmbySeriesUnavailable+err.Error())
+		slog.WarnContext(ctx, "emby history import: series metadata unavailable", "component", "historyimport", "error", err)
+		warnings = append(warnings, warnEmbySeriesUnavailable)
 		seriesMeta = map[string]embyItem{}
 	}
 

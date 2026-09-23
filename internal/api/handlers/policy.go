@@ -23,7 +23,6 @@ const (
 	policyErrorConflict      = "conflict"
 	policyErrorInternal      = "internal_error"
 	policyErrorNotFound      = "not_found"
-	policyErrorUnauthorized  = "unauthorized"
 	policyErrorUnavailable   = "unavailable"
 	policyErrorUnprocessable = "unprocessable_entity"
 

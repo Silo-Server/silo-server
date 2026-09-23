@@ -26,9 +26,14 @@ const (
 
 	unmatchedWarningFormat = "unmatched items (%d): %s"
 
-	warnEmbyFavoritesUnavailable = "fetching Emby favorites: "
-	warnEmbySeriesUnavailable    = "fetching Emby series metadata: "
+	warnEmbyFavoritesUnavailable = "fetching Emby favorites failed"
+	warnEmbySeriesUnavailable    = "fetching Emby series metadata failed"
 	warnEmbySeasonFavorites      = "skipped Emby season favorites (%d)"
+	// Runs before the fixed text stored the upstream error after this prefix.
+	legacyEmbyFavoritesPrefix = "fetching Emby favorites: "
+
+	embyFavoritesUnavailableSummary = "Emby favorites couldn't be read, so none were imported."
+	embySeriesUnavailableSummary    = "Emby show details couldn't be read, so some episodes may be unmatched."
 )
 
 // PublicWarning returns the monitor text for a stored run warning.
@@ -43,10 +48,10 @@ func PublicWarning(diagnostic string) string {
 		return fmt.Sprintf("Season favorites skipped (%d): Silo can't favorite a season.", count)
 	}
 	switch {
-	case strings.HasPrefix(diagnostic, warnEmbyFavoritesUnavailable):
-		return "Emby favorites couldn't be read, so none were imported."
-	case strings.HasPrefix(diagnostic, warnEmbySeriesUnavailable):
-		return "Emby show details couldn't be read, so some episodes may be unmatched."
+	case diagnostic == warnEmbyFavoritesUnavailable, strings.HasPrefix(diagnostic, legacyEmbyFavoritesPrefix):
+		return embyFavoritesUnavailableSummary
+	case diagnostic == warnEmbySeriesUnavailable:
+		return embySeriesUnavailableSummary
 	}
 	return GenericRunWarning
 }

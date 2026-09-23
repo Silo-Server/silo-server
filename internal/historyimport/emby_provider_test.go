@@ -236,8 +236,8 @@ func TestEmbyProviderFetchContinuesWhenFavoritesFail(t *testing.T) {
 	if len(records) != 1 || records["movie-1"].ExternalID == "" {
 		t.Fatalf("records = %+v, want played movie preserved", records)
 	}
-	if len(warnings) != 1 || !strings.HasPrefix(warnings[0], warnEmbyFavoritesUnavailable) {
-		t.Fatalf("warnings = %v, want one favorites warning", warnings)
+	if !slices.Equal(warnings, []string{warnEmbyFavoritesUnavailable}) {
+		t.Fatalf("warnings = %v, want the fixed favorites warning without the upstream body", warnings)
 	}
 }
 
@@ -255,8 +255,8 @@ func TestEmbyProviderFetchContinuesWhenSeriesMetadataFails(t *testing.T) {
 	if episode := records["ep-1"]; episode.TVDBID != "9000101" || !episode.Played {
 		t.Fatalf("episode = %+v, want it imported by its own ID", episode)
 	}
-	if len(warnings) != 1 || !strings.HasPrefix(warnings[0], warnEmbySeriesUnavailable) {
-		t.Fatalf("warnings = %v, want one series metadata warning", warnings)
+	if !slices.Equal(warnings, []string{warnEmbySeriesUnavailable}) {
+		t.Fatalf("warnings = %v, want the fixed series warning without the upstream body", warnings)
 	}
 }
 

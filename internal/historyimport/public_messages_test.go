@@ -57,11 +57,12 @@ func TestPublicWarningSummarizesKnownDiagnostics(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
-		fmt.Sprintf(unmatchedWarningFormat, 3, missingProviderIDsReason):                      "Not matched (3): The source item has no TMDB, IMDb, or TVDB ID.",
-		fmt.Sprintf(warnEmbySeasonFavorites, 2):                                               "Season favorites skipped (2): Silo can't favorite a season.",
-		warnEmbyFavoritesUnavailable + "emby http 500: <html>stack trace</html>":              "Emby favorites couldn't be read, so none were imported.",
-		warnEmbySeriesUnavailable + "fetching Emby items by ids: emby http 414: URI too long": "Emby show details couldn't be read, so some episodes may be unmatched.",
-		"favorites import: add movie-1: pq: deadlock detected":                                GenericRunWarning,
+		fmt.Sprintf(unmatchedWarningFormat, 3, missingProviderIDsReason):      "Not matched (3): The source item has no TMDB, IMDb, or TVDB ID.",
+		fmt.Sprintf(warnEmbySeasonFavorites, 2):                               "Season favorites skipped (2): Silo can't favorite a season.",
+		warnEmbyFavoritesUnavailable:                                          embyFavoritesUnavailableSummary,
+		legacyEmbyFavoritesPrefix + "emby http 500: <html>stack trace</html>": embyFavoritesUnavailableSummary,
+		warnEmbySeriesUnavailable:                                             embySeriesUnavailableSummary,
+		"favorites import: add movie-1: pq: deadlock detected":                GenericRunWarning,
 	}
 	for diagnostic, want := range cases {
 		if got := PublicWarning(diagnostic); got != want {

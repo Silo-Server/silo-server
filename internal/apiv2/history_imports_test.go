@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -225,10 +226,15 @@ func TestCreateHistoryImportRun(t *testing.T) {
 	if p.Detail != historyimport.RunErrorSourceRejected {
 		t.Fatalf("rejected credential detail = %q", p.Detail)
 	}
-	fake.createErr = handlers.HistoryImportUnreachableAPIError()
+	fake.createErr = fmt.Errorf("%w: dial tcp: connection refused", historyimport.ErrSourceUnreachable)
 	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"emby","source_id":"1","username":"alice"}`, bearer(memberToken)), TypeDependencyUnavailable)
-	if !strings.HasPrefix(p.Detail, "Couldn't reach the source server.") {
+	if p.Detail != historyImportUnreachableMessage {
 		t.Fatalf("unreachable detail = %q", p.Detail)
+	}
+	fake.createErr = fmt.Errorf("%w: choose a server and enter the Emby username", historyimport.ErrInvalidInput)
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"emby","source_id":"1"}`, bearer(memberToken)), TypeValidationFailed)
+	if p.Detail != "Choose a server and enter the Emby username." || len(p.Errors) != 1 || p.Errors[0].Detail != p.Detail {
+		t.Fatalf("invalid input problem = %+v", p)
 	}
 	fake.createErr = &handlers.APIError{Status: http.StatusConflict, Code: "conflict", Message: historyimport.ErrActiveRunExists.Error()}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"plex"}`, bearer(memberToken)), TypeConflict)
@@ -363,5 +369,22 @@ func TestHistoryImportRunShowsSafeSummaries(t *testing.T) {
 	}
 	if got := run.UnmatchedSamples[0].Reason; got != "Nothing in the library has the same TMDB, IMDb, or TVDB ID." {
 		t.Fatalf("unmatched reason = %q", got)
+	}
+}
+
+// seamError mirrors the v1 seam's *handlers.APIError: its text is the v1
+// decision and the service error is only reachable by unwrapping.
+type seamError struct{ cause error }
+
+func (e seamError) Error() string { return "internal_error: History import request failed" }
+func (e seamError) Unwrap() error { return e.cause }
+
+func TestHistoryImportInputMessage(t *testing.T) {
+	invalid := fmt.Errorf("%w: choose a server and enter the Emby username", historyimport.ErrInvalidInput)
+	if got := historyImportInputMessage(seamError{invalid}); got != "Choose a server and enter the Emby username." {
+		t.Fatalf("message through the seam = %q", got)
+	}
+	if got := historyImportInputMessage(fmt.Errorf("%w: base_url must be an http or https URL", historyimport.ErrInvalidInput)); got != "base_url must be an http or https URL." {
+		t.Fatalf("field-name message = %q", got)
 	}
 }

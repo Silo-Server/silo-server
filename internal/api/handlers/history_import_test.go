@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/historyimport"
@@ -65,26 +64,17 @@ func TestHistoryImportDurableAdmissionErrorsDoNotExposeCauses(t *testing.T) {
 	}
 }
 
-func TestHistoryImportAPIErrorExplainsUnreachableServersAndInvalidInput(t *testing.T) {
-	dial := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
-	upstream := &url.Error{Op: "Post", URL: "http://emby.example.test/Users/AuthenticateByName", Err: dial}
-	out := historyImportAPIError(fmt.Errorf("%w: %w", historyimport.ErrSourceUnreachable, upstream))
-	if out.Status != http.StatusBadGateway || !IsHistoryImportUpstreamError(out) || !strings.HasPrefix(out.Message, "Couldn't reach the source server.") {
-		t.Fatalf("unreachable mapping = %+v", out)
-	}
-	// Silo's own database failing to connect is not a source address problem.
-	out = historyImportAPIError(fmt.Errorf("loading source: %w", dial))
-	if out.Status != http.StatusInternalServerError || IsHistoryImportUpstreamError(out) {
-		t.Fatalf("database dial failure mapping = %+v, want an internal error", out)
-	}
-	out = historyImportAPIError(fmt.Errorf("%w: choose a server and enter the Emby username", historyimport.ErrInvalidInput))
-	if out.Status != http.StatusBadRequest || out.Message != "Choose a server and enter the Emby username." {
-		t.Fatalf("invalid input mapping = %+v", out)
-	}
-}
-
-func TestHistoryImportInputMessageKeepsFieldNames(t *testing.T) {
-	if got := historyImportInputMessage(fmt.Errorf("%w: base_url must be an http or https URL", historyimport.ErrInvalidInput)); got != "base_url must be an http or https URL." {
-		t.Fatalf("message = %q", got)
+// v1 is frozen: failures the v2 adapter explains still answer 500 here, and
+// the cause stays reachable for the v2 mapping.
+func TestHistoryImportAPIErrorKeepsV1DecisionForV2Causes(t *testing.T) {
+	dial := &url.Error{Op: "Post", URL: "http://emby.example.test/Users/AuthenticateByName", Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}}
+	for _, err := range []error{
+		fmt.Errorf("%w: %w", historyimport.ErrSourceUnreachable, dial),
+		fmt.Errorf("%w: choose a server and enter the Emby username", historyimport.ErrInvalidInput),
+	} {
+		out := historyImportAPIError(err)
+		if out.Status != http.StatusInternalServerError || out.Code != policyErrorInternal || !errors.Is(out, err) {
+			t.Fatalf("historyImportAPIError(%v) = %+v, want the unchanged v1 500 wrapping its cause", err, out)
+		}
 	}
 }
