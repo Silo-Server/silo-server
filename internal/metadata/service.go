@@ -6361,6 +6361,24 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	if err != nil {
 		return nil, fmt.Errorf("generate content id: %w", err)
 	}
+	if flatSeriesGroup {
+		// Another node may have created, and even matched, this group's item
+		// after the group check above. Upsert would reset it to a skeleton.
+		existing, err := s.itemRepo.GetByID(ctx, contentID)
+		if err != nil && !errors.Is(err, catalog.ErrItemNotFound) {
+			return nil, fmt.Errorf("loading existing group item: %w", err)
+		}
+		if existing != nil {
+			if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, existing.ContentID); linkErr != nil {
+				return nil, fmt.Errorf("linking file to existing group item: %w", linkErr)
+			}
+			if err := s.upsertLibraryMembership(ctx, existing.ContentID, folderID); err != nil {
+				s.logLibraryMembershipError("upserting existing group item membership", existing.ContentID, folderID, err)
+			}
+			res.ContentID = existing.ContentID
+			return res, nil
+		}
+	}
 	item := &models.MediaItem{
 		ContentID: contentID,
 		Status:    res.ItemStatus,

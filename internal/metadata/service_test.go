@@ -65,7 +65,7 @@ func (r *fakeItemRepo) GetByID(_ context.Context, contentID string) (*models.Med
 		cp := *item
 		return &cp, nil
 	}
-	return nil, fmt.Errorf("item not found: %s", contentID)
+	return nil, fmt.Errorf("%w: %s", catalog.ErrItemNotFound, contentID)
 }
 
 func (r *fakeItemRepo) GetByExternalID(_ context.Context, tmdbID, imdbID, tvdbID, itemType string) (*models.MediaItem, error) {

@@ -126,11 +126,23 @@ func TestFlatSeriesProvisionalItemConvergesAcrossNodes(t *testing.T) {
 	h.fileRepo.mu.Lock()
 	delete(h.fileRepo.contentIDs, files[0].ID)
 	h.fileRepo.mu.Unlock()
+	// The first node has meanwhile matched the item.
+	h.itemRepo.mu.Lock()
+	h.itemRepo.items[first.ContentID].Title = "Matched Show"
+	h.itemRepo.items[first.ContentID].Status = "matched"
+	h.itemRepo.mu.Unlock()
 	second, err := h.service.createOrFindSkeleton(t.Context(), files[1], 10, "/tv")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.ContentID != second.ContentID {
 		t.Fatalf("concurrent episodes minted separate items %q and %q", first.ContentID, second.ContentID)
+	}
+	item, err := h.itemRepo.GetByID(t.Context(), first.ContentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Title != "Matched Show" || item.Status != "matched" {
+		t.Fatalf("second node reset the matched item: %+v", item)
 	}
 }
