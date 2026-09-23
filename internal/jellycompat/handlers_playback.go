@@ -2159,8 +2159,12 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		}
 		// As Jellyfin does, the default subtitle follows the viewer's subtitle
 		// mode and language, judged against the audio the client starts with.
+		subtitleCandidates := compatSubtitleCandidates(source.Version, downloaded)
+		if !detail.ShowForcedSubtitles {
+			subtitleCandidates = compatWithoutForcedSubtitles(subtitleCandidates)
+		}
 		source.DefaultSubtitleStreamIndex = compatDefaultSubtitleStreamIndex(
-			compatSubtitleCandidates(source.Version, downloaded),
+			subtitleCandidates,
 			preferredSubtitleLanguages,
 			subtitleMode,
 			compatAudioTrack(source.Version, effectiveCompatAudioStreamIndex(source)).Language,

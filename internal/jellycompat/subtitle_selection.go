@@ -100,6 +100,13 @@ func compatSubtitleCandidates(version catalog.FileVersion, downloaded []subtitle
 	return candidates
 }
 
+// compatWithoutForcedSubtitles drops forced tracks for a viewer whose native
+// settings hide them. Jellyfin has no such toggle; without this, its Smart and
+// Default modes would start a forced track the viewer turned off.
+func compatWithoutForcedSubtitles(candidates []compatSubtitleCandidate) []compatSubtitleCandidate {
+	return slices.DeleteFunc(slices.Clone(candidates), func(c compatSubtitleCandidate) bool { return c.Forced })
+}
+
 // compatDefaultSubtitleStreamIndex ports Jellyfin 12.1's
 // MediaStreamSelector.GetDefaultSubtitleStreamIndex. preferred is the user's
 // subtitle language preference (empty matches any language, as upstream);

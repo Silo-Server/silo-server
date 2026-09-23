@@ -905,3 +905,34 @@ func TestPlaybackInfoDownloadedLookupFailureIsRetryable(t *testing.T) {
 		})
 	}
 }
+
+// A native profile can keep "auto" subtitles while hiding forced ones, which
+// reads as Smart. Smart would otherwise start the forced track for audio in
+// the preferred language.
+func TestHandlePlaybackInfo_HiddenForcedSubtitlesAreNotStarted(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		showForced bool
+		want       *int
+	}{
+		{"forced subtitles shown", true, intPtr(2)},
+		{"forced subtitles hidden", false, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, routeID := newSubtitleSelectionHandler(t)
+			handler.SubtitleRepo = fakeSubtitleRepository{}
+			detail := handler.content.(*stubContentService).detail
+			detail.Versions[0].AudioTracks[0].Language = "eng"
+			detail.Versions[0].SubtitleTracks = []catalog.VersionSubtitleTrack{
+				{Index: 2, Codec: "subrip", Language: "eng", Title: "English (forced)", Forced: true},
+				{Index: 3, Codec: "subrip", Language: "spa", Title: "Spanish"},
+			}
+			detail.SubtitleMode, detail.SubtitleModeSet, detail.ShowForcedSubtitles, detail.SubtitleLanguage = "auto", true, tc.showForced, "en"
+			resp := postPlaybackInfo(t, handler, routeID, `{}`)
+			got := resp.MediaSources[0].DefaultSubtitleStreamIndex
+			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+				t.Fatalf("DefaultSubtitleStreamIndex = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
