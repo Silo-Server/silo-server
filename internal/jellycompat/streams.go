@@ -2645,6 +2645,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		}
 	}
 	opts.SegmentDuration = h.compatSegmentDuration()
+	autoPipeline := h.newCompatAutoTranscodePipeline(ctx, opts)
 
 	// Hold the per-session lifecycle lock across "check existing → spawn →
 	// register" so a concurrent reconstruct cannot run a second ffmpeg writer
@@ -2667,7 +2668,9 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		h.tm.CloseTranscodeSessionIf(upstreamSessionID, existing, "")
 	}
 	manifestDeadline := time.Now().Add(compatManifestStartupTimeout)
-	transcodeSession, err := playback.StartTranscode(ctx, opts)
+	// A disabled pipeline returns opts unchanged. An enabled one never carries
+	// a tone-map recipe, so the tone-map downgrade below cannot apply to it.
+	transcodeSession, err := playback.StartTranscode(ctx, autoPipeline.Current())
 	if err != nil && downgradeCompatLocalToneMap(&opts, toneMapCapabilities, autoVideoToolboxBitrate) {
 		transcodeSession, err = playback.StartTranscode(ctx, opts)
 		if err == nil {
@@ -2724,6 +2727,15 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				return nil, fallbackErr
 			}
 		}
+	} else if autoPipeline.Enabled() {
+		var successor *playback.TranscodeSession
+		transcodeSession, successor, err = h.awaitCompatAutoTranscode(ctx, upstreamSessionID, source, requiredToneMapMode, autoPipeline, transcodeSession)
+		if err != nil {
+			return nil, err
+		}
+		if successor != nil {
+			return successor, nil
+		}
 	}
 	if h.compatLocalTranscodeReady != nil {
 		h.compatLocalTranscodeReady(transcodeSession)
@@ -2776,6 +2788,82 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	publishUnlock()
 
 	return transcodeSession, nil
+}
+
+func (h *PlaybackHandler) newCompatAutoTranscodePipeline(ctx context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {
+	if h.compatAutoTranscodePipeline != nil {
+		return h.compatAutoTranscodePipeline(ctx, opts)
+	}
+	return playback.NewAutoTranscodePipeline(ctx, opts)
+}
+
+// awaitCompatAutoTranscode waits for a registered hw_accel=auto transcode and,
+// when FFmpeg exits before its first manifest, replaces it under the lifecycle
+// lock with the pipeline's next safer path. A process still running at the
+// deadline is kept: it is already registered for concurrent manifest requests,
+// and a second encoder would duplicate it. It returns the ready (or slow)
+// session, or the live successor another caller installed instead.
+func (h *PlaybackHandler) awaitCompatAutoTranscode(
+	ctx context.Context,
+	upstreamSessionID string,
+	source PlaybackMediaSource,
+	requiredToneMapMode tonemap.Mode,
+	pipeline *playback.AutoTranscodePipeline,
+	transcodeSession *playback.TranscodeSession,
+) (*playback.TranscodeSession, *playback.TranscodeSession, error) {
+	for {
+		_, readyErr := transcodeSession.WaitForGenerationManifest(compatManifestStartupTimeout)
+		if readyErr == nil {
+			pipeline.RememberSuccess()
+			return transcodeSession, nil, nil
+		}
+		if transcodeSession.IsRunning() {
+			slog.WarnContext(ctx, "compat transcode slow to produce a manifest",
+				"component", "jellycompat", "playback_session_id", upstreamSessionID, "error", readyErr)
+			return transcodeSession, nil, nil
+		}
+		failedDevice := transcodeSession.Opts().HWDevice
+		advanced := pipeline.AdvanceAfterFailure(failedDevice)
+		replaceUnlock := h.tm.LockSessionLifecycle(upstreamSessionID)
+		if live := h.tm.GetTranscodeSession(upstreamSessionID); live != transcodeSession {
+			replaceUnlock()
+			if live != nil && compatTranscodeSessionUsesToneMapMode(live, requiredToneMapMode) {
+				if compatLiveTranscodeMatchesAudioSource(live, source) {
+					return nil, live, nil
+				}
+				return nil, nil, errCompatRecipeSourceMismatch
+			}
+			if live != nil {
+				return nil, nil, errHDRTranscodeUnsupported
+			}
+			return nil, nil, readyErr
+		}
+		h.tm.CloseTranscodeSessionIf(upstreamSessionID, transcodeSession, "")
+		if !advanced {
+			replaceUnlock()
+			return nil, nil, readyErr
+		}
+		next := pipeline.Current()
+		slog.WarnContext(ctx, "compat transcode exited during startup; trying a safer path",
+			"component", "jellycompat",
+			"playback_session_id", upstreamSessionID,
+			"failed_device", failedDevice,
+			"next_hw_accel", next.HWAccel,
+			"next_software_decode", next.SoftwareVideoDecode,
+			"error", readyErr,
+		)
+		replacement, err := playback.StartTranscode(ctx, next)
+		if err != nil {
+			replaceUnlock()
+			return nil, nil, err
+		}
+		if !h.tm.RegisterTranscodeSession(upstreamSessionID, replacement) {
+			replaceUnlock()
+			return nil, nil, context.Canceled
+		}
+		replaceUnlock()
+		transcodeSession = replacement
+	}
 }
 
 // downgradeCompatLocalToneMap removes the bitrate synthesized solely for a

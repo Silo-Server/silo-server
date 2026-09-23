@@ -253,6 +253,9 @@ type PlaybackHandler struct {
 	PlaybackConfig func() config.PlaybackConfig
 	FFmpegLogSink  playback.FFmpegLogSink
 	copySeekAnchor copySeekAnchorResolver
+	// autoTranscodePipelineV3 is a test seam for the hw_accel=auto fallback
+	// pipeline; nil uses playback.NewAutoTranscodePipeline.
+	autoTranscodePipelineV3 func(context.Context, playback.TranscodeOpts) *playback.AutoTranscodePipeline
 	// beforeIdentityLifecycleLockV3 is a test seam for proving that identity
 	// route authority remains unpublished until the shared lifecycle boundary.
 	beforeIdentityLifecycleLockV3 func()

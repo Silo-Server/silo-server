@@ -99,6 +99,11 @@ type TranscodeStartResponse struct {
 	// ThrottleSeconds attests that the executor understood and armed the
 	// control plane's resolved forward-buffer policy.
 	ThrottleSeconds int `json:"throttle_seconds,omitempty"`
+	// SoftwareVideoDecode reports that the executed recipe decodes video on
+	// the CPU, as the hw_accel=auto fallback may choose after a hardware
+	// decoder failed to start. Older nodes omit it, so callers OR it with the
+	// requested value.
+	SoftwareVideoDecode bool `json:"software_video_decode,omitempty"`
 }
 
 var ErrAudioRecipeAttestationMismatch = errors.New("transcode node audio recipe attestation mismatch")
@@ -211,8 +216,15 @@ const sessionReapInterval = time.Minute
 // control-plane response depend on Redis latency.
 const sessionTrackingOperationTimeout = 2 * time.Second
 
-// TranscodeStartReadinessTimeout is the node-side RequireReady manifest budget.
+// TranscodeStartReadinessTimeout is the node-side RequireReady manifest budget
+// for one FFmpeg attempt.
 const TranscodeStartReadinessTimeout = playback.ManifestStartupTimeout
+
+// TranscodeStartReadyMaxDuration bounds how long a RequireReady start can wait
+// on manifests across attempts: under hw_accel=auto each early exit moves to a
+// safer path with its own TranscodeStartReadinessTimeout. Callers size their
+// start deadline to it so a fallback that succeeds on the node is not canceled.
+const TranscodeStartReadyMaxDuration = time.Duration(playback.MaxAutoTranscodeStartupAttempts) * TranscodeStartReadinessTimeout
 
 // progressiveRemuxShutdownTimeout bounds a destructive reload when a canceled
 // FFmpeg process does not exit. A timed-out reload must fail rather than report
@@ -284,6 +296,9 @@ type Server struct {
 	// resolveToneMapRecipeFn is a package-private execution seam for error and
 	// lifecycle tests. Production uses resolveToneMapRecipe.
 	resolveToneMapRecipeFn func(context.Context, *playback.TranscodeOpts) error
+	// autoTranscodePipelineFn is a package-private seam for the hw_accel=auto
+	// fallback pipeline. Production uses playback.NewAutoTranscodePipeline.
+	autoTranscodePipelineFn func(context.Context, playback.TranscodeOpts) *playback.AutoTranscodePipeline
 
 	// lifecycleMu guards lifecycleLocks, the per-session locks that serialize
 	// every path which spawns ffmpeg into a session's output dir (fresh start and
@@ -347,6 +362,13 @@ func (s *Server) resolveToneMapRecipe(ctx context.Context, opts *playback.Transc
 		return s.resolveToneMapRecipeFn(ctx, opts)
 	}
 	return resolveToneMapRecipe(ctx, opts)
+}
+
+func (s *Server) autoTranscodePipeline(ctx context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {
+	if s.autoTranscodePipelineFn != nil {
+		return s.autoTranscodePipelineFn(ctx, opts)
+	}
+	return playback.NewAutoTranscodePipeline(ctx, opts)
 }
 
 // sessionLifecycleLock is a refcounted per-session lock; the refcount lets the
@@ -1600,7 +1622,32 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// spawn or validation failure must leave a healthy live session intact.
-	session, err := playback.StartTranscode(r.Context(), opts)
+	var session *playback.TranscodeSession
+	var err error
+	if req.RequireReady {
+		// Every attempt writes into opts.OutputDir, the replacement directory
+		// when a live session exists, and a failed attempt is closed before
+		// the next, so the live session is untouched until publication. Under
+		// hw_accel=auto an early exit moves to the next safer path; otherwise
+		// the legacy retry mirrors the API server's local transport: an early
+		// death under VideoToolbox retries once in software (there is no
+		// alternate render device to move to), so a hardware encoder session
+		// this Mac cannot create does not fail clustered playback while CPU
+		// encoding was available.
+		session, err = playback.StartReadyTranscode(r.Context(), s.autoTranscodePipeline(r.Context(), opts), playback.TranscodeStartup{
+			Timeout:     TranscodeStartReadinessTimeout,
+			LegacyRetry: playback.TranscodeStartupRetryAccelChange,
+		})
+	} else {
+		session, err = playback.StartTranscode(r.Context(), opts)
+	}
+	var startupErr *playback.TranscodeStartupError
+	if errors.As(err, &startupErr) {
+		unlock()
+		slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+		http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
+		return
+	}
 	if err != nil {
 		unlock()
 		slog.ErrorContext(r.Context(), "start transcode", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
@@ -1610,43 +1657,6 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to start transcode", http.StatusInternalServerError)
 		}
 		return
-	}
-
-	if req.RequireReady {
-		if _, err := session.WaitForManifest(TranscodeStartReadinessTimeout); err != nil {
-			wasRunning := session.IsRunning()
-			_ = session.Close()
-			// Mirror the API server's local-transport retry: an early death
-			// under VideoToolbox retries once in software (there is no
-			// alternate render device to move to), so a hardware encoder
-			// session this Mac cannot create does not fail clustered
-			// playback while CPU encoding was available.
-			retryAccel := playback.StartupRetryHWAccel(opts)
-			if wasRunning || retryAccel == opts.HWAccel {
-				unlock()
-				slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
-				http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
-				return
-			}
-			slog.WarnContext(r.Context(), "transcode crashed during startup; retrying with software encoding",
-				"component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
-			retryOpts := opts
-			retryOpts.HWAccel = retryAccel
-			session, err = playback.StartTranscode(context.WithoutCancel(r.Context()), retryOpts)
-			if err != nil {
-				unlock()
-				slog.ErrorContext(r.Context(), "start transcode retry", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
-				http.Error(w, "failed to start transcode", http.StatusInternalServerError)
-				return
-			}
-			if _, retryErr := session.WaitForManifest(TranscodeStartReadinessTimeout); retryErr != nil {
-				_ = session.Close()
-				unlock()
-				slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", retryErr, "session", req.SessionID, "playback_session_id", req.SessionID)
-				http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
-				return
-			}
-		}
 	}
 
 	// The replacement has successfully spawned, so retire the old session and
@@ -1703,6 +1713,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		AudioRecipeVersion:    req.AudioRecipeVersion,
 		CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion,
 		ThrottleSeconds:       req.ThrottleSeconds,
+		SoftwareVideoDecode:   session.Opts().SoftwareVideoDecode,
 	})
 }
 
@@ -1936,7 +1947,17 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		opts.SeekSeconds = float64(requestedSegment * card.SegmentDuration)
 	}
 
-	session, err := playback.StartTranscode(r.Context(), opts)
+	// Under hw_accel=auto the reconstruct walks the same safer paths as a
+	// fresh start in this output directory, keeping a slow process rather than
+	// duplicating it.
+	pipeline := s.autoTranscodePipeline(r.Context(), opts)
+	adaptive := pipeline.Enabled()
+	var session *playback.TranscodeSession
+	if adaptive {
+		session, err = playback.StartReconstructTranscode(r.Context(), pipeline, playback.TranscodeStartup{Timeout: playback.ManifestStartupTimeout})
+	} else {
+		session, err = playback.StartTranscode(r.Context(), opts)
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "transcode node reconstruct start failed", "component", "transcodenode", "error", err,
 			"session", sessionID, "playback_session_id", sessionID)
@@ -1946,10 +1967,14 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	// Readiness is normally the caller's concern, but a VideoToolbox session
 	// can die at encoder init (e.g. a session the hardware cannot create at
 	// these dimensions), and registering the dead session would serve this
-	// media as permanently missing. Mirror handleStart's software retry for
-	// the accel StartupRetryHWAccel would change; other accels keep the
-	// existing register-immediately behavior.
-	if retryAccel := playback.StartupRetryHWAccel(opts); retryAccel != opts.HWAccel {
+	// media as permanently missing. Outside the automatic pipeline, mirror
+	// handleStart's software retry for the accel StartupRetryHWAccel would
+	// change; other accels keep the existing register-immediately behavior.
+	retryAccel := opts.HWAccel
+	if !adaptive {
+		retryAccel = playback.StartupRetryHWAccel(opts)
+	}
+	if retryAccel != opts.HWAccel {
 		if _, waitErr := session.WaitForManifest(playback.ManifestStartupTimeout); waitErr != nil {
 			if session.IsRunning() {
 				slog.WarnContext(r.Context(), "reconstructed transcode slow to produce a manifest", "component", "transcodenode",

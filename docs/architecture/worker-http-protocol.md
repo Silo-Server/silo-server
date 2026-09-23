@@ -179,9 +179,22 @@ Success is 202 with JSON-encoded `TranscodeStartResponse`, including available
 recipe attestations. The current handler does not set Content-Type: the HTTP
 server emits text/plain. The description uses JSON Schema content annotations
 for that textual payload rather than claiming application/json on the wire.
-`RequireReady` waits for a manifest, with the existing limited software retry for
-early hardware failure. Without it, 202 establishes registration, not playable
-bytes or successful encoder completion. Tracking is asynchronous monitoring.
+`RequireReady` waits for a manifest. When FFmpeg exits before that manifest under
+`hw_accel=auto` (a video transcode without tone mapping that resolves to a
+hardware backend), the node tries CPU decode with GPU encode, then software;
+otherwise it keeps the limited software retry for an early VideoToolbox failure.
+Each attempt gets its own manifest wait. When the dispatched acceleration is
+`auto` and the node's stored capability report resolves to a hardware backend,
+callers size the start deadline to `TranscodeStartReadyMaxDuration` (one wait per
+path); every other start keeps the single-wait deadline, and the
+Jellyfin-compatible surface asks for readiness only in that case. Readiness is
+judged only on a manifest the current FFmpeg process wrote; an earlier
+generation's `stream.m3u8` in a reused directory does not count. A process still
+running at the deadline is closed, never duplicated. The response reports `software_video_decode`
+when the executed recipe decodes on the CPU; older nodes omit it, so callers OR
+it with the requested value. Without
+`RequireReady`, 202 establishes registration, not playable bytes or successful
+encoder completion. Tracking is asynchronous monitoring.
 The command is non-retryable and has no durable admission or replay identity;
 it does not alter native startPlayback ownership or release gates.
 

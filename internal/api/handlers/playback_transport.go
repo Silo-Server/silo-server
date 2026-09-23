@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/telemetry"
@@ -80,6 +81,11 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 
 func (h *PlaybackHandler) remotePlaybackTransportTimeout(nodeURL string, request transcodenode.TranscodeStartRequest) time.Duration {
 	if request.ToneMapMode == "" {
+		if request.RequireReady && h.remoteAutoFallbackPossibleV3(nodeURL, request) {
+			// The node answers only after its first manifest, which under
+			// hw_accel=auto can follow an early exit on each safer path.
+			return transcodenode.TranscodeStartReadyMaxDuration + 5*time.Second
+		}
 		return playback.ManifestStartupTimeout + 5*time.Second
 	}
 	timeout := h.remoteToneMapProbeTimeoutV3(nodeURL) + playback.ManifestStartupTimeout
@@ -90,6 +96,24 @@ func (h *PlaybackHandler) remotePlaybackTransportTimeout(nodeURL string, request
 		timeout += transcodenode.TranscodeStartReadinessTimeout
 	}
 	return timeout
+}
+
+// remoteAutoFallbackPossibleV3 reports whether a node may walk the hw_accel=auto
+// fallback for this start: a video transcode dispatched as auto to a node whose
+// stored capability report resolves to a hardware backend. Every other start
+// keeps the single-wait budget, so an unresponsive node still fails over as
+// quickly as before.
+func (h *PlaybackHandler) remoteAutoFallbackPossibleV3(nodeURL string, request transcodenode.TranscodeStartRequest) bool {
+	if !strings.EqualFold(strings.TrimSpace(request.HWAccel), "auto") ||
+		strings.EqualFold(strings.TrimSpace(request.TargetCodecVideo), "copy") {
+		return false
+	}
+	lookup, ok := h.NodePlanner.(transcodeNodeLookupV3)
+	if !ok {
+		return false
+	}
+	node, found := lookup.TranscodeNodeByURL(nodeURL)
+	return found && playback.StoredReportResolvesHardware(node.StoredCapabilities())
 }
 
 func fetchRemoteTranscodeCapabilities(ctx context.Context, nodeURL, jwtSecret string) (playback.HWAccelInfo, error) {
