@@ -1932,11 +1932,9 @@ func (s *TranscodeSession) getManifest(currentGeneration bool) ([]byte, error) {
 	defer s.mu.Unlock()
 
 	manifestPath := filepath.Join(s.outputDir, "stream.m3u8")
-	data, err := os.ReadFile(manifestPath)
-	if err == nil && currentGeneration && s.inheritedManifest != nil {
-		if info := statManifest(s.outputDir); info != nil && sameManifestFile(info, s.inheritedManifest) {
-			data, err = nil, os.ErrNotExist
-		}
+	data, info, err := readManifestFile(manifestPath)
+	if err == nil && currentGeneration && s.inheritedManifest != nil && sameManifestFile(info, s.inheritedManifest) {
+		data, err = nil, os.ErrNotExist
 	}
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -1988,6 +1986,27 @@ func statManifest(outputDir string) os.FileInfo {
 		return nil
 	}
 	return info
+}
+
+// readManifestFile reads a playlist and describes the same open file. FFmpeg
+// replaces the playlist by rename, so a separate Stat by path could describe a
+// newer file than the bytes returned and let an inherited playlist pass as
+// current.
+func readManifestFile(path string) ([]byte, os.FileInfo, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, nil, err
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, nil, err
+	}
+	return data, info, nil
 }
 
 // sameManifestFile reports whether current is still the inherited playlist.
