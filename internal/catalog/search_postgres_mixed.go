@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -127,10 +126,7 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 			argIdx++
 		}
 		appendLibraryAccessConditions("mi.content_id", filter, &mediaConditions, &args, &argIdx)
-		applyAccessFilter("mi", AccessFilter{
-			MaxContentRating:   filter.MaxContentRating,
-			ExcludedMediaTypes: filter.ExcludedMediaTypes,
-		}, &mediaConditions, &args, &argIdx)
+		applyAccessFilter("mi", filter, &mediaConditions, &args, &argIdx)
 		mediaConditions = append(mediaConditions, MangaChapterExclusionWhere("mi"))
 	}
 
@@ -140,16 +136,7 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 			"si.type = 'series'",
 		)
 		appendEpisodeCatalogSearchAccess("ece", filter, &episodeConditions, &args, &argIdx)
-		if filter.MaxContentRating != "" {
-			allowedRatings := access.AllowedRatingsUpTo(filter.MaxContentRating)
-			if len(allowedRatings) == 0 {
-				episodeConditions = append(episodeConditions, "1 = 0")
-			} else {
-				episodeConditions = append(episodeConditions, fmt.Sprintf("ece.content_rating = ANY($%d)", argIdx))
-				args = append(args, allowedRatings)
-				argIdx++
-			}
-		}
+		applyContentRatingFilter("ece", "ece.series_id", filter, &episodeConditions, &args, &argIdx)
 		if len(filter.ExcludedMediaTypes) > 0 {
 			episodeConditions = append(episodeConditions, fmt.Sprintf("NOT ('episode' = ANY($%d))", argIdx))
 			args = append(args, filter.ExcludedMediaTypes)

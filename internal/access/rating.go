@@ -6,7 +6,8 @@ var ratingRank = map[string]int{
 	"G": 0, "TV-Y": 0, "TV-G": 0,
 	"PG": 1, "TV-Y7": 1, "TV-PG": 1,
 	"PG-13": 2, "TV-14": 2,
-	"R": 3, "NC-17": 3, "TV-MA": 3,
+	"R": 4, "NC-17": 4, "TV-MA": 4,
+	"AU-G": 0, "AU-PG": 1, "AU-M": 2, "AU-MA15+": 3, "AU-R18+": 4, "AU-X18+": 5,
 }
 
 type RatingRankEntry struct {
@@ -23,9 +24,15 @@ var ratingRankEntries = []RatingRankEntry{
 	{Rating: "TV-PG", Rank: 1},
 	{Rating: "PG-13", Rank: 2},
 	{Rating: "TV-14", Rank: 2},
-	{Rating: "R", Rank: 3},
-	{Rating: "NC-17", Rank: 3},
-	{Rating: "TV-MA", Rank: 3},
+	{Rating: "R", Rank: 4},
+	{Rating: "NC-17", Rank: 4},
+	{Rating: "TV-MA", Rank: 4},
+	{Rating: "AU-G", Rank: 0},
+	{Rating: "AU-PG", Rank: 1},
+	{Rating: "AU-M", Rank: 2},
+	{Rating: "AU-MA15+", Rank: 3},
+	{Rating: "AU-R18+", Rank: 4},
+	{Rating: "AU-X18+", Rank: 5},
 }
 
 // RatingAllowed reports whether a content rating is visible under the ceiling.

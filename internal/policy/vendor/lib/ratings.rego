@@ -11,9 +11,15 @@ rank := {
 	"TV-PG": 1,
 	"PG-13": 2,
 	"TV-14": 2,
-	"R": 3,
-	"NC-17": 3,
-	"TV-MA": 3,
+	"R": 4,
+	"NC-17": 4,
+	"TV-MA": 4,
+	"AU-G": 0,
+	"AU-PG": 1,
+	"AU-M": 2,
+	"AU-MA15+": 3,
+	"AU-R18+": 4,
+	"AU-X18+": 5,
 }
 
 normalize(value) := upper(trim(sprintf("%v", [value]), " "))

@@ -235,6 +235,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
             <MetadataBadges
               year={year || undefined}
               contentRating={item.content_rating || undefined}
+              certification={item.certification}
               duration={formatRuntimeMinutes(selectedMediaSummary.durationMinutes) || undefined}
             />
             <QualityBadges summary={selectedMediaSummary} />

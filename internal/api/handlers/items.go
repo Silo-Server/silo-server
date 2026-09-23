@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Silo-Server/silo-server/internal/certification"
 	"net/http"
 	"strconv"
 	"strings"
@@ -297,44 +298,45 @@ func (h *ItemsHandler) requestStaleMetadataRefresh(ctx context.Context, targetTy
 
 // itemListResponse is the shape of a single item in browse/search list responses.
 type itemListResponse struct {
-	ContentID         string                      `json:"content_id"`
-	PlayContentID     string                      `json:"play_content_id,omitempty"`
-	Type              string                      `json:"type"`
-	Title             string                      `json:"title"`
-	SeriesID          string                      `json:"series_id,omitempty"`
-	SeriesTitle       string                      `json:"series_title,omitempty"`
-	SeasonNumber      *int                        `json:"season_number,omitempty"`
-	EpisodeNumber     *int                        `json:"episode_number,omitempty"`
-	Year              int                         `json:"year,omitempty"`
-	Runtime           int                         `json:"runtime,omitempty"`
-	Genres            []string                    `json:"genres"`
-	Keywords          []string                    `json:"keywords"`
-	Studios           []string                    `json:"studios,omitempty"`
-	Networks          []string                    `json:"networks,omitempty"`
-	ContentRating     string                      `json:"content_rating,omitempty"`
-	Status            string                      `json:"status"`
-	ShowStatus        string                      `json:"show_status,omitempty"`
-	RatingIMDB        *float64                    `json:"rating_imdb,omitempty"`
-	RatingTMDB        *float64                    `json:"rating_tmdb,omitempty"`
-	RatingRTCritic    *int                        `json:"rating_rt_critic,omitempty"`
-	RatingRTAudience  *int                        `json:"rating_rt_audience,omitempty"`
-	OriginalLanguage  string                      `json:"original_language,omitempty"`
-	Overview          string                      `json:"overview,omitempty"`
-	PosterURL         string                      `json:"poster_url,omitempty"`
-	PosterThumbhash   string                      `json:"poster_thumbhash,omitempty"`
-	BackdropURL       string                      `json:"backdrop_url,omitempty"`
-	BackdropThumbhash string                      `json:"backdrop_thumbhash,omitempty"`
-	ReleaseDate       *string                     `json:"release_date,omitempty"`
-	LastAirDate       *string                     `json:"last_air_date,omitempty"`
-	AddedAt           *time.Time                  `json:"added_at,omitempty"`
-	MangaChapterCount *int                        `json:"manga_chapter_count,omitempty"`
-	MangaVolumeCount  *int                        `json:"manga_volume_count,omitempty"`
-	OverlaySummary    *models.OverlaySummary      `json:"overlay_summary,omitempty"`
-	SortMetrics       *sortMetricsResponse        `json:"sort_metrics,omitempty"`
-	UserState         *itemUserStateResponse      `json:"user_state,omitempty"`
-	WorkID            string                      `json:"work_id,omitempty"`
-	WorkTitle         string                      `json:"work_title,omitempty"`
-	WorkFormats       []catalog.WorkFormatSummary `json:"work_formats,omitempty"`
+	ContentID         string                       `json:"content_id"`
+	PlayContentID     string                       `json:"play_content_id,omitempty"`
+	Type              string                       `json:"type"`
+	Title             string                       `json:"title"`
+	SeriesID          string                       `json:"series_id,omitempty"`
+	SeriesTitle       string                       `json:"series_title,omitempty"`
+	SeasonNumber      *int                         `json:"season_number,omitempty"`
+	EpisodeNumber     *int                         `json:"episode_number,omitempty"`
+	Year              int                          `json:"year,omitempty"`
+	Runtime           int                          `json:"runtime,omitempty"`
+	Genres            []string                     `json:"genres"`
+	Keywords          []string                     `json:"keywords"`
+	Studios           []string                     `json:"studios,omitempty"`
+	Networks          []string                     `json:"networks,omitempty"`
+	ContentRating     string                       `json:"content_rating,omitempty"`
+	Certification     *certification.Certification `json:"-"`
+	Status            string                       `json:"status"`
+	ShowStatus        string                       `json:"show_status,omitempty"`
+	RatingIMDB        *float64                     `json:"rating_imdb,omitempty"`
+	RatingTMDB        *float64                     `json:"rating_tmdb,omitempty"`
+	RatingRTCritic    *int                         `json:"rating_rt_critic,omitempty"`
+	RatingRTAudience  *int                         `json:"rating_rt_audience,omitempty"`
+	OriginalLanguage  string                       `json:"original_language,omitempty"`
+	Overview          string                       `json:"overview,omitempty"`
+	PosterURL         string                       `json:"poster_url,omitempty"`
+	PosterThumbhash   string                       `json:"poster_thumbhash,omitempty"`
+	BackdropURL       string                       `json:"backdrop_url,omitempty"`
+	BackdropThumbhash string                       `json:"backdrop_thumbhash,omitempty"`
+	ReleaseDate       *string                      `json:"release_date,omitempty"`
+	LastAirDate       *string                      `json:"last_air_date,omitempty"`
+	AddedAt           *time.Time                   `json:"added_at,omitempty"`
+	MangaChapterCount *int                         `json:"manga_chapter_count,omitempty"`
+	MangaVolumeCount  *int                         `json:"manga_volume_count,omitempty"`
+	OverlaySummary    *models.OverlaySummary       `json:"overlay_summary,omitempty"`
+	SortMetrics       *sortMetricsResponse         `json:"sort_metrics,omitempty"`
+	UserState         *itemUserStateResponse       `json:"user_state,omitempty"`
+	WorkID            string                       `json:"work_id,omitempty"`
+	WorkTitle         string                       `json:"work_title,omitempty"`
+	WorkFormats       []catalog.WorkFormatSummary  `json:"work_formats,omitempty"`
 }
 
 type sortMetricsResponse struct {
@@ -965,6 +967,7 @@ func itemListResponseShell(item *models.MediaItem, overlaySummary *models.Overla
 		Studios:           item.Studios,
 		Networks:          item.Networks,
 		ContentRating:     item.ContentRating,
+		Certification:     item.Certification,
 		Status:            item.Status,
 		ShowStatus:        item.ShowStatus,
 		RatingIMDB:        item.RatingIMDB,

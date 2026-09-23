@@ -178,6 +178,7 @@ type createLibraryRequest struct {
 	Paths                    []string `json:"paths"`
 	Type                     string   `json:"type"`
 	Name                     string   `json:"name"`
+	CertificationCountry     string   `json:"-"`
 	MetadataLanguage         string   `json:"metadata_language,omitempty"`
 	ChapterThumbnailsEnabled bool     `json:"chapter_thumbnails_enabled,omitempty"`
 	IntroDetectionEnabled    bool     `json:"intro_detection_enabled,omitempty"`
@@ -192,6 +193,7 @@ type updateLibraryRequest struct {
 	Type                     *string   `json:"type,omitempty"`
 	Name                     *string   `json:"name,omitempty"`
 	Enabled                  *bool     `json:"enabled,omitempty"`
+	CertificationCountry     *string   `json:"-"`
 	MetadataLanguage         *string   `json:"metadata_language,omitempty"`
 	AutoTranslateMetadata    *bool     `json:"auto_translate_metadata,omitempty"`
 	ChapterThumbnailsEnabled *bool     `json:"chapter_thumbnails_enabled,omitempty"`
@@ -236,6 +238,7 @@ type libraryResponse struct {
 	Type                       string     `json:"type"`
 	Name                       string     `json:"name"`
 	Enabled                    bool       `json:"enabled"`
+	CertificationCountry       string     `json:"-"`
 	MetadataLanguage           string     `json:"metadata_language"`
 	AutoTranslateMetadata      bool       `json:"auto_translate_metadata"`
 	ChapterThumbnailsEnabled   bool       `json:"chapter_thumbnails_enabled"`
@@ -376,6 +379,7 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 		Type:                       f.Type,
 		Name:                       f.Name,
 		Enabled:                    f.Enabled,
+		CertificationCountry:       f.CertificationCountry,
 		MetadataLanguage:           f.MetadataLanguage,
 		AutoTranslateMetadata:      f.AutoTranslateMetadata,
 		ChapterThumbnailsEnabled:   f.ChapterThumbnailsEnabled,

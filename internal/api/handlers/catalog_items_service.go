@@ -245,7 +245,7 @@ func (h *CatalogHandler) QueryItems(ctx context.Context, v ItemViewer, req Catal
 	conditions = append(conditions, libraryConditions...)
 	args = append(args, libraryArgs...)
 	argIdx = nextArgIdx
-	catalog.ApplySectionAccessFilter("mi", catalog.AccessFilter{MaxContentRating: accessFilter.MaxContentRating}, &conditions, &args, &argIdx)
+	catalog.ApplySectionAccessFilter("mi", accessFilter, &conditions, &args, &argIdx)
 
 	whereClause := ""
 	if len(conditions) > 0 {

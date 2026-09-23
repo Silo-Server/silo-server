@@ -271,6 +271,25 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
   return (
     <div className="space-y-5">
       <div className="space-y-1.5">
+        <Label>Certification country</Label>
+        <Select
+          value={form.certificationCountry}
+          onValueChange={(value) => form.setCertificationCountry(value as "US" | "AU")}
+        >
+          <SelectTrigger className="w-full sm:w-64">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="US">United States</SelectItem>
+            <SelectItem value="AU">Australia</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-muted-foreground text-xs">
+          Prefer this country's content ratings. Missing Australian ratings use a labelled US-based
+          equivalent for parental controls. Changing this refreshes existing metadata.
+        </p>
+      </div>
+      <div className="space-y-1.5">
         <Label>Metadata Language</Label>
         <Select value={form.metadataLanguage} onValueChange={form.setMetadataLanguage}>
           <SelectTrigger className="w-full sm:w-64">

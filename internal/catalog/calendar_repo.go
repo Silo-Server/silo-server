@@ -235,7 +235,7 @@ WHERE e1.series_id IS NULL`
 // appendContentRatingClause adds content rating ceiling enforcement.
 func (r *CalendarRepository) appendContentRatingClause(miAlias string, f CalendarFilter, conditions *[]string, args *[]any, argIdx *int) {
 	if f.MaxContentRating != "" {
-		applyAccessFilter(miAlias, AccessFilter{MaxContentRating: f.MaxContentRating}, conditions, args, argIdx)
+		applyAccessFilter(miAlias, AccessFilter{MaxContentRating: f.MaxContentRating, AllowedLibraryIDs: f.AllowedLibraryIDs, DisabledLibraryIDs: f.DisabledLibraryIDs}, conditions, args, argIdx)
 	}
 }
 

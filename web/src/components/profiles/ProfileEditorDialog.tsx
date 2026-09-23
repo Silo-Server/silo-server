@@ -42,7 +42,7 @@ import {
   buildProfileRequestFromDraft,
   buildProfileUpdateFromDraft,
   clearKidsPreset,
-  CONTENT_RATING_OPTIONS,
+  contentRatingOptionsForLibraries,
   createProfileDraft,
   type ProfileDraft,
 } from "@/lib/profile-management";
@@ -225,6 +225,11 @@ function ProfileEditorForm({
     setDraft((current) =>
       applyKidsPreset(current, {
         contentRatingTouched,
+        certificationCountry:
+          libraries.length > 0 &&
+          libraries.every((library) => library.certification_country === "AU")
+            ? "AU"
+            : "US",
         libraryAccessTouched,
       }),
     );
@@ -547,14 +552,16 @@ function ProfileEditorForm({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {CONTENT_RATING_OPTIONS.map((option) => (
-                  <SelectItem
-                    key={option.value || ANY_CONTENT_RATING_VALUE}
-                    value={option.value === "" ? ANY_CONTENT_RATING_VALUE : option.value}
-                  >
-                    {option.label}
-                  </SelectItem>
-                ))}
+                {contentRatingOptionsForLibraries(libraries, draft.maxContentRating).map(
+                  (option) => (
+                    <SelectItem
+                      key={option.value || ANY_CONTENT_RATING_VALUE}
+                      value={option.value === "" ? ANY_CONTENT_RATING_VALUE : option.value}
+                    >
+                      {option.label}
+                    </SelectItem>
+                  ),
+                )}
               </SelectContent>
             </Select>
           </div>

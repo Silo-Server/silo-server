@@ -29,6 +29,7 @@ type Library struct {
 	Type                       string   `json:"type" doc:"Library kind (movies, series, mixed, audiobooks, ebooks, podcasts, manga); free-form until the vocabulary is ratified (#135)" example:"movies"`
 	Name                       string   `json:"name" example:"Movies"`
 	Enabled                    bool     `json:"enabled" example:"true"`
+	CertificationCountry       string   `json:"certification_country,omitempty" doc:"Certification scheme: US or AU" example:"AU"`
 	MetadataLanguage           string   `json:"metadata_language" doc:"ISO 639-1 code metadata is fetched in" example:"en"`
 	AutoTranslateMetadata      bool     `json:"auto_translate_metadata" doc:"Translate descriptions when providers lack the language" example:"false"`
 	ChapterThumbnailsEnabled   bool     `json:"chapter_thumbnails_enabled" example:"false"`
@@ -48,6 +49,7 @@ type LibraryCreate struct {
 	Paths                    []string `json:"paths" minItems:"1" doc:"Root directories the library scans" example:"[\"/media/movies\"]"`
 	Type                     string   `json:"type" minLength:"1" doc:"Library kind (movies, series, mixed, audiobooks, ebooks, podcasts, manga)" example:"movies"`
 	Name                     string   `json:"name" minLength:"1" example:"Movies"`
+	CertificationCountry     string   `json:"certification_country,omitempty" doc:"Certification scheme; default US" example:"AU"`
 	MetadataLanguage         string   `json:"metadata_language,omitempty" doc:"ISO 639-1 code; default en" example:"en"`
 	ChapterThumbnailsEnabled bool     `json:"chapter_thumbnails_enabled,omitempty" doc:"Requires public asset storage" example:"false"`
 	IntroDetectionEnabled    bool     `json:"intro_detection_enabled,omitempty" example:"false"`
@@ -61,6 +63,7 @@ type LibraryUpdate struct {
 	Type                     *string   `json:"type,omitempty" nullable:"false" minLength:"1" example:"movies"`
 	Name                     *string   `json:"name,omitempty" nullable:"false" minLength:"1" example:"Movies"`
 	Enabled                  *bool     `json:"enabled,omitempty" nullable:"false" example:"true"`
+	CertificationCountry     *string   `json:"certification_country,omitempty" nullable:"false" doc:"A change queues a metadata refresh" example:"AU"`
 	MetadataLanguage         *string   `json:"metadata_language,omitempty" nullable:"false" doc:"ISO 639-1 code; a change queues a quick metadata refresh" example:"en"`
 	AutoTranslateMetadata    *bool     `json:"auto_translate_metadata,omitempty" nullable:"false" example:"false"`
 	ChapterThumbnailsEnabled *bool     `json:"chapter_thumbnails_enabled,omitempty" nullable:"false" example:"false"`
@@ -1052,6 +1055,7 @@ func (reg *Registry) createLibrary(ctx context.Context, in *LibraryCreateInput) 
 		Paths:                    in.Body.Paths,
 		Type:                     in.Body.Type,
 		Name:                     in.Body.Name,
+		CertificationCountry:     in.Body.CertificationCountry,
 		MetadataLanguage:         in.Body.MetadataLanguage,
 		ChapterThumbnailsEnabled: in.Body.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    in.Body.IntroDetectionEnabled,
@@ -1085,6 +1089,7 @@ func (reg *Registry) updateLibrary(ctx context.Context, in *LibraryUpdateInput) 
 		Type:                     in.Body.Type,
 		Name:                     in.Body.Name,
 		Enabled:                  in.Body.Enabled,
+		CertificationCountry:     in.Body.CertificationCountry,
 		MetadataLanguage:         in.Body.MetadataLanguage,
 		AutoTranslateMetadata:    in.Body.AutoTranslateMetadata,
 		ChapterThumbnailsEnabled: in.Body.ChapterThumbnailsEnabled,
@@ -1482,6 +1487,7 @@ func libraryOf(v handlers.LibraryView) Library {
 		Type:                       v.Type,
 		Name:                       v.Name,
 		Enabled:                    v.Enabled,
+		CertificationCountry:       v.CertificationCountry,
 		MetadataLanguage:           v.MetadataLanguage,
 		AutoTranslateMetadata:      v.AutoTranslateMetadata,
 		ChapterThumbnailsEnabled:   v.ChapterThumbnailsEnabled,

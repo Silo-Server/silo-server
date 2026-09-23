@@ -65,7 +65,7 @@ func applyEpisodeCatalogAccessFilter(access AccessFilter, whereParts *[]string, 
 	}
 	appendEpisodeParentLibraryAccess("ece.series_id", access, whereParts, args, argIdx)
 	access.ExcludedMediaTypes = nil // access is a value param; caller unaffected
-	ApplySectionAccessFilter("ece", access, whereParts, args, argIdx)
+	applyContentRatingFilter("ece", "ece.series_id", access, whereParts, args, argIdx)
 	*whereParts = append(*whereParts, episodeCatalogSeriesParentGuard)
 }
 

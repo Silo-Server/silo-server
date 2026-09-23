@@ -16,6 +16,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/certification"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -168,9 +169,10 @@ func (s *DetailService) ProbedDurationsByEpisodeIDs(ctx context.Context, ids []s
 // ItemDetail is the full detail response for a single media item, including
 // metadata, file versions, subtitles, intro/credits markers, and presigned image URLs.
 type ItemDetail struct {
-	ContentID     string `json:"content_id"`
-	PlayContentID string `json:"play_content_id,omitempty"`
-	Type          string `json:"type"`
+	Certification *certification.Certification `json:"-"`
+	ContentID     string                       `json:"content_id"`
+	PlayContentID string                       `json:"play_content_id,omitempty"`
+	Type          string                       `json:"type"`
 
 	// Metadata (served inline from Postgres).
 	Title         string `json:"title"`
@@ -1068,6 +1070,11 @@ func (s *DetailService) LocalizeItemModel(ctx context.Context, item *models.Medi
 	if item == nil {
 		return nil, nil
 	}
+	rated, err := s.applyCertifications(ctx, []*models.MediaItem{item}, filter)
+	if err != nil {
+		return nil, err
+	}
+	item = rated[0]
 	language, err := s.resolvePresentationLanguage(ctx, filter, item.OriginalLanguage)
 	if err != nil || language == "" || sameMetadataLanguage(item.DefaultMetadataLanguage, language) || s.itemLocRepo == nil {
 		return cloneMediaItem(item), err
@@ -1156,6 +1163,11 @@ func (s *DetailService) LocalizeItemModels(ctx context.Context, items []*models.
 	if len(items) == 0 {
 		return items, nil
 	}
+	rated, ratingErr := s.applyCertifications(ctx, items, filter)
+	if ratingErr != nil {
+		return nil, ratingErr
+	}
+	items = rated
 	localized := make([]*models.MediaItem, len(items))
 	for i, item := range items {
 		localized[i] = cloneMediaItem(item)
@@ -1722,6 +1734,10 @@ func (s *DetailService) GetItemDetailsByIDs(ctx context.Context, contentIDs []st
 	// Localization keeps one lookup per target language. Most profiles still
 	// produce one query; profiles with source-language exceptions produce one
 	// query for each target represented on this page.
+	visible, err = s.applyCertifications(ctx, visible, filter)
+	if err != nil {
+		return nil, err
+	}
 	targetByID, locByID, err := s.loadItemLocalizations(ctx, visible, filter)
 	if err != nil {
 		return nil, fmt.Errorf("localizing item detail: %w", err)
@@ -1933,6 +1949,11 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		pendingTranslation = pf.pendingTranslation
 		item = pf.localizedItem
 	} else {
+		rated, ratingErr := s.applyCertifications(ctx, []*models.MediaItem{item}, filter)
+		if ratingErr != nil {
+			return nil, ratingErr
+		}
+		item = rated[0]
 		// Share the language and row with the pending-translation decision,
 		// just as the batch detail path does.
 		targets, localizations, err := s.loadItemLocalizations(ctx, []*models.MediaItem{item}, filter)
@@ -1974,6 +1995,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		PendingTranslationLanguage: pendingTranslation,
 		Runtime:                    item.Runtime,
 		ContentRating:              item.ContentRating,
+		Certification:              item.Certification,
 		Genres:                     item.Genres,
 		RatingIMDB:                 item.RatingIMDB,
 		RatingTMDB:                 item.RatingTMDB,
@@ -2473,7 +2495,7 @@ func appendAudiobookItemAccessConditions(
 		*args = append(*args, filter.DisabledLibraryIDs)
 		*argIdx = *argIdx + 1
 	}
-	ApplySectionAccessFilter(alias, AccessFilter{MaxContentRating: filter.MaxContentRating}, conditions, args, argIdx)
+	ApplySectionAccessFilter(alias, filter, conditions, args, argIdx)
 	return true
 }
 

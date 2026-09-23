@@ -470,7 +470,8 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 
 	// Content rating filter (multi-value).
 	if len(filters.ContentRating) > 0 {
-		conditions = append(conditions, fmt.Sprintf("mi.content_rating = ANY($%d)", argIdx))
+		rating := browseCertificationSQL(filters, &args, &argIdx)
+		conditions = append(conditions, fmt.Sprintf("%s = ANY($%d)", rating, argIdx))
 		args = append(args, filters.ContentRating)
 		argIdx++
 	}
@@ -536,7 +537,7 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 		argIdx++
 	}
 
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filters.MaxContentRating}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filters.MaxContentRating, AllowedLibraryIDs: filters.LibraryIDs, DisabledLibraryIDs: filters.DisabledLibraryIDs}, &conditions, &args, &argIdx)
 
 	// Manga chapters (type='ebook' rows linked into a manga series) are internal
 	// sub-units and must never surface as standalone catalog items.
@@ -732,7 +733,7 @@ func filterWhereClauseForSource(filters BrowseFilters, baseRelation string, medi
 		appendEpisodeParentLibraryAccessByEpisodeID(libraryContentExpr, parentAccess, &conditions, &args, &argIdx)
 	}
 
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filters.MaxContentRating}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filters.MaxContentRating, AllowedLibraryIDs: filters.LibraryIDs, DisabledLibraryIDs: filters.DisabledLibraryIDs}, &conditions, &args, &argIdx)
 
 	fromClause = baseRelation
 	if filters.PersonID > 0 {
@@ -821,25 +822,13 @@ func listDistinctScalarColumnWithSource(
 		return []string{}, nil
 	}
 
-	query := fmt.Sprintf(`
-		SELECT DISTINCT mi.%s
-		FROM %s
-		%s
-		  AND mi.%s <> ''
-		ORDER BY mi.%s ASC
-		LIMIT %d
-	`, column, fromClause, whereClause, column, column, catalogFacetMaxValues)
-
-	// When there are no WHERE conditions, the extra AND is invalid — prepend WHERE instead.
-	if whereClause == "" {
-		query = fmt.Sprintf(`
-			SELECT DISTINCT mi.%s
-			FROM %s
-			WHERE mi.%s <> ''
-			ORDER BY mi.%s ASC
-			LIMIT %d
-		`, column, fromClause, column, column, catalogFacetMaxValues)
+	expression := "mi." + column
+	if column == "content_rating" {
+		index := len(args) + 1
+		expression = browseCertificationSQL(filters, &args, &index)
 	}
+	query := fmt.Sprintf(`SELECT DISTINCT %s AS value FROM %s %s AND %s <> '' ORDER BY value ASC LIMIT %d`,
+		expression, fromClause, browseFilterPrefix(whereClause), expression, catalogFacetMaxValues)
 
 	rows, err := pool.Query(ctx, query, args...)
 	if err != nil {
@@ -1150,22 +1139,27 @@ func searchDistinctScalarColumnWithSource(
 	if empty {
 		return []string{}, false, nil
 	}
+	expression := "mi." + column
+	if column == "content_rating" {
+		index := len(args) + 1
+		expression = browseCertificationSQL(filters, &args, &index)
+	}
 	args = append(args, prefix+"%")
 	prefixIdx := len(args)
 	// DISTINCT in an inline subquery so the outer ORDER BY can apply
 	// LOWER() without violating the SELECT DISTINCT rule.
 	query := fmt.Sprintf(`
 		SELECT name FROM (
-			SELECT DISTINCT mi.%s AS name
+			SELECT DISTINCT %s AS name
 			FROM %s
 			%s
-			  AND mi.%s IS NOT NULL
-			  AND BTRIM(mi.%s) <> ''
-			  AND LOWER(mi.%s) LIKE LOWER($%d)
+			  AND %s IS NOT NULL
+			  AND BTRIM(%s) <> ''
+			  AND LOWER(%s) LIKE LOWER($%d)
 		) matches
 		ORDER BY LOWER(name) ASC
 		LIMIT %d
-	`, column, fromClause, browseFilterPrefix(whereClause), column, column, column, prefixIdx, limit+1)
+	`, expression, fromClause, browseFilterPrefix(whereClause), expression, expression, expression, prefixIdx, limit+1)
 	return queryFacetSearchResults(ctx, pool, query, args, limit)
 }
 

@@ -238,7 +238,7 @@ func TestUnplayedHighRated_ContentRatingFilter(t *testing.T) {
 		Filter:    AccessFilter{MaxContentRating: "PG-13"},
 	})
 
-	if !strings.Contains(query, "mi.content_rating = ANY(") {
+	if !strings.Contains(query, "mi.content_rating) = ANY(") {
 		t.Fatalf("expected content_rating = ANY filter, got:\n%s", query)
 	}
 	// args: minRating, userID, profileID, then content rating slice (one arg).

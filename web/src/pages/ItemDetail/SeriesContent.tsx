@@ -171,6 +171,7 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
           <MetadataBadges
             year={yearDisplay || undefined}
             contentRating={item.content_rating || undefined}
+            certification={item.certification}
             seasonCount={seasons.length || undefined}
             episodeCount={episodeCount || undefined}
           />

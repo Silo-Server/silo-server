@@ -131,3 +131,17 @@ describe("saving library processing settings", () => {
     },
   );
 });
+
+it("saves the selected certification country on an existing library", () => {
+  const library = {
+    id: 1,
+    name: "Movies",
+    type: "movies",
+    paths: ["/media"],
+    certification_country: "US",
+  } as Library;
+  const { result } = renderHook(() => useLibraryForm({ library }));
+  act(() => result.current.setCertificationCountry("AU"));
+  act(() => result.current.submit());
+  expect(mutate.mock.calls[0]![0]).toMatchObject({ id: 1, body: { certification_country: "AU" } });
+});

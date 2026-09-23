@@ -327,7 +327,9 @@ func buildFilterAccessibleContentIDsSQL(contentIDs []string, allowedFolderIDs, d
 	itemConds = append(itemConds, libraryAccessConditions("mi.content_id", allowedIdx, disabledIdx)...)
 	episodeConds = append(episodeConds, libraryAccessConditions("e.series_id", allowedIdx, disabledIdx)...)
 	if ratingIdx > 0 {
-		rc := fmt.Sprintf("mi.content_rating = ANY($%d)", ratingIdx)
+		ratingArgIdx := len(args) + 1
+		ratingSQL := effectiveCertificationSQL("mi", "mi.content_id", AccessFilter{AllowedLibraryIDs: allowedFolderIDs, DisabledLibraryIDs: disabledFolderIDs}, &args, &ratingArgIdx)
+		rc := fmt.Sprintf("%s = ANY($%d)", ratingSQL, ratingIdx)
 		itemConds = append(itemConds, rc)
 		episodeConds = append(episodeConds, rc)
 	}

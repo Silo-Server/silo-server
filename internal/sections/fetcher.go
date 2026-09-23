@@ -317,6 +317,29 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		items, total, err = getOrRefresh(ctx, key, f.now(), func(loadCtx context.Context) ([]*models.MediaItem, int, error) {
 			return f.fetchSection(loadCtx, resolved, libraryID, libraryIDs, userID, profileID, filter)
 		})
+		// Country preferences and refreshed certifications can change while a
+		// section is cached. Recheck rated profiles against current database values.
+		if err == nil && filter.MaxContentRating != "" && len(items) > 0 {
+			ids := make([]string, 0, len(items))
+			for _, item := range items {
+				if item != nil {
+					ids = append(ids, item.ContentID)
+				}
+			}
+			var allowed map[string]bool
+			allowed, err = catalog.NewLibraryItemRepository(f.pool).FilterAccessibleContentIDs(ctx, ids, filter.AllowedLibraryIDs, filter.DisabledLibraryIDs, filter.MaxContentRating)
+			if err == nil {
+				kept := make([]*models.MediaItem, 0, len(items))
+				for _, item := range items {
+					if item != nil && allowed[item.ContentID] {
+						kept = append(kept, item)
+					}
+				}
+				total = max(0, total-(len(items)-len(kept)))
+				items = kept
+			}
+		}
+
 	} else {
 		items, total, err = f.fetchSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
 	}

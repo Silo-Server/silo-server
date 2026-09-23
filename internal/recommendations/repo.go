@@ -377,23 +377,7 @@ func (r *Repo) findTasteProfileCandidates(
 	}
 	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
 
-	if filter.MaxContentRating != "" {
-		allowedRatings := access.AllowedRatingsUpTo(filter.MaxContentRating)
-		if len(allowedRatings) == 0 {
-			return []ScoredItem{}, map[string][]string{}, nil
-		}
-
-		placeholders := make([]string, len(allowedRatings))
-		for i, rating := range allowedRatings {
-			placeholders[i] = fmt.Sprintf("$%d", argIdx)
-			args = append(args, rating)
-			argIdx++
-		}
-		conditions = append(conditions, fmt.Sprintf(
-			"mi.content_rating IN (%s)",
-			strings.Join(placeholders, ", "),
-		))
-	}
+	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
 
 	query := fmt.Sprintf(`
 			WITH ann_candidates AS (
@@ -1617,15 +1601,7 @@ func (r *Repo) FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, fi
 	}
 	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
 
-	if filter.MaxContentRating != "" {
-		allowedRatings := access.AllowedRatingsUpTo(filter.MaxContentRating)
-		if len(allowedRatings) == 0 {
-			return map[string]struct{}{}, nil
-		}
-		conditions = append(conditions, fmt.Sprintf("mi.content_rating = ANY($%d)", argIdx))
-		args = append(args, allowedRatings)
-		argIdx++
-	}
+	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
 
 	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
 		SELECT mi.content_id

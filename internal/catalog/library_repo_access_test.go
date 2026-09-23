@@ -14,7 +14,7 @@ import (
 // predicate the detail/watch path enforces (ItemRepository.EnsureAccessible):
 //   - episodes are gated on their parent SERIES (media_item_libraries via
 //     series_id), never on episode_libraries;
-//   - a rating-only viewer is gated on rating alone, with no membership join;
+//   - a rating-only viewer resolves library ratings, falling back to raw metadata;
 //   - placeholder numbering tracks the bound args.
 
 func TestBuildFilterAccessibleContentIDsSQL_AllowedLibrariesOnly(t *testing.T) {
@@ -62,12 +62,12 @@ func TestBuildFilterAccessibleContentIDsSQL_RatingOnlyRequiresNoMembership(t *te
 	if len(args) != 2 {
 		t.Fatalf("expected 2 args (ids, ratings); got %d (%v)", len(args), args)
 	}
-	// EnsureAccessible only joins media_item_libraries when a library
-	// restriction is set; a rating-only viewer is gated on rating alone.
-	if strings.Contains(sql, "media_item_libraries") {
-		t.Errorf("rating-only scope must not require a membership join; got %s", sql)
+	// Library preferences affect the rating even without a library restriction.
+	// The scalar resolver falls back to raw metadata when membership is absent.
+	if !strings.Contains(sql, "SELECT silo_certification_rating(") || !strings.Contains(sql, "LIMIT 1), mi.content_rating)") {
+		t.Errorf("rating-only scope must resolve library preferences with a raw fallback; got %s", sql)
 	}
-	if !strings.Contains(sql, "mi.content_rating = ANY($2)") {
+	if !strings.Contains(sql, "mi.content_rating) = ANY($2)") {
 		t.Errorf("expected rating predicate bound at $2; got %s", sql)
 	}
 	// The episode branch still resolves the rating from the parent series.
@@ -107,7 +107,7 @@ func TestBuildFilterAccessibleContentIDsSQL_AllowedDisabledAndRatingPlaceholders
 	for _, want := range []string{
 		"mil.media_folder_id = ANY($2)",
 		"NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($3))",
-		"mi.content_rating = ANY($4)",
+		"mi.content_rating) = ANY($4)",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("expected SQL to contain %q; got %s", want, sql)

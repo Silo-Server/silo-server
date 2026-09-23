@@ -1,6 +1,14 @@
 import { getDefaultQuerySortOrder, normalizeQuerySortField } from "@/lib/querySortOptions";
 import type { SchemaOption } from "@/components/admin/plugins/schemaFormUtils";
 
+export interface Certification {
+  country: string;
+  rating: string;
+  source_country: string;
+  source_rating: string;
+  equivalent: boolean;
+}
+
 // Auth
 export interface LoginRequest {
   username: string;
@@ -782,6 +790,7 @@ export interface BrowseItem {
   studios?: string[];
   networks?: string[];
   content_rating: string;
+  certification?: Certification;
   status: "pending" | "matched" | "unmatched" | "ambiguous";
   show_status?: string;
   rating_imdb: number | null;
@@ -1121,6 +1130,7 @@ export interface ItemDetail {
   pending_translation_language?: string;
   runtime: number;
   content_rating: string;
+  certification?: Certification;
   genres: string[];
   rating_imdb: number | null;
   rating_tmdb: number | null;
@@ -3149,6 +3159,7 @@ export interface Library {
   name: string;
   enabled: boolean;
   metadata_language: string;
+  certification_country?: "US" | "AU";
   auto_translate_metadata: boolean;
   chapter_thumbnails_enabled: boolean;
   chapter_thumbnails_supported: boolean;
@@ -3290,6 +3301,7 @@ export interface CreateLibraryRequest {
   name: string;
   enabled?: boolean;
   metadata_language?: string;
+  certification_country?: "US" | "AU";
   auto_translate_metadata?: boolean;
   chapter_thumbnails_enabled?: boolean;
   intro_detection_enabled?: boolean;
@@ -4076,6 +4088,7 @@ export interface ReprobeNodeResult {
 
 // User-facing library (simplified, no admin fields)
 export interface UserLibrary {
+  certification_country?: string;
   id: number;
   name: string;
   type: string;

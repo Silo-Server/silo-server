@@ -110,3 +110,43 @@ func TestHandleUpdateLibraryLanguageChangeQueuesRefresh(t *testing.T) {
 		t.Fatalf("refresh jobs after same-language update = %d, want still 1", len(got))
 	}
 }
+
+func TestLibraryCertificationCountryChangeQueuesFullRefresh(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	var id int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name) VALUES('movies','Certification test') RETURNING id`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id=$1`, id) }()
+	jobs := &fakeAdminJobCreator{}
+	h := NewLibraryHandler(catalog.NewFolderRepository(pool), nil, nil, pool, nil)
+	h.JobRepo = jobs
+	au := "au"
+	view, err := h.UpdateLibrary(ctx, id, 1, LibraryUpdateRequest{CertificationCountry: &au})
+	if err != nil || view.CertificationCountry != "AU" {
+		t.Fatalf("update: %+v %v", view, err)
+	}
+	refreshes := jobs.libraryRefreshes()
+	if len(refreshes) != 1 || refreshes[0].Mode != adminjob.LibraryRefreshModeFull {
+		t.Fatalf("refresh: %+v", refreshes)
+	}
+	if _, err := h.UpdateLibrary(ctx, id, 1, LibraryUpdateRequest{CertificationCountry: &au}); err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs.libraryRefreshes()) != 1 {
+		t.Fatal("unchanged country queued another refresh")
+	}
+	invalid := "GB"
+	if _, err := h.UpdateLibrary(ctx, id, 1, LibraryUpdateRequest{CertificationCountry: &invalid}); err == nil {
+		t.Fatal("unsupported country accepted")
+	}
+}

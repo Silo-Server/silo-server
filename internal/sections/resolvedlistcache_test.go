@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func mediaItems(ids ...string) []*models.MediaItem {
@@ -1051,5 +1054,56 @@ func TestResolvedListCacheScanPreservesConcurrentNewGenerationLoad(t *testing.T)
 	}
 	if !entry.expiresAt.Equal(now.Add(resolvedListTTL)) {
 		t.Fatal("invalidation shortened a fresh entry's lifetime")
+	}
+}
+
+func TestCachedSectionRechecksCertificationDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	resetResolvedListCacheForTest()
+	defer resetResolvedListCacheForTest()
+	var folder int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,certification_country) VALUES('movies','Certification cache','AU') RETURNING id`).Scan(&folder); err != nil {
+		t.Fatal(err)
+	}
+	id := fmt.Sprintf("movie:cert-cache-%d", time.Now().UnixNano())
+	defer func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id=$1`, id)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id=$1`, folder)
+	}()
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items(content_id,type,title,content_rating,tmdb_id) VALUES($1,'movie','Certification cache','PG-13','123')`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries(content_id,media_folder_id,first_seen_at) VALUES($1,$2,now())`, id, folder); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_item_certifications(content_id,tmdb_id,ratings) VALUES($1,'123','{"AU":"M"}')`, id); err != nil {
+		t.Fatal(err)
+	}
+	f := NewFetcher(pool)
+	resolved := ResolvedSection{ID: "cert-cache", SectionType: SectionRecentlyAdded, ItemLimit: 20}
+	filter := catalog.AccessFilter{AllowedLibraryIDs: []int{folder}, MaxContentRating: "AU-M"}
+	key := resolvedListCacheKey(resolved, &folder, []int{folder}, filter)
+	if _, _, err := getOrRefresh(ctx, key, f.now(), staticLoader(mediaItems(id), nil)); err != nil {
+		t.Fatal(err)
+	}
+	first, err := f.FetchOne(ctx, resolved, &folder, []int{folder}, 0, "", filter)
+	if err != nil || len(first.Items) != 1 {
+		t.Fatalf("initial cached item: %v %v", first, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_item_certifications SET ratings='{"AU":"R18+"}' WHERE content_id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := f.FetchOne(ctx, resolved, &folder, []int{folder}, 0, "", filter)
+	if err != nil || len(updated.Items) != 0 {
+		t.Fatalf("stale cache bypassed new rating: %v %v", updated, err)
 	}
 }

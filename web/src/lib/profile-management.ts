@@ -39,6 +39,12 @@ export const CONTENT_RATING_OPTIONS: ContentRatingOption[] = [
   { value: "PG", label: "PG / TV-PG / TV-Y7", summary: "PG max" },
   { value: "PG-13", label: "PG-13 / TV-14", summary: "PG-13 max" },
   { value: "R", label: "R / TV-MA / NC-17", summary: "R max" },
+  { value: "AU-G", label: "Australia: G", summary: "AU G max" },
+  { value: "AU-PG", label: "Australia: PG", summary: "AU PG max" },
+  { value: "AU-M", label: "Australia: M", summary: "AU M max" },
+  { value: "AU-MA15+", label: "Australia: MA15+", summary: "AU MA15+ max" },
+  { value: "AU-R18+", label: "Australia: R18+", summary: "AU R18+ max" },
+  { value: "AU-X18+", label: "Australia: X18+", summary: "AU X18+ max" },
 ];
 
 function sortUniqueLibraryIDs(ids: number[] | null | undefined): number[] {
@@ -135,7 +141,7 @@ export function buildProfileAccessSummary(
 ): ProfileAccessSummary {
   const contentRating =
     CONTENT_RATING_OPTIONS.find((option) => option.value === profile.max_content_rating)?.summary ??
-    "Any content";
+    (profile.max_content_rating ? `${profile.max_content_rating} max` : "Any content");
   const libraryCount = sortUniqueLibraryIDs(profile.allowed_library_ids).length;
   const libraries = profile.library_restrictions_enabled
     ? `${libraryCount} ${libraryCount === 1 ? "library" : "libraries"}`
@@ -155,6 +161,7 @@ export function applyKidsPreset(
   draft: ProfileDraft,
   options: {
     contentRatingTouched: boolean;
+    certificationCountry?: string;
     libraryAccessTouched: boolean;
   },
 ): ProfileDraft {
@@ -164,7 +171,7 @@ export function applyKidsPreset(
   };
 
   if (!options.contentRatingTouched && next.maxContentRating === "") {
-    next.maxContentRating = "PG";
+    next.maxContentRating = options.certificationCountry === "AU" ? "AU-PG" : "PG";
   }
 
   if (!options.libraryAccessTouched && !next.libraryRestrictionsEnabled) {
@@ -184,4 +191,18 @@ export function clearKidsPreset(draft: ProfileDraft): ProfileDraft {
     libraryRestrictionsEnabled: false,
     allowedLibraryIDs: [],
   };
+}
+
+export function contentRatingOptionsForLibraries(
+  libraries: { certification_country?: string }[],
+  selected: string,
+): ContentRatingOption[] {
+  const countries = new Set(libraries.map((library) => library.certification_country ?? "US"));
+  if (countries.size === 0) countries.add("US");
+  return CONTENT_RATING_OPTIONS.filter(
+    (option) =>
+      option.value === "" ||
+      option.value === selected ||
+      countries.has(option.value.startsWith("AU-") ? "AU" : "US"),
+  );
 }

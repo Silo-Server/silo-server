@@ -16140,6 +16140,7 @@ export interface components {
       backdrop_url?: string;
       /** @description Section-specific badges (new, returning, …) */
       badges?: string[];
+      certification?: components["schemas"]["Certification"];
       /**
        * @description Deterministic catalog identifier
        * @example movie:heat-1995
@@ -16265,6 +16266,7 @@ export interface components {
       badges?: string[];
       /** @description Empty, never null */
       cast: components["schemas"]["CastCredit"][];
+      certification?: components["schemas"]["Certification"];
       /**
        * @description Deterministic catalog identifier
        * @example movie:heat-1995
@@ -16634,6 +16636,13 @@ export interface components {
       category: string;
       label: string;
       templates: components["schemas"]["CollectionTemplate"][];
+    };
+    Certification: {
+      country: string;
+      equivalent: boolean;
+      rating: string;
+      source_country: string;
+      source_rating: string;
     };
     ChangePasswordInputBody: {
       /**
@@ -18778,6 +18787,7 @@ export interface components {
       backdrop_url?: string;
       /** @description Section-specific badges (new, returning, …) */
       badges?: string[];
+      certification?: components["schemas"]["Certification"];
       /**
        * @description Deterministic catalog identifier
        * @example movie:heat-1995
@@ -19344,6 +19354,11 @@ export interface components {
        * @example false
        */
       auto_translate_metadata: boolean;
+      /**
+       * @description Certification scheme: US or AU
+       * @example AU
+       */
+      certification_country?: string;
       /** @example false */
       chapter_thumbnails_enabled: boolean;
       /**
@@ -19476,6 +19491,11 @@ export interface components {
       sort_order: number;
     };
     LibraryCreate: {
+      /**
+       * @description Certification scheme; default US
+       * @example AU
+       */
+      certification_country?: string;
       /**
        * @description Requires public asset storage
        * @example false
@@ -19757,6 +19777,11 @@ export interface components {
     LibraryUpdate: {
       /** @example false */
       auto_translate_metadata?: boolean;
+      /**
+       * @description A change queues a metadata refresh
+       * @example AU
+       */
+      certification_country?: string;
       /** @example false */
       chapter_thumbnails_enabled?: boolean;
       /** @example true */
@@ -25193,6 +25218,7 @@ export interface components {
       page?: components["schemas"]["PageInfo"];
     };
     UserLibrary: {
+      certification_country?: string;
       /**
        * @description Opaque identifier
        * @example 1
@@ -25208,6 +25234,7 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       available: boolean;
+      certification_countries: string[];
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -26094,6 +26121,7 @@ export interface components {
       badges?: string[];
       /** @description Up to four cast members; empty, never null */
       cast: components["schemas"]["WatchTonightCastMember"][];
+      certification?: components["schemas"]["Certification"];
       /**
        * @description Deterministic catalog identifier
        * @example movie:heat-1995
@@ -26239,6 +26267,7 @@ export interface components {
       backdrop_url?: string;
       /** @description Section-specific badges (new, returning, …) */
       badges?: string[];
+      certification?: components["schemas"]["Certification"];
       /**
        * @description Deterministic catalog identifier
        * @example movie:heat-1995

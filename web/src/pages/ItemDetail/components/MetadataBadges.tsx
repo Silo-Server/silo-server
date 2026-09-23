@@ -1,6 +1,8 @@
+import type { Certification } from "@/api/types";
 interface MetadataBadgesProps {
   year?: string;
   contentRating?: string;
+  certification?: Certification;
   duration?: string;
   seasonCount?: number;
   episodeCount?: number;
@@ -12,6 +14,7 @@ interface MetadataBadgesProps {
 export default function MetadataBadges({
   year,
   contentRating,
+  certification,
   duration,
   seasonCount,
   episodeCount,
@@ -22,7 +25,20 @@ export default function MetadataBadges({
   return (
     <div className="flex flex-wrap items-center gap-2">
       {year && <span className="metadata-badge">{year}</span>}
-      {contentRating && <span className="metadata-badge">{contentRating}</span>}
+      {contentRating && (
+        <span
+          className="metadata-badge"
+          title={
+            certification?.equivalent
+              ? `Based on ${certification.source_country} ${certification.source_rating}; local certification unavailable`
+              : undefined
+          }
+        >
+          {certification
+            ? `${certification.rating}${certification.equivalent ? " equivalent" : ""}`
+            : contentRating}
+        </span>
+      )}
       {duration && <span className="metadata-badge">{duration}</span>}
       {seasonCount != null && (
         <span className="metadata-badge">

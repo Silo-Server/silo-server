@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"github.com/Silo-Server/silo-server/internal/certification"
 	"strings"
 	"time"
 )
@@ -20,6 +21,7 @@ type MediaFolder struct {
 	Type                     string   // movies, series, mixed
 	Name                     string
 	Enabled                  bool
+	CertificationCountry     string
 	MetadataLanguage         string // ISO 639-1 code (e.g. "en", "ja")
 	AutoTranslateMetadata    bool   // AI-translate descriptions when providers lack this language
 	ChapterThumbnailsEnabled bool
@@ -573,8 +575,9 @@ type AudiobookSeriesMembership struct {
 
 // MediaItem represents a row in the media_items table.
 type MediaItem struct {
-	ContentID               string // Sonyflake ID (PK)
-	Type                    string // movie, series
+	Certification           *certification.Certification // transient library presentation; never written to base metadata
+	ContentID               string                       // Sonyflake ID (PK)
+	Type                    string                       // movie, series
 	Title                   string
 	SortTitle               string
 	DefaultMetadataLanguage string

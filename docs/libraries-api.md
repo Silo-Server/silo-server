@@ -96,3 +96,52 @@ behalf of an arbitrary user.
 
 Existing web, Apple and Android library callers keep the same response and access
 rules. The new API-key scope requires no changes to those clients or Jellyfin.
+
+## Certification country (fork test)
+
+The v2 library create and update bodies accept `certification_country`: `US`
+(default) or `AU`. Administrator and user library responses report this value.
+`GET /api/v2/user/libraries/capabilities` exposes `certification_countries` for
+feature detection. Metadata language remains independent of certification country.
+Changing country queues a full metadata refresh; until it completes, existing
+recognised US metadata supplies the fallback. Provider failures fail the refresh
+job and preserve the previous certification snapshot.
+
+Australian libraries prefer actual Australian TMDB certifications. The server's
+existing TMDB certification client fetches country data during metadata refresh,
+without requiring a new plugin binary. This test supports TMDB country data and
+explicit country-prefixed NFO/manual values; providers returning only an
+unqualified rating cannot supply an Australian certification. Locked ratings win.
+Country snapshots are bound to the item's TMDB identity and cannot follow a
+reidentified title. Shared items retain one snapshot with country-specific values,
+not whichever library happened to refresh last.
+
+For missing AU certifications the access-control equivalents are:
+
+| US source | Australian equivalent |
+| --- | --- |
+| G, TV-G, TV-Y | G |
+| PG, TV-PG, TV-Y7, TV-Y7-FV | PG |
+| PG-13, TV-14 | M |
+| R, NC-17, TV-MA | R18+ |
+
+These are conservative Silo estimates, not official classifications. Unknown and
+unrated values remain unknown and are denied under a rating ceiling. AU M and
+MA15+ are distinct levels. X18+ is above R18+ and is not inferred from US ratings.
+
+V2 catalogue responses may include `certification` with `country`, `rating`,
+`source_country`, `source_rating` and `equivalent`. `content_rating` remains the
+machine-readable token (for example `AU-M`). Clients should label equivalents
+and retain their source, as the web item-detail badge does. The profile editor
+includes the schemes of available libraries and always retains its saved limit.
+Existing US ceilings keep their previous US-to-US comparisons.
+
+A library-scoped detail displays that library's certification. Unscoped details
+and access checks use the strictest result across the viewer's accessible enabled
+libraries. A presentation-library query cannot loosen a rating restriction.
+Lists, search, recommendations and direct item access share the resolver; episodes
+inherit their series rating. Jellyfin uses the same server-side access checks.
+Apple and Android continue to receive rating strings and server-enforced limits;
+their native configuration and equivalent-rating presentation require client
+follow-up before this fork feature is proposed upstream. The web interface is
+the configuration and testing surface for this version.

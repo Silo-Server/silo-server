@@ -76,6 +76,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 
 	// Built-in metadata providers self-register into the metadata package's
@@ -1895,6 +1896,9 @@ func main() {
 			personRepo,
 			deps.FileRepo, skippedRootRepo, staleIDRepo, rootClaimRepo,
 		)
+		certificationClient := tmdb.NewClient(cfg.TMDBAPIKey, 10)
+		defer certificationClient.Close()
+		metadataService.SetCertificationProvider(certificationClient)
 		// Drop the resolved-chain cache whenever a plugin is installed, enabled,
 		// disabled, updated, or uninstalled. The installation-enabled check is
 		// served from the plugins service's in-memory cache (invalidated on the

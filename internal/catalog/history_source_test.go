@@ -26,7 +26,7 @@ func TestBuildHistoryDisplayBaseQueryIncludesSnapshotAndLibraryAccess(t *testing
 		"media_folder_id = ANY($4)",
 		"media_item_libraries mil_disabled",
 		"media_folder_id = ANY($5)",
-		"mi.content_rating = ANY($",
+		"mi.content_rating) = ANY($",
 		// Anchored episode ids resolve their show by string transform; the
 		// episodes probe is null-poisoned (skipped) for them and kept only for
 		// non-anchored (legacy/local/malformed) ids. The predicate requires the

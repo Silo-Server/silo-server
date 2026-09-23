@@ -176,14 +176,14 @@ func TestItemRepo_GetByIDsWithAccess_AllowedListSkipsRedundantMembershipCheck(t 
 }
 
 // TestItemRepo_GetByIDsWithAccess_MaxContentRatingProducesINClause pins the
-// rating-ladder branch: a content_rating = ANY(...) clause with the bound
+// rating-ladder branch: a content_rating) = ANY(...) clause with the bound
 // rating slice as a single arg.
 func TestItemRepo_GetByIDsWithAccess_MaxContentRatingProducesINClause(t *testing.T) {
 	repo := &ItemRepository{}
 	sql, args := repo.buildGetByIDsWithAccessSQL([]string{"a"}, AccessFilter{
 		MaxContentRating: "PG-13",
 	})
-	if !strings.Contains(sql, "content_rating = ANY($") {
+	if !strings.Contains(sql, "content_rating) = ANY($") {
 		t.Fatalf("expected content_rating = ANY clause; got %s", sql)
 	}
 	if len(args) != 2 {
@@ -209,7 +209,7 @@ func TestItemRepo_GetByIDsWithAccess_CombinedClausesIndexCorrectly(t *testing.T)
 	if !strings.Contains(sql, "media_folder_id = ANY($3)") {
 		t.Fatalf("expected DisabledLibraryIDs at $3; got %s", sql)
 	}
-	if !strings.Contains(sql, "content_rating = ANY($4)") {
+	if !strings.Contains(sql, "content_rating) = ANY($4)") {
 		t.Fatalf("expected content_rating = ANY at $4; got %s", sql)
 	}
 	// All four slots are now array-bound: ids, allowed, disabled, ratings.

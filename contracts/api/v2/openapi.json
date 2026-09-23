@@ -16742,6 +16742,9 @@
             },
             "type": "array"
           },
+          "certification": {
+            "$ref": "#/components/schemas/Certification"
+          },
           "content_id": {
             "description": "Deterministic catalog identifier",
             "examples": [
@@ -17017,6 +17020,9 @@
               "$ref": "#/components/schemas/CastCredit"
             },
             "type": "array"
+          },
+          "certification": {
+            "$ref": "#/components/schemas/Certification"
           },
           "content_id": {
             "description": "Deterministic catalog identifier",
@@ -17924,6 +17930,34 @@
           "category",
           "label",
           "templates"
+        ],
+        "type": "object"
+      },
+      "Certification": {
+        "additionalProperties": false,
+        "properties": {
+          "country": {
+            "type": "string"
+          },
+          "equivalent": {
+            "type": "boolean"
+          },
+          "rating": {
+            "type": "string"
+          },
+          "source_country": {
+            "type": "string"
+          },
+          "source_rating": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "country",
+          "rating",
+          "source_country",
+          "source_rating",
+          "equivalent"
         ],
         "type": "object"
       },
@@ -23720,6 +23754,9 @@
             },
             "type": "array"
           },
+          "certification": {
+            "$ref": "#/components/schemas/Certification"
+          },
           "content_id": {
             "description": "Deterministic catalog identifier",
             "examples": [
@@ -25048,6 +25085,13 @@
             ],
             "type": "boolean"
           },
+          "certification_country": {
+            "description": "Certification scheme: US or AU",
+            "examples": [
+              "AU"
+            ],
+            "type": "string"
+          },
           "chapter_thumbnails_enabled": {
             "examples": [
               false
@@ -25359,6 +25403,13 @@
       "LibraryCreate": {
         "additionalProperties": false,
         "properties": {
+          "certification_country": {
+            "description": "Certification scheme; default US",
+            "examples": [
+              "AU"
+            ],
+            "type": "string"
+          },
           "chapter_thumbnails_enabled": {
             "description": "Requires public asset storage",
             "examples": [
@@ -26023,6 +26074,13 @@
               false
             ],
             "type": "boolean"
+          },
+          "certification_country": {
+            "description": "A change queues a metadata refresh",
+            "examples": [
+              "AU"
+            ],
+            "type": "string"
           },
           "chapter_thumbnails_enabled": {
             "examples": [
@@ -39201,6 +39259,9 @@
       "UserLibrary": {
         "additionalProperties": false,
         "properties": {
+          "certification_country": {
+            "type": "string"
+          },
           "id": {
             "description": "Opaque identifier",
             "examples": [
@@ -39241,6 +39302,12 @@
           "available": {
             "type": "boolean"
           },
+          "certification_countries": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -39257,6 +39324,7 @@
           }
         },
         "required": [
+          "certification_countries",
           "available",
           "revision",
           "state",
@@ -41645,6 +41713,9 @@
             },
             "type": "array"
           },
+          "certification": {
+            "$ref": "#/components/schemas/Certification"
+          },
           "content_id": {
             "description": "Deterministic catalog identifier",
             "examples": [
@@ -41959,6 +42030,9 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "certification": {
+            "$ref": "#/components/schemas/Certification"
           },
           "content_id": {
             "description": "Deterministic catalog identifier",

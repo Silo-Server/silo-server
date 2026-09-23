@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/Silo-Server/silo-server/internal/certification"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -342,42 +343,43 @@ type upcomingEventResponse struct {
 }
 
 type sectionItemResponse struct {
-	ContentID         string                 `json:"content_id"`
-	PlayContentID     string                 `json:"play_content_id,omitempty"`
-	Type              string                 `json:"type"`
-	Title             string                 `json:"title"`
-	SeriesID          string                 `json:"series_id,omitempty"`
-	SeriesTitle       string                 `json:"series_title,omitempty"`
-	SeasonNumber      *int                   `json:"season_number,omitempty"`
-	EpisodeNumber     *int                   `json:"episode_number,omitempty"`
-	Year              int                    `json:"year,omitempty"`
-	Runtime           int                    `json:"runtime,omitempty"`
-	Genres            []string               `json:"genres"`
-	Keywords          []string               `json:"keywords"`
-	Studios           []string               `json:"studios,omitempty"`
-	Networks          []string               `json:"networks,omitempty"`
-	ContentRating     string                 `json:"content_rating,omitempty"`
-	Status            string                 `json:"status"`
-	ShowStatus        string                 `json:"show_status,omitempty"`
-	RatingIMDB        *float64               `json:"rating_imdb,omitempty"`
-	RatingTMDB        *float64               `json:"rating_tmdb,omitempty"`
-	RatingRTCritic    *int                   `json:"rating_rt_critic,omitempty"`
-	RatingRTAudience  *int                   `json:"rating_rt_audience,omitempty"`
-	OriginalLanguage  string                 `json:"original_language,omitempty"`
-	Overview          string                 `json:"overview,omitempty"`
-	PositionSeconds   *float64               `json:"position_seconds,omitempty"`
-	DurationSeconds   *float64               `json:"duration_seconds,omitempty"`
-	ProgressUpdatedAt *string                `json:"progress_updated_at,omitempty"`
-	PosterURL         string                 `json:"poster_url,omitempty"`
-	PosterThumbhash   string                 `json:"poster_thumbhash,omitempty"`
-	BackdropURL       string                 `json:"backdrop_url,omitempty"`
-	BackdropThumbhash string                 `json:"backdrop_thumbhash,omitempty"`
-	LogoURL           string                 `json:"logo_url,omitempty"`
-	OverlaySummary    *models.OverlaySummary `json:"overlay_summary,omitempty"`
-	Badges            []string               `json:"badges,omitempty"`
-	ItemSource        string                 `json:"item_source,omitempty"`
-	UserState         *itemUserStateResponse `json:"user_state,omitempty"`
-	UpcomingEvent     *upcomingEventResponse `json:"upcoming_event,omitempty"`
+	ContentID         string                       `json:"content_id"`
+	PlayContentID     string                       `json:"play_content_id,omitempty"`
+	Type              string                       `json:"type"`
+	Title             string                       `json:"title"`
+	SeriesID          string                       `json:"series_id,omitempty"`
+	SeriesTitle       string                       `json:"series_title,omitempty"`
+	SeasonNumber      *int                         `json:"season_number,omitempty"`
+	EpisodeNumber     *int                         `json:"episode_number,omitempty"`
+	Year              int                          `json:"year,omitempty"`
+	Runtime           int                          `json:"runtime,omitempty"`
+	Genres            []string                     `json:"genres"`
+	Keywords          []string                     `json:"keywords"`
+	Studios           []string                     `json:"studios,omitempty"`
+	Networks          []string                     `json:"networks,omitempty"`
+	ContentRating     string                       `json:"content_rating,omitempty"`
+	Certification     *certification.Certification `json:"-"`
+	Status            string                       `json:"status"`
+	ShowStatus        string                       `json:"show_status,omitempty"`
+	RatingIMDB        *float64                     `json:"rating_imdb,omitempty"`
+	RatingTMDB        *float64                     `json:"rating_tmdb,omitempty"`
+	RatingRTCritic    *int                         `json:"rating_rt_critic,omitempty"`
+	RatingRTAudience  *int                         `json:"rating_rt_audience,omitempty"`
+	OriginalLanguage  string                       `json:"original_language,omitempty"`
+	Overview          string                       `json:"overview,omitempty"`
+	PositionSeconds   *float64                     `json:"position_seconds,omitempty"`
+	DurationSeconds   *float64                     `json:"duration_seconds,omitempty"`
+	ProgressUpdatedAt *string                      `json:"progress_updated_at,omitempty"`
+	PosterURL         string                       `json:"poster_url,omitempty"`
+	PosterThumbhash   string                       `json:"poster_thumbhash,omitempty"`
+	BackdropURL       string                       `json:"backdrop_url,omitempty"`
+	BackdropThumbhash string                       `json:"backdrop_thumbhash,omitempty"`
+	LogoURL           string                       `json:"logo_url,omitempty"`
+	OverlaySummary    *models.OverlaySummary       `json:"overlay_summary,omitempty"`
+	Badges            []string                     `json:"badges,omitempty"`
+	ItemSource        string                       `json:"item_source,omitempty"`
+	UserState         *itemUserStateResponse       `json:"user_state,omitempty"`
+	UpcomingEvent     *upcomingEventResponse       `json:"upcoming_event,omitempty"`
 }
 
 type resolvedSectionResponse struct {
@@ -1331,6 +1333,7 @@ func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections
 	var imageURLs map[sectionItemImageKey]sectionItemImageURLs
 	var episodeMeta map[string]sections.SectionItemMeta
 	var mangaChapterMeta map[string]sections.SectionItemMeta
+	ratedItems := make(map[string]*models.MediaItem)
 
 	var wg sync.WaitGroup
 
@@ -1379,6 +1382,23 @@ func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections
 		playTargets = resolvedTargets
 	})
 
+	wg.Go(func() {
+		if h.DetailSvc == nil {
+			return
+		}
+		filter := viewerAccess
+		filter.PresentationLibraryID = libraryID
+		rated, err := h.DetailSvc.ResolveItemCertifications(ctx, allItems, filter)
+		if err != nil {
+			slog.WarnContext(ctx, "loading section certifications", "error", err)
+			return
+		}
+		for _, item := range rated {
+			if item != nil {
+				ratedItems[item.ContentID] = item
+			}
+		}
+	})
 	wg.Go(func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
 	wg.Go(func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, size) })
 	wg.Go(func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
@@ -1392,6 +1412,9 @@ func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections
 	for _, s := range withItems {
 		items := make([]sectionItemResponse, 0, len(s.Items))
 		for _, item := range s.Items {
+			if rated := ratedItems[item.ContentID]; rated != nil {
+				item = rated
+			}
 			var meta *sections.SectionItemMeta
 			if s.ItemMeta != nil {
 				if value, ok := s.ItemMeta[item.ContentID]; ok {
@@ -1640,6 +1663,7 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		Studios:           item.Studios,
 		Networks:          item.Networks,
 		ContentRating:     item.ContentRating,
+		Certification:     item.Certification,
 		Status:            item.Status,
 		ShowStatus:        item.ShowStatus,
 		RatingIMDB:        item.RatingIMDB,

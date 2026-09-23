@@ -2641,6 +2641,7 @@ func (h *LibraryCollectionHandler) itemListResponseOf(ctx context.Context, item 
 		Year:              item.Year,
 		Genres:            item.Genres,
 		ContentRating:     item.ContentRating,
+		Certification:     item.Certification,
 		Status:            item.Status,
 		RatingIMDB:        item.RatingIMDB,
 		Overview:          item.Overview,

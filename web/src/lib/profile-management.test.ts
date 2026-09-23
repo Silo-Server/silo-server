@@ -4,6 +4,7 @@ import type { Profile } from "@/api/types";
 import { avatarPresetRef } from "@/lib/profile-avatars";
 import {
   applyKidsPreset,
+  contentRatingOptionsForLibraries,
   buildProfileAccessSummary,
   buildProfileUpdateFromDraft,
   clearKidsPreset,
@@ -152,5 +153,38 @@ describe("profile-management", () => {
       max_playback_quality: "1080p",
       allowed_library_ids: ["1", "3"],
     });
+  });
+});
+
+describe("Australian parental controls", () => {
+  it("offers the library scheme and preserves an existing US ceiling", () => {
+    const options = contentRatingOptionsForLibraries([{ certification_country: "AU" }], "PG-13");
+    expect(options.map((option) => option.value)).toEqual([
+      "",
+      "PG-13",
+      "AU-G",
+      "AU-PG",
+      "AU-M",
+      "AU-MA15+",
+      "AU-R18+",
+      "AU-X18+",
+    ]);
+  });
+  it("uses Australian labels for the kids preset", () => {
+    expect(
+      applyKidsPreset(createProfileDraft(), {
+        contentRatingTouched: false,
+        libraryAccessTouched: false,
+        certificationCountry: "AU",
+      }).maxContentRating,
+    ).toBe("AU-PG");
+  });
+  it("retains both schemes for mixed libraries", () => {
+    const values = contentRatingOptionsForLibraries(
+      [{ certification_country: "AU" }, { certification_country: "US" }],
+      "",
+    ).map((option) => option.value);
+    expect(values).toContain("PG-13");
+    expect(values).toContain("AU-MA15+");
   });
 });

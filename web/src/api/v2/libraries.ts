@@ -40,6 +40,7 @@ export function libraryFromV2(library: LibraryV2): Library {
     name: library.name,
     enabled: library.enabled,
     metadata_language: library.metadata_language,
+    certification_country: library.certification_country as "US" | "AU" | undefined,
     auto_translate_metadata: library.auto_translate_metadata,
     chapter_thumbnails_enabled: library.chapter_thumbnails_enabled,
     chapter_thumbnails_supported: library.chapter_thumbnails_supported,
@@ -64,6 +65,9 @@ export function libraryCreateToV2(body: CreateLibraryRequest): V2Body<"POST /api
     paths: body.paths,
     type: body.type,
     name: body.name,
+    ...(body.certification_country === undefined
+      ? {}
+      : { certification_country: body.certification_country }),
     ...(body.metadata_language === undefined ? {} : { metadata_language: body.metadata_language }),
     ...(body.chapter_thumbnails_enabled === undefined
       ? {}

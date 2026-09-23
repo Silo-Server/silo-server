@@ -741,3 +741,16 @@ func TestDiagnosticsSearchAndSkippedPagination(t *testing.T) {
 	decodeJSON(t, rec.Body, &page)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids?q=Lost&cursor="+page.Page.NextCursor, "", bearer(adminToken)), TypeInvalidCursor)
 }
+
+func TestLibraryCertificationCountryContract(t *testing.T) {
+	deps, fake := libraryDeps(t)
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodPost, "/api/v2/libraries", `{"paths":["/media/tv"],"type":"series","name":"TV","certification_country":"AU"}`, bearer(adminToken))
+	if rec.Code != 201 || fake.lastCreate.CertificationCountry != "AU" {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodPatch, "/api/v2/libraries/1", `{"certification_country":"US"}`, bearer(adminToken))
+	if rec.Code != 200 || fake.lastUpdate.CertificationCountry == nil || *fake.lastUpdate.CertificationCountry != "US" {
+		t.Fatalf("update: %d %s", rec.Code, rec.Body.String())
+	}
+}

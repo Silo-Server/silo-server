@@ -1,6 +1,7 @@
 package apiv2
 
 import (
+	"github.com/Silo-Server/silo-server/internal/certification"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -15,6 +16,7 @@ import (
 
 // CatalogItem is a media item as a browsing card shows it.
 type CatalogItem struct {
+	Certification     *Certification            `json:"certification,omitempty"`
 	ContentID         string                    `json:"content_id" doc:"Deterministic catalog identifier" example:"movie:heat-1995"`
 	PlayContentID     string                    `json:"play_content_id,omitempty" doc:"The item to play when the card is a series or season; absent when the item plays itself"`
 	Type              string                    `json:"type" doc:"movie, series, season, episode, audiobook, ebook, podcast, podcast_episode" example:"movie"`
@@ -151,7 +153,7 @@ func catalogItemOfSection(v handlers.SectionItemView) CatalogItem {
 		ContentID: v.ContentID, PlayContentID: v.PlayContentID, Type: v.Type, Title: v.Title,
 		SeriesID: v.SeriesID, SeriesTitle: v.SeriesTitle, SeasonNumber: v.SeasonNumber, EpisodeNumber: v.EpisodeNumber,
 		Year: v.Year, Runtime: v.Runtime, Genres: NonNil(v.Genres), Keywords: NonNil(v.Keywords), Studios: v.Studios, Networks: v.Networks,
-		ContentRating: v.ContentRating, Status: v.Status, ShowStatus: v.ShowStatus,
+		ContentRating: v.ContentRating, Certification: certificationOf(v.Certification), Status: v.Status, ShowStatus: v.ShowStatus,
 		RatingIMDB: v.RatingIMDB, RatingTMDB: v.RatingTMDB, RatingRTCritic: v.RatingRTCritic, RatingRTAudience: v.RatingRTAudience,
 		OriginalLanguage: v.OriginalLanguage, Overview: v.Overview,
 		PositionSeconds: v.PositionSeconds, DurationSeconds: v.DurationSeconds, ProgressUpdatedAt: instantOfRFC3339(v.ProgressUpdatedAt),
@@ -171,7 +173,7 @@ func catalogItemOfListing(v handlers.CollectionItemView) CatalogItem {
 		ContentID: v.ContentID, PlayContentID: v.PlayContentID, Type: v.Type, Title: v.Title,
 		SeriesID: v.SeriesID, SeriesTitle: v.SeriesTitle, SeasonNumber: v.SeasonNumber, EpisodeNumber: v.EpisodeNumber,
 		Year: v.Year, Runtime: v.Runtime, Genres: NonNil(v.Genres), Keywords: NonNil(v.Keywords), Studios: v.Studios, Networks: v.Networks,
-		ContentRating: v.ContentRating, Status: v.Status, ShowStatus: v.ShowStatus,
+		ContentRating: v.ContentRating, Certification: certificationOf(v.Certification), Status: v.Status, ShowStatus: v.ShowStatus,
 		RatingIMDB: v.RatingIMDB, RatingTMDB: v.RatingTMDB, RatingRTCritic: v.RatingRTCritic, RatingRTAudience: v.RatingRTAudience,
 		OriginalLanguage: v.OriginalLanguage, Overview: v.Overview, ReleaseDate: v.ReleaseDate, LastAirDate: v.LastAirDate, AddedAt: instantPtr(v.AddedAt),
 		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, BackdropURL: v.BackdropURL, BackdropThumbhash: v.BackdropThumbhash,
@@ -191,4 +193,21 @@ func catalogItemOfListing(v handlers.CollectionItemView) CatalogItem {
 		item.WorkFormats = append(item.WorkFormats, wf)
 	}
 	return item
+}
+
+// Certification identifies the official source or estimated fallback displayed
+// by a library. The token in content_rating remains the parental-control value.
+type Certification struct {
+	Country       string `json:"country"`
+	Rating        string `json:"rating"`
+	SourceCountry string `json:"source_country"`
+	SourceRating  string `json:"source_rating"`
+	Equivalent    bool   `json:"equivalent"`
+}
+
+func certificationOf(value *certification.Certification) *Certification {
+	if value == nil {
+		return nil
+	}
+	return &Certification{Country: value.Country, Rating: value.Rating, SourceCountry: value.SourceCountry, SourceRating: value.SourceRating, Equivalent: value.Equivalent}
 }

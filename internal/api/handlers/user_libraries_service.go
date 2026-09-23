@@ -11,11 +11,12 @@ import (
 
 // UserLibraryView is a simplified library view for non-admin users.
 type UserLibraryView struct {
-	ID        int    `json:"id"`
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	SortOrder int    `json:"sort_order"`
-	PosterURL string `json:"poster_url,omitempty"`
+	CertificationCountry string `json:"-"`
+	ID                   int    `json:"id"`
+	Name                 string `json:"name"`
+	Type                 string `json:"type"`
+	SortOrder            int    `json:"sort_order"`
+	PosterURL            string `json:"poster_url,omitempty"`
 }
 
 // ListUserLibraries uses the resolved viewer scope, or the account policy when
@@ -60,10 +61,11 @@ func (h *LibraryHandler) ListUserLibraries(ctx context.Context, userID int) ([]U
 	resp := make([]UserLibraryView, 0, len(folders))
 	for _, f := range folders {
 		entry := UserLibraryView{
-			ID:        f.ID,
-			Name:      f.Name,
-			Type:      f.Type,
-			SortOrder: f.SortOrder,
+			ID:                   f.ID,
+			CertificationCountry: f.CertificationCountry,
+			Name:                 f.Name,
+			Type:                 f.Type,
+			SortOrder:            f.SortOrder,
 		}
 		if f.PosterPath != "" && h.ArtworkResolver != nil {
 			entry.PosterURL = h.ArtworkResolver.ResolveURLs(ctx, []string{f.PosterPath})[f.PosterPath].URL

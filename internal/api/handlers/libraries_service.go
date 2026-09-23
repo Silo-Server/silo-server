@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/certification"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
@@ -93,6 +94,10 @@ func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateReq
 		return LibraryView{}, err
 	}
 	req.Paths = paths
+	req.CertificationCountry = certification.CertificationCountry(req.CertificationCountry)
+	if !certification.SupportedCertificationCountry(req.CertificationCountry) {
+		return LibraryView{}, fieldError("certification_country", "Supported certification countries are AU and US")
+	}
 	if req.MetadataLanguage != "" && !validMetadataLanguages[req.MetadataLanguage] {
 		return LibraryView{}, fieldError("metadata_language", "Invalid metadata_language; must be a valid ISO 639-1 code")
 	}
@@ -104,6 +109,7 @@ func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateReq
 		Paths:                    req.Paths,
 		Type:                     req.Type,
 		Name:                     req.Name,
+		CertificationCountry:     req.CertificationCountry,
 		MetadataLanguage:         req.MetadataLanguage,
 		ChapterThumbnailsEnabled: req.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    req.IntroDetectionEnabled,
@@ -171,6 +177,13 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		}
 		req.Paths = &paths
 	}
+	if req.CertificationCountry != nil {
+		country := certification.CertificationCountry(*req.CertificationCountry)
+		if !certification.SupportedCertificationCountry(country) {
+			return LibraryView{}, fieldError("certification_country", "Supported certification countries are AU and US")
+		}
+		req.CertificationCountry = &country
+	}
 	if req.MetadataLanguage != nil && *req.MetadataLanguage != "" && !validMetadataLanguages[*req.MetadataLanguage] {
 		return LibraryView{}, fieldError("metadata_language", "Invalid metadata_language; must be a valid ISO 639-1 code")
 	}
@@ -193,6 +206,7 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		Type:                     req.Type,
 		Name:                     req.Name,
 		Enabled:                  req.Enabled,
+		CertificationCountry:     req.CertificationCountry,
 		MetadataLanguage:         req.MetadataLanguage,
 		AutoTranslateMetadata:    req.AutoTranslateMetadata,
 		ChapterThumbnailsEnabled: req.ChapterThumbnailsEnabled,
@@ -231,16 +245,21 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 	if languageChanged {
 		h.wakeMetadataMatcher(ctx, folder.ID)
 	}
-	if h.JobRepo != nil && languageChanged {
+	countryChanged := oldFolder.CertificationCountry != folder.CertificationCountry
+	if h.JobRepo != nil && (languageChanged || countryChanged) {
+		refreshMode := adminjob.LibraryRefreshModeQuick
+		if countryChanged {
+			refreshMode = adminjob.LibraryRefreshModeFull
+		}
 		job, jobErr := h.JobRepo.CreateLibraryRefresh(ctx, userID, adminjob.LibraryRefreshRequest{
 			LibraryID:   folder.ID,
 			LibraryName: folder.Name,
-			Mode:        adminjob.LibraryRefreshModeQuick,
-		}, "Queued metadata refresh after library language change")
+			Mode:        refreshMode,
+		}, "Queued metadata refresh after library metadata preferences changed")
 		if jobErr != nil {
 			var conflict *adminjob.ActiveJobConflictError
 			if !errors.As(jobErr, &conflict) {
-				slog.WarnContext(ctx, "queue language-change metadata refresh failed", "component", "api", "library_id", folder.ID, "error", jobErr)
+				slog.WarnContext(ctx, "queue library metadata refresh failed", "component", "api", "library_id", folder.ID, "error", jobErr)
 			}
 		} else {
 			publishEventJob(ctx, h.EventsHub, "job.created", job)
