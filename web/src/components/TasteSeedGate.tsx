@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Navigate } from "react-router";
 import { useAuth } from "@/hooks/useAuth";
-import { useFavorites } from "@/hooks/queries/favorites";
+import { useHasFavorites } from "@/hooks/queries/favorites";
 import { useOnboardingState } from "@/hooks/queries/onboarding";
 import { isTasteSeedDismissed } from "@/lib/tasteSeed";
 
@@ -14,7 +14,7 @@ import { isTasteSeedDismissed } from "@/lib/tasteSeed";
  */
 export default function TasteSeedGate({ children }: { children: ReactNode }) {
   const { profile } = useAuth();
-  const { data: favorites, isPending, isError } = useFavorites();
+  const { data: hasFavorites, isPending, isError } = useHasFavorites();
   const onboarding = useOnboardingState({ enabled: profile !== null });
 
   if (isPending || isError || !profile) return <>{children}</>;
@@ -24,7 +24,6 @@ export default function TasteSeedGate({ children }: { children: ReactNode }) {
   // redirecting now would jump the queue.
   if (onboarding.data === undefined || !onboarding.data.done) return <>{children}</>;
 
-  const hasFavorites = (favorites?.length ?? 0) > 0;
   const dismissed = isTasteSeedDismissed(profile.id);
 
   if (!hasFavorites && !dismissed) {
