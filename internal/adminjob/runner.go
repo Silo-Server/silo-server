@@ -354,6 +354,10 @@ func (r *Runner) executeLibraryRefresh(job *models.AdminJob) {
 		r.failJob(job.ID, 0, 0, "Library metadata refresh failed", err.Error())
 		return
 	}
+	// A later claim recovers a job from a worker that stopped heartbeating.
+	// That worker may still hold the library lock, so wait for it to let go
+	// rather than failing the job against its own earlier attempt.
+	req.waitForLibraryLock = job.ClaimGeneration > 1
 
 	ctx, cancel := context.WithTimeout(r.executionContext(), LibraryRefreshTimeout)
 	defer cancel()

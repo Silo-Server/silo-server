@@ -37,6 +37,11 @@ type LibraryRefreshRequest struct {
 	LibraryID   int                `json:"library_id"`
 	LibraryName string             `json:"library_name"`
 	Mode        LibraryRefreshMode `json:"mode,omitempty"`
+
+	// waitForLibraryLock makes Execute wait for the per-library lock instead of
+	// returning ErrLibraryRefreshInProgress. The runner sets it for a recovered
+	// job, whose earlier attempt may still hold the lock.
+	waitForLibraryLock bool
 }
 
 type LibraryRefreshResult struct {
@@ -197,7 +202,12 @@ type LibraryRefreshExecutor struct {
 	unmatchedDelay time.Duration
 	wait           func(ctx context.Context, delay time.Duration) error
 	lockPool       *pgxpool.Pool
+	// lockRetryInterval spaces lock attempts while a recovered job waits;
+	// zero means defaultLibraryLockRetryInterval.
+	lockRetryInterval time.Duration
 }
+
+const defaultLibraryLockRetryInterval = 5 * time.Second
 
 // ErrLibraryRefreshInProgress reports that another refresh of the same
 // library holds its lock, on this server or another one.
@@ -258,12 +268,9 @@ func (e *LibraryRefreshExecutor) Execute(
 		return nil, err
 	}
 	if e.lockPool != nil {
-		lock, acquired, err := pglock.TryAcquire(ctx, e.lockPool, libraryRefreshLockKey(req.LibraryID))
+		lock, err := e.lockLibrary(ctx, req, progress)
 		if err != nil {
-			return nil, fmt.Errorf("lock library %d for refresh: %w", req.LibraryID, err)
-		}
-		if !acquired {
-			return nil, ErrLibraryRefreshInProgress
+			return nil, err
 		}
 		defer func() {
 			if err := lock.Release(ctx); err != nil {
@@ -512,6 +519,42 @@ func decodeLibraryRefreshRequest(data json.RawMessage) (LibraryRefreshRequest, e
 	}
 	req.Mode = normalizeLibraryRefreshMode(req.Mode)
 	return req, nil
+}
+
+// lockLibrary takes the library's refresh lock. When it is held, a request
+// without waitForLibraryLock gets ErrLibraryRefreshInProgress; a recovered job
+// retries until the holder lets go or ctx ends. The holder may be the job's own
+// earlier attempt, which keeps the lock until its worker sees the new claim or
+// PostgreSQL closes the session of a server that disappeared.
+func (e *LibraryRefreshExecutor) lockLibrary(
+	ctx context.Context,
+	req LibraryRefreshRequest,
+	progress func(current, total int, message string),
+) (*pglock.Lock, error) {
+	interval := e.lockRetryInterval
+	if interval <= 0 {
+		interval = defaultLibraryLockRetryInterval
+	}
+	announced := false
+	for {
+		lock, acquired, err := pglock.TryAcquire(ctx, e.lockPool, libraryRefreshLockKey(req.LibraryID))
+		if err != nil {
+			return nil, fmt.Errorf("lock library %d for refresh: %w", req.LibraryID, err)
+		}
+		if acquired {
+			return lock, nil
+		}
+		if !req.waitForLibraryLock {
+			return nil, ErrLibraryRefreshInProgress
+		}
+		if !announced && progress != nil {
+			progress(0, 0, "Waiting for an earlier refresh of this library to stop")
+			announced = true
+		}
+		if err := waitWithContext(ctx, interval); err != nil {
+			return nil, err
+		}
+	}
 }
 
 func normalizeLibraryRefreshMode(mode LibraryRefreshMode) LibraryRefreshMode {

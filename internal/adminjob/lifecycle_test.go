@@ -310,3 +310,44 @@ func TestJobOrdinaryCompletionAfterClaim(t *testing.T) {
 		})
 	}
 }
+
+type recordingRefresh struct{ reqs chan LibraryRefreshRequest }
+
+func (e recordingRefresh) Execute(_ context.Context, req LibraryRefreshRequest, _ func(int, int, string)) (*LibraryRefreshResult, error) {
+	e.reqs <- req
+	return &LibraryRefreshResult{LibraryID: req.LibraryID}, nil
+}
+
+func TestOnlyARecoveredLibraryRefreshWaitsForTheLibraryLock(t *testing.T) {
+	r := lifecycleRepo(t)
+	executor := recordingRefresh{reqs: make(chan LibraryRefreshRequest, 1)}
+	worker := NewRunner(NewRepository(r.pool), nil, nil, nil, executor, nil, nil, nil, nil)
+	executed := func() LibraryRefreshRequest {
+		t.Helper()
+		worker.runNext()
+		select {
+		case req := <-executor.reqs:
+			return req
+		default:
+			t.Fatal("runner did not execute the library refresh")
+			return LibraryRefreshRequest{}
+		}
+	}
+
+	lifecycleJob(t, r, JobTypeLibraryRefresh)
+	if executed().waitForLibraryLock {
+		t.Fatal("a first claim waits for the library lock; want it to fail fast on a held lock")
+	}
+
+	recovered := lifecycleJob(t, r, JobTypeLibraryRefresh)
+	abandoned, err := r.ClaimNextQueued(t.Context(), JobTypeLibraryRefresh)
+	if err != nil || abandoned == nil || abandoned.ID != recovered.ID {
+		t.Fatalf("claim job before recovery: job=%+v err=%v", abandoned, err)
+	}
+	if _, err := r.RequeueStaleRunning(t.Context(), time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if !executed().waitForLibraryLock {
+		t.Fatal("a recovered claim fails fast on the library lock its earlier attempt may still hold")
+	}
+}

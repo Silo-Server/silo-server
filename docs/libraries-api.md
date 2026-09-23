@@ -47,7 +47,11 @@ refresh, or with incomplete episodes. `full` refreshes every matched item and re
 items that have no provider IDs.
 A refresh holds a per-library PostgreSQL advisory lock, shared with the
 `refresh_all_library_metadata` task; a job that starts while another refresh of the
-same library holds it fails rather than refreshing the library twice.
+same library holds it fails rather than refreshing the library twice. A job recovered
+after its worker stopped heartbeating waits for the lock instead: its earlier attempt may
+still hold it until that worker notices the recovery, or until PostgreSQL closes the
+session of a server that disappeared. The wait counts toward the job's six-hour limit
+and can be cancelled.
 
 The job contains `id`, `kind`, `state`, `terminal`, `cancelable`, `created_at`, optional
 `started_at` and `finished_at`, and optional progress measured in items for metadata
