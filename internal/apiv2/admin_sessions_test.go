@@ -24,7 +24,7 @@ func (f *fakeAdminPlaybackSessions) ReadAdminPlaybackSessions(_ context.Context,
 	at := time.Date(2026, 1, 2, 3, 4, 5, 123456789, time.FixedZone("offset", 3600))
 	rows := []handlers.AdminPlaybackSessionView{
 		{SessionID: "b", UserID: 7, ProfileID: "child", MediaFileID: 42, RequestedMediaFileID: 41, StartedAt: at, UpdatedAt: at, RoutingExecutionNodeID: new(9), RoutingNetworkProvider: new("tailscale"), TargetAudioChannels: new(2), SourceAudioChannels: new(8), EffectivePlayMethod: "transcode", IsJellyfinClient: true, HasPlaybackControl: true},
-		{SessionID: "a", UserID: 7, ProfileID: "primary", MediaFileID: 44, RequestedMediaFileID: 44, StartedAt: at, UpdatedAt: at},
+		{SessionID: "a", UserID: 7, ProfileID: "primary", MediaFileID: 44, RequestedMediaFileID: 44, ClientIP: "192.168.1.8", StartedAt: at, UpdatedAt: at},
 	}
 	slices.SortFunc(rows, func(a, b handlers.AdminPlaybackSessionView) int { return cmp.Compare(a.SessionID, b.SessionID) })
 	out := []handlers.AdminPlaybackSessionView{}
@@ -72,7 +72,7 @@ func TestAdminPlaybackSessionReadProjection(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Code != 200 || len(page.Items) != 1 || page.Items[0].SessionID != "a" || page.Items[0].UserID != "7" || page.Items[0].ProfileID != "primary" || page.Page == nil || !page.Page.HasMore {
+	if rec.Code != 200 || len(page.Items) != 1 || page.Items[0].SessionID != "a" || page.Items[0].UserID != "7" || page.Items[0].ProfileID != "primary" || page.Items[0].StreamLocation != "local" || page.Page == nil || !page.Page.HasMore {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	cursor := url.QueryEscape(page.Page.NextCursor)
@@ -81,7 +81,7 @@ func TestAdminPlaybackSessionReadProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := page.Items[0]
-	if rec.Code != 200 || row.SessionID != "b" || row.RoutingNetworkProvider == nil || *row.RoutingNetworkProvider != "tailscale" || row.ProfileID != "child" || row.MediaFileID != "42" || row.RequestedMediaFileID != "41" || row.RoutingExecutionNodeID == nil || *row.RoutingExecutionNodeID != "9" || *row.TargetAudioChannels != 2 || *row.SourceAudioChannels != 8 || !row.IsJellyfinClient || !row.HasPlaybackControl || page.Page.HasMore {
+	if rec.Code != 200 || row.SessionID != "b" || row.RoutingNetworkProvider == nil || *row.RoutingNetworkProvider != "tailscale" || row.StreamLocation != "remote" || row.ProfileID != "child" || row.MediaFileID != "42" || row.RequestedMediaFileID != "41" || row.RoutingExecutionNodeID == nil || *row.RoutingExecutionNodeID != "9" || *row.TargetAudioChannels != 2 || *row.SourceAudioChannels != 8 || !row.IsJellyfinClient || !row.HasPlaybackControl || page.Page.HasMore {
 		t.Fatal(rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), `"started_at":"2026-01-02T02:04:05.123Z"`) {

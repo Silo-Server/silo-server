@@ -2502,6 +2502,8 @@ export interface AdminSession {
   is_paused: boolean;
   has_playback_control?: boolean;
   client_ip?: string;
+  /** Server classification used to select the local or remote stream bitrate policy. */
+  stream_location?: "local" | "remote";
   client_name?: string;
   client_version?: string;
   client_build?: string;

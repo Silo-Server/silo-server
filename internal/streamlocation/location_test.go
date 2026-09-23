@@ -27,6 +27,13 @@ func TestIsRemote(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			wantLocation := Local
+			if test.remote {
+				wantLocation = Remote
+			}
+			if got := FromMetadata(test.ip, test.provider); got != wantLocation {
+				t.Fatalf("FromMetadata() = %q, want %q", got, wantLocation)
+			}
 			ctx := clientip.SetContext(context.Background(), test.ip)
 			if test.provider != "" {
 				ctx = netaccess.WithPath(ctx, netaccess.Path{Provider: test.provider})

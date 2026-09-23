@@ -13,6 +13,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -627,25 +629,27 @@ func newSession(
 	// build a ClientInfo from their own header vocabularies.
 	clientInfo := ClientInfoFromContext(ctx).Normalized()
 	return &Session{
-		ID:                   uuid.New().String(),
-		UserID:               userID,
-		ProfileID:            profileID,
-		MediaFileID:          effectiveFileID,
-		RequestedMediaFileID: requestedFileID,
-		PlayMethod:           method,
-		BasePlayMethod:       method,
-		TranscodeAudio:       transcodeAudio,
-		Position:             0,
-		IsPaused:             false,
-		ClientName:           clientInfo.Name,
-		ClientVersion:        clientInfo.Version,
-		ClientBuild:          clientInfo.Build,
-		ClientChannel:        clientInfo.Channel,
-		ClientUserAgent:      clientInfo.UserAgent,
-		IsJellyfinCompat:     clientInfo.IsCompat,
-		StartedAt:            now,
-		UpdatedAt:            now,
-		LastActivityAt:       now,
+		ID:                     uuid.New().String(),
+		UserID:                 userID,
+		ProfileID:              profileID,
+		MediaFileID:            effectiveFileID,
+		RequestedMediaFileID:   requestedFileID,
+		PlayMethod:             method,
+		BasePlayMethod:         method,
+		TranscodeAudio:         transcodeAudio,
+		ClientIP:               clientip.FromContext(ctx),
+		RoutingNetworkProvider: new(netaccess.PathFromContext(ctx).Provider),
+		Position:               0,
+		IsPaused:               false,
+		ClientName:             clientInfo.Name,
+		ClientVersion:          clientInfo.Version,
+		ClientBuild:            clientInfo.Build,
+		ClientChannel:          clientInfo.Channel,
+		ClientUserAgent:        clientInfo.UserAgent,
+		IsJellyfinCompat:       clientInfo.IsCompat,
+		StartedAt:              now,
+		UpdatedAt:              now,
+		LastActivityAt:         now,
 	}
 }
 

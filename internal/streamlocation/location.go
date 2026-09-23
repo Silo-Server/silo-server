@@ -10,18 +10,34 @@ import (
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
+type Location string
+
+const (
+	Local  Location = "local"
+	Remote Location = "remote"
+)
+
+// FromMetadata uses the same classification for persisted playback observations
+// as for the start request. A provider path or unknown address is remote.
+func FromMetadata(clientIP, provider string) Location {
+	if provider != "" {
+		return Remote
+	}
+	ip := net.ParseIP(clientIP)
+	if ip == nil {
+		return Remote
+	}
+	if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+		return Local
+	}
+	return Remote
+}
+
 // IsRemote fails closed to remote when the resolved client address is absent
 // or invalid. A validated network-access provider is remote even when its
 // proxy connects from a private address.
 func IsRemote(ctx context.Context) bool {
-	if !netaccess.PathFromContext(ctx).IsDefault() {
-		return true
-	}
-	ip := net.ParseIP(clientip.FromContext(ctx))
-	if ip == nil {
-		return true
-	}
-	return !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast()
+	return FromMetadata(clientip.FromContext(ctx), netaccess.PathFromContext(ctx).Provider) == Remote
 }
 
 // BitrateCap selects the administrator ceiling for this request's network

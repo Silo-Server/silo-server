@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/streamlocation"
 )
 
 type AdminPlaybackSessionService interface {
@@ -40,6 +41,7 @@ type AdminPlaybackSession struct {
 	IsPaused                 bool    `json:"is_paused"`
 	HasPlaybackControl       bool    `json:"has_playback_control"`
 	ClientIP                 string  `json:"client_ip,omitempty"`
+	StreamLocation           string  `json:"stream_location" enum:"local,remote" doc:"Local or remote classification used by the server bitrate policy."`
 	ClientName               string  `json:"client_name,omitempty"`
 	ClientVersion            string  `json:"client_version,omitempty"`
 	ClientBuild              string  `json:"client_build,omitempty"`
@@ -102,6 +104,10 @@ func adminSessionNodeID(id *int) *ID {
 	return new(IDFromInt(int64(*id)))
 }
 func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSession {
+	provider := ""
+	if v.RoutingNetworkProvider != nil {
+		provider = *v.RoutingNetworkProvider
+	}
 	return AdminPlaybackSession{
 		SessionID:                v.SessionID,
 		UserID:                   IDFromInt(int64(v.UserID)),
@@ -128,6 +134,7 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		IsPaused:                 v.IsPaused,
 		HasPlaybackControl:       v.HasPlaybackControl,
 		ClientIP:                 v.ClientIP,
+		StreamLocation:           string(streamlocation.FromMetadata(v.ClientIP, provider)),
 		ClientName:               v.ClientName,
 		ClientVersion:            v.ClientVersion,
 		ClientBuild:              v.ClientBuild,
