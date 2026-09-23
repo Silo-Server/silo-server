@@ -2238,6 +2238,9 @@ func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, s
 	if ps != nil && !ps.CreatedAt.IsZero() {
 		card.OriginalStartedAt = ps.CreatedAt
 	}
+	if source.StreamLocation != "" {
+		card.StreamLocation = source.StreamLocation
+	}
 	if ps != nil && ps.RoutingAssignment != nil {
 		card.RoutingNetworkProvider = ps.RoutingAssignment.NetworkProvider
 		card.RoutingExecutionNodeID = ps.RoutingAssignment.ExecutionNodeID
@@ -2410,6 +2413,14 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	}
 	if err != nil {
 		return nil, err
+	}
+	if source.StreamLocation != "" {
+		if setter, ok := h.sessionMgr.(interface{ SetStreamLocation(string, string) error }); ok {
+			if err := setter.SetStreamLocation(session.ID, source.StreamLocation); err != nil {
+				_ = h.sessionMgr.StopSession(session.ID)
+				return nil, err
+			}
+		}
 	}
 	_ = h.syncUpstreamAudioSelection(&PlaybackSession{
 		UpstreamSessionID:  session.ID,
@@ -3183,7 +3194,7 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 	}
 	allow4KTranscode := h.allow4KVideoTranscode(ctx)
 	for _, version := range detail.Versions {
-		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps}, allow4KTranscode)
+		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps, streamLocation: string(streamlocation.FromContext(ctx))}, allow4KTranscode)
 		sources = append(sources, source)
 	}
 

@@ -47,6 +47,7 @@ type Claims struct {
 	TranscodeNode          string  `json:"tnode,omitempty"`
 	TranscodeTransportID   string  `json:"tid,omitempty"`
 	RoutingNetworkProvider *string `json:"rnp,omitempty"`
+	StreamLocation         string  `json:"sl,omitempty"`
 	RoutingWorkload        string  `json:"rwl,omitempty"`
 	RoutingExecution       string  `json:"rex,omitempty"`
 	RoutingExecutionNodeID int     `json:"rxnid,omitzero"`

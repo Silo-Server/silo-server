@@ -13369,6 +13369,7 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      stream_location: boolean;
       summary: boolean;
       target_audio_channels: boolean;
       tone_map_mode: boolean;

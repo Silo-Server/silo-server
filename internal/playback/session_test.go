@@ -24,8 +24,14 @@ func TestSessionManager_CapturesStartNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.ClientIP != "192.168.1.8" || session.RoutingNetworkProvider == nil || *session.RoutingNetworkProvider != "tailscale" {
+	if session.ClientIP != "192.168.1.8" || session.RoutingNetworkProvider == nil || *session.RoutingNetworkProvider != "tailscale" || session.StreamLocation != "remote" {
 		t.Fatalf("start network = (%q, %v)", session.ClientIP, session.RoutingNetworkProvider)
+	}
+	if err := sm.SetStreamLocation(session.ID, "local"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := sm.GetSession(session.ID); err != nil || got.StreamLocation != "local" {
+		t.Fatalf("frozen stream location = %v, %v", got, err)
 	}
 }
 

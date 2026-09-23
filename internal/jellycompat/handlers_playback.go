@@ -55,6 +55,7 @@ const (
 
 type playbackInfoRequest struct {
 	serverBitrateCapKbps                int
+	streamLocation                      string
 	SiloSeekReanchor                    bool            `json:"SiloSeekReanchor"`
 	UserID                              string          `json:"UserId"`
 	MediaSourceID                       string          `json:"MediaSourceId"`
@@ -2076,6 +2077,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "The server could not resolve the stream bitrate limit")
 		return
 	}
+	req.streamLocation = string(streamlocation.FromContext(r.Context()))
 	// PlaybackInfo is authorized by the token-derived session. Some clients
 	// retain a previous UserId in their request body while moving to the next
 	// item; that advisory value must not turn an otherwise authorized playback
@@ -2427,6 +2429,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	}
 	return PlaybackMediaSource{
 		ServerBitrateCapKbps:       req.serverBitrateCapKbps,
+		StreamLocation:             req.streamLocation,
 		CanBurnSubtitle:            enableTranscoding && (maxBitrate <= 0 || targetBitrateKbps >= 64) && (allow4KTranscode || !is4KResolution(version.Resolution)) && canEncodeOutput,
 		TargetBitrateKbps:          max(targetBitrateKbps, 0),
 		TargetResolution:           targetResolution,

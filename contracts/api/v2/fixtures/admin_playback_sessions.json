@@ -17,7 +17,7 @@
       "position_seconds": 0,
       "is_paused": false,
       "has_playback_control": false,
-      "client_ip": "192.168.1.8",
+      "client_ip": "127.0.0.1",
       "stream_location": "local",
       "audio_track_index": 0,
       "transcode_audio": false,

@@ -118,7 +118,7 @@ func TestSessionsCapabilitiesAdvertisesActivityFields(t *testing.T) {
 		t.Fatalf("decode capabilities: %v", err)
 	}
 	if !resp.EffectivePlayMethod || !resp.IsJellyfinClient || !resp.TranscodeHWAccel || !resp.ToneMapMode ||
-		!resp.ClientBuild || !resp.ClientChannel || !resp.TargetAudioChannels || !resp.NodeRouting {
+		!resp.ClientBuild || !resp.ClientChannel || !resp.TargetAudioChannels || !resp.NodeRouting || !resp.StreamLocation {
 		t.Fatalf("capabilities must advertise every additive field: %+v", resp)
 	}
 	want := []string{"direct", "remux", "transcode", "audio"}

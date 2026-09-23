@@ -37,7 +37,12 @@ func FromMetadata(clientIP, provider string) Location {
 // or invalid. A validated network-access provider is remote even when its
 // proxy connects from a private address.
 func IsRemote(ctx context.Context) bool {
-	return FromMetadata(clientip.FromContext(ctx), netaccess.PathFromContext(ctx).Provider) == Remote
+	return FromContext(ctx) == Remote
+}
+
+// FromContext classifies the trusted network metadata on a playback request.
+func FromContext(ctx context.Context) Location {
+	return FromMetadata(clientip.FromContext(ctx), netaccess.PathFromContext(ctx).Provider)
 }
 
 // BitrateCap selects the administrator ceiling for this request's network

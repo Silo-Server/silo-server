@@ -680,6 +680,7 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		TranscodeNodeURL:       card.TranscodeNodeURL,
 		TranscodeTransportID:   card.TranscodeTransportID,
 		RoutingNetworkProvider: card.RoutingNetworkProvider,
+		StreamLocation:         card.StreamLocation,
 		RoutingWorkload:        card.RoutingWorkload,
 		RoutingExecution:       card.RoutingExecution,
 		RoutingExecutionNodeID: card.RoutingExecutionNodeID,

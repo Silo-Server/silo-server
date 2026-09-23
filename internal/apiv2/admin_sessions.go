@@ -108,6 +108,10 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 	if v.RoutingNetworkProvider != nil {
 		provider = *v.RoutingNetworkProvider
 	}
+	location := v.StreamLocation
+	if location != string(streamlocation.Local) && location != string(streamlocation.Remote) {
+		location = string(streamlocation.FromMetadata(v.ClientIP, provider))
+	}
 	return AdminPlaybackSession{
 		SessionID:                v.SessionID,
 		UserID:                   IDFromInt(int64(v.UserID)),
@@ -134,7 +138,7 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		IsPaused:                 v.IsPaused,
 		HasPlaybackControl:       v.HasPlaybackControl,
 		ClientIP:                 v.ClientIP,
-		StreamLocation:           string(streamlocation.FromMetadata(v.ClientIP, provider)),
+		StreamLocation:           location,
 		ClientName:               v.ClientName,
 		ClientVersion:            v.ClientVersion,
 		ClientBuild:              v.ClientBuild,
@@ -211,6 +215,7 @@ type AdminPlaybackSessionCapabilitiesOutputBody struct {
 	ClientChannel             bool     `json:"client_channel"`
 	TargetAudioChannels       bool     `json:"target_audio_channels"`
 	NetworkAccessRoute        bool     `json:"network_access_route"`
+	StreamLocation            bool     `json:"stream_location"`
 	NodeRouting               bool     `json:"node_routing"`
 	OutputFormat              bool     `json:"output_format" doc:"Rows may carry output_container and output_protocol"`
 }
@@ -243,6 +248,7 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		out.Body.TargetAudioChannels = f.TargetAudioChannels
 		out.Body.NodeRouting = f.NodeRouting
 		out.Body.NetworkAccessRoute = true
+		out.Body.StreamLocation = true
 		out.Body.OutputFormat = true
 		return out, nil
 	})

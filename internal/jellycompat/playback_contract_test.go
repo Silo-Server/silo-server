@@ -83,7 +83,7 @@ func TestServerBitrateCapNegotiatesAndFreezesCompliantSource(t *testing.T) {
 	version := catalog.FileVersion{FileID: 42, Container: "mkv", CodecVideo: "h264", CodecAudio: "aac", Bitrate: 8_000, VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}}}
 	h := &PlaybackHandler{codec: NewResourceIDCodec()}
 	profile := DeviceProfile{DirectPlayProfiles: []DirectPlayProfile{{Type: "Video", Container: "mkv", VideoCodec: "h264", AudioCodec: "aac"}}, TranscodingProfiles: []TranscodingProfile{{Type: "Video", Container: "ts", Protocol: "hls", VideoCodec: "h264", AudioCodec: "aac"}}}
-	request := playbackInfoRequest{serverBitrateCapKbps: 4_000}
+	request := playbackInfoRequest{serverBitrateCapKbps: 4_000, streamLocation: "remote"}
 	source := h.buildPlaybackSource("item", "play", version, profile, request, true)
 	if source.SupportsDirectPlay || source.SupportsDirectStream || !source.SupportsTranscoding || source.ServerBitrateCapKbps != 4_000 {
 		t.Fatalf("over-limit source = %+v", source)
@@ -96,7 +96,7 @@ func TestServerBitrateCapNegotiatesAndFreezesCompliantSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	var persisted PlaybackMediaSource
-	if err := json.Unmarshal(data, &persisted); err != nil || persisted.ServerBitrateCapKbps != 4_000 || persisted.TargetBitrateKbps != source.TargetBitrateKbps {
+	if err := json.Unmarshal(data, &persisted); err != nil || persisted.ServerBitrateCapKbps != 4_000 || persisted.TargetBitrateKbps != source.TargetBitrateKbps || persisted.StreamLocation != "remote" {
 		t.Fatalf("frozen source = %+v, err = %v", persisted, err)
 	}
 

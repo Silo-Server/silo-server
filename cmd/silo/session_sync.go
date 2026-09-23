@@ -23,6 +23,7 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		PlayMethod:              string(s.PlayMethod),
 		ReportingNode:           reportingNode,
 		ClientIP:                s.ClientIP,
+		StreamLocation:          s.StreamLocation,
 		ClientName:              s.ClientName,
 		ClientVersion:           s.ClientVersion,
 		ClientBuild:             s.ClientBuild,

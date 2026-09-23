@@ -3725,6 +3725,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	if !mode.headerAuth {
 		card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", ts.Opts())
 		card.OriginalStartedAt = session.StartedAt
+		card.StreamLocation = session.StreamLocation
 		card.RoutingNetworkProvider = new(netaccess.PathFromContext(r.Context()).Provider)
 		card.RoutingWorkload = string(routingWorkloadV3(result))
 		card.RoutingExecution = string(noderouting.ExecutionAPI)
@@ -4055,6 +4056,7 @@ func remoteTranscodeRecipeCardV3(session *playback.Session, file *models.MediaFi
 	// client token, proxy grant, and node recipe alike — so telemetry can age the
 	// session correctly after any reconstruct.
 	card.OriginalStartedAt = session.StartedAt
+	card.StreamLocation = session.StreamLocation
 	return card
 }
 

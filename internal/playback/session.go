@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -38,6 +39,7 @@ type Session struct {
 	TranscodeAudio       bool // when true, remux should transcode audio to AAC
 	RemuxDVMode          RemuxDVMode
 	ClientIP             string // resolved client IP for the playback session
+	StreamLocation       string // local/remote policy classification fixed at playback negotiation
 	ClientName           string // reported playback client name, when available
 	ClientVersion        string // reported playback client version, when available
 	ClientBuild          string // opaque reported client build identifier, when available
@@ -638,6 +640,7 @@ func newSession(
 		BasePlayMethod:         method,
 		TranscodeAudio:         transcodeAudio,
 		ClientIP:               clientip.FromContext(ctx),
+		StreamLocation:         string(streamlocation.FromContext(ctx)),
 		RoutingNetworkProvider: new(netaccess.PathFromContext(ctx).Provider),
 		Position:               0,
 		IsPaused:               false,
@@ -977,6 +980,23 @@ func (m *SessionManager) UpdateStreamState(sessionID string, state SessionStream
 
 	applySessionStreamStateLocked(s, state)
 	s.streamRevision++
+	m.touchSessionLocked(s)
+	return nil
+}
+
+// SetStreamLocation preserves the negotiated bitrate-policy classification
+// when a compatible client starts its media request on another network path.
+func (m *SessionManager) SetStreamLocation(sessionID, location string) error {
+	if location != string(streamlocation.Local) && location != string(streamlocation.Remote) {
+		return fmt.Errorf("invalid stream location %q", location)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	s.StreamLocation = location
 	m.touchSessionLocked(s)
 	return nil
 }

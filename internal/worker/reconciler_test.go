@@ -20,6 +20,14 @@ func TestSessionSnapshotsEqualDetectsOutputFormatChanges(t *testing.T) {
 	}
 }
 
+func TestSessionSnapshotsEqualDetectsPolicyLocationChange(t *testing.T) {
+	local := SessionSync{SessionID: "session", StreamLocation: "local"}
+	remote := SessionSync{SessionID: "session", StreamLocation: "remote"}
+	if sessionSnapshotsEqual([]SessionSync{local}, []SessionSync{remote}) {
+		t.Fatal("policy location change must be published")
+	}
+}
+
 // TestSyncNowSerializesSnapshotCapture guards the SyncNow ordering contract:
 // snapshot capture and reconciliation run under one lock, so a request-path
 // sync (playback start/stop) can never interleave with the periodic tick and

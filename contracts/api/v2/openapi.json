@@ -8900,6 +8900,9 @@
             ],
             "type": "string"
           },
+          "stream_location": {
+            "type": "boolean"
+          },
           "summary": {
             "type": "boolean"
           },
@@ -8937,6 +8940,7 @@
           "client_channel",
           "target_audio_channels",
           "network_access_route",
+          "stream_location",
           "node_routing",
           "output_format",
           "revision",

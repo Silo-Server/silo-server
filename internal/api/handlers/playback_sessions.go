@@ -47,6 +47,7 @@ type playbackSessionRow struct {
 	IsPaused             bool      `json:"is_paused"`
 	HasPlaybackControl   bool      `json:"has_playback_control"`
 	ClientIP             string    `json:"client_ip,omitempty"`
+	StreamLocation       string    `json:"-"`
 	ClientName           string    `json:"client_name,omitempty"`
 	ClientVersion        string    `json:"client_version,omitempty"`
 	ClientBuild          string    `json:"client_build,omitempty"`
@@ -131,6 +132,8 @@ type playbackSessionsCapabilitiesResponse struct {
 	// NodeRouting reports that rows may carry workload/execution/egress route
 	// assignment fields when the active session has resolved them.
 	NodeRouting bool `json:"node_routing"`
+	// StreamLocation reports that native admin rows include the frozen policy classification.
+	StreamLocation bool `json:"stream_location"`
 }
 
 // HandleGetSessionsCapabilities exposes additive feature support for the live
@@ -152,6 +155,7 @@ func AdminPlaybackSessionFeatures() playbackSessionsCapabilitiesResponse {
 		ClientChannel:             true,
 		TargetAudioChannels:       true,
 		NodeRouting:               true,
+		StreamLocation:            true,
 	}
 }
 
@@ -324,7 +328,8 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			COALESCE(egress_node.name, ''),
 			s.routing_network_provider,
 			COALESCE(s.output_container, ''),
-			COALESCE(s.output_protocol, '')
+			COALESCE(s.output_protocol, ''),
+			COALESCE(s.stream_location, '')
 		 FROM playback_sessions_sync s
 		 LEFT JOIN users u ON u.id = s.user_id
 		 LEFT JOIN media_files mf ON mf.id = s.media_file_id
@@ -395,7 +400,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			&s.SourceAudioCodec, &sourceAudioChannels, &audioTracksJSON, &s.RequestedVideoCodec, &s.RequestedVideoResolution,
 			&s.CompatOrigin, &s.RoutingWorkload, &s.RoutingExecution, &s.RoutingExecutionNodeID,
 			&s.RoutingExecutionNodeName, &s.RoutingEgress, &s.RoutingEgressNodeID, &s.RoutingEgressNodeName, &s.RoutingNetworkProvider,
-			&s.OutputContainer, &s.OutputProtocol,
+			&s.OutputContainer, &s.OutputProtocol, &s.StreamLocation,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scanning playback session: %w", err)
 		}
