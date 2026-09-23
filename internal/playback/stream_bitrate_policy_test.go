@@ -45,6 +45,47 @@ func TestServerBitrateCapTranscodesAndBudgetsAudio(t *testing.T) {
 	}
 }
 
+func TestServerBitrateCapCountsAudioInSourceTotal(t *testing.T) {
+	input := bitratePolicyFixtureV3()
+	input.EffectiveFile.Bitrate = 4_200
+	input.EffectiveFile.VideoTracks[0].Bitrate = 3_900
+	input.ServerBitrateCapKbps = 4_000
+	result := PlanPlaybackV3(input)
+	if result.Plan == nil || result.PlayMethod != PlayTranscode {
+		t.Fatalf("expected total bitrate to require a transcode: %s", ExplainPlannerResultV3(result))
+	}
+	if result.TargetBitrateKbps+result.TargetAudioBitrateKbps > 3_800 {
+		t.Fatalf("video/audio targets exceed reserved cap: %d + %d", result.TargetBitrateKbps, result.TargetAudioBitrateKbps)
+	}
+}
+
+func TestServerBitrateCapUnknownSourceTotalRequiresTranscode(t *testing.T) {
+	input := bitratePolicyFixtureV3()
+	input.EffectiveFile.Bitrate = 0
+	input.EffectiveFile.VideoTracks[0].Bitrate = 3_900
+	input.ServerBitrateCapKbps = 4_000
+	result := PlanPlaybackV3(input)
+	if result.Plan == nil || result.PlayMethod != PlayTranscode {
+		t.Fatalf("expected unknown total bitrate to require a transcode: %s", ExplainPlannerResultV3(result))
+	}
+}
+
+func TestServerBitrateCapHonorsLowerClientCapAgainstSourceTotal(t *testing.T) {
+	input := bitratePolicyFixtureV3()
+	input.EffectiveFile.Bitrate = 2_300
+	input.EffectiveFile.VideoTracks[0].Bitrate = 1_800
+	input.ServerBitrateCapKbps = 4_000
+	clientCap := 2_000
+	input.Request.BandwidthCapKbps = &clientCap
+	result := PlanPlaybackV3(input)
+	if result.Plan == nil || result.PlayMethod != PlayTranscode {
+		t.Fatalf("expected lower client cap to require a transcode: %s", ExplainPlannerResultV3(result))
+	}
+	if result.TargetBitrateKbps+result.TargetAudioBitrateKbps > 1_900 {
+		t.Fatalf("video/audio targets exceed client's reserved cap: %d + %d", result.TargetBitrateKbps, result.TargetAudioBitrateKbps)
+	}
+}
+
 func TestServerBitrateCapFailsClosedWithoutTranscode(t *testing.T) {
 	input := bitratePolicyFixtureV3()
 	input.ServerBitrateCapKbps = 4_000

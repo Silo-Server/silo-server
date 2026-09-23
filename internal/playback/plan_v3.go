@@ -196,13 +196,17 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		input.Now = time.Now()
 	}
 	source := SourceDescriptorFromFileV3(file, input.AudioTrackIndex)
+	serverBitrateRequiresEncode := false
 	if input.ServerBitrateCapKbps > 0 {
 		if cap := optionalValueV3(input.Request.BandwidthCapKbps); cap == 0 || input.ServerBitrateCapKbps < cap {
 			input.Request.BandwidthCapKbps = &input.ServerBitrateCapKbps
 		}
-		// No source bitrate is not evidence that a direct copy fits.
-		mustEncode := source.BitrateKbps <= 0 || source.BitrateKbps > input.ServerBitrateCapKbps
-		if mustEncode {
+		// The video track rate excludes audio and container overhead. Only a
+		// known total rate can establish that a source-preserving route fits.
+		cap := optionalValueV3(input.Request.BandwidthCapKbps)
+		totalBitrateKbps := normalizeBitrateKbpsV3(file.Bitrate)
+		serverBitrateRequiresEncode = totalBitrateKbps <= 0 || totalBitrateKbps > cap || source.BitrateKbps > cap
+		if serverBitrateRequiresEncode {
 			defer func() {
 				compliant := result.Plan != nil &&
 					(result.PlayMethod == PlayTranscode || file.IsAudioOnly() && result.TranscodeAudio)
@@ -245,15 +249,16 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	remuxSubtitleOK := remuxSubtitle.Terminal == nil && !remuxSubtitle.RequiresBurn
 	hlsRemuxSubtitleOK := hlsSubtitle.Terminal == nil && !hlsSubtitle.RequiresBurn
 	quality := ResolveQualityPolicyV3(input.Request, source)
-	if input.ServerBitrateCapKbps > 0 && source.BitrateKbps <= 0 {
-		// The ordinary quality resolver treats an unknown rate as eligible for
-		// original delivery; administrator ceilings cannot make that assumption.
+	if serverBitrateRequiresEncode {
+		// The quality resolver uses the video track rate to choose an encode
+		// target, which can undercount a source-preserving route's total rate.
 		quality.RequiresTranscode = true
 		quality.PreservesSource = false
+		cap := optionalValueV3(input.Request.BandwidthCapKbps)
 		if quality.BitrateKbps <= 0 {
-			quality.BitrateKbps = input.ServerBitrateCapKbps
+			quality.BitrateKbps = cap
 		} else {
-			quality.BitrateKbps = min(quality.BitrateKbps, input.ServerBitrateCapKbps)
+			quality.BitrateKbps = min(quality.BitrateKbps, cap)
 		}
 	}
 	videoOK, videoEvidenceInsufficient := videoEligibleV3(source, input.Request)
