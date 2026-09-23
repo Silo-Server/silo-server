@@ -151,8 +151,10 @@ func TestAutoTranscodePipelineCachesOnlyFallbackSuccess(t *testing.T) {
 	opts := resolvedAutoOpts()
 
 	failed := newResolvedAutoTranscodePipeline(opts, cache)
-	if !failed.AdvanceAfterFailure("0") || !failed.AdvanceAfterFailure("0") {
-		t.Fatal("expected fallbacks")
+	for range 2 {
+		if !failed.AdvanceAfterFailure("0") {
+			t.Fatal("expected fallbacks")
+		}
 	}
 	// No RememberSuccess: failures and timeouts are never cached.
 	assertAutoTranscodePath(t, newResolvedAutoTranscodePipeline(opts, cache).Current(), transcodeHWNVENC, false)

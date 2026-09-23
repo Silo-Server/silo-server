@@ -52,7 +52,10 @@ const (
 	subtitleMIMEVTTV3            = "text/vtt"
 	subtitleUnavailableReasonV3  = "subtitle_artifact_unavailable"
 	transcodeStartFailedReasonV3 = "transcode_start_failed"
-	seekRestorationPlayerV3      = "player_position"
+	// transportStartupReadyV3 is the "outcome" of a transport startup whose
+	// first manifest became ready.
+	transportStartupReadyV3 = "ready"
+	seekRestorationPlayerV3 = "player_position"
 	// Failed capability fetches are memoized briefly so an unreachable node
 	// costs one timeout per window instead of one per planning request.
 	v3NodeCapabilityErrorTTL = 15 * time.Second
@@ -3598,7 +3601,7 @@ func (h *PlaybackHandler) startReadyLocalPlaybackTransportV3(ctx context.Context
 		"spawn_ms", spawnFinishedAt.Sub(startedAt).Milliseconds(),
 		"manifest_wait_ms", time.Since(spawnFinishedAt).Milliseconds(),
 		"total_ms", time.Since(startedAt).Milliseconds(),
-		"outcome", "ready",
+		"outcome", transportStartupReadyV3,
 	)
 	return ts, nil
 }
@@ -3625,7 +3628,7 @@ func (h *PlaybackHandler) startReadyAutoLocalPlaybackTransportV3(ctx context.Con
 			return h.startLocalPlaybackTransport(ctx, opts)
 		},
 	})
-	outcome := "ready"
+	outcome := transportStartupReadyV3
 	var failure *localTransportStartupFailureV3
 	var startupErr *playback.TranscodeStartupError
 	switch {
@@ -3913,7 +3916,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	}
 	remoteStartAt := time.Now()
 	nodeResp, status, err := h.startRemotePlaybackTransport(r.Context(), node.URL, req)
-	remoteOutcome := "ready"
+	remoteOutcome := transportStartupReadyV3
 	if err != nil || status != http.StatusAccepted {
 		remoteOutcome = playbackRemoteOutcomeFailedV3
 	}

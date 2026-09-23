@@ -102,7 +102,7 @@ func TestHandleStartRequireReadyAutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
 	if session == nil {
 		t.Fatal("ready fallback session was not registered")
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	var response TranscodeStartResponse
 	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
@@ -190,7 +190,7 @@ func TestSpawnReconstructAutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
 	if err != nil || session == nil {
 		t.Fatalf("spawnReconstruct = %v, %v; want the CPU-decode session", session, err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 	if opts := session.Opts(); opts.HWAccel != "nvenc" || !opts.SoftwareVideoDecode {
 		t.Fatalf("reconstructed = %s software decode %v, want NVENC with CPU decode", opts.HWAccel, opts.SoftwareVideoDecode)
 	}
@@ -244,7 +244,7 @@ func TestHandleStartRequireReadyKeepsVideoToolboxSoftwareRetry(t *testing.T) {
 	if session == nil {
 		t.Fatal("software retry session was not registered")
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 	invocations := readNodeFFmpegInvocations(t, logPath)
 	if len(invocations) != 2 || !strings.Contains(invocations[0], "h264_videotoolbox") || !strings.Contains(invocations[1], "libx264") {
 		t.Fatalf("invocations = %q, want VideoToolbox then the legacy software retry", invocations)
