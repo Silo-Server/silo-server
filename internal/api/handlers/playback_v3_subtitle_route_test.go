@@ -1,6 +1,10 @@
 package handlers
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -28,7 +32,7 @@ func TestSubtitleArtifactDescribesServedBytesOnResumedTransport(t *testing.T) {
 				},
 			}
 			handler := &PlaybackHandler{}
-			if err := handler.attachSubtitleArtifactV3(t.Context(), "session", file, plan, 0, nil); err != nil {
+			if err := handler.attachSubtitleArtifactV3(t.Context(), "session", file, plan, 0, nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			artifact := plan.Subtitle.Artifact
@@ -66,7 +70,7 @@ func TestAttachNativeSubtitleValidatesRouteAndIdentity(t *testing.T) {
 				},
 			}
 			handler := &PlaybackHandler{}
-			err := handler.attachSubtitleArtifactV3(t.Context(), "session", file, plan, 0, nil)
+			err := handler.attachSubtitleArtifactV3(t.Context(), "session", file, plan, 0, nil, nil)
 			if (err != nil) != tc.wantError {
 				t.Fatalf("attach error=%v, wantError=%v", err, tc.wantError)
 			}
@@ -75,6 +79,135 @@ func TestAttachNativeSubtitleValidatesRouteAndIdentity(t *testing.T) {
 			}
 			if err == nil && tc.mode != playback.SubtitleRenderV3 && plan.Subtitle.Embedded != nil {
 				t.Fatalf("off/burned-in route retained native track selection: %#v", plan.Subtitle)
+			}
+		})
+	}
+}
+
+func TestSubtitleArtifactOffersOriginalSubRipOnlyToOptedInClients(t *testing.T) {
+	file := &models.MediaFile{ID: 42, ExternalSubtitles: []models.ExternalSubtitle{{Path: "/media/movie.ar.srt", Format: "srt"}}}
+	for _, tc := range []struct {
+		name     string
+		mode     playback.SubtitleModeV3
+		features []string
+		format   string
+		mime     string
+		ext      string
+	}{
+		{"opted in", playback.SubtitleRenderV3, []string{playback.FeatureSubripSidecarV3}, "srt", "application/x-subrip", "/subtitles/0.srt?file_id=42&original=1"},
+		{"not opted in", playback.SubtitleRenderV3, nil, "vtt", "text/vtt", "/subtitles/0.vtt?"},
+		// A server conversion is WebVTT by definition.
+		{"conversion", playback.SubtitleConvertV3, []string{playback.FeatureSubripSidecarV3}, "vtt", "text/vtt", "/subtitles/0.vtt?"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := &playback.PlanV3{
+				Delivery: playback.DeliveryRemuxProgressiveV3,
+				Subtitle: playback.SubtitleDecisionV3{
+					Mode: tc.mode, TrackID: playback.TrackIDV3(file.ID, "subtitle", 0),
+					Inventory: playback.BuildSubtitleInventoryV3(file, nil),
+				},
+			}
+			handler := &PlaybackHandler{}
+			if err := handler.attachSubtitleArtifactV3(t.Context(), "session", file, plan, 0, nil, tc.features); err != nil {
+				t.Fatal(err)
+			}
+			artifact := plan.Subtitle.Artifact
+			if artifact == nil || artifact.Format != tc.format || artifact.MIMEType != tc.mime || !strings.Contains(artifact.URL, tc.ext) {
+				t.Fatalf("artifact = %#v, want format %s, mime %s, url containing %s", artifact, tc.format, tc.mime, tc.ext)
+			}
+			// original=1 only means something on a .srt URL.
+			if tc.format != "srt" && strings.Contains(artifact.URL, playback.SubtitleOriginalParamV3+"=") {
+				t.Fatalf("a %s artifact must not carry original=1: %s", tc.format, artifact.URL)
+			}
+		})
+	}
+}
+
+// A seek reanchor replays the frozen plan, so its SRT artifact keeps the
+// representation the plan published. An attempt started by a server that did
+// not know subrip_sidecar_v1 persisted WebVTT URLs beside a feature list that
+// already names the feature; reanchoring it must not change the route.
+func TestSeekReanchorKeepsTheFrozenSRTRepresentation(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		startFeature  bool
+		recordFeature bool
+		format        string
+	}{
+		{"negotiated at start", true, true, "srt"},
+		{"started without the feature", false, true, "vtt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := v3HandlerFixtureFile(t)
+			file.ExternalSubtitles = []models.ExternalSubtitle{{Path: "/media/movie.ar.srt", Language: "ar", Format: "srt"}}
+			manager := playback.NewSessionManager(0, 0)
+			handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
+			handler.ItemAccess = allowAllPlaybackItemAccess{}
+			startRequest := v3HandlerStartRequest()
+			if tc.startFeature {
+				startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureSubripSidecarV3)
+			}
+			subtitleIndex := 0
+			startRequest.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", subtitleIndex)
+			startRequest.SubtitleTrackIndex = &subtitleIndex
+			startRR := httptest.NewRecorder()
+			handler.HandleStartPlayback(startRR, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
+			if startRR.Code != http.StatusCreated {
+				t.Fatalf("start status = %d, body = %s", startRR.Code, startRR.Body.String())
+			}
+			var started playback.DecisionResponseV3
+			if err := json.Unmarshal(startRR.Body.Bytes(), &started); err != nil {
+				t.Fatal(err)
+			}
+			if started.PlaybackPlan == nil || started.PlaybackPlan.Subtitle.Artifact == nil || started.PlaybackPlan.Subtitle.Artifact.Format != tc.format {
+				t.Fatalf("start artifact = %#v, want format %s", started.PlaybackPlan, tc.format)
+			}
+			if tc.recordFeature && !tc.startFeature {
+				record, err := handler.PlanStoreV3.GetAttempt(t.Context(), started.SessionID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				record.NormalizedRequest.ClientFeatures = append(record.NormalizedRequest.ClientFeatures, playback.FeatureSubripSidecarV3)
+				// The store keeps an attempt immutable, so persist the edited
+				// record the way the older server would have written it.
+				handler.PlanStoreV3 = playback.NewMemoryPlanStoreV3()
+				if err := handler.PlanStoreV3.SaveAttempt(t.Context(), *record); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := manager.UpdateProgress(started.SessionID, 12, true); err != nil {
+				t.Fatal(err)
+			}
+			currentKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
+			body, err := json.Marshal(playback.ReplanRequestV3{
+				ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationSeekReanchorV3,
+				PlaybackAttemptID: startRequest.PlaybackAttemptID,
+				ReplanRequestID:   "seek-reanchor-srt", FailedPlanID: started.PlaybackPlan.PlanID,
+				PlanAttemptID: "plan-attempt-seek-srt", PlanAttemptKey: currentKey, AttemptCount: 1,
+				QualityPreference: "original", PositionSeconds: 321,
+				SelectedTracks: started.PlaybackPlan.SelectedTracks,
+				Capabilities:   startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := withPlaybackRouteParam(httptest.NewRequest(http.MethodPost, "/api/v1/playback/"+started.SessionID+"/replan", strings.NewReader(string(body))).WithContext(newAuthorizedPlaybackContext()), "session_id", started.SessionID)
+			rr := httptest.NewRecorder()
+			handler.HandleReplanPlaybackV3(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("reanchor status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			var reanchored playback.DecisionResponseV3
+			if err := json.Unmarshal(rr.Body.Bytes(), &reanchored); err != nil {
+				t.Fatal(err)
+			}
+			if reanchored.PlaybackPlan == nil {
+				t.Fatalf("reanchor returned no plan: %s", rr.Body.String())
+			}
+			artifact := reanchored.PlaybackPlan.Subtitle.Artifact
+			if artifact == nil || artifact.Format != tc.format || !strings.Contains(artifact.URL, "/subtitles/0."+tc.format+"?") {
+				t.Fatalf("reanchored artifact = %#v, want the frozen %s representation", artifact, tc.format)
 			}
 		})
 	}

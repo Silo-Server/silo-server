@@ -449,8 +449,13 @@ func TestResponseSchemasEnforcePublishedInvariants(t *testing.T) {
 	}
 
 	capability = decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "capability_response.json"))).(map[string]any)
-	features := capability["features"].([]any)
-	capability["features"] = features[:len(features)-1]
+	var withoutBaseline []any
+	for _, feature := range capability["features"].([]any) {
+		if feature != "plan_source_duration_v1" {
+			withoutBaseline = append(withoutBaseline, feature)
+		}
+	}
+	capability["features"] = withoutBaseline
 	if err := schemas["capability-response.schema.json"].Validate(capability); err == nil {
 		t.Fatal("capability schema accepted a response that omitted a baseline feature")
 	}

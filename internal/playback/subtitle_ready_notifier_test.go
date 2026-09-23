@@ -14,6 +14,7 @@ type stubSubtitleInventoryResolver struct {
 	additional    []SubtitleInventoryEntryV3
 	err           error
 	additionalErr error
+	features      []string
 	calls         int
 }
 
@@ -27,6 +28,10 @@ func (s *stubSubtitleInventoryResolver) MediaFile(context.Context, int) (*models
 
 func (s *stubSubtitleInventoryResolver) AdditionalSubtitles(context.Context, *models.MediaFile) ([]SubtitleInventoryEntryV3, error) {
 	return s.additional, s.additionalErr
+}
+
+func (s *stubSubtitleInventoryResolver) SessionClientFeatures(context.Context, string) []string {
+	return s.features
 }
 
 // A generated track's realtime event carries the ordinal the next plan will
@@ -241,5 +246,31 @@ func TestSubtitleReadyNotifierSkipsSessionsWithoutRealtime(t *testing.T) {
 
 	if resolver.calls != 0 {
 		t.Errorf("resolver called %d times for a session with no realtime connection, want 0", resolver.calls)
+	}
+}
+
+// A realtime event must publish the generated track under the same URL the
+// session's plans use, so a session that negotiated subrip_sidecar_v1 sees the
+// stored SRT here too.
+func TestSubtitleReadyNotifierUsesTheSessionSidecarRepresentation(t *testing.T) {
+	for name, tc := range map[string]struct {
+		features []string
+		want     string
+	}{
+		"negotiated":     {[]string{FeatureSubripSidecarV3}, "/subtitles/0.srt?file_id=100&original=1&downloaded_subtitle_id=77"},
+		"not negotiated": {nil, "/subtitles/0.vtt?file_id=100&downloaded_subtitle_id=77"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resolver := &stubSubtitleInventoryResolver{
+				file:       &models.MediaFile{ID: 100},
+				additional: []SubtitleInventoryEntryV3{{CombinedIndex: 0, Codec: "srt", Source: SubtitleSourceDownloadedV3, DownloadedSubtitleID: 77}},
+				features:   tc.features,
+			}
+			notifier := &SubtitleReadyNotifier{inventory: resolver}
+			track := notifier.resolveTrack(t.Context(), "sess", 100, 77)
+			if track == nil || track.URL != "/stream/sess"+tc.want {
+				t.Fatalf("track = %#v, want URL /stream/sess%s", track, tc.want)
+			}
+		})
 	}
 }

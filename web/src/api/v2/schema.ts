@@ -108169,6 +108169,8 @@ export interface operations {
         duration?: number;
         /** @description Source media file the inventory URL names; must be the plan's effective or requested file. */
         file_id?: string;
+        /** @description 1 on a .srt URL published under subrip_sidecar_v1: serve the stored SRT bytes instead of the WebVTT conversion. */
+        original?: string;
         /** @description Seek position in seconds for windowed text extraction. */
         position?: number;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
@@ -108186,7 +108188,7 @@ export interface operations {
       };
       path: {
         session_id: string;
-        /** @description Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup) the inventory URL carries. */
+        /** @description Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup, .srt) the inventory URL carries. */
         track: string;
       };
       cookie?: never;
@@ -108317,6 +108319,8 @@ export interface operations {
         duration?: number;
         /** @description Source media file the inventory URL names; must be the plan's effective or requested file. */
         file_id?: string;
+        /** @description 1 on a .srt URL published under subrip_sidecar_v1: serve the stored SRT bytes instead of the WebVTT conversion. */
+        original?: string;
         /** @description Seek position in seconds for windowed text extraction. */
         position?: number;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
@@ -108334,7 +108338,7 @@ export interface operations {
       };
       path: {
         session_id: string;
-        /** @description Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup) the inventory URL carries. */
+        /** @description Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup, .srt) the inventory URL carries. */
         track: string;
       };
       cookie?: never;

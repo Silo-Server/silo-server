@@ -18,6 +18,10 @@ type subtitleReadySessionLookup interface {
 type SubtitleInventoryResolver interface {
 	MediaFile(ctx context.Context, fileID int) (*models.MediaFile, error)
 	AdditionalSubtitles(ctx context.Context, file *models.MediaFile) ([]SubtitleInventoryEntryV3, error)
+	// SessionClientFeatures returns the client features that pick the
+	// session's sidecar representations (SubtitleSidecarExtV3), so an event
+	// publishes the same URL as the session's plans. nil selects the defaults.
+	SessionClientFeatures(ctx context.Context, sessionID string) []string
 }
 
 // SubtitleReadyNotifier pushes "subtitle ready" events to active playback
@@ -120,7 +124,8 @@ func (n *SubtitleReadyNotifier) resolveTrack(ctx context.Context, sessionID stri
 			"file_id", fileID, "error", err)
 		return nil
 	}
-	items := SubtitleInventoryV3(sessionID, file, additional)
+	features := n.inventory.SessionClientFeatures(ctx, sessionID)
+	items := ScopeSubtitleInventoryV3(sessionID, file, BuildSubtitleInventoryV3(file, additional), features)
 	for i := range items {
 		if items[i].Source != SubtitleSourceDownloadedV3 {
 			continue

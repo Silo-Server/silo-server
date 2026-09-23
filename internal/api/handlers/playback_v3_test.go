@@ -2830,7 +2830,7 @@ func TestAttachSubtitleArtifactV3UsesFrozenDownloadedIdentityWithoutOrdinalLooku
 		SubtitleSource: playback.SubtitleSourceDownloadedV3, DownloadedSubtitleID: 71,
 		SubtitleTrackIndex: selectedIndex, SubtitleCodec: "vtt",
 	}
-	if err := handler.attachSubtitleArtifactV3(context.Background(), "session-frozen-subtitle", file, plan, selectedIndex, &recipe); err != nil {
+	if err := handler.attachSubtitleArtifactV3(context.Background(), "session-frozen-subtitle", file, plan, selectedIndex, &recipe, nil); err != nil {
 		t.Fatalf("attach frozen downloaded subtitle: %v", err)
 	}
 	if plan.Subtitle.Artifact == nil || !strings.Contains(plan.Subtitle.Artifact.URL, "downloaded_subtitle_id=71") {
@@ -2872,7 +2872,7 @@ func TestAttachSubtitleArtifactV3ClearsStaleArtifactWhenNoArtifactMode(t *testin
 					Inventory: playback.BuildSubtitleInventoryV3(file, nil),
 				},
 			}
-			if err := handler.attachSubtitleArtifactV3(context.Background(), "session-current", file, plan, test.selectedIndex, nil); err != nil {
+			if err := handler.attachSubtitleArtifactV3(context.Background(), "session-current", file, plan, test.selectedIndex, nil, nil); err != nil {
 				t.Fatalf("attach: %v", err)
 			}
 			if plan.Subtitle.Artifact != nil {
@@ -2906,7 +2906,7 @@ func TestAttachSubtitleArtifactV3DropsArtifactAcrossRenderToOffReplan(t *testing
 			Inventory: playback.BuildSubtitleInventoryV3(file, nil),
 		},
 	}
-	if err := handler.attachSubtitleArtifactV3(context.Background(), "session-1", file, rendered, 0, nil); err != nil {
+	if err := handler.attachSubtitleArtifactV3(context.Background(), "session-1", file, rendered, 0, nil, nil); err != nil {
 		t.Fatalf("attach render: %v", err)
 	}
 	if rendered.Subtitle.Artifact == nil {
@@ -2916,7 +2916,7 @@ func TestAttachSubtitleArtifactV3DropsArtifactAcrossRenderToOffReplan(t *testing
 	// subtitles off; the durable artifact must not survive the transition.
 	replanned := *rendered
 	replanned.Subtitle.Mode = playback.SubtitleOffV3
-	if err := handler.attachSubtitleArtifactV3(context.Background(), "session-1", file, &replanned, -1, nil); err != nil {
+	if err := handler.attachSubtitleArtifactV3(context.Background(), "session-1", file, &replanned, -1, nil, nil); err != nil {
 		t.Fatalf("attach off: %v", err)
 	}
 	if replanned.Subtitle.Artifact != nil || replanned.Subtitle.TrackID != "" {
@@ -2952,7 +2952,7 @@ func TestSubtitleArtifactStoreFailuresAreRetryable(t *testing.T) {
 		SubtitleSource: playback.SubtitleSourceDownloadedV3, DownloadedSubtitleID: 71,
 		SubtitleTrackIndex: 0, SubtitleCodec: "vtt",
 	}
-	err := handler.attachSubtitleArtifactV3(context.Background(), "session-store-error", file, plan, 0, &recipe)
+	err := handler.attachSubtitleArtifactV3(context.Background(), "session-store-error", file, plan, 0, &recipe, nil)
 	if !errors.Is(err, errSubtitleStoreUnavailableV3) {
 		t.Fatalf("attach error = %v, want wrapped subtitle-store failure", err)
 	}

@@ -165688,7 +165688,7 @@
             }
           },
           {
-            "description": "Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup) the inventory URL carries.",
+            "description": "Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup, .srt) the inventory URL carries.",
             "in": "path",
             "name": "track",
             "required": true,
@@ -165709,6 +165709,14 @@
             "description": "Stable downloaded-subtitle identity the inventory URL carries; must belong to the source file.",
             "in": "query",
             "name": "downloaded_subtitle_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "1 on a .srt URL published under subrip_sidecar_v1: serve the stored SRT bytes instead of the WebVTT conversion.",
+            "in": "query",
+            "name": "original",
             "schema": {
               "type": "string"
             }
@@ -165960,7 +165968,7 @@
             }
           },
           {
-            "description": "Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup) the inventory URL carries.",
+            "description": "Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup, .srt) the inventory URL carries.",
             "in": "path",
             "name": "track",
             "required": true,
@@ -165981,6 +165989,14 @@
             "description": "Stable downloaded-subtitle identity the inventory URL carries; must belong to the source file.",
             "in": "query",
             "name": "downloaded_subtitle_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "1 on a .srt URL published under subrip_sidecar_v1: serve the stored SRT bytes instead of the WebVTT conversion.",
+            "in": "query",
+            "name": "original",
             "schema": {
               "type": "string"
             }

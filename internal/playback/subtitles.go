@@ -66,6 +66,16 @@ func IsASS(codec string) bool {
 	return assSubtitleCodecs[strings.ToLower(codec)]
 }
 
+// IsSubRip reports whether the given subtitle codec is SubRip (SRT).
+func IsSubRip(codec string) bool {
+	switch normalizeCodecV3(codec) {
+	case subtitleFormatSRT, subtitleCodecSubRip:
+		return true
+	default:
+		return false
+	}
+}
+
 // ExtractSubtitle extracts a subtitle track from a media file using ffmpeg.
 // It returns the raw subtitle data, the detected format (e.g., "srt", "ass"),
 // and any error encountered.

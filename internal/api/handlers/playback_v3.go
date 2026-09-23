@@ -2002,7 +2002,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		return playback.DecisionResponseV3{}, subtitleArtifactErrorV3("Failed to freeze the selected subtitle identity.", frozenErr)
 	}
 	result.Plan.Stream.URL = transport.url
-	if err := h.attachSubtitleArtifactV3(r.Context(), session.ID, effectiveFile, result.Plan, result.SubtitleTrackIndex, &frozenRecipe); err != nil {
+	if err := h.attachSubtitleArtifactV3(r.Context(), session.ID, effectiveFile, result.Plan, result.SubtitleTrackIndex, &frozenRecipe, req.ClientFeatures); err != nil {
 		transport.rollback()
 		abort()
 		return playback.DecisionResponseV3{}, subtitleArtifactErrorV3("Failed to prepare the selected subtitle artifact.", err)
@@ -4309,7 +4309,7 @@ func transportGenerationV3(sessionID, planID string) string {
 // a URL-less menu whenever playback started with subtitles off, so a client
 // building its picker from the inventory (the Cast receiver's text tracks, for
 // one) had nothing fetchable to offer.
-func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionID string, file *models.MediaFile, plan *playback.PlanV3, selectedIndex int, recipe *playback.ExecutableRecipeV3) error {
+func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionID string, file *models.MediaFile, plan *playback.PlanV3, selectedIndex int, recipe *playback.ExecutableRecipeV3, clientFeatures []string) error {
 	if plan == nil || file == nil {
 		return nil
 	}
@@ -4327,7 +4327,7 @@ func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionI
 		}
 		frozenDownloaded = selected
 	}
-	inventory := playback.ScopeSubtitleInventoryV3(sessionID, file, plan.Subtitle.Inventory)
+	inventory := playback.ScopeSubtitleInventoryV3(sessionID, file, plan.Subtitle.Inventory, clientFeatures)
 	// A plan restored from JSON no longer carries the server-only downloaded
 	// row IDs. Rebuild only in that case; a fresh plan stays on the exact
 	// planning snapshot instead of listing a mutable repository twice.
@@ -4339,7 +4339,7 @@ func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionI
 		if err != nil {
 			return wrapSubtitleStoreErrorV3(err)
 		}
-		inventory = playback.SubtitleInventoryV3(sessionID, file, downloadedSubtitleEntriesV3(file, downloaded))
+		inventory = playback.ScopeSubtitleInventoryV3(sessionID, file, playback.BuildSubtitleInventoryV3(file, downloadedSubtitleEntriesV3(file, downloaded)), clientFeatures)
 	}
 	plan.Subtitle.Inventory = inventory
 	// Only render and convert publish a client-fetchable artifact; off and
@@ -4378,10 +4378,13 @@ func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionI
 		return fmt.Errorf("subtitle track %d is %s and has no fetchable artifact", selectedIndex, item.Delivery)
 	}
 	format := strings.ToLower(item.Codec)
+	source := item.Source
 	url := item.URL
 	if frozenDownloaded != nil {
 		format = strings.ToLower(string(frozenDownloaded.Format))
-		url = playback.DownloadedSubtitleStreamURLV3(sessionID, selectedIndex, string(frozenDownloaded.Format), file.ID, frozenDownloaded.ID)
+		source = playback.SubtitleSourceDownloadedV3
+		ext := playback.SubtitleSidecarExtV3(format, source, clientFeatures)
+		url = playback.DownloadedSubtitleStreamURLV3(sessionID, selectedIndex, ext, file.ID, frozenDownloaded.ID)
 		// The plan's selected ordinal must advertise the same opaque URL as the
 		// artifact even if another downloaded row was inserted before a seek.
 		for index := range plan.Subtitle.Inventory {
@@ -4393,8 +4396,9 @@ func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionI
 		}
 	}
 	// Inventory codec names describe the source; artifact metadata describes
-	// the bytes served at its URL (SRT/mov_text are delivered as WebVTT).
-	format = strings.TrimPrefix(playback.SubtitleURLExtV3(format), ".")
+	// the bytes served at its URL (SRT/mov_text are delivered as WebVTT unless
+	// the client negotiated original SRT).
+	format = strings.TrimPrefix(playback.SubtitleSidecarExtV3(format, source, clientFeatures), ".")
 	mime := subtitleMIMEV3(format)
 	if plan.Subtitle.Mode == playback.SubtitleConvertV3 {
 		format = playback.SubtitleFormatVTTV3
@@ -5097,7 +5101,14 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// a GET against that grant immediately, even though this replan response has
 	// not returned yet, so errors after publication would require canceling an
 	// already admitted successor.
-	if err := h.attachSubtitleArtifactV3(r.Context(), session.ID, effectiveFile, result.Plan, result.SubtitleTrackIndex, &artifactRecipe); err != nil {
+	artifactFeatures := start.ClientFeatures
+	if seekReanchor {
+		// The reanchor replays the frozen plan, whose artifact representation
+		// must not change. An attempt started by a server that did not know
+		// subrip_sidecar_v1 may carry the feature with WebVTT URLs.
+		artifactFeatures = playback.SubtitleFeaturesForPlanV3(result.Plan.Subtitle.Inventory, artifactFeatures)
+	}
+	if err := h.attachSubtitleArtifactV3(r.Context(), session.ID, effectiveFile, result.Plan, result.SubtitleTrackIndex, &artifactRecipe, artifactFeatures); err != nil {
 		return playback.DecisionResponseV3{}, *record, nil, subtitleArtifactErrorV3("Failed to prepare the selected subtitle artifact.", err)
 	}
 	if seekReanchor {
@@ -6396,8 +6407,16 @@ func subtitleMIMEV3(format string) string {
 	}
 }
 
+// forceSubtitleExtensionV3 replaces the URL's sidecar extension. It also drops
+// original=1, which only means something on a .srt URL.
 func forceSubtitleExtensionV3(rawURL, extension string) string {
 	pathPart, query, hasQuery := strings.Cut(rawURL, "?")
+	if extension != playback.SubtitleExtSRTV3 {
+		query = strings.Join(slices.DeleteFunc(strings.Split(query, "&"), func(field string) bool {
+			return field == playback.SubtitleOriginalParamV3+"=1"
+		}), "&")
+		hasQuery = query != ""
+	}
 	if slash := strings.LastIndex(pathPart, "/"); slash >= 0 {
 		if dot := strings.LastIndex(pathPart[slash+1:], "."); dot >= 0 {
 			pathPart = pathPart[:slash+1+dot] + extension
