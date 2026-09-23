@@ -3,7 +3,6 @@ package historyimport
 import (
 	"context"
 	"fmt"
-	"log/slog"
 )
 
 type PlexServerProvider struct {
@@ -24,6 +23,22 @@ func (p *PlexServerProvider) WithAccountToken(token string) *PlexServerProvider 
 	return p
 }
 
+// Plex library section types that hold watch state.
+const (
+	plexSectionMovie = "movie"
+	plexSectionShow  = "show"
+)
+
+// plexSectionMediaTypes maps a library section type to the PMS media type
+// whose items carry watch state: movies, and episodes rather than shows.
+var plexSectionMediaTypes = map[string]struct {
+	mediaType int
+	noun      string
+}{
+	plexSectionMovie: {mediaType: 1, noun: "movies"},
+	plexSectionShow:  {mediaType: 4, noun: "episodes"},
+}
+
 func (p *PlexServerProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 	sections, err := p.client.FetchLibrarySections(ctx, p.baseURL, p.token)
 	if err != nil {
@@ -33,37 +48,50 @@ func (p *PlexServerProvider) Fetch(ctx context.Context) ([]Record, []string, err
 	var allItems []PlexItem
 	var warnings []string
 
+	// Watched items include titles marked watched without playback, and whole
+	// shows or seasons marked watched, which Plex records on every episode.
+	// Plex counts started-but-unfinished items as unwatched, so they come from
+	// their own listing. A rewatch appears in both and imports as played.
 	for _, section := range sections {
-		switch section.Type {
-		case "movie":
-			items, err := p.client.FetchWatchedItems(ctx, p.baseURL, p.token, section.Key, 1)
-			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("failed to fetch movies from section %q: %v", section.Title, err))
-				continue
+		kind, ok := plexSectionMediaTypes[section.Type]
+		if !ok {
+			continue
+		}
+		watched, err := p.client.FetchWatchedItems(ctx, p.baseURL, p.token, section.Key, kind.mediaType)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, warnings, ctx.Err()
 			}
-			allItems = append(allItems, items...)
-		case "show":
-			items, err := p.client.FetchWatchedItems(ctx, p.baseURL, p.token, section.Key, 4)
-			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("failed to fetch episodes from section %q: %v", section.Title, err))
-				continue
+			warnings = append(warnings, fmt.Sprintf("failed to fetch watched %s from section %q: %v", kind.noun, section.Title, err))
+		}
+		allItems = append(allItems, watched...)
+		inProgress, err := p.client.FetchInProgressItems(ctx, p.baseURL, p.token, section.Key, kind.mediaType)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, warnings, ctx.Err()
 			}
-			allItems = append(allItems, items...)
+			warnings = append(warnings, fmt.Sprintf("failed to fetch in-progress %s from section %q: %v", kind.noun, section.Title, err))
+		}
+		allItems = append(allItems, inProgress...)
+	}
+
+	var seriesKeys []string
+	for _, item := range allItems {
+		if item.Type == KindEpisode {
+			seriesKeys = append(seriesKeys, item.GrandparentRatingKey)
 		}
 	}
-
-	onDeck, err := p.client.FetchOnDeck(ctx, p.baseURL, p.token)
+	seriesMeta, err := fetchPlexSeriesMetadata(ctx, p.client, p.baseURL, p.token, seriesKeys, &warnings)
 	if err != nil {
-		warnings = append(warnings, fmt.Sprintf("failed to fetch on-deck items: %v", err))
-	} else {
-		allItems = append(allItems, onDeck...)
+		return nil, warnings, err
 	}
-
-	seriesMeta := p.fetchSeriesMetadata(ctx, allItems, &warnings)
 
 	merged := make(map[string]Record, len(allItems))
 	for _, item := range allItems {
 		record := NormalizePlexItem(item, seriesMeta[item.GrandparentRatingKey])
+		if !record.Played && record.PositionSeconds <= 0 {
+			continue
+		}
 		existing, ok := merged[record.ExternalID]
 		if !ok {
 			merged[record.ExternalID] = record
@@ -92,33 +120,4 @@ func (p *PlexServerProvider) Fetch(ctx context.Context) ([]Record, []string, err
 	}
 
 	return records, warnings, nil
-}
-
-func (p *PlexServerProvider) fetchSeriesMetadata(ctx context.Context, items []PlexItem, warnings *[]string) map[string]*PlexItem {
-	seen := make(map[string]struct{})
-	var seriesKeys []string
-	for _, item := range items {
-		if item.Type != "episode" || item.GrandparentRatingKey == "" {
-			continue
-		}
-		if _, ok := seen[item.GrandparentRatingKey]; ok {
-			continue
-		}
-		seen[item.GrandparentRatingKey] = struct{}{}
-		seriesKeys = append(seriesKeys, item.GrandparentRatingKey)
-	}
-
-	result := make(map[string]*PlexItem, len(seriesKeys))
-	for _, key := range seriesKeys {
-		meta, err := p.client.FetchMetadata(ctx, p.baseURL, p.token, key)
-		if err != nil {
-			slog.WarnContext(ctx, "plex history import: failed to fetch series metadata", "component", "historyimport", "rating_key", key, "error", err)
-			*warnings = append(*warnings, fmt.Sprintf("failed to fetch series metadata for %s: %v", key, err))
-			continue
-		}
-		if meta != nil {
-			result[key] = meta
-		}
-	}
-	return result
 }

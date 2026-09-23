@@ -388,6 +388,10 @@ function SourceDialog({
                       value={plexPass}
                       onChange={(e) => setPlexPass(e.target.value)}
                     />
+                    <p className="text-muted-foreground text-xs">
+                      If your Plex account uses two-step verification, type the 6-digit code
+                      straight after your password.
+                    </p>
                   </div>
                 </div>
               ) : (
@@ -559,6 +563,10 @@ function TokenDialog({
                   value={plexPass}
                   onChange={(e) => setPlexPass(e.target.value)}
                 />
+                <p className="text-muted-foreground text-xs">
+                  If your Plex account uses two-step verification, type the 6-digit code straight
+                  after your password.
+                </p>
               </div>
             </div>
           ) : (
@@ -1505,6 +1513,13 @@ function AdminHistoryImportPage() {
         onSetToken={setTokenSource}
       />
 
+      {selected?.source_type === "plex" ? (
+        <p className="text-muted-foreground max-w-3xl text-sm">
+          Plex imports read the server&apos;s play history, so they bring over titles that were
+          played through. Resume points and titles marked as watched without playing only come over
+          when each person imports from their own Plex account in Settings &rarr; History Import.
+        </p>
+      ) : null}
       {selected?.needs_reconfiguration ? (
         <p role="alert" className="text-warning text-sm">
           This source needs reconfiguration. Edit the server address and credential before
