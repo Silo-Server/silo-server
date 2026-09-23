@@ -204,8 +204,9 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		mustEncode := source.BitrateKbps <= 0 || source.BitrateKbps > input.ServerBitrateCapKbps
 		if mustEncode {
 			defer func() {
-				if result.Terminal != nil || result.Plan == nil ||
-					(result.PlayMethod != PlayTranscode && !(file.IsAudioOnly() && result.TranscodeAudio)) {
+				compliant := result.Plan != nil &&
+					(result.PlayMethod == PlayTranscode || file.IsAudioOnly() && result.TranscodeAudio)
+				if result.Terminal != nil || !compliant {
 					result = terminalPlannerResultV3("bitrate_policy_unavailable", "This stream exceeds the server bitrate limit, and no compliant transcoding route is available.", false)
 				}
 			}()
@@ -609,7 +610,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 				return result
 			}
 		}
-		if deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK && (!dvStrip || dvStripEligibleHLS) && !(input.ServerBitrateCapKbps > 0 && (hlsTranscodeAudio || hlsAudioQuirkOK)) {
+		if deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK && (!dvStrip || dvStripEligibleHLS) && (input.ServerBitrateCapKbps <= 0 || (!hlsTranscodeAudio && !hlsAudioQuirkOK)) {
 			plan := cloneRemuxPlanCandidateV3(remuxBase)
 			plan.Delivery = DeliveryRemuxHLSV3
 			plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: "hls", MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
