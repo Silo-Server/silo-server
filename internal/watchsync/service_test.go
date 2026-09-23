@@ -3774,3 +3774,25 @@ func (r *serviceFakeRepo) UpdateConnectionSettings(ctx context.Context, provider
 	}
 	return r.UpsertConnection(ctx, current)
 }
+
+func TestExportItemOutcomeDecidesByMediaItemIDBeforeKey(t *testing.T) {
+	// A movie and a show share the key tmdb:550; the provider reports the
+	// movie missing and the show sent.
+	result := ExportResult{
+		Sent:     []string{"show-1", "tmdb:550"},
+		NotFound: []string{"movie-1", "tmdb:550"},
+	}
+	if sent, notFound := exportItemOutcome(result, "movie-1", "tmdb:550"); sent || !notFound {
+		t.Fatalf("movie outcome = sent %v notFound %v, want not found", sent, notFound)
+	}
+	if sent, notFound := exportItemOutcome(result, "show-1", "tmdb:550"); !sent || notFound {
+		t.Fatalf("show outcome = sent %v notFound %v, want sent", sent, notFound)
+	}
+	// A result that names items only by key still works.
+	if sent, _ := exportItemOutcome(ExportResult{Sent: []string{"imdb:tt1"}}, "movie-2", "imdb:tt1"); !sent {
+		t.Fatal("a key-only result must still confirm the item")
+	}
+	if sent, _ := exportItemOutcome(ExportResult{Failed: map[string]string{"movie-3": "x"}, Sent: []string{"imdb:tt3"}}, "movie-3", "imdb:tt3"); sent {
+		t.Fatal("a failed media item must not be confirmed through its key")
+	}
+}

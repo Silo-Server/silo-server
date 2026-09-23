@@ -1793,14 +1793,20 @@ func providerItemKeyForRemoteFavorite(favorite RemoteFavorite) string {
 	}
 }
 
-func exportResultSentSet(result ExportResult) map[string]bool {
-	sent := make(map[string]bool, len(result.Sent))
-	for _, value := range result.Sent {
-		if value != "" {
-			sent[value] = true
+// exportItemOutcome reports whether a provider answered for one item as sent or
+// as not found. Providers name items by media item id, provider key, or both.
+// The id decides whenever the result names it, because items of different
+// kinds can share a key such as tmdb:550; the key is only a fallback.
+func exportItemOutcome(result ExportResult, mediaItemID, key string) (sent, notFound bool) {
+	if mediaItemID != "" {
+		_, failed := result.Failed[mediaItemID]
+		sent = containsString(result.Sent, mediaItemID)
+		notFound = containsString(result.NotFound, mediaItemID)
+		if sent || notFound || failed {
+			return sent, notFound
 		}
 	}
-	return sent
+	return containsString(result.Sent, key), containsString(result.NotFound, key)
 }
 
 func containsString(values []string, candidate string) bool {

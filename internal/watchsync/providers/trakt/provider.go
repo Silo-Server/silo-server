@@ -816,6 +816,72 @@ type traktIDs struct {
 	TVDB  int    `json:"tvdb"`
 }
 
+// traktIDIndex matches items Trakt echoes back in a response, such as its
+// not_found lists, to the request items that produced them. An echo matches an
+// item when the two share ANY identifier (Trakt id, slug, IMDb, TMDB, or TVDB):
+// Trakt may echo a different id subset than Silo sent, and Silo keys an item by
+// its own preferred id, so comparing one derived key per side misses matches.
+// Identifiers are namespaced by Silo item kind (historyimport.Kind*) because
+// TMDB and TVDB number movies, shows, and episodes independently. Zero ids
+// never match. Create one with traktIDIndex{}.
+//
+// Limitation: an echo that carries only identifiers the item lacks (for
+// example a bare Trakt id for an item Silo knows only by IMDb) cannot be
+// matched, so callers treat that item as accepted.
+type traktIDIndex map[traktIDRef]struct{}
+
+// ID schemes, as used in provider item keys ("tmdb:949") and traktIDRef.
+const (
+	idSchemeTrakt = "trakt"
+	idSchemeSlug  = "slug"
+	idSchemeIMDb  = "imdb"
+	idSchemeTMDB  = "tmdb"
+	idSchemeTVDB  = "tvdb"
+)
+
+type traktIDRef struct {
+	kind   string
+	scheme string
+	value  string
+}
+
+// add records every non-zero identifier in ids under kind.
+func (idx traktIDIndex) add(kind string, ids traktIDs) {
+	for _, ref := range traktIDRefs(kind, ids) {
+		idx[ref] = struct{}{}
+	}
+}
+
+// matches reports whether any non-zero identifier in ids was added under kind.
+func (idx traktIDIndex) matches(kind string, ids traktIDs) bool {
+	for _, ref := range traktIDRefs(kind, ids) {
+		if _, ok := idx[ref]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func traktIDRefs(kind string, ids traktIDs) []traktIDRef {
+	refs := make([]traktIDRef, 0, 5)
+	if ids.Trakt > 0 {
+		refs = append(refs, traktIDRef{kind: kind, scheme: idSchemeTrakt, value: strconv.Itoa(ids.Trakt)})
+	}
+	if ids.Slug != "" {
+		refs = append(refs, traktIDRef{kind: kind, scheme: idSchemeSlug, value: ids.Slug})
+	}
+	if ids.IMDb != "" {
+		refs = append(refs, traktIDRef{kind: kind, scheme: idSchemeIMDb, value: ids.IMDb})
+	}
+	if ids.TMDB > 0 {
+		refs = append(refs, traktIDRef{kind: kind, scheme: idSchemeTMDB, value: strconv.Itoa(ids.TMDB)})
+	}
+	if ids.TVDB > 0 {
+		refs = append(refs, traktIDRef{kind: kind, scheme: idSchemeTVDB, value: strconv.Itoa(ids.TVDB)})
+	}
+	return refs
+}
+
 type traktMovie struct {
 	Title string   `json:"title"`
 	Year  int      `json:"year"`
@@ -1156,11 +1222,8 @@ func appendNestedRemoveEpisode(shows []traktHistoryRemoveShow, showIDs traktIDs,
 func buildFavoritesPayload(favorites []watchsync.LocalFavorite) traktFavoritesPayload {
 	var payload traktFavoritesPayload
 	for _, favorite := range favorites {
-		ids := traktIDs{IMDb: favorite.IMDbID, TMDB: parseInt(favorite.TMDBID), TVDB: parseInt(favorite.TVDBID)}
-		if ids.IMDb == "" && ids.TMDB == 0 && ids.TVDB == 0 {
-			ids = idsFromProviderItemKey(favorite.ProviderItemKey)
-		}
-		if ids.IMDb == "" && ids.TMDB == 0 && ids.TVDB == 0 {
+		ids := favoriteIDs(favorite)
+		if !sendableIDs(ids) {
 			continue
 		}
 		switch favorite.Kind {
@@ -1173,24 +1236,32 @@ func buildFavoritesPayload(favorites []watchsync.LocalFavorite) traktFavoritesPa
 	return payload
 }
 
+// favoriteExportResult maps a favorites or watchlist response back to the
+// request items as (MediaItemID, key) pairs. An item goes to NotFound when a
+// not_found echo of the same kind shares any id with the ids it was sent with
+// (see traktIDIndex for the limitation), otherwise to Sent. Items with no key
+// are left out of both lists.
 func favoriteExportResult(favorites []watchsync.LocalFavorite, notFound traktFavoritesPayload) watchsync.ExportResult {
 	result := watchsync.ExportResult{Sent: make([]string, 0, len(favorites))}
-	notFoundKeys := map[string]bool{}
+	missing := traktIDIndex{}
 	for _, movie := range notFound.Movies {
-		notFoundKeys[movieKey(movie.IDs)] = true
+		missing.add(historyimport.KindMovie, movie.IDs)
 	}
 	for _, show := range notFound.Shows {
-		notFoundKeys[showKey(show.IDs)] = true
+		missing.add(historyimport.KindSeries, show.IDs)
 	}
 	for _, favorite := range favorites {
 		key := favorite.ProviderItemKey
 		if key == "" {
 			key = favoriteKey(favorite)
 		}
-		if key == "" {
+		ids := favoriteIDs(favorite)
+		// An item without a sendable id was left out of the request, so it
+		// is neither sent nor reported missing.
+		if key == "" || !sendableIDs(ids) {
 			continue
 		}
-		if notFoundKeys[key] {
+		if missing.matches(favorite.Kind, ids) {
 			result.NotFound = append(result.NotFound, favorite.MediaItemID, key)
 			continue
 		}
@@ -1199,11 +1270,25 @@ func favoriteExportResult(favorites []watchsync.LocalFavorite, notFound traktFav
 	return result
 }
 
-func favoriteKey(favorite watchsync.LocalFavorite) string {
+// favoriteIDs returns the ids a favorite or watchlist item is sent to Trakt
+// with: its own external ids, falling back to the id its provider item key
+// encodes.
+func favoriteIDs(favorite watchsync.LocalFavorite) traktIDs {
 	ids := traktIDs{IMDb: favorite.IMDbID, TMDB: parseInt(favorite.TMDBID), TVDB: parseInt(favorite.TVDBID)}
 	if ids.IMDb == "" && ids.TMDB == 0 && ids.TVDB == 0 {
 		ids = idsFromProviderItemKey(favorite.ProviderItemKey)
 	}
+	return ids
+}
+
+// sendableIDs reports whether ids can identify a title in a Trakt sync write.
+// Trakt accepts its own id as well as IMDb, TMDB, and TVDB ids.
+func sendableIDs(ids traktIDs) bool {
+	return hasAnyID(ids) || ids.Trakt > 0
+}
+
+func favoriteKey(favorite watchsync.LocalFavorite) string {
+	ids := favoriteIDs(favorite)
 	if favorite.Kind == historyimport.KindSeries {
 		return showKey(ids)
 	}
@@ -1216,13 +1301,13 @@ func idsFromProviderItemKey(key string) traktIDs {
 		return traktIDs{}
 	}
 	switch prefix {
-	case "imdb":
+	case idSchemeIMDb:
 		return traktIDs{IMDb: value}
-	case "tmdb":
+	case idSchemeTMDB:
 		return traktIDs{TMDB: parseInt(value)}
-	case "tvdb":
+	case idSchemeTVDB:
 		return traktIDs{TVDB: parseInt(value)}
-	case "trakt":
+	case idSchemeTrakt:
 		return traktIDs{Trakt: parseInt(value)}
 	default:
 		return traktIDs{}
