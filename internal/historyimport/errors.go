@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"strings"
@@ -85,4 +86,16 @@ func IsReachabilityError(err error) bool {
 		strings.Contains(message, "x509:") ||
 		strings.Contains(message, "timeout") ||
 		strings.Contains(message, "no reachable server url")
+}
+
+// ErrSourceUnreachable marks a source server (or Emby Connect or plex.tv)
+// that Silo could not reach at all. Only upstream call sites tag it, so a
+// failure of Silo's own database never reads as a source address problem.
+var ErrSourceUnreachable = errors.New("history import source unreachable")
+
+func tagUnreachable(err error) error {
+	if IsReachabilityError(err) {
+		return fmt.Errorf("%w: %w", ErrSourceUnreachable, err)
+	}
+	return err
 }

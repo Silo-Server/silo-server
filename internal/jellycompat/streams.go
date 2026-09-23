@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
@@ -39,6 +40,9 @@ const (
 	compatRouteCapacityUnavailableCode = "RouteCapacityUnavailable"
 	compatPlaybackRouteUnboundCode     = "PlaybackRouteUnbound"
 )
+
+var errServerBitrateScopeUnavailable = errors.New("stream bitrate policy unavailable")
+var errServerBitrateDirectUnavailable = errors.New("direct playback exceeds server bitrate limit")
 
 // compatRouteOutcomeCode maps an unselected route outcome onto the Jellyfin
 // error code the client sees. Exhausted capacity is transient and must stay
@@ -439,11 +443,23 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		playSession, source, err = h.createStaticPlaySession(r.Context(), session, routeID, mediaSourceID, clientPlaySessionID)
 	}
 	if err != nil {
+		if errors.Is(err, errServerBitrateScopeUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "The server could not resolve the stream bitrate limit")
+			return
+		}
+		if errors.Is(err, errServerBitrateDirectUnavailable) {
+			writeError(w, http.StatusBadRequest, "PlaybackUnavailable", "This stream exceeds the server bitrate limit; this direct-play request cannot transcode it")
+			return
+		}
 		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
 		return
 	}
 	if source == nil {
 		writeError(w, http.StatusBadRequest, "BadRequest", "Media source is required")
+		return
+	}
+	if staticRequest && source.ServerBitrateCapKbps > 0 && !source.SupportsDirectPlay {
+		writeError(w, http.StatusBadRequest, "PlaybackUnavailable", "This stream exceeds the server bitrate limit; this direct-play request cannot transcode it")
 		return
 	}
 	method := "direct"
@@ -2223,6 +2239,9 @@ func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, s
 	if ps != nil && !ps.CreatedAt.IsZero() {
 		card.OriginalStartedAt = ps.CreatedAt
 	}
+	if source.StreamLocation != "" {
+		card.StreamLocation = source.StreamLocation
+	}
 	if ps != nil && ps.RoutingAssignment != nil {
 		card.RoutingNetworkProvider = ps.RoutingAssignment.NetworkProvider
 		card.RoutingExecutionNodeID = ps.RoutingAssignment.ExecutionNodeID
@@ -2395,6 +2414,14 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	}
 	if err != nil {
 		return nil, err
+	}
+	if source.StreamLocation != "" {
+		if setter, ok := h.sessionMgr.(interface{ SetStreamLocation(string, string) error }); ok {
+			if err := setter.SetStreamLocation(session.ID, source.StreamLocation); err != nil {
+				_ = h.sessionMgr.StopSession(session.ID)
+				return nil, err
+			}
+		}
 	}
 	_ = h.syncUpstreamAudioSelection(&PlaybackSession{
 		UpstreamSessionID:  session.ID,
@@ -3162,9 +3189,13 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 
 	playSessionID := h.codec.EncodeStringID(EncodedIDPlaySession, uuidNewString())
 	sources := make([]PlaybackMediaSource, 0, len(detail.Versions))
+	serverBitrateCapKbps, err := h.serverBitrateCap(ctx, session)
+	if err != nil {
+		return nil, nil, errServerBitrateScopeUnavailable
+	}
 	allow4KTranscode := h.allow4KVideoTranscode(ctx)
 	for _, version := range detail.Versions {
-		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{}, allow4KTranscode)
+		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps, streamLocation: string(streamlocation.FromContext(ctx))}, allow4KTranscode)
 		sources = append(sources, source)
 	}
 
@@ -3177,8 +3208,11 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 		UserID:              session.PseudoUserID.String(),
 		MediaSources:        sources,
 	}
-	matched := playbackRouteSource(ps, mediaSourceID, true)
+	matched := playbackRouteSource(ps, mediaSourceID, true, true)
 	if matched != nil {
+		if serverBitrateCapKbps > 0 && !matched.SupportsDirectPlay {
+			return nil, nil, errServerBitrateDirectUnavailable
+		}
 		h.playbackStore.Put(*ps)
 	}
 	return ps, matched, nil
@@ -3191,12 +3225,13 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	// Only progressive routes support Jellyfin's MediaSource.Id == Item.Id
 	// convention. Subtitle and attachment routes identify an exact source.
 	allowItemAlias := chiURLParam(r, "routeMediaSourceId") == ""
+	staticRequest := strings.EqualFold(newCaseInsensitiveQuery(r.URL.Query()).Get("Static"), "true")
 	if clientPlaySessionID != "" {
 		if playSession, ok := h.playbackStore.Get(clientPlaySessionID); ok && playSession.CompatToken == compatSession.Token {
 			if !mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
 				return nil, nil, errPlaybackRouteMismatch
 			}
-			return playSession, playbackRouteSource(playSession, mediaSourceID, allowItemAlias), nil
+			return playSession, playbackRouteSource(playSession, mediaSourceID, allowItemAlias, staticRequest), nil
 		}
 		// Clients that skip PlaybackInfo reuse their own PlaySessionId on range
 		// requests. Reuse remains scoped to this token and the requested item.
@@ -3209,7 +3244,7 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	if !mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
 		return nil, nil, errPlaybackRouteMismatch
 	}
-	source := playbackRouteSource(playSession, mediaSourceID, allowItemAlias)
+	source := playbackRouteSource(playSession, mediaSourceID, allowItemAlias, staticRequest)
 	if source == nil {
 		return playSession, nil, nil
 	}
@@ -3225,8 +3260,16 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	return playSession, source, nil
 }
 
-func playbackRouteSource(session *PlaybackSession, mediaSourceID string, allowItemAlias bool) *PlaybackMediaSource {
+func playbackRouteSource(session *PlaybackSession, mediaSourceID string, allowItemAlias, staticRequest bool) *PlaybackMediaSource {
 	if mediaSourceID == "" || (allowItemAlias && mediaSourceIDsEqual(mediaSourceID, session.RouteItemID)) {
+		if staticRequest {
+			for _, source := range session.MediaSources {
+				if source.ServerBitrateCapKbps > 0 && source.SupportsDirectPlay {
+					copy := source
+					return &copy
+				}
+			}
+		}
 		return firstMediaSource(session)
 	}
 	return findMediaSource(session, mediaSourceID)

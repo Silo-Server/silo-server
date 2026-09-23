@@ -27,6 +27,7 @@ type RecipeCard struct {
 	TranscodeNodeURL     string    `json:"transcode_node_url,omitempty"`
 	TranscodeTransportID string    `json:"transcode_transport_id,omitempty"`
 	OriginalStartedAt    time.Time `json:"original_started_at,omitempty"`
+	StreamLocation       string    `json:"stream_location,omitempty"`
 	// Routing fields freeze the committed media-serving boundary so a token or
 	// stored card cannot lose a proxy-only assignment when it reconstructs a
 	// session on another process. Stable execution and egress identities bind
@@ -361,6 +362,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		TranscodeNode:          c.TranscodeNodeURL,
 		TranscodeTransportID:   c.TranscodeTransportID,
 		RoutingNetworkProvider: c.RoutingNetworkProvider,
+		StreamLocation:         c.StreamLocation,
 		RoutingWorkload:        c.RoutingWorkload,
 		RoutingExecution:       c.RoutingExecution,
 		RoutingExecutionNodeID: c.RoutingExecutionNodeID,
@@ -450,6 +452,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		TranscodeNodeURL:           c.TranscodeNode,
 		TranscodeTransportID:       c.TranscodeTransportID,
 		RoutingNetworkProvider:     c.RoutingNetworkProvider,
+		StreamLocation:             c.StreamLocation,
 		RoutingWorkload:            c.RoutingWorkload,
 		RoutingExecution:           c.RoutingExecution,
 		RoutingExecutionNodeID:     c.RoutingExecutionNodeID,

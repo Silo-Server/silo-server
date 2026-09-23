@@ -3290,6 +3290,7 @@ func main() {
 					)
 				}
 				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(compatScopeResolver)
+				compatDeps.PlaybackScopeResolver = compatScopeResolver
 			}
 		}
 

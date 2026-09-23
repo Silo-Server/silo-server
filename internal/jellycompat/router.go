@@ -131,6 +131,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 	}
 	playbackHandler := NewPlaybackHandler(deps.Config, deps.ContentService, deps.IDCodec, deps.DeviceProfiles, deps.PlaybackStore, deps.SessionMgr, deps.FileResolver, deps.UserStoreProvider)
+	playbackHandler.ScopeResolver = deps.PlaybackScopeResolver
 	startupSegmentRetention := playbackHandler.SegmentRetentionSeconds
 	playbackHandler.SegmentRetentionSeconds = func() int {
 		if cfg := deps.CurrentConfig(); cfg != nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1184,7 +1185,17 @@ func (s *DetailService) LocalizeSeasonModel(ctx context.Context, season *models.
 	if err != nil || loc == nil {
 		return cloneSeason(season), err
 	}
-	return applySeasonLocalization(season, loc), nil
+	imagesLocked := false
+	if s.itemRepo != nil {
+		series, err := s.itemRepo.GetByID(ctx, season.SeriesID)
+		if err != nil {
+			return cloneSeason(season), err
+		}
+		if series != nil {
+			imagesLocked = slices.Contains(series.LockedFields, fieldImagesLocked)
+		}
+	}
+	return applySeasonLocalization(season, loc, imagesLocked), nil
 }
 
 // LocalizeSeasonModels applies presentation-language localization to a batch
@@ -1250,6 +1261,18 @@ func (s *DetailService) LocalizeSeasonModels(ctx context.Context, seasons []*mod
 			locs[seasonID] = localization
 		}
 	}
+	imageLocksBySeries := make(map[string]bool)
+	if len(locs) > 0 && s.itemRepo != nil {
+		series, err := s.itemRepo.GetByIDs(ctx, seriesIDs)
+		if err != nil {
+			return localized, err
+		}
+		for _, item := range series {
+			if item != nil {
+				imageLocksBySeries[item.ContentID] = slices.Contains(item.LockedFields, fieldImagesLocked)
+			}
+		}
+	}
 	for i, season := range seasons {
 		if season == nil {
 			continue
@@ -1257,7 +1280,7 @@ func (s *DetailService) LocalizeSeasonModels(ctx context.Context, seasons []*mod
 		if loc := locs[season.ContentID]; loc != nil {
 			target := targets[season.ContentID]
 			if target != "" && !sameMetadataLanguage(season.DefaultMetadataLanguage, target) {
-				localized[i] = applySeasonLocalization(season, loc)
+				localized[i] = applySeasonLocalization(season, loc, imageLocksBySeries[season.SeriesID])
 			}
 		}
 	}

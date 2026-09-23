@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // preparePersonalRun performs upstream exchanges without holding database locks.
@@ -36,13 +37,14 @@ func (s *Service) preparePersonalRun(ctx context.Context, userID int, input Crea
 			}
 			auth, err = s.emby.ConnectExchange(ctx, baseURL, session.ConnectUserID, selected.AccessKey)
 			if err != nil {
-				return out, err
+				return out, tagUnreachable(err)
 			}
 			out.ConnectSession = session
 			out.SelectedServerID = selected.ID
 		case ConnectionModePredefined:
-			if input.SourceID <= 0 || input.Username == "" || input.Password == "" {
-				return out, fmt.Errorf("%w: source and user credentials are required", ErrInvalidInput)
+			// Emby accounts may have no password, so only the username is required.
+			if input.SourceID <= 0 || strings.TrimSpace(input.Username) == "" {
+				return out, fmt.Errorf("%w: choose a server and enter the Emby username", ErrInvalidInput)
 			}
 			source, err := s.repo.GetSourceByID(ctx, input.SourceID)
 			if err != nil {
@@ -56,7 +58,7 @@ func (s *Service) preparePersonalRun(ctx context.Context, userID int, input Crea
 			}
 			auth, err = s.emby.AuthenticateServerUser(ctx, source.BaseURL, input.Username, input.Password)
 			if err != nil {
-				return out, err
+				return out, tagUnreachable(err)
 			}
 			out.SourceID = source.ID
 			out.SourceRevision = source.Revision
@@ -70,7 +72,7 @@ func (s *Service) preparePersonalRun(ctx context.Context, userID int, input Crea
 		}
 		auth, err := s.jellyfin.AuthenticateServerUser(ctx, input.JellyfinBaseURL, input.JellyfinUsername, input.JellyfinPassword)
 		if err != nil {
-			return out, err
+			return out, tagUnreachable(err)
 		}
 		out.ConnectionMode = ConnectionModeCustom
 		out.Credentials = personalRunCredentials{BaseURL: auth.BaseURL, ExternalUserID: auth.UserID, ServerToken: auth.AccessToken}

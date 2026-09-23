@@ -61,13 +61,15 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 	}
 
 	scope := Scope{
-		UserID:              user.ID,
-		ProfileID:           input.ProfileID,
-		AllowedLibraryIDs:   cloneInts(effective.LibraryIDs),
-		LibrariesRestricted: effective.LibraryIDs != nil,
-		MaxPlaybackQuality:  NormalizePlaybackQuality(effective.MaxPlaybackQuality),
-		PolicyRevision:      user.AccessPolicyRevision,
-		ProfileVerified:     input.ProfileID == "",
+		UserID:                     user.ID,
+		ProfileID:                  input.ProfileID,
+		AllowedLibraryIDs:          cloneInts(effective.LibraryIDs),
+		LibrariesRestricted:        effective.LibraryIDs != nil,
+		MaxPlaybackQuality:         NormalizePlaybackQuality(effective.MaxPlaybackQuality),
+		MaxRemoteStreamBitrateKbps: effective.MaxRemoteStreamBitrateKbps,
+		MaxLocalStreamBitrateKbps:  effective.MaxLocalStreamBitrateKbps,
+		PolicyRevision:             user.AccessPolicyRevision,
+		ProfileVerified:            input.ProfileID == "",
 	}
 
 	store, err := r.storeFactory.ForUser(ctx, input.UserID)

@@ -11,16 +11,18 @@ import (
 )
 
 const (
-	ProtocolV3                   = 3
-	FeaturePlaybackPlanV3        = "playback_plan_v3"
-	FeatureEmbeddedSubtitlesV3   = "embedded_subtitles_v1"
-	FeatureNeutralContractV3     = "neutral_playback_v3_contract_v1"
-	FeatureLayoutPassthrough     = "layout_aware_passthrough"
-	FeatureClientVideoTransforms = "client_video_transformations_v1"
-	FeatureRouteDiagnostics      = "playback_route_diagnostics"
-	FeatureDeviceQuirksV3        = "device_quirks_v1"
-	FeatureSeekReanchorV3        = "seek_reanchor_v1"
-	FeatureOutputChangeV3        = "output_change_v1"
+	ProtocolV3                               = 3
+	FeaturePlaybackPlanV3                    = "playback_plan_v3"
+	FeatureServerRemoteStreamBitratePolicyV3 = "server_remote_stream_bitrate_policy_v1"
+	FeatureServerLocalStreamBitratePolicyV3  = "server_local_stream_bitrate_policy_v1"
+	FeatureEmbeddedSubtitlesV3               = "embedded_subtitles_v1"
+	FeatureNeutralContractV3                 = "neutral_playback_v3_contract_v1"
+	FeatureLayoutPassthrough                 = "layout_aware_passthrough"
+	FeatureClientVideoTransforms             = "client_video_transformations_v1"
+	FeatureRouteDiagnostics                  = "playback_route_diagnostics"
+	FeatureDeviceQuirksV3                    = "device_quirks_v1"
+	FeatureSeekReanchorV3                    = "seek_reanchor_v1"
+	FeatureOutputChangeV3                    = "output_change_v1"
 	// FeatureOutputDisplayEvidenceV3 tells a client this server understands
 	// output.display and its hdr_evidence tier. A pre-feature server ignores
 	// the field and falls back from a missing output.hdr_details to the
@@ -111,6 +113,8 @@ const DegradationWarningHDRToneMappedV3 = "hdr_tone_mapped"
 func ServerFeaturesV3() []string {
 	return []string{
 		FeaturePlaybackPlanV3,
+		FeatureServerRemoteStreamBitratePolicyV3,
+		FeatureServerLocalStreamBitratePolicyV3,
 		FeatureNeutralContractV3,
 		FeatureEmbeddedSubtitlesV3,
 		FeatureLayoutPassthrough,
@@ -252,6 +256,10 @@ const (
 	TerminalHDRTranscodeUnsupportedV3    = "hdr_transcode_unsupported"
 	TerminalDVConversionUnsupportedV3    = "dv_conversion_unsupported"
 )
+
+// TerminalBitratePolicyUnavailableV3 reports that no route fits the
+// administrator's local or remote per-stream bitrate limit for this version.
+const TerminalBitratePolicyUnavailableV3 = "bitrate_policy_unavailable"
 
 type SubtitleModeV3 string
 

@@ -23,6 +23,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -34,6 +35,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
+	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -81,6 +83,17 @@ const (
 	playbackRemoteOutcomeFailedV3       = "failed"
 	routeCapabilityUnavailableReasonV3  = "route_capability_unavailable"
 )
+
+type serverBitrateCapContextKeyV3 struct{}
+
+func withServerBitrateCapV3(ctx context.Context, capKbps int) context.Context {
+	return context.WithValue(ctx, serverBitrateCapContextKeyV3{}, capKbps)
+}
+
+func serverBitrateCapV3(ctx context.Context) int {
+	cap, _ := ctx.Value(serverBitrateCapContextKeyV3{}).(int)
+	return cap
+}
 
 var errSubtitleStoreUnavailableV3 = errors.New("subtitle store unavailable")
 
@@ -1611,6 +1624,10 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusInternalServerError, "internal_error", "Failed to check playback attempt idempotency")
 	}
 	timings.mark("idempotency")
+	if scope, ok := access.GetScope(r.Context()); ok {
+		capKbps := streamlocation.BitrateCap(r.Context(), scope.MaxLocalStreamBitrateKbps, scope.MaxRemoteStreamBitrateKbps)
+		r = r.WithContext(withServerBitrateCapV3(r.Context(), capKbps))
+	}
 	requestedFile, err := h.loadAuthorizedFile(r, req.FileID)
 	if err != nil {
 		return playback.DecisionResponseV3{}, playbackFileOperationError(err)
@@ -1678,7 +1695,8 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	}
 	result, toneMapCapabilityErr := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{
 		Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile,
-		AudioTrackIndex: audioIndex, Settings: settings,
+		ServerBitrateCapKbps: serverBitrateCapV3(r.Context()),
+		AudioTrackIndex:      audioIndex, Settings: settings,
 		Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(),
 		AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile),
 	})
@@ -1709,7 +1727,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 					if err := preflightPlaybackFile(r.Context(), candidateFile, h.MissingMarker, h.EventsHub); err != nil {
 						continue
 					}
-					candidateResult, candidateToneMapErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: candidateReq, RequestedFile: requestedFile, EffectiveFile: candidateFile, AudioTrackIndex: candidateAudioIndex, Settings: settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), candidateFile), Now: time.Now(), AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), candidateFile)})
+					candidateResult, candidateToneMapErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: candidateReq, RequestedFile: requestedFile, EffectiveFile: candidateFile, ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: candidateAudioIndex, Settings: settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), candidateFile), Now: time.Now(), AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), candidateFile)})
 				}
 				if candidateResult.Terminal == nil {
 					req = candidateReq
@@ -1987,7 +2005,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		return playback.DecisionResponseV3{}, subtitleArtifactErrorV3("Failed to prepare the selected subtitle artifact.", err)
 	}
 	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.ServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
-	record := playback.AttemptRecordV3{PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, UserID: userID, ProfileID: profileID, RequestedMediaFileID: requestedFile.ID, EffectiveMediaFileID: effectiveFile.ID, CurrentPlanID: result.Plan.PlanID, CurrentPlan: *result.Plan, FrozenRecipe: frozenRecipe, NormalizedRequest: req, StartResponse: response, RequestDigest: requestDigests.current, ExpiresAt: time.Now().Add(playback.MaxTokenTTL)}
+	record := playback.AttemptRecordV3{PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, UserID: userID, ProfileID: profileID, RequestedMediaFileID: requestedFile.ID, EffectiveMediaFileID: effectiveFile.ID, CurrentPlanID: result.Plan.PlanID, CurrentPlan: *result.Plan, FrozenRecipe: frozenRecipe, NormalizedRequest: req, ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), StartResponse: response, RequestDigest: requestDigests.current, ExpiresAt: time.Now().Add(playback.MaxTokenTTL)}
 	if err := h.updateV3SessionState(r.Context(), session, effectiveFile, result, transport, mode); err != nil {
 		transport.rollback()
 		abort()
@@ -3124,16 +3142,17 @@ func identityLocalFallbackAllowedV3(result playback.PlannerResultV3, policy conf
 // installs its own lazily memoized snapshot, so the inputs can never disagree.
 func (h *PlaybackHandler) plannerInputV3(ctx context.Context, req playback.StartRequestV3, requestedFile, effectiveFile *models.MediaFile, audioIndex int, attemptedKeys []string) playback.PlannerInputV3 {
 	return playback.PlannerInputV3{
-		Request:             req,
-		RequestedFile:       requestedFile,
-		EffectiveFile:       effectiveFile,
-		AudioTrackIndex:     audioIndex,
-		Settings:            h.plannerSettingsV3(ctx),
-		Registry:            h.transformationRegistryV3(ctx),
-		DVRPUStrippable:     h.lazyDVRPUStrippableV3(ctx, effectiveFile),
-		Now:                 time.Now(),
-		AttemptedKeys:       attemptedKeys,
-		AdditionalSubtitles: h.downloadedSubtitleInventoryV3(ctx, effectiveFile),
+		Request:              req,
+		RequestedFile:        requestedFile,
+		EffectiveFile:        effectiveFile,
+		ServerBitrateCapKbps: serverBitrateCapV3(ctx),
+		AudioTrackIndex:      audioIndex,
+		Settings:             h.plannerSettingsV3(ctx),
+		Registry:             h.transformationRegistryV3(ctx),
+		DVRPUStrippable:      h.lazyDVRPUStrippableV3(ctx, effectiveFile),
+		Now:                  time.Now(),
+		AttemptedKeys:        attemptedKeys,
+		AdditionalSubtitles:  h.downloadedSubtitleInventoryV3(ctx, effectiveFile),
 	}
 }
 
@@ -3706,6 +3725,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	if !mode.headerAuth {
 		card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", ts.Opts())
 		card.OriginalStartedAt = session.StartedAt
+		card.StreamLocation = session.StreamLocation
 		card.RoutingNetworkProvider = new(netaccess.PathFromContext(r.Context()).Provider)
 		card.RoutingWorkload = string(routingWorkloadV3(result))
 		card.RoutingExecution = string(noderouting.ExecutionAPI)
@@ -4036,6 +4056,7 @@ func remoteTranscodeRecipeCardV3(session *playback.Session, file *models.MediaFi
 	// client token, proxy grant, and node recipe alike — so telemetry can age the
 	// session correctly after any reconstruct.
 	card.OriginalStartedAt = session.StartedAt
+	card.StreamLocation = session.StreamLocation
 	return card
 }
 
@@ -4618,6 +4639,7 @@ func (h *PlaybackHandler) raceCopySafetyV3(fileID int, plan *playback.PlanV3) {
 // executeReplanV3 prepares an atomic replacement for a failed playback route.
 func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.AttemptRecordV3, req playback.ReplanRequestV3) (playback.DecisionResponseV3, playback.AttemptRecordV3, *preparedTransportV3, *transportErrorV3) {
 	r = r.WithContext(withPlaybackRoutingPolicySnapshotV3(r.Context(), h.playbackRoutingPolicyV3()))
+	r = r.WithContext(withServerBitrateCapV3(r.Context(), record.ServerBitrateCapKbps))
 	reservationHeld := false
 	reservationHandedOff := false
 	cancelReservation := func() {
@@ -4880,7 +4902,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			}
 		}
 	} else {
-		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
+		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 	}
 	if outputChange && result.Terminal != nil && effectiveFile.ID != currentEffectiveFile.ID {
 		// Returning to the requested edition is speculative during an output
@@ -4894,7 +4916,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		if err != nil {
 			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: err.Error()}
 		}
-		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
+		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 	}
 	if start.AllowsAlternateVersions() && terminalAllowsAlternateFileV3(result.Terminal) && replanAllowsAlternateFileV3(operation, start.QualityPreference) {
 		if alternates, alternateErr := h.findAlternateFiles(r.Context(), requestedFile); alternateErr == nil {
@@ -4926,7 +4948,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 					if err := preflightPlaybackFile(r.Context(), candidateFile, h.MissingMarker, h.EventsHub); err != nil {
 						continue
 					}
-					candidateResult, candidateToneMapErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: candidateStart, RequestedFile: plannerRequestedFile, EffectiveFile: candidateFile, AudioTrackIndex: candidateAudioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), candidateFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), candidateFile)})
+					candidateResult, candidateToneMapErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: candidateStart, RequestedFile: plannerRequestedFile, EffectiveFile: candidateFile, ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: candidateAudioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), candidateFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), candidateFile)})
 				}
 				if candidateResult.Terminal == nil {
 					start = candidateStart
@@ -5666,6 +5688,7 @@ const (
 	terminalHDRTranscodeUnsupportedV3       = playback.TerminalHDRTranscodeUnsupportedV3
 	terminalSubtitleConversionUnsupportedV3 = "subtitle_conversion_unsupported"
 	terminalSubtitleUnavailableInVersionV3  = "subtitle_unavailable_in_version"
+	terminalBitratePolicyUnavailableV3      = playback.TerminalBitratePolicyUnavailableV3
 )
 
 // terminalAllowsAlternateFileV3 reports whether a refusal is the kind another
@@ -5679,12 +5702,16 @@ const (
 // the exact reason this gate exists — a bitmap subtitle needing burn-in that an
 // HDR source cannot support while an SDR alternate can. Leaving the new reason
 // out silently retired that fallback and refused playback outright.
+//
+// bitrate_policy_unavailable belongs here for the same reason: it replaces the
+// 4K and HDR refusals of a version that exceeds the stream's bitrate limit, and
+// a lower-bitrate version may fit that limit.
 func terminalAllowsAlternateFileV3(terminal *playback.TerminalV3) bool {
 	if terminal == nil {
 		return false
 	}
 	switch terminal.Reason {
-	case terminalNoAlternateVersionV3, terminalHDRTranscodeUnsupportedV3, terminalSubtitleConversionUnsupportedV3:
+	case terminalNoAlternateVersionV3, terminalHDRTranscodeUnsupportedV3, terminalSubtitleConversionUnsupportedV3, terminalBitratePolicyUnavailableV3:
 		return true
 	default:
 		return false
@@ -6118,6 +6145,7 @@ func (h *PlaybackHandler) persistTerminalStartDecisionV3(ctx context.Context, us
 		RequestedMediaFileID: requestedFileID,
 		EffectiveMediaFileID: effectiveFileID,
 		NormalizedRequest:    req,
+		ServerBitrateCapKbps: serverBitrateCapV3(ctx),
 		StartResponse:        response,
 		RequestDigest:        requestDigests.current,
 		ExpiresAt:            time.Now().Add(playback.MaxTokenTTL),

@@ -59,16 +59,18 @@ type AdminAccountCapabilitiesOutputBody struct {
 }
 
 type AdminAccountPolicyInput struct {
-	LibraryIDs               []ID    `json:"library_ids,omitempty" nullable:"true"`
-	MaxPlaybackQuality       *string `json:"max_playback_quality,omitempty" nullable:"true"`
-	MaxStreams               *int    `json:"max_streams,omitempty" nullable:"true" minimum:"0"`
-	MaxTranscodes            *int    `json:"max_transcodes,omitempty" nullable:"true" minimum:"0"`
-	TranscodeAllowed         *bool   `json:"transcode_allowed,omitempty" nullable:"true"`
-	AudioTranscodeAllowed    *bool   `json:"audio_transcode_allowed,omitempty" nullable:"true"`
-	DownloadAllowed          *bool   `json:"download_allowed,omitempty" nullable:"true"`
-	DownloadTranscodeAllowed *bool   `json:"download_transcode_allowed,omitempty" nullable:"true"`
-	RequestsAllowed          *bool   `json:"requests_allowed,omitempty" nullable:"true"`
-	AccessGroupID            *ID     `json:"access_group_id,omitempty" nullable:"true"`
+	LibraryIDs                 []ID    `json:"library_ids,omitempty" nullable:"true"`
+	MaxPlaybackQuality         *string `json:"max_playback_quality,omitempty" nullable:"true"`
+	MaxStreams                 *int    `json:"max_streams,omitempty" nullable:"true" minimum:"0"`
+	MaxTranscodes              *int    `json:"max_transcodes,omitempty" nullable:"true" minimum:"0"`
+	MaxRemoteStreamBitrateKbps *int    `json:"max_remote_stream_bitrate_kbps,omitempty" nullable:"true" minimum:"0"`
+	MaxLocalStreamBitrateKbps  *int    `json:"max_local_stream_bitrate_kbps,omitempty" nullable:"true" minimum:"0"`
+	TranscodeAllowed           *bool   `json:"transcode_allowed,omitempty" nullable:"true"`
+	AudioTranscodeAllowed      *bool   `json:"audio_transcode_allowed,omitempty" nullable:"true"`
+	DownloadAllowed            *bool   `json:"download_allowed,omitempty" nullable:"true"`
+	DownloadTranscodeAllowed   *bool   `json:"download_transcode_allowed,omitempty" nullable:"true"`
+	RequestsAllowed            *bool   `json:"requests_allowed,omitempty" nullable:"true"`
+	AccessGroupID              *ID     `json:"access_group_id,omitempty" nullable:"true"`
 }
 type AdminAccountCreateBody struct {
 	AdminAccountPolicyInput
@@ -114,7 +116,7 @@ type AdminAccountProfilesOutput struct {
 	Body Collection[AdminAccountProfile]
 }
 
-var adminAccountNullable = map[string]bool{groupLibraryIDsField: true, "max_playback_quality": true, "max_streams": true, "max_transcodes": true, "transcode_allowed": true, "audio_transcode_allowed": true, "download_allowed": true, "download_transcode_allowed": true, "requests_allowed": true, "access_group_id": true}
+var adminAccountNullable = map[string]bool{groupLibraryIDsField: true, "max_playback_quality": true, "max_streams": true, "max_transcodes": true, "max_remote_stream_bitrate_kbps": true, "max_local_stream_bitrate_kbps": true, "transcode_allowed": true, "audio_transcode_allowed": true, "download_allowed": true, "download_transcode_allowed": true, "requests_allowed": true, "access_group_id": true}
 
 func adminAccountID(id ID) (int, *Problem) {
 	n, err := strconv.Atoi(string(id))
@@ -203,16 +205,18 @@ func (b AdminAccountPolicyInput) model(raw []byte) (models.UpdateUserInput, *Pro
 	}
 	present := func(k string) bool { _, ok := m[k]; return ok }
 	return models.UpdateUserInput{
-		LibraryIDs:               models.Optional[[]int]{Set: present(groupLibraryIDsField), Value: libraries},
-		MaxPlaybackQuality:       models.Optional[string]{Set: present("max_playback_quality"), Value: b.MaxPlaybackQuality},
-		MaxStreams:               models.Optional[int]{Set: present("max_streams"), Value: b.MaxStreams},
-		MaxTranscodes:            models.Optional[int]{Set: present("max_transcodes"), Value: b.MaxTranscodes},
-		TranscodeAllowed:         models.Optional[bool]{Set: present("transcode_allowed"), Value: b.TranscodeAllowed},
-		AudioTranscodeAllowed:    models.Optional[bool]{Set: present("audio_transcode_allowed"), Value: b.AudioTranscodeAllowed},
-		DownloadAllowed:          models.Optional[bool]{Set: present("download_allowed"), Value: b.DownloadAllowed},
-		DownloadTranscodeAllowed: models.Optional[bool]{Set: present("download_transcode_allowed"), Value: b.DownloadTranscodeAllowed},
-		RequestsAllowed:          models.Optional[bool]{Set: present("requests_allowed"), Value: b.RequestsAllowed},
-		AccessGroupID:            models.Optional[int64]{Set: present("access_group_id"), Value: group},
+		LibraryIDs:                 models.Optional[[]int]{Set: present(groupLibraryIDsField), Value: libraries},
+		MaxPlaybackQuality:         models.Optional[string]{Set: present("max_playback_quality"), Value: b.MaxPlaybackQuality},
+		MaxStreams:                 models.Optional[int]{Set: present("max_streams"), Value: b.MaxStreams},
+		MaxTranscodes:              models.Optional[int]{Set: present("max_transcodes"), Value: b.MaxTranscodes},
+		MaxRemoteStreamBitrateKbps: models.Optional[int]{Set: present("max_remote_stream_bitrate_kbps"), Value: b.MaxRemoteStreamBitrateKbps},
+		MaxLocalStreamBitrateKbps:  models.Optional[int]{Set: present("max_local_stream_bitrate_kbps"), Value: b.MaxLocalStreamBitrateKbps},
+		TranscodeAllowed:           models.Optional[bool]{Set: present("transcode_allowed"), Value: b.TranscodeAllowed},
+		AudioTranscodeAllowed:      models.Optional[bool]{Set: present("audio_transcode_allowed"), Value: b.AudioTranscodeAllowed},
+		DownloadAllowed:            models.Optional[bool]{Set: present("download_allowed"), Value: b.DownloadAllowed},
+		DownloadTranscodeAllowed:   models.Optional[bool]{Set: present("download_transcode_allowed"), Value: b.DownloadTranscodeAllowed},
+		RequestsAllowed:            models.Optional[bool]{Set: present("requests_allowed"), Value: b.RequestsAllowed},
+		AccessGroupID:              models.Optional[int64]{Set: present("access_group_id"), Value: group},
 	}, nil
 }
 func registerAdminAccounts(reg *Registry) {
@@ -333,7 +337,7 @@ func (reg *Registry) createAdminAccount(ctx context.Context, in *AdminAccountCre
 	if b.Permissions == nil {
 		permissions = nil
 	}
-	id, err := svc.CreateAdminAccount(ctx, auth.CreateAccountInput{User: models.CreateUserInput{Username: b.Username, Email: b.Email, Password: b.Password, Role: b.Role, Permissions: permissions, MaxProfiles: b.MaxProfiles, LibraryIDs: libraries, AccessGroupID: policy.AccessGroupID.Value, MaxPlaybackQuality: b.MaxPlaybackQuality, MaxStreams: b.MaxStreams, MaxTranscodes: b.MaxTranscodes, TranscodeAllowed: b.TranscodeAllowed, AudioTranscodeAllowed: b.AudioTranscodeAllowed, DownloadAllowed: b.DownloadAllowed, DownloadTranscodeAllowed: b.DownloadTranscodeAllowed, RequestsAllowed: b.RequestsAllowed}, DefaultProfile: auth.DefaultProfileOptions{Enabled: b.CreateDefaultProfile, Name: b.DefaultProfileName}})
+	id, err := svc.CreateAdminAccount(ctx, auth.CreateAccountInput{User: models.CreateUserInput{Username: b.Username, Email: b.Email, Password: b.Password, Role: b.Role, Permissions: permissions, MaxProfiles: b.MaxProfiles, LibraryIDs: libraries, AccessGroupID: policy.AccessGroupID.Value, MaxPlaybackQuality: b.MaxPlaybackQuality, MaxStreams: b.MaxStreams, MaxTranscodes: b.MaxTranscodes, MaxRemoteStreamBitrateKbps: b.MaxRemoteStreamBitrateKbps, MaxLocalStreamBitrateKbps: b.MaxLocalStreamBitrateKbps, TranscodeAllowed: b.TranscodeAllowed, AudioTranscodeAllowed: b.AudioTranscodeAllowed, DownloadAllowed: b.DownloadAllowed, DownloadTranscodeAllowed: b.DownloadTranscodeAllowed, RequestsAllowed: b.RequestsAllowed}, DefaultProfile: auth.DefaultProfileOptions{Enabled: b.CreateDefaultProfile, Name: b.DefaultProfileName}})
 	if err != nil {
 		return nil, adminAccountError(err)
 	}

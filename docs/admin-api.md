@@ -184,6 +184,15 @@ or reverse proxy access. This records the prepared route, not a live measurement
 of every media request or an inference from the client's IP address. Provider
 display names come from `/api/v2/network-access/capabilities`.
 
+`stream_location` on each v2 admin session row reports `local` or `remote` using
+the same trusted client-IP and provider-path classification as the bitrate
+policy. Private, loopback, and link-local clients on the default path are local;
+provider paths and public or unknown client addresses are remote. The web
+Activity panel shows this separately from the access-network badge.
+`GET /api/v2/admin/sessions/capabilities` advertises `stream_location` for client
+feature detection. The displayed location is fixed at playback negotiation,
+even if a later media request arrives over another network path.
+
 The web activity views show that network alongside the named execution and egress
 nodes. API egress is labeled "API server"; its reporting identity remains in the
 tooltip. Native and Jellyfin-compatible playback both populate the route, including
@@ -1515,7 +1524,9 @@ The personal projection always reports `cancelable: false`: this surface has no 
 command. Existing administrator cancellation can appear as nonterminal `canceling`
 until the worker acknowledges it, then terminal `cancelled`. Both personal and admin
 monitors replace persisted diagnostic errors, warnings, and unmatched reasons with safe
-summaries. Run credentials and private dispatch metadata never appear in these responses.
+summaries. Known diagnostics map to a fixed summary of their cause, such as an item with
+no provider ID or a show missing from the library; anything else reads as a generic
+summary. Run credentials and private dispatch metadata never appear in these responses.
 
 New queued personal imports survive server restart. Source changes invalidate captured
 configuration without retargeting the import; stale running executions fail without replay.

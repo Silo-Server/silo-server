@@ -476,8 +476,20 @@
               "null"
             ]
           },
+          "max_local_stream_bitrate_kbps": {
+            "description": "Local per-stream bitrate ceiling in kbps; 0 means unlimited",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "max_playback_quality": {
             "type": "string"
+          },
+          "max_remote_stream_bitrate_kbps": {
+            "description": "Remote per-stream bitrate ceiling in kbps; 0 means unlimited",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
           },
           "max_streams": {
             "format": "int64",
@@ -516,6 +528,8 @@
           "audio_transcode_allowed",
           "max_streams",
           "max_transcodes",
+          "max_remote_stream_bitrate_kbps",
+          "max_local_stream_bitrate_kbps",
           "allowed_permissions",
           "requests_allowed",
           "is_default",
@@ -565,8 +579,18 @@
               "null"
             ]
           },
+          "max_local_stream_bitrate_kbps": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "max_playback_quality": {
             "type": "string"
+          },
+          "max_remote_stream_bitrate_kbps": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
           },
           "max_streams": {
             "format": "int64",
@@ -647,8 +671,20 @@
               "null"
             ]
           },
+          "max_local_stream_bitrate_kbps": {
+            "description": "Local per-stream bitrate ceiling in kbps; 0 means unlimited",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "max_playback_quality": {
             "type": "string"
+          },
+          "max_remote_stream_bitrate_kbps": {
+            "description": "Remote per-stream bitrate ceiling in kbps; 0 means unlimited",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
           },
           "max_streams": {
             "format": "int64",
@@ -692,6 +728,8 @@
           "audio_transcode_allowed",
           "max_streams",
           "max_transcodes",
+          "max_remote_stream_bitrate_kbps",
+          "max_local_stream_bitrate_kbps",
           "allowed_permissions",
           "requests_allowed",
           "is_default",
@@ -807,6 +845,14 @@
               "null"
             ]
           },
+          "max_local_stream_bitrate_kbps": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "max_playback_quality": {
             "type": [
               "string",
@@ -817,6 +863,14 @@
             "format": "int64",
             "minimum": 1,
             "type": "integer"
+          },
+          "max_remote_stream_bitrate_kbps": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "max_streams": {
             "format": "int64",
@@ -1000,6 +1054,14 @@
               "null"
             ]
           },
+          "max_local_stream_bitrate_kbps": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "max_playback_quality": {
             "type": [
               "string",
@@ -1010,6 +1072,14 @@
             "format": "int64",
             "minimum": 1,
             "type": "integer"
+          },
+          "max_remote_stream_bitrate_kbps": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "max_streams": {
             "format": "int64",
@@ -8693,6 +8763,14 @@
               "null"
             ]
           },
+          "stream_location": {
+            "description": "Local or remote classification used by the server bitrate policy.",
+            "enum": [
+              "local",
+              "remote"
+            ],
+            "type": "string"
+          },
           "target_audio_channels": {
             "format": "int64",
             "type": "integer"
@@ -8761,6 +8839,7 @@
           "position_seconds",
           "is_paused",
           "has_playback_control",
+          "stream_location",
           "audio_track_index",
           "transcode_audio",
           "stream_bitrate_kbps",
@@ -8825,6 +8904,9 @@
             ],
             "type": "string"
           },
+          "stream_location": {
+            "type": "boolean"
+          },
           "summary": {
             "type": "boolean"
           },
@@ -8862,6 +8944,7 @@
           "client_channel",
           "target_audio_channels",
           "network_access_route",
+          "stream_location",
           "node_routing",
           "output_format",
           "revision",
@@ -14645,6 +14728,18 @@
               "null"
             ]
           },
+          "max_local_stream_bitrate_kbps": {
+            "description": "Local per-stream bitrate override in kbps; null inherits, 0 means unlimited",
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "max_playback_quality": {
             "description": "Playback ceiling override; null inherits, empty string means no ceiling",
             "examples": [
@@ -14662,6 +14757,18 @@
             ],
             "format": "int64",
             "type": "integer"
+          },
+          "max_remote_stream_bitrate_kbps": {
+            "description": "Remote per-stream bitrate override in kbps; null inherits, 0 means unlimited",
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "max_streams": {
             "description": "Stream limit override; null inherits, 0 means unlimited",
@@ -14759,6 +14866,8 @@
           "max_playback_quality",
           "max_streams",
           "max_transcodes",
+          "max_remote_stream_bitrate_kbps",
+          "max_local_stream_bitrate_kbps",
           "transcode_allowed",
           "audio_transcode_allowed",
           "max_profiles",
@@ -21950,12 +22059,30 @@
               "null"
             ]
           },
+          "max_local_stream_bitrate_kbps": {
+            "description": "Local per-stream bitrate limit in kbps; 0 means unlimited",
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "max_playback_quality": {
             "description": "Playback ceiling; empty means none",
             "examples": [
               "1080p"
             ],
             "type": "string"
+          },
+          "max_remote_stream_bitrate_kbps": {
+            "description": "Remote per-stream bitrate limit in kbps; 0 means unlimited",
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
           },
           "max_streams": {
             "description": "Concurrent stream limit; 0 means unlimited",
@@ -22007,6 +22134,8 @@
           "max_playback_quality",
           "max_streams",
           "max_transcodes",
+          "max_remote_stream_bitrate_kbps",
+          "max_local_stream_bitrate_kbps",
           "transcode_allowed",
           "audio_transcode_allowed",
           "download_allowed",
@@ -23746,7 +23875,7 @@
             "type": "string"
           },
           "password": {
-            "description": "Emby: the source server password when importing from a configured source",
+            "description": "Emby: the source server password when importing from a configured source; empty for an account without one",
             "type": "string"
           },
           "plex_account_token": {

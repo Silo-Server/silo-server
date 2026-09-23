@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -160,7 +161,7 @@ type HistoryImportRunCreate struct {
 	ServerID         string `json:"server_id,omitempty" doc:"Emby: the server chosen from the connect session"`
 	SourceID         *ID    `json:"source_id,omitempty" nullable:"false" doc:"Emby or Plex: a configured source from listHistoryImportSources" example:"1"`
 	Username         string `json:"username,omitempty" doc:"Emby: the source server user name when importing from a configured source"`
-	Password         string `json:"password,omitempty" doc:"Emby: the source server password when importing from a configured source"`
+	Password         string `json:"password,omitempty" doc:"Emby: the source server password when importing from a configured source; empty for an account without one"`
 	JellyfinBaseURL  string `json:"jellyfin_base_url,omitempty" doc:"Jellyfin: the server address" example:"https://jellyfin.example.test"`
 	JellyfinUsername string `json:"jellyfin_username,omitempty" doc:"Jellyfin: the user name"`
 	JellyfinPassword string `json:"jellyfin_password,omitempty" doc:"Jellyfin: the password"`
@@ -521,22 +522,51 @@ func historyImportProblem(err error) *Problem {
 		return NewProblem(TypeDependencyUnavailable, "Personal imports are unavailable. No import was accepted.")
 	case errors.Is(err, historyimport.ErrPersonalSessionChanged), errors.Is(err, historyimport.ErrConnectSessionUsed), errors.Is(err, historyimport.ErrPlexSessionUsed), errors.Is(err, historyimport.ErrRunConfigurationChanged), errors.Is(err, historyimport.ErrSourceDisabled):
 		return NewProblem(TypeConflict, "The import source or login session changed. Review the configuration and authenticate again.")
+	// The frozen v1 decision reports both as internal errors; v2 reads the
+	// cause the seam's *handlers.APIError still wraps.
+	case errors.Is(err, historyimport.ErrSourceUnreachable):
+		return NewProblem(TypeDependencyUnavailable, historyImportUnreachableMessage).WithRetryAfter(30)
+	case errors.Is(err, historyimport.ErrInvalidInput):
+		message := historyImportInputMessage(err)
+		return NewProblem(TypeValidationFailed, message).
+			WithErrors(ProblemError{Location: locationBody, Code: codeInvalid, Detail: message})
 	}
 	apiErr, ok := errors.AsType[*handlers.APIError](err)
 	if !ok {
 		return serviceProblem(err)
 	}
 	switch {
-	case handlers.IsHistoryImportUpstreamError(err) && apiErr.Status < 500:
-		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+	case handlers.IsHistoryImportUpstreamError(err) && apiErr.Status < 500, apiErr.Status == http.StatusBadRequest:
+		// The detail repeats the member error so clients that show only the
+		// problem detail still tell the user what to fix.
+		return NewProblem(TypeValidationFailed, apiErr.Message).
 			WithErrors(ProblemError{Location: locationBody, Code: codeInvalid, Detail: apiErr.Message})
 	case handlers.IsHistoryImportUpstreamError(err):
 		return NewProblem(TypeDependencyUnavailable, apiErr.Message).WithRetryAfter(30)
-	case apiErr.Status == http.StatusBadRequest:
-		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-			WithErrors(ProblemError{Location: locationBody, Code: codeInvalid, Detail: apiErr.Message})
 	}
 	return serviceProblem(err)
+}
+
+const historyImportUnreachableMessage = "Couldn't reach the source server. Check that it's online and reachable from Silo, then try again."
+
+// historyImportInputMessage returns the detail an ErrInvalidInput wraps as a
+// sentence: "invalid history import input: choose a server" becomes
+// "Choose a server.". A leading field name such as base_url keeps its case.
+// The seam's *handlers.APIError hides the detail in its own text, so the
+// chain is searched.
+func historyImportInputMessage(err error) string {
+	marker := historyimport.ErrInvalidInput.Error() + ": "
+	for ; err != nil; err = errors.Unwrap(err) {
+		_, detail, ok := strings.Cut(err.Error(), marker)
+		if !ok || detail == "" {
+			continue
+		}
+		if first, _, _ := strings.Cut(detail, " "); !strings.Contains(first, "_") {
+			detail = strings.ToUpper(detail[:1]) + detail[1:]
+		}
+		return detail + "."
+	}
+	return "Check the import details and try again."
 }
 
 func historyImportSourceOf(s historyimport.Source) HistoryImportSource {
@@ -593,16 +623,19 @@ func historyImportRunOf(run *historyimport.Run) HistoryImportRun {
 		out.ErrorMessage = ""
 	}
 	switch out.ErrorMessage {
-	case "", historyimport.ErrRunConfigurationChanged.Error(), historyimport.LegacyDispatchUnavailableMessage, historyimport.StaleRunInterruptedMessage, historyimport.ErrPersonalCredentialsUnavailable.Error():
+	case "", historyimport.ErrRunConfigurationChanged.Error(), historyimport.LegacyDispatchUnavailableMessage, historyimport.StaleRunInterruptedMessage, historyimport.ErrPersonalCredentialsUnavailable.Error(),
+		historyimport.RunErrorSourceRejected, historyimport.RunErrorStoppedEarly, historyimport.RunErrorNotCompleted:
 	default:
 		out.ErrorMessage = "The import failed. Review the source configuration before starting a new run."
 	}
+	// Stored warnings and reasons are diagnostics; only their fixed summaries
+	// leave the server.
 	out.Warnings = make([]string, 0, len(run.Warnings))
-	for range run.Warnings {
-		out.Warnings = append(out.Warnings, "An import item could not be processed.")
+	for _, warning := range run.Warnings {
+		out.Warnings = append(out.Warnings, historyimport.PublicWarning(warning))
 	}
 	for i := range out.UnmatchedSamples {
-		out.UnmatchedSamples[i].Reason = "No matching catalog item was imported."
+		out.UnmatchedSamples[i].Reason = historyimport.PublicUnmatchedReason(out.UnmatchedSamples[i].Reason)
 	}
 	return out
 }

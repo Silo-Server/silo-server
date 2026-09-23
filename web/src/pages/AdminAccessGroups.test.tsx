@@ -21,6 +21,8 @@ const GROUP = {
   audio_transcode_allowed: true,
   max_streams: 1,
   max_transcodes: 0,
+  max_remote_stream_bitrate_kbps: 0,
+  max_local_stream_bitrate_kbps: 0,
   allowed_permissions: [] as string[],
   requests_allowed: false,
   is_default: true,
@@ -97,6 +99,9 @@ describe("AdminAccessGroups", () => {
 
     // Drill-in editor seeds from the group; toggle downloads on and save.
     fireEvent.click(await screen.findByRole("switch", { name: "Allow downloads" }));
+    fireEvent.change(screen.getByLabelText("Max remote stream bitrate (kbps)"), {
+      target: { value: "4000" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
     await waitFor(() => {
@@ -105,6 +110,7 @@ describe("AdminAccessGroups", () => {
         library_ids: ["2"],
         download_allowed: true,
         max_streams: 1,
+        max_remote_stream_bitrate_kbps: 4000,
         requests_allowed: false,
         allowed_permissions: [],
         is_default: true,
@@ -122,6 +128,30 @@ describe("AdminAccessGroups", () => {
     expect(await screen.findByRole("switch", { name: "Default for new users" })).toBeDisabled();
     expect(screen.getByRole("button", { name: /delete group/i })).toBeDisabled();
     expect(screen.getByText(/make another group the default first/i)).toBeInTheDocument();
+  });
+
+  it("does not truncate a fractional remote bitrate limit", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    const limit = await screen.findByLabelText("Max remote stream bitrate (kbps)");
+    fireEvent.change(limit, { target: { value: "1.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => {
+      expect(putBody).toMatchObject({ max_remote_stream_bitrate_kbps: 0 });
+    });
+  });
+
+  it("keeps an existing limit when the number input has invalid intermediate text", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    const limit = await screen.findByLabelText("Max remote stream bitrate (kbps)");
+    fireEvent.change(limit, { target: { value: "4000" } });
+    Object.defineProperty(limit, "validity", { value: { badInput: true }, configurable: true });
+    fireEvent.change(limit, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => {
+      expect(putBody).toMatchObject({ max_remote_stream_bitrate_kbps: 4000 });
+    });
   });
 });
 

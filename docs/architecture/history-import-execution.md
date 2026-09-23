@@ -25,9 +25,18 @@ establish media identity. Watch provider sync and webhook sync use the same matc
   the entered address. Jellyfin stores a whole-show or whole-season "mark played" on each
   episode, so those markers arrive as episode records. Season favorites are skipped because
   Silo has no season favorite.
-- Emby: played and resumable movies and episodes, plus favorite movies and shows.
+- Emby: played and resumable movies and episodes, plus favorite movies, shows, and episodes.
 - Plex: watched movies and episodes and On Deck progress; personal imports also add the
   account watchlist, and administrator imports read the account's play history.
+
+Emby list queries omit the production year, play count, and last-played date unless
+`Fields` names `ProductionYear`, `UserDataPlayCount`, and `UserDataLastPlayedDate`. The
+last-played date is what creates history rows and orders imported progress against local
+activity, so a missing date would leave re-imports unable to update anything. Emby lists
+are read in pages and item lookups in batches. Movie, series, and episode favorites are
+imported; Silo has no season favorites, so those are counted in a run warning. A played
+multi-episode file (S01E01-E02) marks each episode in its range watched, up to ten; a
+partly watched one stays on its first episode because its position cannot be split.
 
 A Jellyfin or Emby record without a last-played time carries an unknown timestamp, which
 sorts before any local activity: it can create missing progress but never replaces newer

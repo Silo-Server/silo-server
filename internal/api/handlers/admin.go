@@ -303,41 +303,45 @@ func (r *updateUserRequest) libraryIDsOptional() models.Optional[[]int] {
 // value the server enforces (override when set, otherwise the group's value,
 // otherwise the permissive no-group default).
 type AdminUserView struct {
-	ID                       int                 `json:"id"`
-	Username                 string              `json:"username"`
-	Email                    string              `json:"email"`
-	Role                     string              `json:"role"`
-	Permissions              []string            `json:"permissions"`
-	Enabled                  bool                `json:"enabled"`
-	LibraryIDs               []int               `json:"library_ids"`
-	MaxPlaybackQuality       *string             `json:"max_playback_quality"`
-	MaxStreams               *int                `json:"max_streams"`
-	MaxTranscodes            *int                `json:"max_transcodes"`
-	TranscodeAllowed         *bool               `json:"transcode_allowed"`
-	AudioTranscodeAllowed    *bool               `json:"audio_transcode_allowed"`
-	MaxProfiles              int                 `json:"max_profiles"`
-	DownloadAllowed          *bool               `json:"download_allowed"`
-	DownloadTranscodeAllowed *bool               `json:"download_transcode_allowed"`
-	RequestsAllowed          *bool               `json:"requests_allowed"`
-	AccessGroupID            *int64              `json:"access_group_id"`
-	EffectivePolicy          EffectivePolicyView `json:"effective_policy"`
-	CreatedAt                time.Time           `json:"created_at"`
-	UpdatedAt                time.Time           `json:"updated_at"`
-	LastActiveAt             *time.Time          `json:"last_active_at,omitempty"`
+	ID                         int                 `json:"id"`
+	Username                   string              `json:"username"`
+	Email                      string              `json:"email"`
+	Role                       string              `json:"role"`
+	Permissions                []string            `json:"permissions"`
+	Enabled                    bool                `json:"enabled"`
+	LibraryIDs                 []int               `json:"library_ids"`
+	MaxPlaybackQuality         *string             `json:"max_playback_quality"`
+	MaxStreams                 *int                `json:"max_streams"`
+	MaxTranscodes              *int                `json:"max_transcodes"`
+	MaxRemoteStreamBitrateKbps *int                `json:"-"`
+	MaxLocalStreamBitrateKbps  *int                `json:"-"`
+	TranscodeAllowed           *bool               `json:"transcode_allowed"`
+	AudioTranscodeAllowed      *bool               `json:"audio_transcode_allowed"`
+	MaxProfiles                int                 `json:"max_profiles"`
+	DownloadAllowed            *bool               `json:"download_allowed"`
+	DownloadTranscodeAllowed   *bool               `json:"download_transcode_allowed"`
+	RequestsAllowed            *bool               `json:"requests_allowed"`
+	AccessGroupID              *int64              `json:"access_group_id"`
+	EffectivePolicy            EffectivePolicyView `json:"effective_policy"`
+	CreatedAt                  time.Time           `json:"created_at"`
+	UpdatedAt                  time.Time           `json:"updated_at"`
+	LastActiveAt               *time.Time          `json:"last_active_at,omitempty"`
 }
 
 // EffectivePolicyView is the resolved policy block on admin user responses.
 type EffectivePolicyView struct {
-	LibraryIDs               []int    `json:"library_ids"`
-	MaxPlaybackQuality       string   `json:"max_playback_quality"`
-	MaxStreams               int      `json:"max_streams"`
-	MaxTranscodes            int      `json:"max_transcodes"`
-	TranscodeAllowed         bool     `json:"transcode_allowed"`
-	AudioTranscodeAllowed    bool     `json:"audio_transcode_allowed"`
-	DownloadAllowed          bool     `json:"download_allowed"`
-	DownloadTranscodeAllowed bool     `json:"download_transcode_allowed"`
-	RequestsAllowed          bool     `json:"requests_allowed"`
-	Permissions              []string `json:"permissions"`
+	LibraryIDs                 []int    `json:"library_ids"`
+	MaxPlaybackQuality         string   `json:"max_playback_quality"`
+	MaxStreams                 int      `json:"max_streams"`
+	MaxTranscodes              int      `json:"max_transcodes"`
+	MaxRemoteStreamBitrateKbps int      `json:"-"`
+	MaxLocalStreamBitrateKbps  int      `json:"-"`
+	TranscodeAllowed           bool     `json:"transcode_allowed"`
+	AudioTranscodeAllowed      bool     `json:"audio_transcode_allowed"`
+	DownloadAllowed            bool     `json:"download_allowed"`
+	DownloadTranscodeAllowed   bool     `json:"download_transcode_allowed"`
+	RequestsAllowed            bool     `json:"requests_allowed"`
+	Permissions                []string `json:"permissions"`
 }
 
 type adminPlaybackHistoryRow struct {
@@ -388,34 +392,38 @@ func (h *AdminHandler) presignPosterURL(r *http.Request, path string) string {
 func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserView {
 	effective := access.ApplyGroupPolicy(u, group)
 	resp := AdminUserView{
-		ID:                       u.ID,
-		Username:                 u.Username,
-		Email:                    u.Email,
-		Role:                     u.Role,
-		Permissions:              append([]string{}, u.Permissions...),
-		Enabled:                  u.Enabled,
-		LibraryIDs:               cloneIntSlice(u.LibraryIDs),
-		MaxPlaybackQuality:       normalizedQualityPtr(u.MaxPlaybackQuality),
-		MaxStreams:               clonePtr(u.MaxStreams),
-		MaxTranscodes:            clonePtr(u.MaxTranscodes),
-		TranscodeAllowed:         clonePtr(u.TranscodeAllowed),
-		AudioTranscodeAllowed:    clonePtr(u.AudioTranscodeAllowed),
-		MaxProfiles:              u.MaxProfiles,
-		DownloadAllowed:          clonePtr(u.DownloadAllowed),
-		DownloadTranscodeAllowed: clonePtr(u.DownloadTranscodeAllowed),
-		RequestsAllowed:          clonePtr(u.RequestsAllowed),
-		AccessGroupID:            clonePtr(u.AccessGroupID),
+		ID:                         u.ID,
+		Username:                   u.Username,
+		Email:                      u.Email,
+		Role:                       u.Role,
+		Permissions:                append([]string{}, u.Permissions...),
+		Enabled:                    u.Enabled,
+		LibraryIDs:                 cloneIntSlice(u.LibraryIDs),
+		MaxPlaybackQuality:         normalizedQualityPtr(u.MaxPlaybackQuality),
+		MaxStreams:                 clonePtr(u.MaxStreams),
+		MaxTranscodes:              clonePtr(u.MaxTranscodes),
+		MaxRemoteStreamBitrateKbps: clonePtr(u.MaxRemoteStreamBitrateKbps),
+		MaxLocalStreamBitrateKbps:  clonePtr(u.MaxLocalStreamBitrateKbps),
+		TranscodeAllowed:           clonePtr(u.TranscodeAllowed),
+		AudioTranscodeAllowed:      clonePtr(u.AudioTranscodeAllowed),
+		MaxProfiles:                u.MaxProfiles,
+		DownloadAllowed:            clonePtr(u.DownloadAllowed),
+		DownloadTranscodeAllowed:   clonePtr(u.DownloadTranscodeAllowed),
+		RequestsAllowed:            clonePtr(u.RequestsAllowed),
+		AccessGroupID:              clonePtr(u.AccessGroupID),
 		EffectivePolicy: EffectivePolicyView{
-			LibraryIDs:               effective.LibraryIDs,
-			MaxPlaybackQuality:       effective.MaxPlaybackQuality,
-			MaxStreams:               effective.MaxStreams,
-			MaxTranscodes:            effective.MaxTranscodes,
-			TranscodeAllowed:         effective.TranscodeAllowed,
-			AudioTranscodeAllowed:    effective.AudioTranscodeAllowed,
-			DownloadAllowed:          effective.DownloadAllowed,
-			DownloadTranscodeAllowed: effective.DownloadTranscodeAllowed,
-			RequestsAllowed:          effective.RequestsAllowed,
-			Permissions:              append([]string{}, effective.Permissions...),
+			LibraryIDs:                 effective.LibraryIDs,
+			MaxPlaybackQuality:         effective.MaxPlaybackQuality,
+			MaxStreams:                 effective.MaxStreams,
+			MaxTranscodes:              effective.MaxTranscodes,
+			MaxRemoteStreamBitrateKbps: effective.MaxRemoteStreamBitrateKbps,
+			MaxLocalStreamBitrateKbps:  effective.MaxLocalStreamBitrateKbps,
+			TranscodeAllowed:           effective.TranscodeAllowed,
+			AudioTranscodeAllowed:      effective.AudioTranscodeAllowed,
+			DownloadAllowed:            effective.DownloadAllowed,
+			DownloadTranscodeAllowed:   effective.DownloadTranscodeAllowed,
+			RequestsAllowed:            effective.RequestsAllowed,
+			Permissions:                append([]string{}, effective.Permissions...),
 		},
 		CreatedAt: u.CreatedAt,
 		UpdatedAt: u.UpdatedAt,

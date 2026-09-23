@@ -121,6 +121,10 @@ func TestSessionsCapabilitiesAdvertisesActivityFields(t *testing.T) {
 		!resp.ClientBuild || !resp.ClientChannel || !resp.TargetAudioChannels || !resp.NodeRouting {
 		t.Fatalf("capabilities must advertise every additive field: %+v", resp)
 	}
+	// The frozen v1 rows never serialize stream_location; only v2 advertises it.
+	if strings.Contains(rr.Body.String(), "stream_location") {
+		t.Fatalf("v1 capabilities advertise a field v1 rows omit: %s", rr.Body.String())
+	}
 	want := []string{"direct", "remux", "transcode", "audio"}
 	if len(resp.EffectivePlayMethodValues) != len(want) {
 		t.Fatalf("bucket vocabulary = %v, want %v", resp.EffectivePlayMethodValues, want)

@@ -219,6 +219,28 @@ export function resolveActiveQualityOptionId(
   return null;
 }
 
+/**
+ * The next quality rung below what the viewer receives now, for a viewer whose
+ * connection cannot keep up. An explicit rung steps down from itself; Auto and
+ * Original step down from the delivered bitrate, or to the top transcode rung
+ * when a copy delivery reports none.
+ */
+export function lowerQualityOption(
+  options: QualityOption[],
+  preference: string,
+  deliveredBitrateKbps?: number,
+): QualityOption | null {
+  const rungs = options
+    .filter((option) => option.id !== "auto" && !option.isOriginal && option.bitrateKbps > 0)
+    .sort((a, b) => b.bitrateKbps - a.bitrateKbps);
+  const activeId = resolveActiveQualityOptionId(options, preference);
+  const active = rungs.find((option) => option.id === activeId);
+  const ceiling =
+    active?.bitrateKbps ??
+    (deliveredBitrateKbps && deliveredBitrateKbps > 0 ? deliveredBitrateKbps : Infinity);
+  return rungs.find((option) => option.bitrateKbps < ceiling) ?? null;
+}
+
 function qualityPreferenceHeight(preference: string): number | null {
   switch (preference) {
     case "2160p":
