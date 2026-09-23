@@ -368,6 +368,25 @@ Running PostgreSQL on a dedicated VM or managed service simplifies upgrades,
 tuning, and backups. Redis can stay local or move to shared infrastructure if
 you already have it.
 
+### Valkey in place of Redis
+
+[Valkey](https://valkey.io/) works as a drop-in replacement for Redis here. It
+forked from Redis 7.2.4 and keeps the same wire protocol and command set, Silo
+uses only core commands that both implement, and the Go client talks to either
+without configuration. `REDIS_URL` keeps the `redis://` scheme.
+
+Pointing Silo at a Valkey server you already run needs nothing beyond that URL.
+To swap the bundled service, override the image and the healthcheck together —
+the Valkey image ships `valkey-cli` rather than `redis-cli`:
+
+```yaml
+services:
+  redis:
+    image: valkey/valkey:alpine
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+```
+
 ## Server roles and distributed deployments
 
 | Mode | Purpose |
