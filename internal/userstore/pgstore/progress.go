@@ -703,7 +703,9 @@ func progressStatusPredicate(status string) string {
 	case "in_progress":
 		// position_seconds > 0 (not completed = FALSE): completed rows hold
 		// position 0, so a rewatch of a watched item has completed = TRUE with
-		// a live resume point and belongs in Continue Watching.
+		// a live resume point and belongs in Continue Watching. The partial
+		// index idx_uwp_profile_resumable repeats this predicate; change both
+		// together or the in-progress listings fall back to reading every row.
 		return " AND position_seconds > 0"
 	case "completed":
 		return " AND completed = TRUE"
@@ -770,12 +772,13 @@ func (s *PostgresUserStore) ListProgressPage(ctx context.Context, profileID, sta
 // in SQL instead of after a full-set scan. Movies/series resolve through
 // media_items; episodes live in the separate episodes table joined via
 // series_id → media_items (a plain media_items join would miss them); the
-// optional library predicate hits media_item_libraries. The completed branch's
-// `completed = TRUE` + `ORDER BY updated_at DESC` shape keeps
-// idx_uwp_profile_completed in play, while the EXISTS sub-selects ride
-// idx_item_libraries_content. The filter is coarse (callers re-check
-// access/parental exclusions over the hydrated rows), and an empty types slice
-// with a nil libraryID degrades to the plain status listing.
+// optional library predicate hits media_item_libraries. With
+// `ORDER BY updated_at DESC`, the completed branch's `completed = TRUE` keeps
+// idx_uwp_profile_completed in play and the in_progress branch's
+// `position_seconds > 0` keeps idx_uwp_profile_resumable in play, while the
+// EXISTS sub-selects ride idx_item_libraries_content. The filter is coarse
+// (callers re-check access/parental exclusions over the hydrated rows), and an
+// empty types slice with a nil libraryID degrades to the plain status listing.
 func (s *PostgresUserStore) ListProgressFiltered(ctx context.Context, profileID, status string, types []string, libraryID *int, limit, offset int) ([]userstore.WatchProgress, error) {
 	args := []any{s.userID, profileID}
 
