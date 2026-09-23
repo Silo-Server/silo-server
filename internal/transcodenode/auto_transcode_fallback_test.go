@@ -67,15 +67,23 @@ func useAutoNVENCPipeline(t *testing.T, server *Server) {
 
 func postAutoTranscodeStart(t *testing.T, server *Server, sessionID string) *httptest.ResponseRecorder {
 	t.Helper()
+	return postAutoTranscodeStartRequest(t, server, TranscodeStartRequest{SessionID: sessionID, RequireReady: true})
+}
+
+// postAutoTranscodeStartRequest posts an auto video transcode with the
+// readiness fields and session id taken from req.
+func postAutoTranscodeStartRequest(t *testing.T, server *Server, req TranscodeStartRequest) *httptest.ResponseRecorder {
+	t.Helper()
 	requestBody, err := json.Marshal(TranscodeStartRequest{
-		SessionID:        sessionID,
-		InputPath:        "/media/movie.mkv",
-		TargetCodecVideo: "h264",
-		TargetCodecAudio: "aac",
-		TargetResolution: "720p",
-		SegmentDuration:  2,
-		HWAccel:          "auto",
-		RequireReady:     true,
+		SessionID:         req.SessionID,
+		InputPath:         "/media/movie.mkv",
+		TargetCodecVideo:  "h264",
+		TargetCodecAudio:  "aac",
+		TargetResolution:  "720p",
+		SegmentDuration:   2,
+		HWAccel:           "auto",
+		RequireReady:      req.RequireReady,
+		AutoFallbackReady: req.AutoFallbackReady,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -249,4 +257,58 @@ func TestHandleStartRequireReadyKeepsVideoToolboxSoftwareRetry(t *testing.T) {
 	if len(invocations) != 2 || !strings.Contains(invocations[0], "h264_videotoolbox") || !strings.Contains(invocations[1], "libx264") {
 		t.Fatalf("invocations = %q, want VideoToolbox then the legacy software retry", invocations)
 	}
+}
+
+// auto_fallback_ready lets a node whose live auto pipeline is enabled wait for
+// the first manifest and walk the safer paths.
+func TestHandleStartAutoFallbackReadyWalksEnabledPipeline(t *testing.T) {
+	server := newTestServer(t)
+	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	ffmpegPath, logPath := writeNodeFFmpegFailingOn(t, "-hwaccel cuda")
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	useAutoNVENCPipeline(t, server)
+
+	rr := postAutoTranscodeStartRequest(t, server, TranscodeStartRequest{SessionID: "auto-fallback-1", AutoFallbackReady: true})
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	server.mu.RLock()
+	session := server.sessions["auto-fallback-1"]
+	server.mu.RUnlock()
+	if session == nil {
+		t.Fatal("fallback session was not registered")
+	}
+	defer func() { _ = session.Close() }()
+	if invocations := readNodeFFmpegInvocations(t, logPath); len(invocations) != 2 || strings.Contains(invocations[1], "-hwaccel cuda") {
+		t.Fatalf("invocations = %q, want full hardware then CPU decode", invocations)
+	}
+}
+
+// Without an enabled pipeline, auto_fallback_ready must not wait: a slow
+// software encoder would otherwise be closed at the readiness deadline.
+func TestHandleStartAutoFallbackReadyWithoutPipelineDoesNotWait(t *testing.T) {
+	server := newTestServer(t)
+	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	dir := t.TempDir()
+	slowFFmpeg := filepath.Join(dir, "slow-ffmpeg.sh")
+	if err := os.WriteFile(slowFFmpeg, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = slowFFmpeg
+	server.autoTranscodePipelineFn = func(ctx context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {
+		opts.HWAccel = playback.HWAccelNone
+		return playback.NewAutoTranscodePipeline(ctx, opts)
+	}
+
+	rr := postAutoTranscodeStartRequest(t, server, TranscodeStartRequest{SessionID: "auto-software-1", AutoFallbackReady: true})
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s; want an unwaited start", rr.Code, rr.Body.String())
+	}
+	server.mu.RLock()
+	session := server.sessions["auto-software-1"]
+	server.mu.RUnlock()
+	if session == nil || !session.IsRunning() {
+		t.Fatal("slow software session was not kept running")
+	}
+	_ = session.Close()
 }

@@ -2,7 +2,6 @@ package playback
 
 import (
 	"context"
-	"encoding/json"
 	"strconv"
 	"strings"
 	"sync"
@@ -264,24 +263,6 @@ func (cache *autoTranscodePipelineCache) removeOldestLocked() {
 }
 
 // isHardwareTranscodeBackend reports whether a resolved backend encodes on a GPU.
-// StoredReportResolvesHardware reports whether a node's stored capability
-// report resolved its acceleration to a hardware backend, the condition under
-// which that node's hw_accel=auto startup can fall back to a safer path. Like
-// AdvertisedProbeBudgetMillis it parses the one field it needs; a missing or
-// unreadable report reads as false.
-func StoredReportResolvesHardware(storedReport json.RawMessage) bool {
-	if len(storedReport) == 0 {
-		return false
-	}
-	var report struct {
-		Resolved string `json:"resolved"`
-	}
-	if err := json.Unmarshal(storedReport, &report); err != nil {
-		return false
-	}
-	return isHardwareTranscodeBackend(strings.ToLower(strings.TrimSpace(report.Resolved)))
-}
-
 func isHardwareTranscodeBackend(hwAccel string) bool {
 	switch hwAccel {
 	case transcodeHWQSV, transcodeHWVAAPI, transcodeHWNVENC, transcodeHWVideoToolbox:

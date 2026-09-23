@@ -212,12 +212,12 @@ func startCompatRemoteAutoTranscode(t *testing.T, report string, response transc
 	return remoteReq, playbackStore
 }
 
-func TestStartRemoteTranscodeAutoRequestsReadinessAndRecordsDecodePath(t *testing.T) {
+func TestStartRemoteTranscodeAutoRequestsFallbackReadinessAndRecordsDecodePath(t *testing.T) {
 	remoteReq, playbackStore := startCompatRemoteAutoTranscode(t, `{"resolved":"nvenc"}`, transcodenode.TranscodeStartResponse{
 		Status: "started", HWAccel: "nvenc", SoftwareVideoDecode: true,
 	})
-	if !remoteReq.RequireReady {
-		t.Fatal("auto video transcode did not ask the node to wait for readiness")
+	if !remoteReq.AutoFallbackReady || remoteReq.RequireReady {
+		t.Fatalf("request = %+v, want auto_fallback_ready without require_ready", remoteReq)
 	}
 	persisted, ok := playbackStore.Get("play-1")
 	if !ok || persisted.Recipe == nil || !persisted.Recipe.SoftwareVideoDecode || persisted.Recipe.HWAccel != "nvenc" {
@@ -225,38 +225,32 @@ func TestStartRemoteTranscodeAutoRequestsReadinessAndRecordsDecodePath(t *testin
 	}
 }
 
-// A node whose auto resolves to software has no safer path to fall back to,
-// so waiting would only close a slow encoder at the node's deadline.
-func TestStartRemoteTranscodeAutoWithoutNodeHardwareDoesNotWait(t *testing.T) {
+// The node resolves auto against its live hardware, so a missing or software
+// stored report must not keep the fallback from the node.
+func TestStartRemoteTranscodeAutoLeavesFallbackDecisionToNode(t *testing.T) {
 	for _, report := range []string{"", `{"resolved":"none"}`} {
 		remoteReq, _ := startCompatRemoteAutoTranscode(t, report, transcodenode.TranscodeStartResponse{
 			Status: "started", HWAccel: "none",
 		})
-		if remoteReq.RequireReady {
-			t.Errorf("report %q: auto transcode on a node without hardware asked for readiness", report)
+		if !remoteReq.AutoFallbackReady || remoteReq.RequireReady {
+			t.Errorf("report %q: request = %+v, want auto_fallback_ready without require_ready", report, remoteReq)
 		}
 	}
 }
 
 func TestCompatRemoteAutoFallbackEligible(t *testing.T) {
-	hardware := &nodepool.Node{Capabilities: json.RawMessage(`{"resolved":"qsv"}`)}
-	software := &nodepool.Node{Capabilities: json.RawMessage(`{"resolved":"none"}`)}
 	for _, tc := range []struct {
 		name    string
 		request transcodenode.TranscodeStartRequest
-		node    *nodepool.Node
 		want    bool
 	}{
-		{"auto video", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: " AUTO "}, hardware, true},
-		{"node default", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264"}, hardware, false},
-		{"explicit accel", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: "qsv"}, hardware, false},
-		{"video copy", transcodenode.TranscodeStartRequest{TargetCodecVideo: "copy", HWAccel: "auto"}, hardware, false},
-		{"tone map", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: "auto", ToneMapMode: "software"}, hardware, false},
-		{"software node", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: "auto"}, software, false},
-		{"node without report", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: "auto"}, &nodepool.Node{}, false},
-		{"unknown node", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: "auto"}, nil, false},
+		{"auto video", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: " AUTO "}, true},
+		{"node default", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264"}, false},
+		{"explicit accel", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: "qsv"}, false},
+		{"video copy", transcodenode.TranscodeStartRequest{TargetCodecVideo: "copy", HWAccel: "auto"}, false},
+		{"tone map", transcodenode.TranscodeStartRequest{TargetCodecVideo: "h264", HWAccel: "auto", ToneMapMode: "software"}, false},
 	} {
-		if got := compatRemoteAutoFallbackEligible(tc.request, tc.node); got != tc.want {
+		if got := compatRemoteAutoFallbackEligible(tc.request); got != tc.want {
 			t.Errorf("%s: eligible = %v, want %v", tc.name, got, tc.want)
 		}
 	}
@@ -271,6 +265,9 @@ func TestRemoteTranscodeStartTimeoutCoversNodeReadiness(t *testing.T) {
 	want := 20*time.Second + transcodenode.TranscodeStartReadyMaxDuration
 	if got := handler.remoteTranscodeStartTimeout(transcodenode.TranscodeStartRequest{RequireReady: true}, 0); got != want {
 		t.Fatalf("ready timeout = %v, want %v", got, want)
+	}
+	if got := handler.remoteTranscodeStartTimeout(transcodenode.TranscodeStartRequest{AutoFallbackReady: true}, 0); got != want {
+		t.Fatalf("auto fallback timeout = %v, want %v", got, want)
 	}
 	if min := time.Duration(playback.MaxAutoTranscodeStartupAttempts) * transcodenode.TranscodeStartReadinessTimeout; want < min {
 		t.Fatalf("ready timeout = %v, want at least %v", want, min)

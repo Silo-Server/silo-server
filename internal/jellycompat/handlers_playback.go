@@ -758,7 +758,7 @@ func (h *PlaybackHandler) remoteTranscodeStartTimeout(request transcodenode.Tran
 	}
 	if request.ToneMapMode == "" {
 		timeout := 20 * time.Second
-		if request.RequireReady {
+		if request.RequireReady || request.AutoFallbackReady {
 			// The node answers only after its first manifest, which under
 			// hw_accel=auto can follow an early exit on each safer path.
 			timeout += transcodenode.TranscodeStartReadyMaxDuration
@@ -1425,34 +1425,25 @@ func clampSeekSeconds(seekSeconds float64, sources []PlaybackMediaSource) float6
 // backend verbatim and must be left to resolve it against live hardware. This
 // mirrors the v1 dispatch path in internal/api/handlers/playback_v3.go.
 func (h *PlaybackHandler) remoteDispatchHWAccel(nodeURL string) string {
-	return h.remoteTranscodeNode(nodeURL).EffectiveHWAccel(h.HWAccel)
-}
-
-// compatRemoteAutoFallbackEligible reports a video transcode dispatched with
-// hw_accel=auto to a node whose stored capability report resolves to a
-// hardware backend. Such a node can fall back to a safer path, but only while
-// it waits for the first manifest. Any other start keeps the unwaited start
-// Jellyfin-compat remote transcodes have always used: waiting where no
-// fallback exists would only close a slow encoder at the node's deadline.
-func compatRemoteAutoFallbackEligible(request transcodenode.TranscodeStartRequest, node *nodepool.Node) bool {
-	return request.ToneMapMode == "" &&
-		!strings.EqualFold(strings.TrimSpace(request.TargetCodecVideo), compatCopyCodec) &&
-		strings.EqualFold(strings.TrimSpace(request.HWAccel), "auto") &&
-		playback.StoredReportResolvesHardware(node.StoredCapabilities())
-}
-
-// remoteTranscodeNode returns the pooled record behind a transcode node URL,
-// or nil when the planner cannot resolve it.
-func (h *PlaybackHandler) remoteTranscodeNode(nodeURL string) *nodepool.Node {
 	lookup, ok := h.NodePlanner.(compatTranscodeNodeLookup)
 	if !ok {
-		return nil
+		return h.HWAccel
 	}
 	node, found := lookup.TranscodeNodeByURL(nodeURL)
 	if !found {
-		return nil
+		return h.HWAccel
 	}
-	return node
+	return node.EffectiveHWAccel(h.HWAccel)
+}
+
+// compatRemoteAutoFallbackEligible reports a video transcode dispatched with
+// hw_accel=auto and no tone map. The node can fall back to a safer path for
+// it, but only while it waits for the first manifest, and only the node knows
+// whether its live hardware enables that fallback.
+func compatRemoteAutoFallbackEligible(request transcodenode.TranscodeStartRequest) bool {
+	return request.ToneMapMode == "" &&
+		!strings.EqualFold(strings.TrimSpace(request.TargetCodecVideo), compatCopyCodec) &&
+		strings.EqualFold(strings.TrimSpace(request.HWAccel), "auto")
 }
 
 // startRemoteTranscode submits a frozen compatibility recipe to a selected node.
@@ -1658,9 +1649,9 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	if !compatHLSTranscodesAudio(source) {
 		reqBody.TargetCodecAudio = compatCopyCodec
 	}
-	if compatRemoteAutoFallbackEligible(reqBody, h.remoteTranscodeNode(transcodeNodeURL)) {
-		reqBody.RequireReady = true
-	}
+	// Jellyfin-compat remote starts are not otherwise waited on. Let the node
+	// wait only when its live auto pipeline can fall back.
+	reqBody.AutoFallbackReady = compatRemoteAutoFallbackEligible(reqBody)
 
 	dispatch := func(request transcodenode.TranscodeStartRequest) (transcodenode.TranscodeStartResponse, int, bool, error) {
 		body, err := json.Marshal(request)

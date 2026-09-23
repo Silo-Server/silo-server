@@ -185441,6 +185441,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "auto_fallback_ready": {
+            "type": "boolean"
+          },
           "copy_fmp4_recipe_version": {
             "type": "string"
           },

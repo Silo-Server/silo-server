@@ -80,7 +80,13 @@ type TranscodeStartRequest struct {
 	SubtitleCodec              string                 `json:"subtitle_codec,omitempty"`
 	TotalDuration              float64                `json:"total_duration"`
 	RequireReady               bool                   `json:"require_ready,omitempty"`
-	ThrottleSeconds            int                    `json:"throttle_seconds,omitempty"`
+	// AutoFallbackReady asks the node to wait for the first manifest only when
+	// its own hw_accel=auto fallback is enabled for this start, so an early
+	// hardware failure can move to a safer path. The node decides from its
+	// live hardware; any other start is not waited on. RequireReady still
+	// forces a wait.
+	AutoFallbackReady bool `json:"auto_fallback_ready,omitempty"`
+	ThrottleSeconds   int  `json:"throttle_seconds,omitempty"`
 }
 
 // TranscodeStartResponse is the JSON response for POST /transcode/start.
@@ -1624,7 +1630,8 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	// spawn or validation failure must leave a healthy live session intact.
 	var session *playback.TranscodeSession
 	var err error
-	if req.RequireReady {
+	pipeline := s.autoTranscodePipeline(r.Context(), opts)
+	if req.RequireReady || req.AutoFallbackReady && pipeline.Enabled() {
 		// Every attempt writes into opts.OutputDir, the replacement directory
 		// when a live session exists, and a failed attempt is closed before
 		// the next, so the live session is untouched until publication. Under
@@ -1634,7 +1641,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		// alternate render device to move to), so a hardware encoder session
 		// this Mac cannot create does not fail clustered playback while CPU
 		// encoding was available.
-		session, err = playback.StartReadyTranscode(r.Context(), s.autoTranscodePipeline(r.Context(), opts), playback.TranscodeStartup{
+		session, err = playback.StartReadyTranscode(r.Context(), pipeline, playback.TranscodeStartup{
 			Timeout:     TranscodeStartReadinessTimeout,
 			LegacyRetry: playback.TranscodeStartupRetryAccelChange,
 		})
