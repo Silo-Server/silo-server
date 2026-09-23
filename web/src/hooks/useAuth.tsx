@@ -371,7 +371,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    async function initialize() {
+    async function loadSetupStatus() {
       try {
         // Independent reads: a failed provider list must not blank the setup
         // status, or an admin visiting /setup during that outage would see
@@ -398,7 +398,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setSetupLoading(false);
         }
       }
+    }
 
+    async function restoreSession() {
       try {
         await initializeAuthSession({
           refreshToken: storage.get(storage.KEYS.REFRESH_TOKEN),
@@ -444,7 +446,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    initialize();
+    // The restore runs beside the public setup reads, not after them. Those
+    // reads are sent first because a request issued while the restore is in
+    // flight waits for it, and they need no session.
+    void loadSetupStatus();
+    void restoreSession();
 
     return () => {
       cancelled = true;

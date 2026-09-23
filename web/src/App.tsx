@@ -240,7 +240,9 @@ function guardRedirectTarget(base: string, location: ReturnType<typeof useLocati
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading, setupLoading } = useAuth();
   const location = useLocation();
-  if (loading || setupLoading) {
+  // Setup status only decides where a signed-out visitor goes; a restored
+  // session does not wait for it.
+  if (loading || (setupLoading && !user)) {
     return (
       <div className="p-8" role="status" aria-live="polite">
         <span className="sr-only">Loading application</span>
@@ -254,7 +256,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 function SetupGate({ children }: { children: ReactNode }) {
   const { user, setupLoading, setupRequired } = useAuth();
-  if (setupLoading) {
+  if (setupLoading && !user) {
     return (
       <div className="p-8" role="status" aria-live="polite">
         <span className="sr-only">Loading application</span>
@@ -330,15 +332,23 @@ function TasteSeedGate({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-/** Clears user-scoped query caches on profile switch or logout. */
+/** Clears user-scoped query caches on profile switch, sign-out, or account change. */
 function QueryCacheManager() {
   const { user, profile } = useAuth();
   const qc = useQueryClient();
+  const prevUserId = useRef<number | null>(null);
   const prevProfileId = useRef(profile?.id);
 
   useEffect(() => {
-    if (!user) {
+    const userId = user?.id ?? null;
+    // Only a real sign-out or account change drops the cache. Boot starts with
+    // no user while the session restores, and clearing then would discard the
+    // reads the shell already started and send them again.
+    if (prevUserId.current !== null && prevUserId.current !== userId) {
       qc.clear();
+    }
+    prevUserId.current = userId;
+    if (!user) {
       prevProfileId.current = undefined;
       return;
     }

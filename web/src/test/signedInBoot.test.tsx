@@ -1,0 +1,202 @@
+import { render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import eventsSocketTicket from "../../../contracts/api/v2/fixtures/events_socket_ticket.json";
+import getCurrentUserOk from "../../../contracts/api/v2/fixtures/get_current_user_ok.json";
+import getHomeLayoutOk from "../../../contracts/api/v2/fixtures/get_home_layout_ok.json";
+import getSettingsContractCapabilitiesOk from "../../../contracts/api/v2/fixtures/get_settings_contract_capabilities_ok.json";
+import listEffectiveSettingsOk from "../../../contracts/api/v2/fixtures/list_effective_settings_ok.json";
+import listFavoritesOk from "../../../contracts/api/v2/fixtures/list_favorites_ok.json";
+import listProfilesOk from "../../../contracts/api/v2/fixtures/list_profiles_ok.json";
+import { setAccessToken } from "@/api/client";
+import { profileFromV2 } from "@/hooks/queries/profiles";
+import { useHomeLayout } from "@/hooks/queries/sections";
+import { queryClient } from "@/lib/query-client";
+import { storage } from "@/utils/storage";
+import {
+  advanceClock,
+  createFakeServer,
+  describeRequests,
+  measureBoot,
+  settle,
+  type FakeServer,
+} from "./requestBudget";
+
+let initialEntry = "/";
+
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual<typeof import("react-router")>("react-router");
+  return {
+    ...actual,
+    // App builds a data router from the real history; start it at the entry
+    // under test instead.
+    createBrowserRouter: ((routes: Parameters<typeof actual.createMemoryRouter>[0]) =>
+      actual.createMemoryRouter(routes, {
+        initialEntries: [initialEntry],
+      })) as typeof actual.createBrowserRouter,
+  };
+});
+
+// The page chrome and the home rows are out of scope: this budget covers what
+// the always-mounted shell and the route gates cost before Home can ask for
+// its layout. Everything above the routed page is real.
+vi.mock("@/components/Layout", () => ({
+  default: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+
+function HomeLayoutProbe() {
+  const { data } = useHomeLayout();
+  return <div data-testid="home">{data ? `${data.sections.length} sections` : "loading"}</div>;
+}
+
+vi.mock("@/pages/Home", () => ({ default: HomeLayoutProbe }));
+vi.mock("@/lib/routeChunkPrefetch", () => ({ prefetchRouteChunks: () => () => {} }));
+vi.mock("@/player/hooks/useCodecDetection", async () => {
+  const actual = await vi.importActual<typeof import("@/player/hooks/useCodecDetection")>(
+    "@/player/hooks/useCodecDetection",
+  );
+  return { ...actual, prewarmCodecDetection: () => Promise.resolve() };
+});
+
+import App from "@/App";
+
+/** Accepts the events socket and never opens it; the socket is not under test. */
+class InertWebSocket extends EventTarget {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  readonly readyState = 0;
+  onopen = null;
+  onmessage = null;
+  onclose = null;
+  onerror = null;
+  send() {}
+  close() {}
+}
+
+const ownerProfile = listProfilesOk.items[0]!;
+
+function serverRoutes() {
+  return {
+    "GET /api/v2/system/setup": { body: { needs_setup: false, wizard_completed: true } },
+    "GET /api/v2/auth/providers": { body: { items: [] } },
+    "GET /api/v2/theme/branding": { body: {} },
+    "GET /api/v2/theme/admin-css": { body: {} },
+    "GET /api/v2/account/me": { body: getCurrentUserOk },
+    "GET /api/v2/profiles": { body: listProfilesOk },
+    "GET /api/v2/settings/contract/capabilities": { body: getSettingsContractCapabilitiesOk },
+    "GET /api/v2/settings/values/effective": { body: listEffectiveSettingsOk },
+    "GET /api/v2/favorites": { body: listFavoritesOk },
+    "GET /api/v2/home/layout": { body: getHomeLayoutOk },
+    "GET /api/v2/onboarding/state": {
+      body: { tour_id: "welcome", done: true },
+      headers: { ETag: '"onboarding-1"' },
+    },
+    "POST /api/v2/events/ws-ticket": { body: eventsSocketTicket },
+  };
+}
+
+async function releaseUntilQuiet(server: FakeServer) {
+  for (let wave = 0; wave < 20; wave += 1) {
+    await settle(server);
+    if (server.pendingCount() === 0) return;
+    server.releaseWave();
+  }
+  throw new Error(`boot did not settle:\n${describeRequests(server.requests)}`);
+}
+
+async function boot(server: FakeServer) {
+  render(<App />);
+  await releaseUntilQuiet(server);
+  // Past TanStack Query's first retry backoff (1s), so a failed read parked
+  // for a retry is counted too.
+  await advanceClock(1_500);
+  await releaseUntilQuiet(server);
+}
+
+describe("app boot request budget", () => {
+  let server: FakeServer;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    initialEntry = "/";
+    localStorage.clear();
+    sessionStorage.clear();
+    queryClient.clear();
+    setAccessToken(null);
+    server = createFakeServer(serverRoutes());
+    vi.stubGlobal("fetch", server.fetch);
+    vi.stubGlobal("WebSocket", InertWebSocket);
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      })),
+    );
+  });
+
+  afterEach(() => {
+    queryClient.clear();
+    setAccessToken(null);
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("restores a returning session and reaches the home layout in two waves", async () => {
+    // A returning browser: a stored refresh token and a selected profile. The
+    // access token only ever lives in memory, so there is none yet.
+    storage.set(storage.KEYS.REFRESH_TOKEN, "refresh-0");
+    storage.set(storage.KEYS.PROFILE_ID, ownerProfile.id);
+    storage.set(storage.KEYS.CURRENT_PROFILE, JSON.stringify(profileFromV2(ownerProfile)));
+
+    await boot(server);
+
+    const log = describeRequests(server.requests);
+    expect(screen.getByTestId("home"), log).toHaveTextContent("2 sections");
+    expect(measureBoot(server.requests), log).toEqual({
+      requestsBeforeHomeLayout: 6,
+      wavesBeforeHomeLayout: 2,
+      unauthorized: 0,
+      refreshes: 1,
+      duplicateGets: 0,
+      total: 19,
+    });
+    // The session restore starts beside the public setup reads, not after them.
+    expect(
+      server.requests.filter((request) => request.wave === 1).map((request) => request.operation),
+      log,
+    ).toEqual(
+      expect.arrayContaining([
+        "GET /api/v2/system/setup",
+        "GET /api/v2/auth/providers",
+        "POST /api/v2/auth/refresh",
+      ]),
+    );
+    expect(server.refreshTokensUsed).toEqual(["refresh-0"]);
+  });
+
+  it("sends no account reads from the login screen", async () => {
+    initialEntry = "/login";
+
+    await boot(server);
+
+    const log = describeRequests(server.requests);
+    expect(measureBoot(server.requests), log).toEqual({
+      requestsBeforeHomeLayout: -1,
+      wavesBeforeHomeLayout: -1,
+      unauthorized: 0,
+      refreshes: 0,
+      duplicateGets: 0,
+      total: 4,
+    });
+  });
+});

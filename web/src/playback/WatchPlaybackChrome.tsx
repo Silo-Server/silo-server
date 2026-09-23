@@ -448,7 +448,11 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
 }
 
 export function WatchPlaybackHost() {
-  const seekPreferences = useSeekPreferences("video");
+  // The host is mounted on every screen, the login screen included; its
+  // settings reads wait for a session instead of answering 401.
+  const { user } = useAuth();
+  const signedIn = user !== null;
+  const seekPreferences = useSeekPreferences("video", { enabled: signedIn });
   const controller = useContext(WatchPlaybackControllerContext);
   if (!controller) {
     throw new Error("Watch playback host is unavailable outside WatchPlaybackProvider");
@@ -467,10 +471,9 @@ export function WatchPlaybackHost() {
   const queryClient = useQueryClient();
   const location = useLocation();
   const navigate = useViewTransitionNavigate();
-  const { user } = useAuth();
   const { profile: currentProfile } = useCurrentProfile();
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
-  const settingsCapabilities = useSettingsCapabilities();
+  const settingsCapabilities = useSettingsCapabilities({ enabled: signedIn });
   // Three answers, not two: the connected server defines the enum, it provably
   // does not, or nobody knows yet. settingsCapabilitiesSupportKey collapses the
   // last two into false, so the query's own state is what separates them.
@@ -504,6 +507,7 @@ export function WatchPlaybackHost() {
       // tier under this so the setting does what its label says.
       SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS,
     ],
+    enabled: signedIn,
   });
   const request = state.request;
   const isForegroundMode = request != null && state.mode === "foreground";
@@ -1039,7 +1043,8 @@ export function WatchPlaybackBar() {
   const request = state.request;
   const snapshot = state.snapshot;
   const transport = state.transport;
-  const seekPreferences = useSeekPreferences("video");
+  const { user } = useAuth();
+  const seekPreferences = useSeekPreferences("video", { enabled: user !== null });
   const { data: item } = useWatchDetail(request?.contentId, request?.fileId, request?.libraryId);
   const [scrubValue, setScrubValue] = useState<number | null>(null);
 
