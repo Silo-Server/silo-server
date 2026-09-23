@@ -26,6 +26,7 @@ const FIELD_RATING = 6;
 const FIELD_TAGS = 8;
 const FIELD_RUNTIME = 7;
 const FIELD_CONTENT_RATING = 9;
+const FIELD_IMAGES = 10;
 const FIELD_AIR_SCHEDULE = 11;
 const FIELD_RELEASE_DATES = 13;
 
@@ -121,9 +122,10 @@ function initFormState(item: ItemDetail) {
 export default function EditMetadataDialog({ item, open, onOpenChange }: EditMetadataDialogProps) {
   const [activeSection, setActiveSection] = useState<Section>("general");
   const [form, setForm] = useState(() => initFormState(item));
-  const [lockedFields, setLockedFields] = useState<Set<number>>(
-    () => new Set(item.locked_fields ?? []),
-  );
+  // Keep only local changes to locks. Image selection updates the item while
+  // this dialog is open, so a snapshot of the original locks can go stale.
+  const [lockOverrides, setLockOverrides] = useState<Map<number, boolean>>(() => new Map());
+  const [imageApplyPending, setImageApplyPending] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const updateMutation = useUpdateItemMetadata(item.content_id);
@@ -139,29 +141,40 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
     : "general";
 
   const originalForm = useMemo(() => initFormState(item), [item]);
+  const lockedFields = useMemo(() => {
+    const fields = new Set(item.locked_fields ?? []);
+    for (const [field, locked] of lockOverrides) {
+      if (locked) fields.add(field);
+      else fields.delete(field);
+    }
+    return fields;
+  }, [item.locked_fields, lockOverrides]);
 
   const setField = useCallback(
     (field: string, value: unknown) => {
       setForm((prev) => ({ ...prev, [field]: value }));
       if (isLockable && field in FIELD_LOCK_MAP) {
         const lockField = FIELD_LOCK_MAP[field] as number;
-        setLockedFields((prev) => new Set(prev).add(lockField));
+        setLockOverrides((prev) => new Map(prev).set(lockField, true));
       }
     },
     [isLockable],
   );
 
-  const toggleLock = useCallback((metadataField: number) => {
-    setLockedFields((prev) => {
-      const next = new Set(prev);
-      if (next.has(metadataField)) {
-        next.delete(metadataField);
-      } else {
-        next.add(metadataField);
-      }
-      return next;
-    });
-  }, []);
+  const toggleLock = useCallback(
+    (metadataField: number) => {
+      setLockOverrides((prev) =>
+        new Map(prev).set(metadataField, !lockedFields.has(metadataField)),
+      );
+    },
+    [lockedFields],
+  );
+
+  const handleImageApplied = useCallback(() => {
+    if (isLockable) {
+      setLockOverrides((prev) => new Map(prev).set(FIELD_IMAGES, true));
+    }
+  }, [isLockable]);
 
   const lockedCount = lockedFields.size;
 
@@ -213,7 +226,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
     if (form.episode_number !== originalForm.episode_number)
       data.episode_number = form.episode_number;
 
-    if (isLockable) {
+    if (isLockable && lockOverrides.size > 0) {
       const originalLocked = new Set(item.locked_fields ?? []);
       const currentLocked = Array.from(lockedFields).sort();
       const originalSorted = Array.from(originalLocked).sort();
@@ -660,7 +673,12 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                     effectiveActiveSection === "images" ? "flex h-full flex-col" : "hidden"
                   }
                 >
-                  <ImageSelectorTab item={item} enabled={effectiveActiveSection === "images"} />
+                  <ImageSelectorTab
+                    item={item}
+                    enabled={effectiveActiveSection === "images"}
+                    onImageApplied={handleImageApplied}
+                    onApplyPendingChange={setImageApplyPending}
+                  />
                 </div>
               )}
             </div>
@@ -692,7 +710,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
               <Button
                 size="sm"
                 onClick={handleSave}
-                disabled={updateMutation.isPending}
+                disabled={updateMutation.isPending || imageApplyPending}
                 className="max-sm:flex-1"
               >
                 {updateMutation.isPending ? "Saving..." : "Save Changes"}
