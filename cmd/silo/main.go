@@ -1758,11 +1758,9 @@ func main() {
 			log.Fatalf("plugin event dispatcher: %v", err)
 		}
 		defer dispatcher.Stop()
-		// Backfill the capability-subscriber index from the already-preloaded
-		// installations. PreloadEnabled ran earlier (before the dispatcher
-		// existed), so its rebuildDispatcherIndex was a no-op. Without this
-		// call, capability-scoped subscriptions never fire until the next
-		// lifecycle mutation.
+		// Run the lifecycle hooks registered so far once more. The dispatcher
+		// does not depend on this: it builds its subscriber index from the
+		// store on the first event.
 		pluginService.OnLifecycleChange(appCtx)
 	}
 

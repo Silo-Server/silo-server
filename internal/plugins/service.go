@@ -116,11 +116,16 @@ type Service struct {
 	installationCacheGen uint64
 }
 
-// SetEventDispatcher wires the EventDispatcher into the Service. The
-// dispatcher reference is retained so future hooks can act on lifecycle
-// changes; the current dispatcher implementation is fully driven by
-// per-event store reads and needs no notification on install/enable/disable.
-func (s *Service) SetEventDispatcher(d *EventDispatcher) { s.dispatcher = d }
+// SetEventDispatcher wires the EventDispatcher into the Service and registers
+// a lifecycle hook that drops the dispatcher's subscriber index, so an
+// install, enable, disable, upgrade, or uninstall on this replica reaches the
+// next event. Other replicas drop theirs on cache.EventPluginsChanged.
+func (s *Service) SetEventDispatcher(d *EventDispatcher) {
+	s.dispatcher = d
+	if d != nil {
+		s.AddLifecycleHook(func(context.Context) { d.invalidateIndex() })
+	}
+}
 
 // AddLifecycleHook registers a callback invoked after plugin install, enable,
 // disable, uninstall, preload, or runtime-configuration changes.
