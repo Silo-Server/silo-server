@@ -1,3 +1,5 @@
+export const THEME_MUSIC_INTERRUPT_EVENT = "silo:theme-music-interrupt";
+
 export interface ThemeTrack {
   id: string;
 }

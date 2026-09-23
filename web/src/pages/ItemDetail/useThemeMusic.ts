@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 import type { ItemDetail } from "@/api/types";
@@ -6,7 +6,7 @@ import { v2 } from "@/api/v2/request";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { SETTING_KEYS } from "@/lib/settingsContract";
-import { ThemeMusic } from "@/lib/themeMusic";
+import { THEME_MUSIC_INTERRUPT_EVENT, ThemeMusic } from "@/lib/themeMusic";
 import { WatchPlaybackControllerContext } from "@/playback/watchPlaybackContext";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 
@@ -30,7 +30,9 @@ export function useThemeMusic(item: ItemDetail | undefined, loading: boolean) {
   const player = useRef<ThemeMusic | null>(null);
   const suppressedOwner = useRef<string | undefined>(undefined);
   const owner = useRef<string | undefined>(undefined);
-  owner.current = item?.themes?.owner_id;
+  useLayoutEffect(() => {
+    owner.current = item?.themes?.owner_id;
+  }, [item?.themes?.owner_id]);
 
   useEffect(() => {
     const context = captureProfileRequestContext();
@@ -90,12 +92,16 @@ export function useThemeMusic(item: ItemDetail | undefined, loading: boolean) {
   ]);
 
   useEffect(() => {
-    // Includes trailer players and other media outside the persistent players.
+    // Iframe media events cannot reach this document, so trailers signal explicitly.
     const stop = () => {
       suppressedOwner.current = owner.current;
       player.current?.stop(true);
     };
     document.addEventListener("play", stop, true);
-    return () => document.removeEventListener("play", stop, true);
+    document.addEventListener(THEME_MUSIC_INTERRUPT_EVENT, stop);
+    return () => {
+      document.removeEventListener("play", stop, true);
+      document.removeEventListener(THEME_MUSIC_INTERRUPT_EVENT, stop);
+    };
   }, []);
 }

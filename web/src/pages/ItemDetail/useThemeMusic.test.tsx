@@ -1,9 +1,10 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ItemDetail } from "@/api/types";
 import { useThemeMusic } from "./useThemeMusic";
+import TrailersSection from "./components/TrailersSection";
 
 const state = vi.hoisted(() => ({
   profile: { id: "p1" },
@@ -15,6 +16,9 @@ const state = vi.hoisted(() => ({
 
 vi.mock("@/hooks/useAuth", () => ({
   useOptionalAuth: () => ({ user: { id: 1 }, profile: state.profile }),
+}));
+vi.mock("@/hooks/useCarouselEmbla", () => ({
+  useCarouselEmbla: () => ({ emblaRef: vi.fn(), canScrollPrev: false, canScrollNext: false }),
 }));
 vi.mock("@/hooks/queries/settingValues", () => ({
   useEffectiveSettings: () => ({
@@ -93,6 +97,58 @@ function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
+
+function openTrailer() {
+  render(
+    <TrailersSection
+      videos={[
+        {
+          kind: "trailer",
+          site: "YouTube",
+          site_key: "review-fixture",
+          name: "Review trailer",
+          is_official: true,
+        },
+      ]}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Review trailer/ }));
+  expect(screen.getByTitle("Review trailer")).toHaveAttribute(
+    "src",
+    "https://www.youtube-nocookie.com/embed/review-fixture?autoplay=1",
+  );
+}
+
+it("stops theme music when an iframe trailer opens and keeps the owner suppressed", async () => {
+  const { rerender, unmount } = renderHook(({ detail }) => useThemeMusic(detail, false), {
+    wrapper,
+    initialProps: { detail: item("movie") },
+  });
+  await waitFor(() => expect(elements).toHaveLength(1));
+  openTrailer();
+  expect(elements[0]!.paused).toBe(true);
+  expect(elements[0]!.src).toBe("");
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  rerender({ detail: item("movie") });
+  expect(elements).toHaveLength(1);
+  expect(state.requests).toHaveLength(1);
+  unmount();
+});
+
+it("discards an in-flight theme grant when an iframe trailer opens", async () => {
+  let finish!: (grant: { url: string }) => void;
+  state.grant = new Promise((resolve) => {
+    finish = resolve;
+  });
+  const { unmount } = renderHook(() => useThemeMusic(item("movie"), false), { wrapper });
+  await waitFor(() => expect(state.requests).toHaveLength(1));
+  openTrailer();
+  await act(async () => {
+    finish({ url: "/audio?token=obsolete" });
+  });
+  expect(elements).toHaveLength(0);
+  unmount();
+});
 
 it("pauses during unresolved navigation and resumes the same owner's element", async () => {
   const { rerender, unmount } = renderHook(
