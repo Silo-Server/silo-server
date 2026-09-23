@@ -110,9 +110,38 @@ func TestJellyfinProviderFetch_FavoritesFailureIsAWarning(t *testing.T) {
 	}
 }
 
+// A favorite's series lookup is as optional as the favorites query: when it
+// fails, the watch history and the favorite episode survive with a warning.
+func TestJellyfinProviderFetch_FavoriteSeriesLookupFailureIsAWarning(t *testing.T) {
+	t.Parallel()
+
+	server := newJellyfinFetchServer(t, map[string][]jellyfinItem{
+		"IsPlayed":   {{ID: "matrix", Type: "Movie", Name: "The Matrix", ProviderIDs: map[string]string{"Tmdb": "603"}, UserData: jellyfinUserData{Played: true}}},
+		"IsFavorite": {{ID: "bb-s2e2", Type: "Episode", Name: "Grilled", SeriesID: "bb", ParentIndexNumber: 2, IndexNumber: 2, ProviderIDs: map[string]string{"Tvdb": "349234"}, UserData: jellyfinUserData{IsFavorite: true}}},
+	}, nil)
+
+	records, warnings, err := NewJellyfinProvider(NewJellyfinClient(), jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}).Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	byID := map[string]Record{}
+	for _, record := range records {
+		byID[record.ExternalID] = record
+	}
+	if matrix := byID["matrix"]; len(byID) != 2 || !matrix.Played {
+		t.Fatalf("records = %+v, want the played movie and the favorite episode", records)
+	}
+	if episode := byID["bb-s2e2"]; !episode.FavoriteOnly || episode.TVDBID != "349234" {
+		t.Fatalf("favorite episode = %+v, want favorite-only with its own TVDB ID", episode)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "series for favorites") {
+		t.Fatalf("warnings = %v, want one favorite series warning", warnings)
+	}
+}
+
 // newJellyfinFetchServer serves /Items by filter (a filter absent from
 // byFilter answers 500), an empty /UserItems/Resume, and /Items?Ids= lookups
-// from byID.
+// from byID (a nil byID answers 500).
 func newJellyfinFetchServer(t *testing.T, byFilter map[string][]jellyfinItem, byID map[string]jellyfinItem) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -122,6 +151,10 @@ func newJellyfinFetchServer(t *testing.T, byFilter map[string][]jellyfinItem, by
 		switch {
 		case r.URL.Path == "/UserItems/Resume":
 		case r.URL.Path == "/Items" && query.Get("Ids") != "":
+			if byID == nil {
+				http.Error(w, "boom", http.StatusInternalServerError)
+				return
+			}
 			for id := range strings.SplitSeq(query.Get("Ids"), ",") {
 				if item, ok := byID[id]; ok {
 					items = append(items, item)

@@ -2,6 +2,7 @@ package historyimport
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -34,9 +35,21 @@ func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error
 		favorites = nil
 	}
 	watched := slices.Concat(played, resumable)
-	seriesMeta, err := p.fetchSeriesMetadata(ctx, slices.Concat(watched, favorites))
+	seriesMeta, err := p.fetchSeriesMetadata(ctx, watched)
 	if err != nil {
 		return nil, nil, err
+	}
+	// Series that only favorites need are looked up separately so that, like
+	// the favorites query, a failure there cannot discard the watch history.
+	// Favorite episodes then keep only their own provider IDs.
+	favoriteSeries := slices.DeleteFunc(slices.Clone(favorites), func(item jellyfinItem) bool {
+		_, ok := seriesMeta[item.SeriesID]
+		return ok
+	})
+	if extra, err := p.fetchSeriesMetadata(ctx, favoriteSeries); err != nil {
+		warnings = append(warnings, "fetching Jellyfin series for favorites: "+err.Error())
+	} else {
+		maps.Copy(seriesMeta, extra)
 	}
 	merged := map[string]Record{}
 	add := func(record Record) {
