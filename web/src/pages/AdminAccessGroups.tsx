@@ -675,8 +675,14 @@ function LimitField({ id, label, hint, value, onChange }: LimitFieldProps) {
         min={0}
         value={value}
         onChange={(event) => {
-          const next = Number.parseInt(event.target.value, 10);
-          onChange(Number.isFinite(next) && next > 0 ? next : 0);
+          const raw = event.target.value;
+          if (raw === "") {
+            onChange(0);
+            return;
+          }
+          if (!/^\d+$/.test(raw)) return;
+          const next = Number(raw);
+          if (Number.isSafeInteger(next)) onChange(next);
         }}
       />
     </div>

@@ -18,8 +18,8 @@ type EffectivePolicy struct {
 	MaxPlaybackQuality         string       `json:"max_playback_quality" doc:"Playback ceiling; empty means none" example:"1080p"`
 	MaxStreams                 int          `json:"max_streams" doc:"Concurrent stream limit; 0 means unlimited" example:"2"`
 	MaxTranscodes              int          `json:"max_transcodes" doc:"Concurrent transcode limit; 0 means unlimited" example:"0"`
-	MaxRemoteStreamBitrateKbps int          `json:"max_remote_stream_bitrate_kbps" doc:"Remote per-stream bitrate limit in kbps; 0 means unlimited" example:"0"`
-	MaxLocalStreamBitrateKbps  int          `json:"max_local_stream_bitrate_kbps" doc:"Local per-stream bitrate limit in kbps; 0 means unlimited" example:"0"`
+	MaxRemoteStreamBitrateKbps int          `json:"max_remote_stream_bitrate_kbps" minimum:"0" doc:"Remote per-stream bitrate limit in kbps; 0 means unlimited" example:"0"`
+	MaxLocalStreamBitrateKbps  int          `json:"max_local_stream_bitrate_kbps" minimum:"0" doc:"Local per-stream bitrate limit in kbps; 0 means unlimited" example:"0"`
 	TranscodeAllowed           bool         `json:"transcode_allowed" example:"true"`
 	AudioTranscodeAllowed      bool         `json:"audio_transcode_allowed" example:"false"`
 	DownloadAllowed            bool         `json:"download_allowed" example:"true"`
@@ -41,8 +41,8 @@ type AdminUser struct {
 	MaxPlaybackQuality         *string         `json:"max_playback_quality" nullable:"true" doc:"Playback ceiling override; null inherits, empty string means no ceiling" example:"1080p"`
 	MaxStreams                 *int            `json:"max_streams" nullable:"true" doc:"Stream limit override; null inherits, 0 means unlimited" example:"2"`
 	MaxTranscodes              *int            `json:"max_transcodes" nullable:"true" doc:"Transcode limit override; null inherits, 0 means unlimited" example:"0"`
-	MaxRemoteStreamBitrateKbps *int            `json:"max_remote_stream_bitrate_kbps" nullable:"true" doc:"Remote per-stream bitrate override in kbps; null inherits, 0 means unlimited" example:"0"`
-	MaxLocalStreamBitrateKbps  *int            `json:"max_local_stream_bitrate_kbps" nullable:"true" doc:"Local per-stream bitrate override in kbps; null inherits, 0 means unlimited" example:"0"`
+	MaxRemoteStreamBitrateKbps *int            `json:"max_remote_stream_bitrate_kbps" nullable:"true" minimum:"0" doc:"Remote per-stream bitrate override in kbps; null inherits, 0 means unlimited" example:"0"`
+	MaxLocalStreamBitrateKbps  *int            `json:"max_local_stream_bitrate_kbps" nullable:"true" minimum:"0" doc:"Local per-stream bitrate override in kbps; null inherits, 0 means unlimited" example:"0"`
 	TranscodeAllowed           *bool           `json:"transcode_allowed" nullable:"true" doc:"Override; null inherits" example:"true"`
 	AudioTranscodeAllowed      *bool           `json:"audio_transcode_allowed" nullable:"true" doc:"Override; null inherits" example:"false"`
 	MaxProfiles                int             `json:"max_profiles" doc:"Household profile limit" example:"5"`

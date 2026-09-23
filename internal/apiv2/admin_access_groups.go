@@ -33,8 +33,8 @@ type AdminAccessGroup struct {
 	AudioTranscodeAllowed      bool     `json:"audio_transcode_allowed"`
 	MaxStreams                 int      `json:"max_streams"`
 	MaxTranscodes              int      `json:"max_transcodes"`
-	MaxRemoteStreamBitrateKbps int      `json:"max_remote_stream_bitrate_kbps" doc:"Remote per-stream bitrate ceiling in kbps; 0 means unlimited"`
-	MaxLocalStreamBitrateKbps  int      `json:"max_local_stream_bitrate_kbps" doc:"Local per-stream bitrate ceiling in kbps; 0 means unlimited"`
+	MaxRemoteStreamBitrateKbps int      `json:"max_remote_stream_bitrate_kbps" minimum:"0" doc:"Remote per-stream bitrate ceiling in kbps; 0 means unlimited"`
+	MaxLocalStreamBitrateKbps  int      `json:"max_local_stream_bitrate_kbps" minimum:"0" doc:"Local per-stream bitrate ceiling in kbps; 0 means unlimited"`
 	AllowedPermissions         []string `json:"allowed_permissions" nullable:"true"`
 	RequestsAllowed            bool     `json:"requests_allowed"`
 	IsDefault                  bool     `json:"is_default"`
