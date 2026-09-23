@@ -644,24 +644,33 @@ func TestSilenceRefinementFailureBacksOff(t *testing.T) {
 		IntroStart:      60,
 		IntroEnd:        120,
 	}
+	elapsed := time.Now().Add(-time.Hour)
 	withStatus := func(attempt SilenceRefinementAttempt, status string, failures int) *SilenceRefinementAttempt {
 		attempt.Status = status
 		attempt.FailureCount = failures
+		if status == silenceAttemptFailed {
+			attempt.RetryAfter = &elapsed
+		}
 		return &attempt
 	}
 	otherConfig := *withStatus(sameInputs, silenceAttemptFailed, 4)
 	otherConfig.ConfigHash = "previous-settings"
 	movedMarker := *withStatus(sameInputs, silenceAttemptFailed, 4)
 	movedMarker.IntroEnd = 118
+	pendingRetry := time.Now().Add(10 * time.Hour)
+	stillBackingOff := *withStatus(sameInputs, silenceAttemptFailed, 2)
+	stillBackingOff.RetryAfter = &pendingRetry
 
 	tests := []struct {
-		name         string
-		previous     *SilenceRefinementAttempt
-		wantFailures int
-		wantDelay    time.Duration
+		name           string
+		previous       *SilenceRefinementAttempt
+		wantFailures   int
+		wantDelay      time.Duration
+		wantRetryAfter *time.Time
 	}{
 		{name: "first failure", wantFailures: 1, wantDelay: 12 * time.Hour},
 		{name: "repeated failure doubles", previous: withStatus(sameInputs, silenceAttemptFailed, 2), wantFailures: 3, wantDelay: 48 * time.Hour},
+		{name: "failure inside the backoff window keeps it", previous: &stillBackingOff, wantFailures: 2, wantRetryAfter: &pendingRetry},
 		{name: "failure after no improvement starts over", previous: withStatus(sameInputs, silenceAttemptNoImprovement, 0), wantFailures: 1, wantDelay: 12 * time.Hour},
 		{name: "changed settings start over", previous: &otherConfig, wantFailures: 1, wantDelay: 12 * time.Hour},
 		{name: "changed marker range starts over", previous: &movedMarker, wantFailures: 1, wantDelay: 12 * time.Hour},
@@ -692,7 +701,14 @@ func TestSilenceRefinementFailureBacksOff(t *testing.T) {
 			if got.FailureCount != tt.wantFailures {
 				t.Fatalf("failure count = %d, want %d", got.FailureCount, tt.wantFailures)
 			}
-			if got.RetryAfter == nil || got.RetryAfter.Sub(got.AttemptedAt) != tt.wantDelay {
+			switch {
+			case got.RetryAfter == nil:
+				t.Fatal("expected retry_after to be set")
+			case tt.wantRetryAfter != nil:
+				if !got.RetryAfter.Equal(*tt.wantRetryAfter) {
+					t.Fatalf("retry_after = %v, want the pending %v", got.RetryAfter, tt.wantRetryAfter)
+				}
+			case got.RetryAfter.Sub(got.AttemptedAt) != tt.wantDelay:
 				t.Fatalf("retry_after = %v after %v, want delay %v", got.RetryAfter, got.AttemptedAt, tt.wantDelay)
 			}
 			if len(repo.patches) != 1 || repo.patches[0].Algorithm != ChapterAlgorithm {

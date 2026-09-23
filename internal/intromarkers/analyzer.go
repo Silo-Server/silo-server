@@ -462,10 +462,19 @@ func (a *Analyzer) recordSilenceAttempt(ctx context.Context, candidate Candidate
 		attempt.Status = silenceAttemptFailed
 		attempt.LastError = refineErr.Error()
 		attempt.FailureCount = 1
+		retryAfter := attempt.AttemptedAt.Add(silenceRetryDelay(1))
 		if previous != nil && previous.Status == silenceAttemptFailed && previous.sameInputs(attempt) {
-			attempt.FailureCount = previous.FailureCount + 1
+			if previous.RetryAfter != nil && attempt.AttemptedAt.Before(*previous.RetryAfter) {
+				// Another server running the same schedule, or a forced episode
+				// analysis, failed inside the backoff window. That is not a retry,
+				// so it must not escalate the backoff.
+				attempt.FailureCount = previous.FailureCount
+				retryAfter = *previous.RetryAfter
+			} else {
+				attempt.FailureCount = previous.FailureCount + 1
+				retryAfter = attempt.AttemptedAt.Add(silenceRetryDelay(attempt.FailureCount))
+			}
 		}
-		retryAfter := attempt.AttemptedAt.Add(silenceRetryDelay(attempt.FailureCount))
 		attempt.RetryAfter = &retryAfter
 	}
 	if err := a.repo.UpsertSilenceRefinementAttempt(ctx, attempt); err != nil {
