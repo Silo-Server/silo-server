@@ -113,9 +113,11 @@ func TestPersonsJellyfin12QueryOptions(t *testing.T) {
 	if people.opts.Limit != auxSearchMaxResults || people.opts.LibraryID != 0 {
 		t.Fatalf("search keeps the aux cap: %+v", people.opts)
 	}
-	serve("Limit=5000")
-	if people.opts.Limit != personBrowseMaxResults {
-		t.Fatalf("browse limit = %d, want cap %d", people.opts.Limit, personBrowseMaxResults)
+	for _, limit := range []string{"5000", "0"} {
+		serve("Limit=" + limit)
+		if people.opts.Limit != personBrowseMaxResults {
+			t.Fatalf("browse Limit=%s = %d, want the default page %d", limit, people.opts.Limit, personBrowseMaxResults)
+		}
 	}
 	serve("ParentId=" + codec.EncodeStringID(EncodedIDItem, "series-9"))
 	if people.opts.ContentID != "series-9" {

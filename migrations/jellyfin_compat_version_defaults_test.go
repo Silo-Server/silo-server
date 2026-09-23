@@ -83,6 +83,7 @@ func TestJellyfinCompatWebVersionMigrationPinsConfiguredServersPostgres(t *testi
 		{"fresh database", "", false, false, false, ""},
 		{"configured without stored version", "", false, true, true, "10.11.6"},
 		{"configured with an empty stored version", "", true, true, true, "10.11.6"},
+		{"configured with a tab-only stored version", "\t", false, true, true, "10.11.6"},
 		{"fresh with an empty stored version", "", true, false, false, " "},
 		{"setup account created", "", false, true, false, "10.11.6"},
 		{"completed without account", "", false, false, true, "10.11.6"},

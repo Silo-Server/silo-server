@@ -57,7 +57,11 @@ func (h *PersonsHandler) HandleGetPersons(w http.ResponseWriter, r *http.Request
 	// people and may page in larger windows.
 	limit := clampAuxSearchLimit(parsePositiveInt(q.Get("Limit"), auxSearchMaxResults))
 	if searchTerm == "" {
-		limit = min(parsePositiveInt(q.Get("Limit"), personBrowseMaxResults), personBrowseMaxResults)
+		limit = parsePositiveInt(q.Get("Limit"), personBrowseMaxResults)
+		if limit <= 0 || limit > personBrowseMaxResults {
+			// As for searches, a non-positive limit means the default page.
+			limit = personBrowseMaxResults
+		}
 	}
 
 	filter := catalog.AccessFilter{AllowedLibraryIDs: []int{}}

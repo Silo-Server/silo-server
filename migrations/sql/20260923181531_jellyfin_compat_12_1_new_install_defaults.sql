@@ -22,7 +22,7 @@ WHERE key = 'jellyfin_compat.emulated_server_version'
 UPDATE server_settings
 SET value = '10.11.6'
 WHERE key = 'jellyfin_compat.web_version'
-  AND trim(value) = ''
+  AND value ~ '^[[:space:]]*$'
   AND (
       EXISTS (SELECT 1 FROM users)
       OR EXISTS (
