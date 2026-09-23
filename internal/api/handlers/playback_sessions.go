@@ -132,8 +132,6 @@ type playbackSessionsCapabilitiesResponse struct {
 	// NodeRouting reports that rows may carry workload/execution/egress route
 	// assignment fields when the active session has resolved them.
 	NodeRouting bool `json:"node_routing"`
-	// StreamLocation reports that native admin rows include the frozen policy classification.
-	StreamLocation bool `json:"stream_location"`
 }
 
 // HandleGetSessionsCapabilities exposes additive feature support for the live
@@ -155,7 +153,6 @@ func AdminPlaybackSessionFeatures() playbackSessionsCapabilitiesResponse {
 		ClientChannel:             true,
 		TargetAudioChannels:       true,
 		NodeRouting:               true,
-		StreamLocation:            true,
 	}
 }
 

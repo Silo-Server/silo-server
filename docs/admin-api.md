@@ -189,7 +189,7 @@ the same trusted client-IP and provider-path classification as the bitrate
 policy. Private, loopback, and link-local clients on the default path are local;
 provider paths and public or unknown client addresses are remote. The web
 Activity panel shows this separately from the access-network badge.
-The sessions capabilities response advertises `stream_location` for client
+`GET /api/v2/admin/sessions/capabilities` advertises `stream_location` for client
 feature detection. The displayed location is fixed at playback negotiation,
 even if a later media request arrives over another network path.
 
