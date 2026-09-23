@@ -107,17 +107,26 @@ func (s *rootRoutingContent) BrowseItems(context.Context, *Session, url.Values) 
 // a recursive search; a bare request (or one that only excludes virtual
 // items) still lists the libraries.
 func TestHandleItemsRootFiltersSearchRecursively(t *testing.T) {
+	const (
+		views = iota
+		browse
+		empty
+	)
 	cases := []struct {
-		query  string
-		browse bool
+		query string
+		want  int
 	}{
-		{"", false},
-		{"ExcludeLocationTypes=Virtual", false},
-		{"MediaTypes=Video", true},
-		{"Tags=Classic", true},
-		{"HasSubtitles=true", true},
-		{"IsFavorite=false", true},
-		{"Recursive=true", true},
+		{"", views},
+		{"ExcludeLocationTypes=Virtual", views},
+		{"MediaTypes=Video", browse},
+		{"Tags=Classic", browse},
+		{"HasSubtitles=true", browse},
+		{"IsFavorite=false", browse},
+		{"Recursive=true", browse},
+		// Unresolvable IDs never widen into an unfiltered catalog browse.
+		{"Ids=not-an-id", views},
+		{"GenreIds=not-an-id", empty},
+		{"PersonIds=not-an-id", empty},
 	}
 	for _, tc := range cases {
 		t.Run(tc.query, func(t *testing.T) {
@@ -125,11 +134,18 @@ func TestHandleItemsRootFiltersSearchRecursively(t *testing.T) {
 			content := &rootRoutingContent{}
 			h := &ItemsHandler{content: content, userData: &mockUserDataService{}, codec: codec, mapper: newMapper(codec, &config.Config{}), images: NewImageCache(time.Hour, time.Now)}
 			result := performItemsRequest(t, h, "/Items?"+tc.query)
-			if content.browsed != tc.browse {
-				t.Fatalf("browsed = %v, want %v (items %+v)", content.browsed, tc.browse, result.Items)
+			if content.browsed != (tc.want == browse) {
+				t.Fatalf("browsed = %v, want %v (items %+v)", content.browsed, tc.want == browse, result.Items)
 			}
-			if !tc.browse && (len(result.Items) != 1 || result.Items[0].Type != "CollectionFolder") {
-				t.Fatalf("expected the library views, got %+v", result.Items)
+			switch tc.want {
+			case views:
+				if len(result.Items) != 1 || result.Items[0].Type != "CollectionFolder" {
+					t.Fatalf("expected the library views, got %+v", result.Items)
+				}
+			case empty:
+				if len(result.Items) != 0 || result.TotalRecordCount != 0 {
+					t.Fatalf("expected no items, got %+v", result)
+				}
 			}
 		})
 	}

@@ -2549,7 +2549,7 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 		Bitrate:                             source.Version.Bitrate * 1000,
 		DefaultAudioStreamIndex:             selectedAudioStreamIndex,
 		DefaultSubtitleStreamIndex:          effectiveCompatSubtitleStreamIndex(source),
-		MediaStreams:                        buildMediaStreamsWithSelection(routeItemID, source.ID, source.Version, selectedAudioStreamIndex, source.SelectedSubtitleStreamIndex, compatToken, playSessionID),
+		MediaStreams:                        buildMediaStreamsWithSelection(routeItemID, source.ID, source.Version, selectedAudioStreamIndex, compatStreamSubtitleSelection(source), compatToken, playSessionID),
 	}
 	for i := range dto.MediaStreams {
 		stream := &dto.MediaStreams[i]
@@ -3042,6 +3042,18 @@ func resolveSelectedSubtitleStreamIndex(version catalog.FileVersion, downloadedC
 // effectiveCompatSubtitleStreamIndex returns the subtitle stream index to
 // advertise as the default for a source: the explicit selection when present
 // (collapsing "subtitles off" to none), otherwise the media default.
+// compatStreamSubtitleSelection is the subtitle selection PlaybackInfo's
+// stream list reflects. With no requested or default subtitle, because the
+// viewer's subtitle mode chose none, no subtitle stream is marked IsDefault;
+// clients that start the IsDefault stream would otherwise play a subtitle
+// the viewer turned off.
+func compatStreamSubtitleSelection(source PlaybackMediaSource) *int {
+	if source.SelectedSubtitleStreamIndex == nil {
+		return intPtr(-1)
+	}
+	return source.SelectedSubtitleStreamIndex
+}
+
 func effectiveCompatSubtitleStreamIndex(source PlaybackMediaSource) *int {
 	if source.SelectedSubtitleStreamIndex != nil {
 		if *source.SelectedSubtitleStreamIndex < 0 {

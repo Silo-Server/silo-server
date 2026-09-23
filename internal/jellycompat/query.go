@@ -51,6 +51,7 @@ type itemsQuery struct {
 	audioLanguages         []string
 	subtitleLanguages      []string
 	hasRootFilter          bool // a Jellyfin 12 HasFilters parameter was sent; see jellyfinRootFilterParams
+	unmatchedIDFilter      bool // GenreIds or PersonIds was sent but no value names a genre or person
 	mediaTypes             []string
 	mediaTypesSet          map[string]bool
 	mediaTypesExplicit     bool
@@ -120,12 +121,15 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 		}
 	}
 	if genreIDs := strings.TrimSpace(firstNonEmpty(q.Get("GenreIds"), q.Get("GenreItems"))); genreIDs != "" {
+		matched := false
 		for part := range strings.SplitSeq(genreIDs, ",") {
 			decoded, err := codec.DecodeStringID(EncodedIDGenre, strings.TrimSpace(part))
 			if err == nil && decoded != "" {
 				result.genres = append(result.genres, decoded)
+				matched = true
 			}
 		}
+		result.unmatchedIDFilter = !matched
 	}
 
 	if personIDs := strings.TrimSpace(q.Get("PersonIds")); personIDs != "" {
@@ -138,6 +142,9 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 				result.personID = decoded
 				break
 			}
+		}
+		if result.personID == 0 {
+			result.unmatchedIDFilter = true
 		}
 	}
 
@@ -356,7 +363,7 @@ var jellyfinRootFilterParams = []string{
 	"Genres", "GenreIds", "Years", "Tags", "OfficialRatings", "Studios", "StudioIds",
 	"Artists", "ArtistIds", "AlbumArtistIds", "ContributingArtistIds", "ExcludeArtistIds",
 	"Albums", "AlbumIds", "Person", "PersonIds", "PersonTypes", "SeriesStatus",
-	"Ids", "ExcludeItemIds", "AudioLanguages", "SubtitleLanguages", "Filters",
+	"ExcludeItemIds", "AudioLanguages", "SubtitleLanguages", "Filters",
 	"IsFavorite", "IsPlayed", "IsMissing", "IsUnaired", "Is3D", "IsHd", "Is4K", "IsLocked",
 	"IsPlaceHolder", "IsMovie", "IsSports", "IsKids", "IsNews", "IsSeries",
 	"HasImdbId", "HasTmdbId", "HasTvdbId", "HasOverview", "HasOfficialRating",

@@ -337,6 +337,12 @@ func TestHandlePlaybackInfo_SubtitleModeFollowsViewerSettings(t *testing.T) {
 			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
 				t.Fatalf("DefaultSubtitleStreamIndex = %v, want %v", got, tc.want)
 			}
+			// The stream list agrees: the file's own default flag must not
+			// start a subtitle the viewer's mode left off.
+			index, found := defaultSubtitleStreamFromResponse(t, resp)
+			if found != (tc.want != nil) || (found && index != *tc.want) {
+				t.Fatalf("IsDefault subtitle stream = (%d, %v), want %v", index, found, tc.want)
+			}
 		})
 	}
 }
