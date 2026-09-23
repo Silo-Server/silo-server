@@ -45,11 +45,9 @@ import Layout from "@/components/Layout";
 import Home from "@/pages/Home";
 import Login from "@/pages/Login";
 import Catalog from "@/pages/Catalog";
-import { useFavorites } from "@/hooks/queries/favorites";
 import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
-import { isTasteSeedDismissed } from "@/lib/tasteSeed";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
-import { useOnboardingState } from "@/hooks/queries/onboarding";
+import TasteSeedGate from "@/components/TasteSeedGate";
 import SettingsLayout from "@/pages/SettingsLayout";
 import {
   WatchPlaybackBar,
@@ -301,34 +299,6 @@ function RequireRequestsEnabled({ children }: { children: ReactNode }) {
     );
   }
   if (status.data?.requests_enabled !== true) return <Navigate to="/" replace />;
-  return <>{children}</>;
-}
-
-/**
- * Redirects new profiles (no favorites yet, no skip flag) to the taste-seed
- * onboarding screen the first time they land on Home. Only checks on Home so
- * deep-links to other pages aren't blocked. Once the user picks any items
- * (or favorites anything by normal use), or explicitly skips, the gate stops
- * redirecting.
- */
-function TasteSeedGate({ children }: { children: ReactNode }) {
-  const { profile } = useAuth();
-  const { data: favorites, isPending, isError } = useFavorites();
-  const onboarding = useOnboardingState({ enabled: profile !== null });
-
-  if (isPending || isError || !profile) return <>{children}</>;
-
-  // While the feature tour is pending (or its state unknown) the tour owns
-  // the first-run moment — it ends by handing off to /taste-seed itself, so
-  // redirecting now would jump the queue.
-  if (onboarding.data === undefined || !onboarding.data.done) return <>{children}</>;
-
-  const hasFavorites = (favorites?.length ?? 0) > 0;
-  const dismissed = isTasteSeedDismissed(profile.id);
-
-  if (!hasFavorites && !dismissed) {
-    return <Navigate to="/taste-seed" replace />;
-  }
   return <>{children}</>;
 }
 
