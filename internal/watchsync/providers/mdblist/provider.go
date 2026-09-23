@@ -20,6 +20,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
@@ -534,12 +535,6 @@ func (p *Provider) do(ctx context.Context, method string, path string, apiKey st
 	if strings.TrimSpace(apiKey) == "" {
 		return errors.New("mdblist api key is missing")
 	}
-	target := p.baseURL + path
-	separator := "?"
-	if strings.Contains(path, "?") {
-		separator = "&"
-	}
-	target += separator + "apikey=" + url.QueryEscape(apiKey)
 
 	// Buffer the body so rate-limited attempts can be replayed.
 	var payload []byte
@@ -556,7 +551,7 @@ func (p *Provider) do(ctx context.Context, method string, path string, apiKey st
 		if err := limiter.Wait(ctx); err != nil {
 			return fmt.Errorf("wait for mdblist rate limiter: %w", err)
 		}
-		retryAfter, err := p.doOnce(ctx, method, path, target, payload, out)
+		retryAfter, err := p.doOnce(ctx, method, path, apiKey, payload, out)
 		if err == nil {
 			return nil
 		}
@@ -588,14 +583,18 @@ func (p *Provider) do(ctx context.Context, method string, path string, apiKey st
 // doOnce performs a single HTTP attempt. On a 429 it returns the wait hinted
 // by Retry-After (0 when absent) alongside the error; every other failure
 // returns -1 to signal "not retryable".
-func (p *Provider) doOnce(ctx context.Context, method, path, target string, payload []byte, out any) (time.Duration, error) {
+//
+// The request URL carries the API key, so it must stay inside this function:
+// errors returned here name the request by method and path, or by a
+// sanitized URL.
+func (p *Provider) doOnce(ctx context.Context, method, path, apiKey string, payload []byte, out any) (time.Duration, error) {
 	var body io.Reader
 	if payload != nil {
 		body = bytes.NewReader(payload)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, target, body)
+	req, err := http.NewRequestWithContext(ctx, method, p.requestURL(path, apiKey), body)
 	if err != nil {
-		return -1, fmt.Errorf("create mdblist request: %w", err)
+		return -1, requestError("create", apiKey, err)
 	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -604,7 +603,7 @@ func (p *Provider) doOnce(ctx context.Context, method, path, target string, payl
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return -1, fmt.Errorf("send mdblist request: %w", err)
+		return -1, requestError("send", apiKey, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests {
@@ -617,7 +616,7 @@ func (p *Provider) doOnce(ctx context.Context, method, path, target string, payl
 		return -1, fmt.Errorf("mdblist request %s %s rejected: status %d (check api key): %w", method, path, resp.StatusCode, watchsync.ErrInvalidCredential)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		detail := responseErrorDetail(resp.Body)
+		detail := responseErrorDetail(resp.Body, apiKey)
 		if detail != "" {
 			return -1, fmt.Errorf("mdblist request %s %s failed: status %d: %s", method, path, resp.StatusCode, detail)
 		}
@@ -632,12 +631,81 @@ func (p *Provider) doOnce(ctx context.Context, method, path, target string, payl
 	return -1, nil
 }
 
-func responseErrorDetail(body io.Reader) string {
-	raw, err := io.ReadAll(io.LimitReader(body, maxErrorBodyBytes))
+// requestURL appends the API key MDBList expects as a query parameter. The
+// result is a credential and must never reach error text or logs.
+func (p *Provider) requestURL(path, apiKey string) string {
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return p.baseURL + path + separator + "apikey=" + url.QueryEscape(apiKey)
+}
+
+// requestError reports a failure to build or send a request without the API
+// key. http.NewRequestWithContext and http.Client.Do both return a *url.Error
+// whose message embeds the request URL, key included; SanitizeURLError drops
+// the query string while keeping the cause chain, so errors.Is still matches
+// context.Canceled and context.DeadlineExceeded and errors.As still finds
+// net.Error timeouts.
+func requestError(stage, apiKey string, err error) error {
+	err = logredact.SanitizeURLError(err)
+	// The cause can still quote a URL outside the *url.Error field: a
+	// redirect with an unparseable Location header reports that
+	// server-supplied value verbatim.
+	if msg := err.Error(); redactAPIKey(msg, apiKey) != msg {
+		err = errors.New(redactAPIKey(msg, apiKey))
+	}
+	return fmt.Errorf("%s mdblist request: %w", stage, err)
+}
+
+// redactAPIKey masks every occurrence of the API key, raw or query-escaped.
+func redactAPIKey(text, apiKey string) string {
+	for _, form := range apiKeyForms(apiKey) {
+		text = strings.ReplaceAll(text, form, logredact.Placeholder)
+	}
+	return text
+}
+
+// trimPartialAPIKey drops a trailing fragment of the API key that truncation
+// separated from the rest of the key, which redactAPIKey cannot recognize.
+func trimPartialAPIKey(text, apiKey string) string {
+	for _, form := range apiKeyForms(apiKey) {
+		for n := len(form) - 1; n > 0; n-- {
+			if strings.HasSuffix(text, form[:n]) {
+				text = text[:len(text)-n]
+				break
+			}
+		}
+	}
+	return text
+}
+
+func apiKeyForms(apiKey string) []string {
+	if apiKey == "" {
+		return nil
+	}
+	if escaped := url.QueryEscape(apiKey); escaped != apiKey {
+		return []string{apiKey, escaped}
+	}
+	return []string{apiKey}
+}
+
+// responseErrorDetail returns a bounded excerpt of an error response body with
+// the API key masked, since a server error page can echo the request URL.
+func responseErrorDetail(body io.Reader, apiKey string) string {
+	raw, err := io.ReadAll(io.LimitReader(body, maxErrorBodyBytes+1))
 	if err != nil {
 		return ""
 	}
-	raw = bytes.TrimSpace(raw)
+	truncated := len(raw) > maxErrorBodyBytes
+	if truncated {
+		raw = raw[:maxErrorBodyBytes]
+	}
+	text := redactAPIKey(string(raw), apiKey)
+	if truncated {
+		text = trimPartialAPIKey(text, apiKey)
+	}
+	raw = bytes.TrimSpace([]byte(text))
 	if len(raw) == 0 {
 		return ""
 	}
