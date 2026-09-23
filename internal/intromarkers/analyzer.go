@@ -447,6 +447,7 @@ func (a *Analyzer) recordSilenceAttempt(ctx context.Context, candidate Candidate
 		FileHash:        candidate.FileHash,
 		FileSize:        candidate.FileSize,
 		DurationSeconds: candidate.DurationSeconds,
+		ChaptersHash:    candidate.ChaptersHash,
 		IntroStart:      segment.Start,
 		IntroEnd:        segment.End,
 		Status:          silenceAttemptNoImprovement,

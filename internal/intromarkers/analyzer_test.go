@@ -580,6 +580,7 @@ func chapterBackfillCandidate(fileID int) Candidate {
 		FileHash:              fmt.Sprintf("hash-%d", fileID),
 		FileSize:              1_000_000,
 		DurationSeconds:       1200,
+		ChaptersHash:          fmt.Sprintf("chapters-%d", fileID),
 		IntroStart:            &start,
 		IntroEnd:              &end,
 		IntroMarkersSource:    &source,
@@ -618,6 +619,7 @@ func TestRunBackfillRecordsNoImprovementAttempt(t *testing.T) {
 		FileHash:        "hash-10",
 		FileSize:        1_000_000,
 		DurationSeconds: 1200,
+		ChaptersHash:    "chapters-10",
 		IntroStart:      60,
 		IntroEnd:        120,
 	}
@@ -641,6 +643,7 @@ func TestSilenceRefinementFailureBacksOff(t *testing.T) {
 		FileHash:        "hash-10",
 		FileSize:        1_000_000,
 		DurationSeconds: 1200,
+		ChaptersHash:    "chapters-10",
 		IntroStart:      60,
 		IntroEnd:        120,
 	}
@@ -657,6 +660,8 @@ func TestSilenceRefinementFailureBacksOff(t *testing.T) {
 	otherConfig.ConfigHash = "previous-settings"
 	movedMarker := *withStatus(sameInputs, silenceAttemptFailed, 4)
 	movedMarker.IntroEnd = 118
+	reprobedChapters := *withStatus(sameInputs, silenceAttemptFailed, 4)
+	reprobedChapters.ChaptersHash = "chapters-before-reprobe"
 	pendingRetry := time.Now().Add(10 * time.Hour)
 	stillBackingOff := *withStatus(sameInputs, silenceAttemptFailed, 2)
 	stillBackingOff.RetryAfter = &pendingRetry
@@ -674,6 +679,7 @@ func TestSilenceRefinementFailureBacksOff(t *testing.T) {
 		{name: "failure after no improvement starts over", previous: withStatus(sameInputs, silenceAttemptNoImprovement, 0), wantFailures: 1, wantDelay: 12 * time.Hour},
 		{name: "changed settings start over", previous: &otherConfig, wantFailures: 1, wantDelay: 12 * time.Hour},
 		{name: "changed marker range starts over", previous: &movedMarker, wantFailures: 1, wantDelay: 12 * time.Hour},
+		{name: "changed chapters start over", previous: &reprobedChapters, wantFailures: 1, wantDelay: 12 * time.Hour},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

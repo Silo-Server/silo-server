@@ -190,6 +190,7 @@ type Candidate struct {
 	EditionKey             string
 	AudioLanguage          string
 	Chapters               []models.MediaChapter
+	ChaptersHash           string
 	SubtitleTracks         []models.SubtitleTrack
 	ExternalSubtitles      []models.ExternalSubtitle
 	IntroStart             *float64
@@ -307,6 +308,7 @@ type SilenceRefinementAttempt struct {
 	FileHash        string
 	FileSize        int64
 	DurationSeconds float64
+	ChaptersHash    string
 	IntroStart      float64
 	IntroEnd        float64
 	Status          string
@@ -322,6 +324,7 @@ func (a SilenceRefinementAttempt) sameInputs(other SilenceRefinementAttempt) boo
 		a.FileHash == other.FileHash &&
 		a.FileSize == other.FileSize &&
 		a.DurationSeconds == other.DurationSeconds &&
+		a.ChaptersHash == other.ChaptersHash &&
 		a.IntroStart == other.IntroStart &&
 		a.IntroEnd == other.IntroEnd
 }

@@ -119,8 +119,8 @@ func (r *Repository) ListCandidatesForGroup(ctx context.Context, mediaFolderID i
 }
 
 // ListChapterSilenceBackfillCandidates skips a file while its recorded attempt
-// still matches the file identity, the refined marker range, and the silence
-// settings: indefinitely after a clean no-improvement result, and until
+// still matches the file identity, its chapters, the refined marker range, and
+// the silence settings: indefinitely after a clean no-improvement result, and until
 // retry_after after a failure. Files never attempted come first, so retries
 // cannot crowd them out of the per-run budget.
 //
@@ -144,6 +144,7 @@ func (r *Repository) ListChapterSilenceBackfillCandidates(ctx context.Context, l
 		      AND attempts.file_hash = COALESCE(mf.file_hash, '')
 		      AND attempts.file_size = COALESCE(mf.file_size, 0)
 		      AND attempts.duration_seconds = COALESCE(mf.duration, 0)
+		      AND attempts.chapters_hash = encode(sha256(convert_to(COALESCE(mf.chapters::text, ''), 'UTF8')), 'hex')
 		      AND attempts.intro_start = mf.intro_start
 		      AND attempts.intro_end = mf.intro_end
 		      AND (attempts.status = $4 OR attempts.retry_after > NOW()),
@@ -172,6 +173,7 @@ func (r *Repository) LoadSilenceRefinementAttempt(ctx context.Context, fileID in
 		       file_hash,
 		       file_size,
 		       duration_seconds,
+		       chapters_hash,
 		       intro_start,
 		       intro_end,
 		       status,
@@ -186,6 +188,7 @@ func (r *Repository) LoadSilenceRefinementAttempt(ctx context.Context, fileID in
 		&attempt.FileHash,
 		&attempt.FileSize,
 		&attempt.DurationSeconds,
+		&attempt.ChaptersHash,
 		&attempt.IntroStart,
 		&attempt.IntroEnd,
 		&attempt.Status,
@@ -211,6 +214,7 @@ func (r *Repository) UpsertSilenceRefinementAttempt(ctx context.Context, attempt
 		    file_hash,
 		    file_size,
 		    duration_seconds,
+		    chapters_hash,
 		    intro_start,
 		    intro_end,
 		    status,
@@ -219,13 +223,14 @@ func (r *Repository) UpsertSilenceRefinementAttempt(ctx context.Context, attempt
 		    attempted_at,
 		    retry_after
 		) VALUES (
-		    $1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), $11, $12
+		    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''), $12, $13
 		)
 		ON CONFLICT (media_file_id) DO UPDATE SET
 		    config_hash = EXCLUDED.config_hash,
 		    file_hash = EXCLUDED.file_hash,
 		    file_size = EXCLUDED.file_size,
 		    duration_seconds = EXCLUDED.duration_seconds,
+		    chapters_hash = EXCLUDED.chapters_hash,
 		    intro_start = EXCLUDED.intro_start,
 		    intro_end = EXCLUDED.intro_end,
 		    status = EXCLUDED.status,
@@ -238,6 +243,7 @@ func (r *Repository) UpsertSilenceRefinementAttempt(ctx context.Context, attempt
 		attempt.FileHash,
 		attempt.FileSize,
 		attempt.DurationSeconds,
+		attempt.ChaptersHash,
 		attempt.IntroStart,
 		attempt.IntroEnd,
 		attempt.Status,
@@ -360,6 +366,7 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 		); err != nil {
 			return nil, fmt.Errorf("scanning intro marker candidate: %w", err)
 		}
+		c.ChaptersHash = chaptersHash(chaptersJSON)
 		if len(chaptersJSON) > 0 {
 			if err := json.Unmarshal(chaptersJSON, &c.Chapters); err != nil {
 				return nil, fmt.Errorf("unmarshaling chapters for file %d: %w", c.FileID, err)
@@ -388,6 +395,14 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 		return nil, fmt.Errorf("iterating intro marker candidates: %w", err)
 	}
 	return candidates, nil
+}
+
+// chaptersHash is the SHA-256 of the chapters column exactly as Postgres
+// renders it, with a NULL column hashed as empty input, so the backfill query
+// can compute the same value from mf.chapters::text.
+func chaptersHash(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 func (r *Repository) CountEnabledLibraries(ctx context.Context) (int, error) {

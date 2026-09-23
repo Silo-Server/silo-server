@@ -121,11 +121,21 @@ func TestSilenceBackfillSkipsUnchangedAttemptsPostgres(t *testing.T) {
 		t.Fatalf("backfill after a second failure = %v, want only %d", got, untouched)
 	}
 
+	// A re-probe can rewrite chapters without touching the file identity or the
+	// stored marker; the refinement input changed, so the file is due again.
+	if _, err := pool.Exec(ctx, `UPDATE media_files SET chapters = $2::jsonb WHERE id = $1`, failing,
+		`[{"index":0,"title":"Opening","start_seconds":60,"end_seconds":120},{"index":1,"title":"Part 1","start_seconds":120,"end_seconds":1300}]`); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(backfill(cfg)); !slices.Equal(got, []int{untouched, failing}) {
+		t.Fatalf("backfill after the chapters changed = %v, want %d then %d", got, untouched, failing)
+	}
+
 	if _, err := pool.Exec(ctx, `UPDATE media_files SET intro_end = 125 WHERE id = $1`, noImprovement); err != nil {
 		t.Fatal(err)
 	}
-	if got := ids(backfill(cfg)); !slices.Equal(got, []int{untouched, noImprovement}) {
-		t.Fatalf("backfill after the marker moved = %v, want %d then %d", got, untouched, noImprovement)
+	if got := ids(backfill(cfg)); !slices.Equal(got, []int{untouched, noImprovement, failing}) {
+		t.Fatalf("backfill after the marker moved = %v, want %d, %d, %d", got, untouched, noImprovement, failing)
 	}
 }
 
