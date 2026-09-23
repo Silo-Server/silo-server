@@ -70,6 +70,30 @@ func TestServerBitrateCapUnknownSourceTotalRequiresTranscode(t *testing.T) {
 	}
 }
 
+func TestServerBitrateCapAudioOnlyUnknownTotalConvertsAAC(t *testing.T) {
+	file := audioOnlyFixtureFileV3()
+	file.Bitrate = 0
+	file.AudioTracks[0].Bitrate = 128
+	req := validStartRequestV3()
+	req.FileID = file.ID
+	req.Capabilities.Containers = []string{"mp4"}
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request:              req,
+		RequestedFile:        file,
+		EffectiveFile:        file,
+		AudioTrackIndex:      0,
+		ServerBitrateCapKbps: 256,
+		Settings:             PlannerSettingsV3{TranscodeEnabled: true},
+		Registry:             testTransformationRegistryV3(),
+	})
+	if result.Plan == nil || result.PlayMethod != PlayRemux || !result.TranscodeAudio || result.TargetAudioCodec != "aac" {
+		t.Fatalf("expected AAC conversion for unknown container bitrate: %s", ExplainPlannerResultV3(result))
+	}
+	if result.TargetAudioBitrateKbps <= 0 || result.TargetAudioBitrateKbps >= 256 {
+		t.Fatalf("AAC target %d must fit under 256 kbps cap", result.TargetAudioBitrateKbps)
+	}
+}
+
 func TestServerBitrateCapHonorsLowerClientCapAgainstSourceTotal(t *testing.T) {
 	input := bitratePolicyFixtureV3()
 	input.EffectiveFile.Bitrate = 2_300
