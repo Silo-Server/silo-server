@@ -547,13 +547,18 @@ func (h *LibraryCollectionHandler) UploadAdminCollectionArtwork(ctx context.Cont
 	if len(data) == 0 || len(data) > collectionImageMaxBytes {
 		return apiError(400, "bad_request", "Artwork must be nonempty and at most 10 MiB")
 	}
-	if _, err := h.repo.GetByID(ctx, id); err != nil {
+	existing, err := h.repo.GetByID(ctx, id)
+	if err != nil {
 		return err
+	}
+	oldPath := existing.PosterURL
+	if kind != collectionImagePoster {
+		oldPath = existing.BackdropURL
 	}
 	// Content-addressed variant keys (issue #1258) mean the replacement uploads
 	// to a new path that cannot collide with the current artwork, so upload and
 	// commit it first. A failed upload or update then leaves the last valid
-	// image untouched. Obsolete keys are cleaned up only after the commit.
+	// image untouched. The previous version is cleaned up only after the commit.
 	path, hash, err := h.processCollectionImage(ctx, id, kind, data)
 	if err != nil {
 		return err
@@ -571,11 +576,13 @@ func (h *LibraryCollectionHandler) UploadAdminCollectionArtwork(ctx context.Cont
 	if err := h.repo.Update(ctx, input); err != nil {
 		return err
 	}
-	// Best-effort: drop older variants now that the new ones are committed,
-	// keeping the version we just wrote. A cleanup failure leaves harmless
-	// orphans, never a broken image.
-	if err := removeStaleCollectionImageVariants(ctx, h.ArtworkStore, adminCollectionImagePrefix, id, kind, collectionImagePathVersion(path)); err != nil {
-		slog.WarnContext(ctx, "collection artwork: stale variant cleanup failed", "component", "api", "collection_id", id, "kind", kind, "error", err)
+	// Best-effort: delete only the version this request replaced. Targeting the
+	// specific superseded version (rather than "everything but mine") means a
+	// concurrent replacement's committed version is never deleted, so the DB
+	// never ends up pointing at a missing object. A cleanup failure leaves a
+	// harmless orphan, never a broken image.
+	if err := removeReplacedCollectionImageVersion(ctx, h.ArtworkStore, adminCollectionImagePrefix, id, kind, oldPath, path); err != nil {
+		slog.WarnContext(ctx, "collection artwork: previous variant cleanup failed", "component", "api", "collection_id", id, "kind", kind, "error", err)
 	}
 	return nil
 }

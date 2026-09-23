@@ -274,39 +274,67 @@ func (s *stubListDeleteStore) Delete(_ context.Context, keys []string) (int, err
 	return len(keys), nil
 }
 
-func TestRemoveStaleCollectionImageVariants_KeepsNewVersion(t *testing.T) {
+func TestRemoveReplacedCollectionImageVersion_DeletesOnlySupersededVersion(t *testing.T) {
 	store := &stubListDeleteStore{keys: []string{
 		"collection-images/c1/poster/oldversion000000/original.webp",
 		"collection-images/c1/poster/oldversion000000/w300.webp",
-		"collection-images/c1/poster/original.webp", // legacy fixed key
+		// A concurrent replacement's committed version must never be deleted.
+		"collection-images/c1/poster/concurrentaaaa11/original.webp",
 		"collection-images/c1/poster/newversion111111/original.webp",
 		"collection-images/c1/poster/newversion111111/w300.webp",
-		"collection-images/c1/backdrop/other/original.webp", // different imageType, untouched
 	}}
-	if err := removeStaleCollectionImageVariants(context.Background(), store, adminCollectionImagePrefix, "c1", "poster", "newversion111111"); err != nil {
-		t.Fatalf("removeStaleCollectionImageVariants: %v", err)
+	oldPath := "collection-images/c1/poster/oldversion000000/original.webp"
+	newPath := "collection-images/c1/poster/newversion111111/original.webp"
+	if err := removeReplacedCollectionImageVersion(context.Background(), store, adminCollectionImagePrefix, "c1", "poster", oldPath, newPath); err != nil {
+		t.Fatalf("removeReplacedCollectionImageVersion: %v", err)
 	}
 	deleted := map[string]bool{}
 	for _, k := range store.deleted {
 		deleted[k] = true
 	}
-	// Old version and legacy key are removed; the just-written version survives.
 	for _, k := range []string{
 		"collection-images/c1/poster/oldversion000000/original.webp",
 		"collection-images/c1/poster/oldversion000000/w300.webp",
-		"collection-images/c1/poster/original.webp",
 	} {
 		if !deleted[k] {
-			t.Errorf("expected %q to be deleted", k)
+			t.Errorf("expected superseded %q to be deleted", k)
 		}
 	}
+	// Neither the new version nor a concurrent request's version is touched.
 	for _, k := range []string{
 		"collection-images/c1/poster/newversion111111/original.webp",
 		"collection-images/c1/poster/newversion111111/w300.webp",
-		"collection-images/c1/backdrop/other/original.webp",
+		"collection-images/c1/poster/concurrentaaaa11/original.webp",
 	} {
 		if deleted[k] {
 			t.Errorf("did not expect %q to be deleted", k)
 		}
+	}
+}
+
+func TestRemoveReplacedCollectionImageVersion_NoopCases(t *testing.T) {
+	newPath := "collection-images/c1/poster/newversion111111/original.webp"
+	cases := []struct{ name, oldPath string }{
+		// A legacy fixed key has no version folder to remove.
+		{"legacy fixed key", "collection-images/c1/poster/original.webp"},
+		// A bundled-template path is not one of our S3 keys.
+		{"template path", "/images/collection-templates/x.jpg"},
+		{"empty", ""},
+		// Identical content re-upload: same version, nothing to delete.
+		{"same version", newPath},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &stubListDeleteStore{keys: []string{
+				"collection-images/c1/poster/original.webp",
+				"collection-images/c1/poster/newversion111111/original.webp",
+			}}
+			if err := removeReplacedCollectionImageVersion(context.Background(), store, adminCollectionImagePrefix, "c1", "poster", tc.oldPath, newPath); err != nil {
+				t.Fatalf("removeReplacedCollectionImageVersion: %v", err)
+			}
+			if len(store.deleted) != 0 {
+				t.Fatalf("expected no deletions, got %#v", store.deleted)
+			}
+		})
 	}
 }

@@ -200,40 +200,45 @@ func collectionImagePathVersion(storedPath string) string {
 	return parts[len(parts)-2]
 }
 
-// removeStaleCollectionImageVariants deletes every stored variant for the
-// collection / imageType except the version just written. It is used after a
-// replacement is committed, so obsolete keys (older content versions and legacy
-// fixed keys) are cleaned without touching the live artwork. A "" keepVersion
-// falls back to removing the whole imageType prefix.
-func removeStaleCollectionImageVariants(
+// removeReplacedCollectionImageVersion deletes the variants of the version that
+// a replacement superseded, identified from the previously stored path. It runs
+// after the new version is committed.
+//
+// Only the specific superseded version's folder is removed, never "everything
+// but the new version", so a concurrent replacement that committed its own new
+// version is never deleted (the DB can never be left pointing at a missing
+// object). When oldPath is not one of our content-versioned keys (a legacy
+// fixed key, a bundled-template path, or empty) there is no versioned folder to
+// remove and this is a no-op; those rare orphans are harmless.
+func removeReplacedCollectionImageVersion(
 	ctx context.Context,
 	store blobstore.Store,
-	prefix, collectionID, imageType, keepVersion string,
+	prefix, collectionID, imageType, oldPath, newPath string,
 ) error {
 	if store == nil {
 		return nil
 	}
-	base := fmt.Sprintf("%s/%s/%s/", prefix, collectionID, imageType)
-	keepPrefix := ""
-	if keepVersion != "" {
-		keepPrefix = base + keepVersion + "/"
+	oldVersion := collectionImagePathVersion(oldPath)
+	newVersion := collectionImagePathVersion(newPath)
+	if oldVersion == "" || oldVersion == newVersion {
+		return nil
 	}
-	items, _, err := store.List(ctx, base, "", 0)
+	// Delete exactly the old version's folder. For a non-versioned oldPath this
+	// prefix does not exist, so List returns nothing and nothing is deleted.
+	versionPrefix := fmt.Sprintf("%s/%s/%s/%s/", prefix, collectionID, imageType, oldVersion)
+	items, _, err := store.List(ctx, versionPrefix, "", 0)
 	if err != nil {
 		return fmt.Errorf("listing objects: %w", err)
 	}
 	keys := make([]string, 0, len(items))
 	for _, item := range items {
-		if keepPrefix != "" && strings.HasPrefix(item.Key, keepPrefix) {
-			continue
-		}
 		keys = append(keys, item.Key)
 	}
 	if len(keys) == 0 {
 		return nil
 	}
 	if _, err := store.Delete(ctx, keys); err != nil {
-		return fmt.Errorf("deleting stale collection variants: %w", err)
+		return fmt.Errorf("deleting replaced collection variants: %w", err)
 	}
 	return nil
 }
