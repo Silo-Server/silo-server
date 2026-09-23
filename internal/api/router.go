@@ -2174,7 +2174,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.ThemeSongs = &handlers.ThemeSongsHandler{Service: themesongs.NewService(themesongs.NewRepository(deps.DB), deps.Config.Auth.JWTSecret), Sessions: sessionRepo, Users: userRepo, Resolver: viewerResolver}
 	}
 	v2deps.ObserveThemeAudio = func(method string, handler http.Handler) http.Handler {
-		return observeNative(deps.StreamTelemetry, method, "/api/v2/catalog/items/{owner_id}/themes/{theme_id}/audio", handler.ServeHTTP)
+		return observeNative(deps.StreamTelemetry, method, "/api/v2/catalog/items/{id}/themes/{theme_id}/audio", handler.ServeHTTP)
 	}
 
 	var themeHandler *handlers.ThemeHandler

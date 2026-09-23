@@ -5181,6 +5181,39 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/catalog/items/{id}/themes/{theme_id}/audio": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["getThemeSongAudio"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head: operations["headThemeSongAudio"];
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/catalog/items/{id}/themes/{theme_id}/playback": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Authorize original theme audio for this account and profile. */
+    post: operations["createThemeSongPlayback"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/catalog/items/{id}/trailers/refresh": {
     parameters: {
       query?: never;
@@ -5226,39 +5259,6 @@ export interface paths {
     get: operations["listCatalogItemVersions"];
     put?: never;
     post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v2/catalog/items/{owner_id}/themes/{theme_id}/audio": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get: operations["getThemeSongAudio"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head: operations["headThemeSongAudio"];
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v2/catalog/items/{owner_id}/themes/{theme_id}/playback": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Authorize original theme audio for this account and profile. */
-    post: operations["createThemeSongPlayback"];
     delete?: never;
     options?: never;
     head?: never;
@@ -5401,7 +5401,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v2/catalog/themes/capability": {
+  "/api/v2/catalog/themes/capabilities": {
     parameters: {
       query?: never;
       header?: never;
@@ -73422,6 +73422,376 @@ export interface operations {
       };
     };
   };
+  getThemeSongAudio: {
+    parameters: {
+      query: {
+        /** @description Short-lived theme playback grant */
+        token: string;
+      };
+      header?: {
+        "If-Match"?: string;
+        "If-Modified-Since"?: string;
+        "If-None-Match"?: string;
+        "If-Range"?: string;
+        "If-Unmodified-Since"?: string;
+        Range?: string;
+      };
+      path: {
+        id: string;
+        theme_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Original audio */
+      200: {
+        headers: {
+          "Accept-Ranges"?: string;
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Range"?: string;
+          "Content-Type"?: string;
+          ETag?: string;
+          "Last-Modified"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "audio/aac": string;
+          "audio/flac": string;
+          "audio/mp4": string;
+          "audio/mpeg": string;
+          "audio/ogg": string;
+          "audio/wav": string;
+          "multipart/byteranges": string;
+        };
+      };
+      /** @description Requested byte range */
+      206: {
+        headers: {
+          "Accept-Ranges"?: string;
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Range"?: string;
+          "Content-Type"?: string;
+          ETag?: string;
+          "Last-Modified"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "audio/aac": string;
+          "audio/flac": string;
+          "audio/mp4": string;
+          "audio/mpeg": string;
+          "audio/ogg": string;
+          "audio/wav": string;
+          "multipart/byteranges": string;
+        };
+      };
+      /** @description Audio unchanged */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Requested Range Not Satisfiable */
+      416: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  headThemeSongAudio: {
+    parameters: {
+      query: {
+        /** @description Short-lived theme playback grant */
+        token: string;
+      };
+      header?: {
+        "If-Match"?: string;
+        "If-Modified-Since"?: string;
+        "If-None-Match"?: string;
+        "If-Range"?: string;
+        "If-Unmodified-Since"?: string;
+        Range?: string;
+      };
+      path: {
+        id: string;
+        theme_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Original audio */
+      200: {
+        headers: {
+          "Accept-Ranges"?: string;
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Range"?: string;
+          "Content-Type"?: string;
+          ETag?: string;
+          "Last-Modified"?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Requested byte range */
+      206: {
+        headers: {
+          "Accept-Ranges"?: string;
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Range"?: string;
+          "Content-Type"?: string;
+          ETag?: string;
+          "Last-Modified"?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Audio unchanged */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Requested Range Not Satisfiable */
+      416: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  createThemeSongPlayback: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+        theme_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ThemePlayback"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   refreshCatalogItemTrailers: {
     parameters: {
       query?: never;
@@ -73728,376 +74098,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FileVersionCollection"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  getThemeSongAudio: {
-    parameters: {
-      query: {
-        /** @description Short-lived theme playback grant */
-        token: string;
-      };
-      header?: {
-        "If-Match"?: string;
-        "If-Modified-Since"?: string;
-        "If-None-Match"?: string;
-        "If-Range"?: string;
-        "If-Unmodified-Since"?: string;
-        Range?: string;
-      };
-      path: {
-        owner_id: string;
-        theme_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Original audio */
-      200: {
-        headers: {
-          "Accept-Ranges"?: string;
-          "Cache-Control"?: string;
-          "Content-Length"?: string;
-          "Content-Range"?: string;
-          "Content-Type"?: string;
-          ETag?: string;
-          "Last-Modified"?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "audio/aac": string;
-          "audio/flac": string;
-          "audio/mp4": string;
-          "audio/mpeg": string;
-          "audio/ogg": string;
-          "audio/wav": string;
-          "multipart/byteranges": string;
-        };
-      };
-      /** @description Requested byte range */
-      206: {
-        headers: {
-          "Accept-Ranges"?: string;
-          "Cache-Control"?: string;
-          "Content-Length"?: string;
-          "Content-Range"?: string;
-          "Content-Type"?: string;
-          ETag?: string;
-          "Last-Modified"?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "audio/aac": string;
-          "audio/flac": string;
-          "audio/mp4": string;
-          "audio/mpeg": string;
-          "audio/ogg": string;
-          "audio/wav": string;
-          "multipart/byteranges": string;
-        };
-      };
-      /** @description Audio unchanged */
-      304: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Precondition Failed */
-      412: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Requested Range Not Satisfiable */
-      416: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  headThemeSongAudio: {
-    parameters: {
-      query: {
-        /** @description Short-lived theme playback grant */
-        token: string;
-      };
-      header?: {
-        "If-Match"?: string;
-        "If-Modified-Since"?: string;
-        "If-None-Match"?: string;
-        "If-Range"?: string;
-        "If-Unmodified-Since"?: string;
-        Range?: string;
-      };
-      path: {
-        owner_id: string;
-        theme_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Original audio */
-      200: {
-        headers: {
-          "Accept-Ranges"?: string;
-          "Cache-Control"?: string;
-          "Content-Length"?: string;
-          "Content-Range"?: string;
-          "Content-Type"?: string;
-          ETag?: string;
-          "Last-Modified"?: string;
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Requested byte range */
-      206: {
-        headers: {
-          "Accept-Ranges"?: string;
-          "Cache-Control"?: string;
-          "Content-Length"?: string;
-          "Content-Range"?: string;
-          "Content-Type"?: string;
-          ETag?: string;
-          "Last-Modified"?: string;
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Audio unchanged */
-      304: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Precondition Failed */
-      412: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Requested Range Not Satisfiable */
-      416: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  createThemeSongPlayback: {
-    parameters: {
-      query?: never;
-      header: {
-        /** @description The household profile acting for this request; it must belong to the authenticated account. */
-        "X-Profile-Id": string;
-        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
-        "X-Profile-Token"?: string;
-      };
-      path: {
-        owner_id: string;
-        theme_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          "Cache-Control"?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ThemePlayback"];
         };
       };
       /** @description Bad Request */

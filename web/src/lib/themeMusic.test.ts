@@ -35,6 +35,35 @@ afterEach(() => {
 });
 
 describe("ThemeMusic", () => {
+  it("aborts a pending grant while suspended and reloads only after selection resumes", async () => {
+    let resolve!: (url: string) => void;
+    const grant = vi
+      .fn<(_owner: string, _theme: string, signal: AbortSignal) => Promise<string>>()
+      .mockImplementationOnce(
+        () =>
+          new Promise<string>((done) => {
+            resolve = done;
+          }),
+      )
+      .mockResolvedValue("/audio?token=current");
+    const element = audio();
+    const create = vi.fn(() => element);
+    const music = new ThemeMusic(grant, create);
+    music.select(selection, false);
+    music.suspend();
+    expect(grant.mock.calls[0]?.[2].aborted).toBe(true);
+    resolve("/audio?token=obsolete");
+    await flush();
+    expect(create).not.toHaveBeenCalled();
+    expect(grant).toHaveBeenCalledTimes(1);
+    music.select(selection, false);
+    await flush();
+    expect(grant).toHaveBeenCalledTimes(2);
+    expect(element.src).toBe("/audio?token=current");
+    expect(element.play).toHaveBeenCalledOnce();
+    music.stop(true);
+  });
+
   it("does not restart stale audio while navigation is unresolved", async () => {
     vi.useFakeTimers();
     const first = audio();

@@ -32,7 +32,8 @@ type themeSongStore interface {
 
 func (h *ItemsHandler) themeSongsResult(w http.ResponseWriter, r *http.Request) (themeMediaResultDTO, bool) {
 	empty := themeMediaResultDTO{Items: []baseItemDTO{}, OwnerID: chi.URLParam(r, "id")}
-	if !h.validateThemeOwner(w, r) {
+	id, ok := h.validateThemeOwner(w, r)
+	if !ok {
 		return empty, false
 	}
 	if h.themeSongs == nil {
@@ -42,13 +43,9 @@ func (h *ItemsHandler) themeSongsResult(w http.ResponseWriter, r *http.Request) 
 	if userID := firstNonEmpty(chi.URLParam(r, "userId"), newCaseInsensitiveQuery(r.URL.Query()).Get("userId")); userID != "" && !validatePseudoUser(w, userID, session) {
 		return empty, false
 	}
-	id, err := decodeContentID(h.codec, chi.URLParam(r, "id"))
-	if err != nil {
-		writeError(w, 404, "NotFound", "Item not found")
-		return empty, false
-	}
 	query := newCaseInsensitiveQuery(r.URL.Query())
 	inherit := false
+	var err error
 	if value := query.Get("inheritFromParent"); value != "" {
 		inherit, err = strconv.ParseBool(value)
 		if err != nil {

@@ -387,12 +387,12 @@ GET /api/v2/catalog/filters/search	non-media
 GET /api/v2/catalog/items/{id}	non-media
 GET /api/v2/catalog/items/{id}/episodes	non-media
 GET /api/v2/catalog/items/{id}/manga-files	non-media
+GET /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
+HEAD /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
+POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback	non-media
 POST /api/v2/catalog/items/{id}/trailers/refresh	non-media
 POST /api/v2/catalog/items/{id}/translate-description	non-media
 GET /api/v2/catalog/items/{id}/versions	non-media
-GET /api/v2/catalog/items/{owner_id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
-HEAD /api/v2/catalog/items/{owner_id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
-POST /api/v2/catalog/items/{owner_id}/themes/{theme_id}/playback	non-media
 GET /api/v2/catalog/people	non-media
 GET /api/v2/catalog/people/{id}	non-media
 POST /api/v2/catalog/people/{id}/refresh	non-media
@@ -401,7 +401,7 @@ GET /api/v2/catalog/search/capabilities	non-media
 GET /api/v2/catalog/series/{id}/seasons	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}/episodes	non-media
-GET /api/v2/catalog/themes/capability	non-media
+GET /api/v2/catalog/themes/capabilities	non-media
 GET /api/v2/catalog/works/{work_id}	non-media
 GET /api/v2/collections	non-media
 POST /api/v2/collections	non-media
@@ -1545,12 +1545,12 @@ GET /api/v2/catalog/filters/search	non-media
 GET /api/v2/catalog/items/{id}	non-media
 GET /api/v2/catalog/items/{id}/episodes	non-media
 GET /api/v2/catalog/items/{id}/manga-files	non-media
+GET /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
+HEAD /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
+POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback	non-media
 POST /api/v2/catalog/items/{id}/trailers/refresh	non-media
 POST /api/v2/catalog/items/{id}/translate-description	non-media
 GET /api/v2/catalog/items/{id}/versions	non-media
-GET /api/v2/catalog/items/{owner_id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
-HEAD /api/v2/catalog/items/{owner_id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
-POST /api/v2/catalog/items/{owner_id}/themes/{theme_id}/playback	non-media
 GET /api/v2/catalog/people	non-media
 GET /api/v2/catalog/people/{id}	non-media
 POST /api/v2/catalog/people/{id}/refresh	non-media
@@ -1559,7 +1559,7 @@ GET /api/v2/catalog/search/capabilities	non-media
 GET /api/v2/catalog/series/{id}/seasons	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}/episodes	non-media
-GET /api/v2/catalog/themes/capability	non-media
+GET /api/v2/catalog/themes/capabilities	non-media
 GET /api/v2/catalog/works/{work_id}	non-media
 GET /api/v2/collections	non-media
 POST /api/v2/collections	non-media

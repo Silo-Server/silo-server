@@ -23,7 +23,7 @@ export function useThemeMusic(item: ItemDetail | undefined, loading: boolean) {
   const playing = Boolean(watch?.state.request || audiobook?.activeRequest);
   const capability = useQuery({
     queryKey: ["theme-songs-capability", authority],
-    queryFn: ({ signal }) => v2("GET /api/v2/catalog/themes/capability", { signal }),
+    queryFn: ({ signal }) => v2("GET /api/v2/catalog/themes/capabilities", { signal }),
     enabled: enabled && Boolean(auth?.profile),
     staleTime: 60_000,
   });
@@ -46,8 +46,8 @@ export function useThemeMusic(item: ItemDetail | undefined, loading: boolean) {
         current.serverOrigin !== context.serverOrigin
       )
         throw new Error("Profile changed");
-      const grant = await v2("POST /api/v2/catalog/items/{owner_id}/themes/{theme_id}/playback", {
-        path: { owner_id: owner, theme_id: theme },
+      const grant = await v2("POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback", {
+        path: { id: owner, theme_id: theme },
         signal,
         profileContext: current,
       });

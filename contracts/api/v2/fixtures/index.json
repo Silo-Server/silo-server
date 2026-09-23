@@ -12134,7 +12134,7 @@
       "scenario": "A profile can discover local direct-play theme audio and typed delivery limitations.",
       "request": {
         "method": "GET",
-        "path": "/api/v2/catalog/themes/capability",
+        "path": "/api/v2/catalog/themes/capabilities",
         "headers": {
           "Authorization": "Bearer tok-events",
           "X-Profile-Id": "p-owner"

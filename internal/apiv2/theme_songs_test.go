@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
@@ -31,10 +33,11 @@ func (s *fakeThemeSongs) OpenGrant(context.Context, string, string, string) (the
 
 func TestThemeSongsContractAndAuthorization(t *testing.T) {
 	deps, _ := catalogDeps(t)
+	deps.ViewerAccess = apimw.NewViewerAccessMiddleware(policyResolver{scope: &access.Scope{PolicyRevision: 7}})
 	svc := &fakeThemeSongs{}
 	deps.ThemeSongs = svc
 	h := newTestHandler(t, deps)
-	capability := Prefix + "/catalog/themes/capability"
+	capability := Prefix + "/catalog/themes/capabilities"
 	rec := do(t, h, "GET", capability, "", themeSongHeaders())
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"delivery":"local_direct_play"`) || !strings.Contains(rec.Body.String(), `"cluster_routing":false`) {
 		t.Fatal(rec.Code, rec.Body.String())
@@ -51,7 +54,7 @@ func TestThemeSongsContractAndAuthorization(t *testing.T) {
 		t.Fatal("profile-less playback accepted")
 	}
 	rec = do(t, h, "POST", path, "", themeSongHeaders())
-	if rec.Code != 200 || svc.identity.UserID == 0 || svc.identity.ProfileID != "p-owner" || svc.identity.SessionID == "" {
+	if rec.Code != 200 || svc.identity.UserID == 0 || svc.identity.ProfileID != "p-owner" || svc.identity.SessionID == "" || svc.identity.PolicyRevision != 7 {
 		t.Fatal(rec.Code, rec.Body.String(), svc.identity)
 	}
 	if rec.Header().Get("Cache-Control") != "no-store" {
@@ -84,7 +87,7 @@ func TestThemeSongsContractAndAuthorization(t *testing.T) {
 
 func themeSongsFixtureCases() []fixtureCase {
 	return []fixtureCase{
-		{name: "theme_songs_capability", operationID: "getThemeSongsCapability", method: "GET", path: Prefix + "/catalog/themes/capability", headers: themeSongHeaders(), status: 200, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/ThemeSongsCapability", scenario: "A profile can discover local direct-play theme audio and typed delivery limitations."},
+		{name: "theme_songs_capability", operationID: "getThemeSongsCapability", method: "GET", path: Prefix + "/catalog/themes/capabilities", headers: themeSongHeaders(), status: 200, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/ThemeSongsCapability", scenario: "A profile can discover local direct-play theme audio and typed delivery limitations."},
 		{name: "theme_songs_playback", operationID: "createThemeSongPlayback", method: "POST", path: Prefix + "/catalog/items/movie:heat-1995/themes/7/playback", headers: themeSongHeaders(), status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ThemePlayback", scenario: "A login and verified profile receive a short-lived, non-cacheable theme playback grant."},
 		{name: "theme_songs_playback_unauthorized", operationID: "createThemeSongPlayback", method: "POST", path: Prefix + "/catalog/items/movie:heat-1995/themes/7/playback", status: 401, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/Problem", scenario: "Theme playback cannot be granted without account authentication."},
 	}

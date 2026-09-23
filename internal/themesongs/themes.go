@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -195,34 +197,21 @@ func Serve(w http.ResponseWriter, r *http.Request, file File, f *os.File) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Type", ContentType(file.Container))
 	w.Header().Set("ETag", fmt.Sprintf(`"theme-%s-%d-%d"`, file.ID, file.Size, file.Modified.UnixNano()))
-	http.ServeContent(w, r, file.Title, file.Modified, f)
+	http.ServeContent(httpstream.NewRollingDeadlineWriter(w), r, file.Title, file.Modified, f)
 }
 
 func ContentType(container string) string {
-	switch container {
-	case containerMP3:
-		return "audio/mpeg"
-	case "m4a":
-		return "audio/mp4"
-	case "flac":
-		return "audio/flac"
-	case "ogg", "opus":
-		return "audio/ogg"
-	case "wav":
-		return "audio/wav"
-	case "aac":
-		return "audio/aac"
-	default:
-		return "application/octet-stream"
-	}
+	return playback.MimeFromExtension("theme." + container)
 }
 
 func Container(path string) string {
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
-	if ContentType(ext) == "application/octet-stream" {
+	switch ext {
+	case containerMP3, "m4a", "m4b", "flac", "ogg", "opus", "wav", "aac":
+		return ext
+	default:
 		return ""
 	}
-	return ext
 }
 
 func NumericID(id string) (int64, bool) {

@@ -307,7 +307,7 @@ Frozen v1 responses do not expose these fields.
 ## Local theme songs, V2
 
 Movies, series, and seasons can own local theme audio. Place `theme.mp3`
-(or `.m4a`, `.flac`, `.ogg`, `.opus`, `.wav`, `.aac`) in the item's directory,
+(or `.m4a`, `.m4b`, `.flac`, `.ogg`, `.opus`, `.wav`, `.aac`) in the item's directory,
 or put audio files in its `theme-music/` directory. Scans honor the library's
 ignore rules. Theme audio is separate from media files, extras, metadata
 matching, and watch progress. Files must contain audio without video tracks.
@@ -335,9 +335,9 @@ If the optional theme lookup fails, item detail still succeeds and omits `themes
 
 | Method and path | Result |
 | --- | --- |
-| `GET /api/v2/catalog/themes/capability` | Shared capability document with `delivery: local_direct_play`, `transcode: false`, `cluster_routing: false`, and `grant_lifetime_seconds` |
-| `POST /api/v2/catalog/items/{owner_id}/themes/{theme_id}/playback` | `url` and `expires_at` for an authenticated login session and verified profile |
-| `GET\|HEAD /api/v2/catalog/items/{owner_id}/themes/{theme_id}/audio?token=...` | Original audio, authorized by the playback grant |
+| `GET /api/v2/catalog/themes/capabilities` | Shared capability document with `delivery: local_direct_play`, `transcode: false`, `cluster_routing: false`, and `grant_lifetime_seconds` |
+| `POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback` | `url` and `expires_at` for an authenticated login session and verified profile |
+| `GET\|HEAD /api/v2/catalog/items/{id}/themes/{theme_id}/audio?token=...` | Original audio, authorized by the playback grant |
 
 The grant expires after at most five minutes, bounded by the login token's
 remaining lifetime. It binds the account, profile, login session, policy

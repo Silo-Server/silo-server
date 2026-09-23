@@ -3,9 +3,12 @@ package themesongs
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -121,6 +124,36 @@ func TestOriginalAudioHTTPAndStaleFile(t *testing.T) {
 	}
 }
 
+func TestServeReplacesAbsoluteWriteDeadline(t *testing.T) {
+	file := testFile(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, err := Open(file)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		defer func() { _ = f.Close() }()
+		// Simulate the listener's absolute timeout having elapsed before the
+		// next body write, without waiting for the production timeout.
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(-time.Second)); err != nil {
+			t.Error(err)
+			return
+		}
+		Serve(w, r, file, f)
+	}))
+	defer server.Close()
+	response, err := server.Client().Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || string(body) != "0123456789" {
+		t.Fatalf("status=%d body=%q err=%v", response.StatusCode, body, err)
+	}
+}
+
 func TestOpenRefusesEscapingSymlink(t *testing.T) {
 	file := testFile(t)
 	outside := filepath.Join(t.TempDir(), "secret.mp3")
@@ -135,5 +168,23 @@ func TestOpenRefusesEscapingSymlink(t *testing.T) {
 			_ = f.Close()
 		}
 		t.Fatal("escaping symlink accepted", err)
+	}
+}
+
+func TestThemeAudioExtensionsExcludeVideo(t *testing.T) {
+	for _, ext := range []string{"mp3", "m4a", "m4b", "flac", "ogg", "opus", "wav", "aac"} {
+		for _, path := range []string{"/show/theme." + ext, "/show/theme-music/opening." + strings.ToUpper(ext)} {
+			owner, ok := OwnerDirectory(path)
+			if !ok || owner != "/show" || Container(path) != ext || !strings.HasPrefix(ContentType(ext), "audio/") {
+				t.Errorf("audio theme %q: owner=%q ok=%v container=%q", path, owner, ok, Container(path))
+			}
+		}
+	}
+	for _, ext := range []string{"mkv", "mp4", "webm", "srt", "jpg"} {
+		for _, path := range []string{"/show/theme." + ext, "/show/theme-music/file." + ext} {
+			if owner, ok := OwnerDirectory(path); ok || Container(path) != "" {
+				t.Errorf("non-audio %q was classified as theme owned by %q", path, owner)
+			}
+		}
 	}
 }

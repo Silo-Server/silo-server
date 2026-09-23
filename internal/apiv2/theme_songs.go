@@ -52,7 +52,7 @@ type ThemeSongsCapabilityOutput struct {
 }
 
 type ThemePlaybackInput struct {
-	OwnerID string `path:"owner_id"`
+	OwnerID string `path:"id"`
 	ThemeID string `path:"theme_id" pattern:"^[1-9][0-9]*$"`
 }
 
@@ -67,11 +67,11 @@ type ThemePlaybackOutput struct {
 }
 
 func registerThemeSongs(reg *Registry) {
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/catalog/themes/capability", "getThemeSongsCapability", "catalog", "Local theme audio support and delivery limitations."), Class: ClassProfileScoped},
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/catalog/themes/capabilities", "getThemeSongsCapability", "catalog", "Local theme audio support and delivery limitations."), Class: ClassProfileScoped},
 		func(ctx context.Context, _ *CapabilityInput) (*ThemeSongsCapabilityOutput, error) {
 			return &ThemeSongsCapabilityOutput{Body: ThemeSongsCapability{Capability: Capability{State: configuredCapabilityState(reg.deps.ThemeSongs != nil), Allowed: ptr(capabilityLoginAllowed(ctx))}, Delivery: "local_direct_play", GrantLifetimeSeconds: int(themesongs.GrantLifetime.Seconds())}}, nil
 		})
-	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/catalog/items/{owner_id}/themes/{theme_id}/playback", "createThemeSongPlayback", "catalog", "Authorize original theme audio for this account and profile."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
+	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/catalog/items/{id}/themes/{theme_id}/playback", "createThemeSongPlayback", "catalog", "Authorize original theme audio for this account and profile."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	Register(reg, op, func(ctx context.Context, in *ThemePlaybackInput) (*ThemePlaybackOutput, error) {
 		if reg.deps.ThemeSongs == nil || reg.deps.CatalogAccess == nil {
 			return nil, unavailable("theme songs")
@@ -94,7 +94,7 @@ func registerThemeSongs(reg *Registry) {
 	})
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		params := []*huma.Param{}
-		for _, name := range []string{"owner_id", "theme_id"} {
+		for _, name := range []string{"id", "theme_id"} {
 			params = append(params, &huma.Param{Name: name, In: paramInPath, Required: true, Schema: &huma.Schema{Type: huma.TypeString}})
 		}
 		params = append(params, &huma.Param{Name: directAccountToken, In: directParamQuery, Required: true, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Short-lived theme playback grant"})
@@ -120,13 +120,13 @@ func registerThemeSongs(reg *Registry) {
 		if method == http.MethodHead {
 			id = "headThemeSongAudio"
 		}
-		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: method, Path: Prefix + "/catalog/items/{owner_id}/themes/{theme_id}/audio", OperationID: id, Tags: []string{"catalog"}, Parameters: params, Responses: responses}, Class: ClassPublic, ServiceBacked: true}, Protocol: "theme-audio", Reason: "A scoped playback grant and current access checks authorize original audio with range and conditional HTTP semantics."}
+		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: method, Path: Prefix + "/catalog/items/{id}/themes/{theme_id}/audio", OperationID: id, Tags: []string{"catalog"}, Parameters: params, Responses: responses}, Class: ClassPublic, ServiceBacked: true}, Protocol: "theme-audio", Reason: "A scoped playback grant and current access checks authorize original audio with range and conditional HTTP semantics."}
 		var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if reg.deps.ThemeSongs == nil {
 				writeProblem(w, r, unavailable("theme songs"))
 				return
 			}
-			file, f, err := reg.deps.ThemeSongs.OpenGrant(r.Context(), chi.URLParam(r, "owner_id"), chi.URLParam(r, "theme_id"), r.URL.Query().Get(directAccountToken))
+			file, f, err := reg.deps.ThemeSongs.OpenGrant(r.Context(), chi.URLParam(r, "id"), chi.URLParam(r, "theme_id"), r.URL.Query().Get(directAccountToken))
 			if err != nil {
 				writeProblem(w, r, themeSongProblem(err))
 				return

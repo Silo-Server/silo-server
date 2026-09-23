@@ -731,7 +731,7 @@ func (h *ItemsHandler) HandleItemStub(w http.ResponseWriter, r *http.Request) {
 // /Items/{id}/ThemeSongs. It cannot share HandleItemStub because this
 // response shape additionally requires OwnerId (see themeMediaResultDTO).
 func (h *ItemsHandler) HandleThemeSongsStub(w http.ResponseWriter, r *http.Request) {
-	if !h.validateThemeOwner(w, r) {
+	if _, ok := h.validateThemeOwner(w, r); !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, themeMediaResultDTO{
@@ -3876,26 +3876,26 @@ func (h *ItemsHandler) HandleThemeMedia(w http.ResponseWriter, r *http.Request) 
 	empty := themeMediaResultDTO{Items: []baseItemDTO{}, OwnerID: chi.URLParam(r, "id")}
 	writeJSON(w, 200, map[string]themeMediaResultDTO{"ThemeSongsResult": result, "ThemeVideosResult": empty, "SoundtrackSongsResult": empty})
 }
-func (h *ItemsHandler) validateThemeOwner(w http.ResponseWriter, r *http.Request) bool {
+func (h *ItemsHandler) validateThemeOwner(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if h.content == nil || h.codec == nil {
 		writeError(w, 503, "Unavailable", "Catalog unavailable")
-		return false
+		return "", false
 	}
 	session := SessionFromContext(r.Context())
 	if session == nil {
 		writeError(w, 401, "Unauthorized", "Missing authentication token")
-		return false
+		return "", false
 	}
 	id, err := decodeContentID(h.codec, chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, 404, "NotFound", "Item not found")
-		return false
+		return "", false
 	}
 	if _, err = h.content.GetItemDetail(r.Context(), session, id, nil); err != nil {
 		writeCompatUpstreamError(w, err)
-		return false
+		return "", false
 	}
-	return true
+	return id, true
 }
 
 // Mixed Ids requests retain the catalog's composed predicates for ordinary
