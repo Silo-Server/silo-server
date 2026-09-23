@@ -774,23 +774,22 @@ func TestDoIncludesMDBListValidationError(t *testing.T) {
 	}
 }
 
-func TestParseRetryAfter(t *testing.T) {
-	now := time.Date(2026, time.July, 5, 12, 0, 0, 0, time.UTC)
-	cases := []struct {
-		value string
-		want  time.Duration
-	}{
-		{"", 0},
-		{"garbage", 0},
-		{"-5", 0},
-		{"7", 7 * time.Second},
-		{now.Add(90 * time.Second).Format(http.TimeFormat), 90 * time.Second},
-		{now.Add(-time.Minute).Format(http.TimeFormat), 0},
+func TestDoParsesHTTPDateRetryAfter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", time.Now().Add(2*time.Hour).UTC().Format(http.TimeFormat))
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	p := NewProvider(server.Client(), server.URL)
+	_, err := p.fetchUser(context.Background(), "key")
+	rle, ok := watchsync.AsRateLimited(err)
+	if !ok {
+		t.Fatalf("expected RateLimitedError, got %v", err)
 	}
-	for _, tc := range cases {
-		if got := parseRetryAfter(tc.value, now); got != tc.want {
-			t.Fatalf("parseRetryAfter(%q) = %s, want %s", tc.value, got, tc.want)
-		}
+	// HTTP-dates have one-second resolution, so allow for truncation.
+	if rle.RetryAfter <= 2*time.Hour-5*time.Second || rle.RetryAfter > 2*time.Hour {
+		t.Fatalf("got retry-after %s, want about 2h", rle.RetryAfter)
 	}
 }
 

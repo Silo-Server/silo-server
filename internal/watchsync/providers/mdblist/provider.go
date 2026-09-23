@@ -608,8 +608,10 @@ func (p *Provider) doOnce(ctx context.Context, method, path, target string, payl
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
-			fmt.Errorf("mdblist request %s %s rate limited: status 429", method, path)
+		// An absent, malformed, or elapsed Retry-After yields 0, which do
+		// replaces with defaultRetryAfter.
+		wait, _ := watchsync.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		return wait, fmt.Errorf("mdblist request %s %s rate limited: status 429", method, path)
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return -1, fmt.Errorf("mdblist request %s %s rejected: status %d (check api key): %w", method, path, resp.StatusCode, watchsync.ErrInvalidCredential)
@@ -650,27 +652,6 @@ func responseErrorDetail(body io.Reader) string {
 		return compact.String()
 	}
 	return strings.Join(strings.Fields(string(raw)), " ")
-}
-
-// parseRetryAfter reads an RFC 7231 Retry-After value (delay-seconds or
-// HTTP-date). It returns 0 when the header is absent or unparseable.
-func parseRetryAfter(value string, now time.Time) time.Duration {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0
-	}
-	if seconds, err := strconv.Atoi(value); err == nil {
-		if seconds < 0 {
-			return 0
-		}
-		return time.Duration(seconds) * time.Second
-	}
-	if at, err := http.ParseTime(value); err == nil {
-		if wait := at.Sub(now); wait > 0 {
-			return wait
-		}
-	}
-	return 0
 }
 
 // --- ID & payload helpers ---

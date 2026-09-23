@@ -23,9 +23,34 @@ const defaultBaseURL = "https://api.trakt.tv"
 
 const traktMediaShows = "shows"
 
+// Trakt rate limits, from its API rate-limiting guide: authenticated users get
+// one POST/PUT/DELETE per second (AUTHED_API_POST_LIMIT) and 500 GETs per
+// five minutes (AUTHED_API_GET_LIMIT). A sync's sequential GETs stay well
+// inside the GET budget, so only writes are paced.
+const (
+	writeInterval = time.Second
+	writeBurst    = 1
+
+	// A 429 whose Retry-After is this short, which is typical of the
+	// one-second write limit, is retried in place. Longer waits defer the
+	// connection instead of holding a sync run or scrobble open.
+	maxInPlaceRetryWait = 10 * time.Second
+	maxRetryAttempts    = 2
+
+	// Trakt's limiter sends Retry-After, but 429s from its security layer may
+	// not. Without a hint, wait out one full window of the longest documented
+	// bucket (AUTHED_API_GET_LIMIT, 300 seconds) so whichever bucket tripped
+	// has reset. Trakt has no daily quota that would call for longer.
+	defaultRetryAfter = 5 * time.Minute
+)
+
 type Provider struct {
 	client  *http.Client
 	baseURL string
+	// writes paces authenticated writes per access token.
+	writes *watchsync.CredentialLimiter
+	// sleep waits between in-place rate-limit retries; tests replace it.
+	sleep func(context.Context, time.Duration) error
 }
 
 func NewProvider(client *http.Client, baseURL string) *Provider {
@@ -39,6 +64,8 @@ func NewProvider(client *http.Client, baseURL string) *Provider {
 	return &Provider{
 		client:  client,
 		baseURL: strings.TrimRight(baseURL, "/"),
+		writes:  watchsync.NewCredentialLimiter(writeInterval, writeBurst),
+		sleep:   watchsync.SleepContext,
 	}
 }
 
@@ -605,26 +632,86 @@ func (p *Provider) do(
 	body io.Reader,
 	out any,
 ) error {
+	// Buffer the body so a rate-limited request can be replayed.
+	var payload []byte
+	if body != nil {
+		buffered, err := io.ReadAll(body)
+		if err != nil {
+			return fmt.Errorf("read trakt request body: %w", err)
+		}
+		payload = buffered
+	}
+	// Trakt's write limit is per authenticated user. The OAuth endpoints are
+	// unauthenticated and count against the application instead.
+	paced := token != "" && method != http.MethodGet
+	for attempt := 0; ; attempt++ {
+		if paced {
+			if err := p.writes.Wait(ctx, token); err != nil {
+				return fmt.Errorf("wait for trakt write limiter: %w", err)
+			}
+		}
+		wait, limited, err := p.doOnce(ctx, method, path, cfg, token, payload, out)
+		if !limited {
+			return err
+		}
+		if attempt < maxRetryAttempts && wait <= maxInPlaceRetryWait {
+			if err := p.sleep(ctx, wait); err != nil {
+				return err
+			}
+			continue
+		}
+		// Repeated short hints that still end in 429 are not trustworthy, so
+		// back off for a full fallback window rather than the last hint.
+		if attempt >= maxRetryAttempts && wait < defaultRetryAfter {
+			wait = defaultRetryAfter
+		}
+		return watchsync.RateLimitedError{Provider: p.Key(), RetryAfter: wait}
+	}
+}
+
+// doOnce performs a single HTTP attempt. A 429 reports limited with the wait
+// from Retry-After, or defaultRetryAfter when the header is absent or
+// malformed; every other outcome reports its error, if any.
+func (p *Provider) doOnce(
+	ctx context.Context,
+	method string,
+	path string,
+	cfg watchsync.ServerConfig,
+	token string,
+	payload []byte,
+	out any,
+) (wait time.Duration, limited bool, err error) {
+	var body io.Reader
+	if payload != nil {
+		body = bytes.NewReader(payload)
+	}
 	req, err := http.NewRequestWithContext(ctx, method, p.baseURL+path, body)
 	if err != nil {
-		return fmt.Errorf("create trakt request: %w", err)
+		return 0, false, fmt.Errorf("create trakt request: %w", err)
 	}
 	p.addHeaders(req, cfg, token)
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("send trakt request: %w", err)
+		return 0, false, fmt.Errorf("send trakt request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		wait, ok := watchsync.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		if !ok {
+			wait = defaultRetryAfter
+		}
+		return wait, true, nil
+	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("trakt request %s %s failed: status %d", method, path, resp.StatusCode)
+		return 0, false, fmt.Errorf("trakt request %s %s failed: status %d", method, path, resp.StatusCode)
 	}
 	if out == nil {
-		return nil
+		return 0, false, nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode trakt response: %w", err)
+		return 0, false, fmt.Errorf("decode trakt response: %w", err)
 	}
-	return nil
+	return 0, false, nil
 }
 
 type tokenResponse struct {
