@@ -105,8 +105,8 @@ func TestJellyfinProviderFetch_FavoritesFailureIsAWarning(t *testing.T) {
 	if len(records) != 1 || records[0].ExternalID != "matrix" {
 		t.Fatalf("records = %+v", records)
 	}
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "favorites") {
-		t.Fatalf("warnings = %v, want one favorites warning", warnings)
+	if len(warnings) != 1 || warnings[0] != warnJellyfinFavoritesUnavailable {
+		t.Fatalf("warnings = %v, want only %q", warnings, warnJellyfinFavoritesUnavailable)
 	}
 }
 
@@ -134,8 +134,8 @@ func TestJellyfinProviderFetch_FavoriteSeriesLookupFailureIsAWarning(t *testing.
 	if episode := byID["bb-s2e2"]; !episode.FavoriteOnly || episode.TVDBID != "349234" {
 		t.Fatalf("favorite episode = %+v, want favorite-only with its own TVDB ID", episode)
 	}
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "series for favorites") {
-		t.Fatalf("warnings = %v, want one favorite series warning", warnings)
+	if len(warnings) != 1 || warnings[0] != warnJellyfinFavoriteSeriesUnavailable {
+		t.Fatalf("warnings = %v, want only %q", warnings, warnJellyfinFavoriteSeriesUnavailable)
 	}
 }
 

@@ -62,6 +62,8 @@ func TestPublicWarningSummarizesKnownDiagnostics(t *testing.T) {
 		warnEmbyFavoritesUnavailable:                                          embyFavoritesUnavailableSummary,
 		legacyEmbyFavoritesPrefix + "emby http 500: <html>stack trace</html>": embyFavoritesUnavailableSummary,
 		warnEmbySeriesUnavailable:                                             embySeriesUnavailableSummary,
+		warnJellyfinFavoritesUnavailable:                                      jellyfinFavoritesUnavailableSummary,
+		warnJellyfinFavoriteSeriesUnavailable:                                 jellyfinFavoriteSeriesUnavailableSummary,
 		"favorites import: add movie-1: pq: deadlock detected":                GenericRunWarning,
 	}
 	for diagnostic, want := range cases {

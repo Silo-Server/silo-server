@@ -2,6 +2,7 @@ package historyimport
 
 import (
 	"context"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -29,9 +30,12 @@ func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error
 		return nil, nil, err
 	}
 	var warnings []string
+	// Warnings store fixed text: v1 returns them verbatim, and upstream errors
+	// can carry the server's response body. The error itself is logged.
 	favorites, err := p.client.FetchItems(ctx, p.auth, "IsFavorite", jellyfinFavoriteItemTypes)
 	if err != nil {
-		warnings = append(warnings, "fetching Jellyfin favorites: "+err.Error())
+		slog.WarnContext(ctx, "jellyfin history import: favorites unavailable", "component", "historyimport", "error", err)
+		warnings = append(warnings, warnJellyfinFavoritesUnavailable)
 		favorites = nil
 	}
 	watched := slices.Concat(played, resumable)
@@ -47,7 +51,8 @@ func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error
 		return ok
 	})
 	if extra, err := p.fetchSeriesMetadata(ctx, favoriteSeries); err != nil {
-		warnings = append(warnings, "fetching Jellyfin series for favorites: "+err.Error())
+		slog.WarnContext(ctx, "jellyfin history import: favorite series metadata unavailable", "component", "historyimport", "error", err)
+		warnings = append(warnings, warnJellyfinFavoriteSeriesUnavailable)
 	} else {
 		maps.Copy(seriesMeta, extra)
 	}

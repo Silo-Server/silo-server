@@ -32,8 +32,14 @@ const (
 	// Runs before the fixed text stored the upstream error after this prefix.
 	legacyEmbyFavoritesPrefix = "fetching Emby favorites: "
 
+	warnJellyfinFavoritesUnavailable      = "fetching Jellyfin favorites failed"
+	warnJellyfinFavoriteSeriesUnavailable = "fetching Jellyfin series metadata for favorites failed"
+
 	embyFavoritesUnavailableSummary = "Emby favorites couldn't be read, so none were imported."
 	embySeriesUnavailableSummary    = "Emby show details couldn't be read, so some episodes may be unmatched."
+
+	jellyfinFavoritesUnavailableSummary      = "Jellyfin favorites couldn't be read, so none were imported."
+	jellyfinFavoriteSeriesUnavailableSummary = "Jellyfin show details couldn't be read, so some favorite episodes may be unmatched."
 )
 
 // PublicWarning returns the monitor text for a stored run warning.
@@ -52,6 +58,10 @@ func PublicWarning(diagnostic string) string {
 		return embyFavoritesUnavailableSummary
 	case diagnostic == warnEmbySeriesUnavailable:
 		return embySeriesUnavailableSummary
+	case diagnostic == warnJellyfinFavoritesUnavailable:
+		return jellyfinFavoritesUnavailableSummary
+	case diagnostic == warnJellyfinFavoriteSeriesUnavailable:
+		return jellyfinFavoriteSeriesUnavailableSummary
 	}
 	return GenericRunWarning
 }
