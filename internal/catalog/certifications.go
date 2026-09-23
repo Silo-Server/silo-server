@@ -82,10 +82,13 @@ func (s *DetailService) applyCertifications(ctx context.Context, items []*models
 	args := []any{ids}
 	index := 2
 	from := certificationRowsSQL("mi.content_id", filter, true, &args, &index)
-	query := `SELECT mi.content_id, mi.content_rating, mi.locked_fields, chosen.certification_country, COALESCE(chosen.ratings, '{}'::jsonb)
- FROM media_items mi CROSS JOIN LATERAL (
+	query := `SELECT requested.content_id, mi.content_rating, mi.locked_fields, chosen.certification_country, COALESCE(chosen.ratings, '{}'::jsonb)
+ FROM unnest($1::text[]) requested(content_id)
+ LEFT JOIN episodes episode ON episode.content_id = requested.content_id
+ JOIN media_items mi ON mi.content_id = COALESCE(episode.series_id, requested.content_id)
+ CROSS JOIN LATERAL (
  SELECT cf.certification_country, cc.ratings` + from + ` ORDER BY ` + certificationRankSQL(resolvedCertificationSQL) + ` DESC, cf.id LIMIT 1
- ) chosen WHERE mi.content_id = ANY($1)`
+ ) chosen`
 	rows, err := s.itemRepo.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("load library certifications: %w", err)

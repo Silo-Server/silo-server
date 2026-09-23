@@ -18,14 +18,15 @@ import (
 var EbookFinishedProgressThresholdSQL = strconv.FormatFloat(models.EbookFinishedProgressThreshold, 'f', -1, 64)
 
 type QueryBuilder struct {
-	cursorTerms []queryCursorTerm
-	alias       string
-	argIdx      int
-	args        []any
-	userID      int
-	profileID   string
-	libraryIDs  []int
-	mediaScope  string
+	certificationAccess *AccessFilter
+	cursorTerms         []queryCursorTerm
+	alias               string
+	argIdx              int
+	args                []any
+	userID              int
+	profileID           string
+	libraryIDs          []int
+	mediaScope          string
 	// requireUserHistoryCTE is set when an emitted clause references the
 	// per-user history aggregate (audit 2026-05-01 §3.1 Pattern B). The
 	// executor reads this flag to inject the user_last_watched CTE and
@@ -53,6 +54,27 @@ func (qb *QueryBuilder) WithUserScope(userID int, profileID string) *QueryBuilde
 func (qb *QueryBuilder) WithLibraryScope(libraryIDs []int) *QueryBuilder {
 	qb.libraryIDs = append([]int(nil), libraryIDs...)
 	return qb
+}
+
+// WithCertificationScope resolves rating rules and ordering in the same
+// library context as the displayed catalogue.
+func (qb *QueryBuilder) WithCertificationScope(filter AccessFilter) *QueryBuilder {
+	qb.certificationAccess = &filter
+	return qb
+}
+
+func (qb *QueryBuilder) certificationExpression() (string, []any) {
+	if qb.certificationAccess == nil {
+		return qb.alias + ".content_rating", nil
+	}
+	filter := *qb.certificationAccess
+	if len(qb.libraryIDs) == 1 {
+		filter.PresentationLibraryID = &qb.libraryIDs[0]
+	}
+	offset := qb.argIdx - 1
+	args := make([]any, offset)
+	expression := certificationSQL(qb.alias, qb.libraryContentExpr(), filter, true, &args, &qb.argIdx)
+	return expression, args[offset:]
 }
 
 func (qb *QueryBuilder) WithMediaScope(scope string) *QueryBuilder {
@@ -265,8 +287,10 @@ func (qb *QueryBuilder) BuildSortPlan(sortConfig QuerySort) (result QuerySortPla
 		plan.OrderBy = qb.orderByExpr(expr, dir, nullsLast, titleExpr)
 		return plan, nil
 	case "content_rating":
-		rankExpr := qb.contentRatingRankExpr()
-		labelExpr := qb.contentRatingLabelExpr()
+		expression, args := qb.certificationExpression()
+		plan.Args = args
+		rankExpr := qb.contentRatingRankExpr(expression)
+		labelExpr := qb.contentRatingLabelExpr(expression)
 		qb.cursorTerms = []queryCursorTerm{{expression: rankExpr, descending: dir == "DESC"}, {expression: labelExpr, descending: dir == "DESC"}, {expression: titleExpr}, {expression: qb.alias + ".content_id"}}
 		plan.OrderBy = fmt.Sprintf(
 			"ORDER BY %s %s, %s %s, %s ASC, %s.content_id ASC",
@@ -442,6 +466,11 @@ func (qb *QueryBuilder) buildRule(rule QueryRule) (string, error) {
 	}
 
 	column := queryColumnSQL(qb.alias, def.columnSQL)
+	if rule.Field == querySortContentRating {
+		var args []any
+		column, args = qb.certificationExpression()
+		qb.args = append(qb.args, args...)
+	}
 
 	switch rule.Op {
 	case "is":
@@ -1424,14 +1453,17 @@ func (qb *QueryBuilder) addedAtSortPlan() (string, []string, []any, bool) {
 	return "sort_added.added_at", []string{joinSQL}, args, true
 }
 
-func (qb *QueryBuilder) contentRatingRankExpr() string {
+func (qb *QueryBuilder) contentRatingRankExpr(expression string) string {
+	if qb.certificationAccess != nil {
+		return certificationRankSQL(expression)
+	}
 	cases := make([]string, 0, len(access.RatingRankEntries()))
 	for _, entry := range access.RatingRankEntries() {
 		cases = append(
 			cases,
 			fmt.Sprintf(
-				"WHEN UPPER(NULLIF(BTRIM(%s.content_rating), '')) = '%s' THEN %d",
-				qb.alias,
+				"WHEN UPPER(NULLIF(BTRIM(%s), '')) = '%s' THEN %d",
+				expression,
 				entry.Rating,
 				entry.Rank,
 			),
@@ -1443,10 +1475,10 @@ func (qb *QueryBuilder) contentRatingRankExpr() string {
 	)
 }
 
-func (qb *QueryBuilder) contentRatingLabelExpr() string {
+func (qb *QueryBuilder) contentRatingLabelExpr(expression string) string {
 	return fmt.Sprintf(
-		"LOWER(COALESCE(NULLIF(BTRIM(%s.content_rating), ''), '~~~~'))",
-		qb.alias,
+		"LOWER(COALESCE(NULLIF(BTRIM(%s), ''), '~~~~'))",
+		expression,
 	)
 }
 

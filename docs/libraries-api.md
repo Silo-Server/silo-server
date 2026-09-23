@@ -107,7 +107,9 @@ Changing country queues a full metadata refresh; until it completes, existing
 recognised US metadata supplies the fallback. Provider failures fail the refresh
 job and preserve the previous certification snapshot.
 
-Australian libraries prefer actual Australian TMDB certifications. The server's
+Australian libraries prefer actual Australian TMDB certifications. When TMDB
+returns several recognised certifications for one country, the strictest is used.
+The server's
 existing TMDB certification client fetches country data during metadata refresh,
 without requiring a new plugin binary. This test supports TMDB country data and
 explicit country-prefixed NFO/manual values; providers returning only an

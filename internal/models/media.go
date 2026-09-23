@@ -2,9 +2,10 @@ package models
 
 import (
 	"encoding/json"
-	"github.com/Silo-Server/silo-server/internal/certification"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/certification"
 )
 
 const (

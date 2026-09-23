@@ -231,7 +231,7 @@ func buildBrowseFavoritesPlan(f BrowseFavoritesFilters) (browseFavoritesPlan, er
 		argIdx++
 	}
 
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: f.MaxContentRating, ExcludedMediaTypes: f.ExcludedMediaTypes}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: f.MaxContentRating, ExcludedMediaTypes: f.ExcludedMediaTypes, AllowedLibraryIDs: f.AllowedLibraryIDs, DisabledLibraryIDs: f.DisabledLibraryIDs}, &conditions, &args, &argIdx)
 
 	// Manga chapters (type='ebook' rows linked into a manga series) are internal
 	// sub-units and must never surface as standalone cards, matching the

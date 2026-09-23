@@ -222,17 +222,11 @@ func (r *RecentTVRepository) List(ctx context.Context, q RecentTVQuery) ([]Recen
 	access := q.Access
 	access.NamePrefix = ""
 	appendLibraryAccessConditions("si.content_id", access, &eventConditions, &args, &argIdx)
-	applyAccessFilter("si", AccessFilter{
-		MaxContentRating:   access.MaxContentRating,
-		ExcludedMediaTypes: access.ExcludedMediaTypes,
-	}, &eventConditions, &args, &argIdx)
+	applyAccessFilter("si", access, &eventConditions, &args, &argIdx)
 	appendAllowedContentCondition("si.content_id", access.AllowedContentIDs, &eventConditions, &args, &argIdx)
 
 	appendLibraryAccessConditions("mi.content_id", access, &seriesConditions, &args, &argIdx)
-	applyAccessFilter("mi", AccessFilter{
-		MaxContentRating:   access.MaxContentRating,
-		ExcludedMediaTypes: access.ExcludedMediaTypes,
-	}, &seriesConditions, &args, &argIdx)
+	applyAccessFilter("mi", access, &seriesConditions, &args, &argIdx)
 	appendAllowedContentCondition("mi.content_id", access.AllowedContentIDs, &seriesConditions, &args, &argIdx)
 
 	if prefix := strings.TrimSpace(q.NamePrefix); prefix != "" {

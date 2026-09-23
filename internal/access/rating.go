@@ -2,12 +2,23 @@ package access
 
 import "strings"
 
+const (
+	ratingNC17   = "NC-17"
+	ratingTVMA   = "TV-MA"
+	ratingAUG    = "AU-G"
+	ratingAUPG   = "AU-PG"
+	ratingAUM    = "AU-M"
+	ratingAUMA15 = "AU-MA15+"
+	ratingAUR18  = "AU-R18+"
+	ratingAUX18  = "AU-X18+"
+)
+
 var ratingRank = map[string]int{
 	"G": 0, "TV-Y": 0, "TV-G": 0,
 	"PG": 1, "TV-Y7": 1, "TV-PG": 1,
 	"PG-13": 2, "TV-14": 2,
-	"R": 4, "NC-17": 4, "TV-MA": 4,
-	"AU-G": 0, "AU-PG": 1, "AU-M": 2, "AU-MA15+": 3, "AU-R18+": 4, "AU-X18+": 5,
+	"R": 4, ratingNC17: 4, ratingTVMA: 4,
+	ratingAUG: 0, ratingAUPG: 1, ratingAUM: 2, ratingAUMA15: 3, ratingAUR18: 4, ratingAUX18: 5,
 }
 
 type RatingRankEntry struct {
@@ -25,14 +36,14 @@ var ratingRankEntries = []RatingRankEntry{
 	{Rating: "PG-13", Rank: 2},
 	{Rating: "TV-14", Rank: 2},
 	{Rating: "R", Rank: 4},
-	{Rating: "NC-17", Rank: 4},
-	{Rating: "TV-MA", Rank: 4},
-	{Rating: "AU-G", Rank: 0},
-	{Rating: "AU-PG", Rank: 1},
-	{Rating: "AU-M", Rank: 2},
-	{Rating: "AU-MA15+", Rank: 3},
-	{Rating: "AU-R18+", Rank: 4},
-	{Rating: "AU-X18+", Rank: 5},
+	{Rating: ratingNC17, Rank: 4},
+	{Rating: ratingTVMA, Rank: 4},
+	{Rating: ratingAUG, Rank: 0},
+	{Rating: ratingAUPG, Rank: 1},
+	{Rating: ratingAUM, Rank: 2},
+	{Rating: ratingAUMA15, Rank: 3},
+	{Rating: ratingAUR18, Rank: 4},
+	{Rating: ratingAUX18, Rank: 5},
 }
 
 // RatingAllowed reports whether a content rating is visible under the ceiling.

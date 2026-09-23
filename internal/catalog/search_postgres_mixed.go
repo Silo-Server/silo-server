@@ -24,10 +24,7 @@ func (r *ItemRepository) GetSearchItemsByIDsWithAccess(
 	argIdx := 2
 	mediaConditions := []string{"hydrated_mi.content_id = ANY($1)"}
 	appendLibraryAccessConditions("hydrated_mi.content_id", filter, &mediaConditions, &args, &argIdx)
-	applyAccessFilter("hydrated_mi", AccessFilter{
-		MaxContentRating:   filter.MaxContentRating,
-		ExcludedMediaTypes: filter.ExcludedMediaTypes,
-	}, &mediaConditions, &args, &argIdx)
+	applyAccessFilter("hydrated_mi", filter, &mediaConditions, &args, &argIdx)
 
 	episodeConditions := []string{"mi.content_id = ANY($1)"}
 	appendEpisodeLibrarySearchAccess(
@@ -38,10 +35,8 @@ func (r *ItemRepository) GetSearchItemsByIDsWithAccess(
 		&args,
 		&argIdx,
 	)
-	applyAccessFilter("mi", AccessFilter{
-		MaxContentRating:   filter.MaxContentRating,
-		ExcludedMediaTypes: filter.ExcludedMediaTypes,
-	}, &episodeConditions, &args, &argIdx)
+	applyContentRatingFilter("mi", episodeParentSeriesIDExpr("mi.content_id"), filter, &episodeConditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{ExcludedMediaTypes: filter.ExcludedMediaTypes}, &episodeConditions, &args, &argIdx)
 
 	query := fmt.Sprintf(`
 		SELECT %s

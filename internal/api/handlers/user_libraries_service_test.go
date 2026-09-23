@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http/httptest"
 	"os"
@@ -62,6 +63,17 @@ func TestUserLibrarySharedPolicyProjection(t *testing.T) {
 			var bridge []UserLibraryView
 			if err := json.Unmarshal(rec.Body.Bytes(), &bridge); err != nil {
 				t.Fatal(err)
+			}
+			// Certification country is carried to v2 through the service, but
+			// the frozen v1 bridge must retain its original wire shape.
+			if bytes.Contains(rec.Body.Bytes(), []byte("certification_country")) {
+				t.Fatal("v2 field leaked into v1")
+			}
+			for i := range views {
+				if views[i].CertificationCountry != "US" {
+					t.Fatalf("default country = %q", views[i].CertificationCountry)
+				}
+				views[i].CertificationCountry = ""
 			}
 			if rec.Code != 200 || !reflect.DeepEqual(views, bridge) {
 				t.Fatal(rec.Code, rec.Body.String())

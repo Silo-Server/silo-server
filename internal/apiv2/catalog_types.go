@@ -1,10 +1,10 @@
 package apiv2
 
 import (
-	"github.com/Silo-Server/silo-server/internal/certification"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/certification"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 

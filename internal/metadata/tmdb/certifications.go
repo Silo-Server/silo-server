@@ -9,6 +9,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/certification"
 )
 
+const (
+	certificationMovieType  = "movie"
+	certificationSeriesType = "series"
+)
+
 // GetCertifications keeps country provenance for library presentation and
 // parental controls. The existing GetCertification remains US-only for requests.
 func (c *Client) GetCertifications(ctx context.Context, mediaType string, id int) (map[string]string, error) {
@@ -17,7 +22,7 @@ func (c *Client) GetCertifications(ctx context.Context, mediaType string, id int
 	}
 	ratings := make(map[string]string)
 	switch mediaType {
-	case "movie":
+	case certificationMovieType:
 		var response releaseDatesResponse
 		if err := c.doGet(ctx, fmt.Sprintf("/movie/%d/release_dates", id), &response); err != nil {
 			return nil, err
@@ -27,7 +32,7 @@ func (c *Client) GetCertifications(ctx context.Context, mediaType string, id int
 				keepStrictestCertification(ratings, country.ISO3166, release.Certification)
 			}
 		}
-	case "series", "tv":
+	case certificationSeriesType, "tv":
 		var response contentRatingsResponse
 		if err := c.doGet(ctx, fmt.Sprintf("/tv/%d/content_ratings", id), &response); err != nil {
 			return nil, err
@@ -60,7 +65,7 @@ func keepStrictestCertification(ratings map[string]string, country, rating strin
 		oldToken = "AU-" + oldToken
 	}
 	oldRank, oldKnown := access.RatingRank(oldToken)
-	// Retain an unknown-only country as unrated, but prefer recognised release
+	// Retain an unknown-only country as unrated, but prefer known release
 	// classifications over placeholders (NR, CTC) when both are supplied.
 	if ratings[country] == "" || known && (!oldKnown || rank > oldRank) {
 		ratings[country] = rating

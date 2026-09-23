@@ -75,6 +75,12 @@ func TestLibraryCertificationAccessDB(t *testing.T) {
 		t.Fatalf("local rating filter: %v %v", result, err)
 	}
 
+	executor := &QueryExecutor{Pool: pool}
+	definition := QueryDefinition{LibraryIDs: []int{au}, MediaScope: "movie", Groups: []QueryGroup{{Rules: []QueryRule{{Field: "content_rating", Op: "is", Value: "AU-M"}}}}, Sort: QuerySort{Field: "content_rating", Order: "asc"}}
+	matched, _, err := executor.Preview(ctx, definition, AccessFilter{AllowedLibraryIDs: []int{au}}, 10)
+	if err != nil || len(matched) != 1 {
+		t.Fatalf("advanced local rating filter and sort: %v %v", matched, err)
+	}
 	check("US keeps R", AccessFilter{AllowedLibraryIDs: []int{us}, MaxContentRating: "PG-13"}, false)
 	check("shared access chooses strictest", AccessFilter{AllowedLibraryIDs: []int{au, us}, MaxContentRating: "AU-M", PresentationLibraryID: &au}, false)
 	svc := &DetailService{itemRepo: repo}

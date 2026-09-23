@@ -320,7 +320,8 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		WithArgIdx(len(baseArgs)+1).
 		WithUserScope(access.UserID, access.ProfileID).
 		WithMediaScope(effectiveScope).
-		WithLibraryScope(libraryIDs)
+		WithLibraryScope(libraryIDs).
+		WithCertificationScope(access)
 	filterWhere, filterArgs, err := builder.Build(def)
 	if err != nil {
 		return previewPagePlan{}, err

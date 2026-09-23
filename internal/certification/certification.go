@@ -2,6 +2,11 @@ package certification
 
 import "strings"
 
+const (
+	ratingR18Plus = "R18+"
+	ratingPG13    = "PG-13"
+)
+
 // Certification preserves the source of a library's displayed rating. An
 // equivalent is a Silo access-control estimate, never an official local rating.
 type Certification struct {
@@ -43,7 +48,7 @@ func NormalizeCertification(country, rating string) string {
 		case "MA", "MA15":
 			rating = "MA15+"
 		case "R", "R18":
-			rating = "R18+"
+			rating = ratingR18Plus
 		case "X", "X18":
 			rating = "X18+"
 		}
@@ -52,17 +57,17 @@ func NormalizeCertification(country, rating string) string {
 }
 
 // USFallbackRating deliberately maps the broad US adult categories to R18+,
-// not MA15+. Unknown and unrated values never become a recognised rating.
+// not MA15+. Unknown and unrated values never become a known rating.
 func USFallbackRating(rating string) string {
 	switch NormalizeCertification("US", rating) {
 	case "G", "TV-G", "TV-Y":
 		return "G"
 	case "PG", "TV-PG", "TV-Y7", "TV-Y7-FV":
 		return "PG"
-	case "PG-13", "TV-14":
+	case ratingPG13, "TV-14":
 		return "M"
 	case "R", "NC-17", "TV-MA":
-		return "R18+"
+		return ratingR18Plus
 	}
 	return ""
 }

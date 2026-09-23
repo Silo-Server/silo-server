@@ -18,7 +18,7 @@ func (s *MetadataService) SetCertificationProvider(provider CertificationProvide
 }
 
 func (s *MetadataService) refreshCertifications(ctx context.Context, item *models.MediaItem, folderID int, locked []MetadataField) error {
-	if s.certificationProvider == nil || s.dbPool == nil || isFieldLocked(locked, FieldContentRating) || (item.Type != "movie" && item.Type != "series") {
+	if s.certificationProvider == nil || s.dbPool == nil || isFieldLocked(locked, FieldContentRating) || (item.Type != matchContentTypeMovie && item.Type != matchContentTypeSeries) {
 		return nil
 	}
 	var needsCountryRatings bool
@@ -30,8 +30,14 @@ func (s *MetadataService) refreshCertifications(ctx context.Context, item *model
 	if !needsCountryRatings {
 		return nil
 	}
+	if item.TmdbID == "" {
+		return nil
+	}
 	id, err := strconv.Atoi(item.TmdbID)
-	if err != nil || id <= 0 {
+	if err != nil {
+		return fmt.Errorf("invalid certification TMDB ID: %w", err)
+	}
+	if id <= 0 {
 		return nil
 	}
 	ratings, err := s.certificationProvider.GetCertifications(ctx, item.Type, id)
