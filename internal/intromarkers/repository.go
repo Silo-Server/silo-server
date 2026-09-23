@@ -32,7 +32,11 @@ type EpisodeIntroEligibility struct {
 	IntroDetectionEnabled bool
 }
 
-const baseCandidateSelect = `
+const baseCandidateSelect = baseCandidateSelectFrom + baseCandidateWhere
+
+// baseCandidateSelectFrom and baseCandidateWhere are split so a query can add
+// joins between them.
+const baseCandidateSelectFrom = `
 	SELECT mf.id,
 	       mf.episode_id,
 	       e.season_id,
@@ -60,7 +64,9 @@ const baseCandidateSelect = `
 	       mf.file_modified_at
 	FROM media_files mf
 	JOIN media_folders folders ON folders.id = mf.media_folder_id
-	JOIN episodes e ON e.content_id = mf.episode_id
+	JOIN episodes e ON e.content_id = mf.episode_id`
+
+const baseCandidateWhere = `
 	WHERE mf.episode_id IS NOT NULL
 	  AND COALESCE(e.season_id, '') <> ''
 	  AND folders.enabled = true
@@ -112,21 +118,138 @@ func (r *Repository) ListCandidatesForGroup(ctx context.Context, mediaFolderID i
 	return filtered, nil
 }
 
-func (r *Repository) ListChapterSilenceBackfillCandidates(ctx context.Context, limit int) ([]Candidate, error) {
+// ListChapterSilenceBackfillCandidates skips a file while its recorded attempt
+// still matches the file identity, the refined marker range, and the silence
+// settings: indefinitely after a clean no-improvement result, and until
+// retry_after after a failure. Files never attempted come first, so retries
+// cannot crowd them out of the per-run budget.
+//
+// The attempt lookup is a LEFT JOIN so it runs as a per-file primary-key probe
+// inside the parallel scan. The planner estimates the candidate filter at a
+// handful of rows; as NOT EXISTS it either chose an anti-join that rescans the
+// attempts table once per candidate or lost the parallel scan.
+func (r *Repository) ListChapterSilenceBackfillCandidates(ctx context.Context, limit int, cfg Config) ([]Candidate, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
-	rows, err := r.pool.Query(ctx, baseCandidateSelect+`
+	rows, err := r.pool.Query(ctx, baseCandidateSelectFrom+`
+		LEFT JOIN intro_silence_refinement_attempts attempts ON attempts.media_file_id = mf.id`+
+		baseCandidateWhere+`
 		  AND mf.intro_start IS NOT NULL
 		  AND mf.intro_end IS NOT NULL
 		  AND mf.intro_markers_source = $1
 		  AND mf.intro_markers_algorithm = $2
-		ORDER BY mf.intro_markers_detected_at NULLS FIRST, mf.id
-		LIMIT $3`, models.MarkerSourceScanner, ChapterAlgorithm, limit)
+		  AND NOT COALESCE(
+		      attempts.config_hash = $3
+		      AND attempts.file_hash = COALESCE(mf.file_hash, '')
+		      AND attempts.file_size = COALESCE(mf.file_size, 0)
+		      AND attempts.duration_seconds = COALESCE(mf.duration, 0)
+		      AND attempts.intro_start = mf.intro_start
+		      AND attempts.intro_end = mf.intro_end
+		      AND (attempts.status = $4 OR attempts.retry_after > NOW()),
+		      false)
+		ORDER BY attempts.attempted_at NULLS FIRST,
+		  mf.intro_markers_detected_at NULLS FIRST,
+		  mf.id
+		LIMIT $5`,
+		models.MarkerSourceScanner,
+		ChapterAlgorithm,
+		cfg.SilenceConfigHash(),
+		silenceAttemptNoImprovement,
+		limit,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("listing intro marker silence backfill candidates: %w", err)
 	}
 	return scanCandidates(rows)
+}
+
+func (r *Repository) LoadSilenceRefinementAttempt(ctx context.Context, fileID int) (*SilenceRefinementAttempt, error) {
+	var attempt SilenceRefinementAttempt
+	err := r.pool.QueryRow(ctx, `
+		SELECT media_file_id,
+		       config_hash,
+		       file_hash,
+		       file_size,
+		       duration_seconds,
+		       intro_start,
+		       intro_end,
+		       status,
+		       failure_count,
+		       COALESCE(last_error, ''),
+		       attempted_at,
+		       retry_after
+		FROM intro_silence_refinement_attempts
+		WHERE media_file_id = $1`, fileID).Scan(
+		&attempt.MediaFileID,
+		&attempt.ConfigHash,
+		&attempt.FileHash,
+		&attempt.FileSize,
+		&attempt.DurationSeconds,
+		&attempt.IntroStart,
+		&attempt.IntroEnd,
+		&attempt.Status,
+		&attempt.FailureCount,
+		&attempt.LastError,
+		&attempt.AttemptedAt,
+		&attempt.RetryAfter,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("loading intro silence refinement attempt: %w", err)
+	}
+	return &attempt, nil
+}
+
+func (r *Repository) UpsertSilenceRefinementAttempt(ctx context.Context, attempt SilenceRefinementAttempt) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO intro_silence_refinement_attempts (
+		    media_file_id,
+		    config_hash,
+		    file_hash,
+		    file_size,
+		    duration_seconds,
+		    intro_start,
+		    intro_end,
+		    status,
+		    failure_count,
+		    last_error,
+		    attempted_at,
+		    retry_after
+		) VALUES (
+		    $1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), $11, $12
+		)
+		ON CONFLICT (media_file_id) DO UPDATE SET
+		    config_hash = EXCLUDED.config_hash,
+		    file_hash = EXCLUDED.file_hash,
+		    file_size = EXCLUDED.file_size,
+		    duration_seconds = EXCLUDED.duration_seconds,
+		    intro_start = EXCLUDED.intro_start,
+		    intro_end = EXCLUDED.intro_end,
+		    status = EXCLUDED.status,
+		    failure_count = EXCLUDED.failure_count,
+		    last_error = EXCLUDED.last_error,
+		    attempted_at = EXCLUDED.attempted_at,
+		    retry_after = EXCLUDED.retry_after`,
+		attempt.MediaFileID,
+		attempt.ConfigHash,
+		attempt.FileHash,
+		attempt.FileSize,
+		attempt.DurationSeconds,
+		attempt.IntroStart,
+		attempt.IntroEnd,
+		attempt.Status,
+		attempt.FailureCount,
+		attempt.LastError,
+		attempt.AttemptedAt,
+		attempt.RetryAfter,
+	)
+	if err != nil {
+		return fmt.Errorf("upserting intro silence refinement attempt: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) EpisodeIntroEligibility(ctx context.Context, episodeID string) (*EpisodeIntroEligibility, error) {

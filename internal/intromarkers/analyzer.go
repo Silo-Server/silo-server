@@ -25,7 +25,9 @@ type introRepository interface {
 	ListEligibleCandidates(ctx context.Context) ([]Candidate, error)
 	ListCandidatesForEpisode(ctx context.Context, episodeID string) ([]Candidate, error)
 	ListCandidatesForGroup(ctx context.Context, mediaFolderID int, seasonID, analysisGroupKey string) ([]Candidate, error)
-	ListChapterSilenceBackfillCandidates(ctx context.Context, limit int) ([]Candidate, error)
+	ListChapterSilenceBackfillCandidates(ctx context.Context, limit int, cfg Config) ([]Candidate, error)
+	LoadSilenceRefinementAttempt(ctx context.Context, fileID int) (*SilenceRefinementAttempt, error)
+	UpsertSilenceRefinementAttempt(ctx context.Context, attempt SilenceRefinementAttempt) error
 	PatchIntroMarker(ctx context.Context, patch IntroMarkerPatch) (bool, error)
 	LoadSeasonState(ctx context.Context, state SeasonState, cfg Config) (*SeasonState, error)
 	UpsertSeasonState(ctx context.Context, state SeasonState, cfg Config) error
@@ -416,13 +418,71 @@ func (a *Analyzer) refineChapterSegment(ctx context.Context, candidate Candidate
 	if err != nil {
 		summary.SilenceRefinementErrors++
 		a.logger.WarnContext(ctx, "intro marker silence refinement failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
+		if ctx.Err() == nil {
+			a.recordSilenceAttempt(ctx, candidate, segment, err, summary)
+		}
 		return segment
 	}
 	if ok {
 		summary.SilenceRefinementsApplied++
 		return refined
 	}
+	a.recordSilenceAttempt(ctx, candidate, segment, nil, summary)
 	return segment
+}
+
+const (
+	silenceRetryBaseDelay = 12 * time.Hour
+	silenceRetryMaxDelay  = 7 * 24 * time.Hour
+)
+
+// recordSilenceAttempt persists a refinement that kept the chapter boundary so
+// the backfill stops spending its budget on the same unchanged file every run.
+// A clean no-improvement result stands until the inputs change; a failure is
+// retried with exponential backoff.
+func (a *Analyzer) recordSilenceAttempt(ctx context.Context, candidate Candidate, segment Segment, refineErr error, summary *RunSummary) {
+	attempt := SilenceRefinementAttempt{
+		MediaFileID:     candidate.FileID,
+		ConfigHash:      a.config.SilenceConfigHash(),
+		FileHash:        candidate.FileHash,
+		FileSize:        candidate.FileSize,
+		DurationSeconds: candidate.DurationSeconds,
+		IntroStart:      segment.Start,
+		IntroEnd:        segment.End,
+		Status:          silenceAttemptNoImprovement,
+		AttemptedAt:     time.Now().UTC(),
+	}
+	if refineErr != nil {
+		previous, err := a.repo.LoadSilenceRefinementAttempt(ctx, candidate.FileID)
+		if err != nil {
+			summary.Errors = append(summary.Errors, fmt.Sprintf("file %d: %v", candidate.FileID, err))
+			a.logger.WarnContext(ctx, "intro marker silence attempt load failed", "file_id", candidate.FileID, "error", err)
+			return
+		}
+		attempt.Status = silenceAttemptFailed
+		attempt.LastError = refineErr.Error()
+		attempt.FailureCount = 1
+		if previous != nil && previous.Status == silenceAttemptFailed && previous.sameInputs(attempt) {
+			attempt.FailureCount = previous.FailureCount + 1
+		}
+		retryAfter := attempt.AttemptedAt.Add(silenceRetryDelay(attempt.FailureCount))
+		attempt.RetryAfter = &retryAfter
+	}
+	if err := a.repo.UpsertSilenceRefinementAttempt(ctx, attempt); err != nil {
+		summary.Errors = append(summary.Errors, fmt.Sprintf("file %d: %v", candidate.FileID, err))
+		a.logger.WarnContext(ctx, "intro marker silence attempt record failed", "file_id", candidate.FileID, "error", err)
+	}
+}
+
+// silenceRetryDelay doubles from silenceRetryBaseDelay per consecutive failure,
+// capped at silenceRetryMaxDelay. The base sits under the daily schedule so the
+// first retry lands on the next scheduled run.
+func silenceRetryDelay(failures int) time.Duration {
+	delay := silenceRetryBaseDelay
+	for i := 1; i < failures && delay < silenceRetryMaxDelay; i++ {
+		delay *= 2
+	}
+	return min(delay, silenceRetryMaxDelay)
 }
 
 func setBestChapterSource(sources map[string]chapterSourceMarker, candidate Candidate, segment Segment) {
@@ -473,7 +533,7 @@ func (a *Analyzer) runSilenceBackfill(ctx context.Context) (RunSummary, error) {
 	if !cfg.SilenceRefinementEnabled || cfg.SilenceBackfillLimit <= 0 {
 		return summary, nil
 	}
-	candidates, err := a.repo.ListChapterSilenceBackfillCandidates(ctx, cfg.SilenceBackfillLimit)
+	candidates, err := a.repo.ListChapterSilenceBackfillCandidates(ctx, cfg.SilenceBackfillLimit, cfg)
 	if err != nil {
 		return summary, err
 	}
