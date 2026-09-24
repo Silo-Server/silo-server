@@ -297,12 +297,11 @@ func srtToVTT(input []byte) []byte {
 	buf.WriteString("WEBVTT\n\n")
 
 	text := strings.TrimPrefix(string(input), "\ufeff")
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	for i := range lines {
-		// A stray CR (from \r\r\n files) is a line break to WebVTT, so it must
-		// not survive at the end of a line that settings are appended to.
-		lines[i] = strings.TrimRight(lines[i], "\r")
-	}
+	// \r\r\n (a CRLF file converted twice) is one break, and a lone \r is a
+	// break in CR-only files. The longest sequence goes first so \r\r\n does
+	// not become a blank line that ends the cue.
+	text = strings.NewReplacer("\r\r\n", "\n", "\r\n", "\n", "\r", "\n").Replace(text)
+	lines := strings.Split(text, "\n")
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 		if !isSRTTimeLine(line) {
