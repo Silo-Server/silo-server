@@ -20,13 +20,14 @@ func requestAccessFilter(r *http.Request) catalog.AccessFilter {
 func AccessFilterFromContext(ctx context.Context, deviceID string) catalog.AccessFilter {
 	if scope, ok := access.GetScope(ctx); ok {
 		return catalog.AccessFilter{
-			AllowedLibraryIDs:  scope.AllowedLibraryIDs,
-			DisabledLibraryIDs: scope.DisabledLibraryIDs,
-			MaxContentRating:   scope.MaxContentRating,
-			MaxPlaybackQuality: scope.MaxPlaybackQuality,
-			UserID:             apimw.GetUserID(ctx),
-			ProfileID:          apimw.GetProfileID(ctx),
-			DeviceID:           deviceID,
+			AllowedLibraryIDs:   scope.AllowedLibraryIDs,
+			DisabledLibraryIDs:  scope.DisabledLibraryIDs,
+			MaxContentRating:    scope.MaxContentRating,
+			AllowUnratedContent: scope.AllowUnratedContent,
+			MaxPlaybackQuality:  scope.MaxPlaybackQuality,
+			UserID:              apimw.GetUserID(ctx),
+			ProfileID:           apimw.GetProfileID(ctx),
+			DeviceID:            deviceID,
 		}
 	}
 	return catalog.AccessFilter{

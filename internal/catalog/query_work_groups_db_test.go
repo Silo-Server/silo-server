@@ -61,7 +61,7 @@ func TestQueryWorkGroupsDB(t *testing.T) {
 		if i == 207 {
 			mediaType = "comic"
 		}
-		exec(`INSERT INTO media_items(content_id,type,title,status,genres,content_rating,rating_imdb,created_at) VALUES($1,$2,'Tied title','released','{}',$3,$4,'2025-01-01'::timestamptz)`, ids[i], mediaType, map[bool]string{true: "R", false: "PG"}[i == 0], map[bool]any{true: nil, false: float64(i % 3)}[i%4 == 0])
+		exec(`INSERT INTO media_items(content_id,type,title,status,genres,content_rating,content_rating_age,rating_imdb,created_at) VALUES($1,$2,'Tied title','released','{}',$3,$5,$4,'2025-01-01'::timestamptz)`, ids[i], mediaType, map[bool]string{true: "R", false: "PG"}[i == 0], map[bool]any{true: nil, false: float64(i % 3)}[i%4 == 0], map[bool]int{true: 17, false: 8}[i == 0])
 		exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, ids[i], lib)
 		work := 0
 		if i == 205 {

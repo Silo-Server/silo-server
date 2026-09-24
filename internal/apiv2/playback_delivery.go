@@ -110,9 +110,10 @@ func registerPlaybackDelivery(reg *Registry) {
 		subtitle := route.id == playbackSubtitleOperation || route.id == playbackSubtitleHead
 		if subtitle {
 			params = append(params,
-				&huma.Param{Name: playbackParamTrack, In: playbackParamPath, Required: true, Description: "Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup) the inventory URL carries.", Schema: &huma.Schema{Type: huma.TypeString, MinLength: new(1)}},
+				&huma.Param{Name: playbackParamTrack, In: playbackParamPath, Required: true, Description: "Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup, .srt) the inventory URL carries.", Schema: &huma.Schema{Type: huma.TypeString, MinLength: new(1)}},
 				&huma.Param{Name: playbackParamFileID, In: playbackParamQuery, Description: "Source media file the inventory URL names; must be the plan's effective or requested file.", Schema: &huma.Schema{Type: huma.TypeString}},
 				&huma.Param{Name: playback.DownloadedSubtitleIDParamV3, In: playbackParamQuery, Description: "Stable downloaded-subtitle identity the inventory URL carries; must belong to the source file.", Schema: &huma.Schema{Type: huma.TypeString}},
+				&huma.Param{Name: playback.SubtitleOriginalParamV3, In: playbackParamQuery, Description: "1 on a .srt URL published under subrip_sidecar_v1: serve the stored SRT bytes instead of the WebVTT conversion.", Schema: &huma.Schema{Type: huma.TypeString}},
 				&huma.Param{Name: playbackParamPosition, In: playbackParamQuery, Description: "Seek position in seconds for windowed text extraction.", Schema: &huma.Schema{Type: huma.TypeNumber}},
 				&huma.Param{Name: "duration", In: playbackParamQuery, Description: "Window length in seconds for text extraction.", Schema: &huma.Schema{Type: huma.TypeNumber}},
 				&huma.Param{Name: "windowed", In: playbackParamQuery, Description: "PGS: opt into a positioned window instead of the whole track.", Schema: &huma.Schema{Type: huma.TypeString}})

@@ -1726,16 +1726,16 @@ func (h *ItemsHandler) toSeasonResponseFromEpisodes(
 			s = localized
 		}
 	}
-	return h.seasonResponseFromEpisodes(ctx, v, s, episodes, userData, size)
+	return h.localizedSeasonResponse(ctx, v, s, len(episodes), userData, size)
 }
 
-// seasonResponseFromEpisodes maps a season that has already been localized.
+// localizedSeasonResponse maps a season that has already been localized.
 // List endpoints use this after LocalizeSeasonModels so they do not repeat the
 // localization query for every row.
-func (h *ItemsHandler) seasonResponseFromEpisodes(
+func (h *ItemsHandler) localizedSeasonResponse(
 	ctx context.Context, v ItemViewer,
 	s *models.Season,
-	episodes []*models.Episode,
+	episodeCount int,
 	userData *catalog.SeasonUserData,
 	size imagesize.Size,
 ) seasonResponse {
@@ -1745,7 +1745,7 @@ func (h *ItemsHandler) seasonResponseFromEpisodes(
 		IsSpecials:      s.SeasonNumber == 0,
 		Title:           s.Title,
 		Overview:        s.Overview,
-		EpisodeCount:    len(episodes),
+		EpisodeCount:    episodeCount,
 		PosterThumbhash: s.PosterThumbhash,
 	}
 	if s.AirDate != nil {
@@ -1880,6 +1880,86 @@ func (h *ItemsHandler) getAggregateUserData(ctx context.Context, v ItemViewer, e
 		return nil
 	}
 	return catalog.EpisodeRollupUserData(episodes, progressMap)
+}
+
+// episodeRollupStore returns the viewer's store when it aggregates episode
+// watch state in SQL (the Postgres backend). Other stores fold per-episode
+// progress instead.
+func (h *ItemsHandler) episodeRollupStore(ctx context.Context, v ItemViewer) (userstore.SeriesEpisodeRollupStore, bool) {
+	store, _, ok := h.viewerUserStore(ctx, v.ProfileID)
+	if !ok {
+		return nil, false
+	}
+	rollup, ok := store.(userstore.SeriesEpisodeRollupStore)
+	return rollup, ok
+}
+
+// parentRollupUserData is getAggregateUserData for a series or season row,
+// computed by the SQL rollup without loading its episodes. ok is false when
+// the store cannot aggregate or the query fails; the caller then folds the
+// episodes itself.
+func (h *ItemsHandler) parentRollupUserData(ctx context.Context, v ItemViewer, itemType, contentID string) (*catalog.SeasonUserData, bool) {
+	rollup, ok := h.episodeRollupStore(ctx, v)
+	if !ok {
+		return nil, false
+	}
+	load := rollup.SeriesEpisodeWatchCounts
+	if itemType == "season" {
+		load = rollup.SeasonEpisodeWatchCounts
+	}
+	counts, err := load(ctx, v.ProfileID, []string{contentID})
+	if err != nil {
+		// A canceled request fails the fold just as fast; only a real
+		// query failure is worth a warning.
+		if ctx.Err() == nil {
+			slog.WarnContext(ctx, "episode watch rollup failed, folding episodes instead", "component", "api", "type", itemType, "error", err)
+		}
+		return nil, false
+	}
+	parent, ok := counts[contentID]
+	if !ok {
+		// Like getAggregateUserData, a parent without available episodes
+		// has no user data.
+		return nil, true
+	}
+	return catalog.SeasonUserDataFromCounts(parent), true
+}
+
+// seriesSeasonRollups returns each season number's available episode count
+// and, when the viewer's store is reachable, its aggregate user data. A store
+// with the SQL rollup answers both in one query; otherwise the series'
+// episodes are loaded and their progress folded.
+func (h *ItemsHandler) seriesSeasonRollups(ctx context.Context, v ItemViewer, seriesID string) (map[int]int, map[int]*catalog.SeasonUserData, error) {
+	if rollup, ok := h.episodeRollupStore(ctx, v); ok {
+		counts, err := rollup.SeriesSeasonWatchCounts(ctx, v.ProfileID, seriesID)
+		if err == nil {
+			episodeCounts := make(map[int]int, len(counts))
+			userData := make(map[int]*catalog.SeasonUserData, len(counts))
+			for seasonNumber, season := range counts {
+				episodeCounts[seasonNumber] = season.TotalEpisodes
+				userData[seasonNumber] = catalog.SeasonUserDataFromCounts(season)
+			}
+			return episodeCounts, userData, nil
+		}
+		if ctx.Err() != nil {
+			return nil, nil, err
+		}
+		slog.WarnContext(ctx, "season watch rollup failed, folding episodes instead", "component", "api", "error", err)
+	}
+	episodesBySeason, err := h.episodeRepo.ListBySeriesGroupedBySeason(ctx, seriesID)
+	if err != nil {
+		return nil, nil, err
+	}
+	progressMap, hasProgressMap := h.progressMapForEpisodes(ctx, v, flattenEpisodeGroups(episodesBySeason))
+	episodeCounts := make(map[int]int, len(episodesBySeason))
+	userData := make(map[int]*catalog.SeasonUserData, len(episodesBySeason))
+	for seasonNumber, episodes := range episodesBySeason {
+		episodeCounts[seasonNumber] = len(episodes)
+		if hasProgressMap {
+			userData[seasonNumber] = catalog.EpisodeRollupUserData(episodes, progressMap)
+		}
+	}
+	return episodeCounts, userData, nil
 }
 
 func (h *ItemsHandler) progressMapForEpisodes(ctx context.Context, v ItemViewer, episodes []*models.Episode) (map[string]userstore.WatchProgress, bool) {
@@ -2125,6 +2205,7 @@ func (h *ItemsHandler) ContextAccessFilter(ctx context.Context, opts AccessFilte
 			AllowedLibraryIDs:         scope.AllowedLibraryIDs,
 			DisabledLibraryIDs:        scope.DisabledLibraryIDs,
 			MaxContentRating:          scope.MaxContentRating,
+			AllowUnratedContent:       scope.AllowUnratedContent,
 			MaxPlaybackQuality:        scope.MaxPlaybackQuality,
 			PresentationLibraryID:     opts.PresentationLibraryID,
 			ScopeFilesToLibrary:       opts.ScopeFilesToLibrary,

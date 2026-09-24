@@ -1,5 +1,5 @@
 import type { PlayerSubtitleInfo, PlayerSubtitleTrackSignature, SubtitleMode } from "../types";
-import { canonicalLanguageTag, normalizeLanguageCode } from "./languageNames";
+import { canonicalLanguageTag, normalizeLanguageCode } from "@/lib/languageTags";
 import { isBitmapCodec } from "./subtitleCodecs";
 
 const ORIGINAL_LANGUAGE_SENTINEL = "original";

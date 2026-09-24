@@ -419,15 +419,54 @@ func mustGetSetting(store interface {
 	return value
 }
 
+// logBufferSize bounds each node's in-memory queue of log entries awaiting a
+// batch insert; a full queue drops entries and counts them.
+const logBufferSize = 10000
+
+// logDrainStopTimeout bounds how long shutdown waits for a log consumer's
+// final flush.
+const logDrainStopTimeout = 5 * time.Second
+
+// startLogDrain runs a log consumer on its own context rather than appCtx: the
+// graceful shutdown sequence keeps logging after appCtx is canceled, and those
+// entries should still reach Postgres. stop cancels the consumer and waits,
+// bounded, for its final flush.
+func startLogDrain(run func(context.Context)) (stop func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		run(ctx)
+	}()
+	return func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(logDrainStopTimeout):
+		}
+	}
+}
+
+// configureActivityLogging queues activity log entries in memory on this node
+// and persists them in batches, so the request path never waits on Redis or
+// Postgres. stop flushes what is queued.
+func configureActivityLogging(pool *pgxpool.Pool, logStreamHub *logstream.Hub) (activitylog.Writer, func()) {
+	buffer := logstream.NewBuffer[activitylog.LogEntry](logstream.StreamAudit, logBufferSize)
+	consumer := activitylog.NewConsumer(pool, logStreamHub)
+	return buffer, startLogDrain(func(ctx context.Context) { consumer.Run(ctx, buffer.Chan()) })
+}
+
+// configureOperationalLogging installs the slog default that captures records
+// into this node's in-memory operational log queue. stop flushes what is
+// queued.
 func configureOperationalLogging(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	settingsRepo catalog.SettingsStore,
-	redisCfg config.RedisConfig,
 	logStreamHub *logstream.Hub,
 	filteredHandler slog.Handler,
 	nodeID string,
-) (opslog.Writer, *opslog.Repo, *partman.Manager) {
+) (repo *opslog.Repo, pm *partman.Manager, stop func()) {
 	if err := opslog.SeedDefaults(ctx, settingsRepo); err != nil {
 		log.Fatalf("seed opslog defaults: %v", err)
 	}
@@ -442,21 +481,9 @@ func configureOperationalLogging(
 		slog.WarnContext(ctx, "ensure operational log partitions; continuing in degraded mode", "component", "app", "error", err)
 	}
 
-	var operationalWriter opslog.Writer
-	operationalConsumer := opslog.NewConsumer(pool, nil, logStreamHub)
-	if redisCfg.URL != "" {
-		redisClient, redisErr := cache.NewRedisClientForRole(redisCfg, "worker")
-		if redisErr == nil && redisClient != nil {
-			operationalWriter = opslog.NewRedisWriter(redisClient)
-			operationalConsumer = opslog.NewConsumer(pool, redisClient, logStreamHub)
-			go operationalConsumer.RunRedis(ctx)
-		}
-	}
-	if operationalWriter == nil {
-		memWriter := opslog.NewMemoryWriter(10000)
-		operationalWriter = memWriter
-		go operationalConsumer.RunMemory(ctx, memWriter.Chan())
-	}
+	buffer := logstream.NewBuffer[opslog.Entry](logstream.StreamApp, logBufferSize)
+	consumer := opslog.NewConsumer(pool, logStreamHub)
+	stop = startLogDrain(func(ctx context.Context) { consumer.Run(ctx, buffer.Chan()) })
 
 	opsCaptureLevel := slog.LevelInfo
 	switch strings.ToLower(strings.TrimSpace(mustGetSetting(settingsRepo, ctx, "opslog.capture_level", "info"))) {
@@ -468,9 +495,9 @@ func configureOperationalLogging(
 		opsCaptureLevel = slog.LevelError
 	}
 
-	slog.SetDefault(slog.New(opslog.NewHandler(filteredHandler, operationalWriter, opsCaptureLevel, nodeID)))
+	slog.SetDefault(slog.New(opslog.NewHandler(filteredHandler, buffer, opsCaptureLevel, nodeID)))
 
-	return operationalWriter, opslog.NewRepo(pool), opsPM
+	return opslog.NewRepo(pool), opsPM, stop
 }
 
 func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxConnections int, mode string) {
@@ -858,6 +885,10 @@ func main() {
 	// Re-wrap with the encrypting decorator so the recreated pool's settings repo
 	// still encrypts/decrypts — no raw settings repo may escape into later wiring.
 	settingsRepo = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
+	// One reader for access.unrated_content, shared by every scope resolver and
+	// the recommendations engine: forgetting the builder call at a construction
+	// site fails silently (unrated titles hidden, no error).
+	unratedContent := config.NewUnratedContentPolicy(settingsRepo)
 	nodeID := resolveNodeIdentity()
 	catalogSearchStartupSettings, err := catalog.CatalogSearchSettingsFromMap(settings)
 	if err != nil {
@@ -966,12 +997,17 @@ func main() {
 	}
 	eventsHub := realtimeHub.EventsHub()
 	scanRegistry := evt.NewScanRegistry()
-	operationalWriter, opsRepo, opsPM := configureOperationalLogging(appCtx, pool, settingsRepo, cfg.Redis, logStreamHub, quietFilter, nodeID)
+	opsRepo, opsPM, stopOperationalLog := configureOperationalLogging(appCtx, pool, settingsRepo, logStreamHub, quietFilter, nodeID)
 	defer func() {
 		if err := eventBus.Close(); err != nil {
 			slog.Warn("event bus close error", "error", err)
 		}
 	}()
+	// Deferred calls run in reverse: the log consumers flush first (the
+	// activity consumer is deferred later in main), the hub then sends their
+	// rows to other nodes' live tails, and the event bus closes last.
+	defer logStreamHub.Close()
+	defer stopOperationalLog()
 
 	// Proxy and transcode modes run with DB + Redis for hot-reload.
 	if mode == "proxy" || mode == "transcode" {
@@ -1102,7 +1138,6 @@ func main() {
 			shutdownStandalone = srv.Shutdown
 		}
 
-		_ = operationalWriter
 		_ = opsRepo
 		startStandaloneServer(cfg.Server.Listen, handler, appCancel, shutdownStandalone, standaloneHooks)
 		return
@@ -1758,11 +1793,12 @@ func main() {
 			log.Fatalf("plugin event dispatcher: %v", err)
 		}
 		defer dispatcher.Stop()
-		// Backfill the capability-subscriber index from the already-preloaded
-		// installations. PreloadEnabled ran earlier (before the dispatcher
-		// existed), so its rebuildDispatcherIndex was a no-op. Without this
-		// call, capability-scoped subscriptions never fire until the next
-		// lifecycle mutation.
+		// Rerun the lifecycle hooks registered so far. PreloadEnabled ran them
+		// before PublishLifecycleChanges was registered, so this call is the
+		// first plugins_changed this API server publishes: proxy nodes
+		// reconcile when it comes up instead of on their next poll. The event
+		// dispatcher does not need the call; it builds its subscriber index
+		// from the store on the first event.
 		pluginService.OnLifecycleChange(appCtx)
 	}
 
@@ -2216,10 +2252,10 @@ func main() {
 		profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
 		var notificationScopes notifications.ScopeResolver
 		if policySystem != nil {
-			notificationScopes = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore)
+			notificationScopes = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
 		} else {
 			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore)
+			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent)
 		}
 		notificationSystem = notifications.NewSystem(
 			deps.DB,
@@ -2437,7 +2473,7 @@ func main() {
 			catalog.NewPersonRepository(deps.DB),
 			userStoreProvider,
 			cfg.Recommendations,
-		)
+		).WithUnratedContentPolicy(unratedContent)
 		deps.Recommender = recEngine
 		deps.CatalogSearchVectorizer = recEngine
 
@@ -2573,24 +2609,8 @@ func main() {
 		// periodic cleanup retries partition creation.
 		slog.Warn("ensure policy decision log partitions; continuing in degraded mode", "error", err)
 	}
-	var activityWriter activitylog.Writer
-	activityConsumer := activitylog.NewConsumer(pool, nil, logStreamHub)
-
-	if cfg.Redis.URL != "" {
-		actRedisClient, actRedisErr := cache.NewRedisClientForRole(cfg.Redis, "activity")
-		if actRedisErr == nil && actRedisClient != nil {
-			activityWriter = activitylog.NewRedisWriter(actRedisClient)
-			activityConsumer = activitylog.NewConsumer(pool, actRedisClient, logStreamHub)
-			go activityConsumer.RunRedis(appCtx)
-			defer func() { _ = cache.CloseRedisClient(actRedisClient) }()
-		}
-	}
-
-	if activityWriter == nil {
-		memWriter := activitylog.NewMemoryWriter(10000)
-		activityWriter = memWriter
-		go activityConsumer.RunMemory(appCtx, memWriter.Chan())
-	}
+	activityWriter, stopActivityLog := configureActivityLogging(pool, logStreamHub)
+	defer stopActivityLog()
 	deps.ActivityLogWriter = activityWriter
 	deps.ActivityLogRepo = activitylog.NewRepo(pool)
 	deps.NodeID = nodeID
@@ -2868,10 +2888,10 @@ func main() {
 			profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
 			var reconcileResolver scopeResolver
 			if policySystem != nil {
-				reconcileResolver = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore)
+				reconcileResolver = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
 			} else {
 				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				reconcileResolver = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore)
+				reconcileResolver = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent)
 			}
 			requestReconcileSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: reconcileResolver})
 		}
@@ -2978,9 +2998,9 @@ func main() {
 		}
 		var absScopeResolver scopeResolver
 		if policySystem != nil {
-			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore)
+			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
 		} else {
-			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore)
+			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
 		}
 		absHDeps := audiobooks.ABSHandlerDeps{
 			Pool:     deps.DB,
@@ -3390,7 +3410,7 @@ func main() {
 						nil, // profile tokens unused: compat login already verifies PINs
 						policySystem.PDP(),
 						accessGroupStore,
-					)
+					).WithUnratedContentPolicy(unratedContent)
 				} else {
 					// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
 					compatScopeResolver = access.NewResolver(
@@ -3398,7 +3418,7 @@ func main() {
 						userStoreProvider,
 						nil, // profile tokens unused: compat login already verifies PINs
 						accessGroupStore,
-					)
+					).WithUnratedContentPolicy(unratedContent)
 				}
 				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(compatScopeResolver)
 				compatDeps.PlaybackScopeResolver = compatScopeResolver

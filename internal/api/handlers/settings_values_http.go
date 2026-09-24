@@ -424,6 +424,7 @@ func (h *SettingValuesHandler) observedLanguageSuggestions(
 		filters.LibraryIDs = scope.AllowedLibraryIDs
 		filters.DisabledLibraryIDs = scope.DisabledLibraryIDs
 		filters.MaxContentRating = scope.MaxContentRating
+		filters.AllowUnratedContent = scope.AllowUnratedContent
 	}
 	values, err := h.languageSource.ListOriginalLanguages(ctx, filters)
 	if err != nil {

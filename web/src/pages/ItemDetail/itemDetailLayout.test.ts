@@ -72,148 +72,44 @@ function makeEpisodeItem(overrides: Partial<ItemDetail> = {}): ItemDetail {
 }
 
 describe("resolveSeriesPrimaryAction", () => {
-  it("returns resume when the active series episode is in progress", () => {
-    const action = resolveSeriesPrimaryAction({
-      seriesId: "series-1",
-      seasons: [
-        makeSeason({
-          content_id: "season-1",
-          user_data: {
-            watched_count: 3,
-            unplayed_count: 7,
-            in_progress_count: 1,
-            played: false,
-          },
-        }),
-      ],
-      continueWatching: [
-        {
-          contentId: "episode-4",
-          seriesId: "series-1",
-          title: "Episode 4",
-        },
-      ],
-    });
+  function rollup(watched: number, total: number, inProgress = 0) {
+    return {
+      played: watched === total,
+      watched_count: watched,
+      unplayed_count: total - watched,
+      in_progress_count: inProgress,
+    };
+  }
 
-    expect(action).toEqual({
-      label: "Resume",
-      directHref: "/watch/episode-4",
-      context: "Continue Episode 4",
-    });
+  it("resumes the server's target while an episode is in progress", () => {
+    expect(
+      resolveSeriesPrimaryAction({
+        play_content_id: "episode-4",
+        user_data: rollup(3, 10, 1),
+      }),
+    ).toEqual({ label: "Resume", href: "/watch/episode-4" });
   });
 
-  it("returns play latest when the viewer is already working through the series", () => {
-    const action = resolveSeriesPrimaryAction({
-      seriesId: "series-1",
-      seasons: [
-        makeSeason({
-          content_id: "season-1",
-          season_number: 1,
-          user_data: {
-            watched_count: 10,
-            unplayed_count: 0,
-            in_progress_count: 0,
-            played: true,
-          },
-        }),
-        makeSeason({
-          content_id: "season-2",
-          season_number: 2,
-          title: "Season 2",
-          user_data: {
-            watched_count: 2,
-            unplayed_count: 8,
-            in_progress_count: 0,
-            played: false,
-          },
-        }),
-      ],
-      continueWatching: [],
-    });
-
-    expect(action).toEqual({
-      label: "Play Latest",
-      targetSeasonId: "season-2",
-      targetEpisodeNumber: 3,
-      context: "Jump back into Season 2",
-    });
+  it("plays the server's next episode once the viewer is partway through", () => {
+    expect(
+      resolveSeriesPrimaryAction({
+        play_content_id: "episode-4",
+        user_data: rollup(3, 10),
+      }),
+    ).toEqual({ label: "Play Next", href: "/watch/episode-4" });
   });
 
-  it("returns start from episode 1 when everything is unwatched", () => {
-    const action = resolveSeriesPrimaryAction({
-      seriesId: "series-1",
-      seasons: [
-        makeSeason({
-          content_id: "season-1",
-          season_number: 1,
-          title: "Season 1",
-          user_data: {
-            watched_count: 0,
-            unplayed_count: 10,
-            in_progress_count: 0,
-            played: false,
-          },
-        }),
-        makeSeason({
-          content_id: "season-2",
-          season_number: 2,
-          title: "Season 2",
-          episode_count: 8,
-          user_data: {
-            watched_count: 0,
-            unplayed_count: 8,
-            in_progress_count: 0,
-            played: false,
-          },
-        }),
-      ],
-      continueWatching: [],
-    });
-
-    expect(action).toEqual({
-      label: "Start From Episode 1",
-      targetSeasonId: "season-1",
-      targetEpisodeNumber: 1,
-      context: "Begin with Season 1",
-    });
+  it("starts from episode 1 for an unstarted or fully watched series", () => {
+    for (const userData of [rollup(0, 10), rollup(10, 10), undefined]) {
+      expect(
+        resolveSeriesPrimaryAction({ play_content_id: "episode-1", user_data: userData }),
+      ).toEqual({ label: "Start From Episode 1", href: "/watch/episode-1" });
+    }
   });
 
-  it("advances to the next season when the current one is already completed", () => {
-    const action = resolveSeriesPrimaryAction({
-      seriesId: "series-1",
-      seasons: [
-        makeSeason({
-          content_id: "season-1",
-          season_number: 1,
-          title: "Season 1",
-          user_data: {
-            watched_count: 10,
-            unplayed_count: 0,
-            in_progress_count: 0,
-            played: true,
-          },
-        }),
-        makeSeason({
-          content_id: "season-2",
-          season_number: 2,
-          title: "Season 2",
-          episode_count: 8,
-          user_data: {
-            watched_count: 0,
-            unplayed_count: 8,
-            in_progress_count: 0,
-            played: false,
-          },
-        }),
-      ],
-      continueWatching: [],
-    });
-
-    expect(action).toEqual({
-      label: "Play Latest",
-      targetSeasonId: "season-2",
-      targetEpisodeNumber: 1,
-      context: "Jump back into Season 2",
+  it("has nothing to play when the server found no available episode", () => {
+    expect(resolveSeriesPrimaryAction({ user_data: rollup(0, 10) })).toEqual({
+      label: "Browse Series",
     });
   });
 });

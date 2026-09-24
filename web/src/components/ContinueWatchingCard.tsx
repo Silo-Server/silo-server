@@ -183,13 +183,16 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
       }
 
       event.preventDefault();
-      playbackController.startPlayback({
-        contentId: parsed.contentId,
-        fileId: parsed.fileId,
-        libraryId: parsed.libraryId,
-        restart: parsed.restart,
-        returnHref: `${location.pathname}${location.search}`,
-      });
+      playbackController.startPlayback(
+        {
+          contentId: parsed.contentId,
+          fileId: parsed.fileId,
+          libraryId: parsed.libraryId,
+          restart: parsed.restart,
+          returnHref: `${location.pathname}${location.search}`,
+        },
+        "viewer",
+      );
     },
     [card.watchHref, location.pathname, location.search, playbackController],
   );

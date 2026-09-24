@@ -889,12 +889,16 @@ func deriveSegmentID(itemUUID, kind string) string {
 	return uuid.NewSHA1(mediaSegmentIDNamespace, []byte(itemUUID+":"+kind)).String()
 }
 
-// HandleGroupingOptionsStub serves GET /UserViews/GroupingOptions with an empty array.
+// HandleGroupingOptionsStub serves /UserViews/GroupingOptions and its legacy
+// /Users/{userId}/GroupingOptions alias with an empty array.
 // Jellyfin returns []SpecialViewOptionDto; Silo doesn't support library grouping.
 func (h *ItemsHandler) HandleGroupingOptionsStub(w http.ResponseWriter, r *http.Request) {
 	session := SessionFromContext(r.Context())
 	if session == nil {
 		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
+		return
+	}
+	if !validatePseudoUser(w, chi.URLParam(r, "userId"), session) {
 		return
 	}
 	writeJSON(w, http.StatusOK, []struct{}{})
@@ -1337,8 +1341,14 @@ var latestFastPathReproducibleParams = map[string]struct{}{
 // fallback would actually receive: every param must be one the section path
 // reproduces, the request must be for the first page of a movies/series
 // library, the limit must fit the fixed shared fetch budget, and a client
-// rating cap must be a known rating (an unknown string matches nothing in
-// BrowseItems and must not mint arbitrary cache keys).
+// rating cap must resolve to an age.
+//
+// The cap is vetted with AgeForCeiling — the same question clampMaxContentRating
+// asks before it will apply one — so this gate cannot drift from what the
+// clamp on either path actually does with the value. (The cache key itself is
+// already bounded: catalog.WriteAccessScopeCacheKey stores the ceiling's
+// resolved age, not the free text a client sent, so every spelling of one age
+// shares one entry.)
 func latestFastPathEligible(params url.Values, libraryItemType string) bool {
 	if libraryItemType != "movie" && libraryItemType != "series" {
 		return false
@@ -1354,8 +1364,8 @@ func latestFastPathEligible(params url.Values, libraryItemType string) bool {
 	if limit := catalog.ParseIntParam(params.Get("limit")); limit > compatLatestCacheFetchLimit {
 		return false
 	}
-	if rating := strings.TrimSpace(params.Get("max_content_rating")); rating != "" {
-		if _, known := access.RatingRank(rating); !known {
+	if rating := params.Get("max_content_rating"); rating != "" {
+		if _, usable := access.AgeForCeiling(rating); !usable {
 			return false
 		}
 	}
@@ -1850,7 +1860,7 @@ func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *htt
 			sortKey = query.sort
 			order = query.order
 		}
-		filters := catalog.BrowseFilters{UserID: session.StreamAppUserID, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, AudioLanguages: query.audioLanguages, SubtitleLanguages: query.subtitleLanguages, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
+		filters := catalog.BrowseFilters{UserID: session.StreamAppUserID, AllowUnratedContent: filter.AllowUnratedContent, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, AudioLanguages: query.audioLanguages, SubtitleLanguages: query.subtitleLanguages, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
 		if !h.catalogUserState && (filters.IsFavorite || filters.IsPlayed != nil || filters.IsResumable) {
 			content, ok := h.content.(interface {
 				browseConfiguredUserState(context.Context, *Session, catalog.BrowseFilters, bool, func(catalog.BrowseFilters) ([]upstreamListItem, bool, error)) (*upstreamBrowseResponse, error)
@@ -2535,20 +2545,21 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 	if favoriteItemsNeedBrowseFilters(query) && h.browseRepo != nil && favoriteBrowseFiltersSupportedBySQL(query) {
 		access := h.resolveAccessFilter(r.Context(), session)
 		filters := catalog.BrowseFavoritesFilters{
-			UserID:             session.StreamAppUserID,
-			ProfileID:          session.ProfileID,
-			ItemType:           strings.Join(query.itemTypes, ","),
-			Genre:              query.genreName,
-			NamePrefix:         query.namePrefix,
-			LibraryID:          query.parentLibraryID,
-			AllowedLibraryIDs:  access.AllowedLibraryIDs,
-			DisabledLibraryIDs: access.DisabledLibraryIDs,
-			MaxContentRating:   clampMaxContentRating(access.MaxContentRating, query.maxOfficialRating),
-			ExcludedMediaTypes: access.ExcludedMediaTypes,
-			SortField:          query.sort,
-			SortOrder:          query.order,
-			Limit:              query.limit,
-			Offset:             query.startIndex,
+			UserID:              session.StreamAppUserID,
+			ProfileID:           session.ProfileID,
+			ItemType:            strings.Join(query.itemTypes, ","),
+			Genre:               query.genreName,
+			NamePrefix:          query.namePrefix,
+			LibraryID:           query.parentLibraryID,
+			AllowedLibraryIDs:   access.AllowedLibraryIDs,
+			DisabledLibraryIDs:  access.DisabledLibraryIDs,
+			MaxContentRating:    clampMaxContentRating(access.MaxContentRating, query.maxOfficialRating),
+			AllowUnratedContent: access.AllowUnratedContent,
+			ExcludedMediaTypes:  access.ExcludedMediaTypes,
+			SortField:           query.sort,
+			SortOrder:           query.order,
+			Limit:               query.limit,
+			Offset:              query.startIndex,
 		}
 		result, err := h.browseRepo.BrowseFavorites(r.Context(), filters)
 		if err != nil {

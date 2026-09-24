@@ -46,8 +46,8 @@ func withBranding(t *testing.T, settings fakeSettings) {
 	prevFS, prevBranding := WebDistFS, Branding
 	WebDistFS = fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte(
-			`<!doctype html><head><title>Silo</title>` +
-				`<link rel="icon" href="/favicon.ico" sizes="any" /></head><body></body>`)},
+			`<!doctype html><html lang="en" data-theme="midnight-cinema"><head><title>Silo</title>` +
+				`<link rel="icon" href="/favicon.ico" sizes="any" /></head><body></body></html>`)},
 		"favicon.ico": &fstest.MapFile{Data: []byte("STATIC_ICO")},
 	}
 	Branding = branding.NewService(settings, nil) // no S3: text branding only
@@ -98,6 +98,54 @@ func TestFrontendShellCacheFollowsBrandingChanges(t *testing.T) {
 	}
 	if renamed.Header().Get("ETag") == first.Header().Get("ETag") {
 		t.Fatal("etag must change when the rendered shell changes")
+	}
+}
+
+// TestFrontendShellCarriesBrandedDefaultTheme covers the admin's default theme
+// reaching the boot script before first paint. The shell is served no-cache
+// and revalidated by ETag, so the ETag has to change with the default or a
+// browser would keep painting the old one.
+func TestFrontendShellCarriesBrandedDefaultTheme(t *testing.T) {
+	settings := fakeSettings{}
+	withBranding(t, settings)
+	handler := FrontendHandler()
+
+	serve := func() *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+		return rr
+	}
+
+	unset := serve()
+	if strings.Contains(unset.Body.String(), "data-default-theme") {
+		t.Fatalf("shell carries a default theme when none is set: %q", unset.Body.String())
+	}
+
+	settings[branding.KeyDefaultTheme] = "cinema-light"
+	light := serve()
+	if !strings.Contains(light.Body.String(), `<html data-default-theme="cinema-light" `) {
+		t.Fatalf("shell does not carry the branded default theme: %q", light.Body.String())
+	}
+	if light.Header().Get("ETag") == unset.Header().Get("ETag") {
+		t.Fatal("etag must change when the default theme is set")
+	}
+
+	settings[branding.KeyDefaultTheme] = "cobalt-studio"
+	cobalt := serve()
+	if !strings.Contains(cobalt.Body.String(), `data-default-theme="cobalt-studio"`) {
+		t.Fatalf("shell does not follow a changed default theme: %q", cobalt.Body.String())
+	}
+	if cobalt.Header().Get("ETag") == light.Header().Get("ETag") {
+		t.Fatal("etag must change when the default theme changes")
+	}
+
+	// A browser holding the old shell revalidates and gets the new one.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("If-None-Match", light.Header().Get("ETag"))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `data-default-theme="cobalt-studio"`) {
+		t.Fatalf("stale shell revalidation: status = %d body = %q", rr.Code, rr.Body.String())
 	}
 }
 

@@ -30,7 +30,7 @@ func TestBrowseCombinedPredicatesPreserveProfileAndAccess(t *testing.T) {
 		t.Fatalf("build plan: empty=%v err=%v", empty, err)
 	}
 	sql, args := plan.pagedSQL(false)
-	for _, predicate := range []string{"mi.genres &&", "mi.year = ANY", "mi.title ILIKE", "user_favorites", "user_watch_progress", "profile_id", "NOT EXISTS", "content_rating", "media_folder_id", "LIMIT", "OFFSET"} {
+	for _, predicate := range []string{"mi.genres &&", "mi.year = ANY", "mi.title ILIKE", "user_favorites", "user_watch_progress", "profile_id", "NOT EXISTS", "content_rating_age", "media_folder_id", "LIMIT", "OFFSET"} {
 		if !strings.Contains(sql, predicate) {
 			t.Errorf("missing %q in %s", predicate, sql)
 		}

@@ -111,6 +111,13 @@ func (f *controlSocketFixture) hello(t *testing.T, conn *websocket.Conn) {
 	}, "session did not become control-ready after hello")
 }
 
+// lane returns the control lane currently registered for the fixture session.
+func (f *controlSocketFixture) lane() *playbackControlLane {
+	f.handler.laneMu.Lock()
+	defer f.handler.laneMu.Unlock()
+	return f.handler.lanes[f.session.ID]
+}
+
 func waitForCondition(t *testing.T, cond func() bool, message string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -257,11 +264,20 @@ func TestControlSocketReconnectResumesOnlySameOwnerAndInstallation(t *testing.T)
 
 	// The same owner and installation reconnects and takes over the lane; the
 	// old connection's frames are no longer routed and it is closed.
+	firstLane := f.lane()
 	second, _, err := f.dial(t, f.mint(t, controlInstallation), nil) //nolint:bodyclose // dial registers t.Cleanup to close the response body
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.hello(t, second)
+	// The client's dial returns once the upgrade response arrives, before the
+	// server registers the new connection, and hello cannot tell: the session
+	// is already control-ready through the first connection. Wait for the
+	// takeover so the command below is routed to the second connection.
+	waitForCondition(t, func() bool {
+		current := f.lane()
+		return current != nil && current != firstLane
+	}, "second connection did not take over the lane")
 	command, err := playback.NewCommandEnvelope(f.session.ID, "11111111-1111-4111-8111-111111111111", playback.CommandPause, nil)
 	if err != nil {
 		t.Fatal(err)

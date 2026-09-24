@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -63,6 +64,16 @@ var assSubtitleCodecs = map[string]bool{
 // IsASS reports whether the given subtitle codec is ASS/SSA format.
 func IsASS(codec string) bool {
 	return assSubtitleCodecs[strings.ToLower(codec)]
+}
+
+// IsSubRip reports whether the given subtitle codec is SubRip (SRT).
+func IsSubRip(codec string) bool {
+	switch normalizeCodecV3(codec) {
+	case subtitleFormatSRT, subtitleCodecSubRip:
+		return true
+	default:
+		return false
+	}
 }
 
 // ExtractSubtitle extracts a subtitle track from a media file using ffmpeg.
@@ -285,38 +296,184 @@ func ConvertToVTTWithFFmpeg(ctx context.Context, input []byte, fromFormat, ffmpe
 // srtToVTT converts SRT subtitle content to WebVTT format.
 // SRT uses commas for millisecond separators; VTT uses periods.
 // VTT requires a "WEBVTT" header.
+//
+// SRT authors place cues with ASS override blocks such as {\an8}. WebVTT has
+// no such syntax, so a copied block renders as literal text on every WebVTT
+// player and the placement is lost. The cue's \an alignment moves onto the
+// timing line as WebVTT cue settings instead, and every override block is
+// removed from the cue text. FFmpeg's SubRip decoder drops most of those
+// blocks too, keeping only a leading \an.
 func srtToVTT(input []byte) []byte {
 	var buf bytes.Buffer
 	buf.WriteString("WEBVTT\n\n")
 
-	lines := strings.SplitSeq(string(input), "\n")
-	for line := range lines {
+	text := strings.TrimPrefix(string(input), "\ufeff")
+	// \r\r\n (a CRLF file converted twice) is one break, and a lone \r is a
+	// break in CR-only files. The longest sequence goes first so \r\r\n does
+	// not become a blank line that ends the cue.
+	text = strings.NewReplacer("\r\r\n", "\n", "\r\n", "\n", "\r", "\n").Replace(text)
+	lines := strings.Split(text, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if !isSRTTimeLine(line) {
+			// A whitespace-only line ends an SRT cue but not a WebVTT one.
+			if strings.TrimSpace(line) == "" {
+				line = ""
+			}
+			buf.WriteString(line)
+			buf.WriteByte('\n')
+			continue
+		}
+		// The cue text runs to the next blank line, or to the next timing
+		// line when the file omits the blank line between cues. In that case
+		// the line before the timing line is the next cue's number, if any.
+		end := i + 1
+		for end < len(lines) && strings.TrimSpace(lines[end]) != "" && !isSRTTimeLine(lines[end]) {
+			end++
+		}
+		missingBlankLine := end < len(lines) && isSRTTimeLine(lines[end])
+		if missingBlankLine && end-1 > i && isSRTCueNumber(lines[end-1]) {
+			end--
+		}
+		alignment := 0
+		cueText := make([]string, 0, end-i-1)
+		for _, textLine := range lines[i+1 : end] {
+			cleaned, lineAlignment := stripSRTOverrideBlocks(textLine)
+			if alignment == 0 {
+				alignment = lineAlignment
+			}
+			// A line that held only override blocks must go: left blank, it
+			// would end the WebVTT cue early.
+			if strings.TrimSpace(cleaned) == "" {
+				continue
+			}
+			cueText = append(cueText, cleaned)
+		}
+
 		// SRT timestamps use comma: 00:01:23,456 --> 00:01:25,789
 		// VTT timestamps use period: 00:01:23.456 --> 00:01:25.789
-		if isSRTTimeLine(line) {
-			line = strings.ReplaceAll(line, ",", ".")
+		buf.WriteString(strings.ReplaceAll(line, ",", "."))
+		if settings := vttCueSettingsForASSAlignment(alignment); settings != "" {
+			buf.WriteByte(' ')
+			buf.WriteString(settings)
 		}
-		buf.WriteString(line)
 		buf.WriteByte('\n')
+		for _, textLine := range cueText {
+			buf.WriteString(textLine)
+			buf.WriteByte('\n')
+		}
+		if missingBlankLine {
+			buf.WriteByte('\n')
+		}
+		i = end - 1
 	}
 
 	return buf.Bytes()
 }
 
-// isSRTTimeLine checks if a line looks like an SRT timestamp line.
-// Format: 00:01:23,456 --> 00:01:25,789
+// isSRTCueNumber reports whether a line is an SRT cue number.
+func isSRTCueNumber(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return false
+	}
+	for _, r := range line {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// stripSRTOverrideBlocks removes every {\...} override block from one line of
+// SRT cue text and returns the first \an alignment (1-9) the blocks named, or
+// 0. An unclosed block is ordinary text, as it is to FFmpeg.
+func stripSRTOverrideBlocks(line string) (string, int) {
+	var out strings.Builder
+	alignment := 0
+	for {
+		start := strings.Index(line, `{\`)
+		if start < 0 {
+			break
+		}
+		length := strings.IndexByte(line[start:], '}')
+		if length < 0 {
+			break
+		}
+		out.WriteString(line[:start])
+		for tag := range strings.SplitSeq(line[start+1:start+length], `\`) {
+			if alignment != 0 || len(tag) != 3 || !strings.HasPrefix(tag, "an") {
+				continue
+			}
+			if n := int(tag[2] - '0'); n >= 1 && n <= 9 {
+				alignment = n
+			}
+		}
+		line = line[start+length+1:]
+	}
+	out.WriteString(line)
+	return out.String(), alignment
+}
+
+// SRTAlignmentTagForVTTCueSettings returns the {\anN} tag for cue settings
+// that srtToVTT produced from one, or "" for any other settings. A consumer
+// that writes the converted cues back out as SRT uses it to keep the
+// placement.
+func SRTAlignmentTagForVTTCueSettings(settings string) string {
+	settings = strings.Join(strings.Fields(settings), " ")
+	if settings == "" {
+		return ""
+	}
+	for alignment := 1; alignment <= 9; alignment++ {
+		if vttCueSettingsForASSAlignment(alignment) == settings {
+			return `{\an` + strconv.Itoa(alignment) + `}`
+		}
+	}
+	return ""
+}
+
+// vttCueSettingsForASSAlignment maps an ASS \an numpad alignment onto WebVTT
+// cue settings. \an2 (bottom center) is the WebVTT default and, like 0 (no
+// alignment), needs none. Columns use the physical left/right values because
+// \an is physical, while start/end would flip on right-to-left text.
+func vttCueSettingsForASSAlignment(alignment int) string {
+	switch alignment {
+	case 1:
+		return "align:left"
+	case 3:
+		return "align:right"
+	case 4:
+		return "line:50%,center align:left"
+	case 5:
+		return "line:50%,center"
+	case 6:
+		return "line:50%,center align:right"
+	case 7:
+		return "line:0 align:left"
+	case 8:
+		return "line:0"
+	case 9:
+		return "line:0 align:right"
+	default:
+		return ""
+	}
+}
+
+// srtTimestamp matches one SRT timestamp. SRT uses a comma before the
+// milliseconds; some files use a period, which FFmpeg also accepts.
+var srtTimestamp = regexp.MustCompile(`^\d+:\d{1,2}:\d{1,2}[,.]\d{1,3}$`)
+
+// isSRTTimeLine reports whether a line is an SRT timing line:
+// 00:01:23,456 --> 00:01:25,789, optionally followed by coordinates. Both
+// timestamps must parse, because the converter ends a cue at the next timing
+// line and cue text can itself contain an arrow ("Meet at 10:30. --> go").
 func isSRTTimeLine(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	if !strings.Contains(trimmed, "-->") {
+	left, right, found := strings.Cut(strings.TrimSpace(line), "-->")
+	if !found {
 		return false
 	}
-	parts := strings.Split(trimmed, "-->")
-	if len(parts) != 2 {
-		return false
-	}
-	// Check that the left side looks like a timestamp with a comma.
-	left := strings.TrimSpace(parts[0])
-	return strings.Contains(left, ",") && strings.Contains(left, ":")
+	fields := strings.Fields(right)
+	return len(fields) > 0 && srtTimestamp.MatchString(strings.TrimSpace(left)) && srtTimestamp.MatchString(fields[0])
 }
 
 // truncateStderr limits stderr output to a reasonable length for error messages.

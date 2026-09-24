@@ -2354,9 +2354,10 @@ func catalogSearchAccess(req CatalogRequest, access AccessFilter) (AccessFilter,
 	}
 
 	searchAccess := AccessFilter{
-		AllowedLibraryIDs:  allowedLibraryIDs,
-		DisabledLibraryIDs: slices.Clone(access.DisabledLibraryIDs),
-		MaxContentRating:   access.MaxContentRating,
+		AllowedLibraryIDs:   allowedLibraryIDs,
+		DisabledLibraryIDs:  slices.Clone(access.DisabledLibraryIDs),
+		MaxContentRating:    access.MaxContentRating,
+		AllowUnratedContent: access.AllowUnratedContent,
 	}
 
 	return searchAccess, MediaScopeItemTypes(req.Query.MediaScope), false
@@ -2374,7 +2375,11 @@ func catalogBrowseFilters(req CatalogRequest, access AccessFilter) (BrowseFilter
 		Type:               strings.Join(MediaScopeItemTypes(req.Query.MediaScope), ","),
 		NamePrefix:         req.NamePrefix,
 		DisabledLibraryIDs: slices.Clone(access.DisabledLibraryIDs),
-		MaxContentRating:   access.MaxContentRating,
+		// The ceiling string and the unrated-content policy are one boundary:
+		// carrying the string without the flag silently ignores
+		// access.unrated_content on every browse, facet and filter read.
+		MaxContentRating:    access.MaxContentRating,
+		AllowUnratedContent: access.AllowUnratedContent,
 	}
 	applyCatalogBrowseOverlayRules(&filters, req.Query)
 

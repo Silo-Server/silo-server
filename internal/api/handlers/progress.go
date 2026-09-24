@@ -49,7 +49,7 @@ type ProgressLibraryLookup interface {
 	GetItemsInFolder(ctx context.Context, contentIDs []string, folderID int) (map[string]bool, error)
 	// FilterAccessibleContentIDs returns the subset of contentIDs the viewer
 	// may access given their library scope and content-rating ceiling.
-	FilterAccessibleContentIDs(ctx context.Context, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, maxContentRating string) (map[string]bool, error)
+	FilterAccessibleContentIDs(ctx context.Context, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, maxContentRating string, allowUnratedContent bool) (map[string]bool, error)
 }
 
 // ProgressHandler handles watch progress and sync endpoints.
@@ -347,7 +347,7 @@ func filterProgressEntriesByAccess(
 		return entries, nil
 	}
 
-	accessible, err := lookup.FilterAccessibleContentIDs(ctx, progressContentIDs(entries), scope.AllowedLibraryIDs, scope.DisabledLibraryIDs, scope.MaxContentRating)
+	accessible, err := lookup.FilterAccessibleContentIDs(ctx, progressContentIDs(entries), scope.AllowedLibraryIDs, scope.DisabledLibraryIDs, scope.MaxContentRating, scope.AllowUnratedContent)
 	if err != nil {
 		return nil, err
 	}
@@ -441,7 +441,7 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 		if !ok {
 			return nil, apiError(http.StatusServiceUnavailable, "unavailable", "Viewer access is unavailable")
 		}
-		accessible, err = h.LibraryLookup.FilterAccessibleContentIDs(ctx, checkedIDs, scope.AllowedLibraryIDs, scope.DisabledLibraryIDs, scope.MaxContentRating)
+		accessible, err = h.LibraryLookup.FilterAccessibleContentIDs(ctx, checkedIDs, scope.AllowedLibraryIDs, scope.DisabledLibraryIDs, scope.MaxContentRating, scope.AllowUnratedContent)
 		if err != nil {
 			return nil, apiError(http.StatusServiceUnavailable, "unavailable", "Catalog access is unavailable")
 		}

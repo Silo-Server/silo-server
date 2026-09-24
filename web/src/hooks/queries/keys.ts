@@ -95,6 +95,7 @@ export const catalogKeys = {
 export const favoriteKeys = {
   all: ["favorites"] as const,
   list: () => ["favorites", "list"] as const,
+  exists: () => ["favorites", "exists"] as const,
   check: (itemId: string) => ["favorites", "check", itemId] as const,
 };
 

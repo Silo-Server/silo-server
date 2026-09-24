@@ -34,10 +34,18 @@ type AccessFilter struct {
 	// while localizing season and episode rows, which do not duplicate it.
 	PresentationOriginalLanguage string
 	MaxContentRating             string
-	MaxPlaybackQuality           string
-	SelectedFileID               int
-	UserID                       int
-	ProfileID                    string
+	// AllowUnratedContent lets a title with no rating (content_rating_age
+	// NULL) through the MaxContentRating ceiling. An unrecognized rating stores
+	// access.UnrecognizedRatingAge and never passes. It mirrors the server setting
+	// access.unrated_content and reaches the filter on the viewer's
+	// access.Scope; false, the default, is the historical behavior of hiding
+	// such titles from every ceilinged viewer. Without a ceiling it does
+	// nothing.
+	AllowUnratedContent bool
+	MaxPlaybackQuality  string
+	SelectedFileID      int
+	UserID              int
+	ProfileID           string
 	// DeviceID identifies the requesting client for device-scoped setting
 	// resolution. It does not participate in catalog access control.
 	DeviceID string
@@ -84,21 +92,57 @@ func CanAccessLibraryCollection(collection *models.LibraryCollection, filter Acc
 }
 
 func applyAccessFilter(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
-	if filter.MaxContentRating != "" {
-		allowedRatings := access.AllowedRatingsUpTo(filter.MaxContentRating)
-		if len(allowedRatings) == 0 {
-			*conditions = append(*conditions, "1 = 0")
-		} else {
-			*conditions = append(*conditions, fmt.Sprintf("%s.content_rating = ANY($%d)", alias, *argIdx))
-			*args = append(*args, allowedRatings)
-			*argIdx = *argIdx + 1
-		}
-	}
+	ApplyContentRatingCeiling(alias, filter, conditions, args, argIdx)
 	if len(filter.ExcludedMediaTypes) > 0 {
 		*conditions = append(*conditions, fmt.Sprintf("NOT (%s.type = ANY($%d))", alias, *argIdx))
 		*args = append(*args, filter.ExcludedMediaTypes)
 		*argIdx = *argIdx + 1
 	}
+}
+
+// contentRatingCeilingSQL renders a maturity ceiling as a SQL condition over
+// alias, comparing the stored minimum age against the value bound at
+// placeholder argIdx.
+//
+// The comparison is against the stored minimum age, never the display string:
+// content_rating is free text written verbatim by whichever provider won the
+// merge ("15", "FSK 16", "DE:16", "tv-ma"), and only the age makes those
+// comparable with a "PG-13" ceiling. media_items.content_rating_age and
+// episode_catalog_entries.content_rating_age hold the age that
+// access.Normalize resolved when the rating was written.
+//
+// A title whose rating carries no age is governed by the server setting
+// access.unrated_content, which reaches the filter as AllowUnratedContent.
+func contentRatingCeilingSQL(alias string, allowUnrated bool, argIdx int) string {
+	column := alias + ".content_rating_age"
+	if allowUnrated {
+		return fmt.Sprintf("(%s IS NULL OR %s <= $%d)", column, column, argIdx)
+	}
+	return fmt.Sprintf("(%s IS NOT NULL AND %s <= $%d)", column, column, argIdx)
+}
+
+// ApplyContentRatingCeiling appends the filter's maturity ceiling for alias,
+// binding the ceiling age as an argument. It is the single place a ceiling
+// becomes SQL, so every catalog read — including query builders outside this
+// package — enforces the same predicate. A filter with no ceiling appends
+// nothing.
+func ApplyContentRatingCeiling(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	// access.HasCeiling, not a trimmed emptiness test: a stored " " is a set
+	// ceiling nothing resolves under, so it falls through to the fail-closed
+	// branch below instead of silently lifting the ceiling.
+	if !access.HasCeiling(filter.MaxContentRating) {
+		return
+	}
+	ceilingAge, ok := access.AgeForCeiling(filter.MaxContentRating)
+	if !ok {
+		// A ceiling that resolves to no age (unrated, or unrecognized) is
+		// unusable, and an unusable parental control fails closed.
+		*conditions = append(*conditions, "1 = 0")
+		return
+	}
+	*conditions = append(*conditions, contentRatingCeilingSQL(alias, filter.AllowUnratedContent, *argIdx))
+	*args = append(*args, *ceilingAge)
+	*argIdx = *argIdx + 1
 }
 
 // libraryAccessConditions returns the per-item library allow/deny predicates
