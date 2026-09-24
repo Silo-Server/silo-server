@@ -277,23 +277,21 @@ function isActiveSyncRun(run: WatchProviderSyncRun) {
   return run.status === "queued" || run.status === "running";
 }
 
-// syncRunFinished reports whether latest is the run previously seen as queued
-// or running, now in a final state.
+// syncRunFinished reports whether latest is a run that finished since previous
+// was seen: either the run previously seen as queued or running, or a newer
+// run already final when first seen, such as a scheduled run that started and
+// ended between two reads. The first read of the page is never a completion.
 export function syncRunFinished(
   previous: WatchProviderSyncRun | undefined,
   latest: WatchProviderSyncRun,
 ) {
-  return (
-    previous !== undefined &&
-    previous.id === latest.id &&
-    isActiveSyncRun(previous) &&
-    !isActiveSyncRun(latest)
-  );
+  if (previous === undefined || isActiveSyncRun(latest)) return false;
+  return previous.id === latest.id ? isActiveSyncRun(previous) : true;
 }
 
 async function invalidateSyncedSurfaces(queryClient: QueryClient) {
   await Promise.all([
-    queryClient.invalidateQueries({ queryKey: favoriteKeys.list() }),
+    queryClient.invalidateQueries({ queryKey: favoriteKeys.all }),
     queryClient.invalidateQueries({ queryKey: watchlistKeys.list() }),
     invalidateAllRatingSurfaceQueries(queryClient),
   ]);

@@ -377,11 +377,12 @@ func (s *Service) processLocalRatingEvent(ctx context.Context, event LocalRating
 			s.recordLocalWatchEventError(ctx, conn, err)
 			continue
 		}
-		conn, err = s.refreshConnectionIfNeeded(ctx, provider, cfg, conn)
+		refreshed, err := s.refreshConnectionIfNeeded(ctx, provider, cfg, conn)
 		if err != nil {
 			s.recordLocalWatchEventError(ctx, conn, err)
 			continue
 		}
+		conn = refreshed
 		// Wait for any reconciliation of this connection to finish, on any
 		// node, so the send works from settled agreed ratings.
 		_, err = s.repo.WithRatingSyncLock(ctx, conn.ID, true, func(ctx context.Context) error {
@@ -393,6 +394,11 @@ func (s *Service) processLocalRatingEvent(ctx context.Context, event LocalRating
 					s.recordLocalWatchEventError(ctx, conn, errors.Join(err, deferErr))
 				}
 				continue
+			}
+			// The reconciliation this waited for may have saved cursors, which
+			// recording the error from the older snapshot would overwrite.
+			if fresh, reloadErr := s.reloadConnection(ctx, conn); reloadErr == nil {
+				conn = fresh
 			}
 			s.recordLocalWatchEventError(ctx, conn, err)
 		}

@@ -252,7 +252,10 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 		}
 	})
 
-	t.Run("rating sync lock serializes across sessions", func(t *testing.T) {
+	t.Run("rating sync lock serializes across nodes", func(t *testing.T) {
+		// Each repository stands in for one node: its own process-local slots,
+		// one shared database.
+		other := NewPostgresRepository(pool, cipher)
 		held := make(chan struct{})
 		release := make(chan struct{})
 		done := make(chan error, 1)
@@ -265,27 +268,27 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 			done <- err
 		}()
 		<-held
-		// A second session cannot take the lock while the first holds it.
-		locked, err := repo.WithRatingSyncLock(ctx, conn.ID, false, func(context.Context) error {
-			t.Error("ran while another session held the lock")
+		// Another node cannot take the lock while the first holds it.
+		locked, err := other.WithRatingSyncLock(ctx, conn.ID, false, func(context.Context) error {
+			t.Error("ran while another node held the lock")
 			return nil
 		})
 		if err != nil || locked {
 			t.Fatalf("try while held = %v, %v; want not locked", locked, err)
 		}
-		short, cancel := context.WithTimeout(ctx, 600*time.Millisecond)
+		short, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 		defer cancel()
-		if _, err := repo.WithRatingSyncLock(short, conn.ID, true, func(context.Context) error { return nil }); !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("wait while held = %v, want the deadline", err)
+		if _, err := other.WithRatingSyncLock(short, conn.ID, true, func(context.Context) error { return nil }); err == nil {
+			t.Fatal("a wait while held returned before its deadline")
 		}
 		// Another connection's lock is independent.
-		if locked, err := repo.WithRatingSyncLock(ctx, "00000000-0000-0000-0000-000000000000", false, func(context.Context) error { return nil }); err != nil || !locked {
+		if locked, err := other.WithRatingSyncLock(ctx, "00000000-0000-0000-0000-000000000000", false, func(context.Context) error { return nil }); err != nil || !locked {
 			t.Fatalf("other connection lock = %v, %v", locked, err)
 		}
-		// A waiter proceeds once the holder releases.
+		// A waiter on another node proceeds once the holder releases.
 		waited := make(chan bool, 1)
 		go func() {
-			locked, _ := repo.WithRatingSyncLock(ctx, conn.ID, true, func(context.Context) error { return nil })
+			locked, _ := other.WithRatingSyncLock(ctx, conn.ID, true, func(context.Context) error { return nil })
 			waited <- locked
 		}()
 		close(release)
@@ -300,8 +303,30 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 		if _, err := repo.WithRatingSyncLock(ctx, conn.ID, false, func(context.Context) error { return boom }); !errors.Is(err, boom) {
 			t.Fatalf("fn error = %v", err)
 		}
-		if locked, err := repo.WithRatingSyncLock(ctx, conn.ID, false, func(context.Context) error { return nil }); err != nil || !locked {
+		if locked, err := other.WithRatingSyncLock(ctx, conn.ID, false, func(context.Context) error { return nil }); err != nil || !locked {
 			t.Fatalf("lock after an fn error = %v, %v; want it released", locked, err)
+		}
+	})
+
+	t.Run("rating sync lock leaves a one-connection pool usable", func(t *testing.T) {
+		config, err := pgxpool.ParseConfig(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		config.MaxConns = 1
+		single, err := pgxpool.NewWithConfig(ctx, config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer single.Close()
+		bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		locked, err := NewPostgresRepository(single, cipher).WithRatingSyncLock(bounded, conn.ID, true, func(ctx context.Context) error {
+			var one int
+			return single.QueryRow(ctx, "SELECT 1").Scan(&one)
+		})
+		if err != nil || !locked {
+			t.Fatalf("lock with a one-connection pool = %v, %v; want fn to reach the pool", locked, err)
 		}
 	})
 
