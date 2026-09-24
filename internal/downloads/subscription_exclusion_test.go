@@ -268,6 +268,39 @@ func TestMonitorExclusionLifecyclePostgres(t *testing.T) {
 	}
 }
 
+// TestMonitorCreateForgetsDeletionsPostgres: a create for a series the device
+// already monitors (for example a monitor an earlier app install left behind)
+// returns that monitor and forgets the episodes deleted under it, through the
+// native create and the bridge's re-monitor alike.
+func TestMonitorCreateForgetsDeletionsPostgres(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name   string
+		create func(*SubscriptionRepository, *Subscription) (*Subscription, error)
+	}{
+		{"native", func(r *SubscriptionRepository, s *Subscription) (*Subscription, error) { return r.CreateOrGet(ctx, s) }},
+		{"bridge", func(r *SubscriptionRepository, s *Subscription) (*Subscription, error) { return r.Upsert(ctx, s) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := seedMonitorFixture(t, 0, false)
+			if n := fx.sync(t); n != 3 {
+				t.Fatalf("first sync registered %d, want 3", n)
+			}
+			fx.deleteEpisode(t, fx.episodes[0])
+			again, err := tc.create(fx.subRepo, &Subscription{ID: "recreate-" + fx.seriesID, UserID: fx.userID, ProfileID: fx.profileA, DeviceID: fx.deviceA, SeriesID: fx.seriesID, Mode: SubModeAll})
+			if err != nil || again.ID != fx.monitor.ID {
+				t.Fatalf("re-create = %+v, %v; want the existing monitor %s", again, err, fx.monitor.ID)
+			}
+			if n := fx.exclusions(t); n != 0 {
+				t.Fatalf("exclusions after re-create = %d, want 0", n)
+			}
+			if n := fx.sync(t); n != 1 || fx.entry(t, fx.episodes[0]) == nil {
+				t.Fatalf("sync after re-create registered %d, want the deleted episode back", n)
+			}
+		})
+	}
+}
+
 // TestManagedDeleteOutsideMonitorPostgres: deleting a movie, an episode of a
 // series this device does not monitor, or another device's copy of a
 // monitored episode records nothing.

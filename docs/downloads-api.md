@@ -440,7 +440,8 @@ entries return `404`. The client is responsible for deleting local files.
 
 Deleting an episode of a series this device monitors also stops that monitor from
 registering the episode again. Creating a download for the episode, its season or its
-series re-allows it; deleting the monitor forgets these deletions (section 8).
+series re-allows it. Deleting the monitor, or creating it again, forgets these
+deletions (section 8).
 
 ### 4.5 Serve the media file
 
@@ -871,7 +872,8 @@ POST /api/v2/downloads/subscriptions
 
 The response is the persisted monitor with its `etag` validator. If this device
 already monitors that series, its current options and paused state are returned
-unchanged. There is no durable creation receipt: do not automatically replay an
+unchanged, and the episodes this device deleted under it (4.4) become eligible
+again. There is no durable creation receipt: do not automatically replay an
 uncertain create; reconcile the monitor list first, then sync explicitly.
 
 ### 8.2 Sync
