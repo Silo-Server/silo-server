@@ -172,7 +172,9 @@ func TestArtworkRevisionedCachePolicy(t *testing.T) {
 	if _, err := fmt.Sscanf(cache, "private, max-age=%d, immutable", &maxAge); err != nil || got.Code != http.StatusOK {
 		t.Fatalf("status = %d, cache = %q", got.Code, cache)
 	}
-	if remaining := int64(time.Until(expires).Seconds()); maxAge < 3600 || maxAge > remaining+1 {
+	// A few seconds of slack covers a run that crosses midnight UTC between
+	// signing and serving, when the URL has only the TTL left.
+	if remaining := int64(time.Until(expires).Seconds()); maxAge < 3600-5 || maxAge > remaining+1 {
 		t.Fatalf("max-age = %d, URL remaining lifetime = %ds", maxAge, remaining)
 	}
 }

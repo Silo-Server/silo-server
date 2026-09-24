@@ -372,7 +372,8 @@ Clients and CDNs cache images by full URL, so a new URL for unchanged bytes
 costs a download the client already has. A revisioned key names immutable bytes,
 so at the default lifetime (`s3.metadata_presign_expiry`) its URL stays the same
 for a UTC day on every replica and is valid for at least the TTL. A leaked
-revisioned URL therefore works for up to a day plus the TTL.
+revisioned URL therefore works for up to a day plus the TTL; lowering the
+setting shortens the TTL but not the day.
 
 Every other URL is stable within a 15-minute issuance bucket, or a bucket as
 long as the TTL when that is shorter, and is valid for at least its TTL and at
@@ -385,7 +386,10 @@ use private caching and revalidate with the ETag.
 
 S3 installations use direct presigned or public URLs. A revisioned key's
 presigned URL at the default lifetime is signed at the start of its UTC day and
-expires a day plus the TTL later, so every replica mints the same URL. A TTL
+expires a day plus the TTL later, so every replica mints the same URL. That
+relies on every replica signing with the same static access key, the only
+credential mode the S3 client uses; rotating session credentials would change
+the URL at each rotation and end it when the credential expires. A TTL
 near the SigV4 seven-day limit shortens that window rather than the TTL. The
 Cloudflare WAF rule fixes a token's lifetime from its timestamp, so token
 timestamps are truncated to a quarter of the token TTL instead, which leaves
