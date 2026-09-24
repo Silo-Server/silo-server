@@ -106,6 +106,7 @@ function serverRoutes() {
   return {
     "GET /api/v2/system/setup": { body: { needs_setup: false, wizard_completed: true } },
     "GET /api/v2/auth/providers": { body: { items: [] } },
+    "GET /api/v2/auth/signup": { body: { enabled: false } },
     "GET /api/v2/theme/branding": { body: {} },
     "GET /api/v2/theme/admin-css": { body: {} },
     "GET /api/v2/account/me": { body: getCurrentUserOk },
@@ -227,7 +228,8 @@ describe("app boot request budget", () => {
       unauthorized: 1,
       refreshes: 1,
       duplicateGets: 0,
-      total: 5,
+      // Includes the login page's public signup-status read.
+      total: 6,
     });
     expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
   });
@@ -301,7 +303,8 @@ describe("app boot request budget", () => {
       unauthorized: 0,
       refreshes: 0,
       duplicateGets: 0,
-      total: 4,
+      // Includes the login page's public signup-status read.
+      total: 5,
     });
   });
 });

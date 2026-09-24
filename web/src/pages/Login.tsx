@@ -92,10 +92,17 @@ export default function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { serverName, loginSubtitle } = useServerBranding();
+  // Always refetch on mount so a cached answer from before an admin closed
+  // signups can't show the link, and show it only from that fresh result.
   const signupStatusQuery = useQuery({
     queryKey: ["auth", "signup-status"],
     queryFn: () => v2("GET /api/v2/auth/signup"),
+    refetchOnMount: "always",
   });
+  const signupOpen =
+    signupStatusQuery.isSuccess &&
+    signupStatusQuery.isFetchedAfterMount &&
+    signupStatusQuery.data.enabled;
 
   useDocumentTitle("Sign In");
 
@@ -417,7 +424,7 @@ export default function Login() {
             </div>
           </div>
 
-          {signupStatusQuery.data?.enabled && (
+          {signupOpen && (
             <p className="text-muted-foreground text-center text-sm">
               Don&apos;t have an account?{" "}
               <Link to={signupHref} className="text-foreground underline hover:no-underline">
