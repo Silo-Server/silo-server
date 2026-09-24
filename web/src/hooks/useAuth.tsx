@@ -3,7 +3,9 @@ import type { ReactNode } from "react";
 import {
   ApiClientError,
   bootstrapAccessToken,
+  captureSessionIdentity,
   getAccessToken,
+  isSessionIdentityCurrent,
   onProfileUnverified,
   setAccessToken,
   setProfileId,
@@ -412,39 +414,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     async function restoreSession() {
+      // A sign-in on another path (the OAuth completion page, a login,
+      // impersonation) or a sign-out can replace the session while this
+      // restore waits on the network. From then on the restore speaks for a
+      // session that is gone: it must not apply its user or clear the new
+      // session's tokens.
+      let session = captureSessionIdentity();
+      const superseded = () => cancelled || !isSessionIdentityCurrent(session);
       try {
         await initializeAuthSession({
           refreshToken: storage.get(storage.KEYS.REFRESH_TOKEN),
           hasStoredImpersonationAdminSession: Boolean(loadStoredImpersonationAdminSession()),
-          bootstrapAccessToken: () => bootstrapAccessToken(),
+          bootstrapAccessToken: async () => {
+            const restored = await bootstrapAccessToken();
+            // Installing the restored token starts the session the rest of
+            // the restore answers for. The refresh single-flight already
+            // discards an exchange that another sign-in overtook.
+            if (restored) session = captureSessionIdentity();
+            return restored;
+          },
           fetchCurrentUser: () => v2("GET /api/v2/account/me").then(userFromAccount),
           applyCurrentUser: (currentUser) => {
-            if (cancelled) {
+            if (superseded()) {
               return;
             }
             setUser(currentUser);
           },
           restoreProfile: () => {
-            if (cancelled) {
+            if (superseded()) {
               return;
             }
             restoreProfile();
           },
           recoverPreservedAdminSession: async () => {
-            if (cancelled) {
+            if (superseded()) {
               return false;
             }
             return recoverPreservedAdminSession();
           },
           clearTokens: () => {
-            if (cancelled) {
+            if (superseded()) {
               return;
             }
             setAccessToken(null);
             setRefreshToken(null);
           },
           clearActiveAuthState: () => {
-            if (cancelled) {
+            if (superseded()) {
               return;
             }
             clearActiveAuthState();
