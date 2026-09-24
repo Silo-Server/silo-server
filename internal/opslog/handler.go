@@ -2,6 +2,8 @@ package opslog
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -171,10 +173,23 @@ func attrValue(v slog.Value) any {
 	case slog.KindTime:
 		return v.Time().UTC().Format(time.RFC3339Nano)
 	case slog.KindAny:
-		return v.Any()
+		return snapshot(v.Any())
 	default:
 		return v.String()
 	}
+}
+
+// snapshot encodes a value the caller still owns, such as a map, slice or
+// pointer. The consumer encodes Attrs on its own goroutine seconds later, or
+// longer while Postgres is down, and a caller that changed a logged map in the
+// meantime would race that encode; for a map, the race is a fatal runtime
+// error. Encoding now also records the value as it was when it was logged.
+func snapshot(v any) any {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprint(v)
+	}
+	return json.RawMessage(raw)
 }
 
 func inferComponent(message string) string {

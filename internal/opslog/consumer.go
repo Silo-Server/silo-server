@@ -73,7 +73,11 @@ func (c *Consumer) insertBatch(ctx context.Context, entries []Entry) error {
 		if err != nil {
 			attrsJSON = []byte(`{}`)
 		}
-		args = append(args, e.Timestamp, e.Level, e.Component, e.Message, e.RequestID, e.UserID, e.SessionID, e.PlaybackSessionID, e.ClientIP, e.NodeID, string(attrsJSON))
+		// Messages and attrs carry paths, headers and file names.
+		args = append(args, e.Timestamp, logstream.SafeText(e.Level), logstream.SafeText(e.Component),
+			logstream.SafeText(e.Message), logstream.SafeText(e.RequestID), e.UserID, logstream.SafeText(e.SessionID),
+			logstream.SafeText(e.PlaybackSessionID), logstream.SafeText(e.ClientIP), logstream.SafeText(e.NodeID),
+			string(logstream.SafeJSON(attrsJSON)))
 	}
 	b.WriteString(" RETURNING id, timestamp, level, component, message, COALESCE(request_id, ''), user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''), COALESCE(client_ip::text, ''), COALESCE(node_id, ''), attrs")
 

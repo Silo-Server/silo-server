@@ -74,9 +74,9 @@ func TestOperationalLoggingReturnsWhileRedisIsDown(t *testing.T) {
 	}
 }
 
-// TestLoggedRequestIssuesNoRedisCommands serves one request that logs at info
-// through the activity middleware and counts the Redis commands the request
-// goroutine waited on.
+// TestLoggedRequestIssuesNoRedisCommands serves 100 requests that each log at
+// info through the activity middleware and counts the Redis commands issued
+// while they ran.
 func TestLoggedRequestIssuesNoRedisCommands(t *testing.T) {
 	restoreDefaultLogger(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -107,13 +107,16 @@ func TestLoggedRequestIssuesNoRedisCommands(t *testing.T) {
 
 	// The first request may dial; measure the steady state.
 	serve()
+	const requests = 100
 	before := fake.snapshot()
-	serve()
+	for range requests {
+		serve()
+	}
 	delta := fake.snapshot().minus(before)
 
-	t.Logf("Redis commands during one logged request: %d %v", delta.total(), delta)
+	t.Logf("Redis commands during %d logged requests: %d %v", requests, delta.total(), delta)
 	if delta.total() != 0 {
-		t.Fatalf("logged request issued %d Redis commands on the request goroutine (%v), want 0", delta.total(), delta)
+		t.Fatalf("%d logged requests issued %d Redis commands (%v), want 0", requests, delta.total(), delta)
 	}
 }
 

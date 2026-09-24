@@ -129,3 +129,73 @@ func TestConsumerPersistsAtFullSpeedWhileRedisIsStuckDB(t *testing.T) {
 		t.Fatalf("persisting %d rows took %v with the event bus stuck", n, elapsed)
 	}
 }
+
+// TestConsumerKeepsEntriesBesideInvalidTextDB persists a batch whose message,
+// component and attrs hold bytes Postgres text and jsonb reject, plus one row
+// whose client address is not an inet. The bytes are replaced and only the bad
+// address is dropped; before, any one of them failed the whole batch.
+func TestConsumerKeepsEntriesBesideInvalidTextDB(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+
+	requestID := fmt.Sprintf("opslog-invalid-text-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM operational_logs WHERE request_id = $1`, requestID)
+	})
+	hub := logstream.NewHub("node-a", nil)
+	tail, unsubscribe := hub.Subscribe(nil)
+	defer unsubscribe()
+
+	entry := func(component, message, clientIP string, attrs map[string]any) Entry {
+		return Entry{Timestamp: time.Now().UTC(), Level: "info", Component: component, Message: message,
+			RequestID: requestID, ClientIP: clientIP, NodeID: "node-a", Attrs: attrs}
+	}
+	ch := make(chan Entry, 5)
+	ch <- entry("probe", "open caf\xe9.mkv", "", nil)
+	ch <- entry("probe", "attrs", "", map[string]any{"nul": "a\x00b", "k\x00": "v", "literal": `\u0000`})
+	ch <- entry("probe\x00", "component", "192.0.2.1", nil)
+	ch <- entry("probe", "bad address", "bogus", nil)
+	ch <- entry("probe", "last", "", nil)
+	close(ch)
+	NewConsumer(pool, hub).Run(ctx, ch)
+
+	rows, err := pool.Query(ctx, `SELECT component, message, attrs::text FROM operational_logs WHERE request_id = $1 ORDER BY id`, requestID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for rows.Next() {
+		var component, message, attrsJSON string
+		if err := rows.Scan(&component, &message, &attrsJSON); err != nil {
+			t.Fatal(err)
+		}
+		// Re-encode through a Go map, which sorts keys; jsonb orders them
+		// its own way.
+		var attrs map[string]string
+		if err := json.Unmarshal([]byte(attrsJSON), &attrs); err != nil {
+			t.Fatalf("decode attrs %s: %v", attrsJSON, err)
+		}
+		encoded, _ := json.Marshal(attrs)
+		got = append(got, component+"|"+message+"|"+string(encoded))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"probe|open caf\uFFFD.mkv|null",
+		`probe|attrs|{"k` + "\uFFFD" + `":"v","literal":"\\u0000","nul":"a` + "\uFFFD" + `b"}`,
+		"probe\uFFFD|component|null",
+		"probe|last|null",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("persisted %d rows %q, want %q", len(got), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if n := len(tail); n != len(want) {
+		t.Fatalf("live tail received %d appends, want %d", n, len(want))
+	}
+}

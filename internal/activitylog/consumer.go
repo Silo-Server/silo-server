@@ -68,8 +68,11 @@ func (c *Consumer) insertBatch(ctx context.Context, entries []LogEntry) error {
 		base := i * 14
 		fmt.Fprintf(&b, "($%d, $%d::inet, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
 			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11, base+12, base+13, base+14)
-		args = append(args, e.Timestamp, e.ClientIP, e.UserID, e.ImpersonatorUserID, e.SessionID, e.PlaybackSessionID,
-			e.RequestID, e.NodeID, e.Method, e.Path, e.PathPattern, e.StatusCode, e.UserAgent, e.DurationMs)
+		// Path and User-Agent come from the client.
+		args = append(args, e.Timestamp, logstream.SafeText(e.ClientIP), e.UserID, e.ImpersonatorUserID,
+			logstream.SafeText(e.SessionID), logstream.SafeText(e.PlaybackSessionID), logstream.SafeText(e.RequestID),
+			logstream.SafeText(e.NodeID), logstream.SafeText(e.Method), logstream.SafeText(e.Path),
+			logstream.SafeText(e.PathPattern), e.StatusCode, logstream.SafeText(e.UserAgent), e.DurationMs)
 	}
 	b.WriteString(" RETURNING id, timestamp, client_ip::text, user_id, impersonator_user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''), COALESCE(request_id, ''), COALESCE(node_id, ''), method, path, COALESCE(path_pattern, ''), COALESCE(status_code, 0), COALESCE(user_agent, ''), COALESCE(duration_ms, 0)")
 

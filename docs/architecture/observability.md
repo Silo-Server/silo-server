@@ -85,11 +85,21 @@ writers never block and never log. Neither Redis nor Postgres is on that path.
   (`logstream.Drain`) inserts them into Postgres in batches of 100 or every two seconds.
   Each insert attempt has a ten-second deadline.
 - While Postgres is unreachable or refuses work for a passing reason (connection
-  errors, timeouts, restart, failover, overload), the consumer retries the batch with
-  backoff from one to ten seconds, and new entries wait in the buffer. A batch the
-  server rejects is dropped at once. When the node is stopping, each batch gets one
+  errors, timeouts, restart, failover including writes refused as read-only,
+  overload), the consumer retries the batch with backoff from one to ten seconds, and
+  new entries wait in the buffer. When the node is stopping, each batch gets one
   attempt. A connection lost after an insert commits can make the retry insert that
   batch twice.
+- Log fields carry client input and file system data (request paths, User-Agent
+  headers, file names). Before inserting, the consumers replace invalid UTF-8 and NUL
+  bytes with U+FFFD in every text field, and `\u0000` escapes in the attrs JSON,
+  because Postgres rejects them. When the server still rejects a value (SQLSTATE
+  class 22, for example a client address that is not an `inet`), the consumer inserts
+  that batch one row at a time, so only the rejected rows are dropped. Any other batch
+  the server rejects is dropped at once, so it cannot hold up the stream.
+- `opslog.Handler` encodes non-scalar attribute values (maps, slices, structs,
+  pointers) to JSON when the record is logged. The consumer builds the row on its own
+  goroutine later, and a caller may change a map once the log call returns.
 - A full buffer drops the entry, and a batch that is given up is dropped. Both are
   counted in `silo_log_writer_dropped_total{stream, reason}` (`buffer_full`,
   `insert_failed`). App records also reach stderr and OTLP. Audit entries have no

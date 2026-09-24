@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -37,8 +38,10 @@ type Drain[T any] struct {
 	// Size is the largest batch; Interval flushes a partial one.
 	Size     int
 	Interval time.Duration
-	// Insert persists one batch. Each attempt runs under insertTimeout, with
-	// the Run context's values but not its cancellation.
+	// Insert persists one batch in a single statement, so a failed attempt
+	// leaves nothing behind: the batch may be retried or split into single
+	// rows. Each attempt runs under insertTimeout, with the Run context's
+	// values but not its cancellation.
 	Insert func(ctx context.Context, batch []T) error
 	// Failed, when set, is told about every failed attempt.
 	Failed func(ctx context.Context, failure InsertFailure)
@@ -49,9 +52,11 @@ type Drain[T any] struct {
 //
 // While Run is live, a batch that fails because Postgres is unreachable or
 // unavailable is retried with backoff, and new entries wait in the buffer,
-// which drops and counts them once it is full. A batch the server rejects is
-// dropped at once, so one bad batch cannot hold up the stream. Once Run is
-// stopping, each batch gets one attempt, so shutdown stays bounded.
+// which drops and counts them once it is full. When the server rejects a value
+// in a batch, the rows are inserted one at a time, so only the rows it rejects
+// are dropped. Any other batch the server rejects is dropped at once, so it
+// cannot hold up the stream. Once Run is stopping, each batch gets one
+// attempt, so shutdown stays bounded.
 func (d Drain[T]) Run(ctx context.Context, ch <-chan T) {
 	flushCtx := context.WithoutCancel(ctx)
 	ticker := time.NewTicker(d.Interval)
@@ -109,6 +114,15 @@ func (d Drain[T]) persist(live, ctx context.Context, batch []T, stopping bool) {
 		if err == nil {
 			return
 		}
+		if len(batch) > 1 && valueRejected(err) {
+			// The statement failed on one row's value. Insert the rows one at
+			// a time so the others are kept; each rejected row is reported
+			// and counted on its own.
+			for i := range batch {
+				d.persist(live, ctx, batch[i:i+1], stopping)
+			}
+			return
+		}
 		failure := InsertFailure{Err: err, Entries: len(batch), Attempt: attempt}
 		if stopping || live.Err() != nil || !retryable(err) {
 			countDropped(d.Stream, DropInsertFailed, len(batch))
@@ -148,12 +162,18 @@ func (d Drain[T]) report(ctx context.Context, failure InsertFailure) {
 // conflict). Anything else, such as a row the server rejects or a closed pool,
 // is not retried.
 //
+// A write refused as read-only (25006) is retried: during a switchover, pooled
+// connections still point at the demoted primary until they are replaced.
+//
 // A connection lost after the insert committed but before its reply arrived
 // makes the retry insert the batch twice. Duplicate log rows are preferred to
 // lost ones.
 func retryable(err error) bool {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
+		if pgErr.Code == "25006" { // read_only_sql_transaction
+			return true
+		}
 		if len(pgErr.Code) < 2 {
 			return false
 		}
@@ -176,4 +196,13 @@ func retryable(err error) bool {
 		errors.As(err, &netErr) ||
 		errors.Is(err, io.EOF) ||
 		errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+// valueRejected reports whether the server rejected a value in the statement
+// (class 22, data exception), such as a client address that is not an inet.
+// That fails the whole multi-row INSERT, but says nothing about the other
+// rows.
+func valueRejected(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && strings.HasPrefix(pgErr.Code, "22")
 }

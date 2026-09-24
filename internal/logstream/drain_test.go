@@ -211,7 +211,7 @@ func TestDrainRetriesABatchWhilePostgresIsUnreachable(t *testing.T) {
 }
 
 // TestDrainDropsABatchTheServerRejects checks that a batch Postgres rejects
-// is dropped after one attempt instead of holding up the stream.
+// as a whole is dropped after one attempt instead of holding up the stream.
 func TestDrainDropsABatchTheServerRejects(t *testing.T) {
 	shortRetries(t, time.Millisecond)
 	before := insertFailedDrops(StreamAudit)
@@ -219,7 +219,7 @@ func TestDrainDropsABatchTheServerRejects(t *testing.T) {
 	rec := newInsertRecorder()
 	rec.fail = func(attempt int) error {
 		if attempt == 1 {
-			return &pgconn.PgError{Code: "22P02", Message: "invalid input syntax for type inet"}
+			return &pgconn.PgError{Code: "23514", Message: "no partition of relation found for row"}
 		}
 		return nil
 	}
@@ -239,6 +239,50 @@ func TestDrainDropsABatchTheServerRejects(t *testing.T) {
 	}
 	if got := insertFailedDrops(StreamAudit) - before; got != 2 {
 		t.Fatalf("insert_failed drops = %v, want 2", got)
+	}
+}
+
+// TestDrainKeepsTheRowsBesideARejectedValue fails every statement that holds
+// one bad row, the way Postgres rejects a value it cannot store, and checks
+// that the other rows are inserted and only the bad one is counted.
+func TestDrainKeepsTheRowsBesideARejectedValue(t *testing.T) {
+	shortRetries(t, time.Millisecond)
+	before := insertFailedDrops(StreamAudit)
+
+	var mu sync.Mutex
+	var persisted [][]int
+	var failures []InsertFailure
+	d := Drain[int]{Stream: StreamAudit, Size: 4, Interval: time.Hour,
+		Insert: func(_ context.Context, batch []int) error {
+			if slices.Contains(batch, 2) {
+				return fmt.Errorf("batch insert: %w", &pgconn.PgError{Code: "22P02", Message: "invalid input syntax for type inet"})
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			persisted = append(persisted, slices.Clone(batch))
+			return nil
+		},
+		Failed: func(_ context.Context, f InsertFailure) {
+			mu.Lock()
+			defer mu.Unlock()
+			failures = append(failures, f)
+		},
+	}
+	ch := make(chan int, 6)
+	for i := range 6 {
+		ch <- i
+	}
+	close(ch)
+	d.Run(context.Background(), ch)
+
+	if want := [][]int{{0}, {1}, {3}, {4, 5}}; !slices.EqualFunc(persisted, want, slices.Equal) {
+		t.Fatalf("persisted %v, want %v", persisted, want)
+	}
+	if len(failures) != 1 || failures[0].Entries != 1 || failures[0].RetryIn != 0 {
+		t.Fatalf("failures = %+v, want the one rejected row dropped", failures)
+	}
+	if got := insertFailedDrops(StreamAudit) - before; got != 1 {
+		t.Fatalf("insert_failed drops = %v, want 1", got)
 	}
 }
 
@@ -327,6 +371,8 @@ func TestRetryable(t *testing.T) {
 		{"cannot connect now", &pgconn.PgError{Code: "57P03"}, true},
 		{"too many connections", &pgconn.PgError{Code: "53300"}, true},
 		{"serialization failure", &pgconn.PgError{Code: "40001"}, true},
+		{"read-only after switchover", &pgconn.PgError{Code: "25006"}, true},
+		{"other invalid transaction state", &pgconn.PgError{Code: "25P02"}, false},
 		{"invalid inet", &pgconn.PgError{Code: "22P02"}, false},
 		{"missing partition", &pgconn.PgError{Code: "23514"}, false},
 		{"undefined column", &pgconn.PgError{Code: "42703"}, false},
