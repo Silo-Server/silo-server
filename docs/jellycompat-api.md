@@ -280,11 +280,14 @@ Silo saves their reported position when the authenticated item/source identifier
 match exactly one started, active playback. Pending negotiations and terminal
 sessions do not qualify; ambiguous matches are ignored. A final stop sample is
 saved even when the viewer did not pause first. Samples remain last-write-wins,
-including backward seeks to zero; omitted positions leave the bookmark unchanged.
-Without a per-play identifier a delayed sample cannot
-be distinguished from a new one. Unidentified stops do not change audio selection
-or tear down resources; normal idle cleanup handles those sessions. Clients that
-send a valid per-play identifier retain immediate, generation-scoped teardown.
+including backward seeks to a positive position. Zero or omitted positions leave
+the bookmark unchanged so startup reports cannot erase a saved resume point.
+Without a per-play identifier a delayed sample cannot be distinguished from a new one. Unidentified stops do not change audio selection
+or tear down resources. Native idle cleanup reaps the upstream session, but the
+compatibility mapping remains routable until its configured expiry. A later play
+that creates another mapping for the same item can make ID-less reports ambiguous
+until the old mapping expires. Clients that send a valid per-play identifier
+retain immediate, generation-scoped teardown.
 ID-less static requests reject ambiguous matches and failed durable identity
 lookups rather than selecting another session. Durable identity checks remain
 fresh on every request; full session payloads use the normal per-session cache.

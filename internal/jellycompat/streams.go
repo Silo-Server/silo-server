@@ -2263,8 +2263,9 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	// already wrote its progress, and StopSession does not run the native stop
 	// finalizer that would otherwise refresh the profile.
 	refreshTasteProfile := stop
-	// Persist progress to user store
-	if positionReported && h.storeProvider != nil && playSession.ItemID != "" {
+	// Ignore early zero reports while a client is still seeking to its resume
+	// point, matching the native playback persistence rule.
+	if positionSeconds > 0 && h.storeProvider != nil && playSession.ItemID != "" {
 		if store, storeErr := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID); storeErr == nil {
 			// Find the duration from the media source
 			var duration float64

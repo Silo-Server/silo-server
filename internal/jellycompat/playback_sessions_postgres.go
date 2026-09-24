@@ -1572,6 +1572,25 @@ func (d *DurableCompatPlaybackStore) FindUnidentifiedPlayback(compatToken, route
 	if d.pool == nil {
 		return d.mem.FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	for range 3 {
+		session, err := d.findUnidentifiedPlayback(ctx, compatToken, routeItemID, mediaSourceID)
+		if !errors.Is(err, errCompatIdentityChanged) {
+			return session, err
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+	return nil, errCompatIdentityChanged
+}
+
+var errCompatIdentityChanged = errors.New("compat playback changed during identity lookup")
+
+// findUnidentifiedPlayback performs one identity check. Only a local generation
+// change is retryable; ambiguity, pending writes, and database failures are not.
+func (d *DurableCompatPlaybackStore) findUnidentifiedPlayback(ctx context.Context, compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, error) {
 	generation := d.tokenGenerationSnapshot(compatToken)
 	report := sessionReportRequest{ItemID: routeItemID, MediaSourceID: mediaSourceID}
 	// Failed local writes may hide another matching play from the SQL view.
@@ -1593,8 +1612,6 @@ func (d *DurableCompatPlaybackStore) FindUnidentifiedPlayback(compatToken, route
 			return nil, errors.New("compat playback has pending persistence")
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
 	rows, err := d.pool.Query(ctx, `
  SELECT id, data->>'RouteItemID',
  ARRAY(SELECT source->>'ID' FROM jsonb_array_elements(
@@ -1631,7 +1648,7 @@ func (d *DurableCompatPlaybackStore) FindUnidentifiedPlayback(compatToken, route
 	}
 	rows.Close()
 	if generation != d.tokenGenerationSnapshot(compatToken) {
-		return nil, errors.New("compat playback changed during identity lookup")
+		return nil, errCompatIdentityChanged
 	}
 	if matchedID == "" {
 		return nil, nil

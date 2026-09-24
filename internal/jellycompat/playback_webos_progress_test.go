@@ -176,28 +176,28 @@ func TestWebOSStaticAmbiguityDoesNotFallBack(t *testing.T) {
 	}
 }
 
-func TestWebOSExplicitZeroReplacesResume(t *testing.T) {
-	for _, stop := range []bool{false, true} {
-		for _, position := range []string{`,"PositionTicks":0`, ""} {
-			t.Run(fmt.Sprintf("stop=%t/position=%s", stop, position), func(t *testing.T) {
-				h, _, item, source := newReportLivenessHandler("upstream-1", true)
-				store := newJellycompatUserStore(t)
-				h.storeProvider = compatTestUserStoreProvider{store: store}
-				postProgressReport(h, fmt.Sprintf(`{"ItemId":%q,"MediaSourceId":%q,"PositionTicks":14000000000}`, item, source))
-				rec := httptest.NewRecorder()
-				req := viewerRequest("POST", "/Sessions/Playing/Progress", fmt.Sprintf(`{"ItemId":%q,"MediaSourceId":%q%s}`, item, source, position), "", "", &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"})
-				h.handlePlaybackReport(rec, req, stop)
-				want := 1400.0
-				if position != "" {
-					want = 0
-				}
-				progress, err := store.GetProgress(t.Context(), "profile-1", "movie-1")
-				if err != nil || progress == nil || progress.PositionSeconds != want {
-					t.Fatalf("progress=%+v err=%v want=%v", progress, err, want)
-				}
-			})
+func TestWebOSZeroOrOmittedPositionPreservesResume(t *testing.T) {
+	for _, playID := range []string{"", "play-1"} {
+		for _, stop := range []bool{false, true} {
+			for _, position := range []string{`,"PositionTicks":0`, ""} {
+				t.Run(fmt.Sprintf("play=%s/stop=%t/position=%s", playID, stop, position), func(t *testing.T) {
+					h, _, item, source := newReportLivenessHandler("upstream-1", true)
+					store := newJellycompatUserStore(t)
+					h.storeProvider = compatTestUserStoreProvider{store: store}
+					postProgressReport(h, fmt.Sprintf(`{"ItemId":%q,"MediaSourceId":%q,"PositionTicks":14000000000}`, item, source))
+					rec := httptest.NewRecorder()
+					req := viewerRequest("POST", "/Sessions/Playing/Progress", fmt.Sprintf(`{"PlaySessionId":%q,"ItemId":%q,"MediaSourceId":%q%s}`, playID, item, source, position), "", "", &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"})
+					h.handlePlaybackReport(rec, req, stop)
+					want := 1400.0
+					progress, err := store.GetProgress(t.Context(), "profile-1", "movie-1")
+					if err != nil || progress == nil || progress.PositionSeconds != want {
+						t.Fatalf("progress=%+v err=%v want=%v", progress, err, want)
+					}
+				})
+			}
 		}
 	}
+
 }
 
 func TestWebOSStaticRefreshFailureDoesNotUseCachedRoute(t *testing.T) {
@@ -231,11 +231,15 @@ func TestWebOSStaticWithoutStartedMatchUsesNegotiation(t *testing.T) {
 }
 
 type webOSQueryTracer struct {
-	mu        sync.Mutex
-	fullLoads int
+	mu         sync.Mutex
+	fullLoads  int
+	onIdentity func()
 }
 
 func (q *webOSQueryTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(data.SQL, "SELECT id, data->>") && q.onIdentity != nil {
+		q.onIdentity()
+	}
 	if strings.Contains(data.SQL, "SELECT data FROM jellycompat_playback_sessions") {
 		q.mu.Lock()
 		q.fullLoads++
@@ -327,5 +331,45 @@ func TestWebOSStaticUnpersistedNegotiationCanStart(t *testing.T) {
 	got, _, err := h.resolvePlaybackRoute(req, &Session{Token: pending.CompatToken}, item, source)
 	if err != nil || got == nil || got.ID != pending.ID {
 		t.Fatalf("unstarted negotiation route=%+v err=%v", got, err)
+	}
+}
+
+func TestWebOSDurableLookupRetriesConcurrentUpdates(t *testing.T) {
+	for _, changes := range []int{1, 2, 3} {
+		t.Run(fmt.Sprint(changes), func(t *testing.T) {
+			base := newCompatTestPool(t)
+			config := base.Config()
+			tracer := &webOSQueryTracer{}
+			config.ConnConfig.Tracer = tracer
+			pool, err := pgxpool.NewWithConfig(t.Context(), config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pool.Close()
+			store := NewDurableCompatPlaybackStore(pool, 0, nil)
+			h, _, item, source := newReportLivenessHandler("upstream-1", true)
+			active, _ := h.playbackStore.Get("play-1")
+			active.ID = t.Name()
+			active.CompatToken = t.Name()
+			store.Put(*active)
+			defer store.Delete(active.ID)
+			calls := 0
+			tracer.onIdentity = func() {
+				calls++
+				if calls <= changes {
+					if err := store.Update(active.ID, func(p *PlaybackSession) error { p.UpstreamPlayMethod = "direct"; return nil }); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			got, err := store.FindUnidentifiedPlayback(active.CompatToken, item, source)
+			if changes < 3 {
+				if err != nil || got == nil || got.ID != active.ID || calls != changes+1 {
+					t.Fatalf("lookup=%+v err=%v attempts=%d", got, err, calls)
+				}
+			} else if err == nil || got != nil || calls != 3 {
+				t.Fatalf("unbounded or unsafe lookup=%+v err=%v attempts=%d", got, err, calls)
+			}
+		})
 	}
 }
