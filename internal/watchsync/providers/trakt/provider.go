@@ -129,6 +129,13 @@ func (p *Provider) StartDeviceAuth(
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		wait, ok := watchsync.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		if !ok {
+			wait = defaultRetryAfter
+		}
+		return watchsync.DeviceAuthSession{}, watchsync.RateLimitedError{Provider: p.Key(), RetryAfter: wait}
+	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return watchsync.DeviceAuthSession{}, fmt.Errorf("trakt device auth request failed: status %d", resp.StatusCode)
 	}
@@ -647,7 +654,7 @@ func (p *Provider) do(
 	for attempt := 0; ; attempt++ {
 		if paced {
 			if err := p.writes.Wait(ctx, token); err != nil {
-				return fmt.Errorf("wait for trakt write limiter: %w", err)
+				return watchsync.LimiterWaitError(ctx, p.Key(), writeInterval, err)
 			}
 		}
 		wait, limited, err := p.doOnce(ctx, method, path, cfg, token, payload, out)
