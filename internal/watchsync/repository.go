@@ -52,6 +52,7 @@ type Repository interface {
 	DeleteRatingSyncStates(ctx context.Context, connectionID, providerAccountID string, mediaItemIDs []string) error
 	ClearRatingSyncStates(ctx context.Context, connectionID, keepAccountID string) error
 	UpdateRatingCursors(ctx context.Context, connectionID, providerAccountID string, remove []string, set map[string]string) error
+	WithRatingSyncLock(ctx context.Context, connectionID string, wait bool, fn func(context.Context) error) (bool, error)
 	ListScrobbleConnections(ctx context.Context, userID int, profileID string) ([]Connection, error)
 	UpsertScrobbleSession(ctx context.Context, event ScrobbleEvent, connectionID string, action string) error
 	PrepareConfirmedScrobbleStop(ctx context.Context, event ScrobbleEvent, connectionID string, staleBefore time.Time) (confirmedStopPreparation, time.Time, error)
@@ -837,6 +838,80 @@ func (r *PostgresRepository) DeleteRatingSyncStates(ctx context.Context, connect
 		return fmt.Errorf("delete rating sync states: %w", err)
 	}
 	return nil
+}
+
+// ratingSyncLockClass namespaces the advisory locks that serialize rating
+// reconciliation, so they cannot collide with other advisory locks.
+const ratingSyncLockClass = 0x57535254
+
+// ratingSyncLockPoll is how often a waiting caller retries the lock.
+const ratingSyncLockPoll = 250 * time.Millisecond
+
+// WithRatingSyncLock runs fn while holding a cluster-wide advisory lock for the
+// connection's rating reconciliation. Every node runs the scheduled sync, so
+// without it two runs could interleave their reads and writes and leave the
+// agreed ratings describing an older state than the provider holds.
+//
+// The lock belongs to one database session, held from a dedicated pool
+// connection until fn returns. With wait false it reports false when another
+// session holds the lock; with wait true it retries until ctx ends. Waiting
+// retries a non-blocking try, so a waiter never ties up a pool connection the
+// lock holder may need. A dying node's session closes and releases the lock.
+func (r *PostgresRepository) WithRatingSyncLock(ctx context.Context, connectionID string, wait bool, fn func(context.Context) error) (bool, error) {
+	for {
+		held, locked, err := r.tryRatingSyncLock(ctx, connectionID)
+		if err != nil {
+			return false, err
+		}
+		if locked {
+			defer releaseRatingSyncLock(held, connectionID)
+			return true, fn(ctx)
+		}
+		if !wait {
+			return false, nil
+		}
+		timer := time.NewTimer(ratingSyncLockPoll)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (r *PostgresRepository) tryRatingSyncLock(ctx context.Context, connectionID string) (*pgxpool.Conn, bool, error) {
+	conn, err := r.pool.Acquire(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("acquire rating sync lock session: %w", err)
+	}
+	var locked bool
+	err = conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1, hashtext($2))`, int32(ratingSyncLockClass), connectionID).Scan(&locked)
+	if err != nil {
+		// The try may have taken the lock before the error; closing the
+		// session guarantees it is not left held.
+		_ = conn.Conn().Close(context.Background())
+		conn.Release()
+		return nil, false, fmt.Errorf("try rating sync lock: %w", err)
+	}
+	if !locked {
+		conn.Release()
+		return nil, false, nil
+	}
+	return conn, true, nil
+}
+
+// releaseRatingSyncLock unlocks on a fresh context, since the caller's may be
+// done. If the unlock fails the session is closed, which releases the lock.
+func releaseRatingSyncLock(conn *pgxpool.Conn, connectionID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var unlocked bool
+	err := conn.QueryRow(ctx, `SELECT pg_advisory_unlock($1, hashtext($2))`, int32(ratingSyncLockClass), connectionID).Scan(&unlocked)
+	if err != nil || !unlocked {
+		_ = conn.Conn().Close(ctx)
+	}
+	conn.Release()
 }
 
 // ClearRatingSyncStates forgets a connection's agreed ratings with every

@@ -622,17 +622,28 @@ func (s *Service) persistConnection(
 	conn.ProviderUsername = account.Username
 	conn.LastError = ""
 
-	saved, err := s.repo.UpsertConnection(ctx, conn)
-	if err != nil || !rebound {
-		return saved, err
+	if !rebound {
+		return s.repo.UpsertConnection(ctx, conn)
 	}
-	// Agreed ratings are scoped to their account, so the previous account's
-	// rows are already ignored; dropping them only after the new binding is
-	// saved means a failed save never leaves the old account without them.
-	if err := s.repo.ClearRatingSyncStates(ctx, saved.ID, saved.ProviderAccountID); err != nil {
-		slog.WarnContext(ctx, "failed to clear agreed ratings of a previous provider account", "component", "watchsync", "provider", providerKey, "connection_id", saved.ID, "error", err)
-	}
-	return saved, nil
+	// A switch waits for any rating reconciliation of the connection to end,
+	// so no run applies the previous account's ratings after the switch.
+	var saved Connection
+	_, err = s.repo.WithRatingSyncLock(ctx, conn.ID, true, func(ctx context.Context) error {
+		var err error
+		saved, err = s.repo.UpsertConnection(ctx, conn)
+		if err != nil {
+			return err
+		}
+		// Agreed ratings are scoped to their account, so the previous
+		// account's rows are already ignored; dropping them only after the
+		// new binding is saved means a failed save never leaves the old
+		// account without them.
+		if err := s.repo.ClearRatingSyncStates(ctx, saved.ID, saved.ProviderAccountID); err != nil {
+			slog.WarnContext(ctx, "failed to clear agreed ratings of a previous provider account", "component", "watchsync", "provider", providerKey, "connection_id", saved.ID, "error", err)
+		}
+		return nil
+	})
+	return saved, err
 }
 
 func (s *Service) SyncDueConnections(ctx context.Context) error {

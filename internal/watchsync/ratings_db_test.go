@@ -1,9 +1,12 @@
 package watchsync
 
 import (
+	"context"
+	"errors"
 	"os"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -246,6 +249,59 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 		want := map[string]string{"trakt.watched": "w", "test.ratings.shows": "s1"}
 		if len(fresh.SyncCursors) != len(want) || fresh.SyncCursors["trakt.watched"] != "w" || fresh.SyncCursors["test.ratings.shows"] != "s1" {
 			t.Fatalf("cursors = %#v, want %#v", fresh.SyncCursors, want)
+		}
+	})
+
+	t.Run("rating sync lock serializes across sessions", func(t *testing.T) {
+		held := make(chan struct{})
+		release := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			_, err := repo.WithRatingSyncLock(ctx, conn.ID, false, func(context.Context) error {
+				close(held)
+				<-release
+				return nil
+			})
+			done <- err
+		}()
+		<-held
+		// A second session cannot take the lock while the first holds it.
+		locked, err := repo.WithRatingSyncLock(ctx, conn.ID, false, func(context.Context) error {
+			t.Error("ran while another session held the lock")
+			return nil
+		})
+		if err != nil || locked {
+			t.Fatalf("try while held = %v, %v; want not locked", locked, err)
+		}
+		short, cancel := context.WithTimeout(ctx, 600*time.Millisecond)
+		defer cancel()
+		if _, err := repo.WithRatingSyncLock(short, conn.ID, true, func(context.Context) error { return nil }); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("wait while held = %v, want the deadline", err)
+		}
+		// Another connection's lock is independent.
+		if locked, err := repo.WithRatingSyncLock(ctx, "00000000-0000-0000-0000-000000000000", false, func(context.Context) error { return nil }); err != nil || !locked {
+			t.Fatalf("other connection lock = %v, %v", locked, err)
+		}
+		// A waiter proceeds once the holder releases.
+		waited := make(chan bool, 1)
+		go func() {
+			locked, _ := repo.WithRatingSyncLock(ctx, conn.ID, true, func(context.Context) error { return nil })
+			waited <- locked
+		}()
+		close(release)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if !<-waited {
+			t.Fatal("waiter did not get the lock after release")
+		}
+		// An error from fn still releases the lock.
+		boom := errors.New("boom")
+		if _, err := repo.WithRatingSyncLock(ctx, conn.ID, false, func(context.Context) error { return boom }); !errors.Is(err, boom) {
+			t.Fatalf("fn error = %v", err)
+		}
+		if locked, err := repo.WithRatingSyncLock(ctx, conn.ID, false, func(context.Context) error { return nil }); err != nil || !locked {
+			t.Fatalf("lock after an fn error = %v, %v; want it released", locked, err)
 		}
 	})
 

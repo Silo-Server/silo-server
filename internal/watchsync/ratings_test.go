@@ -2,7 +2,9 @@ package watchsync
 
 import (
 	"context"
+	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -747,6 +749,33 @@ func TestPersistConnectionAccountChangeClearsAgreedRatings(t *testing.T) {
 	if len(repo.ratingStates) != 1 {
 		t.Fatal("reconnecting the same account must keep agreed ratings")
 	}
+	// Only the switch waited for the rating sync lock.
+	if !slices.Equal(repo.ratingLocks, []string{"wait:" + ratingTestConnID}) {
+		t.Fatalf("rating sync locks = %v, want one wait by the account switch", repo.ratingLocks)
+	}
+}
+
+func TestSyncRatingsLeavesRatingsToARunHoldingTheLock(t *testing.T) {
+	h := newRatingHarness(t)
+	h.store.set(ratingTestMovieA, 3)
+	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieB, 8)}, SnapshotKinds: []string{historyimport.KindMovie}}
+	// Another node is reconciling this connection's ratings.
+	h.repo.ratingLockBusy = map[string]bool{ratingTestConnID: true}
+	result := h.sync()
+	if h.provider.fetches != 0 || len(h.provider.exported) != 0 || h.store.stars(ratingTestMovieB) != 0 {
+		t.Fatalf("a run without the lock touched ratings: fetches=%d exported=%v movieB=%d", h.provider.fetches, h.provider.exported, h.store.stars(ratingTestMovieB))
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "already syncing") {
+		t.Fatalf("warnings = %v, want the skip reported", result.Warnings)
+	}
+	h.repo.ratingLockBusy = nil
+	h.sync()
+	if h.provider.fetches != 1 || h.store.stars(ratingTestMovieB) != 4 {
+		t.Fatalf("fetches=%d movieB=%d, want the next run to sync", h.provider.fetches, h.store.stars(ratingTestMovieB))
+	}
+	if !slices.Contains(h.repo.ratingLocks, "try:"+ratingTestConnID) {
+		t.Fatalf("rating sync locks = %v, want the scheduled run to try the lock", h.repo.ratingLocks)
+	}
 }
 
 // --- harness ---
@@ -797,6 +826,9 @@ func newRatingHarness(t *testing.T) *ratingHarness {
 func (h *ratingHarness) sync() SyncRatingsResult {
 	h.t.Helper()
 	h.provider.exported, h.provider.removed = nil, nil
+	// The sync re-reads the connection under its lock, so it must see the
+	// toggles this test set.
+	h.repo.connections[connectionKey(h.conn.Provider, h.conn.UserID, h.conn.ProfileID)] = h.conn
 	result, err := h.service.syncRatings(context.Background(), h.conn, ServerConfig{}, h.provider)
 	if err != nil {
 		h.t.Fatal(err)

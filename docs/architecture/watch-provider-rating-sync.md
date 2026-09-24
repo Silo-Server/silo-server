@@ -84,8 +84,18 @@ in the catalog, or without external ids) never counts as a local removal.
 
 ## Concurrency
 
-Scheduled syncs run on every API node and the per-connection lock is local to a
-process, so correctness does not depend on locking. Imports use compare-and-set
+Scheduled syncs run on every API node, and the per-connection sync lock is local to a
+process. Rating reconciliation of a connection is therefore serialized across nodes by
+a PostgreSQL advisory lock keyed by the connection (`WithRatingSyncLock`), held from the
+local read through the provider read to the last agreed-row write. Overlapping runs
+would otherwise merge from their own reads, and an older run could leave an agreed
+rating older than the provider holds, which a later removal would then lose to. A
+scheduled or manual run that finds the lock held skips ratings with a warning; a local
+rating event and an account switch wait for it. Waiting retries a non-blocking try, so
+a waiter holds no pool connection, and a node that dies releases the lock with its
+database session.
+
+Imports use compare-and-set
 writes (`RatingsRepo.SetIfUnchanged` and `DeleteIfUnchanged`) against the local value
 the sync read, so a concurrent user edit wins and is reconsidered next run. Imported
 ratings keep the provider's rating time. Provider writes are idempotent desired-state
