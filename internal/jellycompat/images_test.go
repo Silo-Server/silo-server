@@ -66,6 +66,58 @@ func TestHandleItemImageAcceptsSignedTagWithoutSessionOrCache(t *testing.T) {
 	}
 }
 
+// TestHandleItemImageReadsTagInAnyQueryCase covers jellyfin-kodi, which sends
+// "Tag=" and no auth. Jellyfin binds query parameters case-insensitively, so a
+// signed tag authorizes the request in any casing, even on a node whose image
+// cache has never seen the item.
+func TestHandleItemImageReadsTagInAnyQueryCase(t *testing.T) {
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	updatedAt := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	posterURL := "https://cdn.example.test/poster.jpg"
+	item := &models.MediaItem{
+		ContentID:       contentID,
+		PosterPath:      posterURL,
+		PosterThumbhash: "poster-thumbhash",
+		UpdatedAt:       updatedAt,
+	}
+	cfg := &config.Config{Auth: config.AuthConfig{JWTSecret: "image-secret"}}
+	tag := newMapper(codec, cfg).itemFromList(upstreamListItem{
+		ContentID:       contentID,
+		Type:            "movie",
+		Title:           "Movie",
+		PosterURL:       item.PosterPath,
+		PosterPath:      item.PosterPath,
+		PosterThumbhash: item.PosterThumbhash,
+		UpdatedAt:       item.UpdatedAt,
+	}, false, nil, nil).ImageTags["Primary"]
+
+	for _, param := range []string{"tag", "Tag", "TAG"} {
+		t.Run(param, func(t *testing.T) {
+			h := &ImagesHandler{
+				codec:     codec,
+				images:    NewImageCache(time.Hour, func() time.Time { return updatedAt }),
+				itemRepo:  fakeImageItemRepo{item: item},
+				imageTags: newImageTagSigner(cfg.Auth.JWTSecret),
+			}
+			// The URL jellyfin-kodi builds in get_artwork.
+			req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary/0?Format=original&"+param+"="+tag, nil)
+			req = withImageRouteParams(req, routeID, "Primary")
+			rec := httptest.NewRecorder()
+
+			h.HandleItemImage(rec, req)
+
+			assertImageRedirect(t, rec, posterURL)
+		})
+	}
+
+	proxyReq := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?Tag="+compatImageProxyTag(tag), nil)
+	if !shouldProxyCompatImageRequest(proxyReq) {
+		t.Fatal("a proxy tag sent as Tag= did not select the proxy path")
+	}
+}
+
 func TestHandleItemImageProxiesInfuseSignedTagWithoutSessionOrCache(t *testing.T) {
 	upstreamCalled := false
 	var gotIfNoneMatch string

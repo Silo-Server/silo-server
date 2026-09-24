@@ -107,7 +107,7 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	routeID := chiURLParam(r, "id")
 	imageType := chiURLParam(r, "imageType")
 	imageSize := compatRequestImageSize(r, imageType)
-	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	tag := compatImageRequestTag(r)
 	if canonicalRouteID, ok := canonicalCompatImageRouteID(h.codec, routeID); ok {
 		routeID = canonicalRouteID
 		r = withCompatImageProxyRouteRequest(r)
