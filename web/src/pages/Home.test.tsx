@@ -678,6 +678,46 @@ describe("Home", () => {
         "row-2": "row-2 after bump",
         "row-3": "row-3 after bump",
       });
+      expect(requests).toHaveLength(6);
+    });
+
+    it("renders the newest generation when two bumps land before any request settles", async () => {
+      const requests = deferSectionRequests();
+      const queryClient = new QueryClient();
+
+      await renderHome(queryClient);
+      for (let bump = 0; bump < 2; bump += 1) {
+        await act(async () => {
+          bumpHomeRefreshSignal(queryClient);
+          await settle();
+        });
+        expect(sectionErrorCount()).toBe(0);
+      }
+
+      const [olderGenerations, newestGeneration] = [requests.slice(0, 6), requests.slice(6)];
+      expect(olderGenerations.every((request) => request.signal.aborted)).toBe(true);
+      expect(newestGeneration.map((request) => request.sectionId)).toEqual([
+        "row-1",
+        "row-2",
+        "row-3",
+      ]);
+
+      await act(async () => {
+        newestGeneration.forEach((request) => request.resolve("newest"));
+        await settle();
+      });
+      await act(async () => {
+        olderGenerations.forEach((request) => request.resolve("older"));
+        await settle();
+      });
+
+      expect(sectionErrorCount()).toBe(0);
+      expect(renderedFirstItems()).toEqual({
+        "row-1": "row-1 newest",
+        "row-2": "row-2 newest",
+        "row-3": "row-3 newest",
+      });
+      expect(requests).toHaveLength(9);
     });
 
     it("still shows an error row when a section request really fails", async () => {
