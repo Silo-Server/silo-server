@@ -152,7 +152,7 @@ func TestSeekReanchorKeepsTheFrozenSRTRepresentation(t *testing.T) {
 			startRequest.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", subtitleIndex)
 			startRequest.SubtitleTrackIndex = &subtitleIndex
 			startRR := httptest.NewRecorder()
-			handler.HandleStartPlayback(startRR, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
+			handler.HandleStartPlayback(startRR, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext())))
 			if startRR.Code != http.StatusCreated {
 				t.Fatalf("start status = %d, body = %s", startRR.Code, startRR.Body.String())
 			}
@@ -210,5 +210,33 @@ func TestSeekReanchorKeepsTheFrozenSRTRepresentation(t *testing.T) {
 				t.Fatalf("reanchored artifact = %#v, want the frozen %s representation", artifact, tc.format)
 			}
 		})
+	}
+}
+
+// The frozen /api/v1 start negotiates only its original features, so a v1
+// client that sends subrip_sidecar_v1 keeps WebVTT URLs.
+func TestV1StartDoesNotNegotiateSubripSidecar(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	file.ExternalSubtitles = []models.ExternalSubtitle{{Path: "/media/movie.ar.srt", Language: "ar", Format: "srt"}}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	startRequest := v3HandlerStartRequest()
+	startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureSubripSidecarV3)
+	subtitleIndex := 0
+	startRequest.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", subtitleIndex)
+	startRequest.SubtitleTrackIndex = &subtitleIndex
+	rr := httptest.NewRecorder()
+	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var started playback.DecisionResponseV3
+	if err := json.Unmarshal(rr.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	if started.PlaybackPlan == nil || started.PlaybackPlan.Subtitle.Artifact == nil || started.PlaybackPlan.Subtitle.Artifact.Format != "vtt" ||
+		playback.HasFeatureV3(started.ServerFeatures, playback.FeatureSubripSidecarV3) {
+		t.Fatalf("a v1 start must keep WebVTT and not advertise subrip_sidecar_v1: %#v", started)
 	}
 }

@@ -3,7 +3,6 @@ package playback
 import (
 	"fmt"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -260,9 +259,7 @@ func SubtitleFeaturesForPlanV3(inventory []SubtitleInventoryItemV3, clientFeatur
 			continue
 		}
 		path, _, _ := strings.Cut(item.URL, "?")
-		features := slices.DeleteFunc(slices.Clone(clientFeatures), func(feature string) bool {
-			return strings.EqualFold(strings.TrimSpace(feature), FeatureSubripSidecarV3)
-		})
+		features := WithoutFeatureV3(clientFeatures, FeatureSubripSidecarV3)
 		if strings.HasSuffix(path, SubtitleExtSRTV3) {
 			features = append(features, FeatureSubripSidecarV3)
 		}

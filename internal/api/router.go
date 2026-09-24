@@ -2230,7 +2230,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}", streamHandler.HandleStream)(w, r)
 			})
 			v2deps.PlaybackMedia.Subtitle = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)(w, r)
+				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)(w, r.WithContext(handlers.WithNativeAPIV2(r.Context())))
 			})
 			v2deps.PlaybackMedia.SubtitleFonts = streamHandler
 		}

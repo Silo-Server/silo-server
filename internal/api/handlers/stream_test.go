@@ -475,8 +475,8 @@ func TestHandleSubtitleServesDownloadedSRTOriginalOnRequest(t *testing.T) {
 
 	for _, query := range []string{"file_id=42&original=1&downloaded_subtitle_id=71", "file_id=42&original=1"} {
 		for _, method := range []string{http.MethodGet, http.MethodHead} {
-			req := httptest.NewRequest(method, "/api/v1/stream/"+session.ID+"/subtitles/0.srt?"+query, nil)
-			req = req.WithContext(newAuthorizedPlaybackContext())
+			req := httptest.NewRequest(method, "/api/v2/stream/"+session.ID+"/subtitles/0.srt?"+query, nil)
+			req = req.WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext()))
 			routeCtx := chi.NewRouteContext()
 			routeCtx.URLParams.Add("session_id", session.ID)
 			routeCtx.URLParams.Add("track", "0.srt")

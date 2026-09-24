@@ -73,7 +73,8 @@ const (
 	// itself, including {\anN} placement. An opted-in client receives
 	// external and downloaded SRT tracks as the original .srt bytes instead
 	// of the WebVTT conversion, which cannot carry every SRT feature. Embedded
-	// SRT tracks keep their existing delivery.
+	// SRT tracks keep their existing delivery. It exists only on /api/v2 (see
+	// NativeServerFeaturesV3).
 	FeatureSubripSidecarV3     = "subrip_sidecar_v1"
 	PlanRecipeVersionV3        = "v3.4"
 	ClientDV7ToDV81V3          = "client_dv7_to_dv81"
@@ -140,8 +141,21 @@ func ServerFeaturesV3() []string {
 		// absent field, and a client cannot decide whether its own catalog
 		// fallback is still required.
 		FeaturePlanSourceDurationV3,
-		FeatureSubripSidecarV3,
 	}
+}
+
+// NativeServerFeaturesV3 is ServerFeaturesV3 plus the features the server
+// advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
+// the frozen surface neither advertises nor negotiates them.
+func NativeServerFeaturesV3() []string {
+	return append(ServerFeaturesV3(), FeatureSubripSidecarV3)
+}
+
+// WithoutFeatureV3 returns features with every spelling of feature removed.
+func WithoutFeatureV3(features []string, feature string) []string {
+	return slices.DeleteFunc(slices.Clone(features), func(candidate string) bool {
+		return strings.EqualFold(strings.TrimSpace(candidate), feature)
+	})
 }
 
 type DecisionOutcomeV3 string

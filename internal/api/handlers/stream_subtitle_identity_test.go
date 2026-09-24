@@ -155,7 +155,7 @@ func TestSubtitleExternalIdentitySurvivesReordering(t *testing.T) {
 	}
 }
 
-// The published .srt?original=1 URL answers an external SRT with the original
+// The published .srt?original=1 URL on /api/v2 answers an external SRT with the original
 // bytes, which keep {\an8} for a client that parses SubRip. .vtt, and a bare
 // .srt as the frozen v1 route has always done, answer with the WebVTT
 // conversion.
@@ -177,9 +177,10 @@ func TestSubtitleExternalSRTServesOriginalOrConvertedRepresentation(t *testing.T
 	handler := NewStreamHandler(manager, testPlaybackFileResolver{file: file})
 	request := func(method, track, query string) *httptest.ResponseRecorder {
 		response := httptest.NewRecorder()
-		handler.HandleSubtitle(response, playbackTestRequest(method,
+		req := playbackTestRequest(method,
 			"/stream/"+session.ID+"/subtitles/"+track+"?file_id=42"+query, nil,
-			map[string]string{"session_id": session.ID, "track": track}))
+			map[string]string{"session_id": session.ID, "track": track})
+		handler.HandleSubtitle(response, req.WithContext(WithNativeAPIV2(req.Context())))
 		return response
 	}
 	const original = "&" + playback.SubtitleOriginalParamV3 + "=1"
@@ -189,6 +190,16 @@ func TestSubtitleExternalSRTServesOriginalOrConvertedRepresentation(t *testing.T
 		!strings.HasPrefix(srt.Header().Get("Content-Type"), "application/x-subrip") {
 		t.Fatalf(".srt must serve the original file: %d %q %q", srt.Code, srt.Header().Get("Content-Type"), srt.Body.String())
 	}
+	// The frozen /api/v1 route shares the handler and keeps WebVTT for the
+	// same URL.
+	v1 := httptest.NewRecorder()
+	handler.HandleSubtitle(v1, playbackTestRequest(http.MethodGet,
+		"/stream/"+session.ID+"/subtitles/0.srt?file_id=42"+original, nil,
+		map[string]string{"session_id": session.ID, "track": "0.srt"}))
+	if v1.Code != http.StatusOK || !strings.HasPrefix(v1.Header().Get("Content-Type"), "text/vtt") {
+		t.Fatalf("/api/v1 .srt?original=1 must keep WebVTT: %d %q", v1.Code, v1.Header().Get("Content-Type"))
+	}
+
 	for _, converted := range []struct{ track, query string }{{"0.vtt", ""}, {"0.srt", ""}, {"0.vtt", original}} {
 		vtt := request(http.MethodGet, converted.track, converted.query)
 		if vtt.Code != http.StatusOK || !strings.HasPrefix(vtt.Header().Get("Content-Type"), "text/vtt") ||

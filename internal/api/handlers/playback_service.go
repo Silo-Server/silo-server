@@ -180,7 +180,7 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 		return view, playbackOperationError(http.StatusConflict, "capability_not_configured", "Playback installation identity is not configured")
 	}
 	view.InstallationID = h.InstallationID
-	view.Features = append(playback.ServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1")
+	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1")
 	if h.WatchTogetherAvailable {
 		view.Features = append(view.Features, "watch_party_source_fallback_v1", "watch_party_coordinator_v1")
 	}
@@ -197,6 +197,30 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 // The application pipeline still uses private request-based routing helpers.
 // This request contains only caller facts; it is never dispatched to an HTTP
 // handler and never carries credentials, a body stream, or a response writer.
+// nativeAPIV2ContextKey marks a request that arrived through /api/v2.
+type nativeAPIV2ContextKey struct{}
+
+// WithNativeAPIV2 marks ctx as serving /api/v2. The playback and stream
+// handlers are shared with the frozen /api/v1 routes, and contract additions
+// made after that freeze (subrip_sidecar_v1) apply only under this mark.
+func WithNativeAPIV2(ctx context.Context) context.Context {
+	return context.WithValue(ctx, nativeAPIV2ContextKey{}, true)
+}
+
+func isNativeAPIV2(ctx context.Context) bool {
+	native, _ := ctx.Value(nativeAPIV2ContextKey{}).(bool)
+	return native
+}
+
+// withNativeServerFeaturesV3 advertises the /api/v2-only features on a
+// decision the shared start/replan application produced.
+func withNativeServerFeaturesV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {
+	if len(response.ServerFeatures) > 0 {
+		response.ServerFeatures = playback.NativeServerFeaturesV3()
+	}
+	return response
+}
+
 func playbackCallerRequest(ctx context.Context, caller PlaybackCaller) *http.Request {
 	headers := make(http.Header)
 	headers.Set(deviceIDHeader, caller.DeviceID)
@@ -207,7 +231,7 @@ func playbackCallerRequest(ctx context.Context, caller PlaybackCaller) *http.Req
 	headers.Set("X-Silo-Client-Version", caller.ClientVersion)
 	headers.Set("X-Silo-Client-Build", caller.ClientBuild)
 	headers.Set("X-Silo-Client-Channel", caller.ClientChannel)
-	return (&http.Request{Header: headers, RemoteAddr: caller.RemoteAddr, URL: &url.URL{}}).WithContext(ctx)
+	return (&http.Request{Header: headers, RemoteAddr: caller.RemoteAddr, URL: &url.URL{}}).WithContext(WithNativeAPIV2(ctx))
 }
 
 // playbackCallerSessionRequest is playbackCallerRequest with the routed
@@ -229,7 +253,8 @@ func (h *PlaybackHandler) StartPlaybackV2(ctx context.Context, caller PlaybackCa
 	if err != nil {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid playback request")
 	}
-	return h.startPlaybackApplicationV3(playbackCallerRequest(ctx, caller), body)
+	response, err := h.startPlaybackApplicationV3(playbackCallerRequest(ctx, caller), body)
+	return withNativeServerFeaturesV3(response), err
 }
 
 // ApplyProgressV2 is POST /api/v2/playback/{session_id}/progress. The sample
@@ -606,7 +631,7 @@ func (h *PlaybackHandler) ReplanPlaybackV2(ctx context.Context, caller PlaybackC
 	if errors.Is(err, playback.ErrAttemptStoppedV3) {
 		return playback.DecisionResponseV3{}, playbackSessionNotFoundOperationError()
 	}
-	return response, err
+	return withNativeServerFeaturesV3(response), err
 }
 
 // ReportRouteEventV2 is POST /api/v2/playback/route-events. The event is

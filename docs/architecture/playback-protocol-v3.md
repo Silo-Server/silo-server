@@ -101,13 +101,13 @@ the document is always the full one:
   "features": ["playback_plan_v3", "neutral_playback_v3_contract_v1", "embedded_subtitles_v1", "layout_aware_passthrough", "playback_route_diagnostics",
                "device_quirks_v1", "seek_reanchor_v1", "output_change_v1", "output_display_evidence_v1", "direct_stream_resume_v1",
                "header_authenticated_media_v1", "authorized_media_origins_v1", "software_video_decode_v1",
-               "plan_invalidated_v1", "plan_source_duration_v1", "subrip_sidecar_v1"],
+               "plan_invalidated_v1", "plan_source_duration_v1"],
   "deliveries": ["original_http", "server_remux_progressive", "server_remux_hls", "server_transcode_hls"],
   "transformations": [{"name": "audio_to_aac", "executor": "server", "recipe_version": "2", "validated_claims": ["audio_decode"]}]
 }
 ```
 
-The sixteen feature strings above are the full set this server version advertises:
+The fifteen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `subrip_sidecar_v1`:
 
 | Feature | What it promises |
 | --- | --- |
@@ -126,7 +126,7 @@ The sixteen feature strings above are the full set this server version advertise
 | `software_video_decode_v1` | Exact/platform-attested clients may qualify bounded `video_decode[]` entries with `hardware: false` for direct/original delivery; without the opt-in those evidence tiers remain hardware-only (§3) |
 | `plan_invalidated_v1` | The client can be told mid-session that the plan it is playing was withdrawn, over the realtime `plan_invalidated` command, and replans off it. A session that did not negotiate it is stopped instead (§6.1) |
 | `plan_source_duration_v1` | `source.duration_seconds` is populated when known, so its absence means *unknown* rather than *unsupported* (§5) |
-| `subrip_sidecar_v1` | An opted-in client that parses SubRip itself receives external and downloaded SRT tracks as the original `.srt` file instead of the WebVTT conversion (§8) |
+| `subrip_sidecar_v1` | `/api/v2` only. An opted-in client that parses SubRip itself receives external and downloaded SRT tracks as the original `.srt` file instead of the WebVTT conversion (§8) |
 
 That last one is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
@@ -1160,7 +1160,7 @@ their own query parameters; see §4.2 for the per-route-family contract.
 The sidecar URL suffix is part of the representation contract, not decoration.
 The artifact `format` and `mime_type` describe served bytes, independently of the source codec. SRT, SubRip, and mov_text sources served as VTT therefore report `format: "vtt"` and `mime_type: "text/vtt"`. Artifact timestamps are absolute original-media time, with `timing_origin_seconds: 0` even when the video transport resumes from a nonzero source position.
 
-A client that sends `subrip_sidecar_v1` in `client_features` receives external and downloaded SRT tracks as the original file instead: the inventory and artifact URL is `.srt` with `original=1`, the artifact reports `format: "srt"` and `mime_type: "application/x-subrip"`, and the bytes are the SRT exactly as stored. Embedded SRT tracks keep their existing representation. A `.srt` request without `original=1` keeps the historical WebVTT response, because that is what the frozen v1 route has always returned for it. The feature is attempt-sticky (§6). Realtime subtitle events publish the same representation as the session's current plan, and a seek reanchor keeps the representation its frozen plan published, even when the attempt started on a server that did not know the feature.
+A client that sends `subrip_sidecar_v1` in `client_features` to `/api/v2` receives external and downloaded SRT tracks as the original file instead: the inventory and artifact URL is `.srt` with `original=1`, the artifact reports `format: "srt"` and `mime_type: "application/x-subrip"`, and the bytes are the SRT exactly as stored. Embedded SRT tracks keep their existing representation. A `.srt` request without `original=1`, and any request on the frozen `/api/v1` route, keeps the historical WebVTT response. `/api/v1` neither advertises nor negotiates the feature. The feature is attempt-sticky (§6). Realtime subtitle events publish the same representation as the session's current plan, and a seek reanchor keeps the representation its frozen plan published, even when the attempt started on a server that did not know the feature.
 
 An embedded `hdmv_pgs_subtitle`/PGS sidecar is lossless binary PGS at a `.sup`
 URL with `application/octet-stream`; cached full-track responses support `HEAD`

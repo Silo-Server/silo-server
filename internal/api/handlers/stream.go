@@ -390,7 +390,7 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.Method == http.MethodHead {
-			writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, servesOriginalSubRip(string(downloaded.Format), requestedFormat, r.URL.Query())))
+			writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, servesOriginalSubRip(r, string(downloaded.Format), requestedFormat)))
 			return
 		}
 		h.serveDownloadedSubtitle(w, r, *downloaded, requestedFormat)
@@ -405,13 +405,13 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.Method == http.MethodHead {
-			writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, servesOriginalSubRip(sub.Format, requestedFormat, r.URL.Query())))
+			writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, servesOriginalSubRip(r, sub.Format, requestedFormat)))
 			return
 		}
 
 		// Serve ASS/SSA external subtitles as raw data for client-side
 		// rendering, and SRT the same way when the URL asks for .srt.
-		if servesOriginalSubRip(sub.Format, requestedFormat, r.URL.Query()) {
+		if servesOriginalSubRip(r, sub.Format, requestedFormat) {
 			data, err := playback.LoadExternalSubtitleRaw(sub.Path)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal_error",
@@ -495,7 +495,7 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		downloadedIndex := embeddedIndex - len(file.SubtitleTracks)
 		if downloadedIndex >= 0 && downloadedIndex < len(downloaded) {
 			if r.Method == http.MethodHead {
-				writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, servesOriginalSubRip(string(downloaded[downloadedIndex].Format), requestedFormat, r.URL.Query())))
+				writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, servesOriginalSubRip(r, string(downloaded[downloadedIndex].Format), requestedFormat)))
 				return
 			}
 			h.serveDownloadedSubtitle(w, r, downloaded[downloadedIndex], requestedFormat)
@@ -520,7 +520,7 @@ func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.R
 
 	// Serve ASS/SSA downloaded subtitles as raw data, and SRT the same way
 	// when the URL asks for .srt.
-	if servesOriginalSubRip(string(subtitle.Format), requestedFormat, r.URL.Query()) {
+	if servesOriginalSubRip(r, string(subtitle.Format), requestedFormat) {
 		playback.ServeSubtitle(w, data, subtitleFormatSRT)
 		return
 	}
@@ -567,13 +567,15 @@ func subtitleSidecarFormatSupported(codec, requestedFormat string, embeddedPGS b
 }
 
 // servesOriginalSubRip reports whether a sidecar request is answered with the
-// original SRT bytes: only a SubRip track requested as .srt with original=1,
-// which is the URL subrip_sidecar_v1 publishes. Every other request for a
-// SubRip track, a bare .srt included, keeps the historical WebVTT response.
-func servesOriginalSubRip(codec, requestedFormat string, query url.Values) bool {
+// original SRT bytes: only a SubRip track requested through /api/v2 as .srt
+// with original=1, which is the URL subrip_sidecar_v1 publishes. Every other
+// request for a SubRip track, including any on the frozen /api/v1 route, keeps
+// the historical WebVTT response.
+func servesOriginalSubRip(r *http.Request, codec, requestedFormat string) bool {
 	return playback.IsSubRip(codec) &&
 		strings.EqualFold(strings.TrimSpace(requestedFormat), subtitleFormatSRT) &&
-		query.Get(playback.SubtitleOriginalParamV3) == "1"
+		r.URL.Query().Get(playback.SubtitleOriginalParamV3) == "1" &&
+		isNativeAPIV2(r.Context())
 }
 
 // subtitleRepresentationFormat names the representation a GET would serve, so
