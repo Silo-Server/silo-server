@@ -15,13 +15,19 @@
 --
 -- Measured on a synthetic profile with 20,752 progress rows, 509 of them
 -- resumable, in a 124,452-row table: a Continue Watching page (LIMIT 100) went
--- from a bitmap scan of all 20,752 rows plus a top-N sort (1,850 shared
--- buffers, about 10 ms) to an ordered index scan of 102 rows with no sort (310
--- buffers, under 0.6 ms).
+-- from a bitmap scan of all 20,752 rows plus a top-N sort (1,799 shared
+-- buffers, about 7 ms) to an ordered index scan of 100 rows with no sort (200
+-- buffers, about 0.2 ms).
 --
--- idx_uwp_profile_in_progress goes. No query can use it: every WHERE clause
--- that implies completed = FALSE either fetches one row by primary key or
--- guards an ON CONFLICT update.
+-- idx_uwp_profile_in_progress goes. Its only reader is the Jellyfin
+-- IsResumable browse filter (internal/catalog/browse.go) when it plans as a
+-- join over the profile's rows rather than a primary-key probe per item. That
+-- filter also requires position_seconds > 0, so it moves to this index and
+-- reads the profile's resume points instead of its unfinished rows. The other
+-- completed = FALSE predicates fetch one row by primary key, guard an ON
+-- CONFLICT update, or sit inside an aggregate FILTER. Audiobookshelf Continue
+-- Listening writes COALESCE(completed, FALSE) = FALSE, which the planner
+-- cannot match to a partial index on completed = FALSE.
 --
 -- CONCURRENTLY keeps user_watch_progress writable during the build; it cannot
 -- run inside a transaction, hence NO TRANSACTION. An interrupted concurrent

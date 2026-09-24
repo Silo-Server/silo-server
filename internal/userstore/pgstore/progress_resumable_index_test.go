@@ -53,14 +53,60 @@ func progressRowsRead(node explainNode, indexes map[string]bool) float64 {
 	var read float64
 	if node.RelationName == "user_watch_progress" {
 		read = (node.ActualRows + node.RemovedByFilter + node.RemovedByRecheck) * node.ActualLoops
-		if node.IndexName != "" {
-			indexes[node.IndexName] = true
-		}
+		scanIndexNames(node, indexes)
 	}
 	for _, child := range node.Plans {
 		read += progressRowsRead(child, indexes)
 	}
 	return read
+}
+
+// scanIndexNames records the index a scan node read. An index or index-only
+// scan names it on the node itself; a Bitmap Heap Scan carries only the
+// relation, and its Bitmap Index Scan children (under BitmapAnd/BitmapOr when
+// several combine) carry only the index.
+func scanIndexNames(node explainNode, indexes map[string]bool) {
+	if node.IndexName != "" {
+		indexes[node.IndexName] = true
+	}
+	for _, child := range node.Plans {
+		switch child.NodeType {
+		case "Bitmap Index Scan", "BitmapAnd", "BitmapOr":
+			scanIndexNames(child, indexes)
+		}
+	}
+}
+
+// A bitmap plan must count as reading the index its Bitmap Index Scan names,
+// or the guard below would fail whenever the planner prefers a bitmap scan of
+// idx_uwp_profile_resumable (as ListProgressPage does at production scale).
+func TestProgressRowsReadNamesBitmapIndexes(t *testing.T) {
+	const plan = `{
+		"Node Type": "Hash Join",
+		"Plans": [
+			{"Node Type": "Bitmap Heap Scan", "Relation Name": "user_watch_progress",
+			 "Actual Rows": 409, "Actual Loops": 1, "Rows Removed by Filter": 100,
+			 "Plans": [{"Node Type": "Bitmap Index Scan", "Index Name": "idx_uwp_profile_resumable",
+			            "Actual Rows": 509, "Actual Loops": 1}]},
+			{"Node Type": "Hash", "Plans": [
+				{"Node Type": "Bitmap Heap Scan", "Relation Name": "user_history_hidden_items",
+				 "Actual Rows": 150, "Actual Loops": 1,
+				 "Plans": [{"Node Type": "Bitmap Index Scan", "Index Name": "user_history_hidden_items_pkey",
+				            "Actual Rows": 150, "Actual Loops": 1}]}
+			]}
+		]
+	}`
+	var node explainNode
+	if err := json.Unmarshal([]byte(plan), &node); err != nil {
+		t.Fatal(err)
+	}
+	indexes := map[string]bool{}
+	if read := progressRowsRead(node, indexes); read != 509 {
+		t.Errorf("rows read = %.0f, want 509", read)
+	}
+	if len(indexes) != 1 || !indexes["idx_uwp_profile_resumable"] {
+		t.Errorf("indexes = %v, want only idx_uwp_profile_resumable", indexes)
+	}
 }
 
 // The in-progress listings (Continue Watching, Next Up's resumable branch,
