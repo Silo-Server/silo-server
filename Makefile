@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint lint-changed test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes apiv2-openapi verify-apiv2-openapi verify-apiv2-contract apiv2-fixtures verify-apiv2-fixtures apiv2-fixtures-sync verify-apiv2-fixtures-siblings apiv2-web-types verify-apiv2-web-types
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint lint-changed test test-go test-db-pins test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes apiv2-openapi verify-apiv2-openapi verify-apiv2-contract apiv2-fixtures verify-apiv2-fixtures apiv2-fixtures-sync verify-apiv2-fixtures-siblings apiv2-web-types verify-apiv2-web-types
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -67,8 +67,7 @@ lint-changed:
 # suite has no equivalent — a Go test that cannot pass yet carries a t.Skip and
 # its reason in the source, where whoever reads the test finds it.
 WEBTEST_KNOWN_FAILURES := \
-	--exclude src/pages/Catalog.test.tsx \
-	--exclude src/pages/LibraryRecommended.test.tsx
+	--exclude src/pages/Catalog.test.tsx
 
 # The Go binary embeds the built frontend, so every Go build and test needs
 # web/dist to exist. Tests never serve it, so a placeholder is enough; `make
@@ -82,6 +81,15 @@ test: test-go test-web
 
 test-go: embed-stub
 	go test ./...
+
+# Run the DB-backed query-budget pins listed in $(DB_PINS) against the
+# migrated, disposable database named by SILO_TEST_DATABASE_URL. Unlike
+# test-go, a listed test that skips (no URL, unmigrated schema) or is missing
+# fails the run. Migrate a fresh database first with
+# DATABASE_URL=<url> SECRET_KEY=<32+ chars> go run ./cmd/silo/ --migrate-only.
+DB_PINS := scripts/ci/db-pins.txt
+test-db-pins: embed-stub
+	go run ./scripts/ci/dbpins -list $(DB_PINS)
 
 # WEBTEST_ARGS passes extra vitest flags through; CI uses it to shard the
 # suite across runners (--shard=N/M).

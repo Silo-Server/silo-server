@@ -438,6 +438,11 @@ Deletes the managed entry owned by `(account, profile, header device)` or cancel
 ephemeral transfer, and returns a bodyless `204`. Missing or incorrectly scoped
 entries return `404`. The client is responsible for deleting local files.
 
+Deleting an episode of a series this device monitors also stops that monitor from
+registering the episode again. Creating a download for the episode, its season or its
+series re-allows it. Deleting the monitor, or creating it again, forgets these
+deletions (section 8).
+
 ### 4.5 Serve the media file
 
 ```http
@@ -862,12 +867,13 @@ POST /api/v2/downloads/subscriptions
 | `series_id`         | string | Required.                                                                           |
 | `mode`              | string | `all`, `future`, `latest_season`, or `specific_seasons`.                            |
 | `season_numbers`    | int[]  | Required for `specific_seasons`.                                                    |
-| `delete_watched`    | bool   | Client-enforced retention hint.                                                     |
+| `delete_watched`    | bool   | Client deletes finished episodes; sync skips episodes the profile has finished.     |
 | `max_storage_bytes` | int64  | `0` means unlimited. Client-enforced hard cap; server soft-gates auto-registration. |
 
 The response is the persisted monitor with its `etag` validator. If this device
 already monitors that series, its current options and paused state are returned
-unchanged. There is no durable creation receipt: do not automatically replay an
+unchanged, and the episodes this device deleted under it (4.4) become eligible
+again. There is no durable creation receipt: do not automatically replay an
 uncertain create; reconcile the monitor list first, then sync explicitly.
 
 ### 8.2 Sync
@@ -899,6 +905,11 @@ rechecks the monitor under its transaction lock before registration. A changed
 monitor returns `409` and requires a fresh monitor read before a new sync. Repeating
 a page skips already-registered entries. Paused monitors never register episodes.
 
+Sync never registers an episode this device deleted while the monitor existed (4.4).
+A `delete_watched` monitor also skips episodes whose progress for the profile is
+`completed`, the same flag the client reads before deleting a finished episode. If
+the progress lookup fails, sync registers without this filter rather than failing.
+
 ### 8.3 List, get, update, delete
 
 ```http
@@ -922,8 +933,9 @@ unchanged and an explicit null is rejected:
 ```
 
 Edits preserve the future cutoff and re-anchor latest-season selection only under
-the shared mode-change rules. Delete stops monitoring and retains already-registered
-downloads.
+the shared mode-change rules. Delete stops monitoring, retains already-registered
+downloads and forgets the episodes deleted while it existed, so a new monitor for the
+series registers them again.
 
 Subscription shape:
 
@@ -1604,8 +1616,10 @@ rechecks the monitor under its transaction lock before registration. Registratio
 and storage accounting use that same transaction; a changed monitor returns 409
 and requires a fresh monitor read before a new sync. Repeating a page skips
 already-registered entries and may report zero new registrations. Paused monitors
-never register episodes. The bridge retains immediate best-effort backfill on
-create/edit and now discards delayed sync snapshots after a monitor change.
+never register episodes. Episodes the device deleted while monitored, and finished
+episodes of a `delete_watched` monitor, are skipped (8.2). The bridge retains
+immediate best-effort backfill on create/edit and now discards delayed sync
+snapshots after a monitor change.
 Capabilities `subscription_mutations` and `bounded_subscription_sync` identify
 these operations separately from subscription reads.
 

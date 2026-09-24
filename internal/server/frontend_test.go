@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -79,6 +80,38 @@ func TestFrontendHandlerServesStaticAssetsWithoutCSP(t *testing.T) {
 	}
 }
 
+// The UI fonts ship as content-hashed woff2 files under /assets/. woff2 is
+// already compressed, so the build writes no sidecars for them; they are served
+// as-is with a font type and the same immutable policy as the bundles.
+func TestFrontendServesSelfHostedFontsImmutable(t *testing.T) {
+	prev := WebDistFS
+	WebDistFS = fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<!doctype html>")},
+		"assets/outfit-latin-wght-normal-Bc8i84L.woff2": &fstest.MapFile{
+			Data: []byte("wOF2\x00\x01\x00\x00font-bytes"),
+		},
+	}
+	t.Cleanup(func() { WebDistFS = prev })
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/outfit-latin-wght-normal-Bc8i84L.woff2", nil)
+	req.Header.Set("Accept-Encoding", "br, gzip")
+	rr := httptest.NewRecorder()
+	FrontendHandler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "font/woff2" {
+		t.Fatalf("content-type = %q, want font/woff2", got)
+	}
+	if got := rr.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("cache-control = %q", got)
+	}
+	if got := rr.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("content-encoding = %q, want none", got)
+	}
+}
+
 func TestFrontendHandlerReturns404ForMissingAssets(t *testing.T) {
 	handler := newFrontendTestHandler(t)
 
@@ -113,7 +146,11 @@ func newFrontendTestHandler(t *testing.T) http.Handler {
 		"assets/app.js.br": &fstest.MapFile{Data: []byte("br-compressed")},
 		"assets/app.js.gz": &fstest.MapFile{Data: []byte("gzip-compressed")},
 		"assets/plain.js":  &fstest.MapFile{Data: []byte("plain")},
-		"sw.js":            &fstest.MapFile{Data: []byte("self.addEventListener('fetch', () => {})")},
+		// WASM gets sidecars too: the JASSUB subtitle renderer is ~2 MB raw.
+		"assets/sub.wasm":    &fstest.MapFile{Data: []byte("\x00asm-identity")},
+		"assets/sub.wasm.br": &fstest.MapFile{Data: []byte("wasm-br")},
+		"assets/sub.wasm.gz": &fstest.MapFile{Data: []byte("wasm-gzip")},
+		"sw.js":              &fstest.MapFile{Data: []byte("self.addEventListener('fetch', () => {})")},
 	}
 	t.Cleanup(func() { WebDistFS = prev })
 	return FrontendHandler()
@@ -188,6 +225,57 @@ func TestFrontendPrecompressedAssetNegotiation(t *testing.T) {
 			}
 			if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "javascript") {
 				t.Fatalf("content-type = %q, want JavaScript", got)
+			}
+		})
+	}
+}
+
+// WebAssembly.instantiateStreaming rejects any Content-Type other than
+// application/wasm, so a precompressed WASM must keep the original type while
+// carrying the sidecar's Content-Encoding and length.
+func TestFrontendPrecompressedWasmKeepsWasmContentType(t *testing.T) {
+	handler := newFrontendTestHandler(t)
+
+	tests := []struct {
+		name           string
+		acceptEncoding string
+		wantEncoding   string
+		wantBody       string
+	}{
+		{name: "brotli", acceptEncoding: "gzip, deflate, br, zstd", wantEncoding: "br", wantBody: "wasm-br"},
+		{name: "gzip", acceptEncoding: "gzip, deflate", wantEncoding: "gzip", wantBody: "wasm-gzip"},
+		{name: "identity", acceptEncoding: "", wantBody: "\x00asm-identity"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/assets/sub.wasm", nil)
+			if tt.acceptEncoding != "" {
+				req.Header.Set("Accept-Encoding", tt.acceptEncoding)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			if got := rec.Header().Get("Content-Type"); got != "application/wasm" {
+				t.Fatalf("content-type = %q, want application/wasm", got)
+			}
+			if got := rec.Header().Get("Content-Encoding"); got != tt.wantEncoding {
+				t.Fatalf("content-encoding = %q, want %q", got, tt.wantEncoding)
+			}
+			if got := rec.Body.String(); got != tt.wantBody {
+				t.Fatalf("body = %q, want %q", got, tt.wantBody)
+			}
+			if got, want := rec.Header().Get("Content-Length"), strconv.Itoa(len(tt.wantBody)); got != want {
+				t.Fatalf("content-length = %q, want %q", got, want)
+			}
+			if got := rec.Header().Get("Vary"); got != "Accept-Encoding" {
+				t.Fatalf("vary = %q, want Accept-Encoding", got)
+			}
+			if got := rec.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+				t.Fatalf("cache-control = %q", got)
 			}
 		})
 	}
@@ -407,7 +495,12 @@ func TestFrontendPrecompressedAssetIgnoresRangeOnHead(t *testing.T) {
 func TestFrontendPrecompressedSidecarsAreNotPublicPaths(t *testing.T) {
 	handler := newFrontendTestHandler(t)
 
-	for _, path := range []string{"/assets/app.js.br", "/assets/app.js.gz"} {
+	for _, path := range []string{
+		"/assets/app.js.br",
+		"/assets/app.js.gz",
+		"/assets/sub.wasm.br",
+		"/assets/sub.wasm.gz",
+	} {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusNotFound {

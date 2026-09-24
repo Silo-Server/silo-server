@@ -6245,7 +6245,10 @@ export interface paths {
     /** Page the calling device's series monitors, including paused monitors. */
     get: operations["listDownloadSubscriptions"];
     put?: never;
-    /** Create a monitor or return the existing monitor without changing it. Sync explicitly after receipt; do not automatically resend an uncertain create. */
+    /**
+     * Create a monitor or return the device's existing monitor for the series.
+     * @description An existing monitor keeps its options and forgets the episodes deleted under it, so the next sync can register them again. Sync explicitly after receipt; do not automatically resend an uncertain create.
+     */
     post: operations["createDownloadSubscription"];
     delete?: never;
     options?: never;
@@ -46493,7 +46496,7 @@ export interface operations {
         user_id?: number;
       };
       header: {
-        /** @description Browser origin must match the configured public origin. */
+        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
         Origin?: string;
         /** @description Offer silo.admin-logs.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -85350,7 +85353,7 @@ export interface operations {
         channels?: string;
       };
       header: {
-        /** @description Browser origin must match the configured public origin. */
+        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
         Origin?: string;
         /** @description Offer silo.events.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -98481,7 +98484,7 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        /** @description Browser origin must match the configured public origin. */
+        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
         Origin?: string;
         /** @description Offer silo.playback-control.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -108193,6 +108196,8 @@ export interface operations {
         duration?: number;
         /** @description Source media file the inventory URL names; must be the plan's effective or requested file. */
         file_id?: string;
+        /** @description 1 on a .srt URL published under subrip_sidecar_v1: serve the stored SRT bytes instead of the WebVTT conversion. */
+        original?: string;
         /** @description Seek position in seconds for windowed text extraction. */
         position?: number;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
@@ -108210,7 +108215,7 @@ export interface operations {
       };
       path: {
         session_id: string;
-        /** @description Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup) the inventory URL carries. */
+        /** @description Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup, .srt) the inventory URL carries. */
         track: string;
       };
       cookie?: never;
@@ -108341,6 +108346,8 @@ export interface operations {
         duration?: number;
         /** @description Source media file the inventory URL names; must be the plan's effective or requested file. */
         file_id?: string;
+        /** @description 1 on a .srt URL published under subrip_sidecar_v1: serve the stored SRT bytes instead of the WebVTT conversion. */
+        original?: string;
         /** @description Seek position in seconds for windowed text extraction. */
         position?: number;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
@@ -108358,7 +108365,7 @@ export interface operations {
       };
       path: {
         session_id: string;
-        /** @description Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup) the inventory URL carries. */
+        /** @description Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup, .srt) the inventory URL carries. */
         track: string;
       };
       cookie?: never;
@@ -116330,7 +116337,7 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        /** @description Browser origin must match configured public origin. */
+        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
         Origin?: string;
         /** @description Offer silo.room.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;

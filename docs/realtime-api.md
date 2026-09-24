@@ -38,9 +38,10 @@ in order: `silo.events.v2`, `silo.ticket.<ticket>`. The server selects only
 `silo.events.v2`, never the credential-bearing entry. Neither bearer tokens nor
 tickets belong in the URL. Only the `channels` query selection is needed for
 clients using declared subscriptions. Request bodies are refused. An Origin,
-when present, must equal the configured public origin; without that setting it
-must match the request scheme and host. Forwarded host headers grant no Origin
-exception. Native clients may omit Origin but need the same session proof.
+when present, must equal the configured public origin, the request's own scheme
+and host, or a connected network access overlay origin (see
+[native-raw-handshakes.md](architecture/native-raw-handshakes.md#websocket-origin-behind-a-reverse-proxy)).
+Forwarded host headers grant no Origin exception. Native clients may omit Origin but need the same session proof.
 Malformed upgrades and rejected origins do not consume valid tickets.
 
 Consumption is atomic through Redis `GETDEL`. A Redis failure fails closed.
@@ -89,7 +90,7 @@ Connect to `GET /api/v2/playback/sessions/{session_id}/control/ws`
 (`connectPlaybackControlSocket`) offering exactly `silo.playback-control.v2`
 then `silo.ticket.<ticket>`; the server selects only the protocol. Neither
 bearer tokens nor tickets belong in the URL, request bodies are refused, and an
-Origin, when present, must equal the configured public origin. Malformed
+Origin, when present, must pass the same check as the events socket. Malformed
 upgrades and rejected origins do not consume the credential. At upgrade the
 credential is consumed atomically (Redis `GETDEL`; process-local without
 Redis), login authority is re-validated, and ownership and installation are
@@ -307,7 +308,7 @@ This storage foundation does not expose a socket or validate current account/ses
 
 `POST /api/v2/watch-together/rooms/{room_id}/ws-ticket` (`createWatchTogetherSocketTicket`) requires authenticated profile/demo authority, an expiring access login session, and the original `X-Room-Token` matching room/account/profile. API keys and profile-only room proof cannot delegate a socket. The room proof must have a valid HS256 signature and signed expiry; frozen v1 proof validation is unchanged. Current session validity, enabled account/role, profile PIN verification, viewer scope, and room existence are checked before minting. The response carries `ticket`, `expires_in`, `max_connection_seconds` (300), and `protocol` (`silo.room.v2`). Credential storage failure returns 503; invalid original proof or authority returns 403; closed rooms return 409. No automatic room-proof renewal occurs here.
 
-Connect with `GET /api/v2/watch-together/rooms/{room_id}/ws` (`connectWatchTogetherSocket`), offering exactly `silo.room.v2` and `silo.ticket.<ticket>` in that order. Only `silo.room.v2` is echoed. Request bodies and all query strings are refused, including legacy bearer/profile/PIN/room credentials. A supplied browser Origin must match the configured public origin; absent Origin is permitted for independently authenticated native callers. Forwarded headers do not authorize an Origin. Malformed upgrades are refused before consuming the credential. After consumption, current session/account/profile/PIN/scope and room existence are checked again before 101.
+Connect with `GET /api/v2/watch-together/rooms/{room_id}/ws` (`connectWatchTogetherSocket`), offering exactly `silo.room.v2` and `silo.ticket.<ticket>` in that order. Only `silo.room.v2` is echoed. Request bodies and all query strings are refused, including legacy bearer/profile/PIN/room credentials. A supplied browser Origin must pass the same check as the events socket: the configured public origin, the request's own scheme and host, or a connected overlay origin; absent Origin is permitted for independently authenticated native callers. Forwarded host headers do not authorize an Origin; only a trusted proxy's single `X-Forwarded-Proto` value can supply the scheme for the request-origin match. Malformed upgrades are refused before consuming the credential. After consumption, current session/account/profile/PIN/scope and room existence are checked again before 101.
 
 The handler closes the underlying socket at the earlier of five minutes, access expiry, or original room-proof expiry. Every 15 seconds it rechecks current authority and room existence with a two-second validation timeout; errors close the connection rather than extending its deadline. Revocation is therefore bounded by that polling interval and timeout, not instantaneous. Missing Redis prevents runtime socket wiring; Redis errors never use an in-memory fallback.
 

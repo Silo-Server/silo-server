@@ -116,11 +116,23 @@ type Service struct {
 	installationCacheGen uint64
 }
 
-// SetEventDispatcher wires the EventDispatcher into the Service. The
-// dispatcher reference is retained so future hooks can act on lifecycle
-// changes; the current dispatcher implementation is fully driven by
-// per-event store reads and needs no notification on install/enable/disable.
-func (s *Service) SetEventDispatcher(d *EventDispatcher) { s.dispatcher = d }
+// SetEventDispatcher wires the EventDispatcher into the Service and registers
+// a lifecycle hook that drops the dispatcher's subscriber index, so an
+// install, enable, disable, upgrade, or uninstall on this replica reaches the
+// next event. Other replicas drop theirs on cache.EventPluginsChanged.
+//
+// The hook runs before every other lifecycle hook. Events that arrive while
+// the slower hooks run (resident reconcile, provider reloads) already see the
+// change, and the index rebuilt when this replica's own plugins_changed
+// publish comes back is not dropped again by a hook that runs after it.
+func (s *Service) SetEventDispatcher(d *EventDispatcher) {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.dispatcher = d
+	if d != nil {
+		s.lifecycleHooks = slices.Insert(s.lifecycleHooks, 0, func(context.Context) { d.invalidateIndex() })
+	}
+}
 
 // AddLifecycleHook registers a callback invoked after plugin install, enable,
 // disable, uninstall, preload, or runtime-configuration changes.
@@ -784,7 +796,7 @@ func (s *Service) RouteDescriptors(ctx context.Context, installationID int) ([]*
 }
 
 func (s *Service) ResolveAssetPath(ctx context.Context, installationID int, assetPath string) (string, error) {
-	installation, manifest, err := s.ensureInstallationCache(ctx, installationID, true)
+	installation, manifest, err := s.loadForManifestRead(ctx, installationID, true)
 	if err != nil {
 		return "", err
 	}
@@ -915,10 +927,12 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowR
 }
 
 func (s *Service) manifestForInstallation(ctx context.Context, installationID int, requireEnabled bool) (*pluginv1.PluginManifest, error) {
-	_, manifest, err := s.ensureInstallationCache(ctx, installationID, requireEnabled)
+	_, manifest, err := s.loadForManifestRead(ctx, installationID, requireEnabled)
 	return manifest, err
 }
 
+// ensureInstallationCache loads the installation and fully verifies its
+// files. Callers that are about to execute the binary use it.
 func (s *Service) ensureInstallationCache(
 	ctx context.Context,
 	installationID int,
@@ -929,6 +943,24 @@ func (s *Service) ensureInstallationCache(
 		return nil, nil, err
 	}
 	manifest, err := s.ensureLoadedInstallation(ctx, installation)
+	if err != nil {
+		return nil, nil, err
+	}
+	return installation, manifest, nil
+}
+
+// loadForManifestRead is ensureInstallationCache for callers that only read the
+// manifest or serve packaged assets; see ArchiveCache.Manifest.
+func (s *Service) loadForManifestRead(
+	ctx context.Context,
+	installationID int,
+	requireEnabled bool,
+) (*Installation, *pluginv1.PluginManifest, error) {
+	installation, err := s.loadInstallation(ctx, installationID, requireEnabled)
+	if err != nil {
+		return nil, nil, err
+	}
+	manifest, err := s.readInstalledManifest(ctx, installation)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1029,6 +1061,8 @@ func (s *Service) InstallationKind(ctx context.Context, installationID int) (str
 	return installation.Kind, nil
 }
 
+// ensureLoadedInstallation makes the installation's files present, hashes the
+// binary against the manifest, and returns the manifest.
 func (s *Service) ensureLoadedInstallation(
 	ctx context.Context,
 	installation *Installation,
@@ -1037,6 +1071,19 @@ func (s *Service) ensureLoadedInstallation(
 		return LoadManifestFile(InstalledManifestPath(installation.InstallPath))
 	}
 	return s.archiveCache.Ensure(ctx, installation)
+}
+
+// readInstalledManifest is ensureLoadedInstallation without re-hashing a
+// binary this process already verified and has not seen change. Only callers
+// that never execute the binary may use it.
+func (s *Service) readInstalledManifest(
+	ctx context.Context,
+	installation *Installation,
+) (*pluginv1.PluginManifest, error) {
+	if s.archiveCache == nil {
+		return LoadManifestFile(InstalledManifestPath(installation.InstallPath))
+	}
+	return s.archiveCache.Manifest(ctx, installation)
 }
 
 func (s *Service) globalConfigEntries(ctx context.Context, installationID int) ([]*pluginv1.ConfigEntry, error) {

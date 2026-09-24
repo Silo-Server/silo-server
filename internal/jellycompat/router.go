@@ -34,6 +34,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	r := chi.NewRouter()
 	r.Use(stripSlashesExceptWeb)
 	r.Use(middleware.RequestID)
+	r.Use(observeCompatRequest)
 	if deps.ClientIPResolver != nil {
 		r.Use(clientip.Middleware(deps.ClientIPResolver))
 	}
@@ -215,6 +216,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Users/{id}", authHandler.HandleUserByID)
 			r.Get("/UserViews", itemsHandler.HandleViews)
 			r.Get("/UserViews/GroupingOptions", itemsHandler.HandleGroupingOptionsStub)
+			r.Get("/Users/{userId}/GroupingOptions", itemsHandler.HandleGroupingOptionsStub)
 			if !autoscanVirtualFoldersRegistered {
 				r.Get("/Library/VirtualFolders", itemsHandler.HandleVirtualFolders)
 			}
@@ -263,6 +265,10 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Post("/Users/Configuration", authHandler.HandleUpdateConfiguration)
 			r.Post("/Users/{userId}/Configuration", authHandler.HandleUpdateConfiguration)
 			r.Get("/Localization/Cultures", authHandler.HandleCultures)
+			// Clients probe group discovery even when SyncPlayAccess is None.
+			r.Get("/SyncPlay/List", func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(w, http.StatusOK, []struct{}{})
+			})
 			r.Post("/UserFavoriteItems/{itemId}", userDataHandler.HandleAddFavorite)
 			r.Delete("/UserFavoriteItems/{itemId}", userDataHandler.HandleRemoveFavorite)
 			r.Post("/UserPlayedItems/{itemId}", userDataHandler.HandleMarkPlayed)

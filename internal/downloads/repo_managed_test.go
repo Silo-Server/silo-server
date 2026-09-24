@@ -455,13 +455,16 @@ func TestPurgeProfileDevices(t *testing.T) {
 	}
 }
 
-// TestRegisterManagedItemsBatchAndCount pins the bulk-registration contract:
-// registration is one batched fetch + one batched insert (not a per-episode
-// loop), and the returned rows are ONLY the newly created ones, so the sync
-// response's "registered" count reports 0 in the steady state.
-func TestRegisterManagedItemsBatchAndCount(t *testing.T) {
+// TestRegisterSubscriptionItemsBatchAndCount pins the bulk-registration
+// contract: registration is one batched fetch + one batched insert (not a
+// per-episode loop), and the count covers ONLY the newly created rows, so the
+// sync response's "registered" count reports 0 in the steady state.
+func TestRegisterSubscriptionItemsBatchAndCount(t *testing.T) {
 	ctx := context.Background()
 	f := seedManagedFixture(t)
+	svc := &Service{}
+	sub := &Subscription{ID: "batch-reg", UserID: f.userID, ProfileID: f.profileA, DeviceID: f.deviceA}
+	store := managedRegistryStore{f.pool}
 
 	mkItems := func(n int) []managedItem {
 		items := make([]managedItem, 0, n)
@@ -475,29 +478,29 @@ func TestRegisterManagedItemsBatchAndCount(t *testing.T) {
 		return items
 	}
 
-	first, err := registerManagedItems(ctx, f.repo, f.userID, f.profileA, f.deviceA, mkItems(3), "batch-reg")
+	first, err := svc.registerSubscriptionItems(ctx, sub, mkItems(3), store)
 	if err != nil {
 		t.Fatalf("first register: %v", err)
 	}
-	if len(first) != 3 {
-		t.Fatalf("first register = %d rows, want 3", len(first))
+	if first != 3 {
+		t.Fatalf("first register = %d rows, want 3", first)
 	}
 
 	// Steady state: nothing new → zero rows returned.
-	again, err := registerManagedItems(ctx, f.repo, f.userID, f.profileA, f.deviceA, mkItems(3), "batch-reg")
+	again, err := svc.registerSubscriptionItems(ctx, sub, mkItems(3), store)
 	if err != nil {
 		t.Fatalf("second register: %v", err)
 	}
-	if len(again) != 0 {
-		t.Fatalf("steady-state register = %d rows, want 0", len(again))
+	if again != 0 {
+		t.Fatalf("steady-state register = %d rows, want 0", again)
 	}
 
 	// A grown scope registers only the delta.
-	grown, err := registerManagedItems(ctx, f.repo, f.userID, f.profileA, f.deviceA, mkItems(5), "batch-reg")
+	grown, err := svc.registerSubscriptionItems(ctx, sub, mkItems(5), store)
 	if err != nil {
 		t.Fatalf("grown register: %v", err)
 	}
-	if len(grown) != 2 {
-		t.Fatalf("grown register = %d rows, want 2", len(grown))
+	if grown != 2 {
+		t.Fatalf("grown register = %d rows, want 2", grown)
 	}
 }

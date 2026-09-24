@@ -377,23 +377,7 @@ func (r *Repo) findTasteProfileCandidates(
 	}
 	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
 
-	if filter.MaxContentRating != "" {
-		allowedRatings := access.AllowedRatingsUpTo(filter.MaxContentRating)
-		if len(allowedRatings) == 0 {
-			return []ScoredItem{}, map[string][]string{}, nil
-		}
-
-		placeholders := make([]string, len(allowedRatings))
-		for i, rating := range allowedRatings {
-			placeholders[i] = fmt.Sprintf("$%d", argIdx)
-			args = append(args, rating)
-			argIdx++
-		}
-		conditions = append(conditions, fmt.Sprintf(
-			"mi.content_rating IN (%s)",
-			strings.Join(placeholders, ", "),
-		))
-	}
+	catalog.ApplyContentRatingCeiling("mi", filter, &conditions, &args, &argIdx)
 
 	query := fmt.Sprintf(`
 			WITH ann_candidates AS (
@@ -792,8 +776,12 @@ func (r *Repo) FindSimilarUsers(ctx context.Context, userID int, profileID strin
 	return users, nil
 }
 
+// compatiblePeerContentRatings lists the ceilings a peer profile may carry and
+// still be a safe taste neighbor. It compares ceiling strings to ceiling
+// strings — user_taste_profiles.max_content_rating, not an item's rating — so
+// no stored age applies; see access.CompatibleCeilings.
 func compatiblePeerContentRatings(maxContentRating string) []string {
-	allowed := access.AllowedRatingsUpTo(maxContentRating)
+	allowed := access.CompatibleCeilings(maxContentRating)
 	if len(allowed) == 0 {
 		return []string{}
 	}
@@ -1051,10 +1039,14 @@ func (r *Repo) CowatchPairCount(ctx context.Context) (int, error) {
 
 // --- Staleness Operations ---
 
-// MarkProfileStale sets stale_at = NOW() on a user's taste profile.
+// MarkProfileStale sets stale_at = NOW() on a user's taste profile. A profile
+// already waiting for a refresh (stale_at > updated_at) keeps its pending
+// mark, so a repeat mark writes nothing.
 func (r *Repo) MarkProfileStale(ctx context.Context, userID int, profileID string) error {
-	_, err := r.pool.Exec(ctx,
-		`UPDATE user_taste_profiles SET stale_at = NOW() WHERE user_id = $1 AND profile_id = $2`,
+	_, err := r.pool.Exec(ctx, `
+		UPDATE user_taste_profiles SET stale_at = NOW()
+		WHERE  user_id = $1 AND profile_id = $2
+		  AND  (stale_at IS NULL OR stale_at <= updated_at)`,
 		userID, profileID)
 	if err != nil {
 		return fmt.Errorf("mark profile stale: %w", err)
@@ -1617,15 +1609,7 @@ func (r *Repo) FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, fi
 	}
 	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
 
-	if filter.MaxContentRating != "" {
-		allowedRatings := access.AllowedRatingsUpTo(filter.MaxContentRating)
-		if len(allowedRatings) == 0 {
-			return map[string]struct{}{}, nil
-		}
-		conditions = append(conditions, fmt.Sprintf("mi.content_rating = ANY($%d)", argIdx))
-		args = append(args, allowedRatings)
-		argIdx++
-	}
+	catalog.ApplyContentRatingCeiling("mi", filter, &conditions, &args, &argIdx)
 
 	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
 		SELECT mi.content_id

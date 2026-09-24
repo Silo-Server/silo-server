@@ -40,22 +40,21 @@ var Branding *branding.Service
 //   - script-src 'wasm-unsafe-eval': JASSUB (libass) subtitle rendering and
 //     node-unrar-js CBR extraction compile WebAssembly.
 //   - style-src blob: and 'unsafe-inline': foliate-js loads EPUB stylesheets
-//     via blob: URLs; the app uses inline style attributes. Google Fonts CSS
-//     is linked from index.html.
+//     via blob: URLs; the app uses inline style attributes.
 //   - img-src/media-src http(s): artwork can come from TMDB/TVDB/S3 public
 //     URLs, and stream URLs may point at standalone proxy/transcode workers
 //     on another origin (proxy public_url, plain http on LANs).
 //   - connect-src http(s)/ws(s): realtime session hub WebSockets, browser-side
 //     Plex auth (plex.tv), and HLS fetches against standalone worker origins.
-//   - font-src blob: data: plus fonts.gstatic.com for Google Fonts; reader
-//     book fonts load from blob: URLs.
+//   - font-src blob: data: for reader book fonts, which load from blob: URLs.
+//     The UI fonts are self-hosted under /assets/, so no font CDN is listed.
 //   - frame-src youtube-nocookie.com: the item-detail trailer modal embeds
 //     remote trailers via YouTube's privacy-enhanced iframe host.
 const frontendContentSecurityPolicy = "default-src 'self'; " +
 	"script-src 'self' 'wasm-unsafe-eval'; " +
-	"style-src 'self' 'unsafe-inline' blob: https://fonts.googleapis.com; " +
+	"style-src 'self' 'unsafe-inline' blob:; " +
 	"img-src 'self' blob: data: http: https:; " +
-	"font-src 'self' blob: data: https://fonts.gstatic.com; " +
+	"font-src 'self' blob: data:; " +
 	"media-src 'self' blob: http: https:; " +
 	"connect-src 'self' ws: wss: http: https:; " +
 	"worker-src 'self' blob:; " +
@@ -199,11 +198,15 @@ func (h *frontendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(shell.body))
 }
 
+// isPrecompressedAssetPath matches the sidecars the Vite build writes next to
+// /assets/ files (precompressStaticAssets in web/vite.config.ts).
 func isPrecompressedAssetPath(path string) bool {
 	return strings.HasSuffix(path, ".js.br") ||
 		strings.HasSuffix(path, ".js.gz") ||
 		strings.HasSuffix(path, ".css.br") ||
-		strings.HasSuffix(path, ".css.gz")
+		strings.HasSuffix(path, ".css.gz") ||
+		strings.HasSuffix(path, ".wasm.br") ||
+		strings.HasSuffix(path, ".wasm.gz")
 }
 
 const (

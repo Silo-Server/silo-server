@@ -4,7 +4,6 @@ import type { ItemDetail } from "@/api/types";
 import { useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
 import { useItemEpisodes, useSeasons } from "@/hooks/queries/episodes";
-import { useContinueWatching } from "@/hooks/queries/progress";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -49,7 +48,6 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
   const { data: seasonsData, isLoading: seasonsLoading } = useSeasons(item.content_id);
   const { data: similarData, isLoading: similarLoading } = useSimilarItems(item.content_id);
   const seasons = useMemo(() => seasonsData?.seasons ?? [], [seasonsData?.seasons]);
-  const { items: continueWatchingItems } = useContinueWatching();
 
   const title = item.title ?? "";
   const firstYear = item.first_air_date?.slice(0, 4);
@@ -64,25 +62,7 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
   const episodeCount = seasons.reduce((sum, s) => sum + s.episode_count, 0);
   const singleSeason = seasons.length === 1 ? seasons[0] : undefined;
 
-  const primaryAction = useMemo(
-    () =>
-      resolveSeriesPrimaryAction({
-        seriesId: item.content_id,
-        seasons,
-        continueWatching: continueWatchingItems
-          .filter((entry) => entry.detail?.series_id === item.content_id)
-          .map((entry) => ({
-            contentId: entry.detail?.content_id ?? entry.progress.media_item_id,
-            seriesId: entry.detail?.series_id,
-            title: entry.detail?.title ?? "",
-          })),
-      }),
-    [continueWatchingItems, item.content_id, seasons],
-  );
-  const primaryActionEpisodesQuery = useItemEpisodes(primaryAction.targetSeasonId);
-  const primaryActionEpisodes = primaryActionEpisodesQuery.data;
-  const primaryActionLoading =
-    !!primaryAction.targetSeasonId && primaryActionEpisodesQuery.isLoading;
+  const primaryAction = resolveSeriesPrimaryAction(item);
   const singleSeasonEpisodesQuery = useItemEpisodes(singleSeason?.content_id);
   const singleSeasonEpisodeLinkState = singleSeason
     ? {
@@ -91,67 +71,29 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
       }
     : undefined;
 
-  const resolvedPrimaryHref = useMemo(() => {
-    if (primaryAction.directHref) return primaryAction.directHref;
-
-    const episodes = primaryActionEpisodes?.episodes ?? [];
-    if (episodes.length === 0 || primaryAction.targetEpisodeNumber == null) {
-      return undefined;
-    }
-
-    const targetIndex = Math.max(
-      0,
-      Math.min(primaryAction.targetEpisodeNumber - 1, episodes.length - 1),
-    );
-    const targetEpisode = episodes[targetIndex];
-    return targetEpisode ? `/watch/${targetEpisode.content_id}` : undefined;
-  }, [primaryAction.directHref, primaryAction.targetEpisodeNumber, primaryActionEpisodes]);
-
-  // The party's default episode is the same one the primary action would
-  // play, so the page and the sheet never disagree.
-  const nextUpEpisode = useMemo(() => {
-    if (primaryAction.directHref) {
-      const id = primaryAction.directHref.replace(/^\/watch\//, "").split("?")[0];
-      return id
-        ? {
-            content_id: id,
-            title: primaryAction.context ?? "Continue",
-            subtitle: undefined as string | undefined,
-            seasonNumber: undefined as number | undefined,
-          }
-        : null;
-    }
-    const episodes = primaryActionEpisodes?.episodes ?? [];
-    if (episodes.length === 0 || primaryAction.targetEpisodeNumber == null) return null;
-    const idx = Math.max(0, Math.min(primaryAction.targetEpisodeNumber - 1, episodes.length - 1));
-    const episode = episodes[idx];
-    return episode
-      ? {
-          content_id: episode.content_id,
-          title: episode.title,
-          subtitle: `S${episode.season_number} E${episode.episode_number}`,
-          seasonNumber: episode.season_number,
-        }
-      : null;
-  }, [
-    primaryAction.context,
-    primaryAction.directHref,
-    primaryAction.targetEpisodeNumber,
-    primaryActionEpisodes,
-  ]);
+  // The party's default episode is the one the play button starts. The server
+  // resolves each season's target with the same rule as the series target, so
+  // the season holding it is the one whose own target matches. Its episode
+  // list (shared with the grid on single-season shows) names the episode.
+  const nextUpSeason = item.play_content_id
+    ? seasons.find((season) => season.play_content_id === item.play_content_id)
+    : undefined;
+  const nextUpEpisode = useItemEpisodes(nextUpSeason?.content_id).data?.episodes.find(
+    (episode) => episode.content_id === item.play_content_id,
+  );
   const watchTogether = useDetailWatchTogether({
     item,
     target: nextUpEpisode
       ? {
           content_id: nextUpEpisode.content_id,
           title: nextUpEpisode.title,
-          subtitle: nextUpEpisode.subtitle,
+          subtitle: `S${nextUpEpisode.season_number} E${nextUpEpisode.episode_number}`,
           poster_url: item.poster_url,
           poster_thumbhash: item.poster_thumbhash,
         }
       : null,
     seriesId: item.content_id,
-    initialSeasonNumber: nextUpEpisode?.seasonNumber,
+    initialSeasonNumber: nextUpSeason?.season_number,
   });
 
   return (
@@ -193,9 +135,8 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
             item={item}
             contentId={item.content_id}
             watchTogether={watchTogether.menu}
-            playHref={resolvedPrimaryHref}
+            playHref={primaryAction.href}
             playLabel={primaryAction.label}
-            playLoading={primaryActionLoading}
             onRefresh={
               canCurateMetadata
                 ? (mode) =>
