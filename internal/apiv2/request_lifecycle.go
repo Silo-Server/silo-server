@@ -202,7 +202,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 			if err != nil {
 				return nil, serviceProblem(err)
 			}
-			out.Body.Items = append(out.Body.Items, WatchProviderSummary{Key: row.Key, DisplayName: row.DisplayName, Capabilities: row.Capabilities, ConnectionConfigSchema: schemas})
+			out.Body.Items = append(out.Body.Items, WatchProviderSummary{Key: row.Key, DisplayName: row.DisplayName, Capabilities: watchProviderCapabilitiesOf(row.Capabilities), ConnectionConfigSchema: schemas})
 		}
 		return out, nil
 	})
@@ -386,10 +386,51 @@ func watchProviderProblem(err error) *Problem {
 	return NewProblem(TypeInternalError, "Watch-provider operation failed.")
 }
 
+// WatchProviderCapabilities is the v2 projection of a provider's sync
+// capabilities. It is separate from watchsync.Capabilities so the frozen v1
+// responses, which serialize that type, keep their original fields.
+type WatchProviderCapabilities struct {
+	ImportWatched   bool `json:"import_watched"`
+	ImportProgress  bool `json:"import_progress"`
+	ExportWatched   bool `json:"export_watched"`
+	ExportUnwatched bool `json:"export_unwatched"`
+	ImportFavorites bool `json:"import_favorites"`
+	ExportFavorites bool `json:"export_favorites"`
+	RemoveFavorites bool `json:"remove_favorites"`
+	ImportWatchlist bool `json:"import_watchlist"`
+	ExportWatchlist bool `json:"export_watchlist"`
+	RemoveWatchlist bool `json:"remove_watchlist"`
+	// ProvidesWatchlistOrder is true when the provider returns its watchlist in a
+	// user-configurable order that Silo can mirror locally.
+	ProvidesWatchlistOrder bool `json:"provides_watchlist_order"`
+	ScrobblePlayback       bool `json:"scrobble_playback"`
+	ImportRatings          bool `json:"import_ratings"`
+	ExportRatings          bool `json:"export_ratings"`
+}
+
+func watchProviderCapabilitiesOf(c watchsync.Capabilities) WatchProviderCapabilities {
+	return WatchProviderCapabilities{
+		ImportWatched:          c.ImportWatched,
+		ImportProgress:         c.ImportProgress,
+		ExportWatched:          c.ExportWatched,
+		ExportUnwatched:        c.ExportUnwatched,
+		ImportFavorites:        c.ImportFavorites,
+		ExportFavorites:        c.ExportFavorites,
+		RemoveFavorites:        c.RemoveFavorites,
+		ImportWatchlist:        c.ImportWatchlist,
+		ExportWatchlist:        c.ExportWatchlist,
+		RemoveWatchlist:        c.RemoveWatchlist,
+		ProvidesWatchlistOrder: c.ProvidesWatchlistOrder,
+		ScrobblePlayback:       c.ScrobblePlayback,
+		ImportRatings:          c.ImportRatings,
+		ExportRatings:          c.ExportRatings,
+	}
+}
+
 type WatchProviderConnection struct {
 	Provider                     string                    `json:"provider"`
 	DisplayName                  string                    `json:"display_name"`
-	Capabilities                 watchsync.Capabilities    `json:"capabilities"`
+	Capabilities                 WatchProviderCapabilities `json:"capabilities"`
 	AuthMethod                   string                    `json:"auth_method"`
 	Connected                    bool                      `json:"connected"`
 	ProviderUsername             string                    `json:"provider_username,omitempty"`
@@ -426,7 +467,7 @@ func watchProviderConnectionOf(s watchsync.ConnectionStatus) (WatchProviderConne
 	return WatchProviderConnection{
 		Provider:                     s.Provider,
 		DisplayName:                  s.DisplayName,
-		Capabilities:                 s.Capabilities,
+		Capabilities:                 watchProviderCapabilitiesOf(s.Capabilities),
 		AuthMethod:                   s.AuthMethod,
 		Connected:                    s.Connected,
 		ProviderUsername:             s.ProviderUsername,
@@ -530,6 +571,6 @@ var requestLifecycleOperationIDs = []string{"getRequestStatus", "cancelRequest",
 type WatchProviderSummary struct {
 	Key                    string                    `json:"key"`
 	DisplayName            string                    `json:"display_name"`
-	Capabilities           watchsync.Capabilities    `json:"capabilities"`
+	Capabilities           WatchProviderCapabilities `json:"capabilities"`
 	ConnectionConfigSchema []AdminPluginConfigSchema `json:"connection_config_schema,omitempty"`
 }

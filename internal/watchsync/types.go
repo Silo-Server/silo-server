@@ -27,9 +27,11 @@ type Capabilities struct {
 	ProvidesWatchlistOrder bool `json:"provides_watchlist_order"`
 	ScrobblePlayback       bool `json:"scrobble_playback"`
 	// ImportRatings and ExportRatings cover movie and series ratings.
-	// ExportRatings means the provider can both set and clear a rating.
-	ImportRatings bool `json:"import_ratings"`
-	ExportRatings bool `json:"export_ratings"`
+	// ExportRatings means the provider can both set and clear a rating. They
+	// are served only by /api/v2, which projects them explicitly; the frozen
+	// v1 responses keep their original capability fields.
+	ImportRatings bool `json:"-"`
+	ExportRatings bool `json:"-"`
 }
 
 // ListKind identifies which personal list a sync operates on. The favorites and
