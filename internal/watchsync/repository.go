@@ -50,7 +50,8 @@ type Repository interface {
 	ListRatingSyncStates(ctx context.Context, connectionID, providerAccountID string, mediaItemIDs []string) ([]RatingSyncState, error)
 	UpsertRatingSyncStates(ctx context.Context, states []RatingSyncState) error
 	DeleteRatingSyncStates(ctx context.Context, connectionID string, mediaItemIDs []string) error
-	ClearRatingSyncStates(ctx context.Context, connectionID string) error
+	ClearRatingSyncStates(ctx context.Context, connectionID, keepAccountID string) error
+	UpdateRatingCursors(ctx context.Context, connectionID, providerAccountID string, remove []string, set map[string]string) error
 	ListScrobbleConnections(ctx context.Context, userID int, profileID string) ([]Connection, error)
 	UpsertScrobbleSession(ctx context.Context, event ScrobbleEvent, connectionID string, action string) error
 	PrepareConfirmedScrobbleStop(ctx context.Context, event ScrobbleEvent, connectionID string, staleBefore time.Time) (confirmedStopPreparation, time.Time, error)
@@ -787,12 +788,38 @@ func (r *PostgresRepository) DeleteRatingSyncStates(ctx context.Context, connect
 	return nil
 }
 
-// ClearRatingSyncStates forgets every agreed rating of a connection, used when
-// the connection is re-bound to a different provider account.
-func (r *PostgresRepository) ClearRatingSyncStates(ctx context.Context, connectionID string) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM watch_provider_rating_items WHERE connection_id = $1::uuid`, connectionID)
+// ClearRatingSyncStates forgets a connection's agreed ratings with every
+// provider account other than keepAccountID, used after the connection is
+// re-bound to that account.
+func (r *PostgresRepository) ClearRatingSyncStates(ctx context.Context, connectionID, keepAccountID string) error {
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM watch_provider_rating_items
+		WHERE connection_id = $1::uuid AND provider_account_id <> $2
+	`, connectionID, keepAccountID)
 	if err != nil {
 		return fmt.Errorf("clear rating sync states: %w", err)
+	}
+	return nil
+}
+
+// UpdateRatingCursors removes and sets sync cursor keys in place, only while the
+// connection is still bound to providerAccountID. Other cursor keys and every
+// other column are left alone, so a concurrent rebind or sync flow is never
+// overwritten.
+func (r *PostgresRepository) UpdateRatingCursors(ctx context.Context, connectionID, providerAccountID string, remove []string, set map[string]string) error {
+	if len(remove) == 0 && len(set) == 0 {
+		return nil
+	}
+	if remove == nil {
+		remove = []string{}
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE watch_provider_connections
+		SET sync_cursors = (COALESCE(sync_cursors, '{}'::jsonb) - $3::text[]) || $4::jsonb
+		WHERE id = $1::uuid AND provider_account_id = $2
+	`, connectionID, providerAccountID, remove, encodeSyncCursors(set))
+	if err != nil {
+		return fmt.Errorf("update rating cursors: %w", err)
 	}
 	return nil
 }

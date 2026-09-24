@@ -575,14 +575,32 @@ func (r *serviceFakeRepo) DeleteRatingSyncStates(_ context.Context, connectionID
 	return nil
 }
 
-func (r *serviceFakeRepo) ClearRatingSyncStates(_ context.Context, connectionID string) error {
+func (r *serviceFakeRepo) ClearRatingSyncStates(_ context.Context, connectionID, keepAccountID string) error {
 	kept := r.ratingStates[:0]
 	for _, state := range r.ratingStates {
-		if state.ConnectionID != connectionID {
+		if state.ConnectionID != connectionID || state.ProviderAccountID == keepAccountID {
 			kept = append(kept, state)
 		}
 	}
 	r.ratingStates = kept
+	return nil
+}
+
+func (r *serviceFakeRepo) UpdateRatingCursors(_ context.Context, connectionID, providerAccountID string, remove []string, set map[string]string) error {
+	for key, conn := range r.connections {
+		if conn.ID != connectionID || conn.ProviderAccountID != providerAccountID {
+			continue
+		}
+		cursors := cloneStringMapForTest(conn.SyncCursors)
+		for _, k := range remove {
+			delete(cursors, k)
+		}
+		for k, v := range set {
+			cursors[k] = v
+		}
+		conn.SyncCursors = cursors
+		r.connections[key] = conn
+	}
 	return nil
 }
 
