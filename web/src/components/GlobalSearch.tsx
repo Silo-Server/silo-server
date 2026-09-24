@@ -63,7 +63,7 @@ function GlobalSearchResultRow({
   onPick: (contentId: string) => void;
   onPlay: () => void;
 }) {
-  const { loaded, onLoad } = useImageLoaded(item.poster_url);
+  const { loaded, onLoad, onError } = useImageLoaded(item.poster_url);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
 
   // Virtual focus: keyboard focus stays in the search input and the option is
@@ -107,6 +107,7 @@ function GlobalSearchResultRow({
               className={`h-full w-full object-cover ${loaded ? "opacity-100" : "opacity-0"}`}
               loading="lazy"
               onLoad={onLoad}
+              onError={onError}
             />
           ) : (
             <div className="text-muted-foreground flex h-full items-center justify-center px-1 text-center text-[10px] leading-tight">

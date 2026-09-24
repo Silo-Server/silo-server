@@ -85,6 +85,39 @@ describe("DetailHero artwork revisions", () => {
     expect(nextBackdrop).toHaveAttribute("src", signed("backdrop", 1758622500, "bbbb"));
   });
 
+  it("falls back to the placeholders when a re-signed request fails", () => {
+    const rev = "3f9a".repeat(16);
+    const signed = (image: string, exp: number, sig: string) =>
+      `/api/v2/artwork/tmdb/movies/78/${image}/w780.${rev}.webp?exp=${exp}&sig=${sig}`;
+    const hero = (exp: number, sig: string) => (
+      <DetailHero
+        title="Blade Runner"
+        posterUrl={signed("poster", exp, sig)}
+        posterThumbhash="poster"
+        backdropUrl={signed("backdrop", exp, sig)}
+        backdropThumbhash="backdrop"
+      />
+    );
+    const { container, rerender } = render(hero(1758621600, "aaaa"));
+    fireEvent.load(screen.getByRole("img", { name: "Blade Runner" }));
+    fireEvent.load(container.querySelector<HTMLImageElement>(".hero-backdrop-artwork img")!);
+
+    rerender(hero(1758622500, "bbbb"));
+    const poster = screen.getByRole("img", { name: "Blade Runner" });
+    const backdrop = container.querySelector<HTMLImageElement>(".hero-backdrop-artwork img")!;
+    fireEvent.error(poster);
+    fireEvent.error(backdrop);
+
+    // A failed <img> shows the broken-image state, so each one must hide and
+    // let its thumbhash show through again.
+    const placeholdersShown =
+      Number(
+        poster.classList.contains("opacity-0") &&
+          screen.getByTestId("detail-hero-poster-placeholder").classList.contains("opacity-100"),
+      ) + Number(backdrop.classList.contains("opacity-0"));
+    expect(placeholdersShown).toBe(2);
+  });
+
   it("hides signed artwork again when its revision changes", () => {
     const signed = (image: string, rev: string) =>
       `/api/v2/artwork/tmdb/movies/78/${image}/w780.${rev.repeat(16)}.webp?exp=1758621600&sig=aaaa`;

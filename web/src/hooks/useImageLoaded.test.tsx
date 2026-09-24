@@ -135,6 +135,33 @@ describe("useImageLoaded", () => {
     }
   });
 
+  it("hides the image again when a re-signed request fails", () => {
+    const key = `${ART}/w500.${REV_A}.webp`;
+    const { result, rerender } = renderHook(({ url }: { url: string }) => useImageLoaded(url), {
+      initialProps: { url: localURL(key, 1758621600, "aaaa") },
+    });
+    act(() => result.current.onLoad());
+    rerender({ url: localURL(key, 1758622500, "bbbb") });
+    expect(result.current.loaded).toBe(true);
+
+    // The element drops its kept pixels on error, so the placeholder must show.
+    act(() => result.current.onError());
+    expect(result.current.loaded).toBe(false);
+
+    // A later signature that loads brings the image back.
+    rerender({ url: localURL(key, 1758623400, "cccc") });
+    act(() => result.current.onLoad());
+    expect(result.current.loaded).toBe(true);
+  });
+
+  it("keeps a failed first load hidden", () => {
+    const { result } = renderHook(() =>
+      useImageLoaded(localURL(`${ART}/w500.${REV_A}.webp`, 1, "a")),
+    );
+    act(() => result.current.onError());
+    expect(result.current.loaded).toBe(false);
+  });
+
   it("resets when the query of an unrecognized URL changes", () => {
     expect(
       resetsAfterSwitch(
