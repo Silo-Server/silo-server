@@ -1,7 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { captureProfileRequestContext } from "@/api/client";
 import { v2, V2ProblemError } from "@/api/v2/request";
-import { favoriteKeys, ratingKeys, watchlistKeys, watchProviderKeys } from "./keys";
+import { favoriteKeys, watchlistKeys, watchProviderKeys } from "./keys";
+import { invalidateAllRatingSurfaceQueries } from "./ratingsSurfaceRefresh";
 import { toast } from "sonner";
 import { storage } from "@/utils/storage";
 import type { PluginConfigSchema } from "@/api/types";
@@ -246,15 +248,55 @@ export function useWatchProviderConnection(provider: string) {
 
 export function useWatchProviderSyncRuns(provider: string, enabled = true) {
   const profileId = getActiveProfileId();
-  return useQuery({
+  const queryClient = useQueryClient();
+  const query = useQuery({
     queryKey: watchProviderKeys.syncRuns(profileId, provider),
     queryFn: () => fetchWatchProviderSyncRuns(provider),
     enabled: enabled && Boolean(profileId),
     refetchInterval: (query) => {
       const latest = query.state.data?.runs?.[0];
-      return latest?.status === "queued" || latest?.status === "running" ? 4_000 : false;
+      return latest && isActiveSyncRun(latest) ? 4_000 : false;
     },
   });
+  // A sync imports favorites, watchlist entries and ratings while it runs, so
+  // the surfaces showing them refresh once the run this page watched finishes.
+  const latest = query.data?.runs?.[0];
+  const observed = useRef<WatchProviderSyncRun | undefined>(undefined);
+  useEffect(() => {
+    if (!latest) return;
+    const previous = observed.current;
+    observed.current = latest;
+    if (syncRunFinished(previous, latest)) {
+      void invalidateSyncedSurfaces(queryClient);
+    }
+  }, [latest, queryClient]);
+  return query;
+}
+
+function isActiveSyncRun(run: WatchProviderSyncRun) {
+  return run.status === "queued" || run.status === "running";
+}
+
+// syncRunFinished reports whether latest is the run previously seen as queued
+// or running, now in a final state.
+export function syncRunFinished(
+  previous: WatchProviderSyncRun | undefined,
+  latest: WatchProviderSyncRun,
+) {
+  return (
+    previous !== undefined &&
+    previous.id === latest.id &&
+    isActiveSyncRun(previous) &&
+    !isActiveSyncRun(latest)
+  );
+}
+
+async function invalidateSyncedSurfaces(queryClient: QueryClient) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: favoriteKeys.list() }),
+    queryClient.invalidateQueries({ queryKey: watchlistKeys.list() }),
+    invalidateAllRatingSurfaceQueries(queryClient),
+  ]);
 }
 
 export function useStartWatchProviderDeviceAuth(provider: string) {
@@ -369,7 +411,6 @@ export function useTriggerWatchProviderSync(provider: string) {
       });
       queryClient.invalidateQueries({ queryKey: favoriteKeys.list() });
       queryClient.invalidateQueries({ queryKey: watchlistKeys.list() });
-      queryClient.invalidateQueries({ queryKey: ratingKeys.all });
       toast.success("Watch provider sync started");
     },
     onError: (err) => {

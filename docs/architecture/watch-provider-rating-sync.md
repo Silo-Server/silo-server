@@ -41,15 +41,16 @@ being imported back.
 
 A local rating that changed while its write was in flight may have been sent already by
 a newer event, which the older write then overwrote. So the current value is sent again,
-up to three times. If the rating is still changing after that, its agreed row is dropped,
-so the next merge sees both sides changed and keeps the newer rating instead of importing
-the provider's.
+up to three times. If the rating is still changing after that, its agreed row is set to
+the value last confirmed on the provider, so the next merge reads the newer local value
+(rating or removal) as a local change and sends it instead of importing the provider's.
 
 Rows are scoped to the provider account they were agreed with. A connection that moves
 to another account ignores the old rows, and so does a sync still running for the old
 account, so no stale agreement can read as a removal. Agreed rows and rating cursors are
 written only while the connection is still bound to the account the run read, so a run
-that outlives a re-bind cannot write for the old account.
+that outlives a re-bind cannot write for the old account. Agreed rows are written under a
+share lock on the connection row, so a re-bind waits for them and then clears them.
 
 The row's `provider_item_key` is the provider's own key for the title once a read has
 returned one, and Silo's key (`imdb:`, `tmdb:`, or `tvdb:`) before that. Rating writes

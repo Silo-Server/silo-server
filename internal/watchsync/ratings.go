@@ -830,6 +830,10 @@ func (s *Service) sendRatings(ctx context.Context, conn Connection, cfg ServerCo
 	sent := 0
 	var warnings []string
 	var changedSets, changedRemovals []*ratingItem
+	// What this call last confirmed on the provider for each changed item, in
+	// case the resends run out.
+	var lastSent []RatingSyncState
+	var lastRemoved []string
 	for start := 0; start < len(sets); start += ratingExportBatchSize {
 		batch := sets[start:min(start+ratingExportBatchSize, len(sets))]
 		payload := make([]LocalRating, 0, len(batch))
@@ -867,6 +871,14 @@ func (s *Service) sendRatings(ctx context.Context, conn Connection, cfg ServerCo
 				} else {
 					changedRemovals = append(changedRemovals, &changed)
 				}
+				lastSent = append(lastSent, RatingSyncState{
+					ConnectionID:      conn.ID,
+					ProviderAccountID: conn.ProviderAccountID,
+					MediaItemID:       identity.MediaItemID,
+					Kind:              identity.Kind,
+					ProviderItemKey:   identity.ProviderItemKey,
+					SyncedRating:      item.local,
+				})
 				continue
 			}
 			states = append(states, RatingSyncState{
@@ -905,6 +917,7 @@ func (s *Service) sendRatings(ctx context.Context, conn Connection, cfg ServerCo
 					changed := *item
 					changed.local, changed.localAt = current.Rating, current.RatedAt
 					changedSets = append(changedSets, &changed)
+					lastRemoved = append(lastRemoved, identity.MediaItemID)
 				}
 				continue
 			}
@@ -918,16 +931,14 @@ func (s *Service) sendRatings(ctx context.Context, conn Connection, cfg ServerCo
 		more, moreWarnings, err := s.sendRatings(ctx, conn, cfg, exporter, changedSets, changedRemovals, resends-1)
 		return sent + more, append(warnings, moreWarnings...), err
 	}
-	// The rating kept changing through every resend, so the provider may hold
-	// an older value than the agreed row says. Forgetting the agreed rows of
-	// rated items makes the next merge see both sides changed and keep the
-	// newer rating instead of importing the provider's. A removal keeps its
-	// row: the provider holding the agreed value then reads as a local change.
-	stale := make([]string, 0, len(changedSets))
-	for _, item := range changedSets {
-		stale = append(stale, item.identity.MediaItemID)
+	// The rating kept changing through every resend. The agreed row is set to
+	// what this call last confirmed on the provider, so the next merge reads
+	// the newer local value, rating or removal, as a local change and sends it,
+	// instead of importing a value the provider holds from an older write.
+	if err := s.repo.UpsertRatingSyncStates(ctx, lastSent); err != nil {
+		return sent, warnings, err
 	}
-	if err := s.repo.DeleteRatingSyncStates(ctx, conn.ID, conn.ProviderAccountID, stale); err != nil {
+	if err := s.repo.DeleteRatingSyncStates(ctx, conn.ID, conn.ProviderAccountID, lastRemoved); err != nil {
 		return sent, warnings, err
 	}
 	warnings = append(warnings, fmt.Sprintf("%d ratings changed while being sent and are left for the next sync", len(changedSets)+len(changedRemovals)))
