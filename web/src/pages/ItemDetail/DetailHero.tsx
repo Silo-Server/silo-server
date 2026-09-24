@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { Languages } from "lucide-react";
 import { decodeThumbhash } from "@/lib/thumbhash";
-import { useImageLoaded } from "@/hooks/useImageLoaded";
+import { imageIdentity, useImageLoaded } from "@/hooks/useImageLoaded";
 
 interface DetailHeroProps {
   title: string;
@@ -114,7 +114,7 @@ export default function DetailHero({
         >
           {backdropUrl && (
             <img
-              key={backdropUrl}
+              key={imageIdentity(backdropUrl)}
               src={backdropUrl}
               alt=""
               decoding="async"
@@ -159,7 +159,7 @@ export default function DetailHero({
                 {posterUrl ? (
                   <>
                     <img
-                      key={posterUrl}
+                      key={imageIdentity(posterUrl)}
                       src={posterUrl}
                       alt={title}
                       decoding="async"
@@ -167,7 +167,7 @@ export default function DetailHero({
                       onLoad={onPosterLoad}
                     />
                     <span
-                      key={`placeholder-${posterUrl}`}
+                      key={`placeholder-${imageIdentity(posterUrl)}`}
                       aria-hidden="true"
                       data-testid="detail-hero-poster-placeholder"
                       className={`bg-surface pointer-events-none absolute inset-0 bg-cover bg-center transition-opacity duration-300 ${
