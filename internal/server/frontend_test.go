@@ -79,6 +79,38 @@ func TestFrontendHandlerServesStaticAssetsWithoutCSP(t *testing.T) {
 	}
 }
 
+// The UI fonts ship as content-hashed woff2 files under /assets/. woff2 is
+// already compressed, so the build writes no sidecars for them; they are served
+// as-is with a font type and the same immutable policy as the bundles.
+func TestFrontendServesSelfHostedFontsImmutable(t *testing.T) {
+	prev := WebDistFS
+	WebDistFS = fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<!doctype html>")},
+		"assets/outfit-latin-wght-normal-Bc8i84L.woff2": &fstest.MapFile{
+			Data: []byte("wOF2\x00\x01\x00\x00font-bytes"),
+		},
+	}
+	t.Cleanup(func() { WebDistFS = prev })
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/outfit-latin-wght-normal-Bc8i84L.woff2", nil)
+	req.Header.Set("Accept-Encoding", "br, gzip")
+	rr := httptest.NewRecorder()
+	FrontendHandler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "font/woff2" {
+		t.Fatalf("content-type = %q, want font/woff2", got)
+	}
+	if got := rr.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("cache-control = %q", got)
+	}
+	if got := rr.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("content-encoding = %q, want none", got)
+	}
+}
+
 func TestFrontendHandlerReturns404ForMissingAssets(t *testing.T) {
 	handler := newFrontendTestHandler(t)
 
