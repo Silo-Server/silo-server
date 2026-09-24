@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+// imageCacheExpirySafetyMargin is how long before a signed URL expires the
+// cache stops serving it. A URL with less than twice this left uses half its
+// remaining life instead: s3.metadata_presign_expiry accepts any positive
+// duration, and a fixed margin would never cache a URL that lives five
+// minutes or less, leaving the URL-derived tags /Search/Hints emits
+// unresolvable for a sessionless image request.
 const imageCacheExpirySafetyMargin = 5 * time.Minute
 
 // imageCacheMaxEntries caps each of the cache's two maps. List responses
@@ -22,8 +28,9 @@ type cachedImage struct {
 
 // ImageCache keeps short-lived mappings from Jellyfin-style image requests to
 // the underlying Silo image URLs. Both maps are bounded, and an entry is never
-// served within imageCacheExpirySafetyMargin of its signed URL's expiry when
-// the cache knows that expiry (passed in, or read from the URL).
+// served within imageCacheExpirySafetyMargin, or half the URL's remaining life
+// if that is shorter, of its signed URL's expiry when the cache knows that
+// expiry (passed in, or read from the URL).
 type ImageCache struct {
 	mu sync.RWMutex
 	// byTag answers URL-derived tags, which /Search/Hints still emits even
@@ -76,10 +83,11 @@ func (c *ImageCache) RememberSizedUntil(routeID, imageType, imageURL, size strin
 		}
 	}
 	if urlExpiresAt != nil {
-		capped := urlExpiresAt.Add(-imageCacheExpirySafetyMargin)
-		if !capped.After(now) {
+		remaining := urlExpiresAt.Sub(now)
+		if remaining <= 0 {
 			return
 		}
+		capped := urlExpiresAt.Add(-min(imageCacheExpirySafetyMargin, remaining/2))
 		if capped.Before(expiresAt) {
 			expiresAt = capped
 		}

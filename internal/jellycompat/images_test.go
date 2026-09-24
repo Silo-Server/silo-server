@@ -935,53 +935,71 @@ func TestHandleItemImageServesKodiTagAfterRouteEviction(t *testing.T) {
 
 // TestSearchHintImageTagResolvesThroughTagCache pins why the cache keeps its
 // tag map when image tags are signed: /Search/Hints emits URL-derived tags,
-// which only the tag map can answer for a sessionless image request.
+// which only the tag map can answer for a sessionless image request. The
+// short-lived S3 cases cover a direct-S3 deployment whose
+// s3.metadata_presign_expiry is five minutes or less.
 func TestSearchHintImageTagResolvesThroughTagCache(t *testing.T) {
-	codec := NewResourceIDCodec()
-	contentID := "movie-1"
-	posterURL := "https://cdn.example.test/poster.jpg"
-	cfg := &config.Config{Auth: config.AuthConfig{JWTSecret: "image-secret"}}
-	cache := NewImageCache(time.Hour, time.Now)
-	items := &ItemsHandler{
-		content: &recordingSearchContentService{result: &upstreamBrowseResponse{Items: []upstreamListItem{{
-			ContentID:  contentID,
-			Type:       "movie",
-			Title:      "Movie",
-			PosterURL:  posterURL,
-			PosterPath: "posters/movie-1.jpg",
-		}}}},
-		userData: &mockUserDataService{},
-		codec:    codec,
-		mapper:   newMapper(codec, cfg),
-		images:   cache,
+	now := fixedNow()
+	s3URL := func(lifetime time.Duration) string {
+		return fmt.Sprintf("https://bucket.s3.example.test/posters/movie-1.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=%s&X-Amz-Expires=%d&X-Amz-Signature=sig",
+			now.Format("20060102T150405Z"), int(lifetime.Seconds()))
 	}
-	searchReq := httptest.NewRequest(http.MethodGet, "/Search/Hints?SearchTerm=movie", nil)
-	searchReq = searchReq.WithContext(context.WithValue(searchReq.Context(), compatSessionKey, &Session{
-		StreamAppUserID: 1,
-		ProfileID:       "profile-1",
-	}))
-	searchRec := httptest.NewRecorder()
-	items.HandleSearchHints(searchRec, searchReq)
-	var hints searchHintResultDTO
-	if err := json.Unmarshal(searchRec.Body.Bytes(), &hints); err != nil || len(hints.SearchHints) != 1 {
-		t.Fatalf("search hints: status %d, body %s, err %v", searchRec.Code, searchRec.Body.String(), err)
+	tests := []struct {
+		name      string
+		posterURL string
+	}{
+		{name: "unsigned passthrough", posterURL: "https://cdn.example.test/poster.jpg"},
+		{name: "s3 presign 60s", posterURL: s3URL(time.Minute)},
+		{name: "s3 presign 5m", posterURL: s3URL(5 * time.Minute)},
 	}
-	hint := hints.SearchHints[0]
-	if hint.PrimaryImageTag == "" {
-		t.Fatal("search hint has no primary image tag")
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			codec := NewResourceIDCodec()
+			contentID := "movie-1"
+			cfg := &config.Config{Auth: config.AuthConfig{JWTSecret: "image-secret"}}
+			cache := NewImageCache(time.Hour, func() time.Time { return now })
+			items := &ItemsHandler{
+				content: &recordingSearchContentService{result: &upstreamBrowseResponse{Items: []upstreamListItem{{
+					ContentID:  contentID,
+					Type:       "movie",
+					Title:      "Movie",
+					PosterURL:  tt.posterURL,
+					PosterPath: "posters/movie-1.jpg",
+				}}}},
+				userData: &mockUserDataService{},
+				codec:    codec,
+				mapper:   newMapper(codec, cfg),
+				images:   cache,
+			}
+			searchReq := httptest.NewRequest(http.MethodGet, "/Search/Hints?SearchTerm=movie", nil)
+			searchReq = searchReq.WithContext(context.WithValue(searchReq.Context(), compatSessionKey, &Session{
+				StreamAppUserID: 1,
+				ProfileID:       "profile-1",
+			}))
+			searchRec := httptest.NewRecorder()
+			items.HandleSearchHints(searchRec, searchReq)
+			var hints searchHintResultDTO
+			if err := json.Unmarshal(searchRec.Body.Bytes(), &hints); err != nil || len(hints.SearchHints) != 1 {
+				t.Fatalf("search hints: status %d, body %s, err %v", searchRec.Code, searchRec.Body.String(), err)
+			}
+			hint := hints.SearchHints[0]
+			if hint.PrimaryImageTag == "" {
+				t.Fatal("search hint has no primary image tag")
+			}
 
-	h := &ImagesHandler{
-		codec:     codec,
-		images:    cache,
-		itemRepo:  fakeImageItemRepo{item: &models.MediaItem{ContentID: contentID, PosterPath: "posters/movie-1.jpg"}},
-		imageTags: newImageTagSigner(cfg.Auth.JWTSecret),
+			h := &ImagesHandler{
+				codec:     codec,
+				images:    cache,
+				itemRepo:  fakeImageItemRepo{item: &models.MediaItem{ContentID: contentID, PosterPath: "posters/movie-1.jpg"}},
+				imageTags: newImageTagSigner(cfg.Auth.JWTSecret),
+			}
+			req := httptest.NewRequest(http.MethodGet, "/Items/"+hint.ItemID+"/Images/Primary?tag="+hint.PrimaryImageTag, nil)
+			req = withImageRouteParams(req, hint.ItemID, "Primary")
+			rec := httptest.NewRecorder()
+
+			h.HandleItemImage(rec, req)
+
+			assertImageRedirect(t, rec, tt.posterURL)
+		})
 	}
-	req := httptest.NewRequest(http.MethodGet, "/Items/"+hint.ItemID+"/Images/Primary?tag="+hint.PrimaryImageTag, nil)
-	req = withImageRouteParams(req, hint.ItemID, "Primary")
-	rec := httptest.NewRecorder()
-
-	h.HandleItemImage(rec, req)
-
-	assertImageRedirect(t, rec, posterURL)
 }

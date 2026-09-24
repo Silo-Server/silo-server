@@ -152,15 +152,73 @@ func TestImageCacheNeverServesSignedURLNearExpiry(t *testing.T) {
 	}
 }
 
-func TestImageCacheSkipsSignedURLInsideSafetyMargin(t *testing.T) {
+// TestImageCacheKeepsShortLivedSignedURLs covers a short
+// s3.metadata_presign_expiry, which accepts any positive duration. A URL that
+// lives five minutes or less must still be cached, because the URL-derived
+// tags /Search/Hints emits resolve only through the cache. The margin shrinks
+// to half the URL's remaining life, and the entry is never served inside it.
+func TestImageCacheKeepsShortLivedSignedURLs(t *testing.T) {
+	start := fixedNow()
+	for _, lifetime := range []time.Duration{time.Minute, 5 * time.Minute} {
+		urlExpiresAt := start.Add(lifetime)
+		stopServing := urlExpiresAt.Add(-lifetime / 2)
+		signedURLs := map[string]string{
+			"artwork": "/api/v2/artwork/tmdb/movies/1/poster/w342.abc.webp?exp=" + strconv.FormatInt(urlExpiresAt.Unix(), 10) + "&sig=x",
+			"s3": "https://bucket.s3.example.test/poster.webp?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=" +
+				start.Format("20060102T150405Z") + "&X-Amz-Expires=" + strconv.Itoa(int(lifetime.Seconds())) + "&X-Amz-Signature=y",
+		}
+		for name, signedURL := range signedURLs {
+			remember := map[string]func(*ImageCache){
+				"expiry read from URL": func(c *ImageCache) {
+					c.RememberSized("item-1", "Primary", signedURL, compatCardImageSize)
+				},
+				"expiry passed in": func(c *ImageCache) {
+					c.RememberSizedUntil("item-1", "Primary", signedURL, compatCardImageSize, &urlExpiresAt)
+				},
+			}
+			for how, rememberURL := range remember {
+				t.Run(fmt.Sprintf("%s/%s/%s", lifetime, name, how), func(t *testing.T) {
+					now := start
+					cache := NewImageCache(87600*time.Hour, func() time.Time { return now })
+					rememberURL(cache)
+
+					for _, at := range []time.Time{start, stopServing.Add(-time.Second)} {
+						now = at
+						if got, ok := cache.LookupTag(tagValue(signedURL)); !ok || got != signedURL {
+							t.Fatalf("tag lookup %s before URL expiry = (%q, %v), want hit", urlExpiresAt.Sub(now), got, ok)
+						}
+						if got, ok := cache.LookupSized("item-1", "Primary", "", compatCardImageSize); !ok || got != signedURL {
+							t.Fatalf("route lookup %s before URL expiry = (%q, %v), want hit", urlExpiresAt.Sub(now), got, ok)
+						}
+					}
+
+					now = stopServing
+					if got, ok := cache.LookupTag(tagValue(signedURL)); ok {
+						t.Fatalf("tag lookup %s before URL expiry = (%q, %v), want miss", urlExpiresAt.Sub(now), got, ok)
+					}
+					if got, ok := cache.LookupSized("item-1", "Primary", "", compatCardImageSize); ok {
+						t.Fatalf("route lookup %s before URL expiry = (%q, %v), want miss", urlExpiresAt.Sub(now), got, ok)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestImageCacheSkipsExpiredSignedURL(t *testing.T) {
 	now := fixedNow()
-	cache := NewImageCache(time.Hour, func() time.Time { return now })
-	signedURL := "/api/v2/artwork/poster.webp?exp=" + strconv.FormatInt(now.Add(3*time.Minute).Unix(), 10) + "&sig=x"
+	for _, urlExpiresAt := range []time.Time{now, now.Add(-time.Minute)} {
+		cache := NewImageCache(time.Hour, func() time.Time { return now })
+		signedURL := "/api/v2/artwork/poster.webp?exp=" + strconv.FormatInt(urlExpiresAt.Unix(), 10) + "&sig=x"
 
-	cache.RememberSized("item-1", "Primary", signedURL, compatCardImageSize)
+		cache.RememberSized("item-1", "Primary", signedURL, compatCardImageSize)
 
-	if got, ok := cache.LookupSized("item-1", "Primary", "", compatCardImageSize); ok {
-		t.Fatalf("LookupSized = (%q, %v), want a URL this close to expiry never cached", got, ok)
+		if got, ok := cache.LookupSized("item-1", "Primary", "", compatCardImageSize); ok {
+			t.Fatalf("LookupSized = (%q, %v), want a URL expiring at %s never cached", got, ok, urlExpiresAt)
+		}
+		if got := len(cache.byTag.entries) + len(cache.byRoute.entries); got != 0 {
+			t.Fatalf("cache holds %d entries for a URL expiring at %s, want 0", got, urlExpiresAt)
+		}
 	}
 }
 
