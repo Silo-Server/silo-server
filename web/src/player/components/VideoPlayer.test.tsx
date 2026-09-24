@@ -360,10 +360,45 @@ describe("VideoPlayer room catch-up", () => {
       expect(screen.queryByText(reconnectingMessage)).toBeNull();
       await act(() => vi.advanceTimersByTimeAsync(1));
       expect(screen.getByText(reconnectingMessage)).toBeInTheDocument();
+      // The warning outlasts the usual notice lifetime while the outage lasts.
+      await act(() => vi.advanceTimersByTimeAsync(30_000));
+      expect(screen.getByText(reconnectingMessage)).toBeInTheDocument();
       rerenderPlayer({ watchTogetherConnection: connection });
       expect(screen.queryByText(reconnectingMessage)).toBeNull();
       await act(() => vi.advanceTimersByTimeAsync(60_000));
     }
+  });
+
+  it("lets the reconnect warning expire once the room has closed", async () => {
+    const { connection, rerenderPlayer } = setup(100);
+    const disconnected = { ...connection, connectionState: "disconnected" as const };
+    rerenderPlayer({ watchTogetherConnection: disconnected });
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    expect(screen.getByText(reconnectingMessage)).toBeInTheDocument();
+    rerenderPlayer({ watchTogetherConnection: { ...disconnected, closedReason: "ended" } });
+    await act(() => vi.advanceTimersByTimeAsync(8_000));
+    expect(screen.queryByText(reconnectingMessage)).toBeNull();
+  });
+
+  it("does not replace a notice raised during the reconnect delay", async () => {
+    const { connection, rerenderPlayer } = setup(100);
+    rerenderPlayer({ watchTogetherConnection: { ...connection, connectionState: "disconnected" } });
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    const onCommand = realtimeOptions.current?.onCommand;
+    if (!onCommand) throw new Error("expected the realtime command handler");
+    await act(async () => {
+      await onCommand({
+        type: "command",
+        command_id: "cmd-message-1",
+        session_id: "session-1",
+        name: "display_message",
+        deadline_ms: 8_000,
+        payload: { title: "Admin", message: "Server maintenance at midnight." },
+      });
+    });
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(screen.getByText("Server maintenance at midnight.")).toBeInTheDocument();
+    expect(screen.queryByText(reconnectingMessage)).toBeNull();
   });
 
   it("shows a repeated notice again after the previous one expired", async () => {

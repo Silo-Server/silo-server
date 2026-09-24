@@ -262,6 +262,21 @@ interface PlaybackNoticeState {
   onAction?: () => void;
 }
 
+function watchTogetherNotice(
+  message: string,
+  tone: "info" | "warning",
+  onAction?: () => void,
+  actionLabel = "Join playback",
+): PlaybackNoticeState {
+  return {
+    title: "Watch Party",
+    message,
+    tone,
+    actionLabel: onAction ? actionLabel : undefined,
+    onAction,
+  };
+}
+
 function isAutoplayPolicyRejection(error: unknown): boolean {
   return error instanceof DOMException
     ? error.name === "NotAllowedError"
@@ -420,6 +435,10 @@ export function VideoPlayer({
   const [isLeaving, setIsLeaving] = useState(false);
   const leaveInProgressRef = useRef(false);
   const [notice, setNotice] = useState<PlaybackNoticeState | null>(null);
+  const noticeRef = useRef(notice);
+  useEffect(() => {
+    noticeRef.current = notice;
+  }, [notice]);
 
   // Volume (persisted via localStorage)
   const [volume, setVolume] = useState(() => getPersistedVolume().volume);
@@ -683,23 +702,9 @@ export function VideoPlayer({
   const roomReadinessPending = roomSyncWaiting || watchTogetherSync.catchingUp;
   const watchTogetherRoomActive = watchTogether.room !== null;
 
-  const showWatchTogetherNotice = useCallback(
-    (
-      message: string,
-      tone: "info" | "warning",
-      onAction?: () => void,
-      actionLabel = "Join playback",
-    ) => {
-      setNotice({
-        title: "Watch Party",
-        message,
-        tone,
-        actionLabel: onAction ? actionLabel : undefined,
-        onAction,
-      });
-    },
-    [],
-  );
+  const showWatchTogetherNotice = useCallback((...args: Parameters<typeof watchTogetherNotice>) => {
+    setNotice(watchTogetherNotice(...args));
+  }, []);
 
   const resetLeaveState = useCallback(() => {
     leaveInProgressRef.current = false;
@@ -757,6 +762,11 @@ export function VideoPlayer({
   }, [sessionId]);
 
   const roomConnected = watchTogether.connectionState === "connected";
+  const roomReconnecting =
+    !!watchTogetherRoomId &&
+    !watchTogether.closedReason &&
+    !watchTogether.replacementReason &&
+    !roomConnected;
   useEffect(() => {
     if (!watchTogetherRoomId || watchTogether.closedReason) {
       return;
@@ -771,14 +781,21 @@ export function VideoPlayer({
       return;
     }
 
+    // A notice raised during the delay, such as an admin message, is newer
+    // than the outage and keeps its place.
+    const noticeAtDisconnect = noticeRef.current;
     const timer = setTimeout(
-      () => showWatchTogetherNotice(ROOM_RECONNECTING_MESSAGE, "warning"),
+      () =>
+        setNotice((current) =>
+          current === null || current === noticeAtDisconnect
+            ? watchTogetherNotice(ROOM_RECONNECTING_MESSAGE, "warning")
+            : current,
+        ),
       ROOM_RECONNECT_NOTICE_DELAY_MS,
     );
     return () => clearTimeout(timer);
   }, [
     roomConnected,
-    showWatchTogetherNotice,
     watchTogether.closedReason,
     watchTogether.replacementReason,
     watchTogetherRoomId,
@@ -786,15 +803,16 @@ export function VideoPlayer({
 
   // Expire the notice from state rather than only hiding it, so the next
   // identical notice renders again. A minimized player keeps it until the
-  // viewer can see it.
+  // viewer can see it, and the reconnect warning stays for the whole outage.
   useEffect(() => {
     if (!notice || isDetached) return;
+    if (roomReconnecting && notice.message === ROOM_RECONNECTING_MESSAGE) return;
     const timer = setTimeout(
       () => setNotice((current) => (current === notice ? null : current)),
       PLAYBACK_NOTICE_VISIBLE_MS,
     );
     return () => clearTimeout(timer);
-  }, [isDetached, notice]);
+  }, [isDetached, notice, roomReconnecting]);
 
   useEffect(() => {
     compatibilityFallbackKeyRef.current = null;
