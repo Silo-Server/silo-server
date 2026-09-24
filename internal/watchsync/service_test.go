@@ -68,6 +68,8 @@ type serviceFakeRepo struct {
 	// sync lock; ratingLocks records each lock taken, with whether it waited.
 	ratingLockBusy map[string]bool
 	ratingLocks    []string
+	// upsertRatingErr fails UpsertRatingSyncStates when set.
+	upsertRatingErr error
 }
 
 type scrobbleUpdate struct {
@@ -544,6 +546,9 @@ func (r *serviceFakeRepo) ListRatingSyncStates(_ context.Context, connectionID, 
 }
 
 func (r *serviceFakeRepo) UpsertRatingSyncStates(_ context.Context, states []RatingSyncState) error {
+	if r.upsertRatingErr != nil && len(states) > 0 {
+		return r.upsertRatingErr
+	}
 	for _, state := range states {
 		replaced := false
 		for i := range r.ratingStates {

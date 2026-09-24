@@ -2,6 +2,7 @@ package watchsync
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sort"
 	"strings"
@@ -752,6 +753,32 @@ func TestPersistConnectionAccountChangeClearsAgreedRatings(t *testing.T) {
 	// Only the switch waited for the rating sync lock.
 	if !slices.Equal(repo.ratingLocks, []string{"wait:" + ratingTestConnID}) {
 		t.Fatalf("rating sync locks = %v, want one wait by the account switch", repo.ratingLocks)
+	}
+}
+
+func TestDeleteConnectionWaitsForTheRatingSyncLock(t *testing.T) {
+	h := newRatingHarness(t)
+	if err := h.service.DeleteConnection(context.Background(), h.conn.UserID, h.conn.ProfileID, h.conn.Provider); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(h.repo.ratingLocks, []string{"wait:" + ratingTestConnID}) {
+		t.Fatalf("rating sync locks = %v, want the disconnect to wait for the lock", h.repo.ratingLocks)
+	}
+	if len(h.repo.connections) != 0 {
+		t.Fatal("the connection was not deleted")
+	}
+}
+
+func TestSyncRatingsMarksTheProfileStaleWhenBookkeepingFailsAfterAnImport(t *testing.T) {
+	h := newRatingHarness(t)
+	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieB, 8)}, SnapshotKinds: []string{historyimport.KindMovie}}
+	h.repo.upsertRatingErr = errors.New("database unavailable")
+	h.repo.connections[connectionKey(h.conn.Provider, h.conn.UserID, h.conn.ProfileID)] = h.conn
+	if _, err := h.service.syncRatings(context.Background(), h.conn, ServerConfig{}, h.provider); err == nil {
+		t.Fatal("want the bookkeeping error")
+	}
+	if h.store.stars(ratingTestMovieB) != 4 || !h.stale {
+		t.Fatalf("movieB=%d stale=%v, want the committed import to mark recommendations stale", h.store.stars(ratingTestMovieB), h.stale)
 	}
 }
 

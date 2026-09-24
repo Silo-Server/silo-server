@@ -221,7 +221,19 @@ func (s *Service) clearWatchlistOrder(ctx context.Context, conn Connection) erro
 }
 
 func (s *Service) DeleteConnection(ctx context.Context, userID int, profileID string, providerKey string) error {
-	return s.repo.DeleteConnection(ctx, providerKey, userID, profileID)
+	conn, ok, err := s.repo.GetConnection(ctx, providerKey, userID, profileID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return s.repo.DeleteConnection(ctx, providerKey, userID, profileID)
+	}
+	// Wait for any rating reconciliation of the connection to end, so once a
+	// disconnect returns no run imports or sends with the removed connection.
+	_, err = s.repo.WithRatingSyncLock(ctx, conn.ID, true, func(ctx context.Context) error {
+		return s.repo.DeleteConnection(ctx, providerKey, userID, profileID)
+	})
+	return err
 }
 
 func (s *Service) RequestManualSync(ctx context.Context, userID int, profileID string, providerKey string) (ManualSyncResult, error) {

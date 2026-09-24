@@ -91,9 +91,10 @@ local read through the provider read to the last agreed-row write. Overlapping r
 would otherwise merge from their own reads, and an older run could leave an agreed
 rating older than the provider holds, which a later removal would then lose to. A
 scheduled or manual run that finds the lock held skips ratings with a warning; a local
-rating event and an account switch wait for it. Waiting retries a non-blocking try, so
-a waiter holds no pool connection, and a node that dies releases the lock with its
-database session.
+rating event, an account switch, and a disconnect wait for it. The lock lives on a
+database session opened outside the pool, so the work it guards keeps the whole pool.
+Each node admits one caller per connection and at most four lock sessions, never more
+than its pool size. A node that dies releases the lock with its session.
 
 Imports use compare-and-set
 writes (`RatingsRepo.SetIfUnchanged` and `DeleteIfUnchanged`) against the local value

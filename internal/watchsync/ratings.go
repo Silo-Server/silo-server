@@ -391,19 +391,27 @@ func (s *Service) processLocalRatingEvent(ctx context.Context, event LocalRating
 		if err != nil {
 			if limited, ok := AsRateLimited(err); ok {
 				if deferErr := s.deferRateLimitedConnection(ctx, conn, limited); deferErr != nil {
-					s.recordLocalWatchEventError(ctx, conn, errors.Join(err, deferErr))
+					s.recordRatingEventError(ctx, conn, errors.Join(err, deferErr))
 				}
 				continue
 			}
-			// The reconciliation this waited for may have saved cursors, which
-			// recording the error from the older snapshot would overwrite.
-			if fresh, reloadErr := s.reloadConnection(ctx, conn); reloadErr == nil {
-				conn = fresh
-			}
-			s.recordLocalWatchEventError(ctx, conn, err)
+			s.recordRatingEventError(ctx, conn, err)
 		}
 	}
 	return nil
+}
+
+// recordRatingEventError records a rating event's error on a fresh read of
+// the connection: the reconciliation the event waited for may have saved
+// cursors that a write from the older snapshot would overwrite. The error is
+// only logged when the connection cannot be re-read or changed account.
+func (s *Service) recordRatingEventError(ctx context.Context, conn Connection, err error) {
+	fresh, reloadErr := s.reloadConnection(ctx, conn)
+	if reloadErr != nil || fresh.ProviderAccountID != conn.ProviderAccountID {
+		slog.WarnContext(ctx, "local rating provider event failed", "component", "watchsync", "provider", conn.Provider, "connection_id", conn.ID, "error", err, "reload_error", reloadErr)
+		return
+	}
+	s.recordLocalWatchEventError(ctx, fresh, err)
 }
 
 // sendLocalRatings sends a local rating event's new ratings under the
@@ -752,6 +760,15 @@ func (s *Service) reconcileRatings(
 		}
 	}
 
+	// Imports commit one by one, so recommendations are marked stale once any
+	// applied, even if the bookkeeping after them fails.
+	defer func() {
+		if result.imported > 0 && s.ratingStaler != nil {
+			if err := s.ratingStaler.MarkProfileStale(ctx, conn.UserID, conn.ProfileID); err != nil {
+				slog.WarnContext(ctx, "failed to mark profile stale after rating import", "component", "watchsync", "user_id", conn.UserID, "profile_id", conn.ProfileID, "error", err)
+			}
+		}
+	}()
 	for _, item := range items {
 		switch decideRating(item.local, item.remote, item.base, item.localAt, item.remoteAt) {
 		case ratingKeep:
@@ -788,11 +805,6 @@ func (s *Service) reconcileRatings(
 	}
 	if err := s.repo.DeleteRatingSyncStates(ctx, conn.ID, conn.ProviderAccountID, deletes); err != nil {
 		return result, err
-	}
-	if result.imported > 0 && s.ratingStaler != nil {
-		if err := s.ratingStaler.MarkProfileStale(ctx, conn.UserID, conn.ProfileID); err != nil {
-			slog.WarnContext(ctx, "failed to mark profile stale after rating import", "component", "watchsync", "user_id", conn.UserID, "profile_id", conn.ProfileID, "error", err)
-		}
 	}
 	if afterImport != nil {
 		if err := afterImport(); err != nil {

@@ -118,6 +118,25 @@ type PostgresRepository struct {
 	// ratingLockSlots admits one caller per connection on this node to the
 	// rating sync lock, so waiters cannot pile up database sessions.
 	ratingLockSlots sync.Map
+	// ratingLockSessions caps the lock sessions this node holds at once
+	// across all connections; see ratingLockSessionLimit.
+	ratingLockSessionsOnce sync.Once
+	ratingLockSessions     chan struct{}
+}
+
+// maxRatingLockSessions bounds the database sessions one node opens for
+// rating sync locks, which sit outside the pool's own limit.
+const maxRatingLockSessions = 4
+
+// ratingLockSessionLimit returns the semaphore of lock sessions, sized to at
+// most maxRatingLockSessions and never more than the pool's own size, so a
+// small deployment adds at most as many sessions as it configured.
+func (r *PostgresRepository) ratingLockSessionLimit() chan struct{} {
+	r.ratingLockSessionsOnce.Do(func() {
+		limit := min(maxRatingLockSessions, max(1, int(r.pool.Config().MaxConns)))
+		r.ratingLockSessions = make(chan struct{}, limit)
+	})
+	return r.ratingLockSessions
 }
 
 func NewPostgresRepository(pool *pgxpool.Pool, cipher *secret.Cipher) *PostgresRepository {
@@ -857,8 +876,9 @@ const ratingSyncLockClass = 0x57535254
 // true it blocks until the lock is free or ctx ends. The lock lives on its own
 // database session opened outside the pool, so holding it never takes a pool
 // connection that fn needs, even in a one-connection pool. On this node only
-// one caller per connection holds or waits for that session. Closing the
-// session releases the lock, including when a node dies.
+// one caller per connection holds or waits for that session, and at most
+// ratingLockSessionLimit sessions are open at once. Closing the session
+// releases the lock, including when a node dies.
 func (r *PostgresRepository) WithRatingSyncLock(ctx context.Context, connectionID string, wait bool, fn func(context.Context) error) (bool, error) {
 	slotValue, _ := r.ratingLockSlots.LoadOrStore(connectionID, make(chan struct{}, 1))
 	slot, ok := slotValue.(chan struct{})
@@ -879,6 +899,14 @@ func (r *PostgresRepository) WithRatingSyncLock(ctx context.Context, connectionI
 		}
 	}
 	defer func() { <-slot }()
+
+	sessions := r.ratingLockSessionLimit()
+	select {
+	case sessions <- struct{}{}:
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+	defer func() { <-sessions }()
 
 	session, err := pgx.ConnectConfig(ctx, r.pool.Config().ConnConfig)
 	if err != nil {

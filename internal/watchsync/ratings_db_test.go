@@ -330,6 +330,46 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 		}
 	})
 
+	t.Run("rating sync lock sessions are capped per node", func(t *testing.T) {
+		config, err := pgxpool.ParseConfig(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		config.MaxConns = 1
+		single, err := pgxpool.NewWithConfig(ctx, config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer single.Close()
+		node := NewPostgresRepository(single, cipher)
+		held := make(chan struct{})
+		release := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			_, err := node.WithRatingSyncLock(ctx, conn.ID, false, func(context.Context) error {
+				close(held)
+				<-release
+				return nil
+			})
+			done <- err
+		}()
+		<-held
+		// A one-connection pool allows one lock session, so a lock for a
+		// different connection waits for it.
+		short, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+		defer cancel()
+		if _, err := node.WithRatingSyncLock(short, "00000000-0000-0000-0000-000000000001", true, func(context.Context) error { return nil }); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("second session = %v, want it to wait for the cap", err)
+		}
+		close(release)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if locked, err := node.WithRatingSyncLock(ctx, "00000000-0000-0000-0000-000000000001", false, func(context.Context) error { return nil }); err != nil || !locked {
+			t.Fatalf("lock after the first session closed = %v, %v", locked, err)
+		}
+	})
+
 	t.Run("connection delete cascades", func(t *testing.T) {
 		bind(t, "")
 		if err := repo.UpsertRatingSyncStates(ctx, []RatingSyncState{{ConnectionID: conn.ID, MediaItemID: "m-2", Kind: "movie", SyncedRating: 3}}); err != nil {
