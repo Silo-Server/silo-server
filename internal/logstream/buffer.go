@@ -1,9 +1,6 @@
 package logstream
 
 import (
-	"context"
-	"time"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -16,11 +13,11 @@ const (
 
 var droppedEntries = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "silo_log_writer_dropped_total",
-	Help: "Operational (app) and activity (audit) log entries dropped before reaching Postgres, by reason. The same records still reach stderr and OTLP.",
+	Help: "Operational (app) and activity (audit) log entries that never reached Postgres, by reason. App records also went to stderr and OTLP; audit entries have no other copy.",
 }, []string{"stream", "reason"})
 
-// CountDropped records n entries of stream lost for reason.
-func CountDropped(stream Stream, reason string, n int) {
+// countDropped records n entries of stream lost for reason.
+func countDropped(stream Stream, reason string, n int) {
 	droppedEntries.WithLabelValues(string(stream), reason).Add(float64(n))
 }
 
@@ -60,56 +57,4 @@ func (b *Buffer[T]) Close() error {
 // Chan is the consumer side of the buffer.
 func (b *Buffer[T]) Chan() <-chan T {
 	return b.ch
-}
-
-// Drain hands entries from ch to flush in batches of up to size, and flushes a
-// partial batch every interval. flush owns error handling; the batch slice is
-// reused once it returns. Drain returns after ch is closed, or after ctx ends
-// and the entries already buffered at that moment are flushed.
-//
-// flush always gets ctx's values without its cancellation, so a batch taken
-// from the buffer is inserted even when shutdown starts mid-flush.
-func Drain[T any](ctx context.Context, ch <-chan T, size int, interval time.Duration, flush func(context.Context, []T)) {
-	flushCtx := context.WithoutCancel(ctx)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	batch := make([]T, 0, size)
-	flushPending := func() {
-		if len(batch) > 0 {
-			flush(flushCtx, batch)
-			batch = batch[:0]
-		}
-	}
-	add := func(entry T) {
-		batch = append(batch, entry)
-		if len(batch) >= size {
-			flushPending()
-		}
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			// Bounded by what is buffered now, so writers that keep logging
-			// during shutdown cannot hold the drain open.
-			for n := len(ch); n > 0; n-- {
-				entry, ok := <-ch
-				if !ok {
-					break
-				}
-				add(entry)
-			}
-			flushPending()
-			return
-		case entry, ok := <-ch:
-			if !ok {
-				flushPending()
-				return
-			}
-			add(entry)
-		case <-ticker.C:
-			flushPending()
-		}
-	}
 }

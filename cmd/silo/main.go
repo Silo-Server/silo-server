@@ -999,8 +999,10 @@ func main() {
 			slog.Warn("event bus close error", "error", err)
 		}
 	}()
-	// Deferred after the event bus close so it runs first: the final flush
-	// still reaches other nodes' live tails.
+	// Deferred calls run in reverse: the log consumers flush first (the
+	// activity consumer is deferred later in main), the hub then sends their
+	// rows to other nodes' live tails, and the event bus closes last.
+	defer logStreamHub.Close()
 	defer stopOperationalLog()
 
 	// Proxy and transcode modes run with DB + Redis for hot-reload.

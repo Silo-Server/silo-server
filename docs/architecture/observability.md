@@ -78,22 +78,40 @@ Three properties matter:
 
 The operational log (`opslog.Handler`, stream `app`) and the activity log
 (`activitylog.NewMiddleware`, stream `audit`) run on the goroutine that logs, so their
-writers never block and never log:
+writers never block and never log. Neither Redis nor Postgres is on that path.
 
 - Each node queues entries in its own bounded in-memory buffer
-  (`logstream.Buffer`, 10,000 entries per stream). A consumer on that node inserts them
-  into Postgres in batches of 100 or every two seconds, then publishes each inserted row
-  to the admin live tail: local subscribers directly, other nodes through the Redis
-  event bus. Redis is not on the logging path, and a Redis outage only limits the
-  cross-node tail. Each batch gets one two-second publish budget.
-- A full buffer drops the entry, and a failed batch insert drops the batch. Both are
+  (`logstream.Buffer`, 10,000 entries per stream). A consumer on that node
+  (`logstream.Drain`) inserts them into Postgres in batches of 100 or every two seconds.
+  Each insert attempt has a ten-second deadline.
+- While Postgres is unreachable or refuses work for a passing reason (connection
+  errors, timeouts, restart, failover, overload), the consumer retries the batch with
+  backoff from one to ten seconds, and new entries wait in the buffer. A batch the
+  server rejects is dropped at once. When the node is stopping, each batch gets one
+  attempt. A connection lost after an insert commits can make the retry insert that
+  batch twice.
+- A full buffer drops the entry, and a batch that is given up is dropped. Both are
   counted in `silo_log_writer_dropped_total{stream, reason}` (`buffer_full`,
-  `insert_failed`); stderr and OTLP still receive every record.
+  `insert_failed`). App records also reach stderr and OTLP. Audit entries have no
+  other copy, so an audit drop is permanent loss.
+- After a batch is inserted, `logstream.Hub` hands each row to local live-tail
+  subscribers directly and queues it (1,024 rows) for a goroutine that publishes to
+  other nodes through the Redis event bus. The consumer never waits on Redis. While
+  Redis is down, other nodes' live tails miss this node's rows, which are still in
+  Postgres. Rows that are not sent are counted in
+  `silo_log_tail_publish_dropped_total{stream, reason}` (`queue_full`,
+  `publish_failed`). The hub logs when publishing starts failing and when it recovers,
+  not for each row.
 - The opslog consumer reports its own failures to stderr and OTLP only, so a failing
   batch cannot queue records about itself.
-- Consumers run past the application context and stop after the HTTP servers drain, so
-  graceful-shutdown logging is persisted. A node that dies loses at most the entries
-  still in its buffer.
+- Consumers run past the application context and stop after the HTTP servers drain,
+  and the hub then sends its queue before the event bus closes, so graceful-shutdown
+  logging is persisted and reaches other nodes. A node that dies loses the entries
+  still in its buffer, including the record that `log.Fatalf` writes just before it
+  exits.
+- Earlier Silo versions pushed entries into the Redis lists `ops_log:buffer` and
+  `activity_log:buffer`. Current versions never read them. Once no node runs an earlier
+  version, delete both keys.
 
 ## Logging conventions (enforced)
 

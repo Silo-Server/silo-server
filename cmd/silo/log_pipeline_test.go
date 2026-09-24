@@ -38,6 +38,7 @@ func TestOperationalLoggingReturnsWhileRedisIsDown(t *testing.T) {
 	t.Cleanup(cancel)
 
 	hub := logstream.NewHub("node-a", cache.NewEventBus("redis://"+refusedAddr(t)))
+	t.Cleanup(hub.Close)
 	_, _, stop := configureOperationalLogging(ctx, unreachablePool(t), newMemorySettings(), hub,
 		slog.DiscardHandler, "node-a")
 	t.Cleanup(stop)
@@ -83,6 +84,7 @@ func TestLoggedRequestIssuesNoRedisCommands(t *testing.T) {
 
 	fake := startFakeRedis(t)
 	hub := logstream.NewHub("node-a", cache.NewEventBus("redis://"+fake.addr))
+	t.Cleanup(hub.Close)
 	pool := unreachablePool(t)
 	_, _, stopOperational := configureOperationalLogging(ctx, pool, newMemorySettings(), hub,
 		slog.DiscardHandler, "node-a")
@@ -124,6 +126,7 @@ func BenchmarkLoggedInfo(b *testing.B) {
 
 	fake := startFakeRedis(b)
 	hub := logstream.NewHub("node-a", cache.NewEventBus("redis://"+fake.addr))
+	b.Cleanup(hub.Close)
 	_, _, stop := configureOperationalLogging(ctx, unreachablePool(b), newMemorySettings(), hub,
 		slog.DiscardHandler, "node-a")
 	b.Cleanup(stop)

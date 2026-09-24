@@ -77,7 +77,8 @@ func TestHandlerLeavesPipelineRecordsToTheInnerHandler(t *testing.T) {
 
 // TestConsumerFailureDoesNotFeedThePipeline runs the consumer against a
 // database that refuses connections with the operational handler installed as
-// the slog default, the way main wires it. The failed batch is counted and
+// the slog default, the way main wires it. The channel is closed, so the
+// consumer is stopping and makes one attempt. The failed batch is counted and
 // reported on the console, and nothing is written back into the pipeline.
 func TestConsumerFailureDoesNotFeedThePipeline(t *testing.T) {
 	prev := slog.Default()
@@ -112,7 +113,7 @@ func TestConsumerFailureDoesNotFeedThePipeline(t *testing.T) {
 	if got := writer.messages(); len(got) != 0 {
 		t.Fatalf("consumer wrote %q back into the pipeline, want nothing", got)
 	}
-	if got := inner.seen(); len(got) != 1 || got[0] != "opslog batch insert failed" {
+	if got := inner.seen(); len(got) != 1 || got[0] != "opslog batch insert failed; entries dropped" {
 		t.Fatalf("console saw %q, want the batch failure", got)
 	}
 }

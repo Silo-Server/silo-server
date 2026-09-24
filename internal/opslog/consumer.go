@@ -32,16 +32,25 @@ func NewConsumer(pool *pgxpool.Pool, streamHub *logstream.Hub) *Consumer {
 }
 
 // Run persists entries from ch until ctx ends, then flushes what is already
-// buffered. The consumer's own records reach stderr and OTLP but are not
-// captured: a warning about a failed batch must not queue another entry behind
-// it.
+// buffered; see logstream.Drain for retries and drops. The consumer's own
+// records reach stderr and OTLP but are not captured: a warning about a failed
+// batch must not queue another entry behind it.
 func (c *Consumer) Run(ctx context.Context, ch <-chan Entry) {
-	logstream.Drain(withoutCapture(ctx), ch, c.batchSize, c.interval, func(ctx context.Context, batch []Entry) {
-		if err := c.insertBatch(ctx, batch); err != nil {
-			logstream.CountDropped(logstream.StreamApp, logstream.DropInsertFailed, len(batch))
-			slog.WarnContext(ctx, "opslog batch insert failed", "component", "opslog", "entries", len(batch), "error", err)
-		}
-	})
+	logstream.Drain[Entry]{
+		Stream:   logstream.StreamApp,
+		Size:     c.batchSize,
+		Interval: c.interval,
+		Insert:   c.insertBatch,
+		Failed: func(ctx context.Context, f logstream.InsertFailure) {
+			if f.RetryIn > 0 {
+				slog.WarnContext(ctx, "opslog batch insert failed; retrying", "component", "opslog",
+					"entries", f.Entries, "attempt", f.Attempt, "retry_in", f.RetryIn, "error", f.Err)
+				return
+			}
+			slog.ErrorContext(ctx, "opslog batch insert failed; entries dropped", "component", "opslog",
+				"entries", f.Entries, "attempt", f.Attempt, "error", f.Err)
+		},
+	}.Run(withoutCapture(ctx), ch)
 }
 
 func (c *Consumer) insertBatch(ctx context.Context, entries []Entry) error {
@@ -105,7 +114,7 @@ func (c *Consumer) insertBatch(ctx context.Context, entries []Entry) error {
 		return fmt.Errorf("iterate inserted operational log rows: %w", err)
 	}
 
-	if failed, err := logstream.PublishAppends(ctx, c.streamHub, logstream.StreamApp, inserted); failed > 0 {
+	if failed, err := logstream.PublishAppends(c.streamHub, logstream.StreamApp, inserted); failed > 0 {
 		slog.WarnContext(ctx, "opslog: failed to publish log stream appends", "component", "opslog", "error", err, "failed", failed, "entries", len(inserted))
 	}
 

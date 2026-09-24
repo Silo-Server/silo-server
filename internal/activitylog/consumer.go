@@ -32,14 +32,23 @@ func NewConsumer(pool *pgxpool.Pool, streamHub *logstream.Hub) *Consumer {
 }
 
 // Run persists entries from ch until ctx ends, then flushes what is already
-// buffered.
+// buffered; see logstream.Drain for retries and drops.
 func (c *Consumer) Run(ctx context.Context, ch <-chan LogEntry) {
-	logstream.Drain(ctx, ch, c.batchSize, c.interval, func(ctx context.Context, batch []LogEntry) {
-		if err := c.insertBatch(ctx, batch); err != nil {
-			logstream.CountDropped(logstream.StreamAudit, logstream.DropInsertFailed, len(batch))
-			slog.WarnContext(ctx, "activity log batch insert failed", "component", "activitylog", "entries", len(batch), "error", err)
-		}
-	})
+	logstream.Drain[LogEntry]{
+		Stream:   logstream.StreamAudit,
+		Size:     c.batchSize,
+		Interval: c.interval,
+		Insert:   c.insertBatch,
+		Failed: func(ctx context.Context, f logstream.InsertFailure) {
+			if f.RetryIn > 0 {
+				slog.WarnContext(ctx, "activity log batch insert failed; retrying", "component", "activitylog",
+					"entries", f.Entries, "attempt", f.Attempt, "retry_in", f.RetryIn, "error", f.Err)
+				return
+			}
+			slog.ErrorContext(ctx, "activity log batch insert failed; entries dropped", "component", "activitylog",
+				"entries", f.Entries, "attempt", f.Attempt, "error", f.Err)
+		},
+	}.Run(ctx, ch)
 }
 
 // insertBatch performs a bulk INSERT into the activity_log table.
@@ -98,7 +107,7 @@ func (c *Consumer) insertBatch(ctx context.Context, entries []LogEntry) error {
 		return fmt.Errorf("iterate inserted activity log rows: %w", err)
 	}
 
-	if failed, err := logstream.PublishAppends(ctx, c.streamHub, logstream.StreamAudit, inserted); failed > 0 {
+	if failed, err := logstream.PublishAppends(c.streamHub, logstream.StreamAudit, inserted); failed > 0 {
 		slog.WarnContext(ctx, "activitylog: failed to publish log stream appends", "component", "activitylog", "error", err, "failed", failed, "entries", len(inserted))
 	}
 
