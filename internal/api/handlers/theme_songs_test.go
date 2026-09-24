@@ -42,7 +42,7 @@ func TestThemeGrantRechecksCurrentAuthorityAndFile(t *testing.T) {
 	svc := themesongs.NewService(store, "test secret")
 	sessions := &socketSessionFixture{valid: true}
 	users := &socketUserFixture{user: models.User{ID: 7, Enabled: true, AccessPolicyRevision: 2}}
-	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "profile", ProfileVerified: true, AllowedLibraryIDs: []int{3}}}
+	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "profile", ProfileVerified: true, AllowedLibraryIDs: []int{3}, MaxContentRating: "PG-13", AllowUnratedContent: true}}
 	h := &ThemeSongsHandler{Service: svc, Sessions: sessions, Users: users, Resolver: viewer}
 	token, _, err := svc.Mint(t.Context(), themesongs.Identity{UserID: 7, ProfileID: "profile", SessionID: "session", PolicyRevision: 2}, "movie", "7", catalog.AccessFilter{}, time.Now().Add(time.Minute))
 	if err != nil {
@@ -72,6 +72,12 @@ func TestThemeGrantRechecksCurrentAuthorityAndFile(t *testing.T) {
 	}
 	if len(store.filter.AllowedLibraryIDs) != 1 || store.filter.AllowedLibraryIDs[0] != 3 {
 		t.Fatal("current scope was not applied")
+	}
+	// The recheck must carry every scope field, including the server-wide
+	// unrated-content decision, or an allowed unrated title mints a grant the
+	// audio request then refuses.
+	if store.filter.MaxContentRating != "PG-13" || !store.filter.AllowUnratedContent {
+		t.Fatalf("content-rating scope was not applied: %+v", store.filter)
 	}
 	for _, tc := range []struct {
 		name          string

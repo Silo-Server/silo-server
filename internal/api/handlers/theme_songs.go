@@ -6,7 +6,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
@@ -41,8 +40,7 @@ func (h *ThemeSongsHandler) OpenGrant(ctx context.Context, owner, id, token stri
 	if err != nil || !scope.ProfileVerified {
 		return themesongs.File{}, nil, themesongs.ErrGrant
 	}
-	filter := catalog.AccessFilter{UserID: grant.UserID, ProfileID: grant.ProfileID, AllowedLibraryIDs: scope.AllowedLibraryIDs, DisabledLibraryIDs: scope.DisabledLibraryIDs, MaxContentRating: scope.MaxContentRating, MaxPlaybackQuality: scope.MaxPlaybackQuality}
-	file, err := h.Select(ctx, owner, id, filter)
+	file, err := h.Select(ctx, owner, id, accessFilterFromScope(scope, grant.UserID, grant.ProfileID, ""))
 	if err != nil {
 		return themesongs.File{}, nil, err
 	}
