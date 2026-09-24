@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"testing"
 	"time"
 
@@ -420,10 +419,13 @@ func TestManagedDeleteWaitsForMonitorSyncPostgres(t *testing.T) {
 }
 
 // waitForLockWait polls until a backend running a query that matches pattern
-// (a LIKE pattern) waits on a lock.
+// (a LIKE pattern) waits on a lock, checking every few milliseconds so a wait
+// that never appears does not flood the shared test database.
 func (fx monitorFixture) waitForLockWait(ctx context.Context, pattern string) error {
 	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
 	for {
 		var waiting bool
 		if err := fx.pool.QueryRow(waitCtx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
@@ -433,7 +435,11 @@ func (fx monitorFixture) waitForLockWait(ctx context.Context, pattern string) er
 		if waiting {
 			return nil
 		}
-		runtime.Gosched()
+		select {
+		case <-waitCtx.Done():
+			return waitCtx.Err()
+		case <-tick.C:
+		}
 	}
 }
 
