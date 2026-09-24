@@ -336,12 +336,22 @@ or `/Users/{userId}/Items/{id}` before playback. These lookups recheck visibilit
 
 The authenticated `GET|HEAD /Audio/{itemId}/stream`,
 `/Audio/{itemId}/stream.{container}`, and `/Audio/{itemId}/universal` routes
-serve original theme audio with range and conditional-request support.
-Accepted containers, codecs, channel limits, and bitrate limits must permit the
-original file. Selecting a specific audio stream requires demuxing and is
-unsupported. Requests requiring conversion or a time-based seek return
-`400 PlaybackUnavailable`; clients can seek with byte ranges. Transcode fallback
-hints on a universal request do not prevent direct play when the original fits.
+serve theme audio. The original is served, with range and conditional-request
+support, when the accepted containers, codecs, channel limits, and bitrate
+limits permit it. Otherwise the request may receive a progressive AAC
+conversion in audio-only MP4 if it names an MP4 target and accepts AAC: a
+`stream.mp4`/`stream.m4a` route or `container=mp4|m4a` on the stream routes, or
+`TranscodingContainer=mp4|m4a` over HTTP on the universal route. `static=true`
+asks for the original only. The conversion honors `MaxAudioChannels=1` or
+`TranscodingAudioChannels=1`, caps its bitrate at 192 kbps and at any bitrate
+limit in the request, and seeks to `StartTimeTicks`. It has no byte ranges.
+HLS theme transcoding (`TranscodingProtocol=hls`, which Jellyfin Web requests)
+and requests that name no MP4 target return `400 PlaybackUnavailable`.
+Selecting a specific audio stream is unsupported. Transcode fallback hints on
+a universal request do not prevent direct play when the original fits.
+Theme audio follows the playback routing policy like compatibility video: a
+theme routed through a proxy is a `307` redirect to that proxy, and a policy no
+route satisfies answers `503` with the routing-policy or capacity code.
 For universal audio, `Container` declares accepted direct-play formats, including
 `container|codec` entries. `AudioCodec`, `AudioBitRate`, and
 `TranscodingAudioChannels` describe the fallback encoder. When the source bitrate
@@ -350,4 +360,4 @@ stream routes treat `AudioCodec` as a constraint on the original audio.
 Themes do not create playback sessions or update watched state.
 
 See [local theme songs](catalog-api.md#local-theme-songs-v2) for file conventions,
-ownership, inheritance, and local-node delivery limitations.
+ownership, inheritance, and routing.

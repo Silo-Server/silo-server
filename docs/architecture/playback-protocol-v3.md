@@ -620,6 +620,20 @@ or force reload deletes it. This durable authority prevents a signed URL whose
 token remains valid after a node replacement from resurrecting stopped FFmpeg
 work. When the store is unavailable, route selection excludes only this shape.
 
+**Theme audio.** Detail-page theme songs use the same routing policy without
+becoming playback sessions (`internal/themedelivery`). Original theme audio
+resolves as `direct_play`/`direct`; an AAC conversion resolves as
+`remux`/`progressive_remux`, so `remux_execution=prefer_transcode` converts it
+on a transcode node relayed by a proxy. Each authorization reserves capacity
+under a fresh `theme-` identity, signs a token that lives no longer than the
+theme grant, and, for the transcode shape, writes its node recipe with the same
+bounded lifetime; nothing is stopped explicitly. Proxies serve theme tokens only
+on `/stream/theme/{token}` and publish `theme_audio_egress_v1`; transcode nodes
+accept the `theme_aac_v1` method on `/remux/{session_id}` and publish
+`theme_audio_execution_v1`. Route selection reads those markers from each
+node's stored capability report, so an older worker is excluded from theme
+shapes the same way it is excluded from video shapes it cannot serve.
+
 **Authorized media origins.** A client that also sends
 `authorized_media_origins_v1` promises something further: it will fetch media
 from absolute URLs the plan returns on origins the server designates, attaching

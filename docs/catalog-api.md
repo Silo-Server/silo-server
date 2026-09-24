@@ -335,23 +335,51 @@ If the optional theme lookup fails, item detail still succeeds and omits `themes
 
 | Method and path | Result |
 | --- | --- |
-| `GET /api/v2/catalog/themes/capabilities` | Shared capability document with `delivery: local_direct_play`, `transcode: false`, `cluster_routing: false`, and `grant_lifetime_seconds` |
-| `POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback` | `url` and `expires_at` for an authenticated login session and verified profile |
-| `GET\|HEAD /api/v2/catalog/items/{id}/themes/{theme_id}/audio?token=...` | Original audio, authorized by the playback grant |
+| `GET /api/v2/catalog/themes/capabilities` | Shared capability document with `delivery: routed`, `transcode`, `cluster_routing`, and `grant_lifetime_seconds` |
+| `POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback` | `url`, `expires_at`, `delivery`, and `content_type` for an authenticated login session and verified profile |
+| `GET\|HEAD /api/v2/catalog/items/{id}/themes/{theme_id}/audio?token=...` | Theme audio this API node serves, authorized by the playback grant |
 
-The grant expires after at most five minutes, bounded by the login token's
-remaining lifetime. It binds the account, profile, login session, policy
-revision, owner, theme file ID, size, and modification time. Delivery rechecks
-the current account, login session, profile, permissions, ownership, and file.
-The grant uses a separate signing key derived from the server secret and cannot
-be used as an account or ordinary playback token. Clients must not log or
-persist signed URLs. Grant responses and audio use `Cache-Control: no-store`.
+The optional playback request body lists what the client decodes as
+`accepted_formats`, pairs of `container` and `audio_codec` (for example
+`{"container": "ogg", "audio_codec": "vorbis"}`; an empty codec accepts any
+codec in the container). The server sends the original when it matches.
+Otherwise it sends a conversion to AAC in progressive audio-only MP4
+(`delivery: converted`, `content_type: audio/mp4`) when an `mp4` or `m4a`
+entry accepts `aac`. A client that decodes neither gets `406 not_acceptable`.
+A request without a body receives the original, as before conversion existed.
+`transcode` reports whether any conversion route exists on this deployment.
 
-Audio delivery supports byte ranges, HEAD, ETags, and HTTP read preconditions.
-Authorization happens before a conditional response. Missing local files or
-changed bytes require a rescan or another accessible API node; this version
-does not route requests to remote workers, remux, or transcode. A shared-filesystem
-API deployment can serve the same grants on each node that has the files.
+Themes follow the playback routing policy, like video. Original audio follows
+`playback.routing.direct_play_egress`: with the default `prefer_proxy`, a proxy
+node serves it and the API serves it only when no proxy can. A conversion
+follows `playback.routing.remux_execution` and `playback.routing.remux_egress`:
+by default a transcode node converts it and a proxy relays it, falling back to
+a proxy, then to the API, as far as the policy allows. `proxy_only` and
+`worker_only` are never crossed; when no route satisfies the policy, the
+playback request answers `503 dependency_unavailable`. Only workers that
+advertise `theme_audio_egress_v1` (proxies) or `theme_audio_execution_v1`
+(transcode nodes) are chosen, so a mixed-version cluster never hands a theme to
+a worker that cannot serve it.
+
+`url` is either this server's audio route or an absolute URL on a proxy's
+origin. Both expire after at most five minutes, bounded by the login token's
+remaining lifetime. The API grant binds the account, profile, login session,
+policy revision, owner, theme file ID, size, and modification time, and each
+audio request rechecks the current account, login session, profile,
+permissions, ownership, and file. A proxy URL is checked against the same
+authority when it is issued and is then authorized by its signed token alone
+for its lifetime, as video stream tokens are; it names the theme file, its
+size and modification time, the serving proxy, and, for a conversion, the
+transcode node. Grants use a separate signing key derived from the server
+secret and cannot be used as an account or ordinary playback token. Clients
+must not log or persist signed URLs. Grant responses and audio use
+`Cache-Control: no-store`.
+
+Original audio supports byte ranges, HEAD, ETags, and HTTP read preconditions.
+Authorization happens before a conditional response. A converted stream has no
+length and no byte ranges; replay it with a new grant. The node serving a
+theme must read the theme directory at the path the scanner recorded, as it
+must for library media. Missing local files or changed bytes require a rescan.
 
 The web preferences `ui.theme_music_enabled` and `ui.theme_music_loop` default
 to `false` and support profile and profile-device scope on the web platform.
@@ -361,8 +389,12 @@ stops on normal playback, logout, or profile change. It handles browser autoplay
 rejection and retries a failed audio URL once with a fresh grant. Playback
 progress resets that retry budget for a later expiry.
 
+The web player reports its formats with `canPlayType`. It loops original audio
+with the element's `loop`, and replays a converted theme with a fresh grant when
+it ends.
+
 Apple and Android do not advertise this feature initially, as specified in
 issue #937. They need V2 discovery and fixtures, settings, playback, and lifecycle
 support before enabling it. Provider downloads, theme videos, uploads, remote
-URLs, and cluster routing are outside this local-file capability. No V1 route
-or V1 item-detail shape changes.
+URLs, and HLS theme transcoding are outside this local-file capability. No V1
+route or V1 item-detail shape changes.

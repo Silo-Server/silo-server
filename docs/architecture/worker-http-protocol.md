@@ -155,6 +155,27 @@ limits and tracking. A read failure after headers can truncate bytes without a
 new error status. Neither method prepares an artifact or promises a durable
 transfer, retry receipt or cross-node reconstruction.
 
+Proxy theme GET and HEAD use `/stream/theme/{token}`. The token must pass the
+playback selected-egress check for this proxy and carry a theme method whose
+routing tuple matches it: `theme_direct_v1` with `direct_play`/`none`, or
+`theme_aac_v1` with `remux` and proxy or transcode execution. Theme tokens are
+refused on every video route, and video tokens on this one. Original themes are
+served with ServeContent ranges and conditions after the file's size and
+modification time are checked against the token. Conversions stream progressive
+AAC in audio-only MP4, run on the proxy or relayed from the reserved transcode
+node with the `seek` query forwarded. HEAD never starts FFmpeg and, like
+downloads, is not tracked as an active transfer. Theme transfers are classed as
+transfers, not playback sessions, and node session reports label them
+`theme_audio`.
+
+A transcode node accepts `theme_aac_v1` on `/remux/{session_id}` under the same
+bearer, token, routing tuple, node identity and stored-recipe checks as a video
+progressive remux. Theme files are not `media_files` rows, so the input is
+approved by the theme authority instead: the token's theme ID must still name
+that exact path in an enabled library, and the file must have the size and
+modification time the token recorded. Video tokens remain limited to the
+media-file catalog.
+
 The transcode listener's legacy `DELETE /transcode/{session_id}` holds the same
 lifecycle lock as start and reconstruction. For legacy progressive remux,
 cancellation installs a process-local fence lasting the maximum token lifetime.
