@@ -772,10 +772,18 @@ func TestDeleteConnectionWaitsForTheRatingSyncLock(t *testing.T) {
 func TestSyncRatingsMarksTheProfileStaleWhenBookkeepingFailsAfterAnImport(t *testing.T) {
 	h := newRatingHarness(t)
 	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieB, 8)}, SnapshotKinds: []string{historyimport.KindMovie}}
-	h.repo.upsertRatingErr = errors.New("database unavailable")
 	h.repo.connections[connectionKey(h.conn.Provider, h.conn.UserID, h.conn.ProfileID)] = h.conn
-	if _, err := h.service.syncRatings(context.Background(), h.conn, ServerConfig{}, h.provider); err == nil {
+	// The run's deadline ends right after the import commits.
+	ctx, cancel := context.WithCancel(context.Background())
+	h.repo.upsertRatingErr = context.Canceled
+	h.store.afterWrite = cancel
+	staleCtxErr := errors.New("unset")
+	h.staleCtx = func(ctx context.Context) { staleCtxErr = ctx.Err() }
+	if _, err := h.service.syncRatings(ctx, h.conn, ServerConfig{}, h.provider); err == nil {
 		t.Fatal("want the bookkeeping error")
+	}
+	if staleCtxErr != nil {
+		t.Fatalf("stale mark ran with context error %v, want a live context", staleCtxErr)
 	}
 	if h.store.stars(ratingTestMovieB) != 4 || !h.stale {
 		t.Fatalf("movieB=%d stale=%v, want the committed import to mark recommendations stale", h.store.stars(ratingTestMovieB), h.stale)
@@ -817,6 +825,8 @@ type ratingHarness struct {
 	media    map[string]LocalFavorite
 	watched  map[string]bool
 	stale    bool
+	// staleCtx, when set, sees the context the stale mark ran with.
+	staleCtx func(context.Context)
 }
 
 func newRatingHarness(t *testing.T) *ratingHarness {
@@ -846,7 +856,12 @@ func newRatingHarness(t *testing.T) *ratingHarness {
 	h.service = NewService(h.repo, registry).
 		WithMatcher(ratingMatcherStub{media: h.media}).
 		WithUserStoreProvider(ratingHistoryStoreProvider{watched: h.watched}).
-		WithRatingStore(h.store, ratingStalerFunc(func() { h.stale = true }))
+		WithRatingStore(h.store, ratingStalerFunc(func(ctx context.Context) {
+			h.stale = true
+			if h.staleCtx != nil {
+				h.staleCtx(ctx)
+			}
+		}))
 	return h
 }
 
@@ -893,6 +908,8 @@ type fakeRatingStore struct {
 	ratings   map[string]catalog.UserRating
 	conflicts map[string]bool
 	clock     time.Time
+	// afterWrite runs after each applied import write when set.
+	afterWrite func()
 }
 
 func newFakeRatingStore() *fakeRatingStore {
@@ -942,6 +959,9 @@ func (s *fakeRatingStore) SetIfUnchanged(_ context.Context, _ int, _ string, id 
 		return false, nil
 	}
 	s.ratings[id] = catalog.UserRating{UserID: ratingTestUserID, ProfileID: ratingTestProfileID, MediaItemID: id, Rating: rating, RatedAt: ratedAt}
+	if s.afterWrite != nil {
+		s.afterWrite()
+	}
 	return true, nil
 }
 
@@ -953,10 +973,10 @@ func (s *fakeRatingStore) DeleteIfUnchanged(_ context.Context, _ int, _ string, 
 	return true, nil
 }
 
-type ratingStalerFunc func()
+type ratingStalerFunc func(context.Context)
 
-func (f ratingStalerFunc) MarkProfileStale(context.Context, int, string) error {
-	f()
+func (f ratingStalerFunc) MarkProfileStale(ctx context.Context, _ int, _ string) error {
+	f(ctx)
 	return nil
 }
 

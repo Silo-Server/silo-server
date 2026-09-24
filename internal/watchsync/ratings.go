@@ -761,10 +761,13 @@ func (s *Service) reconcileRatings(
 	}
 
 	// Imports commit one by one, so recommendations are marked stale once any
-	// applied, even if the bookkeeping after them fails.
+	// applied, even if the bookkeeping after them fails or the run's context
+	// ends; the mark gets a short context of its own.
 	defer func() {
 		if result.imported > 0 && s.ratingStaler != nil {
-			if err := s.ratingStaler.MarkProfileStale(ctx, conn.UserID, conn.ProfileID); err != nil {
+			markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			if err := s.ratingStaler.MarkProfileStale(markCtx, conn.UserID, conn.ProfileID); err != nil {
 				slog.WarnContext(ctx, "failed to mark profile stale after rating import", "component", "watchsync", "user_id", conn.UserID, "profile_id", conn.ProfileID, "error", err)
 			}
 		}
