@@ -39,9 +39,17 @@ read confirms the title is unrated; if the provider still reports a rating (for 
 a second entry for the same title), the removal is sent again instead of the rating
 being imported back.
 
+A local rating that changed while its write was in flight may have been sent already by
+a newer event, which the older write then overwrote. So the current value is sent again,
+up to three times. If the rating is still changing after that, its agreed row is dropped,
+so the next merge sees both sides changed and keeps the newer rating instead of importing
+the provider's.
+
 Rows are scoped to the provider account they were agreed with. A connection that moves
 to another account ignores the old rows, and so does a sync still running for the old
-account, so no stale agreement can read as a removal.
+account, so no stale agreement can read as a removal. Agreed rows and rating cursors are
+written only while the connection is still bound to the account the run read, so a run
+that outlives a re-bind cannot write for the old account.
 
 The row's `provider_item_key` is the provider's own key for the title once a read has
 returned one, and Silo's key (`imdb:`, `tmdb:`, or `tvdb:`) before that. Rating writes
@@ -107,8 +115,9 @@ the provider already holds a rating for is not held back, and neither are remova
 
 ## Identity changes
 
-Re-binding a connection to a different provider account clears its agreed ratings and
-drops its rating read cursors, whose keys contain `.ratings`. Whenever ratings move to
+Re-binding a connection to a different provider account drops its rating read cursors,
+whose keys contain `.ratings`, and, once the new binding is saved, clears agreed ratings
+of every other account. Whenever ratings move to
 another media item (a duplicate merge or a reattribution), the agreed rows move with them;
 the destination's row wins a collision. A moved row is unconfirmed and forgets its
 provider key: for the same title the next read confirms it again, and for a different

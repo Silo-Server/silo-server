@@ -49,7 +49,7 @@ type Repository interface {
 	ListRatingEventConnections(ctx context.Context, userID int, profileID string) ([]Connection, error)
 	ListRatingSyncStates(ctx context.Context, connectionID, providerAccountID string, mediaItemIDs []string) ([]RatingSyncState, error)
 	UpsertRatingSyncStates(ctx context.Context, states []RatingSyncState) error
-	DeleteRatingSyncStates(ctx context.Context, connectionID string, mediaItemIDs []string) error
+	DeleteRatingSyncStates(ctx context.Context, connectionID, providerAccountID string, mediaItemIDs []string) error
 	ClearRatingSyncStates(ctx context.Context, connectionID, keepAccountID string) error
 	UpdateRatingCursors(ctx context.Context, connectionID, providerAccountID string, remove []string, set map[string]string) error
 	ListScrobbleConnections(ctx context.Context, userID int, profileID string) ([]Connection, error)
@@ -729,6 +729,9 @@ func (r *PostgresRepository) ListRatingSyncStates(ctx context.Context, connectio
 	return states, nil
 }
 
+// UpsertRatingSyncStates records agreed ratings. A row is written only while
+// its connection is still bound to the row's provider account, so a run that
+// outlived a rebind cannot take a row back from the new account.
 func (r *PostgresRepository) UpsertRatingSyncStates(ctx context.Context, states []RatingSyncState) error {
 	if len(states) == 0 {
 		return nil
@@ -757,6 +760,8 @@ func (r *PostgresRepository) UpsertRatingSyncStates(ctx context.Context, states 
 			input.provider_item_key, input.synced_rating, input.remote_seen
 		FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::smallint[], $7::boolean[])
 			AS input(connection_id, provider_account_id, media_item_id, kind, provider_item_key, synced_rating, remote_seen)
+		JOIN watch_provider_connections conn
+			ON conn.id = input.connection_id::uuid AND conn.provider_account_id = input.provider_account_id
 		ON CONFLICT (connection_id, media_item_id) DO UPDATE SET
 			provider_account_id = EXCLUDED.provider_account_id,
 			kind = CASE WHEN EXCLUDED.kind <> '' THEN EXCLUDED.kind ELSE watch_provider_rating_items.kind END,
@@ -774,14 +779,16 @@ func (r *PostgresRepository) UpsertRatingSyncStates(ctx context.Context, states 
 	return nil
 }
 
-func (r *PostgresRepository) DeleteRatingSyncStates(ctx context.Context, connectionID string, mediaItemIDs []string) error {
+// DeleteRatingSyncStates forgets agreed ratings recorded for one provider
+// account, leaving rows another account has since agreed on.
+func (r *PostgresRepository) DeleteRatingSyncStates(ctx context.Context, connectionID, providerAccountID string, mediaItemIDs []string) error {
 	if len(mediaItemIDs) == 0 {
 		return nil
 	}
 	_, err := r.pool.Exec(ctx, `
 		DELETE FROM watch_provider_rating_items
-		WHERE connection_id = $1::uuid AND media_item_id = ANY($2)
-	`, connectionID, mediaItemIDs)
+		WHERE connection_id = $1::uuid AND provider_account_id = $2 AND media_item_id = ANY($3)
+	`, connectionID, providerAccountID, mediaItemIDs)
 	if err != nil {
 		return fmt.Errorf("delete rating sync states: %w", err)
 	}
