@@ -784,7 +784,7 @@ func (s *Service) RouteDescriptors(ctx context.Context, installationID int) ([]*
 }
 
 func (s *Service) ResolveAssetPath(ctx context.Context, installationID int, assetPath string) (string, error) {
-	installation, manifest, err := s.installedManifest(ctx, installationID, true)
+	installation, manifest, err := s.loadForManifestRead(ctx, installationID, true)
 	if err != nil {
 		return "", err
 	}
@@ -915,7 +915,7 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowR
 }
 
 func (s *Service) manifestForInstallation(ctx context.Context, installationID int, requireEnabled bool) (*pluginv1.PluginManifest, error) {
-	_, manifest, err := s.installedManifest(ctx, installationID, requireEnabled)
+	_, manifest, err := s.loadForManifestRead(ctx, installationID, requireEnabled)
 	return manifest, err
 }
 
@@ -937,9 +937,9 @@ func (s *Service) ensureInstallationCache(
 	return installation, manifest, nil
 }
 
-// installedManifest is ensureInstallationCache for callers that only read the
+// loadForManifestRead is ensureInstallationCache for callers that only read the
 // manifest or serve packaged assets; see ArchiveCache.Manifest.
-func (s *Service) installedManifest(
+func (s *Service) loadForManifestRead(
 	ctx context.Context,
 	installationID int,
 	requireEnabled bool,

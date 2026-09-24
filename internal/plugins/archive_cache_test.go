@@ -468,6 +468,30 @@ func TestArchiveCacheManifestTrustsOnlyAnUnchangedVerifiedBinary(t *testing.T) {
 	}
 	expectRestored("Ensure after a stat-preserving rewrite")
 
+	// A different file renamed over the binary is a new file, even with the
+	// verified size and mtime, so Manifest hashes it and restores the binary.
+	verified, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(filepath.Dir(path), "plugin.replacement")
+	if err := os.WriteFile(replacement, []byte("#!/bin/sh\nexit 2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(replacement, verified.ModTime(), verified.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+	hashed.Store(0)
+	if _, err := cache.Manifest(ctx, installation); err != nil {
+		t.Fatalf("repair after a replaced file: %v", err)
+	}
+	// Once to reject the replacement, once to check the restored binary.
+	expectHashed("Manifest after a replaced file", 2*size)
+	expectRestored("Manifest after a replaced file")
+
 	// A failed check forgets the verification, even when repair fails too.
 	rewrite(true)
 	delete(store.archives, 42)

@@ -163,8 +163,9 @@ func TestServiceManifestReadsSkipRehashOfVerifiedBinary(t *testing.T) {
 
 // BenchmarkInstalledPluginWarmRead reads an installed plugin with a 16 MiB
 // binary that this process has already verified. manifest is the call the
-// admin plugin list makes per installation on every load; launch is the check
-// every plugin start makes, which still hashes the whole binary.
+// admin plugin list makes per installation on every load; ensure is the
+// ArchiveCache.Ensure check every plugin start makes before it executes the
+// binary, which still hashes the whole binary. It does not start a process.
 func BenchmarkInstalledPluginWarmRead(b *testing.B) {
 	svc, installation := newManifestReadService(b, 16<<20)
 	ctx := context.Background()
@@ -179,7 +180,7 @@ func BenchmarkInstalledPluginWarmRead(b *testing.B) {
 			}
 		}
 	})
-	b.Run("launch", func(b *testing.B) {
+	b.Run("ensure", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			if _, err := svc.archiveCache.Ensure(ctx, installation); err != nil {
