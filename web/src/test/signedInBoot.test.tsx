@@ -184,6 +184,31 @@ describe("app boot request budget", () => {
     expect(server.refreshTokensUsed).toEqual(["refresh-0"]);
   });
 
+  it("sends a revoked session to sign-in after one refused refresh", async () => {
+    // Another device revoked this browser's session (Account sessions).
+    storage.set(storage.KEYS.REFRESH_TOKEN, "revoked-0");
+    storage.set(storage.KEYS.PROFILE_ID, ownerProfile.id);
+    storage.set(storage.KEYS.CURRENT_PROFILE, JSON.stringify(profileFromV2(ownerProfile)));
+    server = createFakeServer(serverRoutes(), { revokedRefreshTokens: ["revoked-0"] });
+    vi.stubGlobal("fetch", server.fetch);
+
+    await boot(server);
+
+    const log = describeRequests(server.requests);
+    expect(screen.getByRole("heading", { name: /sign in/i }), log).toBeInTheDocument();
+    // The refused refresh is the only 401: nothing else went out on the
+    // revoked session or retried it.
+    expect(measureBoot(server.requests), log).toEqual({
+      requestsBeforeHomeLayout: -1,
+      wavesBeforeHomeLayout: -1,
+      unauthorized: 1,
+      refreshes: 1,
+      duplicateGets: 0,
+      total: 5,
+    });
+    expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
+  });
+
   it("sends no account reads from the login screen", async () => {
     initialEntry = "/login";
 

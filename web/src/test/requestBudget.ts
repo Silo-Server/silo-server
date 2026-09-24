@@ -98,12 +98,20 @@ export interface FakeServer {
   readonly refreshTokensUsed: readonly string[];
 }
 
+export interface FakeServerOptions {
+  /** Refresh tokens the server refuses, as it refuses a revoked session. */
+  revokedRefreshTokens?: readonly string[];
+}
+
 /**
  * Builds the fake server. `routes` maps a v2 operation key to its answer;
  * an operation without a route answers 501 so an unexpected boot request is
  * visible in the log instead of silently succeeding.
  */
-export function createFakeServer(routes: Record<string, FakeRoute>): FakeServer {
+export function createFakeServer(
+  routes: Record<string, FakeRoute>,
+  { revokedRefreshTokens = [] }: FakeServerOptions = {},
+): FakeServer {
   const requests: RecordedRequest[] = [];
   const refreshTokensUsed: string[] = [];
   const issuedAccessTokens = new Set<string>();
@@ -117,8 +125,8 @@ export function createFakeServer(routes: Record<string, FakeRoute>): FakeServer 
     }
     if (record.operation === "POST /api/v2/auth/refresh") {
       const body = JSON.parse(String(init?.body ?? "{}")) as { refresh_token?: string };
-      if (!body.refresh_token) {
-        return problem(401, "authentication_required", "Authentication required");
+      if (!body.refresh_token || revokedRefreshTokens.includes(body.refresh_token)) {
+        return problem(401, "invalid_token", "The refresh token is invalid or revoked.");
       }
       refreshTokensUsed.push(body.refresh_token);
       tokenCounter += 1;
