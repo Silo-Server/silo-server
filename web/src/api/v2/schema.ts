@@ -6245,7 +6245,7 @@ export interface paths {
     /** Page the calling device's series monitors, including paused monitors. */
     get: operations["listDownloadSubscriptions"];
     put?: never;
-    /** Create a monitor or return the existing monitor without changing it. Sync explicitly after receipt; do not automatically resend an uncertain create. */
+    /** Create a monitor, or return the device's existing monitor for the series with its options unchanged and its record of deleted episodes cleared, so the next sync can register them again. Sync explicitly after receipt; do not automatically resend an uncertain create. */
     post: operations["createDownloadSubscription"];
     delete?: never;
     options?: never;

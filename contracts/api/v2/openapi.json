@@ -124611,7 +124611,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Create a monitor or return the existing monitor without changing it. Sync explicitly after receipt; do not automatically resend an uncertain create.",
+        "summary": "Create a monitor, or return the device's existing monitor for the series with its options unchanged and its record of deleted episodes cleared, so the next sync can register them again. Sync explicitly after receipt; do not automatically resend an uncertain create.",
         "tags": [
           "downloads"
         ],
