@@ -339,8 +339,19 @@ func TestLegacyAttemptWithStoredSubripTokenKeepsWebVTT(t *testing.T) {
 	if err := requireAttemptAPISurfaceV3(v2, legacy, withToken); err == nil {
 		t.Fatal("a v2 start retry with the feature must not replay a WebVTT plan")
 	}
-	if err := requireAttemptAPISurfaceV3(v2, record(nil, nil), withToken); err != nil {
-		t.Fatalf("an attempt that published no SRT has no representation to protect: %v", err)
+	// With no SRT published yet, the stored token decides: this server drops it
+	// from every /api/v1 start, so it marks an attempt negotiated on /api/v2.
+	if err := requireAttemptAPISurfaceV3(v1, record(withToken, nil), nil); err == nil {
+		t.Fatal("a v2 attempt that has published no SRT yet must not continue on v1")
+	}
+	if err := requireAttemptAPISurfaceV3(v2, record(withToken, nil), withToken); err != nil {
+		t.Fatalf("a v2 retry of a v2 attempt must replay: %v", err)
+	}
+	if err := requireAttemptAPISurfaceV3(v2, record(nil, nil), withToken); err == nil {
+		t.Fatal("a v2 start retry with the feature must not replay an attempt negotiated without it")
+	}
+	if err := requireAttemptAPISurfaceV3(v1, record(nil, nil), nil); err != nil {
+		t.Fatalf("a v1 attempt without the feature must continue on v1: %v", err)
 	}
 	if got := replanSubtitleFeaturesV3(legacy, withToken); playback.HasFeatureV3(got, playback.FeatureSubripSidecarV3) {
 		t.Fatalf("a replan of a legacy attempt must keep WebVTT, got features %v", got)

@@ -212,26 +212,38 @@ func isNativeAPIV2(ctx context.Context) bool {
 	return native
 }
 
-// requireAttemptAPISurfaceV3 keeps an attempt on the API surface whose SRT
-// representation it published. /api/v1 must not continue an attempt that
-// published .srt?original=1 URLs: v1 would replay or replan them on a route
-// that serves WebVTT for them. And a start retried through /api/v2 with
-// subrip_sidecar_v1 must not replay a plan that published SRT as WebVTT, which
-// would break the feature's promise. The published representation decides,
-// not the stored token, because a server that predates the feature stored the
-// token verbatim beside WebVTT URLs. requested is the retried start's feature
-// list; replans pass nil because a replan keeps the published representation
-// anyway. The error reuses the existing playback_attempt_reused code so /api/v1
-// gains no new contract.
+// attemptNegotiatedSubRipV3 reports whether an attempt negotiated original SRT.
+// The SRT representation its current plan published decides when there is
+// one, because a server that predates subrip_sidecar_v1 stored the token
+// verbatim beside WebVTT URLs. With no SRT published yet, the stored token
+// decides: this server drops it from every /api/v1 start, so it is present
+// only on attempts negotiated through /api/v2.
+func attemptNegotiatedSubRipV3(record *playback.AttemptRecordV3) bool {
+	if published, original := playback.PublishedSubRipRepresentationV3(record.CurrentPlan.Subtitle.Inventory); published {
+		return original
+	}
+	return playback.HasFeatureV3(record.NormalizedRequest.ClientFeatures, playback.FeatureSubripSidecarV3)
+}
+
+// requireAttemptAPISurfaceV3 keeps an attempt on the API surface that
+// negotiated its SRT representation. /api/v1 must not continue an attempt that
+// negotiated original SRT: v1 would replay or replan its .srt?original=1 URLs,
+// including ones for tracks that appear later, on a route that serves WebVTT
+// for them. And a start retried through /api/v2 with subrip_sidecar_v1 must
+// not replay an attempt negotiated without it, which would break the feature's
+// promise. requested is the retried start's feature list; replans pass nil
+// because a replan keeps the negotiated representation anyway. The error
+// reuses the existing playback_attempt_reused code so /api/v1 gains no new
+// contract.
 func requireAttemptAPISurfaceV3(ctx context.Context, record *playback.AttemptRecordV3, requested []string) error {
 	if record == nil {
 		return nil
 	}
-	published, original := playback.PublishedSubRipRepresentationV3(record.CurrentPlan.Subtitle.Inventory)
+	negotiated := attemptNegotiatedSubRipV3(record)
 	switch {
-	case !isNativeAPIV2(ctx) && original:
+	case !isNativeAPIV2(ctx) && negotiated:
 		return playbackOperationError(http.StatusConflict, "playback_attempt_reused", "The playback attempt belongs to an /api/v2 session")
-	case isNativeAPIV2(ctx) && published && !original && playback.HasFeatureV3(requested, playback.FeatureSubripSidecarV3):
+	case isNativeAPIV2(ctx) && !negotiated && playback.HasFeatureV3(requested, playback.FeatureSubripSidecarV3):
 		return playbackOperationError(http.StatusConflict, "playback_attempt_reused", "The playback attempt was negotiated without subrip_sidecar_v1")
 	}
 	return nil
