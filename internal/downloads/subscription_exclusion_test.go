@@ -451,8 +451,8 @@ func (p chunkedProgressStores) ForUser(context.Context, int) (userstore.UserStor
 	return p.store, nil
 }
 
-// TestDropWatchedEpisodesChunksLookups keeps each progress lookup under the
-// SQLite bind-variable limit for long-running series.
+// TestDropWatchedEpisodesChunksLookups bounds each progress lookup for
+// long-running series, whose IDs the SQLite user store binds one by one.
 func TestDropWatchedEpisodesChunksLookups(t *testing.T) {
 	store := &chunkedProgressStore{completed: map[string]bool{"ep-0": true, "ep-1200": true}}
 	svc := &Service{progressStores: chunkedProgressStores{store}}

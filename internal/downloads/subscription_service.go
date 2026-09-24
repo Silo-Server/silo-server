@@ -222,8 +222,9 @@ func (s *Service) subscriptionEpisodeItems(ctx context.Context, sub *Subscriptio
 	return s.episodeItems(ctx, sub.SeriesID, inScope)
 }
 
-// watchedLookupChunk bounds one progress lookup: per-user stores may be
-// SQLite, whose default bind-variable limit is 999.
+// watchedLookupChunk bounds one progress lookup, as the catalog's playable
+// targets do: the SQLite user store binds one parameter per ID, and a bridge
+// sync passes a whole series.
 const watchedLookupChunk = 500
 
 // dropWatchedEpisodes removes the episodes the monitor's profile has finished.
