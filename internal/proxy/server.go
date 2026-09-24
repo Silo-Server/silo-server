@@ -828,7 +828,10 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 		http.Error(w, "download unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	client := downloadprepare.HTTPPreparer{Client: s.httpClient}
+	// The zero preparer uses the artifact client with a bounded response-header
+	// wait, as the API relay does. s.httpClient waits on headers without a
+	// deadline for transcode rebuilds, which an artifact read never needs.
+	client := downloadprepare.HTTPPreparer{}
 	resp, err := client.Open(r.Context(), claims.TranscodeNode, cfg.Auth.JWTSecret, claims.DownloadArtifactID, r.Method, r.Header)
 	if err != nil {
 		slog.WarnContext(r.Context(), "download artifact relay failed", "component", "proxy", "artifact_id", claims.DownloadArtifactID, "node", claims.TranscodeNode, "error", err)
