@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Home from "./Home";
 import { SIDEBAR_DETAILS_REVEAL_DEADLINE_MS } from "@/components/sidebarItemNavigation";
 import { sectionKeys } from "@/hooks/queries/keys";
+import { bumpHomeRefreshSignal } from "./homeSurfaceRefresh";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -48,8 +49,12 @@ vi.mock("@/components/HeroBanner", () => ({
 }));
 
 vi.mock("@/components/SectionRow", () => ({
-  default: ({ section }: { section: { id: string } }) => (
-    <div data-kind="section-row" data-section-id={section.id} />
+  default: ({ section }: { section: { id: string; items: Array<{ title: string }> } }) => (
+    <div
+      data-kind="section-row"
+      data-section-id={section.id}
+      data-first-item={section.items[0]?.title}
+    />
   ),
 }));
 
@@ -586,7 +591,170 @@ describe("Home", () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
+
+  describe("refresh bump during a section load", () => {
+    const layout = [homeLayout("row-1"), homeLayout("row-2"), homeLayout("row-3")];
+
+    beforeEach(() => {
+      mockUseHomeLayout.mockReturnValue({
+        data: { sections: layout },
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      });
+    });
+
+    it("keeps a cold load out of the error state and renders the newest data", async () => {
+      const requests = deferSectionRequests();
+      const queryClient = new QueryClient();
+
+      await renderHome(queryClient);
+      expect(requests.map((request) => request.sectionId)).toEqual(["row-1", "row-2", "row-3"]);
+
+      await act(async () => {
+        bumpHomeRefreshSignal(queryClient);
+        await settle();
+      });
+
+      expect(sectionErrorCount()).toBe(0);
+      const [firstGeneration, secondGeneration] = [requests.slice(0, 3), requests.slice(3)];
+      expect(firstGeneration.every((request) => request.signal.aborted)).toBe(true);
+      expect(secondGeneration.map((request) => request.sectionId)).toEqual([
+        "row-1",
+        "row-2",
+        "row-3",
+      ]);
+
+      await act(async () => {
+        firstGeneration.forEach((request) => request.resolve("before bump"));
+        secondGeneration.forEach((request) => request.resolve("after bump"));
+        await settle();
+      });
+
+      expect(sectionErrorCount()).toBe(0);
+      expect(renderedFirstItems()).toEqual({
+        "row-1": "row-1 after bump",
+        "row-2": "row-2 after bump",
+        "row-3": "row-3 after bump",
+      });
+      expect(requests).toHaveLength(6);
+    });
+
+    it("refreshes stale cached rows that were in flight when the bump landed", async () => {
+      const requests = deferSectionRequests();
+      const queryClient = new QueryClient();
+      layout.forEach((section) => {
+        queryClient.setQueryData(
+          sectionKeys.homeItems(section.id),
+          homeSection(section.id, "cached"),
+          { updatedAt: Date.now() - 11 * 60 * 1000 },
+        );
+      });
+
+      await renderHome(queryClient);
+      expect(requests).toHaveLength(3);
+
+      await act(async () => {
+        bumpHomeRefreshSignal(queryClient);
+        await settle();
+      });
+
+      expect(sectionErrorCount()).toBe(0);
+      const secondGeneration = requests.slice(3);
+      expect(secondGeneration.map((request) => request.sectionId)).toEqual([
+        "row-1",
+        "row-2",
+        "row-3",
+      ]);
+
+      await act(async () => {
+        secondGeneration.forEach((request) => request.resolve("after bump"));
+        await settle();
+      });
+
+      expect(sectionErrorCount()).toBe(0);
+      expect(renderedFirstItems()).toEqual({
+        "row-1": "row-1 after bump",
+        "row-2": "row-2 after bump",
+        "row-3": "row-3 after bump",
+      });
+    });
+
+    it("still shows an error row when a section request really fails", async () => {
+      const requests = deferSectionRequests();
+      const queryClient = new QueryClient();
+
+      await renderHome(queryClient);
+      await act(async () => {
+        requests[0]!.reject(new Error("boom"));
+        requests.slice(1).forEach((request) => request.resolve("loaded"));
+        await settle();
+      });
+
+      expect(sectionErrorCount()).toBe(1);
+      expect(renderedFirstItems()).toEqual({
+        "row-2": "row-2 loaded",
+        "row-3": "row-3 loaded",
+      });
+    });
+  });
+
+  async function renderHome(queryClient: QueryClient) {
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <Home />
+        </QueryClientProvider>,
+      );
+      await settle();
+    });
+  }
+
+  function sectionErrorCount() {
+    return (container.textContent?.match(/could not be loaded right now/g) ?? []).length;
+  }
+
+  function renderedFirstItems() {
+    return Object.fromEntries(
+      Array.from(container.querySelectorAll('[data-kind="section-row"]')).map((row) => [
+        row.getAttribute("data-section-id"),
+        row.getAttribute("data-first-item"),
+      ]),
+    );
+  }
 });
+
+interface DeferredSectionRequest {
+  sectionId: string;
+  signal: AbortSignal;
+  resolve: (label: string) => void;
+  reject: (error: Error) => void;
+}
+
+// Holds every section request open until the test settles it, so a refresh
+// bump can land while the first generation is still in flight.
+function deferSectionRequests(): DeferredSectionRequest[] {
+  const requests: DeferredSectionRequest[] = [];
+  mockFetchHomeSectionItems.mockImplementation(
+    (sectionId: string, options: { signal: AbortSignal }) =>
+      new Promise((resolve, reject) => {
+        requests.push({
+          sectionId,
+          signal: options.signal,
+          resolve: (label) => resolve(homeSection(sectionId, label)),
+          reject,
+        });
+      }),
+  );
+  return requests;
+}
+
+// Home hears about a refresh bump through a query observer, which TanStack
+// notifies on a zero-delay timer; one macrotask lets that and the promise
+// callbacks it queues run before the assertions.
+async function settle() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 function homeLayout(id: string) {
   return {
@@ -600,7 +768,7 @@ function homeLayout(id: string) {
   };
 }
 
-function homeSection(id: string) {
+function homeSection(id: string, label = "item") {
   return {
     section: {
       ...homeLayout(id),
@@ -609,7 +777,7 @@ function homeSection(id: string) {
         {
           content_id: `${id}-item`,
           type: "movie",
-          title: `${id} item`,
+          title: `${id} ${label}`,
           year: 2026,
           genres: [],
           status: "matched",
