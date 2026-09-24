@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -304,6 +305,11 @@ const (
 // always sent; they replace any page or limit in query, and other parameters
 // such as extended are kept. A failure on any page returns an error and no
 // rows, so callers never import a partial listing.
+//
+// Offset pages shift when the list changes mid-read, which can skip or repeat
+// a row, and callers treat a skipped row as removed. A listing that spans
+// several pages is therefore read twice, and the read fails unless both
+// passes return the same rows; the next sync retries it.
 func fetchTraktPages[T any](
 	ctx context.Context,
 	p *Provider,
@@ -312,33 +318,64 @@ func fetchTraktPages[T any](
 	path string,
 	query url.Values,
 ) ([]T, error) {
-	params := url.Values{}
-	maps.Copy(params, query)
-	params.Set("limit", strconv.Itoa(traktPageLimit))
-	var rows []T
-	itemCount := 0
-	for page := 1; page <= traktMaxPages; page++ {
-		params.Set("page", strconv.Itoa(page))
-		var batch []T
-		header, err := p.doWithHeader(ctx, http.MethodGet, path+"?"+params.Encode(), cfg, conn.AccessToken, nil, &batch)
+	raw, pages, err := fetchTraktPass(ctx, p, cfg, conn, path, query)
+	if err != nil {
+		return nil, err
+	}
+	if pages > 1 {
+		again, _, err := fetchTraktPass(ctx, p, cfg, conn, path, query)
 		if err != nil {
 			return nil, err
 		}
-		// Offset pages shift when the list changes mid-read, which can skip
-		// an item. A changed item count reveals that, and a skipped item
-		// would read as removed, so the read fails and is retried next sync.
+		if !slices.EqualFunc(raw, again, func(a, b json.RawMessage) bool { return bytes.Equal(a, b) }) {
+			return nil, fmt.Errorf("trakt %s changed while it was read", path)
+		}
+	}
+	rows := make([]T, 0, len(raw))
+	for _, item := range raw {
+		var row T
+		if err := json.Unmarshal(item, &row); err != nil {
+			return nil, fmt.Errorf("decode trakt response: %w", err)
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+// fetchTraktPass reads every page of a listing once and reports how many pages
+// it took. A changed X-Pagination-Item-Count between pages fails the pass.
+func fetchTraktPass(
+	ctx context.Context,
+	p *Provider,
+	cfg watchsync.ServerConfig,
+	conn watchsync.Connection,
+	path string,
+	query url.Values,
+) ([]json.RawMessage, int, error) {
+	params := url.Values{}
+	maps.Copy(params, query)
+	params.Set("limit", strconv.Itoa(traktPageLimit))
+	var rows []json.RawMessage
+	itemCount := 0
+	for page := 1; page <= traktMaxPages; page++ {
+		params.Set("page", strconv.Itoa(page))
+		var batch []json.RawMessage
+		header, err := p.doWithHeader(ctx, http.MethodGet, path+"?"+params.Encode(), cfg, conn.AccessToken, nil, &batch)
+		if err != nil {
+			return nil, 0, err
+		}
 		if count, ok := positiveHeaderInt(header, "X-Pagination-Item-Count"); ok {
 			if itemCount != 0 && count != itemCount {
-				return nil, fmt.Errorf("trakt %s changed while it was read (%d items, then %d)", path, itemCount, count)
+				return nil, 0, fmt.Errorf("trakt %s changed while it was read (%d items, then %d)", path, itemCount, count)
 			}
 			itemCount = count
 		}
 		rows = append(rows, batch...)
 		if lastTraktPage(header, page, len(batch)) {
-			return rows, nil
+			return rows, page, nil
 		}
 	}
-	return nil, fmt.Errorf("trakt %s did not reach its last page within %d pages", path, traktMaxPages)
+	return nil, 0, fmt.Errorf("trakt %s did not reach its last page within %d pages", path, traktMaxPages)
 }
 
 // lastTraktPage reports whether page, holding items rows, ends the listing.
