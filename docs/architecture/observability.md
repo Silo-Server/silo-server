@@ -74,6 +74,27 @@ Three properties matter:
   sinks agree. Limitation: values are not scanned, so a secret embedded in a free-text
   message or under a non-secret key is not caught.
 
+### Database log persistence
+
+The operational log (`opslog.Handler`, stream `app`) and the activity log
+(`activitylog.NewMiddleware`, stream `audit`) run on the goroutine that logs, so their
+writers never block and never log:
+
+- Each node queues entries in its own bounded in-memory buffer
+  (`logstream.Buffer`, 10,000 entries per stream). A consumer on that node inserts them
+  into Postgres in batches of 100 or every two seconds, then publishes each inserted row
+  to the admin live tail: local subscribers directly, other nodes through the Redis
+  event bus. Redis is not on the logging path, and a Redis outage only limits the
+  cross-node tail. Each batch gets one two-second publish budget.
+- A full buffer drops the entry, and a failed batch insert drops the batch. Both are
+  counted in `silo_log_writer_dropped_total{stream, reason}` (`buffer_full`,
+  `insert_failed`); stderr and OTLP still receive every record.
+- The opslog consumer reports its own failures to stderr and OTLP only, so a failing
+  batch cannot queue records about itself.
+- Consumers run past the application context and stop after the HTTP servers drain, so
+  graceful-shutdown logging is persisted. A node that dies loses at most the entries
+  still in its buffer.
+
 ## Logging conventions (enforced)
 
 Use the **context-carrying** slog variants and tag the subsystem:

@@ -18,6 +18,15 @@ type Handler struct {
 	groupNames []string
 }
 
+type skipCaptureKey struct{}
+
+// withoutCapture marks ctx so Handler passes its records to the inner handler
+// only. The consumer logs through it, which keeps the pipeline from writing
+// its own failures back into itself.
+func withoutCapture(ctx context.Context) context.Context {
+	return context.WithValue(ctx, skipCaptureKey{}, true)
+}
+
 func NewHandler(inner slog.Handler, writer Writer, capture slog.Level, nodeID string) slog.Handler {
 	return &Handler{
 		inner:   inner,
@@ -37,6 +46,9 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 		return err
 	}
 	if h.writer == nil || r.Level < h.capture {
+		return nil
+	}
+	if ctx != nil && ctx.Value(skipCaptureKey{}) != nil {
 		return nil
 	}
 

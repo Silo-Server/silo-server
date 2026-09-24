@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 )
@@ -84,6 +85,28 @@ func (h *Hub) Subscribe(filter Filter) (<-chan Message, func()) {
 		}
 		h.mu.Unlock()
 	}
+}
+
+// publishBudget bounds the cross-node fan-out of one persisted batch.
+var publishBudget = 2 * time.Second
+
+// PublishAppends fans out a batch of freshly persisted entries. Local
+// subscribers receive every entry. The cross-node event bus shares one
+// deadline for the batch, so an unreachable Redis costs the consumer at most
+// publishBudget per batch instead of stalling the entries queued behind it.
+// It returns how many entries failed to publish and the last error.
+func PublishAppends[T any](ctx context.Context, h *Hub, stream Stream, entries []T) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, publishBudget)
+	defer cancel()
+	failed := 0
+	var lastErr error
+	for _, entry := range entries {
+		if err := h.PublishAppend(ctx, stream, entry); err != nil {
+			failed++
+			lastErr = err
+		}
+	}
+	return failed, lastErr
 }
 
 func (h *Hub) PublishAppend(ctx context.Context, stream Stream, entry any) error {
