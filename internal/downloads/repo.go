@@ -41,6 +41,7 @@ type managedQueryer interface {
 type managedRegistryStore struct{ db managedQueryer }
 type managedRegistrationRepository interface {
 	GetManagedEntriesByKeys(context.Context, int, string, string, []ManagedEntryKey) (map[ManagedEntryKey]*Download, error)
+	ExcludedEpisodes(context.Context, string, []string) (map[string]bool, error)
 	CreateManagedEntriesBatch(context.Context, []*Download) ([]*Download, error)
 	SumManagedFileSize(context.Context, int, string, string) (int64, error)
 }
@@ -395,6 +396,32 @@ func (r managedRegistryStore) GetManagedEntriesByKeys(ctx context.Context, userI
 	return out, nil
 }
 
+// ExcludedEpisodes returns which of episodeIDs the monitor must not register
+// because its device deleted them (see Repository.DeleteManaged).
+func (r managedRegistryStore) ExcludedEpisodes(ctx context.Context, subscriptionID string, episodeIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool)
+	if len(episodeIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.Query(ctx,
+		`SELECT episode_id FROM download_subscription_exclusions
+		 WHERE subscription_id = $1 AND episode_id = ANY($2)`,
+		subscriptionID, episodeIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing monitor exclusions: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning monitor exclusion: %w", err)
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
 // CreateManagedEntriesBatch inserts managed rows in one statement, skipping
 // identities that already exist (including concurrent-insert races) via ON
 // CONFLICT DO NOTHING on the managed-entry unique index. Returns only the rows
@@ -604,17 +631,54 @@ func (r *Repository) UpdateManagedStatus(ctx context.Context, id string, userID 
 }
 
 // DeleteManaged removes a managed entry, authorized on (user, profile, device).
-// Returns ErrNotFound when nothing matches.
+// Deleting an episode of a series this device monitors also records a monitor
+// exclusion in the same statement, so later syncs do not register the episode
+// again. The row and its exclusion commit together, and the exclusion's FK
+// check waits for a sync holding the monitor lock, so a sync never sees the
+// row gone without its exclusion. Returns ErrNotFound when nothing matches.
 func (r *Repository) DeleteManaged(ctx context.Context, id string, userID int, profileID, deviceID string) error {
-	tag, err := r.pool.Exec(ctx,
-		`DELETE FROM downloads WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4`,
+	var deleted int
+	err := r.pool.QueryRow(ctx,
+		`WITH deleted AS (
+			DELETE FROM downloads WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4
+			RETURNING content_id, episode_id
+		), excluded AS (
+			INSERT INTO download_subscription_exclusions (subscription_id, episode_id)
+			SELECT s.id, d.episode_id FROM deleted d
+			JOIN download_subscriptions s
+			  ON s.user_id = $2 AND s.profile_id = $3 AND s.device_id = $4 AND s.series_id = d.content_id
+			WHERE d.episode_id IS NOT NULL
+			ON CONFLICT DO NOTHING
+		)
+		SELECT count(*) FROM deleted`,
 		id, userID, profileID, deviceID,
-	)
+	).Scan(&deleted)
 	if err != nil {
 		return fmt.Errorf("deleting managed download: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	if deleted == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// ClearMonitorExclusions forgets the device's monitor exclusions for episodes
+// of seriesID that the user downloaded explicitly: an explicit download
+// overrides the earlier delete.
+func (r *Repository) ClearMonitorExclusions(ctx context.Context, userID int, profileID, deviceID, seriesID string, episodeIDs []string) error {
+	if profileID == "" || deviceID == "" || len(episodeIDs) == 0 {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx,
+		`DELETE FROM download_subscription_exclusions x
+		 USING download_subscriptions s
+		 WHERE x.subscription_id = s.id
+		   AND s.user_id = $1 AND s.profile_id = $2 AND s.device_id = $3 AND s.series_id = $4
+		   AND x.episode_id = ANY($5)`,
+		userID, profileID, deviceID, seriesID, episodeIDs,
+	)
+	if err != nil {
+		return fmt.Errorf("clearing monitor exclusions: %w", err)
 	}
 	return nil
 }

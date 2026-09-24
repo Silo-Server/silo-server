@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
@@ -201,8 +202,10 @@ func (s *Service) syncSubscription(ctx context.Context, sub *Subscription) (int,
 	return registered, err
 }
 
-// subscriptionEpisodeItems preserves scope and shared file selection before a
-// monitor lock is acquired, avoiding pool waits while holding that lock.
+// subscriptionEpisodeItems preserves scope, the delete_watched filter and
+// shared file selection before a monitor lock is acquired, avoiding pool waits
+// while holding that lock. The locked callers re-check the monitor's
+// updated_at, so an edit to delete_watched in between cancels the sync.
 func (s *Service) subscriptionEpisodeItems(ctx context.Context, sub *Subscription, episodes []*models.Episode) ([]managedItem, error) {
 	inScope := make([]*models.Episode, 0, len(episodes))
 	for _, ep := range episodes {
@@ -210,30 +213,106 @@ func (s *Service) subscriptionEpisodeItems(ctx context.Context, sub *Subscriptio
 			inScope = append(inScope, ep)
 		}
 	}
+	if sub.DeleteWatched {
+		var err error
+		if inScope, err = s.dropWatchedEpisodes(ctx, sub, inScope); err != nil {
+			return nil, err
+		}
+	}
 	return s.episodeItems(ctx, sub.SeriesID, inScope)
 }
-func (s *Service) registerSubscriptionItems(ctx context.Context, sub *Subscription, items []managedItem, repo managedRegistrationRepository) (int, error) {
-	// Already-registered files consume the recorded device usage, so exclude
-	// them before charging prospective bytes against this monitor's budget.
-	if sub.MaxStorageBytes > 0 && len(items) > 0 {
-		keys := make([]ManagedEntryKey, len(items))
-		for i, it := range items {
-			keys[i] = ManagedEntryKey{ContentID: it.contentID, EpisodeID: it.episodeID}
+
+// watchedLookupChunk bounds one progress lookup: per-user stores may be
+// SQLite, whose default bind-variable limit is 999.
+const watchedLookupChunk = 500
+
+// dropWatchedEpisodes removes the episodes the monitor's profile has finished.
+// A delete_watched client deletes a finished download at the end of its
+// monitoring run, so registering one only makes the device fetch a file it is
+// about to delete. "Finished" is the progress row's completed flag, the state
+// the client reads to decide what to delete.
+func (s *Service) dropWatchedEpisodes(ctx context.Context, sub *Subscription, episodes []*models.Episode) ([]*models.Episode, error) {
+	if s.progressStores == nil || len(episodes) == 0 {
+		return episodes, nil
+	}
+	store, err := s.progressStores.ForUser(ctx, sub.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("opening progress store: %w", err)
+	}
+	ids := make([]string, len(episodes))
+	for i, ep := range episodes {
+		ids[i] = ep.ContentID
+	}
+	watched := make(map[string]bool)
+	for start := 0; start < len(ids); start += watchedLookupChunk {
+		progress, err := store.ListProgressByMediaItems(ctx, sub.ProfileID, ids[start:min(start+watchedLookupChunk, len(ids))])
+		if err != nil {
+			return nil, fmt.Errorf("listing episode progress: %w", err)
 		}
-		existing, err := repo.GetManagedEntriesByKeys(ctx, sub.UserID, sub.ProfileID, sub.DeviceID, keys)
+		for id, p := range progress {
+			if p.Completed {
+				watched[id] = true
+			}
+		}
+	}
+	if len(watched) == 0 {
+		return episodes, nil
+	}
+	kept := make([]*models.Episode, 0, len(episodes)-len(watched))
+	for _, ep := range episodes {
+		if !watched[ep.ContentID] {
+			kept = append(kept, ep)
+		}
+	}
+	return kept, nil
+}
+
+// registerSubscriptionItems registers each item as a ready original managed
+// entry under the monitor's batch, inside the monitor lock (repo is the lock's
+// transaction). Before applying the storage cap it skips items the device
+// already holds (their bytes already count toward the device's usage) and
+// episodes the device deleted while monitored (see Repository.DeleteManaged),
+// so neither consumes the budget. Existing entries are read before exclusions,
+// so a concurrent delete is seen as one or the other. Unlike the interactive
+// ensureManaged path it does NOT consume the QuantityLimiter — the subscription
+// is the authorization. Returns only the NEWLY registered count: the sync
+// response's "registered" is documented as new episodes, so a steady-state
+// sync must report 0, not the full in-scope set.
+func (s *Service) registerSubscriptionItems(ctx context.Context, sub *Subscription, items []managedItem, repo managedRegistrationRepository) (int, error) {
+	if len(items) == 0 {
+		return 0, nil
+	}
+	keys := make([]ManagedEntryKey, len(items))
+	for i, it := range items {
+		keys[i] = ManagedEntryKey{ContentID: it.contentID, EpisodeID: it.episodeID}
+	}
+	existing, err := repo.GetManagedEntriesByKeys(ctx, sub.UserID, sub.ProfileID, sub.DeviceID, keys)
+	if err != nil {
+		return 0, err
+	}
+	fresh := make([]managedItem, 0, len(items))
+	freshIDs := make([]string, 0, len(items))
+	for i, it := range items {
+		if _, ok := existing[keys[i]]; !ok {
+			fresh = append(fresh, it)
+			freshIDs = append(freshIDs, it.episodeID)
+		}
+	}
+	excluded, err := repo.ExcludedEpisodes(ctx, sub.ID, freshIDs)
+	if err != nil {
+		return 0, err
+	}
+	fresh = slices.DeleteFunc(fresh, func(it managedItem) bool { return excluded[it.episodeID] })
+	fresh = s.capItemsToStorage(ctx, sub, fresh, repo)
+	toInsert := make([]*Download, 0, len(fresh))
+	for _, it := range fresh {
+		d, err := buildManagedOriginal(sub.UserID, sub.ProfileID, sub.DeviceID, it, originalDecision(), sub.ID)
 		if err != nil {
 			return 0, err
 		}
-		fresh := make([]managedItem, 0, len(items))
-		for i, it := range items {
-			if _, ok := existing[keys[i]]; !ok {
-				fresh = append(fresh, it)
-			}
-		}
-		items = fresh
+		toInsert = append(toInsert, d)
 	}
-	items = s.capItemsToStorage(ctx, sub, items, repo)
-	rows, err := registerManagedItems(ctx, repo, sub.UserID, sub.ProfileID, sub.DeviceID, items, sub.ID)
+	rows, err := repo.CreateManagedEntriesBatch(ctx, toInsert)
 	return len(rows), err
 }
 

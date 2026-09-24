@@ -3,6 +3,8 @@ package downloads
 import (
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -16,6 +18,14 @@ func subscriptionMutationTestRepo(t *testing.T) *SubscriptionRepository {
  active boolean NOT NULL,created_at timestamptz NOT NULL,updated_at timestamptz NOT NULL,
  UNIQUE(user_id,profile_id,device_id,series_id))`)
 	if err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile("../../migrations/sql/20260923232748_add_download_subscription_exclusions.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, _, _ := strings.Cut(string(migration), "-- +goose Down")
+	if _, err := repo.pool.Exec(t.Context(), strings.ReplaceAll(up, "public.", "")); err != nil {
 		t.Fatal(err)
 	}
 	return NewSubscriptionRepository(repo.pool)

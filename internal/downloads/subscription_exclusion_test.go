@@ -1,0 +1,440 @@
+package downloads
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"runtime"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
+)
+
+// monitorFileResolver gives every episode one 10-byte file backed by the
+// fixture's real media_files row, so managed rows satisfy their FK.
+type monitorFileResolver struct {
+	FileResolver
+	fileID   int
+	seriesID string
+}
+
+func (f *monitorFileResolver) ListByEpisodeIDs(_ context.Context, ids []string) (map[string][]*models.MediaFile, error) {
+	out := make(map[string][]*models.MediaFile, len(ids))
+	for _, id := range ids {
+		out[id] = []*models.MediaFile{f.file(id)}
+	}
+	return out, nil
+}
+
+func (f *monitorFileResolver) GetByEpisodeID(_ context.Context, id string) ([]*models.MediaFile, error) {
+	return []*models.MediaFile{f.file(id)}, nil
+}
+
+func (f *monitorFileResolver) file(episodeID string) *models.MediaFile {
+	return &models.MediaFile{ID: f.fileID, ContentID: f.seriesID, EpisodeID: episodeID, FileSize: 10}
+}
+
+type monitorFixture struct {
+	managedFixture
+	svc      *Service
+	subRepo  *SubscriptionRepository
+	pager    *syncEpisodePager
+	monitor  *Subscription
+	seriesID string
+	episodes []string
+}
+
+// seedMonitorFixture seeds a real-schema account whose device monitors a
+// three-episode series (10 bytes per episode) with the given options.
+func seedMonitorFixture(t *testing.T, maxStorageBytes int64, deleteWatched bool) monitorFixture {
+	t.Helper()
+	f := seedManagedFixture(t)
+	ctx := context.Background()
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(ctx, `DELETE FROM user_watch_progress WHERE user_id = $1`, f.userID)
+	})
+	seriesID := f.contentID
+	fx := monitorFixture{managedFixture: f, seriesID: seriesID, pager: &syncEpisodePager{}}
+	for i := 1; i <= 3; i++ {
+		id := fmt.Sprintf("%s-ep-%d", seriesID, i)
+		fx.episodes = append(fx.episodes, id)
+		fx.pager.rows = append(fx.pager.rows, &models.Episode{ContentID: id, SeriesID: seriesID, SeasonNumber: 1, EpisodeNumber: i})
+	}
+	files := &monitorFileResolver{fileID: f.fileID, seriesID: seriesID}
+	user := fakeUserRepo{&models.User{ID: f.userID, DownloadAllowed: new(true)}}
+	fx.svc = NewService(f.repo, nil, nil, files, createItemResolver{}, fx.pager, user, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
+	fx.subRepo = NewSubscriptionRepository(f.pool)
+	fx.svc.SetSubscriptions(fx.subRepo)
+	fx.svc.SetProgressStores(pgstore.NewPostgresProvider(f.pool))
+	monitor, err := fx.subRepo.CreateOrGet(ctx, &Subscription{
+		ID: "monitor-" + seriesID, UserID: f.userID, ProfileID: f.profileA, DeviceID: f.deviceA, SeriesID: seriesID,
+		Mode: SubModeAll, DeleteWatched: deleteWatched, MaxStorageBytes: maxStorageBytes,
+	})
+	if err != nil {
+		t.Fatalf("create monitor: %v", err)
+	}
+	fx.monitor = monitor
+	return fx
+}
+
+func (fx monitorFixture) sync(t *testing.T) int {
+	t.Helper()
+	n, err := fx.svc.SyncSubscriptions(context.Background(), fx.userID, fx.profileA, fx.deviceA, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	return n
+}
+
+func (fx monitorFixture) syncPage(t *testing.T) int {
+	t.Helper()
+	page, err := fx.svc.SyncSubscriptionPage(context.Background(), fx.userID, fx.profileA, fx.deviceA, fx.monitor.ID, nil, 100, catalog.AccessFilter{}, func(*Subscription) error { return nil })
+	if err != nil {
+		t.Fatalf("sync page: %v", err)
+	}
+	return page.Registered
+}
+
+func (fx monitorFixture) entry(t *testing.T, episodeID string) *Download {
+	t.Helper()
+	row, err := fx.repo.GetManagedEntry(context.Background(), fx.userID, fx.profileA, fx.deviceA, fx.seriesID, episodeID)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("get managed entry %s: %v", episodeID, err)
+	}
+	return row
+}
+
+func (fx monitorFixture) deleteEpisode(t *testing.T, episodeID string) {
+	t.Helper()
+	row := fx.entry(t, episodeID)
+	if row == nil {
+		t.Fatalf("episode %s is not registered", episodeID)
+		return
+	}
+	if err := fx.svc.Delete(context.Background(), fx.userID, fx.profileA, fx.deviceA, row.ID); err != nil {
+		t.Fatalf("delete %s: %v", episodeID, err)
+	}
+}
+
+func (fx monitorFixture) exclusions(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := fx.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM download_subscription_exclusions WHERE subscription_id = $1`, fx.monitor.ID,
+	).Scan(&n); err != nil {
+		t.Fatalf("count exclusions: %v", err)
+	}
+	return n
+}
+
+// TestMonitorSyncKeepsDeletedEpisodesDeletedPostgres is the guardrail for
+// sync -> delete -> sync: a deleted episode must not be registered again.
+func TestMonitorSyncKeepsDeletedEpisodesDeletedPostgres(t *testing.T) {
+	t.Run("uncapped", func(t *testing.T) {
+		fx := seedMonitorFixture(t, 0, false)
+		if n := fx.sync(t); n != 3 {
+			t.Fatalf("first sync registered %d, want 3", n)
+		}
+		fx.deleteEpisode(t, fx.episodes[0])
+		n := fx.sync(t)
+		t.Logf("uncapped: registered after delete = %d", n)
+		if n != 0 || fx.entry(t, fx.episodes[0]) != nil {
+			t.Fatalf("sync after delete registered %d (deleted episode back: %v), want 0", n, fx.entry(t, fx.episodes[0]) != nil)
+		}
+		// The native paged sync applies the same exclusion.
+		if n := fx.syncPage(t); n != 0 {
+			t.Fatalf("paged sync after delete registered %d, want 0", n)
+		}
+	})
+
+	t.Run("capped", func(t *testing.T) {
+		// 20 bytes admits two of the three 10-byte episodes.
+		fx := seedMonitorFixture(t, 20, false)
+		if n := fx.sync(t); n != 2 {
+			t.Fatalf("first sync registered %d, want 2", n)
+		}
+		fx.deleteEpisode(t, fx.episodes[0])
+		n := fx.sync(t)
+		back := fx.entry(t, fx.episodes[0]) != nil
+		t.Logf("capped: registered after delete = %d, deleted episode re-registered = %v", n, back)
+		if back {
+			t.Fatal("capped monitor spent its budget re-registering the deleted episode")
+		}
+		// The freed budget goes to the next episode the device has not had.
+		if n != 1 || fx.entry(t, fx.episodes[2]) == nil {
+			t.Fatalf("sync after delete registered %d, want 1 (episode 3)", n)
+		}
+	})
+}
+
+// TestMonitorSyncSkipsWatchedEpisodesPostgres covers delete_watched monitors:
+// an episode the profile has completed is not registered, so the client never
+// downloads what its retention pass would delete.
+func TestMonitorSyncSkipsWatchedEpisodesPostgres(t *testing.T) {
+	ctx := context.Background()
+	for _, deleteWatched := range []bool{true, false} {
+		t.Run(fmt.Sprintf("delete_watched=%v", deleteWatched), func(t *testing.T) {
+			fx := seedMonitorFixture(t, 0, deleteWatched)
+			store, err := pgstore.NewPostgresProvider(fx.pool).ForUser(ctx, fx.userID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SetProgressAt(ctx, fx.profileA, fx.episodes[1], 1200, 1200, true, time.Now()); err != nil {
+				t.Fatalf("seed completed progress: %v", err)
+			}
+			// Another profile's progress on the same account must not count.
+			if err := store.SetProgressAt(ctx, fx.profileB, fx.episodes[2], 1200, 1200, true, time.Now()); err != nil {
+				t.Fatalf("seed other profile progress: %v", err)
+			}
+			n := fx.sync(t)
+			watchedRegistered := fx.entry(t, fx.episodes[1]) != nil
+			t.Logf("delete_watched=%v: registered %d, watched episode registered = %v", deleteWatched, n, watchedRegistered)
+			if deleteWatched && (n != 2 || watchedRegistered) {
+				t.Fatalf("registered %d (watched episode: %v), want 2 without the watched episode", n, watchedRegistered)
+			}
+			if !deleteWatched && n != 3 {
+				t.Fatalf("a monitor without delete_watched registered %d, want 3", n)
+			}
+		})
+	}
+}
+
+// TestMonitorExclusionLifecyclePostgres: an explicit download of a deleted
+// episode clears its exclusion, deleting the monitor drops its exclusions, and
+// a new monitor starts from a clean slate.
+func TestMonitorExclusionLifecyclePostgres(t *testing.T) {
+	ctx := context.Background()
+	fx := seedMonitorFixture(t, 0, false)
+	if n := fx.sync(t); n != 3 {
+		t.Fatalf("first sync registered %d, want 3", n)
+	}
+	fx.deleteEpisode(t, fx.episodes[0])
+	if n := fx.exclusions(t); n != 1 {
+		t.Fatalf("exclusions after delete = %d, want 1", n)
+	}
+
+	// The user downloads the deleted episode again on purpose.
+	row, err := fx.svc.Create(ctx, fx.userID, CreateRequest{ContentID: fx.seriesID, EpisodeID: fx.episodes[0], ProfileID: fx.profileA, DeviceID: fx.deviceA}, catalog.AccessFilter{})
+	if err != nil || row == nil || row.EpisodeID != fx.episodes[0] {
+		t.Fatalf("manual re-download: %+v %v", row, err)
+	}
+	if n := fx.exclusions(t); n != 0 {
+		t.Fatalf("exclusions after manual re-download = %d, want 0", n)
+	}
+	if n := fx.sync(t); n != 0 {
+		t.Fatalf("sync after manual re-download registered %d, want 0", n)
+	}
+
+	// Deleting it again is remembered again.
+	fx.deleteEpisode(t, fx.episodes[0])
+	if n := fx.sync(t); n != 0 {
+		t.Fatalf("sync after second delete registered %d, want 0", n)
+	}
+
+	// Downloading the whole series explicitly also clears it.
+	if _, _, _, err := fx.svc.CreateSeries(ctx, fx.userID, CreateRequest{ContentID: fx.seriesID, ProfileID: fx.profileA, DeviceID: fx.deviceA}, catalog.AccessFilter{}); err != nil {
+		t.Fatalf("series download: %v", err)
+	}
+	if n := fx.exclusions(t); n != 0 || fx.entry(t, fx.episodes[0]) == nil {
+		t.Fatalf("exclusions after series download = %d, want 0 with the episode registered", n)
+	}
+	fx.deleteEpisode(t, fx.episodes[0])
+
+	// Stopping the monitor drops its exclusions; a new monitor for the series
+	// registers the episode again.
+	if err := fx.svc.DeleteSubscriptionMonitor(ctx, fx.userID, fx.profileA, fx.deviceA, fx.monitor.ID, func(*Subscription) error { return nil }); err != nil {
+		t.Fatalf("delete monitor: %v", err)
+	}
+	if n := fx.exclusions(t); n != 0 {
+		t.Fatalf("exclusions after monitor delete = %d, want 0", n)
+	}
+	fresh, err := fx.subRepo.CreateOrGet(ctx, &Subscription{ID: "monitor-again-" + fx.seriesID, UserID: fx.userID, ProfileID: fx.profileA, DeviceID: fx.deviceA, SeriesID: fx.seriesID, Mode: SubModeAll})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx.monitor = fresh
+	if n := fx.sync(t); n != 1 || fx.entry(t, fx.episodes[0]) == nil {
+		t.Fatalf("new monitor registered %d, want the deleted episode back", n)
+	}
+}
+
+// TestManagedDeleteOutsideMonitorPostgres: deleting a movie, an episode of a
+// series this device does not monitor, or another device's copy of a
+// monitored episode records nothing.
+func TestManagedDeleteOutsideMonitorPostgres(t *testing.T) {
+	ctx := context.Background()
+	fx := seedMonitorFixture(t, 0, false)
+	movie := &Download{ID: "movie-" + fx.seriesID, UserID: fx.userID, ProfileID: fx.profileA, DeviceID: fx.deviceA, MediaFileID: fx.fileID, ContentID: "movie-" + fx.seriesID, Kind: KindQueued, Status: StatusReady, Format: FormatOriginal, Quality: QualityOriginal, EffectiveQuality: QualityOriginal, Revision: 1, FileSize: 10, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	other := *movie
+	other.ID, other.ContentID, other.EpisodeID = "other-"+fx.seriesID, "other-series-"+fx.seriesID, "other-ep-"+fx.seriesID
+	for _, d := range []*Download{movie, &other} {
+		if err := fx.repo.Create(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+		if err := fx.svc.Delete(ctx, fx.userID, fx.profileA, fx.deviceA, d.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var n int
+	if err := fx.pool.QueryRow(ctx, `SELECT count(*) FROM download_subscription_exclusions x JOIN download_subscriptions s ON s.id = x.subscription_id WHERE s.user_id = $1`, fx.userID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("exclusions = %d, want 0", n)
+	}
+	// Another device deleting the same episode leaves this device's monitor
+	// alone.
+	onB := *movie
+	onB.ID, onB.ProfileID, onB.DeviceID, onB.ContentID, onB.EpisodeID = "b-"+fx.seriesID, fx.profileB, fx.deviceB, fx.seriesID, fx.episodes[0]
+	if err := fx.repo.Create(ctx, &onB); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.svc.Delete(ctx, fx.userID, fx.profileB, fx.deviceB, onB.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := fx.exclusions(t); n != 0 {
+		t.Fatalf("exclusions after another device's delete = %d, want 0", n)
+	}
+	if n := fx.sync(t); n != 3 {
+		t.Fatalf("sync registered %d, want 3", n)
+	}
+}
+
+// TestMonitorRetentionLoopPostgres replays the iOS monitoring run for a
+// delete_watched monitor: sync, then the client's retention pass deletes the
+// completed download. Across runs the watched episode must not come back.
+func TestMonitorRetentionLoopPostgres(t *testing.T) {
+	ctx := context.Background()
+	fx := seedMonitorFixture(t, 0, true)
+	if n := fx.sync(t); n != 3 {
+		t.Fatalf("first sync registered %d, want 3", n)
+	}
+	store, err := pgstore.NewPostgresProvider(fx.pool).ForUser(ctx, fx.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The profile finishes episode 1 after it was downloaded.
+	if err := store.SetProgressAt(ctx, fx.profileA, fx.episodes[0], 1200, 1200, true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	const runs = 5
+	redownloads := 0
+	for range runs {
+		fx.sync(t)
+		if fx.entry(t, fx.episodes[0]) == nil {
+			continue
+		}
+		redownloads++
+		fx.deleteEpisode(t, fx.episodes[0])
+	}
+	// The first run deletes the copy registered before the episode was watched.
+	redownloads--
+	t.Logf("watched episode re-registered in %d of %d monitoring runs", redownloads, runs)
+	if redownloads != 0 {
+		t.Fatalf("watched episode re-registered in %d runs, want 0", redownloads)
+	}
+}
+
+// TestManagedDeleteWaitsForMonitorSyncPostgres pins the ordering the
+// exclusion relies on: while a sync holds the monitor lock, a delete of one of
+// its episodes cannot commit, so the sync sees either the row or its
+// exclusion, never neither.
+func TestManagedDeleteWaitsForMonitorSyncPostgres(t *testing.T) {
+	ctx := context.Background()
+	fx := seedMonitorFixture(t, 0, false)
+	if n := fx.sync(t); n != 3 {
+		t.Fatalf("first sync registered %d, want 3", n)
+	}
+	row := fx.entry(t, fx.episodes[0])
+	done := make(chan error, 1)
+	err := fx.subRepo.WithLocked(ctx, fx.userID, fx.profileA, fx.deviceA, fx.monitor.ID, func(_ *Subscription, tx pgx.Tx) error {
+		go func() { done <- fx.svc.Delete(ctx, fx.userID, fx.profileA, fx.deviceA, row.ID) }()
+		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		for {
+			var waiting bool
+			if err := fx.pool.QueryRow(waitCtx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+				WHERE datname = current_database() AND wait_event_type = 'Lock'
+				  AND query LIKE '%INSERT INTO download_subscription_exclusions%')`).Scan(&waiting); err != nil {
+				return fmt.Errorf("delete never waited on the monitor lock: %w", err)
+			}
+			if waiting {
+				break
+			}
+			runtime.Gosched()
+		}
+		key := ManagedEntryKey{ContentID: fx.seriesID, EpisodeID: fx.episodes[0]}
+		existing, err := managedRegistryStore{tx}.GetManagedEntriesByKeys(ctx, fx.userID, fx.profileA, fx.deviceA, []ManagedEntryKey{key})
+		if err != nil {
+			return err
+		}
+		if existing[key] == nil {
+			return errors.New("locked sync lost the row before the delete committed")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if n := fx.exclusions(t); n != 1 {
+		t.Fatalf("exclusions = %d, want 1", n)
+	}
+	if n := fx.sync(t); n != 0 {
+		t.Fatalf("sync after delete registered %d, want 0", n)
+	}
+}
+
+type chunkedProgressStore struct {
+	userstore.UserStore
+	completed map[string]bool
+	calls     []int
+}
+
+func (s *chunkedProgressStore) ListProgressByMediaItems(_ context.Context, _ string, ids []string) (map[string]userstore.WatchProgress, error) {
+	s.calls = append(s.calls, len(ids))
+	out := map[string]userstore.WatchProgress{}
+	for _, id := range ids {
+		out[id] = userstore.WatchProgress{MediaItemID: id, Completed: s.completed[id]}
+	}
+	return out, nil
+}
+
+type chunkedProgressStores struct{ store *chunkedProgressStore }
+
+func (p chunkedProgressStores) ForUser(context.Context, int) (userstore.UserStore, error) {
+	return p.store, nil
+}
+
+// TestDropWatchedEpisodesChunksLookups keeps each progress lookup under the
+// SQLite bind-variable limit for long-running series.
+func TestDropWatchedEpisodesChunksLookups(t *testing.T) {
+	store := &chunkedProgressStore{completed: map[string]bool{"ep-0": true, "ep-1200": true}}
+	svc := &Service{progressStores: chunkedProgressStores{store}}
+	episodes := make([]*models.Episode, 1201)
+	for i := range episodes {
+		episodes[i] = &models.Episode{ContentID: fmt.Sprintf("ep-%d", i)}
+	}
+	kept, err := svc.dropWatchedEpisodes(t.Context(), &Subscription{UserID: 1, ProfileID: "profile"}, episodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(store.calls) != "[500 500 201]" {
+		t.Fatalf("lookup sizes = %v, want [500 500 201]", store.calls)
+	}
+	if len(kept) != 1199 || kept[0].ContentID != "ep-1" || kept[len(kept)-1].ContentID != "ep-1199" {
+		t.Fatalf("kept %d episodes (%s..%s), want 1199 without the two finished", len(kept), kept[0].ContentID, kept[len(kept)-1].ContentID)
+	}
+}
