@@ -549,7 +549,7 @@ func (p *Provider) do(ctx context.Context, method string, path string, apiKey st
 	limiter := p.limiter(apiKey)
 	for attempt := 0; ; attempt++ {
 		if err := limiter.Wait(ctx); err != nil {
-			return fmt.Errorf("wait for mdblist rate limiter: %w", err)
+			return watchsync.LimiterWaitError(ctx, p.Key(), requestInterval, err)
 		}
 		retryAfter, err := p.doOnce(ctx, method, path, apiKey, payload, out)
 		if err == nil {
@@ -653,10 +653,23 @@ func requestError(stage, apiKey string, err error) error {
 	// redirect with an unparseable Location header reports that
 	// server-supplied value verbatim.
 	if msg := err.Error(); redactAPIKey(msg, apiKey) != msg {
-		err = errors.New(redactAPIKey(msg, apiKey))
+		err = redactedError{message: redactAPIKey(msg, apiKey), cause: err}
 	}
 	return fmt.Errorf("%s mdblist request: %w", stage, err)
 }
+
+// redactedError carries a message with the API key masked. It answers
+// errors.Is and errors.As from the original error, so cancellations and
+// timeouts stay classifiable, but has no Unwrap: walking the chain never
+// reaches the original, key-bearing message.
+type redactedError struct {
+	message string
+	cause   error
+}
+
+func (e redactedError) Error() string        { return e.message }
+func (e redactedError) Is(target error) bool { return errors.Is(e.cause, target) }
+func (e redactedError) As(target any) bool   { return errors.As(e.cause, target) }
 
 // redactAPIKey masks every occurrence of the API key, raw or query-escaped.
 func redactAPIKey(text, apiKey string) string {
