@@ -2252,6 +2252,12 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			findMediaSource(playSession, req.MediaSourceID), &positionSeconds,
 		)
 	}
+	// Only the Stopped report and the report that marks the item watched change
+	// the taste profile; a position-only report does not. A Stopped report
+	// refreshes even when it carries no position: the play's earlier reports
+	// already wrote its progress, and StopSession does not run the native stop
+	// finalizer that would otherwise refresh the profile.
+	refreshTasteProfile := stop
 	// Persist progress to user store
 	if positionSeconds > 0 && h.storeProvider != nil && playSession.ItemID != "" {
 		if store, storeErr := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID); storeErr == nil {
@@ -2264,12 +2270,13 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 				}
 			}
 			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, duration, h.playbackThresholds(r.Context()))
-			// Only the Stopped report and the report that marks the item
-			// watched change the taste profile; a position-only report does not.
-			if err == nil && (stop || completed) {
-				triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+			if err == nil && completed {
+				refreshTasteProfile = true
 			}
 		}
+	}
+	if refreshTasteProfile && playSession.ItemID != "" {
+		triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
 	}
 	if stop {
 		// Direct ids and recorded aliases are per-play, caller-owned identifiers.
