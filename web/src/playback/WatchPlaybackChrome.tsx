@@ -46,6 +46,7 @@ import type {
   EpisodeRef,
   IntroSkipMode,
   PlaybackExitState,
+  PlaybackStartTrigger,
   PlayerPictureInPictureChange,
 } from "@/player/types";
 import { useSeriesEpisodes } from "@/player/hooks/useSeriesEpisodes";
@@ -250,12 +251,14 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const startPlayback = useCallback(
-    (input: WatchPlaybackStartInput | WatchRouteRequest) => {
+    (input: WatchPlaybackStartInput | WatchRouteRequest, trigger: PlaybackStartTrigger) => {
       const request = normalizeWatchPlaybackRequest(input);
       // Press-play-to-first-frame starts here, before any navigation or
       // Picture-in-Picture exit the viewer also waits for. The route rebuilds
       // the same request key, so the player's session can claim the mark.
-      markPlaybackIntent(request.requestKey);
+      // Nobody pressed Play for an automatic start, so it leaves no mark and
+      // its first_frame goes out without a duration.
+      if (trigger === "viewer") markPlaybackIntent(request.requestKey);
       const current = stateRef.current;
       const currentRequestKey = current.request?.requestKey ?? null;
       const hasActivePictureInPicture =
@@ -716,7 +719,7 @@ export function WatchPlaybackHost() {
   );
 
   const handleNavigateEpisode = useCallback(
-    (nextContentId: string) => {
+    (nextContentId: string, trigger: PlaybackStartTrigger) => {
       if (!activeRequest) return;
       if (activeRequest.roomId && activeRequest.roomToken) {
         const roomReturn = buildRoomReturnNavigation(activeRequest);
@@ -724,10 +727,13 @@ export function WatchPlaybackHost() {
         return;
       }
 
-      controller.startPlayback({
-        contentId: nextContentId,
-        libraryId: activeRequest.libraryId,
-      });
+      controller.startPlayback(
+        {
+          contentId: nextContentId,
+          libraryId: activeRequest.libraryId,
+        },
+        trigger,
+      );
     },
     [activeRequest, controller, navigate],
   );
@@ -799,14 +805,18 @@ export function WatchPlaybackHost() {
       );
       if (nextPartFileId && activeRequest) {
         applyExitStateToCache(exitState);
-        controller.startPlayback({
-          contentId: activeRequest.contentId,
-          fileId: nextPartFileId,
-          libraryId: activeRequest.libraryId,
-          roomId: activeRequest.roomId,
-          roomToken: activeRequest.roomToken,
-          returnHref: activeRequest.returnHref,
-        });
+        // The next part follows the end of this one; nobody pressed Play.
+        controller.startPlayback(
+          {
+            contentId: activeRequest.contentId,
+            fileId: nextPartFileId,
+            libraryId: activeRequest.libraryId,
+            roomId: activeRequest.roomId,
+            roomToken: activeRequest.roomToken,
+            returnHref: activeRequest.returnHref,
+          },
+          "automatic",
+        );
         return;
       }
 
@@ -1024,9 +1034,11 @@ export function WatchPlaybackHost() {
           continueWatchingItems={continueWatchingItems}
           videoEnded={postRollVideoEnded}
           onPlayNow={
-            nextEpisodeRef ? () => handleNavigateEpisode(nextEpisodeRef.contentId) : undefined
+            nextEpisodeRef
+              ? (trigger) => handleNavigateEpisode(nextEpisodeRef.contentId, trigger)
+              : undefined
           }
-          onPlayItem={(contentId: string) => handleNavigateEpisode(contentId)}
+          onPlayItem={(contentId: string) => handleNavigateEpisode(contentId, "viewer")}
           onClose={handlePostRollClose}
         />
       )}

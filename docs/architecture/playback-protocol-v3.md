@@ -1088,7 +1088,9 @@ every value is truncated to 256 characters.
 On a `first_frame` event, `first_frame_ms` is the whole milliseconds from the
 viewer's request to play (the tap, or the in-player action that started the
 attempt) to the first frame on screen. A client that cannot time the request
-omits the key and still sends the event. The server derives
+omits the key and still sends the event. A start the viewer did not ask for,
+such as a Watch Party selection or an autoplay countdown, has no request to
+time, so it omits the key too. The server derives
 `silo_playback_first_frame_seconds` from it; see
 [observability](observability.md#client-experience-and-plugin-coordination).
 

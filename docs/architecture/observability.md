@@ -320,10 +320,12 @@ report. Events dropped because the in-process write queue is full are never
 observed. Each replica exports the events it wrote; sum across replicas.
 
 The clients do not time the same interval yet. The web player measures from the
-Play action (a Play button, card or next-episode start, or a version switch
-inside the player) to the event that removes its loading overlay. It sends `first_frame`
-without a duration when nothing timed the start, such as a deep link or a
-reload. Android sends `first_frame_ms` measured from plan adoption, which leaves
+viewer's Play action (a Play button, a card, an episode pick, the next-episode
+prompt's Play Now, or a version switch inside the player) to the event that
+removes its loading overlay. It sends `first_frame` without a duration when
+nothing timed the start: a deep link, a reload, or a start the viewer did not
+ask for, such as a Watch Party selection, an autoplay countdown, or the next
+part of a multi-part file. Android sends `first_frame_ms` measured from plan adoption, which leaves
 out the start request. Apple sends `first_frame` through the v2 route-event
 endpoint without `first_frame_ms`. Apple's rebuffer counter and Android's buffering callbacks
 remain local. Neither native app consumes administrator resource DTOs, so the

@@ -835,11 +835,14 @@ export default function MediaItemMenu({
           navigate(buildMediaPlayHref({ contentId, type: mediaType, libraryId, restart: true }));
           return;
         }
-        playbackController.startPlayback({
-          contentId,
-          restart: true,
-          returnHref: currentHref,
-        });
+        playbackController.startPlayback(
+          {
+            contentId,
+            restart: true,
+            returnHref: currentHref,
+          },
+          "viewer",
+        );
         return;
       }
       case "toggleWatched": {

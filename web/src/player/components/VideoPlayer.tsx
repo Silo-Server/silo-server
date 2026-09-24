@@ -64,6 +64,7 @@ import type {
   MarkerDraft,
   MarkerKind,
   MarkerRegionView,
+  PlaybackStartTrigger,
   SeriesContext,
   SubtitleMode,
   VideoFitMode,
@@ -200,7 +201,7 @@ interface VideoPlayerProps {
   onMarkersEdited?: (fileId: number, markers: MarkerDraft) => void;
   duration?: number;
   seriesContext?: SeriesContext;
-  onNavigateEpisode?: (contentId: string) => void;
+  onNavigateEpisode?: (contentId: string, trigger: PlaybackStartTrigger) => void;
   /** The session's current quality preference, as the server normalized it. */
   qualityPreference: string;
   onRefreshSubtitles?: (currentPosition: number) => void;
@@ -1626,8 +1627,8 @@ export function VideoPlayer({
 
   // -- Next episode auto-play --
   const handleNavigate = useCallback(
-    (contentId: string) => {
-      onNavigateEpisode?.(contentId);
+    (contentId: string, trigger: PlaybackStartTrigger) => {
+      onNavigateEpisode?.(contentId, trigger);
     },
     [onNavigateEpisode],
   );
@@ -1667,7 +1668,7 @@ export function VideoPlayer({
     return seriesContext.episodes[idx - 1] ?? null;
   })();
   const goToPrevEpisode = useCallback(() => {
-    if (prevEpisodeRef) handleNavigate(prevEpisodeRef.contentId);
+    if (prevEpisodeRef) handleNavigate(prevEpisodeRef.contentId, "viewer");
   }, [prevEpisodeRef, handleNavigate]);
 
   // Title strip copy passed into the floating HUD.

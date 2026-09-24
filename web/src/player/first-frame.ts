@@ -3,9 +3,10 @@
  *
  * The clock starts where the viewer asks for playback, and that is outside the
  * player: a Play button, a card, the next-episode prompt. Each of those goes
- * through the playback controller, which marks the intent here under the
- * request key it is about to open. The playback session takes the mark when it
- * starts that request and reports `first_frame_ms` against it.
+ * through the playback controller as a `viewer` start, and the controller marks
+ * the intent here under the request key it is about to open. A start the app
+ * makes on its own (`automatic`) leaves no mark. The playback session takes the
+ * mark when it starts that request and reports `first_frame_ms` against it.
  *
  * The mark lives in memory only. The URL and history state would survive a
  * reload or come back on a Back navigation, and replay a timestamp from a

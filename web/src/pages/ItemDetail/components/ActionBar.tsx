@@ -274,6 +274,7 @@ export default function ActionBar({
           restart: restartOverride ?? parsed.restart,
           returnHref: currentHref,
         }),
+        "viewer",
       );
     },
     [buildPrePlayStartInput, currentHref, navigate, playbackController, selectedVersion?.file_id],
@@ -478,6 +479,7 @@ export default function ActionBar({
           restart,
           returnHref: currentHref,
         }),
+        "viewer",
       );
     },
     [buildPrePlayStartInput, contentId, currentHref, playbackController, selectedVersion],
