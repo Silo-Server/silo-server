@@ -70,11 +70,22 @@ const maxPrerollSeconds = 20;
 // The pre-roll plays muted behind the syncing overlay, so it can run fast.
 // Close to the target it drops to normal speed and is checked often, so it
 // stops within the guest's one-second readiness tolerance: the stream cannot
-// seek back to a target it has passed. A hidden tab throttles timers to about
-// one a second, so there the whole pre-roll plays at normal speed.
+// seek back to a target it has passed.
 const prerollPlaybackRate = 4;
 const prerollFinalApproachSeconds = 1.5;
 const prerollCheckIntervalMs = 50;
+// A hidden tab throttles timers to about one a second, so the rate there is
+// also held to the gap one late check can spend. That keeps the overshoot
+// inside the tolerance without playing a long pre-roll at normal speed, which
+// would miss the room's waiting deadline and hold everyone anyway.
+const hiddenPrerollCheckSeconds = 1.5;
+
+/** Playback rate for a pre-roll this far short of the room's seek target. */
+function prerollRateFor(remainingSeconds: number): number {
+  if (remainingSeconds <= prerollFinalApproachSeconds) return 1;
+  if (document.visibilityState === "visible") return prerollPlaybackRate;
+  return Math.min(prerollPlaybackRate, remainingSeconds / hiddenPrerollCheckSeconds);
+}
 
 type ReadyCheck =
   | { ok: true; commandId: string; positionSeconds: number; isPaused: boolean }
@@ -220,10 +231,7 @@ export function useWatchTogetherPlaybackSync({
       };
       prerollRef.current = preroll;
       video.muted = true;
-      video.playbackRate =
-        gap > prerollFinalApproachSeconds && document.visibilityState === "visible"
-          ? prerollPlaybackRate
-          : 1;
+      video.playbackRate = prerollRateFor(gap);
       video.play().catch(() => {
         // A later pre-roll owns the element now; leave it alone.
         if (prerollRef.current === preroll) endPreroll(false);
@@ -252,12 +260,10 @@ export function useWatchTogetherPlaybackSync({
       const remaining = targetSeconds - toMediaTime(video.currentTime, streamOriginRef.current);
       if (remaining <= 0) {
         endPreroll(true);
-      } else if (
-        (remaining <= prerollFinalApproachSeconds || document.visibilityState !== "visible") &&
-        video.playbackRate !== 1
-      ) {
-        video.playbackRate = 1;
+        return;
       }
+      const rate = prerollRateFor(remaining);
+      if (video.playbackRate !== rate) video.playbackRate = rate;
     };
     // timeupdate may come only every 250 ms, so poll as well.
     const intervalId = window.setInterval(checkProgress, prerollCheckIntervalMs);

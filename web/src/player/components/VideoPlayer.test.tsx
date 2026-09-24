@@ -821,10 +821,17 @@ describe("VideoPlayer room catch-up", () => {
     });
   });
 
-  it("plays a seek pre-roll at normal speed while the tab is hidden", async () => {
+  it("holds a hidden tab's seek pre-roll to the gap a throttled check can spend", async () => {
     const { connection, video, command, rerenderPlayer } = setup(100);
-    Object.defineProperty(video, "paused", { configurable: true, value: true });
+    let paused = true;
+    Object.defineProperty(video, "paused", { configurable: true, get: () => paused });
     Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+    vi.mocked(video.play).mockImplementation(async () => {
+      paused = false;
+    });
+    vi.mocked(video.pause).mockImplementation(() => {
+      paused = true;
+    });
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
     try {
       const waitingConnection = {
@@ -839,6 +846,8 @@ describe("VideoPlayer room catch-up", () => {
       };
       rerenderPlayer({ watchTogetherConnection: waitingConnection });
       await act(() => vi.advanceTimersByTimeAsync(0));
+      // A 12 s pre-roll at normal speed would outlast the room's 10 s waiting
+      // deadline, so a hidden tab still starts fast and slows as it closes in.
       rerenderPlayer({
         watchTogetherConnection: waitingConnection,
         planRevision: 2,
@@ -848,9 +857,9 @@ describe("VideoPlayer room catch-up", () => {
           timeline: {
             ...directPlan.timeline,
             source_start_seconds: 1500,
-            stream_origin_seconds: 1495,
-            timeline_offset_seconds: 1495,
-            player_start_seconds: 5,
+            stream_origin_seconds: 1488,
+            timeline_offset_seconds: 1488,
+            player_start_seconds: 12,
             can_seek_anywhere: false,
           },
         }),
@@ -861,10 +870,36 @@ describe("VideoPlayer room catch-up", () => {
       });
       video.currentTime = 0.05;
       vi.mocked(video.play).mockClear();
+      vi.mocked(connection.sendRoomMessage).mockClear();
       fireEvent(video, new Event("loadstart"));
       await act(() => vi.advanceTimersByTimeAsync(600));
       expect(video.play).toHaveBeenCalledOnce();
+      expect(video.playbackRate).toBe(4);
+
+      // Within three seconds of the target a throttled check, up to about 1.5 s
+      // late, must not carry the element past the one-second tolerance.
+      video.currentTime = 9;
+      await act(() => vi.advanceTimersByTimeAsync(60));
+      expect(video.playbackRate).toBe(2);
+      expect(paused).toBe(false);
+
+      video.currentTime = 10.6;
+      await act(() => vi.advanceTimersByTimeAsync(60));
       expect(video.playbackRate).toBe(1);
+      expect(connection.sendRoomMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "ready" }),
+      );
+
+      video.currentTime = 12.05;
+      fireEvent.timeUpdate(video);
+      expect(paused).toBe(true);
+      expect(connection.sendRoomMessage).toHaveBeenCalledWith({
+        type: "ready",
+        session_id: "session-1",
+        command_id: command.command_id,
+        position_seconds: 1500.05,
+        is_paused: true,
+      });
     } finally {
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
     }
