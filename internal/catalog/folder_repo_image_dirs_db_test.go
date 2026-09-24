@@ -63,7 +63,7 @@ func TestFilterUnreferencedImageDirsPostgres(t *testing.T) {
 		"imgdirtest/missing/",         // nothing there at all
 		"imgdirtest/missing/",         // duplicates are reported once
 	}
-	// DeleteFolder passes an empty set, so nothing is excluded as deleting and
+	// DeleteWithStats passes an empty set, so nothing is excluded as deleting and
 	// the deleted-owner dirs count as referenced. nil must behave the same:
 	// bound as NULL it would report every candidate.
 	alwaysUnreferenced := []string{
