@@ -3039,6 +3039,8 @@ type restartFlight struct {
 // restartToneMapValidationTimeout bounds the tone-map source recheck on a
 // restart. It is deliberately shorter than the caller's post-restart segment
 // wait (30s) so a slow validation cannot consume the entire recovery window.
+// Both run before the node answers a segment request, so together they must
+// stay under the relays' response-header timeout (60s, in transcodeproxy).
 var restartToneMapValidationTimeout = 20 * time.Second
 
 func (s *TranscodeSession) restart(
