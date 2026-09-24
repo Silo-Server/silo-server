@@ -561,12 +561,13 @@ func TestSyncRatingsResendsAValueChangedDuringTheSend(t *testing.T) {
 	}
 }
 
-func TestSyncRatingsForgetsTheAgreedRatingWhenResendsNeverSettle(t *testing.T) {
+func TestSyncRatingsAgreesOnTheLastSentValueWhenResendsNeverSettle(t *testing.T) {
 	h := newRatingHarness(t)
 	h.agree(ratingTestMovieA, 1, true)
 	h.store.set(ratingTestMovieA, 2)
 	// Every write overlaps another edit, so no send ever confirms the current
-	// value. The agreed row must not be left claiming the provider holds it.
+	// value. The agreed row must name what the provider was last sent, so the
+	// next merge sends the newer value instead of importing the sent one.
 	stars := 2
 	h.provider.onExport = func() {
 		stars = stars%5 + 1
@@ -577,11 +578,47 @@ func TestSyncRatingsForgetsTheAgreedRatingWhenResendsNeverSettle(t *testing.T) {
 	if len(h.provider.exported) != 1+maxRatingResends {
 		t.Fatalf("exports = %d, want the first send and %d resends", len(h.provider.exported), maxRatingResends)
 	}
-	if s := h.state(ratingTestMovieA); s != nil {
-		t.Fatalf("agreed row = %#v, want it forgotten", s)
+	last := h.provider.exported[len(h.provider.exported)-1].Rating
+	if s := h.state(ratingTestMovieA); s == nil || providerRatingFromStars(s.SyncedRating) != last || s.RemoteSeen {
+		t.Fatalf("agreed row = %#v, want the last sent rating %d, unseen", s, last)
 	}
 	if len(result.Warnings) == 0 {
 		t.Fatal("unsettled ratings must be reported")
+	}
+}
+
+func TestSyncRatingsSendsARemovalMadeDuringTheLastResend(t *testing.T) {
+	h := newRatingHarness(t)
+	h.agree(ratingTestMovieA, 1, true)
+	h.store.set(ratingTestMovieA, 2)
+	// The edits keep coming, and the last one removes the rating.
+	sends, stars := 0, 2
+	h.provider.onExport = func() {
+		sends++
+		if sends > maxRatingResends {
+			h.store.remove(ratingTestMovieA)
+			return
+		}
+		stars = stars%5 + 1
+		h.store.set(ratingTestMovieA, stars)
+	}
+	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieA, 2)}, SnapshotKinds: []string{historyimport.KindMovie}}
+	h.sync()
+	if len(h.provider.exported) != 1+maxRatingResends {
+		t.Fatalf("exports = %d, want the first send and %d resends", len(h.provider.exported), maxRatingResends)
+	}
+	last := h.provider.exported[len(h.provider.exported)-1].Rating
+
+	// The provider now holds the last sent rating. The next run must send the
+	// removal rather than import that rating back.
+	h.provider.onExport = nil
+	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieA, last)}, SnapshotKinds: []string{historyimport.KindMovie}}
+	h.sync()
+	if got := h.store.stars(ratingTestMovieA); got != 0 {
+		t.Fatalf("local rating = %d, want the removal kept", got)
+	}
+	if len(h.provider.removed) != 1 {
+		t.Fatalf("removed = %#v, want the removal sent", h.provider.removed)
 	}
 }
 

@@ -428,8 +428,11 @@ describe("WatchTogetherRoomPage", () => {
       roomToken: "proof",
       restart: true,
     });
+    // The room started playing; this viewer pressed nothing, so it is not timed.
+    expect(state.startPlayback.mock.calls[0]![1]).toBe("automatic");
     fireEvent.click(screen.getByRole("button", { name: "Rejoin playback" }));
     expect(state.startPlayback).toHaveBeenCalledTimes(2);
+    expect(state.startPlayback.mock.calls[1]![1]).toBe("viewer");
     expect(screen.getByText(/After this/)).toBeInTheDocument();
   });
 
@@ -511,6 +514,7 @@ describe("WatchTogetherRoomPage", () => {
     expect(state.startPlayback).toHaveBeenCalledTimes(1);
     expect(state.startPlayback).toHaveBeenCalledWith(
       expect.objectContaining({ contentId: "arrival", fileId: 8 }),
+      "automatic",
     );
   });
 

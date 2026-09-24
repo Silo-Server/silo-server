@@ -107,7 +107,7 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	routeID := chiURLParam(r, "id")
 	imageType := chiURLParam(r, "imageType")
 	imageSize := compatRequestImageSize(r, imageType)
-	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	tag := compatImageRequestTag(r)
 	if canonicalRouteID, ok := canonicalCompatImageRouteID(h.codec, routeID); ok {
 		routeID = canonicalRouteID
 		r = withCompatImageProxyRouteRequest(r)
@@ -650,10 +650,15 @@ func (h *ImagesHandler) signedImageTagMatches(routeID, contentID, imageType, tag
 	)
 }
 
+// imageURLForItem presigns the requested image type, and its fallback type
+// only when the requested one yields no URL.
 func (h *ImagesHandler) imageURLForItem(ctx context.Context, primaryPath, primaryImageType, backdropPath, logoPath, imageType, size string) catalog.ResolvedImageURL {
-	primaryURL := compatPresignImageWithExpiry(h.detailSvc, ctx, primaryPath, primaryImageType, size)
-	backdropURL := compatPresignImageWithExpiry(h.detailSvc, ctx, backdropPath, "backdrop", size)
-	logoURL := compatPresignImageWithExpiry(h.detailSvc, ctx, logoPath, "logo", size)
+	primaryURL := func() catalog.ResolvedImageURL {
+		return compatPresignImageWithExpiry(h.detailSvc, ctx, primaryPath, primaryImageType, size)
+	}
+	backdropURL := func() catalog.ResolvedImageURL {
+		return compatPresignImageWithExpiry(h.detailSvc, ctx, backdropPath, "backdrop", size)
+	}
 
 	switch imageType {
 	case "Primary":
@@ -661,15 +666,17 @@ func (h *ImagesHandler) imageURLForItem(ctx context.Context, primaryPath, primar
 	case "Backdrop", "Thumb":
 		return firstResolvedImageURL(backdropURL, primaryURL)
 	case "Logo":
-		return logoURL
+		return compatPresignImageWithExpiry(h.detailSvc, ctx, logoPath, "logo", size)
 	default:
 		return catalog.ResolvedImageURL{}
 	}
 }
 
-func firstResolvedImageURL(values ...catalog.ResolvedImageURL) catalog.ResolvedImageURL {
-	for _, value := range values {
-		if value.URL != "" {
+// firstResolvedImageURL resolves candidates in order and returns the first
+// URL produced, so later candidates are not presigned needlessly.
+func firstResolvedImageURL(candidates ...func() catalog.ResolvedImageURL) catalog.ResolvedImageURL {
+	for _, resolve := range candidates {
+		if value := resolve(); value.URL != "" {
 			return value
 		}
 	}

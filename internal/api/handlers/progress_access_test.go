@@ -25,7 +25,7 @@ func (f *fakeProgressLookup) GetItemsInFolder(context.Context, []string, int) (m
 }
 
 func (f *fakeProgressLookup) FilterAccessibleContentIDs(
-	_ context.Context, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, maxContentRating string,
+	_ context.Context, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, maxContentRating string, _ bool,
 ) (map[string]bool, error) {
 	f.gotContentIDs = contentIDs
 	f.gotAllowed = allowedFolderIDs

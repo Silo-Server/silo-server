@@ -40,7 +40,7 @@ func (s CursorScope) key() string {
 // viewerScopeDigest is a stable digest of the visibility-affecting fields of
 // the request's effective access policy (policy revision, whether library
 // access is restricted at all, allowed and disabled library IDs,
-// content-rating ceiling). It goes into CursorScope.Security for
+// content-rating ceiling and whether it admits unrated titles). It goes into CursorScope.Security for
 // access-filtered collections. "none" stands for a request that resolved no
 // viewer scope.
 //
@@ -76,6 +76,7 @@ func viewerScopeDigest(ctx context.Context) string {
 		ids(scope.AllowedLibraryIDs),
 		ids(scope.DisabledLibraryIDs),
 		scope.MaxContentRating,
+		strconv.FormatBool(scope.AllowUnratedContent),
 	}, "\x00")
 	sum := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(sum[:8])

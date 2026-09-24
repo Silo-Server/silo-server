@@ -4,6 +4,8 @@ import (
 	"context"
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 // PDP exposes typed policy decisions over the generic Rego engine.
@@ -55,8 +57,15 @@ func (p *PDP) CheckPermission(ctx context.Context, input PermissionInput) (Permi
 	return decision, meta, nil
 }
 
-// CheckAction evaluates a download, download-transcode, or playback admission gate.
+// CheckAction evaluates a download, download-transcode, or playback admission
+// gate.
+//
+// The maturity ceiling is resolved here rather than in Rego: only
+// internal/access knows that "FSK 16" and "PG-13" are comparable, so the policy
+// compares the boolean this sets instead of ranking rating strings itself.
 func (p *PDP) CheckAction(ctx context.Context, input ActionInput) (ActionDecision, Meta, error) {
+	input.ContentRatingWithinCeiling = access.RatingAllowed(input.ContentRating, input.MaxContentRating)
+
 	var decision ActionDecision
 	meta, err := p.engine.Evaluate(ctx, DecisionAction, input, &decision)
 	if err != nil {

@@ -178,7 +178,7 @@ func (s *Service) ListNetworkAccessProviders(ctx context.Context) ([]NetworkAcce
 // during a transient manifest read failure. Enabled rows still control membership;
 // a process from an older version cannot stand in for a replacement release.
 func (s *Service) networkAccessManifest(ctx context.Context, installation *Installation) (*pluginv1.PluginManifest, error) {
-	manifest, err := s.ensureLoadedInstallation(ctx, installation)
+	manifest, err := s.readInstalledManifest(ctx, installation)
 	if err == nil || s.host == nil {
 		return manifest, err
 	}

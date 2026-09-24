@@ -15,6 +15,15 @@ afterEach(() => {
 });
 
 describe("playerFetch", () => {
+  it("names the web client on every request", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await playerFetch(config, "/test");
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      headers: { "X-Silo-Client": "Silo Web", "X-Silo-Device-Id": "web-player-device" },
+    });
+  });
+
   it("refreshes once and preserves the original profile and request body", async () => {
     let token = "expired";
     let profile = "original-profile";

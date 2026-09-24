@@ -83,6 +83,15 @@ routes such as `/api/v2/artwork/{key}`. They return `404` for an invalid or
 expired signature, `503` for a storage failure, support `HEAD`, `Range`, and
 `ETag`, and enqueue repair for a missing revisioned cache object.
 
+Clients can cache image bytes by URL. A revisioned artwork URL, whose filename
+carries a content revision such as `w500.<revision>.webp`, stays the same for a
+UTC day on every server and is valid for at least the configured lifetime after
+it is handed out. S3 presigned URLs follow the same rule. Cloudflare token URLs
+change every quarter of the token lifetime and are valid for at least three
+quarters of it. Other artwork URLs change every 15 minutes or sooner. The path
+identifies the bytes and the query only authorizes, so a client may key its
+cache of revisioned artwork by path to keep entries across the daily change.
+
 ## Capability endpoint
 
 ```http

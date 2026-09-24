@@ -21,7 +21,9 @@ owns registration; the native `/api/v1` contract is separate.
 | `POST`, `DELETE /UserPlayedItems/{itemId}` and `/Users/{userId}/PlayedItems/{itemId}` | Mark played or unplayed; return HTTP 200 and the resulting DTO. POST accepts `datePlayed`. |
 | `POST /Users/Configuration`, `/Users/{userId}/Configuration` | Persist profile settings and client presentation preferences; return 204. Current-user responses return effective settings. |
 | `GET`, `POST /DisplayPreferences/{displayPreferencesId}` | Store preferences separately by account, profile, client, and preference ID. Writes return 204. Reads always include `skipBackLength` and `skipForwardLength`, defaulting to 10000 and 30000 ms as Jellyfin does. As in Jellyfin 12, a write without either stores 15000 ms for it, and empty `landing-*` values are dropped. |
-| `GET /Localization/Cultures` | Language choices with two- and three-letter ISO codes. |
+| `GET /Localization/Cultures` | Language choices with two- and three-letter ISO codes. Accepts case-insensitive paths, including `/Localization/cultures`. |
+| `GET /UserViews/GroupingOptions`, `/Users/{userId}/GroupingOptions` | Authenticated empty array; library grouping is unsupported. The legacy alias requires the current profile's user ID. |
+| `GET /SyncPlay/List` | Authenticated empty array for client discovery. Group playback remains unsupported and user policy reports `SyncPlayAccess: "None"`. |
 
 User-data updates support `Played`, `IsFavorite`, `PlaybackPositionTicks`,
 `PlayedPercentage`, `LastPlayedDate`, and `PlayCount` values 0 or 1. Omitted
@@ -309,7 +311,9 @@ probed `original` disposition in the native track model), the
 (rotation is not probed), external delivery of PGS and VobSub tracks during
 direct play or remux (they burn in), `excludeActiveSessions` on resume lists,
 remembered per-item subtitle selections, and `Accept-Language` localization.
-`/Devices`, `/Playlists`, QuickConnect initiation, and SyncPlay are not served.
+`/Devices`, `/Playlists`, QuickConnect initiation, and SyncPlay group operations
+are not served. `/SyncPlay/List` only provides the empty discovery response
+described above.
 
 The compatibility surface does not add audio-library playback, Live TV, IPTV,
 DVR, or `.strm` support. See `docs/non-goals.md` for permanent product boundaries.

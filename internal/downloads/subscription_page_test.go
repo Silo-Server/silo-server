@@ -18,6 +18,12 @@ func subscriptionMutationTestRepo(t *testing.T) *SubscriptionRepository {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, err = repo.pool.Exec(t.Context(), `CREATE TABLE download_subscription_exclusions (
+ subscription_id text NOT NULL REFERENCES download_subscriptions(id) ON DELETE CASCADE,episode_id text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(subscription_id,episode_id))`)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return NewSubscriptionRepository(repo.pool)
 }
 

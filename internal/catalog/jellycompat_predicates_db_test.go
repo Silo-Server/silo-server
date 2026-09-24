@@ -87,7 +87,7 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 		if i == 4 {
 			year = 2023
 		}
-		exec(`UPDATE media_items SET genres=ARRAY[$2]::text[],year=$3,content_rating='PG',status='matched' WHERE content_id=$1`, id, genre, year)
+		exec(`UPDATE media_items SET genres=ARRAY[$2]::text[],year=$3,content_rating='PG',content_rating_age=8,status='matched' WHERE content_id=$1`, id, genre, year)
 		link(id, libraryID)
 		if i != 5 && i != 6 {
 			favorite(id, profiles[0])
@@ -170,7 +170,7 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 	})
 	seriesID, otherSeries := prefix+"-series", prefix+"-other-series"
 	for _, id := range []string{seriesID, otherSeries} {
-		exec(`INSERT INTO media_items(content_id,type,title,genres,content_rating) VALUES($1,'series','Synthetic Series',ARRAY['Drama'],'PG')`, id)
+		exec(`INSERT INTO media_items(content_id,type,title,genres,content_rating,content_rating_age) VALUES($1,'series','Synthetic Series',ARRAY['Drama'],'PG',8)`, id)
 		link(id, libraryID)
 	}
 	seasonIDs := []string{prefix + "-season1", prefix + "-season2"}

@@ -1088,6 +1088,14 @@ func (s *seriesRollupCountingStore) SeriesEpisodeWatchCounts(_ context.Context, 
 	return out, nil
 }
 
+func (s *seriesRollupCountingStore) SeriesSeasonWatchCounts(context.Context, string, string) (map[int]userstore.SeriesWatchCounts, error) {
+	return map[int]userstore.SeriesWatchCounts{}, nil
+}
+
+func (s *seriesRollupCountingStore) SeasonEpisodeWatchCounts(context.Context, string, []string) (map[string]userstore.SeriesWatchCounts, error) {
+	return map[string]userstore.SeriesWatchCounts{}, nil
+}
+
 // TestEnrichSeriesUserDataUsesSQLRollup: a store exposing the SQL rollup
 // capability serves the series watch-state badge from one aggregate call —
 // no episode-list materialization, no chunked per-episode progress queries —

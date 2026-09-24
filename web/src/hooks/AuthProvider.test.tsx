@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Profile } from "@/api/types";
+import type { LoginResponse, Profile } from "@/api/types";
 import { v2Fixture } from "@/api/v2/testing";
 import listAuthProvidersOk from "../../../contracts/api/v2/fixtures/list_auth_providers_ok.json";
 import { storage } from "@/utils/storage";
@@ -106,6 +106,35 @@ function ProfileSelectionProbe() {
   );
 }
 
+function makeSession(id: number, username: string): LoginResponse {
+  return {
+    access_token: `access-${id}`,
+    refresh_token: `refresh-${id}`,
+    expires_in: 3600,
+    user: {
+      id,
+      username,
+      email: "",
+      role: "user",
+      permissions: [],
+      download_allowed: false,
+      impersonation: null,
+    },
+  };
+}
+
+function AccountProbe() {
+  const { user, loading, completeLogin } = useAuth();
+
+  return (
+    <div>
+      <div data-testid="signed-in-user">{loading ? "loading" : (user?.username ?? "none")}</div>
+      <button onClick={() => completeLogin(makeSession(1, "laura"))}>Sign in as laura</button>
+      <button onClick={() => completeLogin(makeSession(2, "sam"))}>Sign in as sam</button>
+    </div>
+  );
+}
+
 describe("AuthProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -190,5 +219,33 @@ describe("AuthProvider", () => {
 
     expect(queryClientClearMock).not.toHaveBeenCalled();
     expect(screen.getByTestId("active-profile")).toHaveTextContent("Alex Updated");
+  });
+
+  it("clears the cache before a different account replaces the signed-in one", async () => {
+    renderWithAuthProvider(<AccountProbe />);
+    await waitFor(() => expect(screen.getByTestId("signed-in-user")).toHaveTextContent("none"));
+
+    // Which account was on screen each time the cache was cleared.
+    const shownAtClear: Array<string | null> = [];
+    queryClientClearMock.mockImplementation(() => {
+      shownAtClear.push(screen.getByTestId("signed-in-user").textContent);
+    });
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Sign in as laura" }).click();
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Sign in as laura" }).click();
+    });
+    expect(screen.getByTestId("signed-in-user")).toHaveTextContent("laura");
+    // Signing in from signed out, or again as the same account, keeps the cache.
+    expect(shownAtClear).toEqual([]);
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Sign in as sam" }).click();
+    });
+    expect(screen.getByTestId("signed-in-user")).toHaveTextContent("sam");
+    // Cleared while laura was still rendered: none of sam's reads had started.
+    expect(shownAtClear).toEqual(["laura"]);
   });
 });

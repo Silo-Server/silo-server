@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
-import { useFavorites } from "@/hooks/queries/favorites";
+import { useHasFavorites } from "@/hooks/queries/favorites";
 import {
   isTasteSeedBannerDismissed,
   isTasteSeedDismissed,
@@ -25,11 +25,11 @@ import {
  */
 export default function TasteSeedBanner() {
   const { profile } = useAuth();
-  const { data: favorites, isPending } = useFavorites();
+  const { data: hasFavorites, isPending } = useHasFavorites();
   const [hidden, setHidden] = useState(false);
 
   if (!profile || isPending) return null;
-  if ((favorites?.length ?? 0) > 0) return null;
+  if (hasFavorites) return null;
   if (!isTasteSeedDismissed(profile.id)) return null;
   if (isTasteSeedBannerDismissed(profile.id) || hidden) return null;
 

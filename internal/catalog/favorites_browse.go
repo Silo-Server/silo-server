@@ -24,11 +24,13 @@ type BrowseFavoritesFilters struct {
 	AllowedLibraryIDs  []int  // nil = no allowlist, []int{} = empty result
 	DisabledLibraryIDs []int  // user-disabled libraries to exclude
 	MaxContentRating   string
-	ExcludedMediaTypes []string // media types the caller's surface never exposes
-	SortField          string   // "added_at" (default), "title"/"sort_title", "year", "release_date"
-	SortOrder          string   // "asc" or "desc" (default desc)
-	Limit              int
-	Offset             int
+	// AllowUnratedContent mirrors AccessFilter.AllowUnratedContent.
+	AllowUnratedContent bool
+	ExcludedMediaTypes  []string // media types the caller's surface never exposes
+	SortField           string   // "added_at" (default), "title"/"sort_title", "year", "release_date"
+	SortOrder           string   // "asc" or "desc" (default desc)
+	Limit               int
+	Offset              int
 }
 
 // errBrowseFavoritesEmpty is the sentinel returned by buildBrowseFavoritesPlan
@@ -231,7 +233,7 @@ func buildBrowseFavoritesPlan(f BrowseFavoritesFilters) (browseFavoritesPlan, er
 		argIdx++
 	}
 
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: f.MaxContentRating, ExcludedMediaTypes: f.ExcludedMediaTypes}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: f.MaxContentRating, AllowUnratedContent: f.AllowUnratedContent, ExcludedMediaTypes: f.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 
 	// Manga chapters (type='ebook' rows linked into a manga series) are internal
 	// sub-units and must never surface as standalone cards, matching the

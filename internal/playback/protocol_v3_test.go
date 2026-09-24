@@ -21,6 +21,19 @@ func hasDegradationWarningV3(warnings []DegradationWarningV3, code string) bool 
 	return false
 }
 
+// /api/v2-only features extend the shared list and never reach /api/v1.
+func TestNativeServerFeaturesV3ExtendTheSharedList(t *testing.T) {
+	shared, native := ServerFeaturesV3(), NativeServerFeaturesV3()
+	if HasFeatureV3(shared, FeatureSubripSidecarV3) || !HasFeatureV3(native, FeatureSubripSidecarV3) {
+		t.Fatalf("subrip_sidecar_v1 must be advertised on /api/v2 only: shared=%v native=%v", shared, native)
+	}
+	for _, feature := range shared {
+		if !HasFeatureV3(native, feature) {
+			t.Fatalf("native features omit shared feature %q", feature)
+		}
+	}
+}
+
 func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
 	first := ServerFeaturesV3()
 	second := ServerFeaturesV3()

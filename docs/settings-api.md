@@ -997,6 +997,17 @@ catalog read return only the versions stored in the `library_id` it was given.
 It is server-wide, applies without a restart, and never affects playback; see
 "Library-scoped version lists" in [catalog-api.md](catalog-api.md).
 
+`access.unrated_content` (`hide` or `allow`, default `hide`) decides whether a
+profile with a content-rating ceiling sees titles that have no rating: an empty
+rating or an explicit marker such as `NR` or `Not Rated`. A rating the server
+cannot read is hidden from every ceilinged profile regardless. The setting covers
+titles in the library; request discovery keeps hiding TMDB titles that have no US
+certification from ceilinged profiles. The setting is
+server-wide and applies within seconds, without a restart. Ceilings compare
+minimum viewer ages, so a ceiling from any national system limits titles rated
+in any other; a US ceiling admits its whole tier (`PG-13` admits `TV-14`, `R`
+admits `NC-17`).
+
 ## Forward and rewind intervals
 
 Revision 9 adds four profile-wide preferences. The backend stores and validates

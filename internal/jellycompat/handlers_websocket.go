@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const wsKeepAlive = "KeepAlive"
@@ -24,8 +25,8 @@ type wsMessage struct {
 func NewSocketHandler(sessions *SessionStore, keys *AdminAPIKeyAuthenticator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token, ok := ExtractToken(r)
-		validate := func() bool {
-			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		validate := func(ctx context.Context) bool {
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 			if strings.HasPrefix(token, "sa_") {
 				session, _, _ := keys.resolveSession(ctx, token)
@@ -41,7 +42,7 @@ func NewSocketHandler(sessions *SessionStore, keys *AdminAPIKeyAuthenticator) ht
 			_, ok := sessions.Get(token)
 			return ok
 		}
-		if !ok || !validate() {
+		if !ok || !validate(r.Context()) {
 			writeError(w, 401, "Unauthorized", "Invalid or expired authentication token")
 			return
 		}
@@ -49,12 +50,18 @@ func NewSocketHandler(sessions *SessionStore, keys *AdminAPIKeyAuthenticator) ht
 	}
 }
 
-func serveCompatSocket(w http.ResponseWriter, r *http.Request, validate func() bool, checkInterval time.Duration) {
+// serveCompatSocket runs the KeepAlive protocol and revalidates the session
+// every checkInterval. Those checks run outside the request's server span: a
+// socket stays open for hours, and a trace that gained a session lookup every
+// check would grow without bound. Each check starts its own trace instead,
+// while the request's cancellation and values still apply.
+func serveCompatSocket(w http.ResponseWriter, r *http.Request, validate func(context.Context) bool, checkInterval time.Duration) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
+	checkCtx := trace.ContextWithSpanContext(r.Context(), trace.SpanContext{})
 	conn.SetReadLimit(64 * 1024)
 	done := make(chan struct{})
 	defer close(done)
@@ -101,7 +108,7 @@ func serveCompatSocket(w http.ResponseWriter, r *http.Request, validate func() b
 				}
 			}
 		case <-ticker.C:
-			if !validate() {
+			if !validate(checkCtx) {
 				_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "Authentication expired"), time.Now().Add(time.Second))
 				return
 			}

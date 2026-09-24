@@ -33,12 +33,25 @@ export interface ProfileAccessSummary {
   text: string;
 }
 
+/**
+ * Maturity ceilings a profile can be given, ordered by the oldest minimum age
+ * each admits. The server enforces the ceiling as an age, so a value from any
+ * national system limits a library certified in any other: "12" admits BBFC
+ * 12A, FSK 12 and PG12 alike.
+ *
+ * A US value admits its whole US tier, which is what the labels say: PG-13
+ * admits TV-14, and R admits TV-MA and NC-17.
+ */
 export const CONTENT_RATING_OPTIONS: ContentRatingOption[] = [
   { value: "", label: "Any content", summary: "Any content" },
-  { value: "G", label: "G / TV-G", summary: "G max" },
+  { value: "G", label: "G / TV-G / U", summary: "G max" },
+  { value: "6", label: "6 / FSK 6", summary: "6 max" },
   { value: "PG", label: "PG / TV-PG / TV-Y7", summary: "PG max" },
+  { value: "12", label: "12 / 12A / FSK 12", summary: "12 max" },
   { value: "PG-13", label: "PG-13 / TV-14", summary: "PG-13 max" },
-  { value: "R", label: "R / TV-MA / NC-17", summary: "R max" },
+  { value: "15", label: "15 / MA 15+", summary: "15 max" },
+  { value: "16", label: "16 / FSK 16", summary: "16 max" },
+  { value: "R", label: "R / TV-MA / NC-17 / 18", summary: "R max" },
 ];
 
 function sortUniqueLibraryIDs(ids: number[] | null | undefined): number[] {

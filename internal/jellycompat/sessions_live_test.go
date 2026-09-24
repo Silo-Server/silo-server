@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -72,7 +73,9 @@ func TestSessionsExposeOnlyCallerActiveDeviceAndPingPreservesPosition(t *testing
 func TestSocketKeepAliveAndRevocation(t *testing.T) {
 	var valid atomic.Bool
 	valid.Store(true)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { serveCompatSocket(w, r, valid.Load, 10*time.Millisecond) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveCompatSocket(w, r, func(context.Context) bool { return valid.Load() }, 10*time.Millisecond)
+	}))
 	defer server.Close()
 	conn, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	if response != nil {
