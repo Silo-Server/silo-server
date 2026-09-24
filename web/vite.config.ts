@@ -12,6 +12,19 @@ import os from "os";
 
 const PRECOMPRESS_MIN_BYTES = 1024;
 
+// React and the router change far less often than the app, so they get a chunk
+// of their own. Its content hash then survives most Silo upgrades, and browsers
+// keep it cached instead of downloading React again with every release. The
+// list includes the router's own dependency (cookie-es): a dependency left out
+// lands in an app chunk, and the vendor chunk would import it and inherit that
+// chunk's hash. scripts/check-bundle-budget.mjs fails when that happens.
+const VENDOR_PACKAGES =
+  /[\\/]node_modules[\\/](?:react|react-dom|scheduler|react-router|cookie-es)[\\/]/;
+
+function vendorChunk(id: string): string | undefined {
+  return VENDOR_PACKAGES.test(id) ? "vendor-react" : undefined;
+}
+
 const brotliCompressAsync = promisify(brotliCompress);
 const gzipAsync = promisify(gzip);
 
@@ -158,6 +171,14 @@ export default defineConfig(({ mode }) => {
       // A font inlined into the CSS downloads for everyone, defeating the
       // unicode-range subsets in src/fonts.css, so fonts always stay files.
       assetsInlineLimit: (filePath: string) => (/\.woff2?$/.test(filePath) ? false : undefined),
+      // scripts/check-bundle-budget.mjs reads the manifest to find the chunks
+      // the entry loads before the app can run.
+      manifest: true,
+      rollupOptions: {
+        output: {
+          manualChunks: vendorChunk,
+        },
+      },
     },
     worker: {
       format: "es",

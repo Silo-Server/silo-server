@@ -9,6 +9,8 @@
     "dev": "vite",
     "test": "vitest run",
     "build": "tsc -b && vite build",
+    "budget:check": "node scripts/check-bundle-budget.mjs",
+    "budget:update": "node scripts/check-bundle-budget.mjs --update",
     "preview": "vite preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

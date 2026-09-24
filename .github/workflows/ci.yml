@@ -329,6 +329,11 @@ jobs:
       - name: Typecheck and build
         run: pnpm run build
 
+      # Fails when the launch bundle grows past web/perf-budget.json, and when it
+      # shrinks without the budget following it down.
+      - name: Check the launch bundle budget
+        run: pnpm run budget:check
+
       - name: Upload frontend bundle for image builds
         uses: actions/upload-artifact@v4
         with:

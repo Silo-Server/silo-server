@@ -92,6 +92,7 @@ pnpm install --frozen-lockfile
 pnpm run lint
 pnpm run format:check
 pnpm run build
+pnpm run budget:check           # launch bundle size against perf-budget.json
 cd ..
 make test-web
 
