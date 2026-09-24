@@ -775,13 +775,26 @@ describe("VideoPlayer room catch-up", () => {
     vi.mocked(video.play).mockClear();
     vi.mocked(connection.sendRoomMessage).mockClear();
 
+    // Until the rebuilt stream loads, the element still holds the old one.
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    expect(video.play).not.toHaveBeenCalled();
+    fireEvent(video, new Event("loadstart"));
+
     await act(() => vi.advanceTimersByTimeAsync(600));
     expect(video.play).toHaveBeenCalledOnce();
     expect(video.muted).toBe(true);
     expect(video.playbackRate).toBe(4);
-    // The temporary mute is not saved as the viewer's preference.
+    // The temporary mute is not saved as the viewer's preference, while a
+    // viewer's volume change still is.
+    video.volume = 0.4;
     fireEvent.volumeChange(video);
     expect(localStorage.getItem("player-muted")).not.toBe("true");
+    expect(localStorage.getItem("player-volume")).toBe("0.4");
+    // A mute chosen during the pre-roll holds; the element stays muted until
+    // the pre-roll ends and then keeps the viewer's choice.
+    act(() => controls.current!.onMutedChange(true));
+    expect(video.muted).toBe(true);
+    expect(localStorage.getItem("player-muted")).toBe("true");
 
     // Still in the pre-roll: no acknowledgement yet. Close to the target it
     // slows to normal speed, found by polling even without a timeupdate.
@@ -796,7 +809,7 @@ describe("VideoPlayer room catch-up", () => {
     video.currentTime = 2.6;
     fireEvent.timeUpdate(video);
     expect(paused).toBe(true);
-    expect(video.muted).toBe(false);
+    expect(video.muted).toBe(true);
     expect(video.playbackRate).toBe(1);
     expect(connection.sendRoomMessage).toHaveBeenCalledWith({
       type: "ready",

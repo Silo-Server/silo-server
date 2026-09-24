@@ -41,10 +41,13 @@ interface UseWatchTogetherPlaybackSyncResult {
   reportReady: () => TransportRequestResult;
   reportBuffering: (positionSeconds?: number, isPaused?: boolean) => TransportRequestResult;
   /**
-   * The element is playing a stream's pre-roll up to a room seek target. Its
-   * mute and rate are temporary then, and are not the viewer's settings.
+   * While the element plays a stream's pre-roll up to a room seek target it
+   * is muted for the pre-roll, not by the viewer. This is the viewer's mute
+   * setting then, restored when the pre-roll ends; null when no pre-roll runs.
    */
-  isPlayingPreroll: () => boolean;
+  prerollMutedPreference: () => boolean | null;
+  /** Records the viewer's mute choice during a pre-roll. False when none runs. */
+  setPrerollMutedPreference: (muted: boolean) => boolean;
 }
 
 const stateReportIntervalMs = 1_500;
@@ -168,6 +171,9 @@ export function useWatchTogetherPlaybackSync({
     restoreMuted: boolean;
     restoreRate: number;
   } | null>(null);
+  // The command whose seek rebuilt the current stream. Until the rebuilt
+  // stream loads, the element still holds the stream the seek replaces.
+  const rebuiltForCommandRef = useRef<string | null>(null);
   const endPreroll = useCallback(
     (pause: boolean) => {
       const preroll = prerollRef.current;
@@ -188,6 +194,7 @@ export function useWatchTogetherPlaybackSync({
         !command ||
         command.command_id !== waitingSeekCommandId ||
         appliedCommandIdRef.current !== command.command_id ||
+        rebuiltForCommandRef.current !== command.command_id ||
         !video.paused ||
         video.seeking ||
         video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
@@ -249,14 +256,22 @@ export function useWatchTogetherPlaybackSync({
     const intervalId = window.setInterval(checkProgress, prerollCheckIntervalMs);
     // A stream replaced mid-pre-roll starts over from its own position.
     const onEmptied = () => endPreroll(false);
+    const onLoadStart = () => {
+      if (appliedCommandIdRef.current === waitingSeekCommandId) {
+        rebuiltForCommandRef.current = waitingSeekCommandId;
+      }
+    };
     video.addEventListener("timeupdate", checkProgress);
     video.addEventListener("emptied", onEmptied);
+    video.addEventListener("loadstart", onLoadStart);
     return () => {
       window.clearInterval(intervalId);
       video.removeEventListener("timeupdate", checkProgress);
       video.removeEventListener("emptied", onEmptied);
+      video.removeEventListener("loadstart", onLoadStart);
     };
   }, [
+    appliedCommandIdRef,
     endPreroll,
     streamOriginRef,
     transportCommand?.position_seconds,
@@ -264,7 +279,13 @@ export function useWatchTogetherPlaybackSync({
     waitingSeekCommandId,
   ]);
   useEffect(() => () => endPreroll(false), [endPreroll]);
-  const isPlayingPreroll = useCallback(() => prerollRef.current !== null, []);
+  const prerollMutedPreference = useCallback(() => prerollRef.current?.restoreMuted ?? null, []);
+  const setPrerollMutedPreference = useCallback((muted: boolean) => {
+    const preroll = prerollRef.current;
+    if (!preroll) return false;
+    preroll.restoreMuted = muted;
+    return true;
+  }, []);
 
   // A new stream, room, selection, phase, or connection starts over.
   useEffect(() => {
@@ -569,7 +590,8 @@ export function useWatchTogetherPlaybackSync({
       requestTransport,
       reportReady,
       reportBuffering,
-      isPlayingPreroll,
+      prerollMutedPreference,
+      setPrerollMutedPreference,
     }),
     [
       attachedSessionId,
@@ -578,7 +600,8 @@ export function useWatchTogetherPlaybackSync({
       requestTransport,
       reportReady,
       reportBuffering,
-      isPlayingPreroll,
+      prerollMutedPreference,
+      setPrerollMutedPreference,
     ],
   );
 }

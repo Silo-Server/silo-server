@@ -2026,12 +2026,21 @@ export function VideoPlayer({
     };
     const onProgress = () => setBuffered(video.buffered);
     const onVolumeChange = () => {
-      // The room seek pre-roll mutes the element for a moment; that is not
-      // the viewer's choice, so it is neither shown nor saved.
-      if (watchTogetherSync.isPlayingPreroll()) return;
+      // A room seek pre-roll mutes the element for a moment. That mute is not
+      // the viewer's, so it is neither shown nor saved; a viewer unmuting
+      // meanwhile is kept for when the pre-roll ends.
+      let viewerMuted = video.muted;
+      const prerollMuted = watchTogetherSync.prerollMutedPreference();
+      if (prerollMuted !== null) {
+        if (!video.muted) {
+          watchTogetherSync.setPrerollMutedPreference(false);
+          video.muted = true;
+        }
+        viewerMuted = watchTogetherSync.prerollMutedPreference() ?? prerollMuted;
+      }
       setVolume(video.volume);
-      setMuted(video.muted);
-      persistVolume(video.volume, video.muted);
+      setMuted(viewerMuted);
+      persistVolume(video.volume, viewerMuted);
     };
     const onWaiting = () => {
       // Delay showing the spinner so brief buffering between segments
@@ -2983,11 +2992,20 @@ export function VideoPlayer({
     if (v > 0 && video.muted) video.muted = false;
   }, []);
 
-  const handleMutedChange = useCallback((m: boolean) => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.muted = m;
-  }, []);
+  const handleMutedChange = useCallback(
+    (m: boolean) => {
+      const video = videoRef.current;
+      if (!video) return;
+      // During a room seek pre-roll the element stays muted until it ends.
+      if (watchTogetherSync.setPrerollMutedPreference(m)) {
+        setMuted(m);
+        persistVolume(video.volume, m);
+        return;
+      }
+      video.muted = m;
+    },
+    [watchTogetherSync],
+  );
 
   // -- Keyboard shortcuts --
   useKeyboardShortcuts(
