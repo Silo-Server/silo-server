@@ -308,8 +308,12 @@ Server response bytes and first playable segments do not establish first frame
 or rebuffering on a client, so press-play-to-first-frame comes from the clients'
 `first_frame` route events. When the server stores a new `first_frame` event
 whose `first_frame_ms` diagnostic parses as 0 to 600,000 ms, it observes
-`silo_playback_first_frame_seconds{client}` (buckets from 0.1 s to 60 s; `client`
-takes the API client families). Only an inserted row counts. A v2 report that
+`silo_playback_first_frame_seconds{client}` (buckets from 0.1 s to 60 s). The
+`client` label is the fixed family (`web`, `apple`, `android`, `other`, `none`)
+of the event's client name, which on a v2 report is the declared `X-Client-Name`
+or else the `X-Silo-Client` product name that also labels
+`streamapp_apiv2_requests_total{client}`. The first-party clients send only
+`X-Silo-Client`. Only an inserted row counts. A v2 report that
 repeats its `event_id` inserts nothing on any replica, so a retry is not counted
 twice. Legacy v1-bridge reports carry no event id and are counted on every
 report. Events dropped because the in-process write queue is full are never
@@ -320,8 +324,8 @@ Play action (a Play button, card or next-episode start, or a version switch
 inside the player) to the event that removes its loading overlay. It sends `first_frame`
 without a duration when nothing timed the start, such as a deep link or a
 reload. Android sends `first_frame_ms` measured from plan adoption, which leaves
-out the start request. Apple sends `first_frame` through its v1 bridge without
-`first_frame_ms`. Apple's rebuffer counter and Android's buffering callbacks
+out the start request. Apple sends `first_frame` through the v2 route-event
+endpoint without `first_frame_ms`. Apple's rebuffer counter and Android's buffering callbacks
 remain local. Neither native app consumes administrator resource DTOs, so the
 additive resource response needs no native model migration.
 

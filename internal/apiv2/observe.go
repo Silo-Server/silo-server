@@ -108,6 +108,10 @@ type observation struct {
 	errorCode   string
 	authClass   string
 	userID      *int
+	// clientName and clientVersion are the clamped X-Silo-Client identity,
+	// read once when the request arrives.
+	clientName    string
+	clientVersion string
 }
 
 type observationKey struct{}
@@ -115,6 +119,16 @@ type observationKey struct{}
 func observationFrom(ctx context.Context) *observation {
 	o, _ := ctx.Value(observationKey{}).(*observation)
 	return o
+}
+
+// observedClientName is the clamped X-Silo-Client name the observe middleware
+// read for this request, the name behind the `client` metric label, or ""
+// when the request did not pass through it.
+func observedClientName(ctx context.Context) string {
+	if o := observationFrom(ctx); o != nil {
+		return o.clientName
+	}
+	return ""
 }
 
 // observe is the outermost v2 chi middleware after requestID: it records the
@@ -130,6 +144,7 @@ func observe(next http.Handler) http.Handler {
 		defer span.End()
 		r = r.WithContext(ctx)
 		o := &observation{operationID: labelNone, errorCode: labelNone, authClass: authClassAnonymous}
+		o.clientName, o.clientVersion = clientIdentity(r)
 		r = r.WithContext(context.WithValue(r.Context(), observationKey{}, o))
 		sw := &statusRecorder{ResponseWriter: w}
 		next.ServeHTTP(sw, r)
@@ -187,7 +202,7 @@ func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 func report(r *http.Request, o *observation, status int, hijacked bool, elapsed time.Duration) {
-	name, version := clientIdentity(r)
+	name, version := o.clientName, o.clientVersion
 	major := strconv.Itoa(APIMajor)
 	method := methodLabel(r.Method)
 	class := statusClass(status)

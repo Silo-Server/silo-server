@@ -61,8 +61,10 @@ func TestReportRouteEventV2ObservesFirstFrameOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The web player, like the native apps, names itself with X-Silo-Client
+	// and sends no X-Client-Name: the v2 adapter passes it as SiloClientName.
 	caller := f.caller
-	caller.ClientName = "Silo Web"
+	caller.SiloClientName = "Silo Web"
 	report := func(eventID, firstFrameMs string) {
 		t.Helper()
 		err := f.handler.ReportRouteEventV2(f.ctx, caller, PlaybackRouteEventCommand{
