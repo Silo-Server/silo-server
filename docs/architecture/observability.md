@@ -283,6 +283,7 @@ fallback, the CORS preflight, or a middleware that refused the request.
 | --- | --- |
 | `silo_jellycompat_requests_total` | `route`, `method`, `status_class`, `client` |
 | `silo_jellycompat_request_duration_seconds` | `route`, `method` |
+| `silo_jellycompat_client_request_duration_seconds` | `client` |
 
 - `route` is the chi route template (`/Items/{id}`), read after routing. It is
   never the raw path or an ID. A request that matched no route is `unmatched`.
@@ -291,33 +292,43 @@ fallback, the CORS preflight, or a middleware that refused the request.
   over the connection, or `other`.
 - `client` comes from the MediaBrowser `Client` field, then the User-Agent:
   `infuse`, `swiftfin`, `findroid`, `streamyfin`, `wholphin`, `fladder`,
-  `senplayer`, `vidhub`, `kodi`, `jellyfin-web`, `jellyfin-androidtv`,
-  `jellyfin` (any other client named Jellyfin, such as the official apps),
-  `other`, or `none` (no identity at all). Free text never becomes a label.
+  `moonfin`, `senplayer`, `vidhub`, `kodi`, `jellyfin-web`,
+  `jellyfin-androidtv`, `jellyfin` (any other client named Jellyfin, such as
+  the official apps), `other`, or `none` (no identity at all). Free text never
+  becomes a label.
 
 The playback and transfer media routes (streams, HLS segments, subtitles,
 attachments, downloads and the bitrate test) and `/socket` are counted but not
 timed. Their duration is the client's viewing or connection time, which would
-land in the `+Inf` bucket and distort the percentiles. Stream telemetry accounts
-for their bytes and sessions. HLS manifests are timed: they are short
-documents, and their latency is the server's part of playback start.
+land in the `+Inf` bucket and distort the percentiles. They are counted when
+the response ends, which can be hours after the request started, and a stream
+cut off by a process exit is not counted, so the counter's rate on these routes
+is not a rate of stream starts. Stream telemetry tracks their live sessions,
+transfers and bytes. HLS manifests are timed: they are short documents, and
+their latency is the server's part of playback start.
 
-The histogram leaves out `status_class` and `client` because an unauthenticated
-caller picks both, and each would multiply the 14 series of every route. About
-120 timed method and route pairs plus `unmatched` give at most about 1,800
-histogram series. The counter's full label product is about 14,000 series. In
-practice a route answers a client with one or two status classes, so even a
-server that sees every client on every route stays near 4,000. Both families
-count toward the per-scrape sample limit in the
+Both histograms time the same requests. The route histogram leaves out
+`status_class` and `client` because an unauthenticated caller picks both, and
+each would multiply the 14 series of every route. About 120 timed method and
+route pairs plus `unmatched` give at most about 1,800 series. The client
+histogram splits the same requests by client family alone, one histogram per
+family, about 200 series; a route by client histogram would be about 26,000.
+The counter's full label product is about 15,000 series. In practice a route
+answers a client with one or two status classes, so even a server that sees
+every client on every route stays near 4,400. All three families count toward
+the per-scrape sample limit in the
 [monitoring examples](../operations/monitoring.md).
 
-Per-client latency lives on the trace. Each request opens a server span named
-`jellycompat <METHOD> <route>` with `http.request.method`, `http.route`,
-`http.response.status_code` (or `http.response.outcome` set to `hijacked`) and
-`jellycompat.client`. Postgres, Redis and S3 dependency spans started during
-the request are its children instead of separate root traces. The span carries
-no path, query, header value or body. A `/socket` span stays open for the life
-of the connection, as the native v2 socket spans do.
+Latency for one client on one route lives on the trace. Each request opens a
+server span named `jellycompat <METHOD> <route>` with `http.request.method`,
+`http.route`, `http.response.status_code` (or `http.response.outcome` set to
+`hijacked`) and `jellycompat.client`. Postgres, Redis and S3 dependency spans
+started during the request are its children instead of separate root traces.
+The span carries no path, query, header value or body. A `/socket` span stays
+open for the life of the connection, as the native v2 socket spans do. It holds
+the session check made before the upgrade; the checks the socket repeats while
+connected each start their own trace, so a socket left open all day does not
+grow one trace without bound.
 
 ## Trace trust, privacy and cost
 

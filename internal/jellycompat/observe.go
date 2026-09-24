@@ -1,8 +1,8 @@
 package jellycompat
 
 import (
+	"bytes"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -51,13 +51,23 @@ var (
 		Help: "Jellyfin-compatible API requests by route template, method, status class and client family.",
 	}, []string{compatLabelRoute, compatLabelMethod, compatLabelStatusClass, compatLabelClient})
 
-	// The histogram omits status class and client: each would multiply every
-	// route's buckets, and an unauthenticated caller can choose both.
+	// The route histogram omits status class and client: each would multiply
+	// every route's buckets, and an unauthenticated caller can choose both.
 	compatRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "silo_jellycompat_request_duration_seconds",
 		Help:    "Jellyfin-compatible API request duration in seconds by route template and method. Media body and socket routes are counted but not timed.",
 		Buckets: prometheus.DefBuckets,
 	}, []string{compatLabelRoute, compatLabelMethod})
+
+	// The client histogram splits the same timed requests by client family
+	// alone: one histogram per family, about 200 series, where a route by
+	// client histogram would be about 26,000. Latency for one client on one
+	// route is on the trace.
+	compatClientRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "silo_jellycompat_client_request_duration_seconds",
+		Help:    "Jellyfin-compatible API request duration in seconds by client family, over the same timed routes as silo_jellycompat_request_duration_seconds.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{compatLabelClient})
 )
 
 // untimedCompatRoutes are the templates whose response lasts as long as the
@@ -103,7 +113,9 @@ func observeCompatRequest(next http.Handler) http.Handler {
 		client := compatClientFamily(r)
 		compatRequestsTotal.WithLabelValues(route, method, compatStatusClass(sw.status, sw.hijacked), client).Inc()
 		if _, untimed := untimedCompatRoutes[route]; !untimed {
-			compatRequestDuration.WithLabelValues(route, method).Observe(elapsed.Seconds())
+			seconds := elapsed.Seconds()
+			compatRequestDuration.WithLabelValues(route, method).Observe(seconds)
+			compatClientRequestDuration.WithLabelValues(client).Observe(seconds)
 		}
 
 		if !span.IsRecording() {
@@ -155,8 +167,8 @@ func compatStatusClass(status int, hijacked bool) string {
 // The first token found wins, so specific names precede the bare "jellyfin"
 // the official apps share. A nameOnly token is trusted only in the MediaBrowser
 // Client field: "android tv" also appears in the Dalvik User-Agent of every app
-// on an NVIDIA Shield. The table is the label vocabulary; naming each family
-// twice would bury what it says.
+// on an NVIDIA Shield. Tokens are lower-case ASCII. The table is the label
+// vocabulary; naming each family twice would bury what it says.
 //
 //nolint:goconst
 var compatClientFamilies = []struct {
@@ -169,6 +181,7 @@ var compatClientFamilies = []struct {
 	{token: "streamyfin", family: "streamyfin"},
 	{token: "wholphin", family: "wholphin"},
 	{token: "fladder", family: "fladder"},
+	{token: "moonfin", family: "moonfin"},
 	{token: "senplayer", family: "senplayer"},
 	{token: "vidhub", family: "vidhub"},
 	{token: "kodi", family: "kodi"},
@@ -178,26 +191,63 @@ var compatClientFamilies = []struct {
 	{token: "jellyfin", family: "jellyfin"},
 }
 
+// maxCompatClientScan bounds how much of the Client field and the User-Agent
+// the family match reads. Real values are far shorter, and an oversized header
+// then costs no more to classify than a normal one.
+const maxCompatClientScan = 512
+
 // compatClientFamily reads the MediaBrowser Client field first, with the same
 // parser the playback path keys sessions on, then the User-Agent, which is all
 // that identifies requests without an authorization header (images, media URLs
 // with an api_key). A client outside the list is "other"; a request with no
-// identity at all is "none". Free text never reaches the label.
+// identity at all is "none". Free text never reaches the label. Matching folds
+// ASCII case into a stack buffer, so it does not allocate.
 func compatClientFamily(r *http.Request) string {
-	name := strings.ToLower(firstMediaBrowserAuthorizationValue(r, "Client"))
+	var buf [maxCompatClientScan]byte
+	name := appendLowerASCII(buf[:0], firstMediaBrowserAuthorizationValue(r, "Client"))
 	for _, c := range compatClientFamilies {
-		if strings.Contains(name, c.token) {
+		if containsToken(name, c.token) {
 			return c.family
 		}
 	}
-	userAgent := strings.ToLower(r.UserAgent())
+	hasName := len(name) > 0
+	userAgent := appendLowerASCII(buf[:0], r.UserAgent())
 	for _, c := range compatClientFamilies {
-		if !c.nameOnly && strings.Contains(userAgent, c.token) {
+		if !c.nameOnly && containsToken(userAgent, c.token) {
 			return c.family
 		}
 	}
-	if name == "" && userAgent == "" {
+	if !hasName && len(userAgent) == 0 {
 		return compatClientNone
 	}
 	return compatLabelOther
+}
+
+// appendLowerASCII appends s to dst with ASCII letters lower-cased, stopping
+// when dst is full.
+func appendLowerASCII(dst []byte, s string) []byte {
+	for i := 0; i < len(s) && len(dst) < cap(dst); i++ {
+		c := s[i]
+		if 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		dst = append(dst, c)
+	}
+	return dst
+}
+
+// containsToken reports whether b contains token. It searches for the token's
+// first byte with bytes.IndexByte and compares the rest in place.
+func containsToken(b []byte, token string) bool {
+	for len(b) >= len(token) {
+		i := bytes.IndexByte(b[:len(b)-len(token)+1], token[0])
+		if i < 0 {
+			return false
+		}
+		if string(b[i:i+len(token)]) == token {
+			return true
+		}
+		b = b[i+1:]
+	}
+	return false
 }

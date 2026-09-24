@@ -24,8 +24,9 @@ import (
 )
 
 const (
-	compatRequestsMetric = "silo_jellycompat_requests_total"
-	compatDurationMetric = "silo_jellycompat_request_duration_seconds"
+	compatRequestsMetric       = "silo_jellycompat_requests_total"
+	compatDurationMetric       = "silo_jellycompat_request_duration_seconds"
+	compatClientDurationMetric = "silo_jellycompat_client_request_duration_seconds"
 )
 
 // The label vocabulary is a dashboard contract: every value a series can carry
@@ -34,7 +35,7 @@ var (
 	compatMetricMethods  = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "other"}
 	compatMetricClasses  = []string{"1xx", "2xx", "3xx", "4xx", "5xx", "hijacked", "other"}
 	compatMetricFamilies = []string{
-		"infuse", "swiftfin", "findroid", "streamyfin", "wholphin", "fladder", "senplayer", "vidhub", "kodi",
+		"infuse", "swiftfin", "findroid", "streamyfin", "wholphin", "fladder", "moonfin", "senplayer", "vidhub", "kodi",
 		"jellyfin-web", "jellyfin-androidtv", "jellyfin", "other", "none",
 	}
 )
@@ -75,7 +76,9 @@ func gatherCompatSeries(t *testing.T) map[string]compatSample {
 	}
 	series := map[string]compatSample{}
 	for _, family := range families {
-		if family.GetName() != compatRequestsMetric && family.GetName() != compatDurationMetric {
+		switch family.GetName() {
+		case compatRequestsMetric, compatDurationMetric, compatClientDurationMetric:
+		default:
 			continue
 		}
 		for _, metric := range family.GetMetric() {
@@ -136,7 +139,8 @@ func compatAuthHeader(client string) string {
 // asserts the exact series each request adds. The route label is the chi
 // template, never the raw path or an ID; media body routes are counted but not
 // timed, while an HLS manifest is timed; requests the router never matched fold
-// into "unmatched".
+// into "unmatched". Every timed request lands in one route histogram and one
+// client histogram.
 func TestCompatRequestMetrics(t *testing.T) {
 	router := newObservedTestRouter(t, nil, nil)
 	requests := []struct {
@@ -187,6 +191,12 @@ func TestCompatRequestMetrics(t *testing.T) {
 		compatDurationMetric + "{method=GET,route=unmatched}":                                                 1,
 		compatRequestsMetric + "{client=none,method=other,route=unmatched,status_class=4xx}":                  1,
 		compatDurationMetric + "{method=other,route=unmatched}":                                               1,
+		// The client histogram times the same requests, the stream excepted.
+		compatClientDurationMetric + "{client=infuse}":       1,
+		compatClientDurationMetric + "{client=jellyfin-web}": 1,
+		compatClientDurationMetric + "{client=swiftfin}":     1,
+		compatClientDurationMetric + "{client=findroid}":     1,
+		compatClientDurationMetric + "{client=none}":         2,
 	})
 }
 
@@ -225,7 +235,15 @@ func TestCompatRequestMetricLabelsStayBounded(t *testing.T) {
 	if len(series) == 0 {
 		t.Fatal("no jellycompat request series were exported")
 	}
+	// Both histograms time exactly the requests on timed routes.
+	var routeTimed, clientTimed float64
 	for key, sample := range series {
+		switch sample.metric {
+		case compatDurationMetric:
+			routeTimed += sample.value
+		case compatClientDurationMetric:
+			clientTimed += sample.value
+		}
 		for name, value := range sample.labels {
 			var ok bool
 			switch name {
@@ -247,6 +265,16 @@ func TestCompatRequestMetricLabelsStayBounded(t *testing.T) {
 		}
 		if _, untimed := untimedCompatRoutes[sample.labels["route"]]; untimed && sample.metric == compatDurationMetric {
 			t.Errorf("untimed route %s has a duration series", sample.labels["route"])
+		}
+	}
+	// Three of the five requests are on timed routes; the HLS segment (Kodi)
+	// and the subtitle stream (Wholphin) are not.
+	if routeTimed != 3 || clientTimed != 3 {
+		t.Errorf("timed requests: route histogram %v, client histogram %v, want 3 each", routeTimed, clientTimed)
+	}
+	for _, family := range []string{"kodi", "wholphin"} {
+		if _, ok := series[compatClientDurationMetric+"{client="+family+"}"]; ok {
+			t.Errorf("client histogram timed an untimed media request from %s", family)
 		}
 	}
 }
@@ -292,6 +320,10 @@ func TestCompatSocketUpgradeIsCountedAsHijacked(t *testing.T) {
 
 func TestCompatClientFamily(t *testing.T) {
 	const shieldDalvik = "Dalvik/2.1.0 (Linux; U; Android 11; SHIELD Android TV Build/RQ1A.210105.003)"
+	// The match reads a bounded prefix: a token that ends inside it counts,
+	// one past it does not.
+	edgeOfScan := strings.Repeat("x", maxCompatClientScan-len("Infuse")) + "Infuse"
+	pastScan := strings.Repeat("x", maxCompatClientScan) + "Infuse/8.0"
 	for _, tc := range []struct {
 		header, value, userAgent, want string
 	}{
@@ -299,6 +331,7 @@ func TestCompatClientFamily(t *testing.T) {
 		{"X-Emby-Authorization", compatAuthHeader("Swiftfin tvOS"), "", "swiftfin"},
 		{"X-Emby-Authorization", compatAuthHeader("Kodi JellyCon"), "", "kodi"},
 		{"X-Emby-Authorization", compatAuthHeader("Fladder"), "", "fladder"},
+		{"X-Emby-Authorization", compatAuthHeader("Moonfin"), "", "moonfin"},
 		{"X-Emby-Authorization", compatAuthHeader("Jellyfin Web"), "Mozilla/5.0 (Macintosh)", "jellyfin-web"},
 		{"X-Emby-Authorization", compatAuthHeader("Android TV"), "", "jellyfin-androidtv"},
 		{"X-Emby-Authorization", compatAuthHeader("Jellyfin Media Player"), "", "jellyfin"},
@@ -308,6 +341,9 @@ func TestCompatClientFamily(t *testing.T) {
 		// Without an authorization header the User-Agent decides, but only
 		// through product names: every app on a Shield says "Android TV".
 		{"", "", "Infuse/8.0 (AppleTV)", "infuse"},
+		{"", "", "KODI/21.0 (Linux)", "kodi"},
+		{"", "", edgeOfScan, "infuse"},
+		{"", "", pastScan, "other"},
 		{"", "", shieldDalvik, "other"},
 		{"X-Emby-Authorization", compatAuthHeader("My Private Player"), "", "other"},
 		{"", "", "", "none"},
@@ -320,7 +356,7 @@ func TestCompatClientFamily(t *testing.T) {
 			req.Header.Set("User-Agent", tc.userAgent)
 		}
 		if got := compatClientFamily(req); got != tc.want {
-			t.Errorf("client family(%s=%q, User-Agent=%q) = %q, want %q", tc.header, tc.value, tc.userAgent, got, tc.want)
+			t.Errorf("client family(%s=%q, User-Agent=%.40q) = %q, want %q", tc.header, tc.value, tc.userAgent, got, tc.want)
 		}
 	}
 }
@@ -413,6 +449,90 @@ func TestCompatRequestSpanParentsDependencySpans(t *testing.T) {
 	}
 }
 
+// TestCompatSocketSessionChecksStartTheirOwnTraces keeps the socket's
+// periodic session checks out of its server span. The socket stays open for
+// hours; if each check joined that one trace, it would grow without bound. The
+// check made before the upgrade still belongs to the request.
+func TestCompatSocketSessionChecksStartTheirOwnTraces(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() { otel.SetTracerProvider(previous); _ = provider.Shutdown(context.Background()) })
+
+	checked := make(chan struct{}, 1)
+	router := chi.NewRouter()
+	router.Use(observeCompatRequest)
+	router.Get("/socket", func(w http.ResponseWriter, r *http.Request) {
+		_, done := telemetry.StartDependency(r.Context(), "postgres", "api", "query")
+		done(nil)
+		serveCompatSocket(w, r, func(ctx context.Context) bool {
+			_, done := telemetry.StartDependency(ctx, "redis", "api", "get")
+			done(nil)
+			select {
+			case checked <- struct{}{}:
+			default:
+			}
+			return true
+		}, 10*time.Millisecond)
+	})
+	listener := httptest.NewServer(router)
+	t.Cleanup(listener.Close)
+
+	conn, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(listener.URL, "http")+"/socket", nil)
+	if response != nil {
+		_ = response.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("dial socket: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var msg wsMessage
+	if err := conn.ReadJSON(&msg); err != nil {
+		t.Fatalf("first socket message: %v", err)
+	}
+	select {
+	case <-checked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no periodic session check ran")
+	}
+	_ = conn.Close()
+
+	// The server span is exported once the handler notices the close.
+	var socketSpan *tracetest.SpanStub
+	for deadline := time.Now().Add(5 * time.Second); socketSpan == nil && time.Now().Before(deadline); {
+		for _, span := range exporter.GetSpans() {
+			if span.SpanKind == trace.SpanKindServer {
+				socketSpan = &span
+			}
+		}
+		if socketSpan == nil {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if socketSpan == nil {
+		t.Fatal("the socket's server span was not exported")
+	}
+	var upgradeChecks, periodicChecks int
+	for _, span := range exporter.GetSpans() {
+		switch span.Name {
+		case "postgres.query":
+			upgradeChecks++
+			if span.Parent.SpanID() != socketSpan.SpanContext.SpanID() {
+				t.Errorf("the check before the upgrade is not a child of the socket span: parent=%v", span.Parent)
+			}
+		case "redis.get":
+			periodicChecks++
+			if span.Parent.IsValid() || span.SpanContext.TraceID() == socketSpan.SpanContext.TraceID() {
+				t.Errorf("a periodic session check joined the socket trace: parent=%v", span.Parent)
+			}
+		}
+	}
+	if upgradeChecks != 1 || periodicChecks == 0 {
+		t.Errorf("checks exported: %d before the upgrade, %d periodic; want 1 and at least 1", upgradeChecks, periodicChecks)
+	}
+}
+
 // BenchmarkCompatRouterPing measures one request through the full compat
 // middleware chain to a trivial handler, so the number isolates what the
 // chain costs per request. The request log is discarded.
@@ -465,4 +585,30 @@ func BenchmarkCompatRequestObserver(b *testing.B) {
 		b.Cleanup(func() { otel.SetTracerProvider(previous); _ = provider.Shutdown(context.Background()) })
 		run(b, newRouter(true))
 	})
+}
+
+// BenchmarkCompatClientFamily covers the classifier's paths: a Client field
+// match, a User-Agent match (image and media URLs carry no authorization
+// header), an unknown client that reads both, and an oversized User-Agent.
+func BenchmarkCompatClientFamily(b *testing.B) {
+	for _, tc := range []struct {
+		name, authorization, userAgent string
+	}{
+		{"client-field", compatAuthHeader("Infuse-Direct"), "Infuse/8.0 (AppleTV)"},
+		{"user-agent", "", "Infuse/8.0 (AppleTV)"},
+		{"unknown", compatAuthHeader("My Private Player"), "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"},
+		{"oversized-user-agent", "", strings.Repeat("X", 8<<10)},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/Items", nil)
+		if tc.authorization != "" {
+			req.Header.Set("X-Emby-Authorization", tc.authorization)
+		}
+		req.Header.Set("User-Agent", tc.userAgent)
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = compatClientFamily(req)
+			}
+		})
+	}
 }
