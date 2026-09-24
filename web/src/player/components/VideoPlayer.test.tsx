@@ -405,6 +405,31 @@ describe("VideoPlayer room catch-up", () => {
     expect(screen.getByText(reconnectingMessage)).toBeInTheDocument();
   });
 
+  it("does not extend an admin notice through a routine room reconnect", async () => {
+    const { connection, rerenderPlayer } = setup(100);
+    const onCommand = realtimeOptions.current?.onCommand;
+    if (!onCommand) throw new Error("expected the realtime command handler");
+    await act(async () => {
+      await onCommand({
+        type: "command",
+        command_id: "cmd-message-brief-reconnect",
+        session_id: "session-1",
+        name: "display_message",
+        deadline_ms: 8_000,
+        payload: { title: "Admin", message: "Server maintenance at midnight." },
+      });
+    });
+
+    await act(() => vi.advanceTimersByTimeAsync(7_500));
+    rerenderPlayer({ watchTogetherConnection: { ...connection, connectionState: "disconnected" } });
+    await act(() => vi.advanceTimersByTimeAsync(499));
+    rerenderPlayer({ watchTogetherConnection: connection });
+    expect(screen.getByText("Server maintenance at midnight.")).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(screen.queryByText("Server maintenance at midnight.")).toBeNull();
+    expect(screen.queryByText(reconnectingMessage)).toBeNull();
+  });
+
   it("shows a repeated notice again after the previous one expired", async () => {
     setup(100);
     for (let attempt = 0; attempt < 2; attempt++) {

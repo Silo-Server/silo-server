@@ -767,6 +767,7 @@ export function VideoPlayer({
     !watchTogether.closedReason &&
     !watchTogether.replacementReason &&
     !roomConnected;
+  const holdReconnectNotice = roomReconnecting && notice?.message === ROOM_RECONNECTING_MESSAGE;
   // Set once an outage outlasts the delay, so a notice that expires during it
   // hands back to the reconnect warning.
   const roomReconnectWarningDueRef = useRef(false);
@@ -811,7 +812,7 @@ export function VideoPlayer({
   // viewer can see it, and the reconnect warning stays for the whole outage.
   useEffect(() => {
     if (!notice || isDetached) return;
-    if (roomReconnecting && notice.message === ROOM_RECONNECTING_MESSAGE) return;
+    if (holdReconnectNotice) return;
     const timer = setTimeout(
       () =>
         setNotice((current) => {
@@ -823,7 +824,7 @@ export function VideoPlayer({
       PLAYBACK_NOTICE_VISIBLE_MS,
     );
     return () => clearTimeout(timer);
-  }, [isDetached, notice, roomReconnecting]);
+  }, [holdReconnectNotice, isDetached, notice]);
 
   useEffect(() => {
     compatibilityFallbackKeyRef.current = null;
