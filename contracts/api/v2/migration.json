@@ -10,7 +10,7 @@
   "consumer_method": "Client call sites were extracted by scripts/apiv2-ledger/extract_consumers.py from web/src (this repo) and the origin/main trees of silo-apple and silo-android at the commits pinned in source_trees (re-resolve a sibling site with git show <sha>:<file> in that repo, never against a moving branch): path literals and templates passed to HTTP/WebSocket calls, plus paths built by helper functions that return a template, templates rooted at the API base URL, Kotlin buildString/const val builders, and Swift let/static let path bindings, with interpolations normalized to a wildcard and matched against inventory paths by method (scripts/apiv2-ledger/match_consumers.py). scripts/apiv2-ledger/sweep_uncredited.py then greps the last two static segments of every inventory path across all three trees and every hit not within four lines of a credited site was resolved by hand. Server-internal and compat consumers are Go URL builders and callers in this repo. Sites marked match=manual were resolved by hand where the path is assembled from variables the scripts cannot follow. Call-site files are repository-root-relative for their repo (web: src/... under web/; apple: iosApp/...; android: shared/, android-shared/, androidApp/, androidTvApp/; server: this repository root). Absence of a first-party consumer is not proof of disuse.",
   "field_reference": "internal/contractledger validates this file against migration.schema.json and reconciles it against the route inventory: listener, namespace, method, path, registration_index, handler, handler_kind, source_file, route_group, middleware_chain, auth_class, auth_traits, conditional, conditions, delegates_to (inventory empty string is null here), request_kind, response_media_kind, streams, and upgrades_websocket are copied from the inventory row and must match it, except that dynamic_plugin_proxy rows record both media kinds as dynamic_proxy; profile_required and admin_required are derived from auth_traits. Every other field is curated by hand and preserved when scripts/apiv2-ledger/build_ledger.py merges a regenerated inventory into this file.",
   "totals": {
-    "entries": 777
+    "entries": 779
   },
   "entries": [
     {
@@ -46490,6 +46490,112 @@
         "operation_id": null
       },
       "notes": "Retained on proxy listener with public; v2 unset by design; description: x-silo-worker-protocols proxy GET /stream/subtitles/{token}/{track}/fonts. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2. No URL builder for the proxy subtitle path was found in server or client code; verify whether v3 subtitle inventory still emits proxy subtitle URLs. No first-party or internal consumer found. Absence from first-party clients is not proof of disuse: third-party clients exist, and removal needs an affirmative product decision."
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/stream/theme/{token}",
+      "registration_index": 0,
+      "handler": "(*internal/proxy.Server).handleThemeAudio",
+      "handler_kind": "method",
+      "source_file": "internal/proxy/server.go",
+      "route_group": "/",
+      "middleware_chain": 25,
+      "auth_class": "public",
+      "auth_traits": [
+        "cors",
+        "egress_metered"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "streams": true,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/themedelivery/router.go",
+          "line": 280,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-proxy",
+      "release_flow": "playback_lifecycle",
+      "tier": 1,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "No exclusion, removal, or ratified redesign applies. The node listeners have no /api/v2 namespace: this route is retained at its version-neutral path on the node listener and described through the typed worker protocol extension (`x-silo-worker-protocols`), with no /api/v2 alias (plan constraint 4; api-contract.md section 8, version-neutral legacy routes are retired individually and are not aliases into v2). Its section PR confirms retention or retires it individually.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on proxy listener with public; v2 unset by design; description: x-silo-worker-protocols proxy GET /stream/theme/{token}. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2."
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "HEAD",
+      "path": "/stream/theme/{token}",
+      "registration_index": 0,
+      "handler": "(*internal/proxy.Server).handleThemeAudio",
+      "handler_kind": "method",
+      "source_file": "internal/proxy/server.go",
+      "route_group": "/",
+      "middleware_chain": 25,
+      "auth_class": "public",
+      "auth_traits": [
+        "cors",
+        "egress_metered"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "streams": true,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/themedelivery/router.go",
+          "line": 280,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-proxy",
+      "release_flow": "playback_lifecycle",
+      "tier": 1,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "No exclusion, removal, or ratified redesign applies. The node listeners have no /api/v2 namespace: this route is retained at its version-neutral path on the node listener and described through the typed worker protocol extension (`x-silo-worker-protocols`), with no /api/v2 alias (plan constraint 4; api-contract.md section 8, version-neutral legacy routes are retired individually and are not aliases into v2). Its section PR confirms retention or retires it individually.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on proxy listener with public; v2 unset by design; description: x-silo-worker-protocols proxy HEAD /stream/theme/{token}. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2."
     },
     {
       "listener": "proxy",

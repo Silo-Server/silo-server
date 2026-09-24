@@ -11,6 +11,7 @@ import (
 	"time"
 
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/themedelivery"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
@@ -26,8 +27,10 @@ const (
 
 type ThemeSongService interface {
 	Discover(context.Context, string, bool, catalogpkg.AccessFilter) (themesongs.Set, error)
-	Mint(context.Context, themesongs.Identity, string, string, catalogpkg.AccessFilter, time.Time) (string, time.Time, error)
-	OpenGrant(context.Context, string, string, string) (themesongs.File, *os.File, error)
+	Authorize(context.Context, themesongs.Identity, string, string, catalogpkg.AccessFilter, []themesongs.Format, time.Time) (themesongs.Authorization, error)
+	OpenGrant(context.Context, string, string, string) (themesongs.File, themesongs.Delivery, *os.File, error)
+	ServeConverted(http.ResponseWriter, *http.Request, themesongs.File)
+	ThemeCapabilities(context.Context) themesongs.Capabilities
 }
 
 type ThemeSong themesongs.Song
@@ -38,9 +41,9 @@ type ThemeSongSet struct {
 
 type ThemeSongsCapability struct {
 	Capability
-	Delivery             string `json:"delivery" enum:"local_direct_play" doc:"Original audio from the API node with filesystem access"`
-	Transcode            bool   `json:"transcode"`
-	ClusterRouting       bool   `json:"cluster_routing"`
+	Delivery             string `json:"delivery" enum:"local_direct_play,routed" doc:"routed: themes follow the playback routing policy, so audio may come from a proxy node on another origin; local_direct_play: original audio from the API node only"`
+	Transcode            bool   `json:"transcode" doc:"A theme the client cannot decode can be converted to AAC in audio-only MP4 when the client accepts it"`
+	ClusterRouting       bool   `json:"cluster_routing" doc:"Theme audio can be served by worker nodes"`
 	GrantLifetimeSeconds int    `json:"grant_lifetime_seconds"`
 }
 
@@ -52,13 +55,27 @@ type ThemeSongsCapabilityOutput struct {
 }
 
 type ThemePlaybackInput struct {
-	OwnerID string `path:"id"`
-	ThemeID string `path:"theme_id" pattern:"^[1-9][0-9]*$"`
+	OwnerID string                `path:"id"`
+	ThemeID string                `path:"theme_id" pattern:"^[1-9][0-9]*$"`
+	Body    *ThemePlaybackRequest `required:"false" doc:"Absent authorizes the original audio, as for a client that does not describe what it decodes"`
+}
+
+// ThemePlaybackRequest describes what the client can decode.
+type ThemePlaybackRequest struct {
+	AcceptedFormats []ThemeAudioFormat `json:"accepted_formats,omitempty" maxItems:"32" doc:"Container and codec pairs the client decodes. The original is chosen when it matches; otherwise AAC in audio-only MP4 when an mp4 (or m4a) entry accepts aac or any codec. Unknown values are ignored"`
+}
+
+// ThemeAudioFormat is one container and audio codec a client decodes.
+type ThemeAudioFormat struct {
+	Container  string `json:"container" maxLength:"16" doc:"File container, lower case, e.g. mp3, mp4, m4a, flac, ogg, opus, wav, aac" example:"ogg"`
+	AudioCodec string `json:"audio_codec,omitempty" maxLength:"16" doc:"Codec, lower case, e.g. mp3, aac, alac, flac, vorbis, opus, pcm. Empty accepts any codec in the container" example:"vorbis"`
 }
 
 type ThemePlayback struct {
-	URL       string    `json:"url" doc:"Short-lived credential; do not log, persist, or share"`
-	ExpiresAt time.Time `json:"expires_at"`
+	URL         string    `json:"url" doc:"Short-lived credential; do not log, persist, or share. Relative to this server, or an absolute URL on a proxy node's origin"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	Delivery    string    `json:"delivery" enum:"original,converted" doc:"converted is progressive AAC in audio-only MP4 with no length and no byte ranges; fetch a new grant to replay it"`
+	ContentType string    `json:"content_type" doc:"Media type of the audio at url" example:"audio/mpeg"`
 }
 
 type ThemePlaybackOutput struct {
@@ -69,9 +86,14 @@ type ThemePlaybackOutput struct {
 func registerThemeSongs(reg *Registry) {
 	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/catalog/themes/capabilities", "getThemeSongsCapability", "catalog", "Local theme audio support and delivery limitations."), Class: ClassProfileScoped},
 		func(ctx context.Context, _ *CapabilityInput) (*ThemeSongsCapabilityOutput, error) {
-			return &ThemeSongsCapabilityOutput{Body: ThemeSongsCapability{Capability: Capability{State: configuredCapabilityState(reg.deps.ThemeSongs != nil), Allowed: ptr(capabilityLoginAllowed(ctx))}, Delivery: "local_direct_play", GrantLifetimeSeconds: int(themesongs.GrantLifetime.Seconds())}}, nil
+			body := ThemeSongsCapability{Capability: Capability{State: configuredCapabilityState(reg.deps.ThemeSongs != nil), Allowed: ptr(capabilityLoginAllowed(ctx))}, Delivery: "routed", GrantLifetimeSeconds: int(themesongs.GrantLifetime.Seconds())}
+			if reg.deps.ThemeSongs != nil {
+				caps := reg.deps.ThemeSongs.ThemeCapabilities(ctx)
+				body.Transcode, body.ClusterRouting = caps.Transcode, caps.ClusterRouting
+			}
+			return &ThemeSongsCapabilityOutput{Body: body}, nil
 		})
-	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/catalog/items/{id}/themes/{theme_id}/playback", "createThemeSongPlayback", "catalog", "Authorize original theme audio for this account and profile."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
+	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/catalog/items/{id}/themes/{theme_id}/playback", "createThemeSongPlayback", "catalog", "Authorize theme audio for this account and profile, routed like video playback and converted to AAC when the client cannot decode the original."), Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	Register(reg, op, func(ctx context.Context, in *ThemePlaybackInput) (*ThemePlaybackOutput, error) {
 		if reg.deps.ThemeSongs == nil || reg.deps.CatalogAccess == nil {
 			return nil, unavailable("theme songs")
@@ -85,12 +107,21 @@ func registerThemeSongs(reg *Registry) {
 			return nil, p
 		}
 		scope, _ := scopeFrom(ctx)
-		token, expires, err := reg.deps.ThemeSongs.Mint(ctx, themesongs.Identity{UserID: claims.UserID, ProfileID: viewer.ProfileID, SessionID: claims.SessionID, PolicyRevision: scope.PolicyRevision}, in.OwnerID, in.ThemeID, viewer.Access, claims.ExpiresAt.Time)
+		var accepted []themesongs.Format
+		if in.Body != nil {
+			for _, format := range in.Body.AcceptedFormats {
+				accepted = append(accepted, themesongs.Format{Container: format.Container, AudioCodec: format.AudioCodec})
+			}
+		}
+		authorization, err := reg.deps.ThemeSongs.Authorize(ctx, themesongs.Identity{UserID: claims.UserID, ProfileID: viewer.ProfileID, SessionID: claims.SessionID, PolicyRevision: scope.PolicyRevision}, in.OwnerID, in.ThemeID, viewer.Access, accepted, claims.ExpiresAt.Time)
 		if err != nil {
 			return nil, themeSongProblem(err)
 		}
-		path := Prefix + "/catalog/items/" + url.PathEscape(in.OwnerID) + "/themes/" + url.PathEscape(in.ThemeID) + "/audio?token=" + url.QueryEscape(token)
-		return &ThemePlaybackOutput{CacheControl: playbackCacheControl, Body: ThemePlayback{URL: path, ExpiresAt: expires}}, nil
+		location := authorization.URL
+		if location == "" {
+			location = Prefix + "/catalog/items/" + url.PathEscape(in.OwnerID) + "/themes/" + url.PathEscape(in.ThemeID) + "/audio?token=" + url.QueryEscape(authorization.Grant)
+		}
+		return &ThemePlaybackOutput{CacheControl: playbackCacheControl, Body: ThemePlayback{URL: location, ExpiresAt: authorization.ExpiresAt, Delivery: string(authorization.Delivery), ContentType: authorization.ContentType}}, nil
 	})
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		params := []*huma.Param{}
@@ -112,7 +143,7 @@ func registerThemeSongs(reg *Registry) {
 		for _, name := range []string{directContentType, directContentLength, directContentRange, directAcceptRanges, etagField, directLastModified, directCacheControl} {
 			headers[name] = &huma.Param{Schema: &huma.Schema{Type: huma.TypeString}}
 		}
-		responses := map[string]*huma.Response{"200": {Description: "Original audio", Content: content, Headers: headers}, "206": {Description: themeRangeDescription, Content: content, Headers: headers}, "304": {Description: "Audio unchanged"}}
+		responses := map[string]*huma.Response{"200": {Description: "Original audio, or for a converted grant progressive AAC in audio-only MP4 with no length or ranges", Content: content, Headers: headers}, "206": {Description: themeRangeDescription, Content: content, Headers: headers}, "304": {Description: "Audio unchanged"}}
 		for _, status := range []int{400, 401, 404, 412, 416, 500, 503} {
 			responses[strconv.Itoa(status)] = &huma.Response{Description: http.StatusText(status), Content: map[string]*huma.MediaType{problemContentType: {Schema: reg.api.OpenAPI().Components.Schemas.Schema(reflect.TypeFor[Problem](), true, "")}}}
 		}
@@ -120,15 +151,19 @@ func registerThemeSongs(reg *Registry) {
 		if method == http.MethodHead {
 			id = "headThemeSongAudio"
 		}
-		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: method, Path: Prefix + "/catalog/items/{id}/themes/{theme_id}/audio", OperationID: id, Tags: []string{"catalog"}, Parameters: params, Responses: responses}, Class: ClassPublic, ServiceBacked: true}, Protocol: "theme-audio", Reason: "A scoped playback grant and current access checks authorize original audio with range and conditional HTTP semantics."}
+		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: method, Path: Prefix + "/catalog/items/{id}/themes/{theme_id}/audio", OperationID: id, Tags: []string{"catalog"}, Parameters: params, Responses: responses}, Class: ClassPublic, ServiceBacked: true}, Protocol: "theme-audio", Reason: "A scoped playback grant and current access checks authorize theme audio this node serves: original audio with range and conditional HTTP semantics, or a progressive AAC conversion."}
 		var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if reg.deps.ThemeSongs == nil {
 				writeProblem(w, r, unavailable("theme songs"))
 				return
 			}
-			file, f, err := reg.deps.ThemeSongs.OpenGrant(r.Context(), chi.URLParam(r, "id"), chi.URLParam(r, "theme_id"), r.URL.Query().Get(directAccountToken))
+			file, delivery, f, err := reg.deps.ThemeSongs.OpenGrant(r.Context(), chi.URLParam(r, "id"), chi.URLParam(r, "theme_id"), r.URL.Query().Get(directAccountToken))
 			if err != nil {
 				writeProblem(w, r, themeSongProblem(err))
+				return
+			}
+			if delivery == themesongs.DeliveryConverted {
+				reg.deps.ThemeSongs.ServeConverted(&directDownloadWriter{ResponseWriter: w, request: r}, r, file)
 				return
 			}
 			defer func() { _ = f.Close() }()
@@ -147,6 +182,10 @@ func themeSongProblem(err error) *Problem {
 		return NewProblem(TypeNotFound, "Theme not found.")
 	case errors.Is(err, themesongs.ErrGrant):
 		return NewProblem(TypeAuthenticationRequired, "The theme playback grant is invalid or expired.")
+	case errors.Is(err, themesongs.ErrNotAcceptable):
+		return NewProblem(TypeNotAcceptable, "The client decodes neither this theme's format nor its AAC conversion.")
+	case errors.Is(err, themedelivery.ErrPolicyUnsatisfied), errors.Is(err, themedelivery.ErrCapacityUnavailable):
+		return NewProblem(TypeDependencyUnavailable, "No theme audio route satisfies the playback routing policy right now.").WithRetryAfter(30)
 	case errors.Is(err, themesongs.ErrUnavailable):
 		return unavailable("local theme audio")
 	default:

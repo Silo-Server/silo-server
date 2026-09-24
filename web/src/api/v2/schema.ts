@@ -5206,7 +5206,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Authorize original theme audio for this account and profile. */
+    /** Authorize theme audio for this account and profile, routed like video playback and converted to AAC when the client cannot decode the original. */
     post: operations["createThemeSongPlayback"];
     delete?: never;
     options?: never;
@@ -24923,6 +24923,18 @@ export interface components {
       reason: string;
       retryable: boolean;
     };
+    ThemeAudioFormat: {
+      /**
+       * @description Codec, lower case, e.g. mp3, aac, alac, flac, vorbis, opus, pcm. Empty accepts any codec in the container
+       * @example vorbis
+       */
+      audio_codec?: string;
+      /**
+       * @description File container, lower case, e.g. mp3, mp4, m4a, flac, ogg, opus, wav, aac
+       * @example ogg
+       */
+      container: string;
+    };
     ThemeCatalogCapabilitiesOutputBody: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
@@ -24981,10 +24993,24 @@ export interface components {
       vars: string;
     };
     ThemePlayback: {
+      /**
+       * @description Media type of the audio at url
+       * @example audio/mpeg
+       */
+      content_type: string;
+      /**
+       * @description converted is progressive AAC in audio-only MP4 with no length and no byte ranges; fetch a new grant to replay it
+       * @enum {string}
+       */
+      delivery: "original" | "converted";
       /** Format: date-time */
       expires_at: string;
-      /** @description Short-lived credential; do not log, persist, or share */
+      /** @description Short-lived credential; do not log, persist, or share. Relative to this server, or an absolute URL on a proxy node's origin */
       url: string;
+    };
+    ThemePlaybackRequest: {
+      /** @description Container and codec pairs the client decodes. The original is chosen when it matches; otherwise AAC in audio-only MP4 when an mp4 (or m4a) entry accepts aac or any codec. Unknown values are ignored */
+      accepted_formats?: components["schemas"]["ThemeAudioFormat"][];
     };
     ThemeSong: {
       container: string;
@@ -24996,12 +25022,13 @@ export interface components {
     ThemeSongsCapability: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description Theme audio can be served by worker nodes */
       cluster_routing: boolean;
       /**
-       * @description Original audio from the API node with filesystem access
+       * @description routed: themes follow the playback routing policy, so audio may come from a proxy node on another origin; local_direct_play: original audio from the API node only
        * @enum {string}
        */
-      delivery: "local_direct_play";
+      delivery: "local_direct_play" | "routed";
       /** Format: int64 */
       grant_lifetime_seconds: number;
       /** @description Opaque revision of this document */
@@ -25011,6 +25038,7 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @description A theme the client cannot decode can be converted to AAC in audio-only MP4 when the client accepts it */
       transcode: boolean;
     };
     ThemeSongSet: {
@@ -73444,7 +73472,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Original audio */
+      /** @description Original audio, or for a converted grant progressive AAC in audio-only MP4 with no length or ranges */
       200: {
         headers: {
           "Accept-Ranges"?: string;
@@ -73582,7 +73610,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Original audio */
+      /** @description Original audio, or for a converted grant progressive AAC in audio-only MP4 with no length or ranges */
       200: {
         headers: {
           "Accept-Ranges"?: string;
@@ -73697,7 +73725,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ThemePlaybackRequest"];
+      };
+    };
     responses: {
       /** @description OK */
       200: {
@@ -73747,6 +73779,33 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };

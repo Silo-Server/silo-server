@@ -336,3 +336,44 @@ func (c *capabilityCache) convertsAAC(n *nodepool.Node) bool {
 	}
 	return false
 }
+
+// ClusterRouting reports whether themes can leave through worker nodes.
+func (r *Router) ClusterRouting() bool { return r != nil && r.Planner != nil }
+
+type nodeLister interface {
+	ProxyNodeURLs() []string
+	ProxyNodeByURL(string) (*nodepool.Node, bool)
+	TranscodeNodeURLs() []string
+	TranscodeNodeByURL(string) (*nodepool.Node, bool)
+}
+
+// CanConvert reports whether a conversion route could exist now: this node
+// runs the AAC recipe, or a worker advertises theme conversion. It ignores
+// policy and capacity, which only a resolution can settle.
+func (r *Router) CanConvert(ctx context.Context) bool {
+	if r == nil {
+		return false
+	}
+	if r.LocalConversion != nil && r.LocalConversion(ctx) {
+		return true
+	}
+	lister, ok := r.Planner.(nodeLister)
+	if !ok {
+		return false
+	}
+	caps := &capabilityCache{infos: map[*nodepool.Node]playback.HWAccelInfo{}}
+	for _, nodeURL := range lister.ProxyNodeURLs() {
+		if n, found := lister.ProxyNodeByURL(nodeURL); found && caps.has(n, playback.TransportFeatureThemeAudioEgressV1) && caps.convertsAAC(n) {
+			return true
+		}
+	}
+	if r.Recipes == nil || !r.Recipes.Enabled() {
+		return false
+	}
+	for _, nodeURL := range lister.TranscodeNodeURLs() {
+		if n, found := lister.TranscodeNodeByURL(nodeURL); found && caps.has(n, playback.TransportFeatureThemeAudioExecutionV1) && caps.convertsAAC(n) {
+			return true
+		}
+	}
+	return false
+}

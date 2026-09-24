@@ -1209,7 +1209,7 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 var mutationWithoutLegacyRow = map[string]string{
 	"cancelAdminJob":                       "V2-only cancellation command for managed background jobs. The job state machine makes repeated requests converge on the same terminal cancellation state.",
 	"createAdminStorageTransition":         "V2-only managed artwork storage transition. The active-transition constraint rejects concurrent or replayed starts instead of creating duplicate transition work.",
-	"createThemeSongPlayback":              "V2-only local theme playback from issue #937; minting a bounded grant changes no persistent state and can be retried after reauthorization.",
+	"createThemeSongPlayback":              "V2-only routed theme playback from issue #937; minting a bounded grant or worker token changes no persistent state and can be retried after reauthorization.",
 	"fallbackWatchTogetherSource":          "V2-only coordinated source fallback. The room selection revision and failed file identify one transition under the room lock; replay returns the current snapshot without another source change.",
 	"createAdminLogsSocketTicket":          "V2-only administrator log stream handshake delegation: v1 accepted the bearer token in the socket URL directly. Repeated minting grants the same bounded authority through expiring single-use tickets; the legacy log stream GET retains its own mapping.",
 	"createWatchTogetherSocketTicket":      "V2-only room handshake delegation: v1 accepted URL login and room credentials directly. Repeated minting grants the same bounded authority through expiring single-use tickets; the legacy room socket GET retains its own mapping.",

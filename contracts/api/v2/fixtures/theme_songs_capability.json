@@ -1,9 +1,9 @@
 {
-  "revision": "eaac30aff884cb1d54d37f5ea043e1ef793656141562e0fa3d193191c0893e74",
+  "revision": "42ceefb2e17cc998a422496d77d1d22148d1ea8897120f68e70384f33868c026",
   "state": "available",
   "allowed": true,
-  "delivery": "local_direct_play",
-  "transcode": false,
-  "cluster_routing": false,
+  "delivery": "routed",
+  "transcode": true,
+  "cluster_routing": true,
   "grant_lifetime_seconds": 300
 }

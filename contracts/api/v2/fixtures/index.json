@@ -12131,7 +12131,7 @@
     {
       "name": "theme_songs_capability",
       "operation_id": "getThemeSongsCapability",
-      "scenario": "A profile can discover local direct-play theme audio and typed delivery limitations.",
+      "scenario": "A profile can discover routed theme audio, conversion and cluster delivery.",
       "request": {
         "method": "GET",
         "path": "/api/v2/catalog/themes/capabilities",
@@ -12144,7 +12144,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"f89e54b5209b58cabb90f50d1668fb6afd2ed1c116c290ab1db84400256b8279\""
+        "ETag": "\"2926f95f749872122ec674143e41c217fc8d24f60d43c3907ac6fa5c567c4204\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/ThemeSongsCapability",
@@ -12170,6 +12170,49 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/ThemePlayback",
       "body_file": "theme_songs_playback.json"
+    },
+    {
+      "name": "theme_songs_playback_converted",
+      "operation_id": "createThemeSongPlayback",
+      "scenario": "A client that cannot decode the original theme receives a grant for its AAC conversion.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/catalog/items/movie:heat-1995/themes/7/playback",
+        "headers": {
+          "Authorization": "Bearer tok-events",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"accepted_formats\":[{\"container\":\"m4a\",\"audio_codec\":\"aac\"}]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ThemePlayback",
+      "body_file": "theme_songs_playback_converted.json"
+    },
+    {
+      "name": "theme_songs_playback_not_acceptable",
+      "operation_id": "createThemeSongPlayback",
+      "scenario": "A client that decodes neither the original theme nor its AAC conversion is refused.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/catalog/items/movie:heat-1995/themes/7/playback",
+        "headers": {
+          "Authorization": "Bearer tok-events",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"accepted_formats\":[{\"container\":\"ogg\",\"audio_codec\":\"opus\"}]}"
+      },
+      "expected_status": 406,
+      "response_headers": {
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "theme_songs_playback_not_acceptable.json"
     },
     {
       "name": "theme_songs_playback_unauthorized",

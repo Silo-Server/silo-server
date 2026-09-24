@@ -1,7 +1,9 @@
 package themesongs
 
 import (
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -14,6 +16,27 @@ const (
 	DeliveryOriginal  Delivery = "original"
 	DeliveryConverted Delivery = "converted"
 )
+
+// ErrNotAcceptable means the client decodes neither the original theme nor
+// its AAC conversion.
+var ErrNotAcceptable = errors.New("no theme audio format the client can play")
+
+// Authorization is where a client plays one theme. URL is a worker URL when the
+// theme is routed through a proxy; otherwise Grant authorizes this API node's
+// own audio route.
+type Authorization struct {
+	URL         string
+	Grant       string
+	Delivery    Delivery
+	ContentType string
+	ExpiresAt   time.Time
+}
+
+// Capabilities describes theme delivery on this deployment.
+type Capabilities struct {
+	Transcode      bool
+	ClusterRouting bool
+}
 
 // ConvertedContentType is the media type of a converted theme: audio-only
 // fragmented MP4 carrying AAC, the same output as audio-only video remux.
@@ -98,4 +121,12 @@ func ConversionFor(file File) Conversion {
 		conversion.SourceChannels = file.AudioChannels
 	}
 	return conversion
+}
+
+// DeliveryContentType is the media type a client receives for file.
+func DeliveryContentType(file File, delivery Delivery) string {
+	if delivery == DeliveryConverted {
+		return ConvertedContentType
+	}
+	return ContentType(file.Container)
 }

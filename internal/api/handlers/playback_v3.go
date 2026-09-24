@@ -6665,3 +6665,14 @@ func optionalFloatEqualV3(left, right *float64) bool {
 	}
 	return *left == *right
 }
+
+// LocalTransformationAvailableV3 reports whether this API node's cached
+// FFmpeg registry can run the named transformation. Theme conversions use it
+// to decide whether the API-executed route is legal.
+func (h *PlaybackHandler) LocalTransformationAvailableV3(ctx context.Context, name string) bool {
+	if h == nil {
+		return false
+	}
+	registry := h.transformationRegistryV3(ctx)
+	return registry != nil && registry.Available(name)
+}

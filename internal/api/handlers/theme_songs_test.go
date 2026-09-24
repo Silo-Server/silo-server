@@ -2,18 +2,23 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
+	"github.com/Silo-Server/silo-server/internal/themedelivery"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
@@ -44,11 +49,15 @@ func TestThemeGrantRechecksCurrentAuthorityAndFile(t *testing.T) {
 	users := &socketUserFixture{user: models.User{ID: 7, Enabled: true, AccessPolicyRevision: 2}}
 	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "profile", ProfileVerified: true, AllowedLibraryIDs: []int{3}, MaxContentRating: "PG-13", AllowUnratedContent: true}}
 	h := &ThemeSongsHandler{Service: svc, Sessions: sessions, Users: users, Resolver: viewer}
-	token, _, err := h.Mint(t.Context(), themesongs.Identity{UserID: 7, ProfileID: "profile", SessionID: "session", PolicyRevision: 2}, "movie", "7", catalog.AccessFilter{}, time.Now().Add(time.Minute))
+	authorization, err := h.Authorize(t.Context(), themesongs.Identity{UserID: 7, ProfileID: "profile", SessionID: "session", PolicyRevision: 2}, "movie", "7", catalog.AccessFilter{}, nil, time.Now().Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, f, err := h.OpenGrant(t.Context(), "movie", "7", token)
+	token := authorization.Grant
+	if authorization.URL != "" || authorization.Delivery != themesongs.DeliveryOriginal || token == "" {
+		t.Fatalf("unrouted authorization = %+v", authorization)
+	}
+	_, _, f, err := h.OpenGrant(t.Context(), "movie", "7", token)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +67,7 @@ func TestThemeGrantRechecksCurrentAuthorityAndFile(t *testing.T) {
 	registry := streamtelemetry.NewRegistry(cfg, streamtelemetry.NewLocalStore(), nil)
 	route := streamtelemetry.MediaRoute{Family: streamtelemetry.FamilyNative, Method: http.MethodGet, Pattern: "/theme", Class: streamtelemetry.ClassTransfer, Role: streamtelemetry.RoleViewerEgress, Enrolled: true}
 	observed := registry.Observe(route)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, opened, err := h.OpenGrant(r.Context(), "movie", "7", token)
+		_, _, opened, err := h.OpenGrant(r.Context(), "movie", "7", token)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -93,7 +102,7 @@ func TestThemeGrantRechecksCurrentAuthorityAndFile(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.change()
 			defer tc.reset()
-			_, f, err := h.OpenGrant(t.Context(), "movie", "7", token)
+			_, _, f, err := h.OpenGrant(t.Context(), "movie", "7", token)
 			if err == nil {
 				if f != nil {
 					_ = f.Close()
@@ -102,7 +111,74 @@ func TestThemeGrantRechecksCurrentAuthorityAndFile(t *testing.T) {
 			}
 		})
 	}
-	if _, _, err := h.OpenGrant(t.Context(), "other", "7", token); !errors.Is(err, themesongs.ErrGrant) {
+	if _, _, _, err := h.OpenGrant(t.Context(), "other", "7", token); !errors.Is(err, themesongs.ErrGrant) {
 		t.Fatal("wrong owner accepted", err)
+	}
+}
+
+type themeRoutePlanner struct{ proxy *nodepool.Node }
+
+func (p themeRoutePlanner) PlanRoute(req nodepool.RouteRequest) nodepool.Plan {
+	if req.NeedsTranscode || !req.NeedsProxy || (req.ProxyEligible != nil && !req.ProxyEligible(p.proxy)) {
+		return nodepool.Plan{}
+	}
+	return nodepool.Plan{ProxyNode: p.proxy}
+}
+
+func TestThemeAuthorizeRoutesWithoutLocalFileAndGrantsConversionLocally(t *testing.T) {
+	// The file does not exist on this API node: a proxy route must not need it.
+	missing := themesongs.File{Song: themesongs.Song{ID: "7", Container: "ogg"}, AudioCodec: "vorbis", AudioChannels: 2, OwnerPath: "/nonexistent", Path: "/nonexistent/theme.ogg", Size: 10, Modified: time.Unix(1_700_000_000, 0)}
+	store := &themeFileFixture{file: missing}
+	raw, err := json.Marshal(playback.HWAccelInfo{TransportFeatures: []string{playback.TransportFeatureThemeAudioEgressV1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := &nodepool.Node{ID: 3, URL: "http://proxy-a", Capabilities: raw}
+	h := &ThemeSongsHandler{Service: themesongs.NewService(store, "test secret"), Router: &themedelivery.Router{
+		Planner: themeRoutePlanner{proxy: proxy}, Secret: func() string { return "stream secret" },
+	}}
+	identity := themesongs.Identity{UserID: 7, ProfileID: "profile", SessionID: "session", PolicyRevision: 2}
+	authorization, err := h.Authorize(t.Context(), identity, "movie", "7", catalog.AccessFilter{}, nil, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(authorization.URL, "http://proxy-a/stream/theme/") || authorization.Grant != "" || authorization.ContentType != "audio/ogg" {
+		t.Fatalf("routed authorization = %+v", authorization)
+	}
+	if _, err := h.Authorize(t.Context(), identity, "movie", "7", catalog.AccessFilter{}, []themesongs.Format{{Container: "mp3"}}, time.Now().Add(time.Minute)); !errors.Is(err, themesongs.ErrNotAcceptable) {
+		t.Fatalf("unplayable theme: %v", err)
+	}
+
+	// With no proxy able to convert and a local AAC recipe, the conversion is
+	// served here under a converted grant.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "theme.ogg")
+	if err := os.WriteFile(path, []byte("ogg bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.file = themesongs.File{Song: themesongs.Song{ID: "7", Container: "ogg"}, AudioCodec: "vorbis", AudioChannels: 2, OwnerPath: dir, Path: path, Size: info.Size(), Modified: info.ModTime().Truncate(time.Microsecond)}
+	h.Router.LocalConversion = func(context.Context) bool { return true }
+	h.Sessions = &socketSessionFixture{valid: true}
+	h.Users = &socketUserFixture{user: models.User{ID: 7, Enabled: true, AccessPolicyRevision: 2}}
+	h.Resolver = &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "profile", ProfileVerified: true}}
+	authorization, err = h.Authorize(t.Context(), identity, "movie", "7", catalog.AccessFilter{}, []themesongs.Format{{Container: "m4a", AudioCodec: "aac"}}, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authorization.URL != "" || authorization.Grant == "" || authorization.Delivery != themesongs.DeliveryConverted || authorization.ContentType != "audio/mp4" {
+		t.Fatalf("local conversion authorization = %+v", authorization)
+	}
+	file, delivery, f, err := h.OpenGrant(t.Context(), "movie", "7", authorization.Grant)
+	if err != nil || delivery != themesongs.DeliveryConverted || f != nil || file.Path != path {
+		t.Fatalf("converted grant = %+v %q %v %v", file, delivery, f, err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeConverted(rec, httptest.NewRequest(http.MethodHead, "/theme", nil), file)
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != themesongs.ConvertedContentType {
+		t.Fatalf("converted HEAD = %d %v", rec.Code, rec.Header())
 	}
 }

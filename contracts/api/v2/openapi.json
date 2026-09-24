@@ -38513,6 +38513,31 @@
         ],
         "type": "object"
       },
+      "ThemeAudioFormat": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_codec": {
+            "description": "Codec, lower case, e.g. mp3, aac, alac, flac, vorbis, opus, pcm. Empty accepts any codec in the container",
+            "examples": [
+              "vorbis"
+            ],
+            "maxLength": 16,
+            "type": "string"
+          },
+          "container": {
+            "description": "File container, lower case, e.g. mp3, mp4, m4a, flac, ogg, opus, wav, aac",
+            "examples": [
+              "ogg"
+            ],
+            "maxLength": 16,
+            "type": "string"
+          }
+        },
+        "required": [
+          "container"
+        ],
+        "type": "object"
+      },
       "ThemeCatalogCapabilitiesOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -38718,19 +38743,50 @@
       "ThemePlayback": {
         "additionalProperties": false,
         "properties": {
+          "content_type": {
+            "description": "Media type of the audio at url",
+            "examples": [
+              "audio/mpeg"
+            ],
+            "type": "string"
+          },
+          "delivery": {
+            "description": "converted is progressive AAC in audio-only MP4 with no length and no byte ranges; fetch a new grant to replay it",
+            "enum": [
+              "original",
+              "converted"
+            ],
+            "type": "string"
+          },
           "expires_at": {
             "format": "date-time",
             "type": "string"
           },
           "url": {
-            "description": "Short-lived credential; do not log, persist, or share",
+            "description": "Short-lived credential; do not log, persist, or share. Relative to this server, or an absolute URL on a proxy node's origin",
             "type": "string"
           }
         },
         "required": [
           "url",
-          "expires_at"
+          "expires_at",
+          "delivery",
+          "content_type"
         ],
+        "type": "object"
+      },
+      "ThemePlaybackRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "accepted_formats": {
+            "description": "Container and codec pairs the client decodes. The original is chosen when it matches; otherwise AAC in audio-only MP4 when an mp4 (or m4a) entry accepts aac or any codec. Unknown values are ignored",
+            "items": {
+              "$ref": "#/components/schemas/ThemeAudioFormat"
+            },
+            "maxItems": 32,
+            "type": "array"
+          }
+        },
         "type": "object"
       },
       "ThemeSong": {
@@ -38785,12 +38841,14 @@
             "type": "boolean"
           },
           "cluster_routing": {
+            "description": "Theme audio can be served by worker nodes",
             "type": "boolean"
           },
           "delivery": {
-            "description": "Original audio from the API node with filesystem access",
+            "description": "routed: themes follow the playback routing policy, so audio may come from a proxy node on another origin; local_direct_play: original audio from the API node only",
             "enum": [
-              "local_direct_play"
+              "local_direct_play",
+              "routed"
             ],
             "type": "string"
           },
@@ -38813,6 +38871,7 @@
             "type": "string"
           },
           "transcode": {
+            "description": "A theme the client cannot decode can be converted to AAC in audio-only MP4 when the client accepts it",
             "type": "boolean"
           }
         },
@@ -111837,7 +111896,7 @@
                 }
               }
             },
-            "description": "Original audio",
+            "description": "Original audio, or for a converted grant progressive AAC in audio-only MP4 with no length or ranges",
             "headers": {
               "Accept-Ranges": {
                 "schema": {
@@ -112046,7 +112105,7 @@
         ],
         "x-silo-class": "public",
         "x-silo-raw-protocol": "theme-audio",
-        "x-silo-raw-reason": "A scoped playback grant and current access checks authorize original audio with range and conditional HTTP semantics.",
+        "x-silo-raw-reason": "A scoped playback grant and current access checks authorize theme audio this node serves: original audio with range and conditional HTTP semantics, or a progressive AAC conversion.",
         "x-silo-service-backed": true
       },
       "head": {
@@ -112122,7 +112181,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Original audio",
+            "description": "Original audio, or for a converted grant progressive AAC in audio-only MP4 with no length or ranges",
             "headers": {
               "Accept-Ranges": {
                 "schema": {
@@ -112280,7 +112339,7 @@
         ],
         "x-silo-class": "public",
         "x-silo-raw-protocol": "theme-audio",
-        "x-silo-raw-reason": "A scoped playback grant and current access checks authorize original audio with range and conditional HTTP semantics.",
+        "x-silo-raw-reason": "A scoped playback grant and current access checks authorize theme audio this node serves: original audio with range and conditional HTTP semantics, or a progressive AAC conversion.",
         "x-silo-service-backed": true
       }
     },
@@ -112329,6 +112388,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThemePlaybackRequest",
+                "description": "Absent authorizes the original audio, as for a client that does not describe what it decodes"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -112397,6 +112466,36 @@
             },
             "description": "Not Acceptable"
           },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -112443,7 +112542,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Authorize original theme audio for this account and profile.",
+        "summary": "Authorize theme audio for this account and profile, routed like video playback and converted to AAC when the client cannot decode the original.",
         "tags": [
           "catalog"
         ],
