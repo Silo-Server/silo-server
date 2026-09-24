@@ -346,7 +346,7 @@ func (h *PlaybackHandler) writeProgressSideEffectsV2(ctx context.Context, record
 		if err := h.sessionMgr.UpdateProgress(sessionID, sample.Position, sample.IsPaused); err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
 			slog.WarnContext(ctx, "failed to update live playback progress", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
 		}
-		h.syncSessionsNow(ctx, "progress")
+		h.syncSessionsOnPauseChange(ctx, wasPaused, sample.IsPaused)
 		if current, getErr := h.sessionMgr.GetSession(sessionID); getErr == nil && current != nil {
 			h.persistProgress(ctx, current)
 			h.scrobblePauseTransitionV2(ctx, current, wasPaused)

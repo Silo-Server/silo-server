@@ -1161,6 +1161,16 @@ func (h *PlaybackHandler) syncSessionsNow(ctx context.Context, reason string) {
 	}
 }
 
+// syncSessionsOnPauseChange syncs after a progress sample only when it flips
+// the pause state. A sync upserts every session on this node and invalidates
+// the admin session caches on every replica, which is too much for each
+// heartbeat; position alone waits for the periodic reconcile tick.
+func (h *PlaybackHandler) syncSessionsOnPauseChange(ctx context.Context, wasPaused, isPaused bool) {
+	if wasPaused != isPaused {
+		h.syncSessionsNow(ctx, "progress_pause")
+	}
+}
+
 func (h *PlaybackHandler) touchSessionActivity(sessionID string) {
 	if h == nil || sessionID == "" {
 		return
@@ -1467,7 +1477,7 @@ func (h *PlaybackHandler) HandleUpdateProgress(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update progress")
 		return
 	}
-	h.syncSessionsNow(r.Context(), "progress")
+	h.syncSessionsOnPauseChange(r.Context(), wasPaused, req.IsPaused)
 
 	// Persist progress to UserStore (best-effort).
 	if sess, getErr := h.sessionMgr.GetSession(sessionID); getErr == nil {
