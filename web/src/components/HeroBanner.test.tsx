@@ -5,6 +5,8 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { SectionItem } from "@/api/types";
 
+import { buildWatchRouteRequest } from "@/pages/watchRouteHelpers";
+import { takePlaybackIntent } from "@/player/first-frame";
 import HeroBanner from "./HeroBanner";
 import { formatHeroMetadata } from "./heroMetadata";
 
@@ -677,6 +679,19 @@ describe("HeroBanner", () => {
     );
 
     expect(markup).toContain("Listen Again");
+  });
+
+  it("starts the first-frame clock under the request key the watch route rebuilds", async () => {
+    render(
+      <MemoryRouter>
+        <HeroBanner libraryId={7} items={[movieSlide()]} />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole("link", { name: "Play" }));
+
+    const routeRequest = buildWatchRouteRequest("movie-1", new URLSearchParams("libraryId=7"));
+    expect(takePlaybackIntent(routeRequest.requestKey)).toEqual(expect.any(Number));
   });
 
   it("pauses the active audiobook from the hero without navigating", async () => {

@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 import type { SectionItem } from "@/api/types";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
+import { parseWatchHref } from "@/pages/watchRouteHelpers";
+import { markPlaybackIntent } from "@/player/first-frame";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { formatHeroMetadata } from "./heroMetadata";
 
@@ -232,6 +234,10 @@ export default function HeroBanner({
 
   const handlePlayClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (activeAudiobookPlaying == null) {
+      // This Play link navigates without the playback controller, so it
+      // starts the first-frame clock itself.
+      const request = parseWatchHref(playHref);
+      if (request) markPlaybackIntent(request.requestKey);
       return;
     }
     event.preventDefault();

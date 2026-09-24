@@ -316,8 +316,8 @@ report. Events dropped because the in-process write queue is full are never
 observed. Each replica exports the events it wrote; sum across replicas.
 
 The clients do not time the same interval yet. The web player measures from the
-Play action (the playback controller's start, or a version switch inside the
-player) to the event that removes its loading overlay. It sends `first_frame`
+Play action (a Play button, card or next-episode start, or a version switch
+inside the player) to the event that removes its loading overlay. It sends `first_frame`
 without a duration when nothing timed the start, such as a deep link or a
 reload. Android sends `first_frame_ms` measured from plan adoption, which leaves
 out the start request. Apple sends `first_frame` through its v1 bridge without
