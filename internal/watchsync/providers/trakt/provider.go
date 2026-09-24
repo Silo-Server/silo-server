@@ -140,6 +140,13 @@ func (p *Provider) StartDeviceAuth(
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		wait, ok := watchsync.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		if !ok {
+			wait = defaultRetryAfter
+		}
+		return watchsync.DeviceAuthSession{}, watchsync.RateLimitedError{Provider: p.Key(), RetryAfter: wait}
+	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return watchsync.DeviceAuthSession{}, fmt.Errorf("trakt device auth request failed: status %d", resp.StatusCode)
 	}
@@ -369,7 +376,7 @@ func fetchTraktPass(
 		params.Set("page", strconv.Itoa(page))
 		if conn.AccessToken != "" {
 			if err := p.pages.Wait(ctx, conn.AccessToken); err != nil {
-				return nil, 0, fmt.Errorf("wait for trakt read limiter: %w", err)
+				return nil, 0, watchsync.LimiterWaitError(ctx, p.Key(), pageInterval, err)
 			}
 		}
 		var batch []json.RawMessage
@@ -771,7 +778,7 @@ func (p *Provider) doWithHeader(
 	for attempt := 0; ; attempt++ {
 		if paced {
 			if err := p.writes.Wait(ctx, token); err != nil {
-				return nil, fmt.Errorf("wait for trakt write limiter: %w", err)
+				return nil, watchsync.LimiterWaitError(ctx, p.Key(), writeInterval, err)
 			}
 		}
 		header, wait, limited, err := p.doOnce(ctx, method, path, cfg, token, payload, out)
