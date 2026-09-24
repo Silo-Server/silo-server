@@ -12,6 +12,7 @@ import {
   setProfileId,
   setProfileToken,
   setRefreshToken,
+  type SessionIdentitySnapshot,
 } from "@/api/client";
 import { storage } from "@/utils/storage";
 import type { LoginResponse, Profile, User } from "@/api/types";
@@ -281,8 +282,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearActiveAuthState]);
 
   const restoreAdminUser = useCallback(
-    async (storedSession: { accessToken: string; refreshToken: string }) => {
+    async (
+      storedSession: { accessToken: string; refreshToken: string },
+      isCurrent: () => boolean = () => true,
+    ) => {
       const restoredSession = await restoreUserSession(storedSession);
+      // A sign-in that replaced the session during the exchange keeps it.
+      if (!isCurrent()) return false;
       clearProfile();
       queryClient.clear();
       setAccessToken(restoredSession.accessToken);
@@ -290,19 +296,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearStoredImpersonationAdminSession();
       setUser(restoredSession.user);
       setSetupRequired(false);
+      return true;
     },
     [clearProfile],
   );
 
-  const recoverPreservedAdminSession = useCallback(async () => {
-    const storedSession = loadStoredImpersonationAdminSession();
-    if (!storedSession) {
-      return false;
-    }
+  const recoverPreservedAdminSession = useCallback(
+    async (isCurrent?: () => boolean) => {
+      const storedSession = loadStoredImpersonationAdminSession();
+      if (!storedSession) {
+        return false;
+      }
 
-    await restoreAdminUser(storedSession);
-    return true;
-  }, [restoreAdminUser]);
+      return restoreAdminUser(storedSession, isCurrent);
+    },
+    [restoreAdminUser],
+  );
 
   const beginImpersonation = useCallback(
     (data: LoginResponse, returnPath: string) => {
@@ -331,7 +340,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await endImpersonationWithRecovery({
       endImpersonationRequest: () => v2("POST /api/v2/auth/impersonation/end"),
       loadStoredImpersonationAdminSession,
-      restoreAdminUser,
+      restoreAdminUser: async (storedSession) => {
+        await restoreAdminUser(storedSession);
+      },
       clearAuthState,
       clearActiveAuthState,
     });
@@ -385,27 +396,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // The server stopped accepting this session mid-use. An admin viewing as
   // another user goes back to their own preserved session, as the boot
   // restore does; otherwise the session and its cached pages are dropped so
-  // RequireAuth sends the user to sign-in. Requests refused while a recovery
-  // runs join it instead of spending the admin's refresh token again.
-  const sessionRejectionRef = useRef<Promise<void> | null>(null);
+  // RequireAuth sends the user to sign-in. Requests refused on the same
+  // session while a recovery runs join it instead of spending the admin's
+  // refresh token again. Nothing here overrides a sign-in that replaced the
+  // rejected session meanwhile.
+  const sessionRejectionRef = useRef<{
+    session: SessionIdentitySnapshot;
+    handling: Promise<void>;
+  } | null>(null);
   useEffect(() => {
     onSessionRejected(() => {
-      if (sessionRejectionRef.current) return;
+      const inFlight = sessionRejectionRef.current;
+      if (inFlight && isSessionIdentityCurrent(inFlight.session)) return;
       const session = captureSessionIdentity();
+      const isCurrent = () => isSessionIdentityCurrent(session);
       const handling = (async () => {
         try {
-          if (await recoverPreservedAdminSession()) {
+          if (await recoverPreservedAdminSession(isCurrent)) {
             restoreProfile();
             return;
           }
         } catch {
           // The admin session is gone too; fall through to sign-in.
         }
-        if (isSessionIdentityCurrent(session)) clearActiveAuthState();
+        if (isCurrent()) clearActiveAuthState();
       })().finally(() => {
-        if (sessionRejectionRef.current === handling) sessionRejectionRef.current = null;
+        if (sessionRejectionRef.current?.handling === handling) sessionRejectionRef.current = null;
       });
-      sessionRejectionRef.current = handling;
+      sessionRejectionRef.current = { session, handling };
     });
     return () => onSessionRejected(null);
   }, [clearActiveAuthState, recoverPreservedAdminSession, restoreProfile]);

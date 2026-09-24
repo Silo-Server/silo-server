@@ -297,6 +297,54 @@ describe("app boot request budget", () => {
     ).toHaveLength(1);
   });
 
+  it("keeps a sign-in that replaces the session while the admin session is restored", async () => {
+    signInReturningOwner();
+    await boot(server);
+    const adminRefreshToken = storage.get(storage.KEYS.REFRESH_TOKEN);
+    const viewedTokens = server.issueTokens();
+    const pair = { ...adminAccountImpersonate, ...viewedTokens } as TokenPair;
+    await act(async () => {
+      homeAuth!.beginImpersonation(sessionFromTokenPair(pair), "/admin/users");
+    });
+    await releaseUntilQuiet(server);
+
+    server.revokeSession(viewedTokens);
+    await act(async () => {
+      void queryClient.invalidateQueries();
+    });
+    // Release waves until the admin restore's account read is in flight.
+    const refusedAt = () =>
+      server.requests.find(
+        (request) => request.operation === "POST /api/v2/auth/refresh" && request.status === 401,
+      );
+    const restoreRead = () =>
+      server.requests.find(
+        (request) =>
+          request.operation === "GET /api/v2/account/me" &&
+          refusedAt() !== undefined &&
+          request.seq > refusedAt()!.seq,
+      );
+    for (let wave = 0; wave < 20 && !restoreRead(); wave += 1) {
+      await settle(server);
+      if (!restoreRead()) server.releaseWave();
+    }
+    expect(restoreRead(), describeRequests(server.requests)).toBeDefined();
+
+    // Another sign-in lands before the restore answers.
+    const next = server.issueTokens();
+    await act(async () => {
+      setAccessToken(next.access_token);
+      storage.set(storage.KEYS.REFRESH_TOKEN, next.refresh_token);
+    });
+    await releaseUntilQuiet(server);
+
+    const log = describeRequests(server.requests);
+    // The new session may rotate its own token; the admin's must not replace it.
+    expect(storage.get(storage.KEYS.REFRESH_TOKEN), log).not.toBe(adminRefreshToken);
+    expect(server.refreshTokensUsed, log).not.toContain(adminRefreshToken);
+    expect(appRouter!.state.location.pathname, log).not.toBe("/login");
+  });
+
   it("reads the viewed account once when an admin starts viewing as another user", async () => {
     signInReturningOwner();
     // The viewed account has two profiles, so its profile picker stays up
