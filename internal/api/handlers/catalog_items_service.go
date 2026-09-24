@@ -566,14 +566,24 @@ func (h *CatalogResourceHandler) SeriesSeason(ctx context.Context, v ItemViewer,
 			if err != nil {
 				return SeasonView{}, apiError(http.StatusInternalServerError, "internal_error", failed)
 			}
-			if len(episodes) == 0 {
+			// The SQL rollup groups by season row, so it answers only when
+			// the episodes are linked to this row. The by-number fallback
+			// for unlinked episodes folds their progress instead.
+			var userData *catalog.SeasonUserData
+			rolledUp := false
+			if len(episodes) > 0 {
+				userData, rolledUp = h.items.parentRollupUserData(ctx, v, "season", season.ContentID)
+			} else {
 				episodes, err = h.items.episodeRepo.ListBySeason(ctx, id, season.SeasonNumber)
 				if err != nil {
 					return SeasonView{}, apiError(http.StatusInternalServerError, "internal_error", failed)
 				}
 			}
+			if !rolledUp {
+				userData = h.items.getAggregateUserData(ctx, v, episodes)
+			}
 			h.items.maybeRequestStaleSeasonMetadataRefresh(ctx, season.ContentID, episodes)
-			resp := h.items.toSeasonResponseFromEpisodes(ctx, v, id, season, episodes, h.items.getAggregateUserData(ctx, v, episodes), v.Access.ImageSize)
+			resp := h.items.toSeasonResponseFromEpisodes(ctx, v, id, season, episodes, userData, v.Access.ImageSize)
 			h.items.resolveSeasonPlayTarget(ctx, v, id, &resp)
 			return resp, nil
 		case !errors.Is(err, catalog.ErrSeasonNotFound):

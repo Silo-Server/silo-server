@@ -1909,7 +1909,11 @@ func (h *ItemsHandler) parentRollupUserData(ctx context.Context, v ItemViewer, i
 	}
 	counts, err := load(ctx, v.ProfileID, []string{contentID})
 	if err != nil {
-		slog.WarnContext(ctx, "episode watch rollup failed, folding episodes instead", "component", "api", "type", itemType, "error", err)
+		// A canceled request fails the fold just as fast; only a real
+		// query failure is worth a warning.
+		if ctx.Err() == nil {
+			slog.WarnContext(ctx, "episode watch rollup failed, folding episodes instead", "component", "api", "type", itemType, "error", err)
+		}
 		return nil, false
 	}
 	parent, ok := counts[contentID]
@@ -1936,6 +1940,9 @@ func (h *ItemsHandler) seriesSeasonRollups(ctx context.Context, v ItemViewer, se
 				userData[seasonNumber] = catalog.SeasonUserDataFromCounts(season)
 			}
 			return episodeCounts, userData, nil
+		}
+		if ctx.Err() != nil {
+			return nil, nil, err
 		}
 		slog.WarnContext(ctx, "season watch rollup failed, folding episodes instead", "component", "api", "error", err)
 	}

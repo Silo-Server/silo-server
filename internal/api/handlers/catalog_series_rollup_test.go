@@ -316,6 +316,7 @@ func TestSeriesUserDataRollupParity(t *testing.T) {
 	type result struct {
 		seriesDetail, seasonDetail *catalog.ItemDetail
 		seasons                    []SeasonView
+		seasonByNumber             SeasonView
 		counts                     map[string][2]int64
 	}
 	run := func(h *CatalogResourceHandler) result {
@@ -337,13 +338,18 @@ func TestSeriesUserDataRollupParity(t *testing.T) {
 			t.Fatalf("series seasons: %v", err)
 		}
 		res.counts["series seasons"] = [2]int64{int64(statements), rows}
+		statements, rows = tracer.measure(func() { res.seasonByNumber, err = h.SeriesSeason(ctx, viewer, series, 3) })
+		if err != nil {
+			t.Fatalf("series season: %v", err)
+		}
+		res.counts["series season"] = [2]int64{int64(statements), rows}
 		return res
 	}
 	// The rollup runs first, so anything it warms can only make the fold
 	// cheaper and the comparison below stricter.
 	rollup := run(newHandler(provider))
 	fold := run(newHandler(rollupFallbackProvider{provider}))
-	for _, name := range []string{"series detail", "season detail", "series seasons"} {
+	for _, name := range []string{"series detail", "season detail", "series seasons", "series season"} {
 		t.Logf("%s: fold %d statements / %d rows, rollup %d statements / %d rows",
 			name, fold.counts[name][0], fold.counts[name][1], rollup.counts[name][0], rollup.counts[name][1])
 	}
@@ -353,6 +359,9 @@ func TestSeriesUserDataRollupParity(t *testing.T) {
 	}
 	if rollup.seasonDetail.SeasonUserData == nil || *rollup.seasonDetail.SeasonUserData != want[3] {
 		t.Fatalf("season user_data = %+v, want %+v", rollup.seasonDetail.SeasonUserData, want[3])
+	}
+	if got := rollup.seasonByNumber; got.UserData == nil || *got.UserData != want[3] || got.EpisodeCount != perSeason {
+		t.Fatalf("season 3 by number: user_data = %+v, episode_count = %d; want %+v, %d", got.UserData, got.EpisodeCount, want[3], perSeason)
 	}
 	if len(rollup.seasons) != seasonCount+1 {
 		t.Fatalf("got %d seasons, want %d", len(rollup.seasons), seasonCount+1)
@@ -382,6 +391,9 @@ func TestSeriesUserDataRollupParity(t *testing.T) {
 	if !reflect.DeepEqual(rollup.seasons, fold.seasons) {
 		t.Fatalf("seasons differ from the per-episode fold:\nrollup %+v\nfold   %+v", rollup.seasons, fold.seasons)
 	}
+	if !reflect.DeepEqual(rollup.seasonByNumber, fold.seasonByNumber) {
+		t.Fatalf("season by number differs from the per-episode fold:\nrollup %+v\nfold   %+v", rollup.seasonByNumber, fold.seasonByNumber)
+	}
 
 	// The fold reads every available episode row in scope; the rollup must
 	// not, so it saves at least that many rows and some statements.
@@ -390,5 +402,11 @@ func TestSeriesUserDataRollupParity(t *testing.T) {
 			t.Errorf("%s: rollup %d statements / %d rows, fold %d statements / %d rows; want fewer statements and at least %d fewer rows",
 				name, rollup.counts[name][0], rollup.counts[name][1], fold.counts[name][0], fold.counts[name][1], episodes)
 		}
+	}
+	// A season requested by number still lists its episodes for the stale
+	// metadata check, so the rollup replaces only the progress reads.
+	if name := "series season"; rollup.counts[name][0] >= fold.counts[name][0] || rollup.counts[name][1] >= fold.counts[name][1] {
+		t.Errorf("%s: rollup %d statements / %d rows, fold %d statements / %d rows; want fewer of both",
+			name, rollup.counts[name][0], rollup.counts[name][1], fold.counts[name][0], fold.counts[name][1])
 	}
 }
