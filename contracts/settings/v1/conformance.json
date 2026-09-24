@@ -1,6 +1,6 @@
 {
   "fixture_version": 1,
-  "manifest_revision": 9,
+  "manifest_revision": 10,
   "description": "Cross-platform conformance cases for settings resolution. Every case runs against the shipped manifest in this directory: definitions are referenced by key, never restated, so an expectation can only be satisfied by resolving the real contract. Each platform's resolver (Go in internal/settingsresolve, TypeScript in web/src/lib/settingsResolve.ts, Kotlin and Swift in the client repos) runs every case through a hand-written runner; a runner must fail on any fixture field it does not know, because schema drift in the fixture itself is drift. A case's constraint_bindings attach a constraint to a copy of a real definition so constraint semantics stay testable even while no shipped definition carries that constraint kind. In expected entries, constrained:true requires stored_value and constraint_kind to be present, and stored_value may be null to mean the authored value was JSON null.",
   "cases": [
     {
@@ -1000,6 +1000,48 @@
           "key": "ui.card_quick_actions_enabled",
           "value": null,
           "source": "default"
+        }
+      ]
+    },
+    {
+      "name": "advisory_age_badge_is_off_until_a_profile_asks",
+      "description": "The advisory-age badge is per profile and off unless that profile turned it on. p1 opted in, so it resolves true from the profile; p2 stored nothing and falls to the contract default false. A profile row must never leak across profiles here, because the setting decides what a household parent sees about a child's viewing.",
+      "keys": ["catalog.show_advisory_age"],
+      "context": { "profile_id": "p2", "device_id": "d1" },
+      "stored": [
+        {
+          "key": "catalog.show_advisory_age",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": true
+        }
+      ],
+      "expected": [
+        {
+          "key": "catalog.show_advisory_age",
+          "value": false,
+          "source": "default"
+        }
+      ]
+    },
+    {
+      "name": "advisory_age_badge_resolves_from_the_opted_in_profile",
+      "description": "The same stored row resolves true for the profile that owns it, with source \"profile\" rather than the default.",
+      "keys": ["catalog.show_advisory_age"],
+      "context": { "profile_id": "p1", "device_id": "d1" },
+      "stored": [
+        {
+          "key": "catalog.show_advisory_age",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": true
+        }
+      ],
+      "expected": [
+        {
+          "key": "catalog.show_advisory_age",
+          "value": true,
+          "source": "profile"
         }
       ]
     }

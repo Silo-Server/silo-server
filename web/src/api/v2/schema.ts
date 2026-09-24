@@ -16138,6 +16138,18 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       added_at?: string;
+      /**
+       * Format: int64
+       * @description Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch
+       * @example 13
+       */
+      advisory_age?: number;
+      /**
+       * @description Who recommended advisory_age
+       * @example commonsense
+       * @enum {string}
+       */
+      advisory_source?: "commonsense" | "mdblist";
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;
@@ -16256,6 +16268,18 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       added_at?: string;
+      /**
+       * Format: int64
+       * @description Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch
+       * @example 13
+       */
+      advisory_age?: number;
+      /**
+       * @description Who recommended advisory_age
+       * @example commonsense
+       * @enum {string}
+       */
+      advisory_source?: "commonsense" | "mdblist";
       /** @description Calendar date, YYYY-MM-DD */
       air_date?: string;
       air_time?: string;
@@ -18778,6 +18802,18 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       added_at?: string;
+      /**
+       * Format: int64
+       * @description Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch
+       * @example 13
+       */
+      advisory_age?: number;
+      /**
+       * @description Who recommended advisory_age
+       * @example commonsense
+       * @enum {string}
+       */
+      advisory_source?: "commonsense" | "mdblist";
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;
@@ -26114,6 +26150,18 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       added_at?: string;
+      /**
+       * Format: int64
+       * @description Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch
+       * @example 13
+       */
+      advisory_age?: number;
+      /**
+       * @description Who recommended advisory_age
+       * @example commonsense
+       * @enum {string}
+       */
+      advisory_source?: "commonsense" | "mdblist";
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;
@@ -26261,6 +26309,18 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       added_at?: string;
+      /**
+       * Format: int64
+       * @description Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch
+       * @example 13
+       */
+      advisory_age?: number;
+      /**
+       * @description Who recommended advisory_age
+       * @example commonsense
+       * @enum {string}
+       */
+      advisory_source?: "commonsense" | "mdblist";
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;

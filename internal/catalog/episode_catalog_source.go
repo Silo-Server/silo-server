@@ -31,6 +31,8 @@ const episodeCatalogSelectBody = `(
 		COALESCE(si.genres, '{}'::text[]) AS genres,
 		COALESCE(si.content_rating, '') AS content_rating,
 		si.content_rating_age,
+		si.advisory_age,
+		COALESCE(si.advisory_source, '') AS advisory_source,
 		COALESCE(NULLIF(e.runtime, 0), COALESCE(si.runtime, 0)) AS runtime,
 		COALESCE(e.overview, '') AS overview,
 		''::text AS tagline,

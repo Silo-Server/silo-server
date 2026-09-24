@@ -1399,11 +1399,20 @@ func browseItemColumns(alias string) string {
 		"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date",
 		"show_status",
 		"matched_at", "episode_metadata_incomplete", "episode_metadata_last_checked_at", "status", "created_at", "updated_at",
+		advisoryAgeColumn, advisorySourceColumn,
 	}
 	prefixed := make([]string, len(cols))
 	for i, col := range cols {
 		if col == "last_air_date" {
 			prefixed[i] = effectiveLastAirDateExpr(alias)
+			continue
+		}
+		if col == advisorySourceColumn {
+			// Nullable in the table but a plain string on MediaItem, so it is
+			// coalesced here the way item_repo coalesces its nullable string
+			// columns. browseGroupByColumns groups by the bare column, which
+			// this expression depends on and nothing else.
+			prefixed[i] = "COALESCE(" + alias + "." + advisorySourceColumn + ", '') AS " + advisorySourceColumn
 			continue
 		}
 		prefixed[i] = alias + "." + col
@@ -1481,6 +1490,7 @@ func browseGroupByColumns(alias string) string {
 		"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date",
 		"show_status",
 		"matched_at", "episode_metadata_incomplete", "episode_metadata_last_checked_at", "status", "created_at", "updated_at",
+		advisoryAgeColumn, advisorySourceColumn,
 	}
 	prefixed := make([]string, len(cols))
 	for i, col := range cols {
@@ -1545,6 +1555,8 @@ func scanBrowseItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.Status,
 			&item.CreatedAt,
 			&item.UpdatedAt,
+			&item.AdvisoryAge,
+			&item.AdvisorySource,
 			&item.MangaChapterCount,
 			&item.MangaVolumeCount,
 			&item.AddedAt,

@@ -161,6 +161,7 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 		for _, item := range bundle.Items {
 			studios, networks, countries, keywords := itemRecordStringArrays(item)
 			contentRatingAge := access.StoredRating(item.ContentRating)
+			advisoryAge, advisorySource := models.AdvisoryColumns(item.AdvisoryAge, item.AdvisorySource)
 			itemRows = append(itemRows, []any{
 				item.ContentID, item.Type, item.Title, item.SortTitle, item.OriginalTitle, item.Year, item.Genres,
 				item.ContentRating, item.Runtime, item.Overview, item.Tagline,
@@ -172,6 +173,7 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 				item.MatchedAt, item.LastRefreshed, item.RefreshFailures, item.LockedFields, item.Status,
 				item.CreatedAt, item.UpdatedAt,
 				contentRatingAge,
+				advisoryAge, advisorySource,
 			})
 		}
 		if err := copyInsertBatches(ctx, tx, "media_items",
@@ -186,6 +188,7 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 				"matched_at", "last_refreshed", "refresh_failures", "locked_fields", "status",
 				"created_at", "updated_at",
 				"content_rating_age",
+				"advisory_age", "advisory_source",
 			},
 			itemRows, func(processed int) {
 				currentWork += processed
@@ -749,6 +752,8 @@ func itemToRecord(item *models.MediaItem) ItemRecord {
 		Year:              item.Year,
 		Genres:            cloneStrings(item.Genres),
 		ContentRating:     item.ContentRating,
+		AdvisoryAge:       item.AdvisoryAge,
+		AdvisorySource:    item.AdvisorySource,
 		Runtime:           item.Runtime,
 		Overview:          item.Overview,
 		Tagline:           item.Tagline,
@@ -1048,6 +1053,7 @@ func bulkInsertItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, onBatch
 	rows := make([][]any, 0, len(items))
 	for _, item := range items {
 		contentRatingAge := access.StoredRating(item.ContentRating)
+		advisoryAge, advisorySource := models.AdvisoryColumns(item.AdvisoryAge, item.AdvisorySource)
 		rows = append(rows, []any{
 			item.ContentID, item.Type, item.Title, item.SortTitle, item.OriginalTitle, item.Year, item.Genres,
 			item.ContentRating, item.Runtime, item.Overview, item.Tagline,
@@ -1059,6 +1065,7 @@ func bulkInsertItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, onBatch
 			item.MatchedAt, item.LastRefreshed, item.RefreshFailures, item.LockedFields, item.Status,
 			item.CreatedAt, item.UpdatedAt,
 			contentRatingAge,
+			advisoryAge, advisorySource,
 		})
 	}
 
@@ -1073,10 +1080,11 @@ func bulkInsertItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, onBatch
 			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time, air_timezone,
 			matched_at, last_refreshed, refresh_failures, locked_fields, status,
 			created_at, updated_at,
-			content_rating_age
+			content_rating_age,
+			advisory_age, advisory_source
 		) VALUES `,
 		rows,
-		44,
+		46,
 		nil,
 		"",
 		onBatch,
@@ -1913,6 +1921,7 @@ func batchImportItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, mode C
 	for _, item := range items {
 		studios, networks, countries, keywords := itemRecordStringArrays(item)
 		contentRatingAge := access.StoredRating(item.ContentRating)
+		advisoryAge, advisorySource := models.AdvisoryColumns(item.AdvisoryAge, item.AdvisorySource)
 		contentIDs = append(contentIDs, item.ContentID)
 		rows = append(rows, []any{
 			item.ContentID, item.Type, item.Title, item.SortTitle, item.OriginalTitle, item.Year, item.Genres,
@@ -1925,10 +1934,11 @@ func batchImportItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, mode C
 			item.MatchedAt, item.LastRefreshed, item.RefreshFailures, item.LockedFields, item.Status,
 			item.CreatedAt, item.UpdatedAt,
 			contentRatingAge,
+			advisoryAge, advisorySource,
 		})
 	}
 
-	const colCount = 44
+	const colCount = 46
 	prefix := `
 		INSERT INTO media_items (
 			content_id, type, title, sort_title, original_title, year, genres,
@@ -1940,7 +1950,8 @@ func batchImportItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, mode C
 			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time, air_timezone,
 			matched_at, last_refreshed, refresh_failures, locked_fields, status,
 			created_at, updated_at,
-			content_rating_age
+			content_rating_age,
+			advisory_age, advisory_source
 		) VALUES `
 
 	var suffix string
@@ -1990,6 +2001,8 @@ func batchImportItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, mode C
 			locked_fields = EXCLUDED.locked_fields,
 			status = EXCLUDED.status,
 			content_rating_age = EXCLUDED.content_rating_age,
+			advisory_age = EXCLUDED.advisory_age,
+			advisory_source = EXCLUDED.advisory_source,
 			updated_at = EXCLUDED.updated_at
 		RETURNING content_id, (xmax = 0)`
 	}
@@ -2073,6 +2086,7 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 	// the only ladder; content_rating keeps the verbatim string, which is what
 	// re-derives the matched system if anything ever needs it.
 	contentRatingAge := access.StoredRating(item.ContentRating)
+	advisoryAge, advisorySource := models.AdvisoryColumns(item.AdvisoryAge, item.AdvisorySource)
 	if mode == ConflictModeSkipExisting {
 		tag, execErr := tx.Exec(ctx, `
 			INSERT INTO media_items (
@@ -2085,7 +2099,8 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 				studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time, air_timezone,
 				matched_at, last_refreshed, refresh_failures, locked_fields, status,
 				created_at, updated_at,
-				content_rating_age
+				content_rating_age,
+				advisory_age, advisory_source
 			) VALUES (
 				$1, $2, $3, $4, $5, $6, $7,
 				$8, $9, $10, $11,
@@ -2096,7 +2111,8 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 				$27, $28, $29, $30, $31, $32, $33, $34, $35, $36,
 				$37, $38, $39, $40, $41,
 				$42, $43,
-				$44
+				$44,
+				$45, $46
 			)
 			ON CONFLICT (content_id) DO NOTHING`,
 			item.ContentID, item.Type, item.Title, item.SortTitle, item.OriginalTitle, item.Year, item.Genres,
@@ -2109,6 +2125,7 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 			item.MatchedAt, item.LastRefreshed, item.RefreshFailures, item.LockedFields, item.Status,
 			item.CreatedAt, item.UpdatedAt,
 			contentRatingAge,
+			advisoryAge, advisorySource,
 		)
 		if execErr != nil {
 			return false, false, false, fmt.Errorf("importing item %s: %w", item.ContentID, execErr)
@@ -2127,7 +2144,8 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time, air_timezone,
 			matched_at, last_refreshed, refresh_failures, locked_fields, status,
 			created_at, updated_at,
-			content_rating_age
+			content_rating_age,
+			advisory_age, advisory_source
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
 			$8, $9, $10, $11,
@@ -2138,7 +2156,8 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 			$27, $28, $29, $30, $31, $32, $33, $34, $35, $36,
 			$37, $38, $39, $40, $41,
 			$42, $43,
-			$44
+			$44,
+			$45, $46
 		)
 		ON CONFLICT (content_id) DO UPDATE SET
 			type = EXCLUDED.type,
@@ -2182,6 +2201,8 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 			locked_fields = EXCLUDED.locked_fields,
 			status = EXCLUDED.status,
 			content_rating_age = EXCLUDED.content_rating_age,
+			advisory_age = EXCLUDED.advisory_age,
+			advisory_source = EXCLUDED.advisory_source,
 			updated_at = EXCLUDED.updated_at
 		RETURNING (xmax = 0)`,
 		item.ContentID, item.Type, item.Title, item.SortTitle, item.OriginalTitle, item.Year, item.Genres,
@@ -2194,6 +2215,7 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 		item.MatchedAt, item.LastRefreshed, item.RefreshFailures, item.LockedFields, item.Status,
 		item.CreatedAt, item.UpdatedAt,
 		contentRatingAge,
+		advisoryAge, advisorySource,
 	).Scan(&created)
 	if err != nil {
 		return false, false, false, fmt.Errorf("upserting item %s: %w", item.ContentID, err)

@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 9;
+export const SETTINGS_REVISION = 10;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -184,6 +184,8 @@ export const SETTING_KEYS = {
   CATALOG_METADATA_LANGUAGE: "catalog.metadata_language",
   /** Metadata language exceptions */
   CATALOG_METADATA_LANGUAGE_OVERRIDES: "catalog.metadata_language_overrides",
+  /** Show advisory age */
+  CATALOG_SHOW_ADVISORY_AGE: "catalog.show_advisory_age",
   /** Download quality */
   DOWNLOADS_DEFAULT_QUALITY: "downloads.default_quality",
   /** Keep watched downloads */
@@ -387,6 +389,22 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Preferred metadata language for items in specific original languages.",
     category: "catalog",
     control: "panel",
+  },
+  "catalog.show_advisory_age": {
+    key: "catalog.show_advisory_age",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 10,
+    scopes: ["profile"],
+    scopeIntroducedIn: [10],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: false,
+    label: "Show advisory age",
+    description:
+      "Show a recommended minimum viewer age from an advisory service, such as Common Sense Media, on item detail.",
+    category: "catalog",
+    control: "switch",
   },
   "downloads.default_quality": {
     key: "downloads.default_quality",

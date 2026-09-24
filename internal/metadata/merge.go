@@ -33,6 +33,7 @@ func MergeMetadata(source, target *MetadataResult, locked []MetadataField, mode 
 	if !isLocked(FieldContentRating) {
 		mergeScalar(&target.ContentRating, source.ContentRating, mode)
 	}
+	mergeAdvisory(target, source, mode)
 	if !isLocked(FieldRating) {
 		mergeFloat(&target.Ratings.IMDB, source.Ratings.IMDB, mode)
 		mergeFloat(&target.Ratings.TMDB, source.Ratings.TMDB, mode)
@@ -112,6 +113,7 @@ func MergeGlobalMetadata(source, target *MetadataResult, locked []MetadataField,
 	if !isLocked(FieldContentRating) {
 		mergeScalar(&target.ContentRating, source.ContentRating, mode)
 	}
+	mergeAdvisory(target, source, mode)
 	if !isLocked(FieldRating) {
 		mergeFloat(&target.Ratings.IMDB, source.Ratings.IMDB, mode)
 		mergeFloat(&target.Ratings.TMDB, source.Ratings.TMDB, mode)
@@ -272,6 +274,26 @@ func mergeProviderIDMap(target *map[string]string, source map[string]string) {
 		if (*target)[key] == "" {
 			(*target)[key] = value
 		}
+	}
+}
+
+// mergeAdvisory merges the advisory age and its source as one unit.
+//
+// Merging them as separate scalars would let a new age land beside the
+// previous provider's source and misattribute the recommendation. They move
+// together or not at all.
+//
+// The advisory is deliberately not gated on FieldContentRating: that lock
+// protects a manual certification correction, and the advisory is a different
+// number from a different body that no one can edit by hand. It has no lock of
+// its own for the same reason.
+func mergeAdvisory(target, source *MetadataResult, mode MergeMode) {
+	if source.AdvisoryAge <= 0 || source.AdvisorySource == "" {
+		return
+	}
+	if mode == MergeReplaceUnlocked || target.AdvisoryAge <= 0 {
+		target.AdvisoryAge = source.AdvisoryAge
+		target.AdvisorySource = source.AdvisorySource
 	}
 }
 

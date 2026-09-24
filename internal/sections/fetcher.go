@@ -2829,9 +2829,17 @@ func itemColumnsList(alias string) []string {
 		"studios", "networks", "countries", "release_date::text", "first_air_date", "last_air_date",
 		"show_status",
 		"matched_at", "status", "created_at", "updated_at",
+		"advisory_age", "advisory_source",
 	}
 	prefixed := make([]string, len(cols))
 	for i, c := range cols {
+		if c == "advisory_source" {
+			// Nullable in the table but a plain string on MediaItem. Aliased
+			// back to its own name so itemColumnsLatestMangaPoster can still
+			// match columns by name and the scan order is unchanged.
+			prefixed[i] = "COALESCE(" + alias + ".advisory_source, '') AS advisory_source"
+			continue
+		}
 		prefixed[i] = alias + "." + c
 	}
 	return prefixed
@@ -2898,6 +2906,7 @@ func scanMediaItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.Studios, &item.Networks, &item.Countries, &item.ReleaseDate, &item.FirstAirDate, &item.LastAirDate,
 			&item.ShowStatus,
 			&item.MatchedAt, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+			&item.AdvisoryAge, &item.AdvisorySource,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning item: %w", err)

@@ -51,6 +51,7 @@ const BASE_PLAYBACK_KEYS: SettingKey[] = [
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
   SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
   SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES,
+  SETTING_KEYS.CATALOG_SHOW_ADVISORY_AGE,
   SETTING_KEYS.UI_NEXT_UP_MODE,
 ];
 
@@ -544,6 +545,21 @@ export default function PlaybackSettings() {
             saveValue(SETTING_KEYS.CATALOG_METADATA_LANGUAGE, language)
           }
           onOverridesChange={saveMetadataOverrides}
+        />
+
+        <SettingRow
+          label="Show advisory age"
+          description="Show a suggested minimum viewer age, such as Common Sense Media's, on item detail. This is advice for you, not a restriction: it never changes what anyone can watch."
+          control={(id) => (
+            <Switch
+              id={id}
+              checked={read<boolean>(SETTING_KEYS.CATALOG_SHOW_ADVISORY_AGE)}
+              disabled={pending}
+              onCheckedChange={(checked) =>
+                saveValue(SETTING_KEYS.CATALOG_SHOW_ADVISORY_AGE, checked)
+              }
+            />
+          )}
         />
 
         {introSkipControl === "mode" ? (

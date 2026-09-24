@@ -197,6 +197,13 @@ const fuzzyAugmentSimilarityFloor = 0.45
 // item queries. Shared by itemColumns, qualifiedItemColumns, and
 // qualifiedListItemColumns so the select lists can never drift from each
 // other or from scanItem.
+// Advisory column names, shared by every select list and scan-order check in
+// this package so a rename cannot drift between them.
+const (
+	advisoryAgeColumn    = "advisory_age"
+	advisorySourceColumn = "advisory_source"
+)
+
 var itemColumnNames = []string{
 	"content_id", "type", "title", "sort_title", "default_metadata_language", "original_title", "year", "genres",
 	"content_rating", "runtime", "overview", "tagline",
@@ -208,12 +215,14 @@ var itemColumnNames = []string{
 	"show_status",
 	"matched_at", "last_refreshed", "refresh_failures",
 	"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
+	advisoryAgeColumn, advisorySourceColumn,
 }
 
 // nullableStringItemColumns are media_items columns that may hold NULL but
 // scan into plain (non-pointer) string fields on models.MediaItem, so select
 // lists coalesce them to ”.
 var nullableStringItemColumns = map[string]bool{
+	advisorySourceColumn:   true,
 	"poster_path":          true,
 	"poster_source_path":   true,
 	"poster_thumbhash":     true,
@@ -333,6 +342,8 @@ func scanItem(row pgx.Row) (*models.MediaItem, error) {
 		&item.Status,
 		&item.CreatedAt,
 		&item.UpdatedAt,
+		&item.AdvisoryAge,
+		&item.AdvisorySource,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -399,6 +410,8 @@ func listItemScanDests(item *models.MediaItem) []any {
 		&item.Status,
 		&item.CreatedAt,
 		&item.UpdatedAt,
+		&item.AdvisoryAge,
+		&item.AdvisorySource,
 	}
 }
 
@@ -544,7 +557,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			show_status,
 			matched_at, last_refreshed, refresh_failures,
 			episode_metadata_incomplete, episode_metadata_last_checked_at, status,
-			content_rating_age
+			content_rating_age,
+			advisory_age, advisory_source
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			$9, $10, $11, $12,
@@ -556,7 +570,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			$41,
 			$42, $43, $44,
 			$45, $46, $47,
-			$48
+			$48,
+			$49, $50
 		)`
 	conflict := `
 		ON CONFLICT (content_id) DO NOTHING`
@@ -610,12 +625,15 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			episode_metadata_last_checked_at = EXCLUDED.episode_metadata_last_checked_at,
 			status = EXCLUDED.status,
 			content_rating_age = EXCLUDED.content_rating_age,
+			advisory_age = EXCLUDED.advisory_age,
+			advisory_source = EXCLUDED.advisory_source,
 			updated_at = NOW()`
 	}
 
 	// The stored age is derived here, never in SQL: access.Normalize is the one
 	// ladder, and content_rating stays the verbatim provider string.
 	contentRatingAge := access.StoredRating(item.ContentRating)
+	advisoryAge, advisorySource := models.AdvisoryColumns(item.AdvisoryAge, item.AdvisorySource)
 
 	tag, err := execer.Exec(ctx, query+conflict,
 		item.ContentID,
@@ -666,6 +684,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 		item.EpisodeMetadataLastCheckedAt,
 		item.Status,
 		contentRatingAge,
+		advisoryAge,
+		advisorySource,
 	)
 	if err != nil {
 		return false, fmt.Errorf("writing media item: %w", err)

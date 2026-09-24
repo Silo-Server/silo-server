@@ -16728,6 +16728,25 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "advisory_age": {
+            "description": "Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch",
+            "examples": [
+              13
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "advisory_source": {
+            "description": "Who recommended advisory_age",
+            "enum": [
+              "commonsense",
+              "mdblist"
+            ],
+            "examples": [
+              "commonsense"
+            ],
+            "type": "string"
+          },
           "backdrop_thumbhash": {
             "type": "string"
           },
@@ -16982,6 +17001,25 @@
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "advisory_age": {
+            "description": "Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch",
+            "examples": [
+              13
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "advisory_source": {
+            "description": "Who recommended advisory_age",
+            "enum": [
+              "commonsense",
+              "mdblist"
+            ],
+            "examples": [
+              "commonsense"
+            ],
             "type": "string"
           },
           "air_date": {
@@ -23710,6 +23748,25 @@
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "advisory_age": {
+            "description": "Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch",
+            "examples": [
+              13
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "advisory_source": {
+            "description": "Who recommended advisory_age",
+            "enum": [
+              "commonsense",
+              "mdblist"
+            ],
+            "examples": [
+              "commonsense"
+            ],
             "type": "string"
           },
           "backdrop_thumbhash": {
@@ -41678,6 +41735,25 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "advisory_age": {
+            "description": "Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch",
+            "examples": [
+              13
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "advisory_source": {
+            "description": "Who recommended advisory_age",
+            "enum": [
+              "commonsense",
+              "mdblist"
+            ],
+            "examples": [
+              "commonsense"
+            ],
+            "type": "string"
+          },
           "backdrop_thumbhash": {
             "type": "string"
           },
@@ -41998,6 +42074,25 @@
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "advisory_age": {
+            "description": "Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch",
+            "examples": [
+              13
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "advisory_source": {
+            "description": "Who recommended advisory_age",
+            "enum": [
+              "commonsense",
+              "mdblist"
+            ],
+            "examples": [
+              "commonsense"
+            ],
             "type": "string"
           },
           "backdrop_thumbhash": {

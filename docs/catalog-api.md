@@ -274,3 +274,32 @@ fall back to the ID when the title is absent. Personal membership pages hydrate
 titles through the existing viewer access filter; admin pages require acting
 administrator access. Membership identity, ordering and cursor revision checks
 are unchanged. Frozen v1 membership responses do not expose this field.
+
+## Advisory age
+
+Catalog items may carry `advisory_age`, a recommended minimum viewer age from an
+advisory service such as Common Sense Media, and `advisory_source`, which names
+who recommended it (`commonsense` or `mdblist`). Both are optional and appear
+only together; an item with no advisory omits both.
+
+**The advisory is display only and clients must treat it that way.** It is not a
+certification and it never restricts anything. `content_rating` remains the
+certification a rating body issued, and it alone drives the server's
+content-rating ceiling, so a profile's access is identical whether or not an
+advisory is present. Do not filter, gate, or hide content on `advisory_age`, and
+do not present it as a rating a viewer has to satisfy.
+
+Coverage is partial by design. The providers that supply advisory ages are rate
+limited per day, so on a large library some titles carry one and others do not,
+and the set grows over time. Absence means "not fetched yet", never "suitable
+for everyone". That unpredictability is exactly why the value is kept out of
+parental controls: a ceiling that tightened or loosened based on which titles a
+provider happened to reach that day would be impossible for an administrator to
+predict or reproduce.
+
+Whether to show the badge is a per-profile choice, `catalog.show_advisory_age`
+in the settings contract, default off. The field is served regardless; the
+setting decides whether a client renders it. Detect support by reading the
+setting from the settings contract capabilities rather than sniffing versions.
+
+Frozen v1 responses do not expose these fields.

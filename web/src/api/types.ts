@@ -1121,6 +1121,15 @@ export interface ItemDetail {
   pending_translation_language?: string;
   runtime: number;
   content_rating: string;
+  /**
+   * Recommended minimum viewer age from an advisory service, with
+   * advisory_source naming who recommended it. Display only: the advisory
+   * never restricts anything, and content_rating remains the certification
+   * that drives the server's content-rating ceiling. Absent means "no
+   * advisory fetched", never "suitable for everyone".
+   */
+  advisory_age?: number | null;
+  advisory_source?: string;
   genres: string[];
   rating_imdb: number | null;
   rating_tmdb: number | null;

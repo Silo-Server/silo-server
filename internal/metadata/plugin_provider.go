@@ -248,6 +248,8 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		return nil, nil
 	}
 
+	advisoryAge, advisorySource := advisoryFromPluginMetadata(response.GetItem().GetMetadata())
+
 	return &MetadataResult{
 		HasMetadata:          true,
 		ProviderIDs:          mergePluginProviderIDs(p.capabilityID, response.GetItem().GetProviderId(), response.GetItem().GetProviderIds()),
@@ -269,6 +271,8 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		Countries:            append([]string(nil), response.GetItem().GetCountries()...),
 		OriginalLanguage:     response.GetItem().GetOriginalLanguage(),
 		ContentRating:        response.GetItem().GetContentRating(),
+		AdvisoryAge:          advisoryAge,
+		AdvisorySource:       advisorySource,
 		Ratings:              ratingsFromStruct(response.GetItem().GetRatings()),
 		People:               peopleFromRecords(response.GetItem().GetPeople()),
 		Videos:               videosFromRecords(p.Slug(), response.GetItem().GetVideos()),
@@ -564,6 +568,68 @@ func ratingsFromStruct(value *structpb.Struct) Ratings {
 		}
 	}
 	return ratings
+}
+
+// Advisory sources Silo stores, mirroring the names the MDBList plugin emits.
+const (
+	// AdvisorySourceCommonSense marks an age MDBList attributed to Common
+	// Sense Media via its "commonsense" flag.
+	AdvisorySourceCommonSense = "commonsense"
+	// AdvisorySourceMDBList marks an age MDBList derived itself.
+	AdvisorySourceMDBList = "mdblist"
+)
+
+// advisoryAgeSources are the only values accepted into MediaItem.AdvisorySource.
+//
+// A plugin controls this Struct completely, and the string ends up rendered on
+// item detail, so the host picks from a fixed vocabulary rather than storing
+// whatever arrived. Both values come from the MDBList plugin, which reports
+// "commonsense" when the response's commonsense flag marks the age as Common
+// Sense Media's and "mdblist" when MDBList derived it itself.
+var advisoryAgeSources = map[string]string{
+	AdvisorySourceCommonSense: AdvisorySourceCommonSense,
+	AdvisorySourceMDBList:     AdvisorySourceMDBList,
+}
+
+// maxAdvisoryAge bounds a reported advisory age. Advisory services top out at
+// 18; anything above 21 is junk, the same cutoff access.Normalize applies to a
+// bare numeric certification.
+const maxAdvisoryAge = 21
+
+// advisoryFromPluginMetadata reads a display-only advisory age out of the
+// free-form plugin metadata Struct. MetadataItem has no typed advisory fields
+// yet, so plugins carry the pair under these two keys; typed proto fields
+// remain a later additive option.
+//
+// The input is a plugin's word, so it is treated as hostile: structpb numbers
+// arrive as float64 and a fractional, negative, or out-of-range age is dropped
+// rather than rounded. The age and the source are all-or-nothing, because an
+// age Silo cannot attribute is an anonymous number shown to a parent choosing
+// what a child may watch.
+func advisoryFromPluginMetadata(value *structpb.Struct) (int, string) {
+	if value == nil {
+		return 0, ""
+	}
+	fields := value.AsMap()
+
+	rawSource, ok := fields["advisory_source"].(string)
+	if !ok {
+		return 0, ""
+	}
+	source, ok := advisoryAgeSources[strings.ToLower(strings.TrimSpace(rawSource))]
+	if !ok {
+		return 0, ""
+	}
+
+	number, ok := fields["advisory_age"].(float64)
+	if !ok {
+		return 0, ""
+	}
+	age := int(number)
+	if float64(age) != number || age <= 0 || age > maxAdvisoryAge {
+		return 0, ""
+	}
+	return age, source
 }
 
 func keywordsFromPluginMetadata(value *structpb.Struct) []string {

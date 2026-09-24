@@ -342,21 +342,26 @@ type upcomingEventResponse struct {
 }
 
 type sectionItemResponse struct {
-	ContentID         string                 `json:"content_id"`
-	PlayContentID     string                 `json:"play_content_id,omitempty"`
-	Type              string                 `json:"type"`
-	Title             string                 `json:"title"`
-	SeriesID          string                 `json:"series_id,omitempty"`
-	SeriesTitle       string                 `json:"series_title,omitempty"`
-	SeasonNumber      *int                   `json:"season_number,omitempty"`
-	EpisodeNumber     *int                   `json:"episode_number,omitempty"`
-	Year              int                    `json:"year,omitempty"`
-	Runtime           int                    `json:"runtime,omitempty"`
-	Genres            []string               `json:"genres"`
-	Keywords          []string               `json:"keywords"`
-	Studios           []string               `json:"studios,omitempty"`
-	Networks          []string               `json:"networks,omitempty"`
-	ContentRating     string                 `json:"content_rating,omitempty"`
+	ContentID     string   `json:"content_id"`
+	PlayContentID string   `json:"play_content_id,omitempty"`
+	Type          string   `json:"type"`
+	Title         string   `json:"title"`
+	SeriesID      string   `json:"series_id,omitempty"`
+	SeriesTitle   string   `json:"series_title,omitempty"`
+	SeasonNumber  *int     `json:"season_number,omitempty"`
+	EpisodeNumber *int     `json:"episode_number,omitempty"`
+	Year          int      `json:"year,omitempty"`
+	Runtime       int      `json:"runtime,omitempty"`
+	Genres        []string `json:"genres"`
+	Keywords      []string `json:"keywords"`
+	Studios       []string `json:"studios,omitempty"`
+	Networks      []string `json:"networks,omitempty"`
+	ContentRating string   `json:"content_rating,omitempty"`
+	// AdvisoryAge and AdvisorySource carry the display-only advisory to the
+	// v2 card renderer. json:"-" because /api/v1 is frozen: the fields exist on
+	// the Go struct only, and apiv2 emits them under its own names.
+	AdvisoryAge       *int                   `json:"-"`
+	AdvisorySource    string                 `json:"-"`
 	Status            string                 `json:"status"`
 	ShowStatus        string                 `json:"show_status,omitempty"`
 	RatingIMDB        *float64               `json:"rating_imdb,omitempty"`
@@ -1642,6 +1647,8 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		Studios:           item.Studios,
 		Networks:          item.Networks,
 		ContentRating:     item.ContentRating,
+		AdvisoryAge:       item.AdvisoryAge,
+		AdvisorySource:    item.AdvisorySource,
 		Status:            item.Status,
 		ShowStatus:        item.ShowStatus,
 		RatingIMDB:        item.RatingIMDB,

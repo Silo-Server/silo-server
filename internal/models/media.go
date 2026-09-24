@@ -572,6 +572,22 @@ type AudiobookSeriesMembership struct {
 }
 
 // MediaItem represents a row in the media_items table.
+// AdvisoryColumns normalizes an advisory age and its source for storage.
+//
+// The pair is all-or-nothing: an age Silo cannot attribute is an anonymous
+// number shown to a parent, and a source with no age says nothing. Whenever
+// either half is missing, both columns store NULL, so "no advisory" has one
+// spelling in the database rather than a NULL, an empty string, and a zero.
+//
+// Every write path funnels through here, including the COPY-based bulk import,
+// which cannot lean on a NULLIF in SQL.
+func AdvisoryColumns(age *int, source string) (*int, *string) {
+	if age == nil || *age <= 0 || source == "" {
+		return nil, nil
+	}
+	return age, &source
+}
+
 type MediaItem struct {
 	ContentID               string // Sonyflake ID (PK)
 	Type                    string // movie, series
@@ -582,7 +598,16 @@ type MediaItem struct {
 	Year                    int
 	Genres                  []string
 	ContentRating           string // PG-13, TV-MA
-	Runtime                 int    // minutes
+	// AdvisoryAge is a recommended minimum viewer age from an advisory service
+	// (Common Sense Media), distinct from the certification in ContentRating.
+	// Display only: it feeds no ceiling or other parental control. Nil means no
+	// advisory; the column is nullable and a stored age is always positive,
+	// since providers spell "unknown" as zero.
+	AdvisoryAge *int
+	// AdvisorySource attributes AdvisoryAge so the UI can name who recommended
+	// it. Empty when AdvisoryAge is nil.
+	AdvisorySource string
+	Runtime        int // minutes
 	// AudiobookDurationSeconds is an exact transient duration overlay loaded
 	// from active audiobook file stats for protocol adapters that use seconds.
 	AudiobookDurationSeconds     int

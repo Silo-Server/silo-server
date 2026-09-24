@@ -30,7 +30,13 @@ import { SeasonCarouselSkeleton, RecommendationGridSkeleton } from "./components
 import { getSeasonDisplayTitle, resolveSeriesPrimaryAction } from "./itemDetailLayout";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 
-export default function SeriesContent({ item }: { item: ItemDetail & { type: "series" } }) {
+export default function SeriesContent({
+  item,
+  showAdvisoryAge,
+}: {
+  item: ItemDetail & { type: "series" };
+  showAdvisoryAge?: boolean;
+}) {
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(item);
   const navigate = useNavigate();
@@ -113,6 +119,8 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
           <MetadataBadges
             year={yearDisplay || undefined}
             contentRating={item.content_rating || undefined}
+            advisoryAge={showAdvisoryAge ? (item.advisory_age ?? undefined) : undefined}
+            advisorySource={item.advisory_source || undefined}
             seasonCount={seasons.length || undefined}
             episodeCount={episodeCount || undefined}
           />

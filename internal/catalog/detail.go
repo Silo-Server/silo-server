@@ -185,29 +185,35 @@ type ItemDetail struct {
 	// PendingTranslationLanguage, when set, is the viewer's presentation
 	// language that the description is missing — the on-view AI translation
 	// affordance keys off it.
-	PendingTranslationLanguage string       `json:"pending_translation_language,omitempty"`
-	Runtime                    int          `json:"runtime,omitempty"`
-	ContentRating              string       `json:"content_rating,omitempty"`
-	Genres                     []string     `json:"genres"`
-	RatingIMDB                 *float64     `json:"rating_imdb,omitempty"`
-	RatingTMDB                 *float64     `json:"rating_tmdb,omitempty"`
-	RatingRTCritic             *int         `json:"rating_rt_critic,omitempty"`
-	RatingRTAudience           *int         `json:"rating_rt_audience,omitempty"`
-	ImdbID                     string       `json:"imdb_id,omitempty"`
-	TmdbID                     string       `json:"tmdb_id,omitempty"`
-	TvdbID                     string       `json:"tvdb_id,omitempty"`
-	Cast                       []CastCredit `json:"cast"`
-	Crew                       []CrewCredit `json:"crew"`
-	Studios                    []string     `json:"studios"`
-	Networks                   []string     `json:"networks"`
-	Countries                  []string     `json:"countries,omitempty"`
-	LockedFields               []int        `json:"locked_fields,omitempty"`
-	FirstAirDate               *string      `json:"first_air_date,omitempty"`
-	LastAirDate                *string      `json:"last_air_date,omitempty"`
-	ReleaseDate                *string      `json:"release_date,omitempty"`
-	AirTime                    *string      `json:"air_time,omitempty"`
-	AirTimezone                *string      `json:"air_timezone,omitempty"`
-	ShowStatus                 string       `json:"show_status,omitempty"`
+	PendingTranslationLanguage string `json:"pending_translation_language,omitempty"`
+	Runtime                    int    `json:"runtime,omitempty"`
+	ContentRating              string `json:"content_rating,omitempty"`
+	// AdvisoryAge and AdvisorySource carry the display-only advisory to the
+	// v2 renderer. Kept out of this JSON contract the way OriginalLanguage is:
+	// /api/v1 is frozen, so the fields ride the Go struct and apiv2 emits them
+	// under its own names.
+	AdvisoryAge      *int         `json:"-"`
+	AdvisorySource   string       `json:"-"`
+	Genres           []string     `json:"genres"`
+	RatingIMDB       *float64     `json:"rating_imdb,omitempty"`
+	RatingTMDB       *float64     `json:"rating_tmdb,omitempty"`
+	RatingRTCritic   *int         `json:"rating_rt_critic,omitempty"`
+	RatingRTAudience *int         `json:"rating_rt_audience,omitempty"`
+	ImdbID           string       `json:"imdb_id,omitempty"`
+	TmdbID           string       `json:"tmdb_id,omitempty"`
+	TvdbID           string       `json:"tvdb_id,omitempty"`
+	Cast             []CastCredit `json:"cast"`
+	Crew             []CrewCredit `json:"crew"`
+	Studios          []string     `json:"studios"`
+	Networks         []string     `json:"networks"`
+	Countries        []string     `json:"countries,omitempty"`
+	LockedFields     []int        `json:"locked_fields,omitempty"`
+	FirstAirDate     *string      `json:"first_air_date,omitempty"`
+	LastAirDate      *string      `json:"last_air_date,omitempty"`
+	ReleaseDate      *string      `json:"release_date,omitempty"`
+	AirTime          *string      `json:"air_time,omitempty"`
+	AirTimezone      *string      `json:"air_timezone,omitempty"`
+	ShowStatus       string       `json:"show_status,omitempty"`
 
 	// Presigned image URLs.
 	PosterURL         string `json:"poster_url,omitempty"`
@@ -1974,6 +1980,8 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		PendingTranslationLanguage: pendingTranslation,
 		Runtime:                    item.Runtime,
 		ContentRating:              item.ContentRating,
+		AdvisoryAge:                item.AdvisoryAge,
+		AdvisorySource:             item.AdvisorySource,
 		Genres:                     item.Genres,
 		RatingIMDB:                 item.RatingIMDB,
 		RatingTMDB:                 item.RatingTMDB,

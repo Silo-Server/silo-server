@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 9,
+  "revision": 10,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -644,6 +644,20 @@
       "description": "Preferred metadata language for items in specific original languages.",
       "recommended_control": "panel",
       "notes": "Keys are canonical catalog original_language codes. Values are target BCP 47 language tags; x-silo-original means retain that source language. This key is separate from catalog.metadata_language so existing clients can continue changing the fallback without rewriting or discarding exceptions."
+    },
+    {
+      "key": "catalog.show_advisory_age",
+      "introduced_in": 10,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "category": "catalog",
+      "label": "Show advisory age",
+      "description": "Show a recommended minimum viewer age from an advisory service, such as Common Sense Media, on item detail.",
+      "recommended_control": "switch",
+      "notes": "Profile scope because the reader is a household parent deciding what a child may watch, and they browse on their own profile. Default false: the advisory is extra chrome most viewers do not want, and only the profiles that ask for it should carry it. Display only. The advisory age never feeds content_rating_age, ApplyContentRatingCeiling, or any other parental control, so turning this on cannot change what a profile is allowed to watch, and turning it off hides nothing that was restricting anything. Coverage is partial by nature: the provider that supplies the advisory is rate limited per day, so on a large library some titles carry one and others do not."
     },
     {
       "key": "player.hdr_enabled",

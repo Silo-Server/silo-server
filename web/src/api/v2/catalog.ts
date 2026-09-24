@@ -269,6 +269,8 @@ export function catalogItemDetailFromV2(item: CatalogItemDetailV2): ItemDetail {
     pending_translation_language: item.pending_translation_language,
     runtime: item.runtime ?? 0,
     content_rating: item.content_rating ?? "",
+    advisory_age: item.advisory_age ?? null,
+    advisory_source: item.advisory_source ?? "",
     genres: item.genres,
     rating_imdb: item.rating_imdb ?? null,
     rating_tmdb: item.rating_tmdb ?? null,

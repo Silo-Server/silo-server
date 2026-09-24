@@ -274,8 +274,13 @@ type MetadataResult struct {
 	// refresh and prevents them from being persisted by the same operation.
 	sameRunStaleProviderIDs providerIDValueSet
 	ContentRating           string
-	Ratings                 Ratings
-	People                  []models.ItemPerson
+	// AdvisoryAge is a recommended minimum viewer age from an advisory service,
+	// 0 when none was reported. It never feeds a content-rating ceiling.
+	AdvisoryAge int
+	// AdvisorySource attributes AdvisoryAge; empty when AdvisoryAge is 0.
+	AdvisorySource string
+	Ratings        Ratings
+	People         []models.ItemPerson
 	// Images (S3 paths or URLs).
 	PosterPath        string
 	PosterThumbhash   string
