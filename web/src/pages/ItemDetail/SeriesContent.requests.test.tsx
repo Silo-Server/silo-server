@@ -39,7 +39,8 @@ vi.mock("@/pages/watchtogether/DetailWatchTogether", () => ({
     return { menu: undefined, sheet: null };
   },
 }));
-vi.mock("@/playback/watchPlaybackContext", () => ({
+vi.mock("@/playback/watchPlaybackContext", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/playback/watchPlaybackContext")>()),
   useWatchPlaybackController: () => ({ startPlayback: () => {} }),
 }));
 vi.mock("./components/ActionBar", () => ({
@@ -173,6 +174,13 @@ function installServer(fixture: Fixture) {
         };
       case "GET /api/v2/recommendations/similar/{item_id}":
         return { items: [] };
+      case "GET /api/v2/settings/values/effective":
+        return {
+          items: [
+            { key: "ui.theme_music_enabled", value: false, source: "default" },
+            { key: "ui.theme_music_loop", value: false, source: "default" },
+          ],
+        };
       default:
         throw new Error(`unexpected request ${operation}`);
     }
@@ -255,6 +263,7 @@ describe("series page request budget and play target", () => {
     });
     expect(requestLog()).toEqual([
       `GET /api/v2/catalog/items/{id} ${SERIES_ID}`,
+      "GET /api/v2/settings/values/effective",
       `GET /api/v2/catalog/series/{id}/seasons ${SERIES_ID}`,
       `GET /api/v2/recommendations/similar/{item_id} ${SERIES_ID}`,
       "GET /api/v2/catalog/items/{id}/episodes season-2",
@@ -273,9 +282,9 @@ describe("series page request budget and play target", () => {
     await openSeriesPage();
 
     expect(playButton()).toEqual({ href: "/watch/s2e2", label: "Resume" });
-    // Detail, seasons and similar titles, plus the target season's episodes
-    // for the Watch Together pick. Nothing scales with the profile's history.
-    expect(requestLog()).toHaveLength(4);
+    // Detail, theme settings, seasons and similar titles, plus the target
+    // season's episodes for Watch Together. Nothing scales with the profile's history.
+    expect(requestLog()).toHaveLength(5);
     expect(requestLog().filter((request) => request.startsWith("GET /api/v2/progress"))).toEqual(
       [],
     );
@@ -297,7 +306,7 @@ describe("series page request budget and play target", () => {
       href: "/watch/s1e1",
       label: "Start From Episode 1",
     });
-    expect(requestLog()).toHaveLength(4);
+    expect(requestLog()).toHaveLength(5);
   });
 
   it("plays the first unwatched episode after a finished one", async () => {
@@ -317,7 +326,7 @@ describe("series page request budget and play target", () => {
       target: { content_id: "s2e1", subtitle: "S2 E1" },
       initialSeasonNumber: 2,
     });
-    expect(requestLog()).toHaveLength(4);
+    expect(requestLog()).toHaveLength(5);
   });
 
   it("starts an unstarted series from episode 1", async () => {
@@ -336,7 +345,7 @@ describe("series page request budget and play target", () => {
       href: "/watch/s1e1",
       label: "Start From Episode 1",
     });
-    expect(requestLog()).toHaveLength(4);
+    expect(requestLog()).toHaveLength(5);
   });
 
   it("plays the specials once every regular episode is watched", async () => {
@@ -359,7 +368,7 @@ describe("series page request budget and play target", () => {
       target: { content_id: "s0e1", subtitle: "S0 E1" },
       initialSeasonNumber: 0,
     });
-    expect(requestLog()).toHaveLength(4);
+    expect(requestLog()).toHaveLength(5);
   });
 
   it("starts an unstarted series at season 1, not the specials", async () => {
@@ -380,7 +389,7 @@ describe("series page request budget and play target", () => {
       target: { content_id: "s1e1", subtitle: "S1 E1" },
       initialSeasonNumber: 1,
     });
-    expect(requestLog()).toHaveLength(4);
+    expect(requestLog()).toHaveLength(5);
   });
 
   it("shares the single season's episode list with the episode grid", async () => {
@@ -395,6 +404,7 @@ describe("series page request budget and play target", () => {
     expect(playButton()).toEqual({ href: "/watch/s1e2", label: "Resume" });
     expect(requestLog()).toEqual([
       `GET /api/v2/catalog/items/{id} ${SERIES_ID}`,
+      "GET /api/v2/settings/values/effective",
       `GET /api/v2/catalog/series/{id}/seasons ${SERIES_ID}`,
       `GET /api/v2/recommendations/similar/{item_id} ${SERIES_ID}`,
       "GET /api/v2/catalog/items/{id}/episodes season-1",
