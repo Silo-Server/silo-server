@@ -212,17 +212,29 @@ func isNativeAPIV2(ctx context.Context) bool {
 	return native
 }
 
+// serverFeaturesForRequestV3 is the feature list a decision advertises on the
+// surface the request arrived through. The decision is persisted as the
+// attempt's StartResponse, so a /api/v2 decision also records durably that
+// this server offered subrip_sidecar_v1 to the attempt.
+func serverFeaturesForRequestV3(ctx context.Context) []string {
+	if isNativeAPIV2(ctx) {
+		return playback.NativeServerFeaturesV3()
+	}
+	return playback.ServerFeaturesV3()
+}
+
 // attemptNegotiatedSubRipV3 reports whether an attempt negotiated original SRT.
 // The SRT representation its current plan published decides when there is
-// one, because a server that predates subrip_sidecar_v1 stored the token
-// verbatim beside WebVTT URLs. With no SRT published yet, the stored token
-// decides: this server drops it from every /api/v1 start, so it is present
-// only on attempts negotiated through /api/v2.
+// one. With no SRT published yet, the attempt negotiated it only if the client
+// sent subrip_sidecar_v1 and a /api/v2 decision of this server offered it. The
+// stored token alone is not enough: a server that predates the feature stored
+// it verbatim for any client, on either surface, and never offered it.
 func attemptNegotiatedSubRipV3(record *playback.AttemptRecordV3) bool {
 	if published, original := playback.PublishedSubRipRepresentationV3(record.CurrentPlan.Subtitle.Inventory); published {
 		return original
 	}
-	return playback.HasFeatureV3(record.NormalizedRequest.ClientFeatures, playback.FeatureSubripSidecarV3)
+	return playback.HasFeatureV3(record.NormalizedRequest.ClientFeatures, playback.FeatureSubripSidecarV3) &&
+		playback.HasFeatureV3(record.StartResponse.ServerFeatures, playback.FeatureSubripSidecarV3)
 }
 
 // requireAttemptAPISurfaceV3 keeps an attempt on the API surface that
@@ -250,14 +262,18 @@ func requireAttemptAPISurfaceV3(ctx context.Context, record *playback.AttemptRec
 }
 
 // replanSubtitleFeaturesV3 returns the client features a replan attaches its
-// subtitle artifact with: the attempt's features aligned with the SRT
-// representation its current plan already published. Every replan, not only a
-// seek reanchor, keeps that representation for the attempt's lifetime.
+// subtitle artifact with: subrip_sidecar_v1 present exactly when the attempt
+// negotiated original SRT. Every replan, not only a seek reanchor, keeps that
+// representation for the attempt's lifetime.
 func replanSubtitleFeaturesV3(record *playback.AttemptRecordV3, clientFeatures []string) []string {
 	if record == nil {
 		return clientFeatures
 	}
-	return playback.SubtitleFeaturesForPlanV3(record.CurrentPlan.Subtitle.Inventory, clientFeatures)
+	features := playback.WithoutFeatureV3(clientFeatures, playback.FeatureSubripSidecarV3)
+	if attemptNegotiatedSubRipV3(record) {
+		features = append(features, playback.FeatureSubripSidecarV3)
+	}
+	return features
 }
 
 // withNativeServerFeaturesV3 advertises the /api/v2-only features on a

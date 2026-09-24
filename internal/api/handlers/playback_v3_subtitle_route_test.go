@@ -311,52 +311,64 @@ func TestV1RefusesAnAttemptNegotiatedWithSubripSidecar(t *testing.T) {
 	}
 }
 
-// A server that predates subrip_sidecar_v1 stored the token verbatim while
-// publishing WebVTT. The published representation, not the token, decides both
-// the cross-surface guard and the representation a replan keeps.
+// A server that predates subrip_sidecar_v1 stored the token verbatim for any
+// client while publishing WebVTT, and never offered the feature. The published
+// representation decides once there is one; before that, the token counts only
+// when a /api/v2 decision of this server offered the feature.
 func TestLegacyAttemptWithStoredSubripTokenKeepsWebVTT(t *testing.T) {
 	file := &models.MediaFile{ID: 42, ExternalSubtitles: []models.ExternalSubtitle{{Path: "/media/movie.ar.srt", Format: "srt"}}}
 	inventory := func(features []string) []playback.SubtitleInventoryItemV3 {
 		return playback.ScopeSubtitleInventoryV3("session", file, playback.BuildSubtitleInventoryV3(file, nil), features)
 	}
-	record := func(stored []string, published []playback.SubtitleInventoryItemV3) *playback.AttemptRecordV3 {
+	record := func(stored, offered []string, published []playback.SubtitleInventoryItemV3) *playback.AttemptRecordV3 {
 		r := &playback.AttemptRecordV3{}
 		r.NormalizedRequest.ClientFeatures = stored
+		r.StartResponse.ServerFeatures = offered
 		r.CurrentPlan.Subtitle.Inventory = published
 		return r
 	}
 	withToken := []string{playback.FeatureSubripSidecarV3}
-	legacy := record(withToken, inventory(nil))
-	native := record(withToken, inventory(withToken))
+	shared, native := playback.ServerFeaturesV3(), playback.NativeServerFeaturesV3()
+	legacyWebVTT := record(withToken, shared, inventory(nil))
+	legacyNoSRT := record(withToken, shared, nil)
+	v2SRT := record(withToken, native, inventory(withToken))
+	v2NoSRT := record(withToken, native, nil)
+	v1NoSRT := record(nil, shared, nil)
 	v1, v2 := t.Context(), WithNativeAPIV2(t.Context())
 
-	if err := requireAttemptAPISurfaceV3(v1, legacy, nil); err != nil {
-		t.Fatalf("a legacy v1 attempt that published WebVTT must continue on v1: %v", err)
+	for name, tc := range map[string]struct {
+		ctx       context.Context
+		record    *playback.AttemptRecordV3
+		requested []string
+		refused   bool
+	}{
+		"legacy WebVTT attempt continues on v1":           {v1, legacyWebVTT, nil, false},
+		"legacy token-only attempt continues on v1":       {v1, legacyNoSRT, nil, false},
+		"original-SRT attempt is refused on v1":           {v1, v2SRT, nil, true},
+		"v2 attempt with no SRT yet is refused on v1":     {v1, v2NoSRT, nil, true},
+		"v1 attempt continues on v1":                      {v1, v1NoSRT, nil, false},
+		"v2 retry of a WebVTT attempt is refused":         {v2, legacyWebVTT, withToken, true},
+		"v2 retry of a legacy token-only attempt refused": {v2, legacyNoSRT, withToken, true},
+		"v2 retry of a v1 attempt is refused":             {v2, v1NoSRT, withToken, true},
+		"v2 retry of a v2 attempt replays":                {v2, v2NoSRT, withToken, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := requireAttemptAPISurfaceV3(tc.ctx, tc.record, tc.requested); (err != nil) != tc.refused {
+				t.Fatalf("refused = %v, want %v", err != nil, tc.refused)
+			}
+		})
 	}
-	if err := requireAttemptAPISurfaceV3(v1, native, nil); err == nil {
-		t.Fatal("an attempt that published original SRT must not continue on v1")
-	}
-	if err := requireAttemptAPISurfaceV3(v2, legacy, withToken); err == nil {
-		t.Fatal("a v2 start retry with the feature must not replay a WebVTT plan")
-	}
-	// With no SRT published yet, the stored token decides: this server drops it
-	// from every /api/v1 start, so it marks an attempt negotiated on /api/v2.
-	if err := requireAttemptAPISurfaceV3(v1, record(withToken, nil), nil); err == nil {
-		t.Fatal("a v2 attempt that has published no SRT yet must not continue on v1")
-	}
-	if err := requireAttemptAPISurfaceV3(v2, record(withToken, nil), withToken); err != nil {
-		t.Fatalf("a v2 retry of a v2 attempt must replay: %v", err)
-	}
-	if err := requireAttemptAPISurfaceV3(v2, record(nil, nil), withToken); err == nil {
-		t.Fatal("a v2 start retry with the feature must not replay an attempt negotiated without it")
-	}
-	if err := requireAttemptAPISurfaceV3(v1, record(nil, nil), nil); err != nil {
-		t.Fatalf("a v1 attempt without the feature must continue on v1: %v", err)
-	}
-	if got := replanSubtitleFeaturesV3(legacy, withToken); playback.HasFeatureV3(got, playback.FeatureSubripSidecarV3) {
-		t.Fatalf("a replan of a legacy attempt must keep WebVTT, got features %v", got)
-	}
-	if got := replanSubtitleFeaturesV3(native, withToken); !playback.HasFeatureV3(got, playback.FeatureSubripSidecarV3) {
-		t.Fatalf("a replan of an original-SRT attempt must keep original SRT, got features %v", got)
+	for name, tc := range map[string]struct {
+		record   *playback.AttemptRecordV3
+		original bool
+	}{
+		"legacy WebVTT attempt": {legacyWebVTT, false},
+		"legacy token-only":     {legacyNoSRT, false},
+		"original-SRT attempt":  {v2SRT, true},
+		"v2 attempt, no SRT":    {v2NoSRT, true},
+	} {
+		if got := playback.HasFeatureV3(replanSubtitleFeaturesV3(tc.record, withToken), playback.FeatureSubripSidecarV3); got != tc.original {
+			t.Errorf("%s: replan keeps original SRT = %v, want %v", name, got, tc.original)
+		}
 	}
 }

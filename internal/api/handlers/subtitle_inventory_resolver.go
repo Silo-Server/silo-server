@@ -61,8 +61,7 @@ func (r *SubtitleInventoryResolver) AdditionalSubtitles(ctx context.Context, fil
 }
 
 // SessionClientFeatures returns the features that decide the session's sidecar
-// representations: the attempt's negotiated features, aligned with whatever
-// representation its current plan already published.
+// representations, the same ones its replans use.
 func (r *SubtitleInventoryResolver) SessionClientFeatures(ctx context.Context, sessionID string) []string {
 	if r == nil || r.attempts == nil || sessionID == "" {
 		return nil
@@ -71,5 +70,5 @@ func (r *SubtitleInventoryResolver) SessionClientFeatures(ctx context.Context, s
 	if err != nil || record == nil {
 		return nil
 	}
-	return playback.SubtitleFeaturesForPlanV3(record.CurrentPlan.Subtitle.Inventory, record.NormalizedRequest.ClientFeatures)
+	return replanSubtitleFeaturesV3(record, record.NormalizedRequest.ClientFeatures)
 }
