@@ -231,20 +231,21 @@ function resetCatalogMocks() {
 describe("Catalog page", () => {
   beforeAll(async () => {
     // Catalog is a lazy route, and a static render cannot wait for its chunk.
-    // Load it once up front so the static renders below show the page rather
-    // than the route fallback.
+    // Import the page first so the slow module load happens once, outside any
+    // render. The first render below then starts React.lazy on a cached
+    // module, and the next one shows the page rather than the route fallback.
+    await import("@/pages/Catalog");
     resetCatalogMocks();
-    await vi.waitFor(
-      () =>
-        expect(
-          renderToStaticMarkup(
-            <QueryClientProvider client={new QueryClient()}>
-              <App />
-            </QueryClientProvider>,
-          ),
-        ).not.toContain("Loading page"),
-      { timeout: 10_000 },
-    );
+    const renderApp = () =>
+      renderToStaticMarkup(
+        <QueryClientProvider client={new QueryClient()}>
+          <App />
+        </QueryClientProvider>,
+      );
+    renderApp();
+    await vi.waitFor(() => expect(renderApp()).not.toContain("Loading page"), {
+      timeout: 5_000,
+    });
   }, 15_000);
 
   beforeEach(() => {

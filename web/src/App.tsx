@@ -65,10 +65,10 @@ import { buildLegacyWebhookSyncRedirectTarget } from "@/lib/webhookSync";
 import { toast } from "sonner";
 import { prewarmCodecDetection } from "@/player/hooks/useCodecDetection";
 import { prefetchRouteChunks, type RouteChunkImport } from "@/lib/routeChunkPrefetch";
+import { importCatalog } from "@/pages/catalogRoute";
 
 // Hot routes keep their import factory in a named binding so the idle warm-up
 // below can pull the chunk before the user navigates. See HOT_ROUTE_CHUNKS.
-const importCatalog = () => import("@/pages/Catalog");
 const importLibraryPage = () => import("@/pages/LibraryPage");
 const importItemDetail = () => import("@/pages/ItemDetail/index");
 const importPersonDetail = () => import("@/pages/PersonDetail");
