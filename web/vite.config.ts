@@ -1,18 +1,8 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, rmdirSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { brotliCompress, constants, gzip } from "node:zlib";
 import { defineConfig, loadEnv, transformWithEsbuild, type Plugin } from "vite";
-import {
-  existsSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmdirSync,
-  writeFileSync,
-} from "node:fs";
-import { brotliCompressSync, constants, gzipSync } from "node:zlib";
-import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
@@ -198,8 +188,13 @@ export default defineConfig(({ mode }) => {
   ).version;
 
   return {
-    plugins: [react(), tailwindcss(), themeBootScript(), precompressStaticAssets()],
-    plugins: [react(), tailwindcss(), precompressStaticAssets(), moveManifestOutOfDist()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      themeBootScript(),
+      precompressStaticAssets(),
+      moveManifestOutOfDist(),
+    ],
     define: {
       // Reported in X-Silo-Client-Version on every v2 request (src/api/v2/request.ts).
       __SILO_WEB_VERSION__: JSON.stringify(webVersion),
