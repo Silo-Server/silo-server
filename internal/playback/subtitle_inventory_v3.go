@@ -254,18 +254,32 @@ func SubtitleSidecarExtV3(codec, source string, clientFeatures []string) string 
 // holds, even when the attempt's features were negotiated by a server that
 // did not know the feature.
 func SubtitleFeaturesForPlanV3(inventory []SubtitleInventoryItemV3, clientFeatures []string) []string {
+	published, original := PublishedSubRipRepresentationV3(inventory)
+	if !published {
+		return clientFeatures
+	}
+	features := WithoutFeatureV3(clientFeatures, FeatureSubripSidecarV3)
+	if original {
+		features = append(features, FeatureSubripSidecarV3)
+	}
+	return features
+}
+
+// PublishedSubRipRepresentationV3 reports how an inventory published its
+// external and downloaded SRT tracks: published is false when it has none with
+// a URL, and original tells .srt?original=1 apart from the WebVTT conversion.
+// This, not the stored subrip_sidecar_v1 token, is what an attempt negotiated:
+// a server that predates the feature stored unknown client features verbatim
+// but still published WebVTT.
+func PublishedSubRipRepresentationV3(inventory []SubtitleInventoryItemV3) (published, original bool) {
 	for _, item := range inventory {
 		if item.URL == "" || item.Source == SubtitleSourceEmbeddedV3 || !IsSubRip(item.Codec) {
 			continue
 		}
 		path, _, _ := strings.Cut(item.URL, "?")
-		features := WithoutFeatureV3(clientFeatures, FeatureSubripSidecarV3)
-		if strings.HasSuffix(path, SubtitleExtSRTV3) {
-			features = append(features, FeatureSubripSidecarV3)
-		}
-		return features
+		return true, strings.HasSuffix(path, SubtitleExtSRTV3)
 	}
-	return clientFeatures
+	return false, false
 }
 
 // SubtitleStreamURLV3 builds the session-scoped sidecar URL for a combined

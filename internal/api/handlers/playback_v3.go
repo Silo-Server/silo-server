@@ -5116,13 +5116,11 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// a GET against that grant immediately, even though this replan response has
 	// not returned yet, so errors after publication would require canceling an
 	// already admitted successor.
-	artifactFeatures := start.ClientFeatures
-	if seekReanchor {
-		// The reanchor replays the frozen plan, whose artifact representation
-		// must not change. An attempt started by a server that did not know
-		// subrip_sidecar_v1 may carry the feature with WebVTT URLs.
-		artifactFeatures = playback.SubtitleFeaturesForPlanV3(result.Plan.Subtitle.Inventory, artifactFeatures)
-	}
+	// Every replan keeps the SRT representation the attempt already published;
+	// a seek reanchor must also reproduce its frozen artifact exactly. An
+	// attempt started by a server that did not know subrip_sidecar_v1 may carry
+	// the feature beside WebVTT URLs.
+	artifactFeatures := replanSubtitleFeaturesV3(record, start.ClientFeatures)
 	if err := h.attachSubtitleArtifactV3(r.Context(), session.ID, effectiveFile, result.Plan, result.SubtitleTrackIndex, &artifactRecipe, artifactFeatures); err != nil {
 		return playback.DecisionResponseV3{}, *record, nil, subtitleArtifactErrorV3("Failed to prepare the selected subtitle artifact.", err)
 	}

@@ -310,3 +310,42 @@ func TestV1RefusesAnAttemptNegotiatedWithSubripSidecar(t *testing.T) {
 		t.Fatalf("v1 replan status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 }
+
+// A server that predates subrip_sidecar_v1 stored the token verbatim while
+// publishing WebVTT. The published representation, not the token, decides both
+// the cross-surface guard and the representation a replan keeps.
+func TestLegacyAttemptWithStoredSubripTokenKeepsWebVTT(t *testing.T) {
+	file := &models.MediaFile{ID: 42, ExternalSubtitles: []models.ExternalSubtitle{{Path: "/media/movie.ar.srt", Format: "srt"}}}
+	inventory := func(features []string) []playback.SubtitleInventoryItemV3 {
+		return playback.ScopeSubtitleInventoryV3("session", file, playback.BuildSubtitleInventoryV3(file, nil), features)
+	}
+	record := func(stored []string, published []playback.SubtitleInventoryItemV3) *playback.AttemptRecordV3 {
+		r := &playback.AttemptRecordV3{}
+		r.NormalizedRequest.ClientFeatures = stored
+		r.CurrentPlan.Subtitle.Inventory = published
+		return r
+	}
+	withToken := []string{playback.FeatureSubripSidecarV3}
+	legacy := record(withToken, inventory(nil))
+	native := record(withToken, inventory(withToken))
+	v1, v2 := t.Context(), WithNativeAPIV2(t.Context())
+
+	if err := requireAttemptAPISurfaceV3(v1, legacy, nil); err != nil {
+		t.Fatalf("a legacy v1 attempt that published WebVTT must continue on v1: %v", err)
+	}
+	if err := requireAttemptAPISurfaceV3(v1, native, nil); err == nil {
+		t.Fatal("an attempt that published original SRT must not continue on v1")
+	}
+	if err := requireAttemptAPISurfaceV3(v2, legacy, withToken); err == nil {
+		t.Fatal("a v2 start retry with the feature must not replay a WebVTT plan")
+	}
+	if err := requireAttemptAPISurfaceV3(v2, record(nil, nil), withToken); err != nil {
+		t.Fatalf("an attempt that published no SRT has no representation to protect: %v", err)
+	}
+	if got := replanSubtitleFeaturesV3(legacy, withToken); playback.HasFeatureV3(got, playback.FeatureSubripSidecarV3) {
+		t.Fatalf("a replan of a legacy attempt must keep WebVTT, got features %v", got)
+	}
+	if got := replanSubtitleFeaturesV3(native, withToken); !playback.HasFeatureV3(got, playback.FeatureSubripSidecarV3) {
+		t.Fatalf("a replan of an original-SRT attempt must keep original SRT, got features %v", got)
+	}
+}

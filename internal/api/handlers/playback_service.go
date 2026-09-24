@@ -212,27 +212,40 @@ func isNativeAPIV2(ctx context.Context) bool {
 	return native
 }
 
-// requireAttemptAPISurfaceV3 keeps an attempt on the API surface that
-// negotiated subrip_sidecar_v1. /api/v1 must not continue an attempt that
-// negotiated it on /api/v2: v1 would replay or replan its .srt?original=1 URLs
-// on a route that serves WebVTT for them. And a start retried through /api/v2
-// with the feature must not replay the WebVTT plan /api/v1 stored after
-// dropping it, which would break the feature's promise. requested is the
-// retried start's feature list; replans pass nil because a replan cannot add
-// an attempt-sticky feature anyway. The error reuses the existing
-// playback_attempt_reused code so /api/v1 gains no new contract.
+// requireAttemptAPISurfaceV3 keeps an attempt on the API surface whose SRT
+// representation it published. /api/v1 must not continue an attempt that
+// published .srt?original=1 URLs: v1 would replay or replan them on a route
+// that serves WebVTT for them. And a start retried through /api/v2 with
+// subrip_sidecar_v1 must not replay a plan that published SRT as WebVTT, which
+// would break the feature's promise. The published representation decides,
+// not the stored token, because a server that predates the feature stored the
+// token verbatim beside WebVTT URLs. requested is the retried start's feature
+// list; replans pass nil because a replan keeps the published representation
+// anyway. The error reuses the existing playback_attempt_reused code so /api/v1
+// gains no new contract.
 func requireAttemptAPISurfaceV3(ctx context.Context, record *playback.AttemptRecordV3, requested []string) error {
 	if record == nil {
 		return nil
 	}
-	negotiated := playback.HasFeatureV3(record.NormalizedRequest.ClientFeatures, playback.FeatureSubripSidecarV3)
+	published, original := playback.PublishedSubRipRepresentationV3(record.CurrentPlan.Subtitle.Inventory)
 	switch {
-	case !isNativeAPIV2(ctx) && negotiated:
+	case !isNativeAPIV2(ctx) && original:
 		return playbackOperationError(http.StatusConflict, "playback_attempt_reused", "The playback attempt belongs to an /api/v2 session")
-	case isNativeAPIV2(ctx) && !negotiated && playback.HasFeatureV3(requested, playback.FeatureSubripSidecarV3):
+	case isNativeAPIV2(ctx) && published && !original && playback.HasFeatureV3(requested, playback.FeatureSubripSidecarV3):
 		return playbackOperationError(http.StatusConflict, "playback_attempt_reused", "The playback attempt was negotiated without subrip_sidecar_v1")
 	}
 	return nil
+}
+
+// replanSubtitleFeaturesV3 returns the client features a replan attaches its
+// subtitle artifact with: the attempt's features aligned with the SRT
+// representation its current plan already published. Every replan, not only a
+// seek reanchor, keeps that representation for the attempt's lifetime.
+func replanSubtitleFeaturesV3(record *playback.AttemptRecordV3, clientFeatures []string) []string {
+	if record == nil {
+		return clientFeatures
+	}
+	return playback.SubtitleFeaturesForPlanV3(record.CurrentPlan.Subtitle.Inventory, clientFeatures)
 }
 
 // withNativeServerFeaturesV3 advertises the /api/v2-only features on a
