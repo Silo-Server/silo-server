@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 10;
+export const SETTINGS_REVISION = 11;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -1474,9 +1474,9 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     type: "boolean",
     nullable: false,
     persistence: "remote",
-    introducedIn: 10,
+    introducedIn: 11,
     scopes: ["profile", "profile_device"],
-    scopeIntroducedIn: [10, 10],
+    scopeIntroducedIn: [11, 11],
     resolutionOrder: ["profile_device", "profile", "default"],
     defaultValue: false,
     label: "Theme music",
@@ -1490,9 +1490,9 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     type: "boolean",
     nullable: false,
     persistence: "remote",
-    introducedIn: 10,
+    introducedIn: 11,
     scopes: ["profile", "profile_device"],
-    scopeIntroducedIn: [10, 10],
+    scopeIntroducedIn: [11, 11],
     resolutionOrder: ["profile_device", "profile", "default"],
     defaultValue: false,
     label: "Loop theme music",

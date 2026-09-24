@@ -130,10 +130,10 @@ describe("PlaybackSettings", () => {
   afterEach(cleanup);
 
   it.each([
-    ["older server", capabilitiesAtRevision(9)],
+    ["older server", capabilitiesAtRevision(10)],
     ["unknown capabilities", undefined],
-    ["unsupported settings API", { ...capabilitiesAtRevision(10), api_version: 2 }],
-    ["no batched settings", { ...capabilitiesAtRevision(10), supports_batched_effective: false }],
+    ["unsupported settings API", { ...capabilitiesAtRevision(11), api_version: 2 }],
+    ["no batched settings", { ...capabilitiesAtRevision(11), supports_batched_effective: false }],
   ])("does not request or offer theme settings with %s", (_scenario, capabilities) => {
     mocks.capabilities = capabilities as SettingsCapabilities | undefined;
     mocks.capabilitiesSettled = capabilities !== undefined;
@@ -150,7 +150,7 @@ describe("PlaybackSettings", () => {
   });
 
   it("offers supported theme settings and saves them at profile scope", async () => {
-    mocks.capabilities = capabilitiesAtRevision(10);
+    mocks.capabilities = capabilitiesAtRevision(11);
     render(<PlaybackSettings />);
 
     const requested = mocks.useEffectiveSettings.mock.calls.flatMap(
@@ -182,13 +182,13 @@ describe("PlaybackSettings", () => {
     const { rerender } = render(<PlaybackSettings />);
     expect(screen.queryByRole("switch", { name: "Theme music" })).not.toBeInTheDocument();
 
-    mocks.capabilities = capabilitiesAtRevision(10);
+    mocks.capabilities = capabilitiesAtRevision(11);
     mocks.capabilitiesSettled = true;
     rerender(<PlaybackSettings />);
     expect(screen.getByRole("switch", { name: "Theme music" })).toBeInTheDocument();
 
     mocks.useEffectiveSettings.mockClear();
-    mocks.capabilities = capabilitiesAtRevision(9);
+    mocks.capabilities = capabilitiesAtRevision(10);
     rerender(<PlaybackSettings />);
     expect(screen.queryByRole("switch", { name: "Theme music" })).not.toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "Loop theme music" })).not.toBeInTheDocument();
@@ -201,7 +201,7 @@ describe("PlaybackSettings", () => {
   it.each(["pending", "error", "refetch error"] as const)(
     "blocks theme writes while effective settings are %s and recovers after loading",
     async (state) => {
-      mocks.capabilities = capabilitiesAtRevision(10);
+      mocks.capabilities = capabilitiesAtRevision(11);
       const values = {
         ...resolved(SETTING_KEYS.UI_THEME_MUSIC_ENABLED, true, "profile"),
         ...resolved(SETTING_KEYS.UI_THEME_MUSIC_LOOP, true, "profile"),
