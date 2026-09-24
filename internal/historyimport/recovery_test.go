@@ -131,8 +131,7 @@ func testImportedStore(t *testing.T, store userstore.UserStore) {
 	}
 
 	// A record the source gave no play time for still seeds an item the profile has
-	// no progress for, and lands at the import time: an epoch row would sort below
-	// every real watch in Continue Watching for good.
+	// no progress for, and is dated so it loses to any local activity that follows.
 	outcome, err = service.applyImportedWatch(ctx, 1, "p", "seeded", Record{DurationSeconds: 100, PositionSeconds: 20})
 	if err != nil || !outcome.ProgressWritten || outcome.HiddenSuppressed {
 		t.Fatalf("undated seed=%+v %v", outcome, err)
@@ -145,8 +144,8 @@ func testImportedStore(t *testing.T, store userstore.UserStore) {
 	if err != nil {
 		t.Fatalf("parsing seeded updated_at %q: %v", seeded.UpdatedAt, err)
 	}
-	if !seededAt.After(stamp) {
-		t.Fatalf("seeded updated_at = %s, want the import time, not the epoch", seeded.UpdatedAt)
+	if seededAt.After(stamp) {
+		t.Fatalf("seeded updated_at = %s, want a date that cannot outrank local activity", seeded.UpdatedAt)
 	}
 
 	// An item this profile removed from its history stays removed. The run has to

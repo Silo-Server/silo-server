@@ -528,38 +528,33 @@ func (s *Service) applyImportedWatch(ctx context.Context, userID int, profileID,
 	return outcome, err
 }
 
-// seedUndatedProgress imports a record the source gave no timestamp for. Such a
-// record must never overwrite local activity, so it is written only when the
-// profile has no progress for the item yet.
+// seedUndatedProgress imports a record the source gave no play time for. The
+// write is dated at the epoch so it loses every freshness comparison: one atomic
+// write that seeds an item the profile has no progress for and can never replace
+// local activity, whatever else is writing to the row at the same moment.
 //
-// The write is probed at the epoch first because the store refuses a write dated
-// before a history hide, which is how a title the profile removed from its history
-// stays removed. A refusal with no visible row is that hide, and it is permanent:
-// the caller reports it instead of counting an ordinary skip. Once the probe shows
-// no hide, the row is restamped with the import time, because a row left at the
-// epoch sorts below every real watch in Continue Watching for good.
+// That date is also what a history removal refuses, because the store rejects any
+// write at or before the removal. A refusal with nothing visible to have lost to
+// is that removal, and it is permanent — the record never changes, so every later
+// run is refused the same way — so the caller reports it rather than counting an
+// ordinary skip. The read only classifies that counter, so a row written
+// concurrently simply counts as the skip it is.
 func (s *Service) seedUndatedProgress(
 	ctx context.Context,
 	store userstore.UserStore,
 	profileID, itemID string,
 	record Record,
 ) (written, hiddenSuppressed bool, err error) {
-	existing, err := store.GetProgress(ctx, profileID, itemID)
-	if err != nil || existing != nil {
-		return false, false, err
+	written, err = store.SetProgressIfNewer(
+		ctx, profileID, itemID, importedPosition(record), record.DurationSeconds, record.Played, time.Unix(0, 0).UTC())
+	if err != nil || written {
+		return written, false, err
 	}
-	position, duration := importedPosition(record), record.DurationSeconds
-	seeded, err := store.SetProgressIfNewer(ctx, profileID, itemID, position, duration, record.Played, time.Unix(0, 0).UTC())
+	existing, err := store.GetProgress(ctx, profileID, itemID)
 	if err != nil {
 		return false, false, err
 	}
-	if !seeded {
-		return false, true, nil
-	}
-	if _, err := store.SetProgressIfNewer(ctx, profileID, itemID, position, duration, record.Played, time.Now().UTC()); err != nil {
-		return true, false, err
-	}
-	return true, false, nil
+	return false, existing == nil, nil
 }
 
 // Run failure messages written for users; run monitors show them verbatim.
