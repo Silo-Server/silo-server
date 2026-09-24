@@ -535,7 +535,7 @@ func TestCertificationCeilingFor(t *testing.T) {
 		{"G", "movie", "G"},
 		{"PG", "movie", "PG"},
 		{"PG-13", "movie", "PG-13"},
-		// Rank 3 maps to the ladder maximum: an R ceiling locally allows
+		// An adult ceiling maps to the ladder maximum: an R ceiling locally allows
 		// NC-17 (same rank), and the pre-filter must stay a superset of the
 		// post-filter or allowed titles vanish upstream unrecoverably.
 		{"R", "movie", "NC-17"},
@@ -549,6 +549,13 @@ func TestCertificationCeilingFor(t *testing.T) {
 		{"PG-13", "tv", "TV-14"},
 		{"TV-14", "movie", "PG-13"},
 		{"", "movie", ""},
+		{"AU-G", "movie", "G"},
+		{"AU-PG", "tv", "TV-PG"},
+		{"AU-M", "movie", "PG-13"},
+		{"AU-M", "tv", "TV-14"},
+		{"AU-MA15+", "movie", "NC-17"},
+		{"AU-R18+", "tv", "TV-MA"},
+		{"AU-X18+", "movie", "NC-17"},
 		{"BOGUS", "movie", ""},
 		{"", "tv", ""},
 	}

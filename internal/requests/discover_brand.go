@@ -289,9 +289,9 @@ func (s *Service) BrowseGenre(ctx context.Context, viewer Viewer, slug string, r
 //
 // Because that post-filter cannot resurrect titles TMDB already omitted, the
 // mapping must be a SUPERSET of what access.RatingAllowed permits at the
-// ceiling, never a subset. Two spots encode that: rank 3 maps to TMDB's
+// ceiling, never a subset. Two spots encode that: adult ceilings map to TMDB's
 // maximum on each ladder ("NC-17"/"TV-MA" — an R ceiling locally allows
-// NC-17, since both are rank 3), and TV rank 0 maps to "TV-G" (TMDB order 3)
+// NC-17, since both have the same rank), and TV rank 0 maps to "TV-G" (TMDB order 3)
 // rather than "TV-Y" so TV-Y/TV-Y7 titles are not excluded upstream of our
 // own ladder, which ranks them together.
 func certificationCeilingFor(ceiling, tmdbMediaType string) string {

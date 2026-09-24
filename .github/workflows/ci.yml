@@ -203,7 +203,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       watch-party-postgres:
-        image: postgres:17-alpine
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -239,6 +239,15 @@ jobs:
         env:
           SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable
         run: go test -race -count=1 -run '^(TestHistoryImportCancellation.*|TestQueue.*)$' ./migrations/ ./internal/historyimport/
+
+      - name: Test library certifications against Postgres
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable
+          SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable
+          SECRET_KEY: ci-only-disposable-database-encryption-key-00000000
+        run: |
+          go run ./cmd/silo --migrate-only
+          go test -p 1 -count=1 ./internal/catalog ./internal/api/handlers ./internal/apiv2 ./internal/sections ./internal/metadata ./internal/jellycompat
 
       # Compiles every package on the way, so there is no separate build step.
       - name: Test

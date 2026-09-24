@@ -97,7 +97,7 @@ behalf of an arbitrary user.
 Existing web, Apple and Android library callers keep the same response and access
 rules. The new API-key scope requires no changes to those clients or Jellyfin.
 
-## Certification country (fork test)
+## Certification country
 
 The v2 library create and update bodies accept `certification_country`: `US`
 (default) or `AU`. Administrator and user library responses report this value.
@@ -124,7 +124,7 @@ Australian libraries prefer actual Australian TMDB certifications. When TMDB
 returns several recognised certifications for one country, the strictest is used.
 The server's
 existing TMDB certification client fetches country data during metadata refresh,
-without requiring a new plugin binary. This test supports TMDB country data and
+without requiring a new plugin binary. This implementation supports TMDB country data and
 explicit country-prefixed NFO/manual values; providers returning only an
 unqualified rating cannot supply an Australian certification. Locked ratings win.
 Country snapshots are bound to the item's TMDB identity and cannot follow a
@@ -158,5 +158,17 @@ Lists, search, recommendations and direct item access share the resolver; episod
 inherit their series rating. Jellyfin uses the same server-side access checks.
 Apple and Android continue to receive rating strings and server-enforced limits;
 their native configuration and equivalent-rating presentation require client
-follow-up before this fork feature is proposed upstream. The web interface is
-the configuration and testing surface for this version.
+follow-up. The web interface is the configuration and testing surface for this
+version. Request discovery still uses US certifications and compares them with
+the selected profile ceiling; it has no library country context.
+
+### Adding another country
+
+The country preference and certification provenance can be reused for more
+schemes, such as the United Kingdom (`GB`). Only Australia and the United States
+are enabled in this version. Adding a country requires its accepted labels and
+aliases, maturity ordering, conservative US fallback mapping, and matching Go,
+SQL and policy tests. Extend the database country constraint in a new migration,
+the capability response, provider extraction, and client selectors together.
+A mapped equivalent must remain labelled as an estimate, and unknown ratings
+must remain blocked for profiles with a rating limit.
