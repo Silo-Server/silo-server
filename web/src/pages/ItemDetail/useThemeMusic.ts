@@ -6,7 +6,7 @@ import { v2 } from "@/api/v2/request";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { SETTING_KEYS } from "@/lib/settingsContract";
-import { THEME_MUSIC_INTERRUPT_EVENT, ThemeMusic } from "@/lib/themeMusic";
+import { THEME_MUSIC_INTERRUPT_EVENT, ThemeMusic, themeAudioFormats } from "@/lib/themeMusic";
 import { WatchPlaybackControllerContext } from "@/playback/watchPlaybackContext";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 
@@ -46,13 +46,15 @@ export function useThemeMusic(item: ItemDetail | undefined, loading: boolean) {
         current.serverOrigin !== context.serverOrigin
       )
         throw new Error("Profile changed");
+      const formats = themeAudioFormats();
       const grant = await v2("POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback", {
         path: { id: owner, theme_id: theme },
+        body: formats.length > 0 ? { accepted_formats: formats } : undefined,
         signal,
         profileContext: current,
       });
       if (!isCapturedProfileAuthorityActive(current)) throw new Error("Profile changed");
-      return grant.url;
+      return { url: grant.url, delivery: grant.delivery };
     });
     player.current = music;
     return () => {

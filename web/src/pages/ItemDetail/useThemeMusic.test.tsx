@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ItemDetail } from "@/api/types";
+import { resetThemeAudioFormats } from "@/lib/themeMusic";
 import { useThemeMusic } from "./useThemeMusic";
 import TrailersSection from "./components/TrailersSection";
 
@@ -11,6 +12,7 @@ const state = vi.hoisted(() => ({
   proof: "pin-1",
   enabled: true,
   requests: [] as string[],
+  bodies: [] as unknown[],
   grant: undefined as Promise<{ url: string }> | undefined,
 }));
 
@@ -40,9 +42,13 @@ vi.mock("@/api/client", () => ({
     context.profileId === state.profile.id && context.profileToken === state.proof,
 }));
 vi.mock("@/api/v2/request", () => ({
-  v2: async (operation: string, options: { profileContext?: { profileToken: string } }) => {
+  v2: async (
+    operation: string,
+    options: { profileContext?: { profileToken: string }; body?: unknown },
+  ) => {
     if (operation.startsWith("GET")) return { state: "available", allowed: true };
     state.requests.push(options.profileContext?.profileToken ?? "");
+    state.bodies.push(options.body);
     return state.grant ?? { url: "/audio?token=test" };
   },
 }));
@@ -53,7 +59,9 @@ beforeEach(() => {
   state.proof = "pin-1";
   state.enabled = true;
   state.requests = [];
+  state.bodies = [];
   state.grant = undefined;
+  resetThemeAudioFormats();
   elements = [];
   vi.stubGlobal(
     "Audio",
@@ -221,4 +229,24 @@ it("discards a grant if the profile changes before React rerenders", async () =>
   });
   expect(elements).toHaveLength(0);
   unmount();
+});
+
+it("tells the server which theme formats this browser decodes", async () => {
+  const canPlay = vi
+    .spyOn(HTMLMediaElement.prototype, "canPlayType")
+    .mockImplementation((mime: string) => (mime === "audio/mpeg" ? "probably" : ""));
+  const { unmount } = renderHook(() => useThemeMusic(item("movie"), false), { wrapper });
+  await waitFor(() => expect(elements).toHaveLength(1));
+  expect(state.bodies[0]).toEqual({ accepted_formats: [{ container: "mp3", audio_codec: "mp3" }] });
+  unmount();
+  canPlay.mockRestore();
+});
+
+it("omits the format list when the browser cannot describe itself", async () => {
+  const canPlay = vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+  const { unmount } = renderHook(() => useThemeMusic(item("movie"), false), { wrapper });
+  await waitFor(() => expect(elements).toHaveLength(1));
+  expect(state.bodies[0]).toBeUndefined();
+  unmount();
+  canPlay.mockRestore();
 });

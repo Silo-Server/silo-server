@@ -9,7 +9,54 @@ export interface ThemeSelection {
   items: ThemeTrack[];
 }
 
-type GrantRequest = (owner: string, theme: string, signal: AbortSignal) => Promise<string>;
+/** Where to play one theme. A converted theme is a progressive stream with no
+ * byte ranges, so it cannot loop by seeking back to the start. */
+export interface ThemeGrant {
+  url: string;
+  delivery?: "original" | "converted";
+}
+
+type GrantRequest = (owner: string, theme: string, signal: AbortSignal) => Promise<ThemeGrant>;
+
+export interface ThemeAudioFormat {
+  container: string;
+  audio_codec: string;
+}
+
+// Probed with canPlayType. mp4/aac is also the conversion the server offers
+// when the browser cannot decode a theme's own format.
+const FORMAT_PROBES: ReadonlyArray<ThemeAudioFormat & { mime: string }> = [
+  { container: "mp3", audio_codec: "mp3", mime: "audio/mpeg" },
+  { container: "mp4", audio_codec: "aac", mime: 'audio/mp4; codecs="mp4a.40.2"' },
+  { container: "m4a", audio_codec: "aac", mime: 'audio/mp4; codecs="mp4a.40.2"' },
+  { container: "m4a", audio_codec: "alac", mime: 'audio/mp4; codecs="alac"' },
+  { container: "aac", audio_codec: "aac", mime: "audio/aac" },
+  { container: "flac", audio_codec: "flac", mime: "audio/flac" },
+  { container: "ogg", audio_codec: "vorbis", mime: 'audio/ogg; codecs="vorbis"' },
+  { container: "ogg", audio_codec: "opus", mime: 'audio/ogg; codecs="opus"' },
+  { container: "opus", audio_codec: "opus", mime: 'audio/ogg; codecs="opus"' },
+  { container: "wav", audio_codec: "pcm", mime: 'audio/wav; codecs="1"' },
+];
+
+let cachedFormats: ThemeAudioFormat[] | undefined;
+
+/** The theme formats this browser decodes. Empty when it cannot say, which the
+ * server answers with the original audio, as before conversion existed. */
+export function themeAudioFormats(
+  probe: () => Pick<HTMLMediaElement, "canPlayType"> = () => document.createElement("audio"),
+): ThemeAudioFormat[] {
+  if (cachedFormats) return cachedFormats;
+  const element = probe();
+  cachedFormats = FORMAT_PROBES.filter(({ mime }) => element.canPlayType(mime) !== "").map(
+    ({ container, audio_codec }) => ({ container, audio_codec }),
+  );
+  return cachedFormats;
+}
+
+/** Test seam: forget the probed formats. */
+export function resetThemeAudioFormats() {
+  cachedFormats = undefined;
+}
 
 /** Owns one detail-page audio element. Signed URLs live only in the element. */
 export class ThemeMusic {
@@ -19,6 +66,7 @@ export class ThemeMusic {
   private owner = "";
   private theme = "";
   private loop = false;
+  private converted = false;
   private retry = 0;
   private suspended = false;
   private fade: ReturnType<typeof setInterval> | null = null;
@@ -31,7 +79,7 @@ export class ThemeMusic {
 
   select(selection: ThemeSelection | undefined, loop: boolean) {
     this.loop = loop;
-    if (this.audio) this.audio.loop = loop;
+    if (this.audio) this.audio.loop = loop && !this.converted;
     const song = selection?.items[0];
     if (!song || !selection) {
       this.stop();
@@ -57,17 +105,24 @@ export class ThemeMusic {
     this.request?.abort();
     this.request = new AbortController();
     try {
-      const url = await this.grant(this.owner, this.theme, this.request.signal);
+      const grant = await this.grant(this.owner, this.theme, this.request.signal);
       if (generation !== this.generation) return;
       this.clearAudio();
       const audio = this.createAudio();
       this.audio = audio;
+      this.converted = grant.delivery === "converted";
       audio.preload = "none";
       audio.volume = 0;
-      audio.loop = this.loop;
-      audio.src = url;
+      audio.loop = this.loop && !this.converted;
+      audio.src = grant.url;
       audio.ontimeupdate = () => {
         if (generation === this.generation && audio.currentTime > 0) this.retry = 0;
+      };
+      audio.onended = () => {
+        // A converted stream cannot seek back, and its short-lived URL may have
+        // expired, so a loop replays it with a fresh grant.
+        if (generation === this.generation && this.converted && this.loop && !this.suspended)
+          void this.load();
       };
       audio.onerror = () => {
         if (generation !== this.generation) return;
@@ -133,6 +188,7 @@ export class ThemeMusic {
     if (this.audio) {
       this.audio.onerror = null;
       this.audio.ontimeupdate = null;
+      this.audio.onended = null;
       this.audio.pause();
       this.audio.removeAttribute("src");
       this.audio.load();
@@ -161,6 +217,7 @@ export class ThemeMusic {
     if (!immediate && this.audio && !this.audio.paused) {
       this.audio.onerror = null;
       this.audio.ontimeupdate = null;
+      this.audio.onended = null;
       this.fadeVolume(this.audio, 0, () => this.clearAudio());
     } else {
       this.clearAudio();

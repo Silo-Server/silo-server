@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ThemeMusic } from "./themeMusic";
+import {
+  ThemeMusic,
+  resetThemeAudioFormats,
+  themeAudioFormats,
+  type ThemeGrant,
+} from "./themeMusic";
 
 function audio() {
   const element = {
@@ -9,6 +14,8 @@ function audio() {
     paused: true,
     preload: "",
     onerror: null,
+    onended: null,
+    currentTime: 0,
     play: vi.fn(async () => {
       element.paused = false;
     }),
@@ -36,23 +43,23 @@ afterEach(() => {
 
 describe("ThemeMusic", () => {
   it("aborts a pending grant while suspended and reloads only after selection resumes", async () => {
-    let resolve!: (url: string) => void;
+    let resolve!: (grant: ThemeGrant) => void;
     const grant = vi
-      .fn<(_owner: string, _theme: string, signal: AbortSignal) => Promise<string>>()
+      .fn<(_owner: string, _theme: string, signal: AbortSignal) => Promise<ThemeGrant>>()
       .mockImplementationOnce(
         () =>
-          new Promise<string>((done) => {
+          new Promise<ThemeGrant>((done) => {
             resolve = done;
           }),
       )
-      .mockResolvedValue("/audio?token=current");
+      .mockResolvedValue({ url: "/audio?token=current" });
     const element = audio();
     const create = vi.fn(() => element);
     const music = new ThemeMusic(grant, create);
     music.select(selection, false);
     music.suspend();
     expect(grant.mock.calls[0]?.[2].aborted).toBe(true);
-    resolve("/audio?token=obsolete");
+    resolve({ url: "/audio?token=obsolete" });
     await flush();
     expect(create).not.toHaveBeenCalled();
     expect(grant).toHaveBeenCalledTimes(1);
@@ -68,7 +75,7 @@ describe("ThemeMusic", () => {
     vi.useFakeTimers();
     const first = audio();
     const second = audio();
-    const grant = vi.fn(async () => "/audio");
+    const grant = vi.fn(async () => ({ url: "/audio" }));
     const music = new ThemeMusic(
       grant,
       vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second),
@@ -97,7 +104,7 @@ describe("ThemeMusic", () => {
         }),
     );
     const music = new ThemeMusic(
-      async () => "/audio",
+      async () => ({ url: "/audio" }),
       () => element,
     );
     music.select(selection, false);
@@ -114,7 +121,7 @@ describe("ThemeMusic", () => {
     vi.useFakeTimers();
     const element = audio();
     const create = vi.fn(() => element);
-    const grant = vi.fn(async () => "/audio?token=short-lived");
+    const grant = vi.fn(async () => ({ url: "/audio?token=short-lived" }));
     const music = new ThemeMusic(grant, create);
     music.select(selection, false);
     await flush();
@@ -132,10 +139,10 @@ describe("ThemeMusic", () => {
   });
 
   it("discards a grant that arrives after navigation or profile change", async () => {
-    let resolve!: (url: string) => void;
+    let resolve!: (grant: ThemeGrant) => void;
     const grant = vi.fn(
       () =>
-        new Promise<string>((done) => {
+        new Promise<ThemeGrant>((done) => {
           resolve = done;
         }),
     );
@@ -143,7 +150,7 @@ describe("ThemeMusic", () => {
     const music = new ThemeMusic(grant, create);
     music.select(selection, false);
     music.stop(true);
-    resolve("/audio?token=obsolete");
+    resolve({ url: "/audio?token=obsolete" });
     await flush();
     expect(create).not.toHaveBeenCalled();
   });
@@ -151,7 +158,7 @@ describe("ThemeMusic", () => {
   it("recovers once from a stale playback URL and then stops retrying", async () => {
     const first = audio(),
       second = audio();
-    const grant = vi.fn(async () => "/audio?token=renewed");
+    const grant = vi.fn(async () => ({ url: "/audio?token=renewed" }));
     const music = new ThemeMusic(
       grant,
       vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second),
@@ -171,7 +178,7 @@ describe("ThemeMusic", () => {
     const element = audio();
     vi.mocked(element.play).mockRejectedValueOnce(new DOMException("blocked", "NotAllowedError"));
     const music = new ThemeMusic(
-      async () => "/audio",
+      async () => ({ url: "/audio" }),
       () => element,
     );
     music.select(selection, false);
@@ -187,7 +194,7 @@ describe("ThemeMusic", () => {
 
   it("can renew again after recovered playback makes progress", async () => {
     const elements = [audio(), audio(), audio()];
-    const grant = vi.fn(async () => "/audio?token=renewed");
+    const grant = vi.fn(async () => ({ url: "/audio?token=renewed" }));
     const music = new ThemeMusic(grant, () => elements.shift()!);
     const first = elements[0]!;
     const second = elements[1]!;
@@ -201,5 +208,63 @@ describe("ThemeMusic", () => {
     await flush();
     expect(grant).toHaveBeenCalledTimes(3);
     music.stop(true);
+  });
+
+  it("replays a converted theme with a fresh grant instead of looping it", async () => {
+    const first = audio();
+    const second = audio();
+    const grant = vi.fn(async () => ({
+      url: "/stream/theme/signed",
+      delivery: "converted" as const,
+    }));
+    const music = new ThemeMusic(
+      grant,
+      vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second),
+    );
+    music.select(selection, true);
+    await flush();
+    expect(first.loop).toBe(false);
+    first.onended?.(new Event("ended"));
+    await flush();
+    expect(grant).toHaveBeenCalledTimes(2);
+    expect(second.src).toBe("/stream/theme/signed");
+    expect(first.src).toBe("");
+    music.stop(true);
+  });
+
+  it("keeps native looping for original audio and does not replay on end", async () => {
+    const element = audio();
+    const grant = vi.fn(async () => ({ url: "/audio", delivery: "original" as const }));
+    const music = new ThemeMusic(grant, () => element);
+    music.select(selection, true);
+    await flush();
+    expect(element.loop).toBe(true);
+    element.onended?.(new Event("ended"));
+    await flush();
+    expect(grant).toHaveBeenCalledOnce();
+    music.stop(true);
+  });
+});
+
+describe("themeAudioFormats", () => {
+  afterEach(() => resetThemeAudioFormats());
+
+  it("reports the probed formats once", () => {
+    const canPlayType = vi.fn((mime: string) =>
+      mime.startsWith("audio/mp4") && !mime.includes("alac")
+        ? "maybe"
+        : mime === "audio/flac"
+          ? "probably"
+          : "",
+    );
+    const probe = vi.fn(() => ({ canPlayType }) as Pick<HTMLMediaElement, "canPlayType">);
+    const formats = themeAudioFormats(probe);
+    expect(formats).toEqual([
+      { container: "mp4", audio_codec: "aac" },
+      { container: "m4a", audio_codec: "aac" },
+      { container: "flac", audio_codec: "flac" },
+    ]);
+    expect(themeAudioFormats(probe)).toBe(formats);
+    expect(probe).toHaveBeenCalledOnce();
   });
 });
