@@ -38,7 +38,8 @@ func TestNormalizeUnratedContentSetting(t *testing.T) {
 }
 
 // TestUnratedContentPolicyFailsClosed: only an explicit "allow" loosens a
-// ceiling. A read failure, an unset row, or a nil reader keeps titles hidden.
+// ceiling. An unset row, a nil reader, or a read that fails before any read
+// has ever succeeded keeps titles hidden.
 func TestUnratedContentPolicyFailsClosed(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -49,7 +50,7 @@ func TestUnratedContentPolicyFailsClosed(t *testing.T) {
 		{"allow with whitespace and case", NewUnratedContentPolicy(stubSettingReader{value: " Allow "}), true},
 		{"hide", NewUnratedContentPolicy(stubSettingReader{value: "hide"}), false},
 		{"unset", NewUnratedContentPolicy(stubSettingReader{}), false},
-		{"read failure", NewUnratedContentPolicy(stubSettingReader{value: "allow", err: errors.New("boom")}), false},
+		{"read failure with nothing cached", NewUnratedContentPolicy(stubSettingReader{value: "allow", err: errors.New("boom")}), false},
 		{"no reader", NewUnratedContentPolicy(nil), false},
 		{"nil policy", nil, false},
 	}
@@ -99,13 +100,43 @@ func TestUnratedContentPolicyCachesSuccessfulReads(t *testing.T) {
 	reader.err = errors.New("boom")
 	now = now.Add(unratedContentCacheTTL)
 	if policy.AllowUnratedContent(ctx) {
-		t.Fatal("a failed read must hide unrated titles")
+		t.Fatal("a failed read must keep the last value read successfully, which was hide")
 	}
 	reader.err = nil
 	reader.value = "allow"
 	reads := reader.reads
 	if !policy.AllowUnratedContent(ctx) || reader.reads != reads+1 {
 		t.Fatal("a failed read must not be cached")
+	}
+}
+
+// TestUnratedContentPolicyKeepsLastValueOnReadFailure pins that a transient
+// settings read failure does not flip an administrator's "allow" back to the
+// default. The value feeds the /api/v2 viewer scope digest, so flipping it
+// would both blank unrated titles mid-browse and invalidate every in-flight
+// cursor.
+func TestUnratedContentPolicyKeepsLastValueOnReadFailure(t *testing.T) {
+	ctx := context.Background()
+	reader := &countingSettingReader{value: "allow"}
+	policy := NewUnratedContentPolicy(reader)
+	now := time.Unix(1000, 0)
+	policy.now = func() time.Time { return now }
+
+	if !policy.AllowUnratedContent(ctx) {
+		t.Fatal("want allow from the first read")
+	}
+
+	reader.err = errors.New("boom")
+	now = now.Add(unratedContentCacheTTL)
+	if !policy.AllowUnratedContent(ctx) {
+		t.Fatal("a failed read must keep the last value read successfully")
+	}
+
+	reader.err = nil
+	reader.value = "hide"
+	now = now.Add(unratedContentCacheTTL)
+	if policy.AllowUnratedContent(ctx) {
+		t.Fatal("want hide once a read succeeds again")
 	}
 }
 

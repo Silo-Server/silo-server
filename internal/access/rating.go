@@ -452,11 +452,26 @@ func rankForAge(age int) int {
 	}
 }
 
+// HasCeiling reports whether a stored max_content_rating value sets a ceiling
+// at all. Only the empty string means "no ceiling".
+//
+// Text that is nothing but whitespace is deliberately NOT "no ceiling": it is a
+// ceiling no rating can be compared against, and an unusable parental control
+// blocks everything rather than admitting the whole catalog (see
+// catalog.ApplyContentRatingCeiling). max_content_rating is free text on both
+// profile APIs, so a stored " " is reachable; trimming before the emptiness
+// test would turn a deny-all control into an allow-all one, which is the one
+// direction a parental control must never fail in. Callers that clear a
+// ceiling write "" or null.
+func HasCeiling(ceiling string) bool {
+	return ceiling != ""
+}
+
 // RatingAllowed reports whether a content rating is visible under the ceiling.
 // An empty ceiling allows everything; a ceiling that resolves to no age blocks
 // everything, as does a rating that resolves to no age.
 func RatingAllowed(rating, ceiling string) bool {
-	if strings.TrimSpace(ceiling) == "" {
+	if !HasCeiling(ceiling) {
 		return true
 	}
 	ceilingAge, ok := AgeForCeiling(ceiling)
@@ -482,7 +497,7 @@ func RatingAllowed(rating, ceiling string) bool {
 // nil means "no ceiling, no predicate"; a non-nil empty slice means the ceiling
 // is unusable and nothing is compatible.
 func CompatibleCeilings(ceiling string) []string {
-	if strings.TrimSpace(ceiling) == "" {
+	if !HasCeiling(ceiling) {
 		return nil
 	}
 	ceilingAge, ok := AgeForCeiling(ceiling)
@@ -549,7 +564,8 @@ func hasRatingText(raw string) bool {
 }
 
 // StricterCeiling combines two maturity ceilings into the one that permits
-// less. An empty ceiling means "no limit", so it always loses to a real one.
+// less. An empty ceiling means "no limit" (see HasCeiling), so it always loses
+// to a real one.
 //
 // A non-empty ceiling that resolves to no age at all is unusable, and an
 // unusable parental control blocks everything (see
@@ -558,11 +574,10 @@ func hasRatingText(raw string) bool {
 // produced somewhere Silo's ladder is not available, such as an
 // administrator-authored policy override: combining can only tighten.
 func StricterCeiling(a, b string) string {
-	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
 	switch {
-	case a == "":
+	case !HasCeiling(a):
 		return b
-	case b == "":
+	case !HasCeiling(b):
 		return a
 	}
 	ageA, okA := AgeForCeiling(a)

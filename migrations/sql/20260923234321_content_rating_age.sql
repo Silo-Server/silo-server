@@ -149,11 +149,16 @@ resolved AS (
     FROM scored s
     ORDER BY s.content_id, (s.unrated OR s.age IS NOT NULL) DESC, s.ord
 )
+-- IS DISTINCT FROM makes a re-run cheap as well as correct: a concurrent index
+-- build below can fail and leave the migration to be applied again, and without
+-- the guard the retry rewrites every already-correct row plus all of that
+-- table's index entries a second time.
 UPDATE public.media_items mi
 SET content_rating_age = r.age
 FROM resolved r
 WHERE r.content_id = mi.content_id
-  AND r.age IS NOT NULL;
+  AND r.age IS NOT NULL
+  AND mi.content_rating_age IS DISTINCT FROM r.age;
 
 -- Not a partial index: with access.unrated_content = allow the ceiling
 -- predicate is "(content_rating_age IS NULL OR content_rating_age <= $n)", and

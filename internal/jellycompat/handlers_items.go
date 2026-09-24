@@ -1337,8 +1337,14 @@ var latestFastPathReproducibleParams = map[string]struct{}{
 // fallback would actually receive: every param must be one the section path
 // reproduces, the request must be for the first page of a movies/series
 // library, the limit must fit the fixed shared fetch budget, and a client
-// rating cap must be a known rating (an unknown string matches nothing in
-// BrowseItems and must not mint arbitrary cache keys).
+// rating cap must resolve to an age.
+//
+// The cap is vetted with AgeForCeiling — the same question clampMaxContentRating
+// asks before it will apply one — so this gate cannot drift from what the
+// clamp on either path actually does with the value. (The cache key itself is
+// already bounded: catalog.WriteAccessScopeCacheKey stores the ceiling's
+// resolved age, not the free text a client sent, so every spelling of one age
+// shares one entry.)
 func latestFastPathEligible(params url.Values, libraryItemType string) bool {
 	if libraryItemType != "movie" && libraryItemType != "series" {
 		return false
@@ -1354,8 +1360,8 @@ func latestFastPathEligible(params url.Values, libraryItemType string) bool {
 	if limit := catalog.ParseIntParam(params.Get("limit")); limit > compatLatestCacheFetchLimit {
 		return false
 	}
-	if rating := strings.TrimSpace(params.Get("max_content_rating")); rating != "" {
-		if _, known := access.RatingRank(rating); !known {
+	if rating := params.Get("max_content_rating"); rating != "" {
+		if _, usable := access.AgeForCeiling(rating); !usable {
 			return false
 		}
 	}

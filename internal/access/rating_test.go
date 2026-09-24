@@ -432,6 +432,14 @@ func TestRatingAllowed(t *testing.T) {
 		{"R", "NR", false},
 		{"R", "banana", false},
 		{"", "R", false},
+
+		// A whitespace-only ceiling is a SET ceiling nothing resolves under,
+		// not an absent one: max_content_rating is free text on both profile
+		// APIs, and a stored " " must keep blocking rather than admit the
+		// whole catalog.
+		{"G", " ", false},
+		{"G", "\t", false},
+		{"NR", " ", false},
 	}
 	for _, tc := range cases {
 		if got := RatingAllowed(tc.rating, tc.ceiling); got != tc.want {
@@ -535,10 +543,11 @@ func TestCompatibleCeilings(t *testing.T) {
 	}{
 		// No ceiling means no predicate at all.
 		{"", nil},
-		{"   ", nil},
-		// A ceiling with no usable age is compatible with nothing.
+		// A ceiling with no usable age is compatible with nothing. Whitespace
+		// is one of those, not an absent ceiling (see HasCeiling).
 		{"NR", []string{}},
 		{"banana", []string{}},
+		{"   ", []string{}},
 
 		{"G", []string{"G", "TV-Y", "TV-G", "0"}},
 		{"TV-Y7", []string{"G", "TV-Y", "TV-G", "PG", "TV-Y7", "TV-PG", "0", "1", "2", "3", "4", "5", "6", "7", "8"}},
@@ -672,7 +681,10 @@ func TestStricterCeilingOnlyTightens(t *testing.T) {
 		{"", "", ""},
 		{"PG-13", "", "PG-13"},
 		{"", "PG-13", "PG-13"},
-		{"  ", "PG", "PG"},
+		// Only "" is "no ceiling" (see HasCeiling): whitespace is a set
+		// ceiling that resolves to nothing, so it blocks and therefore wins.
+		{"  ", "PG", "  "},
+		{"PG", "  ", "  "},
 		{"PG", "PG-13", "PG"},
 		{"PG-13", "PG", "PG"},
 		// Cross-system: FSK 16 (16) is stricter than BBFC 18.

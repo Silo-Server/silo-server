@@ -276,16 +276,15 @@ func applyCompatPresentationLibrary(filter catalog.AccessFilter, libraryID *int)
 // that sets no usable age is ignored rather than allowed to hide the whole
 // library.
 func clampMaxContentRating(existing, requested string) string {
-	existing = strings.TrimSpace(existing)
-	requested = strings.TrimSpace(requested)
-	switch {
-	case existing == "":
-		return requested
-	case requested == "":
-		return existing
-	}
+	// The client's value is vetted FIRST, before the profile's ceiling is even
+	// looked at: an absent, blank or unrecognized MaxOfficialRating is dropped
+	// here, so it can never reach StricterCeiling and become a
+	// deny-everything ceiling the profile never had.
 	if _, ok := access.AgeForCeiling(requested); !ok {
 		return existing
+	}
+	if !access.HasCeiling(existing) {
+		return requested
 	}
 	return access.StricterCeiling(existing, requested)
 }

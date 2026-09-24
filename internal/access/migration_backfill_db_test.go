@@ -66,6 +66,19 @@ func TestBackfillMigrationAgreesWithNormalize(t *testing.T) {
 		t.Fatalf("executing the migration backfill statement: %v", err)
 	}
 
+	// The migration runs without a wrapping transaction, so a concurrent index
+	// build failing after this statement leaves the whole file to be applied
+	// again. Its IS DISTINCT FROM guard is what keeps the retry from rewriting
+	// every already-correct row, and every index entry that row owns, a second
+	// time: re-running it over settled data must touch nothing.
+	tag, err := tx.Exec(ctx, statement)
+	if err != nil {
+		t.Fatalf("re-executing the migration backfill statement: %v", err)
+	}
+	if tag.RowsAffected() != 0 {
+		t.Errorf("re-running the backfill rewrote %d rows, want 0", tag.RowsAffected())
+	}
+
 	rows, err := tx.Query(ctx,
 		`SELECT content_id, content_rating_age FROM media_items WHERE content_id = ANY($1)`, ids)
 	if err != nil {

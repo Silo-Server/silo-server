@@ -127,7 +127,10 @@ func contentRatingCeilingSQL(alias string, allowUnrated bool, argIdx int) string
 // package — enforces the same predicate. A filter with no ceiling appends
 // nothing.
 func ApplyContentRatingCeiling(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
-	if strings.TrimSpace(filter.MaxContentRating) == "" {
+	// access.HasCeiling, not a trimmed emptiness test: a stored " " is a set
+	// ceiling nothing resolves under, so it falls through to the fail-closed
+	// branch below instead of silently lifting the ceiling.
+	if !access.HasCeiling(filter.MaxContentRating) {
 		return
 	}
 	ceilingAge, ok := access.AgeForCeiling(filter.MaxContentRating)

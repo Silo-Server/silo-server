@@ -54,6 +54,21 @@ func TestApplyContentRatingCeilingBindsTheCeilingAge(t *testing.T) {
 		}
 	})
 
+	t.Run("whitespace-only ceiling fails closed", func(t *testing.T) {
+		// max_content_rating is free text on both profile APIs, so a stored
+		// " " is reachable. It is a set ceiling nothing resolves under, and
+		// must block rather than lift the profile's parental control.
+		for _, ceiling := range []string{" ", "\t", "\u00A0"} {
+			var conditions []string
+			var args []any
+			argIdx := 1
+			ApplyContentRatingCeiling("mi", AccessFilter{MaxContentRating: ceiling}, &conditions, &args, &argIdx)
+			if len(conditions) != 1 || conditions[0] != "1 = 0" {
+				t.Fatalf("ceiling %q: expected a blocking predicate; got %v", ceiling, conditions)
+			}
+		}
+	})
+
 	t.Run("non-US ceiling resolves through its age", func(t *testing.T) {
 		var conditions []string
 		var args []any

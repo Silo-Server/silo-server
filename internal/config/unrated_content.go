@@ -38,8 +38,15 @@ func NewUnratedContentPolicy(settings SettingReader) *UnratedContentPolicy {
 // AllowUnratedContent reports whether a title with no rating stays visible to
 // a viewer with a content-rating ceiling. Anything other than an explicit
 // "allow" — including an unset row or a value written before this setting
-// existed — keeps the default of hiding it. A read failure also hides it and
-// is not cached, so a parental control never loosens because a lookup failed.
+// existed — keeps the default of hiding it.
+//
+// A read failure answers with the value last read successfully, falling back
+// to the default only when no read has ever succeeded. Flipping an
+// administrator's "allow" back to "hide" because one lookup timed out is not a
+// safety win: it makes titles blink out of a library, and because this value
+// feeds the /api/v2 viewer scope digest it also invalidates every in-flight
+// cursor and bounces paging clients to page 1. The failed read is not cached,
+// so the next call retries.
 //
 // The lock guards only the cached value. The settings read runs without it,
 // so a slow database stalls the callers that need a fresh value rather than
@@ -58,7 +65,9 @@ func (p *UnratedContentPolicy) AllowUnratedContent(ctx context.Context) bool {
 
 	value, err := p.settings.Get(ctx, AccessUnratedContentSettingKey)
 	if err != nil {
-		return false
+		// p.allow is only ever written from a successful read, so its zero
+		// value is the "hide" default a node that has never read it needs.
+		return allow
 	}
 	allow = strings.EqualFold(strings.TrimSpace(value), AccessUnratedContentAllow)
 
