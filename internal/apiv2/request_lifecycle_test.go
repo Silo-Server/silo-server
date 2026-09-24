@@ -122,6 +122,12 @@ func TestWatchProviderLifecycleErrors(t *testing.T) {
 	if rec.Header().Get("Retry-After") != "42" {
 		t.Fatal("cooldown header lost")
 	}
+	w.err = watchsync.RateLimitedError{Provider: "trakt", RetryAfter: 1500 * time.Millisecond}
+	rec = do(t, h, http.MethodPost, Prefix+"/watch-providers/trakt/auth/poll", `{"auth_session_id":"00000000-0000-4000-8000-000000000001"}`, requestOwner)
+	requireProblem(t, rec, TypeRateLimited)
+	if rec.Header().Get("Retry-After") != "2" {
+		t.Fatalf("provider rate limit Retry-After = %q, want 2", rec.Header().Get("Retry-After"))
+	}
 }
 
 // A built-in provider that rejects the supplied API key is a client problem,
