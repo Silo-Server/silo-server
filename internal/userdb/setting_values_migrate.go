@@ -76,10 +76,12 @@ VALUES (?, ?, ?, ?, ?, ?)`,
 }
 
 // materializeRetiredSettingsFallbacks is the SQLite half of the Postgres
-// retired-fallbacks migration (internal/database/retired_settings_fallbacks.go):
-// every profile with no ui.disabled_library_ids or ui.next_up_mode row gets the
-// value the legacy account setting's read-time fallback gave it, so the
-// fallback read can go. Stored rows win, and legacy rows stay in place.
+// migration materialize_retired_settings_fallbacks: every profile with no
+// ui.disabled_library_ids or ui.next_up_mode row gets the value the legacy
+// account setting's read-time fallback gave it, so the fallback read can go.
+// Stored rows win, and legacy rows stay in place. Postgres runs the same
+// conversion in SQL; TestRetiredSettingsFallbacksMigrationMatchesPlanner pins
+// it to PlanRetiredFallback, which this uses directly.
 func materializeRetiredSettingsFallbacks(tx *sql.Tx) error {
 	contract, err := settingscontract.Load()
 	if err != nil {

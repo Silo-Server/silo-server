@@ -23,11 +23,11 @@ const (
 // store read, however many times its fetchers ask. Anything else, such as a
 // background caller, resolves it here.
 //
-// The legacy account-wide next_up_mode setting is no longer read. The
-// retired-fallback migration (internal/database/retired_settings_fallbacks.go
-// and SQLite schema v26) copied it onto every profile that had no canonical
-// row, so each profile keeps the mode the fallback used to supply. A failed
-// read degrades to combined, the presentation an absent value has always meant.
+// The legacy account-wide next_up_mode setting is no longer read. The Postgres
+// migration materialize_retired_settings_fallbacks and SQLite schema v26
+// copied it onto every profile that had no canonical row, so each profile
+// keeps the mode the fallback used to supply. A failed read degrades to
+// combined, the presentation an absent value has always meant.
 func NextUpMode(ctx context.Context, store userstore.UserStore, profileID string) string {
 	if profileID == "" {
 		return NextUpModeCombined

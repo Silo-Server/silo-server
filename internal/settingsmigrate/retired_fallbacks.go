@@ -16,8 +16,9 @@ const (
 )
 
 // RetiredFallbackKeys lists the legacy user_settings keys whose read-time
-// fallback was replaced by materialized profile-scope rows. Both backends
-// select exactly these keys when they run the replacement migration.
+// fallback was replaced by materialized profile-scope rows. The SQLite user
+// store selects exactly these keys when it runs the replacement migration; the
+// Postgres SQL migration names the same two.
 func RetiredFallbackKeys() []string {
 	return []string{legacyDisabledLibraryIDsKey, legacyNextUpModeKey}
 }

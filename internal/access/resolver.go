@@ -145,11 +145,11 @@ func VerifyProfileForRequest(
 // its own browsing: the canonical profile-scoped ui.disabled_library_ids row.
 //
 // The legacy account-wide disabled_library_ids setting is no longer read. The
-// retired-fallback migration (internal/database/retired_settings_fallbacks.go
-// and SQLite schema v26) copied it onto every profile that had no canonical
-// row, so each profile keeps the value the fallback used to supply; a store
-// restored from a pre-cutover snapshot runs both the backfill and that
-// migration before it serves a request.
+// Postgres migration materialize_retired_settings_fallbacks and SQLite schema
+// v26 copied it onto every profile that had no canonical row, so each profile
+// keeps the value the fallback used to supply; a store restored from a
+// pre-cutover snapshot runs both the backfill and that migration before it
+// serves a request.
 func DisabledLibraryIDs(ctx context.Context, store userstore.UserStore, profileID string) []int {
 	return ResolveViewerPreferences(ctx, store, profileID).DisabledLibraryIDs
 }
