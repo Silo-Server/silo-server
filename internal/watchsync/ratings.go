@@ -546,10 +546,20 @@ func (s *Service) resolveRemoteRatings(ctx context.Context, items map[string]*ra
 	for _, kind := range batch.SnapshotKinds {
 		snapshot[kind] = true
 	}
+	// Tombstones resolve by provider key within their kind: the same key (for
+	// example tmdb:101) can name a movie and a series. A tombstone without a
+	// kind resolves by key alone and must then name a single title.
 	byKey := make(map[string][]*ratingItem, len(items))
+	byKindKey := make(map[string][]*ratingItem, len(items))
 	for _, item := range items {
 		if item.stored != nil && item.stored.ProviderItemKey != "" {
-			byKey[item.stored.ProviderItemKey] = append(byKey[item.stored.ProviderItemKey], item)
+			key := item.stored.ProviderItemKey
+			kind := item.stored.Kind
+			if kind == "" {
+				kind = item.identity.Kind
+			}
+			byKey[key] = append(byKey[key], item)
+			byKindKey[kind+"\x00"+key] = append(byKindKey[kind+"\x00"+key], item)
 		}
 	}
 
@@ -564,7 +574,11 @@ func (s *Service) resolveRemoteRatings(ctx context.Context, items map[string]*ra
 	var unresolved []string
 	for _, row := range batch.Rows {
 		if row.Removed {
-			candidates := byKey[strings.TrimSpace(row.ProviderItemKey)]
+			key := strings.TrimSpace(row.ProviderItemKey)
+			candidates := byKey[key]
+			if row.Kind != "" {
+				candidates = byKindKey[row.Kind+"\x00"+key]
+			}
 			if len(candidates) != 1 {
 				warnings = append(warnings, "watch sync provider returned a rating removal that matches no single title")
 				continue
@@ -578,7 +592,6 @@ func (s *Service) resolveRemoteRatings(ctx context.Context, items map[string]*ra
 		}
 		// Record the row's ids before any check, so a row Silo cannot use
 		// still keeps its title from reading as removed.
-		rowsPerKind[row.Kind]++
 		for _, token := range ratingIdentityTokens(row.Kind, row.IMDbID, row.TMDBID, row.TVDBID, row.ProviderItemKey) {
 			seenTokens[token] = true
 		}
@@ -592,6 +605,9 @@ func (s *Service) resolveRemoteRatings(ctx context.Context, items map[string]*ra
 			warnings = append(warnings, fmt.Sprintf("watch sync provider returned an out-of-range rating %d", row.Rating))
 			continue
 		}
+		// Only usable rows show the snapshot is not empty; an invalid row
+		// must not switch off the empty-snapshot guard below.
+		rowsPerKind[row.Kind]++
 		match, reason, err := s.matcher.Match(ctx, row.HistoryRecord())
 		if err != nil {
 			return warnings, err

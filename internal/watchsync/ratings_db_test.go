@@ -361,6 +361,14 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 		if _, err := node.WithRatingSyncLock(short, "00000000-0000-0000-0000-000000000001", true, func(context.Context) error { return nil }); !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("second session = %v, want it to wait for the cap", err)
 		}
+		// A try does not wait for the cap: it reports the lock busy at once.
+		started := time.Now()
+		if locked, err := node.WithRatingSyncLock(ctx, "00000000-0000-0000-0000-000000000001", false, func(context.Context) error { return nil }); err != nil || locked {
+			t.Fatalf("try at the cap = %v, %v; want not locked", locked, err)
+		}
+		if waited := time.Since(started); waited > time.Second {
+			t.Fatalf("try at the cap took %v, want it immediate", waited)
+		}
 		close(release)
 		if err := <-done; err != nil {
 			t.Fatal(err)

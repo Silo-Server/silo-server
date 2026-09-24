@@ -678,6 +678,65 @@ func TestSyncRatingsSkipsAmbiguousTombstones(t *testing.T) {
 	}
 }
 
+func TestSyncRatingsResolvesTombstonesWithinTheirKind(t *testing.T) {
+	t.Run("both kinds use the key", func(t *testing.T) {
+		h := newRatingHarness(t)
+		h.store.set(ratingTestMovieA, 4)
+		h.store.set(ratingTestSeries, 3)
+		h.agree(ratingTestMovieA, 4, true)
+		h.agree(ratingTestSeries, 3, true)
+		tombstone := RemoteRating{RemoteFavorite: RemoteFavorite{ProviderItemKey: "tmdb:101", Kind: historyimport.KindSeries, Removed: true}}
+		h.provider.batch = RatingImportBatch{Rows: []RemoteRating{tombstone}}
+		h.sync()
+		if h.store.stars(ratingTestSeries) != 0 || h.store.stars(ratingTestMovieA) != 4 {
+			t.Fatalf("series=%d movie=%d, want only the series rating removed", h.store.stars(ratingTestSeries), h.store.stars(ratingTestMovieA))
+		}
+	})
+	t.Run("only the other kind uses the key", func(t *testing.T) {
+		h := newRatingHarness(t)
+		h.store.set(ratingTestMovieA, 4)
+		h.agree(ratingTestMovieA, 4, true)
+		tombstone := RemoteRating{RemoteFavorite: RemoteFavorite{ProviderItemKey: "tmdb:101", Kind: historyimport.KindSeries, Removed: true}}
+		h.provider.batch = RatingImportBatch{Rows: []RemoteRating{tombstone}}
+		h.sync()
+		if h.store.stars(ratingTestMovieA) != 4 {
+			t.Fatalf("movie=%d, a series tombstone must not remove a movie rating", h.store.stars(ratingTestMovieA))
+		}
+	})
+}
+
+func TestSyncRatingsInvalidRowsKeepTheEmptySnapshotGuard(t *testing.T) {
+	h := newRatingHarness(t)
+	h.store.set(ratingTestMovieA, 4)
+	h.store.set(ratingTestMovieB, 2)
+	h.agree(ratingTestMovieA, 4, true)
+	h.agree(ratingTestMovieB, 2, true)
+	// The only movie row is unusable and names neither title.
+	bad := RemoteRating{RemoteFavorite: RemoteFavorite{ProviderItemKey: "imdb:tt9999", Kind: historyimport.KindMovie, IMDbID: "tt9999"}, Rating: 11}
+	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{bad}, SnapshotKinds: []string{historyimport.KindMovie}}
+	result := h.sync()
+	if h.store.stars(ratingTestMovieA) != 4 || h.store.stars(ratingTestMovieB) != 2 {
+		t.Fatalf("movieA=%d movieB=%d, a snapshot with no usable rows must not remove ratings", h.store.stars(ratingTestMovieA), h.store.stars(ratingTestMovieB))
+	}
+	found := false
+	for _, w := range result.Warnings {
+		found = found || strings.Contains(w, "returned no movie ratings")
+	}
+	if !found {
+		t.Fatalf("warnings = %v, want the empty-snapshot guard reported", result.Warnings)
+	}
+}
+
+func TestDeleteConnectionWithoutAConnectionTakesNoLock(t *testing.T) {
+	h := newRatingHarness(t)
+	if err := h.service.DeleteConnection(context.Background(), h.conn.UserID, "another-profile", h.conn.Provider); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.repo.ratingLocks) != 0 || len(h.repo.connections) != 1 {
+		t.Fatalf("locks=%v connections=%d, want nothing touched", h.repo.ratingLocks, len(h.repo.connections))
+	}
+}
+
 func TestSyncRatingsWatchGateLetsHeldTitlesChange(t *testing.T) {
 	h := newRatingHarness(t)
 	h.provider.gateMovies = true

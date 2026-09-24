@@ -900,11 +900,21 @@ func (r *PostgresRepository) WithRatingSyncLock(ctx context.Context, connectionI
 	}
 	defer func() { <-slot }()
 
+	// A try that finds every session in use reports the lock as busy rather
+	// than waiting, so a scheduled sync moves on to its next connection.
 	sessions := r.ratingLockSessionLimit()
-	select {
-	case sessions <- struct{}{}:
-	case <-ctx.Done():
-		return false, ctx.Err()
+	if wait {
+		select {
+		case sessions <- struct{}{}:
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	} else {
+		select {
+		case sessions <- struct{}{}:
+		default:
+			return false, nil
+		}
 	}
 	defer func() { <-sessions }()
 
