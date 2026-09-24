@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import Home from "./Home";
@@ -609,12 +610,11 @@ describe("Home", () => {
       const queryClient = new QueryClient();
 
       await renderHome(queryClient);
+      await waitForRequestCount(requests, 3);
       expect(requests.map((request) => request.sectionId)).toEqual(["row-1", "row-2", "row-3"]);
 
-      await act(async () => {
-        bumpHomeRefreshSignal(queryClient);
-        await settle();
-      });
+      bumpHomeRefreshSignal(queryClient);
+      await waitForRequestCount(requests, 6);
 
       expect(sectionErrorCount()).toBe(0);
       const [firstGeneration, secondGeneration] = [requests.slice(0, 3), requests.slice(3)];
@@ -625,18 +625,17 @@ describe("Home", () => {
         "row-3",
       ]);
 
-      await act(async () => {
-        firstGeneration.forEach((request) => request.resolve("before bump"));
-        secondGeneration.forEach((request) => request.resolve("after bump"));
-        await settle();
-      });
-
-      expect(sectionErrorCount()).toBe(0);
-      expect(renderedFirstItems()).toEqual({
+      // The cancelled generation answers after the new one, so a stale result
+      // that got through would overwrite the new data.
+      secondGeneration.forEach((request) => request.resolve("after bump"));
+      firstGeneration.forEach((request) => request.resolve("before bump"));
+      await waitForRenderedFirstItems({
         "row-1": "row-1 after bump",
         "row-2": "row-2 after bump",
         "row-3": "row-3 after bump",
       });
+
+      expect(sectionErrorCount()).toBe(0);
       expect(requests).toHaveLength(6);
     });
 
@@ -652,12 +651,10 @@ describe("Home", () => {
       });
 
       await renderHome(queryClient);
-      expect(requests).toHaveLength(3);
+      await waitForRequestCount(requests, 3);
 
-      await act(async () => {
-        bumpHomeRefreshSignal(queryClient);
-        await settle();
-      });
+      bumpHomeRefreshSignal(queryClient);
+      await waitForRequestCount(requests, 6);
 
       expect(sectionErrorCount()).toBe(0);
       const secondGeneration = requests.slice(3);
@@ -667,17 +664,14 @@ describe("Home", () => {
         "row-3",
       ]);
 
-      await act(async () => {
-        secondGeneration.forEach((request) => request.resolve("after bump"));
-        await settle();
-      });
-
-      expect(sectionErrorCount()).toBe(0);
-      expect(renderedFirstItems()).toEqual({
+      secondGeneration.forEach((request) => request.resolve("after bump"));
+      await waitForRenderedFirstItems({
         "row-1": "row-1 after bump",
         "row-2": "row-2 after bump",
         "row-3": "row-3 after bump",
       });
+
+      expect(sectionErrorCount()).toBe(0);
       expect(requests).toHaveLength(6);
     });
 
@@ -686,11 +680,10 @@ describe("Home", () => {
       const queryClient = new QueryClient();
 
       await renderHome(queryClient);
-      for (let bump = 0; bump < 2; bump += 1) {
-        await act(async () => {
-          bumpHomeRefreshSignal(queryClient);
-          await settle();
-        });
+      await waitForRequestCount(requests, 3);
+      for (const expectedRequests of [6, 9]) {
+        bumpHomeRefreshSignal(queryClient);
+        await waitForRequestCount(requests, expectedRequests);
         expect(sectionErrorCount()).toBe(0);
       }
 
@@ -702,21 +695,17 @@ describe("Home", () => {
         "row-3",
       ]);
 
-      await act(async () => {
-        newestGeneration.forEach((request) => request.resolve("newest"));
-        await settle();
-      });
-      await act(async () => {
-        olderGenerations.forEach((request) => request.resolve("older"));
-        await settle();
-      });
-
-      expect(sectionErrorCount()).toBe(0);
-      expect(renderedFirstItems()).toEqual({
+      // The older generations answer after the newest one, so a stale result
+      // that got through would overwrite the newest data.
+      newestGeneration.forEach((request) => request.resolve("newest"));
+      olderGenerations.forEach((request) => request.resolve("older"));
+      await waitForRenderedFirstItems({
         "row-1": "row-1 newest",
         "row-2": "row-2 newest",
         "row-3": "row-3 newest",
       });
+
+      expect(sectionErrorCount()).toBe(0);
       expect(requests).toHaveLength(9);
     });
 
@@ -725,16 +714,16 @@ describe("Home", () => {
       const queryClient = new QueryClient();
 
       await renderHome(queryClient);
-      await act(async () => {
-        requests[0]!.reject(new Error("boom"));
-        requests.slice(1).forEach((request) => request.resolve("loaded"));
-        await settle();
-      });
+      await waitForRequestCount(requests, 3);
 
-      expect(sectionErrorCount()).toBe(1);
-      expect(renderedFirstItems()).toEqual({
-        "row-2": "row-2 loaded",
-        "row-3": "row-3 loaded",
+      requests[0]!.reject(new Error("boom"));
+      requests.slice(1).forEach((request) => request.resolve("loaded"));
+      await waitFor(() => {
+        expect(sectionErrorCount()).toBe(1);
+        expect(renderedFirstItems()).toEqual({
+          "row-2": "row-2 loaded",
+          "row-3": "row-3 loaded",
+        });
       });
     });
   });
@@ -746,7 +735,6 @@ describe("Home", () => {
           <Home />
         </QueryClientProvider>,
       );
-      await settle();
     });
   }
 
@@ -761,6 +749,10 @@ describe("Home", () => {
         row.getAttribute("data-first-item"),
       ]),
     );
+  }
+
+  async function waitForRenderedFirstItems(expected: Record<string, string>) {
+    await waitFor(() => expect(renderedFirstItems()).toEqual(expected));
   }
 });
 
@@ -789,11 +781,11 @@ function deferSectionRequests(): DeferredSectionRequest[] {
   return requests;
 }
 
-// Home hears about a refresh bump through a query observer, which TanStack
-// notifies on a zero-delay timer; one macrotask lets that and the promise
-// callbacks it queues run before the assertions.
-async function settle() {
-  await new Promise((resolve) => setTimeout(resolve, 0));
+// Home hears about a refresh bump through a query observer that TanStack
+// notifies on its own schedule. The next generation's requests are the
+// observable sign that Home has reset and re-requested its sections.
+async function waitForRequestCount(requests: DeferredSectionRequest[], count: number) {
+  await waitFor(() => expect(requests).toHaveLength(count));
 }
 
 function homeLayout(id: string) {
