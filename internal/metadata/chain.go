@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -331,6 +332,10 @@ type CapabilityInfo struct {
 	PluginInstallationID int
 	CapabilityID         string
 	DisplayName          string
+	// LookupProviderIDs are the provider-ID keys (e.g. "imdb", "tmdb") the
+	// capability declares it can look an item up by, from its manifest's
+	// lookup_provider_ids. See extractLookupProviderIDs.
+	LookupProviderIDs []string
 }
 
 // resolveEnabledProviders returns all enabled providers in installation ID order.
@@ -487,19 +492,7 @@ func extractDefaultPriority(metadataJSON []byte, contentLevel string) int {
 // leaving it one click away for users who want it. The flag lives in the same
 // "metadata" envelope as default_priority.
 func extractDefaultEnabled(metadataJSON []byte) bool {
-	var meta map[string]json.RawMessage
-	if err := json.Unmarshal(metadataJSON, &meta); err != nil {
-		return true
-	}
-	raw, ok := meta["default_enabled"]
-	if !ok {
-		if innerRaw, innerOK := meta["metadata"]; innerOK {
-			var inner map[string]json.RawMessage
-			if err := json.Unmarshal(innerRaw, &inner); err == nil {
-				raw, ok = inner["default_enabled"]
-			}
-		}
-	}
+	raw, ok := capabilityMetadataField(metadataJSON, "default_enabled")
 	if !ok {
 		return true
 	}
@@ -508,6 +501,67 @@ func extractDefaultEnabled(metadataJSON []byte) bool {
 		return true
 	}
 	return enabled
+}
+
+// extractLookupProviderIDs parses a capability's lookup_provider_ids: the
+// provider-ID keys an enrichment-only provider can look an item up by when it
+// never assigns an ID of its own. The MDBList plugin, for one, declares
+// ["imdb", "tmdb"] and is called whenever the item carries either.
+//
+// The list means "any one of these", unlike the markers capability's
+// required_external_ids, which means "all of these". Keys are trimmed,
+// lowercased (provider-ID keys are lowercase throughout the host) and
+// deduplicated. Anything other than a JSON array of strings yields nil, which
+// leaves the provider gated on its own ID as before.
+func extractLookupProviderIDs(metadataJSON []byte) []string {
+	raw, ok := capabilityMetadataField(metadataJSON, "lookup_provider_ids")
+	if !ok {
+		return nil
+	}
+	var keys []string
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(keys))
+	seen := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		key = strings.ToLower(strings.TrimSpace(key))
+		if key == "" {
+			continue
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// capabilityMetadataField reads one plugin-declared field from capability
+// metadata JSON. The field may sit at the top level or inside the "metadata"
+// envelope the SDK wraps plugin-declared fields in; the top level wins.
+func capabilityMetadataField(metadataJSON []byte, key string) (json.RawMessage, bool) {
+	var meta map[string]json.RawMessage
+	if err := json.Unmarshal(metadataJSON, &meta); err != nil {
+		return nil, false
+	}
+	if raw, ok := meta[key]; ok {
+		return raw, true
+	}
+	innerRaw, ok := meta["metadata"]
+	if !ok {
+		return nil, false
+	}
+	var inner map[string]json.RawMessage
+	if err := json.Unmarshal(innerRaw, &inner); err != nil {
+		return nil, false
+	}
+	raw, ok := inner[key]
+	return raw, ok
 }
 
 // SeedPlacement captures how a provider's manifest wants it placed when a chain
@@ -539,19 +593,7 @@ func LookupSeedPlacement(ctx context.Context, pool *pgxpool.Pool, pluginInstalla
 // return value is true only when a non-empty map was found, i.e. the provider
 // explicitly enumerates the content levels it supports.
 func declaredPriorityLevels(metadataJSON []byte) (map[string]float64, bool) {
-	var meta map[string]json.RawMessage
-	if err := json.Unmarshal(metadataJSON, &meta); err != nil {
-		return nil, false
-	}
-	dpRaw, ok := meta["default_priority"]
-	if !ok {
-		if innerRaw, innerOK := meta["metadata"]; innerOK {
-			var inner map[string]json.RawMessage
-			if err := json.Unmarshal(innerRaw, &inner); err == nil {
-				dpRaw, ok = inner["default_priority"]
-			}
-		}
-	}
+	dpRaw, ok := capabilityMetadataField(metadataJSON, "default_priority")
 	if !ok {
 		return nil, false
 	}
@@ -567,7 +609,8 @@ func declaredPriorityLevels(metadataJSON []byte) (map[string]float64, bool) {
 func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([]CapabilityInfo, error) {
 	rows, err := pool.Query(ctx,
 		`SELECT pc.plugin_installation_id, pc.capability_id,
-		        COALESCE(pc.metadata->>'display_name', pc.capability_id)
+		        COALESCE(pc.metadata->>'display_name', pc.capability_id),
+		        pc.metadata
 		 FROM plugin_capabilities pc
 		 JOIN plugin_installations pi ON pi.id = pc.plugin_installation_id
 		 WHERE pc.capability_type = 'metadata_provider.v1'
@@ -581,9 +624,11 @@ func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([
 	var caps []CapabilityInfo
 	for rows.Next() {
 		var c CapabilityInfo
-		if err := rows.Scan(&c.PluginInstallationID, &c.CapabilityID, &c.DisplayName); err != nil {
+		var metadataJSON []byte
+		if err := rows.Scan(&c.PluginInstallationID, &c.CapabilityID, &c.DisplayName, &metadataJSON); err != nil {
 			return nil, fmt.Errorf("scanning capability: %w", err)
 		}
+		c.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
 		caps = append(caps, c)
 	}
 	return caps, rows.Err()
@@ -600,12 +645,7 @@ func resolveChainEntries(
 ) []Provider {
 	caps := make([]CapabilityInfo, 0, len(entries))
 	for _, e := range entries {
-		displayName := lookupCapabilityDisplayName(ctx, pool, e.PluginInstallationID, e.CapabilityID)
-		caps = append(caps, CapabilityInfo{
-			PluginInstallationID: e.PluginInstallationID,
-			CapabilityID:         e.CapabilityID,
-			DisplayName:          displayName,
-		})
+		caps = append(caps, lookupCapabilityInfo(ctx, pool, e.PluginInstallationID, e.CapabilityID))
 	}
 	return buildProviders(ctx, caps, resolver, pool, checker)
 }
@@ -646,7 +686,7 @@ func buildProviders(
 			continue
 		}
 
-		provider, err := NewPluginProviderFromCapability(c.PluginInstallationID, c.CapabilityID, c.DisplayName, resolver)
+		provider, err := NewPluginProviderFromCapability(c.PluginInstallationID, c.CapabilityID, c.DisplayName, c.LookupProviderIDs, resolver)
 		if err != nil {
 			slog.WarnContext(ctx, "skipping metadata provider during chain resolution", "component", "metadata",
 				"installation_id", c.PluginInstallationID,
@@ -696,17 +736,26 @@ func installationIsBuiltin(ctx context.Context, checker InstallationEnabledCheck
 	return kind == "builtin"
 }
 
-// lookupCapabilityDisplayName retrieves the display name from plugin capability metadata.
-func lookupCapabilityDisplayName(ctx context.Context, pool *pgxpool.Pool, installationID int, capabilityID string) string {
-	var displayName string
+// lookupCapabilityInfo reads the construction fields for one chain entry's
+// metadata_provider.v1 capability in a single query. A missing row falls back
+// to the capability ID as display name and no lookup keys.
+func lookupCapabilityInfo(ctx context.Context, pool *pgxpool.Pool, installationID int, capabilityID string) CapabilityInfo {
+	info := CapabilityInfo{
+		PluginInstallationID: installationID,
+		CapabilityID:         capabilityID,
+		DisplayName:          capabilityID,
+	}
+	var metadataJSON []byte
 	err := pool.QueryRow(ctx,
-		`SELECT COALESCE(metadata->>'display_name', $2)
+		`SELECT COALESCE(metadata->>'display_name', $2), metadata
 		 FROM plugin_capabilities
 		 WHERE plugin_installation_id = $1 AND capability_id = $2 AND capability_type = 'metadata_provider.v1'`,
 		installationID, capabilityID,
-	).Scan(&displayName)
+	).Scan(&info.DisplayName, &metadataJSON)
 	if err != nil {
-		return capabilityID
+		info.DisplayName = capabilityID
+		return info
 	}
-	return displayName
+	info.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
+	return info
 }

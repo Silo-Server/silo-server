@@ -98,7 +98,10 @@ func TestAdvisoryFromPluginMetadata(t *testing.T) {
 }
 
 // TestPluginProviderGetMetadata_MapsAdvisoryAge proves the keys survive the
-// whole provider call, not just the helper.
+// whole provider call, not just the helper. The request has the shape the MDBList
+// plugin really sees: the item carries the IMDb and TMDB IDs a primary provider
+// resolved and no ID of MDBList's own, so only the declared lookup keys let the
+// call through.
 func TestPluginProviderGetMetadata_MapsAdvisoryAge(t *testing.T) {
 	metadata, err := structpb.NewStruct(map[string]any{
 		"advisory_age":    13,
@@ -108,32 +111,34 @@ func TestPluginProviderGetMetadata_MapsAdvisoryAge(t *testing.T) {
 		t.Fatalf("structpb.NewStruct() error = %v", err)
 	}
 
+	client := &fakePluginMetadataClient{
+		response: &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{
+			ItemType:      "movie",
+			ContentRating: "PG",
+			Metadata:      metadata,
+		}},
+	}
 	provider, err := NewPluginProviderWithClientFactory(map[string]string{
 		pluginInstallationIDSetting: "1",
 		capabilityIDSetting:         "mdblist",
 	}, func(context.Context, int, string) (pluginMetadataClient, error) {
-		return &fakePluginMetadataClient{
-			response: &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{
-				ProviderId:    "provider-1",
-				ItemType:      "movie",
-				Title:         "Jaws",
-				ContentRating: "PG",
-				Metadata:      metadata,
-			}},
-		}, nil
+		return client, nil
 	})
 	if err != nil {
 		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
 	}
+	provider.lookupProviderIDs = []string{"imdb", "tmdb"}
 
 	result, err := provider.GetMetadata(context.Background(), MetadataRequest{
-		ProviderIDs: map[string]string{"mdblist": "578"},
+		ProviderIDs: map[string]string{"imdb": "tt0073195", "tmdb": "578"},
 		ContentType: "movie",
 	})
 	if err != nil {
 		t.Fatalf("GetMetadata() error = %v", err)
 	}
 	switch {
+	case client.getMetadataReq == nil:
+		t.Fatal("expected the plugin to be called on its declared lookup IDs")
 	case result == nil:
 		t.Fatal("expected metadata result")
 	case result.AdvisoryAge != 13 || result.AdvisorySource != AdvisorySourceCommonSense:
