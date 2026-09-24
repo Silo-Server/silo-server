@@ -235,8 +235,11 @@ export default function HeroBanner({
   const handlePlayClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (activeAudiobookPlaying == null) {
       // This Play link navigates without the playback controller, so it
-      // starts the first-frame clock itself.
-      const request = parseWatchHref(playHref);
+      // starts the first-frame clock itself. A modified or non-primary click
+      // opens another tab, which this tab's clock cannot time.
+      const opensHere =
+        event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+      const request = opensHere ? parseWatchHref(playHref) : null;
       if (request) markPlaybackIntent(request.requestKey);
       return;
     }

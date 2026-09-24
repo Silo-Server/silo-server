@@ -325,6 +325,8 @@ export function usePlaybackSession(
   const startIntentRef = useRef({
     position: initialPosition,
     forceStartPosition: forceInitialPosition,
+    // When the viewer asked for this request, for its first_frame_ms.
+    intentAt: null as number | null,
   });
   const hasAdoptedPlanRef = useRef(false);
   const awaitingInitialPlayerPositionRef = useRef(false);
@@ -846,9 +848,11 @@ export function usePlaybackSession(
     activeCapabilityRequestKeyRef.current = capabilityRequestKey;
     qualityRef.current = qualityPreference?.trim() || "auto";
     playbackPositionRef.current = initialPosition;
+    const intentAt = takePlaybackIntent(requestKey);
     startIntentRef.current = {
       position: initialPosition,
       forceStartPosition: forceInitialPosition,
+      intentAt,
     };
     hasAdoptedPlanRef.current = false;
     awaitingInitialPlayerPositionRef.current = false;
@@ -862,7 +866,7 @@ export function usePlaybackSession(
       allowPreserveExistingSessionOnError: false,
       replacementErrorMessage: "Failed to replace playback request",
       initialErrorMessage: "Failed to start playback",
-      intentAt: takePlaybackIntent(requestKey),
+      intentAt,
     });
   }, [
     capabilityRequestKey,
@@ -1132,8 +1136,10 @@ export function usePlaybackSession(
         allowPreserveExistingSessionOnError: false,
         replacementErrorMessage: "Failed to refresh playback output",
         initialErrorMessage: "Failed to refresh playback output",
-        // The browser's output changed; nobody pressed Play.
-        intentAt: null,
+        // Before any plan was adopted, the viewer is still waiting on the
+        // Play they pressed, so the replacement start keeps its clock. After
+        // one, video has been shown and nobody pressed Play for this start.
+        intentAt: resumeFromAdoptedPlan ? null : startIntent.intentAt,
       });
       return;
     }
