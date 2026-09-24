@@ -57,7 +57,7 @@ type Provider struct {
 	baseURL string
 	// writes paces authenticated writes per access token.
 	writes *watchsync.CredentialLimiter
-	// pages paces paginated reads per access token.
+	// pages paces paginated reads per Trakt account (see pageLimiterKey).
 	pages *watchsync.CredentialLimiter
 	// sleep waits between in-place rate-limit retries; tests replace it.
 	sleep func(context.Context, time.Duration) error
@@ -357,6 +357,16 @@ func fetchTraktPages[T any](
 	return rows, nil
 }
 
+// pageLimiterKey identifies whose GET budget a paged read spends. Trakt counts
+// requests per user, so profiles linked to one Trakt account with different
+// tokens share a budget; the token is the fallback before the account is known.
+func pageLimiterKey(conn watchsync.Connection) string {
+	if account := strings.TrimSpace(conn.ProviderAccountID); account != "" {
+		return "account:" + account
+	}
+	return "token:" + conn.AccessToken
+}
+
 // fetchTraktPass reads every page of a listing once and reports how many pages
 // it took. A changed X-Pagination-Item-Count between pages fails the pass.
 func fetchTraktPass(
@@ -375,7 +385,7 @@ func fetchTraktPass(
 	for page := 1; page <= traktMaxPages; page++ {
 		params.Set("page", strconv.Itoa(page))
 		if conn.AccessToken != "" {
-			if err := p.pages.Wait(ctx, conn.AccessToken); err != nil {
+			if err := p.pages.Wait(ctx, pageLimiterKey(conn)); err != nil {
 				return nil, 0, watchsync.LimiterWaitError(ctx, p.Key(), pageInterval, err)
 			}
 		}
