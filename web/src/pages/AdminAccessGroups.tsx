@@ -89,11 +89,26 @@ function AccessGroupsPage() {
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  // Bumped to retry a failed load of the group already in the URL.
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const mounted = useRef(true);
   const createGroup = useCreateAccessGroup();
 
   useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
     setSelected(null);
-    if (!selectedId || !available) return;
+    if (!selectedId || !available) {
+      // A load cancelled by leaving the group must not leave its status behind.
+      setLoading(false);
+      setError("");
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError("");
@@ -110,10 +125,14 @@ function AccessGroupsPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedId, available, authority]);
+  }, [selectedId, available, authority, loadAttempt]);
 
   function select(id: number | string) {
     if (!available) return;
+    if (String(id) === selectedId) {
+      setLoadAttempt((attempt) => attempt + 1);
+      return;
+    }
     navigate(`/admin/access-groups/${id}`);
   }
   async function create() {
@@ -125,7 +144,8 @@ function AccessGroupsPage() {
       const group = await createGroup.mutateAsync({ body: { name }, profileContext: authority });
       setNewName("");
       setCreating(false);
-      select(group.id);
+      // Don't pull the admin back if they left while the group was created.
+      if (mounted.current) select(group.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create group.");
     } finally {

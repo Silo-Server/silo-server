@@ -140,6 +140,50 @@ describe("AdminAccessGroups", () => {
     expect(screen.queryByRole("button", { name: "All groups" })).not.toBeInTheDocument();
   });
 
+  it("retries a failed group load when the same group is opened again", async () => {
+    const serve = globalThis.fetch;
+    let groupReads = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        if (
+          String(input) === "/api/v2/admin/access-groups/1" &&
+          (init?.method ?? "GET") === "GET"
+        ) {
+          groupReads += 1;
+          if (groupReads === 1) return jsonResponse({ error: "unavailable", message: "down" }, 503);
+        }
+        return serve(input, init);
+      }),
+    );
+    const router = renderPage("/admin/access-groups/1");
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText("Loading group editor...")).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    expect(await screen.findByLabelText("Name")).toHaveValue("Kids");
+    expect(groupReads).toBe(2);
+    expect(router.state.location.pathname).toBe("/admin/access-groups/1");
+  });
+
+  it("clears the loading message when leaving a group before it loads", async () => {
+    const serve = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) =>
+        String(input) === "/api/v2/admin/access-groups/1" && (init?.method ?? "GET") === "GET"
+          ? new Promise<Response>(() => {})
+          : serve(input, init),
+      ),
+    );
+    const router = renderPage("/admin/access-groups/1");
+    expect(await screen.findByText("Loading group editor...")).toBeInTheDocument();
+    await router.navigate("/admin/access-groups");
+    await waitFor(() =>
+      expect(screen.queryByText("Loading group editor...")).not.toBeInTheDocument(),
+    );
+  });
+
   it("opens the group editor when loaded from a group URL", async () => {
     const router = renderPage("/admin/access-groups/1");
     expect(await screen.findByLabelText("Name")).toHaveValue("Kids");
@@ -295,7 +339,7 @@ it("keeps delete confirmation after conflict and reloads before retry", async ()
       return jsonResponse([]);
     }),
   );
-  renderPage();
+  const router = renderPage();
   fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
   fireEvent.click(await screen.findByRole("button", { name: "Delete group" }));
   fireEvent.click(screen.getByRole("button", { name: "Delete" }));
@@ -307,6 +351,10 @@ it("keeps delete confirmation after conflict and reloads before retry", async ()
   fireEvent.click(screen.getByRole("button", { name: "Delete" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
   expect(tags).toEqual(['"old"', '"fresh"']);
+  // Deleting replaces the group's history entry, so Back can't reopen it.
+  await waitFor(() => expect(router.state.location.pathname).toBe("/admin/access-groups"));
+  await router.navigate(-1);
+  expect(router.state.location.pathname).toBe("/admin/access-groups");
   cleanup();
   vi.unstubAllGlobals();
 });
