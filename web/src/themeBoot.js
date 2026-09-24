@@ -13,7 +13,8 @@
  * hooks/themePreferences.ts parses it. themeBoot.test.tsx checks the two agree,
  * so a new theme id or storage key has to be added here too.
  *
- * It runs untranspiled, so keep it plain script syntax with no imports.
+ * The build minifies it but neither bundles nor transpiles it, so keep it plain
+ * script syntax with no imports.
  */
 (() => {
   const THEME_IDS = [

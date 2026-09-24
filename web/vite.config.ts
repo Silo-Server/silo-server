@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
-import { defineConfig, loadEnv, type Plugin } from "vite";
+import { defineConfig, loadEnv, transformWithEsbuild, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
@@ -59,13 +59,20 @@ function themeBootScript(): Plugin {
     configResolved(config) {
       base = config.base;
     },
-    generateBundle() {
+    async generateBundle() {
       // Runs before vite:build-html's generateBundle, which applies the
       // transformIndexHtml hook below, so the hashed name is known by then.
+      // Emitted assets skip the build's minifier, so minify it here: the file
+      // sits on the render-blocking path and its source is half comment.
+      const { code } = await transformWithEsbuild(
+        readFileSync(path.resolve(__dirname, THEME_BOOT_SOURCE), "utf8"),
+        THEME_BOOT_SOURCE,
+        { minify: true },
+      );
       const referenceId = this.emitFile({
         type: "asset",
         name: path.basename(THEME_BOOT_SOURCE),
-        source: readFileSync(path.resolve(__dirname, THEME_BOOT_SOURCE), "utf8"),
+        source: code,
       });
       builtFileName = this.getFileName(referenceId);
     },
@@ -115,6 +122,11 @@ export default defineConfig(({ mode }) => {
     define: {
       // Reported in X-Silo-Client-Version on every v2 request (src/api/v2/request.ts).
       __SILO_WEB_VERSION__: JSON.stringify(webVersion),
+    },
+    build: {
+      // A font inlined into the CSS downloads for everyone, defeating the
+      // unicode-range subsets in src/fonts.css, so fonts always stay files.
+      assetsInlineLimit: (filePath: string) => (/\.woff2?$/.test(filePath) ? false : undefined),
     },
     worker: {
       format: "es",
