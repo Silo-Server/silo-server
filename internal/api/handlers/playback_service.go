@@ -212,16 +212,27 @@ func isNativeAPIV2(ctx context.Context) bool {
 	return native
 }
 
-// requireAttemptAPISurfaceV3 refuses to continue an attempt through /api/v1
-// once it negotiated a feature that exists only on /api/v2. v1 would otherwise
-// replay or replan the attempt's v2-only representations (.srt?original=1) on
-// a route that serves WebVTT for them. The error reuses the existing
+// requireAttemptAPISurfaceV3 keeps an attempt on the API surface that
+// negotiated subrip_sidecar_v1. /api/v1 must not continue an attempt that
+// negotiated it on /api/v2: v1 would replay or replan its .srt?original=1 URLs
+// on a route that serves WebVTT for them. And a start retried through /api/v2
+// with the feature must not replay the WebVTT plan /api/v1 stored after
+// dropping it, which would break the feature's promise. requested is the
+// retried start's feature list; replans pass nil because a replan cannot add
+// an attempt-sticky feature anyway. The error reuses the existing
 // playback_attempt_reused code so /api/v1 gains no new contract.
-func requireAttemptAPISurfaceV3(ctx context.Context, record *playback.AttemptRecordV3) error {
-	if record == nil || isNativeAPIV2(ctx) || !playback.HasFeatureV3(record.NormalizedRequest.ClientFeatures, playback.FeatureSubripSidecarV3) {
+func requireAttemptAPISurfaceV3(ctx context.Context, record *playback.AttemptRecordV3, requested []string) error {
+	if record == nil {
 		return nil
 	}
-	return playbackOperationError(http.StatusConflict, "playback_attempt_reused", "The playback attempt belongs to an /api/v2 session")
+	negotiated := playback.HasFeatureV3(record.NormalizedRequest.ClientFeatures, playback.FeatureSubripSidecarV3)
+	switch {
+	case !isNativeAPIV2(ctx) && negotiated:
+		return playbackOperationError(http.StatusConflict, "playback_attempt_reused", "The playback attempt belongs to an /api/v2 session")
+	case isNativeAPIV2(ctx) && !negotiated && playback.HasFeatureV3(requested, playback.FeatureSubripSidecarV3):
+		return playbackOperationError(http.StatusConflict, "playback_attempt_reused", "The playback attempt was negotiated without subrip_sidecar_v1")
+	}
+	return nil
 }
 
 // withNativeServerFeaturesV3 advertises the /api/v2-only features on a

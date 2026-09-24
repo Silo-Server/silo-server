@@ -1610,7 +1610,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 			!requestDigests.matches(existing.RequestDigest) {
 			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "playback_attempt_reused", "The playback attempt ID belongs to a different request")
 		}
-		if err := requireAttemptAPISurfaceV3(r.Context(), existing); err != nil {
+		if err := requireAttemptAPISurfaceV3(r.Context(), existing, req.ClientFeatures); err != nil {
 			return playback.DecisionResponseV3{}, err
 		}
 		response := decisionResponseFromAttemptV3(existing)
@@ -2029,8 +2029,8 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		if errors.Is(err, playback.ErrPlaybackAttemptExistsV3) || errors.Is(err, playback.ErrIdempotencyKeyReusedV3) {
 			existing, lookupErr := h.PlanStoreV3.GetAttemptByPlaybackAttemptID(r.Context(), req.PlaybackAttemptID)
 			if lookupErr == nil && existing.UserID == userID && existing.ProfileID == profileID && existing.RequestedMediaFileID == req.FileID && requestDigests.matches(existing.RequestDigest) {
-				if err := requireAttemptAPISurfaceV3(r.Context(), existing); err != nil {
-					return playback.DecisionResponseV3{}, &transportErrorV3{reason: "playback_attempt_reused", message: "The playback attempt belongs to an /api/v2 session."}
+				if err := requireAttemptAPISurfaceV3(r.Context(), existing, req.ClientFeatures); err != nil {
+					return playback.DecisionResponseV3{}, &transportErrorV3{reason: "playback_attempt_reused", message: "The playback attempt belongs to a different API surface."}
 				}
 				// Replaying a concurrent duplicate is only valid while its
 				// session is alive; otherwise tell the client to mint a new
@@ -4536,7 +4536,7 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 	if record.UserID != userID || record.ProfileID != profileID {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
 	}
-	if err := requireAttemptAPISurfaceV3(r.Context(), record); err != nil {
+	if err := requireAttemptAPISurfaceV3(r.Context(), record, nil); err != nil {
 		return playback.DecisionResponseV3{}, err
 	}
 	if record.PlaybackAttemptID != req.PlaybackAttemptID {

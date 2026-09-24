@@ -240,6 +240,14 @@ func TestV1StartDoesNotNegotiateSubripSidecar(t *testing.T) {
 		playback.HasFeatureV3(started.ServerFeatures, playback.FeatureSubripSidecarV3) {
 		t.Fatalf("a v1 start must keep WebVTT and not advertise subrip_sidecar_v1: %#v", started)
 	}
+
+	// The same body retried through /api/v2 must not replay that WebVTT plan
+	// to a client whose request promises it original SRT.
+	retry := httptest.NewRecorder()
+	handler.HandleStartPlayback(retry, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext())))
+	if retry.Code != http.StatusConflict || !strings.Contains(retry.Body.String(), "playback_attempt_reused") {
+		t.Fatalf("v2 retry of a v1 attempt status = %d, body = %s", retry.Code, retry.Body.String())
+	}
 }
 
 // An attempt that negotiated subrip_sidecar_v1 on /api/v2 cannot continue on
