@@ -68,23 +68,51 @@ const bufferingGraceMs = 2_000;
 // a pre-roll at the start of the stream, and no longer than this, is played.
 const maxPrerollSeconds = 20;
 // The pre-roll plays muted behind the syncing overlay, so it can run fast.
-// Close to the target it drops to normal speed and is checked often, so it
-// stops within the guest's one-second readiness tolerance: the stream cannot
-// seek back to a target it has passed.
+// Close to the target it drops to normal speed, which leaves a late check the
+// most room: the stream cannot seek back to a target it has passed.
 const prerollPlaybackRate = 4;
 const prerollFinalApproachSeconds = 1.5;
 const prerollCheckIntervalMs = 50;
-// A hidden tab throttles timers to about one a second, so the rate there is
-// also held to the gap one late check can spend. That keeps the overshoot
-// inside the tolerance without playing a long pre-roll at normal speed, which
-// would miss the room's waiting deadline and hold everyone anyway.
-const hiddenPrerollCheckSeconds = 1.5;
+// Nothing in the element stops it at a position; only a check on the main
+// thread can, and checks are as regular as that thread allows. A hidden tab
+// throttles timers to about one a second, so the estimate of how late the next
+// check may be starts there and then follows the delays actually seen. Both
+// the rate and the stopping point answer to it.
+const visiblePrerollWakeupSeconds = 0.3;
+const hiddenPrerollWakeupSeconds = 1.5;
+
+/** How late the next check may be, given this tab and the delays seen so far. */
+function prerollWakeupSeconds(observedSeconds: number): number {
+  const floor =
+    document.visibilityState === "visible"
+      ? visiblePrerollWakeupSeconds
+      : hiddenPrerollWakeupSeconds;
+  return Math.max(floor, observedSeconds);
+}
 
 /** Playback rate for a pre-roll this far short of the room's seek target. */
-function prerollRateFor(remainingSeconds: number): number {
+function prerollRateFor(remainingSeconds: number, wakeupSeconds: number): number {
   if (remainingSeconds <= prerollFinalApproachSeconds) return 1;
-  if (document.visibilityState === "visible") return prerollPlaybackRate;
-  return Math.min(prerollPlaybackRate, remainingSeconds / hiddenPrerollCheckSeconds);
+  return Math.min(prerollPlaybackRate, Math.max(1, remainingSeconds / wakeupSeconds));
+}
+
+/**
+ * Whether to stop the pre-roll here. Stopping short of the target is safe: the
+ * room acknowledges a position inside its tolerance and absorbs the rest by
+ * rate. Stopping past it is not, so the pre-roll gives up the last of the gap
+ * once a late check could carry the element out of that tolerance.
+ */
+function prerollLanded(
+  remainingSeconds: number,
+  rate: number,
+  wakeupSeconds: number,
+  toleranceSeconds: number,
+): boolean {
+  if (remainingSeconds <= 0) return true;
+  return (
+    remainingSeconds <= toleranceSeconds &&
+    rate * wakeupSeconds > remainingSeconds + toleranceSeconds
+  );
 }
 
 type ReadyCheck =
@@ -182,6 +210,8 @@ export function useWatchTogetherPlaybackSync({
     commandId: string;
     restoreMuted: boolean;
     restoreRate: number;
+    /** When the pre-roll was last checked, to measure how late checks run. */
+    lastCheckMs: number;
   } | null>(null);
   // The command whose seek rebuilt the current stream. Until the rebuilt
   // stream loads, the element still holds the stream the seek replaces.
@@ -228,10 +258,11 @@ export function useWatchTogetherPlaybackSync({
         commandId: command.command_id,
         restoreMuted: video.muted,
         restoreRate: video.playbackRate,
+        lastCheckMs: performance.now(),
       };
       prerollRef.current = preroll;
       video.muted = true;
-      video.playbackRate = prerollRateFor(gap);
+      video.playbackRate = prerollRateFor(gap, prerollWakeupSeconds(0));
       video.play().catch(() => {
         // A later pre-roll owns the element now; leave it alone.
         if (prerollRef.current === preroll) endPreroll(false);
@@ -255,14 +286,19 @@ export function useWatchTogetherPlaybackSync({
     }
     if (!video || !waitingSeekCommandId) return;
     const targetSeconds = transportCommand?.position_seconds ?? 0;
+    const tolerance = isHost ? hostReadySeekToleranceSeconds : readySeekToleranceSeconds;
     const checkProgress = () => {
-      if (prerollRef.current?.commandId !== waitingSeekCommandId) return;
+      const preroll = prerollRef.current;
+      if (preroll?.commandId !== waitingSeekCommandId) return;
+      const nowMs = performance.now();
+      const wakeup = prerollWakeupSeconds((nowMs - preroll.lastCheckMs) / 1000);
+      preroll.lastCheckMs = nowMs;
       const remaining = targetSeconds - toMediaTime(video.currentTime, streamOriginRef.current);
-      if (remaining <= 0) {
+      const rate = prerollRateFor(remaining, wakeup);
+      if (prerollLanded(remaining, rate, wakeup, tolerance)) {
         endPreroll(true);
         return;
       }
-      const rate = prerollRateFor(remaining);
       if (video.playbackRate !== rate) video.playbackRate = rate;
     };
     // timeupdate may come only every 250 ms, so poll as well.
@@ -288,6 +324,7 @@ export function useWatchTogetherPlaybackSync({
   }, [
     appliedCommandIdRef,
     endPreroll,
+    isHost,
     streamOriginRef,
     transportCommand?.position_seconds,
     videoRef,

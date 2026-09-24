@@ -3007,6 +3007,10 @@ export function VideoPlayer({
     [watchTogetherSync],
   );
 
+  const handleToggleMuted = useCallback(() => {
+    handleMutedChange(!muted);
+  }, [handleMutedChange, muted]);
+
   // -- Keyboard shortcuts --
   useKeyboardShortcuts(
     videoRef,
@@ -3014,6 +3018,7 @@ export function VideoPlayer({
     handlePlayPause,
     handleKeyboardSeek,
     toggleCaptions,
+    handleToggleMuted,
     handleTogglePiP,
     displayMode === "foreground",
   );

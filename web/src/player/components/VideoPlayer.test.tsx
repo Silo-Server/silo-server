@@ -10,6 +10,7 @@ import type {
   PlaybackRealtimeEventEnvelope,
 } from "../realtime-protocol";
 import type { PlayerSubtitleInfo, VideoFitMode } from "../types";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { HLS_STARTUP_TIMEOUT_MS } from "../utils/hlsStartupGuard";
 import { VideoPlayer } from "./VideoPlayer";
 
@@ -791,6 +792,16 @@ describe("VideoPlayer room catch-up", () => {
     fireEvent.volumeChange(video);
     expect(localStorage.getItem("player-muted")).not.toBe("true");
     expect(localStorage.getItem("player-volume")).toBe("0.4");
+    // The mute shortcut flips the viewer's choice rather than the element's
+    // temporary pre-roll mute, which it could only ever turn off.
+    const toggleMuted = vi.mocked(useKeyboardShortcuts).mock.lastCall![5];
+    act(() => toggleMuted());
+    expect(localStorage.getItem("player-muted")).toBe("true");
+    expect(video.muted).toBe(true);
+    act(() => vi.mocked(useKeyboardShortcuts).mock.lastCall![5]());
+    expect(localStorage.getItem("player-muted")).toBe("false");
+    expect(video.muted).toBe(true);
+
     // A mute chosen during the pre-roll holds; the element stays muted until
     // the pre-roll ends and then keeps the viewer's choice.
     act(() => controls.current!.onMutedChange!(true));
@@ -886,18 +897,22 @@ describe("VideoPlayer room catch-up", () => {
       video.currentTime = 10.6;
       await act(() => vi.advanceTimersByTimeAsync(60));
       expect(video.playbackRate).toBe(1);
+      expect(paused).toBe(false);
       expect(connection.sendRoomMessage).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: "ready" }),
       );
 
-      video.currentTime = 12.05;
+      // Inside the last half second a throttled check could carry the element
+      // out of the room's tolerance, so the pre-roll gives up the rest of the
+      // gap and acknowledges from where it stopped.
+      video.currentTime = 11.6;
       fireEvent.timeUpdate(video);
       expect(paused).toBe(true);
       expect(connection.sendRoomMessage).toHaveBeenCalledWith({
         type: "ready",
         session_id: "session-1",
         command_id: command.command_id,
-        position_seconds: 1500.05,
+        position_seconds: 1499.6,
         is_paused: true,
       });
     } finally {

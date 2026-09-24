@@ -11,6 +11,7 @@ export function useKeyboardShortcuts(
   handlePlayPause: () => void,
   handleSeek: (time: number) => void,
   toggleCaptions: () => void,
+  toggleMuted: () => void,
   togglePiP?: () => void,
   enabled = true,
 ) {
@@ -73,7 +74,9 @@ export function useKeyboardShortcuts(
         case "m":
         case "M":
           e.preventDefault();
-          video.muted = !video.muted;
+          // Through the player, not the element: a room seek pre-roll mutes
+          // the element for itself and keeps the viewer's choice separately.
+          toggleMuted();
           break;
 
         case "c":
@@ -112,5 +115,14 @@ export function useKeyboardShortcuts(
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [containerRef, enabled, handlePlayPause, handleSeek, toggleCaptions, togglePiP, videoRef]);
+  }, [
+    containerRef,
+    enabled,
+    handlePlayPause,
+    handleSeek,
+    toggleCaptions,
+    toggleMuted,
+    togglePiP,
+    videoRef,
+  ]);
 }
