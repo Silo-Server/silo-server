@@ -6011,11 +6011,7 @@ func (h *PlaybackHandler) enqueueRouteEventV3(event playback.RouteEventRecordV3)
 		store := h.PlanStoreV3
 		go func() {
 			for value := range h.v3EventQueue {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				if err := store.RecordRouteEvent(ctx, value); err != nil {
-					slog.Warn("playback route event write failed", "error", err, "event", value.Event)
-				}
-				cancel()
+				recordRouteEventV3(store, value)
 			}
 		}()
 	})
@@ -6023,6 +6019,22 @@ func (h *PlaybackHandler) enqueueRouteEventV3(event playback.RouteEventRecordV3)
 	case h.v3EventQueue <- event:
 	default:
 		slog.Warn("playback route event dropped", "event", event.Event, "playback_attempt_id", event.PlaybackAttemptID)
+	}
+}
+
+// recordRouteEventV3 writes one queued route event and feeds the metrics
+// derived from it. Only a newly inserted row is observed: a v2 retry after a
+// lost 202 reuses its event_id and must not be counted twice.
+func recordRouteEventV3(store playback.PlanStoreV3, event playback.RouteEventRecordV3) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	inserted, err := store.RecordRouteEvent(ctx, event)
+	if err != nil {
+		slog.Warn("playback route event write failed", "error", err, "event", event.Event)
+		return
+	}
+	if inserted {
+		playback.ObserveStoredRouteEvent(event)
 	}
 }
 

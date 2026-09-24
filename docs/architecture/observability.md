@@ -305,11 +305,25 @@ collector/backend self-metrics. There is no OTel MeterProvider.
 ## Client experience and plugin coordination
 
 Server response bytes and first playable segments do not establish first frame
-or rebuffering on a client. Apple already emits first-frame route events through
-its v1 bridge; its rebuffer counter remains local. Android has a route-event DTO
-and API/repository methods, but its first-frame and buffering callbacks currently
-update local player state. Neither native app consumes administrator resource
-DTOs, so the additive resource response needs no native model migration.
+or rebuffering on a client, so press-play-to-first-frame comes from the clients'
+`first_frame` route events. When the server stores a new `first_frame` event
+whose `first_frame_ms` diagnostic parses as 0 to 600,000 ms, it observes
+`silo_playback_first_frame_seconds{client}` (buckets from 0.1 s to 60 s; `client`
+takes the API client families). Only an inserted row counts. A v2 report that
+repeats its `event_id` inserts nothing on any replica, so a retry is not counted
+twice. Legacy v1-bridge reports carry no event id and are counted on every
+report. Events dropped because the in-process write queue is full are never
+observed. Each replica exports the events it wrote; sum across replicas.
+
+The clients do not time the same interval yet. The web player measures from the
+Play action (the playback controller's start, or a version switch inside the
+player) to the event that removes its loading overlay. It sends `first_frame`
+without a duration when nothing timed the start, such as a deep link or a
+reload. Android sends `first_frame_ms` measured from plan adoption, which leaves
+out the start request. Apple sends `first_frame` through its v1 bridge without
+`first_frame_ms`. Apple's rebuffer counter and Android's buffering callbacks
+remain local. Neither native app consumes administrator resource DTOs, so the
+additive resource response needs no native model migration.
 
 The API v2 program must coordinate capability-gated first-frame and rebuffer
 reporting with both native apps, including v2 route-event migration and retry/

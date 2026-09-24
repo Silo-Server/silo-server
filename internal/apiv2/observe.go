@@ -57,11 +57,9 @@ const (
 	// authClassAnonymous labels a gated operation that established no identity
 	// (no credential, or one the gate refused).
 	authClassAnonymous = "anonymous"
-	// labelOther replaces unknown client names and methods outside the standard set.
-	labelOther          = "other"
-	metricClientWeb     = "web"
-	metricClientApple   = "apple"
-	metricClientAndroid = "android"
+	// labelOther replaces methods outside the standard set and unknown
+	// credential kinds. Client names fold through telemetry.ClientLabel.
+	labelOther = "other"
 	// maxClientNameLen and maxClientVersionLen clamp the X-Silo-Client and
 	// X-Silo-Client-Version values before they reach a label or a log line.
 	maxClientNameLen    = 64
@@ -196,7 +194,7 @@ func report(r *http.Request, o *observation, status int, hijacked bool, elapsed 
 	if status == 0 && hijacked {
 		class = "hijacked"
 	}
-	requestsTotal.WithLabelValues(major, o.operationID, method, class, o.errorCode, o.authClass, clientLabel(name)).Inc()
+	requestsTotal.WithLabelValues(major, o.operationID, method, class, o.errorCode, o.authClass, telemetry.ClientLabel(name)).Inc()
 	requestDuration.WithLabelValues(major, o.operationID, method).Observe(elapsed.Seconds())
 	if o.errorCode == TypeValidationFailed.ID {
 		validationFailures.WithLabelValues(o.operationID).Inc()
@@ -271,24 +269,6 @@ func clampLabel(v string, limit int) string {
 		v = v[:limit]
 	}
 	return v
-}
-
-// clientLabel maps only recognized first-party product names into fixed families.
-// Arbitrary self-reported names cannot create metric series or store private text
-// in Prometheus. Logs retain the existing clamped client identity for diagnosis.
-func clientLabel(name string) string {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "":
-		return labelNone
-	case "silo web":
-		return metricClientWeb
-	case "silo apple", "silo apple tv", "silo ios", "silo tvos", "silo macos", "silo ipados":
-		return metricClientApple
-	case "silo android", "silo android tv":
-		return metricClientAndroid
-	default:
-		return labelOther
-	}
 }
 
 // observeOperation is the first Huma middleware: the request matched an

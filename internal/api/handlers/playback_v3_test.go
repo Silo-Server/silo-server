@@ -193,9 +193,9 @@ type releaseDeadlinePlanStoreV3 struct {
 	contextErr   error
 }
 
-func (s *recordingRouteEventPlanStoreV3) RecordRouteEvent(_ context.Context, event playback.RouteEventRecordV3) error {
+func (s *recordingRouteEventPlanStoreV3) RecordRouteEvent(_ context.Context, event playback.RouteEventRecordV3) (bool, error) {
 	s.events <- event
-	return nil
+	return true, nil
 }
 
 func (s *releaseDeadlinePlanStoreV3) ReleaseReplan(ctx context.Context, _, _, _ string) error {
