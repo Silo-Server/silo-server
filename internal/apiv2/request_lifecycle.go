@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -372,6 +373,12 @@ func watchProviderProblem(err error) *Problem {
 	if cooldown, ok := errors.AsType[watchsync.SyncCooldownError](err); ok {
 		p := NewProblem(TypeRateLimited, "Watch provider sync recently ran. Try again later.")
 		return p.WithHeader("Retry-After", strconv.Itoa(max(1, cooldown.RetryAfterSeconds)))
+	}
+	if limited, ok := watchsync.AsRateLimited(err); ok {
+		// The provider throttled this call (for example Trakt's slow_down answer
+		// to a device-code poll); pass its wait on so the client backs off.
+		p := NewProblem(TypeRateLimited, "The watch provider is rate limiting requests. Try again later.")
+		return p.WithHeader("Retry-After", strconv.Itoa(max(1, int(math.Ceil(limited.RetryAfter.Seconds())))))
 	}
 	if watchsync.IsInvalidCredentialError(err) {
 		return NewProblem(TypeValidationFailed, "The watch provider rejected the supplied credential.")
