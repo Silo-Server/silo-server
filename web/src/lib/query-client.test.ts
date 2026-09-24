@@ -9,6 +9,8 @@ function problem(status: number): V2ProblemError {
     type: `https://siloserver.org/docs/api/v2/problems/status_${status}`,
     title: `HTTP ${status}`,
     status,
+    detail: `The server answered ${status}.`,
+    instance: "/api/v2/profiles",
   });
 }
 

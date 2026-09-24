@@ -10,6 +10,7 @@ import listEffectiveSettingsOk from "../../../contracts/api/v2/fixtures/list_eff
 import listFavoritesOk from "../../../contracts/api/v2/fixtures/list_favorites_ok.json";
 import listProfilesOk from "../../../contracts/api/v2/fixtures/list_profiles_ok.json";
 import { setAccessToken } from "@/api/client";
+import type { components } from "@/api/v2/schema";
 import { profileFromV2 } from "@/hooks/queries/profiles";
 import { useHomeLayout } from "@/hooks/queries/sections";
 import { queryClient } from "@/lib/query-client";
@@ -76,7 +77,8 @@ class InertWebSocket extends EventTarget {
   close() {}
 }
 
-const ownerProfile = listProfilesOk.items[0]!;
+// JSON imports widen enum fields to string; the fixture is a contract Profile.
+const ownerProfile = listProfilesOk.items[0]! as components["schemas"]["Profile"];
 
 function serverRoutes() {
   return {
