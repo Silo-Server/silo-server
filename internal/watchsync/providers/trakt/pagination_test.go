@@ -300,3 +300,32 @@ func TestFetchTraktPagesReadsASinglePageOnce(t *testing.T) {
 		t.Fatalf("rows=%d requests=%d err=%v, want one row from one request", len(rows), requests, err)
 	}
 }
+
+func TestFetchTraktPagesPacesReadsPerToken(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("X-Pagination-Page-Count", "3")
+		writeTraktFixture(t, w, `[{"listed_at":"2026-01-01T00:00:00Z","movie":{"title":"A","ids":{"trakt":1,"tmdb":1}}}]`)
+	}))
+	defer server.Close()
+	provider := NewProvider(server.Client(), server.URL)
+	// Two pages at once, then one per hour: the third page must wait, which
+	// the one-minute deadline refuses before the request is sent.
+	provider.pages = watchsync.NewCredentialLimiter(time.Hour, 2)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	rows, err := fetchTraktPages[traktFavoriteMovie](ctx, provider, watchsync.ServerConfig{},
+		watchsync.Connection{AccessToken: "t"}, "/sync/watchlist/movies", nil)
+	if err == nil || rows != nil || requests != 2 {
+		t.Fatalf("rows=%v requests=%d err=%v, want the read limiter to stop the third page", rows, requests, err)
+	}
+}
+
+func TestTraktPageBudgetStaysUnderTheGETLimit(t *testing.T) {
+	// Trakt allows 500 authenticated GETs per five minutes.
+	if perWindow := pageBurst + int((5*time.Minute)/pageInterval); perWindow >= 500 {
+		t.Fatalf("paged reads allow %d GETs in five minutes, want fewer than 500", perWindow)
+	}
+}

@@ -28,11 +28,16 @@ const traktExtendedProgress = "progress"
 
 // Trakt rate limits, from its API rate-limiting guide: authenticated users get
 // one POST/PUT/DELETE per second (AUTHED_API_POST_LIMIT) and 500 GETs per
-// five minutes (AUTHED_API_GET_LIMIT). A sync's sequential GETs stay well
-// inside the GET budget, so only writes are paced.
+// five minutes (AUTHED_API_GET_LIMIT). Writes are paced to one per second.
+// Paged reads, which a large history can stretch to hundreds of pages (read
+// twice for consistency), are paced so any five-minute window stays inside the
+// GET budget: a burst of 50 covers ordinary accounts at full speed, and the
+// refill keeps burst plus five minutes of refill under 500.
 const (
 	writeInterval = time.Second
 	writeBurst    = 1
+	pageInterval  = 675 * time.Millisecond
+	pageBurst     = 50
 
 	// A 429 whose Retry-After is this short, which is typical of the
 	// one-second write limit, is retried in place. Longer waits defer the
@@ -52,6 +57,8 @@ type Provider struct {
 	baseURL string
 	// writes paces authenticated writes per access token.
 	writes *watchsync.CredentialLimiter
+	// pages paces paginated reads per access token.
+	pages *watchsync.CredentialLimiter
 	// sleep waits between in-place rate-limit retries; tests replace it.
 	sleep func(context.Context, time.Duration) error
 }
@@ -68,6 +75,7 @@ func NewProvider(client *http.Client, baseURL string) *Provider {
 		client:  client,
 		baseURL: strings.TrimRight(baseURL, "/"),
 		writes:  watchsync.NewCredentialLimiter(writeInterval, writeBurst),
+		pages:   watchsync.NewCredentialLimiter(pageInterval, pageBurst),
 		sleep:   watchsync.SleepContext,
 	}
 }
@@ -361,6 +369,11 @@ func fetchTraktPass(
 	itemCount := 0
 	for page := 1; page <= traktMaxPages; page++ {
 		params.Set("page", strconv.Itoa(page))
+		if conn.AccessToken != "" {
+			if err := p.pages.Wait(ctx, conn.AccessToken); err != nil {
+				return nil, 0, fmt.Errorf("wait for trakt read limiter: %w", err)
+			}
+		}
 		var batch []json.RawMessage
 		header, err := p.doWithHeader(ctx, http.MethodGet, path+"?"+params.Encode(), cfg, conn.AccessToken, nil, &batch)
 		if err != nil {
