@@ -61,14 +61,19 @@ func (r *SubtitleInventoryResolver) AdditionalSubtitles(ctx context.Context, fil
 }
 
 // SessionClientFeatures returns the features that decide the session's sidecar
-// representations, the same ones its replans use.
-func (r *SubtitleInventoryResolver) SessionClientFeatures(ctx context.Context, sessionID string) []string {
+// representations, the same ones its replans use. A session with no v3
+// attempt uses the defaults; a failed lookup is returned so the caller does
+// not publish a representation the attempt may not have negotiated.
+func (r *SubtitleInventoryResolver) SessionClientFeatures(ctx context.Context, sessionID string) ([]string, error) {
 	if r == nil || r.attempts == nil || sessionID == "" {
-		return nil
+		return nil, nil
 	}
 	record, err := r.attempts.GetAttempt(ctx, sessionID)
-	if err != nil || record == nil {
-		return nil
+	if errors.Is(err, playback.ErrSessionNotFound) || (err == nil && record == nil) {
+		return nil, nil
 	}
-	return replanSubtitleFeaturesV3(record, record.NormalizedRequest.ClientFeatures)
+	if err != nil {
+		return nil, err
+	}
+	return replanSubtitleFeaturesV3(record, record.NormalizedRequest.ClientFeatures), nil
 }

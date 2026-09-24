@@ -21,7 +21,9 @@ type SubtitleInventoryResolver interface {
 	// SessionClientFeatures returns the client features that pick the
 	// session's sidecar representations (SubtitleSidecarExtV3), so an event
 	// publishes the same URL as the session's plans. nil selects the defaults.
-	SessionClientFeatures(ctx context.Context, sessionID string) []string
+	// An error means the representation is unknown; the event then omits the
+	// track rather than guess.
+	SessionClientFeatures(ctx context.Context, sessionID string) ([]string, error)
 }
 
 // SubtitleReadyNotifier pushes "subtitle ready" events to active playback
@@ -124,7 +126,12 @@ func (n *SubtitleReadyNotifier) resolveTrack(ctx context.Context, sessionID stri
 			"file_id", fileID, "error", err)
 		return nil
 	}
-	features := n.inventory.SessionClientFeatures(ctx, sessionID)
+	features, err := n.inventory.SessionClientFeatures(ctx, sessionID)
+	if err != nil {
+		slog.WarnContext(ctx, "subtitle realtime event omits track identity", "component", "playback",
+			"file_id", fileID, "error", err)
+		return nil
+	}
 	items := ScopeSubtitleInventoryV3(sessionID, file, BuildSubtitleInventoryV3(file, additional), features)
 	for i := range items {
 		if items[i].Source != SubtitleSourceDownloadedV3 {

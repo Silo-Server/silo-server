@@ -15,6 +15,7 @@ type stubSubtitleInventoryResolver struct {
 	err           error
 	additionalErr error
 	features      []string
+	featuresErr   error
 	calls         int
 }
 
@@ -30,8 +31,8 @@ func (s *stubSubtitleInventoryResolver) AdditionalSubtitles(context.Context, *mo
 	return s.additional, s.additionalErr
 }
 
-func (s *stubSubtitleInventoryResolver) SessionClientFeatures(context.Context, string) []string {
-	return s.features
+func (s *stubSubtitleInventoryResolver) SessionClientFeatures(context.Context, string) ([]string, error) {
+	return s.features, s.featuresErr
 }
 
 // A generated track's realtime event carries the ordinal the next plan will
@@ -272,5 +273,19 @@ func TestSubtitleReadyNotifierUsesTheSessionSidecarRepresentation(t *testing.T) 
 				t.Fatalf("track = %#v, want URL /stream/sess%s", track, tc.want)
 			}
 		})
+	}
+}
+
+// When the session's negotiated representation cannot be read, the event
+// omits the track instead of guessing a URL; the client refetches its plan.
+func TestSubtitleReadyNotifierOmitsTrackWhenSessionFeaturesAreUnknown(t *testing.T) {
+	resolver := &stubSubtitleInventoryResolver{
+		file:        &models.MediaFile{ID: 100},
+		additional:  []SubtitleInventoryEntryV3{{CombinedIndex: 0, Codec: "srt", Source: SubtitleSourceDownloadedV3, DownloadedSubtitleID: 77}},
+		featuresErr: errors.New("attempt store unavailable"),
+	}
+	notifier := &SubtitleReadyNotifier{inventory: resolver}
+	if track := notifier.resolveTrack(t.Context(), "sess", 100, 77); track != nil {
+		t.Fatalf("track = %#v, want it omitted while the representation is unknown", track)
 	}
 }
