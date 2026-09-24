@@ -168,8 +168,8 @@ func TestFetchRatingsCountsMDBListOnlyIDsAsUnidentified(t *testing.T) {
 }
 
 // ratingsPage renders one ratings page of movies, shows, and episodes with
-// the given pagination. Titles are numbered from first so pages do not
-// repeat an id.
+// the given pagination. Entries are numbered from first so pages do not
+// repeat an entry.
 func ratingsPage(first, movies, shows, episodes int, pagination string) string {
 	var movieRows, showRows, episodeRows []string
 	for i := range movies {
@@ -178,8 +178,8 @@ func ratingsPage(first, movies, shows, episodes int, pagination string) string {
 	for i := range shows {
 		showRows = append(showRows, fmt.Sprintf(`{"rating":8,"show":{"ids":{"tvdb":%d}}}`, first+movies+i+1))
 	}
-	for range episodes {
-		episodeRows = append(episodeRows, `{"rating":9,"episode":{"ids":{"tmdb":1}}}`)
+	for i := range episodes {
+		episodeRows = append(episodeRows, fmt.Sprintf(`{"rating":9,"episode":{"ids":{"tmdb":%d}}}`, first+movies+shows+i+1))
 	}
 	return fmt.Sprintf(`{"movies":[%s],"shows":[%s],"episodes":[%s],"pagination":%s}`,
 		strings.Join(movieRows, ","), strings.Join(showRows, ","), strings.Join(episodeRows, ","), pagination)
@@ -286,6 +286,88 @@ func TestFetchRatingsShortOfTotalIsNotASnapshot(t *testing.T) {
 			}
 			if len(batch.Rows) != tc.wantRows {
 				t.Fatalf("rows = %d, want %d: a short read still imports what it read", len(batch.Rows), tc.wantRows)
+			}
+		})
+	}
+}
+
+func TestFetchRatingsRepeatedEntryIsNotASnapshot(t *testing.T) {
+	cases := map[string]struct {
+		// pages maps "cursor|offset" to a response body; any other request
+		// gets an empty page.
+		pages     map[string]string
+		wantKinds []string
+		wantRows  int
+	}{
+		"clean offset read": {
+			pages: map[string]string{
+				"|":  ratingsPage(0, 2, 1, 0, `{"total":5,"limit":3,"offset":0,"next_cursor":null}`),
+				"|3": ratingsPage(3, 1, 1, 0, `{"total":5,"limit":3,"offset":3,"next_cursor":null}`),
+			},
+			wantKinds: []string{historyimport.KindMovie, historyimport.KindSeries},
+			wantRows:  5,
+		},
+		"clean cursor read": {
+			pages: map[string]string{
+				"|":   ratingsPage(0, 2, 1, 0, `{"total":5,"limit":3,"next_cursor":"c2"}`),
+				"c2|": ratingsPage(3, 1, 1, 0, `{"total":5,"limit":3,"next_cursor":null}`),
+			},
+			wantKinds: []string{historyimport.KindMovie, historyimport.KindSeries},
+			wantRows:  5,
+		},
+		// A rating added between the requests shifts page 2 by one: it
+		// repeats page 1's show (tvdb 3) and the read never sees one entry,
+		// yet the count still reaches total.
+		"offset read repeats a rated title": {
+			pages: map[string]string{
+				"|":  ratingsPage(0, 2, 1, 0, `{"total":5,"limit":3,"offset":0,"next_cursor":null}`),
+				"|3": `{"movies":[],"shows":[{"rating":8,"show":{"ids":{"tvdb":3}}},{"rating":8,"show":{"ids":{"tvdb":5}}}],"pagination":{"total":5,"limit":3,"offset":3,"next_cursor":null}}`,
+			},
+			wantRows: 5,
+		},
+		"offset read repeats an entry without a rating row": {
+			pages: map[string]string{
+				"|":  `{"movies":[{"rating":7,"movie":{"ids":{"tmdb":1}}}],"shows":[],"episodes":[{"rating":9,"episode":{"ids":{"tmdb":2}}}],"pagination":{"total":4,"limit":2,"offset":0,"next_cursor":null}}`,
+				"|2": `{"movies":[{"rating":7,"movie":{"ids":{"tmdb":4}}}],"shows":[],"episodes":[{"rating":9,"episode":{"ids":{"tmdb":2}}}],"pagination":{"total":4,"limit":2,"offset":2,"next_cursor":null}}`,
+			},
+			wantRows: 2,
+		},
+		"cursor read repeats a rated title": {
+			pages: map[string]string{
+				"|":   ratingsPage(0, 2, 1, 0, `{"total":5,"limit":3,"next_cursor":"c2"}`),
+				"c2|": `{"movies":[{"rating":7,"movie":{"ids":{"tmdb":2}}},{"rating":7,"movie":{"ids":{"tmdb":4}}}],"shows":[],"pagination":{"total":5,"limit":3,"next_cursor":null}}`,
+			},
+			wantRows: 5,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, ok := tc.pages[r.URL.Query().Get("cursor")+"|"+r.URL.Query().Get("offset")]
+				if !ok {
+					body = `{"movies":[],"shows":[],"pagination":{"next_cursor":null}}`
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+
+			batch, err := NewProvider(server.Client(), server.URL).FetchRatings(context.Background(), watchsync.ServerConfig{}, watchsync.Connection{AccessToken: "k"})
+			if err != nil {
+				t.Fatalf("fetch ratings: %v", err)
+			}
+			if !slices.Equal(batch.SnapshotKinds, tc.wantKinds) {
+				t.Fatalf("snapshot kinds = %v, want %v", batch.SnapshotKinds, tc.wantKinds)
+			}
+			if tc.wantKinds == nil {
+				if len(batch.Warnings) != 1 || !strings.Contains(batch.Warnings[0], "repeated") {
+					t.Fatalf("warnings = %#v, want one repeated-entry warning", batch.Warnings)
+				}
+			} else if len(batch.Warnings) != 0 {
+				t.Fatalf("warnings = %#v, want none for a clean read", batch.Warnings)
+			}
+			if len(batch.Rows) != tc.wantRows {
+				t.Fatalf("rows = %d, want %d: an unstable read still imports what it read", len(batch.Rows), tc.wantRows)
 			}
 		})
 	}

@@ -36,17 +36,33 @@ type mdblistRatedShow struct {
 	Show    mdblistShow `json:"show"`
 }
 
+// ratedEntry is one rated title as decoded, kept with its raw JSON. The raw
+// JSON identifies an entry that maps to no rating row when a read checks its
+// pages for a repeated entry.
+type ratedEntry[T any] struct {
+	value T
+	raw   json.RawMessage
+}
+
+func (e *ratedEntry[T]) UnmarshalJSON(data []byte) error {
+	if err := json.Unmarshal(data, &e.value); err != nil {
+		return err
+	}
+	e.raw = append(json.RawMessage(nil), data...)
+	return nil
+}
+
 // mdblistRatingsResponse is one page of GET /sync/ratings. Shows stays raw so
 // the read can tell a missing shows list from an empty one: MDBList's
 // documented sample has no shows key, and a list that is not there cannot say
 // a show is unrated. Seasons and episodes are only counted, because the
 // pagination counts them too.
 type mdblistRatingsResponse struct {
-	Movies     []mdblistRatedMovie       `json:"movies"`
-	Shows      json.RawMessage           `json:"shows"`
-	Seasons    []json.RawMessage         `json:"seasons"`
-	Episodes   []json.RawMessage         `json:"episodes"`
-	Pagination *mdblistRatingsPagination `json:"pagination"`
+	Movies     []ratedEntry[mdblistRatedMovie] `json:"movies"`
+	Shows      json.RawMessage                 `json:"shows"`
+	Seasons    []json.RawMessage               `json:"seasons"`
+	Episodes   []json.RawMessage               `json:"episodes"`
+	Pagination *mdblistRatingsPagination       `json:"pagination"`
 }
 
 // mdblistRatingsPagination is the pagination of a ratings page. The schema
@@ -123,7 +139,11 @@ type ratingWrite struct {
 // returned a shows list at all. A kind with a rated title Silo cannot identify
 // is left out of the snapshot, because that title could be any local item.
 // When the pagination reports how many entries the read holds, a read that
-// ends with fewer is not a snapshot of either kind.
+// ends with fewer is not a snapshot of either kind. Neither is a read that
+// returns an entry twice: a rating added or changed between page requests
+// shifts the pages, so a later page repeats an entry and skips another, and
+// the repeat hides the skip from the count. The skipped entry's kind is
+// unknown, so both kinds are left out.
 func (p *Provider) FetchRatings(
 	ctx context.Context,
 	_ watchsync.ServerConfig,
@@ -136,6 +156,16 @@ func (p *Provider) FetchRatings(
 	// read counts entries of every type; total is the largest entry total a
 	// page reported, or -1.
 	read, total := 0, -1
+	// seen keys every entry read so far: a rating row by kind and provider
+	// item key, any other entry by its raw JSON.
+	seen := make(map[string]struct{})
+	repeated := false
+	see := func(key string) {
+		if _, dup := seen[key]; dup {
+			repeated = true
+		}
+		seen[key] = struct{}{}
+	}
 	for {
 		var payload mdblistRatingsResponse
 		if err := p.do(ctx, http.MethodGet, page.path("/sync/ratings"), conn.AccessToken, nil, &payload); err != nil {
@@ -148,21 +178,39 @@ func (p *Provider) FetchRatings(
 		// A shows list on any page means MDBList reports show ratings; pages
 		// may leave out a list they have nothing for.
 		hasShows = hasShows || present
-		for _, item := range payload.Movies {
+		for _, entry := range payload.Movies {
+			item := entry.value
 			row, ok := p.ratingRow(historyimport.KindMovie, item.Rating, item.RatedAt, item.Movie.Title, item.Movie.Year, item.Movie.IDs)
 			if ok {
 				rows = append(rows, row)
-			} else if providerRating(item.Rating) != 0 {
+				see(row.Kind + " " + row.ProviderItemKey)
+				continue
+			}
+			if providerRating(item.Rating) != 0 {
 				unidentified[historyimport.KindMovie]++
 			}
+			see("movie entry " + string(entry.raw))
 		}
-		for _, item := range shows {
+		for _, entry := range shows {
+			item := entry.value
 			row, ok := p.ratingRow(historyimport.KindSeries, item.Rating, item.RatedAt, item.Show.Title, item.Show.Year, item.Show.IDs)
 			if ok {
 				rows = append(rows, row)
-			} else if providerRating(item.Rating) != 0 {
+				see(row.Kind + " " + row.ProviderItemKey)
+				continue
+			}
+			if providerRating(item.Rating) != 0 {
 				unidentified[historyimport.KindSeries]++
 			}
+			see("show entry " + string(entry.raw))
+		}
+		// Seasons and episodes count toward total too, so a repeated one
+		// hides a skipped entry just the same.
+		for _, raw := range payload.Seasons {
+			see("season entry " + string(raw))
+		}
+		for _, raw := range payload.Episodes {
+			see("episode entry " + string(raw))
 		}
 		fetched := len(payload.Movies) + len(shows) + len(payload.Seasons) + len(payload.Episodes)
 		read += fetched
@@ -182,6 +230,11 @@ func (p *Provider) FetchRatings(
 	if total >= 0 && read < total {
 		batch.Warnings = append(batch.Warnings, fmt.Sprintf(
 			"mdblist ratings read ended after %d of %d entries; skipped rating removals", read, total))
+		return batch, nil
+	}
+	if repeated {
+		batch.Warnings = append(batch.Warnings,
+			"mdblist ratings pages repeated an entry, so ratings changed during the read; skipped rating removals")
 		return batch, nil
 	}
 	for _, kind := range []string{historyimport.KindMovie, historyimport.KindSeries} {
@@ -261,12 +314,12 @@ func (s *mdblistPageState) advanceTo(pagination *mdblistPagination, fetched, rea
 
 // ratedShows decodes a shows list and reports whether the response carried
 // one. A null list counts as missing.
-func ratedShows(raw json.RawMessage) ([]mdblistRatedShow, bool, error) {
+func ratedShows(raw json.RawMessage) ([]ratedEntry[mdblistRatedShow], bool, error) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		return nil, false, nil
 	}
-	var shows []mdblistRatedShow
+	var shows []ratedEntry[mdblistRatedShow]
 	if err := json.Unmarshal(raw, &shows); err != nil {
 		return nil, false, err
 	}
