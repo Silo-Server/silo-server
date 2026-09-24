@@ -10,7 +10,8 @@ import os from "os";
 
 const PRECOMPRESS_MIN_BYTES = 1024;
 
-function precompressStaticAssets(): Plugin {
+// Exported for vite.config.test.ts.
+export function precompressStaticAssets(): Plugin {
   return {
     name: "precompress-static-assets",
     apply: "build",
@@ -18,7 +19,10 @@ function precompressStaticAssets(): Plugin {
       if (!options.dir) return;
 
       for (const output of Object.values(bundle)) {
-        if (!/\.(?:css|js)$/.test(output.fileName)) continue;
+        // WASM compresses well (the JASSUB subtitle renderer shrinks from
+        // 2.1 MB to 0.7 MB with brotli). WOFF/WOFF2 fonts are already
+        // compressed, so sidecars would only add weight to the binary.
+        if (!/\.(?:css|js|wasm)$/.test(output.fileName)) continue;
 
         // Read the written file rather than the generateBundle value: later
         // Rollup hooks can still finalize chunk bytes before they reach disk.

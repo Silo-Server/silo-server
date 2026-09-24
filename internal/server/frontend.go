@@ -198,11 +198,15 @@ func (h *frontendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(shell.body))
 }
 
+// isPrecompressedAssetPath matches the sidecars the Vite build writes next to
+// /assets/ files (precompressStaticAssets in web/vite.config.ts).
 func isPrecompressedAssetPath(path string) bool {
 	return strings.HasSuffix(path, ".js.br") ||
 		strings.HasSuffix(path, ".js.gz") ||
 		strings.HasSuffix(path, ".css.br") ||
-		strings.HasSuffix(path, ".css.gz")
+		strings.HasSuffix(path, ".css.gz") ||
+		strings.HasSuffix(path, ".wasm.br") ||
+		strings.HasSuffix(path, ".wasm.gz")
 }
 
 const (
