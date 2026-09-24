@@ -260,7 +260,12 @@ func filterAccessibleContentIDs(ctx context.Context, db interface {
 	}
 
 	var ceilingAge *int
-	if strings.TrimSpace(maxContentRating) != "" {
+	// access.HasCeiling, not a trimmed emptiness test, so this agrees with
+	// ApplyContentRatingCeiling: a stored " " is a set ceiling that resolves to
+	// nothing, and it must block here too. These callers are the progress list
+	// and sync paths, so treating it as absent would let a viewer read and
+	// write progress for titles the catalog hides from them.
+	if access.HasCeiling(maxContentRating) {
 		age, ok := access.AgeForCeiling(maxContentRating)
 		if !ok {
 			// Ceiling names no usable age → nothing is accessible.

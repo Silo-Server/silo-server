@@ -218,6 +218,19 @@ func TestContentRatingCeilingAcrossSystemsDB(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("a whitespace ceiling shows nothing", func(t *testing.T) {
+		// This is the path the progress list and sync take, so a stored " "
+		// reading as "no ceiling" here would let a restricted viewer read and
+		// write progress for titles browse hides. It must agree with
+		// ApplyContentRatingCeiling and block, however the setting is set.
+		for _, allowUnrated := range []bool{false, true} {
+			got := visible(t, " ", allowUnrated)
+			if len(got) != 0 {
+				t.Errorf("allow_unrated=%v: a whitespace ceiling admitted %d titles, want none", allowUnrated, len(got))
+			}
+		}
+	})
 }
 
 func ageOf(age int) *int { return &age }
