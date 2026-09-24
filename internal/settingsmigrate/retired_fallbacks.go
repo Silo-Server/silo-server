@@ -68,9 +68,11 @@ func (p *Planner) planRetiredFallback(legacyKey, raw string) ([]RuntimeValue, er
 		return p.PlanRuntimeValue(legacyKey, string(encoded))
 	case legacyNextUpModeKey:
 		// The fallback returned the stored string unchanged and the section
-		// fetchers compared it exactly, so a padded member never took effect;
-		// it behaved as the default. Reject it before PlanRuntimeValue, which
-		// trims, would turn it into the member.
+		// fetchers matched it exactly against each member, so a padded or
+		// unknown value showed next-up in neither place. The contract has no
+		// such state, so those profiles get the default. Reject a padded value
+		// here, before PlanRuntimeValue trims it into a member the user never
+		// had in effect.
 		if strings.TrimSpace(raw) != raw {
 			return nil, fmt.Errorf("%s value %q is padded; the fallback treated it as the default", legacyKey, raw)
 		}

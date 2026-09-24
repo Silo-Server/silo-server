@@ -23,7 +23,9 @@
 -- which also keeps the jsonb cast within numeric's range; the decodable check
 -- covers the rest. Nulls and non-positive ids are ignored, and a repeat hid
 -- nothing extra. The contract then requires unique ids, kept here in
--- first-seen order, and at most 512 of them.
+-- first-seen order, and at most 512 of them. A longer list, which needs more
+-- than 512 distinct libraries, is not copied, and those libraries become
+-- visible.
 WITH legacy_ids AS (
     SELECT s.user_id,
            e.ord,
@@ -62,9 +64,10 @@ SELECT p.user_id, 'ui.disabled_library_ids', 'profile', p.id, planned.value
 ON CONFLICT (user_id, profile_id, key) WHERE scope = 'profile' DO NOTHING;
 
 -- Next-up mode. The fallback returned the stored string unchanged and the
--- section fetchers compared it exactly, so only an exact enum member ever took
--- effect. Anything else, padded or not, behaved as combined, the default, and
--- stays unset.
+-- section fetchers matched it exactly against each member, so only an exact
+-- member took effect. A padded or unknown value showed next-up in neither
+-- place, a state the contract cannot hold, so it is not copied and those
+-- profiles get the default, combined.
 INSERT INTO user_setting_values (user_id, key, scope, profile_id, value)
 SELECT p.user_id, 'ui.next_up_mode', 'profile', p.id, to_jsonb(s.value)
   FROM user_settings s
