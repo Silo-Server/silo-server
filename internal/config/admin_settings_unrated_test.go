@@ -108,3 +108,46 @@ func TestUnratedContentPolicyCachesSuccessfulReads(t *testing.T) {
 		t.Fatal("a failed read must not be cached")
 	}
 }
+
+type blockingSettingReader struct {
+	release chan struct{}
+}
+
+func (s blockingSettingReader) Get(ctx context.Context, _ string) (string, error) {
+	select {
+	case <-s.release:
+		return "allow", nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+// TestUnratedContentPolicyDoesNotSerializeOnSlowReads checks a stalled
+// settings read does not block other callers behind the cache lock: a caller
+// whose context is canceled returns the fail-closed default while the first
+// read is still outstanding.
+func TestUnratedContentPolicyDoesNotSerializeOnSlowReads(t *testing.T) {
+	reader := blockingSettingReader{release: make(chan struct{})}
+	policy := NewUnratedContentPolicy(reader)
+
+	done := make(chan bool)
+	go func() { done <- policy.AllowUnratedContent(context.Background()) }()
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	returned := make(chan bool)
+	go func() { returned <- policy.AllowUnratedContent(canceled) }()
+	select {
+	case got := <-returned:
+		if got {
+			t.Fatal("a canceled read must hide unrated titles")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a second caller blocked behind the stalled settings read")
+	}
+
+	close(reader.release)
+	if !<-done {
+		t.Fatal("want allow once the read completes")
+	}
+}

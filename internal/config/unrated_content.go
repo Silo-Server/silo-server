@@ -40,21 +40,31 @@ func NewUnratedContentPolicy(settings SettingReader) *UnratedContentPolicy {
 // "allow" — including an unset row or a value written before this setting
 // existed — keeps the default of hiding it. A read failure also hides it and
 // is not cached, so a parental control never loosens because a lookup failed.
+//
+// The lock guards only the cached value. The settings read runs without it,
+// so a slow database stalls the callers that need a fresh value rather than
+// queueing every scope resolution behind one query; concurrent callers that
+// find the cache expired may each read once.
 func (p *UnratedContentPolicy) AllowUnratedContent(ctx context.Context) bool {
 	if p == nil || p.settings == nil {
 		return false
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	now := p.now()
-	if now.Before(p.expires) {
-		return p.allow
+	allow, fresh := p.allow, p.now().Before(p.expires)
+	p.mu.Unlock()
+	if fresh {
+		return allow
 	}
+
 	value, err := p.settings.Get(ctx, AccessUnratedContentSettingKey)
 	if err != nil {
 		return false
 	}
-	p.allow = strings.EqualFold(strings.TrimSpace(value), AccessUnratedContentAllow)
-	p.expires = now.Add(unratedContentCacheTTL)
-	return p.allow
+	allow = strings.EqualFold(strings.TrimSpace(value), AccessUnratedContentAllow)
+
+	p.mu.Lock()
+	p.allow = allow
+	p.expires = p.now().Add(unratedContentCacheTTL)
+	p.mu.Unlock()
+	return allow
 }
