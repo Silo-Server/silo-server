@@ -1581,7 +1581,7 @@ func (d *DurableCompatPlaybackStore) FindUnidentifiedPlayback(compatToken, route
 		uncertain[id] = struct{}{}
 	}
 	for id := range uncertain {
-		if local, ok := d.mem.Get(id); ok && local.CompatToken == compatToken && reportMatchesPlaySession(local, report) {
+		if local, ok := d.mem.Get(id); ok && local.CompatToken == compatToken && local.UpstreamSessionID != "" && reportMatchesPlaySession(local, report) {
 			// Exercise the normal bounded repair paths so ID-less requests can
 			// recover after a database outage. Reject this request even if repair
 			// succeeds; the next lookup must check durable uniqueness afresh.

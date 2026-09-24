@@ -310,3 +310,22 @@ func TestWebOSDurableLookupRejectsUnpersistedLocalPlay(t *testing.T) {
 		t.Fatalf("lookup after repair=%+v err=%v", got, err)
 	}
 }
+
+func TestWebOSStaticUnpersistedNegotiationCanStart(t *testing.T) {
+	pool := newCompatTestPool(t)
+	store := NewDurableCompatPlaybackStore(pool, 0, nil)
+	h, _, item, source := newReportLivenessHandler("upstream-1", true)
+	pending, _ := h.playbackStore.Get("play-1")
+	pending.ID = t.Name()
+	pending.CompatToken = t.Name()
+	pending.UpstreamSessionID = ""
+	store.mem.Put(*pending)
+	store.markUnpersisted(pending.ID)
+	defer store.Delete(pending.ID)
+	h.playbackStore = store
+	req := httptest.NewRequest("GET", "/stream?Static=true", nil)
+	got, _, err := h.resolvePlaybackRoute(req, &Session{Token: pending.CompatToken}, item, source)
+	if err != nil || got == nil || got.ID != pending.ID {
+		t.Fatalf("unstarted negotiation route=%+v err=%v", got, err)
+	}
+}
