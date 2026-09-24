@@ -178,7 +178,7 @@ type CompatPlaybackStore interface {
 	FindByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool)
 	// FindUnidentifiedPlayback resolves an item/source pair to exactly one started,
 	// active session owned by the caller. Pending negotiations are not playback.
-	FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, bool)
+	FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, error)
 	// FindByClientPlaySessionID resolves the client-generated PlaySessionId
 	// alias recorded for plays that skipped PlaybackInfo. The alias must
 	// identify exactly one live session; ambiguity returns not-found.
@@ -724,12 +724,15 @@ func (s *PlaybackSessionStore) findByRoute(
 	return matchedSession, matchedSource, matchedSession != nil
 }
 
+var errUnidentifiedPlaybackAmbiguous = errors.New("ambiguous unidentified playback")
+
 // FindUnidentifiedPlayback supports direct players that omit PlaySessionId.
 // Require a unique started session and validate both identifiers before binding
 // a report; map iteration must never select another simultaneous play.
-func (s *PlaybackSessionStore) FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, bool) {
+// A nil session with no error means no started match; ambiguity is an error.
+func (s *PlaybackSessionStore) FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, error) {
 	if compatToken == "" || (routeItemID == "" && mediaSourceID == "") {
-		return nil, false
+		return nil, nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -741,10 +744,10 @@ func (s *PlaybackSessionStore) FindUnidentifiedPlayback(compatToken, routeItemID
 			continue
 		}
 		if match != nil {
-			return nil, false
+			return nil, errUnidentifiedPlaybackAmbiguous
 		}
 		copy := candidate
 		match = &copy
 	}
-	return match, match != nil
+	return match, nil
 }

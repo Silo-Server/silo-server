@@ -1,10 +1,16 @@
 package jellycompat
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -154,5 +160,153 @@ func TestWebOSDurableLookupSeesOtherReplicas(t *testing.T) {
 	postProgressReport(h, body)
 	if len(mgr.progressUpdates) != 2 {
 		t.Fatal("removed remote sibling remained in cached route matching")
+	}
+}
+
+func TestWebOSStaticAmbiguityDoesNotFallBack(t *testing.T) {
+	h, _, item, source := newReportLivenessHandler("upstream-1", true)
+	sibling, _ := h.playbackStore.Get("play-1")
+	sibling.ID = "play-2"
+	sibling.UpstreamSessionID = "upstream-2"
+	h.playbackStore.Put(*sibling)
+	req := httptest.NewRequest("GET", "/stream?Static=true", nil)
+	got, _, err := h.resolvePlaybackRoute(req, &Session{Token: "token-1"}, item, source)
+	if err == nil || got != nil {
+		t.Fatalf("ambiguous route selected %+v, err=%v", got, err)
+	}
+}
+
+func TestWebOSExplicitZeroReplacesResume(t *testing.T) {
+	for _, stop := range []bool{false, true} {
+		for _, position := range []string{`,"PositionTicks":0`, ""} {
+			t.Run(fmt.Sprintf("stop=%t/position=%s", stop, position), func(t *testing.T) {
+				h, _, item, source := newReportLivenessHandler("upstream-1", true)
+				store := newJellycompatUserStore(t)
+				h.storeProvider = compatTestUserStoreProvider{store: store}
+				postProgressReport(h, fmt.Sprintf(`{"ItemId":%q,"MediaSourceId":%q,"PositionTicks":14000000000}`, item, source))
+				rec := httptest.NewRecorder()
+				req := viewerRequest("POST", "/Sessions/Playing/Progress", fmt.Sprintf(`{"ItemId":%q,"MediaSourceId":%q%s}`, item, source, position), "", "", &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"})
+				h.handlePlaybackReport(rec, req, stop)
+				want := 1400.0
+				if position != "" {
+					want = 0
+				}
+				progress, err := store.GetProgress(t.Context(), "profile-1", "movie-1")
+				if err != nil || progress == nil || progress.PositionSeconds != want {
+					t.Fatalf("progress=%+v err=%v want=%v", progress, err, want)
+				}
+			})
+		}
+	}
+}
+
+func TestWebOSStaticRefreshFailureDoesNotUseCachedRoute(t *testing.T) {
+	pool, err := pgxpool.New(t.Context(), "postgres://localhost/unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	h, _, item, source := newReportLivenessHandler("upstream-1", true)
+	cached, _ := h.playbackStore.Get("play-1")
+	durable := NewDurableCompatPlaybackStore(pool, 0, nil)
+	durable.mem.Put(*cached)
+	h.playbackStore = durable
+	req := httptest.NewRequest("GET", "/stream?Static=true", nil)
+	got, _, err := h.resolvePlaybackRoute(req, &Session{Token: "token-1"}, item, source)
+	if err == nil || got != nil {
+		t.Fatalf("failed refresh selected cached route %+v, err=%v", got, err)
+	}
+}
+
+func TestWebOSStaticWithoutStartedMatchUsesNegotiation(t *testing.T) {
+	h, _, item, source := newReportLivenessHandler("upstream-1", true)
+	if err := h.playbackStore.Update("play-1", func(p *PlaybackSession) error { p.UpstreamSessionID = ""; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/stream?Static=true", nil)
+	got, _, err := h.resolvePlaybackRoute(req, &Session{Token: "token-1"}, item, source)
+	if err != nil || got == nil || got.ID != "play-1" {
+		t.Fatalf("pending route=%+v err=%v", got, err)
+	}
+}
+
+type webOSQueryTracer struct {
+	mu        sync.Mutex
+	fullLoads int
+}
+
+func (q *webOSQueryTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(data.SQL, "SELECT data FROM jellycompat_playback_sessions") {
+		q.mu.Lock()
+		q.fullLoads++
+		q.mu.Unlock()
+	}
+	return ctx
+}
+func (*webOSQueryTracer) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func TestWebOSDurableRangeDoesNotReloadSnapshots(t *testing.T) {
+	base := newCompatTestPool(t)
+	config := base.Config()
+	tracer := &webOSQueryTracer{}
+	config.ConnConfig.Tracer = tracer
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	writer := NewDurableCompatPlaybackStore(base, 0, nil)
+	reader := NewDurableCompatPlaybackStore(pool, 0, nil)
+	h, _, item, source := newReportLivenessHandler("upstream-1", true)
+	active, _ := h.playbackStore.Get("play-1")
+	active.ID = t.Name()
+	active.CompatToken = t.Name()
+	writer.Put(*active)
+	defer writer.Delete(active.ID)
+	h.playbackStore = reader
+	for range 10 {
+		req := httptest.NewRequest("GET", "/stream?Static=true", nil)
+		got, _, err := h.resolvePlaybackRoute(req, &Session{Token: active.CompatToken}, item, source)
+		if err != nil || got == nil || got.ID != active.ID {
+			t.Fatalf("route=%+v err=%v", got, err)
+		}
+	}
+	tracer.mu.Lock()
+	defer tracer.mu.Unlock()
+	if tracer.fullLoads != 1 {
+		t.Fatalf("full session payload loads=%d, want 1", tracer.fullLoads)
+	}
+}
+
+func TestWebOSDurableLookupRejectsUnpersistedLocalPlay(t *testing.T) {
+	pool := newCompatTestPool(t)
+	store := NewDurableCompatPlaybackStore(pool, 0, nil)
+	h, _, item, source := newReportLivenessHandler("upstream-1", true)
+	active, _ := h.playbackStore.Get("play-1")
+	active.ID = t.Name()
+	active.CompatToken = t.Name()
+	store.Put(*active)
+	defer store.Delete(active.ID)
+	sibling := *active
+	sibling.ID += "-local"
+	sibling.UpstreamSessionID = "upstream-2"
+	store.mem.Put(sibling)
+	store.markUnpersisted(sibling.ID)
+	got, err := store.FindUnidentifiedPlayback(active.CompatToken, item, source)
+	if err == nil || got != nil {
+		t.Fatalf("unpersisted sibling ignored: got=%+v err=%v", got, err)
+	}
+	defer store.Delete(sibling.ID)
+	if store.isUnpersisted(sibling.ID) {
+		t.Fatal("lookup did not repair failed creation")
+	}
+	other := NewDurableCompatPlaybackStore(pool, 0, nil)
+	if _, ok := other.Get(sibling.ID); !ok {
+		t.Fatal("repaired session is not durable")
+	}
+	store.Delete(sibling.ID)
+	got, err = store.FindUnidentifiedPlayback(active.CompatToken, item, source)
+	if err != nil || got == nil || got.ID != active.ID {
+		t.Fatalf("lookup after repair=%+v err=%v", got, err)
 	}
 }

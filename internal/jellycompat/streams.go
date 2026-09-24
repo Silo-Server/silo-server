@@ -2130,7 +2130,9 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	var ok bool
 	unidentified := req.PlaySessionID == ""
 	if unidentified {
-		playSession, ok = h.playbackStore.FindUnidentifiedPlayback(session.Token, req.ItemID, req.MediaSourceID)
+		var lookupErr error
+		playSession, lookupErr = h.playbackStore.FindUnidentifiedPlayback(session.Token, req.ItemID, req.MediaSourceID)
+		ok = lookupErr == nil && playSession != nil
 		if !ok {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -2262,7 +2264,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	// finalizer that would otherwise refresh the profile.
 	refreshTasteProfile := stop
 	// Persist progress to user store
-	if positionSeconds > 0 && h.storeProvider != nil && playSession.ItemID != "" {
+	if positionReported && h.storeProvider != nil && playSession.ItemID != "" {
 		if store, storeErr := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID); storeErr == nil {
 			// Find the duration from the media source
 			var duration float64
@@ -3413,7 +3415,11 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	// An ID-less direct player's repeated range requests and resumes belong
 	// to the already-started stream, not an unstarted PlaybackInfo negotiation.
 	if clientPlaySessionID == "" && staticRequest {
-		if active, ok := h.playbackStore.FindUnidentifiedPlayback(compatSession.Token, routeID, mediaSourceID); ok {
+		active, err := h.playbackStore.FindUnidentifiedPlayback(compatSession.Token, routeID, mediaSourceID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if active != nil {
 			return active, playbackRouteSource(active, mediaSourceID, allowItemAlias, staticRequest), nil
 		}
 	}

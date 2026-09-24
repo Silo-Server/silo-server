@@ -53,3 +53,6 @@
 ./internal/scanner TestUnchangedBooksDoNotQueryLiteraryWorks
 ./internal/scanner TestEbookScanBatchesSkipQueries
 ./internal/scanner TestEbookSkipPreloadPreservesEligibility
+
+# ID-less direct ranges reuse full session payloads while checking identities.
+./internal/jellycompat TestWebOSDurableRangeDoesNotReloadSnapshots

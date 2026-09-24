@@ -1229,13 +1229,8 @@ func (d *DurableCompatPlaybackStore) load(id string) (*PlaybackSession, bool, er
 // the indexed compat_token predicate; FindByRoute never calls it with an empty
 // token (that would be an unbounded full-table load).
 func (d *DurableCompatPlaybackStore) loadByCompatToken(compatToken string) error {
-	_, err := d.loadCompatTokenSnapshot(compatToken)
-	return err
-}
-
-func (d *DurableCompatPlaybackStore) loadCompatTokenSnapshot(compatToken string) (bool, error) {
 	if d.pool == nil || compatToken == "" {
-		return true, nil
+		return nil
 	}
 	generation := d.tokenGenerationSnapshot(compatToken)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -1245,7 +1240,7 @@ func (d *DurableCompatPlaybackStore) loadCompatTokenSnapshot(compatToken string)
 		compatToken, d.now())
 	if err != nil {
 		slog.Warn("load compat playback sessions by token failed", "error", err)
-		return false, err
+		return err
 	}
 	defer rows.Close()
 	var sessions []PlaybackSession
@@ -1253,20 +1248,21 @@ func (d *DurableCompatPlaybackStore) loadCompatTokenSnapshot(compatToken string)
 		var raw []byte
 		if err := rows.Scan(&raw); err != nil {
 			slog.Warn("scan compat playback session failed", "error", err)
-			return false, err
+			return err
 		}
 		var session PlaybackSession
 		if err := json.Unmarshal(raw, &session); err != nil {
 			slog.Warn("unmarshal compat playback session by token failed", "error", err)
-			return false, err
+			return err
 		}
 		sessions = append(sessions, session)
 	}
 	if err := rows.Err(); err != nil {
 		slog.Warn("iterate compat playback sessions failed", "error", err)
-		return false, err
+		return err
 	}
-	return d.applyCompatTokenSnapshot(compatToken, sessions, generation), nil
+	d.applyCompatTokenSnapshot(compatToken, sessions, generation)
+	return nil
 }
 
 func (d *DurableCompatPlaybackStore) applyCompatTokenSnapshot(
@@ -1566,15 +1562,83 @@ func (d *DurableCompatPlaybackStore) lockSessionMutation(id string) func() {
 	return lock.Unlock
 }
 
-// FindUnidentifiedPlayback also sees sessions started on another replica.
-func (d *DurableCompatPlaybackStore) FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, bool) {
+// FindUnidentifiedPlayback checks durable identities on every request so a
+// cached match cannot conceal another replica's started play. Full payloads use
+// the existing per-ID cache; range requests do not reload token-wide snapshots.
+func (d *DurableCompatPlaybackStore) FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, error) {
 	if compatToken == "" || (routeItemID == "" && mediaSourceID == "") {
-		return nil, false
+		return nil, nil
 	}
-	// Refresh the caller's complete set before deciding uniqueness. A local
-	// positive match alone cannot rule out a second play on another replica.
-	if applied, err := d.loadCompatTokenSnapshot(compatToken); err != nil || !applied {
-		return nil, false
+	if d.pool == nil {
+		return d.mem.FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID)
 	}
-	return d.mem.FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID)
+	generation := d.tokenGenerationSnapshot(compatToken)
+	report := sessionReportRequest{ItemID: routeItemID, MediaSourceID: mediaSourceID}
+	// Failed local writes may hide another matching play from the SQL view.
+	// Reject uncertain matches until the existing persistence repair completes.
+	uncertain := d.unpersistedSnapshot()
+	for id := range d.pendingUpdateIDsSnapshot(compatToken) {
+		uncertain[id] = struct{}{}
+	}
+	for id := range uncertain {
+		if local, ok := d.mem.Get(id); ok && local.CompatToken == compatToken && reportMatchesPlaySession(local, report) {
+			// Exercise the normal bounded repair paths so ID-less requests can
+			// recover after a database outage. Reject this request even if repair
+			// succeeds; the next lookup must check durable uniqueness afresh.
+			d.invalidateValidation(id, "")
+			_, _ = d.Get(id)
+			if d.hasPendingUpdates(id) {
+				_ = d.Update(id, func(*PlaybackSession) error { return nil })
+			}
+			return nil, errors.New("compat playback has pending persistence")
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	rows, err := d.pool.Query(ctx, `
+ SELECT id, data->>'RouteItemID',
+ ARRAY(SELECT source->>'ID' FROM jsonb_array_elements(
+ CASE WHEN jsonb_typeof(data->'MediaSources') = 'array' THEN data->'MediaSources' ELSE '[]'::jsonb END
+ ) source)
+ FROM jellycompat_playback_sessions
+ WHERE compat_token = $1 AND expires_at > $2
+ AND COALESCE(data->>'UpstreamSessionID', '') <> ''
+ AND COALESCE((data->>'Terminal')::boolean, false) = false`, compatToken, d.now())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	matchedID := ""
+	for rows.Next() {
+		var candidate PlaybackSession
+		var sourceIDs []string
+		if err := rows.Scan(&candidate.ID, &candidate.RouteItemID, &sourceIDs); err != nil {
+			return nil, err
+		}
+		for _, id := range sourceIDs {
+			candidate.MediaSources = append(candidate.MediaSources, PlaybackMediaSource{ID: id})
+		}
+		if !reportMatchesPlaySession(&candidate, report) {
+			continue
+		}
+		if matchedID != "" {
+			return nil, errUnidentifiedPlaybackAmbiguous
+		}
+		matchedID = candidate.ID
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if generation != d.tokenGenerationSnapshot(compatToken) {
+		return nil, errors.New("compat playback changed during identity lookup")
+	}
+	if matchedID == "" {
+		return nil, nil
+	}
+	matched, ok := d.Get(matchedID)
+	if !ok || matched.CompatToken != compatToken || matched.UpstreamSessionID == "" || !reportMatchesPlaySession(matched, report) {
+		return nil, errors.New("compat playback changed after identity lookup")
+	}
+	return matched, nil
 }

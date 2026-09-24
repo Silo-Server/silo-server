@@ -280,10 +280,14 @@ Silo saves their reported position when the authenticated item/source identifier
 match exactly one started, active playback. Pending negotiations and terminal
 sessions do not qualify; ambiguous matches are ignored. A final stop sample is
 saved even when the viewer did not pause first. Samples remain last-write-wins,
-including backward seeks; without a per-play identifier a delayed sample cannot
+including backward seeks to zero; omitted positions leave the bookmark unchanged.
+Without a per-play identifier a delayed sample cannot
 be distinguished from a new one. Unidentified stops do not change audio selection
 or tear down resources; normal idle cleanup handles those sessions. Clients that
 send a valid per-play identifier retain immediate, generation-scoped teardown.
+ID-less static requests reject ambiguous matches and failed durable identity
+lookups rather than selecting another session. Durable identity checks remain
+fresh on every request; full session payloads use the normal per-session cache.
 
 `POST /Sessions/Playing/Ping` touches the caller-owned playback activity without
 changing position or paused state. The native session owner consumes persisted
