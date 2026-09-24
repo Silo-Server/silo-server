@@ -1114,7 +1114,7 @@
     },
     {
       "key": "ui.theme_music_enabled",
-      "introduced_in": 9,
+      "introduced_in": 10,
       "persistence": "remote",
       "allowed_scopes": [
         "profile",
@@ -1139,7 +1139,7 @@
     },
     {
       "key": "ui.theme_music_loop",
-      "introduced_in": 9,
+      "introduced_in": 10,
       "persistence": "remote",
       "allowed_scopes": [
         "profile",
