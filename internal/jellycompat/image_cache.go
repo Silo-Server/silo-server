@@ -22,9 +22,12 @@ type cachedImage struct {
 
 // ImageCache keeps short-lived mappings from Jellyfin-style image requests to
 // the underlying Silo image URLs. Both maps are bounded, and an entry is never
-// served within imageCacheExpirySafetyMargin of its signed URL's expiry.
+// served within imageCacheExpirySafetyMargin of its signed URL's expiry when
+// the cache knows that expiry (passed in, or read from the URL).
 type ImageCache struct {
-	mu      sync.RWMutex
+	mu sync.RWMutex
+	// byTag answers URL-derived tags, which /Search/Hints still emits even
+	// when list and detail responses carry signed tags.
 	byTag   imageCacheMap
 	byRoute imageCacheMap
 	ttl     time.Duration
@@ -165,14 +168,18 @@ func normalizeImageCacheSize(size string) string {
 	return normalized
 }
 
+// artworkCapabilityPath is the route of Silo artwork capability URLs, the
+// only URLs whose "exp" query parameter the cache trusts.
+const artworkCapabilityPath = "/api/v2/artwork/"
+
 // signedImageURLExpiry reads the expiry a signed image URL carries in its
 // query: Silo artwork capability URLs sign an "exp" Unix time, and S3 SigV4
 // presigned URLs carry X-Amz-Date plus X-Amz-Expires. List and detail
 // responses only hold the URL string, so this is how their entries learn the
-// real expiry. Misreading an unrelated URL can only shorten how long it stays
-// cached.
+// real expiry. "exp" is read only on artwork capability paths, because a
+// passthrough or plugin URL may use the name for something else.
 func signedImageURLExpiry(imageURL string) (time.Time, bool) {
-	_, query, ok := strings.Cut(imageURL, "?")
+	path, query, ok := strings.Cut(imageURL, "?")
 	if !ok {
 		return time.Time{}, false
 	}
@@ -191,8 +198,10 @@ func signedImageURLExpiry(imageURL string) (time.Time, bool) {
 			amzExpires = value
 		}
 	}
-	if unix, err := strconv.ParseInt(exp, 10, 64); err == nil {
-		return time.Unix(unix, 0), true
+	if strings.Contains(path, artworkCapabilityPath) {
+		if unix, err := strconv.ParseInt(exp, 10, 64); err == nil {
+			return time.Unix(unix, 0), true
+		}
 	}
 	signedAt, dateErr := time.Parse("20060102T150405Z", amzDate)
 	seconds, expiresErr := strconv.ParseInt(amzExpires, 10, 64)

@@ -2,7 +2,9 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -879,4 +881,107 @@ func TestHandleItemImagePresignsOnlyRequestedType(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestHandleItemImageServesKodiTagAfterRouteEviction covers the bounded cache
+// on a large library: a Kodi-style request ("Tag=", no auth) for an item whose
+// route entry was evicted still resolves through its signed tag.
+func TestHandleItemImageServesKodiTagAfterRouteEviction(t *testing.T) {
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	updatedAt := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	posterURL := "https://cdn.example.test/poster.jpg"
+	item := &models.MediaItem{
+		ContentID:       contentID,
+		PosterPath:      posterURL,
+		PosterThumbhash: "poster-thumbhash",
+		UpdatedAt:       updatedAt,
+	}
+	cfg := &config.Config{Auth: config.AuthConfig{JWTSecret: "image-secret"}}
+	tag := newMapper(codec, cfg).itemFromList(upstreamListItem{
+		ContentID:       contentID,
+		Type:            "movie",
+		Title:           "Movie",
+		PosterURL:       item.PosterPath,
+		PosterPath:      item.PosterPath,
+		PosterThumbhash: item.PosterThumbhash,
+		UpdatedAt:       item.UpdatedAt,
+	}, false, nil, nil).ImageTags["Primary"]
+
+	cache := NewImageCache(time.Hour, func() time.Time { return updatedAt })
+	cache.RememberSized(routeID, "Primary", posterURL, compatCardImageSize)
+	for i := range imageCacheMaxEntries {
+		cache.RememberSized(fmt.Sprintf("filler-%d", i), "Primary", fmt.Sprintf("https://cdn.example.test/%d.jpg", i), compatCardImageSize)
+	}
+	if _, ok := cache.LookupSized(routeID, "Primary", "", compatCardImageSize); ok {
+		t.Fatal("route entry survived a full cache of newer writes; the test no longer exercises eviction")
+	}
+	h := &ImagesHandler{
+		codec:     codec,
+		images:    cache,
+		itemRepo:  fakeImageItemRepo{item: item},
+		imageTags: newImageTagSigner(cfg.Auth.JWTSecret),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary/0?Format=original&Tag="+tag, nil)
+	req = withImageRouteParams(req, routeID, "Primary")
+	rec := httptest.NewRecorder()
+
+	h.HandleItemImage(rec, req)
+
+	assertImageRedirect(t, rec, posterURL)
+}
+
+// TestSearchHintImageTagResolvesThroughTagCache pins why the cache keeps its
+// tag map when image tags are signed: /Search/Hints emits URL-derived tags,
+// which only the tag map can answer for a sessionless image request.
+func TestSearchHintImageTagResolvesThroughTagCache(t *testing.T) {
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	posterURL := "https://cdn.example.test/poster.jpg"
+	cfg := &config.Config{Auth: config.AuthConfig{JWTSecret: "image-secret"}}
+	cache := NewImageCache(time.Hour, time.Now)
+	items := &ItemsHandler{
+		content: &recordingSearchContentService{result: &upstreamBrowseResponse{Items: []upstreamListItem{{
+			ContentID:  contentID,
+			Type:       "movie",
+			Title:      "Movie",
+			PosterURL:  posterURL,
+			PosterPath: "posters/movie-1.jpg",
+		}}}},
+		userData: &mockUserDataService{},
+		codec:    codec,
+		mapper:   newMapper(codec, cfg),
+		images:   cache,
+	}
+	searchReq := httptest.NewRequest(http.MethodGet, "/Search/Hints?SearchTerm=movie", nil)
+	searchReq = searchReq.WithContext(context.WithValue(searchReq.Context(), compatSessionKey, &Session{
+		StreamAppUserID: 1,
+		ProfileID:       "profile-1",
+	}))
+	searchRec := httptest.NewRecorder()
+	items.HandleSearchHints(searchRec, searchReq)
+	var hints searchHintResultDTO
+	if err := json.Unmarshal(searchRec.Body.Bytes(), &hints); err != nil || len(hints.SearchHints) != 1 {
+		t.Fatalf("search hints: status %d, body %s, err %v", searchRec.Code, searchRec.Body.String(), err)
+	}
+	hint := hints.SearchHints[0]
+	if hint.PrimaryImageTag == "" {
+		t.Fatal("search hint has no primary image tag")
+	}
+
+	h := &ImagesHandler{
+		codec:     codec,
+		images:    cache,
+		itemRepo:  fakeImageItemRepo{item: &models.MediaItem{ContentID: contentID, PosterPath: "posters/movie-1.jpg"}},
+		imageTags: newImageTagSigner(cfg.Auth.JWTSecret),
+	}
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+hint.ItemID+"/Images/Primary?tag="+hint.PrimaryImageTag, nil)
+	req = withImageRouteParams(req, hint.ItemID, "Primary")
+	rec := httptest.NewRecorder()
+
+	h.HandleItemImage(rec, req)
+
+	assertImageRedirect(t, rec, posterURL)
 }

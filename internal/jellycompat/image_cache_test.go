@@ -178,6 +178,8 @@ func TestSignedImageURLExpiry(t *testing.T) {
 		{name: "unrelated query", url: "https://cdn.example.test/p.jpg?width=300"},
 		{name: "s3 missing expires", url: "https://s3.example.test/k.webp?X-Amz-Date=20260923T120000Z"},
 		{name: "malformed exp", url: "/api/v2/artwork/p.webp?exp=soon"},
+		{name: "exp outside artwork path", url: "https://cdn.example.test/p.jpg?exp=1"},
+		{name: "absolute artwork URL", url: "https://silo.example.test/api/v2/artwork/a/poster.webp?exp=1790000000&sig=abc", want: time.Unix(1790000000, 0), wantOK: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
