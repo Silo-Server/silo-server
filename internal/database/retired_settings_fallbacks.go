@@ -32,7 +32,8 @@ const retiredSettingsFallbacksVersion int64 = 20260923233933
 // settingsmigrate.PlanRetiredFallback, shared with the SQLite backend.
 //
 // The legacy rows stay in user_settings, like every other legacy row the
-// cutover converted, until the post-cutover cleanup drops the table.
+// cutover converted. The table itself stays in use for other keys, so a later
+// cleanup can delete these two retired keys' rows but not drop the table.
 //
 // The down migration keeps the written rows. Each one equals what the old
 // binary's fallback derives from the untouched legacy row, so an old binary
@@ -62,19 +63,17 @@ func materializeRetiredSettingsFallbacks(ctx context.Context, tx *sql.Tx) error 
 		key, value string
 	}
 	var legacy []legacyRow
-	for _, key := range settingsmigrate.RetiredFallbackKeys() {
-		if err := eachRow(ctx, tx,
-			`SELECT user_id, key, value FROM user_settings WHERE key = $1`,
-			func(scan func(...any) error) error {
-				var row legacyRow
-				if err := scan(&row.userID, &row.key, &row.value); err != nil {
-					return err
-				}
-				legacy = append(legacy, row)
-				return nil
-			}, key); err != nil {
-			return fmt.Errorf("reading legacy %s rows: %w", key, err)
-		}
+	if err := eachRow(ctx, tx,
+		`SELECT user_id, key, value FROM user_settings WHERE key = ANY($1) ORDER BY user_id, key`,
+		func(scan func(...any) error) error {
+			var row legacyRow
+			if err := scan(&row.userID, &row.key, &row.value); err != nil {
+				return err
+			}
+			legacy = append(legacy, row)
+			return nil
+		}, settingsmigrate.RetiredFallbackKeys()); err != nil {
+		return fmt.Errorf("reading legacy retired-fallback rows: %w", err)
 	}
 
 	for _, row := range legacy {

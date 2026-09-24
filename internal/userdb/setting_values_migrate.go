@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -105,6 +106,8 @@ func materializeRetiredSettingsFallbacks(tx *sql.Tx) error {
 		if err != nil {
 			// The contract cannot store this value, so the cutover backfill
 			// rejected it too and recorded it in user_setting_migration_rejects.
+			slog.Warn("legacy setting has no canonical form; leaving it unconverted",
+				"component", "userdb", "key", row.Key, "error", err)
 			continue
 		}
 		for _, value := range planned {
