@@ -53,38 +53,53 @@ const THEME_BOOT_SOURCE = "src/themeBoot.js";
  */
 function themeBootScript(): Plugin {
   let base = "/";
+  let isBuild = false;
   let builtFileName: string | undefined;
   return {
     name: "theme-boot-script",
     configResolved(config) {
       base = config.base;
+      isBuild = config.command === "build";
     },
-    async generateBundle() {
-      // Runs before vite:build-html's generateBundle, which applies the
+    generateBundle: {
+      // Must run before vite:build-html's generateBundle, which applies the
       // transformIndexHtml hook below, so the hashed name is known by then.
-      // Emitted assets skip the build's minifier, so minify it here: the file
-      // sits on the render-blocking path and its source is half comment.
-      const { code } = await transformWithEsbuild(
-        readFileSync(path.resolve(__dirname, THEME_BOOT_SOURCE), "utf8"),
-        THEME_BOOT_SOURCE,
-        { minify: true },
-      );
-      const referenceId = this.emitFile({
-        type: "asset",
-        name: path.basename(THEME_BOOT_SOURCE),
-        source: code,
-      });
-      builtFileName = this.getFileName(referenceId);
+      order: "pre",
+      async handler() {
+        // Emitted assets skip the build's minifier, so minify it here: the
+        // file sits on the render-blocking path and its source is half comment.
+        const { code } = await transformWithEsbuild(
+          readFileSync(path.resolve(__dirname, THEME_BOOT_SOURCE), "utf8"),
+          THEME_BOOT_SOURCE,
+          { minify: true },
+        );
+        const referenceId = this.emitFile({
+          type: "asset",
+          name: path.basename(THEME_BOOT_SOURCE),
+          source: code,
+        });
+        builtFileName = this.getFileName(referenceId);
+      },
     },
     transformIndexHtml: {
       order: "post",
-      handler: () => [
-        {
-          tag: "script",
-          attrs: { src: base + (builtFileName ?? THEME_BOOT_SOURCE) },
-          injectTo: "head-prepend",
-        },
-      ],
+      handler: () => {
+        // The source path works only on the dev server. In a built shell it
+        // falls through to the SPA fallback, which the browser refuses to run
+        // as a script, so the cached theme would silently stop painting.
+        if (isBuild && builtFileName === undefined) {
+          throw new Error(
+            "theme-boot-script: index.html was transformed before the boot script was emitted",
+          );
+        }
+        return [
+          {
+            tag: "script",
+            attrs: { src: base + (builtFileName ?? THEME_BOOT_SOURCE) },
+            injectTo: "head-prepend",
+          },
+        ];
+      },
     },
   };
 }
