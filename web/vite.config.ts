@@ -1,5 +1,7 @@
-import { readFileSync, writeFileSync } from "node:fs";
-import { brotliCompressSync, constants, gzipSync } from "node:zlib";
+import { readFileSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
+import { brotliCompress, constants, gzip } from "node:zlib";
 import { defineConfig, loadEnv, transformWithEsbuild, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -10,34 +12,44 @@ import os from "os";
 
 const PRECOMPRESS_MIN_BYTES = 1024;
 
+const brotliCompressAsync = promisify(brotliCompress);
+const gzipAsync = promisify(gzip);
+
 // Exported for vite.config.test.ts.
 export function precompressStaticAssets(): Plugin {
   return {
     name: "precompress-static-assets",
     apply: "build",
-    writeBundle(options, bundle) {
-      if (!options.dir) return;
+    async writeBundle(options, bundle) {
+      const dir = options.dir;
+      if (!dir) return;
 
-      for (const output of Object.values(bundle)) {
-        // WASM compresses well (the JASSUB subtitle renderer shrinks from
-        // 2.1 MB to 0.7 MB with brotli). WOFF/WOFF2 fonts are already
-        // compressed, so sidecars would only add weight to the binary.
-        if (!/\.(?:css|js|wasm)$/.test(output.fileName)) continue;
+      // The async zlib calls run on the libuv thread pool, so files compress
+      // in parallel. Brotli-11 on the two 2 MB JASSUB WASM files alone takes
+      // longer than every JS and CSS file together, so compressing one file
+      // at a time would roughly double this step.
+      await Promise.all(
+        Object.values(bundle).map(async (output) => {
+          // WASM compresses well (the JASSUB subtitle renderer shrinks from
+          // 2.1 MB to 0.7 MB with brotli). WOFF/WOFF2 fonts are already
+          // compressed, so sidecars would only add weight to the binary.
+          if (!/\.(?:css|js|wasm)$/.test(output.fileName)) return;
 
-        // Read the written file rather than the generateBundle value: later
-        // Rollup hooks can still finalize chunk bytes before they reach disk.
-        const filePath = path.resolve(options.dir, output.fileName);
-        const bytes = readFileSync(filePath);
-        if (bytes.byteLength < PRECOMPRESS_MIN_BYTES) continue;
+          // Read the written file rather than the generateBundle value: later
+          // Rollup hooks can still finalize chunk bytes before they reach disk.
+          const filePath = path.resolve(dir, output.fileName);
+          const bytes = await readFile(filePath);
+          if (bytes.byteLength < PRECOMPRESS_MIN_BYTES) return;
 
-        writeFileSync(
-          `${filePath}.br`,
-          brotliCompressSync(bytes, {
-            params: { [constants.BROTLI_PARAM_QUALITY]: 11 },
-          }),
-        );
-        writeFileSync(`${filePath}.gz`, gzipSync(bytes, { level: 9 }));
-      }
+          const [br, gz] = await Promise.all([
+            brotliCompressAsync(bytes, {
+              params: { [constants.BROTLI_PARAM_QUALITY]: 11 },
+            }),
+            gzipAsync(bytes, { level: 9 }),
+          ]);
+          await Promise.all([writeFile(`${filePath}.br`, br), writeFile(`${filePath}.gz`, gz)]);
+        }),
+      );
     },
   };
 }
