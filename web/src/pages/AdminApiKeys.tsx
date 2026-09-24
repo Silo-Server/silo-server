@@ -33,6 +33,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -319,7 +320,7 @@ function ApiKeyEditor({
             Reload current key
           </Button>
         )}
-        <div className="flex gap-2">
+        <DialogFooter>
           <Button variant="outline" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
@@ -330,7 +331,7 @@ function ApiKeyEditor({
           >
             {busy ? "Working…" : mode === "revoke" ? "Revoke" : "Save tier"}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
