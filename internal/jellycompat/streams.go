@@ -2126,14 +2126,16 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, "BadRequest", "Invalid session report")
 		return
 	}
-	if req.PlaySessionID == "" {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
 	var playSession *PlaybackSession
 	var ok bool
-	if stop {
+	unidentified := req.PlaySessionID == ""
+	if unidentified {
+		playSession, ok = h.playbackStore.FindUnidentifiedPlayback(session.Token, req.ItemID, req.MediaSourceID)
+		if !ok {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	} else if stop {
 		playSession, ok = h.playbackStore.GetFinalizable(req.PlaySessionID, session.Token)
 	} else {
 		playSession, ok = h.playbackStore.Get(req.PlaySessionID)
@@ -2191,7 +2193,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	// report, not just on track changes. Restarting ffmpeg on each report
 	// (every ~10s) tears down segments the player is still appending and
 	// causes an hls.js retry loop. Only act when the index actually changes.
-	if req.AudioStreamIndex != nil && audioSelectionChanged(playSession, req.MediaSourceID, int(*req.AudioStreamIndex)) {
+	if (!stop || !unidentified) && req.AudioStreamIndex != nil && audioSelectionChanged(playSession, req.MediaSourceID, int(*req.AudioStreamIndex)) {
 		selectedAudioStreamIndex := int(*req.AudioStreamIndex)
 		updatedPlaySession, updatedSource, restarted, selectionErr := h.applyCompatAudioSelection(
 			r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds,
@@ -2279,7 +2281,12 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	if refreshTasteProfile && playSession.ItemID != "" {
 		triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
 	}
-	if stop {
+	// ID-less players still supply a final resume sample on Stopped. Persist
+	// it above, but do not use an item/source match to tear down a play: a
+	// delayed report has no generation identifier. Normal idle cleanup owns
+	// resource expiry for these clients. Their samples are last-write-wins,
+	// just like progress reports (including intentional backward seeks).
+	if stop && !unidentified {
 		// Direct ids and recorded aliases are per-play, caller-owned identifiers.
 		// Route-only matching is intentionally excluded for Stopped reports: a
 		// delayed stop for an earlier play of the same item must never tear down
@@ -3401,6 +3408,14 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 		}
 		// Clients that skip PlaybackInfo reuse their own PlaySessionId on range
 		// requests. Reuse remains scoped to this token and the requested item.
+	}
+
+	// An ID-less direct player's repeated range requests and resumes belong
+	// to the already-started stream, not an unstarted PlaybackInfo negotiation.
+	if clientPlaySessionID == "" && staticRequest {
+		if active, ok := h.playbackStore.FindUnidentifiedPlayback(compatSession.Token, routeID, mediaSourceID); ok {
+			return active, playbackRouteSource(active, mediaSourceID, allowItemAlias, staticRequest), nil
+		}
 	}
 
 	playSession, _, ok := h.playbackStore.FindByRoute(compatSession.Token, routeID)

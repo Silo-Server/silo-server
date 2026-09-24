@@ -176,6 +176,9 @@ type CompatPlaybackStore interface {
 	Update(id string, fn func(*PlaybackSession) error) error
 	// FindByRoute resolves a route item / media-source id to a session.
 	FindByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool)
+	// FindUnidentifiedPlayback resolves an item/source pair to exactly one started,
+	// active session owned by the caller. Pending negotiations are not playback.
+	FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, bool)
 	// FindByClientPlaySessionID resolves the client-generated PlaySessionId
 	// alias recorded for plays that skipped PlaybackInfo. The alias must
 	// identify exactly one live session; ambiguity returns not-found.
@@ -719,4 +722,29 @@ func (s *PlaybackSessionStore) findByRoute(
 	}
 
 	return matchedSession, matchedSource, matchedSession != nil
+}
+
+// FindUnidentifiedPlayback supports direct players that omit PlaySessionId.
+// Require a unique started session and validate both identifiers before binding
+// a report; map iteration must never select another simultaneous play.
+func (s *PlaybackSessionStore) FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, bool) {
+	if compatToken == "" || (routeItemID == "" && mediaSourceID == "") {
+		return nil, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var match *PlaybackSession
+	report := sessionReportRequest{ItemID: routeItemID, MediaSourceID: mediaSourceID}
+	now := s.now()
+	for _, candidate := range s.sessions {
+		if candidate.CompatToken != compatToken || candidate.Terminal || candidate.UpstreamSessionID == "" || !candidate.ExpiresAt.After(now) || !reportMatchesPlaySession(&candidate, report) {
+			continue
+		}
+		if match != nil {
+			return nil, false
+		}
+		copy := candidate
+		match = &copy
+	}
+	return match, match != nil
 }
