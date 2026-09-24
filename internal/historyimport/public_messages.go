@@ -54,6 +54,19 @@ func hiddenHistoryWarning(count int) string {
 	return fmt.Sprintf(warnHiddenHistorySuppressed, count)
 }
 
+// upsertHiddenHistoryWarning keeps that diagnostic current in warnings, returning
+// the slice and the index it lives at (pass -1 the first time). A run updates it
+// as it goes rather than adding it at the end, so a run that is canceled or fails
+// partway still explains the records it skipped. Appending other warnings around
+// it is safe: the index only has to survive appends, which never reorder.
+func upsertHiddenHistoryWarning(warnings []string, index, count int) ([]string, int) {
+	if index < 0 {
+		return append(warnings, hiddenHistoryWarning(count)), len(warnings)
+	}
+	warnings[index] = hiddenHistoryWarning(count)
+	return warnings, index
+}
+
 // PublicWarning returns the monitor text for a stored run warning.
 func PublicWarning(diagnostic string) string {
 	var count int

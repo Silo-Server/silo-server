@@ -358,6 +358,7 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 	s.persistClaimProgress(ctx, claim, summary)
 
 	hiddenSuppressed := 0
+	hiddenWarningAt := -1
 	for i, record := range records {
 		if err := s.repo.validateRunClaim(ctx, claim); err != nil {
 			s.failClaim(ctx, claim, summary, err)
@@ -447,13 +448,12 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 			}
 			if outcome.HiddenSuppressed {
 				hiddenSuppressed++
+				summary.Warnings, hiddenWarningAt = upsertHiddenHistoryWarning(
+					summary.Warnings, hiddenWarningAt, hiddenSuppressed)
 			}
 		}
 
 		s.persistClaimProgressMaybe(ctx, claim, summary, i+1, len(records))
-	}
-	if hiddenSuppressed > 0 {
-		summary.Warnings = append(summary.Warnings, hiddenHistoryWarning(hiddenSuppressed))
 	}
 
 	if err := s.repo.validateRunClaim(ctx, claim); err != nil {

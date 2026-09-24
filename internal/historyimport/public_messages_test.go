@@ -118,3 +118,36 @@ func TestPublicWarningExplainsHiddenHistorySkips(t *testing.T) {
 		t.Errorf("PublicWarning = %q, want it to name the history removal", got)
 	}
 }
+
+// A run updates the hidden-skip warning as it goes, so a run that is canceled or
+// fails partway still carries the explanation for what it skipped. Other warnings
+// appended around it must not produce a second copy or strand the index.
+func TestHiddenHistoryWarningStaysCurrentDuringARun(t *testing.T) {
+	t.Parallel()
+
+	warnings := []string{"an earlier warning"}
+	index := -1
+	warnings, index = upsertHiddenHistoryWarning(warnings, index, 1)
+	if got := PublicWarning(warnings[index]); !strings.Contains(got, "(1)") {
+		t.Fatalf("after one skip PublicWarning = %q", got)
+	}
+	warnings = append(warnings, "a warning from a later record")
+	warnings, index = upsertHiddenHistoryWarning(warnings, index, 2)
+	warnings, index = upsertHiddenHistoryWarning(warnings, index, 3)
+
+	hidden := 0
+	for _, warning := range warnings {
+		if strings.HasPrefix(warning, "skipped hidden history items") {
+			hidden++
+		}
+	}
+	if hidden != 1 {
+		t.Errorf("hidden warnings = %d, want exactly 1: %q", hidden, warnings)
+	}
+	if warnings[index] != hiddenHistoryWarning(3) {
+		t.Errorf("warnings[%d] = %q, want the latest count", index, warnings[index])
+	}
+	if len(warnings) != 3 {
+		t.Errorf("warnings = %q, want the two unrelated entries kept", warnings)
+	}
+}
