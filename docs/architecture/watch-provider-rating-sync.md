@@ -119,6 +119,11 @@ mark the profile's recommendations stale once per run.
 
 A provider that rates only some kinds implements `RatingKindFilter`; items of other
 kinds are left out of its sync entirely, so they are neither sent nor read as removed.
+Plugin providers rate the kinds they list in `supported_media_types`. Removing an
+absent rating must answer `APPLIED` or `NO_CHANGE`, so a plugin's `REJECTED` answer to
+a rating removal counts as a failure and the removal is retried on the next run. A
+complete plugin snapshot with an unreadable rating row covers no kind, because the
+row's kind is unknown, and the run records a warning.
 
 A provider that records a rated title as watched implements `RatingExportWatchGate`.
 Silo then sends a new rating of that kind only once the profile has a completed play of

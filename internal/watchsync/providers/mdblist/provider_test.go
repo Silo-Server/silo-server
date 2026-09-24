@@ -37,7 +37,12 @@ func TestProviderIdentityAndCapabilities(t *testing.T) {
 	if !caps.ProvidesWatchlistOrder {
 		t.Fatalf("mdblist should provide watchlist order: %#v", caps)
 	}
+	if !caps.ImportRatings || !caps.ExportRatings {
+		t.Fatalf("mdblist should sync ratings both ways: %#v", caps)
+	}
 	var _ watchsync.APIKeyAuthProvider = p
+	var _ watchsync.RatingImporter = p
+	var _ watchsync.RatingExporter = p
 }
 
 func TestConnectWithAPIKeyHitsUserEndpoint(t *testing.T) {
@@ -664,6 +669,27 @@ func TestFetchWatchlistContinuesOffsetPaginationWhenHasMore(t *testing.T) {
 	}
 	if len(offsets) != 2 || offsets[0] != "" || offsets[1] != "1" {
 		t.Fatalf("unexpected offsets: %#v", offsets)
+	}
+}
+
+func TestFetchWatchlistIgnoresPaginationTotal(t *testing.T) {
+	// Only the ratings read checks total; the watchlist read still ends at
+	// the first page without next_cursor or has_more.
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"movies":[{"title":"The Shawshank Redemption","release_year":1994,"ids":{"imdb":"tt0111161"}}],"shows":[],"pagination":{"total":5,"limit":1000,"next_cursor":null}}`))
+	}))
+	defer server.Close()
+
+	p := NewProvider(server.Client(), server.URL)
+	rows, err := p.FetchWatchlist(context.Background(), watchsync.ServerConfig{}, watchsync.Connection{AccessToken: "k"})
+	if err != nil {
+		t.Fatalf("fetch watchlist: %v", err)
+	}
+	if requests != 1 || len(rows) != 1 {
+		t.Fatalf("requests = %d rows = %d, want one page and one row", requests, len(rows))
 	}
 }
 
