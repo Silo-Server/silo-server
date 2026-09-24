@@ -455,6 +455,42 @@ func TestHandleSubtitleUsesBoundDownloadedIdentityAfterInventoryReorder(t *testi
 	}
 }
 
+// A downloaded SRT answers the published .srt?original=1 URL with its stored
+// bytes on both GET and HEAD, whether the URL pins the row or uses the ordinal.
+func TestHandleSubtitleServesDownloadedSRTOriginalOnRequest(t *testing.T) {
+	const stored = "1\n00:00:01,000 --> 00:00:02,000\n{\\an8}Top\n"
+	file := &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: "/tmp/movie.mkv", Duration: 3600}
+	baseMgr := playback.NewSessionManager(0, 0)
+	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	repo := newMockSubtitleRepoForHandler()
+	row := subtitles.DownloadedSubtitle{ID: 71, MediaFileID: 42, Format: subtitles.FormatSRT, S3Key: "ai-71.srt"}
+	repo.subtitles[71] = &row
+	repo.list = []subtitles.DownloadedSubtitle{row}
+	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
+	handler.SubtitleRepo = repo
+	handler.SubtitleBlobs = subtitleContentBlobStore{objects: map[string][]byte{"ai-71.srt": []byte(stored)}}
+
+	for _, query := range []string{"file_id=42&original=1&downloaded_subtitle_id=71", "file_id=42&original=1"} {
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			req := httptest.NewRequest(method, "/api/v2/stream/"+session.ID+"/subtitles/0.srt?"+query, nil)
+			req = req.WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext()))
+			routeCtx := chi.NewRouteContext()
+			routeCtx.URLParams.Add("session_id", session.ID)
+			routeCtx.URLParams.Add("track", "0.srt")
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+			rr := httptest.NewRecorder()
+			handler.HandleSubtitle(rr, req)
+			if rr.Code != http.StatusOK || !strings.HasPrefix(rr.Header().Get("Content-Type"), "application/x-subrip") ||
+				(method == http.MethodGet && rr.Body.String() != stored) {
+				t.Fatalf("%s ?%s = %d %q %q", method, query, rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
+			}
+		}
+	}
+}
+
 type subtitleContentBlobStore struct {
 	objects map[string][]byte
 }

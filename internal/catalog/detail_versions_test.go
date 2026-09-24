@@ -110,7 +110,7 @@ func newVersionsFixture(t testing.TB) *versionsFixture {
 	for _, kind := range []string{"movie", "audiobook", "ebook", "manga", "series"} {
 		id := prefix + kind
 		f.ids[kind] = id
-		exec(`INSERT INTO media_items (content_id,type,title,overview,genres,content_rating,default_metadata_language,poster_path) VALUES ($1,$2,$3,'Overview','{}','PG','en','tmdb/poster/original.jpg')`, id, kind, kind)
+		exec(`INSERT INTO media_items (content_id,type,title,overview,genres,content_rating,content_rating_age,default_metadata_language,poster_path) VALUES ($1,$2,$3,'Overview','{}','PG',8,'en','tmdb/poster/original.jpg')`, id, kind, kind)
 		exec(`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, id, f.library)
 	}
 	f.ids["season"] = prefix + "season"

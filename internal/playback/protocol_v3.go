@@ -68,7 +68,14 @@ const (
 	// negotiate the token, or has no realtime connection, is stopped instead;
 	// the client's ordinary recovery then mints a fresh attempt that plans
 	// against the now-persisted verdict.
-	FeaturePlanInvalidatedV3   = "plan_invalidated_v1"
+	FeaturePlanInvalidatedV3 = "plan_invalidated_v1"
+	// FeatureSubripSidecarV3 is the client's statement that it parses SubRip
+	// itself, including {\anN} placement. An opted-in client receives
+	// external and downloaded SRT tracks as the original .srt bytes instead
+	// of the WebVTT conversion, which cannot carry every SRT feature. Embedded
+	// SRT tracks keep their existing delivery. It exists only on /api/v2 (see
+	// NativeServerFeaturesV3).
+	FeatureSubripSidecarV3     = "subrip_sidecar_v1"
 	PlanRecipeVersionV3        = "v3.4"
 	ClientDV7ToDV81V3          = "client_dv7_to_dv81"
 	ClientDV7ToHDR10V3         = "client_dv7_to_hdr10"
@@ -135,6 +142,20 @@ func ServerFeaturesV3() []string {
 		// fallback is still required.
 		FeaturePlanSourceDurationV3,
 	}
+}
+
+// NativeServerFeaturesV3 is ServerFeaturesV3 plus the features the server
+// advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
+// the frozen surface neither advertises nor negotiates them.
+func NativeServerFeaturesV3() []string {
+	return append(ServerFeaturesV3(), FeatureSubripSidecarV3)
+}
+
+// WithoutFeatureV3 returns features with every spelling of feature removed.
+func WithoutFeatureV3(features []string, feature string) []string {
+	return slices.DeleteFunc(slices.Clone(features), func(candidate string) bool {
+		return strings.EqualFold(strings.TrimSpace(candidate), feature)
+	})
 }
 
 type DecisionOutcomeV3 string
@@ -1364,10 +1385,13 @@ func HasFeatureV3(features []string, wanted string) bool {
 //   - software_video_decode_v1 widens the direct-play evidence tiers. Dropping
 //     it on a replan silently converts a direct route into a transcode and
 //     persists that downgrade into the durable normalized request.
+//   - subrip_sidecar_v1 picks the representation of every SRT sidecar URL.
+//     Switching it mid-attempt would publish one track under two URLs, and a
+//     seek reanchor must reproduce the frozen plan's artifact exactly.
 //
 // Stop/start is the explicit boundary for changing any of them.
 func AttemptStickyFeaturesV3() []string {
-	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3}
+	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3, FeatureSubripSidecarV3}
 }
 
 // PinAttemptStickyFeaturesV3 returns requested with every attempt-sticky

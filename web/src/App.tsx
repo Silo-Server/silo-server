@@ -44,12 +44,9 @@ import { useSettingValuesRealtime } from "@/hooks/queries/settingValues";
 import Layout from "@/components/Layout";
 import Home from "@/pages/Home";
 import Login from "@/pages/Login";
-import Catalog from "@/pages/Catalog";
-import { useFavorites } from "@/hooks/queries/favorites";
 import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
-import { isTasteSeedDismissed } from "@/lib/tasteSeed";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
-import { useOnboardingState } from "@/hooks/queries/onboarding";
+import TasteSeedGate from "@/components/TasteSeedGate";
 import SettingsLayout from "@/pages/SettingsLayout";
 import {
   WatchPlaybackBar,
@@ -68,6 +65,7 @@ import { buildLegacyWebhookSyncRedirectTarget } from "@/lib/webhookSync";
 import { toast } from "sonner";
 import { prewarmCodecDetection } from "@/player/hooks/useCodecDetection";
 import { prefetchRouteChunks, type RouteChunkImport } from "@/lib/routeChunkPrefetch";
+import { importCatalog } from "@/pages/catalogRoute";
 
 // Hot routes keep their import factory in a named binding so the idle warm-up
 // below can pull the chunk before the user navigates. See HOT_ROUTE_CHUNKS.
@@ -82,6 +80,7 @@ const OAuthComplete = lazy(() => import("@/pages/OAuthComplete"));
 const ActivateDevice = lazy(() => import("@/pages/ActivateDevice"));
 const SetupWizard = lazy(() => import("@/pages/SetupWizard"));
 const Profiles = lazy(() => import("@/pages/Profiles"));
+const Catalog = lazy(importCatalog);
 const LibraryPage = lazy(importLibraryPage);
 const ItemDetail = lazy(importItemDetail);
 const EbookReader = lazy(() => import("@/pages/EbookReader"));
@@ -152,12 +151,14 @@ const ProfileCustomizeHome = lazy(() => import("@/pages/ProfileCustomizeHome"));
 
 /**
  * Routes a browsing session reaches within the first few interactions. Home
- * links straight into item details, the sidebar into libraries, and item pages
- * into people and recommendations, so paying their chunk cost while the app is
- * idle is cheaper than paying it inside a navigation.
+ * links straight into item details and, through search and "see all", the
+ * catalog; the sidebar leads into libraries, and item pages into people and
+ * recommendations. Paying their chunk cost while the app is idle is cheaper
+ * than paying it inside a navigation.
  */
 const HOT_ROUTE_CHUNKS: readonly RouteChunkImport[] = [
   importItemDetail,
+  importCatalog,
   importLibraryPage,
   importPersonDetail,
   importRecommendations,
@@ -240,7 +241,9 @@ function guardRedirectTarget(base: string, location: ReturnType<typeof useLocati
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading, setupLoading } = useAuth();
   const location = useLocation();
-  if (loading || setupLoading) {
+  // Setup status only decides where a signed-out visitor goes; a restored
+  // session does not wait for it.
+  if (loading || (setupLoading && !user)) {
     return (
       <div className="p-8" role="status" aria-live="polite">
         <span className="sr-only">Loading application</span>
@@ -254,7 +257,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 function SetupGate({ children }: { children: ReactNode }) {
   const { user, setupLoading, setupRequired } = useAuth();
-  if (setupLoading) {
+  if (setupLoading && !user) {
     return (
       <div className="p-8" role="status" aria-live="polite">
         <span className="sr-only">Loading application</span>
@@ -303,45 +306,26 @@ function RequireRequestsEnabled({ children }: { children: ReactNode }) {
 }
 
 /**
- * Redirects new profiles (no favorites yet, no skip flag) to the taste-seed
- * onboarding screen the first time they land on Home. Only checks on Home so
- * deep-links to other pages aren't blocked. Once the user picks any items
- * (or favorites anything by normal use), or explicitly skips, the gate stops
- * redirecting.
+ * Clears user-scoped query caches on profile switch or sign-out. An account
+ * change clears in AuthProvider, before the new account renders.
  */
-function TasteSeedGate({ children }: { children: ReactNode }) {
-  const { profile } = useAuth();
-  const { data: favorites, isPending, isError } = useFavorites();
-  const onboarding = useOnboardingState({ enabled: profile !== null });
-
-  if (isPending || isError || !profile) return <>{children}</>;
-
-  // While the feature tour is pending (or its state unknown) the tour owns
-  // the first-run moment — it ends by handing off to /taste-seed itself, so
-  // redirecting now would jump the queue.
-  if (onboarding.data === undefined || !onboarding.data.done) return <>{children}</>;
-
-  const hasFavorites = (favorites?.length ?? 0) > 0;
-  const dismissed = isTasteSeedDismissed(profile.id);
-
-  if (!hasFavorites && !dismissed) {
-    return <Navigate to="/taste-seed" replace />;
-  }
-  return <>{children}</>;
-}
-
-/** Clears user-scoped query caches on profile switch or logout. */
-function QueryCacheManager() {
+export function QueryCacheManager() {
   const { user, profile } = useAuth();
   const qc = useQueryClient();
+  const hadUser = useRef(false);
   const prevProfileId = useRef(profile?.id);
 
   useEffect(() => {
     if (!user) {
-      qc.clear();
+      // Only a real sign-out drops the cache. Boot starts with no user while
+      // the session restores, and clearing then would discard the reads the
+      // shell already started and send them again.
+      if (hadUser.current) qc.clear();
+      hadUser.current = false;
       prevProfileId.current = undefined;
       return;
     }
+    hadUser.current = true;
     if (prevProfileId.current && prevProfileId.current !== profile?.id) {
       qc.removeQueries({ queryKey: ["favorites"] });
       qc.removeQueries({ queryKey: ["watchlist"] });

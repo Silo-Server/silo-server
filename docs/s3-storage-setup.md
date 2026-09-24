@@ -42,6 +42,8 @@ Generates HMAC-signed URLs validated by a Cloudflare WAF rule. Best for Cloudfla
 - **Token Param** — Query parameter name (default: `verify`)
 - **Token TTL** — Token lifetime in seconds (default: `10800` = 3 hours)
 
+Silo reuses the token for revisioned artwork, such as `w500.<revision>.webp`, for a quarter of the Token TTL, capped at a day, so clients and the CDN keep their cached images. Each URL stays valid for at least three quarters of the TTL. A longer TTL means fewer URL changes and a longer life for a leaked URL.
+
 ---
 
 ## Cloudflare R2 Setup Guide

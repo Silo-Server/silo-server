@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -367,7 +368,147 @@ func TestArchiveCacheSerializesRehydration(t *testing.T) {
 		t.Errorf("archive loads=%d, want 1", got)
 	}
 
-	if err := validateInstalledFiles(cache.LocalInstallPath(installation), manifest); err != nil {
+	if _, err := cache.validateInstalledFiles(cache.LocalInstallPath(installation), manifest); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Manifest reuses a verification only while the binary is the same file with
+// the same size and mtime. Ensure, which every launch goes through, hashes the
+// binary every time and so catches what Manifest's file check cannot.
+func TestArchiveCacheManifestTrustsOnlyAnUnchangedVerifiedBinary(t *testing.T) {
+	ctx := t.Context()
+	binaryData := []byte("#!/bin/sh\nexit 0\n")
+	size := int64(len(binaryData))
+	sum := sha256.Sum256(binaryData)
+	manifest := testPluginManifest(t, "silo.metadb", "0.0.19")
+	manifest.Checksum = hex.EncodeToString(sum[:])
+	manifestBytes, err := protojson.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiveBytes, err := buildBinaryPluginArchive(manifestBytes, binaryData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := &InstallationArchive{InstallationID: 42, ManifestJSON: manifestBytes, Checksum: manifest.GetChecksum(), Bytes: archiveBytes}
+	installation := &Installation{
+		ID: 42, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(),
+		InstallPath: filepath.Join(t.TempDir(), "install-aaaa", "plugin"),
+	}
+	store := newFakeServiceInstallationStore(installation)
+	store.archives = map[int]*InstallationArchive{42: archive}
+	cache := NewArchiveCache(store)
+	hashed := countHashedBytes(cache)
+	path := cache.LocalInstallPath(installation)
+
+	expectHashed := func(step string, want int64) {
+		t.Helper()
+		if got := hashed.Swap(0); got != want {
+			t.Fatalf("%s hashed %d bytes, want %d", step, got, want)
+		}
+	}
+	expectRestored := func(step string) {
+		t.Helper()
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, binaryData) {
+			t.Fatalf("%s: binary = %q, want the stored binary", step, got)
+		}
+	}
+	// rewrite changes the binary in place without changing its size, then
+	// sets its mtime: the verified one when keepMtime, a later one otherwise.
+	rewrite := func(keepMtime bool) {
+		t.Helper()
+		before, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		mtime := before.ModTime().Add(time.Second)
+		if keepMtime {
+			mtime = before.ModTime()
+		}
+		if err := os.Chtimes(path, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := cache.Manifest(ctx, installation); err != nil {
+		t.Fatalf("rehydrate: %v", err)
+	}
+	expectHashed("rehydrating Manifest", size)
+	if _, err := cache.Manifest(ctx, installation); err != nil {
+		t.Fatal(err)
+	}
+	expectHashed("warm Manifest", 0)
+	if _, err := cache.Ensure(ctx, installation); err != nil {
+		t.Fatal(err)
+	}
+	expectHashed("warm Ensure", size)
+
+	rewrite(false)
+	if _, err := cache.Manifest(ctx, installation); err != nil {
+		t.Fatalf("repair after a visible change: %v", err)
+	}
+	expectRestored("Manifest after a visible change")
+
+	rewrite(true)
+	hashed.Store(0)
+	if _, err := cache.Manifest(ctx, installation); err != nil {
+		t.Fatal(err)
+	}
+	expectHashed("Manifest after a stat-preserving rewrite", 0)
+	if _, err := cache.Ensure(ctx, installation); err != nil {
+		t.Fatalf("repair before launch: %v", err)
+	}
+	expectRestored("Ensure after a stat-preserving rewrite")
+
+	// A different file renamed over the binary is a new file, even with the
+	// verified size and mtime, so Manifest hashes it and restores the binary.
+	verified, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(filepath.Dir(path), "plugin.replacement")
+	if err := os.WriteFile(replacement, []byte("#!/bin/sh\nexit 2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(replacement, verified.ModTime(), verified.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+	hashed.Store(0)
+	if _, err := cache.Manifest(ctx, installation); err != nil {
+		t.Fatalf("repair after a replaced file: %v", err)
+	}
+	// Once to reject the replacement, once to check the restored binary.
+	expectHashed("Manifest after a replaced file", 2*size)
+	expectRestored("Manifest after a replaced file")
+
+	// A failed check forgets the verification, even when repair fails too.
+	rewrite(true)
+	delete(store.archives, 42)
+	if _, err := cache.Ensure(ctx, installation); err == nil {
+		t.Fatal("Ensure accepted a rewritten binary with no archive to restore")
+	}
+	if _, err := cache.Manifest(ctx, installation); err == nil {
+		t.Fatal("Manifest served a binary that failed its last check")
+	}
+	store.archives[42] = archive
+
+	// A new release lands at a new path and is hashed before it is trusted.
+	upgraded := *installation
+	upgraded.InstallPath = filepath.Join(t.TempDir(), "install-bbbb", "plugin")
+	hashed.Store(0)
+	if _, err := cache.Manifest(ctx, &upgraded); err != nil {
+		t.Fatal(err)
+	}
+	expectHashed("Manifest of a new release", size)
 }

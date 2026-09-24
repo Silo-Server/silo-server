@@ -554,6 +554,7 @@ func (h *SectionHandler) loadResolvedHomeSections(ctx context.Context) ([]sectio
 		accessFilter.AllowedLibraryIDs = scope.AllowedLibraryIDs
 		accessFilter.DisabledLibraryIDs = scope.DisabledLibraryIDs
 		accessFilter.MaxContentRating = scope.MaxContentRating
+		accessFilter.AllowUnratedContent = scope.AllowUnratedContent
 	} else if h.UserRepo != nil {
 		// Fail closed: an unresolved policy must not serve unrestricted
 		// sections, so a lookup failure becomes an error for the caller
@@ -619,6 +620,7 @@ func (h *SectionHandler) loadResolvedLibrarySections(ctx context.Context, librar
 		accessFilter.AllowedLibraryIDs = scope.AllowedLibraryIDs
 		accessFilter.DisabledLibraryIDs = scope.DisabledLibraryIDs
 		accessFilter.MaxContentRating = scope.MaxContentRating
+		accessFilter.AllowUnratedContent = scope.AllowUnratedContent
 	}
 
 	return resolved, accessFilter, profileID, nil

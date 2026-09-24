@@ -36,8 +36,13 @@ const IdentitySettingKey = "artwork.storage_identity"
 // Private writes do not record the assets IdentitySettingKey.
 const OperationalIdentitySettingKey = "storage.operational_identity"
 
+// DirectURLer hands clients a URL that reads an object from the backend
+// without this server.
 type DirectURLer interface {
-	DirectURL(ctx context.Context, key string, ttl time.Duration) (string, error)
+	// DirectURL returns a read URL for key and the time it stops working.
+	// Calls within the same window, on any replica, return the same URL; a zero
+	// window issues a fresh URL per call.
+	DirectURL(ctx context.Context, key string, ttl, window time.Duration) (string, time.Time, error)
 }
 
 type ObjectInfo struct {

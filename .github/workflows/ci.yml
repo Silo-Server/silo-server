@@ -30,9 +30,10 @@ permissions:
   contents: read
 
 jobs:
-  # The Go gate is three jobs so that lint, the contract checks, and the test
-  # suite run side by side; each one alone is shorter than the serial job they
-  # replace. They share the composite setup action under .github/actions.
+  # The Go gate is four jobs so that lint, the contract checks, the test suite
+  # and the DB-backed pins run side by side; each one alone is shorter than a
+  # serial job would be. They share the composite setup action under
+  # .github/actions.
   go-lint:
     name: Go lint
     runs-on: ubuntu-latest
@@ -244,6 +245,51 @@ jobs:
       - name: Test
         run: make test-go
 
+  # make test-go has no database, so every DB-backed test in it skips, and go
+  # test counts a skip as a pass. This job migrates a fresh database and runs
+  # the query-budget pins listed in scripts/ci/db-pins.txt, failing when one
+  # is missing, skipped or failing, so a PR that turns a pinned budget into an
+  # N+1 fails here. It is a job of its own so it adds no time to go-test, and
+  # because the full schema needs pgvector, which go-test's image lacks.
+  go-db-pins:
+    name: Go DB pins
+    runs-on: ubuntu-latest
+    services:
+      # The image docker-compose.yml runs: the schema needs pgvector.
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: silo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d silo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/silo_test?sslmode=disable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          cache-name: db-pins
+
+      # A throwaway key: it only has to pass the bootstrap length check, and
+      # nothing encrypted with it outlives the job.
+      - name: Migrate the test database
+        run: DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" go run ./cmd/silo/ --migrate-only
+
+      - name: Run the query-budget pins
+        run: make test-db-pins
+
   web:
     name: Web
     runs-on: ubuntu-latest
@@ -282,6 +328,11 @@ jobs:
 
       - name: Typecheck and build
         run: pnpm run build
+
+      # Fails when the launch bundle grows past web/perf-budget.json, and when it
+      # shrinks without the budget following it down.
+      - name: Check the launch bundle budget
+        run: pnpm run budget:check
 
       - name: Upload frontend bundle for image builds
         uses: actions/upload-artifact@v4

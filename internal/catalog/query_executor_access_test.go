@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -33,8 +32,9 @@ func TestQueryExecutorGroupQueryPreservesAccessFilters(t *testing.T) {
 		!reflect.DeepEqual(args[2], []int{42}) || args[4] != 42 || args[5] != 21 {
 		t.Fatalf("unexpected query args: %#v", args)
 	}
-	allowedRatings, ok := args[3].([]string)
-	if !ok || !slices.Contains(allowedRatings, "PG") || slices.Contains(allowedRatings, "R") {
-		t.Fatalf("rating arg = %#v, want PG allowed and R blocked", args[3])
+	// The ceiling binds the minimum age it stands for; PG is 8, so an R title
+	// (17) cannot satisfy the predicate.
+	if args[3] != 8 {
+		t.Fatalf("ceiling arg = %#v, want the PG ceiling bound as age 8", args[3])
 	}
 }

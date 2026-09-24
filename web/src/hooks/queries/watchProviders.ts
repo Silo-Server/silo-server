@@ -357,7 +357,7 @@ export function useTriggerWatchProviderSync(provider: string) {
       queryClient.invalidateQueries({
         queryKey: watchProviderKeys.connection(profileId, provider),
       });
-      queryClient.invalidateQueries({ queryKey: favoriteKeys.list() });
+      queryClient.invalidateQueries({ queryKey: favoriteKeys.all });
       queryClient.invalidateQueries({ queryKey: watchlistKeys.list() });
       toast.success("Watch provider sync started");
     },

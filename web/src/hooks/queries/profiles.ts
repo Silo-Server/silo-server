@@ -135,10 +135,11 @@ export function useHouseholdSessions(enabled = true) {
   });
 }
 
-export function useProfiles() {
+export function useProfiles(options?: { enabled?: boolean }) {
   const query = useQuery({
     queryKey: profileKeys.list(),
     queryFn: listProfiles,
+    enabled: options?.enabled ?? true,
   });
 
   return {

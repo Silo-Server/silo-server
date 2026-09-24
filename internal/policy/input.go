@@ -62,12 +62,18 @@ type ScopeInput struct {
 // unrestricted explicitly records whether allowed_library_ids is meaningful.
 // Adapters map unrestricted=true to a nil access.Scope.AllowedLibraryIDs.
 type ScopeDecision struct {
-	SchemaVersion             int    `json:"schema_version"`
-	Unrestricted              bool   `json:"unrestricted"`
-	AllowedLibraryIDs         []int  `json:"allowed_library_ids"`
-	DisabledLibraryIDs        []int  `json:"disabled_library_ids"`
-	LibrariesRestricted       bool   `json:"libraries_restricted"`
-	MaxContentRating          string `json:"max_content_rating"`
+	SchemaVersion       int    `json:"schema_version"`
+	Unrestricted        bool   `json:"unrestricted"`
+	AllowedLibraryIDs   []int  `json:"allowed_library_ids"`
+	DisabledLibraryIDs  []int  `json:"disabled_library_ids"`
+	LibrariesRestricted bool   `json:"libraries_restricted"`
+	MaxContentRating    string `json:"max_content_rating"`
+	// MaxContentRatingOverride is the ceiling a custom scope override asked for,
+	// reported unreduced. Rego cannot rank one rating against another — the
+	// maturity ladder lives in internal/access — so the effective ceiling is
+	// access.StricterCeiling(MaxContentRating, MaxContentRatingOverride), which
+	// can only tighten. Empty means no override asked for one.
+	MaxContentRatingOverride  string `json:"max_content_rating_override"`
 	MaxPlaybackQuality        string `json:"max_playback_quality"`
 	PreferredMetadataLanguage string `json:"preferred_metadata_language"`
 	PolicyRevision            int64  `json:"policy_revision"`
@@ -176,6 +182,12 @@ type ActionInput struct {
 	MaxPlaybackQuality string `json:"max_playback_quality"`
 	ContentRating      string `json:"content_rating"`
 	MaxContentRating   string `json:"max_content_rating"`
+	// ContentRatingWithinCeiling is derived, not supplied: CheckAction resolves
+	// ContentRating against MaxContentRating with access.RatingAllowed before
+	// evaluation, because comparing ratings from different national systems
+	// needs the ladder in internal/access. Whatever a caller sets here is
+	// overwritten.
+	ContentRatingWithinCeiling bool `json:"content_rating_within_ceiling"`
 
 	RequestTime string `json:"request_time"`
 	DeviceID    string `json:"device_id"`

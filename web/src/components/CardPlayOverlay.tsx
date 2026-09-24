@@ -49,13 +49,16 @@ export default function CardPlayOverlay({
 
       event.preventDefault();
       onPlaybackStart?.();
-      playbackController.startPlayback({
-        contentId: parsed.contentId,
-        fileId: parsed.fileId,
-        libraryId: parsed.libraryId,
-        restart: parsed.restart,
-        returnHref: `${location.pathname}${location.search}`,
-      });
+      playbackController.startPlayback(
+        {
+          contentId: parsed.contentId,
+          fileId: parsed.fileId,
+          libraryId: parsed.libraryId,
+          restart: parsed.restart,
+          returnHref: `${location.pathname}${location.search}`,
+        },
+        "viewer",
+      );
     },
     [location.pathname, location.search, onPlaybackStart, playbackController, watchHref],
   );

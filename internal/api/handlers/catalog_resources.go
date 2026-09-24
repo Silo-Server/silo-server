@@ -265,15 +265,17 @@ func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemVie
 	switch detail.Type {
 	case "season":
 		if h.items.episodeRepo != nil {
-			episodes, err := h.items.episodeRepo.ListBySeasonID(ctx, detail.ContentID)
-			if err == nil {
+			if userData, ok := h.items.parentRollupUserData(ctx, v, detail.Type, detail.ContentID); ok {
+				detail.SeasonUserData = userData
+			} else if episodes, err := h.items.episodeRepo.ListBySeasonID(ctx, detail.ContentID); err == nil {
 				detail.SeasonUserData = h.items.getAggregateUserData(ctx, v, episodes)
 			}
 		}
 	case "series":
 		if h.items.episodeRepo != nil {
-			episodes, err := h.items.episodeRepo.ListBySeries(ctx, detail.ContentID)
-			if err == nil {
+			if userData, ok := h.items.parentRollupUserData(ctx, v, detail.Type, detail.ContentID); ok {
+				detail.SeasonUserData = userData
+			} else if episodes, err := h.items.episodeRepo.ListBySeries(ctx, detail.ContentID); err == nil {
 				detail.SeasonUserData = h.items.getAggregateUserData(ctx, v, episodes)
 			}
 		}

@@ -567,7 +567,7 @@ func (r *ItemRepository) searchCandidatesExecutor(def QueryDefinition, access Ac
 		if episode {
 			relation = episodeCatalogBaseRelation
 		}
-		branches = append(branches, "SELECT "+qualifiedItemColumns("mi")+", mi.last_air_date_at FROM "+relation+" WHERE "+condition)
+		branches = append(branches, "SELECT "+qualifiedItemColumns("mi")+", mi.last_air_date_at, mi.content_rating_age FROM "+relation+" WHERE "+condition)
 	}
 	executor := &QueryExecutor{Pool: r.pool, BaseRelationSQL: "(" + strings.Join(branches, " UNION ALL ") + ") mi"}
 	// The full access/definition predicate has already been applied in the

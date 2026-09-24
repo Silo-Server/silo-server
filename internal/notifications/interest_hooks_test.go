@@ -304,6 +304,14 @@ func (s *rollupCapableStore) SeriesEpisodeWatchCounts(_ context.Context, _ strin
 	return counts, nil
 }
 
+func (s *rollupCapableStore) SeriesSeasonWatchCounts(context.Context, string, string) (map[int]userstore.SeriesWatchCounts, error) {
+	return map[int]userstore.SeriesWatchCounts{}, nil
+}
+
+func (s *rollupCapableStore) SeasonEpisodeWatchCounts(context.Context, string, []string) (map[string]userstore.SeriesWatchCounts, error) {
+	return map[string]userstore.SeriesWatchCounts{}, nil
+}
+
 // TestInterestTrackingStoreForwardsRollupWhenSupported is the other half of the
 // conditional: a backend that can do the rollup must keep advertising it
 // through the wrapper, and calls must reach it. Losing this would silently

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
@@ -542,7 +543,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time, air_timezone,
 			show_status,
 			matched_at, last_refreshed, refresh_failures,
-			episode_metadata_incomplete, episode_metadata_last_checked_at, status
+			episode_metadata_incomplete, episode_metadata_last_checked_at, status,
+			content_rating_age
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			$9, $10, $11, $12,
@@ -553,7 +555,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			$31, $32, $33, $34, $35, $36, $37, $38, $39, $40,
 			$41,
 			$42, $43, $44,
-			$45, $46, $47
+			$45, $46, $47,
+			$48
 		)`
 	conflict := `
 		ON CONFLICT (content_id) DO NOTHING`
@@ -606,8 +609,13 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			episode_metadata_incomplete = EXCLUDED.episode_metadata_incomplete,
 			episode_metadata_last_checked_at = EXCLUDED.episode_metadata_last_checked_at,
 			status = EXCLUDED.status,
+			content_rating_age = EXCLUDED.content_rating_age,
 			updated_at = NOW()`
 	}
+
+	// The stored age is derived here, never in SQL: access.Normalize is the one
+	// ladder, and content_rating stays the verbatim provider string.
+	contentRatingAge := access.StoredRating(item.ContentRating)
 
 	tag, err := execer.Exec(ctx, query+conflict,
 		item.ContentID,
@@ -657,6 +665,7 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 		item.EpisodeMetadataIncomplete,
 		item.EpisodeMetadataLastCheckedAt,
 		item.Status,
+		contentRatingAge,
 	)
 	if err != nil {
 		return false, fmt.Errorf("writing media item: %w", err)
@@ -763,7 +772,7 @@ func (r *ItemRepository) buildGetByIDsWithAccessSQL(contentIDs []string, access 
 
 	var conditions []string
 	appendLibraryAccessConditions("mi.content_id", access, &conditions, &args, &argIdx)
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: access.MaxContentRating, ExcludedMediaTypes: access.ExcludedMediaTypes}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: access.MaxContentRating, AllowUnratedContent: access.AllowUnratedContent, ExcludedMediaTypes: access.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 	for _, c := range conditions {
 		sql += "\n            AND " + c
 	}
@@ -1631,7 +1640,7 @@ func appendSearchScopeFilters(itemTypes []string, filter AccessFilter, condition
 	// needs no JOIN.
 	appendLibraryAccessConditions("mi.content_id", filter, conditions, args, argIdx)
 
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, conditions, args, argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, AllowUnratedContent: filter.AllowUnratedContent, ExcludedMediaTypes: filter.ExcludedMediaTypes}, conditions, args, argIdx)
 
 	// Manga chapters (type='ebook' rows linked into a manga series) are internal
 	// sub-units and must never surface as standalone search results.
@@ -1885,7 +1894,7 @@ func buildEnsureAccessibleSQL(contentID string, filter AccessFilter) (string, []
 	argIdx++
 
 	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &argIdx)
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, AllowUnratedContent: filter.AllowUnratedContent, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 
 	return fmt.Sprintf("SELECT 1 FROM media_items mi WHERE %s LIMIT 1", strings.Join(conditions, " AND ")), args
 }
@@ -1934,7 +1943,7 @@ func buildEnsureAccessibleIDsSQL(contentIDs []string, filter AccessFilter) (stri
 	argIdx++
 
 	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &argIdx)
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, AllowUnratedContent: filter.AllowUnratedContent, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 
 	return fmt.Sprintf("SELECT mi.content_id FROM media_items mi WHERE %s", strings.Join(conditions, " AND ")), args
 }
@@ -2150,6 +2159,14 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 	addString("overview", upd.Overview)
 	addString("tagline", upd.Tagline)
 	addString("content_rating", upd.ContentRating)
+	if upd.ContentRating != nil {
+		// content_rating_age is derived, so an edit that changes the rating
+		// string has to rewrite it in the same statement; leaving the old age
+		// behind would keep filtering by the previous certification.
+		setClauses = append(setClauses, fmt.Sprintf("content_rating_age = $%d", argIdx))
+		args = append(args, access.StoredRating(*upd.ContentRating))
+		argIdx++
+	}
 	addInt("year", upd.Year)
 	addInt("runtime", upd.Runtime)
 	addFloat("rating_imdb", upd.RatingIMDB)

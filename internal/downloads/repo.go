@@ -40,7 +40,7 @@ type managedQueryer interface {
 }
 type managedRegistryStore struct{ db managedQueryer }
 type managedRegistrationRepository interface {
-	GetManagedEntriesByKeys(context.Context, int, string, string, []ManagedEntryKey) (map[ManagedEntryKey]*Download, error)
+	MonitorEntriesToRegister(context.Context, *Subscription, []ManagedEntryKey) (map[ManagedEntryKey]bool, error)
 	CreateManagedEntriesBatch(context.Context, []*Download) ([]*Download, error)
 	SumManagedFileSize(context.Context, int, string, string) (int64, error)
 }
@@ -395,6 +395,47 @@ func (r managedRegistryStore) GetManagedEntriesByKeys(ctx context.Context, userI
 	return out, nil
 }
 
+// MonitorEntriesToRegister returns which of keys the monitor may register on
+// its device: the device holds no entry with that key, and the monitor has no
+// exclusion for the episode (see Repository.DeleteManaged). One statement
+// reads both, so a concurrent delete, which removes the row and records its
+// exclusion in one commit, is seen as one or the other.
+func (r managedRegistryStore) MonitorEntriesToRegister(ctx context.Context, sub *Subscription, keys []ManagedEntryKey) (map[ManagedEntryKey]bool, error) {
+	out := make(map[ManagedEntryKey]bool, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	contentIDs := make([]string, len(keys))
+	episodeIDs := make([]string, len(keys))
+	for i, k := range keys {
+		contentIDs[i], episodeIDs[i] = k.ContentID, k.EpisodeID
+	}
+	rows, err := r.db.Query(ctx,
+		`SELECT k.content_id, k.episode_id
+		 FROM unnest($4::text[], $5::text[]) AS k(content_id, episode_id)
+		 WHERE NOT EXISTS (
+		         SELECT 1 FROM downloads d
+		         WHERE d.user_id = $1 AND d.profile_id = $2 AND d.device_id = $3
+		           AND d.content_id = k.content_id AND COALESCE(d.episode_id, '') = k.episode_id)
+		   AND NOT EXISTS (
+		         SELECT 1 FROM download_subscription_exclusions x
+		         WHERE x.subscription_id = $6 AND x.episode_id = k.episode_id)`,
+		sub.UserID, sub.ProfileID, sub.DeviceID, contentIDs, episodeIDs, sub.ID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing monitor entries to register: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k ManagedEntryKey
+		if err := rows.Scan(&k.ContentID, &k.EpisodeID); err != nil {
+			return nil, fmt.Errorf("scanning monitor entry to register: %w", err)
+		}
+		out[k] = true
+	}
+	return out, rows.Err()
+}
+
 // CreateManagedEntriesBatch inserts managed rows in one statement, skipping
 // identities that already exist (including concurrent-insert races) via ON
 // CONFLICT DO NOTHING on the managed-entry unique index. Returns only the rows
@@ -603,18 +644,88 @@ func (r *Repository) UpdateManagedStatus(ctx context.Context, id string, userID 
 	return nil
 }
 
+// deleteManagedSQL is DeleteManaged's statement: it returns the number of rows
+// deleted. Tests run it inside an open transaction to hold a delete between its
+// statement and its commit.
+const deleteManagedSQL = `WITH deleted AS (
+	DELETE FROM downloads WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4
+	RETURNING content_id, episode_id
+), monitor AS (
+	SELECT s.id, d.episode_id FROM deleted d
+	JOIN download_subscriptions s
+	  ON s.user_id = $2 AND s.profile_id = $3 AND s.device_id = $4 AND s.series_id = d.content_id
+	WHERE d.episode_id IS NOT NULL
+	FOR KEY SHARE OF s
+), excluded AS (
+	INSERT INTO download_subscription_exclusions (subscription_id, episode_id)
+	SELECT id, episode_id FROM monitor
+	ON CONFLICT DO NOTHING
+)
+SELECT count(*) FROM deleted`
+
 // DeleteManaged removes a managed entry, authorized on (user, profile, device).
-// Returns ErrNotFound when nothing matches.
+// Deleting an episode of a series this device monitors also records a monitor
+// exclusion in the same statement, so later syncs do not register the episode
+// again. The row and its exclusion commit together, so a sync, which reads
+// both in one statement (MonitorEntriesToRegister), sees one or the other.
+// The statement locks the monitor FOR KEY SHARE, waiting out a sync or edit
+// that holds it, so a monitor deleted meanwhile yields no row and the delete
+// records nothing instead of failing the exclusion's foreign key. It deletes
+// the downloads row before locking the monitor. A device delete cascades in
+// the same order when the downloads cascade trigger fires first; Postgres
+// fires triggers in name order, and the cascade triggers' names end in their
+// OIDs compared as text, so a database can get the opposite order. There a
+// device delete racing this one can fail one of them with a deadlock error,
+// which a retry resolves. Returns ErrNotFound when nothing matches.
 func (r *Repository) DeleteManaged(ctx context.Context, id string, userID int, profileID, deviceID string) error {
-	tag, err := r.pool.Exec(ctx,
-		`DELETE FROM downloads WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4`,
-		id, userID, profileID, deviceID,
-	)
+	var deleted int
+	err := r.pool.QueryRow(ctx, deleteManagedSQL, id, userID, profileID, deviceID).Scan(&deleted)
 	if err != nil {
 		return fmt.Errorf("deleting managed download: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	if deleted == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// ClearMonitorExclusions forgets the device's monitor exclusions for episodes
+// of seriesID that the user downloaded explicitly: an explicit download
+// overrides the earlier delete. It runs after the download commits, so it
+// forgets an episode only while the device still holds the episode's row. A
+// delete that removed the row in between came after the download, so its
+// exclusion stays. The row is locked FOR KEY SHARE SKIP LOCKED: a delete that
+// has run its statement but not committed still holds the row, and a plain
+// read would see the row and erase that delete's exclusion. The exclusion is
+// locked FOR UPDATE SKIP LOCKED. The clear is best-effort cleanup after the
+// download succeeded, so it never makes the download wait on another
+// transaction's row lock, such as a delete of the row that is itself waiting
+// on the monitor behind a sync. A skipped row or exclusion keeps the
+// exclusion, the direction forgetMonitorDeletes already tolerates.
+func (r *Repository) ClearMonitorExclusions(ctx context.Context, userID int, profileID, deviceID, seriesID string, episodeIDs []string) error {
+	if profileID == "" || deviceID == "" || len(episodeIDs) == 0 {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx,
+		`WITH forgotten AS (
+			SELECT x.subscription_id, x.episode_id
+			FROM download_subscription_exclusions x
+			JOIN download_subscriptions s ON s.id = x.subscription_id
+			WHERE s.user_id = $1 AND s.profile_id = $2 AND s.device_id = $3 AND s.series_id = $4
+			  AND x.episode_id = ANY($5)
+			  AND EXISTS (
+			        SELECT 1 FROM downloads d
+			        WHERE d.user_id = $1 AND d.profile_id = $2 AND d.device_id = $3
+			          AND d.content_id = $4 AND COALESCE(d.episode_id, '') = x.episode_id
+			        FOR KEY SHARE SKIP LOCKED)
+			FOR UPDATE OF x SKIP LOCKED
+		)
+		DELETE FROM download_subscription_exclusions x USING forgotten f
+		WHERE x.subscription_id = f.subscription_id AND x.episode_id = f.episode_id`,
+		userID, profileID, deviceID, seriesID, episodeIDs,
+	)
+	if err != nil {
+		return fmt.Errorf("clearing monitor exclusions: %w", err)
 	}
 	return nil
 }
