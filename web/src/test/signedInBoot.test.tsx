@@ -256,6 +256,47 @@ describe("app boot request budget", () => {
     expect(refusedRefreshes, log).toHaveLength(1);
   });
 
+  it("returns an admin to their own session when the viewed session is revoked", async () => {
+    signInReturningOwner();
+    await boot(server);
+    expect(screen.getByTestId("home"), describeRequests(server.requests)).toBeInTheDocument();
+    const adminRefreshToken = storage.get(storage.KEYS.REFRESH_TOKEN);
+
+    // What AdminUserImpersonationDialog does with the impersonate answer.
+    const viewedTokens = server.issueTokens();
+    const pair = { ...adminAccountImpersonate, ...viewedTokens } as TokenPair;
+    await act(async () => {
+      homeAuth!.beginImpersonation(sessionFromTokenPair(pair), "/admin/users");
+    });
+    await releaseUntilQuiet(server);
+    expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBe(viewedTokens.refresh_token);
+
+    // The viewed account is disabled while the admin browses as it.
+    server.revokeSession(viewedTokens);
+    await act(async () => {
+      void queryClient.invalidateQueries();
+    });
+    await releaseUntilQuiet(server);
+
+    const log = describeRequests(server.requests);
+    expect(appRouter!.state.location.pathname, log).not.toBe("/login");
+    expect(screen.queryByRole("heading", { name: /sign in/i }), log).not.toBeInTheDocument();
+    expect(storage.get(storage.KEYS.REFRESH_TOKEN), log).toBe(adminRefreshToken);
+    expect(localStorage.getItem("impersonation_admin_session"), log).toBeNull();
+    // Every request refused on the viewed session joins one recovery.
+    const refusedRefreshes = server.requests.filter(
+      (request) => request.operation === "POST /api/v2/auth/refresh" && request.status === 401,
+    );
+    expect(refusedRefreshes.length, log).toBeGreaterThan(0);
+    expect(
+      server.requests.filter(
+        (request) =>
+          request.operation === "GET /api/v2/account/me" && request.seq > refusedRefreshes[0]!.seq,
+      ),
+      log,
+    ).toHaveLength(1);
+  });
+
   it("reads the viewed account once when an admin starts viewing as another user", async () => {
     signInReturningOwner();
     // The viewed account has two profiles, so its profile picker stays up

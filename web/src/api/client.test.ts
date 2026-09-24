@@ -9,6 +9,7 @@ import {
   setRefreshToken,
 } from "./client";
 import { v2 } from "./v2/request";
+import { storage } from "../utils/storage";
 
 function refreshedTokens(accessToken: string, refreshToken: string): Response {
   return new Response(
@@ -170,29 +171,52 @@ describe("session rejection", () => {
     setRefreshToken(null);
   });
 
-  // A signed-in request meets a 401, and the refresh answers `refreshStatus`.
-  function signedInRequestWithRefresh(refreshStatus: number) {
+  function refreshProblem(status: number, id: string): Response {
+    return Response.json(
+      { type: `https://siloserver.org/docs/api/v2/problems/${id}`, title: id, status },
+      { status, headers: { "Content-Type": "application/problem+json" } },
+    );
+  }
+
+  // A signed-in request meets a 401, and the refresh answers with `status` and
+  // the problem `id`.
+  function signedInRequestWithRefresh(status: number, id: string) {
     setAccessToken("active");
     setRefreshToken("stored");
     const fetchMock = vi.fn<typeof fetch>(async (input) =>
       String(input) === "/api/v2/auth/refresh"
-        ? Response.json({ error: "invalid_token" }, { status: refreshStatus })
-        : Response.json({ error: "invalid_token" }, { status: 401 }),
+        ? refreshProblem(status, id)
+        : refreshProblem(401, "authentication_required"),
     );
     vi.stubGlobal("fetch", fetchMock);
     return v2("GET /api/v2/profiles").catch(() => undefined);
   }
 
-  it.each([400, 401, 403])(
-    "reports a signed-in session whose refresh the server refuses (%i)",
-    async (status) => {
-      await signedInRequestWithRefresh(status);
-      expect(rejected).toHaveBeenCalledTimes(1);
-    },
-  );
+  it("reports a signed-in session whose refresh the server answers session_expired", async () => {
+    await signedInRequestWithRefresh(401, "session_expired");
+    expect(rejected).toHaveBeenCalledTimes(1);
+  });
 
-  it.each([429, 500, 503])("keeps the session when the refresh fails with %i", async (status) => {
-    await signedInRequestWithRefresh(status);
+  it.each([
+    // The server also answers its own failures (a database error) this way.
+    [401, "invalid_token"],
+    [400, "validation_failed"],
+    [429, "rate_limited"],
+    [500, "internal_error"],
+    [503, "dependency_unavailable"],
+  ])("keeps the session when the refresh fails with %i %s", async (status, id) => {
+    await signedInRequestWithRefresh(status, id);
+    expect(rejected).not.toHaveBeenCalled();
+  });
+
+  it("keeps the session when a refused refresh has no problem body", async () => {
+    setAccessToken("active");
+    setRefreshToken("stored");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => new Response("Unauthorized", { status: 401 })),
+    );
+    await v2("GET /api/v2/profiles").catch(() => undefined);
     expect(rejected).not.toHaveBeenCalled();
   });
 
@@ -214,7 +238,7 @@ describe("session rejection", () => {
     setRefreshToken("revoked");
     vi.stubGlobal(
       "fetch",
-      vi.fn<typeof fetch>(async () => Response.json({ error: "invalid_token" }, { status: 401 })),
+      vi.fn<typeof fetch>(async () => refreshProblem(401, "session_expired")),
     );
     await expect(bootstrapAccessToken()).resolves.toBe(false);
     expect(rejected).not.toHaveBeenCalled();
@@ -235,9 +259,32 @@ describe("session rejection", () => {
     );
     const refresh = refreshAuthentication();
     setAccessToken("new-account");
-    finishRefresh(Response.json({ error: "invalid_token" }, { status: 401 }));
+    finishRefresh(refreshProblem(401, "session_expired"));
     await expect(refresh).resolves.toBe(false);
     expect(rejected).not.toHaveBeenCalled();
+  });
+
+  it("ignores a refusal after another tab stored a new session", async () => {
+    setAccessToken("stale-tab");
+    setRefreshToken("old-refresh");
+    let finishRefresh!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(
+        () =>
+          new Promise<Response>((resolve) => {
+            finishRefresh = resolve;
+          }),
+      ),
+    );
+    const refresh = refreshAuthentication();
+    // Another tab signs in and writes its refresh token to shared storage;
+    // this tab's in-memory access token is untouched.
+    localStorage.setItem(storage.KEYS.REFRESH_TOKEN, "other-tab-refresh");
+    finishRefresh(refreshProblem(401, "session_expired"));
+    await expect(refresh).resolves.toBe(false);
+    expect(rejected).not.toHaveBeenCalled();
+    expect(localStorage.getItem(storage.KEYS.REFRESH_TOKEN)).toBe("other-tab-refresh");
   });
 });
 

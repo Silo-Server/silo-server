@@ -382,13 +382,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => onProfileUnverified(null);
   }, [clearProfile]);
 
-  // The server stopped accepting this session mid-use: drop it and its cached
-  // pages so RequireAuth sends the user to sign-in. A preserved impersonation
-  // admin session is kept for the next restore to recover.
+  // The server stopped accepting this session mid-use. An admin viewing as
+  // another user goes back to their own preserved session, as the boot
+  // restore does; otherwise the session and its cached pages are dropped so
+  // RequireAuth sends the user to sign-in. Requests refused while a recovery
+  // runs join it instead of spending the admin's refresh token again.
+  const sessionRejectionRef = useRef<Promise<void> | null>(null);
   useEffect(() => {
-    onSessionRejected(clearActiveAuthState);
+    onSessionRejected(() => {
+      if (sessionRejectionRef.current) return;
+      const session = captureSessionIdentity();
+      const handling = (async () => {
+        try {
+          if (await recoverPreservedAdminSession()) {
+            restoreProfile();
+            return;
+          }
+        } catch {
+          // The admin session is gone too; fall through to sign-in.
+        }
+        if (isSessionIdentityCurrent(session)) clearActiveAuthState();
+      })().finally(() => {
+        if (sessionRejectionRef.current === handling) sessionRejectionRef.current = null;
+      });
+      sessionRejectionRef.current = handling;
+    });
     return () => onSessionRejected(null);
-  }, [clearActiveAuthState]);
+  }, [clearActiveAuthState, recoverPreservedAdminSession, restoreProfile]);
 
   useEffect(() => {
     let cancelled = false;

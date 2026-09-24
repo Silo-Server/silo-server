@@ -103,9 +103,12 @@ export interface FakeServer {
   issueTokens(): { access_token: string; refresh_token: string; expires_in: number };
   /**
    * Stops accepting every token issued so far, as the server does when an
-   * admin disables the account or the session is revoked.
+   * admin disables the account or the session is revoked. A refresh with a
+   * revoked token is 401 `session_expired`.
    */
   revokeSessions(): void;
+  /** Stops accepting one issued token pair, leaving every other session live. */
+  revokeSession(tokens: { access_token: string; refresh_token: string }): void;
 }
 
 export interface FakeServerOptions {
@@ -149,8 +152,11 @@ export function createFakeServer(
     }
     if (record.operation === "POST /api/v2/auth/refresh") {
       const body = JSON.parse(String(init?.body ?? "{}")) as { refresh_token?: string };
-      if (!body.refresh_token || refusedRefreshTokens.has(body.refresh_token)) {
-        return problem(401, "invalid_token", "The refresh token is invalid or revoked.");
+      if (body.refresh_token && refusedRefreshTokens.has(body.refresh_token)) {
+        return problem(401, "session_expired", "Session has been revoked.");
+      }
+      if (!body.refresh_token) {
+        return problem(401, "invalid_token", "Invalid or expired refresh token.");
       }
       refreshTokensUsed.push(body.refresh_token);
       return { body: issueTokens() };
@@ -201,6 +207,10 @@ export function createFakeServer(
         refusedRefreshTokens.add(token);
       }
       issuedRefreshTokens = [];
+    },
+    revokeSession(tokens) {
+      issuedAccessTokens.delete(tokens.access_token);
+      refusedRefreshTokens.add(tokens.refresh_token);
     },
     pendingCount: () => pending.length,
     releaseWave() {

@@ -21,6 +21,7 @@ import {
   type ProfileRequestContextSnapshot,
 } from "../client";
 import { v2Operations } from "./operations";
+import { problemId } from "./problemId";
 import type { components, paths } from "./schema";
 
 // ---------------------------------------------------------------------------
@@ -212,12 +213,7 @@ export type Problem = components["schemas"]["Problem"];
 /** One field-level validation detail inside a `validation_failed` problem. */
 export type ProblemError = components["schemas"]["ProblemError"];
 
-/** The machine-readable identifier: the final path segment of `Problem.type`. */
-export function problemId(problem: Pick<Problem, "type">): string {
-  const path = problem.type.split("?")[0] ?? "";
-  const segment = path.slice(path.lastIndexOf("/") + 1);
-  return segment.replace(/#.*$/, "");
-}
+export { problemId };
 
 /** A documented v2 error: the server answered with a Problem Details body. */
 export class V2ProblemError extends Error {

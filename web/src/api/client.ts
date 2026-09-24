@@ -2,6 +2,7 @@ import type { ApiError } from "./types";
 import type { components } from "./v2/schema";
 import { storage } from "../utils/storage";
 import { randomUUID } from "../lib/uuid";
+import { problemId } from "./v2/problemId";
 
 type ProfileUnverifiedListener = () => void;
 let profileUnverifiedListener: ProfileUnverifiedListener | null = null;
@@ -22,9 +23,21 @@ export function onSessionRejected(listener: SessionRejectedListener | null) {
   sessionRejectedListener = listener;
 }
 
-/** Refresh answers that mean the server will never accept this session again. */
-function isSessionRejection(status: number): boolean {
-  return status === 400 || status === 401 || status === 403;
+/**
+ * Whether a refused refresh means the server will never accept this session
+ * again: 401 `session_expired`, sent for a session that was revoked or expired
+ * or whose account was disabled or deleted. The server also answers its own
+ * failures (a database error, say) with 401 `invalid_token`, so no other
+ * refusal ends a session that is in use.
+ */
+async function isSessionRejection(res: Response): Promise<boolean> {
+  if (res.status !== 401) return false;
+  try {
+    const body = (await res.clone().json()) as { type?: unknown };
+    return typeof body.type === "string" && problemId({ type: body.type }) === "session_expired";
+  } catch {
+    return false;
+  }
 }
 
 let accessToken: string | null = null;
@@ -305,12 +318,12 @@ async function attemptRefresh(): Promise<boolean> {
   const startingAuthContextVersion = authContextVersion;
   const startingServerOrigin = currentServerOrigin();
   const hadAccessToken = accessToken !== null;
-  let refreshStatus = 0;
+  let sessionRejected = false;
 
   try {
     const data = await refreshAccessToken(rt, async (input, init) => {
       const res = await fetch(input, init);
-      refreshStatus = res.status;
+      if (!res.ok) sessionRejected = await isSessionRejection(res);
       return res;
     });
     if (
@@ -322,8 +335,10 @@ async function attemptRefresh(): Promise<boolean> {
     if (!data) {
       // Only a mid-session refusal ends the session here. The boot restore
       // (no access token yet) clears its own tokens, and a server error or
-      // outage may pass, so neither signs the user out.
-      if (hadAccessToken && isSessionRejection(refreshStatus)) {
+      // outage may pass, so neither signs the user out. The refresh token is
+      // shared across tabs: when another tab has already stored a new one,
+      // this refusal is about a session that tab replaced.
+      if (hadAccessToken && sessionRejected && getRefreshToken() === rt) {
         sessionRejectedListener?.();
       }
       return false;
