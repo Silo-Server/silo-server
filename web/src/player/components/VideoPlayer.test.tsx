@@ -32,6 +32,7 @@ const controls = vi.hoisted(() => ({
     videoFit?: VideoFitMode;
     onVideoFitToggle?: () => void;
     onSubtitleJobAccepted?: (jobId: string) => void;
+    onMutedChange?: (muted: boolean) => void;
   },
 }));
 const playerV2Mock = vi.hoisted(() => vi.fn());
@@ -792,7 +793,7 @@ describe("VideoPlayer room catch-up", () => {
     expect(localStorage.getItem("player-volume")).toBe("0.4");
     // A mute chosen during the pre-roll holds; the element stays muted until
     // the pre-roll ends and then keeps the viewer's choice.
-    act(() => controls.current!.onMutedChange(true));
+    act(() => controls.current!.onMutedChange!(true));
     expect(video.muted).toBe(true);
     expect(localStorage.getItem("player-muted")).toBe("true");
 
@@ -818,6 +819,55 @@ describe("VideoPlayer room catch-up", () => {
       position_seconds: 1500.1,
       is_paused: true,
     });
+  });
+
+  it("plays a seek pre-roll at normal speed while the tab is hidden", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100);
+    Object.defineProperty(video, "paused", { configurable: true, value: true });
+    Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    try {
+      const waitingConnection = {
+        ...connection,
+        room: { ...connection.room!, playback_state: "waiting" as const },
+        transportCommand: {
+          ...command,
+          action: "seek" as const,
+          playback_state: "waiting" as const,
+          position_seconds: 1500,
+        },
+      };
+      rerenderPlayer({ watchTogetherConnection: waitingConnection });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      rerenderPlayer({
+        watchTogetherConnection: waitingConnection,
+        planRevision: 2,
+        plan: fixturePlanV3({
+          ...directPlan,
+          delivery: "server_remux_progressive",
+          timeline: {
+            ...directPlan.timeline,
+            source_start_seconds: 1500,
+            stream_origin_seconds: 1495,
+            timeline_offset_seconds: 1495,
+            player_start_seconds: 5,
+            can_seek_anywhere: false,
+          },
+        }),
+      });
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 1, start: () => 0, end: () => 0 },
+      });
+      video.currentTime = 0.05;
+      vi.mocked(video.play).mockClear();
+      fireEvent(video, new Event("loadstart"));
+      await act(() => vi.advanceTimersByTimeAsync(600));
+      expect(video.play).toHaveBeenCalledOnce();
+      expect(video.playbackRate).toBe(1);
+    } finally {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    }
   });
 
   it("lets the host acknowledge a seek that landed short of the target", async () => {

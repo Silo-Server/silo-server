@@ -70,7 +70,8 @@ const maxPrerollSeconds = 20;
 // The pre-roll plays muted behind the syncing overlay, so it can run fast.
 // Close to the target it drops to normal speed and is checked often, so it
 // stops within the guest's one-second readiness tolerance: the stream cannot
-// seek back to a target it has passed.
+// seek back to a target it has passed. A hidden tab throttles timers to about
+// one a second, so there the whole pre-roll plays at normal speed.
 const prerollPlaybackRate = 4;
 const prerollFinalApproachSeconds = 1.5;
 const prerollCheckIntervalMs = 50;
@@ -219,7 +220,10 @@ export function useWatchTogetherPlaybackSync({
       };
       prerollRef.current = preroll;
       video.muted = true;
-      video.playbackRate = gap > prerollFinalApproachSeconds ? prerollPlaybackRate : 1;
+      video.playbackRate =
+        gap > prerollFinalApproachSeconds && document.visibilityState === "visible"
+          ? prerollPlaybackRate
+          : 1;
       video.play().catch(() => {
         // A later pre-roll owns the element now; leave it alone.
         if (prerollRef.current === preroll) endPreroll(false);
@@ -248,7 +252,10 @@ export function useWatchTogetherPlaybackSync({
       const remaining = targetSeconds - toMediaTime(video.currentTime, streamOriginRef.current);
       if (remaining <= 0) {
         endPreroll(true);
-      } else if (remaining <= prerollFinalApproachSeconds && video.playbackRate !== 1) {
+      } else if (
+        (remaining <= prerollFinalApproachSeconds || document.visibilityState !== "visible") &&
+        video.playbackRate !== 1
+      ) {
         video.playbackRate = 1;
       }
     };
@@ -264,8 +271,10 @@ export function useWatchTogetherPlaybackSync({
     video.addEventListener("timeupdate", checkProgress);
     video.addEventListener("emptied", onEmptied);
     video.addEventListener("loadstart", onLoadStart);
+    document.addEventListener("visibilitychange", checkProgress);
     return () => {
       window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", checkProgress);
       video.removeEventListener("timeupdate", checkProgress);
       video.removeEventListener("emptied", onEmptied);
       video.removeEventListener("loadstart", onLoadStart);
