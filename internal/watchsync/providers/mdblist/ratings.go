@@ -160,6 +160,11 @@ func (p *Provider) FetchRatings(
 	// item key, any other entry by its raw JSON.
 	seen := make(map[string]struct{})
 	repeated := false
+	// offsetPaged records that a later page was requested by offset. Offsets
+	// shift when ratings change mid-read, and two changes can skip an entry
+	// without repeating one or changing the count, so such a read is never a
+	// complete snapshot. Cursor pages do not shift.
+	offsetPaged := false
 	see := func(key string) {
 		if _, dup := seen[key]; dup {
 			repeated = true
@@ -224,6 +229,7 @@ func (p *Provider) FetchRatings(
 		if done {
 			break
 		}
+		offsetPaged = offsetPaged || page.legacyOffset
 	}
 
 	batch := watchsync.RatingImportBatch{Rows: rows}
@@ -235,6 +241,11 @@ func (p *Provider) FetchRatings(
 	if repeated {
 		batch.Warnings = append(batch.Warnings,
 			"mdblist ratings pages repeated an entry, so ratings changed during the read; skipped rating removals")
+		return batch, nil
+	}
+	if offsetPaged {
+		batch.Warnings = append(batch.Warnings,
+			"mdblist ratings were read by offset, which can skip entries that change during the read; skipped rating removals")
 		return batch, nil
 	}
 	for _, kind := range []string{historyimport.KindMovie, historyimport.KindSeries} {

@@ -218,8 +218,10 @@ func TestFetchRatingsPagesByOffsetUntilTotal(t *testing.T) {
 	if len(batch.Rows) != 1875 {
 		t.Fatalf("rows = %d, want every rated movie and show", len(batch.Rows))
 	}
-	if !slices.Equal(batch.SnapshotKinds, []string{historyimport.KindMovie, historyimport.KindSeries}) || len(batch.Warnings) != 0 {
-		t.Fatalf("snapshot kinds = %v warnings = %v, want movie and series without warnings", batch.SnapshotKinds, batch.Warnings)
+	// Offset pages can shift under a concurrent change, so the read imports
+	// what it saw but claims no snapshot.
+	if len(batch.SnapshotKinds) != 0 || len(batch.Warnings) != 1 || !strings.Contains(batch.Warnings[0], "offset") {
+		t.Fatalf("snapshot kinds = %v warnings = %v, want no snapshot and an offset warning", batch.SnapshotKinds, batch.Warnings)
 	}
 }
 
@@ -298,14 +300,19 @@ func TestFetchRatingsRepeatedEntryIsNotASnapshot(t *testing.T) {
 		pages     map[string]string
 		wantKinds []string
 		wantRows  int
+		// wantWarning is the reason a read claims no snapshot; empty for a
+		// clean read.
+		wantWarning string
 	}{
-		"clean offset read": {
+		// Offsets can shift without a repeat: B removed and X added after
+		// the boundary skips an entry while the count still reaches total.
+		"offset read without a repeat": {
 			pages: map[string]string{
 				"|":  ratingsPage(0, 2, 1, 0, `{"total":5,"limit":3,"offset":0,"next_cursor":null}`),
 				"|3": ratingsPage(3, 1, 1, 0, `{"total":5,"limit":3,"offset":3,"next_cursor":null}`),
 			},
-			wantKinds: []string{historyimport.KindMovie, historyimport.KindSeries},
-			wantRows:  5,
+			wantRows:    5,
+			wantWarning: "offset",
 		},
 		"clean cursor read": {
 			pages: map[string]string{
@@ -323,21 +330,24 @@ func TestFetchRatingsRepeatedEntryIsNotASnapshot(t *testing.T) {
 				"|":  ratingsPage(0, 2, 1, 0, `{"total":5,"limit":3,"offset":0,"next_cursor":null}`),
 				"|3": `{"movies":[],"shows":[{"rating":8,"show":{"ids":{"tvdb":3}}},{"rating":8,"show":{"ids":{"tvdb":5}}}],"pagination":{"total":5,"limit":3,"offset":3,"next_cursor":null}}`,
 			},
-			wantRows: 5,
+			wantRows:    5,
+			wantWarning: "repeated",
 		},
 		"offset read repeats an entry without a rating row": {
 			pages: map[string]string{
 				"|":  `{"movies":[{"rating":7,"movie":{"ids":{"tmdb":1}}}],"shows":[],"episodes":[{"rating":9,"episode":{"ids":{"tmdb":2}}}],"pagination":{"total":4,"limit":2,"offset":0,"next_cursor":null}}`,
 				"|2": `{"movies":[{"rating":7,"movie":{"ids":{"tmdb":4}}}],"shows":[],"episodes":[{"rating":9,"episode":{"ids":{"tmdb":2}}}],"pagination":{"total":4,"limit":2,"offset":2,"next_cursor":null}}`,
 			},
-			wantRows: 2,
+			wantRows:    2,
+			wantWarning: "repeated",
 		},
 		"cursor read repeats a rated title": {
 			pages: map[string]string{
 				"|":   ratingsPage(0, 2, 1, 0, `{"total":5,"limit":3,"next_cursor":"c2"}`),
 				"c2|": `{"movies":[{"rating":7,"movie":{"ids":{"tmdb":2}}},{"rating":7,"movie":{"ids":{"tmdb":4}}}],"shows":[],"pagination":{"total":5,"limit":3,"next_cursor":null}}`,
 			},
-			wantRows: 5,
+			wantRows:    5,
+			wantWarning: "repeated",
 		},
 	}
 	for name, tc := range cases {
@@ -359,9 +369,9 @@ func TestFetchRatingsRepeatedEntryIsNotASnapshot(t *testing.T) {
 			if !slices.Equal(batch.SnapshotKinds, tc.wantKinds) {
 				t.Fatalf("snapshot kinds = %v, want %v", batch.SnapshotKinds, tc.wantKinds)
 			}
-			if tc.wantKinds == nil {
-				if len(batch.Warnings) != 1 || !strings.Contains(batch.Warnings[0], "repeated") {
-					t.Fatalf("warnings = %#v, want one repeated-entry warning", batch.Warnings)
+			if tc.wantWarning != "" {
+				if len(batch.Warnings) != 1 || !strings.Contains(batch.Warnings[0], tc.wantWarning) {
+					t.Fatalf("warnings = %#v, want one %q warning", batch.Warnings, tc.wantWarning)
 				}
 			} else if len(batch.Warnings) != 0 {
 				t.Fatalf("warnings = %#v, want none for a clean read", batch.Warnings)
