@@ -7,6 +7,7 @@ import {
   getAccessToken,
   isSessionIdentityCurrent,
   onProfileUnverified,
+  onSessionRejected,
   setAccessToken,
   setProfileId,
   setProfileToken,
@@ -380,6 +381,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     onProfileUnverified(clearProfile);
     return () => onProfileUnverified(null);
   }, [clearProfile]);
+
+  // The server stopped accepting this session mid-use: drop it and its cached
+  // pages so RequireAuth sends the user to sign-in. A preserved impersonation
+  // admin session is kept for the next restore to recover.
+  useEffect(() => {
+    onSessionRejected(clearActiveAuthState);
+    return () => onSessionRejected(null);
+  }, [clearActiveAuthState]);
 
   useEffect(() => {
     let cancelled = false;

@@ -101,6 +101,11 @@ export interface FakeServer {
    * impersonate operation would hand one out.
    */
   issueTokens(): { access_token: string; refresh_token: string; expires_in: number };
+  /**
+   * Stops accepting every token issued so far, as the server does when an
+   * admin disables the account or the session is revoked.
+   */
+  revokeSessions(): void;
 }
 
 export interface FakeServerOptions {
@@ -120,6 +125,8 @@ export function createFakeServer(
   const requests: RecordedRequest[] = [];
   const refreshTokensUsed: string[] = [];
   const issuedAccessTokens = new Set<string>();
+  const refusedRefreshTokens = new Set<string>(revokedRefreshTokens);
+  let issuedRefreshTokens: string[] = [];
   let pending: Array<() => void> = [];
   let wave = 1;
   let tokenCounter = 0;
@@ -128,6 +135,7 @@ export function createFakeServer(
     tokenCounter += 1;
     const accessToken = `access-${tokenCounter}`;
     issuedAccessTokens.add(accessToken);
+    issuedRefreshTokens.push(`refresh-${tokenCounter}`);
     return {
       access_token: accessToken,
       refresh_token: `refresh-${tokenCounter}`,
@@ -141,7 +149,7 @@ export function createFakeServer(
     }
     if (record.operation === "POST /api/v2/auth/refresh") {
       const body = JSON.parse(String(init?.body ?? "{}")) as { refresh_token?: string };
-      if (!body.refresh_token || revokedRefreshTokens.includes(body.refresh_token)) {
+      if (!body.refresh_token || refusedRefreshTokens.has(body.refresh_token)) {
         return problem(401, "invalid_token", "The refresh token is invalid or revoked.");
       }
       refreshTokensUsed.push(body.refresh_token);
@@ -187,6 +195,13 @@ export function createFakeServer(
     requests,
     refreshTokensUsed,
     issueTokens,
+    revokeSessions() {
+      issuedAccessTokens.clear();
+      for (const token of [...refreshTokensUsed, ...issuedRefreshTokens]) {
+        refusedRefreshTokens.add(token);
+      }
+      issuedRefreshTokens = [];
+    },
     pendingCount: () => pending.length,
     releaseWave() {
       const batch = pending;

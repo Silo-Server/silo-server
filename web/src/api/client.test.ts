@@ -3,6 +3,7 @@ import {
   bootstrapAccessToken,
   getAccessToken,
   getAuthContextVersion,
+  onSessionRejected,
   refreshAuthentication,
   setAccessToken,
   setRefreshToken,
@@ -129,6 +130,114 @@ describe("bootstrapAccessToken", () => {
       "/api/v2/auth/refresh",
       "/api/v2/profiles",
     ]);
+  });
+});
+
+describe("session rejection", () => {
+  const rejected = vi.fn();
+
+  beforeEach(() => {
+    const localStorageState = new Map<string, string>();
+    Object.defineProperty(globalThis, "localStorage", {
+      value: {
+        get length() {
+          return localStorageState.size;
+        },
+        getItem: (key: string) => localStorageState.get(key) ?? null,
+        key: (index: number) => Array.from(localStorageState.keys())[index] ?? null,
+        setItem: (key: string, value: string) => {
+          localStorageState.set(key, value);
+        },
+        removeItem: (key: string) => {
+          localStorageState.delete(key);
+        },
+        clear: () => {
+          localStorageState.clear();
+        },
+      } satisfies Storage,
+      configurable: true,
+    });
+    setAccessToken(null);
+    setRefreshToken(null);
+    rejected.mockReset();
+    onSessionRejected(rejected);
+  });
+
+  afterEach(() => {
+    onSessionRejected(null);
+    vi.unstubAllGlobals();
+    setAccessToken(null);
+    setRefreshToken(null);
+  });
+
+  // A signed-in request meets a 401, and the refresh answers `refreshStatus`.
+  function signedInRequestWithRefresh(refreshStatus: number) {
+    setAccessToken("active");
+    setRefreshToken("stored");
+    const fetchMock = vi.fn<typeof fetch>(async (input) =>
+      String(input) === "/api/v2/auth/refresh"
+        ? Response.json({ error: "invalid_token" }, { status: refreshStatus })
+        : Response.json({ error: "invalid_token" }, { status: 401 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return v2("GET /api/v2/profiles").catch(() => undefined);
+  }
+
+  it.each([400, 401, 403])(
+    "reports a signed-in session whose refresh the server refuses (%i)",
+    async (status) => {
+      await signedInRequestWithRefresh(status);
+      expect(rejected).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([429, 500, 503])("keeps the session when the refresh fails with %i", async (status) => {
+    await signedInRequestWithRefresh(status);
+    expect(rejected).not.toHaveBeenCalled();
+  });
+
+  it("keeps the session when the refresh cannot reach the server", async () => {
+    setAccessToken("active");
+    setRefreshToken("stored");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        if (String(input) === "/api/v2/auth/refresh") throw new TypeError("offline");
+        return Response.json({ error: "invalid_token" }, { status: 401 });
+      }),
+    );
+    await v2("GET /api/v2/profiles").catch(() => undefined);
+    expect(rejected).not.toHaveBeenCalled();
+  });
+
+  it("leaves a refused boot restore to the restore path", async () => {
+    setRefreshToken("revoked");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => Response.json({ error: "invalid_token" }, { status: 401 })),
+    );
+    await expect(bootstrapAccessToken()).resolves.toBe(false);
+    expect(rejected).not.toHaveBeenCalled();
+  });
+
+  it("ignores a refusal for a session that was replaced during the refresh", async () => {
+    setAccessToken("old");
+    setRefreshToken("old-refresh");
+    let finishRefresh!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(
+        () =>
+          new Promise<Response>((resolve) => {
+            finishRefresh = resolve;
+          }),
+      ),
+    );
+    const refresh = refreshAuthentication();
+    setAccessToken("new-account");
+    finishRefresh(Response.json({ error: "invalid_token" }, { status: 401 }));
+    await expect(refresh).resolves.toBe(false);
+    expect(rejected).not.toHaveBeenCalled();
   });
 });
 

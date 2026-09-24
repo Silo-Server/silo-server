@@ -10,6 +10,23 @@ export function onProfileUnverified(listener: ProfileUnverifiedListener | null) 
   profileUnverifiedListener = listener;
 }
 
+type SessionRejectedListener = () => void;
+let sessionRejectedListener: SessionRejectedListener | null = null;
+
+/**
+ * Registers the handler for a signed-in session the server stopped accepting
+ * (the account was disabled or the session revoked): a refresh the server
+ * refused while an access token was in use. The handler ends the session.
+ */
+export function onSessionRejected(listener: SessionRejectedListener | null) {
+  sessionRejectedListener = listener;
+}
+
+/** Refresh answers that mean the server will never accept this session again. */
+function isSessionRejection(status: number): boolean {
+  return status === 400 || status === 401 || status === 403;
+}
+
 let accessToken: string | null = null;
 let authContextVersion = 0;
 let pendingRefresh: {
@@ -287,14 +304,28 @@ async function attemptRefresh(): Promise<boolean> {
   // response from overwriting the new account's access or refresh token.
   const startingAuthContextVersion = authContextVersion;
   const startingServerOrigin = currentServerOrigin();
+  const hadAccessToken = accessToken !== null;
+  let refreshStatus = 0;
 
   try {
-    const data = await refreshAccessToken(rt, fetch);
-    if (!data) return false;
+    const data = await refreshAccessToken(rt, async (input, init) => {
+      const res = await fetch(input, init);
+      refreshStatus = res.status;
+      return res;
+    });
     if (
       startingAuthContextVersion !== authContextVersion ||
       startingServerOrigin !== currentServerOrigin()
     ) {
+      return false;
+    }
+    if (!data) {
+      // Only a mid-session refusal ends the session here. The boot restore
+      // (no access token yet) clears its own tokens, and a server error or
+      // outage may pass, so neither signs the user out.
+      if (hadAccessToken && isSessionRejection(refreshStatus)) {
+        sessionRejectedListener?.();
+      }
       return false;
     }
     if (accessToken === null) {

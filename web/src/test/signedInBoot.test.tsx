@@ -232,6 +232,30 @@ describe("app boot request budget", () => {
     expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
   });
 
+  it("sends a session the server stops accepting mid-use to sign-in", async () => {
+    // An admin disables the account (or revokes the session) while it browses.
+    signInReturningOwner();
+    await boot(server);
+    expect(screen.getByTestId("home"), describeRequests(server.requests)).toBeInTheDocument();
+
+    server.revokeSessions();
+    await act(async () => {
+      void queryClient.invalidateQueries();
+    });
+    await releaseUntilQuiet(server);
+
+    const log = describeRequests(server.requests);
+    expect(screen.getByRole("heading", { name: /sign in/i }), log).toBeInTheDocument();
+    expect(screen.queryByTestId("home"), log).not.toBeInTheDocument();
+    expect(appRouter!.state.location.pathname, log).toBe("/login");
+    expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
+    // One refused refresh is shared; nothing retries the rejected session.
+    const refusedRefreshes = server.requests.filter(
+      (request) => request.operation === "POST /api/v2/auth/refresh" && request.status === 401,
+    );
+    expect(refusedRefreshes, log).toHaveLength(1);
+  });
+
   it("reads the viewed account once when an admin starts viewing as another user", async () => {
     signInReturningOwner();
     // The viewed account has two profiles, so its profile picker stays up
