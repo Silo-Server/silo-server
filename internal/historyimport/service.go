@@ -357,6 +357,7 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 	)
 	s.persistClaimProgress(ctx, claim, summary)
 
+	hiddenSuppressed := 0
 	for i, record := range records {
 		if err := s.repo.validateRunClaim(ctx, claim); err != nil {
 			s.failClaim(ctx, claim, summary, err)
@@ -432,21 +433,27 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 			s.failClaim(ctx, claim, summary, err)
 			return
 		}
-		updated, created, err := s.applyImportedWatch(ctx, run.UserID, run.ProfileID, match.MediaItemID, record)
+		outcome, err := s.applyImportedWatch(ctx, run.UserID, run.ProfileID, match.MediaItemID, record)
 		if err != nil {
 			summary.Warnings = append(summary.Warnings, err.Error())
 		} else {
-			if updated {
+			if outcome.ProgressWritten {
 				summary.ProgressUpdated++
 			} else {
 				summary.Skipped++
 			}
-			if created {
+			if outcome.HistoryCreated {
 				summary.HistoryCreated++
+			}
+			if outcome.HiddenSuppressed {
+				hiddenSuppressed++
 			}
 		}
 
 		s.persistClaimProgressMaybe(ctx, claim, summary, i+1, len(records))
+	}
+	if hiddenSuppressed > 0 {
+		summary.Warnings = append(summary.Warnings, hiddenHistoryWarning(hiddenSuppressed))
 	}
 
 	if err := s.repo.validateRunClaim(ctx, claim); err != nil {
@@ -487,24 +494,72 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 	}
 }
 
-// applyImportedWatch uses the selected user store's atomic freshness guard.
-// Unknown source timestamps sort before real activity, so replay never
-// replaces progress merely because an import happened later.
-func (s *Service) applyImportedWatch(ctx context.Context, userID int, profileID, itemID string, record Record) (bool, bool, error) {
+// importedWatchOutcome reports what applyImportedWatch did with one record.
+type importedWatchOutcome struct {
+	ProgressWritten bool
+	HistoryCreated  bool
+	// HiddenSuppressed marks a record for an item the profile removed from its
+	// history. The store refuses the write, and every later run refuses it the
+	// same way, so the run has to say so rather than count a plain skip.
+	HiddenSuppressed bool
+}
+
+// applyImportedWatch uses the selected user store's atomic freshness guard, so
+// replay never replaces progress merely because an import happened later. A
+// record the source dated nothing goes through seedUndatedProgress, which cannot
+// overwrite local activity at all.
+func (s *Service) applyImportedWatch(ctx context.Context, userID int, profileID, itemID string, record Record) (importedWatchOutcome, error) {
+	var outcome importedWatchOutcome
 	store, err := s.stores.ForUser(ctx, userID)
 	if err != nil {
+		return outcome, err
+	}
+	if record.UpdatedAt.IsZero() {
+		outcome.ProgressWritten, outcome.HiddenSuppressed, err = s.seedUndatedProgress(ctx, store, profileID, itemID, record)
+	} else {
+		outcome.ProgressWritten, err = store.SetProgressIfNewer(
+			ctx, profileID, itemID, importedPosition(record), record.DurationSeconds, record.Played, record.UpdatedAt)
+	}
+	if err != nil {
+		return outcome, err
+	}
+	outcome.HistoryCreated, err = s.watchState.RecordImportedHistory(
+		ctx, userID, profileID, itemID, record.DurationSeconds, record.Played, record.LastPlayedAt)
+	return outcome, err
+}
+
+// seedUndatedProgress imports a record the source gave no timestamp for. Such a
+// record must never overwrite local activity, so it is written only when the
+// profile has no progress for the item yet.
+//
+// The write is probed at the epoch first because the store refuses a write dated
+// before a history hide, which is how a title the profile removed from its history
+// stays removed. A refusal with no visible row is that hide, and it is permanent:
+// the caller reports it instead of counting an ordinary skip. Once the probe shows
+// no hide, the row is restamped with the import time, because a row left at the
+// epoch sorts below every real watch in Continue Watching for good.
+func (s *Service) seedUndatedProgress(
+	ctx context.Context,
+	store userstore.UserStore,
+	profileID, itemID string,
+	record Record,
+) (written, hiddenSuppressed bool, err error) {
+	existing, err := store.GetProgress(ctx, profileID, itemID)
+	if err != nil || existing != nil {
 		return false, false, err
 	}
-	updatedAt := record.UpdatedAt
-	if updatedAt.IsZero() {
-		updatedAt = time.Unix(0, 0).UTC()
-	}
-	updated, err := store.SetProgressIfNewer(ctx, profileID, itemID, importedPosition(record), record.DurationSeconds, record.Played, updatedAt)
+	position, duration := importedPosition(record), record.DurationSeconds
+	seeded, err := store.SetProgressIfNewer(ctx, profileID, itemID, position, duration, record.Played, time.Unix(0, 0).UTC())
 	if err != nil {
 		return false, false, err
 	}
-	created, err := s.watchState.RecordImportedHistory(ctx, userID, profileID, itemID, record.DurationSeconds, record.Played, record.LastPlayedAt)
-	return updated, created, err
+	if !seeded {
+		return false, true, nil
+	}
+	if _, err := store.SetProgressIfNewer(ctx, profileID, itemID, position, duration, record.Played, time.Now().UTC()); err != nil {
+		return true, false, err
+	}
+	return true, false, nil
 }
 
 // Run failure messages written for users; run monitors show them verbatim.

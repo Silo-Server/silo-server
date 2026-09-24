@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -97,5 +98,23 @@ func TestTagUnreachableMarksOnlyNetworkFailures(t *testing.T) {
 	rejected := UpstreamHTTPError(http.StatusUnauthorized)
 	if err := tagUnreachable(rejected); errors.Is(err, ErrSourceUnreachable) {
 		t.Fatalf("HTTP 401 was tagged unreachable: %v", err)
+	}
+}
+
+// The stored diagnostic has to reach a real summary: an unmapped warning falls
+// through to GenericRunWarning, which would leave the skip as opaque to the
+// person reading the run as counting it silently was.
+func TestPublicWarningExplainsHiddenHistorySkips(t *testing.T) {
+	t.Parallel()
+
+	got := PublicWarning(hiddenHistoryWarning(3))
+	if got == GenericRunWarning {
+		t.Fatalf("PublicWarning(%q) fell through to the generic text", hiddenHistoryWarning(3))
+	}
+	if !strings.Contains(got, "(3)") {
+		t.Errorf("PublicWarning = %q, want the count of skipped items", got)
+	}
+	if !strings.Contains(got, "removed") {
+		t.Errorf("PublicWarning = %q, want it to name the history removal", got)
 	}
 }

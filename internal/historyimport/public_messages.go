@@ -26,6 +26,11 @@ const (
 
 	unmatchedWarningFormat = "unmatched items (%d): %s"
 
+	// warnHiddenHistorySuppressed counts records the source gave no play time for
+	// whose item this profile had removed from its history. The store keeps them
+	// hidden, so every later run drops them the same way.
+	warnHiddenHistorySuppressed = "skipped hidden history items (%d)"
+
 	warnEmbyFavoritesUnavailable = "fetching Emby favorites failed"
 	warnEmbySeriesUnavailable    = "fetching Emby series metadata failed"
 	warnEmbySeasonFavorites      = "skipped Emby season favorites (%d)"
@@ -42,6 +47,13 @@ const (
 	jellyfinFavoriteSeriesUnavailableSummary = "Jellyfin show details couldn't be read, so some favorite episodes may be unmatched."
 )
 
+// hiddenHistoryWarning is the stored diagnostic for records this profile keeps
+// hidden. Runs record the count so the summary explains the gap between matched
+// items and imported ones instead of leaving them in the plain skipped tally.
+func hiddenHistoryWarning(count int) string {
+	return fmt.Sprintf(warnHiddenHistorySuppressed, count)
+}
+
 // PublicWarning returns the monitor text for a stored run warning.
 func PublicWarning(diagnostic string) string {
 	var count int
@@ -52,6 +64,11 @@ func PublicWarning(diagnostic string) string {
 	}
 	if n, _ := fmt.Sscanf(diagnostic, warnEmbySeasonFavorites, &count); n == 1 {
 		return fmt.Sprintf("Season favorites skipped (%d): Silo can't favorite a season.", count)
+	}
+	if n, _ := fmt.Sscanf(diagnostic, warnHiddenHistorySuppressed, &count); n == 1 {
+		return fmt.Sprintf(
+			"Not imported (%d): you removed these titles from this profile's history, and the source didn't say when they were played.",
+			count)
 	}
 	switch {
 	case diagnostic == warnEmbyFavoritesUnavailable, strings.HasPrefix(diagnostic, legacyEmbyFavoritesPrefix):
