@@ -378,10 +378,10 @@ func TestMonitorRetentionLoopPostgres(t *testing.T) {
 	}
 }
 
-// TestManagedDeleteWaitsForMonitorSyncPostgres pins the ordering the
-// exclusion relies on: while a sync holds the monitor lock, a delete of one of
-// its episodes cannot commit, so the sync sees either the row or its
-// exclusion, never neither.
+// TestManagedDeleteWaitsForMonitorSyncPostgres: while a sync holds the monitor
+// lock, a delete of one of its episodes waits and cannot commit, so the locked
+// sync still sees the episode as held; once the delete commits, the next sync
+// sees its exclusion.
 func TestManagedDeleteWaitsForMonitorSyncPostgres(t *testing.T) {
 	ctx := context.Background()
 	fx := seedMonitorFixture(t, 0, false)
@@ -390,28 +390,17 @@ func TestManagedDeleteWaitsForMonitorSyncPostgres(t *testing.T) {
 	}
 	row := fx.entry(t, fx.episodes[0])
 	done := make(chan error, 1)
-	err := fx.subRepo.WithLocked(ctx, fx.userID, fx.profileA, fx.deviceA, fx.monitor.ID, func(_ *Subscription, tx pgx.Tx) error {
+	err := fx.subRepo.WithLocked(ctx, fx.userID, fx.profileA, fx.deviceA, fx.monitor.ID, func(locked *Subscription, tx pgx.Tx) error {
 		go func() { done <- fx.svc.Delete(ctx, fx.userID, fx.profileA, fx.deviceA, row.ID) }()
-		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		for {
-			var waiting bool
-			if err := fx.pool.QueryRow(waitCtx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
-				WHERE datname = current_database() AND wait_event_type = 'Lock'
-				  AND query LIKE '%INSERT INTO download_subscription_exclusions%')`).Scan(&waiting); err != nil {
-				return fmt.Errorf("delete never waited on the monitor lock: %w", err)
-			}
-			if waiting {
-				break
-			}
-			runtime.Gosched()
+		if err := fx.waitForLockWait(ctx, "%INSERT INTO download_subscription_exclusions%"); err != nil {
+			return fmt.Errorf("delete never waited on the monitor lock: %w", err)
 		}
 		key := ManagedEntryKey{ContentID: fx.seriesID, EpisodeID: fx.episodes[0]}
-		existing, err := managedRegistryStore{tx}.GetManagedEntriesByKeys(ctx, fx.userID, fx.profileA, fx.deviceA, []ManagedEntryKey{key})
+		candidates, err := managedRegistryStore{tx}.MonitorEntriesToRegister(ctx, locked, []ManagedEntryKey{key})
 		if err != nil {
 			return err
 		}
-		if existing[key] == nil {
+		if candidates[key] {
 			return errors.New("locked sync lost the row before the delete committed")
 		}
 		return nil
@@ -430,14 +419,112 @@ func TestManagedDeleteWaitsForMonitorSyncPostgres(t *testing.T) {
 	}
 }
 
+// waitForLockWait polls until a backend running a query that matches pattern
+// (a LIKE pattern) waits on a lock.
+func (fx monitorFixture) waitForLockWait(ctx context.Context, pattern string) error {
+	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	for {
+		var waiting bool
+		if err := fx.pool.QueryRow(waitCtx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE $1)`, pattern).Scan(&waiting); err != nil {
+			return err
+		}
+		if waiting {
+			return nil
+		}
+		runtime.Gosched()
+	}
+}
+
+// TestManagedDeleteRacingMonitorRemovalPostgres: a managed delete that waits
+// on the monitor lock while the monitor (or its whole device) is deleted still
+// deletes the row. It records no exclusion for the vanished monitor instead of
+// failing the exclusion's foreign key.
+func TestManagedDeleteRacingMonitorRemovalPostgres(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("monitor deleted by its lock holder", func(t *testing.T) {
+		fx := seedMonitorFixture(t, 0, false)
+		if n := fx.sync(t); n != 3 {
+			t.Fatalf("first sync registered %d, want 3", n)
+		}
+		row := fx.entry(t, fx.episodes[0])
+		done := make(chan error, 1)
+		// Mutate(remove) locks the monitor FOR UPDATE and deletes it, as the
+		// stop-monitoring endpoints do.
+		_, err := fx.subRepo.Mutate(ctx, fx.userID, fx.profileA, fx.deviceA, fx.monitor.ID, true, func(*Subscription) error {
+			go func() { done <- fx.svc.Delete(ctx, fx.userID, fx.profileA, fx.deviceA, row.ID) }()
+			return fx.waitForLockWait(ctx, "%INSERT INTO download_subscription_exclusions%")
+		})
+		if err != nil {
+			t.Fatalf("delete monitor: %v", err)
+		}
+		if err := <-done; err != nil {
+			t.Fatalf("managed delete racing the monitor delete: %v", err)
+		}
+		if fx.entry(t, fx.episodes[0]) != nil {
+			t.Fatal("managed row survived its delete")
+		}
+		if n := fx.exclusions(t); n != 0 {
+			t.Fatalf("exclusions = %d, want 0", n)
+		}
+	})
+
+	t.Run("device deleted", func(t *testing.T) {
+		fx := seedMonitorFixture(t, 0, false)
+		if n := fx.sync(t); n != 3 {
+			t.Fatalf("first sync registered %d, want 3", n)
+		}
+		row := fx.entry(t, fx.episodes[0])
+		deleted := make(chan error, 1)
+		forgotten := make(chan error, 1)
+		// A sync holds the monitor lock; the managed delete waits on it, and a
+		// device delete then waits behind the managed delete's row.
+		err := fx.subRepo.WithLocked(ctx, fx.userID, fx.profileA, fx.deviceA, fx.monitor.ID, func(*Subscription, pgx.Tx) error {
+			go func() { deleted <- fx.svc.Delete(ctx, fx.userID, fx.profileA, fx.deviceA, row.ID) }()
+			if err := fx.waitForLockWait(ctx, "%INSERT INTO download_subscription_exclusions%"); err != nil {
+				return err
+			}
+			go func() {
+				_, err := fx.pool.Exec(ctx, `DELETE FROM user_devices WHERE user_id = $1 AND profile_id = $2 AND device_id = $3`, fx.userID, fx.profileA, fx.deviceA)
+				forgotten <- err
+			}()
+			return fx.waitForLockWait(ctx, "%DELETE FROM user_devices%")
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := <-deleted; err != nil {
+			t.Fatalf("managed delete racing the device delete: %v", err)
+		}
+		if err := <-forgotten; err != nil {
+			t.Fatalf("device delete: %v", err)
+		}
+		var left int
+		if err := fx.pool.QueryRow(ctx, `SELECT
+			(SELECT count(*) FROM downloads WHERE user_id = $1 AND device_id = $2) +
+			(SELECT count(*) FROM download_subscriptions WHERE user_id = $1 AND device_id = $2)`, fx.userID, fx.deviceA).Scan(&left); err != nil {
+			t.Fatal(err)
+		}
+		if left != 0 || fx.exclusions(t) != 0 {
+			t.Fatalf("device rows left = %d, exclusions = %d; want both 0", left, fx.exclusions(t))
+		}
+	})
+}
+
 type chunkedProgressStore struct {
 	userstore.UserStore
 	completed map[string]bool
 	calls     []int
+	err       error
 }
 
 func (s *chunkedProgressStore) ListProgressByMediaItems(_ context.Context, _ string, ids []string) (map[string]userstore.WatchProgress, error) {
 	s.calls = append(s.calls, len(ids))
+	if s.err != nil {
+		return nil, s.err
+	}
 	out := map[string]userstore.WatchProgress{}
 	for _, id := range ids {
 		out[id] = userstore.WatchProgress{MediaItemID: id, Completed: s.completed[id]}
@@ -469,5 +556,21 @@ func TestDropWatchedEpisodesChunksLookups(t *testing.T) {
 	}
 	if len(kept) != 1199 || kept[0].ContentID != "ep-1" || kept[len(kept)-1].ContentID != "ep-1199" {
 		t.Fatalf("kept %d episodes (%s..%s), want 1199 without the two finished", len(kept), kept[0].ContentID, kept[len(kept)-1].ContentID)
+	}
+}
+
+// TestWatchedFilterFailsOpen: a progress-store failure registers the monitor's
+// episodes without the watched filter instead of failing the sync, so new
+// episodes keep arriving.
+func TestWatchedFilterFailsOpen(t *testing.T) {
+	store := &chunkedProgressStore{completed: map[string]bool{"ep-1": true}, err: errors.New("progress store down")}
+	svc := &Service{progressStores: chunkedProgressStores{store}, fileRepo: &monitorFileResolver{fileID: 1, seriesID: "series"}}
+	episodes := []*models.Episode{{ContentID: "ep-0"}, {ContentID: "ep-1"}, {ContentID: "ep-2"}}
+	items, err := svc.subscriptionEpisodeItems(t.Context(), &Subscription{UserID: 1, ProfileID: "profile", SeriesID: "series", Mode: SubModeAll, DeleteWatched: true}, episodes)
+	if err != nil {
+		t.Fatalf("sync items with the progress store down: %v", err)
+	}
+	if len(store.calls) != 1 || len(items) != 3 {
+		t.Fatalf("lookups = %v, items = %d; want one failed lookup and all 3 episodes", store.calls, len(items))
 	}
 }

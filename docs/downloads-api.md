@@ -907,7 +907,8 @@ a page skips already-registered entries. Paused monitors never register episodes
 
 Sync never registers an episode this device deleted while the monitor existed (4.4).
 A `delete_watched` monitor also skips episodes whose progress for the profile is
-`completed`, the same flag the client reads before deleting a finished episode.
+`completed`, the same flag the client reads before deleting a finished episode. If
+the progress lookup fails, sync registers without this filter rather than failing.
 
 ### 8.3 List, get, update, delete
 

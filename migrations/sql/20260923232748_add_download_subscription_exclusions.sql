@@ -4,7 +4,9 @@
 -- monitor sync saw the episode as missing and registered it again. Deleting
 -- an episode of a monitored series records it here instead; monitor syncs skip
 -- it until the user downloads the episode explicitly, which clears the row.
--- Deleting the monitor (or its device) drops its rows through the FK cascade.
+-- Creating the monitor again (the native create or the bridge re-monitor)
+-- clears all of its rows, and deleting the monitor (or its device) drops them
+-- through the FK cascade.
 
 -- +goose Up
 -- +goose StatementBegin

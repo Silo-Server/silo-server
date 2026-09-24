@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
@@ -214,9 +213,14 @@ func (s *Service) subscriptionEpisodeItems(ctx context.Context, sub *Subscriptio
 		}
 	}
 	if sub.DeleteWatched {
-		var err error
-		if inScope, err = s.dropWatchedEpisodes(ctx, sub, inScope); err != nil {
-			return nil, err
+		// Fail open, like the storage gate: a progress-store outage must not
+		// stop new episodes arriving. A finished episode registered meanwhile
+		// is deleted by the client's retention pass, and that delete's
+		// exclusion keeps it from coming back.
+		if unwatched, err := s.dropWatchedEpisodes(ctx, sub, inScope); err != nil {
+			slog.WarnContext(ctx, "download subscription watched filter: progress lookup failed; registering without it", "component", "downloads", "subscription_id", sub.ID, "error", err)
+		} else {
+			inScope = unwatched
 		}
 	}
 	return s.episodeItems(ctx, sub.SeriesID, inScope)
@@ -273,12 +277,11 @@ func (s *Service) dropWatchedEpisodes(ctx context.Context, sub *Subscription, ep
 // transaction). Before applying the storage cap it skips items the device
 // already holds (their bytes already count toward the device's usage) and
 // episodes the device deleted while monitored (see Repository.DeleteManaged),
-// so neither consumes the budget. Existing entries are read before exclusions,
-// so a concurrent delete is seen as one or the other. Unlike the interactive
-// ensureManaged path it does NOT consume the QuantityLimiter — the subscription
-// is the authorization. Returns only the NEWLY registered count: the sync
-// response's "registered" is documented as new episodes, so a steady-state
-// sync must report 0, not the full in-scope set.
+// so neither consumes the budget. Unlike the interactive ensureManaged path it
+// does NOT consume the QuantityLimiter — the subscription is the
+// authorization. Returns only the NEWLY registered count: the sync response's
+// "registered" is documented as new episodes, so a steady-state sync must
+// report 0, not the full in-scope set.
 func (s *Service) registerSubscriptionItems(ctx context.Context, sub *Subscription, items []managedItem, repo managedRegistrationRepository) (int, error) {
 	if len(items) == 0 {
 		return 0, nil
@@ -287,23 +290,16 @@ func (s *Service) registerSubscriptionItems(ctx context.Context, sub *Subscripti
 	for i, it := range items {
 		keys[i] = ManagedEntryKey{ContentID: it.contentID, EpisodeID: it.episodeID}
 	}
-	existing, err := repo.GetManagedEntriesByKeys(ctx, sub.UserID, sub.ProfileID, sub.DeviceID, keys)
+	candidates, err := repo.MonitorEntriesToRegister(ctx, sub, keys)
 	if err != nil {
 		return 0, err
 	}
-	fresh := make([]managedItem, 0, len(items))
-	freshIDs := make([]string, 0, len(items))
+	fresh := make([]managedItem, 0, len(candidates))
 	for i, it := range items {
-		if _, ok := existing[keys[i]]; !ok {
+		if candidates[keys[i]] {
 			fresh = append(fresh, it)
-			freshIDs = append(freshIDs, it.episodeID)
 		}
 	}
-	excluded, err := repo.ExcludedEpisodes(ctx, sub.ID, freshIDs)
-	if err != nil {
-		return 0, err
-	}
-	fresh = slices.DeleteFunc(fresh, func(it managedItem) bool { return excluded[it.episodeID] })
 	fresh = s.capItemsToStorage(ctx, sub, fresh, repo)
 	toInsert := make([]*Download, 0, len(fresh))
 	for _, it := range fresh {
