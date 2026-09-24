@@ -34,6 +34,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	r := chi.NewRouter()
 	r.Use(stripSlashesExceptWeb)
 	r.Use(middleware.RequestID)
+	r.Use(observeCompatRequest)
 	if deps.ClientIPResolver != nil {
 		r.Use(clientip.Middleware(deps.ClientIPResolver))
 	}

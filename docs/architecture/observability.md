@@ -271,15 +271,63 @@ instruments use `silo_`; Go/process collectors retain upstream names. One
 only GC, scheduler, memory classes, CPU classes and synchronization families.
 Audit the emitted families when upgrading Go.
 
+## Jellyfin-compatible listener
+
+The Jellyfin-compatible listener runs on its own `http.Server`, so the native
+request metrics never see it. `observeCompatRequest`
+(`internal/jellycompat/observe.go`) runs right after the request ID middleware
+and records each request once, whatever answered it: a route, the 404 or 405
+fallback, the CORS preflight, or a middleware that refused the request.
+
+| Metric | Labels |
+| --- | --- |
+| `silo_jellycompat_requests_total` | `route`, `method`, `status_class`, `client` |
+| `silo_jellycompat_request_duration_seconds` | `route`, `method` |
+
+- `route` is the chi route template (`/Items/{id}`), read after routing. It is
+  never the raw path or an ID. A request that matched no route is `unmatched`.
+- `method` is a standard method or `other`.
+- `status_class` is `1xx` to `5xx`, `hijacked` when the session socket took
+  over the connection, or `other`.
+- `client` comes from the MediaBrowser `Client` field, then the User-Agent:
+  `infuse`, `swiftfin`, `findroid`, `streamyfin`, `wholphin`, `fladder`,
+  `senplayer`, `vidhub`, `kodi`, `jellyfin-web`, `jellyfin-androidtv`,
+  `jellyfin` (any other client named Jellyfin, such as the official apps),
+  `other`, or `none` (no identity at all). Free text never becomes a label.
+
+The playback and transfer media routes (streams, HLS segments, subtitles,
+attachments, downloads and the bitrate test) and `/socket` are counted but not
+timed. Their duration is the client's viewing or connection time, which would
+land in the `+Inf` bucket and distort the percentiles. Stream telemetry accounts
+for their bytes and sessions. HLS manifests are timed: they are short
+documents, and their latency is the server's part of playback start.
+
+The histogram leaves out `status_class` and `client` because an unauthenticated
+caller picks both, and each would multiply the 14 series of every route. About
+120 timed method and route pairs plus `unmatched` give at most about 1,800
+histogram series. The counter's full label product is about 14,000 series. In
+practice a route answers a client with one or two status classes, so even a
+server that sees every client on every route stays near 4,000. Both families
+count toward the per-scrape sample limit in the
+[monitoring examples](../operations/monitoring.md).
+
+Per-client latency lives on the trace. Each request opens a server span named
+`jellycompat <METHOD> <route>` with `http.request.method`, `http.route`,
+`http.response.status_code` (or `http.response.outcome` set to `hijacked`) and
+`jellycompat.client`. Postgres, Redis and S3 dependency spans started during
+the request are its children instead of separate root traces. The span carries
+no path, query, header value or body. A `/socket` span stays open for the life
+of the connection, as the native v2 socket spans do.
+
 ## Trace trust, privacy and cost
 
-Native v2 requests start fresh server traces. Public trace IDs, sampling flags
-and baggage cannot select the local sampling decision. The enabled default is
-1%; use 100% only during a bounded investigation. Authenticated worker HTTP calls
-propagate W3C trace context without baggage; redirects cannot forward internal
-credentials or trace context to another destination. Plugin host gRPC spans use
-fixed SDK operation names. Plugins need SDK extraction before their internal
-spans can join those traces.
+Native v2 and Jellyfin-compatible requests start fresh server traces. Public
+trace IDs, sampling flags and baggage cannot select the local sampling decision.
+The enabled default is 1%; use 100% only during a bounded investigation.
+Authenticated worker HTTP calls propagate W3C trace context without baggage;
+redirects cannot forward internal credentials or trace context to another
+destination. Plugin host gRPC spans use fixed SDK operation names. Plugins need
+SDK extraction before their internal spans can join those traces.
 
 Dependency spans record finite Postgres statement classes, Redis commands,
 S3 operations, notification sends and configured pool roles. They exclude SQL, bind arguments,
@@ -289,6 +337,8 @@ available and start their own trace; durable job identity is not a metric label.
 Persisted queues do not currently retain initiating trace context across restarts.
 
 API metric client labels are `web`, `apple`, `android`, `other`, or `none`.
+Jellyfin-compatible client families are listed under
+[Jellyfin-compatible listener](#jellyfin-compatible-listener).
 Unmatched legacy routes and unknown HTTP methods fold into fixed values.
 No provider or user identity may allocate a new series. Histograms are bounded
 by operation categories and fixed buckets; no per-job histogram is permitted.
