@@ -524,31 +524,11 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 			}
 		}
 
-		// Collect image paths before deletion.
 		if len(orphanIDs) > 0 {
-			orphanedImageDirs, err = collectImageDirs(ctx, tx, orphanIDs)
+			var deletedContentIDs []string
+			deletedContentIDs, orphanedImageDirs, err = deleteOrphanedItemsAndImageDirs(ctx, tx, orphanIDs)
 			if err != nil {
 				return 0, 0, nil, err
-			}
-		}
-
-		if len(orphanIDs) > 0 {
-			rows, err := tx.Query(ctx, `
-				DELETE FROM media_items mi
-				WHERE mi.content_id = ANY($1)
-				  AND NOT EXISTS (
-					SELECT 1
-					FROM media_item_libraries mil
-					WHERE mil.content_id = mi.content_id
-				  )
-				RETURNING mi.content_id
-			`, orphanIDs)
-			if err != nil {
-				return 0, 0, nil, fmt.Errorf("deleting orphaned media items after folder reconciliation: %w", err)
-			}
-			deletedContentIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
-			if err != nil {
-				return 0, 0, nil, fmt.Errorf("collecting deleted orphaned media item IDs: %w", err)
 			}
 			deletedItems = len(deletedContentIDs)
 			if err := EnqueueSearchIndexDeletes(ctx, tx, deletedContentIDs); err != nil {
@@ -562,6 +542,49 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 	}
 
 	return len(removedContentIDs), deletedItems, orphanedImageDirs, nil
+}
+
+// deleteOrphanedItemsAndImageDirs deletes the orphanIDs that still have no
+// library membership and returns the IDs it deleted, plus the artwork
+// directories that no surviving row references any more.
+//
+// The directories are filtered after the DELETE, against the IDs it actually
+// removed. orphanIDs was read earlier in the transaction, and a concurrent scan
+// can link one of those items to a library before the DELETE runs; the guarded
+// DELETE then keeps it. Filtering before the DELETE would have treated that
+// item as gone and reported its directories as unreferenced, so the caller
+// would delete artwork a surviving item still uses. The raw paths are read
+// first because the deleted rows are gone afterwards.
+func deleteOrphanedItemsAndImageDirs(ctx context.Context, tx pgx.Tx, orphanIDs []string) ([]string, []string, error) {
+	rawImageDirs, err := collectRawImageDirs(ctx, tx, orphanIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err := tx.Query(ctx, `
+		DELETE FROM media_items mi
+		WHERE mi.content_id = ANY($1)
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM media_item_libraries mil
+			WHERE mil.content_id = mi.content_id
+		  )
+		RETURNING mi.content_id
+	`, orphanIDs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("deleting orphaned media items after folder reconciliation: %w", err)
+	}
+	deletedContentIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, nil, fmt.Errorf("collecting deleted orphaned media item IDs: %w", err)
+	}
+	if len(deletedContentIDs) == 0 || len(rawImageDirs) == 0 {
+		return deletedContentIDs, nil, nil
+	}
+	imageDirs, err := filterUnreferencedImageDirs(ctx, tx, rawImageDirs, deletedContentIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return deletedContentIDs, imageDirs, nil
 }
 
 func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int) ([]string, error) {

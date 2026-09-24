@@ -50,9 +50,11 @@ const (
 	// carries the daily reset, so it is ignored.
 	perSecondRetryWait = time.Second
 	// A 400 {"error":"RATE_LIMIT"} is not a quota: it is a 20-second per-user
-	// lock on /scrobble and POST /sync/history that clears as soon as the
-	// user's in-flight write finishes. Simkl says to retry shortly, without
-	// exponential backoff.
+	// lock on /scrobble and on the sync writes /sync/history,
+	// /sync/history/remove, /sync/add-to-list, /sync/ratings,
+	// /sync/ratings/remove, and /sync/watched. It clears as soon as the
+	// user's in-flight write finishes, and Simkl says to retry shortly,
+	// without exponential backoff.
 	writeLockRetryWait = 5 * time.Second
 
 	maxInPlaceRetryWait = 10 * time.Second
@@ -110,6 +112,8 @@ func (p *Provider) Capabilities() watchsync.Capabilities {
 		ExportWatchlist:  true,
 		RemoveWatchlist:  true,
 		ScrobblePlayback: true,
+		ImportRatings:    true,
+		ExportRatings:    true,
 	}
 }
 
@@ -654,6 +658,7 @@ type simklActivityBucket struct {
 	Watching        string `json:"watching"`
 	Completed       string `json:"completed"`
 	RemovedFromList string `json:"removed_from_list"`
+	RatedAt         string `json:"rated_at"`
 }
 
 type simklWatchedBucket struct {
@@ -1285,10 +1290,7 @@ type simklListItem struct {
 func buildSimklListPayload(items []watchsync.LocalFavorite, to string) simklListPayload {
 	var payload simklListPayload
 	for _, item := range items {
-		ids := idsFromLocal(item.IMDbID, item.TMDBID, item.TVDBID)
-		if ids == (simklIDs{}) {
-			ids = idsFromProviderItemKey(item.ProviderItemKey)
-		}
+		ids := localItemIDs(item)
 		if ids == (simklIDs{}) {
 			continue
 		}
@@ -1301,6 +1303,16 @@ func buildSimklListPayload(items []watchsync.LocalFavorite, to string) simklList
 		}
 	}
 	return payload
+}
+
+// localItemIDs returns the ids a list or rating item is sent to Simkl with: its
+// own external ids, falling back to the id its provider item key encodes.
+func localItemIDs(item watchsync.LocalFavorite) simklIDs {
+	ids := idsFromLocal(item.IMDbID, item.TMDBID, item.TVDBID)
+	if ids == (simklIDs{}) {
+		ids = idsFromProviderItemKey(item.ProviderItemKey)
+	}
+	return ids
 }
 
 func idsFromProviderItemKey(key string) simklIDs {

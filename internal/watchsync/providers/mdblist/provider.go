@@ -90,6 +90,8 @@ func (p *Provider) Capabilities() watchsync.Capabilities {
 		RemoveWatchlist:        true,
 		ProvidesWatchlistOrder: true,
 		ScrobblePlayback:       true,
+		ImportRatings:          true,
+		ExportRatings:          true,
 	}
 }
 
@@ -455,34 +457,73 @@ func (p *Provider) sendWatchlist(ctx context.Context, conn watchsync.Connection,
 }
 
 func watchlistExportResult(favorites []watchsync.LocalFavorite, responseHasNotFound, removing bool) watchsync.ExportResult {
-	result := watchsync.ExportResult{
-		Sent:     make([]string, 0, len(favorites)),
-		NotFound: make([]string, 0, len(favorites)),
-		Failed:   make(map[string]string),
-	}
+	result := newSyncWriteResult("watchlist items", removing, len(favorites))
+	requested := make([]string, 0, len(favorites))
 	for _, fav := range favorites {
-		if fav.MediaItemID == "" {
+		if _, ok := listItemIDs(fav); !ok {
+			result.skip(fav.MediaItemID, "MDBList watchlist export requires a movie or series with an external ID")
 			continue
 		}
-		if !watchlistFavoriteSupported(fav) {
-			result.Failed[fav.MediaItemID] = "MDBList watchlist export requires a movie or series with an external ID"
-			continue
-		}
-		if responseHasNotFound {
-			if removing {
-				// A successful removal leaves both removed and already-absent items
-				// absent remotely. MDBList returns only aggregate counts, so mark
-				// the batch reconciled without trying to attribute individual rows.
-				result.NotFound = append(result.NotFound, fav.MediaItemID)
-				continue
-			}
-			// Adds still need item-level identity that the aggregate response
-			// does not provide, so never claim that any item in the batch sent.
-			result.Failed[fav.MediaItemID] = "MDBList did not accept one or more watchlist items in the batch"
-			continue
-		}
-		result.Sent = append(result.Sent, fav.MediaItemID)
+		requested = append(requested, fav.MediaItemID)
 	}
+	result.request(requested, responseHasNotFound, false)
+	return result.exportResult()
+}
+
+// syncWriteResult builds the ExportResult of MDBList watchlist and rating
+// writes, keyed by media item. MDBList answers a write with per-kind counts
+// and never names the items it did not accept, so every item of one request
+// shares that request's outcome:
+//   - a set with any not_found entry fails as a whole, because no single item
+//     can be shown to have been accepted;
+//   - a removal with any not_found entry is reconciled as a whole, because
+//     removed and already-absent items both end up absent;
+//   - a request that reports errors fails as a whole, set or removal;
+//   - an item MDBList cannot identify is left out of the request and fails.
+type syncWriteResult struct {
+	// noun names the batch's items in failure reasons, such as "ratings".
+	noun     string
+	removing bool
+	sent     []string
+	notFound []string
+	failed   map[string]string
+}
+
+func newSyncWriteResult(noun string, removing bool, size int) *syncWriteResult {
+	return &syncWriteResult{
+		noun:     noun,
+		removing: removing,
+		sent:     make([]string, 0, size),
+		failed:   make(map[string]string),
+	}
+}
+
+// skip fails an item that was left out of the request.
+func (r *syncWriteResult) skip(mediaItemID, reason string) {
+	if mediaItemID != "" {
+		r.failed[mediaItemID] = reason
+	}
+}
+
+// request records the outcome of one request that carried the given items.
+func (r *syncWriteResult) request(mediaItemIDs []string, responseHasNotFound, responseHasErrors bool) {
+	for _, id := range mediaItemIDs {
+		switch {
+		case id == "":
+		case responseHasErrors:
+			r.failed[id] = "MDBList reported errors for the " + r.noun + " in the batch"
+		case !responseHasNotFound:
+			r.sent = append(r.sent, id)
+		case r.removing:
+			r.notFound = append(r.notFound, id)
+		default:
+			r.failed[id] = "MDBList did not accept one or more " + r.noun + " in the batch"
+		}
+	}
+}
+
+func (r *syncWriteResult) exportResult() watchsync.ExportResult {
+	result := watchsync.ExportResult{Sent: r.sent, NotFound: r.notFound, Failed: r.failed}
 	if len(result.Failed) == 0 {
 		result.Failed = nil
 	}
@@ -1194,33 +1235,32 @@ func watchedPlaySupported(play watchsync.LocalPlay) bool {
 func buildWatchlistPayload(favorites []watchsync.LocalFavorite) mdblistWatchlistPayload {
 	var payload mdblistWatchlistPayload
 	for _, fav := range favorites {
-		ids := idsFromLocal(fav.IMDbID, fav.TMDBID, fav.TVDBID)
-		if ids == (mdblistIDs{}) {
-			ids = idsFromProviderItemKey(fav.ProviderItemKey)
-		}
-		if ids == (mdblistIDs{}) {
+		ids, ok := listItemIDs(fav)
+		if !ok {
 			continue
 		}
 		ref := mdblistWatchlistRef{IDs: ids}
-		switch fav.Kind {
-		case historyimport.KindMovie:
+		if fav.Kind == historyimport.KindMovie {
 			payload.Movies = append(payload.Movies, ref)
-		case historyimport.KindSeries:
+		} else {
 			payload.Shows = append(payload.Shows, ref)
 		}
 	}
 	return payload
 }
 
-func watchlistFavoriteSupported(fav watchsync.LocalFavorite) bool {
+// listItemIDs returns the ids that identify a movie or series in a watchlist
+// or rating write: its external ids, or else the id in its provider item key.
+// It reports false for any other kind and for an item with no id.
+func listItemIDs(fav watchsync.LocalFavorite) (mdblistIDs, bool) {
 	if fav.Kind != historyimport.KindMovie && fav.Kind != historyimport.KindSeries {
-		return false
+		return mdblistIDs{}, false
 	}
 	ids := idsFromLocal(fav.IMDbID, fav.TMDBID, fav.TVDBID)
 	if ids == (mdblistIDs{}) {
 		ids = idsFromProviderItemKey(fav.ProviderItemKey)
 	}
-	return ids != (mdblistIDs{})
+	return ids, ids != (mdblistIDs{})
 }
 
 func buildScrobblePayload(event watchsync.ScrobbleEvent) map[string]any {

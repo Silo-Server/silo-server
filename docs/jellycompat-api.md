@@ -8,6 +8,10 @@ API changes, and 12.1 is a bug-fix release with the same OpenAPI surface.
 `/System/Info` and `/System/Info/Public` report the configured emulated
 version, `12.1.0` on new installs.
 
+`/System/Info` also returns `CastReceiverApplications: []`. Silo does not
+advertise Chromecast receiver applications; the empty array lets Jellyfin Web
+initialize playback preferences without attempting to iterate a missing field.
+
 The route inventory is maintained in
 `internal/jellycompat/testdata/media_routes.txt`. `internal/jellycompat/router.go`
 owns registration; the native `/api/v1` contract is separate.

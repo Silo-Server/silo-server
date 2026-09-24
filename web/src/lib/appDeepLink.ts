@@ -7,7 +7,8 @@
  * `silo://invite?server=<url>&token=<token>` (see silo-android
  * InviteClaimRouteParser.kt and its navDeepLink) — this module emits that
  * exact contract, with `server` carrying the full origin so non-443 ports
- * and plain-http LAN servers need no extra convention.
+ * and plain-http LAN servers need no extra convention. Watch Party joins use
+ * the same shape under the `watch-party` host.
  *
  * Custom-scheme URLs don't linkify in email or SMS and error when the app
  * is missing, so they are never sent anywhere: they only back an explicit
@@ -30,6 +31,19 @@ export function detectMobilePlatform(ua: string): MobilePlatform | null {
  * Returns null for origins the apps can't talk to (non-http(s), userinfo).
  */
 export function buildInviteDeepLink(pageOrigin: string, token: string): string | null {
+  return buildServerDeepLink("invite", pageOrigin, token);
+}
+
+/**
+ * Builds the silo:// deep link that joins a Watch Party by its invite token:
+ * `silo://watch-party?server=<url>&token=<token>`. The Apple app registers it
+ * (silo-apple#412); Android does not yet. Same origin rules as invites.
+ */
+export function buildWatchPartyDeepLink(pageOrigin: string, token: string): string | null {
+  return buildServerDeepLink("watch-party", pageOrigin, token);
+}
+
+function buildServerDeepLink(host: string, pageOrigin: string, token: string): string | null {
   let origin: URL;
   try {
     origin = new URL(pageOrigin);
@@ -38,6 +52,7 @@ export function buildInviteDeepLink(pageOrigin: string, token: string): string |
   }
   if (origin.username || origin.password) return null;
   if (origin.protocol !== "https:" && origin.protocol !== "http:") return null;
+  if (!token) return null;
   const server = encodeURIComponent(origin.origin);
-  return `silo://invite?server=${server}&token=${encodeURIComponent(token)}`;
+  return `silo://${host}?server=${server}&token=${encodeURIComponent(token)}`;
 }

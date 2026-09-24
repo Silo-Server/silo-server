@@ -29,8 +29,10 @@ const (
 	// plexMetadataBatchSize caps how many rating keys one /library/metadata/{a,b,c}
 	// request carries. The PMS accepts comma-separated keys; batching keeps a
 	// history sweep of thousands of id-less items to a handful of requests under
-	// the shared upstream rate limit.
-	plexMetadataBatchSize = 50
+	// the shared upstream rate limit. Full movie metadata is heavy: on a loaded
+	// PMS 1.43 server a cold batch of 50 movies took over 40s, past the client
+	// timeout, so batches stay small enough to finish well inside it.
+	plexMetadataBatchSize = 20
 )
 
 type PlexClient struct {
@@ -248,22 +250,31 @@ func (c *PlexClient) FetchLibrarySections(ctx context.Context, baseURL, token st
 	return sections, nil
 }
 
+// FetchWatchedItems lists the section items the token's user has played at
+// least once, including items marked watched without playback.
 func (c *PlexClient) FetchWatchedItems(ctx context.Context, baseURL, token, sectionKey string, mediaType int) ([]PlexItem, error) {
-	return c.fetchSectionItems(ctx, baseURL, token, sectionKey, mediaType, true)
+	return c.fetchSectionItems(ctx, baseURL, token, sectionKey, mediaType, "unwatched", "0")
+}
+
+// FetchInProgressItems lists the section items with a saved resume position.
+// Unlike /library/onDeck it has no Continue Watching age window and never
+// adds unstarted next-up episodes.
+func (c *PlexClient) FetchInProgressItems(ctx context.Context, baseURL, token, sectionKey string, mediaType int) ([]PlexItem, error) {
+	return c.fetchSectionItems(ctx, baseURL, token, sectionKey, mediaType, "inProgress", "1")
 }
 
 func (c *PlexClient) FetchSectionItems(ctx context.Context, baseURL, token, sectionKey string, mediaType int) ([]PlexItem, error) {
-	return c.fetchSectionItems(ctx, baseURL, token, sectionKey, mediaType, false)
+	return c.fetchSectionItems(ctx, baseURL, token, sectionKey, mediaType, "", "")
 }
 
-func (c *PlexClient) fetchSectionItems(ctx context.Context, baseURL, token, sectionKey string, mediaType int, watchedOnly bool) ([]PlexItem, error) {
+func (c *PlexClient) fetchSectionItems(ctx context.Context, baseURL, token, sectionKey string, mediaType int, filterKey, filterValue string) ([]PlexItem, error) {
 	var allItems []PlexItem
 	offset := 0
 	for {
 		query := url.Values{}
 		query.Set("type", strconv.Itoa(mediaType))
-		if watchedOnly {
-			query.Set("unwatched", "0")
+		if filterKey != "" {
+			query.Set(filterKey, filterValue)
 		}
 		query.Set("includeGuids", "1")
 		query.Set("X-Plex-Container-Start", strconv.Itoa(offset))
@@ -373,19 +384,6 @@ func (c *PlexClient) fetchWatchlistItemMetadata(ctx context.Context, base, accou
 		return nil, nil
 	}
 	return &items[0], nil
-}
-
-func (c *PlexClient) FetchOnDeck(ctx context.Context, baseURL, token string) ([]PlexItem, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/library/onDeck?includeGuids=1", nil)
-	if err != nil {
-		return nil, err
-	}
-	c.setPlexHeaders(req, token)
-	var container plexMediaContainer
-	if err := c.doJSON(req, &container); err != nil {
-		return nil, fmt.Errorf("fetching Plex on-deck items: %w", err)
-	}
-	return container.MediaContainer.Metadata, nil
 }
 
 func (c *PlexClient) FetchMetadata(ctx context.Context, baseURL, token, ratingKey string) (*PlexItem, error) {
@@ -532,12 +530,15 @@ func (c *PlexClient) ListAccounts(ctx context.Context, baseURL, token string) ([
 
 // PlexHistoryItem is a single entry from the PMS session history endpoint.
 // It shares fields with plexItem but comes from the history API rather than the library API.
+// History rows are sparse: PMS 1.43 sends no Guid, year, duration, or
+// grandparentRatingKey, only grandparentKey (/library/metadata/{key}).
 type PlexHistoryItem struct {
 	RatingKey            string    `json:"ratingKey"`
 	Key                  string    `json:"key"`
 	Type                 string    `json:"type"`
 	Title                string    `json:"title"`
 	GrandparentTitle     string    `json:"grandparentTitle"`
+	GrandparentKey       string    `json:"grandparentKey"`
 	GrandparentRatingKey string    `json:"grandparentRatingKey"`
 	ParentIndex          int       `json:"parentIndex"`
 	Index                int       `json:"index"`
@@ -576,6 +577,12 @@ func (c *PlexClient) FetchUserHistory(ctx context.Context, baseURL, token, accou
 		if err := c.doJSON(req, &container); err != nil {
 			return nil, fmt.Errorf("fetching Plex user history (account %s, offset %d): %w", accountID, offset, err)
 		}
+		for i := range container.MediaContainer.Metadata {
+			item := &container.MediaContainer.Metadata[i]
+			if item.GrandparentRatingKey == "" {
+				item.GrandparentRatingKey = plexRatingKeyFromMetadataPath(item.GrandparentKey)
+			}
+		}
 		allItems = append(allItems, container.MediaContainer.Metadata...)
 		offset += len(container.MediaContainer.Metadata)
 		if offset >= container.MediaContainer.TotalSize || len(container.MediaContainer.Metadata) == 0 {
@@ -583,6 +590,16 @@ func (c *PlexClient) FetchUserHistory(ctx context.Context, baseURL, token, accou
 		}
 	}
 	return allItems, nil
+}
+
+// plexRatingKeyFromMetadataPath returns the rating key of a PMS metadata path
+// such as "/library/metadata/4000", or "" for any other shape.
+func plexRatingKeyFromMetadataPath(path string) string {
+	key, ok := strings.CutPrefix(path, "/library/metadata/")
+	if !ok || key == "" || strings.Contains(key, "/") {
+		return ""
+	}
+	return key
 }
 
 func (c *PlexClient) Scrobble(ctx context.Context, baseURL, token, ratingKey string) error {
