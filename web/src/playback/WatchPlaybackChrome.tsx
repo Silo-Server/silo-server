@@ -65,6 +65,7 @@ import {
   type WatchRouteRequest,
 } from "@/pages/watchRouteHelpers";
 import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
+import { markPlaybackIntent } from "@/player/first-frame";
 
 const WatchPage = lazy(() =>
   import("@/player/components/WatchPage").then((module) => ({ default: module.WatchPage })),
@@ -251,6 +252,10 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
   const startPlayback = useCallback(
     (input: WatchPlaybackStartInput | WatchRouteRequest) => {
       const request = normalizeWatchPlaybackRequest(input);
+      // Press-play-to-first-frame starts here, before any navigation or
+      // Picture-in-Picture exit the viewer also waits for. The route rebuilds
+      // the same request key, so the player's session can claim the mark.
+      markPlaybackIntent(request.requestKey);
       const current = stateRef.current;
       const currentRequestKey = current.request?.requestKey ?? null;
       const hasActivePictureInPicture =

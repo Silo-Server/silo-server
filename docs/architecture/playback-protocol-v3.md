@@ -1085,6 +1085,13 @@ every value is truncated to 256 characters.
 `network_metered`, `network_validated`, `bandwidth_estimate_kbps`,
 `link_downstream_kbps`, `target_source_position_seconds`, `reason`.
 
+On a `first_frame` event, `first_frame_ms` is the whole milliseconds from the
+viewer's request to play (the tap, or the in-player action that started the
+attempt) to the first frame on screen. A client that cannot time the request
+omits the key and still sends the event. The server derives
+`silo_playback_first_frame_seconds` from it; see
+[observability](observability.md#client-experience-and-plugin-coordination).
+
 ---
 
 ## 8. Track identity and the subtitle ordinal space

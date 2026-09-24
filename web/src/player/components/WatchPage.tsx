@@ -652,6 +652,7 @@ function WatchPagePlayer({
       onPlaybackStateChange={handlePlaybackStateChange}
       onPlaybackTransportReady={onPlaybackTransportReady}
       seekIntervals={seekIntervals}
+      onFirstFrame={session.reportFirstFrame}
       onRealtimeEvent={handleRealtimeEvent}
       onRealtimeConnectionStateChange={setRealtimeConnectionState}
       onExit={onExit}

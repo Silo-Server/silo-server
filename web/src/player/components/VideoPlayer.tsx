@@ -220,6 +220,8 @@ interface VideoPlayerProps {
   autoEnterPictureInPicture?: boolean;
   onPlaybackStateChange?: (state: PlayerPlaybackStateChange) => void;
   onPlaybackTransportReady?: (transport: PlayerPlaybackTransport | null) => void;
+  /** Called each time a newly loaded transport shows its first frame. */
+  onFirstFrame?: () => void;
   onReturnFromPostRoll?: () => void;
   onRealtimeEvent?: (event: PlaybackRealtimeEventEnvelope) => void;
   onRealtimeConnectionStateChange?: (state: "disconnected" | "connecting" | "connected") => void;
@@ -368,6 +370,7 @@ export function VideoPlayer({
   autoEnterPictureInPicture = false,
   onPlaybackStateChange,
   onPlaybackTransportReady,
+  onFirstFrame,
   onReturnFromPostRoll,
   onRealtimeEvent,
   onRealtimeConnectionStateChange,
@@ -1551,6 +1554,19 @@ export function VideoPlayer({
   useEffect(() => {
     onEndedRef.current = onEnded;
   }, [onEnded]);
+
+  const onFirstFrameRef = useRef(onFirstFrame);
+  useEffect(() => {
+    onFirstFrameRef.current = onFirstFrame;
+  }, [onFirstFrame]);
+
+  // Every transport starts out awaiting its first frame, and the flag clears
+  // on the event that proves a frame is on screen: `playing`, a `timeupdate`,
+  // the seek that lands the start position, or a deliberately paused start.
+  // The loading overlay goes with it, so this is when the viewer sees video.
+  useEffect(() => {
+    if (!awaitingFirstFrame) onFirstFrameRef.current?.();
+  }, [awaitingFirstFrame]);
 
   useEffect(() => {
     const video = videoRef.current;

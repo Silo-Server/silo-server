@@ -104,6 +104,7 @@ function playbackSession(
     refreshSubtitles: vi.fn(),
     applySubtitleTrack: vi.fn(),
     updatePlaybackState: vi.fn(),
+    reportFirstFrame: vi.fn(),
     reportEvent: vi.fn(),
     ...overrides,
   };

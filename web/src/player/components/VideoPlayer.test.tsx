@@ -2431,6 +2431,40 @@ describe("VideoPlayer plan failure recovery", () => {
   });
 });
 
+describe("VideoPlayer first frame", () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("reports the first frame of each transport once", async () => {
+    const onFirstFrame = vi.fn();
+    const { container, rerenderPlayer } = renderPlayer({ onFirstFrame });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    expect(onFirstFrame).not.toHaveBeenCalled();
+
+    fireEvent.playing(video);
+    fireEvent.timeUpdate(video);
+    fireEvent.timeUpdate(video);
+    expect(onFirstFrame).toHaveBeenCalledTimes(1);
+
+    // A replan loads a new transport, which has a first frame of its own.
+    rerenderPlayer({ planRevision: 2 });
+    expect(onFirstFrame).toHaveBeenCalledTimes(1);
+    fireEvent.playing(video);
+    expect(onFirstFrame).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("VideoPlayer intro skip prompt", () => {
   beforeEach(() => {
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
