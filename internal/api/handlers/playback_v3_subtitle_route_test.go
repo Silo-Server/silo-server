@@ -372,3 +372,32 @@ func TestLegacyAttemptWithStoredSubripTokenKeepsWebVTT(t *testing.T) {
 		}
 	}
 }
+
+// A terminal start publishes no subtitle URLs, so an identical opted-in retry
+// through /api/v2 replays it instead of failing the surface check.
+func TestV2RetryReplaysATerminalStartWithSubripSidecar(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	startRequest := v3HandlerStartRequest()
+	startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureSubripSidecarV3)
+	// A track identity for another file makes the start terminal.
+	startRequest.SubtitleTrackID = playback.TrackIDV3(file.ID+1, "subtitle", 0)
+	body := marshalV3StartRequest(t, startRequest)
+	start := func() (*httptest.ResponseRecorder, playback.DecisionResponseV3) {
+		rr := httptest.NewRecorder()
+		handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(body)).WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext())))
+		var response playback.DecisionResponseV3
+		_ = json.Unmarshal(rr.Body.Bytes(), &response)
+		return rr, response
+	}
+	firstRR, first := start()
+	if first.Terminal == nil {
+		t.Fatalf("expected a terminal start, got %d %s", firstRR.Code, firstRR.Body.String())
+	}
+	retryRR, retry := start()
+	if retryRR.Code != firstRR.Code || retry.Terminal == nil || retry.Terminal.Reason != first.Terminal.Reason {
+		t.Fatalf("terminal retry = %d %s, want a replay of %d", retryRR.Code, retryRR.Body.String(), firstRR.Code)
+	}
+}
