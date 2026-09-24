@@ -644,6 +644,25 @@ func (r *Repository) UpdateManagedStatus(ctx context.Context, id string, userID 
 	return nil
 }
 
+// deleteManagedSQL is DeleteManaged's statement: it returns the number of rows
+// deleted. Tests run it inside an open transaction to hold a delete between its
+// statement and its commit.
+const deleteManagedSQL = `WITH deleted AS (
+	DELETE FROM downloads WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4
+	RETURNING content_id, episode_id
+), monitor AS (
+	SELECT s.id, d.episode_id FROM deleted d
+	JOIN download_subscriptions s
+	  ON s.user_id = $2 AND s.profile_id = $3 AND s.device_id = $4 AND s.series_id = d.content_id
+	WHERE d.episode_id IS NOT NULL
+	FOR KEY SHARE OF s
+), excluded AS (
+	INSERT INTO download_subscription_exclusions (subscription_id, episode_id)
+	SELECT id, episode_id FROM monitor
+	ON CONFLICT DO NOTHING
+)
+SELECT count(*) FROM deleted`
+
 // DeleteManaged removes a managed entry, authorized on (user, profile, device).
 // Deleting an episode of a series this device monitors also records a monitor
 // exclusion in the same statement, so later syncs do not register the episode
@@ -660,24 +679,7 @@ func (r *Repository) UpdateManagedStatus(ctx context.Context, id string, userID 
 // which a retry resolves. Returns ErrNotFound when nothing matches.
 func (r *Repository) DeleteManaged(ctx context.Context, id string, userID int, profileID, deviceID string) error {
 	var deleted int
-	err := r.pool.QueryRow(ctx,
-		`WITH deleted AS (
-			DELETE FROM downloads WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4
-			RETURNING content_id, episode_id
-		), monitor AS (
-			SELECT s.id, d.episode_id FROM deleted d
-			JOIN download_subscriptions s
-			  ON s.user_id = $2 AND s.profile_id = $3 AND s.device_id = $4 AND s.series_id = d.content_id
-			WHERE d.episode_id IS NOT NULL
-			FOR KEY SHARE OF s
-		), excluded AS (
-			INSERT INTO download_subscription_exclusions (subscription_id, episode_id)
-			SELECT id, episode_id FROM monitor
-			ON CONFLICT DO NOTHING
-		)
-		SELECT count(*) FROM deleted`,
-		id, userID, profileID, deviceID,
-	).Scan(&deleted)
+	err := r.pool.QueryRow(ctx, deleteManagedSQL, id, userID, profileID, deviceID).Scan(&deleted)
 	if err != nil {
 		return fmt.Errorf("deleting managed download: %w", err)
 	}
@@ -689,17 +691,37 @@ func (r *Repository) DeleteManaged(ctx context.Context, id string, userID int, p
 
 // ClearMonitorExclusions forgets the device's monitor exclusions for episodes
 // of seriesID that the user downloaded explicitly: an explicit download
-// overrides the earlier delete.
+// overrides the earlier delete. It runs after the download commits, so it
+// forgets an episode only while the device still holds the episode's row. A
+// delete that removed the row in between came after the download, so its
+// exclusion stays. The row is locked FOR KEY SHARE SKIP LOCKED: a delete that
+// has run its statement but not committed still holds the row, and a plain
+// read would see the row and erase that delete's exclusion. The exclusion is
+// locked FOR UPDATE SKIP LOCKED. The clear is best-effort cleanup after the
+// download succeeded, so it never makes the download wait on another
+// transaction's row lock, such as a delete of the row that is itself waiting
+// on the monitor behind a sync. A skipped row or exclusion keeps the
+// exclusion, the direction forgetMonitorDeletes already tolerates.
 func (r *Repository) ClearMonitorExclusions(ctx context.Context, userID int, profileID, deviceID, seriesID string, episodeIDs []string) error {
 	if profileID == "" || deviceID == "" || len(episodeIDs) == 0 {
 		return nil
 	}
 	_, err := r.pool.Exec(ctx,
-		`DELETE FROM download_subscription_exclusions x
-		 USING download_subscriptions s
-		 WHERE x.subscription_id = s.id
-		   AND s.user_id = $1 AND s.profile_id = $2 AND s.device_id = $3 AND s.series_id = $4
-		   AND x.episode_id = ANY($5)`,
+		`WITH forgotten AS (
+			SELECT x.subscription_id, x.episode_id
+			FROM download_subscription_exclusions x
+			JOIN download_subscriptions s ON s.id = x.subscription_id
+			WHERE s.user_id = $1 AND s.profile_id = $2 AND s.device_id = $3 AND s.series_id = $4
+			  AND x.episode_id = ANY($5)
+			  AND EXISTS (
+			        SELECT 1 FROM downloads d
+			        WHERE d.user_id = $1 AND d.profile_id = $2 AND d.device_id = $3
+			          AND d.content_id = $4 AND COALESCE(d.episode_id, '') = x.episode_id
+			        FOR KEY SHARE SKIP LOCKED)
+			FOR UPDATE OF x SKIP LOCKED
+		)
+		DELETE FROM download_subscription_exclusions x USING forgotten f
+		WHERE x.subscription_id = f.subscription_id AND x.episode_id = f.episode_id`,
 		userID, profileID, deviceID, seriesID, episodeIDs,
 	)
 	if err != nil {

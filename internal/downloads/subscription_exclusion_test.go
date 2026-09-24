@@ -519,6 +519,122 @@ func TestManagedDeleteRacingMonitorRemovalPostgres(t *testing.T) {
 	})
 }
 
+// TestExplicitDownloadRacingDeletePostgres: an explicit download of a deleted
+// episode registers the row, then clears the episode's exclusion in a separate
+// statement. A delete of the new row that lands in between, whether committed
+// before the clear or run but not yet committed, keeps its exclusion, so the
+// next sync does not bring the episode back. The clear never waits on another
+// transaction's row lock.
+func TestExplicitDownloadRacingDeletePostgres(t *testing.T) {
+	ctx := context.Background()
+	// registered leaves the fixture where an explicit re-download stands
+	// before its clear: the episode is registered again and the earlier
+	// delete's exclusion is still recorded.
+	registered := func(t *testing.T) (monitorFixture, *Download) {
+		t.Helper()
+		fx := seedMonitorFixture(t, 0, false)
+		if n := fx.sync(t); n != 3 {
+			t.Fatalf("first sync registered %d, want 3", n)
+		}
+		fx.deleteEpisode(t, fx.episodes[0])
+		files := &monitorFileResolver{fileID: fx.fileID, seriesID: fx.seriesID}
+		req := CreateRequest{ContentID: fx.seriesID, EpisodeID: fx.episodes[0], ProfileID: fx.profileA, DeviceID: fx.deviceA}
+		item := managedItem{file: files.file(fx.episodes[0]), contentID: fx.seriesID, episodeID: fx.episodes[0]}
+		rows, err := fx.svc.ensureManaged(ctx, fx.userID, req, []managedItem{item}, originalDecision(), "")
+		if err != nil {
+			t.Fatalf("explicit re-download: %v", err)
+		}
+		if n := fx.exclusions(t); n != 1 {
+			t.Fatalf("exclusions before the clear = %d, want 1", n)
+		}
+		return fx, rows[0]
+	}
+	// forget runs the clear with a deadline, so a clear that waits on the
+	// test's open transaction fails instead of hanging the test.
+	forget := func(fx monitorFixture) error {
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		return fx.repo.ClearMonitorExclusions(ctx, fx.userID, fx.profileA, fx.deviceA, fx.seriesID, fx.episodes[:1])
+	}
+	stillDeleted := func(t *testing.T, fx monitorFixture) {
+		t.Helper()
+		if fx.entry(t, fx.episodes[0]) != nil {
+			t.Fatal("managed row survived its delete")
+		}
+		if n := fx.exclusions(t); n != 1 {
+			t.Fatalf("exclusions after the clear = %d, want the delete's 1", n)
+		}
+		if n := fx.sync(t); n != 0 {
+			t.Fatalf("sync after the delete registered %d, want 0", n)
+		}
+	}
+
+	t.Run("delete committed first", func(t *testing.T) {
+		fx, row := registered(t)
+		if err := fx.svc.Delete(ctx, fx.userID, fx.profileA, fx.deviceA, row.ID); err != nil {
+			t.Fatalf("delete: %v", err)
+		}
+		if err := forget(fx); err != nil {
+			t.Fatalf("clear: %v", err)
+		}
+		stillDeleted(t, fx)
+	})
+
+	t.Run("delete not yet committed", func(t *testing.T) {
+		fx, row := registered(t)
+		// DeleteManaged's statement has run: the row is gone and its
+		// exclusion insert found the earlier exclusion and did nothing, so
+		// the delete holds the row but not the exclusion. The clear still
+		// sees the row in its snapshot and must not act on it.
+		tx, err := fx.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		var deleted int
+		if err := tx.QueryRow(ctx, deleteManagedSQL, row.ID, fx.userID, fx.profileA, fx.deviceA).Scan(&deleted); err != nil {
+			t.Fatalf("delete: %v", err)
+		}
+		if deleted != 1 {
+			t.Fatalf("delete removed %d rows, want 1", deleted)
+		}
+		if err := forget(fx); err != nil {
+			t.Fatalf("clear during the uncommitted delete: %v", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatalf("commit delete: %v", err)
+		}
+		stillDeleted(t, fx)
+	})
+
+	t.Run("monitor removal not yet committed", func(t *testing.T) {
+		fx, _ := registered(t)
+		// Removing the monitor (Mutate's DELETE) cascades to its exclusions
+		// and holds them locked until it commits. The clear must not wait on
+		// them; the removal drops the exclusion either way.
+		tx, err := fx.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, `DELETE FROM download_subscriptions WHERE id=$1`, fx.monitor.ID); err != nil {
+			t.Fatalf("remove monitor: %v", err)
+		}
+		if err := forget(fx); err != nil {
+			t.Fatalf("clear during the monitor removal: %v", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatalf("commit monitor removal: %v", err)
+		}
+		if fx.entry(t, fx.episodes[0]) == nil {
+			t.Fatal("monitor removal deleted the explicit download")
+		}
+		if n := fx.exclusions(t); n != 0 {
+			t.Fatalf("exclusions after the monitor removal = %d, want 0", n)
+		}
+	})
+}
+
 type chunkedProgressStore struct {
 	userstore.UserStore
 	completed map[string]bool
