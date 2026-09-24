@@ -2,6 +2,18 @@ package telemetry
 
 import "strings"
 
+// ClientLabelName is the metric label that carries a ClientLabel family.
+const ClientLabelName = "client"
+
+// The client families, the only values ClientLabel returns.
+const (
+	clientNone    = "none"
+	clientWeb     = "web"
+	clientApple   = "apple"
+	clientAndroid = "android"
+	clientOther   = "other"
+)
+
 // ClientLabel maps only recognized first-party product names into the fixed
 // client families used as the `client` metric label: web, apple, android,
 // other, or none for a nameless client. Arbitrary self-reported names cannot
@@ -10,14 +22,14 @@ import "strings"
 func ClientLabel(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "":
-		return "none"
+		return clientNone
 	case "silo web":
-		return "web"
+		return clientWeb
 	case "silo apple", "silo apple tv", "silo ios", "silo tvos", "silo macos", "silo ipados":
-		return "apple"
+		return clientApple
 	case "silo android", "silo android tv":
-		return "android"
+		return clientAndroid
 	default:
-		return "other"
+		return clientOther
 	}
 }

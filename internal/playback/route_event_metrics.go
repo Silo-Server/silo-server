@@ -22,7 +22,7 @@ var firstFrameSeconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 	Name:    "silo_playback_first_frame_seconds",
 	Help:    "Client-reported time from pressing play to the first rendered frame, by client family.",
 	Buckets: []float64{0.1, 0.25, 0.5, 1, 1.5, 2, 3, 5, 8, 13, 20, 30, 60},
-}, []string{"client"})
+}, []string{telemetry.ClientLabelName})
 
 // ObserveStoredRouteEvent feeds the metrics derived from a route event. Call
 // it only for a row the store has just inserted: a v2 retry reuses its
