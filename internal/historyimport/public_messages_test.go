@@ -151,3 +151,30 @@ func TestHiddenHistoryWarningStaysCurrentDuringARun(t *testing.T) {
 		t.Errorf("warnings = %q, want the two unrelated entries kept", warnings)
 	}
 }
+
+// Only the first maxStoredWarnings entries are persisted. A run noisy enough to
+// fill that cap is exactly the one whose skipped tally needs explaining, so the
+// aggregate has to survive the trim.
+func TestHiddenHistoryWarningSurvivesTheStoredWarningCap(t *testing.T) {
+	t.Parallel()
+
+	summary := ExecutionSummary{}
+	for i := range maxStoredWarnings {
+		summary.Warnings = append(summary.Warnings, fmt.Sprintf("an earlier diagnostic %d", i))
+	}
+	index := -1
+	summary.Warnings, index = upsertHiddenHistoryWarning(summary.Warnings, index, 1)
+	summary.Warnings, _ = upsertHiddenHistoryWarning(summary.Warnings, index, 2)
+
+	stored := trimWarnings(persistedWarnings(summary))
+	found := false
+	for _, warning := range stored {
+		if warning == hiddenHistoryWarning(2) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the hidden-history warning was trimmed away; stored %d of %d warnings",
+			len(stored), len(summary.Warnings))
+	}
+}
