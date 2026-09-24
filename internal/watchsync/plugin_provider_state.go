@@ -163,7 +163,12 @@ func (p *PluginProvider) FetchRatings(
 	}
 	droppedRating := false
 	for _, state := range traversal.items {
+		// A RATING traversal must return rating state only. A missing item or
+		// rating payload may hide a title that is still rated, so it is
+		// unreadable like a malformed rating.
 		if state.GetRating() == nil {
+			batch.Warnings = append(batch.Warnings, "watch sync plugin returned remote state without a rating")
+			droppedRating = true
 			continue
 		}
 		row, err := remoteRatingFromProto(p.Key(), state)

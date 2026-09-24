@@ -1455,10 +1455,8 @@ func TestPluginProviderDecodesRatingSnapshot(t *testing.T) {
 		Items: []*pluginv1.WatchSyncRemoteState{
 			remoteRatingState("m1", pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE, "tt1", 8, timestamppb.New(ratedAt)),
 			remoteRatingState("s1", pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES, "tt2", 7, nil),
-			// Silo does not sync episode ratings, and a state without rating
-			// data is not a rating.
+			// Silo does not sync episode ratings.
 			remoteRatingState("e1", pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE, "tt3", 9, nil),
-			{ProviderItemKey: "f1", Favorite: &pluginv1.WatchSyncRemoteListState{}},
 		},
 	}}
 	provider := testPluginProviderWithDescriptor(t, client, ratingTestDescriptor(
@@ -1612,6 +1610,16 @@ func TestPluginProviderRatingSnapshotWithUnreadableRatingCoversNoKind(t *testing
 			name: "out of range", complete: true,
 			bad:      remoteRatingState("x", pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE, "tt2", 11, nil),
 			wantWarn: []string{"watch sync plugin returned an out-of-range rating 11", watchSyncIncompleteRatingSnapshotWarning},
+		},
+		{
+			name: "missing rating payload", complete: true,
+			bad:      &pluginv1.WatchSyncRemoteState{ProviderItemKey: "x"},
+			wantWarn: []string{"watch sync plugin returned remote state without a rating", watchSyncIncompleteRatingSnapshotWarning},
+		},
+		{
+			name: "nil item", complete: true,
+			bad:      nil,
+			wantWarn: []string{"watch sync plugin returned remote state without a rating", watchSyncIncompleteRatingSnapshotWarning},
 		},
 		{
 			name: "bad tombstone keeps the snapshot", complete: true,
