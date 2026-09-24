@@ -243,6 +243,15 @@ export interface PlayerPlaybackTransport {
   togglePictureInPicture: () => void | Promise<void>;
 }
 
+/**
+ * What started a playback. `viewer`: the viewer asked for it here, with a Play
+ * button, a card, an episode pick or the next-episode prompt's Play Now.
+ * `automatic`: the app started it on its own, for a Watch Party selection, an
+ * autoplay countdown or the next part of a multi-part file. Only a viewer's
+ * start times `first_frame_ms`; an automatic one still reports `first_frame`.
+ */
+export type PlaybackStartTrigger = "viewer" | "automatic";
+
 /** Props for the top-level WatchPage component. */
 export interface WatchPageProps {
   contentId: string;
@@ -282,7 +291,7 @@ export interface WatchPageProps {
   autoPlayNextPreview?: boolean;
   canEditMarkers?: boolean;
   seriesContext?: SeriesContext;
-  onNavigateEpisode?: (contentId: string) => void;
+  onNavigateEpisode?: (contentId: string, trigger: PlaybackStartTrigger) => void;
   onEnded?: (state?: PlaybackExitState) => void | Promise<void>;
   onExit: (state?: PlaybackExitState) => void | Promise<void>;
   onMinimize?: (state?: PlaybackExitState) => void | Promise<void>;

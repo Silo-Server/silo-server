@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -26,8 +25,9 @@ func (r *ItemRepository) GetSearchItemsByIDsWithAccess(
 	mediaConditions := []string{"hydrated_mi.content_id = ANY($1)"}
 	appendLibraryAccessConditions("hydrated_mi.content_id", filter, &mediaConditions, &args, &argIdx)
 	applyAccessFilter("hydrated_mi", AccessFilter{
-		MaxContentRating:   filter.MaxContentRating,
-		ExcludedMediaTypes: filter.ExcludedMediaTypes,
+		MaxContentRating:    filter.MaxContentRating,
+		AllowUnratedContent: filter.AllowUnratedContent,
+		ExcludedMediaTypes:  filter.ExcludedMediaTypes,
 	}, &mediaConditions, &args, &argIdx)
 
 	episodeConditions := []string{"mi.content_id = ANY($1)"}
@@ -40,8 +40,9 @@ func (r *ItemRepository) GetSearchItemsByIDsWithAccess(
 		&argIdx,
 	)
 	applyAccessFilter("mi", AccessFilter{
-		MaxContentRating:   filter.MaxContentRating,
-		ExcludedMediaTypes: filter.ExcludedMediaTypes,
+		MaxContentRating:    filter.MaxContentRating,
+		AllowUnratedContent: filter.AllowUnratedContent,
+		ExcludedMediaTypes:  filter.ExcludedMediaTypes,
 	}, &episodeConditions, &args, &argIdx)
 
 	query := fmt.Sprintf(`
@@ -128,8 +129,9 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 		}
 		appendLibraryAccessConditions("mi.content_id", filter, &mediaConditions, &args, &argIdx)
 		applyAccessFilter("mi", AccessFilter{
-			MaxContentRating:   filter.MaxContentRating,
-			ExcludedMediaTypes: filter.ExcludedMediaTypes,
+			MaxContentRating:    filter.MaxContentRating,
+			AllowUnratedContent: filter.AllowUnratedContent,
+			ExcludedMediaTypes:  filter.ExcludedMediaTypes,
 		}, &mediaConditions, &args, &argIdx)
 		mediaConditions = append(mediaConditions, MangaChapterExclusionWhere("mi"))
 	}
@@ -140,16 +142,10 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 			"si.type = 'series'",
 		)
 		appendEpisodeCatalogSearchAccess("ece", filter, &episodeConditions, &args, &argIdx)
-		if filter.MaxContentRating != "" {
-			allowedRatings := access.AllowedRatingsUpTo(filter.MaxContentRating)
-			if len(allowedRatings) == 0 {
-				episodeConditions = append(episodeConditions, "1 = 0")
-			} else {
-				episodeConditions = append(episodeConditions, fmt.Sprintf("ece.content_rating = ANY($%d)", argIdx))
-				args = append(args, allowedRatings)
-				argIdx++
-			}
-		}
+		ApplyContentRatingCeiling("ece", AccessFilter{
+			MaxContentRating:    filter.MaxContentRating,
+			AllowUnratedContent: filter.AllowUnratedContent,
+		}, &episodeConditions, &args, &argIdx)
 		if len(filter.ExcludedMediaTypes) > 0 {
 			episodeConditions = append(episodeConditions, fmt.Sprintf("NOT ('episode' = ANY($%d))", argIdx))
 			args = append(args, filter.ExcludedMediaTypes)

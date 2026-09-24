@@ -415,7 +415,7 @@ func (reg *Registry) playbackCaller(ctx context.Context, headers PlaybackRequest
 	if !playbackUUID(string(installation)) {
 		return handlers.PlaybackCaller{}, validationProblem("body.installation_id", "invalid", "Expected the installation identifier from capabilities.")
 	}
-	return handlers.PlaybackCaller{UserID: userID, ProfileID: profileID, InstallationID: string(installation), DeviceID: headers.DeviceID, UserAgent: headers.UserAgent, ClientName: headers.ClientName, ClientVersion: headers.ClientVersion, ClientBuild: headers.ClientBuild, ClientChannel: headers.ClientChannel, DeviceName: headers.ClientModel, Platform: headers.ClientPlatform, RemoteAddr: clientip.FromContext(ctx)}, nil
+	return handlers.PlaybackCaller{UserID: userID, ProfileID: profileID, InstallationID: string(installation), DeviceID: headers.DeviceID, UserAgent: headers.UserAgent, ClientName: headers.ClientName, ClientVersion: headers.ClientVersion, ClientBuild: headers.ClientBuild, ClientChannel: headers.ClientChannel, SiloClientName: observedClientName(ctx), DeviceName: headers.ClientModel, Platform: headers.ClientPlatform, RemoteAddr: clientip.FromContext(ctx)}, nil
 }
 
 // playbackProblem maps a service error onto the shared problem catalog: the

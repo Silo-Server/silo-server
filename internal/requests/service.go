@@ -140,6 +140,11 @@ func (s *Service) requesterCeiling(ctx context.Context, userID int, profileID st
 // treating a failed lookup as "unrestricted" would leak adult content to a
 // kid profile, and treating it as "restricted" would render every carousel
 // empty with no visible cause.
+//
+// access.unrated_content does not apply here. It governs titles already in
+// the library; a TMDB title with no US certification stays hidden from a
+// ceilinged profile, which is also all the certification.lte push-down can
+// express.
 func (s *Service) viewerContentCeiling(ctx context.Context, viewer Viewer) (string, error) {
 	resolver, ok := s.entitlements.(ContentRatingResolver)
 	if !ok {

@@ -17,6 +17,12 @@ let pendingRefresh: {
   serverOrigin: string;
   promise: Promise<boolean>;
 } | null = null;
+/**
+ * The boot-time restore of a stored session: the first exchange of the
+ * persisted refresh token for an access token. Requests sent while it is in
+ * flight wait for it instead of going out anonymous and coming back 401.
+ */
+let sessionRestore: Promise<boolean> | null = null;
 
 export function setAccessToken(token: string | null) {
   if (accessToken !== token) authContextVersion += 1;
@@ -291,7 +297,13 @@ async function attemptRefresh(): Promise<boolean> {
     ) {
       return false;
     }
-    refreshCurrentAccessToken(data.access_token);
+    if (accessToken === null) {
+      // Nothing to rotate: this exchange establishes the session (the boot
+      // restore), which changes the client's authority the way a login does.
+      setAccessToken(data.access_token);
+    } else {
+      refreshCurrentAccessToken(data.access_token);
+    }
     setRefreshToken(data.refresh_token);
     return true;
   } catch {
@@ -299,27 +311,21 @@ async function attemptRefresh(): Promise<boolean> {
   }
 }
 
-export async function bootstrapAccessToken(fetchImpl: typeof fetch = fetch): Promise<boolean> {
-  if (accessToken) {
-    return true;
-  }
-
-  const rt = getRefreshToken();
-  if (!rt) {
-    return false;
-  }
-
-  try {
-    const data = await refreshAccessToken(rt, fetchImpl);
-    if (!data) {
-      return false;
-    }
-    setAccessToken(data.access_token);
-    setRefreshToken(data.refresh_token);
-    return true;
-  } catch {
-    return false;
-  }
+/**
+ * Restores the stored session at boot; resolves true once an access token is
+ * available. It runs on the refresh single-flight, so a request that meets a
+ * 401 meanwhile joins this exchange instead of spending the refresh token a
+ * second time.
+ */
+export function bootstrapAccessToken(): Promise<boolean> {
+  if (accessToken) return Promise.resolve(true);
+  if (sessionRestore) return sessionRestore;
+  if (!getRefreshToken()) return Promise.resolve(false);
+  const restore = refreshAuthentication().finally(() => {
+    if (sessionRestore === restore) sessionRestore = null;
+  });
+  sessionRestore = restore;
+  return restore;
 }
 
 /** The tokens the v2 refreshSession operation answers with. */
@@ -414,6 +420,11 @@ export async function fetchWithSession(
     (options.headers as Record<string, string> | undefined) ?? {},
     "Authorization",
   );
+  // Wait out a boot-time session restore so the request carries the restored
+  // token. A request that brings its own authority does not depend on it.
+  if (sessionRestore && !accessToken && !explicitAuthorization && !snapshot) {
+    await sessionRestore;
+  }
   const headers = buildApiHeaders(options);
   const requestProfileId = headers["X-Profile-Id"] ?? null;
   const requestProfileToken = headers["X-Profile-Token"] ?? null;

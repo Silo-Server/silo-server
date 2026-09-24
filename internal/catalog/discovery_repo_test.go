@@ -238,12 +238,12 @@ func TestUnplayedHighRated_ContentRatingFilter(t *testing.T) {
 		Filter:    AccessFilter{MaxContentRating: "PG-13"},
 	})
 
-	if !strings.Contains(query, "mi.content_rating = ANY(") {
-		t.Fatalf("expected content_rating = ANY filter, got:\n%s", query)
+	if !strings.Contains(query, "mi.content_rating_age IS NOT NULL AND mi.content_rating_age <= $") {
+		t.Fatalf("expected stored-age ceiling filter, got:\n%s", query)
 	}
-	// args: minRating, userID, profileID, then content rating slice (one arg).
+	// args: minRating, userID, profileID, then the ceiling age (one arg).
 	if len(args) != 4 {
-		t.Fatalf("expected exactly 4 args (minRating, userID, profileID, rating slice); got %d: %v", len(args), args)
+		t.Fatalf("expected exactly 4 args (minRating, userID, profileID, ceiling age); got %d: %v", len(args), args)
 	}
 }
 

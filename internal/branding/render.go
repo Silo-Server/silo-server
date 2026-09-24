@@ -72,12 +72,21 @@ func (s Snapshot) RenderKey() string {
 // file; RenderIndexHTML rewrites it to a custom favicon when one is set.
 const indexFaviconLink = `<link rel="icon" href="/favicon.ico" sizes="any" />`
 
+// Start of the root element in web/index.html. RenderIndexHTML stamps the
+// default theme onto it as data-default-theme.
+const indexHTMLOpen = "<html "
+
 // RenderIndexHTML injects branding into the SPA shell: the browser tab title
-// and, when configured, the custom favicon link and a theme-color meta tag.
-// Favicon/manifest paths themselves are served dynamically by the frontend
-// handler, so only the title and the cache-bustable favicon href are rewritten
-// here. Replacements that don't match are no-ops, so a build that changes the
-// shell degrades gracefully to the bundled defaults.
+// and, when configured, the custom favicon link, a theme-color meta tag, and
+// the default theme. Favicon/manifest paths themselves are served dynamically
+// by the frontend handler, so only the cache-bustable favicon href is
+// rewritten here. Replacements that don't match are no-ops, so a build that
+// changes the shell degrades gracefully to the bundled defaults.
+//
+// The default theme goes on <html> as data-default-theme, which
+// web/src/themeBoot.js paints before first paint when the device has no cached
+// theme. It is not checked against the theme list, which lives in the web
+// build: the boot script and ThemeProvider both ignore an id they do not know.
 func RenderIndexHTML(index []byte, snap Snapshot) []byte {
 	out := string(index)
 
@@ -91,6 +100,14 @@ func RenderIndexHTML(index []byte, snap Snapshot) []byte {
 		out = strings.Replace(out,
 			indexFaviconLink,
 			`<link rel="icon" href="`+html.EscapeString(u)+`" sizes="any" />`,
+			1,
+		)
+	}
+
+	if snap.DefaultTheme != "" {
+		out = strings.Replace(out,
+			indexHTMLOpen,
+			indexHTMLOpen+`data-default-theme="`+html.EscapeString(snap.DefaultTheme)+`" `,
 			1,
 		)
 	}

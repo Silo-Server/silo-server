@@ -2473,7 +2473,7 @@ func appendAudiobookItemAccessConditions(
 		*args = append(*args, filter.DisabledLibraryIDs)
 		*argIdx = *argIdx + 1
 	}
-	ApplySectionAccessFilter(alias, AccessFilter{MaxContentRating: filter.MaxContentRating}, conditions, args, argIdx)
+	ApplySectionAccessFilter(alias, AccessFilter{MaxContentRating: filter.MaxContentRating, AllowUnratedContent: filter.AllowUnratedContent}, conditions, args, argIdx)
 	return true
 }
 

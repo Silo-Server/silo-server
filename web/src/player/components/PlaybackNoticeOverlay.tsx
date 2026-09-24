@@ -1,5 +1,3 @@
-import { useEffect, useState } from "react";
-
 interface PlaybackNoticeOverlayProps {
   title?: string;
   message: string;
@@ -15,16 +13,6 @@ export function PlaybackNoticeOverlay({
   actionLabel,
   onAction,
 }: PlaybackNoticeOverlayProps) {
-  const [visible, setVisible] = useState(true);
-
-  useEffect(() => {
-    setVisible(true);
-    const timer = setTimeout(() => setVisible(false), 8000);
-    return () => clearTimeout(timer);
-  }, [title, message, onAction]);
-
-  if (!visible) return null;
-
   const accentClass =
     tone === "warning" ? "border-amber-400/50 bg-amber-500/15" : "border-sky-400/50 bg-sky-500/15";
 

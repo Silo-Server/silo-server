@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
@@ -33,15 +34,43 @@ const (
 	jobArtifactRoute  = "/api/v2/admin/jobs/"
 )
 
+// Issuance windows. Clients and CDNs cache images by full URL, so every new URL
+// for unchanged bytes costs a download the client already holds.
+const (
+	// revisionedURLWindow applies to a revisioned key at the default lifetime.
+	// Its path names immutable bytes: the path is the identity and the query
+	// only authorizes, so the query can hold for a UTC day.
+	revisionedURLWindow = 24 * time.Hour
+	// shortURLBucket bounds every other URL. A mutable key, such as a library
+	// poster replaced in place, must change URL soon after its bytes do, and a
+	// capability shorter than the default keeps its extra lifetime within its
+	// own TTL.
+	shortURLBucket = 15 * time.Minute
+)
+
+// revisionedWindow returns the day-long window for a URL for key with lifetime
+// ttl, or zero when key is mutable or ttl is shorter than defaultTTL.
+func revisionedWindow(key string, ttl, defaultTTL time.Duration) time.Duration {
+	if ttl < defaultTTL || artworkkey.Revision(key) == "" {
+		return 0
+	}
+	return revisionedURLWindow
+}
+
 type Signer struct {
 	key   []byte
 	label string
 	route string
 	ttl   time.Duration
+	// dayWindows lets revisioned keys use the day-long window. Job artifacts
+	// are downloads, not cached images, so they keep short buckets.
+	dayWindows bool
 }
 
 func NewSigner(jwtSecret string, ttl time.Duration) *Signer {
-	return newSigner(jwtSecret, artworkDomain, artworkLabel, artworkRoute, ttl)
+	s := newSigner(jwtSecret, artworkDomain, artworkLabel, artworkRoute, ttl)
+	s.dayWindows = true
+	return s
 }
 
 // NewJobArtifactSigner signs admin job artifact downloads. A presigned S3 URL
@@ -84,8 +113,12 @@ func (s *Signer) Sign(key string, now time.Time) (string, time.Time) {
 func (s *Signer) SignFor(key string, now time.Time, ttl time.Duration) (string, time.Time) {
 	ttl = clampTTL(ttl, s.ttl)
 	// Keep URLs stable within an issuance bucket and valid for at least ttl.
-	// Short TTLs use shorter buckets, bounding the extra lifetime to ttl.
-	bucket := min(15*time.Minute, ttl)
+	// Short TTLs use shorter buckets, bounding the extra lifetime to ttl. A
+	// revisioned artwork key at the default lifetime holds for a UTC day.
+	bucket := min(shortURLBucket, ttl)
+	if s.dayWindows {
+		bucket = max(bucket, revisionedWindow(key, ttl, s.ttl))
+	}
 	expires := now.Truncate(bucket).Add(bucket + ttl)
 	exp := expires.Unix()
 	route := &url.URL{Path: s.route + strings.TrimPrefix(key, "/") + s.suffix()}
@@ -166,24 +199,24 @@ func NewDirectResolver(direct blobstore.DirectURLer, ttl time.Duration) Resolver
 	}
 	return directResolver{direct: direct, ttl: ttl}
 }
+
+// ResolveURLFor holds a revisioned key's URL at the default lifetime for the
+// same day-long window as the local signer; every other URL is issued fresh.
 func (r directResolver) ResolveURLFor(ctx context.Context, key string, ttl time.Duration) (catalog.ResolvedImageURL, bool) {
 	if ttl <= 0 {
 		ttl = r.ttl
 	}
-	url, err := r.direct.DirectURL(ctx, key, ttl)
+	url, expiry, err := r.direct.DirectURL(ctx, key, ttl, revisionedWindow(key, ttl, r.ttl))
 	if err != nil || url == "" {
 		return catalog.ResolvedImageURL{}, false
 	}
-	expiry := time.Now().Add(ttl)
 	return catalog.ResolvedImageURL{URL: url, ExpiresAt: &expiry}, true
 }
 func (r directResolver) ResolveURLs(ctx context.Context, keys []string) map[string]catalog.ResolvedImageURL {
 	out := make(map[string]catalog.ResolvedImageURL, len(keys))
 	for _, key := range keys {
-		url, err := r.direct.DirectURL(ctx, key, r.ttl)
-		if err == nil {
-			expiry := time.Now().Add(r.ttl)
-			out[key] = catalog.ResolvedImageURL{URL: url, ExpiresAt: &expiry}
+		if resolved, ok := r.ResolveURLFor(ctx, key, r.ttl); ok {
+			out[key] = resolved
 		}
 	}
 	return out

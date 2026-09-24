@@ -590,11 +590,12 @@ func (h *RecommendationsHandler) blendUpcomingIntoDiscoverRows(
 	end := start.AddDate(0, 0, discoverUpcomingWindowDays-1)
 
 	events, err := h.CalendarRepo.ListEvents(ctx, catalog.CalendarFilter{
-		Start:              start,
-		End:                end,
-		AllowedLibraryIDs:  filter.AllowedLibraryIDs,
-		DisabledLibraryIDs: filter.DisabledLibraryIDs,
-		MaxContentRating:   filter.MaxContentRating,
+		Start:               start,
+		End:                 end,
+		AllowedLibraryIDs:   filter.AllowedLibraryIDs,
+		DisabledLibraryIDs:  filter.DisabledLibraryIDs,
+		MaxContentRating:    filter.MaxContentRating,
+		AllowUnratedContent: filter.AllowUnratedContent,
 	})
 	if err != nil {
 		return discoverRows, err

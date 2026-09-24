@@ -129,7 +129,10 @@ test_tightening_override_applies if {
 	not got.unrestricted
 	got.allowed_library_ids == [2]
 	got.disabled_library_ids == []
-	got.max_content_rating == "PG"
+	# The ceiling is reported unreduced in both fields: only Go can rank one
+	# rating against another, so the caller resolves the stricter of the two.
+	got.max_content_rating == ""
+	got.max_content_rating_override == "PG"
 	got.max_playback_quality == "1080p"
 	not got.profile_verified
 }

@@ -31,8 +31,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
@@ -1265,7 +1267,7 @@ func (h *PlaybackHandler) fetchRemoteCompatManifest(ctx context.Context, nodeURL
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+h.JWTSecret)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), req, "stream")
 	if err != nil {
 		return nil, err
 	}
@@ -1287,7 +1289,7 @@ func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *htt
 	}
 	req.Header.Set("Authorization", "Bearer "+h.JWTSecret)
 	transcodeproxy.PrepareRequest(req, r)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), req, "stream")
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "TranscodeUnavailable", "Remote transcode segment is unavailable")
 		return
@@ -1301,7 +1303,7 @@ func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *htt
 		return
 	}
 	if generation != "" && r.Method == http.MethodGet && sw.CompletedFullResponse(transcodeproxy.FullRepresentationSize(resp)) {
-		if err := transcodeproxy.Acknowledge(r.Context(), http.DefaultClient, nodepool.NodeEndpoint(nodeURL, path), h.JWTSecret, generation); err != nil {
+		if err := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), nodepool.NodeEndpoint(nodeURL, path), h.JWTSecret, generation); err != nil {
 			slog.WarnContext(r.Context(), "acknowledge Jellyfin-compatible transcode segment", "component", "jellycompat", "error", err, "playback_session_id", upstreamSessionID)
 		}
 	}
@@ -2251,6 +2253,12 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			findMediaSource(playSession, req.MediaSourceID), &positionSeconds,
 		)
 	}
+	// Only the Stopped report and the report that marks the item watched change
+	// the taste profile; a position-only report does not. A Stopped report
+	// refreshes even when it carries no position: the play's earlier reports
+	// already wrote its progress, and StopSession does not run the native stop
+	// finalizer that would otherwise refresh the profile.
+	refreshTasteProfile := stop
 	// Persist progress to user store
 	if positionSeconds > 0 && h.storeProvider != nil && playSession.ItemID != "" {
 		if store, storeErr := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID); storeErr == nil {
@@ -2262,10 +2270,14 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 					break
 				}
 			}
-			if err := store.UpdateProgress(r.Context(), session.ProfileID, playSession.ItemID, positionSeconds, duration, h.playbackThresholds(r.Context())); err == nil {
-				triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, duration, h.playbackThresholds(r.Context()))
+			if err == nil && completed {
+				refreshTasteProfile = true
 			}
 		}
+	}
+	if refreshTasteProfile && playSession.ItemID != "" {
+		triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
 	}
 	if stop {
 		// Direct ids and recorded aliases are per-play, caller-owned identifiers.

@@ -174,6 +174,11 @@ func windowSubtitleVTT(data []byte, format string, start, end int64, copyTimesta
 				out.WriteString(strings.Join(fields[1:], " "))
 			}
 			out.WriteByte('\n')
+			if format == compatSubtitleSRT {
+				// SRT has no cue settings; carry the placement the SRT source
+				// had as its {\anN} tag again.
+				out.WriteString(playback.SRTAlignmentTagForVTTCueSettings(strings.Join(fields[1:], " ")))
+			}
 			out.WriteString(strings.Join(lines[i+1:], "\n"))
 			out.WriteString("\n\n")
 			break

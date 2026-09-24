@@ -1,4 +1,12 @@
-import { startTransition, useCallback, useEffect, useLayoutEffect, useState } from "react";
+import {
+  lazy,
+  startTransition,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useState,
+} from "react";
 import { Link, useLocation } from "react-router";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Menu, Search } from "lucide-react";
@@ -8,11 +16,12 @@ import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import AppSidebar from "@/components/AppSidebar";
-import ServerActivity from "@/components/ServerActivity";
+import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import { SiloBrand } from "@/components/SiloBrand";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { buildQueryCatalogHref, parseCatalogSearchParams } from "@/pages/catalogSearchParams";
+import { prefetchCatalog } from "@/pages/catalogRoute";
 import type { ReactNode, TransitionEvent as ReactTransitionEvent } from "react";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
@@ -32,6 +41,23 @@ import { useSidebarItemDetailsGate } from "@/hooks/useSidebarItemDetailsGate";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
+
+// Only admins see the activity indicator, so everyone else skips downloading it.
+const ServerActivity = lazy(() => import("@/components/ServerActivity"));
+
+/**
+ * The lazily loaded activity indicator. Layout wraps every page, so a chunk
+ * that fails to load leaves the indicator out instead of breaking the page.
+ */
+function AdminActivityIndicator() {
+  return (
+    <LocalErrorBoundary>
+      <Suspense fallback={null}>
+        <ServerActivity hideWhenEmpty />
+      </Suspense>
+    </LocalErrorBoundary>
+  );
+}
 
 interface LayoutProps {
   children: ReactNode;
@@ -350,11 +376,13 @@ export default function Layout({ children }: LayoutProps) {
           <div className="flex items-center gap-2">
             <ViewTransitionLink
               to={buildQueryCatalogHref()}
+              onPointerDown={prefetchCatalog}
+              onFocus={prefetchCatalog}
               className="text-muted-foreground hover:text-foreground hover:bg-accent/60 flex h-10 w-10 items-center justify-center rounded-xl transition-all active:scale-[0.98]"
             >
               <Search className="h-5 w-5" />
             </ViewTransitionLink>
-            {showAdminActivity && <ServerActivity hideWhenEmpty />}
+            {showAdminActivity && <AdminActivityIndicator />}
             <Link
               to="/settings"
               aria-label={`${profile?.name ?? user?.username ?? "User"} settings`}
@@ -387,7 +415,7 @@ export default function Layout({ children }: LayoutProps) {
         {/* Desktop admin activity indicator (top-right, hidden on mobile) */}
         {showAdminActivity && (
           <div className="fixed top-6 right-5 z-40 hidden lg:block">
-            <ServerActivity hideWhenEmpty />
+            <AdminActivityIndicator />
           </div>
         )}
 

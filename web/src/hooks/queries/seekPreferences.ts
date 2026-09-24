@@ -26,9 +26,13 @@ const ALL_SEEK_KEYS = [
   SEEK_KEYS.audiobook.forward,
 ];
 
-/** Shared by playback and settings surfaces; the settings query is the only remote value store. */
-export function useSeekPreferences(media: SeekMedia) {
-  const capabilities = useSettingsCapabilities();
+/**
+ * Shared by playback and settings surfaces; the settings query is the only
+ * remote value store. `enabled: false` holds the reads, e.g. while the
+ * always-mounted player has no session to read them with.
+ */
+export function useSeekPreferences(media: SeekMedia, options?: { enabled?: boolean }) {
+  const capabilities = useSettingsCapabilities({ enabled: options?.enabled ?? true });
   const keys = SEEK_KEYS[media];
   const supported = ALL_SEEK_KEYS.every((key) =>
     settingsCapabilitiesSupportKey(capabilities.data, key),

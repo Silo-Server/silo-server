@@ -17,9 +17,6 @@ type ViewerSnapshotReader struct {
 func NewViewerSnapshotReader(tx pgx.Tx, userID int) *ViewerSnapshotReader {
 	return &ViewerSnapshotReader{tx: tx, userID: userID}
 }
-func (r *ViewerSnapshotReader) GetSetting(ctx context.Context, key string) (string, error) {
-	return getSetting(ctx, r.tx, r.userID, key)
-}
 func (r *ViewerSnapshotReader) ListSettingValuesForResolution(ctx context.Context, q userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
 	return listSettingValuesForResolution(ctx, r.tx, r.userID, q)
 }

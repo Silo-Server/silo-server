@@ -731,8 +731,54 @@ func (r *PostgresRepository) ListRatingSyncStates(ctx context.Context, connectio
 
 // UpsertRatingSyncStates records agreed ratings. A row is written only while
 // its connection is still bound to the row's provider account, so a run that
-// outlived a rebind cannot take a row back from the new account.
+// outlived a rebind cannot take a row back from the new account. The binding
+// is checked under a share lock on the connection row, held until the rows are
+// written: a rebind waits for the write and then clears what it wrote, and a
+// write that follows a rebind finds no match and writes nothing.
 func (r *PostgresRepository) UpsertRatingSyncStates(ctx context.Context, states []RatingSyncState) error {
+	if len(states) == 0 {
+		return nil
+	}
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		bound, err := lockBoundRatingAccounts(ctx, tx, states)
+		if err != nil {
+			return err
+		}
+		kept := states[:0:0]
+		for _, state := range states {
+			if bound[ratingBinding{state.ConnectionID, state.ProviderAccountID}] {
+				kept = append(kept, state)
+			}
+		}
+		return upsertRatingSyncStates(ctx, tx, kept)
+	})
+}
+
+type ratingBinding struct{ connectionID, providerAccountID string }
+
+// lockBoundRatingAccounts share-locks the connections the states belong to and
+// reports which (connection, account) pairs are still bound.
+func lockBoundRatingAccounts(ctx context.Context, tx pgx.Tx, states []RatingSyncState) (map[ratingBinding]bool, error) {
+	pairs := make(map[ratingBinding]bool)
+	for _, state := range states {
+		pairs[ratingBinding{state.ConnectionID, state.ProviderAccountID}] = false
+	}
+	for pair := range pairs {
+		var found bool
+		err := tx.QueryRow(ctx, `
+			SELECT true FROM watch_provider_connections
+			WHERE id = $1::uuid AND provider_account_id = $2
+			FOR SHARE
+		`, pair.connectionID, pair.providerAccountID).Scan(&found)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("lock rating connection: %w", err)
+		}
+		pairs[pair] = found
+	}
+	return pairs, nil
+}
+
+func upsertRatingSyncStates(ctx context.Context, tx pgx.Tx, states []RatingSyncState) error {
 	if len(states) == 0 {
 		return nil
 	}
@@ -752,7 +798,7 @@ func (r *PostgresRepository) UpsertRatingSyncStates(ctx context.Context, states 
 		ratings[i] = int32(state.SyncedRating)
 		seen[i] = state.RemoteSeen
 	}
-	_, err := r.pool.Exec(ctx, `
+	_, err := tx.Exec(ctx, `
 		INSERT INTO watch_provider_rating_items (
 			connection_id, provider_account_id, media_item_id, kind, provider_item_key, synced_rating, remote_seen
 		)
@@ -760,8 +806,6 @@ func (r *PostgresRepository) UpsertRatingSyncStates(ctx context.Context, states 
 			input.provider_item_key, input.synced_rating, input.remote_seen
 		FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::smallint[], $7::boolean[])
 			AS input(connection_id, provider_account_id, media_item_id, kind, provider_item_key, synced_rating, remote_seen)
-		JOIN watch_provider_connections conn
-			ON conn.id = input.connection_id::uuid AND conn.provider_account_id = input.provider_account_id
 		ON CONFLICT (connection_id, media_item_id) DO UPDATE SET
 			provider_account_id = EXCLUDED.provider_account_id,
 			kind = CASE WHEN EXCLUDED.kind <> '' THEN EXCLUDED.kind ELSE watch_provider_rating_items.kind END,

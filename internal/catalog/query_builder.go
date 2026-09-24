@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -1424,23 +1423,12 @@ func (qb *QueryBuilder) addedAtSortPlan() (string, []string, []any, bool) {
 	return "sort_added.added_at", []string{joinSQL}, args, true
 }
 
+// contentRatingRankExpr sorts by the stored minimum age, so ratings from
+// different national systems interleave correctly instead of only the eleven
+// US strings ordering at all. A rating with no age — unrated, or a string no
+// ladder recognizes — still sorts last.
 func (qb *QueryBuilder) contentRatingRankExpr() string {
-	cases := make([]string, 0, len(access.RatingRankEntries()))
-	for _, entry := range access.RatingRankEntries() {
-		cases = append(
-			cases,
-			fmt.Sprintf(
-				"WHEN UPPER(NULLIF(BTRIM(%s.content_rating), '')) = '%s' THEN %d",
-				qb.alias,
-				entry.Rating,
-				entry.Rank,
-			),
-		)
-	}
-	return fmt.Sprintf(
-		"CASE %s ELSE 2147483647 END",
-		strings.Join(cases, " "),
-	)
+	return fmt.Sprintf("COALESCE(%s.content_rating_age, 2147483647)", qb.alias)
 }
 
 func (qb *QueryBuilder) contentRatingLabelExpr() string {
