@@ -291,6 +291,8 @@ func (s *Server) router() chi.Router {
 		r.Get("/stream/v3/{session_id}/segment/{name}", observeProxy(s.telemetry, http.MethodGet, "/stream/v3/{session_id}/segment/{name}", s.handleGrantTranscodeSegment))
 		r.Get("/stream/subtitles/{token}/{track}/fonts", observeProxy(s.telemetry, http.MethodGet, "/stream/subtitles/{token}/{track}/fonts", s.handleSubtitleFonts))
 		r.Get("/stream/subtitles/{token}/{track}", observeProxy(s.telemetry, http.MethodGet, "/stream/subtitles/{token}/{track}", s.handleSubtitle))
+		r.Head("/stream/theme/{token}", observeProxy(s.telemetry, http.MethodHead, "/stream/theme/{token}", s.handleThemeAudio))
+		r.Get("/stream/theme/{token}", observeProxy(s.telemetry, http.MethodGet, "/stream/theme/{token}", s.handleThemeAudio))
 		r.Head("/downloads/file/{token}", observeProxy(s.telemetry, http.MethodHead, "/downloads/file/{token}", s.handleDownloadFile))
 		r.Get("/downloads/file/{token}", observeProxy(s.telemetry, http.MethodGet, "/downloads/file/{token}", s.handleDownloadFile))
 	})
@@ -405,7 +407,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 		return playback.HWAccelInfo{}, err
 	}
 	info.Transformations = registry.Advertised()
-	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1}
+	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureThemeAudioEgressV1}
 	// Advertised before the hash is taken, because it is part of what the hash
 	// covers: a build that needs longer reaches the sweep rather than sitting
 	// behind an unchanged identity.

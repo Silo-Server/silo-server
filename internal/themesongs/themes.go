@@ -214,7 +214,7 @@ func Open(file File) (*os.File, error) {
 		return nil, ErrUnavailable
 	}
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() != file.Size || !info.ModTime().Truncate(time.Microsecond).Equal(file.Modified) {
+	if err != nil || !matches(info, file.Size, file.Modified) {
 		_ = f.Close()
 		return nil, ErrUnavailable
 	}
@@ -250,11 +250,25 @@ func ServeFile(w http.ResponseWriter, r *http.Request, id, path string, size int
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() != size || !info.ModTime().Truncate(time.Microsecond).Equal(modified) {
+	if err != nil || !matches(info, size, modified) {
 		http.Error(w, "theme audio changed", http.StatusNotFound)
 		return
 	}
 	serveOriginal(w, r, id, container, filepath.Base(path), size, modified, f)
+}
+
+// Unchanged reports whether path is still the regular file a token described:
+// same size and modification time at the catalog's microsecond precision.
+func Unchanged(path string, size int64, modified time.Time) bool {
+	if !filepath.IsAbs(path) || Container(path) == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && matches(info, size, modified)
+}
+
+func matches(info os.FileInfo, size int64, modified time.Time) bool {
+	return info.Mode().IsRegular() && info.Size() == size && info.ModTime().Truncate(time.Microsecond).Equal(modified)
 }
 
 // ServeConverted streams path as progressive AAC in audio-only fragmented MP4,

@@ -50,7 +50,7 @@
       "id": "proxy",
       "entrypoint": "internal/proxy.(*Server).Handler",
       "description": "Proxy node listener: media relay, node control, and its own health/metrics probes.",
-      "route_count": 29
+      "route_count": 31
     },
     {
       "id": "transcode_node",
@@ -60,9 +60,9 @@
     }
   ],
   "totals": {
-    "routes": 867,
+    "routes": 869,
     "conditional_routes": 691,
-    "streaming_routes": 42,
+    "streaming_routes": 44,
     "websocket_routes": 4
   },
   "middleware_chains": [
@@ -27537,6 +27537,62 @@
       "conditional": false,
       "request_kind": "none",
       "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": true,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/proxy/server.go"
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/stream/theme/{token}",
+      "route_group": "/",
+      "handler": "(*internal/proxy.Server).handleThemeAudio",
+      "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/theme/{token}\", s.handleThemeAudio)",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 25,
+      "auth_class": "public",
+      "auth_traits": [
+        "cors",
+        "egress_metered"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "none",
+      "response_media_kind": "binary",
+      "delegates_to": "",
+      "streams": true,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/proxy/server.go"
+    },
+    {
+      "listener": "proxy",
+      "namespace": "legacy_unversioned",
+      "method": "HEAD",
+      "path": "/stream/theme/{token}",
+      "route_group": "/",
+      "handler": "(*internal/proxy.Server).handleThemeAudio",
+      "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/theme/{token}\", s.handleThemeAudio)",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 25,
+      "auth_class": "public",
+      "auth_traits": [
+        "cors",
+        "egress_metered"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "none",
+      "response_media_kind": "binary",
       "delegates_to": "",
       "streams": true,
       "upgrades_websocket": false,

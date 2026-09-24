@@ -183737,6 +183737,666 @@
       {
         "parameters": [
           {
+            "description": "Signed theme authority bound to this proxy, the theme file and its recipe.",
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Conversion start offset in seconds. Ignored for original themes.",
+            "in": "query",
+            "name": "seek",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Range",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Range",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Modified-Since",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Unmodified-Since",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Signed, expiring theme token required despite public outer middleware; it must name this proxy as egress and a theme_direct_v1 or theme_aac_v1 recipe. Original themes are served with ServeContent ranges and conditions after the file's size and modification time are checked against the token. AAC conversions stream progressive audio-only fragmented MP4 with no length or ranges, run here or relayed from the reserved transcode node with the seek query forwarded. Theme transfers are not playback sessions.",
+        "listener": "proxy",
+        "method": "GET",
+        "path": "/stream/theme/{token}",
+        "handler": "(*internal/proxy.Server).handleThemeAudio",
+        "auth_class": "public",
+        "responses": {
+          "200": {
+            "content": {
+              "audio/*": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Original theme, or its progressive AAC conversion",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Range": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Type": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Last-Modified": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "206": {
+            "content": {
+              "audio/*": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Requested byte range of an original theme",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Range": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Type": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Last-Modified": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Not Modified",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Range": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Type": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Last-Modified": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "412": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
+          "416": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Range Not Satisfiable",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Range": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Type": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Last-Modified": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
+            "description": "Signed theme authority bound to this proxy, the theme file and its recipe.",
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Conversion start offset in seconds. Ignored for original themes.",
+            "in": "query",
+            "name": "seek",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Range",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Range",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Modified-Since",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Unmodified-Since",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Signed, expiring theme token required despite public outer middleware; it must name this proxy as egress and a theme_direct_v1 or theme_aac_v1 recipe. Original themes are served with ServeContent ranges and conditions after the file's size and modification time are checked against the token. AAC conversions stream progressive audio-only fragmented MP4 with no length or ranges, run here or relayed from the reserved transcode node with the seek query forwarded. Theme transfers are not playback sessions. HEAD never starts FFmpeg and does not create active transfer tracking. The HTTP server suppresses response bytes.",
+        "listener": "proxy",
+        "method": "HEAD",
+        "path": "/stream/theme/{token}",
+        "handler": "(*internal/proxy.Server).handleThemeAudio",
+        "auth_class": "public",
+        "responses": {
+          "200": {
+            "description": "Original theme, or its progressive AAC conversion",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Range": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Type": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Last-Modified": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Requested byte range of an original theme",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Range": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Type": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Last-Modified": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Not Modified",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Range": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Type": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Last-Modified": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "410": {
+            "description": "Gone"
+          },
+          "412": {
+            "description": "Precondition Failed"
+          },
+          "416": {
+            "description": "Range Not Satisfiable",
+            "headers": {
+              "Accept-Ranges": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Range": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Type": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Last-Modified": {
+                "description": "Original themes only, except Content-Type and Cache-Control.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
             "description": "Transport identifier; not a durable stop receipt.",
             "in": "path",
             "name": "session_id",
