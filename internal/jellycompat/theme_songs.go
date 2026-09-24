@@ -26,6 +26,8 @@ const (
 	compatThemeUniversal  = "universal"
 	compatThemeM4A        = "m4a"
 	compatThemeSeason     = "season"
+	compatThemeAudioRate  = "audioBitRate"
+	compatThemeMaxRate    = "maxStreamingBitrate"
 )
 
 type themeSongStore interface {
@@ -138,6 +140,9 @@ func (h *ItemsHandler) HandleThemeAudio(w http.ResponseWriter, r *http.Request) 
 		var reason string
 		var ok bool
 		conversion, seekSeconds, reason, ok = themeConversionAllowed(query, routeContainer, file, universal)
+		if ok && h.themeRouter != nil && !h.themeRouter.CanConvert(r.Context()) {
+			ok, reason = false, "Theme audio conversion is unavailable on this server"
+		}
 		if !ok {
 			writeError(w, 400, "PlaybackUnavailable", reason)
 			return
@@ -223,7 +228,7 @@ func themeConversionAllowed(query caseInsensitiveQuery, routeContainer string, f
 	if !named {
 		return themesongs.Conversion{}, 0, unsupported, false
 	}
-	if codec := strings.ToLower(query.Get("audioCodec")); codec != "" && !containsThemeContainer(codec, "aac") {
+	if codec := strings.ToLower(query.Get("audioCodec")); codec != "" && !containsThemeContainer(codec, themesongs.CodecAAC) {
 		return themesongs.Conversion{}, 0, unsupported, false
 	}
 	target := file
@@ -234,7 +239,7 @@ func themeConversionAllowed(query caseInsensitiveQuery, routeContainer string, f
 	if target.AudioChannels == 1 {
 		conversion.SourceChannels = 0
 	}
-	for _, key := range []string{"maxAudioBitRate", "audioBitRate", "maxStreamingBitrate"} {
+	for _, key := range []string{"maxAudioBitRate", compatThemeAudioRate, compatThemeMaxRate} {
 		if value := query.Get(key); value != "" {
 			bps, err := strconv.Atoi(value)
 			if err != nil || bps <= 0 {
@@ -318,12 +323,12 @@ func themeDirectPlayAllowed(query caseInsensitiveQuery, routeContainer string, f
 		actual int
 		exact  bool
 	}{
-		{"audioBitRate", file.BitrateKbps * 1000, false}, {"maxAudioBitRate", file.BitrateKbps * 1000, false},
-		{"maxStreamingBitrate", file.BitrateKbps * 1000, false}, {"audioChannels", file.AudioChannels, true},
+		{compatThemeAudioRate, file.BitrateKbps * 1000, false}, {"maxAudioBitRate", file.BitrateKbps * 1000, false},
+		{compatThemeMaxRate, file.BitrateKbps * 1000, false}, {"audioChannels", file.AudioChannels, true},
 		{"maxAudioChannels", file.AudioChannels, false}, {"audioSampleRate", file.SampleRate, true},
 		{"maxAudioSampleRate", file.SampleRate, false},
 	} {
-		if universal && limit.key == "audioBitRate" {
+		if universal && limit.key == compatThemeAudioRate {
 			// The universal route uses this only for its fallback encoder.
 			continue
 		}
@@ -331,7 +336,7 @@ func themeDirectPlayAllowed(query caseInsensitiveQuery, routeContainer string, f
 		if value == "" {
 			continue
 		}
-		if limit.actual <= 0 && limit.key == "maxStreamingBitrate" {
+		if limit.actual <= 0 && limit.key == compatThemeMaxRate {
 			// Jellyfin's StreamBuilder assumes 40 Mbps when bitrate is unknown.
 			limit.actual = 40_000_000
 		}

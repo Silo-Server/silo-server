@@ -267,3 +267,64 @@ func TestConversionSeekTravelsInTheURL(t *testing.T) {
 		t.Fatalf("empty request: %v", err)
 	}
 }
+
+type listingPlanner struct {
+	fakePlanner
+}
+
+func (p *listingPlanner) ProxyNodeURLs() []string { return urls(p.proxies) }
+func (p *listingPlanner) ProxyNodeByURL(u string) (*nodepool.Node, bool) {
+	return byURL(p.proxies, u)
+}
+func (p *listingPlanner) TranscodeNodeURLs() []string { return urls(p.transcodes) }
+func (p *listingPlanner) TranscodeNodeByURL(u string) (*nodepool.Node, bool) {
+	return byURL(p.transcodes, u)
+}
+
+func urls(nodes []*nodepool.Node) []string {
+	out := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, n.URL)
+	}
+	return out
+}
+
+func byURL(nodes []*nodepool.Node, u string) (*nodepool.Node, bool) {
+	for _, n := range nodes {
+		if n.URL == u {
+			return n, true
+		}
+	}
+	return nil, false
+}
+
+func TestCanConvertMatchesResolvableRoutes(t *testing.T) {
+	egressOnly := node(t, 13, "http://proxy-egress", []string{playback.TransportFeatureThemeAudioEgressV1}, false)
+	relayProxy := node(t, 14, "http://proxy-relay", []string{playback.TransportFeatureThemeAudioEgressV1, playback.TransportFeatureProgressiveRemuxRelayV1}, false)
+	oldTranscode := node(t, 23, "http://transcode-old", []string{playback.TransportFeatureThemeAudioExecutionV1}, true)
+	for _, tc := range []struct {
+		name    string
+		planner *listingPlanner
+		recipes RecipeStore
+		want    bool
+	}{
+		{"converting proxy", &listingPlanner{fakePlanner{proxies: []*nodepool.Node{themeProxy(t)}}}, nil, true},
+		{"transcode node behind a relaying proxy", &listingPlanner{fakePlanner{proxies: []*nodepool.Node{relayProxy}, transcodes: []*nodepool.Node{themeTranscode(t)}}}, &fakeRecipes{}, true},
+		{"transcode node without a relaying proxy", &listingPlanner{fakePlanner{proxies: []*nodepool.Node{egressOnly}, transcodes: []*nodepool.Node{themeTranscode(t)}}}, &fakeRecipes{}, false},
+		{"transcode node without a recipe store", &listingPlanner{fakePlanner{proxies: []*nodepool.Node{relayProxy}, transcodes: []*nodepool.Node{themeTranscode(t)}}}, nil, false},
+		{"transcode node without progressive execution", &listingPlanner{fakePlanner{proxies: []*nodepool.Node{relayProxy}, transcodes: []*nodepool.Node{oldTranscode}}}, &fakeRecipes{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := &Router{Planner: tc.planner}
+			if tc.recipes != nil {
+				router.Recipes = tc.recipes
+			}
+			if got := router.CanConvert(t.Context()); got != tc.want {
+				t.Fatalf("CanConvert = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	if !(&Router{LocalConversion: func(context.Context) bool { return true }}).CanConvert(t.Context()) {
+		t.Fatal("local AAC recipe not counted")
+	}
+}

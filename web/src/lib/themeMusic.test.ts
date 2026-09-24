@@ -224,11 +224,31 @@ describe("ThemeMusic", () => {
     music.select(selection, true);
     await flush();
     expect(first.loop).toBe(false);
+    first.currentTime = 20;
     first.onended?.(new Event("ended"));
     await flush();
     expect(grant).toHaveBeenCalledTimes(2);
     expect(second.src).toBe("/stream/theme/signed");
     expect(first.src).toBe("");
+    music.stop(true);
+  });
+
+  it("stops replaying a converted theme that ends without playing", async () => {
+    const elements = [audio(), audio(), audio()];
+    const grant = vi.fn(async () => ({
+      url: "/stream/theme/signed",
+      delivery: "converted" as const,
+    }));
+    const music = new ThemeMusic(grant, () => elements.shift()!);
+    const first = elements[0]!;
+    const second = elements[1]!;
+    music.select(selection, true);
+    await flush();
+    first.onended?.(new Event("ended"));
+    await flush();
+    second.onended?.(new Event("ended"));
+    await flush();
+    expect(grant).toHaveBeenCalledTimes(2);
     music.stop(true);
   });
 

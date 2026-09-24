@@ -42,9 +42,17 @@ type Capabilities struct {
 // fragmented MP4 carrying AAC, the same output as audio-only video remux.
 const ConvertedContentType = playback.AudioOnlyRemuxMIMEV3
 
+// CodecAAC is the codec of every theme conversion.
+const CodecAAC = "aac"
+
 const (
-	codecAAC        = "aac"
 	containerMP4    = "mp4"
+	containerM4A    = "m4a"
+	containerM4B    = "m4b"
+	containerFLAC   = "flac"
+	containerOGG    = "ogg"
+	containerOpus   = "opus"
+	containerWAV    = "wav"
 	convertedBitMax = 192
 )
 
@@ -77,7 +85,7 @@ func NormalizeCodec(codec string) string {
 // containerFamily treats the MP4 audio extensions as one container.
 func containerFamily(container string) string {
 	switch container = strings.ToLower(strings.TrimSpace(container)); container {
-	case "m4a", "m4b", containerMP4:
+	case containerM4A, containerM4B, containerMP4:
 		return containerMP4
 	default:
 		return container
@@ -101,7 +109,7 @@ func Negotiate(file File, accepted []Format) (Delivery, bool) {
 	}
 	for _, format := range accepted {
 		want := NormalizeCodec(format.AudioCodec)
-		if containerFamily(format.Container) == containerMP4 && (want == "" || want == codecAAC) {
+		if containerFamily(format.Container) == containerMP4 && (want == "" || want == CodecAAC) {
 			return DeliveryConverted, true
 		}
 	}

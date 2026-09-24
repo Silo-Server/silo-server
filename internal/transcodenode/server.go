@@ -34,6 +34,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
@@ -2170,7 +2171,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	}
 	theme := claims.PlayMethod == streamtoken.PlayMethodThemeAAC
 	if theme {
-		if !claims.TranscodeAudio || !claims.AudioOnly || claims.TargetCodecAudio != "aac" || claims.ThemeID <= 0 {
+		if !claims.TranscodeAudio || !claims.AudioOnly || claims.TargetCodecAudio != themesongs.CodecAAC || claims.ThemeID <= 0 {
 			http.NotFound(w, r)
 			return
 		}

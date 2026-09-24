@@ -41,7 +41,7 @@ type ThemeSongSet struct {
 
 type ThemeSongsCapability struct {
 	Capability
-	Delivery             string `json:"delivery" enum:"local_direct_play,routed" doc:"routed: themes follow the playback routing policy, so audio may come from a proxy node on another origin; local_direct_play: original audio from the API node only"`
+	Delivery             string `json:"delivery" enum:"local_direct_play,routed" doc:"routed: themes follow the playback routing policy, so audio may come from a proxy node on another origin; local_direct_play: audio comes from this API origin only"`
 	Transcode            bool   `json:"transcode" doc:"A theme the client cannot decode can be converted to AAC in audio-only MP4 when the client accepts it"`
 	ClusterRouting       bool   `json:"cluster_routing" doc:"Theme audio can be served by worker nodes"`
 	GrantLifetimeSeconds int    `json:"grant_lifetime_seconds"`
@@ -86,10 +86,13 @@ type ThemePlaybackOutput struct {
 func registerThemeSongs(reg *Registry) {
 	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/catalog/themes/capabilities", "getThemeSongsCapability", "catalog", "Local theme audio support and delivery limitations."), Class: ClassProfileScoped},
 		func(ctx context.Context, _ *CapabilityInput) (*ThemeSongsCapabilityOutput, error) {
-			body := ThemeSongsCapability{Capability: Capability{State: configuredCapabilityState(reg.deps.ThemeSongs != nil), Allowed: ptr(capabilityLoginAllowed(ctx))}, Delivery: "routed", GrantLifetimeSeconds: int(themesongs.GrantLifetime.Seconds())}
+			body := ThemeSongsCapability{Capability: Capability{State: configuredCapabilityState(reg.deps.ThemeSongs != nil), Allowed: ptr(capabilityLoginAllowed(ctx))}, Delivery: "local_direct_play", GrantLifetimeSeconds: int(themesongs.GrantLifetime.Seconds())}
 			if reg.deps.ThemeSongs != nil {
 				caps := reg.deps.ThemeSongs.ThemeCapabilities(ctx)
 				body.Transcode, body.ClusterRouting = caps.Transcode, caps.ClusterRouting
+				if caps.ClusterRouting {
+					body.Delivery = "routed"
+				}
 			}
 			return &ThemeSongsCapabilityOutput{Body: body}, nil
 		})
@@ -184,8 +187,10 @@ func themeSongProblem(err error) *Problem {
 		return NewProblem(TypeAuthenticationRequired, "The theme playback grant is invalid or expired.")
 	case errors.Is(err, themesongs.ErrNotAcceptable):
 		return NewProblem(TypeNotAcceptable, "The client decodes neither this theme's format nor its AAC conversion.")
-	case errors.Is(err, themedelivery.ErrPolicyUnsatisfied), errors.Is(err, themedelivery.ErrCapacityUnavailable):
-		return NewProblem(TypeDependencyUnavailable, "No theme audio route satisfies the playback routing policy right now.").WithRetryAfter(30)
+	case errors.Is(err, themedelivery.ErrPolicyUnsatisfied):
+		return NewProblem(TypeDependencyUnavailable, "The playback routing policy admits no route for theme audio.")
+	case errors.Is(err, themedelivery.ErrCapacityUnavailable):
+		return NewProblem(TypeDependencyUnavailable, "No node can serve theme audio right now.").WithRetryAfter(30)
 	case errors.Is(err, themesongs.ErrUnavailable):
 		return unavailable("local theme audio")
 	default:

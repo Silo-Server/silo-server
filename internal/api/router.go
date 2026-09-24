@@ -283,15 +283,6 @@ func (d *Dependencies) CurrentConfig() *config.Config {
 	return d.Config
 }
 
-// invalidateNodeCapabilities drops every cached view of one node's hardware.
-//
-// There is more than one: protocol-v3 planning holds an inventory, and prepared
-// downloads hold their own with its own TTL. A policy edit or a capability hash
-// change invalidates the node itself, not one reader of it, so anything that
-// caches the answer has to be told — otherwise a QSV-to-NVENC edit keeps
-// selecting the node for a tone-map executor it no longer has, and the
-// reconfigured worker rejects the recipe or the download falls back locally for
-// no reason.
 // themeRouter routes theme audio with the same planner, token secret, recipe
 // store and routing policy as video playback. The local AAC recipe is read
 // from the playback handler's cached FFmpeg registry.
@@ -312,6 +303,15 @@ func (deps Dependencies) themeRouter(playbackHandler *handlers.PlaybackHandler) 
 	return router
 }
 
+// invalidateNodeCapabilities drops every cached view of one node's hardware.
+//
+// There is more than one: protocol-v3 planning holds an inventory, and prepared
+// downloads hold their own with its own TTL. A policy edit or a capability hash
+// change invalidates the node itself, not one reader of it, so anything that
+// caches the answer has to be told — otherwise a QSV-to-NVENC edit keeps
+// selecting the node for a tone-map executor it no longer has, and the
+// reconfigured worker rejects the recipe or the download falls back locally for
+// no reason.
 func (deps Dependencies) invalidateNodeCapabilities(playbackHandler *handlers.PlaybackHandler) func(nodeURL string) {
 	return func(nodeURL string) {
 		playbackHandler.RefreshNodeCapabilitiesV3(nodeURL)

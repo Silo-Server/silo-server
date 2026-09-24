@@ -40,7 +40,7 @@ func classifyThemeToken(claims *streamtoken.Claims) themeTokenShape {
 			return themeTokenDirect
 		}
 	case streamtoken.PlayMethodThemeAAC:
-		if claims.RoutingWorkload != string(noderouting.WorkloadRemux) || !claims.TranscodeAudio || !claims.AudioOnly || claims.TargetCodecAudio != "aac" {
+		if claims.RoutingWorkload != string(noderouting.WorkloadRemux) || !claims.TranscodeAudio || !claims.AudioOnly || claims.TargetCodecAudio != themesongs.CodecAAC {
 			return themeTokenInvalid
 		}
 		switch claims.RoutingExecution {

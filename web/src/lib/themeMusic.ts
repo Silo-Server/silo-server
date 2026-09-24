@@ -120,9 +120,12 @@ export class ThemeMusic {
       };
       audio.onended = () => {
         // A converted stream cannot seek back, and its short-lived URL may have
-        // expired, so a loop replays it with a fresh grant.
-        if (generation === this.generation && this.converted && this.loop && !this.suspended)
-          void this.load();
+        // expired, so a loop replays it with a fresh grant. A stream that ended
+        // without playing counts against the same single retry as an error, so
+        // a conversion that fails cleanly cannot replay forever.
+        if (generation !== this.generation || !this.converted || !this.loop || this.suspended)
+          return;
+        if (audio.currentTime > 0 || this.retry++ === 0) void this.load();
       };
       audio.onerror = () => {
         if (generation !== this.generation) return;

@@ -141,6 +141,9 @@ func (r *Router) Resolve(ctx context.Context, req Request) (Result, error) {
 		}
 	}
 	caps := &capabilityCache{infos: map[*nodepool.Node]playback.HWAccelInfo{}}
+	// Predicates run under the planner lock, which the planner reserves for
+	// cheap lookups: parse every stored report before resolving.
+	caps.warm(r.Planner)
 	proxyEligible := nodepool.ClientReachableVia(req.AccessPath, func(n *nodepool.Node) bool {
 		return caps.has(n, playback.TransportFeatureThemeAudioEgressV1) &&
 			(!converted || caps.has(n, playback.TransportFeatureProgressiveRemuxRelayV1))
@@ -163,7 +166,7 @@ func (r *Router) Resolve(ctx context.Context, req Request) (Result, error) {
 			ExcludedShapeIDs:       excluded,
 		})
 		if err != nil {
-			return Result{}, fmt.Errorf("%w: %v", ErrPolicyUnsatisfied, err)
+			return Result{}, fmt.Errorf("%w: %w", ErrPolicyUnsatisfied, err)
 		}
 		switch decision.Outcome {
 		case noderouting.OutcomeSelected:
@@ -239,7 +242,7 @@ func (r *Router) publish(ctx context.Context, id, secret string, req Request, de
 	if req.Delivery == themesongs.DeliveryConverted {
 		card.PlayMethod = playback.PlayMethod(streamtoken.PlayMethodThemeAAC)
 		card.TranscodeAudio = true
-		card.TargetCodecAudio = "aac"
+		card.TargetCodecAudio = themesongs.CodecAAC
 		card.TargetAudioChannels = req.Conversion.Channels
 		card.TargetAudioBitrateKbps = req.Conversion.BitrateKbps
 		card.SourceAudioChannels = req.Conversion.SourceChannels
@@ -309,6 +312,25 @@ func (c *capabilityCache) info(n *nodepool.Node) playback.HWAccelInfo {
 	return info
 }
 
+// warm decodes every pooled node's report ahead of route planning. A planner
+// that cannot list its nodes leaves the cache to fill lazily.
+func (c *capabilityCache) warm(planner nodepool.RoutePlanner) {
+	lister, ok := planner.(nodeLister)
+	if !ok {
+		return
+	}
+	for _, nodeURL := range lister.ProxyNodeURLs() {
+		if n, found := lister.ProxyNodeByURL(nodeURL); found {
+			c.info(n)
+		}
+	}
+	for _, nodeURL := range lister.TranscodeNodeURLs() {
+		if n, found := lister.TranscodeNodeByURL(nodeURL); found {
+			c.info(n)
+		}
+	}
+}
+
 func (c *capabilityCache) has(n *nodepool.Node, feature string) bool {
 	if n == nil {
 		return false
@@ -362,16 +384,25 @@ func (r *Router) CanConvert(ctx context.Context) bool {
 		return false
 	}
 	caps := &capabilityCache{infos: map[*nodepool.Node]playback.HWAccelInfo{}}
+	relay := false
 	for _, nodeURL := range lister.ProxyNodeURLs() {
-		if n, found := lister.ProxyNodeByURL(nodeURL); found && caps.has(n, playback.TransportFeatureThemeAudioEgressV1) && caps.convertsAAC(n) {
+		n, found := lister.ProxyNodeByURL(nodeURL)
+		if !found || !caps.has(n, playback.TransportFeatureThemeAudioEgressV1) {
+			continue
+		}
+		if caps.convertsAAC(n) {
 			return true
 		}
+		relay = relay || caps.has(n, playback.TransportFeatureProgressiveRemuxRelayV1)
 	}
-	if r.Recipes == nil || !r.Recipes.Enabled() {
+	// A transcode node's conversion reaches the client only through a proxy
+	// that serves themes and relays progressive remux, as Resolve requires.
+	if !relay || r.Recipes == nil || !r.Recipes.Enabled() {
 		return false
 	}
 	for _, nodeURL := range lister.TranscodeNodeURLs() {
-		if n, found := lister.TranscodeNodeByURL(nodeURL); found && caps.has(n, playback.TransportFeatureThemeAudioExecutionV1) && caps.convertsAAC(n) {
+		if n, found := lister.TranscodeNodeByURL(nodeURL); found && caps.has(n, playback.TransportFeatureThemeAudioExecutionV1) &&
+			caps.has(n, playback.TransportFeatureProgressiveRemuxExecutionV1) && caps.convertsAAC(n) {
 			return true
 		}
 	}

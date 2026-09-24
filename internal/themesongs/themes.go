@@ -299,7 +299,7 @@ func ContentType(container string) string {
 func Container(path string) string {
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
 	switch ext {
-	case containerMP3, "m4a", "m4b", "flac", "ogg", "opus", "wav", "aac":
+	case containerMP3, containerM4A, containerM4B, containerFLAC, containerOGG, containerOpus, containerWAV, CodecAAC:
 		return ext
 	default:
 		return ""

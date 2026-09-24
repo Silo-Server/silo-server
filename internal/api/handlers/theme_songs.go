@@ -40,7 +40,8 @@ func (h *ThemeSongsHandler) Authorize(ctx context.Context, identity themesongs.I
 		return themesongs.Authorization{}, err
 	}
 	delivery, ok := themesongs.Negotiate(file, accepted)
-	if !ok {
+	if !ok || (delivery == themesongs.DeliveryConverted && h.Router != nil && !h.Router.CanConvert(ctx)) {
+		// Neither the original nor a conversion this deployment can run.
 		return themesongs.Authorization{}, themesongs.ErrNotAcceptable
 	}
 	expires, err := themesongs.Expiry(time.Now(), accessExpiry)

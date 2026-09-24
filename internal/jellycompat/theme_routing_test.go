@@ -128,6 +128,12 @@ func TestCompatThemeAudioRoutesAndConverts(t *testing.T) {
 		t.Fatalf("proxy_only without proxies = %d %s", w.Code, w.Body.String())
 	}
 
+	// Nothing can convert: the conversion is refused like an unsupported format.
+	h.themeRouter = &themedelivery.Router{}
+	if w = request(http.MethodGet, "/Audio/"+id+"/stream.mp4"); w.Code != http.StatusBadRequest {
+		t.Fatalf("unconvertible theme = %d %s", w.Code, w.Body.String())
+	}
+
 	// No proxy converts and this node runs the AAC recipe: convert here.
 	h.themeRouter = &themedelivery.Router{LocalConversion: func(context.Context) bool { return true }}
 	w = request(http.MethodGet, "/Audio/"+id+"/stream.mp4")

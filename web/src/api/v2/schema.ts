@@ -25025,7 +25025,7 @@ export interface components {
       /** @description Theme audio can be served by worker nodes */
       cluster_routing: boolean;
       /**
-       * @description routed: themes follow the playback routing policy, so audio may come from a proxy node on another origin; local_direct_play: original audio from the API node only
+       * @description routed: themes follow the playback routing policy, so audio may come from a proxy node on another origin; local_direct_play: audio comes from this API origin only
        * @enum {string}
        */
       delivery: "local_direct_play" | "routed";

@@ -149,6 +149,11 @@ func TestThemeAuthorizeRoutesWithoutLocalFileAndGrantsConversionLocally(t *testi
 		t.Fatalf("unplayable theme: %v", err)
 	}
 
+	// A conversion nothing in this deployment can run is not offered.
+	if _, err := h.Authorize(t.Context(), identity, "movie", "7", catalog.AccessFilter{}, []themesongs.Format{{Container: "m4a", AudioCodec: "aac"}}, time.Now().Add(time.Minute)); !errors.Is(err, themesongs.ErrNotAcceptable) {
+		t.Fatalf("unconvertible theme: %v", err)
+	}
+
 	// With no proxy able to convert and a local AAC recipe, the conversion is
 	// served here under a converted grant.
 	dir := t.TempDir()
