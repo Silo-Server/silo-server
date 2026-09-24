@@ -51,7 +51,7 @@ func TestFetchHistoryImportsEveryPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"1", "2", "3"}; !reflect.DeepEqual(pages, want) {
+	if want := []string{"1", "2", "3", "1", "2", "3"}; !reflect.DeepEqual(pages, want) {
 		t.Fatalf("pages = %v, want %v", pages, want)
 	}
 	want := []struct {

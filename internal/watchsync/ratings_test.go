@@ -770,6 +770,14 @@ func (s *fakeRatingStore) remove(id string) { delete(s.ratings, id) }
 
 func (s *fakeRatingStore) stars(id string) int { return s.ratings[id].Rating }
 
+func (s *fakeRatingStore) matches(id string, observed catalog.ObservedRating) bool {
+	current, ok := s.ratings[id]
+	if observed.Rating == 0 {
+		return !ok
+	}
+	return ok && current.Rating == observed.Rating && current.RatedAt.Equal(observed.RatedAt)
+}
+
 func (s *fakeRatingStore) ListAll(_ context.Context, _ int, _ string) ([]catalog.UserRating, error) {
 	all := make([]catalog.UserRating, 0, len(s.ratings))
 	for _, rating := range s.ratings {
@@ -787,16 +795,16 @@ func (s *fakeRatingStore) Get(_ context.Context, _ int, _ string, id string) (*c
 	return &rating, nil
 }
 
-func (s *fakeRatingStore) SetIfUnchanged(_ context.Context, _ int, _ string, id string, expected, rating int, ratedAt time.Time) (bool, error) {
-	if s.conflicts[id] || s.stars(id) != expected {
+func (s *fakeRatingStore) SetIfUnchanged(_ context.Context, _ int, _ string, id string, observed catalog.ObservedRating, rating int, ratedAt time.Time) (bool, error) {
+	if s.conflicts[id] || !s.matches(id, observed) {
 		return false, nil
 	}
 	s.ratings[id] = catalog.UserRating{UserID: ratingTestUserID, ProfileID: ratingTestProfileID, MediaItemID: id, Rating: rating, RatedAt: ratedAt}
 	return true, nil
 }
 
-func (s *fakeRatingStore) DeleteIfUnchanged(_ context.Context, _ int, _ string, id string, expected int) (bool, error) {
-	if s.conflicts[id] || s.stars(id) != expected {
+func (s *fakeRatingStore) DeleteIfUnchanged(_ context.Context, _ int, _ string, id string, observed catalog.ObservedRating) (bool, error) {
+	if s.conflicts[id] || !s.matches(id, observed) {
 		return false, nil
 	}
 	delete(s.ratings, id)
@@ -861,6 +869,7 @@ type ratingProviderStub struct {
 	exportErr  error
 	gateMovies bool
 	onExport   func()
+	onFetch    func()
 	// fetchedCursors are the cursors the last FetchRatings call received.
 	fetchedCursors map[string]string
 	// kinds limits the rated kinds when set; nil rates every kind.
@@ -884,6 +893,9 @@ func (*ratingProviderStub) ConnectWithAPIKey(context.Context, string) (TokenSet,
 func (p *ratingProviderStub) FetchRatings(_ context.Context, _ ServerConfig, conn Connection) (RatingImportBatch, error) {
 	p.fetches++
 	p.fetchedCursors = conn.SyncCursors
+	if p.onFetch != nil {
+		p.onFetch()
+	}
 	return p.batch, nil
 }
 
@@ -913,4 +925,42 @@ func (p *ratingProviderStub) RemoveRatings(_ context.Context, _ ServerConfig, _ 
 
 func (p *ratingProviderStub) RatingExportRequiresWatched(kind string) bool {
 	return p.gateMovies && kind == historyimport.KindMovie
+}
+
+func TestSyncRatingsSkipsApplyingAfterAnAccountRebind(t *testing.T) {
+	h := newRatingHarness(t)
+	h.store.set(ratingTestMovieA, 3)
+	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieB, 7)}, SnapshotKinds: []string{historyimport.KindMovie}}
+	// The connection is re-bound while the provider read is in flight.
+	h.provider.onFetch = func() {
+		key := connectionKey(h.conn.Provider, h.conn.UserID, h.conn.ProfileID)
+		rebound := h.repo.connections[key]
+		rebound.ProviderAccountID = "another-account"
+		h.repo.connections[key] = rebound
+	}
+
+	result := h.sync()
+
+	if h.store.stars(ratingTestMovieB) != 0 || len(h.provider.exported) != 0 || len(h.repo.ratingStates) != 0 {
+		t.Fatalf("a stale run must not apply ratings: movieB=%d exported=%#v states=%#v",
+			h.store.stars(ratingTestMovieB), h.provider.exported, h.repo.ratingStates)
+	}
+	if len(result.Warnings) == 0 {
+		t.Fatal("a skipped stale run should warn")
+	}
+}
+
+func TestSyncRatingsImportLosesToASameValueResave(t *testing.T) {
+	h := newRatingHarness(t)
+	h.store.set(ratingTestMovieA, 4)
+	h.agree(ratingTestMovieA, 4, true)
+	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieA, 2)}, SnapshotKinds: []string{historyimport.KindMovie}}
+	// The user re-saves the same stars after the sync read them.
+	h.provider.onFetch = func() { h.store.set(ratingTestMovieA, 4) }
+
+	result := h.sync()
+
+	if got := h.store.stars(ratingTestMovieA); got != 4 || result.Imported != 0 {
+		t.Fatalf("movie A = %d stars, imported %d; a newer local save must win", got, result.Imported)
+	}
 }

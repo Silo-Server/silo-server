@@ -49,8 +49,8 @@ const (
 type ratingStore interface {
 	ListAll(ctx context.Context, userID int, profileID string) ([]catalog.UserRating, error)
 	Get(ctx context.Context, userID int, profileID, mediaItemID string) (*catalog.UserRating, error)
-	SetIfUnchanged(ctx context.Context, userID int, profileID, mediaItemID string, expected, rating int, ratedAt time.Time) (bool, error)
-	DeleteIfUnchanged(ctx context.Context, userID int, profileID, mediaItemID string, expected int) (bool, error)
+	SetIfUnchanged(ctx context.Context, userID int, profileID, mediaItemID string, observed catalog.ObservedRating, rating int, ratedAt time.Time) (bool, error)
+	DeleteIfUnchanged(ctx context.Context, userID int, profileID, mediaItemID string, observed catalog.ObservedRating) (bool, error)
 }
 
 // ratingProfileStaler marks a profile's recommendations stale after imports
@@ -130,6 +130,11 @@ type ratingItem struct {
 	observed bool
 	// remoteKey is the provider's own key for the item from this run's read.
 	remoteKey string
+}
+
+// observedLocal is the local rating this sync read, for compare-and-set writes.
+func (item *ratingItem) observedLocal() catalog.ObservedRating {
+	return catalog.ObservedRating{Rating: item.local, RatedAt: item.localAt}
 }
 
 // providerKey is the key recorded for an item and sent with its writes: the
@@ -235,6 +240,16 @@ func (s *Service) syncRatings(ctx context.Context, conn Connection, cfg ServerCo
 		result.Warnings = append(result.Warnings, warnings...)
 	} else {
 		markRemoteUnknown(items)
+	}
+
+	// The provider read can take a while, and the connection can be re-bound
+	// to another account meanwhile (on any node; the sync lock is local). Its
+	// ratings must not be applied to the profile once the account changed.
+	if current, err := s.reloadConnection(ctx, conn); err != nil {
+		return result, err
+	} else if current.ProviderAccountID != conn.ProviderAccountID {
+		result.Warnings = append(result.Warnings, "the connection moved to another provider account during the sync; ratings were not applied")
+		return result, nil
 	}
 
 	applied, err := s.reconcileRatings(ctx, conn, cfg, provider, items, importAllowed, exportAllowed, func() error {
@@ -736,13 +751,13 @@ func (s *Service) reconcileRatings(
 func (s *Service) importRating(ctx context.Context, conn Connection, item *ratingItem) (bool, error) {
 	id := item.identity.MediaItemID
 	if item.remote == 0 {
-		return s.ratings.DeleteIfUnchanged(ctx, conn.UserID, conn.ProfileID, id, item.local)
+		return s.ratings.DeleteIfUnchanged(ctx, conn.UserID, conn.ProfileID, id, item.observedLocal())
 	}
 	ratedAt := item.remoteAt
 	if ratedAt.IsZero() {
 		ratedAt = s.now()
 	}
-	return s.ratings.SetIfUnchanged(ctx, conn.UserID, conn.ProfileID, id, item.local, item.remote, ratedAt)
+	return s.ratings.SetIfUnchanged(ctx, conn.UserID, conn.ProfileID, id, item.observedLocal(), item.remote, ratedAt)
 }
 
 // gateRatingExports holds back new ratings that a provider would record as a

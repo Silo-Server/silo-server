@@ -82,7 +82,7 @@ func TestFetchListsImportEveryPage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantRequests := []string{"movies:1", "movies:2", "movies:3", "shows:1", "shows:2", "shows:3"}
+			wantRequests := []string{"movies:1", "movies:2", "movies:3", "movies:1", "movies:2", "movies:3", "shows:1", "shows:2", "shows:3", "shows:1", "shows:2", "shows:3"}
 			if !reflect.DeepEqual(requests, wantRequests) {
 				t.Fatalf("requests = %v, want %v", requests, wantRequests)
 			}
@@ -158,7 +158,7 @@ func TestFetchTraktPagesStopsOnPaginationHeaders(t *testing.T) {
 			name:      "page count",
 			headers:   map[string]string{"X-Pagination-Limit": "250", "X-Pagination-Page-Count": "2", "X-Pagination-Item-Count": "2"},
 			bodies:    map[string]string{"1": `[{"movie":{"ids":{"tmdb":1}}}]`, "2": `[{"movie":{"ids":{"tmdb":2}}}]`},
-			wantPages: []string{"1", "2"},
+			wantPages: []string{"1", "2", "1", "2"},
 			wantRows:  2,
 		},
 		{
@@ -166,7 +166,7 @@ func TestFetchTraktPagesStopsOnPaginationHeaders(t *testing.T) {
 			name:      "applied limit",
 			headers:   map[string]string{"X-Pagination-Limit": "2"},
 			bodies:    map[string]string{"1": `[{"movie":{"ids":{"tmdb":1}}},{"movie":{"ids":{"tmdb":2}}}]`, "2": `[{"movie":{"ids":{"tmdb":3}}}]`},
-			wantPages: []string{"1", "2"},
+			wantPages: []string{"1", "2", "1", "2"},
 			wantRows:  3,
 		},
 	} {
@@ -253,5 +253,50 @@ func TestFetchTraktPagesFailsWhenTheListChangesMidRead(t *testing.T) {
 		watchsync.ServerConfig{}, watchsync.Connection{AccessToken: "t"}, "/sync/watchlist/movies", nil)
 	if err == nil || rows != nil {
 		t.Fatalf("rows=%v err=%v, want an error and no rows", rows, err)
+	}
+}
+
+func TestFetchTraktPagesFailsWhenAnEqualCountChangeShiftsPages(t *testing.T) {
+	// Between the two passes one title was removed and another added, so the
+	// item count is unchanged but page 2 now holds a different title.
+	pass := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		if page == "1" {
+			pass++
+		}
+		w.Header().Set("X-Pagination-Item-Count", "251")
+		w.Header().Set("X-Pagination-Page-Count", "2")
+		switch {
+		case page == "1":
+			writeTraktFixture(t, w, `[{"listed_at":"2026-01-01T00:00:00Z","movie":{"title":"A","ids":{"trakt":1,"tmdb":1}}}]`)
+		case pass == 1:
+			writeTraktFixture(t, w, `[{"listed_at":"2026-01-01T00:00:00Z","movie":{"title":"B","ids":{"trakt":2,"tmdb":2}}}]`)
+		default:
+			writeTraktFixture(t, w, `[{"listed_at":"2026-01-01T00:00:00Z","movie":{"title":"C","ids":{"trakt":3,"tmdb":3}}}]`)
+		}
+	}))
+	defer server.Close()
+
+	rows, err := fetchTraktPages[traktFavoriteMovie](context.Background(), NewProvider(server.Client(), server.URL),
+		watchsync.ServerConfig{}, watchsync.Connection{AccessToken: "t"}, "/sync/watchlist/movies", nil)
+	if err == nil || rows != nil {
+		t.Fatalf("rows=%v err=%v, want an error and no rows", rows, err)
+	}
+}
+
+func TestFetchTraktPagesReadsASinglePageOnce(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("X-Pagination-Page-Count", "1")
+		writeTraktFixture(t, w, `[{"listed_at":"2026-01-01T00:00:00Z","movie":{"title":"A","ids":{"trakt":1,"tmdb":1}}}]`)
+	}))
+	defer server.Close()
+
+	rows, err := fetchTraktPages[traktFavoriteMovie](context.Background(), NewProvider(server.Client(), server.URL),
+		watchsync.ServerConfig{}, watchsync.Connection{AccessToken: "t"}, "/sync/watchlist/movies", nil)
+	if err != nil || len(rows) != 1 || requests != 1 {
+		t.Fatalf("rows=%d requests=%d err=%v, want one row from one request", len(rows), requests, err)
 	}
 }
