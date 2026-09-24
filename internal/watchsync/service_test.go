@@ -563,10 +563,10 @@ func (r *serviceFakeRepo) UpsertRatingSyncStates(_ context.Context, states []Rat
 	return nil
 }
 
-func (r *serviceFakeRepo) DeleteRatingSyncStates(_ context.Context, connectionID string, mediaItemIDs []string) error {
+func (r *serviceFakeRepo) DeleteRatingSyncStates(_ context.Context, connectionID, providerAccountID string, mediaItemIDs []string) error {
 	kept := r.ratingStates[:0]
 	for _, state := range r.ratingStates {
-		if state.ConnectionID == connectionID && containsString(mediaItemIDs, state.MediaItemID) {
+		if state.ConnectionID == connectionID && state.ProviderAccountID == providerAccountID && containsString(mediaItemIDs, state.MediaItemID) {
 			continue
 		}
 		kept = append(kept, state)

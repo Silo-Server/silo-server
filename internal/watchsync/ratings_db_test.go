@@ -143,7 +143,13 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 		if len(only) != 1 || only[0].MediaItemID != "s-1" {
 			t.Fatalf("filtered states = %#v", only)
 		}
-		if err := repo.DeleteRatingSyncStates(ctx, conn.ID, []string{"m-1"}); err != nil {
+		if err := repo.DeleteRatingSyncStates(ctx, conn.ID, "other-account", []string{"m-1"}); err != nil {
+			t.Fatal(err)
+		}
+		if states, _ := repo.ListRatingSyncStates(ctx, conn.ID, "", nil); len(states) != 2 {
+			t.Fatalf("another account's delete removed rows: %#v", states)
+		}
+		if err := repo.DeleteRatingSyncStates(ctx, conn.ID, "", []string{"m-1"}); err != nil {
 			t.Fatal(err)
 		}
 		if states, _ := repo.ListRatingSyncStates(ctx, conn.ID, "", nil); len(states) != 1 {
@@ -157,7 +163,15 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 		}
 	})
 
+	bind := func(t *testing.T, account string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `UPDATE watch_provider_connections SET provider_account_id=$2 WHERE id=$1::uuid`, conn.ID, account); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	t.Run("agreed ratings are scoped to the provider account", func(t *testing.T) {
+		bind(t, "account-a")
 		if err := repo.UpsertRatingSyncStates(ctx, []RatingSyncState{
 			{ConnectionID: conn.ID, ProviderAccountID: "account-a", MediaItemID: "m-3", Kind: "movie", SyncedRating: 3},
 		}); err != nil {
@@ -171,6 +185,7 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 			t.Fatalf("account rows = %#v (%v)", states, err)
 		}
 		// Re-agreeing under the new account takes the row over.
+		bind(t, "account-b")
 		if err := repo.UpsertRatingSyncStates(ctx, []RatingSyncState{
 			{ConnectionID: conn.ID, ProviderAccountID: "account-b", MediaItemID: "m-3", Kind: "movie", SyncedRating: 5},
 		}); err != nil {
@@ -179,10 +194,24 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 		if states, _ := repo.ListRatingSyncStates(ctx, conn.ID, "account-a", nil); len(states) != 0 {
 			t.Fatalf("old account still sees %#v", states)
 		}
-		// Clearing keeps the bound account's rows and drops the others.
+		// A run still writing for the previous account changes nothing.
 		if err := repo.UpsertRatingSyncStates(ctx, []RatingSyncState{
-			{ConnectionID: conn.ID, ProviderAccountID: "account-a", MediaItemID: "m-4", Kind: "movie", SyncedRating: 2},
+			{ConnectionID: conn.ID, ProviderAccountID: "account-a", MediaItemID: "m-3", Kind: "movie", SyncedRating: 1},
+			{ConnectionID: conn.ID, ProviderAccountID: "account-a", MediaItemID: "m-5", Kind: "movie", SyncedRating: 1},
 		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.DeleteRatingSyncStates(ctx, conn.ID, "account-a", []string{"m-3"}); err != nil {
+			t.Fatal(err)
+		}
+		if states, _ := repo.ListRatingSyncStates(ctx, conn.ID, "account-b", nil); len(states) != 1 || states[0].SyncedRating != 5 {
+			t.Fatalf("bound account rows after a stale write = %#v, want m-3 at 5", states)
+		}
+		if states, _ := repo.ListRatingSyncStates(ctx, conn.ID, "account-a", nil); len(states) != 0 {
+			t.Fatalf("stale write recorded %#v", states)
+		}
+		// Clearing keeps the bound account's rows and drops the others.
+		if _, err := pool.Exec(ctx, `INSERT INTO watch_provider_rating_items (connection_id, provider_account_id, media_item_id, kind, synced_rating) VALUES ($1::uuid, 'account-a', 'm-4', 'movie', 2)`, conn.ID); err != nil {
 			t.Fatal(err)
 		}
 		if err := repo.ClearRatingSyncStates(ctx, conn.ID, "account-b"); err != nil {
@@ -197,6 +226,7 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 		if err := repo.ClearRatingSyncStates(ctx, conn.ID, "none"); err != nil {
 			t.Fatal(err)
 		}
+		bind(t, "")
 	})
 
 	t.Run("rating cursors update in place for the bound account only", func(t *testing.T) {
@@ -220,8 +250,12 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 	})
 
 	t.Run("connection delete cascades", func(t *testing.T) {
+		bind(t, "")
 		if err := repo.UpsertRatingSyncStates(ctx, []RatingSyncState{{ConnectionID: conn.ID, MediaItemID: "m-2", Kind: "movie", SyncedRating: 3}}); err != nil {
 			t.Fatal(err)
+		}
+		if states, _ := repo.ListRatingSyncStates(ctx, conn.ID, "", nil); len(states) != 1 {
+			t.Fatalf("states before delete = %#v, want one", states)
 		}
 		if err := repo.DeleteConnection(ctx, "ratings", userID, "ratings-p"); err != nil {
 			t.Fatal(err)
