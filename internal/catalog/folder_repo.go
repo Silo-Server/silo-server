@@ -1026,37 +1026,80 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 	return dirs, nil
 }
 
+// sqlImageDeletePrefix is imageDeletePrefix expressed over a column named "s"
+// holding an already-trimmed path. The two must agree: a divergence would
+// either keep directories alive forever or, worse, report a still-referenced
+// directory as unreferenced and delete artwork that is in use.
+// TestSQLImageDeletePrefixMatchesGo pins them together, so change both or
+// neither.
+//
+// Branch by branch against imageDeletePrefix -> artworkkey.Directory:
+//   - "" and anything holding "://" are not local object keys.
+//   - the "local/" collapse mirrors the Go SplitN(path, "/", 4) guard: three
+//     separators are needed before a three-segment prefix exists.
+//   - no separator means path.Dir returns ".", and a single leading separator
+//     means it returns "/"; Directory maps both to "".
+//   - otherwise take everything before the last separator, which is what
+//     path.Dir does after Clean, then re-add exactly one trailing separator.
+const sqlImageDeletePrefix = `
+			CASE
+				WHEN s = '' OR position('://' in s) > 0 THEN ''
+				WHEN s LIKE 'local/%'
+					AND length(s) - length(replace(s, '/', '')) >= 3
+				THEN split_part(s, '/', 1) || '/' ||
+				     split_part(s, '/', 2) || '/' ||
+				     split_part(s, '/', 3) || '/'
+				WHEN position('/' in s) = 0 THEN ''
+				WHEN left(s, length(s) - position('/' in reverse(s))) = '' THEN ''
+				ELSE rtrim(left(s, length(s) - position('/' in reverse(s))), '/') || '/'
+			END`
+
+// filterUnreferencedImageDirs returns the candidate directories that no
+// surviving row still has artwork in.
+//
+// It derives each surviving path's directory once and compares on equality,
+// rather than testing every candidate against every row with a correlated
+// LIKE. The previous form spent one sequential scan of media_items, seasons and
+// episodes *per candidate directory*: the LIKE pattern was built from a column
+// (candidate.dir || '%'), so the planner could not turn it into range quals,
+// could not use an index, and produced three nested-loop anti joins. Cost grew
+// linearly with the number of candidates and made reconcile the longest
+// transaction in a scan on a large catalog.
+//
+// Equality on the derived directory is what makes a single pass possible, and
+// it also drops a latent bug: '%' or '_' in a directory name was being treated
+// as a LIKE wildcard.
 func filterUnreferencedImageDirs(ctx context.Context, q rowQuerier, dirs, deletingContentIDs []string) ([]string, error) {
 	if len(dirs) == 0 {
 		return nil, nil
 	}
 
 	rows, err := q.Query(ctx, `
-		SELECT candidate.dir
-		FROM unnest($1::text[]) AS candidate(dir)
-		WHERE NOT EXISTS (
-			SELECT 1
-			FROM media_items mi
-			WHERE NOT (mi.content_id = ANY($2::text[]))
-			  AND (
-				mi.poster_path LIKE candidate.dir || '%'
-				OR mi.backdrop_path LIKE candidate.dir || '%'
-				OR mi.logo_path LIKE candidate.dir || '%'
-			  )
+		WITH candidate AS (
+			SELECT DISTINCT dir FROM unnest($1::text[]) AS t(dir)
+		), referenced_path AS (
+			SELECT mi.poster_path AS path FROM media_items mi
+				WHERE NOT (mi.content_id = ANY($2::text[])) AND mi.poster_path <> ''
+			UNION ALL
+			SELECT mi.backdrop_path FROM media_items mi
+				WHERE NOT (mi.content_id = ANY($2::text[])) AND mi.backdrop_path <> ''
+			UNION ALL
+			SELECT mi.logo_path FROM media_items mi
+				WHERE NOT (mi.content_id = ANY($2::text[])) AND mi.logo_path <> ''
+			UNION ALL
+			SELECT s.poster_path FROM seasons s
+				WHERE NOT (s.series_id = ANY($2::text[])) AND s.poster_path <> ''
+			UNION ALL
+			SELECT e.still_path FROM episodes e
+				WHERE NOT (e.series_id = ANY($2::text[])) AND e.still_path <> ''
+		), referenced_dir AS (
+			SELECT DISTINCT `+sqlImageDeletePrefix+` AS dir
+			FROM (SELECT btrim(path) AS s FROM referenced_path) trimmed
 		)
-		AND NOT EXISTS (
-			SELECT 1
-			FROM seasons s
-			WHERE NOT (s.series_id = ANY($2::text[]))
-			  AND s.poster_path LIKE candidate.dir || '%'
-		)
-		AND NOT EXISTS (
-			SELECT 1
-			FROM episodes e
-			WHERE NOT (e.series_id = ANY($2::text[]))
-			  AND e.still_path LIKE candidate.dir || '%'
-		)
-		ORDER BY candidate.dir
+		SELECT c.dir
+		FROM candidate c
+		WHERE NOT EXISTS (SELECT 1 FROM referenced_dir r WHERE r.dir = c.dir)
+		ORDER BY c.dir
 	`, dirs, deletingContentIDs)
 	if err != nil {
 		return nil, fmt.Errorf("filtering referenced image dirs: %w", err)
