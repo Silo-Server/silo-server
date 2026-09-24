@@ -1026,81 +1026,75 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 	return dirs, nil
 }
 
-// sqlImageDeletePrefix is imageDeletePrefix expressed over a column named "s"
-// holding an already-trimmed path. The two must agree: a divergence would
-// either keep directories alive forever or, worse, report a still-referenced
-// directory as unreferenced and delete artwork that is in use.
-// TestSQLImageDeletePrefixMatchesGo pins them together, so change both or
-// neither.
-//
-// Branch by branch against imageDeletePrefix -> artworkkey.Directory:
-//   - "" and anything holding "://" are not local object keys.
-//   - the "local/" collapse mirrors the Go SplitN(path, "/", 4) guard: three
-//     separators are needed before a three-segment prefix exists.
-//   - no separator means path.Dir returns ".", and a single leading separator
-//     means it returns "/"; Directory maps both to "".
-//   - otherwise take everything before the last separator, which is what
-//     path.Dir does after Clean, then re-add exactly one trailing separator.
-const sqlImageDeletePrefix = `
-			CASE
-				WHEN s = '' OR position('://' in s) > 0 THEN ''
-				WHEN s LIKE 'local/%'
-					AND length(s) - length(replace(s, '/', '')) >= 3
-				THEN split_part(s, '/', 1) || '/' ||
-				     split_part(s, '/', 2) || '/' ||
-				     split_part(s, '/', 3) || '/'
-				WHEN position('/' in s) = 0 THEN ''
-				WHEN left(s, length(s) - position('/' in reverse(s))) = '' THEN ''
-				ELSE rtrim(left(s, length(s) - position('/' in reverse(s))), '/') || '/'
-			END`
-
 // filterUnreferencedImageDirs returns the candidate directories that no
-// surviving row still has artwork in.
+// surviving row still has artwork under: no poster, backdrop, logo, season
+// poster or episode still outside deletingContentIDs has a path that starts
+// with the directory.
 //
-// It derives each surviving path's directory once and compares on equality,
-// rather than testing every candidate against every row with a correlated
-// LIKE. The previous form spent one sequential scan of media_items, seasons and
-// episodes *per candidate directory*: the LIKE pattern was built from a column
-// (candidate.dir || '%'), so the planner could not turn it into range quals,
-// could not use an index, and produced three nested-loop anti joins. Cost grew
-// linearly with the number of candidates and made reconcile the longest
-// transaction in a scan on a large catalog.
+// The obvious form is a correlated `path LIKE candidate || '%'` per candidate,
+// and that is what this used to run. A pattern built from a column cannot be
+// turned into range quals, so it cost one sequential scan of media_items,
+// seasons and episodes per candidate. Reconcile runs it inside the scan's
+// transaction, and on a large catalog a big delete held that transaction open
+// long enough to block vacuum.
 //
-// Equality on the derived directory is what makes a single pass possible, and
-// it also drops a latent bug: '%' or '_' in a directory name was being treated
-// as a LIKE wildcard.
+// This reads each table once instead. Every candidate ends in '/', so "path
+// starts with candidate" holds exactly when the candidate equals the path cut
+// just after one of its own '/' separators. The query cuts each surviving path
+// at the candidate lengths where it has a '/' and looks each cut up among the
+// candidates. Work grows with the number of distinct candidate lengths, which
+// the shape of artwork keys keeps small, not with the number of candidates.
+// Matching is literal, so '%' and '_' in a directory name no longer act as
+// wildcards.
+//
+// The lookup is a jsonb key test rather than a join on purpose. The planner
+// cannot estimate how many cuts end in '/', and with a generic plan (pgx caches
+// statements) and no parallel workers it underestimated that count badly and
+// chose a nested-loop anti join over the cuts, which brought back the
+// per-candidate scaling this replaces. A per-row lookup leaves it no join to get wrong, and
+// the only set that reaches the final anti join is the referenced candidates,
+// which cannot outnumber the candidates.
+//
+// Candidates come from imageDeletePrefix, which always ends a directory in '/'.
+// Anything else is reported as referenced rather than guessed at: keeping a
+// directory costs storage, deleting a live one loses artwork.
 func filterUnreferencedImageDirs(ctx context.Context, q rowQuerier, dirs, deletingContentIDs []string) ([]string, error) {
-	if len(dirs) == 0 {
+	candidates := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		if strings.HasSuffix(dir, "/") {
+			candidates = append(candidates, dir)
+		}
+	}
+	if len(candidates) == 0 {
 		return nil, nil
 	}
 
 	rows, err := q.Query(ctx, `
-		WITH candidate AS (
-			SELECT DISTINCT dir FROM unnest($1::text[]) AS t(dir)
+		WITH lookup AS (
+			SELECT jsonb_object_agg(dir, true) AS keys, array_agg(DISTINCT length(dir)) AS lens
+			FROM unnest($1::text[]) AS t(dir)
 		), referenced_path AS (
-			SELECT mi.poster_path AS path FROM media_items mi
-				WHERE NOT (mi.content_id = ANY($2::text[])) AND mi.poster_path <> ''
-			UNION ALL
-			SELECT mi.backdrop_path FROM media_items mi
-				WHERE NOT (mi.content_id = ANY($2::text[])) AND mi.backdrop_path <> ''
-			UNION ALL
-			SELECT mi.logo_path FROM media_items mi
-				WHERE NOT (mi.content_id = ANY($2::text[])) AND mi.logo_path <> ''
+			SELECT a.path FROM media_items mi
+				CROSS JOIN LATERAL (VALUES (mi.poster_path), (mi.backdrop_path), (mi.logo_path)) AS a(path)
+				WHERE NOT (mi.content_id = ANY($2::text[])) AND a.path <> ''
 			UNION ALL
 			SELECT s.poster_path FROM seasons s
 				WHERE NOT (s.series_id = ANY($2::text[])) AND s.poster_path <> ''
 			UNION ALL
 			SELECT e.still_path FROM episodes e
 				WHERE NOT (e.series_id = ANY($2::text[])) AND e.still_path <> ''
-		), referenced_dir AS (
-			SELECT DISTINCT `+sqlImageDeletePrefix+` AS dir
-			FROM (SELECT btrim(path) AS s FROM referenced_path) trimmed
+		), referenced AS (
+			SELECT DISTINCT left(p.path, n) AS dir
+			FROM referenced_path p
+			CROSS JOIN lookup
+			CROSS JOIN LATERAL unnest(lookup.lens) AS n
+			WHERE substr(p.path, n, 1) = '/' AND lookup.keys ? left(p.path, n)
 		)
-		SELECT c.dir
-		FROM candidate c
-		WHERE NOT EXISTS (SELECT 1 FROM referenced_dir r WHERE r.dir = c.dir)
+		SELECT DISTINCT c.dir
+		FROM unnest($1::text[]) AS c(dir)
+		WHERE NOT EXISTS (SELECT 1 FROM referenced r WHERE r.dir = c.dir)
 		ORDER BY c.dir
-	`, dirs, deletingContentIDs)
+	`, candidates, deletingContentIDs)
 	if err != nil {
 		return nil, fmt.Errorf("filtering referenced image dirs: %w", err)
 	}
