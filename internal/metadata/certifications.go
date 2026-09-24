@@ -64,7 +64,7 @@ func (s *MetadataService) fetchAndStoreCertifications(ctx context.Context, item 
 		return fmt.Errorf("invalid certification TMDB ID: %w", err)
 	}
 	if id <= 0 {
-		return nil
+		return fmt.Errorf("invalid certification TMDB ID")
 	}
 	ratings, err := s.certificationProvider.GetCertifications(ctx, item.Type, id)
 	if err != nil {
@@ -75,8 +75,14 @@ func (s *MetadataService) fetchAndStoreCertifications(ctx context.Context, item 
 		return err
 	}
 	// Do not attach a result to a concurrently reidentified item.
-	_, err = s.dbPool.Exec(ctx, `INSERT INTO media_item_certifications(content_id, tmdb_id, ratings)
- SELECT content_id, tmdb_id, $3::jsonb FROM media_items WHERE content_id = $1 AND tmdb_id = $2
+	tag, err := s.dbPool.Exec(ctx, `INSERT INTO media_item_certifications(content_id, tmdb_id, ratings)
+ SELECT content_id, tmdb_id, $3::jsonb FROM media_items WHERE content_id = $1 AND tmdb_id = $2 AND NOT (9 = ANY(COALESCE(locked_fields, '{}')))
  ON CONFLICT (content_id) DO UPDATE SET tmdb_id = EXCLUDED.tmdb_id, ratings = EXCLUDED.ratings, updated_at = now()`, item.ContentID, item.TmdbID, data)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("item changed or rating was locked during certification refresh; retry after checking the item")
+	}
+	return nil
 }

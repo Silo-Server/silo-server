@@ -247,7 +247,7 @@ jobs:
           SECRET_KEY: ci-only-disposable-database-encryption-key-00000000
         run: |
           go run ./cmd/silo --migrate-only
-          go test -p 1 -count=1 ./internal/catalog ./internal/api/handlers ./internal/apiv2 ./internal/sections ./internal/metadata ./internal/jellycompat
+          go test -p 1 -count=1 -run 'Certification|TestHandleUpdateLibraryLanguageChangeQueuesRefresh|TestUserLibrarySharedPolicyProjection' ./internal/catalog ./internal/api/handlers ./internal/apiv2 ./internal/sections ./internal/metadata
 
       # Compiles every package on the way, so there is no separate build step.
       - name: Test

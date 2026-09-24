@@ -2444,7 +2444,9 @@ func (s *MetadataService) mergeAndPersist(
 	unlockProviderDedup()
 	providerDedupReleased = true
 	if err := s.refreshCertifications(ctx, item, parseProcessFolderID(req.FolderID), locked); err != nil {
-		return nil, err
+		// Country data is supplemental during a normal metadata refresh.
+		// Keep the previous snapshot and finish artwork, people and localization.
+		slog.WarnContext(ctx, "metadata: certification refresh failed; keeping previous snapshot", "component", "metadata", "content_id", contentID, "error", err)
 	}
 	if isCanonicalWrite {
 		s.enqueueItemImages(ctx, item, accumulator.ProviderIDs, images)

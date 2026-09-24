@@ -116,7 +116,11 @@ This uses `POST /api/v2/admin/items/{id}/refresh-metadata` with
 that title's country ratings, without scanning files, refreshing artwork, or
 changing other metadata. It requires a TMDB match and an unlocked content rating.
 The user-library capability response advertises `certification_only_refresh`.
-Provider failures fail the job and preserve the previous certification snapshot.
+Provider failures fail a certification-only job and preserve the previous snapshot.
+During a normal metadata refresh, a certification failure is logged and the
+remaining metadata processing continues. If a title is deleted, reidentified or
+locked during a certification-only fetch, the job reports failure rather than
+claiming that the stale result was applied.
 These controls are available in the bundled web client; native clients can keep
 using existing refresh modes until they add the advertised mode.
 
