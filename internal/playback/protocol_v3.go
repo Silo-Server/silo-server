@@ -109,6 +109,10 @@ const (
 const (
 	TransportFeatureProgressiveRemuxExecutionV1 = "progressive_remux_execution_v1"
 	TransportFeatureProgressiveRemuxRelayV1     = "progressive_remux_relay_v1"
+	// Theme audio markers: a proxy that serves /stream/theme, and a transcode
+	// node that approves theme files as progressive AAC inputs.
+	TransportFeatureThemeAudioEgressV1    = "theme_audio_egress_v1"
+	TransportFeatureThemeAudioExecutionV1 = "theme_audio_execution_v1"
 )
 
 // Degradation warning codes reported by playback plans.

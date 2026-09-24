@@ -431,3 +431,49 @@ func TestOrdinaryRecipeRemainsLegacyFlatJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestPutTTLBoundsRecordLifetime(t *testing.T) {
+	rawURL := os.Getenv("SILO_TEST_REDIS_URL")
+	if rawURL == "" {
+		t.Skip("SILO_TEST_REDIS_URL not set")
+	}
+	options, err := redis.ParseURL(rawURL)
+	if err != nil {
+		t.Fatalf("parse SILO_TEST_REDIS_URL: %v", err)
+	}
+	client := redis.NewClient(options)
+	t.Cleanup(func() { _ = client.Close() })
+	store := NewStore(client, time.Hour)
+	unique := uuid.NewString()
+	nodeBound := "theme-" + unique
+	flat := "flat-" + unique
+	clamped := "clamped-" + unique
+	t.Cleanup(func() {
+		_ = client.Del(context.WithoutCancel(t.Context()), store.key(nodeBound), store.key(flat), store.key(clamped),
+			nodeAuthorityRecordGenerationKey(nodeBound), nodeAuthorityRecordDigestKey(nodeBound)).Err()
+	})
+	// A node-bound card takes the authority script path; a card without a node
+	// identity takes the plain SET path. Both must honor the shorter lifetime.
+	cards := map[string]playback.RecipeCard{
+		nodeBound: {SessionID: nodeBound, InputPath: "/media/theme.ogg", TranscodeNodeURL: "http://node-" + unique, RoutingExecutionNodeID: 7},
+		flat:      {SessionID: flat, InputPath: "/media/theme.ogg"},
+	}
+	for id, card := range cards {
+		if err := store.PutTTL(t.Context(), id, card, 5*time.Second); err != nil {
+			t.Fatal(err)
+		}
+		ttl, err := client.PTTL(t.Context(), store.key(id)).Result()
+		if err != nil || ttl <= 0 || ttl > 5*time.Second {
+			t.Fatalf("%s ttl = %v err=%v, want within 5s", id, ttl, err)
+		}
+		if _, ok := store.Get(t.Context(), id); !ok {
+			t.Fatalf("%s was not readable", id)
+		}
+	}
+	if err := store.PutTTL(t.Context(), clamped, cards[flat], 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if ttl, err := client.PTTL(t.Context(), store.key(clamped)).Result(); err != nil || ttl > time.Hour {
+		t.Fatalf("ttl above the store bound = %v err=%v", ttl, err)
+	}
+}
