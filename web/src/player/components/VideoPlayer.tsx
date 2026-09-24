@@ -248,6 +248,11 @@ const MAX_AUTOPLAY_ATTEMPTS = 4;
 const ROOM_STALLS_BEFORE_LOWER_QUALITY = 2;
 const ROOM_STALL_WINDOW_MS = 5 * 60_000;
 const LOWER_QUALITY_ACTION_LABEL = "Lower quality";
+const PLAYBACK_NOTICE_VISIBLE_MS = 8_000;
+const ROOM_RECONNECTING_MESSAGE = "Reconnecting to room. Controls are temporarily unavailable.";
+// The server ends room sockets on a fixed lifetime and the client reconnects
+// in well under a second, so only a longer gap is worth a warning.
+const ROOM_RECONNECT_NOTICE_DELAY_MS = 2_000;
 
 interface PlaybackNoticeState {
   title?: string;
@@ -751,6 +756,7 @@ export function VideoPlayer({
     setVideoFit("contain");
   }, [sessionId]);
 
+  const roomConnected = watchTogether.connectionState === "connected";
   useEffect(() => {
     if (!watchTogetherRoomId || watchTogether.closedReason) {
       return;
@@ -760,21 +766,34 @@ export function VideoPlayer({
       setNotice(null);
       return;
     }
-    if (watchTogether.connectionState === "connected") {
+    if (roomConnected) {
+      setNotice((current) => (current?.message === ROOM_RECONNECTING_MESSAGE ? null : current));
       return;
     }
 
-    showWatchTogetherNotice(
-      "Reconnecting to room. Controls are temporarily unavailable.",
-      "warning",
+    const timer = setTimeout(
+      () => showWatchTogetherNotice(ROOM_RECONNECTING_MESSAGE, "warning"),
+      ROOM_RECONNECT_NOTICE_DELAY_MS,
     );
+    return () => clearTimeout(timer);
   }, [
+    roomConnected,
     showWatchTogetherNotice,
     watchTogether.closedReason,
     watchTogether.replacementReason,
-    watchTogether.connectionState,
     watchTogetherRoomId,
   ]);
+
+  // Expire the notice from state rather than only hiding it, so the next
+  // identical notice renders again.
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(
+      () => setNotice((current) => (current === notice ? null : current)),
+      PLAYBACK_NOTICE_VISIBLE_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   useEffect(() => {
     compatibilityFallbackKeyRef.current = null;
@@ -985,10 +1004,7 @@ export function VideoPlayer({
         !watchTogether.closedReason &&
         (watchTogether.connectionState !== "connected" || !watchTogether.room)
       ) {
-        showWatchTogetherNotice(
-          "Reconnecting to room. Controls are temporarily unavailable.",
-          "warning",
-        );
+        showWatchTogetherNotice(ROOM_RECONNECTING_MESSAGE, "warning");
         return false;
       }
       if (watchTogether.room && !watchTogether.room.self_can_manage_room) {
@@ -2657,10 +2673,7 @@ export function VideoPlayer({
         !watchTogether.closedReason &&
         (watchTogether.connectionState !== "connected" || !watchTogether.room)
       ) {
-        showWatchTogetherNotice(
-          "Reconnecting to room. Controls are temporarily unavailable.",
-          "warning",
-        );
+        showWatchTogetherNotice(ROOM_RECONNECTING_MESSAGE, "warning");
         return;
       }
       if (watchTogether.room && !watchTogether.room.self_can_control_transport) {

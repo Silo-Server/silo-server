@@ -256,6 +256,8 @@ function roomConnection(
   };
 }
 
+const reconnectingMessage = "Reconnecting to room. Controls are temporarily unavailable.";
+
 describe("VideoPlayer room catch-up", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -331,6 +333,46 @@ describe("VideoPlayer room catch-up", () => {
     expect(video.pause).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Rejoin Watch Party" }));
     expect(connection.rejoinRoom).toHaveBeenCalledOnce();
+  });
+
+  it("does not warn about a room socket that reconnects quickly", async () => {
+    const { connection, rerenderPlayer } = setup(100);
+    rerenderPlayer({ watchTogetherConnection: { ...connection, connectionState: "disconnected" } });
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    rerenderPlayer({ watchTogetherConnection: { ...connection, connectionState: "connecting" } });
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    rerenderPlayer({ watchTogetherConnection: connection });
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+    expect(screen.queryByText(reconnectingMessage)).toBeNull();
+  });
+
+  it("warns during a sustained room outage and clears the warning on reconnect", async () => {
+    const { connection, rerenderPlayer } = setup(100);
+    for (let outage = 0; outage < 2; outage++) {
+      rerenderPlayer({
+        watchTogetherConnection: { ...connection, connectionState: "disconnected" },
+      });
+      await act(() => vi.advanceTimersByTimeAsync(1_000));
+      // Backoff moves between disconnected and connecting without restarting the delay.
+      rerenderPlayer({ watchTogetherConnection: { ...connection, connectionState: "connecting" } });
+      await act(() => vi.advanceTimersByTimeAsync(999));
+      expect(screen.queryByText(reconnectingMessage)).toBeNull();
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(screen.getByText(reconnectingMessage)).toBeInTheDocument();
+      rerenderPlayer({ watchTogetherConnection: connection });
+      expect(screen.queryByText(reconnectingMessage)).toBeNull();
+      await act(() => vi.advanceTimersByTimeAsync(60_000));
+    }
+  });
+
+  it("shows a repeated notice again after the previous one expired", async () => {
+    setup(100);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      act(() => controls.current!.onSeek(50));
+      expect(screen.getByText("Only the host can seek the room.")).toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(8_000));
+      expect(screen.queryByText("Only the host can seek the room.")).toBeNull();
+    }
   });
 
   it("keeps displaced playback stopped on a late lobby read and leaves through the hub", async () => {
