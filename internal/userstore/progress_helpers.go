@@ -32,6 +32,23 @@ func AddVisibleHistory(ctx context.Context, store UserStore, entry WatchHistoryE
 	return entry, nil
 }
 
+// UpdateProgressReportingCompletion writes one playback sample through
+// UpdateProgress and reports whether that write marked the item watched.
+// Only a sample past the watched threshold can, so the prior row is read for
+// those samples alone. A failed read does not block the write; it reports
+// completion, so the caller errs toward treating the sample as a change.
+func UpdateProgressReportingCompletion(ctx context.Context, store UserStore, profileID, mediaItemID string, position, duration float64, thresholds ProgressThresholds) (completed bool, err error) {
+	if _, pastThreshold, skip := ResolveProgressState(position, duration, thresholds); skip || !pastThreshold {
+		return false, store.UpdateProgress(ctx, profileID, mediaItemID, position, duration, thresholds)
+	}
+	prior, priorErr := store.GetProgress(ctx, profileID, mediaItemID)
+	wasCompleted := priorErr == nil && prior != nil && prior.Completed
+	if err := store.UpdateProgress(ctx, profileID, mediaItemID, position, duration, thresholds); err != nil {
+		return false, err
+	}
+	return !wasCompleted, nil
+}
+
 // MarkWatchedTarget is one leaf item to mark watched, carrying the duration
 // that belongs on its progress row.
 type MarkWatchedTarget struct {

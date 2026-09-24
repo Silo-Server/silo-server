@@ -1051,10 +1051,14 @@ func (r *Repo) CowatchPairCount(ctx context.Context) (int, error) {
 
 // --- Staleness Operations ---
 
-// MarkProfileStale sets stale_at = NOW() on a user's taste profile.
+// MarkProfileStale sets stale_at = NOW() on a user's taste profile. A profile
+// already waiting for a refresh (stale_at > updated_at) keeps its pending
+// mark, so a repeat mark writes nothing.
 func (r *Repo) MarkProfileStale(ctx context.Context, userID int, profileID string) error {
-	_, err := r.pool.Exec(ctx,
-		`UPDATE user_taste_profiles SET stale_at = NOW() WHERE user_id = $1 AND profile_id = $2`,
+	_, err := r.pool.Exec(ctx, `
+		UPDATE user_taste_profiles SET stale_at = NOW()
+		WHERE  user_id = $1 AND profile_id = $2
+		  AND  (stale_at IS NULL OR stale_at <= updated_at)`,
 		userID, profileID)
 	if err != nil {
 		return fmt.Errorf("mark profile stale: %w", err)

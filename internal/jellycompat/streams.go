@@ -33,6 +33,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
@@ -2262,7 +2263,10 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 					break
 				}
 			}
-			if err := store.UpdateProgress(r.Context(), session.ProfileID, playSession.ItemID, positionSeconds, duration, h.playbackThresholds(r.Context())); err == nil {
+			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, duration, h.playbackThresholds(r.Context()))
+			// Only the Stopped report and the report that marks the item
+			// watched change the taste profile; a position-only report does not.
+			if err == nil && (stop || completed) {
 				triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
 			}
 		}

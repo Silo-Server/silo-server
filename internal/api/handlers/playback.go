@@ -993,9 +993,13 @@ func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback
 	}
 
 	duration := float64(file.Duration)
-	if err := store.UpdateProgress(ctx, session.ProfileID, targetID, session.Position, duration, h.playbackThresholds(ctx)); err != nil {
+	completed, err := userstore.UpdateProgressReportingCompletion(ctx, store, session.ProfileID, targetID, session.Position, duration, h.playbackThresholds(ctx))
+	if err != nil {
 		slog.ErrorContext(ctx, "failed to persist progress", "component", "api", "session", session.ID, "error", err)
-	} else {
+	} else if completed {
+		// A heartbeat that only moves the position leaves the taste profile
+		// alone; the stop (persistStopAndHistory) refreshes it for the play,
+		// and marking the item watched refreshes it here.
 		triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, session.UserID, session.ProfileID)
 	}
 
