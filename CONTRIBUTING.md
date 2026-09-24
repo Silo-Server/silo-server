@@ -85,6 +85,7 @@ gofmt -l .                      # must print nothing
 go vet ./...
 make lint-changed                   # BASE_REF=origin/<pr-base> when not main
 make test-go
+make test-db-pins                   # needs SILO_TEST_DATABASE_URL; see below
 
 # Web
 cd web
@@ -112,6 +113,15 @@ make verify-local-paths
 Touching `internal/apiv2` registrations? Run `make apiv2-openapi` and
 `make apiv2-fixtures` and commit what they write; the gates above fail on a
 stale artifact or fixture tree.
+
+`make test-go` has no database, so every DB-backed test in it skips.
+`make test-db-pins` runs the query-budget pins listed in
+[scripts/ci/db-pins.txt](scripts/ci/db-pins.txt) against the database named by
+`SILO_TEST_DATABASE_URL`, and fails if any of them skips. Point it at a
+disposable database migrated with
+`DATABASE_URL=<url> SECRET_KEY=<32+ chars> go run ./cmd/silo/ --migrate-only`.
+A test that pins a statement count or query plan belongs in that list, added in
+the same change.
 
 `make lint` runs `golangci-lint` over the whole tree and reports inherited
 findings the repository does not pass yet; CI only gates the lines your branch
