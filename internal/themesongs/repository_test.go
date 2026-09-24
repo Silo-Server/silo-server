@@ -341,3 +341,51 @@ func TestRepositoryInheritanceRematchingAndAccess(t *testing.T) {
 		t.Fatal("orphan themes were retained", cache, err)
 	}
 }
+
+func TestRepositoryIsActiveTheme(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	var folder int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,enabled) VALUES('movies','Theme input approval test',true) RETURNING id`).Scan(&folder); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id=$1`, folder) }()
+	root := filepath.Join(t.TempDir(), "Movie")
+	path := filepath.Join(root, "theme.ogg")
+	repo := NewRepository(pool)
+	if err := repo.Replace(ctx, folder, root, []File{{Song: Song{Title: "Theme", Container: "ogg", DurationSeconds: 4}, OwnerPath: root, Path: path, Size: 50, Modified: time.Now().Truncate(time.Microsecond)}}); err != nil {
+		t.Fatal(err)
+	}
+	var id int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM item_theme_songs WHERE media_folder_id=$1`, folder).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	check := func(id int64, path string) bool {
+		t.Helper()
+		active, err := repo.IsActiveTheme(ctx, id, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return active
+	}
+	if !check(id, path) {
+		t.Fatal("discovered theme was not approved")
+	}
+	if check(id, filepath.Join(root, "other.ogg")) || check(id+1_000_000, path) || check(0, path) {
+		t.Fatal("theme approval accepted a mismatched id or path")
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_folders SET enabled=false WHERE id=$1`, folder); err != nil {
+		t.Fatal(err)
+	}
+	if check(id, path) {
+		t.Fatal("theme in a disabled library was approved")
+	}
+}

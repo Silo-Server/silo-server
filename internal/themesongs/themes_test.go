@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type fixedStore struct{ files []File }
@@ -39,7 +40,7 @@ func TestGrantBindsIdentityOwnerAndFile(t *testing.T) {
 	file := testFile(t)
 	svc := NewService(&fixedStore{[]File{file}}, "secret")
 	identity := Identity{UserID: 7, ProfileID: "profile", SessionID: "session", PolicyRevision: 3}
-	token, expiry, err := svc.Mint(context.Background(), identity, "movie", "1", catalog.AccessFilter{}, time.Now().Add(time.Minute))
+	token, expiry, err := svc.Mint(identity, "movie", file, DeliveryOriginal, time.Now().Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +48,7 @@ func TestGrantBindsIdentityOwnerAndFile(t *testing.T) {
 		t.Fatal("grant exceeds login lifetime")
 	}
 	grant, err := svc.Validate(token, "movie", "1")
-	if err != nil || grant.Identity != identity || grant.Size != file.Size || grant.Modified != file.Modified.UnixNano() {
+	if err != nil || grant.Identity != identity || grant.Size != file.Size || grant.Modified != file.Modified.UnixNano() || grant.Delivery != DeliveryOriginal {
 		t.Fatalf("grant=%+v err=%v", grant, err)
 	}
 	for _, pair := range [][2]string{{"other", "1"}, {"movie", "2"}} {
@@ -58,8 +59,20 @@ func TestGrantBindsIdentityOwnerAndFile(t *testing.T) {
 	if _, err := NewService(&fixedStore{}, "other secret").Validate(token, "movie", "1"); !errors.Is(err, ErrGrant) {
 		t.Fatal("wrong key accepted")
 	}
-	if _, _, err := svc.Mint(context.Background(), identity, "movie", "1", catalog.AccessFilter{}, time.Now().Add(-time.Second)); !errors.Is(err, ErrGrant) {
+	if _, _, err := svc.Mint(identity, "movie", file, DeliveryOriginal, time.Now().Add(-time.Second)); !errors.Is(err, ErrGrant) {
 		t.Fatal("expired identity accepted")
+	}
+	converted, _, err := svc.Mint(identity, "movie", file, DeliveryConverted, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grant, err := svc.Validate(converted, "movie", "1"); err != nil || grant.Delivery != DeliveryConverted {
+		t.Fatalf("converted grant=%+v err=%v", grant, err)
+	}
+	// An API that predates conversion validates only the original audience, so
+	// it must refuse a converted grant rather than serve the original bytes.
+	if _, err := jwt.ParseWithClaims(converted, &Grant{}, func(*jwt.Token) (any, error) { return svc.key, nil }, jwt.WithAudience(grantAudienceOriginal)); err == nil {
+		t.Fatal("converted grant carries the original audience")
 	}
 }
 

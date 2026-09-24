@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"os"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
@@ -50,4 +52,18 @@ func (h *ThemeSongsHandler) OpenGrant(ctx context.Context, owner, id, token stri
 	streamtelemetry.Attach(ctx, streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(grant.UserID), ProfileID: grant.ProfileID, PlayMethod: string(playback.PlayDirect)})
 	f, err := themesongs.Open(file)
 	return file, f, err
+}
+
+// Mint authorizes original theme audio served by this API node.
+func (h *ThemeSongsHandler) Mint(ctx context.Context, identity themesongs.Identity, owner, id string, filter catalog.AccessFilter, accessExpiry time.Time) (string, time.Time, error) {
+	file, err := h.Select(ctx, owner, id, filter)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	f, err := themesongs.Open(file)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	_ = f.Close()
+	return h.Service.Mint(identity, owner, file, themesongs.DeliveryOriginal, accessExpiry)
 }

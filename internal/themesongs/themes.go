@@ -89,7 +89,23 @@ type Grant struct {
 	ThemeID  string `json:"theme_id"`
 	Size     int64  `json:"size"`
 	Modified int64  `json:"modified"`
+	// Delivery is derived from the audience on validation, never trusted from
+	// the payload: a converted grant carries its own audience so an API that
+	// predates conversion rejects it instead of serving the original bytes.
+	Delivery Delivery `json:"-"`
 	jwt.RegisteredClaims
+}
+
+const (
+	grantAudienceOriginal  = "theme-audio"
+	grantAudienceConverted = "theme-audio-aac"
+)
+
+func grantAudience(delivery Delivery) string {
+	if delivery == DeliveryConverted {
+		return grantAudienceConverted
+	}
+	return grantAudienceOriginal
 }
 
 type Service struct {
@@ -130,28 +146,33 @@ func (s *Service) Select(ctx context.Context, owner, id string, filter catalog.A
 	return File{}, ErrNotFound
 }
 
-func (s *Service) Mint(ctx context.Context, identity Identity, owner, id string, filter catalog.AccessFilter, accessExpiry time.Time) (string, time.Time, error) {
-	if len(s.key) == 0 || identity.UserID <= 0 || identity.ProfileID == "" || identity.SessionID == "" {
-		return "", time.Time{}, ErrGrant
-	}
-	file, err := s.Select(ctx, owner, id, filter)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	f, err := Open(file)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	_ = f.Close()
-	now := time.Now()
+// Expiry is when a theme credential issued now must end: the grant lifetime,
+// cut short by the login session that authorized it. Routed proxy tokens use
+// the same bound as the API grant.
+func Expiry(now, accessExpiry time.Time) (time.Time, error) {
 	expires := now.Add(GrantLifetime)
-	if accessExpiry.Before(expires) {
+	if !accessExpiry.IsZero() && accessExpiry.Before(expires) {
 		expires = accessExpiry
 	}
 	if !expires.After(now) {
+		return time.Time{}, ErrGrant
+	}
+	return expires, nil
+}
+
+// Mint signs an API-served grant for a file the caller already selected under
+// the viewer's access filter. It does not touch the disk: an API node serving
+// the grant opens the file itself, and a routed theme never reaches it.
+func (s *Service) Mint(identity Identity, owner string, file File, delivery Delivery, accessExpiry time.Time) (string, time.Time, error) {
+	if len(s.key) == 0 || identity.UserID <= 0 || identity.ProfileID == "" || identity.SessionID == "" || file.ID == "" {
 		return "", time.Time{}, ErrGrant
 	}
-	grant := Grant{Identity: identity, OwnerID: owner, ThemeID: id, Size: file.Size, Modified: file.Modified.UnixNano(), RegisteredClaims: jwt.RegisteredClaims{Audience: jwt.ClaimStrings{"theme-audio"}, ExpiresAt: jwt.NewNumericDate(expires), IssuedAt: jwt.NewNumericDate(now)}}
+	now := time.Now()
+	expires, err := Expiry(now, accessExpiry)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	grant := Grant{Identity: identity, OwnerID: owner, ThemeID: file.ID, Size: file.Size, Modified: file.Modified.UnixNano(), RegisteredClaims: jwt.RegisteredClaims{Audience: jwt.ClaimStrings{grantAudience(delivery)}, ExpiresAt: jwt.NewNumericDate(expires), IssuedAt: jwt.NewNumericDate(now)}}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, grant).SignedString(s.key)
 	return token, expires, err
 }
@@ -161,8 +182,16 @@ func (s *Service) Validate(token, owner, id string) (*Grant, error) {
 		return nil, ErrGrant
 	}
 	var grant Grant
-	parsed, err := jwt.ParseWithClaims(token, &grant, func(_ *jwt.Token) (any, error) { return s.key, nil }, jwt.WithValidMethods([]string{"HS256"}), jwt.WithAudience("theme-audio"), jwt.WithExpirationRequired())
-	if err != nil || !parsed.Valid || grant.OwnerID != owner || grant.ThemeID != id || grant.UserID <= 0 || grant.ProfileID == "" || grant.SessionID == "" {
+	parsed, err := jwt.ParseWithClaims(token, &grant, func(_ *jwt.Token) (any, error) { return s.key, nil }, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
+	if err != nil || !parsed.Valid || grant.OwnerID != owner || grant.ThemeID != id || grant.UserID <= 0 || grant.ProfileID == "" || grant.SessionID == "" || len(grant.Audience) != 1 {
+		return nil, ErrGrant
+	}
+	switch grant.Audience[0] {
+	case grantAudienceOriginal:
+		grant.Delivery = DeliveryOriginal
+	case grantAudienceConverted:
+		grant.Delivery = DeliveryConverted
+	default:
 		return nil, ErrGrant
 	}
 	return &grant, nil
@@ -193,11 +222,60 @@ func Open(file File) (*os.File, error) {
 }
 
 func Serve(w http.ResponseWriter, r *http.Request, file File, f *os.File) {
+	serveOriginal(w, r, file.ID, file.Container, file.Title, file.Size, file.Modified, f)
+}
+
+func serveOriginal(w http.ResponseWriter, r *http.Request, id, container, name string, size int64, modified time.Time, f *os.File) {
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Type", ContentType(file.Container))
-	w.Header().Set("ETag", fmt.Sprintf(`"theme-%s-%d-%d"`, file.ID, file.Size, file.Modified.UnixNano()))
-	http.ServeContent(httpstream.NewRollingDeadlineWriter(w), r, file.Title, file.Modified, f)
+	w.Header().Set("Content-Type", ContentType(container))
+	w.Header().Set("ETag", fmt.Sprintf(`"theme-%s-%d-%d"`, id, size, modified.UnixNano()))
+	http.ServeContent(httpstream.NewRollingDeadlineWriter(w), r, name, modified, f)
+}
+
+// ServeFile serves an original theme on a worker from its signed path. The
+// token froze the size and modification time the API selected, so a file
+// replaced since then is refused until a scan and a new token describe it,
+// matching Open on the API.
+func ServeFile(w http.ResponseWriter, r *http.Request, id, path string, size int64, modified time.Time) {
+	container := Container(path)
+	if container == "" || !filepath.IsAbs(path) {
+		http.Error(w, "theme audio unavailable", http.StatusNotFound)
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		http.Error(w, "theme audio unavailable", http.StatusNotFound)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() != size || !info.ModTime().Truncate(time.Microsecond).Equal(modified) {
+		http.Error(w, "theme audio changed", http.StatusNotFound)
+		return
+	}
+	serveOriginal(w, r, id, container, filepath.Base(path), size, modified, f)
+}
+
+// ServeConverted streams path as progressive AAC in audio-only fragmented MP4,
+// the audio-only remux recipe video uses. The output has no length and no byte
+// ranges. HEAD answers with headers only so a probe never starts FFmpeg.
+func ServeConverted(w http.ResponseWriter, r *http.Request, path string, conversion Conversion, seekSeconds float64, ffmpegPath string) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Type", ConvertedContentType)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	_ = playback.ServeRemuxWithOptions(w, r, path, containerMP4, seekSeconds, true, -1, 0, playback.RemuxServeOptions{
+		FFmpegPath:             ffmpegPath,
+		ContentType:            ConvertedContentType,
+		AudioOnly:              true,
+		SourceAudioChannels:    conversion.SourceChannels,
+		TargetAudioChannels:    conversion.Channels,
+		TargetAudioBitrateKbps: conversion.BitrateKbps,
+	})
 }
 
 func ContentType(container string) string {

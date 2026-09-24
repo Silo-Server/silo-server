@@ -311,3 +311,23 @@ func (r *Repository) PruneOrphans(ctx context.Context, folderID int, scope strin
  AND mf.extra_id IS NULL AND mf.file_path ~>=~ (t.owner_path||'/') AND mf.file_path ~<~ (t.owner_path||'0'))`, folderID, scope)
 	return err
 }
+
+// IsActiveTheme reports whether id is a discovered theme whose file is still
+// path in an enabled library. Transcode nodes use it to approve a theme as an
+// FFmpeg input: the lookup is by primary key, and the path must match the row
+// exactly, so a signed token cannot name any other file.
+func (r *Repository) IsActiveTheme(ctx context.Context, id int64, path string) (bool, error) {
+	if r == nil || r.pool == nil || id <= 0 || path == "" {
+		return false, nil
+	}
+	var active bool
+	err := r.pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM item_theme_songs t
+		JOIN media_folders f ON f.id = t.media_folder_id
+		WHERE t.id = $1 AND t.file_path = $2 AND f.enabled
+	)`, id, path).Scan(&active)
+	if err != nil {
+		return false, fmt.Errorf("checking active theme %d: %w", id, err)
+	}
+	return active, nil
+}
