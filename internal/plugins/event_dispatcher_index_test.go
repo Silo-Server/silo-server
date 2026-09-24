@@ -199,11 +199,14 @@ func TestDispatcherStoreReadsPerEvent(t *testing.T) {
 	unsubscribedBus := measure("bus event, 0 subscribers", func() {
 		d.dispatchBusEvent(ctx, cache.Event{Type: cache.EventPlaybackSessionsChanged, Payload: "42"})
 	})
+	// The envelope a progress sync publishes for each updated item.
 	unsubscribedHub := measure("hub event, 0 subscribers", func() {
 		d.dispatchEnvelope(ctx, events.Envelope{
-			Channel: events.ChannelUserState,
-			Event:   "progress_updated",
-			Data:    json.RawMessage(`{"itemId":"m1","positionMs":1000}`),
+			Channel:   events.ChannelUserState,
+			Event:     "user_state.changed",
+			Data:      json.RawMessage(`{"profile_id":"p1","content_id":"m1","change":"progress"}`),
+			UserID:    7,
+			ProfileID: "p1",
 		})
 	})
 	if got := recorder.take(); len(got) != 0 {

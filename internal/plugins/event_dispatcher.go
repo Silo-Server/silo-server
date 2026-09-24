@@ -50,7 +50,7 @@ type EventDispatcher struct {
 	hubUnsubscribe func()
 
 	// index maps an event name to its subscribers so an event costs a map
-	// lookup rather than 1+N store reads per event on every replica. It is
+	// lookup instead of 1+N store reads on every replica. It is
 	// built from the store on first use and dropped by invalidateIndex after
 	// every lifecycle change on this replica (Service.SetEventDispatcher
 	// registers the hook) and on every cache.EventPluginsChanged, which is how
