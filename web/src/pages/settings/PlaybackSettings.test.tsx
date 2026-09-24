@@ -129,6 +129,75 @@ describe("PlaybackSettings", () => {
 
   afterEach(cleanup);
 
+  it.each([
+    ["older server", capabilitiesAtRevision(9)],
+    ["unknown capabilities", undefined],
+    ["unsupported settings API", { ...capabilitiesAtRevision(10), api_version: 2 }],
+    ["no batched settings", { ...capabilitiesAtRevision(10), supports_batched_effective: false }],
+  ])("does not request or offer theme settings with %s", (_scenario, capabilities) => {
+    mocks.capabilities = capabilities as SettingsCapabilities | undefined;
+    mocks.capabilitiesSettled = capabilities !== undefined;
+
+    render(<PlaybackSettings />);
+
+    expect(screen.queryByRole("switch", { name: "Theme music" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Loop theme music" })).not.toBeInTheDocument();
+    for (const [options] of mocks.useEffectiveSettings.mock.calls) {
+      expect(options.keys ?? []).not.toContain(SETTING_KEYS.UI_THEME_MUSIC_ENABLED);
+      expect(options.keys ?? []).not.toContain(SETTING_KEYS.UI_THEME_MUSIC_LOOP);
+    }
+    expect(mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("offers supported theme settings and saves them at profile scope", async () => {
+    mocks.capabilities = capabilitiesAtRevision(10);
+    render(<PlaybackSettings />);
+
+    const requested = mocks.useEffectiveSettings.mock.calls.flatMap(
+      ([options]) => options.keys ?? [],
+    );
+    expect(requested).toContain(SETTING_KEYS.UI_THEME_MUSIC_ENABLED);
+    expect(requested).toContain(SETTING_KEYS.UI_THEME_MUSIC_LOOP);
+    const enabled = screen.getByRole("switch", { name: "Theme music" });
+    const loop = screen.getByRole("switch", { name: "Loop theme music" });
+    expect(enabled).not.toBeChecked();
+    expect(loop).not.toBeChecked();
+    await userEvent.click(enabled);
+    await userEvent.click(loop);
+    expect(mutateAsync).toHaveBeenCalledWith({
+      key: SETTING_KEYS.UI_THEME_MUSIC_ENABLED,
+      value: true,
+      identity: { scope: "profile" },
+    });
+    expect(mutateAsync).toHaveBeenCalledWith({
+      key: SETTING_KEYS.UI_THEME_MUSIC_LOOP,
+      value: true,
+      identity: { scope: "profile" },
+    });
+  });
+
+  it("updates theme controls and requested keys when server support changes", () => {
+    mocks.capabilities = undefined;
+    mocks.capabilitiesSettled = false;
+    const { rerender } = render(<PlaybackSettings />);
+    expect(screen.queryByRole("switch", { name: "Theme music" })).not.toBeInTheDocument();
+
+    mocks.capabilities = capabilitiesAtRevision(10);
+    mocks.capabilitiesSettled = true;
+    rerender(<PlaybackSettings />);
+    expect(screen.getByRole("switch", { name: "Theme music" })).toBeInTheDocument();
+
+    mocks.useEffectiveSettings.mockClear();
+    mocks.capabilities = capabilitiesAtRevision(9);
+    rerender(<PlaybackSettings />);
+    expect(screen.queryByRole("switch", { name: "Theme music" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Loop theme music" })).not.toBeInTheDocument();
+    for (const [options] of mocks.useEffectiveSettings.mock.calls) {
+      expect(options.keys ?? []).not.toContain(SETTING_KEYS.UI_THEME_MUSIC_ENABLED);
+      expect(options.keys ?? []).not.toContain(SETTING_KEYS.UI_THEME_MUSIC_LOOP);
+    }
+  });
+
   it("renders without a profile record, reading every value from the contract", () => {
     // The screen used to require the cached profile object and read its
     // preference columns; it now resolves them, so it renders from the

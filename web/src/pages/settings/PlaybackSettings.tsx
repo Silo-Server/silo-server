@@ -45,8 +45,6 @@ import { toast } from "sonner";
  * surfaces cannot land on different scopes.
  */
 const BASE_PLAYBACK_KEYS: SettingKey[] = [
-  SETTING_KEYS.UI_THEME_MUSIC_ENABLED,
-  SETTING_KEYS.UI_THEME_MUSIC_LOOP,
   SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
   SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS,
@@ -413,6 +411,14 @@ export default function PlaybackSettings() {
     capabilities.data,
     SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE,
   );
+  const supportsThemeMusic = settingsCapabilitiesSupportKey(
+    capabilities.data,
+    SETTING_KEYS.UI_THEME_MUSIC_ENABLED,
+  );
+  const supportsThemeMusicLoop = settingsCapabilitiesSupportKey(
+    capabilities.data,
+    SETTING_KEYS.UI_THEME_MUSIC_LOOP,
+  );
   /**
    * Which intro control this server can honestly show.
    *
@@ -432,11 +438,13 @@ export default function PlaybackSettings() {
   const playbackKeys = useMemo(
     () => [
       ...BASE_PLAYBACK_KEYS,
+      ...(supportsThemeMusic ? [SETTING_KEYS.UI_THEME_MUSIC_ENABLED] : []),
+      ...(supportsThemeMusicLoop ? [SETTING_KEYS.UI_THEME_MUSIC_LOOP] : []),
       supportsIntroSkipMode
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
     ],
-    [supportsIntroSkipMode],
+    [supportsIntroSkipMode, supportsThemeMusic, supportsThemeMusicLoop],
   );
   const { data: effective } = useEffectiveSettings({ keys: playbackKeys });
   const {
@@ -511,31 +519,35 @@ export default function PlaybackSettings() {
         description="These preferences apply unless a library or item has a more specific playback choice."
       >
         <QualitySetting />
-        <SettingRow
-          label={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_ENABLED].label}
-          description={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_ENABLED].description}
-          control={(id) => (
-            <Switch
-              id={id}
-              checked={read<boolean>(SETTING_KEYS.UI_THEME_MUSIC_ENABLED)}
-              disabled={pending}
-              onCheckedChange={(value) => saveValue(SETTING_KEYS.UI_THEME_MUSIC_ENABLED, value)}
-            />
-          )}
-        />
+        {supportsThemeMusic ? (
+          <SettingRow
+            label={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_ENABLED].label}
+            description={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_ENABLED].description}
+            control={(id) => (
+              <Switch
+                id={id}
+                checked={read<boolean>(SETTING_KEYS.UI_THEME_MUSIC_ENABLED)}
+                disabled={pending}
+                onCheckedChange={(value) => saveValue(SETTING_KEYS.UI_THEME_MUSIC_ENABLED, value)}
+              />
+            )}
+          />
+        ) : null}
 
-        <SettingRow
-          label={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_LOOP].label}
-          description={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_LOOP].description}
-          control={(id) => (
-            <Switch
-              id={id}
-              checked={read<boolean>(SETTING_KEYS.UI_THEME_MUSIC_LOOP)}
-              disabled={pending}
-              onCheckedChange={(value) => saveValue(SETTING_KEYS.UI_THEME_MUSIC_LOOP, value)}
-            />
-          )}
-        />
+        {supportsThemeMusicLoop ? (
+          <SettingRow
+            label={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_LOOP].label}
+            description={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_LOOP].description}
+            control={(id) => (
+              <Switch
+                id={id}
+                checked={read<boolean>(SETTING_KEYS.UI_THEME_MUSIC_LOOP)}
+                disabled={pending}
+                onCheckedChange={(value) => saveValue(SETTING_KEYS.UI_THEME_MUSIC_LOOP, value)}
+              />
+            )}
+          />
+        ) : null}
 
         <SettingRow
           label="Spoken language"
