@@ -93,3 +93,25 @@ func TestCredentialLimiterDropsIdleCredentials(t *testing.T) {
 		t.Fatalf("got %d limiters after sweep, want 1", len(limiter.limiters))
 	}
 }
+
+func TestLimiterWaitErrorDefersRefusalsButKeepsCancellation(t *testing.T) {
+	limiter := NewCredentialLimiter(time.Hour, 1)
+	if err := limiter.Wait(context.Background(), "token"); err != nil {
+		t.Fatal(err)
+	}
+	deadline, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	err := LimiterWaitError(deadline, "trakt", time.Second, limiter.Wait(deadline, "token"))
+	if limited, ok := AsRateLimited(err); !ok || limited.RetryAfter != time.Second || limited.Provider != "trakt" {
+		t.Fatalf("refusal = %v, want a one-second RateLimitedError", err)
+	}
+	canceled, stop := context.WithCancel(context.Background())
+	stop()
+	err = LimiterWaitError(canceled, "trakt", time.Second, limiter.Wait(canceled, "token"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled wait = %v, want context.Canceled", err)
+	}
+	if LimiterWaitError(context.Background(), "trakt", time.Second, nil) != nil {
+		t.Fatal("a successful wait must stay nil")
+	}
+}
