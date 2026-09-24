@@ -861,7 +861,10 @@ const ratingSyncLockClass = 0x57535254
 // session releases the lock, including when a node dies.
 func (r *PostgresRepository) WithRatingSyncLock(ctx context.Context, connectionID string, wait bool, fn func(context.Context) error) (bool, error) {
 	slotValue, _ := r.ratingLockSlots.LoadOrStore(connectionID, make(chan struct{}, 1))
-	slot := slotValue.(chan struct{})
+	slot, ok := slotValue.(chan struct{})
+	if !ok {
+		return false, fmt.Errorf("rating sync lock slot has type %T", slotValue)
+	}
 	if wait {
 		select {
 		case slot <- struct{}{}:
@@ -881,7 +884,7 @@ func (r *PostgresRepository) WithRatingSyncLock(ctx context.Context, connectionI
 	if err != nil {
 		return false, fmt.Errorf("open rating sync lock session: %w", err)
 	}
-	// Closing the session releases the lock, whatever state a cancelled
+	// Closing the session releases the lock, whatever state a canceled
 	// lock call left it in.
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
