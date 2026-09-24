@@ -261,8 +261,8 @@ func TestRatingRowsFromListClassifiesAnimeByType(t *testing.T) {
 			if err := json.Unmarshal([]byte(body), &list); err != nil {
 				t.Fatalf("decode: %v", err)
 			}
-			rows, untyped, warnings := ratingRowsFromList(list, simklTypeAnime, "simkl")
-			if len(rows) != 1 || len(warnings) != 0 {
+			rows, untyped, skipped, warnings := ratingRowsFromList(list, simklTypeAnime, "simkl")
+			if len(rows) != 1 || len(skipped) != 0 || len(warnings) != 0 {
 				t.Fatalf("rows = %#v warnings = %v, want one row", rows, warnings)
 			}
 			if wantUntyped := tc.wantKind == historyimport.KindSeries && tc.wantTMDB == ""; untyped != wantUntyped {
@@ -288,7 +288,7 @@ func TestRatingRowsFromListUntypedAnimeWithOnlyTMDBHasNoExternalID(t *testing.T)
 	]}`), &list); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	rows, _, warnings := ratingRowsFromList(list, simklTypeAnime, "simkl")
+	rows, _, skipped, warnings := ratingRowsFromList(list, simklTypeAnime, "simkl")
 	// The OVA keeps only its Simkl id; the untyped entry has no id left.
 	if len(rows) != 1 || rows[0].ProviderItemKey != "simkl:9" || rows[0].Kind != historyimport.KindSeries ||
 		rows[0].TMDBID != "" || rows[0].IMDbID != "" || rows[0].TVDBID != "" {
@@ -296,6 +296,9 @@ func TestRatingRowsFromListUntypedAnimeWithOnlyTMDBHasNoExternalID(t *testing.T)
 	}
 	if len(warnings) != 1 {
 		t.Fatalf("warnings = %v, want one for the entry with no usable id", warnings)
+	}
+	if !reflect.DeepEqual(skipped, map[string]bool{historyimport.KindSeries: true}) {
+		t.Fatalf("skipped kinds = %v, want series for the untyped entry", skipped)
 	}
 }
 
@@ -486,5 +489,56 @@ func TestFetchRatingsUntypedAnimeIsNotAMovieSnapshot(t *testing.T) {
 	}
 	if !slices.Contains(batch.SnapshotKinds, historyimport.KindSeries) || len(batch.Warnings) == 0 {
 		t.Fatalf("snapshot kinds = %v warnings = %v, want series kept and a warning", batch.SnapshotKinds, batch.Warnings)
+	}
+}
+
+func TestFetchRatingsSkippedEntryIsNotASnapshot(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		lists         map[string]string
+		wantSnapshots []string
+	}{
+		{
+			// The untyped entry's only id is TMDB, which animeRatingIdentity
+			// clears, so it is skipped as a series. Being untyped, it also
+			// keeps the movie snapshot out.
+			name: "untyped anime with only a tmdb id",
+			lists: map[string]string{
+				"anime": `{"anime":[{"user_rating":7,"show":{"title":"Untyped","ids":{"tmdb":"551"}}}]}`,
+			},
+			wantSnapshots: nil,
+		},
+		{
+			name: "show with no ids",
+			lists: map[string]string{
+				"shows": `{"shows":[{"user_rating":6,"show":{"title":"No IDs","year":2003,"ids":{}}}]}`,
+			},
+			wantSnapshots: []string{historyimport.KindMovie},
+		},
+		{
+			name: "typed anime movie with no ids",
+			lists: map[string]string{
+				"anime": `{"anime":[{"user_rating":6,"anime_type":"movie","show":{"title":"No IDs","ids":{}}}]}`,
+			},
+			wantSnapshots: []string{historyimport.KindSeries},
+		},
+		{
+			name: "movie with no ids",
+			lists: map[string]string{
+				"movies": `{"movies":[{"user_rating":4,"movie":{"title":"No IDs","year":2002,"ids":{}}}]}`,
+			},
+			wantSnapshots: []string{historyimport.KindSeries},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := &ratingsServer{t: t, activities: ratingsActivitiesFixture, lists: tc.lists}
+			batch := fetchRatingsFrom(t, server, nil)
+			if !reflect.DeepEqual(batch.SnapshotKinds, tc.wantSnapshots) {
+				t.Fatalf("snapshot kinds = %v, want %v", batch.SnapshotKinds, tc.wantSnapshots)
+			}
+			if len(batch.Rows) != 0 || len(batch.Warnings) == 0 {
+				t.Fatalf("rows = %#v warnings = %v, want no rows and a warning", batch.Rows, batch.Warnings)
+			}
+		})
 	}
 }

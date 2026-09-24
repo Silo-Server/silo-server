@@ -109,6 +109,7 @@ func (p *Provider) FetchRatings(
 
 	batch := watchsync.RatingImportBatch{UpdatedCursors: make(map[string]string)}
 	anyUntyped := false
+	skippedKinds := make(map[string]bool)
 	for _, bucket := range []struct {
 		read      bool
 		listType  string
@@ -127,10 +128,13 @@ func (p *Provider) FetchRatings(
 		if err := p.do(ctx, http.MethodGet, path, cfg, conn.AccessToken, nil, &list); err != nil {
 			return watchsync.RatingImportBatch{}, err
 		}
-		rows, untyped, warnings := ratingRowsFromList(list, bucket.listType, p.Key())
+		rows, untyped, skipped, warnings := ratingRowsFromList(list, bucket.listType, p.Key())
 		batch.Rows = append(batch.Rows, rows...)
 		batch.Warnings = append(batch.Warnings, warnings...)
 		anyUntyped = anyUntyped || untyped
+		for kind := range skipped {
+			skippedKinds[kind] = true
+		}
 		if bucket.activity != "" {
 			batch.UpdatedCursors[bucket.cursorKey] = bucket.activity
 		}
@@ -139,13 +143,15 @@ func (p *Provider) FetchRatings(
 	// may be an anime movie, which the movie read never returns. The movie read
 	// is then not provably complete, so movie removals wait for a read without
 	// such entries rather than risk reading a rated anime movie as removed.
-	if readMovies && !anyUntyped {
+	// A rated entry skipped for lack of an id is a title the read did not
+	// return, so its kind is not a complete snapshot either.
+	if readMovies && !anyUntyped && !skippedKinds[historyimport.KindMovie] {
 		batch.SnapshotKinds = append(batch.SnapshotKinds, historyimport.KindMovie)
 	}
 	if readMovies && anyUntyped {
 		batch.Warnings = append(batch.Warnings, "simkl returned rated anime without a movie or tv type; skipped movie rating removals")
 	}
-	if readShows {
+	if readShows && !skippedKinds[historyimport.KindSeries] {
 		batch.SnapshotKinds = append(batch.SnapshotKinds, historyimport.KindSeries)
 	}
 	return batch, nil
@@ -164,8 +170,13 @@ func simklRatingsChanged(conn watchsync.Connection, cursorKey, activity string) 
 
 // ratingRowsFromList maps one ratings read. listType is the type the read
 // asked for; only that key of the reply is used. untyped reports a rated anime
-// entry whose anime_type names neither a movie nor a series.
-func ratingRowsFromList(list simklRatingsList, listType, provider string) (rows []watchsync.RemoteRating, untyped bool, warnings []string) {
+// entry whose anime_type names neither a movie nor a series. skippedKinds holds
+// the kind of each rated entry skipped for lack of a usable id; the read is
+// not a complete snapshot of those kinds.
+func ratingRowsFromList(
+	list simklRatingsList,
+	listType, provider string,
+) (rows []watchsync.RemoteRating, untyped bool, skippedKinds map[string]bool, warnings []string) {
 	var items []simklRatedItem
 	switch listType {
 	case simklTypeMovies:
@@ -176,6 +187,7 @@ func ratingRowsFromList(list simklRatingsList, listType, provider string) (rows 
 		items = list.Anime
 	}
 	rows = make([]watchsync.RemoteRating, 0, len(items))
+	skippedKinds = make(map[string]bool)
 	for _, item := range items {
 		if item.UserRating == nil {
 			continue
@@ -201,7 +213,8 @@ func ratingRowsFromList(list simklRatingsList, listType, provider string) (rows 
 			key = movieKey(ids)
 		}
 		if key == "" {
-			warnings = append(warnings, "simkl rating skipped because it has no usable id")
+			skippedKinds[kind] = true
+			warnings = append(warnings, "simkl "+kind+" rating skipped because it has no usable id; skipped "+kind+" rating removals")
 			continue
 		}
 		rows = append(rows, watchsync.RemoteRating{
@@ -219,7 +232,7 @@ func ratingRowsFromList(list simklRatingsList, listType, provider string) (rows 
 			RatedAt: parseSimklTime(item.UserRatedAt),
 		})
 	}
-	return rows, untyped, warnings
+	return rows, untyped, skippedKinds, warnings
 }
 
 // typedAnime reports whether an anime_type names a Silo kind outright.
