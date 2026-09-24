@@ -652,9 +652,12 @@ func (r *Repository) UpdateManagedStatus(ctx context.Context, id string, userID 
 // The statement locks the monitor FOR KEY SHARE, waiting out a sync or edit
 // that holds it, so a monitor deleted meanwhile yields no row and the delete
 // records nothing instead of failing the exclusion's foreign key. It deletes
-// the downloads row before locking the monitor, the order a device delete's
-// cascade normally takes, so the two do not deadlock. Returns ErrNotFound when
-// nothing matches.
+// the downloads row before locking the monitor. A device delete cascades in
+// the same order when the downloads cascade trigger fires first; Postgres
+// fires triggers in name order, and the cascade triggers' names end in their
+// OIDs compared as text, so a database can get the opposite order. There a
+// device delete racing this one can fail one of them with a deadlock error,
+// which a retry resolves. Returns ErrNotFound when nothing matches.
 func (r *Repository) DeleteManaged(ctx context.Context, id string, userID int, profileID, deviceID string) error {
 	var deleted int
 	err := r.pool.QueryRow(ctx,
