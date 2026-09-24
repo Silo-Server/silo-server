@@ -41,19 +41,26 @@ func TestRepositoryDirectoriesCanonicalRootBoundaries(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		root string
+		file string
 		want []string
 	}{
-		{"clean", root, []string{root, directory}},
-		{"trailing slash", root + "/", []string{root, directory}},
-		{"dot component", root + "/.", []string{root, directory}},
-		{"parent component", root + "/nested/..", []string{root, directory}},
-		{"filesystem root", "/", []string{"/", root, directory}},
-		{"empty root", "", []string{directory}},
-		{"file root", file, []string{directory}},
-		{"sibling prefix", root + "-other", []string{directory}},
+		{"clean", root, file, []string{root, directory}},
+		{"trailing slash", root + "/", file, []string{root, directory}},
+		{"dot component", root + "/.", file, []string{root, directory}},
+		{"parent component", root + "/nested/..", file, []string{root, directory}},
+		{"filesystem root", "/", file, []string{"/", root, directory}},
+		{"empty root", "", file, []string{directory}},
+		{"file root", file, file, []string{directory}},
+		{"sibling prefix", root + "-other", file, []string{directory}},
+		{"file duplicate separator", root, root + "//Season 1/episode.mp3", nil},
+		{"file dot component", root, root + "/./Season 1/episode.mp3", nil},
+		{"file parent component", root, root + "/nested/../Season 1/episode.mp3", nil},
+		{"file root alias", root, "/" + root + "/episode.mp3", nil},
+		{"file alias without root", "", root + "/./Season 1/episode.mp3", nil},
+		{"file and root aliases", root + "/.", root + "/./Season 1/episode.mp3", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := pool.Exec(ctx, `UPDATE media_files SET canonical_root_path=$1 WHERE media_folder_id=$2`, tc.root, folder); err != nil {
+			if _, err := pool.Exec(ctx, `UPDATE media_files SET canonical_root_path=$1, file_path=$2 WHERE media_folder_id=$3`, tc.root, tc.file, folder); err != nil {
 				t.Fatal(err)
 			}
 			for _, scope := range []string{"", directory} {
@@ -66,6 +73,17 @@ func TestRepositoryDirectoriesCanonicalRootBoundaries(t *testing.T) {
 				}
 			}
 		})
+	}
+
+	// The final malformed row must not prevent another video's discovery.
+	if _, err := pool.Exec(ctx, `INSERT INTO media_files(media_folder_id,file_path,canonical_root_path) VALUES($1,$2,$3)`, folder, file, root); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []string{"", directory} {
+		got, err := repo.Directories(ctx, folder, scope)
+		if err != nil || !slices.Equal(got, []string{root, directory}) {
+			t.Fatalf("valid row lost alongside malformed row: scope=%q directories=%q err=%v", scope, got, err)
+		}
 	}
 }
 

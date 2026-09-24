@@ -113,6 +113,9 @@ type themeDiscovery struct {
 // ancestorRules reads each ancestor once per pass. Retaining only the rules
 // avoids keeping a large library root listing alive for the entire scan.
 func (d *themeDiscovery) ancestorRules(directory, root string) themeIgnoreState {
+	if !pathWithinAnyRoot(directory, []string{root}) {
+		return themeIgnoreState{err: themesongs.ErrUnavailable}
+	}
 	if state, ok := d.ancestors[themeIgnoreKey{directory, root}]; ok {
 		return state
 	}

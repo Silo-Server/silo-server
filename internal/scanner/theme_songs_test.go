@@ -35,6 +35,23 @@ func TestThemeRootObservationPreservesLibraryBoundary(t *testing.T) {
 	}
 }
 
+func TestThemeAncestorRulesRejectsPathsOutsideLibrary(t *testing.T) {
+	root := t.TempDir()
+	d := themeDiscovery{
+		roots:     []string{root},
+		ancestors: make(map[themeIgnoreKey]themeIgnoreState),
+		readDir: func(path string) ([]os.DirEntry, error) {
+			t.Fatalf("read outside library root: %s", path)
+			return nil, nil
+		},
+	}
+	for _, directory := range []string{"/", filepath.Dir(root), root + "-other"} {
+		if state := d.ancestorRules(directory, root); !errors.Is(state.err, themesongs.ErrUnavailable) {
+			t.Errorf("directory=%q: err=%v, want unavailable", directory, state.err)
+		}
+	}
+}
+
 func TestThemeScanAtLibraryRoot(t *testing.T) {
 	pool := newDeadRootTestPool(t)
 	ffprobe, err := exec.LookPath("ffprobe")

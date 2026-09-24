@@ -213,6 +213,11 @@ func (r *Repository) Directories(ctx context.Context, folderID int, scope string
 		if err := rows.Scan(&path, &root); err != nil {
 			return nil, err
 		}
+		// Ownership queries use stored paths verbatim. Do not create a cleaned
+		// alias that those queries cannot resolve or retain during pruning.
+		if path != filepath.Clean(path) {
+			continue
+		}
 		seen[path] = true
 		if root != "" {
 			root = filepath.Clean(root)
