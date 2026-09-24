@@ -349,10 +349,12 @@ func TestRoomSocketV2AdmitsRequestOriginWithPublicOriginConfigured(t *testing.T)
 	if conn != nil {
 		_ = conn.Close()
 	}
-	if err == nil || resp.StatusCode != http.StatusForbidden {
-		t.Fatal("foreign origin admitted")
+	if resp != nil {
+		_ = resp.Body.Close()
 	}
-	_ = resp.Body.Close()
+	if err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("foreign origin: want 403 refusal, got resp=%v err=%v", resp, err)
+	}
 	conn, resp, err = dialer.DialContext(t.Context(), endpoint, http.Header{"Origin": []string{server.URL}})
 	if err != nil {
 		t.Fatalf("request origin refused with a public origin configured: %v", err)
