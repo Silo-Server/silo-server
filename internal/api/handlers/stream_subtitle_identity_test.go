@@ -221,3 +221,23 @@ func TestSubtitleExternalSRTServesOriginalOrConvertedRepresentation(t *testing.T
 		}
 	}
 }
+
+// SRT declares no encoding, so original bytes that are not UTF-8 are served
+// without a UTF-8 charset label.
+func TestOriginalSubRipDeclaresUTF8OnlyForUTF8Bytes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		data []byte
+		want string
+	}{
+		"utf-8":        {[]byte("1\n00:00:01,000 --> 00:00:02,000\nمرحبا\n"), "application/x-subrip; charset=utf-8"},
+		"windows-1256": {[]byte("1\n00:00:01,000 --> 00:00:02,000\n\xe3\xd1\xcd\xc8\xc7\n"), "application/x-subrip"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			serveOriginalSubRip(rr, tc.data)
+			if got := rr.Header().Get("Content-Type"); got != tc.want || rr.Body.String() != string(tc.data) {
+				t.Fatalf("content type = %q, want %q; body changed: %v", got, tc.want, rr.Body.String() != string(tc.data))
+			}
+		})
+	}
+}

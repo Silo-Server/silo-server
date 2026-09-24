@@ -128,7 +128,7 @@ The fifteen feature strings above are the full set this server version advertise
 | `plan_source_duration_v1` | `source.duration_seconds` is populated when known, so its absence means *unknown* rather than *unsupported* (§5) |
 | `subrip_sidecar_v1` | `/api/v2` only. An opted-in client that parses SubRip itself receives external and downloaded SRT tracks as the original `.srt` file instead of the WebVTT conversion (§8) |
 
-That last one is the reason feature detection is a list and not a version
+`plan_source_duration_v1` is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
 apart from a server that knows this particular file's runtime is genuinely
 unknown, and both look like an absent field.

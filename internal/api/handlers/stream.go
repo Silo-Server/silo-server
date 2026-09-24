@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -26,10 +27,11 @@ import (
 )
 
 const (
-	subtitleFormatASS = "ass"
-	subtitleFormatSSA = "ssa"
-	subtitleFormatSUP = "sup"
-	subtitleFormatSRT = "srt"
+	subtitleFormatASS  = "ass"
+	subtitleFormatSSA  = "ssa"
+	subtitleFormatSUP  = "sup"
+	subtitleFormatSRT  = "srt"
+	subtitleMIMESubRip = "application/x-subrip"
 )
 
 // FilePathResolver looks up a media file by its ID.
@@ -418,7 +420,7 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 					"Failed to load external subtitle")
 				return
 			}
-			playback.ServeSubtitle(w, data, subtitleFormatSRT)
+			serveOriginalSubRip(w, data)
 			return
 		}
 		if playback.IsASS(sub.Format) && requestedFormat != "vtt" {
@@ -521,7 +523,7 @@ func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.R
 	// Serve ASS/SSA downloaded subtitles as raw data, and SRT the same way
 	// when the URL asks for .srt.
 	if servesOriginalSubRip(r, string(subtitle.Format), requestedFormat) {
-		playback.ServeSubtitle(w, data, subtitleFormatSRT)
+		serveOriginalSubRip(w, data)
 		return
 	}
 	if playback.IsASS(string(subtitle.Format)) && requestedFormat != "vtt" {
@@ -578,6 +580,20 @@ func servesOriginalSubRip(r *http.Request, codec, requestedFormat string) bool {
 		isNativeAPIV2(r.Context())
 }
 
+// serveOriginalSubRip writes stored SRT bytes as they are. SRT declares no
+// encoding, so the response claims UTF-8 only when the bytes are valid UTF-8;
+// a legacy-encoded file is labeled without a charset rather than mislabeled.
+func serveOriginalSubRip(w http.ResponseWriter, data []byte) {
+	contentType := subtitleMIMESubRip
+	if utf8.Valid(data) {
+		contentType += "; charset=utf-8"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.WriteHeader(http.StatusOK)
+	w.Write(data) //nolint:errcheck
+}
+
 // subtitleRepresentationFormat names the representation a GET would serve, so
 // a HEAD reports the same content type: a .srt request that is not answered
 // with the original SRT is answered with WebVTT.
@@ -593,7 +609,8 @@ func writeSubtitleRepresentationHead(w http.ResponseWriter, requestedFormat stri
 	case subtitleFormatASS, subtitleFormatSSA:
 		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
 	case subtitleFormatSRT:
-		w.Header().Set("Content-Type", "application/x-subrip; charset=utf-8")
+		// HEAD does not read the stored bytes, so it cannot vouch for UTF-8.
+		w.Header().Set("Content-Type", subtitleMIMESubRip)
 	case subtitleFormatSUP:
 		w.Header().Set("Content-Type", "application/octet-stream")
 	default:
