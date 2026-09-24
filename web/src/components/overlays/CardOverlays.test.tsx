@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 
 import CardOverlays from "./CardOverlays";
+import { formatLanguageWhenLoaded } from "@/lib/languageNamesLoader";
 import {
   OVERLAY_PRESETS,
   OVERLAY_REGISTRY,
@@ -41,7 +42,9 @@ describe("CardOverlays", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders a badge for every registered overlay given sample data", () => {
+  it("renders a badge for every registered overlay given sample data", async () => {
+    // The language badge reads name data that loads on first use.
+    await vi.waitFor(() => expect(formatLanguageWhenLoaded("en")).toBe("English"));
     for (const def of OVERLAY_REGISTRY) {
       const data =
         def.id === "network" || def.id === "show_status" ? SAMPLE_SHOW_DATA : SAMPLE_MOVIE_DATA;

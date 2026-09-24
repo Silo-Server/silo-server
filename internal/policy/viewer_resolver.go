@@ -18,6 +18,16 @@ type ViewerResolver struct {
 	tokens       access.ProfileTokenValidator
 	pdp          *PDP
 	groups       access.GroupPolicyProvider
+	unrated      access.UnratedContentPolicy
+}
+
+// WithUnratedContentPolicy installs the reader for access.unrated_content and
+// returns the resolver. See access.Resolver.WithUnratedContentPolicy.
+func (r *ViewerResolver) WithUnratedContentPolicy(policy access.UnratedContentPolicy) *ViewerResolver {
+	if r != nil {
+		r.unrated = policy
+	}
+	return r
 }
 
 // NewViewerResolver creates a PDP-backed viewer scope resolver.
@@ -147,18 +157,25 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		disabled = nil
 	}
 
+	allowUnrated := false
+	if r.unrated != nil {
+		allowUnrated = r.unrated.AllowUnratedContent(ctx)
+	}
+
 	return access.Scope{
 		UserID:                     user.ID,
 		ProfileID:                  input.ProfileID,
 		AllowedLibraryIDs:          allowed,
 		DisabledLibraryIDs:         disabled,
 		LibrariesRestricted:        decision.LibrariesRestricted,
-		MaxContentRating:           decision.MaxContentRating,
+		MaxContentRating:           access.StricterCeiling(decision.MaxContentRating, decision.MaxContentRatingOverride),
+		AllowUnratedContent:        allowUnrated,
 		MaxPlaybackQuality:         decision.MaxPlaybackQuality,
 		MaxRemoteStreamBitrateKbps: effective.MaxRemoteStreamBitrateKbps,
 		MaxLocalStreamBitrateKbps:  effective.MaxLocalStreamBitrateKbps,
 		PreferredMetadataLanguage:  decision.PreferredMetadataLanguage,
 		MetadataLanguageOverrides:  preferences.MetadataLanguageOverrides,
+		NextUpMode:                 preferences.NextUpMode,
 		PolicyRevision:             user.AccessPolicyRevision,
 		// The policy output is tighten-only (merged_profile_verified), so a
 		// custom override may revoke verification but never grant it. ANDing

@@ -49,7 +49,7 @@ func TestAudiobookGroupsCursorDB(t *testing.T) {
 	for i, name := range names {
 		id := fmt.Sprintf("%s-%d", prefix, i)
 		pid := time.Now().UnixNano()
-		exec(`INSERT INTO media_items(content_id,type,title,status,genres,content_rating,poster_path) VALUES($1,'audiobook',$1,'released','{}',$2,$3)`, id, map[bool]string{true: "R", false: "PG"}[i == 6], map[bool]string{true: "", false: id + ".jpg"}[i == 5])
+		exec(`INSERT INTO media_items(content_id,type,title,status,genres,content_rating,content_rating_age,poster_path) VALUES($1,'audiobook',$1,'released','{}',$2,$4,$3)`, id, map[bool]string{true: "R", false: "PG"}[i == 6], map[bool]string{true: "", false: id + ".jpg"}[i == 5], map[bool]int{true: 17, false: 8}[i == 6])
 		exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, id, lib)
 		exec(`INSERT INTO audiobook_series(content_id,series_name) VALUES($1,$2)`, id, name)
 		exec(`INSERT INTO people(id,name) VALUES($1,$2)`, pid, prefix+name)

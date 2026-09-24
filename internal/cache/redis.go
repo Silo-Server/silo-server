@@ -57,7 +57,8 @@ const (
 	// EventPluginsChanged is published on ChannelAdmin by the API server after
 	// every plugin lifecycle change (install, enable, disable, config save,
 	// auto-update, uninstall) so proxy nodes running resident plugins from the
-	// same installations reconcile at once instead of on their next poll.
+	// same installations reconcile at once instead of on their next poll, and
+	// every API replica's plugin event dispatcher rebuilds its subscriber index.
 	EventPluginsChanged = "plugins_changed"
 )
 

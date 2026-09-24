@@ -19,7 +19,7 @@ import (
 
 func TestBuildFilterAccessibleContentIDsSQL_AllowedLibrariesOnly(t *testing.T) {
 	sql, args := buildFilterAccessibleContentIDsSQL(
-		[]string{"a", "b"}, []int{1, 2}, nil, nil,
+		[]string{"a", "b"}, []int{1, 2}, nil, nil, false,
 	)
 
 	if len(args) != 2 {
@@ -54,21 +54,27 @@ func TestBuildFilterAccessibleContentIDsSQL_AllowedLibrariesOnly(t *testing.T) {
 }
 
 func TestBuildFilterAccessibleContentIDsSQL_RatingOnlyRequiresNoMembership(t *testing.T) {
-	ratings := access.AllowedRatingsUpTo("PG-13")
+	ceiling, ok := access.AgeForCeiling("PG-13")
+	if !ok {
+		t.Fatal(`AgeForCeiling("PG-13") reported no age`)
+	}
 	sql, args := buildFilterAccessibleContentIDsSQL(
-		[]string{"a"}, nil, nil, ratings,
+		[]string{"a"}, nil, nil, ceiling, false,
 	)
 
 	if len(args) != 2 {
-		t.Fatalf("expected 2 args (ids, ratings); got %d (%v)", len(args), args)
+		t.Fatalf("expected 2 args (ids, ceiling age); got %d (%v)", len(args), args)
+	}
+	if args[1] != 14 {
+		t.Errorf("expected the PG-13 ceiling to bind age 14, the top of its US tier; got %v", args[1])
 	}
 	// EnsureAccessible only joins media_item_libraries when a library
 	// restriction is set; a rating-only viewer is gated on rating alone.
 	if strings.Contains(sql, "media_item_libraries") {
 		t.Errorf("rating-only scope must not require a membership join; got %s", sql)
 	}
-	if !strings.Contains(sql, "mi.content_rating = ANY($2)") {
-		t.Errorf("expected rating predicate bound at $2; got %s", sql)
+	if !strings.Contains(sql, "(mi.content_rating_age IS NOT NULL AND mi.content_rating_age <= $2)") {
+		t.Errorf("expected stored-age ceiling predicate bound at $2; got %s", sql)
 	}
 	// The episode branch still resolves the rating from the parent series.
 	if !strings.Contains(sql, "episodes e JOIN media_items mi ON mi.content_id = e.series_id") {
@@ -78,7 +84,7 @@ func TestBuildFilterAccessibleContentIDsSQL_RatingOnlyRequiresNoMembership(t *te
 
 func TestBuildFilterAccessibleContentIDsSQL_DisabledLibrariesOnly(t *testing.T) {
 	sql, args := buildFilterAccessibleContentIDsSQL(
-		[]string{"a"}, nil, []int{9, 10}, nil,
+		[]string{"a"}, nil, []int{9, 10}, nil, false,
 	)
 
 	if len(args) != 2 {
@@ -95,19 +101,22 @@ func TestBuildFilterAccessibleContentIDsSQL_DisabledLibrariesOnly(t *testing.T) 
 }
 
 func TestBuildFilterAccessibleContentIDsSQL_AllowedDisabledAndRatingPlaceholders(t *testing.T) {
-	ratings := access.AllowedRatingsUpTo("R")
+	ceiling, ok := access.AgeForCeiling("R")
+	if !ok {
+		t.Fatal(`AgeForCeiling("R") reported no age`)
+	}
 	sql, args := buildFilterAccessibleContentIDsSQL(
-		[]string{"a"}, []int{1}, []int{9}, ratings,
+		[]string{"a"}, []int{1}, []int{9}, ceiling, false,
 	)
 
-	// $1 ids, $2 allowed, $3 disabled, $4 ratings — in append order.
+	// $1 ids, $2 allowed, $3 disabled, $4 ceiling age — in append order.
 	if len(args) != 4 {
-		t.Fatalf("expected 4 args (ids, allowed, disabled, ratings); got %d (%v)", len(args), args)
+		t.Fatalf("expected 4 args (ids, allowed, disabled, ceiling age); got %d (%v)", len(args), args)
 	}
 	for _, want := range []string{
 		"mil.media_folder_id = ANY($2)",
 		"NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($3))",
-		"mi.content_rating = ANY($4)",
+		"(mi.content_rating_age IS NOT NULL AND mi.content_rating_age <= $4)",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("expected SQL to contain %q; got %s", want, sql)

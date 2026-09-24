@@ -2,7 +2,9 @@ package userdb
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -70,6 +72,59 @@ VALUES (?, ?, ?, ?, ?, ?)`,
 		}
 	}
 
+	return nil
+}
+
+// materializeRetiredSettingsFallbacks is the SQLite half of the Postgres
+// migration materialize_retired_settings_fallbacks: every profile with no
+// ui.disabled_library_ids or ui.next_up_mode row gets the value the legacy
+// account setting's read-time fallback gave it, so the fallback read can go.
+// Stored rows win, and legacy rows stay in place. Postgres runs the same
+// conversion in SQL; TestRetiredSettingsFallbacksMigrationMatchesPlanner pins
+// it to PlanRetiredFallback, which this uses directly.
+func materializeRetiredSettingsFallbacks(tx *sql.Tx) error {
+	contract, err := settingscontract.Load()
+	if err != nil {
+		return fmt.Errorf("loading settings contract: %w", err)
+	}
+	planner := settingsmigrate.New(contract, settingscontract.ObjectSchemas())
+
+	var legacy []settingsmigrate.LegacySetting
+	for _, key := range settingsmigrate.RetiredFallbackKeys() {
+		var row settingsmigrate.LegacySetting
+		err := tx.QueryRow(`SELECT key, value FROM user_settings WHERE key = ?`, key).Scan(&row.Key, &row.Value)
+		if errors.Is(err, sql.ErrNoRows) || isMissingTable(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("reading legacy %s: %w", key, err)
+		}
+		legacy = append(legacy, row)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, row := range legacy {
+		planned, err := planner.PlanRetiredFallback(row.Key, row.Value)
+		if err != nil {
+			// The contract cannot store this value, so the cutover backfill
+			// rejected it too and recorded it in user_setting_migration_rejects.
+			slog.Warn("legacy setting has no canonical form; leaving it unconverted",
+				"component", "userdb", "key", row.Key, "error", err)
+			continue
+		}
+		for _, value := range planned {
+			// "WHERE true" is SQLite's documented way to keep the upsert's
+			// ON CONFLICT from parsing as a join constraint.
+			if _, err := tx.Exec(`
+INSERT INTO user_setting_values (key, scope, profile_id, value, revision, created_at, updated_at)
+SELECT ?, 'profile', id, ?, 1, ?, ? FROM profiles WHERE true
+ON CONFLICT (profile_id, key) WHERE scope = 'profile' DO NOTHING`,
+				value.Key, string(value.Value), now, now,
+			); err != nil {
+				return fmt.Errorf("writing %s: %w", value.Key, err)
+			}
+		}
+	}
 	return nil
 }
 

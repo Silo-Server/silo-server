@@ -84,7 +84,7 @@ plugin's loopback source is indistinguishable from any other local proxy.
   Operators who narrow `clientip.trusted_proxies` must keep loopback.
 - `socketOriginAllowed` accepts the overlay origins of providers currently
   connected on this host (`StatusCache.ConnectedOrigins`) next to
-  `server.public_url`, so a browser reaching Silo over the overlay can open
+  `server.public_url` and the request's own origin, so a browser reaching Silo over the overlay can open
   WebSockets.
 
 Downstream, `Path.Provider` selects the proxy origin a client is handed: a

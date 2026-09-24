@@ -1,4 +1,4 @@
-import { formatLanguage } from "@/lib/languageDisplay";
+import { formatLanguageWhenLoaded } from "@/lib/languageNamesLoader";
 import type { OverlayDef } from "../types";
 
 function formatRuntime(minutes: number | null | undefined): string | null {
@@ -39,7 +39,7 @@ export const METADATA_OVERLAYS: readonly OverlayDef[] = [
     defaultEnabled: false,
     iconId: "globe",
     iconCapable: true,
-    getValue: (d) => (d.original_language ? formatLanguage(d.original_language) : null),
+    getValue: (d) => (d.original_language ? formatLanguageWhenLoaded(d.original_language) : null),
   },
   {
     id: "studio",

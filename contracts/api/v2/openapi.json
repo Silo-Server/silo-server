@@ -72087,7 +72087,7 @@
             }
           },
           {
-            "description": "Browser origin must match the configured public origin.",
+            "description": "Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin.",
             "in": "header",
             "name": "Origin",
             "schema": {
@@ -124400,6 +124400,7 @@
         "x-silo-service-backed": true
       },
       "post": {
+        "description": "An existing monitor keeps its options and forgets the episodes deleted under it, so the next sync can register them again. Sync explicitly after receipt; do not automatically resend an uncertain create.",
         "operationId": "createDownloadSubscription",
         "parameters": [
           {
@@ -124611,7 +124612,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Create a monitor or return the existing monitor without changing it. Sync explicitly after receipt; do not automatically resend an uncertain create.",
+        "summary": "Create a monitor or return the device's existing monitor for the series.",
         "tags": [
           "downloads"
         ],
@@ -131168,7 +131169,7 @@
             }
           },
           {
-            "description": "Browser origin must match the configured public origin.",
+            "description": "Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin.",
             "in": "header",
             "name": "Origin",
             "schema": {
@@ -149856,7 +149857,7 @@
             }
           },
           {
-            "description": "Browser origin must match the configured public origin.",
+            "description": "Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin.",
             "in": "header",
             "name": "Origin",
             "schema": {
@@ -165688,7 +165689,7 @@
             }
           },
           {
-            "description": "Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup) the inventory URL carries.",
+            "description": "Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup, .srt) the inventory URL carries.",
             "in": "path",
             "name": "track",
             "required": true,
@@ -165709,6 +165710,14 @@
             "description": "Stable downloaded-subtitle identity the inventory URL carries; must belong to the source file.",
             "in": "query",
             "name": "downloaded_subtitle_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "1 on a .srt URL published under subrip_sidecar_v1: serve the stored SRT bytes instead of the WebVTT conversion.",
+            "in": "query",
+            "name": "original",
             "schema": {
               "type": "string"
             }
@@ -165960,7 +165969,7 @@
             }
           },
           {
-            "description": "Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup) the inventory URL carries.",
+            "description": "Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup, .srt) the inventory URL carries.",
             "in": "path",
             "name": "track",
             "required": true,
@@ -165981,6 +165990,14 @@
             "description": "Stable downloaded-subtitle identity the inventory URL carries; must belong to the source file.",
             "in": "query",
             "name": "downloaded_subtitle_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "1 on a .srt URL published under subrip_sidecar_v1: serve the stored SRT bytes instead of the WebVTT conversion.",
+            "in": "query",
+            "name": "original",
             "schema": {
               "type": "string"
             }
@@ -177289,7 +177306,7 @@
             }
           },
           {
-            "description": "Browser origin must match configured public origin.",
+            "description": "Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin.",
             "in": "header",
             "name": "Origin",
             "schema": {

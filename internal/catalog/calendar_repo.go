@@ -36,6 +36,8 @@ type CalendarFilter struct {
 	AllowedLibraryIDs  []int
 	DisabledLibraryIDs []int
 	MaxContentRating   string
+	// AllowUnratedContent mirrors AccessFilter.AllowUnratedContent.
+	AllowUnratedContent bool
 
 	// RestrictByIDs limits results to items whose movie content_id (movies) or
 	// series_id (episodes / season premieres) is in RestrictToIDs. When
@@ -235,7 +237,7 @@ WHERE e1.series_id IS NULL`
 // appendContentRatingClause adds content rating ceiling enforcement.
 func (r *CalendarRepository) appendContentRatingClause(miAlias string, f CalendarFilter, conditions *[]string, args *[]any, argIdx *int) {
 	if f.MaxContentRating != "" {
-		applyAccessFilter(miAlias, AccessFilter{MaxContentRating: f.MaxContentRating}, conditions, args, argIdx)
+		applyAccessFilter(miAlias, AccessFilter{MaxContentRating: f.MaxContentRating, AllowUnratedContent: f.AllowUnratedContent}, conditions, args, argIdx)
 	}
 }
 

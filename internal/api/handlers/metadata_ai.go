@@ -100,11 +100,12 @@ func (h *MetadataAIHandler) HandleTranslateOnView(w http.ResponseWriter, r *http
 		return
 	}
 	filter := catalog.AccessFilter{
-		AllowedLibraryIDs:  scope.AllowedLibraryIDs,
-		DisabledLibraryIDs: scope.DisabledLibraryIDs,
-		MaxContentRating:   scope.MaxContentRating,
-		UserID:             scope.UserID,
-		ProfileID:          scope.ProfileID,
+		AllowedLibraryIDs:   scope.AllowedLibraryIDs,
+		DisabledLibraryIDs:  scope.DisabledLibraryIDs,
+		MaxContentRating:    scope.MaxContentRating,
+		AllowUnratedContent: scope.AllowUnratedContent,
+		UserID:              scope.UserID,
+		ProfileID:           scope.ProfileID,
 	}
 	var requestedBy *int
 	if userID := apimw.GetUserID(r.Context()); userID != 0 {

@@ -40,8 +40,7 @@ type APIKeyUserLoader interface {
 	GetByID(ctx context.Context, id int) (*models.User, error)
 }
 
-// AuthMiddleware provides HTTP middleware for JWT-based authentication with
-// session validity caching.
+// AuthMiddleware provides HTTP middleware for JWT and API key authentication.
 type AuthMiddleware struct {
 	tokenValidator   TokenValidator
 	sessionValidator SessionValidator
@@ -65,8 +64,10 @@ func NewAuthMiddleware(tv TokenValidator, sv SessionValidator, akv APIKeyValidat
 
 // RequireAuth is an HTTP middleware that enforces JWT authentication.
 // It extracts the Bearer token from the Authorization header, validates the
-// JWT, checks session validity (with an in-memory cache), and sets the
-// parsed claims in the request context for downstream handlers.
+// JWT, checks session validity with the SessionValidator on every request (the
+// middleware keeps no cache, so a revocation applies to the session's next
+// request), and sets the parsed claims in the request context for downstream
+// handlers.
 func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := extractBearerToken(r)

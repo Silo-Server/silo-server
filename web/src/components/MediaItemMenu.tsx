@@ -1,6 +1,8 @@
 import {
+  lazy,
   type ReactNode,
   type RefObject,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -32,9 +34,8 @@ import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queri
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
-import EditMetadataDialog from "@/components/EditMetadataDialog";
+import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
-import MatchItemDialog from "@/components/MatchItemDialog";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -75,6 +76,21 @@ import {
   showsWatchedQuickAction,
   type CardQuickActionMode,
 } from "@/lib/cardQuickActions";
+
+// Edit Metadata and Match Item are curator tools, yet every media card carries
+// this menu, so the dialogs load on demand instead of with the launch bundle.
+// Opening a menu that offers them starts the download.
+const importEditMetadataDialog = () => import("@/components/EditMetadataDialog");
+const importMatchItemDialog = () => import("@/components/MatchItemDialog");
+const EditMetadataDialog = lazy(importEditMetadataDialog);
+const MatchItemDialog = lazy(importMatchItemDialog);
+
+function prefetchMetadataDialogs() {
+  // Nothing to report here: the dialog host imports them again when it
+  // renders, and its error boundary shows a failure.
+  importEditMetadataDialog().catch(() => undefined);
+  importMatchItemDialog().catch(() => undefined);
+}
 
 type MediaItemType = ItemDetail["type"];
 
@@ -607,6 +623,67 @@ function WatchedQuickActionButton({
 
 type MetadataAction = "edit" | "match";
 
+/** What the status dialog stands in for: the item fetch or the dialog's own chunk. */
+type MetadataActionPending = "details" | "dialog";
+
+const PENDING_TEXT: Record<MetadataActionPending, { loading: string; failed: string }> = {
+  details: {
+    loading: "Loading the latest item details…",
+    failed: "The item details could not be loaded.",
+  },
+  dialog: {
+    loading: "Loading the dialog…",
+    failed: "The dialog could not be loaded.",
+  },
+};
+
+function MetadataActionStatusDialog({
+  action,
+  pending,
+  loading,
+  error,
+  retryLabel = "Try Again",
+  onRetry,
+  onClose,
+}: {
+  action: MetadataAction;
+  pending: MetadataActionPending;
+  loading: boolean;
+  error?: unknown;
+  retryLabel?: string;
+  onRetry?: () => void;
+  onClose: () => void;
+}) {
+  const actionLabel = action === "edit" ? "Edit Metadata" : "Match Item";
+  const text = PENDING_TEXT[pending];
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{actionLabel}</DialogTitle>
+          <DialogDescription>{loading ? text.loading : text.failed}</DialogDescription>
+        </DialogHeader>
+        {loading ? (
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
+            <LoaderCircle className="size-4 animate-spin" />
+            Loading…
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-muted-foreground text-sm">
+              {error instanceof Error ? error.message : "Please try again."}
+            </p>
+            <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+              {retryLabel}
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function MetadataActionDialogHost({
   action,
   contentId,
@@ -627,47 +704,56 @@ export function MetadataActionDialogHost({
   } = useCatalogItemDetail(contentId, libraryId);
 
   if (item) {
-    return action === "edit" ? (
-      <EditMetadataDialog item={item} open onOpenChange={(open) => !open && onClose()} />
-    ) : (
-      <MatchItemDialog
-        key={item.content_id}
-        item={libraryId === undefined ? item : { ...item, library_id: libraryId }}
-        open
-        onOpenChange={(open) => !open && onClose()}
-      />
+    return (
+      <LocalErrorBoundary
+        fallback={(dialogError) => (
+          // Browsers remember a failed module import for the life of the page,
+          // so importing the chunk again cannot succeed; a reload can.
+          <MetadataActionStatusDialog
+            action={action}
+            pending="dialog"
+            loading={false}
+            error={dialogError}
+            retryLabel="Reload Page"
+            onRetry={() => window.location.reload()}
+            onClose={onClose}
+          />
+        )}
+      >
+        <Suspense
+          fallback={
+            <MetadataActionStatusDialog
+              action={action}
+              pending="dialog"
+              loading
+              onClose={onClose}
+            />
+          }
+        >
+          {action === "edit" ? (
+            <EditMetadataDialog item={item} open onOpenChange={(open) => !open && onClose()} />
+          ) : (
+            <MatchItemDialog
+              key={item.content_id}
+              item={libraryId === undefined ? item : { ...item, library_id: libraryId }}
+              open
+              onOpenChange={(open) => !open && onClose()}
+            />
+          )}
+        </Suspense>
+      </LocalErrorBoundary>
     );
   }
 
-  const actionLabel = action === "edit" ? "Edit Metadata" : "Match Item";
-  const loading = isLoading || isFetching;
-
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>{actionLabel}</DialogTitle>
-          <DialogDescription>
-            {loading ? "Loading the latest item details…" : "The item details could not be loaded."}
-          </DialogDescription>
-        </DialogHeader>
-        {loading ? (
-          <div className="text-muted-foreground flex items-center gap-2 text-sm">
-            <LoaderCircle className="size-4 animate-spin" />
-            Loading…
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-muted-foreground text-sm">
-              {error instanceof Error ? error.message : "Please try again."}
-            </p>
-            <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
-              Try Again
-            </Button>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
+    <MetadataActionStatusDialog
+      action={action}
+      pending="details"
+      loading={isLoading || isFetching}
+      error={error}
+      onRetry={() => void refetch()}
+      onClose={onClose}
+    />
   );
 }
 
@@ -759,8 +845,13 @@ export default function MediaItemMenu({
     showCollectionActions,
     dismissLabel,
   });
+  const offersMetadataDialogs = model.some(
+    (entry) =>
+      entry.kind === "action" && (entry.key === "editMetadata" || entry.key === "matchItem"),
+  );
   useLongPress(longPressRef, {
     onLongPress: () => {
+      if (offersMetadataDialogs) prefetchMetadataDialogs();
       setActionSheetMounted(true);
       setActionSheetOpen(true);
     },
@@ -835,11 +926,14 @@ export default function MediaItemMenu({
           navigate(buildMediaPlayHref({ contentId, type: mediaType, libraryId, restart: true }));
           return;
         }
-        playbackController.startPlayback({
-          contentId,
-          restart: true,
-          returnHref: currentHref,
-        });
+        playbackController.startPlayback(
+          {
+            contentId,
+            restart: true,
+            returnHref: currentHref,
+          },
+          "viewer",
+        );
         return;
       }
       case "toggleWatched": {
@@ -957,6 +1051,7 @@ export default function MediaItemMenu({
             modal={false}
             onOpenChange={(open) => {
               if (open) {
+                if (offersMetadataDialogs) prefetchMetadataDialogs();
                 pointerClosedMenuRef.current = false;
                 lastMenuInteractionRef.current = null;
                 return;

@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Outlet } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 let appInitialEntries = ["/catalog?source=query&q=heat"];
 let latestNavigateTo: string | null = null;
@@ -194,39 +194,62 @@ vi.mock("@/pages/WatchRoute", () => stubPage("Watch"));
 
 import App from "../App";
 
-describe("Catalog page", () => {
-  beforeEach(() => {
-    appInitialEntries = ["/catalog?source=query&q=heat"];
-    latestNavigateTo = null;
-    appProfile = { id: "profile-1" };
-    mockUseCatalogWindow.mockReset();
-    mockUseCatalogFilters.mockReset();
-    mockItemGrid.mockReset();
-    mockUseCanRequest.mockReset();
-    mockUseRequestSearch.mockReset();
-    mockUsePersonSearch.mockReset();
-    mockUsePersonSearch.mockReturnValue({ data: [], isLoading: false, isError: false });
-    mockUseCanRequest.mockReturnValue({
-      discoveryEnabled: false,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    mockUseRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: false });
+function resetCatalogMocks() {
+  appInitialEntries = ["/catalog?source=query&q=heat"];
+  latestNavigateTo = null;
+  appProfile = { id: "profile-1" };
+  mockUseCatalogWindow.mockReset();
+  mockUseCatalogFilters.mockReset();
+  mockItemGrid.mockReset();
+  mockUseCanRequest.mockReset();
+  mockUseRequestSearch.mockReset();
+  mockUsePersonSearch.mockReset();
+  mockUsePersonSearch.mockReturnValue({ data: [], isLoading: false, isError: false });
+  mockUseCanRequest.mockReturnValue({
+    discoveryEnabled: false,
+    isResolving: false,
+    submitDisabledReason: null,
+  });
+  mockUseRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: false });
 
-    mockUseCatalogWindow.mockReturnValue({
-      data: {
-        title: "Heat Search",
-        totalItems: 1,
-        pages: new Map([[0, [{ content_id: "movie-1", title: "Heat", type: "movie" }]]]),
-      },
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
+  mockUseCatalogWindow.mockReturnValue({
+    data: {
+      title: "Heat Search",
+      totalItems: 1,
+      pages: new Map([[0, [{ content_id: "movie-1", title: "Heat", type: "movie" }]]]),
+    },
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  });
+  mockUseCatalogFilters.mockReturnValue({
+    data: { genres: ["Drama"], content_ratings: ["R"] },
+    isLoading: false,
+  });
+}
+
+describe("Catalog page", () => {
+  beforeAll(async () => {
+    // Catalog is a lazy route, and a static render cannot wait for its chunk.
+    // Import the page first so the slow module load happens once, outside any
+    // render. The first render below then starts React.lazy on a cached
+    // module, and the next one shows the page rather than the route fallback.
+    await import("@/pages/Catalog");
+    resetCatalogMocks();
+    const renderApp = () =>
+      renderToStaticMarkup(
+        <QueryClientProvider client={new QueryClient()}>
+          <App />
+        </QueryClientProvider>,
+      );
+    renderApp();
+    await vi.waitFor(() => expect(renderApp()).not.toContain("Loading page"), {
+      timeout: 5_000,
     });
-    mockUseCatalogFilters.mockReturnValue({
-      data: { genres: ["Drama"], content_ratings: ["R"] },
-      isLoading: false,
-    });
+  }, 15_000);
+
+  beforeEach(() => {
+    resetCatalogMocks();
   });
 
   it("offers actor and director results with exact person links when no titles match", () => {
