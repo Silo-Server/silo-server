@@ -20,6 +20,8 @@ type countingMarkerStore struct {
 	gets    atomic.Int64
 	lists   atomic.Int64
 	listErr error
+	// listHook, when set, runs before each List and can block or fail it.
+	listHook func(ctx context.Context) error
 }
 
 func newCountingMarkerStore() *countingMarkerStore {
@@ -35,6 +37,11 @@ func (s *countingMarkerStore) List(ctx context.Context, prefix, cursor string, l
 	s.lists.Add(1)
 	if s.listErr != nil {
 		return nil, "", s.listErr
+	}
+	if s.listHook != nil {
+		if err := s.listHook(ctx); err != nil {
+			return nil, "", err
+		}
 	}
 	return s.Memory.List(ctx, prefix, cursor, limit)
 }
@@ -159,5 +166,109 @@ func TestFetchMarkersFallsBackToGetsWhenListFails(t *testing.T) {
 	// every file.
 	if gets, lists := store.gets.Load(), store.lists.Load(); gets != markerFetchFiles || lists != 1 {
 		t.Fatalf("got %d GETs and %d LISTs, want %d GETs and 1 LIST", gets, lists, markerFetchFiles)
+	}
+}
+
+// blockingListStore returns a store whose List blocks until its context ends,
+// like a request to a server that accepted the connection and never answers.
+// The returned channel receives once each List starts.
+func blockingListStore() (*countingMarkerStore, <-chan struct{}) {
+	store := newCountingMarkerStore()
+	entered := make(chan struct{}, 16)
+	store.listHook = func(ctx context.Context) error {
+		entered <- struct{}{}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return store, entered
+}
+
+// awaitResult fails the test if a marker prefix check does not return within
+// limit, which is far shorter than the blocked LIST it must not wait on.
+func awaitResult(t *testing.T, res <-chan bool, limit time.Duration, what string) bool {
+	t.Helper()
+	select {
+	case v := <-res:
+		return v
+	case <-time.After(limit):
+		t.Fatalf("%s did not return within %s", what, limit)
+		return false
+	}
+}
+
+func TestMarkerPrefixCheckWaitersHonorTheirContext(t *testing.T) {
+	store, entered := blockingListStore()
+	s := &Scanner{artworkStore: store}
+	// Only the leader's own context ends this LIST.
+	s.markerPrefix.listTimeout = time.Hour
+
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	defer cancelLeader()
+	leader := make(chan bool, 1)
+	go func() { leader <- s.markerPrefixEmpty(leaderCtx) }()
+	<-entered
+
+	// A worker from a canceled scan leaves at once instead of waiting on
+	// another scan's LIST.
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	waiter := make(chan bool, 1)
+	go func() { waiter <- s.markerPrefixEmpty(canceled) }()
+	if awaitResult(t, waiter, 2*time.Second, "canceled waiter") {
+		t.Fatal("canceled waiter reported an empty prefix")
+	}
+
+	cancelLeader()
+	if awaitResult(t, leader, 2*time.Second, "canceled leader") {
+		t.Fatal("canceled leader reported an empty prefix")
+	}
+	// A check its caller abandoned records nothing, so the next caller lists
+	// again.
+	if !s.markerPrefix.checkedAt.IsZero() || s.markerPrefix.checking != nil {
+		t.Fatalf("canceled check left state: checkedAt=%v checking=%v", s.markerPrefix.checkedAt, s.markerPrefix.checking)
+	}
+	store.listHook = nil
+	if !s.markerPrefixEmpty(context.Background()) {
+		t.Fatal("empty store reported markers after a canceled check")
+	}
+	if lists := store.lists.Load(); lists != 2 {
+		t.Fatalf("got %d LISTs, want 2", lists)
+	}
+}
+
+func TestMarkerPrefixCheckTimesOutToPerFileReads(t *testing.T) {
+	store, entered := blockingListStore()
+	s := &Scanner{artworkStore: store}
+	const timeout = 50 * time.Millisecond
+	s.markerPrefix.listTimeout = timeout
+	hash := markerTestHash(0)
+	if err := store.Put(context.Background(), "markers/"+hash+".json", []byte(`{"IntroEnd":30}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	leader := make(chan bool, 1)
+	go func() { leader <- s.fetchMarkers(context.Background(), hash) != nil }()
+	<-entered
+	// A second worker waits on the hung LIST only until its timeout, then
+	// reads its file directly, as it does today.
+	waiter := make(chan bool, 1)
+	go func() { waiter <- s.fetchMarkers(context.Background(), hash) != nil }()
+
+	limit := timeout + 5*time.Second
+	if !awaitResult(t, leader, limit, "worker running the hung LIST") {
+		t.Fatal("worker running the hung LIST did not read the marker")
+	}
+	if !awaitResult(t, waiter, limit, "worker waiting on the hung LIST") {
+		t.Fatal("worker waiting on the hung LIST did not read the marker")
+	}
+	if !s.markerPrefix.listFailed {
+		t.Fatal("timed-out LIST was not recorded as failed")
+	}
+
+	// The timeout is cached like any failed LIST: later files GET without
+	// listing again.
+	fetchMarkersForFiles(t, s, 10)
+	if gets, lists := store.gets.Load(), store.lists.Load(); gets != 12 || lists != 1 {
+		t.Fatalf("got %d GETs and %d LISTs, want 12 GETs and 1 LIST", gets, lists)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -58,6 +59,7 @@ func TestScanFolderMarkerObjectReads(t *testing.T) {
 			}
 
 			s := NewScanner(NewFileRepository(pool), "", store, 4, false, 0)
+			started := time.Now()
 			result, err := s.ScanFolder(ctx, &models.MediaFolder{ID: folderID, Type: "movies", Paths: []string{root}, Enabled: true})
 			if err != nil {
 				t.Fatal(err)
@@ -67,8 +69,10 @@ func TestScanFolderMarkerObjectReads(t *testing.T) {
 			}
 			gets, lists := store.gets.Load(), store.lists.Load()
 			t.Logf("%s: %d new files, %d marker GETs, %d LISTs", tc.name, result.New, gets, lists)
-			if gets != tc.wantGets || lists != 1 {
-				t.Fatalf("got %d GETs and %d LISTs, want %d GETs and 1 LIST", gets, lists, tc.wantGets)
+			// One LIST per markerPrefixCheckTTL; a slow run may cross it.
+			maxLists := int64(time.Since(started)/markerPrefixCheckTTL) + 1
+			if gets != tc.wantGets || lists < 1 || lists > maxLists {
+				t.Fatalf("got %d GETs and %d LISTs, want %d GETs and 1 to %d LISTs", gets, lists, tc.wantGets, maxLists)
 			}
 
 			if tc.withMarker {
