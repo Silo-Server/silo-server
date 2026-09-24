@@ -4,8 +4,9 @@
 //   eagerBrotliBytes           brotli-11 bytes of everything the browser must
 //                              download before the app runs: the index.html
 //                              entry chunk, its static-import closure, and
-//                              their CSS, read from the Vite manifest
-//                              (dist/.vite/manifest.json). Lazy chunks are
+//                              their CSS, read from the Vite manifest that
+//                              vite.config.ts moves out of dist to
+//                              .bundle-manifest.json. Lazy chunks are
 //                              excluded.
 //   crossOriginRenderBlocking  stylesheets and classic scripts in
 //                              dist/index.html that load from another origin
@@ -14,12 +15,12 @@
 // The check fails when a value grows past its budget, and also when it falls
 // below it, so the change that shrinks the launch bundle lowers the budget in
 // the same PR. Byte counts get BYTE_TOLERANCE of slack either way. It also
-// fails when the vendor chunk imports another chunk, since its URL then stops
-// surviving releases.
+// fails when the vendor chunk is missing or imports another chunk, since its
+// URL then stops surviving releases.
 //
 // Usage: node scripts/check-bundle-budget.mjs [--update]
 //   --update rewrites perf-budget.json from the current build.
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { brotliCompressSync, constants } from "node:zlib";
@@ -28,7 +29,7 @@ export const BYTE_TOLERANCE = 1024;
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distDir = path.join(webRoot, "dist");
-const manifestPath = path.join(distDir, ".vite/manifest.json");
+const manifestPath = path.join(webRoot, ".bundle-manifest.json");
 const budgetPath = path.join(webRoot, "perf-budget.json");
 
 /**
@@ -60,8 +61,9 @@ export const VENDOR_CHUNK_NAME = "vendor-react";
 /**
  * The vendor chunk keeps its URL across releases only while it imports no
  * other chunk: an import pulls the imported chunk's content hash into its own.
- * A new dependency of a vendor package lands in an app chunk unless
- * vite.config.ts lists it with the vendor packages.
+ * Rollup puts the dependencies of the vendor packages into the vendor chunk by
+ * itself, so an import only appears after a config change splits vendor code
+ * across chunks, such as a second manual chunk that claims a shared module.
  */
 export function vendorChunkFailures(manifest) {
   const vendor = Object.values(manifest).find((chunk) => chunk.name === VENDOR_CHUNK_NAME);
@@ -73,7 +75,7 @@ export function vendorChunkFailures(manifest) {
   if (!vendor.imports?.length) return [];
   return [
     `${vendor.file} imports ${vendor.imports.join(", ")}, so its hash changes with the app. ` +
-      "A vendor package depends on a package missing from VENDOR_PACKAGES in vite.config.ts; add it there.",
+      "Check manualChunks in vite.config.ts: another chunk now holds code the vendor chunk depends on.",
   ];
 }
 
@@ -156,6 +158,11 @@ function brotliSize(bytes) {
 }
 
 function measure() {
+  if (!existsSync(manifestPath)) {
+    throw new Error(
+      `${path.relative(webRoot, manifestPath)} is missing. Run \`pnpm run build\` first.`,
+    );
+  }
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   const { js, css } = eagerFiles(manifest);
   const files = [...js, ...css].map((file) => {

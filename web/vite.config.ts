@@ -3,6 +3,16 @@ import { readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { brotliCompress, constants, gzip } from "node:zlib";
 import { defineConfig, loadEnv, transformWithEsbuild, type Plugin } from "vite";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmdirSync,
+  writeFileSync,
+} from "node:fs";
+import { brotliCompressSync, constants, gzipSync } from "node:zlib";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
@@ -14,12 +24,17 @@ const PRECOMPRESS_MIN_BYTES = 1024;
 
 // React and the router change far less often than the app, so they get a chunk
 // of their own. Its content hash then survives most Silo upgrades, and browsers
-// keep it cached instead of downloading React again with every release. The
-// list includes the router's own dependency (cookie-es): a dependency left out
-// lands in an app chunk, and the vendor chunk would import it and inherit that
-// chunk's hash. scripts/check-bundle-budget.mjs fails when that happens.
-const VENDOR_PACKAGES =
-  /[\\/]node_modules[\\/](?:react|react-dom|scheduler|react-router|cookie-es)[\\/]/;
+// keep it cached instead of downloading React again with every release. Rollup
+// adds the static dependencies of these packages to the chunk by itself, so
+// the list names only the packages the app imports.
+//
+// The hash still changes when these packages change, when the app starts
+// using an export of theirs that no app chunk used before, and when app code
+// starts needing a CommonJS interop helper the chunk does not export yet
+// (React is CommonJS, so Rollup's shared helpers live in this chunk).
+// scripts/check-bundle-budget.mjs fails if a config change leaves the chunk
+// importing another chunk, which would tie its hash to that chunk's.
+const VENDOR_PACKAGES = /[\\/]node_modules[\\/](?:react|react-dom|scheduler|react-router)[\\/]/;
 
 function vendorChunk(id: string): string | undefined {
   return VENDOR_PACKAGES.test(id) ? "vendor-react" : undefined;
@@ -133,6 +148,27 @@ function themeBootScript(): Plugin {
   };
 }
 
+// The server embeds dist and serves every file in it, and nothing in the app
+// reads the Vite manifest. Only scripts/check-bundle-budget.mjs does, so the
+// manifest moves next to dist instead of shipping.
+const VITE_MANIFEST = ".vite/manifest.json";
+const BUNDLE_MANIFEST_PATH = path.resolve(__dirname, ".bundle-manifest.json");
+
+function moveManifestOutOfDist(): Plugin {
+  return {
+    name: "move-manifest-out-of-dist",
+    apply: "build",
+    writeBundle(options) {
+      if (!options.dir) return;
+      const manifestPath = path.resolve(options.dir, VITE_MANIFEST);
+      if (!existsSync(manifestPath)) return;
+      renameSync(manifestPath, BUNDLE_MANIFEST_PATH);
+      const manifestDir = path.dirname(manifestPath);
+      if (readdirSync(manifestDir).length === 0) rmdirSync(manifestDir);
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const apiProxyTarget = env.VITE_API_PROXY_TARGET || "http://localhost:8090";
@@ -163,6 +199,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), tailwindcss(), themeBootScript(), precompressStaticAssets()],
+    plugins: [react(), tailwindcss(), precompressStaticAssets(), moveManifestOutOfDist()],
     define: {
       // Reported in X-Silo-Client-Version on every v2 request (src/api/v2/request.ts).
       __SILO_WEB_VERSION__: JSON.stringify(webVersion),
@@ -172,8 +209,9 @@ export default defineConfig(({ mode }) => {
       // unicode-range subsets in src/fonts.css, so fonts always stay files.
       assetsInlineLimit: (filePath: string) => (/\.woff2?$/.test(filePath) ? false : undefined),
       // scripts/check-bundle-budget.mjs reads the manifest to find the chunks
-      // the entry loads before the app can run.
-      manifest: true,
+      // the entry loads before the app can run. moveManifestOutOfDist keeps it
+      // out of the embedded bundle.
+      manifest: VITE_MANIFEST,
       rollupOptions: {
         output: {
           manualChunks: vendorChunk,
