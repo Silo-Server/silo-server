@@ -45,7 +45,7 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
 vi.mock("./components/ActionBar", () => ({
   default: (props: Record<string, unknown>) => {
     mocks.actionBarProps.value = props;
-    const state = `${String(props.playLabel)} ${String(props.playHref ?? "(no link)")}${props.playLoading ? " (loading)" : ""}`;
+    const state = `${String(props.playLabel)} ${String(props.playHref ?? "(no link)")}`;
     if (mocks.playButtonStates.at(-1) !== state) mocks.playButtonStates.push(state);
     return <div />;
   },
@@ -216,7 +216,7 @@ async function openSeriesPage() {
 
 function playButton() {
   const props = mocks.actionBarProps.value;
-  return { href: props?.playHref, label: props?.playLabel, loading: props?.playLoading ?? false };
+  return { href: props?.playHref, label: props?.playLabel };
 }
 
 const twoSeasonsInProgress: Fixture["seasons"] = {
@@ -245,7 +245,7 @@ describe("series page request budget and play target", () => {
 
     await openSeriesPage();
 
-    expect(playButton()).toEqual({ href: "/watch/s2e2", label: "Resume", loading: false });
+    expect(playButton()).toEqual({ href: "/watch/s2e2", label: "Resume" });
     // The series detail alone decides the button, so it never changes after
     // the first render.
     expect(mocks.playButtonStates).toEqual(["Resume /watch/s2e2"]);
@@ -272,7 +272,7 @@ describe("series page request budget and play target", () => {
 
     await openSeriesPage();
 
-    expect(playButton()).toEqual({ href: "/watch/s2e2", label: "Resume", loading: false });
+    expect(playButton()).toEqual({ href: "/watch/s2e2", label: "Resume" });
     // Detail, seasons and similar titles, plus the target season's episodes
     // for the Watch Together pick. Nothing scales with the profile's history.
     expect(requestLog()).toHaveLength(4);
@@ -296,7 +296,6 @@ describe("series page request budget and play target", () => {
     expect(playButton()).toEqual({
       href: "/watch/s1e1",
       label: "Start From Episode 1",
-      loading: false,
     });
     expect(requestLog()).toHaveLength(4);
   });
@@ -313,7 +312,7 @@ describe("series page request budget and play target", () => {
 
     await openSeriesPage();
 
-    expect(playButton()).toEqual({ href: "/watch/s2e1", label: "Play Next", loading: false });
+    expect(playButton()).toEqual({ href: "/watch/s2e1", label: "Play Next" });
     expect(mocks.watchTogether.value).toMatchObject({
       target: { content_id: "s2e1", subtitle: "S2 E1" },
       initialSeasonNumber: 2,
@@ -336,7 +335,50 @@ describe("series page request budget and play target", () => {
     expect(playButton()).toEqual({
       href: "/watch/s1e1",
       label: "Start From Episode 1",
-      loading: false,
+    });
+    expect(requestLog()).toHaveLength(4);
+  });
+
+  it("plays the specials once every regular episode is watched", async () => {
+    // The series rollup counts specials, so the series is not fully watched,
+    // and the server ranks unwatched specials after every regular episode.
+    installServer({
+      seasons: {
+        0: ["unwatched", "unwatched"],
+        1: ["watched", "watched", "watched"],
+        2: ["watched", "watched", "watched"],
+      },
+      seriesPlayContentId: "s0e1",
+      progressPage: [],
+    });
+
+    await openSeriesPage();
+
+    expect(playButton()).toEqual({ href: "/watch/s0e1", label: "Play Next" });
+    expect(mocks.watchTogether.value).toMatchObject({
+      target: { content_id: "s0e1", subtitle: "S0 E1" },
+      initialSeasonNumber: 0,
+    });
+    expect(requestLog()).toHaveLength(4);
+  });
+
+  it("starts an unstarted series at season 1, not the specials", async () => {
+    installServer({
+      seasons: {
+        0: ["unwatched", "unwatched"],
+        1: ["unwatched", "unwatched", "unwatched"],
+        2: ["unwatched", "unwatched", "unwatched"],
+      },
+      seriesPlayContentId: "s1e1",
+      progressPage: [],
+    });
+
+    await openSeriesPage();
+
+    expect(playButton()).toEqual({ href: "/watch/s1e1", label: "Start From Episode 1" });
+    expect(mocks.watchTogether.value).toMatchObject({
+      target: { content_id: "s1e1", subtitle: "S1 E1" },
+      initialSeasonNumber: 1,
     });
     expect(requestLog()).toHaveLength(4);
   });
@@ -350,7 +392,7 @@ describe("series page request budget and play target", () => {
 
     await openSeriesPage();
 
-    expect(playButton()).toEqual({ href: "/watch/s1e2", label: "Resume", loading: false });
+    expect(playButton()).toEqual({ href: "/watch/s1e2", label: "Resume" });
     expect(requestLog()).toEqual([
       `GET /api/v2/catalog/items/{id} ${SERIES_ID}`,
       `GET /api/v2/catalog/series/{id}/seasons ${SERIES_ID}`,
