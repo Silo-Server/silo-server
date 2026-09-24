@@ -17,6 +17,7 @@ GET /Items/Latest	non-media
 GET /Items/Suggestions	non-media
 GET /Items/{id}	non-media
 GET /Items/{id}/Ancestors	non-media
+GET /Items/{id}/Collections	non-media
 GET /Items/{id}/Download	media	transfer	viewer_egress	false	true
 HEAD /Items/{id}/Download	media	transfer	viewer_egress	false	true
 GET /Items/{id}/Images/{imageType}	non-media
@@ -154,6 +155,7 @@ GET /Items/Latest	non-media
 GET /Items/Suggestions	non-media
 GET /Items/{id}	non-media
 GET /Items/{id}/Ancestors	non-media
+GET /Items/{id}/Collections	non-media
 GET /Items/{id}/Download	media	transfer	viewer_egress	false	true
 HEAD /Items/{id}/Download	media	transfer	viewer_egress	false	true
 GET /Items/{id}/Images/{imageType}	non-media

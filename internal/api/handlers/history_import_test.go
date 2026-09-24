@@ -2,7 +2,10 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/historyimport"
@@ -58,5 +61,20 @@ func TestHistoryImportDurableAdmissionErrorsDoNotExposeCauses(t *testing.T) {
 	out := historyImportAPIError(err)
 	if out.Status != http.StatusServiceUnavailable || out.Message != historyimport.ErrPersonalAdmissionUncertain.Error() || !errors.Is(out, historyimport.ErrPersonalAdmissionUncertain) {
 		t.Fatalf("unsafe uncertain admission mapping: %+v", out)
+	}
+}
+
+// v1 is frozen: failures the v2 adapter explains still answer 500 here, and
+// the cause stays reachable for the v2 mapping.
+func TestHistoryImportAPIErrorKeepsV1DecisionForV2Causes(t *testing.T) {
+	dial := &url.Error{Op: "Post", URL: "http://emby.example.test/Users/AuthenticateByName", Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}}
+	for _, err := range []error{
+		fmt.Errorf("%w: %w", historyimport.ErrSourceUnreachable, dial),
+		fmt.Errorf("%w: choose a server and enter the Emby username", historyimport.ErrInvalidInput),
+	} {
+		out := historyImportAPIError(err)
+		if out.Status != http.StatusInternalServerError || out.Code != policyErrorInternal || !errors.Is(out, err) {
+			t.Fatalf("historyImportAPIError(%v) = %+v, want the unchanged v1 500 wrapping its cause", err, out)
+		}
 	}
 }

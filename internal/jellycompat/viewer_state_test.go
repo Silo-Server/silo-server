@@ -293,7 +293,9 @@ func TestDisplayPreferencesCustomPrefsObject(t *testing.T) {
 			t.Fatal(rec.Code, rec.Body.String())
 		}
 		raw, err := store.GetJellycompatDisplayPrefs(t.Context(), profilePreferencesID(session.ProfileID, "home"), "web")
-		if err != nil || !strings.Contains(raw, `"CustomPrefs":{}`) {
+		// CustomPrefs is stored as an object; the only entries are the skip
+		// lengths Jellyfin 12 saves when a client omits them.
+		if err != nil || !strings.Contains(raw, `"CustomPrefs":{"skipBackLength":"15000","skipForwardLength":"15000"}`) {
 			t.Fatalf("stored prefs %s: %v", raw, err)
 		}
 	}
@@ -302,7 +304,9 @@ func TestDisplayPreferencesCustomPrefsObject(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	h.HandleGetDisplayPreferences(rec, viewerRequest("GET", "/?client=web", "", "displayPreferencesId", "home", session))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"CustomPrefs":{}`) {
+	// A stored null reads back as an object carrying Jellyfin's read-time skip
+	// defaults, never as null.
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"CustomPrefs":{"skipBackLength":"10000","skipForwardLength":"30000"}`) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 }

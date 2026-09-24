@@ -19,6 +19,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/text/language"
+	"golang.org/x/text/language/display"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -183,6 +185,10 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case query.unmatchedIDFilter:
+		// A genre or person filter whose IDs name nothing matches nothing,
+		// rather than falling back to an unfiltered browse.
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 	case len(query.specificIDs) > 0 || len(query.specificCollectionIDs) > 0 || idsRequestCollectionsView(r):
 		h.handleSpecificItems(w, r, session, query)
 	case query.parentCollectionID != "":
@@ -218,10 +224,12 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 		h.handleSearchItems(w, r, session, query)
 	case query.isFavorite:
 		h.handleFavoriteItems(w, r, session, query)
-	case query.parentLibraryID == 0 && len(query.itemTypes) == 0 && !query.recursive:
-		// No ParentId and no type filter: return top-level library views.
+	case query.parentLibraryID == 0 && len(query.itemTypes) == 0 && !query.recursive && !query.hasRootFilter:
+		// No ParentId and no filter: return top-level library views.
 		// Jellyfin clients (e.g. Findroid "My Media") call GET /Items?userId=...
 		// and expect CollectionFolder items representing the user's libraries.
+		// Any Jellyfin 12 HasFilters parameter makes the request a recursive
+		// search instead, even one Silo cannot apply.
 		h.handleViewsResponse(w, r, session)
 	default:
 		h.handleBrowseItems(w, r, session, query)
@@ -382,6 +390,14 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 				dto.SeasonID = h.codec.EncodeStringID(EncodedIDSeason, season.ContentID)
 				dto.SeasonName = season.Title
 				dto.ParentID = dto.SeasonID
+				h.rememberSeasonImages([]upstreamSeason{*season}, "")
+				h.mapper.applySeasonPrimaryImage(&dto, seriesImageSet{
+					ContentID:       season.ContentID,
+					PosterURL:       season.PosterURL,
+					PosterPath:      season.PosterPath,
+					PosterThumbhash: season.PosterThumbhash,
+					UpdatedAt:       season.UpdatedAt,
+				})
 			}
 		}
 	}
@@ -416,6 +432,7 @@ func (h *ItemsHandler) appendDownloadedSubtitlesToDetailDTO(ctx context.Context,
 				Type:                   "Subtitle",
 				Codec:                  string(dl.Format),
 				Language:               dl.Language,
+				LocalizedLanguage:      compatLocalizedLanguage(dl.Language),
 				DisplayTitle:           displayTitle,
 				Title:                  displayTitle,
 				IsDefault:              false,
@@ -952,16 +969,64 @@ func (h *ItemsHandler) HandleFilters2Stub(w http.ResponseWriter, r *http.Request
 		writeError(w, 401, "Unauthorized", "Missing authentication token")
 		return
 	}
-	filters, err := h.content.ListItemFilters(r.Context(), session, buildBrowseParams(parseItemsQuery(r, h.codec)))
+	params := buildBrowseParams(parseItemsQuery(r, h.codec))
+	if languageTypes := languageFacetTypes(newCaseInsensitiveQuery(r.URL.Query()).Values("IncludeItemTypes")); languageTypes != "" {
+		params.Set("language_facet_types", languageTypes)
+	}
+	filters, err := h.content.ListItemFilters(r.Context(), session, params)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	result := queryFiltersDTO{Genres: []nameGuidPair{}, Tags: []string{}, AudioLanguages: []nameValuePair{}, SubtitleLanguages: []nameValuePair{}}
+	result := queryFiltersDTO{Genres: []nameGuidPair{}, Tags: []string{}, AudioLanguages: languageFacetPairs(filters.AudioLanguages), SubtitleLanguages: languageFacetPairs(filters.SubtitleLanguages)}
 	for _, genre := range filters.Genres {
 		result.Genres = append(result.Genres, nameGuidPair{Name: genre, ID: h.codec.EncodeStringID(EncodedIDGenre, genre)})
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// Catalog item types as mapped from Jellyfin IncludeItemTypes.
+const (
+	compatCatalogTypeMovie   = "movie"
+	compatCatalogTypeSeries  = "series"
+	compatCatalogTypeSeason  = "season"
+	compatCatalogTypeEpisode = "episode"
+)
+
+// languageFacetTypes returns the catalog types whose media files feed the
+// Filters2 language facets. As in Jellyfin 12, the facets are populated only
+// for Movie, Series, Season and Episode queries; season and episode streams
+// are the series' files.
+func languageFacetTypes(rawIncludeItemTypes []string) string {
+	var types []string
+	requested := mapIncludeItemTypes(rawIncludeItemTypes)
+	if slices.Contains(requested, compatCatalogTypeMovie) {
+		types = append(types, compatCatalogTypeMovie)
+	}
+	if slices.ContainsFunc(requested, func(itemType string) bool {
+		return itemType == compatCatalogTypeSeries || itemType == compatCatalogTypeSeason || itemType == compatCatalogTypeEpisode
+	}) {
+		types = append(types, compatCatalogTypeSeries)
+	}
+	return strings.Join(types, ",")
+}
+
+// languageFacetPairs renders stored language codes as Jellyfin
+// NameValuePairs: "<English name> (<code>)" sorted by name, with the raw code
+// as the value clients send back in AudioLanguages/SubtitleLanguages.
+func languageFacetPairs(codes []string) []nameValuePair {
+	pairs := make([]nameValuePair, 0, len(codes))
+	for _, code := range codes {
+		name := code
+		if tag, err := language.Parse(code); err == nil {
+			if languageName := display.English.Languages().Name(tag); languageName != "" {
+				name = languageName + " (" + code + ")"
+			}
+		}
+		pairs = append(pairs, nameValuePair{Name: name, Value: code})
+	}
+	sort.SliceStable(pairs, func(i, j int) bool { return pairs[i].Name < pairs[j].Name })
+	return pairs
 }
 
 // HandleStudios lists studios represented in the viewer's catalog.
@@ -1149,6 +1214,7 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 	if h.sectionsFetcher != nil && latestFastPathEligible(params, libraryItemType) {
 		items, err := h.loadLatestViaSections(r.Context(), session, query)
 		if err == nil {
+			h.applyListMediaSourceCounts(r.Context(), session, items, query)
 			applyItemsResponseOptions(items, query)
 			writeJSON(w, http.StatusOK, items)
 			return
@@ -1171,6 +1237,7 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 		writeCompatUpstreamError(w, err)
 		return
 	}
+	h.applyListMediaSourceCounts(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, items)
 }
@@ -1783,7 +1850,7 @@ func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *htt
 			sortKey = query.sort
 			order = query.order
 		}
-		filters := catalog.BrowseFilters{UserID: session.StreamAppUserID, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
+		filters := catalog.BrowseFilters{UserID: session.StreamAppUserID, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, AudioLanguages: query.audioLanguages, SubtitleLanguages: query.subtitleLanguages, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
 		if !h.catalogUserState && (filters.IsFavorite || filters.IsPlayed != nil || filters.IsResumable) {
 			content, ok := h.content.(interface {
 				browseConfiguredUserState(context.Context, *Session, catalog.BrowseFilters, bool, func(catalog.BrowseFilters) ([]upstreamListItem, bool, error)) (*upstreamBrowseResponse, error)
@@ -1999,6 +2066,7 @@ func (h *ItemsHandler) writeEpisodeModelsPage(w http.ResponseWriter, r *http.Req
 	if page {
 		startIndex = query.startIndex
 	}
+	h.applyListMediaSourceCounts(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	if query.totalOverride != nil {
 		total = *query.totalOverride
@@ -2177,6 +2245,7 @@ func (h *ItemsHandler) writeNextUpResponse(w http.ResponseWriter, r *http.Reques
 			items[i] = dto
 		}
 	}
+	h.applyListMediaSourceCounts(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -2263,6 +2332,7 @@ func (h *ItemsHandler) HandleUpcoming(w http.ResponseWriter, r *http.Request) {
 	for i, ep := range episodes {
 		applyPlayableLocation(&items[i], hasFiles[ep.ContentID])
 	}
+	h.applyListMediaSourceCounts(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, 200, queryResultDTO{Items: items, TotalRecordCount: total, StartIndex: query.startIndex})
 }
@@ -2431,6 +2501,7 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 		}
 		items = append(items, dto)
 	}
+	h.applyListMediaSourceCounts(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -2502,6 +2573,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 		for _, item := range listItems {
 			items = append(items, h.mapper.itemFromList(item, true, progress[item.ContentID], query.requestedFields))
 		}
+		h.applyListMediaSourceCounts(r.Context(), session, items, query)
 		applyItemsResponseOptions(items, query)
 		writeJSON(w, http.StatusOK, queryResultDTO{
 			Items:            items,
@@ -2551,6 +2623,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 		for _, item := range result.Items {
 			items = append(items, h.mapper.itemFromList(item, true, progress[item.ContentID], query.requestedFields))
 		}
+		h.applyListMediaSourceCounts(r.Context(), session, items, query)
 		applyItemsResponseOptions(items, query)
 		writeJSON(w, http.StatusOK, queryResultDTO{
 			Items:            items,
@@ -2587,6 +2660,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 	}
 	total := len(items)
 	items = sliceBaseItems(items, query.startIndex, query.limit)
+	h.applyListMediaSourceCounts(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -2658,6 +2732,7 @@ func (h *ItemsHandler) handleSearchItems(w http.ResponseWriter, r *http.Request,
 		}
 		items = append(items, dto)
 	}
+	h.applyListMediaSourceCounts(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -2745,6 +2820,7 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 		total = 0
 	}
 	items = slicePage(items, query.startIndex, query.limit)
+	h.applyListMediaSourceCounts(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{Items: items, TotalRecordCount: total, StartIndex: query.startIndex})
 }
@@ -2782,6 +2858,7 @@ func (h *ItemsHandler) handlePlayedItems(w http.ResponseWriter, r *http.Request,
 		writeCompatUpstreamError(w, err)
 		return
 	}
+	h.applyListMediaSourceCounts(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 
 	writeJSON(w, http.StatusOK, queryResultDTO{
@@ -2831,6 +2908,7 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 	if h.sectionsFetcher != nil && (len(typeSet) == 0 || typeSet["episode"] || typeSet["movie"]) {
 		items, total, err := h.loadResumeViaSections(r.Context(), session, query, typeSet)
 		if err == nil {
+			h.applyListMediaSourceCounts(r.Context(), session, items, query)
 			applyItemsResponseOptions(items, query)
 			writeJSON(w, http.StatusOK, queryResultDTO{
 				Items:            items,
@@ -2847,6 +2925,7 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 		writeCompatUpstreamError(w, err)
 		return
 	}
+	h.applyListMediaSourceCounts(r.Context(), session, items, query)
 	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -3278,7 +3357,11 @@ func (h *ItemsHandler) applyCompatEpisodeTarget(dto *baseItemDTO, target compatE
 		dto.SeasonName = target.SeasonName
 	}
 	h.mapper.applySeriesImages(dto, target.SeriesImages)
+	h.mapper.applySeasonPrimaryImage(dto, target.SeasonImages)
 	h.rememberCompatEpisodeImages(*dto, firstNonEmpty(target.Item.StillURL, target.Item.PosterURL), target.SeriesImages)
+	if h.images != nil && target.SeasonImages.PosterURL != "" && dto.ParentPrimaryImageItemID != "" {
+		h.images.RememberSized(dto.ParentPrimaryImageItemID, "Primary", target.SeasonImages.PosterURL, compatCardImageSize)
+	}
 }
 
 func (h *ItemsHandler) listSeriesEpisodes(ctx context.Context, session *Session, seriesID string, seasons []upstreamSeason, requestedSeasonID string) ([]*models.Episode, error) {
@@ -3675,6 +3758,8 @@ func applyItemsResponseOptions(items []baseItemDTO, query itemsQuery) {
 			dto.PrimaryImageItemID = ""
 			dto.PrimaryImageAspectRatio = nil
 			dto.SeriesPrimaryImageTag = ""
+			dto.ParentPrimaryImageItemID = ""
+			dto.ParentPrimaryImageTag = ""
 		}
 		if !allowed("backdrop") {
 			dto.BackdropImageTags = nil

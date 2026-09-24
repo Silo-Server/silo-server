@@ -2,8 +2,11 @@ package intromarkers
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -18,6 +21,8 @@ type fakeIntroRepository struct {
 	seasonState        *SeasonState
 	upsertedStates     []SeasonState
 	patches            []IntroMarkerPatch
+	silenceAttempts    map[int]SilenceRefinementAttempt
+	upsertedAttempts   []SilenceRefinementAttempt
 }
 
 func (f *fakeIntroRepository) CountEnabledLibraries(context.Context) (int, error) {
@@ -37,8 +42,25 @@ func (f *fakeIntroRepository) ListCandidatesForGroup(_ context.Context, mediaFol
 	return append([]Candidate(nil), f.groupCandidates[key]...), nil
 }
 
-func (f *fakeIntroRepository) ListChapterSilenceBackfillCandidates(context.Context, int) ([]Candidate, error) {
+func (f *fakeIntroRepository) ListChapterSilenceBackfillCandidates(context.Context, int, Config, string) ([]Candidate, error) {
 	return append([]Candidate(nil), f.backfillCandidates...), nil
+}
+
+func (f *fakeIntroRepository) LoadSilenceRefinementAttempt(_ context.Context, fileID int) (*SilenceRefinementAttempt, error) {
+	attempt, ok := f.silenceAttempts[fileID]
+	if !ok {
+		return nil, nil
+	}
+	return &attempt, nil
+}
+
+func (f *fakeIntroRepository) UpsertSilenceRefinementAttempt(_ context.Context, attempt SilenceRefinementAttempt) error {
+	if f.silenceAttempts == nil {
+		f.silenceAttempts = map[int]SilenceRefinementAttempt{}
+	}
+	f.silenceAttempts[attempt.MediaFileID] = attempt
+	f.upsertedAttempts = append(f.upsertedAttempts, attempt)
+	return nil
 }
 
 func (f *fakeIntroRepository) PatchIntroMarker(_ context.Context, patch IntroMarkerPatch) (bool, error) {
@@ -91,10 +113,14 @@ func (f *fakeFingerprintExtractor) Extract(context.Context, Candidate) (Fingerpr
 type fakeBoundaryRefiner struct {
 	calls    int
 	segments map[int]Segment
+	errors   map[int]error
 }
 
 func (f *fakeBoundaryRefiner) RefineChapterEnd(_ context.Context, candidate Candidate, segment Segment) (Segment, bool, error) {
 	f.calls++
+	if err := f.errors[candidate.FileID]; err != nil {
+		return segment, false, err
+	}
 	refined, ok := f.segments[candidate.FileID]
 	if !ok {
 		return segment, false, nil
@@ -537,6 +563,223 @@ func TestRunBackfillsExistingChapterMarkerWithSilenceBudget(t *testing.T) {
 	}
 	if repo.patches[0].Algorithm != ChapterSilenceAlgorithm {
 		t.Fatalf("expected silence algorithm, got %q", repo.patches[0].Algorithm)
+	}
+	if len(repo.upsertedAttempts) != 0 {
+		t.Fatalf("an applied refinement must not record a skip attempt, got %+v", repo.upsertedAttempts)
+	}
+}
+
+func chapterBackfillCandidate(fileID int) Candidate {
+	source := models.MarkerSourceScanner
+	algorithm := ChapterAlgorithm
+	start := 60.0
+	end := 120.0
+	return Candidate{
+		FileID:                fileID,
+		EpisodeID:             fmt.Sprintf("ep%d", fileID),
+		FileHash:              fmt.Sprintf("hash-%d", fileID),
+		FileSize:              1_000_000,
+		DurationSeconds:       1200,
+		ChaptersHash:          fmt.Sprintf("chapters-%d", fileID),
+		IntroStart:            &start,
+		IntroEnd:              &end,
+		IntroMarkersSource:    &source,
+		IntroMarkersAlgorithm: &algorithm,
+		Chapters: []models.MediaChapter{
+			{Index: 1, Title: "Opening", StartSeconds: 60, EndSeconds: 120},
+			{Index: 2, Title: "Part 1", StartSeconds: 120, EndSeconds: 900},
+		},
+	}
+}
+
+func TestRunBackfillRecordsNoImprovementAttempt(t *testing.T) {
+	cfg := DefaultConfig("ffmpeg")
+	candidate := chapterBackfillCandidate(10)
+	repo := &fakeIntroRepository{
+		enabledLibraries:   1,
+		eligibleCandidates: []Candidate{candidate},
+		backfillCandidates: []Candidate{candidate},
+	}
+	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, refiner: &fakeBoundaryRefiner{}, config: cfg, node: "node-a"}
+
+	summary, err := analyzer.Run(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if summary.SilenceRefinementsAttempted != 1 || summary.SilenceRefinementsApplied != 0 {
+		t.Fatalf("expected one unapplied refinement, got %+v", summary)
+	}
+	if len(repo.upsertedAttempts) != 1 {
+		t.Fatalf("expected one recorded attempt, got %d", len(repo.upsertedAttempts))
+	}
+	got := repo.upsertedAttempts[0]
+	want := SilenceRefinementAttempt{
+		MediaFileID:     10,
+		ConfigHash:      cfg.SilenceConfigHash(),
+		FileHash:        "hash-10",
+		FileSize:        1_000_000,
+		DurationSeconds: 1200,
+		ChaptersHash:    "chapters-10",
+		IntroStart:      60,
+		IntroEnd:        120,
+	}
+	if !got.sameInputs(want) {
+		t.Fatalf("recorded inputs = %+v, want %+v", got, want)
+	}
+	if got.Status != silenceAttemptNoImprovement || got.RecordedBy != "node-a" || got.FailureCount != 0 || got.RetryAfter != nil || got.LastError != "" {
+		t.Fatalf("expected a final no-improvement attempt, got %+v", got)
+	}
+	if got.AttemptedAt.IsZero() {
+		t.Fatal("expected attempted_at to be set")
+	}
+}
+
+func TestSilenceRefinementFailureBacksOff(t *testing.T) {
+	cfg := DefaultConfig("ffmpeg")
+	candidate := chapterBackfillCandidate(10)
+	sameInputs := SilenceRefinementAttempt{
+		MediaFileID:     10,
+		ConfigHash:      cfg.SilenceConfigHash(),
+		FileHash:        "hash-10",
+		FileSize:        1_000_000,
+		DurationSeconds: 1200,
+		ChaptersHash:    "chapters-10",
+		IntroStart:      60,
+		IntroEnd:        120,
+	}
+	elapsed := time.Now().Add(-time.Hour)
+	withStatus := func(attempt SilenceRefinementAttempt, status string, failures int) *SilenceRefinementAttempt {
+		attempt.Status = status
+		attempt.RecordedBy = "node-a"
+		attempt.FailureCount = failures
+		if status == silenceAttemptFailed {
+			attempt.RetryAfter = &elapsed
+		}
+		return &attempt
+	}
+	otherConfig := *withStatus(sameInputs, silenceAttemptFailed, 4)
+	otherConfig.ConfigHash = "previous-settings"
+	movedMarker := *withStatus(sameInputs, silenceAttemptFailed, 4)
+	movedMarker.IntroEnd = 118
+	reprobedChapters := *withStatus(sameInputs, silenceAttemptFailed, 4)
+	reprobedChapters.ChaptersHash = "chapters-before-reprobe"
+	pendingRetry := time.Now().Add(10 * time.Hour)
+	stillBackingOff := *withStatus(sameInputs, silenceAttemptFailed, 2)
+	stillBackingOff.RetryAfter = &pendingRetry
+	otherServer := *withStatus(sameInputs, silenceAttemptFailed, 2)
+	otherServer.RecordedBy = "node-b"
+	otherServer.RetryAfter = &pendingRetry
+
+	tests := []struct {
+		name           string
+		previous       *SilenceRefinementAttempt
+		wantFailures   int
+		wantDelay      time.Duration
+		wantRetryAfter *time.Time
+	}{
+		{name: "first failure", wantFailures: 1, wantDelay: 12 * time.Hour},
+		{name: "repeated failure doubles", previous: withStatus(sameInputs, silenceAttemptFailed, 2), wantFailures: 3, wantDelay: 48 * time.Hour},
+		{name: "failure inside the backoff window keeps it", previous: &stillBackingOff, wantFailures: 2, wantRetryAfter: &pendingRetry},
+		{name: "another server's failure starts over", previous: &otherServer, wantFailures: 1, wantDelay: 12 * time.Hour},
+		{name: "failure after no improvement starts over", previous: withStatus(sameInputs, silenceAttemptNoImprovement, 0), wantFailures: 1, wantDelay: 12 * time.Hour},
+		{name: "changed settings start over", previous: &otherConfig, wantFailures: 1, wantDelay: 12 * time.Hour},
+		{name: "changed marker range starts over", previous: &movedMarker, wantFailures: 1, wantDelay: 12 * time.Hour},
+		{name: "changed chapters start over", previous: &reprobedChapters, wantFailures: 1, wantDelay: 12 * time.Hour},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeIntroRepository{backfillCandidates: []Candidate{candidate}, silenceAttempts: map[int]SilenceRefinementAttempt{}}
+			if tt.previous != nil {
+				repo.silenceAttempts[10] = *tt.previous
+			}
+			refiner := &fakeBoundaryRefiner{errors: map[int]error{10: errors.New("ffmpeg exited 1")}}
+			analyzer := &Analyzer{repo: repo, refiner: refiner, config: cfg, logger: slog.New(slog.DiscardHandler), node: "node-a"}
+
+			summary, err := analyzer.runSilenceBackfill(context.Background())
+			if err != nil {
+				t.Fatalf("runSilenceBackfill returned error: %v", err)
+			}
+			if summary.SilenceRefinementErrors != 1 {
+				t.Fatalf("expected one refinement error, got %+v", summary)
+			}
+			if len(repo.upsertedAttempts) != 1 {
+				t.Fatalf("expected one recorded attempt, got %d", len(repo.upsertedAttempts))
+			}
+			got := repo.upsertedAttempts[0]
+			if got.Status != silenceAttemptFailed || got.RecordedBy != "node-a" || got.LastError != "ffmpeg exited 1" || !got.sameInputs(sameInputs) {
+				t.Fatalf("unexpected failed attempt: %+v", got)
+			}
+			if got.FailureCount != tt.wantFailures {
+				t.Fatalf("failure count = %d, want %d", got.FailureCount, tt.wantFailures)
+			}
+			switch {
+			case got.RetryAfter == nil:
+				t.Fatal("expected retry_after to be set")
+			case tt.wantRetryAfter != nil:
+				if !got.RetryAfter.Equal(*tt.wantRetryAfter) {
+					t.Fatalf("retry_after = %v, want the pending %v", got.RetryAfter, tt.wantRetryAfter)
+				}
+			case got.RetryAfter.Sub(got.AttemptedAt) != tt.wantDelay:
+				t.Fatalf("retry_after = %v after %v, want delay %v", got.RetryAfter, got.AttemptedAt, tt.wantDelay)
+			}
+			if len(repo.patches) != 1 || repo.patches[0].Algorithm != ChapterAlgorithm {
+				t.Fatalf("expected the unrefined chapter marker to be kept, got %+v", repo.patches)
+			}
+		})
+	}
+}
+
+type cancelingBoundaryRefiner struct {
+	cancel context.CancelFunc
+}
+
+func (r cancelingBoundaryRefiner) RefineChapterEnd(ctx context.Context, _ Candidate, segment Segment) (Segment, bool, error) {
+	r.cancel()
+	return segment, false, ctx.Err()
+}
+
+func TestSilenceRefinementCancellationIsNotRecorded(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	repo := &fakeIntroRepository{backfillCandidates: []Candidate{chapterBackfillCandidate(10)}}
+	analyzer := &Analyzer{repo: repo, refiner: cancelingBoundaryRefiner{cancel: cancel}, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
+
+	if _, err := analyzer.runSilenceBackfill(ctx); err != nil {
+		t.Fatalf("runSilenceBackfill returned error: %v", err)
+	}
+	if len(repo.upsertedAttempts) != 0 {
+		t.Fatalf("a canceled refinement must stay eligible, got %+v", repo.upsertedAttempts)
+	}
+}
+
+func TestSilenceRetryDelay(t *testing.T) {
+	for failures, want := range map[int]time.Duration{
+		0:  12 * time.Hour,
+		1:  12 * time.Hour,
+		2:  24 * time.Hour,
+		3:  48 * time.Hour,
+		4:  96 * time.Hour,
+		5:  7 * 24 * time.Hour,
+		60: 7 * 24 * time.Hour,
+	} {
+		if got := silenceRetryDelay(failures); got != want {
+			t.Errorf("silenceRetryDelay(%d) = %v, want %v", failures, got, want)
+		}
+	}
+}
+
+func TestSilenceConfigHashTracksSilenceSettingsOnly(t *testing.T) {
+	base := DefaultConfig("ffmpeg")
+	changedSilence := base
+	changedSilence.SilenceWindowAfterSeconds = 45
+	if base.SilenceConfigHash() == changedSilence.SilenceConfigHash() {
+		t.Fatal("changing a silence setting must change the silence config hash")
+	}
+	changedOther := base
+	changedOther.DialogueRefinementWindowSeconds = 99
+	changedOther.SilenceBackfillLimit = 10
+	if base.SilenceConfigHash() != changedOther.SilenceConfigHash() {
+		t.Fatal("settings that do not affect silence refinement must not change its hash")
 	}
 }
 

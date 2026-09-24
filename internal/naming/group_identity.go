@@ -43,7 +43,7 @@ func InferGroupIdentity(filePath string, libraryType string, assignment RootAssi
 	}
 
 	if group.BaseType == "" {
-		ctx := ResolvePathContext(cleanFilePath, libraryType)
+		ctx := ResolvePathContext(cleanFilePath, libraryType, assignment.LibraryRootPath)
 		group.BaseType = "movie"
 		if ctx != nil && ctx.Type != "" {
 			group.BaseType = ctx.Type
@@ -55,7 +55,11 @@ func InferGroupIdentity(filePath string, libraryType string, assignment RootAssi
 	// conflicts must not mark the group ambiguous. Renamed releases inside a
 	// tagged folder ("Override (2021) {tmdb-694938}" containing "R.I.A.
 	// (2021).mkv") are the common case.
-	idAnchored := hasStructuredIDAnchor(cleanFilePath, group.ObservedRootPath)
+	idAnchorRoot := group.ObservedRootPath
+	if idAnchorRoot == assignment.LibraryRootPath {
+		idAnchorRoot = ""
+	}
+	idAnchored := hasStructuredIDAnchor(cleanFilePath, idAnchorRoot)
 
 	if group.BaseType == "series" {
 		populateSeriesGroupIdentity(cleanFilePath, libraryType, assignment, idAnchored, &group)
@@ -65,7 +69,7 @@ func InferGroupIdentity(filePath string, libraryType string, assignment RootAssi
 
 	// ID persistence must mirror hasStructuredIDAnchor: any evidence strong
 	// enough to anchor identity must also reach downstream matching.
-	if ids := ParseFolderIDs(filepath.Base(group.ObservedRootPath)); ids != nil {
+	if ids := ParseFolderIDs(filepath.Base(idAnchorRoot)); ids != nil {
 		group.TmdbID = ids.TmdbID
 		group.ImdbID = ids.ImdbID
 		group.TvdbID = ids.TvdbID
@@ -105,6 +109,9 @@ func InferGroupIdentity(filePath string, libraryType string, assignment RootAssi
 func populateMovieGroupIdentity(filePath string, assignment RootAssignment, idAnchored bool, group *GroupIdentity) {
 	parentDir := filepath.Dir(filePath)
 	parentTitle, parentYear, parentTrusted := parseInferFolderTitleYear(filepath.Base(group.ObservedRootPath))
+	if group.ObservedRootPath == assignment.LibraryRootPath || filepath.Clean(group.ObservedRootPath) == filepath.Clean(filePath) {
+		parentTitle, parentYear, parentTrusted = "", 0, false
+	}
 	parentTitle = StripComparisonSafeEditionSuffix(parentTitle)
 	baseNoExt := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
 	stem := parseInferMovieStem(baseNoExt, parentTitle, parentYear)
@@ -132,6 +139,8 @@ func populateMovieGroupIdentity(filePath string, assignment RootAssignment, idAn
 		case parentTrusted && relation == titleRelationHard:
 			if idAnchored {
 				reasons = append(reasons, "unrelated_title_resolved_by_provider_ids")
+			} else if stem.Year == 0 {
+				reasons = append(reasons, "undated_title_resolved_by_folder")
 			} else {
 				state = "ambiguous"
 				reasons = append(reasons, "unrelated_title")
@@ -182,7 +191,7 @@ func populateMovieGroupIdentity(filePath string, assignment RootAssignment, idAn
 }
 
 func populateSeriesGroupIdentity(filePath string, libraryType string, assignment RootAssignment, idAnchored bool, group *GroupIdentity) {
-	ctx := ResolvePathContext(filePath, libraryType)
+	ctx := ResolvePathContext(filePath, libraryType, assignment.LibraryRootPath)
 	title := assignment.Title
 	year := assignment.Year
 	state := "resolved"
@@ -195,12 +204,15 @@ func populateSeriesGroupIdentity(filePath string, libraryType string, assignment
 			year = ctx.Year
 		}
 	}
-	if title == "" {
+	if title == "" && group.ObservedRootPath != assignment.LibraryRootPath {
 		folderTitle, folderYear, _ := parseInferFolderTitleYear(filepath.Base(group.ObservedRootPath))
 		title = folderTitle
 		year = folderYear
 	}
 	observedTitle, observedYear, observedTrusted := parseInferFolderTitleYear(filepath.Base(group.ObservedRootPath))
+	if filepath.Clean(group.ObservedRootPath) == filepath.Clean(filePath) || group.ObservedRootPath == assignment.LibraryRootPath {
+		observedTitle, observedYear, observedTrusted = "", 0, false
+	}
 	if observedTrusted && observedTitle != "" && title != "" {
 		switch classifyTitleRelation(observedTitle, title) {
 		case titleRelationSoft:

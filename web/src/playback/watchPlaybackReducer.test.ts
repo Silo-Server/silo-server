@@ -35,6 +35,8 @@ describe("watchPlaybackReducer", () => {
         transport: {
           playPause: () => {},
           seekBy: () => {},
+          skipBack: () => {},
+          skipForward: () => {},
           seekTo: () => {},
           togglePictureInPicture: () => {},
         },

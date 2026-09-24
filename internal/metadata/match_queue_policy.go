@@ -15,8 +15,8 @@ var (
 )
 
 const (
-	movieMatcherRevision       = 10
-	seriesMatcherRevision      = 10
+	movieMatcherRevision       = 11
+	seriesMatcherRevision      = 11
 	movieQueueRetryDelay       = 15 * time.Second
 	seriesRootQueueQuietWindow = 10 * time.Second
 	seriesRootQueueRetryDelay  = 30 * time.Second
@@ -48,6 +48,10 @@ func matchQueueBackoffExpr(basePlaceholder, maxPlaceholder string) string {
 	)
 }
 
+// movieMatchQueueFileIdentitySQL includes the scanned group key: a rescan that
+// changes a file's parsed identity must wake a row backed off on the old one.
+const movieMatchQueueFileIdentitySQL = "mf.file_path || '|' || mf.content_group_key"
+
 // matchQueueInputFingerprintSQL returns a deterministic SQL expression for
 // inputs that can change a result without changing the queue key. Arguments
 // are internal SQL expressions selected by repository code, never user input.
@@ -73,11 +77,12 @@ func matchQueueInputFingerprintSQL(pathExpression, typeExpression, folderIDExpre
 
 // seriesMatchQueueInputFingerprintSQL includes the active file-path set because
 // episode validation derives both coordinates and episode-title evidence from
-// those paths. Adding, removing, or renaming an episode wakes a parked match.
+// those paths. Adding, removing, or renaming an episode wakes a parked match,
+// as does a rescan that changes an episode's scanned group identity.
 func seriesMatchQueueInputFingerprintSQL(rootExpression, folderIDExpression, languageExpression string) string {
 	shapeExpression := fmt.Sprintf(`(COALESCE(%s, '') || '|shape:' || COALESCE((
 		SELECT md5(string_agg(
-			md5(shape_file.file_path), '' ORDER BY shape_file.file_path
+			md5(shape_file.file_path || '|' || shape_file.content_group_key), '' ORDER BY shape_file.file_path
 		))
 		FROM media_files shape_file
 		WHERE shape_file.media_folder_id = %s

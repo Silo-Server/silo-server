@@ -108,13 +108,13 @@ func (s *Postgres) SaveAttempt(ctx context.Context, record playback.AttemptRecor
 			playback_attempt_id, session_id, user_id, profile_id,
 			requested_media_file_id, effective_media_file_id,
 			current_plan_id, current_replan_request_id, current_plan, frozen_recipe,
-			normalized_request, start_response, request_digest, expires_at
-		) VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+			normalized_request, start_response, request_digest, expires_at, server_bitrate_cap_kbps
+		) VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT DO NOTHING`,
 		record.PlaybackAttemptID, record.SessionID, record.UserID, record.ProfileID,
 		record.RequestedMediaFileID, record.EffectiveMediaFileID,
 		record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON,
-		requestJSON, responseJSON, record.RequestDigest, record.ExpiresAt)
+		requestJSON, responseJSON, record.RequestDigest, record.ExpiresAt, record.ServerBitrateCapKbps)
 	if err != nil {
 		return err
 	}
@@ -175,14 +175,14 @@ func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) 
 		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id,
 		       requested_media_file_id, effective_media_file_id,
 		       current_plan_id, current_replan_request_id, current_plan, frozen_recipe,
-		       normalized_request, start_response, request_digest, expires_at,
+		       normalized_request, start_response, request_digest, expires_at, server_bitrate_cap_kbps,
 		       last_sequence, last_sample, stopped_at, updated_at
 		FROM playback_v3_attempts
 		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
 		&record.PlaybackAttemptID, &record.SessionID, &record.UserID, &record.ProfileID,
 		&record.RequestedMediaFileID, &record.EffectiveMediaFileID,
 		&record.CurrentPlanID, &record.CurrentReplanRequestID, &planJSON, &recipeJSON,
-		&requestJSON, &responseJSON, &record.RequestDigest, &record.ExpiresAt,
+		&requestJSON, &responseJSON, &record.RequestDigest, &record.ExpiresAt, &record.ServerBitrateCapKbps,
 		&record.LastSequence, &sampleJSON, &record.StoppedAt, &record.LastSampleAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

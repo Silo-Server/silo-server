@@ -22,8 +22,10 @@ type AdminServerHealth struct {
 	Warnings24h int64                      `json:"warnings_24h"`
 }
 type AdminArtworkStorageStatus struct {
-	Backend string `json:"backend,omitempty"`
-	Locked  bool   `json:"locked"`
+	Backend       string `json:"backend,omitempty"`
+	Locked        bool   `json:"locked"`
+	StatusKnown   bool   `json:"status_known" doc:"Whether the storage lock state was read successfully. When false, clients must not treat locked=false as permission to edit storage locations."`
+	PrivateLocked bool   `json:"private_locked" doc:"Whether the private bucket's endpoint, bucket, and key prefix are locked: when a bucket is configured at startup, or once artwork is stored. Changing them then takes a managed storage transition."`
 }
 type AdminServerStatus struct {
 	StartedAt              Instant           `json:"started_at"`
@@ -47,6 +49,6 @@ func registerAdminServerStatus(reg *Registry) {
 			return nil, unavailable("server status")
 		}
 		s := reg.deps.AdminServerStatus.ReadAdminServerStatus(ctx)
-		return &AdminServerStatusOutput{Body: AdminServerStatus{StartedAt: NewInstant(s.StartedAt), RestartRequired: s.RestartRequired, RestartRequiredAt: instantPtr(s.RestartRequiredAt), RestartRequiredReason: s.RestartRequiredReason, RestartRequiredReasons: slices.Clone(s.RestartRequiredReasons), RestartMarkCount: s.RestartMarkCount, RestartRequested: s.RestartRequested, RestartRequestedAt: instantPtr(s.RestartRequestedAt), Health: AdminServerHealth{Postgres: AdminServerHealthComponent{Configured: s.Health.Postgres.Configured, OK: s.Health.Postgres.OK, LatencyMS: s.Health.Postgres.LatencyMS}, Redis: AdminServerHealthComponent{Configured: s.Health.Redis.Configured, OK: s.Health.Redis.OK, LatencyMS: s.Health.Redis.LatencyMS}, Errors24h: s.Health.Errors24h, Warnings24h: s.Health.Warnings24h}, ArtworkStorage: AdminArtworkStorageStatus{Backend: s.ArtworkStorage.Backend, Locked: s.ArtworkStorage.Locked}}}, nil
+		return &AdminServerStatusOutput{Body: AdminServerStatus{StartedAt: NewInstant(s.StartedAt), RestartRequired: s.RestartRequired, RestartRequiredAt: instantPtr(s.RestartRequiredAt), RestartRequiredReason: s.RestartRequiredReason, RestartRequiredReasons: slices.Clone(s.RestartRequiredReasons), RestartMarkCount: s.RestartMarkCount, RestartRequested: s.RestartRequested, RestartRequestedAt: instantPtr(s.RestartRequestedAt), Health: AdminServerHealth{Postgres: AdminServerHealthComponent{Configured: s.Health.Postgres.Configured, OK: s.Health.Postgres.OK, LatencyMS: s.Health.Postgres.LatencyMS}, Redis: AdminServerHealthComponent{Configured: s.Health.Redis.Configured, OK: s.Health.Redis.OK, LatencyMS: s.Health.Redis.LatencyMS}, Errors24h: s.Health.Errors24h, Warnings24h: s.Health.Warnings24h}, ArtworkStorage: AdminArtworkStorageStatus{Backend: s.ArtworkStorage.Backend, Locked: s.ArtworkStorage.Locked, StatusKnown: s.ArtworkStorage.StatusKnown, PrivateLocked: s.ArtworkStorage.PrivateLocked}}}, nil
 	})
 }

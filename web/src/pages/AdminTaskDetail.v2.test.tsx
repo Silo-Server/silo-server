@@ -102,3 +102,63 @@ it("keeps the original schedule guard and draft after412 until explicit revision
     body: { triggers: [{ type: "interval", interval_ms: 3000 }] },
   });
 });
+
+it("names failed maintenance steps in execution history", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async (url) => {
+      const path = String(url);
+      if (path.endsWith("/triggers"))
+        return new Response(JSON.stringify({ task_key: "database_maintenance", triggers: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ETag: '"revision-1"' },
+        });
+      if (path.includes("/history"))
+        return jsonResponse({
+          items: [
+            {
+              id: "1",
+              task_key: "database_maintenance",
+              started_at: "2026-09-23T05:00:00Z",
+              completed_at: "2026-09-23T05:00:01Z",
+              status: "failed",
+              duration_ms: 1000,
+              error_message: "Task failed. Inspect administrator diagnostics for details.",
+              steps: [
+                { key: "cleanup_activity_log", name: "Cleanup Activity Log", status: "completed" },
+                {
+                  key: "cleanup_policy_decision_log",
+                  name: "Cleanup Policy Decision Log",
+                  status: "failed",
+                },
+              ],
+            },
+          ],
+          page: { has_more: false },
+        });
+      return jsonResponse({
+        key: "database_maintenance",
+        name: "Database Maintenance",
+        description: "Task description",
+        category: "system",
+        state: "idle",
+        progress: 0,
+        manual_only: false,
+        triggers: [],
+        execution_scope: "process",
+      });
+    }),
+  );
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <MemoryRouter initialEntries={["/admin/tasks/database_maintenance"]}>
+        <Routes>
+          <Route path="/admin/tasks/:key" element={<AdminTaskDetail />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText("Failed steps: Cleanup Policy Decision Log")).toBeInTheDocument();
+});

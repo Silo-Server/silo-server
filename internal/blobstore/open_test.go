@@ -2,12 +2,15 @@ package blobstore
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
@@ -124,10 +127,9 @@ func TestOpenRecordsIdentityOnFirstStreamedWrite(t *testing.T) {
 	}
 }
 
-// The private bucket is a different location from the catalog's assets. Its
-// identity must never be recorded, or the next start would refuse the real
-// assets store as a mismatch.
-func TestOpenS3KeepsBucketsSeparateAndLeavesPrivateUnrecorded(t *testing.T) {
+// The private bucket is a different location from the catalog's assets. It
+// records a separate identity without claiming the assets location.
+func TestOpenS3KeepsBucketIdentitiesSeparate(t *testing.T) {
 	settings := &testSettings{values: map[string]string{}}
 	public := newTestS3Client(t, "assets")
 	private := newTestS3Client(t, "operational")
@@ -148,6 +150,9 @@ func TestOpenS3KeepsBucketsSeparateAndLeavesPrivateUnrecorded(t *testing.T) {
 	}
 	if !strings.Contains(stores.Operational.Identity(), "operational") {
 		t.Fatalf("operational identity = %q", stores.Operational.Identity())
+	}
+	if got := settings.values[OperationalIdentitySettingKey]; got != stores.Operational.Identity() {
+		t.Fatalf("private identity = %q, want %q", got, stores.Operational.Identity())
 	}
 	if err = stores.Operational.Put(context.Background(), "diagnostics/1/report.tar.gz", []byte("x")); err != nil {
 		t.Fatal(err)
@@ -298,3 +303,210 @@ type identityStore struct {
 }
 
 func (s *identityStore) Identity() string { return s.identity }
+
+func TestOpenRecordedS3ForwardsSharedClientFenceAndOptionalInterfaces(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	client := s3client.NewClient(s3client.BucketConfig{
+		Endpoint: server.URL, Region: "us-east-1", Bucket: "artwork", PathStyle: true,
+		AccessKey: "test", SecretKey: "test",
+	})
+	settings := &testSettings{values: map[string]string{}}
+	stores, _, err := Open(t.Context(), Options{Backend: BackendS3, S3: client, Settings: settings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := stores.Assets
+	if _, ok := store.(DirectURLer); !ok {
+		t.Fatal("recorded S3 store lost DirectURL")
+	}
+	if _, ok := store.(interface {
+		ObjectAvailable(context.Context, string) (bool, error)
+	}); !ok {
+		t.Fatal("recorded S3 store lost ObjectAvailable")
+	}
+	fencer, ok := store.(MutationFencer)
+	if !ok {
+		t.Fatal("recorded S3 store lost mutation fence")
+	}
+	release, err := fencer.BeginMutationFence(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- client.PutObject(context.Background(), client.Bucket(), "direct.webp", []byte("image"))
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("direct client write bypassed recorded-store fence: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	release()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("direct client write did not resume")
+	}
+}
+
+// A local backend shares one root between the assets and operational stores.
+// Open must fence it before sharing it, or operational writes (avatars,
+// diagnostics, job artifacts) would slip past a storage transition's fence.
+func TestOpenLocalFencesSharedOperationalStore(t *testing.T) {
+	stores, _, err := Open(t.Context(), Options{Backend: BackendLocal, LocalPath: t.TempDir(), Settings: &testSettings{values: map[string]string{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fencer, ok := stores.Assets.(MutationFencer)
+	if !ok {
+		t.Fatalf("local assets store %T is not a MutationFencer", stores.Assets)
+	}
+	if _, ok := stores.Assets.(interface {
+		Matches(context.Context, string, []byte) (bool, error)
+	}); !ok {
+		t.Fatal("fenced local store hid Matches from the image cache")
+	}
+	release, err := fencer.BeginMutationFence(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- stores.Operational.Put(context.Background(), "diagnostics/1/report.tar.gz", []byte("bundle"))
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("operational write passed an active fence: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	release()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("operational write did not resume after the fence was released")
+	}
+}
+
+func TestLocalIdentityMatchesFilesystemWithoutCreatingRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "not", "yet")
+	identity, err := LocalIdentity(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("LocalIdentity touched the root: %v", err)
+	}
+	fs, err := NewFilesystem(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity != fs.Identity() {
+		t.Fatalf("LocalIdentity = %q, Filesystem.Identity = %q", identity, fs.Identity())
+	}
+}
+
+// A legacy private bucket can hold objects without an identity row. Opening
+// it must protect those objects before the next private write or settings edit.
+func TestOpenBackfillsLegacyPrivateIdentityBeforeNextWrite(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	private := s3client.NewClient(s3client.BucketConfig{
+		Endpoint: server.URL, Region: "us-east-1", Bucket: "private", PathStyle: true,
+		AccessKey: "test", SecretKey: "test",
+	})
+	settings := &testSettings{values: map[string]string{}}
+	if err := private.PutObject(t.Context(), private.Bucket(), "profile-avatars/1/a.webp", []byte("old avatar")); err != nil {
+		t.Fatal(err)
+	}
+	if got := settings.values[OperationalIdentitySettingKey]; got != "" {
+		t.Fatalf("legacy write recorded an identity before Open: %q", got)
+	}
+	if _, _, err := Open(t.Context(), Options{Backend: BackendLocal, LocalPath: t.TempDir(), S3Private: private, Settings: settings}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := settings.values[OperationalIdentitySettingKey], NewS3(private).Identity(); got != want {
+		t.Fatalf("recorded private identity = %q, want %q", got, want)
+	}
+	if settings.values[IdentitySettingKey] != "" {
+		t.Fatalf("a private write recorded the assets identity %q", settings.values[IdentitySettingKey])
+	}
+}
+
+// A mismatch must stop startup before a changed bucket can serve old private
+// references. Removing a recorded bucket without a transition is a mismatch.
+func TestOpenRejectsPrivateLocationChangedOutsideTransition(t *testing.T) {
+	private := newTestS3Client(t, "private")
+	other := newTestS3Client(t, "other-private")
+	settings := &testSettings{values: map[string]string{OperationalIdentitySettingKey: NewS3(private).Identity()}}
+	for name, client := range map[string]*s3client.Client{"changed bucket": other, "removed bucket": nil} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := Open(t.Context(), Options{Backend: BackendLocal, LocalPath: t.TempDir(), S3Private: client, Settings: settings}); err == nil {
+				t.Fatal("Open accepted a private location different from the recorded identity")
+			} else if !strings.Contains(err.Error(), OperationalIdentitySettingKey) || !strings.Contains(err.Error(), "restore") {
+				t.Fatalf("mismatch error does not explain recovery: %v", err)
+			}
+			if got, want := settings.values[OperationalIdentitySettingKey], NewS3(private).Identity(); got != want {
+				t.Fatalf("recorded private location changed during refusal: got %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// If the identity cannot be saved, startup must stop before private writes
+// can create another unprotected object.
+func TestOpenRequiresPrivateIdentityBackfill(t *testing.T) {
+	private := newTestS3Client(t, "private")
+	settings := &flakySettings{testSettings: testSettings{values: map[string]string{}}, fail: true}
+	if _, _, err := Open(t.Context(), Options{Backend: BackendLocal, LocalPath: t.TempDir(), S3Private: private, Settings: settings}); err == nil {
+		t.Fatal("Open accepted a private bucket without recording its identity")
+	}
+	if settings.values[OperationalIdentitySettingKey] != "" {
+		t.Fatal("identity recorded despite the injected failure")
+	}
+	if _, _, err := Open(t.Context(), Options{Backend: BackendLocal, LocalPath: t.TempDir(), S3Private: private, Settings: settings}); err != nil {
+		t.Fatal(err)
+	}
+	if settings.values[OperationalIdentitySettingKey] != NewS3(private).Identity() {
+		t.Fatalf("retry did not record the identity: %q", settings.values[OperationalIdentitySettingKey])
+	}
+}
+
+// A process that was cut off from the database while another node committed a
+// transition must notice the move before it writes again.
+func TestCheckRecordedLocation(t *testing.T) {
+	const assets, private = "local|/srv/silo", "s3|https://s3|private|"
+	for name, tc := range map[string]struct {
+		recorded map[string]string
+		private  string
+		moved    bool
+	}{
+		"unchanged":                  {recorded: map[string]string{IdentitySettingKey: assets, OperationalIdentitySettingKey: private}, private: private},
+		"artwork not written yet":    {recorded: map[string]string{OperationalIdentitySettingKey: private}, private: private},
+		"no private bucket":          {recorded: map[string]string{IdentitySettingKey: assets}},
+		"artwork moved":              {recorded: map[string]string{IdentitySettingKey: "s3|https://s3|public|", OperationalIdentitySettingKey: private}, private: private, moved: true},
+		"private bucket moved":       {recorded: map[string]string{IdentitySettingKey: assets, OperationalIdentitySettingKey: "s3|https://s3|other|"}, private: private, moved: true},
+		"private bucket removed":     {recorded: map[string]string{IdentitySettingKey: assets}, private: private, moved: true},
+		"private bucket added":       {recorded: map[string]string{IdentitySettingKey: assets, OperationalIdentitySettingKey: private}, moved: true},
+		"empty artwork, moved local": {recorded: map[string]string{IdentitySettingKey: "local|/srv/new"}, moved: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := CheckRecordedLocation(tc.recorded, assets, tc.private)
+			if moved := errors.Is(err, ErrLocationMoved); moved != tc.moved || (err != nil && !moved) {
+				t.Fatalf("CheckRecordedLocation = %v, want moved=%t", err, tc.moved)
+			}
+		})
+	}
+}

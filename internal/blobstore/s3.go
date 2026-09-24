@@ -106,6 +106,9 @@ func (s *S3) DirectURL(ctx context.Context, key string, ttl time.Duration) (stri
 func (s *S3) ObjectAvailable(ctx context.Context, key string) (bool, error) {
 	return s.client.ObjectAvailable(ctx, s.client.Bucket(), key)
 }
+func (s *S3) BeginMutationFence(ctx context.Context) (func(), error) {
+	return s.client.BeginMutationFence(ctx)
+}
 
 // Identity covers the endpoint, bucket, and key prefix. Bucket names and the
 // endpoint's scheme and host are case-insensitive; an endpoint path (a
@@ -118,6 +121,10 @@ func (s *S3) Identity() string {
 
 // normalizeEndpoint lowercases only the case-insensitive parts of an endpoint
 // URL. An endpoint that does not parse is lowercased whole, as before.
+// NormalizeEndpoint is the endpoint form Identity uses, for callers comparing
+// configured endpoints the way the store will.
+func NormalizeEndpoint(raw string) string { return normalizeEndpoint(raw) }
+
 func normalizeEndpoint(raw string) string {
 	raw = strings.TrimSpace(raw)
 	parsed, err := url.Parse(raw)

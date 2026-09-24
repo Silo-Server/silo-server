@@ -155,6 +155,7 @@ GET /api/v2/admin/jobs	non-media
 GET /api/v2/admin/jobs/capabilities	non-media
 GET /api/v2/admin/jobs/{id}	non-media
 GET /api/v2/admin/jobs/{id}/artifact	non-media
+POST /api/v2/admin/jobs/{id}/cancel	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 POST /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
@@ -300,6 +301,9 @@ GET /api/v2/admin/stats/downloads	non-media
 GET /api/v2/admin/stats/playback-activity	non-media
 GET /api/v2/admin/stats/timeseries	non-media
 GET /api/v2/admin/stats/top-activity	non-media
+POST /api/v2/admin/storage-transitions	non-media
+GET /api/v2/admin/storage-transitions/capabilities	non-media
+GET /api/v2/admin/storage-transitions/source-health	non-media
 GET /api/v2/admin/stream-telemetry/parity	non-media
 GET /api/v2/admin/subtitle-providers	non-media
 GET /api/v2/admin/subtitle-providers/{provider}	non-media
@@ -1305,6 +1309,7 @@ GET /api/v2/admin/jobs	non-media
 GET /api/v2/admin/jobs/capabilities	non-media
 GET /api/v2/admin/jobs/{id}	non-media
 GET /api/v2/admin/jobs/{id}/artifact	non-media
+POST /api/v2/admin/jobs/{id}/cancel	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 POST /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
@@ -1450,6 +1455,9 @@ GET /api/v2/admin/stats/downloads	non-media
 GET /api/v2/admin/stats/playback-activity	non-media
 GET /api/v2/admin/stats/timeseries	non-media
 GET /api/v2/admin/stats/top-activity	non-media
+POST /api/v2/admin/storage-transitions	non-media
+GET /api/v2/admin/storage-transitions/capabilities	non-media
+GET /api/v2/admin/storage-transitions/source-health	non-media
 GET /api/v2/admin/stream-telemetry/parity	non-media
 GET /api/v2/admin/subtitle-providers	non-media
 GET /api/v2/admin/subtitle-providers/{provider}	non-media

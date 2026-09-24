@@ -121,7 +121,7 @@ Some settings are only read at startup. Two routes carry that contract:
 | `restart_required_reasons` | string[] | Every distinct reason since boot, first-seen order. Settings saves record one `setting:<key>` entry per restart-required key, so a client can scope a pending restart to the subsystem it belongs to. |
 | `restart_mark_count` | int | Increments on every restart-required save. Because the boolean latches, this counter is the only signal that a **new** requirement arrived — the admin UI re-arms its dismissed restart banner on it. |
 | `restart_requested`, `restart_requested_at` | bool, RFC3339 string | An in-app restart was requested, and when. |
-| `artwork_storage` | object | `backend` is the resolved artwork backend of this process (`local` or `s3`); `locked` is true once artwork has been stored and `artwork.storage_backend` can no longer change. |
+| `artwork_storage` | object | `backend` is the resolved artwork backend of this process (`local` or `s3`); `locked` is true once the assets storage identity has been recorded and its location can no longer change directly. `/api/v2` also reports `status_known`, true only when the settings read succeeded, and `private_locked`, true when a configured private bucket is recorded at startup, even if empty, or when the assets location is locked. Clients must treat `status_known: false` as an unknown lock state. |
 
 ## Playback node routing
 
@@ -183,6 +183,15 @@ the session predates this telemetry. Default does not distinguish LAN, public UR
 or reverse proxy access. This records the prepared route, not a live measurement
 of every media request or an inference from the client's IP address. Provider
 display names come from `/api/v2/network-access/capabilities`.
+
+`stream_location` on each v2 admin session row reports `local` or `remote` using
+the same trusted client-IP and provider-path classification as the bitrate
+policy. Private, loopback, and link-local clients on the default path are local;
+provider paths and public or unknown client addresses are remote. The web
+Activity panel shows this separately from the access-network badge.
+`GET /api/v2/admin/sessions/capabilities` advertises `stream_location` for client
+feature detection. The displayed location is fixed at playback negotiation,
+even if a later media request arrives over another network path.
 
 The web activity views show that network alongside the named execution and egress
 nodes. API egress is labeled "API server"; its reporting identity remains in the
@@ -1515,7 +1524,9 @@ The personal projection always reports `cancelable: false`: this surface has no 
 command. Existing administrator cancellation can appear as nonterminal `canceling`
 until the worker acknowledges it, then terminal `cancelled`. Both personal and admin
 monitors replace persisted diagnostic errors, warnings, and unmatched reasons with safe
-summaries. Run credentials and private dispatch metadata never appear in these responses.
+summaries. Known diagnostics map to a fixed summary of their cause, such as an item with
+no provider ID or a show missing from the library; anything else reads as a generic
+summary. Run credentials and private dispatch metadata never appear in these responses.
 
 New queued personal imports survive server restart. Source changes invalidate captured
 configuration without retargeting the import; stale running executions fail without replay.

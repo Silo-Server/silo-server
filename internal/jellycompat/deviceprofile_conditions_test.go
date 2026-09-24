@@ -904,3 +904,83 @@ func TestAudioTranscodeRemuxTriesLaterProfileConditions(t *testing.T) {
 		})
 	}
 }
+
+func TestDeviceProfileDeclaresVideoRangeType(t *testing.T) {
+	declared := DeviceProfile{CodecProfiles: []CodecProfile{{
+		Type:  "Video",
+		Codec: "hevc,h265",
+		Conditions: []ProfileCondition{{
+			Condition: "EqualsAny", Property: "VideoRangeType", Value: "SDR|HDR10|DOVI|DOVIWithHDR10",
+		}},
+	}}}
+	if !declared.declaresVideoRangeType("hevc", compatRangeDOVI) {
+		t.Fatal("an explicit DOVI range type must be detected")
+	}
+	if declared.declaresVideoRangeType("av1", compatRangeDOVI) {
+		t.Fatal("a declaration for hevc must not apply to av1")
+	}
+	if (DeviceProfile{}).declaresVideoRangeType("hevc", compatRangeDOVI) {
+		t.Fatal("a profile without range conditions does not declare DOVI")
+	}
+	notEquals := DeviceProfile{CodecProfiles: []CodecProfile{{Type: "Video", Conditions: []ProfileCondition{{Condition: "NotEquals", Property: "VideoRangeType", Value: "DOVI"}}}}}
+	if notEquals.declaresVideoRangeType("hevc", compatRangeDOVI) {
+		t.Fatal("NotEquals DOVI is not a declaration of support")
+	}
+}
+
+func TestBuildPlaybackSourceFlagsJellyfin12DolbyVisionVariant(t *testing.T) {
+	version := catalog.FileVersion{
+		FileID:     7,
+		Container:  "mkv",
+		CodecVideo: "hevc",
+		HDR:        true,
+		Bitrate:    18_000,
+		VideoTracks: []models.VideoTrack{{
+			Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160,
+			DVProfile: 5, DVLevel: 6, VideoRangeType: compatRangeDOVI,
+		}},
+		AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 6, Default: true}},
+	}
+	profileWith := func(conditions ...ProfileCondition) DeviceProfile {
+		return DeviceProfile{
+			DirectPlayProfiles:  []DirectPlayProfile{{Type: "Video", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"}},
+			TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "hevc,h264", AudioCodec: "eac3,aac"}},
+			CodecProfiles:       []CodecProfile{{Type: "Video", Codec: "hevc", Conditions: conditions}},
+		}
+	}
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+
+	declared := h.buildPlaybackSource("item", "play", version, profileWith(ProfileCondition{Condition: "EqualsAny", Property: "VideoRangeType", Value: "SDR|HDR10|DOVI"}), playbackInfoRequest{}, true)
+	if !declared.HLSRemux || !declared.DOVIVariant {
+		t.Fatalf("declared DOVI remux: HLSRemux=%v DOVIVariant=%v", declared.HLSRemux, declared.DOVIVariant)
+	}
+
+	permissive := h.buildPlaybackSource("item", "play", version, profileWith(), playbackInfoRequest{}, true)
+	if !permissive.HLSRemux || permissive.DOVIVariant {
+		t.Fatalf("a profile that never names DOVI must keep the single hvc1 variant: HLSRemux=%v DOVIVariant=%v", permissive.HLSRemux, permissive.DOVIVariant)
+	}
+}
+
+// Only HEVC profile 5 and AV1 profile 10 have a dvh1/dav1 stream to offer; an
+// AVC Dolby Vision track must not be advertised as dvh1.
+func TestCompatDOVIVariantEligibleCodecProfiles(t *testing.T) {
+	for _, tc := range []struct {
+		codec   string
+		profile int
+		want    bool
+	}{
+		{"hevc", 5, true},
+		{"h265", 5, true},
+		{"av1", 10, true},
+		{"h264", 9, false},
+		{"hevc", 10, false},
+		{"av1", 5, false},
+	} {
+		version := catalog.FileVersion{HDR: true, VideoTracks: []models.VideoTrack{{
+			Codec: tc.codec, DVProfile: tc.profile, DVLevel: 6, VideoRangeType: compatRangeDOVI,
+		}}}
+		if got := compatDOVIVariantEligible(version); got != tc.want {
+			t.Errorf("%s profile %d eligible = %v, want %v", tc.codec, tc.profile, got, tc.want)
+		}
+	}
+}

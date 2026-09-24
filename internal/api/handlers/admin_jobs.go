@@ -235,6 +235,7 @@ func (h *AdminJobsHandler) requestRunningCancellation(w http.ResponseWriter, r *
 }
 
 func adminJobToResponse(r *http.Request, job *models.AdminJob, store AdminJobArtifactStore) adminJobResponse {
+	job = notifications.SafeStorageTransitionJob(job)
 	resp := adminJobResponse{
 		ID:                job.ID,
 		JobType:           job.JobType,

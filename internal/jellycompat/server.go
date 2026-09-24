@@ -113,6 +113,7 @@ type Dependencies struct {
 	WatchScrobbler         PlaybackWatchScrobbler
 	StableIdentityResolver watchsync.ScrobbleIdentityResolver
 	AccessFilterFn         AccessFilterResolver
+	PlaybackScopeResolver  ScopeResolver
 	NodePlanner            nodepool.SessionPlanner
 	JWTSecret              string
 	Recommender            recommendations.Recommender

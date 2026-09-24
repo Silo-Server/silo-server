@@ -61,6 +61,7 @@ const version: PlayerFileVersion = {
 };
 
 const watchPageProps: WatchPageProps = {
+  seekIntervals: { back: 10, forward: 30 },
   contentId: "content-1",
   title: "Test movie",
   versions: [version],

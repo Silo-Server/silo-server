@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
@@ -39,6 +41,9 @@ const (
 	compatRouteCapacityUnavailableCode = "RouteCapacityUnavailable"
 	compatPlaybackRouteUnboundCode     = "PlaybackRouteUnbound"
 )
+
+var errServerBitrateScopeUnavailable = errors.New("stream bitrate policy unavailable")
+var errServerBitrateDirectUnavailable = errors.New("direct playback exceeds server bitrate limit")
 
 // compatRouteOutcomeCode maps an unselected route outcome onto the Jellyfin
 // error code the client sees. Exhausted capacity is transient and must stay
@@ -439,11 +444,23 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		playSession, source, err = h.createStaticPlaySession(r.Context(), session, routeID, mediaSourceID, clientPlaySessionID)
 	}
 	if err != nil {
+		if errors.Is(err, errServerBitrateScopeUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "The server could not resolve the stream bitrate limit")
+			return
+		}
+		if errors.Is(err, errServerBitrateDirectUnavailable) {
+			writeError(w, http.StatusBadRequest, "PlaybackUnavailable", "This stream exceeds the server bitrate limit; this direct-play request cannot transcode it")
+			return
+		}
 		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
 		return
 	}
 	if source == nil {
 		writeError(w, http.StatusBadRequest, "BadRequest", "Media source is required")
+		return
+	}
+	if staticRequest && source.ServerBitrateCapKbps > 0 && !source.SupportsDirectPlay {
+		writeError(w, http.StatusBadRequest, "PlaybackUnavailable", "This stream exceeds the server bitrate limit; this direct-play request cannot transcode it")
 		return
 	}
 	method := "direct"
@@ -1485,7 +1502,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 
 	// Serve ASS/SSA as raw ASS when requested, preserving styled subtitle data.
 	if requestedFormat == "ass" && playback.IsASS(embeddedTrack.Codec) {
-		data, err := h.extractEmbeddedTextSubtitle(r.Context(), file.FilePath, embeddedOrdinal, "ass")
+		data, err := h.extractEmbeddedTextSubtitle(r.Context(), file, embeddedOrdinal, "ass")
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
 			return
@@ -1494,7 +1511,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	data, subErr := h.extractEmbeddedTextSubtitle(r.Context(), file.FilePath, embeddedOrdinal, "srt")
+	data, subErr := h.extractEmbeddedTextSubtitle(r.Context(), file, embeddedOrdinal, "srt")
 	if subErr != nil {
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
 		return
@@ -1564,9 +1581,72 @@ func writeSubtitleResponse(w http.ResponseWriter, format string, data []byte) {
 	_, _ = w.Write(data)
 }
 
-func (h *PlaybackHandler) extractEmbeddedTextSubtitle(ctx context.Context, filePath string, trackIndex int, format string) ([]byte, error) {
-	return h.SubtitleCache.ExtractText(ctx, filePath, trackIndex, format, func(ctx context.Context) ([]byte, error) {
-		return playback.ExtractSubtitleWithFormat(ctx, filePath, trackIndex, format, h.FFmpegPath)
+// extractEmbeddedTextSubtitle serves one embedded text track. A cache miss
+// extracts every text track of the file in the same demux, so switching to
+// another track later does not read the whole source again.
+func (h *PlaybackHandler) extractEmbeddedTextSubtitle(ctx context.Context, file *models.MediaFile, trackIndex int, format string) ([]byte, error) {
+	want := playback.TextSubtitleTrack{Ordinal: trackIndex, Format: format}
+	return h.SubtitleCache.ExtractTextTracks(ctx, file.FilePath, want, compatTextSubtitleTracks(file), h.extractTextSubtitleBatch,
+		func(ctx context.Context) ([]byte, error) {
+			return playback.ExtractSubtitleWithFormat(ctx, file.FilePath, trackIndex, format, h.FFmpegPath)
+		})
+}
+
+func (h *PlaybackHandler) extractTextSubtitleBatch(ctx context.Context, inputPath string, outputs []playback.TextSubtitleOutput) error {
+	return playback.ExtractTextSubtitlesToFiles(ctx, inputPath, outputs, h.FFmpegPath)
+}
+
+// compatTextSubtitleTracks lists the text renditions of a file's embedded
+// subtitle streams, indexed by their position among its subtitle streams.
+func compatTextSubtitleTracks(file *models.MediaFile) []playback.TextSubtitleTrack {
+	codecs := make([]string, len(file.SubtitleTracks))
+	for i, track := range file.SubtitleTracks {
+		codecs[i] = track.Codec
+	}
+	return playback.TextSubtitleTracks(codecs)
+}
+
+// compatWarmTextSubtitlesTimeout bounds the file lookup that starts a warm.
+const compatWarmTextSubtitlesTimeout = 10 * time.Second
+
+// warmCompatTextSubtitles extracts a file's embedded text subtitles in the
+// background. Jellyfin Web requests a track only when the viewer selects it,
+// and the first extraction reads the whole source, which takes minutes for a
+// large remux on network storage; starting it with playback makes a later
+// switch instant.
+func (h *PlaybackHandler) warmCompatTextSubtitles(fileID int) {
+	if h.SubtitleCache == nil || h.fileResolver == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), compatWarmTextSubtitlesTimeout)
+		file, err := h.fileResolver.GetByID(ctx, fileID)
+		cancel()
+		if err != nil || file == nil {
+			return
+		}
+		h.SubtitleCache.WarmTextTracks(file.FilePath, compatTextSubtitleTracks(file), h.extractTextSubtitleBatch)
+	}()
+}
+
+const (
+	compatStreamTypeSubtitle       = "Subtitle"
+	compatSubtitleDeliveryExternal = "External"
+)
+
+// compatWarmsTextSubtitles reports whether PlaybackInfo should extract a
+// source's embedded text subtitles ahead of time: the client fetches them
+// from the server, and the viewer has not turned subtitles off entirely.
+func compatWarmsTextSubtitles(subtitleMode string, streams []mediaStreamDTO) bool {
+	return subtitleMode != compatSubtitleNone && compatFetchesEmbeddedTextSubtitles(streams)
+}
+
+// compatFetchesEmbeddedTextSubtitles reports whether the client will fetch an
+// embedded text subtitle from the server rather than read it from the stream.
+func compatFetchesEmbeddedTextSubtitles(streams []mediaStreamDTO) bool {
+	return slices.ContainsFunc(streams, func(stream mediaStreamDTO) bool {
+		return stream.Type == compatStreamTypeSubtitle && !stream.IsExternal && stream.IsTextSubtitleStream &&
+			stream.DeliveryMethod == compatSubtitleDeliveryExternal
 	})
 }
 
@@ -1780,6 +1860,8 @@ const (
 	compatAudioCodecOpus       = "opus"
 	compatContainerMP4         = "mp4"
 	compatVideoCodecHEVC       = "hevc"
+	compatVideoCodecH265       = "h265"
+	compatVideoCodecAV1        = "av1"
 	compatRangeDOVI            = "DOVI"
 	compatRangeDOVIWithHLG     = "DOVIWithHLG"
 	compatRangeDOVIWithHDR     = "DOVIWithHDR10"
@@ -2223,6 +2305,9 @@ func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, s
 	if ps != nil && !ps.CreatedAt.IsZero() {
 		card.OriginalStartedAt = ps.CreatedAt
 	}
+	if source.StreamLocation != "" {
+		card.StreamLocation = source.StreamLocation
+	}
 	if ps != nil && ps.RoutingAssignment != nil {
 		card.RoutingNetworkProvider = ps.RoutingAssignment.NetworkProvider
 		card.RoutingExecutionNodeID = ps.RoutingAssignment.ExecutionNodeID
@@ -2395,6 +2480,14 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	}
 	if err != nil {
 		return nil, err
+	}
+	if source.StreamLocation != "" {
+		if setter, ok := h.sessionMgr.(interface{ SetStreamLocation(string, string) error }); ok {
+			if err := setter.SetStreamLocation(session.ID, source.StreamLocation); err != nil {
+				_ = h.sessionMgr.StopSession(session.ID)
+				return nil, err
+			}
+		}
 	}
 	_ = h.syncUpstreamAudioSelection(&PlaybackSession{
 		UpstreamSessionID:  session.ID,
@@ -3250,9 +3343,13 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 
 	playSessionID := h.codec.EncodeStringID(EncodedIDPlaySession, uuidNewString())
 	sources := make([]PlaybackMediaSource, 0, len(detail.Versions))
+	serverBitrateCapKbps, err := h.serverBitrateCap(ctx, session)
+	if err != nil {
+		return nil, nil, errServerBitrateScopeUnavailable
+	}
 	allow4KTranscode := h.allow4KVideoTranscode(ctx)
 	for _, version := range detail.Versions {
-		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{}, allow4KTranscode)
+		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps, streamLocation: string(streamlocation.FromContext(ctx))}, allow4KTranscode)
 		sources = append(sources, source)
 	}
 
@@ -3265,8 +3362,11 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 		UserID:              session.PseudoUserID.String(),
 		MediaSources:        sources,
 	}
-	matched := playbackRouteSource(ps, mediaSourceID, true)
+	matched := playbackRouteSource(ps, mediaSourceID, true, true)
 	if matched != nil {
+		if serverBitrateCapKbps > 0 && !matched.SupportsDirectPlay {
+			return nil, nil, errServerBitrateDirectUnavailable
+		}
 		h.playbackStore.Put(*ps)
 	}
 	return ps, matched, nil
@@ -3279,12 +3379,13 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	// Only progressive routes support Jellyfin's MediaSource.Id == Item.Id
 	// convention. Subtitle and attachment routes identify an exact source.
 	allowItemAlias := chiURLParam(r, "routeMediaSourceId") == ""
+	staticRequest := strings.EqualFold(newCaseInsensitiveQuery(r.URL.Query()).Get("Static"), "true")
 	if clientPlaySessionID != "" {
 		if playSession, ok := h.playbackStore.Get(clientPlaySessionID); ok && playSession.CompatToken == compatSession.Token {
 			if !mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
 				return nil, nil, errPlaybackRouteMismatch
 			}
-			return playSession, playbackRouteSource(playSession, mediaSourceID, allowItemAlias), nil
+			return playSession, playbackRouteSource(playSession, mediaSourceID, allowItemAlias, staticRequest), nil
 		}
 		// Clients that skip PlaybackInfo reuse their own PlaySessionId on range
 		// requests. Reuse remains scoped to this token and the requested item.
@@ -3297,7 +3398,7 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	if !mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
 		return nil, nil, errPlaybackRouteMismatch
 	}
-	source := playbackRouteSource(playSession, mediaSourceID, allowItemAlias)
+	source := playbackRouteSource(playSession, mediaSourceID, allowItemAlias, staticRequest)
 	if source == nil {
 		return playSession, nil, nil
 	}
@@ -3313,8 +3414,16 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	return playSession, source, nil
 }
 
-func playbackRouteSource(session *PlaybackSession, mediaSourceID string, allowItemAlias bool) *PlaybackMediaSource {
+func playbackRouteSource(session *PlaybackSession, mediaSourceID string, allowItemAlias, staticRequest bool) *PlaybackMediaSource {
 	if mediaSourceID == "" || (allowItemAlias && mediaSourceIDsEqual(mediaSourceID, session.RouteItemID)) {
+		if staticRequest {
+			for _, source := range session.MediaSources {
+				if source.ServerBitrateCapKbps > 0 && source.SupportsDirectPlay {
+					copy := source
+					return &copy
+				}
+			}
+		}
 		return firstMediaSource(session)
 	}
 	return findMediaSource(session, mediaSourceID)
@@ -3428,6 +3537,33 @@ func generateCompatCopyVideoMasterManifestForVariant(source PlaybackMediaSource,
 	if supplemental := compatMasterSupplementalCodec(video); supplemental != "" {
 		attributes = append(attributes, fmt.Sprintf("SUPPLEMENTAL-CODECS=%q", supplemental))
 	}
+	shape := compatMasterShapeAttributes(video)
+	attributes = append(attributes, shape...)
+
+	manifest := "#EXTM3U\n"
+	if source.DOVIVariant && !source.HLSRemuxMPEGTS {
+		// Jellyfin 12 lists the spec-compliant Dolby Vision variant first so
+		// DV-capable players pick it over the hvc1 fallback at equal bandwidth.
+		dovi := []string{
+			fmt.Sprintf("BANDWIDTH=%d", bandwidth),
+			fmt.Sprintf("AVERAGE-BANDWIDTH=%d", bandwidth),
+			"VIDEO-RANGE=PQ",
+		}
+		codecs := compatDOVICodecString(video)
+		if audioCodec := compatMasterAudioCodec(source, audio); audioCodec != "" {
+			codecs += "," + audioCodec
+		}
+		dovi = append(dovi, fmt.Sprintf("CODECS=%q", codecs))
+		dovi = append(dovi, shape...)
+		manifest += "#EXT-X-STREAM-INF:" + strings.Join(dovi, ",") + "\n" + variantURL + "\n"
+	}
+	return []byte(manifest + "#EXT-X-STREAM-INF:" + strings.Join(attributes, ",") + "\n" + variantURL + "\n")
+}
+
+// compatMasterShapeAttributes returns the RESOLUTION and FRAME-RATE
+// attributes shared by every variant of a copy master playlist.
+func compatMasterShapeAttributes(video models.VideoTrack) []string {
+	var attributes []string
 	if video.Width > 0 && video.Height > 0 {
 		attributes = append(attributes, fmt.Sprintf("RESOLUTION=%dx%d", video.Width, video.Height))
 	}
@@ -3435,8 +3571,18 @@ func generateCompatCopyVideoMasterManifestForVariant(source PlaybackMediaSource,
 		rounded := math.Round(frameRate*1000) / 1000
 		attributes = append(attributes, "FRAME-RATE="+strconv.FormatFloat(rounded, 'f', -1, 64))
 	}
+	return attributes
+}
 
-	return []byte("#EXTM3U\n#EXT-X-STREAM-INF:" + strings.Join(attributes, ",") + "\n" + variantURL + "\n")
+// compatDOVICodecString is Jellyfin 12's Dolby Vision CODECS entry for a
+// stream without a compatible base layer: dvh1.PP.LL for HEVC, dav1.PP.LL for
+// AV1.
+func compatDOVICodecString(video models.VideoTrack) string {
+	fourCC := "dvh1"
+	if strings.EqualFold(strings.TrimSpace(video.Codec), "av1") {
+		fourCC = "dav1"
+	}
+	return fmt.Sprintf("%s.%02d.%02d", fourCC, video.DVProfile, video.DVLevel)
 }
 
 func compatMasterVideoRange(video models.VideoTrack, versionHDR bool) string {
@@ -3478,32 +3624,80 @@ func compatMasterCodecs(source PlaybackMediaSource, video models.VideoTrack, aud
 		}
 	}
 
+	if audioCodec := compatMasterAudioCodec(source, audio); audioCodec != "" {
+		codecs = append(codecs, audioCodec)
+	}
+	return strings.Join(codecs, ",")
+}
+
+// compatMasterAudioCodec returns the RFC 6381 CODECS entry for the audio a
+// copy master playlist carries, or "" when the codec has none.
+func compatMasterAudioCodec(source PlaybackMediaSource, audio models.AudioTrack) string {
 	audioCodec := strings.ToLower(strings.TrimSpace(audio.Codec))
 	if compatHLSTranscodesAudio(source) {
 		audioCodec = compatTargetAudioCodec
 	}
 	switch audioCodec {
 	case compatTargetAudioCodec:
-		if strings.EqualFold(audio.Profile, "HE") && !compatHLSTranscodesAudio(source) {
-			codecs = append(codecs, "mp4a.40.5")
-		} else {
-			codecs = append(codecs, "mp4a.40.2")
-		}
+		return compatAACCodecString(audio.Profile, compatHLSTranscodesAudio(source))
 	case compatAudioCodecMP3:
-		codecs = append(codecs, "mp4a.40.34")
+		return "mp4a.40.34"
 	case compatAudioCodecAC3, "ac-3":
-		codecs = append(codecs, "ac-3")
+		return "ac-3"
 	case compatAudioCodecEAC3, "e-ac-3", "ec-3":
-		codecs = append(codecs, "ec-3")
+		return "ec-3"
 	case compatAudioCodecFLAC:
-		codecs = append(codecs, "fLaC")
+		return "fLaC"
 	case "alac":
-		codecs = append(codecs, "alac")
+		return "alac"
 	case compatAudioCodecOpus:
-		codecs = append(codecs, "Opus")
+		return "Opus"
+	case "truehd", "mlp": //nolint:goconst // probed codec names
+		return "mlpa"
+	case "dts", "dca": //nolint:goconst // probed codec names
+		return compatDTSCodecString(audio.Profile)
+	default:
+		return ""
 	}
-	return strings.Join(codecs, ",")
 }
+
+// compatAACCodecString names a copied AAC track by its probed profile (ffprobe
+// reports "HE-AAC" and "HE-AACv2"); the transcode ladder always encodes AAC-LC.
+func compatAACCodecString(profile string, transcoded bool) string {
+	if transcoded {
+		return hlsCodecAACLC
+	}
+	switch strings.ToUpper(strings.TrimSpace(profile)) {
+	case "HE-AAC", "HE": //nolint:goconst // ffprobe AAC profile names
+		return "mp4a.40.5"
+	case "HE-AACV2":
+		return "mp4a.40.29"
+	default:
+		return hlsCodecAACLC
+	}
+}
+
+// compatDTSCodecString maps a copied DTS track's probed profile to its HLS
+// sample-entry code, matching Jellyfin 12: core DTS (and unknown profiles) is
+// dtsc, the lossless and high-resolution DTS-HD profiles are dtsh, and DTS
+// Express is dtse.
+func compatDTSCodecString(profile string) string {
+	switch strings.ToUpper(strings.TrimSpace(profile)) {
+	case "DTS-HD HRA", "DTS-HD MA", "DTS-HD MA + DTS:X", "DTS-HD MA + DTS:X IMAX": //nolint:goconst // ffprobe DTS profile names
+		return hlsCodecDTSHD
+	case "DTS EXPRESS":
+		return "dtse"
+	default:
+		return hlsCodecDTSCore
+	}
+}
+
+// RFC 6381 sample-entry codes used more than once in copy master playlists.
+const (
+	hlsCodecAACLC   = "mp4a.40.2"
+	hlsCodecDTSCore = "dtsc"
+	hlsCodecDTSHD   = "dtsh"
+)
 
 func compatMasterSupplementalCodec(video models.VideoTrack) string {
 	if playback.VideoSampleEntryForDVCopy(video.DVProfile) != playback.VideoSampleEntryDVH1 || video.DVLevel <= 0 {

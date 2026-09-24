@@ -55,6 +55,13 @@ type BrowseFilters struct {
 	Offset             int
 	SnapshotAt         *time.Time // pagination fence: exclude items created after this timestamp
 	RequireBackdrop    bool       // only return items with a non-empty backdrop_path (Jellyfin ImageTypes=Backdrop filter)
+	AudioLanguages     []string   // any accessible file has an audio track in one of these languages
+	SubtitleLanguages  []string   // any accessible file has an embedded or external subtitle in one of these languages
+	MaxPlaybackQuality string     // viewer quality ceiling for file-level language predicates and facets
+	// ScopeFacetFilesToAccess limits the audio/subtitle language facets to
+	// files the viewer may play (library lists and MaxPlaybackQuality), as the
+	// Jellyfin-compat Filters2 languages must agree with its language filters.
+	ScopeFacetFilesToAccess bool
 	// Internal source scope stays in SQL instead of materializing an ID allowlist.
 	contentSourceSQL  string
 	contentSourceArgs []any
@@ -939,6 +946,7 @@ func listSubtitleLanguagesWithSource(
 		return nil, nil
 	}
 	mediaFileJoin := catalogMediaFileJoinConditionForScope(mediaScope, "mf", "mi")
+	fileAccess, args := facetFileAccessSQL(filters, args)
 
 	// Embedded subtitles use the migration 104 generated text[]
 	// `subtitle_language_codes`; external subs still need a JSONB unnest
@@ -957,7 +965,7 @@ func listSubtitleLanguagesWithSource(
 			JOIN media_files mf ON %s
 			CROSS JOIN LATERAL UNNEST(mf.subtitle_language_codes) AS lang
 			%s
-			  AND mf.missing_since IS NULL
+			  AND mf.missing_since IS NULL%s
 
 			UNION ALL
 
@@ -966,12 +974,12 @@ func listSubtitleLanguagesWithSource(
 			JOIN media_files mf ON %s
 			CROSS JOIN LATERAL jsonb_array_elements(COALESCE(mf.external_subtitles, '[]'::jsonb)) AS track
 			%s
-			  AND mf.missing_since IS NULL
+			  AND mf.missing_since IS NULL%s
 		) languages
 		WHERE value IS NOT NULL AND value <> ''
 		ORDER BY value ASC
 		LIMIT %d
-	`, fromClause, mediaFileJoin, browseFilterPrefix(whereClause), fromClause, mediaFileJoin, browseFilterPrefix(whereClause), catalogFacetMaxValues)
+	`, fromClause, mediaFileJoin, browseFilterPrefix(whereClause), fileAccess, fromClause, mediaFileJoin, browseFilterPrefix(whereClause), fileAccess, catalogFacetMaxValues)
 	values, err := queryDistinctStrings(ctx, pool, query, args)
 	if err != nil {
 		return nil, err
@@ -1296,6 +1304,7 @@ func listDistinctJSONBLanguageWithSource(
 		return nil, nil
 	}
 	mediaFileJoin := catalogMediaFileJoinConditionForScope(mediaScope, "mf", "mi")
+	fileAccess, args := facetFileAccessSQL(filters, args)
 
 	// Migration 104 added STORED text[] generated columns derived from the
 	// JSONB tracks. Use them when available so this listing UNNESTs an
@@ -1309,12 +1318,12 @@ func listDistinctJSONBLanguageWithSource(
 			JOIN media_files mf ON %s
 			CROSS JOIN LATERAL UNNEST(mf.%s) AS lang
 			%s
-			  AND mf.missing_since IS NULL
+			  AND mf.missing_since IS NULL%s
 			  AND lang IS NOT NULL
 			  AND lang <> ''
 			ORDER BY value ASC
 			LIMIT %d
-		`, fromClause, mediaFileJoin, arrayColumn, browseFilterPrefix(whereClause), catalogFacetMaxValues)
+		`, fromClause, mediaFileJoin, arrayColumn, browseFilterPrefix(whereClause), fileAccess, catalogFacetMaxValues)
 		return queryDistinctStrings(ctx, pool, query, args)
 	}
 
@@ -1324,11 +1333,11 @@ func listDistinctJSONBLanguageWithSource(
 		JOIN media_files mf ON %s
 		CROSS JOIN LATERAL jsonb_array_elements(COALESCE(mf.%s, '[]'::jsonb)) AS track
 		%s
-		  AND mf.missing_since IS NULL
+		  AND mf.missing_since IS NULL%s
 		  AND COALESCE(track->>'language', '') <> ''
 		ORDER BY value ASC
 		LIMIT %d
-	`, fromClause, mediaFileJoin, column, browseFilterPrefix(whereClause), catalogFacetMaxValues)
+	`, fromClause, mediaFileJoin, column, browseFilterPrefix(whereClause), fileAccess, catalogFacetMaxValues)
 	return queryDistinctStrings(ctx, pool, query, args)
 }
 
@@ -1702,6 +1711,28 @@ func appendCompatBrowsePredicates(filters BrowseFilters, conditions *[]string, a
 	if filters.SearchTerm != "" {
 		add("mi.title ILIKE $%d ESCAPE '\\'", "%"+strings.TrimSuffix(likePrefixPattern(filters.SearchTerm), "%")+"%")
 	}
+	audioCodes := languageFilterCodes(filters.AudioLanguages)
+	subtitleCodes := languageFilterCodes(filters.SubtitleLanguages)
+	if len(audioCodes) > 0 || len(subtitleCodes) > 0 {
+		bind := func(value any) int {
+			*args = append(*args, value)
+			*argIdx++
+			return *argIdx - 1
+		}
+		// Only files the viewer may play count, matching the versions the
+		// detail path lists.
+		fileScope := playableFileExists
+		for _, condition := range mediaFileAccessConditions("mf", compatMediaFileAccess(filters), bind) {
+			fileScope += " AND " + condition
+		}
+		mediaFileJoin := catalogMediaFileJoinConditionForScope(filters.Type, "mf", "mi")
+		if len(audioCodes) > 0 {
+			*conditions = append(*conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM media_files mf WHERE %s AND %s AND mf.audio_language_codes && $%d::text[])`, mediaFileJoin, fileScope, bind(audioCodes)))
+		}
+		if len(subtitleCodes) > 0 {
+			*conditions = append(*conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM media_files mf WHERE %s AND %s AND (mf.subtitle_language_codes && $%[3]d::text[] OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(mf.external_subtitles, '[]'::jsonb)) AS track WHERE LOWER(COALESCE(track->>'language', '')) = ANY($%[3]d::text[]))))`, mediaFileJoin, fileScope, bind(subtitleCodes)))
+		}
+	}
 	if !filters.IsFavorite && filters.IsPlayed == nil && !filters.IsResumable {
 		return
 	}
@@ -1732,6 +1763,60 @@ func appendCompatBrowsePredicates(filters BrowseFilters, conditions *[]string, a
 	if filters.IsResumable {
 		*conditions = append(*conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM user_watch_progress uwp WHERE uwp.user_id = $%d AND uwp.profile_id = $%d AND uwp.media_item_id = mi.content_id AND uwp.position_seconds > 0 AND NOT uwp.completed AND NOT EXISTS (SELECT 1 FROM user_history_hidden_items hhi WHERE hhi.user_id = uwp.user_id AND hhi.profile_id = uwp.profile_id AND hhi.media_item_id = uwp.media_item_id AND uwp.updated_at <= hhi.hidden_before))`, userArg, profileArg))
 	}
+}
+
+// compatMediaFileAccess is the file-level part of the viewer's access carried
+// on BrowseFilters.
+func compatMediaFileAccess(filters BrowseFilters) AccessFilter {
+	return AccessFilter{
+		AllowedLibraryIDs:  filters.LibraryIDs,
+		DisabledLibraryIDs: filters.DisabledLibraryIDs,
+		MaxPlaybackQuality: filters.MaxPlaybackQuality,
+	}
+}
+
+// facetFileAccessSQL returns " AND ..." conditions restricting a facet
+// query's media_files alias mf to files the viewer may play, or "" when the
+// filters do not ask for it. Placeholders continue after args.
+func facetFileAccessSQL(filters BrowseFilters, args []any) (string, []any) {
+	if !filters.ScopeFacetFilesToAccess {
+		return "", args
+	}
+	conditions, args := MediaFileAccessSQL("mf", compatMediaFileAccess(filters), args)
+	if len(conditions) == 0 {
+		return "", args
+	}
+	return " AND " + strings.Join(conditions, " AND "), args
+}
+
+// languageFilterCodes lowercases requested track languages into the stored
+// form of media_files.audio_language_codes / subtitle_language_codes. Both the
+// canonical tag ("eng" -> "en") and the raw code are kept, because the stored
+// columns canonicalize only a fixed ISO 639-2 table and keep other codes as
+// written.
+func languageFilterCodes(values []string) []string {
+	out := make([]string, 0, len(values)*2)
+	seen := make(map[string]struct{}, len(values)*2)
+	addCode := func(code string) {
+		code = strings.ToLower(strings.TrimSpace(code))
+		if code == "" {
+			return
+		}
+		if _, dup := seen[code]; dup {
+			return
+		}
+		seen[code] = struct{}{}
+		out = append(out, code)
+	}
+	// External subtitle tags keep the spelling of their filename ("spa",
+	// "ger"), while facets offer the canonical code, so match every alias.
+	for _, value := range values {
+		for _, alias := range lang.CodeAliases(value) {
+			addCode(alias)
+		}
+		addCode(value)
+	}
+	return out
 }
 
 // ListYears returns release years from the same viewer-scoped facet relation.

@@ -154,6 +154,24 @@ func (c Config) AnalysisConfigHash() string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
+// SilenceConfigHash identifies the settings a chapter silence refinement runs
+// with, so a recorded attempt stops matching when any of them change. It does
+// not cover the refiner's code: bump ChapterSilenceAlgorithm when a change to
+// RefineChapterEnd should re-run files already recorded as no improvement.
+func (c Config) SilenceConfigHash() string {
+	c = c.normalized()
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%.3f:%.3f:%.3f:%d:%.3f:%.3f",
+		ChapterSilenceAlgorithm,
+		c.SilenceWindowBeforeSeconds,
+		c.SilenceWindowAfterSeconds,
+		c.SilenceMinimumDurationSeconds,
+		*c.SilenceNoiseThresholdDB,
+		c.SilenceMinimumExtensionSeconds,
+		c.SilenceMaximumExtensionSeconds,
+	)))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
 type Candidate struct {
 	ContentID              string
 	ExtraID                string
@@ -172,6 +190,7 @@ type Candidate struct {
 	EditionKey             string
 	AudioLanguage          string
 	Chapters               []models.MediaChapter
+	ChaptersHash           string
 	SubtitleTracks         []models.SubtitleTrack
 	ExternalSubtitles      []models.ExternalSubtitle
 	IntroStart             *float64
@@ -274,6 +293,41 @@ type SeasonState struct {
 	Status           string
 	MarkersWritten   int
 	LastError        string
+}
+
+const (
+	silenceAttemptNoImprovement = "no_improvement"
+	silenceAttemptFailed        = "failed"
+)
+
+// SilenceRefinementAttempt records a chapter silence refinement that kept the
+// chapter boundary, together with the inputs it ran against.
+type SilenceRefinementAttempt struct {
+	MediaFileID     int
+	ConfigHash      string
+	FileHash        string
+	FileSize        int64
+	DurationSeconds float64
+	ChaptersHash    string
+	IntroStart      float64
+	IntroEnd        float64
+	Status          string
+	RecordedBy      string
+	FailureCount    int
+	LastError       string
+	AttemptedAt     time.Time
+	RetryAfter      *time.Time
+}
+
+func (a SilenceRefinementAttempt) sameInputs(other SilenceRefinementAttempt) bool {
+	return a.MediaFileID == other.MediaFileID &&
+		a.ConfigHash == other.ConfigHash &&
+		a.FileHash == other.FileHash &&
+		a.FileSize == other.FileSize &&
+		a.DurationSeconds == other.DurationSeconds &&
+		a.ChaptersHash == other.ChaptersHash &&
+		a.IntroStart == other.IntroStart &&
+		a.IntroEnd == other.IntroEnd
 }
 
 type RunSummary struct {

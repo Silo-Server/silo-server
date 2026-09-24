@@ -1101,6 +1101,25 @@ func (r *FolderRepository) DistinctLibraryPaths(ctx context.Context) ([]string, 
 	return paths, rows.Err()
 }
 
+// DistinctTypes returns the media_folders.type value of every library, once
+// each, whether or not the library is enabled.
+func (r *FolderRepository) DistinctTypes(ctx context.Context) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `SELECT DISTINCT type FROM media_folders`)
+	if err != nil {
+		return nil, fmt.Errorf("querying library types: %w", err)
+	}
+	defer rows.Close()
+	var types []string
+	for rows.Next() {
+		var libraryType string
+		if err := rows.Scan(&libraryType); err != nil {
+			return nil, fmt.Errorf("scanning library type: %w", err)
+		}
+		types = append(types, libraryType)
+	}
+	return types, rows.Err()
+}
+
 // UpdateLastScanned sets the last_scanned_at timestamp for the given folder.
 // LibraryRootsForContent returns the media folder root paths the given
 // content belongs to, resolved through media_item_libraries. The metadata

@@ -12,19 +12,16 @@ import (
 	"golang.org/x/text/language/display"
 
 	"github.com/Silo-Server/silo-server/internal/lang"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-const (
-	compatSubtitleAlways  = "Always"
-	compatSubtitleNone    = "None"
-	compatSubtitleDefault = "Default"
-	compatSubtitleSmart   = "Smart"
-	profileSubtitleAuto   = "auto"
-)
+// compatAudioOriginalLanguage is Jellyfin 12's AudioLanguagePreference for
+// "each item's original language", stored as playback.OriginalLanguageTag.
+const compatAudioOriginalLanguage = "OriginalLanguage"
 
 func (h *AuthHandler) WithUserStore(provider userstore.UserStoreProvider) *AuthHandler {
 	h.storeProvider = provider
@@ -55,35 +52,33 @@ func (h *AuthHandler) resolvedUserDTO(ctx context.Context, session *Session) (us
 	if err != nil {
 		return dto, err
 	}
-	values, err := settingsresolve.New(contract).Resolve(ctx, store, settingsresolve.Context{ProfileID: session.ProfileID}, []string{settingskeys.PlaybackAudioLanguage, settingskeys.PlaybackSubtitleLanguage, settingskeys.PlaybackSubtitleMode, settingskeys.PlaybackAutoPlayNext}, nil)
+	values, err := settingsresolve.New(contract).Resolve(ctx, store, settingsresolve.Context{ProfileID: session.ProfileID}, []string{settingskeys.PlaybackAudioLanguage, settingskeys.PlaybackSubtitleLanguage, settingskeys.PlaybackSubtitleMode, settingskeys.PlaybackShowForcedSubtitles, settingskeys.PlaybackAutoPlayNext}, nil)
 	if err != nil {
 		return dto, err
 	}
+	savedSubtitleMode := dto.Configuration.SubtitleMode
+	nativeSubtitleMode, subtitleModeSet, showForced := "", false, true
 	for _, value := range values {
 		switch value.Key {
 		case settingskeys.PlaybackAudioLanguage:
 			dto.Configuration.AudioLanguagePreference = ""
 			_ = json.Unmarshal(value.Value, &dto.Configuration.AudioLanguagePreference)
+			if playback.IsOriginalLanguagePreference(dto.Configuration.AudioLanguagePreference) {
+				dto.Configuration.AudioLanguagePreference = compatAudioOriginalLanguage
+			}
 		case settingskeys.PlaybackSubtitleLanguage:
 			dto.Configuration.SubtitleLanguagePreference = ""
 			_ = json.Unmarshal(value.Value, &dto.Configuration.SubtitleLanguagePreference)
 		case settingskeys.PlaybackAutoPlayNext:
 			_ = json.Unmarshal(value.Value, &dto.Configuration.EnableNextEpisodeAutoPlay)
 		case settingskeys.PlaybackSubtitleMode:
-			var mode string
-			_ = json.Unmarshal(value.Value, &mode)
-			switch mode {
-			case "always":
-				dto.Configuration.SubtitleMode = compatSubtitleAlways
-			case "off":
-				dto.Configuration.SubtitleMode = compatSubtitleNone
-			default:
-				if dto.Configuration.SubtitleMode != compatSubtitleDefault {
-					dto.Configuration.SubtitleMode = compatSubtitleSmart
-				}
-			}
+			_ = json.Unmarshal(value.Value, &nativeSubtitleMode)
+			subtitleModeSet = value.Source != settingscontract.ScopeDefault
+		case settingskeys.PlaybackShowForcedSubtitles:
+			_ = json.Unmarshal(value.Value, &showForced)
 		}
 	}
+	dto.Configuration.SubtitleMode = compatJellyfinSubtitleMode(nativeSubtitleMode, subtitleModeSet, showForced, savedSubtitleMode)
 	return dto, nil
 }
 
@@ -138,6 +133,11 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 			}
 		}
 	}
+	// Jellyfin Web saves the whole configuration from every settings page, so
+	// an unchanged SubtitleMode must not rewrite the canonical settings: native
+	// "auto" with forced subtitles hidden reads as Smart, which writes back as
+	// auto with forced subtitles shown.
+	currentSubtitleMode := dto.Configuration.SubtitleMode
 	raw, _ := json.Marshal(patch)
 	if err := json.Unmarshal(raw, &dto.Configuration); err != nil {
 		writeError(w, 400, "BadRequest", "Invalid configuration")
@@ -150,13 +150,18 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 			continue
 		}
 		if field == "subtitlemode" {
-			modes := map[string]string{compatSubtitleDefault: profileSubtitleAuto, compatSubtitleSmart: profileSubtitleAuto, compatSubtitleAlways: "always", compatSubtitleNone: "off"}
-			mode, ok := modes[dto.Configuration.SubtitleMode]
+			// Each Jellyfin mode sets both canonical settings, so the mode reads
+			// back unchanged and native clients see the same behavior.
+			mode, showForced, ok := compatNativeSubtitleSettings(dto.Configuration.SubtitleMode)
 			if !ok {
 				writeError(w, 400, "BadRequest", "Unsupported subtitle mode")
 				return
 			}
+			if dto.Configuration.SubtitleMode == currentSubtitleMode {
+				continue
+			}
 			value, _ = json.Marshal(mode)
+			values[settingskeys.PlaybackShowForcedSubtitles], _ = json.Marshal(showForced)
 		} else if field != "enablenextepisodeautoplay" {
 			var tag string
 			if err := json.Unmarshal(value, &tag); err != nil {
@@ -165,6 +170,8 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 			}
 			if tag == "" {
 				value = json.RawMessage("null")
+			} else if field == "audiolanguagepreference" && strings.EqualFold(strings.TrimSpace(tag), compatAudioOriginalLanguage) {
+				value, _ = json.Marshal(playback.OriginalLanguageTag)
 			} else {
 				normalized, ok := settingscontract.NormalizeLanguageTag(tag)
 				if !ok {

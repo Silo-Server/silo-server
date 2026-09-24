@@ -3,6 +3,7 @@ package catalog
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -67,5 +68,51 @@ func TestBrowsePlayedSeriesUsesEpisodeCompletionAndHistory(t *testing.T) {
 		if !strings.Contains(sql, predicate) {
 			t.Fatalf("played series omits %s: %s", predicate, sql)
 		}
+	}
+}
+
+func TestBrowseLanguagePredicatesUseStoredCodeArrays(t *testing.T) {
+	filters := BrowseFilters{Type: "movie,series", AudioLanguages: []string{"eng", "pt-BR"}, SubtitleLanguages: []string{"fre"}, Limit: 1}
+	plan, empty, err := (&BrowseRepository{}).buildBrowsePlan(filters)
+	if err != nil || empty {
+		t.Fatalf("build plan: empty=%v err=%v", empty, err)
+	}
+	sql, args := plan.pagedSQL(false)
+	for _, predicate := range []string{"mf.content_id = mi.content_id", "mf.audio_language_codes &&", "mf.subtitle_language_codes &&", "external_subtitles", "mf.missing_since IS NULL"} {
+		if !strings.Contains(sql, predicate) {
+			t.Errorf("missing %q in %s", predicate, sql)
+		}
+	}
+	for i := range args {
+		if !regexp.MustCompile(fmt.Sprintf(`\$%d\b`, i+1)).MatchString(sql) {
+			t.Fatalf("parameter $%d has no SQL reference: %s", i+1, sql)
+		}
+	}
+	var audio, subtitle []string
+	for _, arg := range args {
+		if codes, ok := arg.([]string); ok {
+			switch {
+			case slices.Contains(codes, "en"):
+				audio = codes
+			case slices.Contains(codes, "fr"):
+				subtitle = codes
+			}
+		}
+	}
+	if !slices.Equal(audio, []string{"en", "eng", "pt-br"}) {
+		t.Fatalf("audio codes = %v, want canonical and raw lowercase forms", audio)
+	}
+	if !slices.Equal(subtitle, []string{"fr", "fra", "fre"}) {
+		t.Fatalf("subtitle codes = %v, want the canonical code and both ISO 639-2 forms", subtitle)
+	}
+}
+
+func TestBrowseLanguagePredicateJoinsEpisodeFiles(t *testing.T) {
+	var conditions []string
+	var args []any
+	idx := 1
+	appendCompatBrowsePredicates(BrowseFilters{Type: browseTypeEpisode, AudioLanguages: []string{"ja"}}, &conditions, &args, &idx)
+	if len(conditions) != 1 || !strings.Contains(conditions[0], "mf.episode_id = mi.content_id") {
+		t.Fatalf("episode scope should join media files by episode_id: %v", conditions)
 	}
 }

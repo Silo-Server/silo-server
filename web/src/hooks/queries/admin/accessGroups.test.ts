@@ -30,6 +30,8 @@ const group: AccessGroup = {
   audio_transcode_allowed: true,
   max_streams: 0,
   max_transcodes: 0,
+  max_remote_stream_bitrate_kbps: 0,
+  max_local_stream_bitrate_kbps: 0,
   allowed_permissions: null,
   requests_allowed: true,
   is_default: false,

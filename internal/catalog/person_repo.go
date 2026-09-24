@@ -1288,16 +1288,70 @@ func scanItemPeople(rows pgx.Rows) ([]models.ItemPerson, error) {
 // SearchVisible restricts both the page and total to people credited on visible
 // video items. A hidden library's credits never enter the result set.
 func (r *PersonRepository) SearchVisible(ctx context.Context, term string, exact bool, limit, offset int, filter AccessFilter, includeTotal bool) ([]models.Person, int, error) {
+	return r.SearchVisibleWithOptions(ctx, PersonSearchOptions{Term: term, Exact: exact, Limit: limit, Offset: offset, Filter: filter, IncludeTotal: includeTotal})
+}
+
+// PersonSearchOptions narrows SearchVisibleWithOptions. Name bounds compare
+// lowercased names, as Jellyfin's people query does; LibraryID and
+// ContentID keep only people credited on items in that library or on that
+// item.
+type PersonSearchOptions struct {
+	Term                    string
+	Exact                   bool
+	NameStartsWith          string
+	NameLessThan            string
+	NameStartsWithOrGreater string
+	LibraryID               int
+	ContentID               string
+	Limit                   int
+	Offset                  int
+	Filter                  AccessFilter
+	IncludeTotal            bool
+}
+
+// SearchVisibleWithOptions lists people credited on at least one movie or
+// series the filter allows, ordered by name.
+func (r *PersonRepository) SearchVisibleWithOptions(ctx context.Context, opts PersonSearchOptions) ([]models.Person, int, error) {
+	filter := opts.Filter
 	conditions := []string{"ip.person_id = p.id", "mi.type IN ('movie', 'series')"}
-	args := []any{term}
-	argIdx := 2
+	args := []any{}
+	argIdx := 1
 	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &argIdx)
 	applyAccessFilter("mi", filter, &conditions, &args, &argIdx)
-	nameClause := "p.name ILIKE '%' || $1 || '%'"
-	if exact {
-		nameClause = "LOWER(p.name) = LOWER($1)"
+	if opts.LibraryID > 0 {
+		conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM media_item_libraries scope_mil WHERE scope_mil.content_id = mi.content_id AND scope_mil.media_folder_id = $%d)", argIdx))
+		args = append(args, opts.LibraryID)
+		argIdx++
 	}
-	where := nameClause + " AND EXISTS (SELECT 1 FROM item_people ip JOIN media_items mi ON mi.content_id = ip.content_id WHERE " + strings.Join(conditions, " AND ") + ")"
+	if opts.ContentID != "" {
+		conditions = append(conditions, fmt.Sprintf("mi.content_id = $%d", argIdx))
+		args = append(args, opts.ContentID)
+		argIdx++
+	}
+	personConditions := []string{}
+	addName := func(clause, value string) {
+		personConditions = append(personConditions, fmt.Sprintf(clause, argIdx))
+		args = append(args, value)
+		argIdx++
+	}
+	switch {
+	case opts.Exact:
+		addName("LOWER(p.name) = LOWER($%d)", opts.Term)
+	case opts.Term != "":
+		addName("p.name ILIKE '%%' || $%d || '%%'", opts.Term)
+	}
+	if opts.NameStartsWith != "" {
+		addName("LOWER(p.name) LIKE $%d ESCAPE '\\'", likePrefixPattern(opts.NameStartsWith))
+	}
+	if opts.NameLessThan != "" {
+		addName("LOWER(p.name) < LOWER($%d)", opts.NameLessThan)
+	}
+	if opts.NameStartsWithOrGreater != "" {
+		addName("LOWER(p.name) >= LOWER($%d)", opts.NameStartsWithOrGreater)
+	}
+	personConditions = append(personConditions, "EXISTS (SELECT 1 FROM item_people ip JOIN media_items mi ON mi.content_id = ip.content_id WHERE "+strings.Join(conditions, " AND ")+")")
+	where := strings.Join(personConditions, " AND ")
+	limit, offset, includeTotal := opts.Limit, opts.Offset, opts.IncludeTotal
 	var total int
 	if includeTotal {
 		if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM people p WHERE "+where, args...).Scan(&total); err != nil {

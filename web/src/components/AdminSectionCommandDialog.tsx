@@ -137,14 +137,14 @@ export function AdminSectionCommandDialog({
       }}
     >
       <DialogContent
-        className="top-[18%] max-h-[min(34rem,calc(100dvh-4rem))] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-xl"
+        className="top-[18%] flex max-h-[min(34rem,calc(82dvh-1rem))] translate-y-0 flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
         showCloseButton={false}
       >
         <VisuallyHidden.Root>
           <DialogTitle>Search admin sections</DialogTitle>
           <DialogDescription>Search and open admin sections.</DialogDescription>
         </VisuallyHidden.Root>
-        <div className="border-border flex h-12 items-center border-b px-4">
+        <div className="border-border flex h-12 shrink-0 items-center border-b px-4">
           <Search className="text-muted-foreground mr-3 h-4 w-4 shrink-0" aria-hidden="true" />
           <input
             ref={inputRef}
@@ -167,7 +167,7 @@ export function AdminSectionCommandDialog({
           </kbd>
         </div>
 
-        <div className="max-h-[min(25rem,58vh)] overflow-y-auto overscroll-contain p-2">
+        <div className="overlay-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
           {filteredSections.length > 0 ? (
             <div role="listbox" aria-label="Admin sections" className="space-y-3">
               {filteredSections.map((section) => (
@@ -200,7 +200,7 @@ export function AdminSectionCommandDialog({
           )}
         </div>
 
-        <div className="text-muted-foreground border-border border-t px-4 py-2 text-xs">
+        <div className="text-muted-foreground border-border shrink-0 border-t px-4 py-2 text-xs">
           {query.trim()
             ? `${resultCount} ${resultCount === 1 ? "match" : "matches"}`
             : `${totalCount} admin sections`}

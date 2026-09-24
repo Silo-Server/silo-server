@@ -90,6 +90,17 @@ type BodyOf<Op> = Op extends { requestBody: { content: { "application/json": inf
   ? B
   : never;
 
+// An operation whose JSON body the server marks optional (`requestBody?`).
+// `requestBody?: never` (no body at all) must not match, and `[never]` is
+// assignable to any tuple, so it is excluded first.
+type OptionalBodyOf<Op> = Op extends { requestBody?: infer R }
+  ? [NonNullable<R>] extends [never]
+    ? never
+    : [NonNullable<R>] extends [{ content: { "application/json": infer B } }]
+      ? B
+      : never
+  : never;
+
 type FormBodyOf<Op> = Op extends { requestBody: { content: { "multipart/form-data": infer F } } }
   ? F
   : never;
@@ -126,6 +137,11 @@ export type V2Result<K extends V2OperationKey> = V2<SuccessOf<OperationOf<K>>>;
 
 /** The JSON request body type of a v2 operation (`never` when it has none). */
 export type V2Body<K extends V2OperationKey> = BodyOf<OperationOf<K>>;
+
+/** The JSON body of a v2 operation that may be sent without one (`never` otherwise). */
+export type V2OptionalBody<K extends V2OperationKey> = [V2Body<K>] extends [never]
+  ? OptionalBodyOf<OperationOf<K>>
+  : never;
 
 /**
  * The multipart form of a v2 operation (`never` when it has none): each
@@ -173,6 +189,7 @@ export type V2RequestOptions<K extends V2OperationKey> = CommonOptions &
   ([V2PathParams<K>] extends [never] ? unknown : { path: V2PathParams<K> }) &
   ([V2Query<K>] extends [never] ? unknown : { query?: V2Query<K> }) &
   ([V2Body<K>] extends [never] ? unknown : { body: V2Body<K> }) &
+  ([V2OptionalBody<K>] extends [never] ? unknown : { body?: V2OptionalBody<K> }) &
   ([V2Form<K>] extends [never] ? unknown : { form: V2Form<K> }) &
   ([V2Headers<K>] extends [never]
     ? unknown

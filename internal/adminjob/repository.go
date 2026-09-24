@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	JobTypeCatalogExport = "catalog_export"
-	JobTypeCatalogImport = "catalog_import"
+	JobTypeCatalogExport     = "catalog_export"
+	JobTypeCatalogImport     = "catalog_import"
+	JobTypeStorageTransition = "storage_transition"
 
 	StatusQueued    = "queued"
 	StatusRunning   = "running"
@@ -28,9 +29,10 @@ const (
 )
 
 var (
-	ErrJobNotFound       = errors.New("admin job not found")
-	ErrActiveJobConflict = errors.New("admin job already active for type")
-	ErrJobNotCancellable = errors.New("admin job is not cancellable")
+	ErrJobNotFound                       = errors.New("admin job not found")
+	ErrActiveJobConflict                 = errors.New("admin job already active for type")
+	ErrJobNotCancellable                 = errors.New("admin job is not cancellable")
+	ErrStorageTransitionAlreadyCommitted = errors.New("storage transition already committed")
 )
 
 type ActiveJobConflictError struct {
@@ -69,6 +71,7 @@ type CompleteJobInput struct {
 type FailJobInput struct {
 	Message         string
 	ErrorMessage    string
+	ResultPayload   any
 	ProgressCurrent int
 	ProgressTotal   int
 	ExpiresAt       time.Time
@@ -395,6 +398,62 @@ func (r *Repository) UpdateProgress(ctx context.Context, id string, current, tot
 	return nil
 }
 
+func (r *Repository) UpdateProgressResult(ctx context.Context, id string, current, total int, message string, result any) error {
+	payload, err := marshalPayload(result)
+	if err != nil {
+		return fmt.Errorf("marshaling admin job result payload: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE admin_jobs
+		SET progress_current = $2,
+			progress_total = $3,
+			message = $4,
+			result_payload = $5,
+			heartbeat_at = NOW(),
+			updated_at = NOW()
+		WHERE id = $1 AND status = 'running' AND ($6::bigint IS NULL OR claim_generation = $6)`,
+		id, current, total, message, payload, r.claim,
+	)
+	if err != nil {
+		return fmt.Errorf("updating admin job progress and result: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrJobNotFound
+	}
+	return nil
+}
+
+// HoldStorageTransitionForRestart keeps a committed or possibly committed
+// transition's receipt running until the process restarts. A cancellation
+// requested now cannot undo the commit, so it is cleared instead of leaving the
+// job reported as canceling.
+func (r *Repository) HoldStorageTransitionForRestart(ctx context.Context, id string, current, total int, message string, result any) error {
+	payload, err := marshalPayload(result)
+	if err != nil {
+		return fmt.Errorf("marshaling storage transition receipt: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE admin_jobs
+		SET progress_current = $2,
+			progress_total = $3,
+			message = $4,
+			result_payload = $5,
+			cancel_requested = false,
+			heartbeat_at = NOW(),
+			updated_at = NOW()
+		WHERE id = $1 AND job_type = $7 AND status = 'running'
+			AND ($6::bigint IS NULL OR claim_generation = $6)`,
+		id, current, total, message, payload, r.claim, JobTypeStorageTransition,
+	)
+	if err != nil {
+		return fmt.Errorf("holding storage transition receipt: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrJobNotFound
+	}
+	return nil
+}
+
 func (r *Repository) TouchHeartbeat(ctx context.Context, id string) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE admin_jobs
@@ -455,6 +514,41 @@ func (r *Repository) Complete(ctx context.Context, id string, input CompleteJobI
 	return nil
 }
 
+// CompleteCommittedStorageTransition records an irreversible storage commit.
+// A cancellation requested after the settings commit cannot undo it, so the
+// committed result takes precedence over that late request.
+func (r *Repository) CompleteCommittedStorageTransition(ctx context.Context, id string, input CompleteJobInput) error {
+	resultPayload, err := marshalPayload(input.ResultPayload)
+	if err != nil {
+		return fmt.Errorf("marshaling storage transition result payload: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE admin_jobs
+		SET status = 'completed',
+			result_payload = $2,
+			message = $3,
+			error_message = '',
+			progress_current = $4,
+			progress_total = $5,
+			cancel_requested = false,
+			completed_at = NOW(),
+			heartbeat_at = NOW(),
+			expires_at = GREATEST($6, NOW() + INTERVAL '24 hours'),
+			updated_at = NOW()
+		WHERE id = $1 AND job_type = $7 AND status = 'running'
+			AND ($8::bigint IS NULL OR claim_generation = $8)`,
+		id, resultPayload, input.Message, input.ProgressCurrent, input.ProgressTotal,
+		input.ExpiresAt, JobTypeStorageTransition, r.claim,
+	)
+	if err != nil {
+		return fmt.Errorf("completing committed storage transition: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrJobNotFound
+	}
+	return nil
+}
+
 func (r *Repository) MarkPublic(ctx context.Context, id, publicURL string, publishedAt time.Time) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE admin_jobs
@@ -474,22 +568,32 @@ func (r *Repository) MarkPublic(ctx context.Context, id, publicURL string, publi
 }
 
 func (r *Repository) Fail(ctx context.Context, id string, input FailJobInput) error {
+	var resultPayload []byte
+	if input.ResultPayload != nil {
+		var err error
+		resultPayload, err = marshalPayload(input.ResultPayload)
+		if err != nil {
+			return fmt.Errorf("marshaling failed admin job result payload: %w", err)
+		}
+	}
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE admin_jobs
 		SET status = CASE WHEN cancel_requested THEN 'cancelled' ELSE $2 END,
 			message = $3,
 			error_message = $4,
-			progress_current = $5,
-			progress_total = $6,
+			result_payload = COALESCE($5::jsonb, result_payload),
+			progress_current = $6,
+			progress_total = $7,
 			completed_at = NOW(),
 			heartbeat_at = NOW(),
-			expires_at = GREATEST($7, NOW() + INTERVAL '24 hours'),
+			expires_at = GREATEST($8, NOW() + INTERVAL '24 hours'),
 			updated_at = NOW()
-		WHERE id = $1 AND status = 'running' AND ($8::bigint IS NULL OR claim_generation = $8)`,
+		WHERE id = $1 AND status = 'running' AND ($9::bigint IS NULL OR claim_generation = $9)`,
 		id,
 		StatusFailed,
 		input.Message,
 		input.ErrorMessage,
+		resultPayload,
 		input.ProgressCurrent,
 		input.ProgressTotal,
 		input.ExpiresAt,
@@ -586,7 +690,10 @@ func (r *Repository) RequeueStaleRunning(ctx context.Context, before time.Time) 
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE admin_jobs
 		SET status = $2,
-			message = 'Requeued after stale worker heartbeat',
+			message = CASE
+				WHEN job_type = 'storage_transition' THEN 'Resuming storage transition after an interrupted or unconfirmed commit'
+				ELSE 'Requeued after stale worker heartbeat'
+			END,
 			error_message = '',
 			started_at = NULL,
 			completed_at = NULL,
@@ -657,8 +764,8 @@ func (r *Repository) withClaim(job *models.AdminJob) *Repository {
 func (r *Repository) RequestCancellation(ctx context.Context, id string) (*models.AdminJob, error) {
 	job, err := scanAdminJob(r.pool.QueryRow(ctx, `UPDATE admin_jobs
  SET cancel_requested = true, updated_at = CASE WHEN cancel_requested THEN updated_at ELSE NOW() END
- WHERE id = $1 AND job_type = $2 AND status IN ('queued', 'running')
- RETURNING `+adminJobColumns, id, JobTypeLibraryRefresh))
+ WHERE id = $1 AND job_type = ANY($2) AND status IN ('queued', 'running')
+	 RETURNING `+adminJobColumns, id, []string{JobTypeLibraryRefresh, JobTypeStorageTransition}))
 	if err == nil {
 		return job, nil
 	}
@@ -669,7 +776,7 @@ func (r *Repository) RequestCancellation(ctx context.Context, id string) (*model
 	if err != nil {
 		return nil, err
 	}
-	if job.JobType == JobTypeLibraryRefresh && job.Status == StatusCancelled {
+	if (job.JobType == JobTypeLibraryRefresh || job.JobType == JobTypeStorageTransition) && job.Status == StatusCancelled {
 		return job, nil
 	}
 	return nil, ErrJobNotCancellable

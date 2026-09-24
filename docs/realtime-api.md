@@ -393,13 +393,29 @@ acknowledgements and returns to ordinary state reports every 1.5 s, even while
 other members are still waiting. A readiness reset for a new command enables
 retries again. Reports without `is_ready` are still ignored while waiting.
 
+A viewer the room stopped waiting for sends `ready` while the room is `playing`
+or `paused`. The v2 snapshot shows this state as `self_ignore_wait: true`, or as
+the viewer's own member entry still marked `is_buffering`. The client sends the
+acknowledgement once it has executed the latest transport command and its media
+is playable, and retries every 500 ms until its own member entry is `is_ready`.
+The server then clears the viewer's buffering status and, while the room plays,
+sends it a transport command at the room's current position. When nobody else is
+watching, for example after the other viewers left, the room's position moves to
+the viewer's reported position first, so the viewer does not skip ahead. A `state_report` within one second of the room's
+position, with a matching pause state, also marks the member ready and clears
+the same status; this covers late joiners and clients that never send
+`ready`. Seek-destination checks apply only while the room is
+`waiting`.
+
 `command_id` is optional for older clients on the shared v1/v2 message loop. Their
 seek acknowledgements still need to reach the destination, but a client that
 omits the ID cannot distinguish consecutive seeks to the same position. Older
 servers ignore these additive request fields. Updated servers advertise
 `watch_party_coordinator_v1` in playback capabilities. The waiting deadline,
 after which members that never became ready stop blocking the room, is 10
-seconds; it is a safety net rather than the expected path.
+seconds; it is a safety net rather than the expected path. It takes effect only
+once at least one attached member is ready, so a room where nobody is ready
+keeps waiting. Past the deadline, the first `ready` resumes the room.
 
 
 ### Room membership and buffering
@@ -449,13 +465,26 @@ readiness barrier. HTTP v2 snapshots and raw socket snapshots expose these field
 The frozen v1 HTTP responses and room socket omit these status fields. The web
 player lists viewer status and names the viewers it is waiting for.
 
-The web player reports buffering after 500 ms without playable media. Recovery,
-a changed command/session, pause, a phase change, disconnect, and unmount cancel
-a pending report. The server ignores late buffering reports for paused rooms. A
-reconnected socket retains its validated playback-session attachment, and
-reattaching that session does not pause a playing room. A member attaching during
-an explicit seek receives the seek command and must reach its destination before
-acknowledging readiness.
+The web player reports buffering after 2 seconds without playable media and
+sends no `state_report` while its element is stalled, or while its media is
+unplayable and a readiness acknowledgement is pending. Recovery, a changed
+command/session, pause, a phase change, disconnect, and unmount cancel a pending
+report. The server ignores late buffering reports for paused rooms. A buffering
+report pauses a playing room only when the viewer has not stalled in the last 5
+minutes, the room has not paused for buffering in the last minute, and the viewer
+is not already catching up; a stall from a viewer with nobody else watching
+always pauses the room. Otherwise the room keeps playing and the viewer's snapshot reports
+`self_ignore_wait: true` until it acknowledges recovery. The waiting deadline
+also sets `self_ignore_wait` for the members it skips.
+
+A reconnected socket retains its validated playback-session attachment, and
+reattaching that session does not pause a playing room. Attaching a new playback
+session while the room plays does not pause it either: the member receives a
+transport command at the room's position and catches up alone. A member attaching
+during an explicit seek receives the seek command and must reach its destination
+before acknowledging readiness. See
+[Watch Party synchronization](architecture/watch-party-synchronization.md#buffering-policy)
+for the full buffering policy.
 
 See [Watch Party synchronization](architecture/watch-party-synchronization.md)
 for transaction, lease, delivery, and deployment behavior.

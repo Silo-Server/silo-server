@@ -30,6 +30,12 @@ const (
 // governs the assets store, which on a local backend is the whole root.
 const IdentitySettingKey = "artwork.storage_identity"
 
+// OperationalIdentitySettingKey records the configured private bucket that
+// holds diagnostic bundles, job artifacts, and avatars. Startup seeds it for
+// buckets written by older releases and refuses a different private location.
+// Private writes do not record the assets IdentitySettingKey.
+const OperationalIdentitySettingKey = "storage.operational_identity"
+
 type DirectURLer interface {
 	DirectURL(ctx context.Context, key string, ttl time.Duration) (string, error)
 }

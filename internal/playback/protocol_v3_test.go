@@ -25,21 +25,23 @@ func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
 	first := ServerFeaturesV3()
 	second := ServerFeaturesV3()
 	expected := map[string]struct{}{
-		FeaturePlaybackPlanV3:             {},
-		FeatureNeutralContractV3:          {},
-		FeatureLayoutPassthrough:          {},
-		FeatureEmbeddedSubtitlesV3:        {},
-		FeatureRouteDiagnostics:           {},
-		FeatureDeviceQuirksV3:             {},
-		FeatureSeekReanchorV3:             {},
-		FeatureOutputChangeV3:             {},
-		FeatureDirectStreamResumeV3:       {},
-		FeatureHeaderAuthenticatedMediaV3: {},
-		FeatureAuthorizedMediaOriginsV3:   {},
-		FeatureSoftwareVideoDecodeV3:      {},
-		FeaturePlanInvalidatedV3:          {},
-		FeaturePlanSourceDurationV3:       {},
-		FeatureOutputDisplayEvidenceV3:    {},
+		FeaturePlaybackPlanV3:                    {},
+		FeatureServerRemoteStreamBitratePolicyV3: {},
+		FeatureServerLocalStreamBitratePolicyV3:  {},
+		FeatureNeutralContractV3:                 {},
+		FeatureLayoutPassthrough:                 {},
+		FeatureEmbeddedSubtitlesV3:               {},
+		FeatureRouteDiagnostics:                  {},
+		FeatureDeviceQuirksV3:                    {},
+		FeatureSeekReanchorV3:                    {},
+		FeatureOutputChangeV3:                    {},
+		FeatureDirectStreamResumeV3:              {},
+		FeatureHeaderAuthenticatedMediaV3:        {},
+		FeatureAuthorizedMediaOriginsV3:          {},
+		FeatureSoftwareVideoDecodeV3:             {},
+		FeaturePlanInvalidatedV3:                 {},
+		FeaturePlanSourceDurationV3:              {},
+		FeatureOutputDisplayEvidenceV3:           {},
 	}
 	if len(first) != len(expected) {
 		t.Fatalf("server features = %v, want %d entries", first, len(expected))

@@ -158,7 +158,7 @@ func (h *Hub) PublishJob(ctx context.Context, eventType Type, job *models.AdminJ
 	if h == nil || h.inner == nil || job == nil {
 		return nil
 	}
-	return h.inner.PublishJSON(ctx, evt.ChannelJobs, string(eventType), job, evt.PublishOptions{
+	return h.inner.PublishJSON(ctx, evt.ChannelJobs, string(eventType), SafeStorageTransitionJob(job), evt.PublishOptions{
 		AdminOnly: true,
 	})
 }

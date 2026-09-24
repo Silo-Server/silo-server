@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -40,7 +40,12 @@ const mocks = vi.hoisted(() => ({
   } as SettingsCapabilities | undefined,
   /** Whether the capability check has answered; false covers pending and failed. */
   capabilitiesSettled: true,
+  /** A failed capability request, which reads as "unknown", never as "old". */
+  capabilitiesError: undefined as Error | undefined,
+  toast: { error: vi.fn(), success: vi.fn() },
 }));
+
+vi.mock("sonner", () => ({ toast: mocks.toast }));
 
 vi.mock("@/hooks/queries/settingValues", async () => {
   const actual = await vi.importActual<typeof import("@/hooks/queries/settingValues")>(
@@ -55,12 +60,16 @@ vi.mock("@/hooks/queries/settingValues", async () => {
     useSettingsCapabilities: () => ({
       data: mocks.capabilities,
       isLoading: false,
+      isPending: !mocks.capabilitiesSettled && !mocks.capabilitiesError,
       isSuccess: mocks.capabilitiesSettled,
+      error: mocks.capabilitiesError,
     }),
   };
 });
 
 import PlaybackSettings from "./PlaybackSettings";
+import { SEEK_KEYS } from "@/lib/seekIntervals";
+import { storage } from "@/utils/storage";
 
 function capabilitiesAtRevision(revision: number): SettingsCapabilities {
   return {
@@ -91,6 +100,20 @@ describe("PlaybackSettings", () => {
     mocks.useClearSettingValue.mockReset();
     mocks.capabilities = capabilitiesAtRevision(7);
     mocks.capabilitiesSettled = true;
+    mocks.capabilitiesError = undefined;
+    mocks.toast.error.mockReset();
+    mocks.toast.success.mockReset();
+    // The environment's localStorage global is inert; legacy audiobook
+    // intervals are read through it, so give each test a fresh in-memory one.
+    const memory = new Map<string, string>();
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      },
+    });
     mutate = vi.fn();
     mutateAsync = vi.fn().mockResolvedValue(undefined);
     clearMutateAsync = vi.fn().mockResolvedValue(undefined);
@@ -346,5 +369,228 @@ describe("PlaybackSettings", () => {
     expect(screen.getByRole("combobox", { name: "Maximum bitrate" }).textContent).toContain(
       "12.3 Mbps",
     );
+  });
+
+  describe("seek controls", () => {
+    const group = (name: string) => within(screen.getByRole("group", { name }));
+
+    it("hides the shared controls on a server that predates revision 9", () => {
+      render(<PlaybackSettings />);
+
+      expect(screen.getByText("Seek controls")).toBeInTheDocument();
+      expect(screen.queryByRole("group", { name: "Video" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("group", { name: "Audiobooks" })).not.toBeInTheDocument();
+      expect(screen.getByText(/does not store seek intervals per profile yet/)).toBeInTheDocument();
+    });
+
+    it("renders four profile-scoped selectors reading the contract defaults", () => {
+      mocks.capabilities = capabilitiesAtRevision(9);
+
+      render(<PlaybackSettings />);
+
+      for (const name of ["Video", "Audiobooks"]) {
+        const back = group(name).getByRole("combobox", { name: "Rewind interval" });
+        const forward = group(name).getByRole("combobox", { name: "Fast-forward interval" });
+        expect(back).toHaveTextContent("10 seconds");
+        expect(forward).toHaveTextContent("30 seconds");
+        expect(back).toBeEnabled();
+        expect(forward).toBeEnabled();
+      }
+      expect(screen.getByText(/follow it across supported Silo apps/)).toBeInTheDocument();
+    });
+
+    it("shows the stored value and saves each direction independently at profile scope", async () => {
+      mocks.capabilities = capabilitiesAtRevision(9);
+      mocks.useEffectiveSettings.mockReturnValue({
+        data: {
+          ...resolved(SEEK_KEYS.video.back, 15, "profile"),
+          ...resolved(SEEK_KEYS.audiobook.forward, 90, "profile"),
+        },
+        isLoading: false,
+      });
+
+      render(<PlaybackSettings />);
+
+      expect(group("Video").getByRole("combobox", { name: "Rewind interval" })).toHaveTextContent(
+        "15 seconds",
+      );
+      expect(
+        group("Audiobooks").getByRole("combobox", { name: "Fast-forward interval" }),
+      ).toHaveTextContent("90 seconds");
+
+      await userEvent.click(group("Audiobooks").getByRole("combobox", { name: "Rewind interval" }));
+      await userEvent.click(await screen.findByRole("option", { name: "45 seconds" }));
+
+      await waitFor(() =>
+        expect(mutateAsync).toHaveBeenCalledWith({
+          key: SEEK_KEYS.audiobook.back,
+          value: 45,
+          identity: { scope: "profile" },
+        }),
+      );
+      expect(mutateAsync).toHaveBeenCalledTimes(1);
+      expect(clearMutateAsync).not.toHaveBeenCalled();
+    });
+
+    it("reports a rejected write and keeps showing the resolved value", async () => {
+      mocks.capabilities = capabilitiesAtRevision(9);
+      mutateAsync.mockRejectedValue(new Error("boom"));
+
+      render(<PlaybackSettings />);
+
+      await userEvent.click(
+        group("Video").getByRole("combobox", { name: "Fast-forward interval" }),
+      );
+      await userEvent.click(await screen.findByRole("option", { name: "60 seconds" }));
+
+      await waitFor(() =>
+        expect(mocks.toast.error).toHaveBeenCalledWith(
+          "Failed to save fast-forward interval for video",
+        ),
+      );
+      expect(
+        group("Video").getByRole("combobox", { name: "Fast-forward interval" }),
+      ).toHaveTextContent("30 seconds");
+    });
+
+    it("disables the selectors while the effective values are still loading", () => {
+      mocks.capabilities = capabilitiesAtRevision(9);
+      mocks.useEffectiveSettings.mockReturnValue({ data: undefined, isPending: true });
+
+      render(<PlaybackSettings />);
+
+      const back = group("Video").getByRole("combobox", { name: "Rewind interval" });
+      expect(back).toBeDisabled();
+      expect(back).toHaveTextContent("Loading…");
+    });
+
+    it("surfaces a failed read instead of a default the server never confirmed", () => {
+      mocks.capabilities = capabilitiesAtRevision(9);
+      mocks.useEffectiveSettings.mockReturnValue({
+        data: undefined,
+        isPending: false,
+        error: new Error("Offline"),
+      });
+
+      render(<PlaybackSettings />);
+
+      const back = group("Video").getByRole("combobox", { name: "Rewind interval" });
+      expect(back).toBeDisabled();
+      expect(back).toHaveTextContent("Unavailable");
+      expect(
+        group("Video").getByText("Could not load the rewind interval for video."),
+      ).toBeInTheDocument();
+    });
+
+    it("distinguishes a failed capability check from an old server", () => {
+      mocks.capabilities = undefined;
+      mocks.capabilitiesSettled = false;
+      mocks.capabilitiesError = new Error("Offline");
+
+      render(<PlaybackSettings />);
+
+      expect(screen.getByRole("alert")).toHaveTextContent(/Could not check whether this server/);
+      expect(screen.queryByText(/does not store seek intervals per profile yet/)).toBeNull();
+    });
+
+    it("offers no import when this browser holds no legacy audiobook intervals", () => {
+      mocks.capabilities = capabilitiesAtRevision(9);
+
+      render(<PlaybackSettings />);
+
+      expect(
+        screen.queryByRole("button", { name: "Use this browser's audiobook intervals" }),
+      ).toBeNull();
+      expect(mutateAsync).not.toHaveBeenCalled();
+    });
+
+    it("imports only on a click, listing exactly what will be written", async () => {
+      mocks.capabilities = capabilitiesAtRevision(9);
+      storage.set(storage.KEYS.AUDIOBOOK_SKIP_BACK, "15");
+      storage.set(storage.KEYS.AUDIOBOOK_SKIP_FORWARD, "60");
+
+      render(<PlaybackSettings />);
+
+      expect(
+        screen.getByText(/rewind 15 seconds and fast-forward 60 seconds saved locally/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/replaces both intervals for the active profile/),
+      ).toBeInTheDocument();
+      // Nothing is written on mount.
+      expect(mutateAsync).not.toHaveBeenCalled();
+
+      await userEvent.click(
+        screen.getByRole("button", { name: "Use this browser's audiobook intervals" }),
+      );
+
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(2));
+      expect(mutateAsync).toHaveBeenCalledWith({
+        key: SEEK_KEYS.audiobook.back,
+        value: 15,
+        identity: { scope: "profile" },
+      });
+      expect(mutateAsync).toHaveBeenCalledWith({
+        key: SEEK_KEYS.audiobook.forward,
+        value: 60,
+        identity: { scope: "profile" },
+      });
+      expect(await screen.findByRole("status")).toHaveTextContent("Saved rewind and fast-forward.");
+      expect(mocks.toast.success).toHaveBeenCalled();
+      // Legacy values stay, so the row remains available as an explicit overwrite.
+      expect(storage.get(storage.KEYS.AUDIOBOOK_SKIP_BACK)).toBe("15");
+      expect(
+        screen.getByRole("button", { name: "Use this browser's audiobook intervals" }),
+      ).toBeInTheDocument();
+    });
+
+    it("imports a single legacy direction and says the other stays unchanged", async () => {
+      mocks.capabilities = capabilitiesAtRevision(9);
+      storage.set(storage.KEYS.AUDIOBOOK_SKIP_FORWARD, "45");
+      // An out-of-contract value is not a legacy preference.
+      storage.set(storage.KEYS.AUDIOBOOK_SKIP_BACK, "7");
+
+      render(<PlaybackSettings />);
+
+      expect(screen.getByText(/fast-forward 45 seconds saved locally/)).toBeInTheDocument();
+      expect(screen.getByText(/the rewind interval stays as it is/)).toBeInTheDocument();
+
+      await userEvent.click(
+        screen.getByRole("button", { name: "Use this browser's audiobook intervals" }),
+      );
+
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+      expect(mutateAsync).toHaveBeenCalledWith({
+        key: SEEK_KEYS.audiobook.forward,
+        value: 45,
+        identity: { scope: "profile" },
+      });
+    });
+
+    it("reports a partial import failure per direction and keeps the retry available", async () => {
+      mocks.capabilities = capabilitiesAtRevision(9);
+      storage.set(storage.KEYS.AUDIOBOOK_SKIP_BACK, "15");
+      storage.set(storage.KEYS.AUDIOBOOK_SKIP_FORWARD, "60");
+      mutateAsync.mockImplementation(async ({ key }: { key: string }) => {
+        if (key === SEEK_KEYS.audiobook.forward) throw new Error("Save failed");
+      });
+
+      render(<PlaybackSettings />);
+
+      await userEvent.click(
+        screen.getByRole("button", { name: "Use this browser's audiobook intervals" }),
+      );
+
+      const status = await screen.findByRole("status");
+      expect(status).toHaveTextContent("Saved rewind.");
+      expect(status).toHaveTextContent("Could not save fast-forward.");
+      expect(mocks.toast.error).toHaveBeenCalledWith(
+        "Imported rewind interval, but fast-forward failed",
+      );
+      expect(storage.get(storage.KEYS.AUDIOBOOK_SKIP_FORWARD)).toBe("60");
+      expect(
+        screen.getByRole("button", { name: "Use this browser's audiobook intervals" }),
+      ).toBeEnabled();
+    });
   });
 });

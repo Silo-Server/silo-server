@@ -43,6 +43,8 @@ const adminUser: AdminUser = {
   max_playback_quality: null,
   max_streams: null,
   max_transcodes: null,
+  max_remote_stream_bitrate_kbps: null,
+  max_local_stream_bitrate_kbps: null,
   transcode_allowed: null,
   audio_transcode_allowed: null,
   max_profiles: 4,
@@ -54,6 +56,8 @@ const adminUser: AdminUser = {
     max_playback_quality: "",
     max_streams: 0,
     max_transcodes: 0,
+    max_remote_stream_bitrate_kbps: 0,
+    max_local_stream_bitrate_kbps: 0,
     transcode_allowed: true,
     audio_transcode_allowed: true,
     download_allowed: true,
@@ -130,6 +134,8 @@ vi.mock("@/hooks/queries/admin/accessGroups", () => ({
         audio_transcode_allowed: true,
         max_streams: 0,
         max_transcodes: 0,
+        max_remote_stream_bitrate_kbps: 0,
+        max_local_stream_bitrate_kbps: 0,
         allowed_permissions: null,
         requests_allowed: true,
         member_count: 0,
@@ -148,6 +154,8 @@ vi.mock("@/hooks/queries/admin/accessGroups", () => ({
         audio_transcode_allowed: true,
         max_streams: 1,
         max_transcodes: 0,
+        max_remote_stream_bitrate_kbps: 0,
+        max_local_stream_bitrate_kbps: 0,
         allowed_permissions: [],
         requests_allowed: false,
         member_count: 0,
@@ -448,8 +456,8 @@ describe("AdminUserDetail inherit hints", () => {
     renderUserDetail();
 
     await openLimitsTab(user);
-    // Ungrouped: the no-group layer leaves both ceilings uncapped.
-    expect(screen.getAllByText("Inherited: Unlimited")).toHaveLength(2);
+    // Ungrouped: the no-group layer leaves all four ceilings uncapped.
+    expect(screen.getAllByText("Inherited: Unlimited")).toHaveLength(4);
 
     await selectGuestsGroup(user);
     // The access tab's hints follow the picker straight away.
@@ -461,7 +469,7 @@ describe("AdminUserDetail inherit hints", () => {
     // effective_policy resolved against the account's saved group.
     await user.click(screen.getByRole("tab", { name: "Limits" }));
     expect(screen.getByText("Inherited: 1")).toBeInTheDocument();
-    expect(screen.getAllByText("Inherited: Unlimited")).toHaveLength(1);
+    expect(screen.getAllByText("Inherited: Unlimited")).toHaveLength(3);
   });
 
   it("seeds a limit override from the inherited value, not from unlimited", async () => {

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { LanguageSelect } from "@/components/settings/LanguageSelect";
@@ -26,6 +26,8 @@ import {
   useSettingsCapabilities,
 } from "@/hooks/queries/settingValues";
 import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
+import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
+import type { SeekDirection } from "@/lib/seekIntervals";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { toast } from "sonner";
 
@@ -183,6 +185,222 @@ function AutoPlayNextSetting() {
         />
       )}
     />
+  );
+}
+
+const SEEK_DIRECTION_LABELS: Record<SeekDirection, string> = {
+  back: "Rewind interval",
+  forward: "Fast-forward interval",
+};
+
+function formatSeconds(seconds: number) {
+  return `${seconds} seconds`;
+}
+
+/**
+ * One rewind/fast-forward pair for a media kind. The Select is controlled by
+ * the resolved value, so a rejected write leaves the previous choice selected
+ * and the toast is the only trace of the attempt — never a value the server
+ * did not accept.
+ */
+function SeekIntervalRows({
+  media,
+  prefs,
+}: {
+  media: "video" | "audiobook";
+  prefs: ReturnType<typeof useSeekPreferences>;
+}) {
+  const noun = media === "video" ? "video" : "audiobooks";
+  return (
+    <>
+      {(["back", "forward"] as const).map((direction) => {
+        const value = direction === "back" ? prefs.skipBack : prefs.skipForward;
+        const verb = direction === "back" ? "rewind" : "fast-forward";
+        const choices = prefs.choices[direction];
+        return (
+          <SettingRow
+            key={direction}
+            label={SEEK_DIRECTION_LABELS[direction]}
+            description={
+              prefs.error
+                ? `Could not load the ${verb} interval for ${noun}.`
+                : `How far ${noun === "video" ? "video" : "an audiobook"} jumps when you ${verb}.`
+            }
+            control={(id) => (
+              <Select
+                value={prefs.isLoading || prefs.error ? undefined : String(value)}
+                disabled={prefs.isLoading || Boolean(prefs.error) || prefs.isSaving}
+                onValueChange={(next) => {
+                  prefs
+                    .save(direction, Number(next))
+                    .catch(() => toast.error(`Failed to save ${verb} interval for ${noun}`));
+                }}
+              >
+                <SelectTrigger id={id} className="w-full sm:w-[220px]">
+                  <SelectValue placeholder={prefs.isLoading ? "Loading…" : "Unavailable"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {choices.map((seconds) => (
+                    <SelectItem key={seconds} value={String(seconds)}>
+                      {formatSeconds(seconds)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+type ImportOutcome = { saved: SeekDirection[]; failed: SeekDirection[] };
+
+function describeDirections(directions: SeekDirection[]) {
+  return directions
+    .map((direction) => (direction === "back" ? "rewind" : "fast-forward"))
+    .join(" and ");
+}
+
+/**
+ * Explicit, click-driven import of the intervals this browser stored before
+ * the server learned to keep them per profile. Nothing imports on mount or on
+ * a profile switch, the legacy values stay in local storage after any outcome
+ * so a failed direction can be retried, and the row stays available because
+ * it is an overwrite the user asks for, not a migration to be marked done.
+ */
+function LegacyAudiobookImportRow({ prefs }: { prefs: ReturnType<typeof useSeekPreferences> }) {
+  const [outcome, setOutcome] = useState<ImportOutcome | null>(null);
+  const entries = (Object.entries(prefs.legacy) as [SeekDirection, number][]).sort(([a]) =>
+    a === "back" ? -1 : 1,
+  );
+  if (entries.length === 0) return null;
+
+  const listed = entries
+    .map(([direction, seconds]) =>
+      direction === "back"
+        ? `rewind ${formatSeconds(seconds)}`
+        : `fast-forward ${formatSeconds(seconds)}`,
+    )
+    .join(" and ");
+  const untouched = entries.length === 1 ? (entries[0]![0] === "back" ? "forward" : "back") : null;
+
+  const runImport = async () => {
+    setOutcome(null);
+    const results = await prefs.importLegacy();
+    const next: ImportOutcome = { saved: [], failed: [] };
+    for (const result of results) {
+      (result.status === "fulfilled" ? next.saved : next.failed).push(result.direction);
+    }
+    setOutcome(next);
+    if (next.failed.length === 0) {
+      toast.success(`Imported ${describeDirections(next.saved)} interval for audiobooks`);
+    } else if (next.saved.length === 0) {
+      toast.error(`Failed to import ${describeDirections(next.failed)} interval for audiobooks`);
+    } else {
+      toast.error(
+        `Imported ${describeDirections(next.saved)} interval, but ${describeDirections(next.failed)} failed`,
+      );
+    }
+  };
+
+  return (
+    <div className="border-border/50 grid gap-3 border-t pt-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+      <div className="min-w-0 space-y-1">
+        <p className="text-sm font-medium">Use this browser's audiobook intervals</p>
+        <p className="text-muted-foreground text-[13px] leading-relaxed">
+          This browser still has {listed} saved locally. Importing replaces{" "}
+          {entries.length === 1 ? "that interval" : "both intervals"} for the active profile across
+          supported apps
+          {untouched
+            ? `; the ${untouched === "back" ? "rewind" : "fast-forward"} interval stays as it is`
+            : ""}
+          .
+        </p>
+        {outcome ? (
+          <p
+            className={
+              outcome.failed.length > 0
+                ? "text-destructive text-[13px] leading-relaxed"
+                : "text-muted-foreground text-[13px] leading-relaxed"
+            }
+            role="status"
+          >
+            {outcome.saved.length > 0 ? `Saved ${describeDirections(outcome.saved)}.` : null}
+            {outcome.saved.length > 0 && outcome.failed.length > 0 ? " " : null}
+            {outcome.failed.length > 0
+              ? `Could not save ${describeDirections(outcome.failed)}. Try again to retry.`
+              : null}
+          </p>
+        ) : null}
+      </div>
+      <div className="flex md:justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="rounded-full"
+          disabled={prefs.isSaving || prefs.isLoading || Boolean(prefs.error)}
+          onClick={() => void runImport()}
+        >
+          Use this browser's audiobook intervals
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Seek intervals belong to the household profile, not this device: the
+ * server stores all four per profile so every supported client jumps by the
+ * same amount. Older servers get no shared controls at all — the audiobook
+ * player keeps its browser-local choice there — and an unanswered capability
+ * check renders nothing writable rather than a guess.
+ */
+function SeekControls() {
+  const video = useSeekPreferences("video");
+  const audiobook = useSeekPreferences("audiobook");
+  const supported = video.supported && audiobook.supported;
+  const discoveryError = !supported && !video.isLoading ? video.error : null;
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1">
+        <h3 className="text-base font-semibold tracking-tight">Seek controls</h3>
+        <p className="text-muted-foreground max-w-2xl text-[13px] leading-relaxed">
+          How far rewind and fast-forward jump. These belong to the active profile and follow it
+          across supported Silo apps.
+        </p>
+      </div>
+
+      {supported || video.isLoading ? (
+        <>
+          <SettingsGroup
+            title="Video"
+            description="Applies to the transport buttons, double-tap gestures, arrow keys, and system media controls."
+          >
+            <SeekIntervalRows media="video" prefs={video} />
+          </SettingsGroup>
+          <SettingsGroup
+            title="Audiobooks"
+            description="The same values the audiobook player's settings menu shows and edits."
+          >
+            <SeekIntervalRows media="audiobook" prefs={audiobook} />
+            {supported ? <LegacyAudiobookImportRow prefs={audiobook} /> : null}
+          </SettingsGroup>
+        </>
+      ) : discoveryError ? (
+        <p className="text-destructive text-sm" role="alert">
+          Could not check whether this server supports shared seek intervals. Reload to try again.
+        </p>
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          This server does not store seek intervals per profile yet. Audiobook intervals can still
+          be set for this browser from the audiobook player.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -473,6 +691,8 @@ export default function PlaybackSettings() {
           )}
         />
       </SettingsGroup>
+
+      <SeekControls />
     </div>
   );
 }

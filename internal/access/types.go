@@ -2,13 +2,15 @@ package access
 
 // Scope is the resolved effective access policy for a viewer request.
 type Scope struct {
-	UserID              int
-	ProfileID           string
-	AllowedLibraryIDs   []int
-	DisabledLibraryIDs  []int // libraries whose membership globally hides an item
-	LibrariesRestricted bool
-	MaxContentRating    string
-	MaxPlaybackQuality  string
+	UserID                     int
+	ProfileID                  string
+	AllowedLibraryIDs          []int
+	DisabledLibraryIDs         []int // libraries whose membership globally hides an item
+	LibrariesRestricted        bool
+	MaxContentRating           string
+	MaxPlaybackQuality         string
+	MaxRemoteStreamBitrateKbps int
+	MaxLocalStreamBitrateKbps  int
 	// PreferredMetadataLanguage is the profile's metadata (presentation)
 	// language; "" inherits the library's metadata language.
 	PreferredMetadataLanguage string

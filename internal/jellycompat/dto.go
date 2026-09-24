@@ -70,6 +70,7 @@ type baseItemDTO struct {
 	CriticRating             *float64                     `json:"CriticRating,omitempty"`
 	Overview                 string                       `json:"Overview,omitempty"`
 	OriginalTitle            string                       `json:"OriginalTitle,omitempty"`
+	OriginalLanguage         string                       `json:"OriginalLanguage,omitempty"`
 	PremiereDate             string                       `json:"PremiereDate,omitempty"`
 	Path                     string                       `json:"Path,omitempty"`
 	ExternalURLs             []map[string]any             `json:"ExternalUrls,omitempty"`
@@ -96,6 +97,8 @@ type baseItemDTO struct {
 	ParentBackdropItemID     string                       `json:"ParentBackdropItemId,omitempty"`
 	ParentThumbImageTag      string                       `json:"ParentThumbImageTag,omitempty"`
 	ParentThumbItemID        string                       `json:"ParentThumbItemId,omitempty"`
+	ParentPrimaryImageItemID string                       `json:"ParentPrimaryImageItemId,omitempty"`
+	ParentPrimaryImageTag    string                       `json:"ParentPrimaryImageTag,omitempty"`
 	ParentID                 string                       `json:"ParentId,omitempty"`
 	SortName                 string                       `json:"SortName,omitempty"`
 	ForcedSortName           string                       `json:"ForcedSortName,omitempty"`
@@ -241,6 +244,8 @@ type mediaStreamDTO struct {
 	Type                   string  `json:"Type"`
 	Codec                  string  `json:"Codec,omitempty"`
 	Language               string  `json:"Language,omitempty"`
+	LocalizedLanguage      string  `json:"LocalizedLanguage,omitempty"`
+	LocalizedOriginal      string  `json:"LocalizedOriginal,omitempty"`
 	TimeBase               string  `json:"TimeBase,omitempty"`
 	DisplayTitle           string  `json:"DisplayTitle,omitempty"`
 	Title                  string  `json:"Title,omitempty"`

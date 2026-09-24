@@ -361,7 +361,7 @@ function AdminLogsPage() {
                   {formatDateTime(selectedEntry.timestamp)}
                 </SheetDescription>
               </SheetHeader>
-              <div className="space-y-4 overflow-y-auto px-4 pb-6">
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-6">
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <DetailField label="Request ID" value={selectedEntry.request_id || "-"} mono />
                   <DetailField label="Node" value={selectedEntry.node_id || "-"} />

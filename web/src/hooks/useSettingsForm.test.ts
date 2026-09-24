@@ -70,6 +70,26 @@ describe("useSettingsForm save()", () => {
     expect(result.current.restartRequired).toBe(false);
   });
 
+  it("can save selected dirty keys without clearing the remaining draft", async () => {
+    mutateAsync.mockResolvedValue({
+      values: { "branding.server_name": "Casa" },
+      restart_required: false,
+    });
+    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
+
+    act(() => {
+      result.current.setValue("branding.server_name", "Casa");
+      result.current.setValue("database.max_connections", "40");
+    });
+    await act(async () => {
+      await result.current.save(["branding.server_name"]);
+    });
+
+    expect(mutateAsync).toHaveBeenCalledWith({ "branding.server_name": "Casa" });
+    expect(result.current.getValue("database.max_connections")).toBe("40");
+    expect(result.current.dirtyKeys).toEqual(["database.max_connections"]);
+  });
+
   it("adopts canonical server values after save", async () => {
     mutateAsync.mockResolvedValue({
       values: { "database.max_connections": "40" },

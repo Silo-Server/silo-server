@@ -2315,6 +2315,8 @@ export interface AccessGroup {
   audio_transcode_allowed: boolean;
   max_streams: number;
   max_transcodes: number;
+  max_remote_stream_bitrate_kbps: number;
+  max_local_stream_bitrate_kbps: number;
   allowed_permissions: string[] | null;
   requests_allowed: boolean;
   is_default: boolean;
@@ -2334,6 +2336,8 @@ export interface AccessGroupInput {
   audio_transcode_allowed?: boolean;
   max_streams?: number;
   max_transcodes?: number;
+  max_remote_stream_bitrate_kbps?: number;
+  max_local_stream_bitrate_kbps?: number;
   allowed_permissions?: string[] | null;
   requests_allowed?: boolean;
   is_default?: boolean;
@@ -2347,6 +2351,8 @@ export interface AdminUserEffectivePolicy {
   max_playback_quality: string;
   max_streams: number;
   max_transcodes: number;
+  max_remote_stream_bitrate_kbps: number;
+  max_local_stream_bitrate_kbps: number;
   transcode_allowed: boolean;
   audio_transcode_allowed: boolean;
   download_allowed: boolean;
@@ -2367,6 +2373,8 @@ export interface AdminUser {
   max_playback_quality: string | null;
   max_streams: number | null;
   max_transcodes: number | null;
+  max_remote_stream_bitrate_kbps: number | null;
+  max_local_stream_bitrate_kbps: number | null;
   transcode_allowed: boolean | null;
   audio_transcode_allowed: boolean | null;
   max_profiles: number;
@@ -2392,6 +2400,8 @@ export interface CreateUserRequest {
   max_playback_quality?: string;
   max_streams?: number;
   max_transcodes?: number;
+  max_remote_stream_bitrate_kbps?: number;
+  max_local_stream_bitrate_kbps?: number;
   transcode_allowed?: boolean;
   audio_transcode_allowed?: boolean;
   max_profiles?: number;
@@ -2415,6 +2425,8 @@ export interface UpdateUserRequest {
   max_playback_quality?: string | null;
   max_streams?: number | null;
   max_transcodes?: number | null;
+  max_remote_stream_bitrate_kbps?: number | null;
+  max_local_stream_bitrate_kbps?: number | null;
   transcode_allowed?: boolean | null;
   audio_transcode_allowed?: boolean | null;
   max_profiles?: number;
@@ -2490,6 +2502,8 @@ export interface AdminSession {
   is_paused: boolean;
   has_playback_control?: boolean;
   client_ip?: string;
+  /** Server classification used to select the local or remote stream bitrate policy. */
+  stream_location?: "local" | "remote";
   client_name?: string;
   client_version?: string;
   client_build?: string;
@@ -3354,6 +3368,32 @@ export interface CatalogSeedImportResponse {
 
 export type AdminJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
+export type StorageTransitionPhase =
+  | "queued"
+  | "checking_target"
+  | "copying"
+  | "verifying"
+  | "committing"
+  | "restart_pending"
+  | "completed"
+  | "failed"
+  | "canceled";
+
+export type StorageTransitionFailureCategory =
+  | "preparation_failed"
+  | "target_check_failed"
+  | "copy_failed"
+  | "verification_failed"
+  | "commit_failed"
+  | "unknown";
+
+export interface StorageTransitionJobResult {
+  manual_restart_required?: boolean;
+  phase?: StorageTransitionPhase;
+  verified_objects?: number;
+  failure_category?: StorageTransitionFailureCategory;
+}
+
 export interface LibraryRefreshJobRequest {
   library_id: number;
   library_name?: string;
@@ -3377,7 +3417,11 @@ export interface AdminJob {
   status: AdminJobStatus;
   created_by_user_id: number;
   request_payload: CatalogSeedExportRequest | LibraryRefreshJobRequest | Record<string, unknown>;
-  result_payload: CatalogSeedExportResult | LibraryRefreshJobResult | Record<string, unknown>;
+  result_payload:
+    | CatalogSeedExportResult
+    | LibraryRefreshJobResult
+    | StorageTransitionJobResult
+    | Record<string, unknown>;
   message: string;
   error_message?: string;
   progress_current: number;
@@ -4541,6 +4585,7 @@ export interface AdminServerStatus {
 export interface AdminArtworkStorageStatus {
   backend?: string;
   locked: boolean;
+  private_locked?: boolean;
 }
 
 // GET /admin/stats/playback-activity. `buckets` carries only hours that saw a

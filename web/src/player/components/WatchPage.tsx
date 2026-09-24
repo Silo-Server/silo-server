@@ -180,6 +180,7 @@ function WatchPagePlayer({
   autoEnterPictureInPicture,
   onPlaybackStateChange,
   onPlaybackTransportReady,
+  seekIntervals,
   onReturnFromPostRoll,
   watchTogetherRoomId,
   watchTogetherRoomToken,
@@ -650,6 +651,7 @@ function WatchPagePlayer({
       autoEnterPictureInPicture={autoEnterPictureInPicture}
       onPlaybackStateChange={handlePlaybackStateChange}
       onPlaybackTransportReady={onPlaybackTransportReady}
+      seekIntervals={seekIntervals}
       onRealtimeEvent={handleRealtimeEvent}
       onRealtimeConnectionStateChange={setRealtimeConnectionState}
       onExit={onExit}

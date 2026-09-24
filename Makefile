@@ -16,7 +16,7 @@ DEV_PLUGIN_SDK_DIR ?= $(SHARED_PLUGIN_SDK_DIR)
 endif
 
 JELLYFIN_WEB_INSTALL_DIR ?= .local/compat/jellyfin-web
-JELLYFIN_WEB_VERSION ?= 10.11.6
+JELLYFIN_WEB_VERSION ?= 12.1
 
 # Build version stamping: inject the git revision so the admin Build panel shows a
 # version even when Go's VCS metadata isn't embedded (mirrors the Dockerfile ldflags).

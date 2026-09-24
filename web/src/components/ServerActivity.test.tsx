@@ -23,7 +23,7 @@ vi.mock("@/hooks/queries/admin/stats", () => ({
   useAdminSessions: () => ({ data: [] }),
 }));
 vi.mock("@/hooks/queries/admin/tasks", () => ({
-  useTasks: () => ({ data: mocks.tasks }),
+  useTasksIncludingHidden: () => ({ data: mocks.tasks }),
 }));
 vi.mock("@/hooks/queries/admin/scans", () => ({
   useActiveScans: () => ({ data: [] }),
@@ -49,5 +49,9 @@ describe("ServerActivity task progress", () => {
 
     expect(screen.getByText("Running")).toBeInTheDocument();
     expect(screen.queryByText("0%")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Cache Metadata Images" })).toHaveAttribute(
+      "href",
+      "/admin/tasks/cache_metadata_images",
+    );
   });
 });

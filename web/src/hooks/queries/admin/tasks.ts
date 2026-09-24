@@ -33,6 +33,16 @@ export function useTasks() {
     staleTime: 0,
   });
 }
+// Hidden tasks are internal workers the Scheduled Tasks page omits. Activity
+// views still need them to show what is running right now.
+export function useTasksIncludingHidden() {
+  return useQuery({
+    queryKey: adminKeys.tasksIncludingHidden(),
+    queryFn: async () =>
+      (await v2("GET /api/v2/admin/tasks", { query: { include_hidden: true } })).items,
+    staleTime: 0,
+  });
+}
 export function useTask(key: string) {
   return useQuery({
     queryKey: adminKeys.task(key),

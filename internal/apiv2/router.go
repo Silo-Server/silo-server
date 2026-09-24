@@ -215,6 +215,7 @@ type Dependencies struct {
 	AdminSettingsInspection         AdminSettingsInspectionService
 	AdminResourceSampler            AdminResourceSampler
 	AdminTaskJobs                   AdminTaskJobsService
+	AdminStorageTransition          AdminStorageTransitionService
 	AdminCatalogSources             AdminCatalogSourcesService
 	AdminFilesystem                 AdminFilesystemService
 	AdminTaskMetrics                AdminTaskMetricsService

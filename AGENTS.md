@@ -233,6 +233,28 @@ At the 1.0 lock the additive-only rules bind `/api/v2`:
 
 Design new endpoints today so they can live under that regime tomorrow.
 
+## 1.0 validation
+
+Until 1.0 ships, maintainers check each 1.0 feature by hand on the
+[Silo v1.0.0 board](https://github.com/orgs/Silo-Server/projects/5). A `[v1] <Feature>` issue
+holds the acceptance criteria. Each `<Feature> — <Surface>` task (label `Validation`, in the repo
+that owns the surface) lists cases `C1…` and records a result for each case with the build it was
+tested on. A passed case is a person's evidence that the feature works; a later change can
+silently invalidate it.
+
+- Validation issues are the validators' record. Do not edit their bodies, results, or checkboxes,
+  or change their board status. Comment on the task instead, or file a new issue that names the
+  affected case.
+- Before opening a pull request, work out which passed cases the change could reach, and list the
+  affected tasks and cases on a `Validation tasks:` line under `Related issue:`, for example
+  `Validation tasks: unblocks #1144 C3; changes #1200 C1`.
+- Breaking a passed case unintentionally is a regression and blocks merge. A deliberate change to
+  validated behavior must say why and still meet the published criterion; changing the criterion
+  itself needs a maintainer decision.
+- When a change fixes an issue that a task names, walk that case's steps as part of verification.
+- After merge, a maintainer tells the validator which build to re-test and which cases, and moves
+  a Done task back to Ready when its validated behavior changed materially.
+
 ## Pull requests
 
 Never create a pull request unless the developer explicitly asks for one.
@@ -259,12 +281,14 @@ authorization to open a PR does not authorize publishing private evidence.
   turning verification into a media deliverable. Do not explain omitted media.
 - When the user requests PR media, check it for private information and upload it
   to GitHub. Never commit PR-only assets such as `.github/pr-assets/`.
-- Link the capability epic or sub-issue the pull request serves with
-  `Related issue: #NNN`. Use `Related issue: N/A — narrow fix` only when no prior
-  coordination was needed. For non-trivial work, establish the issue or discussion
-  first. If no existing one fits and publishing has not been authorized, prepare
-  a concrete draft while continuing authorized local work; publish only when
-  the user authorizes that external action.
+- An open issue is not a precondition for a pull request. Link the capability
+  epic or sub-issue the pull request serves with `Related issue: #NNN` when one
+  covers the work, and write `Related issue: N/A` when none does. Either way, the
+  Problem section must state the problem on its own: what breaks or is missing,
+  who it affects, and why this change is the right answer.
+- Do not open a pull request against an issue someone else is working on. Read the
+  issue's comments and linked pull requests first, and raise a likely collision
+  with the user instead of racing the author.
 - When babysitting a pull request, poll checks and review comments created
   after the last push. Verify bot findings against the source, fix real issues,
   and dismiss false positives with a written reason. Remain quiet when nothing

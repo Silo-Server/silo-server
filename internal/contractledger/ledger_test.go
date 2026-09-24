@@ -1207,6 +1207,8 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"cancelAdminJob":                       "V2-only cancellation command for managed background jobs. The job state machine makes repeated requests converge on the same terminal cancellation state.",
+	"createAdminStorageTransition":         "V2-only managed artwork storage transition. The active-transition constraint rejects concurrent or replayed starts instead of creating duplicate transition work.",
 	"fallbackWatchTogetherSource":          "V2-only coordinated source fallback. The room selection revision and failed file identify one transition under the room lock; replay returns the current snapshot without another source change.",
 	"createAdminLogsSocketTicket":          "V2-only administrator log stream handshake delegation: v1 accepted the bearer token in the socket URL directly. Repeated minting grants the same bounded authority through expiring single-use tickets; the legacy log stream GET retains its own mapping.",
 	"createWatchTogetherSocketTicket":      "V2-only room handshake delegation: v1 accepted URL login and room credentials directly. Repeated minting grants the same bounded authority through expiring single-use tickets; the legacy room socket GET retains its own mapping.",

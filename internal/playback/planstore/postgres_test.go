@@ -321,6 +321,7 @@ func TestPostgresPlanStore(t *testing.T) {
 		sessionID := uuid.NewString()
 		attemptID := "att-get-" + sessionID
 		record := f.attemptRecord(sessionID, attemptID, "digest-get")
+		record.ServerBitrateCapKbps = 4_000
 		if err := store.SaveAttempt(ctx, record); err != nil {
 			t.Fatalf("SaveAttempt: %v", err)
 		}
@@ -347,6 +348,9 @@ func TestPostgresPlanStore(t *testing.T) {
 			}
 			if got.RequestDigest != record.RequestDigest {
 				t.Fatalf("%s request_digest = %q, want %q", name, got.RequestDigest, record.RequestDigest)
+			}
+			if got.ServerBitrateCapKbps != record.ServerBitrateCapKbps {
+				t.Fatalf("%s server bitrate cap = %d, want %d", name, got.ServerBitrateCapKbps, record.ServerBitrateCapKbps)
 			}
 			if !bytes.Equal(mustJSON(t, got.CurrentPlan), mustJSON(t, record.CurrentPlan)) {
 				t.Fatalf("%s plan JSON did not round-trip:\n got %s\nwant %s", name, mustJSON(t, got.CurrentPlan), mustJSON(t, record.CurrentPlan))

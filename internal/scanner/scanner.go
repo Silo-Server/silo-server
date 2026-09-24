@@ -810,7 +810,7 @@ func (s *Scanner) scanPaths(
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
 	}
-	rootInference := inferRootAssignments(primaryPaths, folder.Type, folder.ID, rootOverrides)
+	rootInference := inferRootAssignments(primaryPaths, folder.Type, folder.ID, rootOverrides, folder.Paths...)
 	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
 	if err != nil {
 		return nil, fmt.Errorf("loading identity overrides: %w", err)
@@ -1719,7 +1719,7 @@ func (s *Scanner) scanScope(
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
 	}
-	rootInference := inferRootAssignments(primaryPaths, folder.Type, folder.ID, rootOverrides)
+	rootInference := inferRootAssignments(primaryPaths, folder.Type, folder.ID, rootOverrides, folder.Paths...)
 	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
 	if err != nil {
 		return nil, fmt.Errorf("loading identity overrides: %w", err)
@@ -2652,7 +2652,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	if err != nil {
 		return fmt.Errorf("loading item statuses for file: %w", err)
 	}
-	observation, ok := ObserveRoot(filePath, folder.Type)
+	observation, ok := ObserveRoot(filePath, folder.Type, folder.Paths...)
 	if ok {
 		cleared, clearErr := s.clearLegacyLinksForUnmatchableRoots(ctx, folder.ID, []RootObservation{observation})
 		if clearErr != nil {
@@ -2673,7 +2673,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	if err != nil {
 		return fmt.Errorf("loading root overrides for file: %w", err)
 	}
-	rootInference := inferRootAssignments([]string{filePath}, folder.Type, folder.ID, rootOverrides)
+	rootInference := inferRootAssignments([]string{filePath}, folder.Type, folder.ID, rootOverrides, folder.Paths...)
 	s.logRootInferenceDisagreements(rootInference.Assignments)
 
 	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
@@ -3147,7 +3147,7 @@ func populateScanIdentity(
 ) {
 	if assignment.RootPath != "" {
 		mf.CanonicalRootPath = filepath.Clean(assignment.RootPath)
-	} else if root, ok := naming.DetectCanonicalRoot(filePath, folderType); ok {
+	} else if root, ok := naming.DetectCanonicalRoot(filePath, folderType, assignment.LibraryRootPath); ok {
 		mf.CanonicalRootPath = filepath.Clean(root.RootPath)
 	}
 	mf.ObservedRootPath = filepath.Clean(groupAssignment.ObservedRootPath)
@@ -3158,12 +3158,12 @@ func populateScanIdentity(
 	mf.BaseType = groupAssignment.BaseType
 	mf.IdentityConfidence = groupAssignment.Confidence
 	mf.IdentityJSON = append([]byte(nil), groupAssignment.EvidenceJSON...)
-	if filenameHints := naming.ParseFilename(filePath, folderType); filenameHints != nil &&
+	if filenameHints := naming.ParseFilename(filePath, folderType, assignment.LibraryRootPath); filenameHints != nil &&
 		filenameHints.Type == "series" && filenameHints.EpisodeNum > 0 {
 		mf.SeasonNumber = filenameHints.SeasonNum
 		mf.EpisodeNumber = filenameHints.EpisodeNum
 	}
-	variantHints := naming.ParseVariantHints(filePath, folderType)
+	variantHints := naming.ParseVariantHints(filePath, folderType, assignment.LibraryRootPath)
 	if existing != nil && existing.EditionSource == "import" && existing.EditionKey != "" {
 		variantHints = &naming.VariantHints{
 			EditionRaw:            existing.EditionRaw,
@@ -3796,7 +3796,7 @@ func scanStateRootAssignmentChanged(existing *scanStateFile, assignment fileRoot
 	}
 	expectedRoot := assignment.RootPath
 	if expectedRoot == "" {
-		if root, ok := naming.DetectCanonicalRoot(existing.FilePath, libraryType); ok {
+		if root, ok := naming.DetectCanonicalRoot(existing.FilePath, libraryType, assignment.LibraryRootPath); ok {
 			expectedRoot = filepath.Clean(root.RootPath)
 		}
 	}
@@ -3804,7 +3804,7 @@ func scanStateRootAssignmentChanged(existing *scanStateFile, assignment fileRoot
 		return true
 	}
 
-	hints := naming.ParseVariantHints(existing.FilePath, libraryType)
+	hints := naming.ParseVariantHints(existing.FilePath, libraryType, assignment.LibraryRootPath)
 	if existing.EditionSource == "import" && existing.EditionKey != "" {
 		hints = &naming.VariantHints{
 			EditionRaw:            existing.EditionRaw,
@@ -3865,7 +3865,7 @@ func rootAssignmentChanged(existing *models.MediaFile, assignment fileRootAssign
 	}
 	expectedRoot := assignment.RootPath
 	if expectedRoot == "" {
-		if root, ok := naming.DetectCanonicalRoot(existing.FilePath, libraryType); ok {
+		if root, ok := naming.DetectCanonicalRoot(existing.FilePath, libraryType, assignment.LibraryRootPath); ok {
 			expectedRoot = filepath.Clean(root.RootPath)
 		}
 	}
@@ -3873,7 +3873,7 @@ func rootAssignmentChanged(existing *models.MediaFile, assignment fileRootAssign
 		return true
 	}
 
-	hints := naming.ParseVariantHints(existing.FilePath, libraryType)
+	hints := naming.ParseVariantHints(existing.FilePath, libraryType, assignment.LibraryRootPath)
 	if existing.EditionSource == "import" && existing.EditionKey != "" {
 		hints = &naming.VariantHints{
 			EditionRaw:            existing.EditionRaw,

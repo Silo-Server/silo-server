@@ -3,6 +3,7 @@ import {
   buildPlaybackInfoSections,
   formatProtocol,
   formatStreamType,
+  lowerQualityOption,
   qualityOptionsFromPlanV3,
   resolveActiveQualityOptionId,
 } from "./playback-info";
@@ -348,5 +349,31 @@ describe("qualityOptionsFromPlanV3", () => {
         isOriginal: true,
       },
     ]);
+  });
+});
+
+describe("lowerQualityOption", () => {
+  const options = qualityOptionsFromPlanV3(
+    fixturePlanV3({
+      available_qualities: [
+        { label: "original", height: 2160, bitrate_kbps: 40_000, preserves_source: true },
+        { label: "2160p-medium", height: 2160, bitrate_kbps: 20_000, preserves_source: false },
+        { label: "1080p-medium", height: 1080, bitrate_kbps: 6000, preserves_source: false },
+        { label: "720p", height: 720, bitrate_kbps: 3000, preserves_source: false },
+      ],
+    }),
+  );
+
+  it("steps down one rung from an explicit choice", () => {
+    expect(lowerQualityOption(options, "1080p-medium")?.id).toBe("720p");
+    expect(lowerQualityOption(options, "1080p")?.id).toBe("720p");
+    expect(lowerQualityOption(options, "720p")).toBeNull();
+  });
+
+  it("steps down from what Auto or Original actually delivers", () => {
+    expect(lowerQualityOption(options, "auto", 6000)?.id).toBe("720p");
+    expect(lowerQualityOption(options, "original", 40_000)?.id).toBe("2160p-medium");
+    // A copy delivery reports no bitrate; the top transcode rung is lower.
+    expect(lowerQualityOption(options, "auto")?.id).toBe("2160p-medium");
   });
 });

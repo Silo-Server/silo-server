@@ -456,6 +456,8 @@ export const adminKeys = {
     ["admin", "historyImportAdminRuns", "detail", id] as const,
   activeScans: () => ["admin", "activeScans"] as const,
   tasks: () => ["admin", "tasks"] as const,
+  // Under tasks() so every task-list invalidation also refreshes it.
+  tasksIncludingHidden: () => ["admin", "tasks", { includeHidden: true }] as const,
   task: (key: string) => ["admin", "tasks", key] as const,
   taskHistory: (key: string) => ["admin", "tasks", key, "history"] as const,
   taskMetrics: (key: string) => ["admin", "tasks", key, "metrics"] as const,

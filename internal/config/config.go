@@ -451,8 +451,8 @@ func EffectiveDownloadArtifactDir(artifactDir, transcodeDir string) string {
 	return filepath.Join(filepath.Dir(filepath.Clean(transcodeDir)), "silo-download-artifacts")
 }
 
-const DefaultJellyfinCompatEmulatedServerVersion = "10.12.0"
-const DefaultJellyfinWebVersion = "10.11.6"
+const DefaultJellyfinCompatEmulatedServerVersion = "12.1.0"
+const DefaultJellyfinWebVersion = "12.1"
 const DefaultJellyfinWebInstallDir = "/var/lib/silo/compat/jellyfin-web"
 const DefaultJellyfinWebDir = DefaultJellyfinWebInstallDir + "/current"
 

@@ -131,6 +131,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 	}
 	playbackHandler := NewPlaybackHandler(deps.Config, deps.ContentService, deps.IDCodec, deps.DeviceProfiles, deps.PlaybackStore, deps.SessionMgr, deps.FileResolver, deps.UserStoreProvider)
+	playbackHandler.ScopeResolver = deps.PlaybackScopeResolver
 	startupSegmentRetention := playbackHandler.SegmentRetentionSeconds
 	playbackHandler.SegmentRetentionSeconds = func() int {
 		if cfg := deps.CurrentConfig(); cfg != nil {
@@ -230,6 +231,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Shows/{id}/Similar", itemsHandler.HandleSimilar)
 			r.Get("/Items/{id}/ThemeMedia", itemsHandler.HandleThemeMedia)
 			r.Get("/Items/{id}/Ancestors", itemsHandler.HandleAncestors)
+			r.Get("/Items/{id}/Collections", itemsHandler.HandleItemCollections)
 			r.Get("/Items/{id}/ThemeVideos", itemsHandler.HandleThemeSongsStub)
 			r.Get("/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongsStub)
 			r.Get("/Items/{id}/SpecialFeatures", itemsHandler.HandleSpecialFeatures)

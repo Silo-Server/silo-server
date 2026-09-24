@@ -142,6 +142,7 @@ type MatchHints struct {
 	ObservedRootPath          string
 	AllGroupFilePaths         []string
 	PrimarySidecarSearchPaths []string
+	LibraryRoots              []string // Internal naming context; configured containers do not identify series or seasons.
 	// AlternateIdentities are independently parsed title/year hypotheses from
 	// the filename and surrounding directories. They are tried only after the
 	// primary scanner identity fails, keeping provider traffic bounded while

@@ -54,6 +54,10 @@ const (
 // edited through the administrator settings API.
 const ArtworkStorageReconcileCheckpointKey = "s3.public_storage_reconcile_checkpoint"
 
+// StorageTransitionTargetKey holds the machine-managed staged transition and
+// its post-restart recovery status.
+const StorageTransitionTargetKey = "storage.transition.target"
+
 // ArtworkStorageSweepCheckpointKey is the machine-managed cursor for the
 // artwork storage sweep, kept out of the administrator settings API for the
 // same reason as the reconcile checkpoint.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -18,6 +19,9 @@ type Analyzer struct {
 	chromaprintRefiner chromaprintStartRefiner
 	config             Config
 	logger             *slog.Logger
+	// node names this server in recorded silence refinement failures, which
+	// only defer retries on the server that recorded them.
+	node string
 }
 
 type introRepository interface {
@@ -25,7 +29,9 @@ type introRepository interface {
 	ListEligibleCandidates(ctx context.Context) ([]Candidate, error)
 	ListCandidatesForEpisode(ctx context.Context, episodeID string) ([]Candidate, error)
 	ListCandidatesForGroup(ctx context.Context, mediaFolderID int, seasonID, analysisGroupKey string) ([]Candidate, error)
-	ListChapterSilenceBackfillCandidates(ctx context.Context, limit int) ([]Candidate, error)
+	ListChapterSilenceBackfillCandidates(ctx context.Context, limit int, cfg Config, node string) ([]Candidate, error)
+	LoadSilenceRefinementAttempt(ctx context.Context, fileID int) (*SilenceRefinementAttempt, error)
+	UpsertSilenceRefinementAttempt(ctx context.Context, attempt SilenceRefinementAttempt) error
 	PatchIntroMarker(ctx context.Context, patch IntroMarkerPatch) (bool, error)
 	LoadSeasonState(ctx context.Context, state SeasonState, cfg Config) (*SeasonState, error)
 	UpsertSeasonState(ctx context.Context, state SeasonState, cfg Config) error
@@ -43,6 +49,10 @@ func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer
 	if logger == nil {
 		logger = slog.Default()
 	}
+	node, _ := os.Hostname()
+	if node == "" {
+		node = "silo"
+	}
 	return &Analyzer{
 		repo:               repo,
 		extractor:          NewChromaprintExtractor(config),
@@ -50,6 +60,7 @@ func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer
 		chromaprintRefiner: NewDialogueBoundaryRefiner(config),
 		config:             config,
 		logger:             logger,
+		node:               node,
 	}
 }
 
@@ -416,13 +427,84 @@ func (a *Analyzer) refineChapterSegment(ctx context.Context, candidate Candidate
 	if err != nil {
 		summary.SilenceRefinementErrors++
 		a.logger.WarnContext(ctx, "intro marker silence refinement failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
+		if ctx.Err() == nil {
+			a.recordSilenceAttempt(ctx, candidate, segment, err, summary)
+		}
 		return segment
 	}
 	if ok {
 		summary.SilenceRefinementsApplied++
 		return refined
 	}
+	a.recordSilenceAttempt(ctx, candidate, segment, nil, summary)
 	return segment
+}
+
+const (
+	silenceRetryBaseDelay = 12 * time.Hour
+	silenceRetryMaxDelay  = 7 * 24 * time.Hour
+)
+
+// recordSilenceAttempt persists a refinement that kept the chapter boundary so
+// the backfill stops spending its budget on the same unchanged file every run.
+// A clean no-improvement result stands until the inputs change; a failure is
+// retried with exponential backoff.
+func (a *Analyzer) recordSilenceAttempt(ctx context.Context, candidate Candidate, segment Segment, refineErr error, summary *RunSummary) {
+	attempt := SilenceRefinementAttempt{
+		MediaFileID:     candidate.FileID,
+		ConfigHash:      a.config.SilenceConfigHash(),
+		FileHash:        candidate.FileHash,
+		FileSize:        candidate.FileSize,
+		DurationSeconds: candidate.DurationSeconds,
+		ChaptersHash:    candidate.ChaptersHash,
+		IntroStart:      segment.Start,
+		IntroEnd:        segment.End,
+		Status:          silenceAttemptNoImprovement,
+		RecordedBy:      a.node,
+		AttemptedAt:     time.Now().UTC(),
+	}
+	if refineErr != nil {
+		previous, err := a.repo.LoadSilenceRefinementAttempt(ctx, candidate.FileID)
+		if err != nil {
+			summary.Errors = append(summary.Errors, fmt.Sprintf("file %d: %v", candidate.FileID, err))
+			a.logger.WarnContext(ctx, "intro marker silence attempt load failed", "file_id", candidate.FileID, "error", err)
+			return
+		}
+		attempt.Status = silenceAttemptFailed
+		attempt.LastError = refineErr.Error()
+		attempt.FailureCount = 1
+		retryAfter := attempt.AttemptedAt.Add(silenceRetryDelay(1))
+		// Backoff escalates only for this server's own consecutive failures; a
+		// failure recorded elsewhere may come from that server's environment.
+		if previous != nil && previous.Status == silenceAttemptFailed && previous.RecordedBy == attempt.RecordedBy &&
+			previous.sameInputs(attempt) {
+			if previous.RetryAfter != nil && attempt.AttemptedAt.Before(*previous.RetryAfter) {
+				// A forced episode analysis failed inside the backoff window. That
+				// is not a retry, so it must not escalate the backoff.
+				attempt.FailureCount = previous.FailureCount
+				retryAfter = *previous.RetryAfter
+			} else {
+				attempt.FailureCount = previous.FailureCount + 1
+				retryAfter = attempt.AttemptedAt.Add(silenceRetryDelay(attempt.FailureCount))
+			}
+		}
+		attempt.RetryAfter = &retryAfter
+	}
+	if err := a.repo.UpsertSilenceRefinementAttempt(ctx, attempt); err != nil {
+		summary.Errors = append(summary.Errors, fmt.Sprintf("file %d: %v", candidate.FileID, err))
+		a.logger.WarnContext(ctx, "intro marker silence attempt record failed", "file_id", candidate.FileID, "error", err)
+	}
+}
+
+// silenceRetryDelay doubles from silenceRetryBaseDelay per consecutive failure,
+// capped at silenceRetryMaxDelay. The base sits under the daily schedule so the
+// first retry lands on the next scheduled run.
+func silenceRetryDelay(failures int) time.Duration {
+	delay := silenceRetryBaseDelay
+	for i := 1; i < failures && delay < silenceRetryMaxDelay; i++ {
+		delay *= 2
+	}
+	return min(delay, silenceRetryMaxDelay)
 }
 
 func setBestChapterSource(sources map[string]chapterSourceMarker, candidate Candidate, segment Segment) {
@@ -473,7 +555,7 @@ func (a *Analyzer) runSilenceBackfill(ctx context.Context) (RunSummary, error) {
 	if !cfg.SilenceRefinementEnabled || cfg.SilenceBackfillLimit <= 0 {
 		return summary, nil
 	}
-	candidates, err := a.repo.ListChapterSilenceBackfillCandidates(ctx, cfg.SilenceBackfillLimit)
+	candidates, err := a.repo.ListChapterSilenceBackfillCandidates(ctx, cfg.SilenceBackfillLimit, cfg, a.node)
 	if err != nil {
 		return summary, err
 	}

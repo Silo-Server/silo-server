@@ -1,8 +1,10 @@
+import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
+import { skipTarget } from "../utils/skipTarget";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedCue } from "../utils/parseVTT";
 import { resolveSubtitleAutoSelect } from "../utils/subtitleSort";
 import type HlsType from "hls.js";
-import { PlayerControls, SKIP_BACK_SECONDS, SKIP_FORWARD_SECONDS } from "./PlayerControls";
+import { PlayerControls } from "./PlayerControls";
 import { PlaybackInfoOverlay } from "./PlaybackInfoOverlay";
 import { PlaybackNoticeOverlay } from "./PlaybackNoticeOverlay";
 import { IntroSkipButton } from "./IntroSkipButton";
@@ -26,7 +28,7 @@ import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogethe
 import { getPersistedVolume, persistVolume } from "./VolumeControl";
 import { playerV2 } from "../player-v2";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
-import { qualityOptionsFromPlanV3 } from "../playback-info";
+import { lowerQualityOption, qualityOptionsFromPlanV3 } from "../playback-info";
 import { preconnectToStreamOrigin } from "../stream-url";
 import { WatchTogetherPanel } from "./WatchTogetherPanel";
 import { readPlanInvalidatedPayload, VIDEO_PLAYBACK_COMMANDS } from "../realtime-protocol";
@@ -74,10 +76,19 @@ import {
   toPlayerTime,
 } from "../utils/mediaTimeline";
 import {
+  abandonRoomReload,
+  beginRoomReload,
+  createRoomReloadBudget,
   decideRoomCatchup,
-  isNativePositionSeekable,
+  isNativePositionInRanges,
+  landRoomReload,
+  noteRoomReloadLoading,
   roomCatchupConverged,
   roomCatchupExpectedPosition,
+  roomReloadAllowed,
+  roomMembersLeftBehind,
+  roomReloadLanded,
+  settleRoomReloads,
   type RoomCatchupTarget,
 } from "../utils/roomSyncCatchup";
 import { pendingServerSubtitleSelection } from "../utils/playableSubtitles";
@@ -202,6 +213,8 @@ interface VideoPlayerProps {
   onExit: (state?: PlaybackExitState) => void | Promise<void>;
   onMinimize?: (state?: PlaybackExitState) => void | Promise<void>;
   onEnded?: () => void;
+  /** Profile rewind/fast-forward intervals; the host resolves contract defaults for old servers. */
+  seekIntervals: { back: number; forward: number };
   displayMode?: PlayerDisplayMode;
   onPictureInPictureChange?: (change: PlayerPictureInPictureChange) => void;
   autoEnterPictureInPicture?: boolean;
@@ -230,6 +243,11 @@ const AUTOPLAY_RETRY_DELAY_MS = 400;
 // (fullscreen toggle) before toggling play/pause.
 const DOUBLE_CLICK_WINDOW_MS = 250;
 const MAX_AUTOPLAY_ATTEMPTS = 4;
+// A viewer who reports this many sustained stalls to a room within the window
+// cannot keep up at its current quality and is offered a lower one.
+const ROOM_STALLS_BEFORE_LOWER_QUALITY = 2;
+const ROOM_STALL_WINDOW_MS = 5 * 60_000;
+const LOWER_QUALITY_ACTION_LABEL = "Lower quality";
 
 interface PlaybackNoticeState {
   title?: string;
@@ -325,6 +343,7 @@ export function VideoPlayer({
   onMinimize,
   onEnded,
   displayMode = "foreground",
+  seekIntervals,
   onPictureInPictureChange,
   autoEnterPictureInPicture = false,
   onPlaybackStateChange,
@@ -366,6 +385,11 @@ export function VideoPlayer({
   // The advancing room position a playbackRate catch-up is converging toward,
   // when one is active. Non-null means playbackRate is intentionally not 1.
   const roomCatchupTargetRef = useRef<RoomCatchupTarget | null>(null);
+  // Bounds media reloads that room corrections trigger; see roomSyncCatchup.ts.
+  const roomReloadBudgetRef = useRef(createRoomReloadBudget());
+  // Sustained stalls reported to the room, for offering a lower quality.
+  const roomStallTimesRef = useRef<number[]>([]);
+  const lowerQualityOfferedRef = useRef(false);
   const performPlayerSeekRef = useRef<(seconds: number) => boolean | Promise<boolean>>(() => false);
   const reportRoomReadyRef = useRef<() => { ok: boolean }>(() => ({ ok: false }));
 
@@ -373,6 +397,13 @@ export function VideoPlayer({
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [pendingSeekTime, setPendingSeekTime] = useState<number | null>(null);
+  // Mirror for synchronous readers (relative skips): a seek whose target the
+  // element has not reached yet — including a reanchor still being replanned —
+  // is the position playback is heading to, so the next skip starts there.
+  const pendingSeekTimeRef = useRef<number | null>(null);
+  useEffect(() => {
+    pendingSeekTimeRef.current = pendingSeekTime;
+  }, [pendingSeekTime]);
   const [duration, setDuration] = useState(propDuration ?? 0);
   const [buffered, setBuffered] = useState<TimeRanges | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -625,24 +656,40 @@ export function VideoPlayer({
     } satisfies WatchTogetherRoomConnectionResult);
   const connectionReplacedRef = useRef(false);
   connectionReplacedRef.current = Boolean(watchTogether.replacementReason);
+  const [roomStallSignal, setRoomStallSignal] = useState(0);
+  const noteRoomStall = useCallback(() => {
+    // Once the lower quality is offered, stall history has done its job.
+    if (lowerQualityOfferedRef.current) return;
+    roomStallTimesRef.current.push(Date.now());
+    setRoomStallSignal((signal) => signal + 1);
+  }, []);
   const watchTogetherSync = useWatchTogetherPlaybackSync({
     roomConnection: watchTogether,
     sessionId,
     videoRef,
     streamOriginRef: timelineOffsetRef,
     appliedCommandIdRef: appliedRoomCommandIdRef,
+    onSustainedStall: noteRoomStall,
   });
   const roomPlaybackActive = !!watchTogetherRoomId && !watchTogether.closedReason;
   const roomSyncWaiting = watchTogether.room?.playback_state === "waiting";
+  // Media events acknowledge readiness while the room waits and while this
+  // viewer recovers from a stall the room did not wait for.
+  const roomReadinessPending = roomSyncWaiting || watchTogetherSync.catchingUp;
   const watchTogetherRoomActive = watchTogether.room !== null;
 
   const showWatchTogetherNotice = useCallback(
-    (message: string, tone: "info" | "warning", onAction?: () => void) => {
+    (
+      message: string,
+      tone: "info" | "warning",
+      onAction?: () => void,
+      actionLabel = "Join playback",
+    ) => {
       setNotice({
         title: "Watch Party",
         message,
         tone,
-        actionLabel: onAction ? "Join playback" : undefined,
+        actionLabel: onAction ? actionLabel : undefined,
         onAction,
       });
     },
@@ -831,6 +878,9 @@ export function VideoPlayer({
   useEffect(() => {
     if (!replanError || replanning) return;
 
+    // A refused reanchor never reaches its target. Resume relative skips from
+    // the surviving stream instead of extending the abandoned request.
+    pendingSeekTimeRef.current = null;
     setPendingSeekTime(null);
     const video = videoRef.current;
     if (video) setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
@@ -848,6 +898,21 @@ export function VideoPlayer({
   // Only the progressive/direct routes take this path; HLS seeking is handled
   // against the plan's timeline below.
   const { handleSeek } = useRemuxSeeking(videoRef);
+
+  const rememberPendingSeek = useCallback((seconds: number) => {
+    pendingSeekTimeRef.current = seconds;
+    setPendingSeekTime(seconds);
+  }, []);
+
+  // A refused reanchor never reaches its target. Resume relative skips from
+  // the surviving stream unless a newer seek has already replaced the target.
+  const releasePendingSeek = useCallback((seconds: number) => {
+    if (pendingSeekTimeRef.current !== seconds) return;
+    pendingSeekTimeRef.current = null;
+    setPendingSeekTime(null);
+    const video = videoRef.current;
+    if (video) setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
+  }, []);
 
   // Ends an active room catch-up nudge; any seek or local stop returns the
   // element to 1x so a stale rate never survives a context change.
@@ -868,11 +933,11 @@ export function VideoPlayer({
       if (!video) return false;
 
       resetRoomCatchupRate();
-      setPendingSeekTime(seconds);
-      setCurrentTime(seconds);
 
       const nativeSeconds = toPlayerTime(seconds, timelineOffsetRef.current);
-      if (canSeekAnywhere || isNativePositionSeekable(video.seekable, nativeSeconds)) {
+      if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
+        rememberPendingSeek(seconds);
+        setCurrentTime(seconds);
         if (isHlsStream) video.currentTime = nativeSeconds;
         else handleSeek(nativeSeconds);
         return true;
@@ -883,9 +948,33 @@ export function VideoPlayer({
       // The replan decides whether the seek took: a refused or failed replan
       // leaves playback where it was. With no handler the seek is dropped.
       if (!onReanchorSeek) return false;
-      return onReanchorSeek(seconds);
+      rememberPendingSeek(seconds);
+      setCurrentTime(seconds);
+      const accepted = onReanchorSeek(seconds);
+      if (typeof accepted === "boolean") {
+        if (!accepted) releasePendingSeek(seconds);
+        return accepted;
+      }
+      return accepted.then(
+        (ok) => {
+          if (!ok) releasePendingSeek(seconds);
+          return ok;
+        },
+        (error: unknown) => {
+          releasePendingSeek(seconds);
+          throw error;
+        },
+      );
     },
-    [canSeekAnywhere, handleSeek, isHlsStream, onReanchorSeek, resetRoomCatchupRate],
+    [
+      canSeekAnywhere,
+      handleSeek,
+      isHlsStream,
+      onReanchorSeek,
+      releasePendingSeek,
+      rememberPendingSeek,
+      resetRoomCatchupRate,
+    ],
   );
 
   const handlePlayerSeek = useCallback(
@@ -916,8 +1005,9 @@ export function VideoPlayer({
         const result = watchTogetherSync.requestTransport("seek", seconds, video?.paused ?? true);
         if (result.ok) {
           // Hold the requested position in the controls immediately. The media
-          // element still waits for the room's scheduled transport command.
-          setPendingSeekTime(seconds);
+          // element still waits for the room's scheduled transport command, and
+          // a relative skip before then extends this target.
+          rememberPendingSeek(seconds);
           setCurrentTime(seconds);
         }
         return result.ok;
@@ -926,6 +1016,7 @@ export function VideoPlayer({
     },
     [
       performPlayerSeek,
+      rememberPendingSeek,
       sessionId,
       showWatchTogetherNotice,
       watchTogether,
@@ -938,16 +1029,40 @@ export function VideoPlayer({
     performPlayerSeekRef.current = performPlayerSeek;
   }, [performPlayerSeek]);
 
-  // -- Keyboard seek adapter --
-  // Keyboard shortcuts read player-local video.currentTime (e.g., 10) and add
-  // ±10 s. This wrapper remaps that local time back onto the media timeline
-  // before dispatching the seek request.
-  const handleKeyboardSeek = useCallback(
-    (seconds: number) => {
-      handlePlayerSeek(toMediaTime(seconds, timelineOffsetRef.current));
+  // Every relative skip starts on the canonical media timeline, including
+  // remux playback whose HTML media clock starts at a nonzero offset. A seek
+  // still in flight (a reanchor being replanned, a remux reload) is the origin
+  // rather than the element clock, so a skip right after a scrub extends the
+  // scrub instead of snapping back to where the element still is.
+  const handleSkip = useCallback(
+    (direction: "back" | "forward") => {
+      const now =
+        pendingSeekTimeRef.current ??
+        (videoRef.current
+          ? toMediaTime(videoRef.current.currentTime, timelineOffsetRef.current)
+          : currentTimeRef.current);
+      const seconds = direction === "back" ? seekIntervals.back : seekIntervals.forward;
+      handlePlayerSeek(
+        skipTarget(now, durationRef.current, direction === "back" ? -seconds : seconds),
+      );
     },
-    [handlePlayerSeek],
+    [handlePlayerSeek, seekIntervals.back, seekIntervals.forward],
   );
+  const handleSkipRef = useRef(handleSkip);
+  useEffect(() => {
+    handleSkipRef.current = handleSkip;
+  }, [handleSkip]);
+  // One stable pair for every consumer that registers listeners (keyboard,
+  // Media Session, controls), so a time update never re-registers anything.
+  const skipActions = useMemo(
+    () => ({
+      back: () => handleSkipRef.current("back"),
+      forward: () => handleSkipRef.current("forward"),
+    }),
+    [],
+  );
+
+  useMediaSkipHandlers(displayMode !== "postroll", skipActions.back, skipActions.forward);
 
   // -- Watch progress reporting --
   const flushWatchProgress = useWatchProgress(sessionId, videoRef, timelineOffsetRef);
@@ -1941,13 +2056,24 @@ export function VideoPlayer({
       if (catchupTarget !== null && roomCatchupConverged(catchupTarget, nextTime, Date.now())) {
         roomCatchupTargetRef.current = null;
         video.playbackRate = 1;
+        settleRoomReloads(roomReloadBudgetRef.current);
+      }
+      // A correction's reloaded media is playing. How long it took to load
+      // becomes the lead for the next reload.
+      if (
+        !video.paused &&
+        !video.seeking &&
+        video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA &&
+        roomReloadLanded(roomReloadBudgetRef.current, nextTime)
+      ) {
+        landRoomReload(roomReloadBudgetRef.current, Date.now());
       }
       // timeupdate is the most reliable signal that frames are rendering.
       // Also clears any stale buffering state from HLS segment transitions
       // where `waiting` fired but `canplay`/`playing` never followed.
       markPlaybackStarted();
       clearBuffering();
-      if (roomSyncWaiting && watchTogetherSync.attachedSessionId === sessionId) {
+      if (roomReadinessPending && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportReady();
       }
     };
@@ -1962,7 +2088,7 @@ export function VideoPlayer({
       // the requested seek. Readiness is still evaluated: the sync hook checks
       // the actual media position against the room's seek target, and the
       // host may be accepted short of it.
-      if (roomSyncWaiting && watchTogetherSync.attachedSessionId === sessionId) {
+      if (roomReadinessPending && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportReady();
       }
       if (resolved.pendingSeekTime !== null) return;
@@ -1999,19 +2125,19 @@ export function VideoPlayer({
     };
     const onCanPlay = () => {
       clearBuffering();
-      if (roomSyncWaiting && watchTogetherSync.attachedSessionId === sessionId) {
+      if (roomReadinessPending && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportReady();
       }
     };
     const onPlaying = () => {
       clearBuffering();
       markPlaybackStarted();
-      if (roomSyncWaiting && watchTogetherSync.attachedSessionId === sessionId) {
+      if (roomReadinessPending && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportReady();
       }
     };
     const onLoadedData = () => {
-      if (roomSyncWaiting && watchTogetherSync.attachedSessionId === sessionId) {
+      if (roomReadinessPending && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportReady();
       }
     };
@@ -2081,7 +2207,7 @@ export function VideoPlayer({
     pendingSeekTime,
     reportCurrentPlanFailure,
     resetRoomCatchupRate,
-    roomSyncWaiting,
+    roomReadinessPending,
     sessionId,
     watchTogetherRoomActive,
     watchTogetherSync,
@@ -2641,14 +2767,11 @@ export function VideoPlayer({
         surfaceTapTimerRef.current = null;
         const rect = event?.currentTarget.getBoundingClientRect();
         const relativeX = rect && event ? (event.clientX - rect.left) / rect.width : 0.5;
-        const now = videoRef.current?.currentTime ?? currentTime;
         if (relativeX < 1 / 3) {
-          handlePlayerSeek(Math.max(0, now - SKIP_BACK_SECONDS));
+          handleSkip("back");
           resetControlsTimer();
         } else if (relativeX > 2 / 3) {
-          handlePlayerSeek(
-            Math.min(duration || now + SKIP_FORWARD_SECONDS, now + SKIP_FORWARD_SECONDS),
-          );
+          handleSkip("forward");
           resetControlsTimer();
         } else {
           handlePlayPause();
@@ -2668,11 +2791,9 @@ export function VideoPlayer({
     [
       clearControlsTimer,
       controlsVisible,
-      currentTime,
-      duration,
       handleFullscreenToggle,
       handlePlayPause,
-      handlePlayerSeek,
+      handleSkip,
       isCoarsePointer,
       resetControlsTimer,
       setPlayback,
@@ -2738,6 +2859,12 @@ export function VideoPlayer({
       if (command.action === "pause" || command.action === "seek") {
         resetRoomCatchupRate();
       }
+      const reloadBudget = roomReloadBudgetRef.current;
+      if (command.action === "seek") {
+        // An explicit room seek supersedes any correction reload.
+        abandonRoomReload(reloadBudget, Date.now());
+        settleRoomReloads(reloadBudget);
+      }
 
       // Room corrections land here. Small drift against a target the element
       // cannot reach without a rebuild converges via playbackRate instead of
@@ -2752,19 +2879,46 @@ export function VideoPlayer({
         command.action === "play"
           ? roomCatchupExpectedPosition(catchupTarget, Date.now())
           : command.position_seconds;
+      const targetLocallySeekable =
+        canSeekAnywhere ||
+        isNativePositionInRanges(
+          video.seekable,
+          toPlayerTime(targetPositionSeconds, timelineOffsetRef.current),
+        );
       const decision = decideRoomCatchup({
         action: command.action,
         targetPositionSeconds,
         localPositionSeconds: toMediaTime(video.currentTime, timelineOffsetRef.current),
-        targetLocallySeekable:
-          canSeekAnywhere ||
-          isNativePositionSeekable(
-            video.seekable,
-            toPlayerTime(targetPositionSeconds, timelineOffsetRef.current),
-          ),
+        targetLocallySeekable,
       });
 
-      if (decision.kind === "seek") {
+      const targetBuffered = isNativePositionInRanges(
+        video.buffered,
+        toPlayerTime(targetPositionSeconds, timelineOffsetRef.current),
+      );
+      if (decision.kind === "seek" && command.action === "play" && !targetBuffered) {
+        // A correction to media that is not buffered yet loads it: a range
+        // request or a stream rebuild. Keep playing behind the room while an
+        // earlier reload is still loading or the backoff runs; the server
+        // repeats corrections that still apply.
+        const now = Date.now();
+        if (!roomReloadAllowed(reloadBudget, now)) return;
+        const reloadTarget = beginRoomReload(
+          reloadBudget,
+          targetPositionSeconds,
+          now,
+          mediaDurationSeconds(backendDurationRef.current, durationRef.current),
+        );
+        const reloadGeneration = reloadBudget.generation;
+        // Only this reload's own seek counts as its load: an in-stream seek
+        // that was taken, or an adopted reanchor. Other stream swaps, such as
+        // a subtitle replan, cannot settle it.
+        void Promise.resolve(performPlayerSeekRef.current(reloadTarget)).then((accepted) => {
+          if (reloadBudget.generation !== reloadGeneration) return;
+          if (accepted) noteRoomReloadLoading(reloadBudget);
+          else abandonRoomReload(reloadBudget, Date.now());
+        });
+      } else if (decision.kind === "seek") {
         performPlayerSeekRef.current(targetPositionSeconds);
       } else if (decision.kind === "rate") {
         video.playbackRate = decision.rate;
@@ -2774,6 +2928,7 @@ export function VideoPlayer({
       } else {
         // Already at the room position; drop any stale convergence nudge.
         resetRoomCatchupRate();
+        if (command.action === "play") settleRoomReloads(reloadBudget);
       }
     };
 
@@ -2911,7 +3066,7 @@ export function VideoPlayer({
     videoRef,
     containerRef,
     handlePlayPause,
-    handleKeyboardSeek,
+    skipActions,
     toggleCaptions,
     handleTogglePiP,
     displayMode === "foreground",
@@ -2920,6 +3075,9 @@ export function VideoPlayer({
   // The id is the plan's own quality label, handed back to the server verbatim.
   const handleQualitySelect = useCallback(
     (id: string) => {
+      // A new quality replaces the stream; reload pacing from the old one
+      // does not apply to it.
+      roomReloadBudgetRef.current = createRoomReloadBudget();
       onQualitySelect?.(id, currentTime);
     },
     [currentTime, onQualitySelect],
@@ -2928,6 +3086,7 @@ export function VideoPlayer({
   const handlePlayPauseRef = useRef(handlePlayPause);
   const handlePlayerSeekRef = useRef(handlePlayerSeek);
   const handleTogglePiPRef = useRef(handleTogglePiP);
+  const handleQualitySelectRef = useRef(handleQualitySelect);
 
   useEffect(() => {
     handlePlayPauseRef.current = handlePlayPause;
@@ -2940,6 +3099,96 @@ export function VideoPlayer({
   useEffect(() => {
     handleTogglePiPRef.current = handleTogglePiP;
   }, [handleTogglePiP]);
+
+  useEffect(() => {
+    handleQualitySelectRef.current = handleQualitySelect;
+  }, [handleQualitySelect]);
+
+  // Rebuild pacing belongs to one stream in one room.
+  useEffect(() => {
+    roomReloadBudgetRef.current = createRoomReloadBudget();
+  }, [sessionId, watchTogetherRoomId]);
+
+  // Stall history is judged per quality: choosing another starts over, and an
+  // offer computed for the previous quality no longer applies.
+  useEffect(() => {
+    roomStallTimesRef.current = [];
+    lowerQualityOfferedRef.current = false;
+    setNotice((current) => (current?.actionLabel === LOWER_QUALITY_ACTION_LABEL ? null : current));
+  }, [activeQualityId, sessionId, watchTogetherRoomId]);
+
+  const lowerQualityChoiceRef = useRef(() =>
+    lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe?.bitrate_kbps),
+  );
+  useEffect(() => {
+    lowerQualityChoiceRef.current = () =>
+      lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe?.bitrate_kbps);
+    // A replan can leave no lower rung; an offer that cannot act is withdrawn.
+    if (!lowerQualityChoiceRef.current()) {
+      setNotice((current) =>
+        current?.actionLabel === LOWER_QUALITY_ACTION_LABEL ? null : current,
+      );
+    }
+  }, [activeQualityId, plan.effective_recipe?.bitrate_kbps, qualityOptions]);
+
+  // A viewer who keeps stalling in a room cannot keep up at this quality.
+  // Offer one step down, once per quality; the room's shared source is kept.
+  useEffect(() => {
+    if (roomStallSignal === 0 || lowerQualityOfferedRef.current) return;
+    const now = Date.now();
+    const recent = roomStallTimesRef.current.filter((at) => now - at < ROOM_STALL_WINDOW_MS);
+    roomStallTimesRef.current = recent;
+    if (recent.length < ROOM_STALLS_BEFORE_LOWER_QUALITY) return;
+    if (!lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe?.bitrate_kbps)) {
+      return;
+    }
+    lowerQualityOfferedRef.current = true;
+    showWatchTogetherNotice(
+      "Your connection is having trouble keeping up with the party.",
+      "warning",
+      () => {
+        // A replan can change the ladder while the offer shows; choose the
+        // step down from what is available when the viewer accepts.
+        const lower = lowerQualityChoiceRef.current();
+        if (lower) handleQualitySelectRef.current(lower.id);
+      },
+      LOWER_QUALITY_ACTION_LABEL,
+    );
+  }, [
+    activeQualityId,
+    plan.effective_recipe?.bitrate_kbps,
+    qualityOptions,
+    roomStallSignal,
+    showWatchTogetherNotice,
+  ]);
+
+  // Explain a room that keeps playing without someone. This viewer hears it
+  // once per stream; the spinner caption covers later stalls.
+  const catchingUpExplainedRef = useRef(false);
+  useEffect(() => {
+    catchingUpExplainedRef.current = false;
+  }, [sessionId, watchTogetherRoomId]);
+  useEffect(() => {
+    if (!watchTogetherSync.catchingUp || catchingUpExplainedRef.current) return;
+    catchingUpExplainedRef.current = true;
+    showWatchTogetherNotice(
+      "The party kept playing. You'll rejoin at the current scene once your stream catches up.",
+      "info",
+    );
+  }, [showWatchTogetherNotice, watchTogetherSync.catchingUp]);
+
+  const previousRoomRef = useRef(watchTogether.room);
+  useEffect(() => {
+    const previous = previousRoomRef.current;
+    previousRoomRef.current = watchTogether.room;
+    const leftBehind = roomMembersLeftBehind(previous, watchTogether.room);
+    if (leftBehind.length > 0) {
+      showWatchTogetherNotice(
+        `Continuing without ${leftBehind.join(", ")}. They'll catch up.`,
+        "info",
+      );
+    }
+  }, [showWatchTogetherNotice, watchTogether.room]);
 
   useEffect(() => {
     if (!onPlaybackStateChange) {
@@ -2968,6 +3217,8 @@ export function VideoPlayer({
         const maxTime = nextDuration > 0 ? nextDuration : nextCurrentTime + Math.abs(secondsDelta);
         handlePlayerSeekRef.current(Math.max(0, Math.min(maxTime, nextCurrentTime + secondsDelta)));
       },
+      skipBack: skipActions.back,
+      skipForward: skipActions.forward,
       seekTo: (seconds: number) => {
         handlePlayerSeekRef.current(seconds);
       },
@@ -2976,7 +3227,7 @@ export function VideoPlayer({
 
     onPlaybackTransportReady(transport);
     return () => onPlaybackTransportReady(null);
-  }, [onPlaybackTransportReady]);
+  }, [onPlaybackTransportReady, skipActions]);
 
   const executeRealtimeCommand = useCallback(
     async (command: PlaybackRealtimeCommandEnvelope) => {
@@ -3363,11 +3614,17 @@ export function VideoPlayer({
       {!isDetached && buffering && !roomSyncWaiting && !awaitingFirstFrame && isPlayerReady && (
         <div
           role="status"
-          aria-label="Buffering"
-          className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
+          aria-label={watchTogetherSync.catchingUp ? "Catching up to the party" : "Buffering"}
+          className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3"
         >
           <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-          <span className="sr-only">Buffering</span>
+          {watchTogetherSync.catchingUp ? (
+            <span className="rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white/85">
+              Catching up to the party
+            </span>
+          ) : (
+            <span className="sr-only">Buffering</span>
+          )}
         </div>
       )}
 
@@ -3507,6 +3764,8 @@ export function VideoPlayer({
       {!isDetached && isPlayerReady && (
         <PlayerControls
           visible={controlsVisible || markerEditor.editing}
+          skipSeconds={seekIntervals}
+          onSkip={skipActions}
           playing={playing}
           currentTime={currentTime}
           duration={duration}
