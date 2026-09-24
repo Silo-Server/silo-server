@@ -332,26 +332,27 @@ function TasteSeedGate({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-/** Clears user-scoped query caches on profile switch, sign-out, or account change. */
-function QueryCacheManager() {
+/**
+ * Clears user-scoped query caches on profile switch or sign-out. An account
+ * change clears in AuthProvider, before the new account renders.
+ */
+export function QueryCacheManager() {
   const { user, profile } = useAuth();
   const qc = useQueryClient();
-  const prevUserId = useRef<number | null>(null);
+  const hadUser = useRef(false);
   const prevProfileId = useRef(profile?.id);
 
   useEffect(() => {
-    const userId = user?.id ?? null;
-    // Only a real sign-out or account change drops the cache. Boot starts with
-    // no user while the session restores, and clearing then would discard the
-    // reads the shell already started and send them again.
-    if (prevUserId.current !== null && prevUserId.current !== userId) {
-      qc.clear();
-    }
-    prevUserId.current = userId;
     if (!user) {
+      // Only a real sign-out drops the cache. Boot starts with no user while
+      // the session restores, and clearing then would discard the reads the
+      // shell already started and send them again.
+      if (hadUser.current) qc.clear();
+      hadUser.current = false;
       prevProfileId.current = undefined;
       return;
     }
+    hadUser.current = true;
     if (prevProfileId.current && prevProfileId.current !== profile?.id) {
       qc.removeQueries({ queryKey: ["favorites"] });
       qc.removeQueries({ queryKey: ["watchlist"] });

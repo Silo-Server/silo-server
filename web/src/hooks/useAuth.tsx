@@ -209,6 +209,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [providers, setProviders] = useState<AuthProviderOption[]>([]);
   const isImpersonating = Boolean(user?.impersonation?.active);
   const soleProfileBootstrapRef = useRef<string | null>(null);
+  // The committed account, for the auth callbacks, which run after commit.
+  const signedInUserIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    signedInUserIdRef.current = user?.id ?? null;
+  }, [user]);
 
   const restoreProfile = useCallback(() => {
     const savedProfile = storage.get(storage.KEYS.CURRENT_PROFILE);
@@ -240,6 +245,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         preserveStoredImpersonationAdminSession?: boolean;
       } = {},
     ) => {
+      // A different account replacing a signed-in one. Drop the old account's
+      // cache before the new one renders, so the new account's reads start on
+      // an empty cache instead of being thrown away a render later.
+      if (signedInUserIdRef.current !== null && signedInUserIdRef.current !== data.user.id) {
+        queryClient.clear();
+      }
       setAccessToken(data.access_token);
       setRefreshToken(data.refresh_token);
       if (!options.preserveStoredImpersonationAdminSession) {

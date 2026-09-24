@@ -96,6 +96,11 @@ export interface FakeServer {
   releaseWave(): number;
   /** Refresh tokens the server accepted, in order. */
   readonly refreshTokensUsed: readonly string[];
+  /**
+   * Mints a token pair the server accepts, as a sign-in or an admin's
+   * impersonate operation would hand one out.
+   */
+  issueTokens(): { access_token: string; refresh_token: string; expires_in: number };
 }
 
 export interface FakeServerOptions {
@@ -119,6 +124,17 @@ export function createFakeServer(
   let wave = 1;
   let tokenCounter = 0;
 
+  function issueTokens() {
+    tokenCounter += 1;
+    const accessToken = `access-${tokenCounter}`;
+    issuedAccessTokens.add(accessToken);
+    return {
+      access_token: accessToken,
+      refresh_token: `refresh-${tokenCounter}`,
+      expires_in: 3600,
+    };
+  }
+
   function answer(record: RecordedRequest, init: RequestInit | undefined): FakeResponse {
     if (record.operation === null) {
       return problem(404, "not_found", "Not found");
@@ -129,16 +145,7 @@ export function createFakeServer(
         return problem(401, "invalid_token", "The refresh token is invalid or revoked.");
       }
       refreshTokensUsed.push(body.refresh_token);
-      tokenCounter += 1;
-      const accessToken = `access-${tokenCounter}`;
-      issuedAccessTokens.add(accessToken);
-      return {
-        body: {
-          access_token: accessToken,
-          refresh_token: `refresh-${tokenCounter}`,
-          expires_in: 3600,
-        },
-      };
+      return { body: issueTokens() };
     }
     const headers = new Headers(init?.headers);
     const bearer = headers.get("Authorization")?.replace(/^Bearer /, "") ?? "";
@@ -179,6 +186,7 @@ export function createFakeServer(
     fetch: fakeFetch,
     requests,
     refreshTokensUsed,
+    issueTokens,
     pendingCount: () => pending.length,
     releaseWave() {
       const batch = pending;

@@ -1,7 +1,9 @@
-import { render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { act, render, screen } from "@testing-library/react";
+import { useEffect, type ReactNode } from "react";
+import type { createMemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import adminAccountImpersonate from "../../../contracts/api/v2/fixtures/admin_account_impersonate.json";
 import eventsSocketTicket from "../../../contracts/api/v2/fixtures/events_socket_ticket.json";
 import getCurrentUserOk from "../../../contracts/api/v2/fixtures/get_current_user_ok.json";
 import getHomeLayoutOk from "../../../contracts/api/v2/fixtures/get_home_layout_ok.json";
@@ -9,10 +11,13 @@ import getSettingsContractCapabilitiesOk from "../../../contracts/api/v2/fixture
 import listEffectiveSettingsOk from "../../../contracts/api/v2/fixtures/list_effective_settings_ok.json";
 import listFavoritesOk from "../../../contracts/api/v2/fixtures/list_favorites_ok.json";
 import listProfilesOk from "../../../contracts/api/v2/fixtures/list_profiles_ok.json";
+import userLibraries from "../../../contracts/api/v2/fixtures/user_libraries.json";
 import { setAccessToken } from "@/api/client";
+import { sessionFromTokenPair, type TokenPair } from "@/api/v2/account";
 import type { components } from "@/api/v2/schema";
 import { profileFromV2 } from "@/hooks/queries/profiles";
 import { useHomeLayout } from "@/hooks/queries/sections";
+import { useAuth } from "@/hooks/useAuth";
 import { queryClient } from "@/lib/query-client";
 import { storage } from "@/utils/storage";
 import {
@@ -25,6 +30,8 @@ import {
 } from "./requestBudget";
 
 let initialEntry = "/";
+let appRouter: ReturnType<typeof createMemoryRouter> | null = null;
+let homeAuth: ReturnType<typeof useAuth> | null = null;
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
@@ -32,10 +39,12 @@ vi.mock("react-router", async () => {
     ...actual,
     // App builds a data router from the real history; start it at the entry
     // under test instead.
-    createBrowserRouter: ((routes: Parameters<typeof actual.createMemoryRouter>[0]) =>
-      actual.createMemoryRouter(routes, {
+    createBrowserRouter: ((routes: Parameters<typeof actual.createMemoryRouter>[0]) => {
+      appRouter = actual.createMemoryRouter(routes, {
         initialEntries: [initialEntry],
-      })) as typeof actual.createBrowserRouter,
+      });
+      return appRouter;
+    }) as typeof actual.createBrowserRouter,
   };
 });
 
@@ -47,6 +56,11 @@ vi.mock("@/components/Layout", () => ({
 }));
 
 function HomeLayoutProbe() {
+  const auth = useAuth();
+  // Keeps the signed-in auth actions reachable for cases that act after boot.
+  useEffect(() => {
+    homeAuth = auth;
+  }, [auth]);
   const { data } = useHomeLayout();
   return <div data-testid="home">{data ? `${data.sections.length} sections` : "loading"}</div>;
 }
@@ -80,6 +94,14 @@ class InertWebSocket extends EventTarget {
 // JSON imports widen enum fields to string; the fixture is a contract Profile.
 const ownerProfile = listProfilesOk.items[0]! as components["schemas"]["Profile"];
 
+function signInReturningOwner() {
+  // A returning browser: a stored refresh token and a selected profile. The
+  // access token only ever lives in memory, so there is none yet.
+  storage.set(storage.KEYS.REFRESH_TOKEN, "refresh-0");
+  storage.set(storage.KEYS.PROFILE_ID, ownerProfile.id);
+  storage.set(storage.KEYS.CURRENT_PROFILE, JSON.stringify(profileFromV2(ownerProfile)));
+}
+
 function serverRoutes() {
   return {
     "GET /api/v2/system/setup": { body: { needs_setup: false, wizard_completed: true } },
@@ -91,6 +113,7 @@ function serverRoutes() {
     "GET /api/v2/settings/contract/capabilities": { body: getSettingsContractCapabilitiesOk },
     "GET /api/v2/settings/values/effective": { body: listEffectiveSettingsOk },
     "GET /api/v2/favorites": { body: listFavoritesOk },
+    "GET /api/v2/user/libraries": { body: userLibraries },
     "GET /api/v2/home/layout": { body: getHomeLayoutOk },
     "GET /api/v2/onboarding/state": {
       body: { tour_id: "welcome", done: true },
@@ -124,6 +147,8 @@ describe("app boot request budget", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     initialEntry = "/";
+    appRouter = null;
+    homeAuth = null;
     localStorage.clear();
     sessionStorage.clear();
     queryClient.clear();
@@ -154,11 +179,7 @@ describe("app boot request budget", () => {
   });
 
   it("restores a returning session and reaches the home layout in two waves", async () => {
-    // A returning browser: a stored refresh token and a selected profile. The
-    // access token only ever lives in memory, so there is none yet.
-    storage.set(storage.KEYS.REFRESH_TOKEN, "refresh-0");
-    storage.set(storage.KEYS.PROFILE_ID, ownerProfile.id);
-    storage.set(storage.KEYS.CURRENT_PROFILE, JSON.stringify(profileFromV2(ownerProfile)));
+    signInReturningOwner();
 
     await boot(server);
 
@@ -209,6 +230,63 @@ describe("app boot request budget", () => {
       total: 5,
     });
     expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
+  });
+
+  it("reads the viewed account once when an admin starts viewing as another user", async () => {
+    signInReturningOwner();
+    // The viewed account has two profiles, so its profile picker stays up
+    // instead of auto-selecting one and clearing the cache again.
+    let viewing = false;
+    const viewedProfiles = {
+      ...listProfilesOk,
+      items: [
+        ...listProfilesOk.items,
+        { ...ownerProfile, id: "p-second", name: "Second", is_primary: false },
+      ],
+    };
+    server = createFakeServer({
+      ...serverRoutes(),
+      "GET /api/v2/profiles": () => ({ body: viewing ? viewedProfiles : listProfilesOk }),
+    });
+    vi.stubGlobal("fetch", server.fetch);
+    await boot(server);
+    expect(screen.getByTestId("home"), describeRequests(server.requests)).toHaveTextContent(
+      "2 sections",
+    );
+    const bootRequests = server.requests.length;
+
+    // The picker is a lazy route chunk; load it now so the fake clock does not
+    // outrun the module import.
+    await import("@/pages/Profiles");
+
+    // What AdminUserImpersonationDialog does with the impersonate answer.
+    viewing = true;
+    const pair = { ...adminAccountImpersonate, ...server.issueTokens() } as TokenPair;
+    await act(async () => {
+      homeAuth!.beginImpersonation(sessionFromTokenPair(pair), "/admin/users");
+      await appRouter!.navigate("/profiles");
+    });
+    await releaseUntilQuiet(server);
+
+    const viewedAccount = server.requests.slice(bootRequests);
+    const log = describeRequests(viewedAccount);
+    expect(screen.getByText("Second"), log).toBeInTheDocument();
+    // The old account's cache is dropped before the new account renders, so
+    // none of the new account's cached reads is thrown away and sent again.
+    // The one repeated GET is /profiles: AuthProvider's sole-profile check
+    // reads the list directly, beside the picker's cached read.
+    expect(measureBoot(viewedAccount), log).toEqual({
+      requestsBeforeHomeLayout: -1,
+      wavesBeforeHomeLayout: -1,
+      unauthorized: 0,
+      refreshes: 0,
+      duplicateGets: 1,
+      total: 9,
+    });
+    expect(
+      viewedAccount.filter((request) => request.operation === "GET /api/v2/profiles"),
+      log,
+    ).toHaveLength(2);
   });
 
   it("sends no account reads from the login screen", async () => {
