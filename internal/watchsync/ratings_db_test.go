@@ -149,7 +149,7 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 		if states, _ := repo.ListRatingSyncStates(ctx, conn.ID, "", nil); len(states) != 1 {
 			t.Fatalf("states after delete = %#v", states)
 		}
-		if err := repo.ClearRatingSyncStates(ctx, conn.ID); err != nil {
+		if err := repo.ClearRatingSyncStates(ctx, conn.ID, "new-account"); err != nil {
 			t.Fatal(err)
 		}
 		if states, _ := repo.ListRatingSyncStates(ctx, conn.ID, "", nil); len(states) != 0 {
@@ -179,8 +179,43 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 		if states, _ := repo.ListRatingSyncStates(ctx, conn.ID, "account-a", nil); len(states) != 0 {
 			t.Fatalf("old account still sees %#v", states)
 		}
-		if err := repo.ClearRatingSyncStates(ctx, conn.ID); err != nil {
+		// Clearing keeps the bound account's rows and drops the others.
+		if err := repo.UpsertRatingSyncStates(ctx, []RatingSyncState{
+			{ConnectionID: conn.ID, ProviderAccountID: "account-a", MediaItemID: "m-4", Kind: "movie", SyncedRating: 2},
+		}); err != nil {
 			t.Fatal(err)
+		}
+		if err := repo.ClearRatingSyncStates(ctx, conn.ID, "account-b"); err != nil {
+			t.Fatal(err)
+		}
+		if kept, _ := repo.ListRatingSyncStates(ctx, conn.ID, "account-b", nil); len(kept) != 1 {
+			t.Fatalf("bound account rows after clear = %#v, want m-3 kept", kept)
+		}
+		if old, _ := repo.ListRatingSyncStates(ctx, conn.ID, "account-a", nil); len(old) != 0 {
+			t.Fatalf("previous account rows after clear = %#v", old)
+		}
+		if err := repo.ClearRatingSyncStates(ctx, conn.ID, "none"); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("rating cursors update in place for the bound account only", func(t *testing.T) {
+		if _, err := pool.Exec(ctx, `UPDATE watch_provider_connections SET provider_account_id='acct', sync_cursors='{"trakt.watched":"w","test.ratings.movies":"old"}' WHERE id=$1::uuid`, conn.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.UpdateRatingCursors(ctx, conn.ID, "acct", []string{"test.ratings.movies"}, map[string]string{"test.ratings.shows": "s1"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.UpdateRatingCursors(ctx, conn.ID, "other-acct", nil, map[string]string{"stale": "x"}); err != nil {
+			t.Fatal(err)
+		}
+		fresh, ok, err := repo.GetConnectionByID(ctx, conn.ID)
+		if err != nil || !ok {
+			t.Fatalf("reload: %v", err)
+		}
+		want := map[string]string{"trakt.watched": "w", "test.ratings.shows": "s1"}
+		if len(fresh.SyncCursors) != len(want) || fresh.SyncCursors["trakt.watched"] != "w" || fresh.SyncCursors["test.ratings.shows"] != "s1" {
+			t.Fatalf("cursors = %#v, want %#v", fresh.SyncCursors, want)
 		}
 	})
 
