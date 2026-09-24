@@ -140,9 +140,26 @@ describe("taste-seed gate and banner", () => {
     await screen.findByText("Personalize your home");
   });
 
-  it("hides the banner once the profile has a favorite", async () => {
+  it("hides the banner once the profile favorites something", async () => {
     setTasteSeedDismissed("p-owner");
+    stubFavorites(noFavorites);
+
+    const client = renderHome();
+    await screen.findByText("Personalize your home");
+
+    // The profile favorites an item; the toggle's media-surface refresh
+    // reaches the banner, which then has its answer and stays away.
     stubFavorites(listFavoritesOk);
+    await invalidateMediaSurfaceQueries(client);
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+
+    expect(screen.getByText("home")).toBeTruthy();
+    expect(screen.queryByText("Personalize your home")).toBeNull();
+  });
+
+  it("hides the banner when the newest favorite is hidden but more follow", async () => {
+    setTasteSeedDismissed("p-owner");
+    stubFavorites(hiddenNewestFavorite);
 
     const client = renderHome();
     await waitFor(() => expect(client.isFetching()).toBe(0));
