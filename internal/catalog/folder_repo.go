@@ -1055,6 +1055,11 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 // the only set that reaches the final anti join is the referenced candidates,
 // which cannot outnumber the candidates.
 //
+// lookup is deliberately not MATERIALIZED. Inlined, its aggregate still runs
+// once per process (the leader and each parallel worker), never per path row;
+// a materialized CTE scan is parallel-restricted and pins the whole per-row
+// lookup to the leader, which measured about 4x slower.
+//
 // Candidates come from imageDeletePrefix, which always ends a directory in '/'.
 // Anything else is reported as referenced rather than guessed at: keeping a
 // directory costs storage, deleting a live one loses artwork.
@@ -1067,6 +1072,11 @@ func filterUnreferencedImageDirs(ctx context.Context, q rowQuerier, dirs, deleti
 	}
 	if len(candidates) == 0 {
 		return nil, nil
+	}
+	// pgx sends a nil slice as NULL, and NOT (x = ANY(NULL)) is NULL, which
+	// would drop every surviving row and report every candidate unreferenced.
+	if deletingContentIDs == nil {
+		deletingContentIDs = []string{}
 	}
 
 	rows, err := q.Query(ctx, `

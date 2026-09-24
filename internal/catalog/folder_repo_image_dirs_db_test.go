@@ -63,19 +63,38 @@ func TestFilterUnreferencedImageDirsPostgres(t *testing.T) {
 		"imgdirtest/missing/",         // nothing there at all
 		"imgdirtest/missing/",         // duplicates are reported once
 	}
-	got, err := filterUnreferencedImageDirs(ctx, tx, candidates, []string{"imgdir-gone", "imgdir-gone-series"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	slices.Sort(got)
-	want := []string{
+	// DeleteFolder passes an empty set, so nothing is excluded as deleting and
+	// the deleted-owner dirs count as referenced. nil must behave the same:
+	// bound as NULL it would report every candidate.
+	alwaysUnreferenced := []string{
 		"imgdirtest/100%/",
 		"imgdirtest/a_c/",
 		"imgdirtest/missing/",
-		"imgdirtest/movies/2/poster/",
-		"imgdirtest/series/4/e1/",
 	}
-	if !slices.Equal(got, want) {
-		t.Fatalf("unreferenced dirs = %q, want %q", got, want)
+	tests := []struct {
+		name     string
+		deleting []string
+		want     []string
+	}{
+		{
+			name:     "owners being deleted",
+			deleting: []string{"imgdir-gone", "imgdir-gone-series"},
+			want:     append(slices.Clone(alwaysUnreferenced), "imgdirtest/movies/2/poster/", "imgdirtest/series/4/e1/"),
+		},
+		{name: "empty deleting set", deleting: []string{}, want: alwaysUnreferenced},
+		{name: "nil deleting set", deleting: nil, want: alwaysUnreferenced},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := filterUnreferencedImageDirs(ctx, tx, candidates, tc.deleting)
+			if err != nil {
+				t.Fatal(err)
+			}
+			slices.Sort(got)
+			want := slices.Sorted(slices.Values(tc.want))
+			if !slices.Equal(got, want) {
+				t.Fatalf("unreferenced dirs = %q, want %q", got, want)
+			}
+		})
 	}
 }
