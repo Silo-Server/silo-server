@@ -561,6 +561,30 @@ func TestSyncRatingsResendsAValueChangedDuringTheSend(t *testing.T) {
 	}
 }
 
+func TestSyncRatingsForgetsTheAgreedRatingWhenResendsNeverSettle(t *testing.T) {
+	h := newRatingHarness(t)
+	h.agree(ratingTestMovieA, 1, true)
+	h.store.set(ratingTestMovieA, 2)
+	// Every write overlaps another edit, so no send ever confirms the current
+	// value. The agreed row must not be left claiming the provider holds it.
+	stars := 2
+	h.provider.onExport = func() {
+		stars = stars%5 + 1
+		h.store.set(ratingTestMovieA, stars)
+	}
+	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieA, 2)}, SnapshotKinds: []string{historyimport.KindMovie}}
+	result := h.sync()
+	if len(h.provider.exported) != 1+maxRatingResends {
+		t.Fatalf("exports = %d, want the first send and %d resends", len(h.provider.exported), maxRatingResends)
+	}
+	if s := h.state(ratingTestMovieA); s != nil {
+		t.Fatalf("agreed row = %#v, want it forgotten", s)
+	}
+	if len(result.Warnings) == 0 {
+		t.Fatal("unsettled ratings must be reported")
+	}
+}
+
 func TestSyncRatingsResendsARatingSetDuringARemoval(t *testing.T) {
 	h := newRatingHarness(t)
 	h.agree(ratingTestMovieA, 4, true)

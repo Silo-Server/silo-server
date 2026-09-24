@@ -32,6 +32,9 @@ import (
 
 const (
 	ratingExportBatchSize = 100
+	// maxRatingResends bounds how many times sendRatings resends ratings that
+	// changed while their write was in flight.
+	maxRatingResends = 3
 	// ratingCursorSegment marks provider cursor keys that belong to rating
 	// reads (for example "simkl.ratings.movies"), so they reset together with
 	// the agreed ratings when a connection moves to another provider account.
@@ -715,7 +718,7 @@ func (s *Service) reconcileRatings(
 	if err := s.repo.UpsertRatingSyncStates(ctx, upserts); err != nil {
 		return result, err
 	}
-	if err := s.repo.DeleteRatingSyncStates(ctx, conn.ID, deletes); err != nil {
+	if err := s.repo.DeleteRatingSyncStates(ctx, conn.ID, conn.ProviderAccountID, deletes); err != nil {
 		return result, err
 	}
 	if result.imported > 0 && s.ratingStaler != nil {
@@ -741,7 +744,7 @@ func (s *Service) reconcileRatings(
 		return result, err
 	}
 	result.warnings = append(result.warnings, deferred...)
-	sent, warnings, err := s.sendRatings(ctx, conn, cfg, exporter, sets, removals, true)
+	sent, warnings, err := s.sendRatings(ctx, conn, cfg, exporter, sets, removals, maxRatingResends)
 	result.sent = sent
 	result.warnings = append(result.warnings, warnings...)
 	return result, err
@@ -818,12 +821,14 @@ func (s *Service) gateRatingExports(ctx context.Context, conn Connection, provid
 // its agreed row: the next read either finds the title unrated, which clears
 // the row, or finds another provider entry still rated, which is removed in
 // turn instead of being imported back.
-func (s *Service) sendRatings(ctx context.Context, conn Connection, cfg ServerConfig, exporter RatingExporter, sets, removals []*ratingItem, followUp bool) (int, []string, error) {
+//
+// A rating changed while its write was in flight may have been sent by a
+// newer event already, which this older write has just overwritten on the
+// provider. The current value is sent again, up to resends more times, so the
+// provider ends on it.
+func (s *Service) sendRatings(ctx context.Context, conn Connection, cfg ServerConfig, exporter RatingExporter, sets, removals []*ratingItem, resends int) (int, []string, error) {
 	sent := 0
 	var warnings []string
-	// A rating changed while its write was in flight may have been sent by a
-	// newer event already, which this older write has just overwritten on the
-	// provider. The current value is sent once more so the provider ends on it.
 	var changedSets, changedRemovals []*ratingItem
 	for start := 0; start < len(sets); start += ratingExportBatchSize {
 		batch := sets[start:min(start+ratingExportBatchSize, len(sets))]
@@ -906,10 +911,26 @@ func (s *Service) sendRatings(ctx context.Context, conn Connection, cfg ServerCo
 			warnings = append(warnings, exportFailureReason(result, identity, "rating removal")+": "+identity.MediaItemID)
 		}
 	}
-	if followUp && (len(changedSets) > 0 || len(changedRemovals) > 0) {
-		more, moreWarnings, err := s.sendRatings(ctx, conn, cfg, exporter, changedSets, changedRemovals, false)
+	if len(changedSets) == 0 && len(changedRemovals) == 0 {
+		return sent, warnings, nil
+	}
+	if resends > 0 {
+		more, moreWarnings, err := s.sendRatings(ctx, conn, cfg, exporter, changedSets, changedRemovals, resends-1)
 		return sent + more, append(warnings, moreWarnings...), err
 	}
+	// The rating kept changing through every resend, so the provider may hold
+	// an older value than the agreed row says. Forgetting the agreed rows of
+	// rated items makes the next merge see both sides changed and keep the
+	// newer rating instead of importing the provider's. A removal keeps its
+	// row: the provider holding the agreed value then reads as a local change.
+	stale := make([]string, 0, len(changedSets))
+	for _, item := range changedSets {
+		stale = append(stale, item.identity.MediaItemID)
+	}
+	if err := s.repo.DeleteRatingSyncStates(ctx, conn.ID, conn.ProviderAccountID, stale); err != nil {
+		return sent, warnings, err
+	}
+	warnings = append(warnings, fmt.Sprintf("%d ratings changed while being sent and are left for the next sync", len(changedSets)+len(changedRemovals)))
 	return sent, warnings, nil
 }
 
