@@ -327,6 +327,35 @@ func TestFetchTraktPagesPacesReadsPerToken(t *testing.T) {
 	}
 }
 
+func TestFetchTraktPagesShareTheBudgetOfOneAccount(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		writeTraktFixture(t, w, `[]`)
+	}))
+	defer server.Close()
+	provider := NewProvider(server.Client(), server.URL)
+	provider.pages = watchsync.NewCredentialLimiter(time.Hour, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	// Two profiles linked to one Trakt account hold different tokens.
+	first := watchsync.Connection{AccessToken: "token-a", ProviderAccountID: "trakt-user"}
+	second := watchsync.Connection{AccessToken: "token-b", ProviderAccountID: "trakt-user"}
+	if _, err := fetchTraktPages[traktFavoriteMovie](ctx, provider, watchsync.ServerConfig{}, first, "/sync/watchlist/movies", nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err := fetchTraktPages[traktFavoriteMovie](ctx, provider, watchsync.ServerConfig{}, second, "/sync/watchlist/movies", nil)
+	if _, ok := watchsync.AsRateLimited(err); !ok || requests != 1 {
+		t.Fatalf("requests=%d err=%v, want the second token to wait on the account's budget", requests, err)
+	}
+	// Another account has its own budget.
+	other := watchsync.Connection{AccessToken: "token-c", ProviderAccountID: "other-user"}
+	if _, err := fetchTraktPages[traktFavoriteMovie](ctx, provider, watchsync.ServerConfig{}, other, "/sync/watchlist/movies", nil); err != nil {
+		t.Fatalf("another account: %v", err)
+	}
+}
+
 func TestTraktPageBudgetStaysUnderTheGETLimit(t *testing.T) {
 	// Trakt allows 500 authenticated GETs per five minutes.
 	if perWindow := pageBurst + int((5*time.Minute)/pageInterval); perWindow >= 500 {
