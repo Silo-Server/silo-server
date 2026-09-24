@@ -521,7 +521,7 @@ func (p *Provider) do(ctx context.Context, method string, path string, cfg watch
 	for attempt := 0; ; attempt++ {
 		if paced {
 			if err := p.writes.Wait(ctx, token); err != nil {
-				return fmt.Errorf("wait for simkl write limiter: %w", err)
+				return watchsync.LimiterWaitError(ctx, p.Key(), writeInterval, err)
 			}
 		}
 		wait, limited, err := p.doOnce(ctx, method, path, cfg, token, payload, out)

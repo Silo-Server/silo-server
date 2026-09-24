@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -255,8 +254,8 @@ func TestWriteLimiterPacesPerTokenAndLeavesReadsAlone(t *testing.T) {
 	// so the request never reaches the server. Without pacing it would.
 	deadline, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if err := provider.Start(deadline, rateLimitTestConfig, tokenA, rateLimitTestEvent); err == nil || !strings.Contains(err.Error(), "write limiter") {
-		t.Fatalf("second write for token-a = %v, want the write limiter to refuse it", err)
+	if _, limited := watchsync.AsRateLimited(provider.Start(deadline, rateLimitTestConfig, tokenA, rateLimitTestEvent)); !limited {
+		t.Fatal("second write for token-a must be deferred as rate limited, unsent")
 	}
 	if err := provider.Start(context.Background(), rateLimitTestConfig, watchsync.Connection{AccessToken: "token-b"}, rateLimitTestEvent); err != nil {
 		t.Fatalf("token-b must not wait behind token-a: %v", err)

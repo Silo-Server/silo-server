@@ -549,7 +549,7 @@ func (p *Provider) do(ctx context.Context, method string, path string, apiKey st
 	limiter := p.limiter(apiKey)
 	for attempt := 0; ; attempt++ {
 		if err := limiter.Wait(ctx); err != nil {
-			return fmt.Errorf("wait for mdblist rate limiter: %w", err)
+			return watchsync.LimiterWaitError(ctx, p.Key(), requestInterval, err)
 		}
 		retryAfter, err := p.doOnce(ctx, method, path, apiKey, payload, out)
 		if err == nil {
