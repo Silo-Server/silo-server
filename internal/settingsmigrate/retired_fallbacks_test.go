@@ -53,6 +53,11 @@ func TestPlanRetiredFallbackRejectsWhatTheContractCannotStore(t *testing.T) {
 	if _, err := p.PlanRetiredFallback("next_up_mode", "sideways"); err == nil {
 		t.Error("an unknown next-up mode planned a row; it is not a ui.next_up_mode member")
 	}
+	// The fallback compared the raw string exactly, so a padded member acted
+	// as the default and must not become the member.
+	if _, err := p.PlanRetiredFallback("next_up_mode", " separate\n"); err == nil {
+		t.Error("a padded next-up mode planned a row; the fallback treated it as the default")
+	}
 	if _, err := p.PlanRetiredFallback("ui_theme", "dark"); err == nil {
 		t.Error("a key with no retired fallback planned a row")
 	}

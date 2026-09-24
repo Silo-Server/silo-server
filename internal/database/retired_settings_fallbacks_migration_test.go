@@ -115,9 +115,9 @@ func retiredFallbackAccounts() []retiredFallbackAccount {
 
 		mode("separate", "separate", true),
 		mode("combined", "combined", true),
-		mode("with ASCII whitespace", " separate\n", true),
-		mode("with vertical tab, form feed, NEL and line separator", "\v\fseparate\u0085\u2028", true),
-		mode("with Unicode spaces", "\u00a0\u1680\u2000combined\u200a\u202f\u205f\u3000", true),
+		mode("with ASCII whitespace", " separate\n", false),
+		mode("with vertical tab, form feed, NEL and line separator", "\v\fseparate\u0085\u2028", false),
+		mode("with Unicode spaces", "\u00a0\u1680\u2000combined\u200a\u202f\u205f\u3000", false),
 		mode("empty", "", false),
 		mode("blank", " \t\u0085 ", false),
 		mode("unknown", "sideways", false),

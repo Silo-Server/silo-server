@@ -61,20 +61,16 @@ SELECT p.user_id, 'ui.disabled_library_ids', 'profile', p.id, planned.value
   JOIN user_profiles p ON p.user_id = planned.user_id
 ON CONFLICT (user_id, profile_id, key) WHERE scope = 'profile' DO NOTHING;
 
--- Next-up mode. The planner trims the value with Go's strings.TrimSpace, whose
--- Unicode White_Space set is the bracket expression below, and the contract
--- accepts only the two enum members, case-sensitively. Anything else has no
--- canonical form and resolves to combined, the default, as it did before.
+-- Next-up mode. The fallback returned the stored string unchanged and the
+-- section fetchers compared it exactly, so only an exact enum member ever took
+-- effect. Anything else, padded or not, behaved as combined, the default, and
+-- stays unset.
 INSERT INTO user_setting_values (user_id, key, scope, profile_id, value)
-SELECT p.user_id, 'ui.next_up_mode', 'profile', p.id, to_jsonb(legacy.mode)
-  FROM (
-        SELECT user_id,
-               substring(value FROM '^[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*(combined|separate)[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*$') AS mode
-          FROM user_settings
-         WHERE key = 'next_up_mode'
-       ) legacy
-  JOIN user_profiles p ON p.user_id = legacy.user_id
- WHERE legacy.mode IS NOT NULL
+SELECT p.user_id, 'ui.next_up_mode', 'profile', p.id, to_jsonb(s.value)
+  FROM user_settings s
+  JOIN user_profiles p ON p.user_id = s.user_id
+ WHERE s.key = 'next_up_mode'
+   AND s.value IN ('combined', 'separate')
 ON CONFLICT (user_id, profile_id, key) WHERE scope = 'profile' DO NOTHING;
 
 -- +goose Down

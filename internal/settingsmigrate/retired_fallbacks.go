@@ -3,6 +3,7 @@ package settingsmigrate
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Legacy account-wide keys that the server used to read at request time
@@ -66,6 +67,13 @@ func (p *Planner) planRetiredFallback(legacyKey, raw string) ([]RuntimeValue, er
 		}
 		return p.PlanRuntimeValue(legacyKey, string(encoded))
 	case legacyNextUpModeKey:
+		// The fallback returned the stored string unchanged and the section
+		// fetchers compared it exactly, so a padded member never took effect;
+		// it behaved as the default. Reject it before PlanRuntimeValue, which
+		// trims, would turn it into the member.
+		if strings.TrimSpace(raw) != raw {
+			return nil, fmt.Errorf("%s value %q is padded; the fallback treated it as the default", legacyKey, raw)
+		}
 		return p.PlanRuntimeValue(legacyKey, raw)
 	default:
 		return nil, fmt.Errorf("%s has no retired read-time fallback", legacyKey)
