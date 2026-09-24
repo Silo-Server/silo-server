@@ -3,6 +3,7 @@ import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { installPolicyStorageMocks, jsonResponse } from "./admin-policy/policyTestUtils";
@@ -31,13 +32,22 @@ const GROUP = {
   updated_at: "2026-07-02T12:00:00Z",
 };
 
-function renderPage() {
+function renderPage(initialPath = "/admin/access-groups") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const router = createMemoryRouter(
+    [
+      { path: "/admin", element: <p>Admin home</p> },
+      { path: "/admin/access-groups", element: <AdminAccessGroups /> },
+      { path: "/admin/access-groups/:id", element: <AdminAccessGroups /> },
+    ],
+    { initialEntries: ["/admin", initialPath], initialIndex: 1 },
+  );
+  render(
     <QueryClientProvider client={client}>
-      <AdminAccessGroups />
+      <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+  return router;
 }
 
 describe("AdminAccessGroups", () => {
@@ -116,6 +126,26 @@ describe("AdminAccessGroups", () => {
         is_default: true,
       });
     });
+  });
+
+  it("opens a group at its own URL so Back returns to the group list", async () => {
+    const router = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    expect(await screen.findByRole("button", { name: "All groups" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/admin/access-groups/1");
+
+    await router.navigate(-1);
+    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/admin/access-groups");
+    expect(screen.queryByRole("button", { name: "All groups" })).not.toBeInTheDocument();
+  });
+
+  it("opens the group editor when loaded from a group URL", async () => {
+    const router = renderPage("/admin/access-groups/1");
+    expect(await screen.findByLabelText("Name")).toHaveValue("Kids");
+    fireEvent.click(screen.getByRole("button", { name: "All groups" }));
+    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/admin/access-groups");
   });
 
   it("locks demotion and deletion for the default group", async () => {

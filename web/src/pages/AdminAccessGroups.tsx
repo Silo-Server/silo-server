@@ -1,5 +1,6 @@
 import { ArrowLeft, Plus, Trash2, UsersRound } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router";
 
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -77,6 +78,10 @@ function AccessGroupsPage() {
   const groups = useAccessGroups();
   const capabilities = useAccessGroupCapabilities();
   const available = capabilities.data?.access_groups === true;
+  // The open group lives in the URL (/admin/access-groups/:id) so Back returns
+  // to the list and a group link can be reloaded or shared.
+  const { id: selectedId } = useParams();
+  const navigate = useNavigate();
   const [selected, setSelected] = useState<GroupEditor | null>(null);
   const [authority] = useState(captureAccessGroupAuthority);
   const busy = useRef(false);
@@ -86,19 +91,30 @@ function AccessGroupsPage() {
   const [newName, setNewName] = useState("");
   const createGroup = useCreateAccessGroup();
 
-  async function select(id: number) {
-    if (busy.current || !available) return;
-    busy.current = true;
+  useEffect(() => {
+    setSelected(null);
+    if (!selectedId || !available) return;
+    let cancelled = false;
     setLoading(true);
     setError("");
-    try {
-      setSelected(await getAccessGroup(id, authority));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load group.");
-    } finally {
-      busy.current = false;
-      setLoading(false);
-    }
+    getAccessGroup(Number(selectedId), authority)
+      .then((editor) => {
+        if (!cancelled) setSelected(editor);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load group.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, available, authority]);
+
+  function select(id: number | string) {
+    if (!available) return;
+    navigate(`/admin/access-groups/${id}`);
   }
   async function create() {
     const name = newName.trim();
@@ -109,7 +125,7 @@ function AccessGroupsPage() {
       const group = await createGroup.mutateAsync({ body: { name }, profileContext: authority });
       setNewName("");
       setCreating(false);
-      setSelected(await getAccessGroup(group.id, authority));
+      select(group.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create group.");
     } finally {
@@ -125,7 +141,7 @@ function AccessGroupsPage() {
           variant="ghost"
           size="sm"
           className="text-muted-foreground -ml-2 w-fit"
-          onClick={() => setSelected(null)}
+          onClick={() => navigate("/admin/access-groups")}
         >
           <ArrowLeft className="size-4" />
           All groups
@@ -133,7 +149,7 @@ function AccessGroupsPage() {
         <AccessGroupEditor
           key={selected.group.id}
           initialEditor={selected}
-          onDeleted={() => setSelected(null)}
+          onDeleted={() => navigate("/admin/access-groups", { replace: true })}
         />
       </div>
     );
@@ -215,7 +231,7 @@ function AccessGroupsPage() {
       {groups.data && groups.data.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {groups.data.map((group) => (
-            <AccessGroupCard key={group.id} group={group} onClick={() => void select(group.id)} />
+            <AccessGroupCard key={group.id} group={group} onClick={() => select(group.id)} />
           ))}
         </div>
       )}
