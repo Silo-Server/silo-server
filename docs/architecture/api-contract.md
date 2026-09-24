@@ -1859,10 +1859,10 @@ web settings page displays the delay. No watch-provider consumers were found in
 the Apple and Android source inventory.
 
 Rating sync settings (`import_ratings_enabled`, `export_ratings_enabled`) and the
-rating run counters exist only on v2. The frozen v1 connection and run responses omit
-them, and a v1 settings update ignores them. The `import_ratings` and `export_ratings`
-capability flags are the exception: v1 and v2 share the capabilities object, so v1
-responses gain those two additive fields. See
+rating run counters exist only on v2, as do the `import_ratings` and `export_ratings`
+capability flags, which v2 projects through its own `WatchProviderCapabilities` type. The
+frozen v1 provider, connection, and run responses omit all of them, and a v1 settings
+update ignores the toggles. See
 [watch-provider-rating-sync.md](watch-provider-rating-sync.md) for the sync rules.
 
 ### Webhook connection management

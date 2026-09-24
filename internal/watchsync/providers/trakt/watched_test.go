@@ -57,7 +57,7 @@ func TestFetchWatchedImportsEveryPageAndEpisodeProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantRequests := []string{"movies:1", "movies:2", "movies:3", "shows:1", "shows:2", "shows:3"}
+	wantRequests := []string{"movies:1", "movies:2", "movies:3", "movies:1", "movies:2", "movies:3", "shows:1", "shows:2", "shows:3", "shows:1", "shows:2", "shows:3"}
 	if !reflect.DeepEqual(requests, wantRequests) {
 		t.Fatalf("requests = %v, want %v", requests, wantRequests)
 	}
