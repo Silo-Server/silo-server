@@ -364,13 +364,33 @@ retained `/api/v1/ready` contract, which previously answered 503 on an S3
 
 Local URLs use an HMAC derived from the JWT secret and the fixed domain
 `silo-artwork-url-v1`. The signature covers `artwork-v1`, the logical key, and
-the expiry. URLs stay stable within issuance buckets of 15 minutes, reduced to
-the TTL for shorter URLs. Their remaining lifetime is at least the configured
-TTL, with up to one bucket added. Invalid or expired capabilities return 404 so
-the route does not reveal whether a key exists.
-Revisioned URLs are cacheable for their remaining lifetime and marked immutable;
-mutable uploads use private caching. S3 installations continue to use direct
-presigned or public URLs.
+the expiry. Invalid or expired capabilities return 404 so the route does not
+reveal whether a key exists.
+
+For artwork, the path is the identity and the query is the authorization.
+Clients and CDNs cache images by full URL, so a new URL for unchanged bytes
+costs a download the client already has. A revisioned key names immutable bytes,
+so at the default lifetime (`s3.metadata_presign_expiry`) its URL stays the same
+for a UTC day on every replica and is valid for at least the TTL. A leaked
+revisioned URL therefore works for up to a day plus the TTL.
+
+Every other URL is stable within a 15-minute issuance bucket, or a bucket as
+long as the TTL when that is shorter, and is valid for at least its TTL and at
+most one bucket longer. A mutable key, such as a library poster or collection
+image replaced in place, must get a new URL soon after its bytes change. A
+capability requested for less than the default, such as an avatar or a chapter
+thumbnail, keeps its extra lifetime within its own TTL. Revisioned responses are
+cacheable for the URL's remaining lifetime and marked immutable; mutable keys
+use private caching and revalidate with the ETag.
+
+S3 installations use direct presigned or public URLs. A revisioned key's
+presigned URL at the default lifetime is signed at the start of its UTC day and
+expires a day plus the TTL later, so every replica mints the same URL. A TTL
+near the SigV4 seven-day limit shortens that window rather than the TTL. The
+Cloudflare WAF rule fixes a token's lifetime from its timestamp, so token
+timestamps are truncated to a quarter of the token TTL instead, which leaves
+each URL valid for at least three quarters of it. Other presigned and token
+URLs are issued fresh on every resolve, and public URLs never change.
 
 Local storage publishes each object with an atomic rename, and direct S3 reads
 see an object as soon as its upload returns, so catalog responses resolve the

@@ -104,7 +104,7 @@ func resolveProfileAvatar(ctx context.Context, store profileAvatarStore, ttl tim
 			presignTTL = 15 * time.Minute
 		}
 		if direct, ok := store.(blobstore.DirectURLer); ok {
-			if resolved, err := direct.DirectURL(ctx, displayKey, presignTTL); err == nil && resolved != "" {
+			if resolved, _, err := direct.DirectURL(ctx, displayKey, presignTTL, 0); err == nil && resolved != "" {
 				return "upload", resolved
 			}
 			return "upload", ""

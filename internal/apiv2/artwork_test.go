@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -70,7 +71,8 @@ func TestArtworkRejectsInvalidSignaturesBeforeStorage(t *testing.T) {
 	store := &artworkReadFailure{}
 	h := NewHandler(Dependencies{ArtworkStore: store, ArtworkSigner: signer})
 	valid, _ := signer.Sign("nested/original.rev.webp", time.Now())
-	expired, _ := signer.Sign("nested/original.rev.webp", time.Now().Add(-2*time.Hour))
+	// A revisioned URL holds for a UTC day plus the TTL.
+	expired, _ := signer.Sign("nested/original.rev.webp", time.Now().Add(-26*time.Hour))
 	traversal, _ := signer.Sign("nested/../original.rev.webp", time.Now())
 	for name, u := range map[string]string{
 		"missing query":     Prefix + "/artwork/nested/original.rev.webp",
@@ -147,6 +149,31 @@ func TestArtworkMutableCachePolicy(t *testing.T) {
 	cache := got.Header().Get("Cache-Control")
 	if got.Code != http.StatusOK || cache != "private, no-cache" {
 		t.Fatalf("status = %d, cache = %q", got.Code, cache)
+	}
+}
+
+// A revisioned URL holds for its UTC day, so its bytes may stay cached until
+// the URL expires.
+func TestArtworkRevisionedCachePolicy(t *testing.T) {
+	store, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "nested/w500.rev.webp"
+	if err := store.Put(t.Context(), key, []byte("image")); err != nil {
+		t.Fatal(err)
+	}
+	signer := artworkurl.NewSigner("test-secret", time.Hour)
+	h := NewHandler(Dependencies{ArtworkStore: store, ArtworkSigner: signer})
+	u, expires := signer.Sign(key, time.Now())
+	got := do(t, h, http.MethodGet, u, "", nil)
+	var maxAge int64
+	cache := got.Header().Get("Cache-Control")
+	if _, err := fmt.Sscanf(cache, "private, max-age=%d, immutable", &maxAge); err != nil || got.Code != http.StatusOK {
+		t.Fatalf("status = %d, cache = %q", got.Code, cache)
+	}
+	if remaining := int64(time.Until(expires).Seconds()); maxAge < 3600 || maxAge > remaining+1 {
+		t.Fatalf("max-age = %d, URL remaining lifetime = %ds", maxAge, remaining)
 	}
 }
 

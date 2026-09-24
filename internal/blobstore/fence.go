@@ -107,8 +107,8 @@ type fencedDirectStore struct {
 	direct DirectURLer
 }
 
-func (s *fencedDirectStore) DirectURL(ctx context.Context, key string, ttl time.Duration) (string, error) {
-	return s.direct.DirectURL(ctx, key, ttl)
+func (s *fencedDirectStore) DirectURL(ctx context.Context, key string, ttl, window time.Duration) (string, time.Time, error) {
+	return s.direct.DirectURL(ctx, key, ttl, window)
 }
 
 // WithMutationFence wraps a store once and preserves optional direct delivery.
