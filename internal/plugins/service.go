@@ -784,7 +784,7 @@ func (s *Service) RouteDescriptors(ctx context.Context, installationID int) ([]*
 }
 
 func (s *Service) ResolveAssetPath(ctx context.Context, installationID int, assetPath string) (string, error) {
-	installation, manifest, err := s.ensureInstallationCache(ctx, installationID, true)
+	installation, manifest, err := s.installedManifest(ctx, installationID, true)
 	if err != nil {
 		return "", err
 	}
@@ -915,10 +915,12 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowR
 }
 
 func (s *Service) manifestForInstallation(ctx context.Context, installationID int, requireEnabled bool) (*pluginv1.PluginManifest, error) {
-	_, manifest, err := s.ensureInstallationCache(ctx, installationID, requireEnabled)
+	_, manifest, err := s.installedManifest(ctx, installationID, requireEnabled)
 	return manifest, err
 }
 
+// ensureInstallationCache loads the installation and fully verifies its
+// files. Callers that are about to execute the binary use it.
 func (s *Service) ensureInstallationCache(
 	ctx context.Context,
 	installationID int,
@@ -929,6 +931,24 @@ func (s *Service) ensureInstallationCache(
 		return nil, nil, err
 	}
 	manifest, err := s.ensureLoadedInstallation(ctx, installation)
+	if err != nil {
+		return nil, nil, err
+	}
+	return installation, manifest, nil
+}
+
+// installedManifest is ensureInstallationCache for callers that only read the
+// manifest or serve packaged assets; see ArchiveCache.Manifest.
+func (s *Service) installedManifest(
+	ctx context.Context,
+	installationID int,
+	requireEnabled bool,
+) (*Installation, *pluginv1.PluginManifest, error) {
+	installation, err := s.loadInstallation(ctx, installationID, requireEnabled)
+	if err != nil {
+		return nil, nil, err
+	}
+	manifest, err := s.readInstalledManifest(ctx, installation)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1029,6 +1049,8 @@ func (s *Service) InstallationKind(ctx context.Context, installationID int) (str
 	return installation.Kind, nil
 }
 
+// ensureLoadedInstallation makes the installation's files present, hashes the
+// binary against the manifest, and returns the manifest.
 func (s *Service) ensureLoadedInstallation(
 	ctx context.Context,
 	installation *Installation,
@@ -1037,6 +1059,19 @@ func (s *Service) ensureLoadedInstallation(
 		return LoadManifestFile(InstalledManifestPath(installation.InstallPath))
 	}
 	return s.archiveCache.Ensure(ctx, installation)
+}
+
+// readInstalledManifest is ensureLoadedInstallation without re-hashing a
+// binary this process already verified and has not seen change. Only callers
+// that never execute the binary may use it.
+func (s *Service) readInstalledManifest(
+	ctx context.Context,
+	installation *Installation,
+) (*pluginv1.PluginManifest, error) {
+	if s.archiveCache == nil {
+		return LoadManifestFile(InstalledManifestPath(installation.InstallPath))
+	}
+	return s.archiveCache.Manifest(ctx, installation)
 }
 
 func (s *Service) globalConfigEntries(ctx context.Context, installationID int) ([]*pluginv1.ConfigEntry, error) {
