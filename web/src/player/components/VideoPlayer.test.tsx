@@ -308,7 +308,7 @@ describe("VideoPlayer room catch-up", () => {
     return { ...rendered, connection, video, command, onReanchorSeek };
   }
 
-  it("pauses displaced playback and offers an explicit room rejoin", () => {
+  it("pauses displaced playback and offers an explicit room rejoin", async () => {
     const { connection, video, rerenderPlayer } = setup(100);
     vi.mocked(video.pause).mockClear();
     rerenderPlayer({
@@ -318,6 +318,7 @@ describe("VideoPlayer room catch-up", () => {
         replacementReason: "This profile joined the Watch Party on another device.",
       },
     });
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
     expect(video.pause).toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "This profile joined the Watch Party on another device.",
@@ -373,6 +374,17 @@ describe("VideoPlayer room catch-up", () => {
       await act(() => vi.advanceTimersByTimeAsync(8_000));
       expect(screen.queryByText("Only the host can seek the room.")).toBeNull();
     }
+  });
+
+  it("keeps a notice raised while minimized until the player is shown again", async () => {
+    const { rerenderPlayer } = setup(100);
+    rerenderPlayer({ displayMode: "detached" });
+    act(() => controls.current!.onSeek(50));
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    rerenderPlayer({ displayMode: "foreground" });
+    expect(screen.getByText("Only the host can seek the room.")).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(8_000));
+    expect(screen.queryByText("Only the host can seek the room.")).toBeNull();
   });
 
   it("keeps displaced playback stopped on a late lobby read and leaves through the hub", async () => {

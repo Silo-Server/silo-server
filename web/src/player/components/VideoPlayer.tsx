@@ -785,15 +785,16 @@ export function VideoPlayer({
   ]);
 
   // Expire the notice from state rather than only hiding it, so the next
-  // identical notice renders again.
+  // identical notice renders again. A minimized player keeps it until the
+  // viewer can see it.
   useEffect(() => {
-    if (!notice) return;
+    if (!notice || isDetached) return;
     const timer = setTimeout(
       () => setNotice((current) => (current === notice ? null : current)),
       PLAYBACK_NOTICE_VISIBLE_MS,
     );
     return () => clearTimeout(timer);
-  }, [notice]);
+  }, [isDetached, notice]);
 
   useEffect(() => {
     compatibilityFallbackKeyRef.current = null;
