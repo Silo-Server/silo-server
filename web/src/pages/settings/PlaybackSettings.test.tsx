@@ -198,6 +198,51 @@ describe("PlaybackSettings", () => {
     }
   });
 
+  it.each(["pending", "error", "refetch error"] as const)(
+    "blocks theme writes while effective settings are %s and recovers after loading",
+    async (state) => {
+      mocks.capabilities = capabilitiesAtRevision(10);
+      const values = {
+        ...resolved(SETTING_KEYS.UI_THEME_MUSIC_ENABLED, true, "profile"),
+        ...resolved(SETTING_KEYS.UI_THEME_MUSIC_LOOP, true, "profile"),
+      };
+      mocks.useEffectiveSettings.mockReturnValue({
+        data: state === "refetch error" ? values : undefined,
+        isPending: state === "pending",
+        isError: state !== "pending",
+      });
+      const { rerender } = render(<PlaybackSettings />);
+      const enabled = screen.getByRole("switch", { name: "Theme music" });
+      const loop = screen.getByRole("switch", { name: "Loop theme music" });
+      expect(enabled).toBeDisabled();
+      expect(loop).toBeDisabled();
+      await userEvent.click(enabled);
+      await userEvent.click(loop);
+      expect(mutateAsync).not.toHaveBeenCalled();
+      expect(clearMutateAsync).not.toHaveBeenCalled();
+
+      mocks.useEffectiveSettings.mockReturnValue({
+        data: values,
+        isPending: false,
+        isError: false,
+      });
+      rerender(<PlaybackSettings />);
+      expect(enabled).toBeEnabled();
+      expect(loop).toBeEnabled();
+      expect(enabled).toBeChecked();
+      expect(loop).toBeChecked();
+      await userEvent.click(enabled);
+      await userEvent.click(loop);
+      for (const key of [SETTING_KEYS.UI_THEME_MUSIC_ENABLED, SETTING_KEYS.UI_THEME_MUSIC_LOOP]) {
+        expect(mutateAsync).toHaveBeenCalledWith({
+          key,
+          value: false,
+          identity: { scope: "profile" },
+        });
+      }
+    },
+  );
+
   it("renders without a profile record, reading every value from the contract", () => {
     // The screen used to require the cached profile object and read its
     // preference columns; it now resolves them, so it renders from the

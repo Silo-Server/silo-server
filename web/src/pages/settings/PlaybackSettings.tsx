@@ -446,7 +446,11 @@ export default function PlaybackSettings() {
     ],
     [supportsIntroSkipMode, supportsThemeMusic, supportsThemeMusicLoop],
   );
-  const { data: effective } = useEffectiveSettings({ keys: playbackKeys });
+  const {
+    data: effective,
+    isPending: effectivePending,
+    isError: effectiveError,
+  } = useEffectiveSettings({ keys: playbackKeys });
   const {
     save: saveProfileDefault,
     reset: resetProfileDefault,
@@ -527,7 +531,7 @@ export default function PlaybackSettings() {
               <Switch
                 id={id}
                 checked={read<boolean>(SETTING_KEYS.UI_THEME_MUSIC_ENABLED)}
-                disabled={pending}
+                disabled={pending || effectivePending || effectiveError}
                 onCheckedChange={(value) => saveValue(SETTING_KEYS.UI_THEME_MUSIC_ENABLED, value)}
               />
             )}
@@ -542,7 +546,7 @@ export default function PlaybackSettings() {
               <Switch
                 id={id}
                 checked={read<boolean>(SETTING_KEYS.UI_THEME_MUSIC_LOOP)}
-                disabled={pending}
+                disabled={pending || effectivePending || effectiveError}
                 onCheckedChange={(value) => saveValue(SETTING_KEYS.UI_THEME_MUSIC_LOOP, value)}
               />
             )}
