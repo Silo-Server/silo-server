@@ -127,3 +127,65 @@ func TestFetchMetadataByKeyResumesAfterRecoveredFailure(t *testing.T) {
 		t.Errorf("sweep.items = %d, want %d", len(sweep.items), want)
 	}
 }
+
+// A 404 batch means the server answered, so it breaks the run of failures. A
+// server alternating 500 and 404 is reachable and resolving keys per retry, and
+// must not be given up on.
+func TestFetchMetadataByKeyTreats404AsAnAnswer(t *testing.T) {
+	var mu sync.Mutex
+	batches := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		keys := requestedKeys(r.URL.Path)
+		if len(keys) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"MediaContainer":{"Metadata":[{"ratingKey":%q,"type":"movie","title":"Movie"}]}}`, keys[0])
+			return
+		}
+		mu.Lock()
+		even := batches%2 == 0
+		batches++
+		mu.Unlock()
+		if even {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client := &PlexClient{httpClient: server.Client()}
+	keys := metadataKeys(plexMetadataBatchSize * 8)
+	sweep, err := client.fetchMetadataByKey(t.Context(), server.URL, "token", keys)
+	if err != nil {
+		t.Fatalf("fetchMetadataByKey: %v", err)
+	}
+	if sweep.aborted {
+		t.Error("sweep.aborted = true, want false — a 404 batch is not a consecutive failure")
+	}
+	// Every 404 batch resolves its keys one at a time; the 500 batches resolve none.
+	if want := len(keys) / 2; len(sweep.items) != want {
+		t.Errorf("sweep.items = %d, want %d", len(sweep.items), want)
+	}
+}
+
+// Giving up on the final batch left no key unasked, so the run must not claim the
+// lookup stopped early.
+func TestFetchMetadataByKeyDoesNotReportAnEarlyStopOnTheLastBatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := &PlexClient{httpClient: server.Client()}
+	keys := metadataKeys(plexMetadataBatchSize * plexMetadataFailureStreakLimit)
+	sweep, err := client.fetchMetadataByKey(t.Context(), server.URL, "token", keys)
+	if err != nil {
+		t.Fatalf("fetchMetadataByKey: %v", err)
+	}
+	if sweep.aborted {
+		t.Error("sweep.aborted = true, want false — every key was attempted")
+	}
+	if sweep.firstErr == nil {
+		t.Error("sweep.firstErr = nil, want the failures still reported")
+	}
+}

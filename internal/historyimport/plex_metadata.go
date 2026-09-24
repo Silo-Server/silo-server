@@ -59,14 +59,21 @@ func (c *PlexClient) fetchMetadataByKey(ctx context.Context, baseURL, token stri
 		if !isPlexHTTPStatus(err, http.StatusNotFound) {
 			failureStreak++
 			if failureStreak >= plexMetadataFailureStreakLimit {
-				sweep.aborted = true
-				slog.WarnContext(ctx, "plex history import: giving up on item metadata after repeated failures",
-					"component", "historyimport", "consecutive_failures", failureStreak,
-					"resolved", len(sweep.items), "requested", len(pending), "error", err)
+				// Only an early stop that left keys unasked is worth reporting as
+				// one; the same streak ending on the last batch skipped nothing.
+				sweep.aborted = start+plexMetadataBatchSize < len(pending)
+				if sweep.aborted {
+					slog.WarnContext(ctx, "plex history import: giving up on item metadata after repeated failures",
+						"component", "historyimport", "consecutive_failures", failureStreak,
+						"resolved", len(sweep.items), "requested", len(pending), "error", err)
+				}
 				return sweep, nil
 			}
 			continue
 		}
+		// A 404 means the server answered, so it breaks the run of failures even
+		// though the keys it named are gone.
+		failureStreak = 0
 		if len(batch) == 1 {
 			continue
 		}
