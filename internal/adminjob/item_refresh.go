@@ -20,6 +20,8 @@ import (
 
 const (
 	JobTypeItemRefresh    = "item_refresh"
+	itemRefreshTypeSeries = "series"
+	itemRefreshTargetItem = "item"
 	ScanScopeMovieParent  = "movie_parent"
 	ScanScopeSeriesRoot   = "series_root"
 	ScanScopeSeasonFolder = "season_folder"
@@ -164,14 +166,14 @@ func (r *ItemRefreshResolver) resolve(ctx context.Context, contentID string, lib
 		if err != nil {
 			return nil, err
 		}
-		if item.Type != "movie" && item.Type != "series" {
+		if item.Type != "movie" && item.Type != itemRefreshTypeSeries {
 			return nil, &ScopeResolutionError{StatusCode: 400, Message: "Certification refresh supports movies and series"}
 		}
 		return &ItemRefreshRequest{RequestedContentID: item.ContentID, RequestedType: item.Type,
-			RefreshContentID: item.ContentID, RefreshTargetType: "item", Mode: mode}, nil
+			RefreshContentID: item.ContentID, RefreshTargetType: itemRefreshTargetItem, Mode: mode}, nil
 	}
 	if item, err := r.itemRepo.GetByID(ctx, contentID); err == nil {
-		if item.Type == "series" {
+		if item.Type == itemRefreshTypeSeries {
 			return r.resolveSeries(ctx, item, libraryID, mode)
 		}
 		return r.resolveMovie(ctx, item, libraryID, mode)
@@ -210,7 +212,7 @@ func (r *ItemRefreshResolver) resolveMovie(ctx context.Context, item *models.Med
 	req := &ItemRefreshRequest{
 		RequestedContentID: item.ContentID,
 		RequestedType:      item.Type,
-		RefreshTargetType:  "item",
+		RefreshTargetType:  itemRefreshTargetItem,
 		RefreshContentID:   item.ContentID,
 		ScanScope:          ScanScopeMovieParent,
 		Mode:               mode,
@@ -229,7 +231,7 @@ func (r *ItemRefreshResolver) resolveSeries(ctx context.Context, item *models.Me
 	req := &ItemRefreshRequest{
 		RequestedContentID: item.ContentID,
 		RequestedType:      item.Type,
-		RefreshTargetType:  "item",
+		RefreshTargetType:  itemRefreshTargetItem,
 		RefreshContentID:   item.ContentID,
 		ScanScope:          ScanScopeSeriesRoot,
 		Mode:               mode,
@@ -368,7 +370,7 @@ func shouldRefreshSeriesCanonicalRoot(folder *models.MediaFolder, file *models.M
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(folder.Type)) {
-	case "series", "tv", "show", "tvshows":
+	case itemRefreshTypeSeries, "tv", "show", "tvshows":
 		return true
 	default:
 		return false
@@ -594,7 +596,7 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 		case "season", "episode":
 			refreshTargetType = req.RequestedType
 		default:
-			refreshTargetType = "item"
+			refreshTargetType = itemRefreshTargetItem
 		}
 	}
 	if err := e.refresher.RefreshTargetForLibrary(ctx, refreshTargetType, refreshContentID, req.ScanFolderID); err != nil {

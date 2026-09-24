@@ -29,9 +29,7 @@ export default function RefreshMetadataDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Refresh Metadata</DialogTitle>
-          <DialogDescription>
-            Choose what to refresh for this title.
-          </DialogDescription>
+          <DialogDescription>Choose what to refresh for this title.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
