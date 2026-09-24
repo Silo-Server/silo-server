@@ -977,16 +977,6 @@ func collectOrphanIDs(ctx context.Context, tx pgx.Tx, contentIDs []string) ([]st
 	return ids, rows.Err()
 }
 
-// collectImageDirs returns S3 directory prefixes for images belonging to the
-// given content IDs that are not still referenced by other surviving content.
-func collectImageDirs(ctx context.Context, q rowQuerier, contentIDs []string) ([]string, error) {
-	dirs, err := collectRawImageDirs(ctx, q, contentIDs)
-	if err != nil {
-		return nil, err
-	}
-	return filterUnreferencedImageDirs(ctx, q, dirs, contentIDs)
-}
-
 // collectRawImageDirs returns the deduped S3 directory prefixes referenced by
 // the given content IDs (items, their seasons, and their episodes), without
 // filtering out dirs still used by other content.
