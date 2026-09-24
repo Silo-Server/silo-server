@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -175,8 +174,8 @@ func TestWriteLimiterPacesPerTokenAndLeavesReadsAlone(t *testing.T) {
 	// so the request never reaches the server. Without pacing it would.
 	deadline, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if err := provider.Start(deadline, rateLimitTestConfig, tokenA, event); err == nil || !strings.Contains(err.Error(), "write limiter") {
-		t.Fatalf("second write for token-a = %v, want the write limiter to refuse it", err)
+	if _, limited := watchsync.AsRateLimited(provider.Start(deadline, rateLimitTestConfig, tokenA, event)); !limited {
+		t.Fatal("second write for token-a must be deferred as rate limited, unsent")
 	}
 	if err := provider.Start(context.Background(), rateLimitTestConfig, watchsync.Connection{AccessToken: "token-b"}, event); err != nil {
 		t.Fatalf("token-b must not wait behind token-a: %v", err)
@@ -192,5 +191,18 @@ func TestWriteLimiterPacesPerTokenAndLeavesReadsAlone(t *testing.T) {
 	}
 	if reads.Load() != 3 {
 		t.Fatalf("server saw %d reads, want 3", reads.Load())
+	}
+}
+
+func TestStartDeviceAuthReportsRateLimits(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+	_, err := NewProvider(server.Client(), server.URL).StartDeviceAuth(context.Background(), rateLimitTestConfig)
+	limited, ok := watchsync.AsRateLimited(err)
+	if !ok || limited.RetryAfter != 30*time.Second {
+		t.Fatalf("err = %v, want a 30s RateLimitedError", err)
 	}
 }

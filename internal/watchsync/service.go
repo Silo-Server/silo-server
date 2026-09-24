@@ -608,12 +608,10 @@ func (s *Service) persistConnection(
 			ImportRatingsEnabled:      true,
 			ExportRatingsEnabled:      true,
 		}
-	} else if conn.ProviderAccountID != "" && account.ID != "" && account.ID != conn.ProviderAccountID {
-		// The agreed ratings describe the previous account. Keeping them would
-		// read every rating missing from the new account as a removal.
-		if err := s.repo.ClearRatingSyncStates(ctx, conn.ID); err != nil {
-			return Connection{}, err
-		}
+	}
+	rebound := ok && conn.ProviderAccountID != "" && account.ID != "" && account.ID != conn.ProviderAccountID
+	if rebound {
+		// Rating read cursors belong to the previous account.
 		conn.SyncCursors = withoutRatingCursors(conn.SyncCursors)
 	}
 	conn.Provider = providerKey
@@ -624,7 +622,17 @@ func (s *Service) persistConnection(
 	conn.ProviderUsername = account.Username
 	conn.LastError = ""
 
-	return s.repo.UpsertConnection(ctx, conn)
+	saved, err := s.repo.UpsertConnection(ctx, conn)
+	if err != nil || !rebound {
+		return saved, err
+	}
+	// Agreed ratings are scoped to their account, so the previous account's
+	// rows are already ignored; dropping them only after the new binding is
+	// saved means a failed save never leaves the old account without them.
+	if err := s.repo.ClearRatingSyncStates(ctx, saved.ID, saved.ProviderAccountID); err != nil {
+		slog.WarnContext(ctx, "failed to clear agreed ratings of a previous provider account", "component", "watchsync", "provider", providerKey, "connection_id", saved.ID, "error", err)
+	}
+	return saved, nil
 }
 
 func (s *Service) SyncDueConnections(ctx context.Context) error {

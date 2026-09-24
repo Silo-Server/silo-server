@@ -51,6 +51,21 @@ func SleepContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// LimiterWaitError classifies a failed local limiter wait. A canceled context
+// is returned as is. Otherwise the limiter refused because the next slot lies
+// past the context deadline: the request was never sent, so it is reported as
+// a RateLimitedError, which leaves the caller's work pending for a later run
+// instead of failing it.
+func LimiterWaitError(ctx context.Context, provider string, retryAfter time.Duration, err error) error {
+	if err == nil {
+		return nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	return RateLimitedError{Provider: provider, RetryAfter: retryAfter}
+}
+
 // credentialLimiterIdleTTL is how long a credential's limiter may sit unused
 // before it becomes eligible for removal.
 const credentialLimiterIdleTTL = 10 * time.Minute

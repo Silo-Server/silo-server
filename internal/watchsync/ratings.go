@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"strings"
 	"time"
 
@@ -275,22 +274,24 @@ func (s *Service) saveRatingCursors(ctx context.Context, conn Connection, update
 	if fresh.ProviderAccountID != conn.ProviderAccountID {
 		return nil
 	}
-	cursors := fresh.SyncCursors
-	if importAllowed && cursors[ratingImportCursorKey] == "" {
-		cursors = withoutRatingCursors(cursors)
+	var remove []string
+	if importAllowed && fresh.SyncCursors[ratingImportCursorKey] == "" {
+		for key := range fresh.SyncCursors {
+			if strings.Contains(key, ratingCursorSegment) {
+				remove = append(remove, key)
+			}
+		}
 	}
-	cursors = mergeSyncCursors(cursors, updated)
+	set := mergeSyncCursors(nil, updated)
 	if importAllowed {
-		cursors[ratingImportCursorKey] = "1"
+		set[ratingImportCursorKey] = "1"
 	} else {
-		delete(cursors, ratingImportCursorKey)
+		remove = append(remove, ratingImportCursorKey)
 	}
-	if maps.Equal(cursors, fresh.SyncCursors) {
-		return nil
-	}
-	fresh.SyncCursors = cursors
-	_, err = s.repo.UpsertConnection(ctx, fresh)
-	return err
+	// Only the rating cursor keys change, and only while the connection is
+	// still bound to this account: a full-row write from this snapshot could
+	// otherwise restore the old account over a rebind made meanwhile.
+	return s.repo.UpdateRatingCursors(ctx, conn.ID, conn.ProviderAccountID, remove, set)
 }
 
 // HandleLocalRatingEvent sends a profile's rating changes to the providers
@@ -740,7 +741,7 @@ func (s *Service) reconcileRatings(
 		return result, err
 	}
 	result.warnings = append(result.warnings, deferred...)
-	sent, warnings, err := s.sendRatings(ctx, conn, cfg, exporter, sets, removals)
+	sent, warnings, err := s.sendRatings(ctx, conn, cfg, exporter, sets, removals, true)
 	result.sent = sent
 	result.warnings = append(result.warnings, warnings...)
 	return result, err
@@ -817,9 +818,13 @@ func (s *Service) gateRatingExports(ctx context.Context, conn Connection, provid
 // its agreed row: the next read either finds the title unrated, which clears
 // the row, or finds another provider entry still rated, which is removed in
 // turn instead of being imported back.
-func (s *Service) sendRatings(ctx context.Context, conn Connection, cfg ServerConfig, exporter RatingExporter, sets, removals []*ratingItem) (int, []string, error) {
+func (s *Service) sendRatings(ctx context.Context, conn Connection, cfg ServerConfig, exporter RatingExporter, sets, removals []*ratingItem, followUp bool) (int, []string, error) {
 	sent := 0
 	var warnings []string
+	// A rating changed while its write was in flight may have been sent by a
+	// newer event already, which this older write has just overwritten on the
+	// provider. The current value is sent once more so the provider ends on it.
+	var changedSets, changedRemovals []*ratingItem
 	for start := 0; start < len(sets); start += ratingExportBatchSize {
 		batch := sets[start:min(start+ratingExportBatchSize, len(sets))]
 		payload := make([]LocalRating, 0, len(batch))
@@ -847,6 +852,16 @@ func (s *Service) sendRatings(ctx context.Context, conn Connection, cfg ServerCo
 				return sent, warnings, err
 			}
 			if current == nil || current.Rating != item.local {
+				changed := *item
+				changed.local, changed.localAt = 0, time.Time{}
+				if current != nil {
+					changed.local, changed.localAt = current.Rating, current.RatedAt
+				}
+				if changed.local > 0 {
+					changedSets = append(changedSets, &changed)
+				} else {
+					changedRemovals = append(changedRemovals, &changed)
+				}
 				continue
 			}
 			states = append(states, RatingSyncState{
@@ -877,10 +892,23 @@ func (s *Service) sendRatings(ctx context.Context, conn Connection, cfg ServerCo
 			// A provider that no longer knows the title has no rating to clear.
 			if confirmed, missing := exportItemOutcome(result, identity.MediaItemID, identity.ProviderItemKey); confirmed || missing {
 				sent++
+				current, err := s.ratings.Get(ctx, conn.UserID, conn.ProfileID, identity.MediaItemID)
+				if err != nil {
+					return sent, warnings, err
+				}
+				if current != nil {
+					changed := *item
+					changed.local, changed.localAt = current.Rating, current.RatedAt
+					changedSets = append(changedSets, &changed)
+				}
 				continue
 			}
 			warnings = append(warnings, exportFailureReason(result, identity, "rating removal")+": "+identity.MediaItemID)
 		}
+	}
+	if followUp && (len(changedSets) > 0 || len(changedRemovals) > 0) {
+		more, moreWarnings, err := s.sendRatings(ctx, conn, cfg, exporter, changedSets, changedRemovals, false)
+		return sent + more, append(warnings, moreWarnings...), err
 	}
 	return sent, warnings, nil
 }

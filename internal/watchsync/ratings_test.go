@@ -539,14 +539,36 @@ func TestSyncRatingsIgnoresAgreedRatingsOfAnotherAccount(t *testing.T) {
 	}
 }
 
-func TestSyncRatingsDoesNotAgreeOnAValueChangedDuringTheSend(t *testing.T) {
+func TestSyncRatingsResendsAValueChangedDuringTheSend(t *testing.T) {
 	h := newRatingHarness(t)
 	h.store.set(ratingTestMovieA, 3)
-	h.provider.onExport = func() { h.store.set(ratingTestMovieA, 5) }
+	// A newer edit lands while the first write is in flight, so the provider
+	// may now hold the older value: the current one is sent once more.
+	edited := false
+	h.provider.onExport = func() {
+		if !edited {
+			edited = true
+			h.store.set(ratingTestMovieA, 5)
+		}
+	}
 	h.provider.batch = RatingImportBatch{SnapshotKinds: []string{historyimport.KindMovie}}
 	h.sync()
-	if s := h.state(ratingTestMovieA); s != nil {
-		t.Fatalf("agreed row = %#v; a rating changed during the send must stay pending", s)
+	if len(h.provider.exported) != 2 || h.provider.exported[1].Rating != 10 {
+		t.Fatalf("exported = %#v, want the newer 5 stars sent last", h.provider.exported)
+	}
+	if s := h.state(ratingTestMovieA); s == nil || s.SyncedRating != 5 {
+		t.Fatalf("agreed row = %#v, want the resent 5 stars", s)
+	}
+}
+
+func TestSyncRatingsResendsARatingSetDuringARemoval(t *testing.T) {
+	h := newRatingHarness(t)
+	h.agree(ratingTestMovieA, 4, true)
+	h.provider.onRemove = func() { h.store.set(ratingTestMovieA, 2) }
+	h.provider.batch = RatingImportBatch{Rows: []RemoteRating{h.remoteRow(ratingTestMovieA, 8)}, SnapshotKinds: []string{historyimport.KindMovie}}
+	h.sync()
+	if len(h.provider.removed) != 1 || len(h.provider.exported) != 1 || h.provider.exported[0].Rating != 4 {
+		t.Fatalf("removed = %#v exported = %#v, want the new rating sent after the removal", h.provider.removed, h.provider.exported)
 	}
 }
 
@@ -869,6 +891,7 @@ type ratingProviderStub struct {
 	exportErr  error
 	gateMovies bool
 	onExport   func()
+	onRemove   func()
 	onFetch    func()
 	// fetchedCursors are the cursors the last FetchRatings call received.
 	fetchedCursors map[string]string
@@ -916,6 +939,9 @@ func (p *ratingProviderStub) ExportRatings(_ context.Context, _ ServerConfig, _ 
 
 func (p *ratingProviderStub) RemoveRatings(_ context.Context, _ ServerConfig, _ Connection, items []LocalFavorite) (ExportResult, error) {
 	p.removed = append(p.removed, items...)
+	if p.onRemove != nil {
+		p.onRemove()
+	}
 	var result ExportResult
 	for _, item := range items {
 		result.Sent = append(result.Sent, item.MediaItemID, item.ProviderItemKey)

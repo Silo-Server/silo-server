@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -1134,3 +1135,28 @@ func TestRedactAPIKeyMasksRawAndEscapedForms(t *testing.T) {
 		t.Fatal("empty key must not alter text")
 	}
 }
+
+func TestRequestErrorKeepsCauseClassificationWhenMaskingTheMessage(t *testing.T) {
+	const key = "SENTINEL-KEY-123"
+	cause := fmt.Errorf("GET https://api.mdblist.com/x?apikey=%s: %w", key, context.DeadlineExceeded)
+	err := requestError("send", key, cause)
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if strings.Contains(e.Error(), key) {
+			t.Fatalf("chain exposes the key: %q", e.Error())
+		}
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want it to still match context.DeadlineExceeded", err)
+	}
+	var netErr net.Error
+	timeout := &net.OpError{Op: "dial", Err: timeoutError{}}
+	if !errors.As(requestError("send", key, fmt.Errorf("%s: %w", key, timeout)), &netErr) || !netErr.Timeout() {
+		t.Fatal("a masked timeout must still be found as a net.Error")
+	}
+}
+
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "i/o timeout" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
