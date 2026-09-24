@@ -2,12 +2,19 @@ package access
 
 // Scope is the resolved effective access policy for a viewer request.
 type Scope struct {
-	UserID                     int
-	ProfileID                  string
-	AllowedLibraryIDs          []int
-	DisabledLibraryIDs         []int // libraries whose membership globally hides an item
-	LibrariesRestricted        bool
-	MaxContentRating           string
+	UserID              int
+	ProfileID           string
+	AllowedLibraryIDs   []int
+	DisabledLibraryIDs  []int // libraries whose membership globally hides an item
+	LibrariesRestricted bool
+	MaxContentRating    string
+	// AllowUnratedContent carries the server-wide decision for titles with no
+	// rating (empty, or explicitly unrated). False, the default, hides them
+	// from any viewer with a MaxContentRating ceiling; true shows them. It has
+	// no effect without a ceiling, and never admits an unrecognized rating
+	// (see UnrecognizedRatingAge). Resolved from the server setting
+	// access.unrated_content.
+	AllowUnratedContent        bool
 	MaxPlaybackQuality         string
 	MaxRemoteStreamBitrateKbps int
 	MaxLocalStreamBitrateKbps  int

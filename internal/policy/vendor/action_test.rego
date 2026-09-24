@@ -68,6 +68,7 @@ test_download_rejects_content_rating if {
 	got := decision with input as object.union(base_input, {
 		"content_rating": "R",
 		"max_content_rating": "PG-13",
+		"content_rating_within_ceiling": false,
 	})
 	not got.allowed
 	got.reason == "content rating exceeded"

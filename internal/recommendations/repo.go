@@ -377,23 +377,7 @@ func (r *Repo) findTasteProfileCandidates(
 	}
 	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
 
-	if filter.MaxContentRating != "" {
-		allowedRatings := access.AllowedRatingsUpTo(filter.MaxContentRating)
-		if len(allowedRatings) == 0 {
-			return []ScoredItem{}, map[string][]string{}, nil
-		}
-
-		placeholders := make([]string, len(allowedRatings))
-		for i, rating := range allowedRatings {
-			placeholders[i] = fmt.Sprintf("$%d", argIdx)
-			args = append(args, rating)
-			argIdx++
-		}
-		conditions = append(conditions, fmt.Sprintf(
-			"mi.content_rating IN (%s)",
-			strings.Join(placeholders, ", "),
-		))
-	}
+	catalog.ApplyContentRatingCeiling("mi", filter, &conditions, &args, &argIdx)
 
 	query := fmt.Sprintf(`
 			WITH ann_candidates AS (
@@ -792,8 +776,12 @@ func (r *Repo) FindSimilarUsers(ctx context.Context, userID int, profileID strin
 	return users, nil
 }
 
+// compatiblePeerContentRatings lists the ceilings a peer profile may carry and
+// still be a safe taste neighbor. It compares ceiling strings to ceiling
+// strings — user_taste_profiles.max_content_rating, not an item's rating — so
+// no stored age applies; see access.CompatibleCeilings.
 func compatiblePeerContentRatings(maxContentRating string) []string {
-	allowed := access.AllowedRatingsUpTo(maxContentRating)
+	allowed := access.CompatibleCeilings(maxContentRating)
 	if len(allowed) == 0 {
 		return []string{}
 	}
@@ -1617,15 +1605,7 @@ func (r *Repo) FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, fi
 	}
 	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
 
-	if filter.MaxContentRating != "" {
-		allowedRatings := access.AllowedRatingsUpTo(filter.MaxContentRating)
-		if len(allowedRatings) == 0 {
-			return map[string]struct{}{}, nil
-		}
-		conditions = append(conditions, fmt.Sprintf("mi.content_rating = ANY($%d)", argIdx))
-		args = append(args, allowedRatings)
-		argIdx++
-	}
+	catalog.ApplyContentRatingCeiling("mi", filter, &conditions, &args, &argIdx)
 
 	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
 		SELECT mi.content_id

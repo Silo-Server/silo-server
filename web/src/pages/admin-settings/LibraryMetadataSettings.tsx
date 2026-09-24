@@ -24,7 +24,7 @@ import { WORKER_SETTING_DEFAULTS, hasWorkerOverrides } from "./settingsWorkerDef
 
 const ARTWORK_KEYS = ["metadata.cache_images"];
 
-const BROWSING_KEYS = ["catalog.scope_versions_to_library"];
+const BROWSING_KEYS = ["catalog.scope_versions_to_library", "access.unrated_content"];
 
 const SCANNER_KEYS = [
   "scanner.workers",
@@ -149,6 +149,18 @@ export default function LibraryMetadataSettings() {
             value={form.getValue("catalog.scope_versions_to_library") || "false"}
             onChange={(value) => form.setValue("catalog.scope_versions_to_library", value)}
             restartRequired={restartKeys.has("catalog.scope_versions_to_library")}
+          />
+          <SettingField
+            label="Titles with no age rating"
+            type="select"
+            description="Applies to profiles with a maturity ceiling: whether they see titles with no rating, or marked Not Rated. A rating the server cannot read stays hidden from them either way. Profiles without a ceiling always see these titles."
+            value={form.getValue("access.unrated_content") || "hide"}
+            onChange={(value) => form.setValue("access.unrated_content", value)}
+            options={[
+              { value: "hide", label: "Hide from profiles with a ceiling" },
+              { value: "allow", label: "Show to every profile" },
+            ]}
+            restartRequired={restartKeys.has("access.unrated_content")}
           />
         </FieldGroup>
 

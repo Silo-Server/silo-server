@@ -832,7 +832,7 @@
       "expected_status": 412,
       "response_headers": {
         "Content-Type": "application/problem+json",
-        "ETag": "\"faabd5e2d11a55980e701ee1.2gbju2epduq44\""
+        "ETag": "\"03162360ca7232de7d4f44cd.3e084bgn9fpb7\""
       },
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
@@ -1998,7 +1998,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"90f5613bc4659499fc475e97.s2d99uz9dna2\""
+        "ETag": "\"dddf498a8d36d3c0443a254c.2xf5o435kgkcd\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminPolicyApplyResult",
@@ -2019,7 +2019,7 @@
       "expected_status": 201,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"90f5613bc4659499fc475e97.s2d99uz9dna7\"",
+        "ETag": "\"dddf498a8d36d3c0443a254c.2xf5o435kgkc8\"",
         "Location": "/api/v2/admin/policy/documents/1"
       },
       "response_media_type": "application/json",
@@ -2079,7 +2079,7 @@
       "expected_status": 412,
       "response_headers": {
         "Content-Type": "application/problem+json",
-        "ETag": "\"90f5613bc4659499fc475e97.s2d99uz9dna2\""
+        "ETag": "\"dddf498a8d36d3c0443a254c.2xf5o435kgkcd\""
       },
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
@@ -2099,7 +2099,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"90f5613bc4659499fc475e97.s2d99uz9dna7\""
+        "ETag": "\"dddf498a8d36d3c0443a254c.2xf5o435kgkc8\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminPolicySnapshot",
@@ -2159,7 +2159,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"90f5613bc4659499fc475e97.s2d99uz9dna5\""
+        "ETag": "\"dddf498a8d36d3c0443a254c.2xf5o435kgkca\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminPolicyApplyResult",
@@ -2263,7 +2263,7 @@
       "expected_status": 412,
       "response_headers": {
         "Content-Type": "application/problem+json",
-        "ETag": "\"90f5613bc4659499fc475e97.s2d99uz9dna2\""
+        "ETag": "\"dddf498a8d36d3c0443a254c.2xf5o435kgkcd\""
       },
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
@@ -2751,7 +2751,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"93272854178acc6b53f14e94.1fmgqpavefas9\""
+        "ETag": "\"6868161890535f639610dc9b.xl90occ865ir\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminSectionOrder",
@@ -2772,7 +2772,7 @@
       "expected_status": 412,
       "response_headers": {
         "Content-Type": "application/problem+json",
-        "ETag": "\"35ce951926424eeb772d6f6e.3hay8xviit405\""
+        "ETag": "\"c5311de6fc802ea5a41b590b.1snzg7zndlyk7\""
       },
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
@@ -3017,7 +3017,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"a184e75510a2b7ed5f432900.1rtsrip3bemn2\""
+        "ETag": "\"468f6573f9ccbba8734666b6.15r12u2fktxzu\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminTaskSchedule",
@@ -3508,7 +3508,7 @@
       "expected_status": 412,
       "response_headers": {
         "Content-Type": "application/problem+json",
-        "ETag": "\"851a440b070a75a6569aa59c.3r49ydbqg4fzt\""
+        "ETag": "\"a398556adb45deecf5779ee6.25gpp42zguq5f\""
       },
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
@@ -5074,7 +5074,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"faabd5e2d11a55980e701ee1.2gbju2epduq44\""
+        "ETag": "\"03162360ca7232de7d4f44cd.3e084bgn9fpb7\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminCollection",
@@ -5114,7 +5114,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"35ce951926424eeb772d6f6e.3hay8xviit405\""
+        "ETag": "\"c5311de6fc802ea5a41b590b.1snzg7zndlyk7\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminSection",
@@ -5440,7 +5440,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"0c504e617c17fd3b12546443.2liy2jaopuymu\""
+        "ETag": "\"1ccfbbd89c0c45a4c0c5565a.2yjng52toqtml\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/PersonalCollection",

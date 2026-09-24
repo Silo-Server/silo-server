@@ -2125,6 +2125,7 @@ func (h *ItemsHandler) ContextAccessFilter(ctx context.Context, opts AccessFilte
 			AllowedLibraryIDs:         scope.AllowedLibraryIDs,
 			DisabledLibraryIDs:        scope.DisabledLibraryIDs,
 			MaxContentRating:          scope.MaxContentRating,
+			AllowUnratedContent:       scope.AllowUnratedContent,
 			MaxPlaybackQuality:        scope.MaxPlaybackQuality,
 			PresentationLibraryID:     opts.PresentationLibraryID,
 			ScopeFilesToLibrary:       opts.ScopeFilesToLibrary,

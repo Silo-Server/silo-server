@@ -85,6 +85,7 @@ func (r *CatalogSelectionResolver) watchDetail(ctx context.Context, userID int, 
 		filter.AllowedLibraryIDs = scope.AllowedLibraryIDs
 		filter.DisabledLibraryIDs = scope.DisabledLibraryIDs
 		filter.MaxContentRating = scope.MaxContentRating
+		filter.AllowUnratedContent = scope.AllowUnratedContent
 		filter.MaxPlaybackQuality = scope.MaxPlaybackQuality
 	}
 	if input.LibraryID != nil && *input.LibraryID > 0 {

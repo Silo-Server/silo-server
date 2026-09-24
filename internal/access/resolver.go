@@ -27,12 +27,31 @@ type ProfileTokenValidator interface {
 	Validate(tokenStr string) (*ProfileTokenClaims, error)
 }
 
+// UnratedContentPolicy reports the server-wide decision for titles whose
+// rating is empty or explicitly unrated (server setting access.unrated_content).
+// Implemented by *config.UnratedContentPolicy.
+type UnratedContentPolicy interface {
+	AllowUnratedContent(ctx context.Context) bool
+}
+
 // Resolver resolves a viewer request into an effective access scope.
 type Resolver struct {
 	users        UserRepository
 	storeFactory userstore.UserStoreProvider
 	tokens       ProfileTokenValidator
 	groups       GroupPolicyProvider
+	unrated      UnratedContentPolicy
+}
+
+// WithUnratedContentPolicy installs the reader for access.unrated_content and
+// returns the resolver, so wiring can add it without every caller passing one.
+// Without it a resolved scope hides unrated titles from ceilinged profiles,
+// which is the setting's default.
+func (r *Resolver) WithUnratedContentPolicy(policy UnratedContentPolicy) *Resolver {
+	if r != nil {
+		r.unrated = policy
+	}
+	return r
 }
 
 // NewResolver creates a new scope resolver.
@@ -70,6 +89,9 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		MaxLocalStreamBitrateKbps:  effective.MaxLocalStreamBitrateKbps,
 		PolicyRevision:             user.AccessPolicyRevision,
 		ProfileVerified:            input.ProfileID == "",
+	}
+	if r.unrated != nil {
+		scope.AllowUnratedContent = r.unrated.AllowUnratedContent(ctx)
 	}
 
 	store, err := r.storeFactory.ForUser(ctx, input.UserID)

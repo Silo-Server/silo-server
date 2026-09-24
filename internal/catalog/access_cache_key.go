@@ -17,7 +17,7 @@ import (
 // to be captured here — never in per-cache copies that can silently drift.
 //
 // Included: AllowedLibraryIDs, DisabledLibraryIDs, MaxContentRating,
-// ExcludedMediaTypes, NamePrefix, AllowedContentIDs. AllowedLibraryIDs and
+// AllowUnratedContent, ExcludedMediaTypes, NamePrefix, AllowedContentIDs. AllowedLibraryIDs and
 // AllowedContentIDs preserve the nil (unrestricted) vs empty (restrict to
 // nothing) distinction the access layer branches on; AllowedContentIDs is
 // hashed because the allow-list can be large.
@@ -37,6 +37,12 @@ func (f AccessFilter) WriteAccessScopeCacheKey(b *strings.Builder) {
 
 	b.WriteString("|rating=")
 	b.WriteString(f.MaxContentRating)
+
+	// Part of the ceiling, not a separate preference: flipping
+	// access.unrated_content changes which rows the same ceiling admits, so a
+	// cached list warmed under one value must not be served under the other.
+	b.WriteString("|unrated=")
+	b.WriteString(strconv.FormatBool(f.AllowUnratedContent))
 
 	b.WriteString("|excludedtypes=")
 	writeSortedStringsKey(b, f.ExcludedMediaTypes)
