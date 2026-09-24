@@ -25,6 +25,10 @@
 ./internal/catalog TestQueryExecutorTerminalPageTotals
 ./internal/catalog TestJellycompatPredicatesPostgres
 
+# Card play targets: leaf cards and a validated anchor hint resolve without a
+# watch-progress query.
+./internal/catalog TestPlayableTargetResolverProfileStateAvailabilityAndAccess
+
 # Keyset pages: ratings and collection continuations read an index in page
 # order, with no Sort node.
 ./internal/catalog TestRatingsPageIndexDB

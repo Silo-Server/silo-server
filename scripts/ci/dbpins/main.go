@@ -67,6 +67,11 @@ func main() {
 		fail(err)
 	}
 	res, readErr := readEvents(stdout, func(line string) { fmt.Print(line) })
+	if readErr != nil {
+		// Keep draining, or a go test still writing blocks on the full pipe
+		// and Wait never returns.
+		_, _ = io.Copy(io.Discard, stdout)
+	}
 	waitErr := cmd.Wait()
 	if readErr != nil {
 		fail(readErr)
