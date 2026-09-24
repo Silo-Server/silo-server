@@ -114,6 +114,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/taskmanager/tasks"
 	"github.com/Silo-Server/silo-server/internal/taskmanager/triggers"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userdb"
@@ -1115,6 +1116,7 @@ func main() {
 		} else {
 			srv := transcodenode.NewServer(watcher, tracker)
 			srv.SetInputPathAuthorizer(transcodenode.NewCatalogPathAuthorizer(scanner.NewFileRepository(pool)))
+			srv.SetThemeInputAuthorizer(transcodenode.NewThemeInputAuthorizer(themesongs.NewRepository(pool)))
 			// Consult the session-deny marker central writes on stop, expiry,
 			// and admin terminate before serving or reconstructing a session,
 			// so a revoked stream token stops here instead of at its 24h TTL.

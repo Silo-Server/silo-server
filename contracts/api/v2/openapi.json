@@ -186713,7 +186713,7 @@
             }
           }
         ],
-        "description": "Node bearer plus independently verified playback recipe token must bind exact transport and this node's remux-execution/proxy-egress route. Audio-downmix recipes require the exact stereo shape; input authority and current configuration are checked. A session carrying the deny marker, or revoked/stopped authority, returns410 and a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure. HEAD validates authority but does not check actual file existence or start an encoder. Process-local fences are not durable across node replacement.",
+        "description": "Node bearer plus independently verified playback recipe token must bind exact transport and this node's remux-execution/proxy-egress route. Audio-downmix recipes require the exact stereo shape. A theme_aac_v1 recipe converts one detail-page theme to AAC; the theme authority approves its id, path, size and modification time in place of the media-file catalog. Input authority and current configuration are checked. A session carrying the deny marker, or revoked/stopped authority, returns410 and a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure. HEAD validates authority but does not check actual file existence or start an encoder. Process-local fences are not durable across node replacement.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/remux/{session_id}",
@@ -186839,7 +186839,7 @@
             }
           }
         ],
-        "description": "Node bearer plus independently verified playback recipe token must bind exact transport and this node's remux-execution/proxy-egress route. Audio-downmix recipes require the exact stereo shape; input authority and current configuration are checked. A session carrying the deny marker, or revoked/stopped authority, returns410 and a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure. HEAD validates authority but does not check actual file existence or start an encoder. Process-local fences are not durable across node replacement.",
+        "description": "Node bearer plus independently verified playback recipe token must bind exact transport and this node's remux-execution/proxy-egress route. Audio-downmix recipes require the exact stereo shape. A theme_aac_v1 recipe converts one detail-page theme to AAC; the theme authority approves its id, path, size and modification time in place of the media-file catalog. Input authority and current configuration are checked. A session carrying the deny marker, or revoked/stopped authority, returns410 and a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure. HEAD validates authority but does not check actual file existence or start an encoder. Process-local fences are not durable across node replacement.",
         "listener": "transcode_node",
         "method": "HEAD",
         "path": "/remux/{session_id}",

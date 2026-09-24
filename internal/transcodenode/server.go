@@ -261,6 +261,7 @@ type Server struct {
 	tracker                   sessionTracker
 	ffmpegSink                playback.FFmpegLogSink
 	inputPaths                InputPathAuthorizer
+	themeInputs               ThemeInputApprover
 	transcodeDir              string
 	artifactRoot              string
 	telemetry                 *streamtelemetry.Registry
@@ -787,6 +788,13 @@ func (s *Server) SetRecipeStore(store recipeStore) {
 // endpoint that accepts an FFmpeg input path.
 func (s *Server) SetInputPathAuthorizer(authorizer InputPathAuthorizer) {
 	s.inputPaths = authorizer
+}
+
+// SetThemeInputAuthorizer wires the theme-file authority for theme AAC
+// conversions. A node without one does not advertise theme execution, so the
+// API never routes a theme conversion to it.
+func (s *Server) SetThemeInputAuthorizer(authorizer ThemeInputApprover) {
+	s.themeInputs = authorizer
 }
 
 // SetStreamTelemetry wires local stream observation. A nil registry is a
@@ -1337,6 +1345,9 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 	if s.nodeRowID != nil {
 		if nodeID, ok := s.nodeRowID(); ok && nodeID > 0 {
 			info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxExecutionV1}
+			if s.themeInputs != nil {
+				info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeatureThemeAudioExecutionV1)
+			}
 		}
 	}
 	info.CapabilityHash = playback.ComputeCapabilityHash(info)
@@ -2157,7 +2168,16 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if !s.requireApprovedInputPath(w, r, claims.MediaPath) {
+	theme := claims.PlayMethod == streamtoken.PlayMethodThemeAAC
+	if theme {
+		if !claims.TranscodeAudio || !claims.AudioOnly || claims.TargetCodecAudio != "aac" || claims.ThemeID <= 0 {
+			http.NotFound(w, r)
+			return
+		}
+		if !s.requireApprovedThemeInput(w, r, claims) {
+			return
+		}
+	} else if !s.requireApprovedInputPath(w, r, claims.MediaPath) {
 		return
 	}
 	seekSeconds := 0.0
@@ -2257,8 +2277,12 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		if source == streamtoken.StartedAtSourceNone {
 			startedAt = time.Now().UTC()
 		}
+		trackerType := "remux"
+		if theme {
+			trackerType = "theme_audio"
+		}
 		s.tracker.Track(ctx, nodesessions.SessionInfo{
-			SessionID: playbackSessionID, NodeURL: s.tracker.NodeURL(), NodeName: s.tracker.NodeName(), Type: "remux",
+			SessionID: playbackSessionID, NodeURL: s.tracker.NodeURL(), NodeName: s.tracker.NodeName(), Type: trackerType,
 			CodecAudio: claims.TargetCodecAudio, StartedAt: startedAt.Format(time.RFC3339), StartedAtUnixNano: startedAt.UnixNano(),
 			StartedAtSource: string(source), AuthUserID: claims.UserID, ProfileID: claims.ProfileID, MediaFileID: claims.MediaFileID,
 		})
@@ -2266,7 +2290,13 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	}
 
 	request := r.WithContext(ctx)
-	s.attachTelemetrySession(request, transportID)
+	if theme {
+		// A theme conversion is a transfer attributed to its viewer, not a
+		// playback session.
+		streamtelemetry.Attach(ctx, streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(claims.UserID), ProfileID: claims.ProfileID})
+	} else {
+		s.attachTelemetrySession(request, transportID)
+	}
 	if err := playback.ServeRemuxWithOptions(w, request, claims.MediaPath, "mp4", seekSeconds, claims.TranscodeAudio, claims.AudioTrackIndex, claims.DVProfile, playback.RemuxServeOptions{
 		DVMode: playback.RemuxDVMode(claims.RemuxDVMode), FFmpegPath: cfg.Playback.FFmpegPath,
 		ContentType: playback.RemuxContentType(claims.AudioOnly), AudioOnly: claims.AudioOnly,
@@ -2293,7 +2323,28 @@ func (s *Server) progressiveRemuxRunsOnThisNode(claims *streamtoken.Claims) bool
 }
 
 func transcodeNodeRemuxPlayMethod(method string) bool {
-	return method == string(playback.PlayRemux) || method == streamtoken.PlayMethodAudioDownmixRemux
+	return method == string(playback.PlayRemux) || method == streamtoken.PlayMethodAudioDownmixRemux ||
+		method == streamtoken.PlayMethodThemeAAC
+}
+
+// requireApprovedThemeInput is requireApprovedInputPath for theme conversions:
+// the theme authority, not the media_files catalog, approves the input.
+func (s *Server) requireApprovedThemeInput(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims) bool {
+	if s.themeInputs == nil {
+		http.Error(w, "theme input authority unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	allowed, err := s.themeInputs.AllowedTheme(r.Context(), claims.ThemeID, claims.MediaPath, claims.ThemeSize, time.Unix(0, claims.ThemeModifiedUnixNano))
+	if err != nil {
+		slog.ErrorContext(r.Context(), "authorize theme conversion input", "component", "transcodenode", "error", err)
+		http.Error(w, "theme input authority unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	if !allowed {
+		http.Error(w, "theme input is not an approved theme file", http.StatusBadRequest)
+		return false
+	}
+	return true
 }
 
 // progressiveRemuxAuthorityActive checks the durable transport record written
