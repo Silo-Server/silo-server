@@ -26,6 +26,12 @@ type Scope struct {
 	// management by a PIN-locked primary profile, treat such a scope as
 	// unverified.
 	PINVerificationSkipped bool
+	// NextUpMode is the profile's resolved ui.next_up_mode, or "" when the
+	// scope has no profile or its preferences could not be read. It is a
+	// presentation preference, not access, so it stays out of the JSON that
+	// socket tickets and progress snapshots hash as the access fingerprint:
+	// changing the row mid-session must not invalidate either.
+	NextUpMode string `json:"-"`
 }
 
 // ResolveInput is the request input for resolving a viewer access scope.

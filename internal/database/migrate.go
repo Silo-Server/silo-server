@@ -160,13 +160,15 @@ func newMigrationProvider(pool *pgxpool.Pool, fsys fs.FS, dir string) (*goose.Pr
 		// in Go packages shared with other write paths: the settings backfill
 		// validates every value against the contract and re-encodes it as
 		// typed JSON, the displayprefs move parses the legacy jellycompat
-		// keys, and the subtitle language backfill applies the scanner's
-		// lang.CompatibleTag — none expressible in SQL without duplicating
+		// keys, the subtitle language backfill applies the scanner's
+		// lang.CompatibleTag, and the retired-fallback migration reuses the
+		// settings planner — none expressible in SQL without duplicating
 		// those rules.
 		goose.WithGoMigrations(
 			settingsBackfillMigration(),
 			displayPrefsMoveMigration(),
 			subtitleLanguageBackfillMigration(),
+			retiredSettingsFallbacksMigration(),
 		),
 	)
 	if err != nil {

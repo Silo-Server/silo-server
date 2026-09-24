@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userdb"
@@ -64,9 +66,10 @@ func TestNextUpModeCanonicalRowWins(t *testing.T) {
 	}
 }
 
-// TestNextUpModeFallsBackToLegacySetting covers a store the one-time backfill
-// never ran on: with no canonical row the legacy account value still decides.
-func TestNextUpModeFallsBackToLegacySetting(t *testing.T) {
+// TestNextUpModeIgnoresLegacySetting: the retired-fallback migration copied
+// the legacy account value onto every profile that existed, so the read no
+// longer consults it. A profile without a canonical row reads the default.
+func TestNextUpModeIgnoresLegacySetting(t *testing.T) {
 	ctx := context.Background()
 	store := newNextUpModeTestStore(t)
 
@@ -74,8 +77,8 @@ func TestNextUpModeFallsBackToLegacySetting(t *testing.T) {
 		t.Fatalf("seed legacy setting: %v", err)
 	}
 
-	if got := NextUpMode(ctx, store, "profile-1"); got != NextUpModeSeparate {
-		t.Errorf("NextUpMode = %q, want legacy fallback %q", got, NextUpModeSeparate)
+	if got := NextUpMode(ctx, store, "profile-1"); got != NextUpModeCombined {
+		t.Errorf("NextUpMode = %q, want default %q; the legacy key is retired", got, NextUpModeCombined)
 	}
 }
 
@@ -101,5 +104,36 @@ func TestNextUpModeProfileIsolation(t *testing.T) {
 
 	if got := NextUpMode(ctx, store, "profile-2"); got != NextUpModeCombined {
 		t.Errorf("NextUpMode for the other profile = %q, want %q", got, NextUpModeCombined)
+	}
+}
+
+// failingStore fails every settings read. A read would degrade NextUpMode to
+// combined, so getting "separate" back proves the store was never asked.
+type failingStore struct{ userstore.UserStore }
+
+func (failingStore) ListSettingValuesForResolution(context.Context, userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
+	return nil, errors.New("store read")
+}
+
+// TestNextUpModeReadsTheRequestScope: a request that passed viewer access
+// carries the resolved mode, so section fetchers asking again cost no read.
+func TestNextUpModeReadsTheRequestScope(t *testing.T) {
+	ctx := access.SetScope(context.Background(), access.Scope{
+		UserID: 1, ProfileID: "profile-1", NextUpMode: NextUpModeSeparate,
+	})
+	if got := NextUpMode(ctx, failingStore{}, "profile-1"); got != NextUpModeSeparate {
+		t.Errorf("NextUpMode = %q, want the scope's %q", got, NextUpModeSeparate)
+	}
+}
+
+// TestNextUpModeScopeForAnotherProfileIsNotUsed: the scope answers only for
+// the profile it was resolved for.
+func TestNextUpModeScopeForAnotherProfileIsNotUsed(t *testing.T) {
+	store := newNextUpModeTestStore(t)
+	ctx := access.SetScope(context.Background(), access.Scope{
+		UserID: 1, ProfileID: "profile-2", NextUpMode: NextUpModeSeparate,
+	})
+	if got := NextUpMode(ctx, store, "profile-1"); got != NextUpModeCombined {
+		t.Errorf("NextUpMode = %q, want profile-1's stored default %q", got, NextUpModeCombined)
 	}
 }
