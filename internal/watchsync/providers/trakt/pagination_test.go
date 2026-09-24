@@ -321,6 +321,10 @@ func TestFetchTraktPagesPacesReadsPerToken(t *testing.T) {
 	if err == nil || rows != nil || requests != 2 {
 		t.Fatalf("rows=%v requests=%d err=%v, want the read limiter to stop the third page", rows, requests, err)
 	}
+	// A refused wait defers the sync like a 429 rather than failing it.
+	if _, ok := watchsync.AsRateLimited(err); !ok {
+		t.Fatalf("err = %v, want a rate-limited deferral", err)
+	}
 }
 
 func TestTraktPageBudgetStaysUnderTheGETLimit(t *testing.T) {
