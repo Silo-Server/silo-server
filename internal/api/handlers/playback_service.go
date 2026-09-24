@@ -212,6 +212,18 @@ func isNativeAPIV2(ctx context.Context) bool {
 	return native
 }
 
+// requireAttemptAPISurfaceV3 refuses to continue an attempt through /api/v1
+// once it negotiated a feature that exists only on /api/v2. v1 would otherwise
+// replay or replan the attempt's v2-only representations (.srt?original=1) on
+// a route that serves WebVTT for them. The error reuses the existing
+// playback_attempt_reused code so /api/v1 gains no new contract.
+func requireAttemptAPISurfaceV3(ctx context.Context, record *playback.AttemptRecordV3) error {
+	if record == nil || isNativeAPIV2(ctx) || !playback.HasFeatureV3(record.NormalizedRequest.ClientFeatures, playback.FeatureSubripSidecarV3) {
+		return nil
+	}
+	return playbackOperationError(http.StatusConflict, "playback_attempt_reused", "The playback attempt belongs to an /api/v2 session")
+}
+
 // withNativeServerFeaturesV3 advertises the /api/v2-only features on a
 // decision the shared start/replan application produced.
 func withNativeServerFeaturesV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -192,7 +193,7 @@ func TestSeekReanchorKeepsTheFrozenSRTRepresentation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			req := withPlaybackRouteParam(httptest.NewRequest(http.MethodPost, "/api/v1/playback/"+started.SessionID+"/replan", strings.NewReader(string(body))).WithContext(newAuthorizedPlaybackContext()), "session_id", started.SessionID)
+			req := withPlaybackRouteParam(httptest.NewRequest(http.MethodPost, "/api/v2/playback/"+started.SessionID+"/replan", strings.NewReader(string(body))).WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext())), "session_id", started.SessionID)
 			rr := httptest.NewRecorder()
 			handler.HandleReplanPlaybackV3(rr, req)
 			if rr.Code != http.StatusOK {
@@ -238,5 +239,66 @@ func TestV1StartDoesNotNegotiateSubripSidecar(t *testing.T) {
 	if started.PlaybackPlan == nil || started.PlaybackPlan.Subtitle.Artifact == nil || started.PlaybackPlan.Subtitle.Artifact.Format != "vtt" ||
 		playback.HasFeatureV3(started.ServerFeatures, playback.FeatureSubripSidecarV3) {
 		t.Fatalf("a v1 start must keep WebVTT and not advertise subrip_sidecar_v1: %#v", started)
+	}
+}
+
+// An attempt that negotiated subrip_sidecar_v1 on /api/v2 cannot continue on
+// the frozen /api/v1 surface, which would publish its .srt?original=1 URLs on a
+// route that serves WebVTT for them.
+func TestV1RefusesAnAttemptNegotiatedWithSubripSidecar(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	file.ExternalSubtitles = []models.ExternalSubtitle{{Path: "/media/movie.ar.srt", Language: "ar", Format: "srt"}}
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	startRequest := v3HandlerStartRequest()
+	startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureSubripSidecarV3)
+	subtitleIndex := 0
+	startRequest.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", subtitleIndex)
+	startRequest.SubtitleTrackIndex = &subtitleIndex
+	startBody := marshalV3StartRequest(t, startRequest)
+	start := func(ctx context.Context) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(startBody)).WithContext(ctx))
+		return rr
+	}
+	startRR := start(WithNativeAPIV2(newAuthorizedPlaybackContext()))
+	if startRR.Code != http.StatusCreated {
+		t.Fatalf("v2 start status = %d, body = %s", startRR.Code, startRR.Body.String())
+	}
+	var started playback.DecisionResponseV3
+	if err := json.Unmarshal(startRR.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	if started.PlaybackPlan == nil || started.PlaybackPlan.Subtitle.Artifact == nil || started.PlaybackPlan.Subtitle.Artifact.Format != "srt" {
+		t.Fatalf("v2 start must negotiate original SRT: %#v", started.PlaybackPlan)
+	}
+
+	// An identical start retried through /api/v1 must not replay the v2 plan.
+	if rr := start(newAuthorizedPlaybackContext()); rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "playback_attempt_reused") {
+		t.Fatalf("v1 start replay status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	body, err := json.Marshal(playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationSeekReanchorV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID,
+		ReplanRequestID:   "seek-reanchor-v1", FailedPlanID: started.PlaybackPlan.PlanID,
+		PlanAttemptID: "plan-attempt-seek-v1", AttemptCount: 1,
+		PlanAttemptKey:    playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil),
+		QualityPreference: "original", PositionSeconds: 60,
+		SelectedTracks: started.PlaybackPlan.SelectedTracks,
+		Capabilities:   startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.UpdateProgress(started.SessionID, 12, true); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	handler.HandleReplanPlaybackV3(rr, withPlaybackRouteParam(httptest.NewRequest(http.MethodPost, "/api/v1/playback/"+started.SessionID+"/replan", strings.NewReader(string(body))).WithContext(newAuthorizedPlaybackContext()), "session_id", started.SessionID))
+	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "playback_attempt_reused") {
+		t.Fatalf("v1 replan status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 }
