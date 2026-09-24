@@ -889,12 +889,16 @@ func deriveSegmentID(itemUUID, kind string) string {
 	return uuid.NewSHA1(mediaSegmentIDNamespace, []byte(itemUUID+":"+kind)).String()
 }
 
-// HandleGroupingOptionsStub serves GET /UserViews/GroupingOptions with an empty array.
+// HandleGroupingOptionsStub serves /UserViews/GroupingOptions and its legacy
+// /Users/{userId}/GroupingOptions alias with an empty array.
 // Jellyfin returns []SpecialViewOptionDto; Silo doesn't support library grouping.
 func (h *ItemsHandler) HandleGroupingOptionsStub(w http.ResponseWriter, r *http.Request) {
 	session := SessionFromContext(r.Context())
 	if session == nil {
 		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
+		return
+	}
+	if !validatePseudoUser(w, chi.URLParam(r, "userId"), session) {
 		return
 	}
 	writeJSON(w, http.StatusOK, []struct{}{})
