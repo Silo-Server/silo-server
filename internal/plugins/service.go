@@ -120,10 +120,17 @@ type Service struct {
 // a lifecycle hook that drops the dispatcher's subscriber index, so an
 // install, enable, disable, upgrade, or uninstall on this replica reaches the
 // next event. Other replicas drop theirs on cache.EventPluginsChanged.
+//
+// The hook runs before every other lifecycle hook. Events that arrive while
+// the slower hooks run (resident reconcile, provider reloads) already see the
+// change, and the index rebuilt when this replica's own plugins_changed
+// publish comes back is not dropped again by a hook that runs after it.
 func (s *Service) SetEventDispatcher(d *EventDispatcher) {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 	s.dispatcher = d
 	if d != nil {
-		s.AddLifecycleHook(func(context.Context) { d.invalidateIndex() })
+		s.lifecycleHooks = slices.Insert(s.lifecycleHooks, 0, func(context.Context) { d.invalidateIndex() })
 	}
 }
 

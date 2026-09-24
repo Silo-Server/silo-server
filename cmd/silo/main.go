@@ -1758,9 +1758,12 @@ func main() {
 			log.Fatalf("plugin event dispatcher: %v", err)
 		}
 		defer dispatcher.Stop()
-		// Run the lifecycle hooks registered so far once more. The dispatcher
-		// does not depend on this: it builds its subscriber index from the
-		// store on the first event.
+		// Rerun the lifecycle hooks registered so far. PreloadEnabled ran them
+		// before PublishLifecycleChanges was registered, so this call is the
+		// first plugins_changed this API server publishes: proxy nodes
+		// reconcile when it comes up instead of on their next poll. The event
+		// dispatcher does not need the call; it builds its subscriber index
+		// from the store on the first event.
 		pluginService.OnLifecycleChange(appCtx)
 	}
 
