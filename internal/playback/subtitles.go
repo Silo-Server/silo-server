@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -448,21 +449,21 @@ func vttCueSettingsForASSAlignment(alignment int) string {
 	}
 }
 
-// isSRTTimeLine checks if a line looks like an SRT timestamp line.
-// Format: 00:01:23,456 --> 00:01:25,789
+// srtTimestamp matches one SRT timestamp. SRT uses a comma before the
+// milliseconds; some files use a period, which FFmpeg also accepts.
+var srtTimestamp = regexp.MustCompile(`^\d+:\d{1,2}:\d{1,2}[,.]\d{1,3}$`)
+
+// isSRTTimeLine reports whether a line is an SRT timing line:
+// 00:01:23,456 --> 00:01:25,789, optionally followed by coordinates. Both
+// timestamps must parse, because the converter ends a cue at the next timing
+// line and cue text can itself contain an arrow ("Meet at 10:30. --> go").
 func isSRTTimeLine(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	if !strings.Contains(trimmed, "-->") {
+	left, right, found := strings.Cut(strings.TrimSpace(line), "-->")
+	if !found {
 		return false
 	}
-	parts := strings.Split(trimmed, "-->")
-	if len(parts) != 2 {
-		return false
-	}
-	// Check that the left side looks like a timestamp. SRT uses a comma before
-	// the milliseconds; some files use a period, which FFmpeg also accepts.
-	left := strings.TrimSpace(parts[0])
-	return strings.ContainsAny(left, ",.") && strings.Contains(left, ":")
+	fields := strings.Fields(right)
+	return len(fields) > 0 && srtTimestamp.MatchString(strings.TrimSpace(left)) && srtTimestamp.MatchString(fields[0])
 }
 
 // truncateStderr limits stderr output to a reasonable length for error messages.

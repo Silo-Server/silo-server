@@ -113,6 +113,11 @@ func TestConvertToVTTSeparatesCuesWithoutBlankLines(t *testing.T) {
 			"1\r00:00:01,000 --> 00:00:02,000\r{\\an8}Top\r\r2\r00:00:03,000 --> 00:00:04,000\rTwo\r",
 			"WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.000 line:0\nTop\n\n2\n00:00:03.000 --> 00:00:04.000\nTwo\n\n",
 		},
+		// An arrow in cue text must not start a new cue.
+		"arrow in cue text": {
+			"1\n00:00:01,000 --> 00:00:02,000\n{\\an8}Meet at 10:30. --> go now\nSecond line\n",
+			"WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.000 line:0\nMeet at 10:30. --> go now\nSecond line\n\n",
+		},
 		"period milliseconds": {
 			"1\n00:00:01.000 --> 00:00:02.000\n{\\an8}Top\n",
 			"WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.000 line:0\nTop\n\n",

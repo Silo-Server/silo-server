@@ -358,6 +358,20 @@ func TestWindowedSRTSubtitleKeepsAlignmentTag(t *testing.T) {
 	}
 }
 
+// A cue line that contains an arrow stays cue text through the SRT conversion,
+// so windowing never tries to parse it as a timestamp.
+func TestWindowedSRTSubtitleKeepsArrowCueText(t *testing.T) {
+	r := httptest.NewRequest("GET", "/subtitle?StartPositionTicks=5000000", nil)
+	route := chi.NewRouteContext()
+	route.URLParams.Add("routeFormat", "srt")
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
+	rr := httptest.NewRecorder()
+	(&PlaybackHandler{}).deliverSubtitle(rr, r, "srt", []byte("1\n00:00:01,000 --> 00:00:02,000\nMeet at 10:30. --> go now\n"))
+	if want := "1\n00:00:00,500 --> 00:00:01,500\nMeet at 10:30. --> go now\n\n"; rr.Code != 200 || rr.Body.String() != want {
+		t.Fatalf("status=%d body=%q, want %q", rr.Code, rr.Body.String(), want)
+	}
+}
+
 func TestJSONSubtitleTimingEmptyWindow(t *testing.T) {
 	r := httptest.NewRequest("GET", "/subtitle?StartPositionTicks=90000000", nil)
 	route := chi.NewRouteContext()
