@@ -491,11 +491,10 @@ func (h *CatalogResourceHandler) seriesSeasons(ctx context.Context, v ItemViewer
 					seasons = localized
 				}
 			}
-			episodesBySeason, err := h.items.episodeRepo.ListBySeriesGroupedBySeason(ctx, id)
+			episodeCounts, userData, err := h.items.seriesSeasonRollups(ctx, v, id)
 			if err != nil {
 				return nil, apiError(http.StatusInternalServerError, "internal_error", failed)
 			}
-			progressMap, hasProgressMap := h.items.progressMapForEpisodes(ctx, v, flattenEpisodeGroups(episodesBySeason))
 
 			// Sign every season poster in one batch instead of resolving each
 			// season again; a text-only selector skips the batch entirely.
@@ -503,7 +502,7 @@ func (h *CatalogResourceHandler) seriesSeasons(ctx context.Context, v ItemViewer
 			if includeArtwork && h.items.detailSvc != nil {
 				paths := make([]string, 0, len(seasons))
 				for _, season := range seasons {
-					if len(episodesBySeason[season.SeasonNumber]) > 0 && season.PosterPath != "" {
+					if episodeCounts[season.SeasonNumber] > 0 && season.PosterPath != "" {
 						paths = append(paths, sizedPosterPath(season.PosterPath, filter.ImageSize))
 					}
 				}
@@ -511,13 +510,9 @@ func (h *CatalogResourceHandler) seriesSeasons(ctx context.Context, v ItemViewer
 			}
 			resp := make([]seasonResponse, 0, len(seasons))
 			for _, s := range seasons {
-				episodes := episodesBySeason[s.SeasonNumber]
-				if len(episodes) == 0 {
+				episodeCount := episodeCounts[s.SeasonNumber]
+				if episodeCount == 0 {
 					continue
-				}
-				var userData *catalog.SeasonUserData
-				if hasProgressMap {
-					userData = catalog.EpisodeRollupUserData(episodes, progressMap)
 				}
 				// Construct metadata without resolving each season again.
 				season := *s
@@ -525,7 +520,7 @@ func (h *CatalogResourceHandler) seriesSeasons(ctx context.Context, v ItemViewer
 				if !includeArtwork {
 					season.PosterThumbhash = ""
 				}
-				sr := h.items.seasonResponseFromEpisodes(ctx, v, &season, episodes, userData, filter.ImageSize)
+				sr := h.items.localizedSeasonResponse(ctx, v, &season, episodeCount, userData[s.SeasonNumber], filter.ImageSize)
 				sr.PosterURL = posterURLs[sizedPosterPath(s.PosterPath, filter.ImageSize)].URL
 				resp = append(resp, sr)
 			}

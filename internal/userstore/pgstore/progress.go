@@ -947,8 +947,8 @@ func (s *PostgresUserStore) ListProgressByMediaItems(ctx context.Context, profil
 	return result, nil
 }
 
-// Compile-time capability check: the Postgres store computes series episode
-// rollups in SQL (see userstore.SeriesEpisodeRollupStore).
+// Compile-time capability check: the Postgres store computes series and season
+// episode rollups in SQL (see userstore.SeriesEpisodeRollupStore).
 var _ userstore.SeriesEpisodeRollupStore = (*PostgresUserStore)(nil)
 
 // SeriesEpisodeWatchCounts aggregates per-series episode watch state in one
@@ -971,13 +971,38 @@ var _ userstore.SeriesEpisodeRollupStore = (*PostgresUserStore)(nil)
 // Series with no available episodes produce no row, so callers keep the same
 // "no rollup" behavior the episode-list path had for them.
 func (s *PostgresUserStore) SeriesEpisodeWatchCounts(ctx context.Context, profileID string, seriesIDs []string) (map[string]userstore.SeriesWatchCounts, error) {
-	result := make(map[string]userstore.SeriesWatchCounts, len(seriesIDs))
 	if len(seriesIDs) == 0 {
-		return result, nil
+		return map[string]userstore.SeriesWatchCounts{}, nil
 	}
+	return queryEpisodeWatchCounts[string](ctx, s, `SELECT e.series_id,`+episodeWatchCountsSQL+`
+		  AND e.series_id = ANY($3::text[])
+		GROUP BY e.series_id`, profileID, seriesIDs)
+}
 
-	rows, err := s.pool.Query(ctx, `
-		SELECT e.series_id,
+// SeriesSeasonWatchCounts is SeriesEpisodeWatchCounts for one series, grouped
+// by episode season number like catalog's ListBySeriesGroupedBySeason. The
+// season list reads each season's episode count from it as well.
+func (s *PostgresUserStore) SeriesSeasonWatchCounts(ctx context.Context, profileID, seriesID string) (map[int]userstore.SeriesWatchCounts, error) {
+	return queryEpisodeWatchCounts[int](ctx, s, `SELECT e.season_number,`+episodeWatchCountsSQL+`
+		  AND e.series_id = $3
+		GROUP BY e.season_number`, profileID, seriesID)
+}
+
+// SeasonEpisodeWatchCounts is SeriesEpisodeWatchCounts grouped by season row
+// ID, matching catalog's ListBySeasonID.
+func (s *PostgresUserStore) SeasonEpisodeWatchCounts(ctx context.Context, profileID string, seasonIDs []string) (map[string]userstore.SeriesWatchCounts, error) {
+	if len(seasonIDs) == 0 {
+		return map[string]userstore.SeriesWatchCounts{}, nil
+	}
+	return queryEpisodeWatchCounts[string](ctx, s, `SELECT e.season_id,`+episodeWatchCountsSQL+`
+		  AND e.season_id = ANY($3::text[])
+		GROUP BY e.season_id`, profileID, seasonIDs)
+}
+
+// episodeWatchCountsSQL is the rollup shared by the series and season
+// variants. Each selects its grouping column first, then appends its $3
+// parent filter and GROUP BY.
+const episodeWatchCountsSQL = `
 		       COUNT(*)::int,
 		       COUNT(*) FILTER (WHERE ws.watched)::int,
 		       COUNT(*) FILTER (WHERE NOT ws.watched AND ws.resumable)::int
@@ -1003,26 +1028,28 @@ func (s *PostgresUserStore) SeriesEpisodeWatchCounts(ctx context.Context, profil
 		        ) AS watched,
 		        COALESCE(p.position_seconds, 0) > 0 AS resumable
 		) ws
-		WHERE e.series_id = ANY($3::text[])
-		  AND EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id = e.content_id)
-		GROUP BY e.series_id`,
-		s.userID, profileID, seriesIDs,
-	)
+		WHERE EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id = e.content_id)`
+
+// queryEpisodeWatchCounts runs one episodeWatchCountsSQL rollup and keys the
+// counts by its grouping column.
+func queryEpisodeWatchCounts[K comparable](ctx context.Context, s *PostgresUserStore, query, profileID string, parent any) (map[K]userstore.SeriesWatchCounts, error) {
+	rows, err := s.pool.Query(ctx, query, s.userID, profileID, parent)
 	if err != nil {
-		return nil, fmt.Errorf("aggregating series episode watch counts: %w", err)
+		return nil, fmt.Errorf("aggregating episode watch counts: %w", err)
 	}
 	defer rows.Close()
 
+	result := make(map[K]userstore.SeriesWatchCounts)
 	for rows.Next() {
-		var seriesID string
+		var key K
 		var counts userstore.SeriesWatchCounts
-		if err := rows.Scan(&seriesID, &counts.TotalEpisodes, &counts.WatchedCount, &counts.InProgressCount); err != nil {
-			return nil, fmt.Errorf("scanning series episode watch counts: %w", err)
+		if err := rows.Scan(&key, &counts.TotalEpisodes, &counts.WatchedCount, &counts.InProgressCount); err != nil {
+			return nil, fmt.Errorf("scanning episode watch counts: %w", err)
 		}
-		result[seriesID] = counts
+		result[key] = counts
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating series episode watch counts: %w", err)
+		return nil, fmt.Errorf("iterating episode watch counts: %w", err)
 	}
 	return result, nil
 }

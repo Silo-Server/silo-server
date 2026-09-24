@@ -121,8 +121,8 @@ func parseHistoryTimestamp(value string) time.Time {
 	return parsed
 }
 
-// SeriesWatchCounts is the aggregate episode watch state for one series, as
-// computed by SeriesEpisodeRollupStore.
+// SeriesWatchCounts is the aggregate episode watch state for one series or
+// season, as computed by SeriesEpisodeRollupStore.
 type SeriesWatchCounts struct {
 	TotalEpisodes   int
 	WatchedCount    int
@@ -130,18 +130,24 @@ type SeriesWatchCounts struct {
 }
 
 // SeriesEpisodeRollupStore is an optional store capability: compute the
-// per-series episode watch-state rollup (total / watched / in-progress
-// episode counts) in SQL instead of materializing every episode of every
-// series and batching per-episode progress lookups through
+// per-series or per-season episode watch-state rollup (total / watched /
+// in-progress episode counts) in SQL instead of materializing every episode
+// and batching per-episode progress lookups through
 // ListProgressWithCompletedHistory. Implemented by the Postgres store, where
 // episodes and progress live in the same database; SQLite-backed stores fall
 // back to the chunked in-memory path. Semantics must match
 // ListProgressWithCompletedHistory + catalog.EpisodeRollupUserData: an episode
-// is watched when its visible progress row is completed or a visible completed
-// history row exists, and in-progress when it is not watched and its visible
-// progress row has position_seconds > 0.
+// counts when it is available (has library membership), is watched when its
+// visible progress row is completed or a visible completed history row
+// exists, and is in-progress when it is not watched and its visible progress
+// row has position_seconds > 0. Parents without available episodes are
+// absent from the result.
 type SeriesEpisodeRollupStore interface {
 	SeriesEpisodeWatchCounts(ctx context.Context, profileID string, seriesIDs []string) (map[string]SeriesWatchCounts, error)
+	// SeriesSeasonWatchCounts groups one series' episodes by season number.
+	SeriesSeasonWatchCounts(ctx context.Context, profileID, seriesID string) (map[int]SeriesWatchCounts, error)
+	// SeasonEpisodeWatchCounts groups episodes by their season row ID.
+	SeasonEpisodeWatchCounts(ctx context.Context, profileID string, seasonIDs []string) (map[string]SeriesWatchCounts, error)
 }
 
 // EpisodeParentCompletionStore determines whether every available episode of a
