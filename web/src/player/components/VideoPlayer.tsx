@@ -767,6 +767,9 @@ export function VideoPlayer({
     !watchTogether.closedReason &&
     !watchTogether.replacementReason &&
     !roomConnected;
+  // Set once an outage outlasts the delay, so a notice that expires during it
+  // hands back to the reconnect warning.
+  const roomReconnectWarningDueRef = useRef(false);
   useEffect(() => {
     if (!watchTogetherRoomId || watchTogether.closedReason) {
       return;
@@ -784,16 +787,18 @@ export function VideoPlayer({
     // A notice raised during the delay, such as an admin message, is newer
     // than the outage and keeps its place.
     const noticeAtDisconnect = noticeRef.current;
-    const timer = setTimeout(
-      () =>
-        setNotice((current) =>
-          current === null || current === noticeAtDisconnect
-            ? watchTogetherNotice(ROOM_RECONNECTING_MESSAGE, "warning")
-            : current,
-        ),
-      ROOM_RECONNECT_NOTICE_DELAY_MS,
-    );
-    return () => clearTimeout(timer);
+    const timer = setTimeout(() => {
+      roomReconnectWarningDueRef.current = true;
+      setNotice((current) =>
+        current === null || current === noticeAtDisconnect
+          ? watchTogetherNotice(ROOM_RECONNECTING_MESSAGE, "warning")
+          : current,
+      );
+    }, ROOM_RECONNECT_NOTICE_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+      roomReconnectWarningDueRef.current = false;
+    };
   }, [
     roomConnected,
     watchTogether.closedReason,
@@ -808,7 +813,13 @@ export function VideoPlayer({
     if (!notice || isDetached) return;
     if (roomReconnecting && notice.message === ROOM_RECONNECTING_MESSAGE) return;
     const timer = setTimeout(
-      () => setNotice((current) => (current === notice ? null : current)),
+      () =>
+        setNotice((current) => {
+          if (current !== notice) return current;
+          return roomReconnectWarningDueRef.current
+            ? watchTogetherNotice(ROOM_RECONNECTING_MESSAGE, "warning")
+            : null;
+        }),
       PLAYBACK_NOTICE_VISIBLE_MS,
     );
     return () => clearTimeout(timer);

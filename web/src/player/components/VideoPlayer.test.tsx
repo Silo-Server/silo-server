@@ -380,7 +380,7 @@ describe("VideoPlayer room catch-up", () => {
     expect(screen.queryByText(reconnectingMessage)).toBeNull();
   });
 
-  it("does not replace a notice raised during the reconnect delay", async () => {
+  it("shows the reconnect warning after a notice raised during the delay", async () => {
     const { connection, rerenderPlayer } = setup(100);
     rerenderPlayer({ watchTogetherConnection: { ...connection, connectionState: "disconnected" } });
     await act(() => vi.advanceTimersByTimeAsync(1_000));
@@ -399,6 +399,10 @@ describe("VideoPlayer room catch-up", () => {
     await act(() => vi.advanceTimersByTimeAsync(1_000));
     expect(screen.getByText("Server maintenance at midnight.")).toBeInTheDocument();
     expect(screen.queryByText(reconnectingMessage)).toBeNull();
+    // The outage outlasts the message, so the warning takes its place.
+    await act(() => vi.advanceTimersByTimeAsync(7_000));
+    expect(screen.queryByText("Server maintenance at midnight.")).toBeNull();
+    expect(screen.getByText(reconnectingMessage)).toBeInTheDocument();
   });
 
   it("shows a repeated notice again after the previous one expired", async () => {
