@@ -1,6 +1,8 @@
 import {
+  lazy,
   type ReactNode,
   type RefObject,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -32,9 +34,7 @@ import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queri
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
-import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
-import MatchItemDialog from "@/components/MatchItemDialog";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -75,6 +75,21 @@ import {
   showsWatchedQuickAction,
   type CardQuickActionMode,
 } from "@/lib/cardQuickActions";
+
+// Edit Metadata and Match Item are curator tools, yet every media card carries
+// this menu, so the dialogs load on demand instead of with the launch bundle.
+// Opening a menu that offers them starts the download.
+const importEditMetadataDialog = () => import("@/components/EditMetadataDialog");
+const importMatchItemDialog = () => import("@/components/MatchItemDialog");
+const EditMetadataDialog = lazy(importEditMetadataDialog);
+const MatchItemDialog = lazy(importMatchItemDialog);
+
+function prefetchMetadataDialogs() {
+  // The dialog host imports them again when it renders, so a failed prefetch
+  // only loses the head start.
+  importEditMetadataDialog().catch(() => undefined);
+  importMatchItemDialog().catch(() => undefined);
+}
 
 type MediaItemType = ItemDetail["type"];
 
@@ -607,40 +622,20 @@ function WatchedQuickActionButton({
 
 type MetadataAction = "edit" | "match";
 
-export function MetadataActionDialogHost({
+function MetadataActionStatusDialog({
   action,
-  contentId,
-  libraryId,
+  loading,
+  error,
+  onRetry,
   onClose,
 }: {
   action: MetadataAction;
-  contentId: string;
-  libraryId?: number;
+  loading: boolean;
+  error?: unknown;
+  onRetry?: () => void;
   onClose: () => void;
 }) {
-  const {
-    data: item,
-    error,
-    isFetching,
-    isLoading,
-    refetch,
-  } = useCatalogItemDetail(contentId, libraryId);
-
-  if (item) {
-    return action === "edit" ? (
-      <EditMetadataDialog item={item} open onOpenChange={(open) => !open && onClose()} />
-    ) : (
-      <MatchItemDialog
-        key={item.content_id}
-        item={libraryId === undefined ? item : { ...item, library_id: libraryId }}
-        open
-        onOpenChange={(open) => !open && onClose()}
-      />
-    );
-  }
-
   const actionLabel = action === "edit" ? "Edit Metadata" : "Match Item";
-  const loading = isLoading || isFetching;
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -661,13 +656,60 @@ export function MetadataActionDialogHost({
             <p className="text-muted-foreground text-sm">
               {error instanceof Error ? error.message : "Please try again."}
             </p>
-            <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
+            <Button type="button" variant="outline" size="sm" onClick={onRetry}>
               Try Again
             </Button>
           </div>
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+export function MetadataActionDialogHost({
+  action,
+  contentId,
+  libraryId,
+  onClose,
+}: {
+  action: MetadataAction;
+  contentId: string;
+  libraryId?: number;
+  onClose: () => void;
+}) {
+  const {
+    data: item,
+    error,
+    isFetching,
+    isLoading,
+    refetch,
+  } = useCatalogItemDetail(contentId, libraryId);
+
+  if (item) {
+    return (
+      <Suspense fallback={<MetadataActionStatusDialog action={action} loading onClose={onClose} />}>
+        {action === "edit" ? (
+          <EditMetadataDialog item={item} open onOpenChange={(open) => !open && onClose()} />
+        ) : (
+          <MatchItemDialog
+            key={item.content_id}
+            item={libraryId === undefined ? item : { ...item, library_id: libraryId }}
+            open
+            onOpenChange={(open) => !open && onClose()}
+          />
+        )}
+      </Suspense>
+    );
+  }
+
+  return (
+    <MetadataActionStatusDialog
+      action={action}
+      loading={isLoading || isFetching}
+      error={error}
+      onRetry={() => void refetch()}
+      onClose={onClose}
+    />
   );
 }
 
@@ -759,8 +801,13 @@ export default function MediaItemMenu({
     showCollectionActions,
     dismissLabel,
   });
+  const offersMetadataDialogs = model.some(
+    (entry) =>
+      entry.kind === "action" && (entry.key === "editMetadata" || entry.key === "matchItem"),
+  );
   useLongPress(longPressRef, {
     onLongPress: () => {
+      if (offersMetadataDialogs) prefetchMetadataDialogs();
       setActionSheetMounted(true);
       setActionSheetOpen(true);
     },
@@ -960,6 +1007,7 @@ export default function MediaItemMenu({
             modal={false}
             onOpenChange={(open) => {
               if (open) {
+                if (offersMetadataDialogs) prefetchMetadataDialogs();
                 pointerClosedMenuRef.current = false;
                 lastMenuInteractionRef.current = null;
                 return;
