@@ -168,6 +168,8 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.profileRefreshRequester = deps.RecWorker
 	playbackHandler.SettingsRepo = deps.SettingsRepo
 	playbackHandler.RecipeNodeStore = deps.RecipeNodeStore
+	itemsHandler.themeRouter = compatThemeRouter(deps, playbackHandler)
+	itemsHandler.themeFFmpegPath = func() string { return playback.ResolveFFmpegPath(playbackHandler.FFmpegPath) }
 	playbackHandler.SessionSyncer = deps.SessionSyncer
 	playbackHandler.WatchScrobbler = deps.WatchScrobbler
 	playbackHandler.StableIdentityResolver = deps.StableIdentityResolver

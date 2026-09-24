@@ -31,11 +31,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	"github.com/Silo-Server/silo-server/internal/themedelivery"
 )
 
 // ItemsHandler serves Jellyfin browse/search/item endpoints.
 type ItemsHandler struct {
 	themeSongs       themeSongStore
+	themeRouter      *themedelivery.Router
+	themeFFmpegPath  func() string
 	content          ContentService
 	userData         UserDataService
 	codec            *ResourceIDCodec

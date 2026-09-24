@@ -8,10 +8,13 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
+	"github.com/Silo-Server/silo-server/internal/themedelivery"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/go-chi/chi/v5"
 )
@@ -125,12 +128,47 @@ func (h *ItemsHandler) HandleThemeAudio(w http.ResponseWriter, r *http.Request) 
 		writeThemeLookupError(w, err)
 		return
 	}
-	streamtelemetry.Attach(r.Context(), streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(session.StreamAppUserID), ProfileID: session.ProfileID, PlayMethod: string(playback.PlayDirect)})
 	query := newCaseInsensitiveQuery(r.URL.Query())
 	universal := strings.EqualFold(path.Base(r.URL.Path), compatThemeUniversal)
-	if !themeDirectPlayAllowed(query, chi.URLParam(r, "container"), file, universal) {
-		writeError(w, 400, "PlaybackUnavailable", "Only original theme audio is supported")
-		return
+	routeContainer := chi.URLParam(r, "container")
+	delivery, method := themesongs.DeliveryOriginal, playback.PlayDirect
+	var conversion themesongs.Conversion
+	seekSeconds := 0.0
+	if !themeDirectPlayAllowed(query, routeContainer, file, universal) {
+		var reason string
+		var ok bool
+		conversion, seekSeconds, reason, ok = themeConversionAllowed(query, routeContainer, file, universal)
+		if !ok {
+			writeError(w, 400, "PlaybackUnavailable", reason)
+			return
+		}
+		delivery, method = themesongs.DeliveryConverted, playback.PlayRemux
+	}
+	streamtelemetry.Attach(r.Context(), streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(session.StreamAppUserID), ProfileID: session.ProfileID, PlayMethod: string(method)})
+	if h.themeRouter != nil {
+		expires, _ := themesongs.Expiry(time.Now(), time.Time{})
+		result, err := h.themeRouter.Resolve(r.Context(), themedelivery.Request{
+			File: file, Delivery: delivery, Conversion: conversion, SeekSeconds: seekSeconds,
+			UserID: session.StreamAppUserID, ProfileID: session.ProfileID,
+			AccessPath: netaccess.PathFromContext(r.Context()), ExpiresAt: expires,
+		})
+		if err != nil {
+			code := compatRoutingPolicyUnsatisfiedCode
+			if errors.Is(err, themedelivery.ErrCapacityUnavailable) {
+				code = compatRouteCapacityUnavailableCode
+			}
+			writeError(w, http.StatusServiceUnavailable, code, "No theme audio route satisfies the configured policy and current node availability")
+			return
+		}
+		if !result.Local() {
+			// Like compatibility video, a routed theme is a redirect to the proxy
+			// the route reserved. A HEAD probe does not hold that capacity.
+			http.Redirect(w, r, result.URL, http.StatusTemporaryRedirect)
+			if r.Method == http.MethodHead {
+				result.Release()
+			}
+			return
+		}
 	}
 
 	f, err := themesongs.Open(file)
@@ -139,7 +177,87 @@ func (h *ItemsHandler) HandleThemeAudio(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer func() { _ = f.Close() }()
+	if delivery == themesongs.DeliveryConverted {
+		ffmpeg := ""
+		if h.themeFFmpegPath != nil {
+			ffmpeg = h.themeFFmpegPath()
+		}
+		themesongs.ServeConverted(w, r, file.Path, conversion, seekSeconds, ffmpeg)
+		return
+	}
 	themesongs.Serve(w, r, file, f)
+}
+
+// themeConversionAllowed decides whether a request the original cannot satisfy
+// accepts the progressive AAC conversion, and with which output. Themes have
+// no HLS transcode, and a static request asks for the original bytes only.
+func themeConversionAllowed(query caseInsensitiveQuery, routeContainer string, file themesongs.File, universal bool) (themesongs.Conversion, float64, string, bool) {
+	const unsupported = "Only original theme audio or its AAC conversion is supported"
+	if strings.EqualFold(query.Get("static"), "true") {
+		return themesongs.Conversion{}, 0, "Static theme streams serve original audio only", false
+	}
+	if stream := query.Get("audioStreamIndex"); stream != "" && stream != "-1" && stream != "0" {
+		return themesongs.Conversion{}, 0, unsupported, false
+	}
+	containers := []string{routeContainer, query.Get("container")}
+	if universal {
+		if strings.EqualFold(query.Get("transcodingProtocol"), "hls") {
+			return themesongs.Conversion{}, 0, "HLS theme transcoding is unsupported", false
+		}
+		// Universal Container lists direct-play formats; the conversion is
+		// described by the transcoding parameters instead.
+		containers = []string{query.Get("transcodingContainer")}
+	}
+	// The request must name an MP4 target itself: a client that did not ask for
+	// a container could not expect the conversion's audio-only MP4.
+	named := false
+	for _, container := range containers {
+		switch strings.ToLower(strings.TrimSpace(container)) {
+		case "":
+		case compatContainerMP4, compatThemeM4A:
+			named = true
+		default:
+			return themesongs.Conversion{}, 0, unsupported, false
+		}
+	}
+	if !named {
+		return themesongs.Conversion{}, 0, unsupported, false
+	}
+	if codec := strings.ToLower(query.Get("audioCodec")); codec != "" && !containsThemeContainer(codec, "aac") {
+		return themesongs.Conversion{}, 0, unsupported, false
+	}
+	target := file
+	if query.Get("maxAudioChannels") == "1" || query.Get("transcodingAudioChannels") == "1" {
+		target.AudioChannels = 1
+	}
+	conversion := themesongs.ConversionFor(target)
+	if target.AudioChannels == 1 {
+		conversion.SourceChannels = 0
+	}
+	for _, key := range []string{"maxAudioBitRate", "audioBitRate", "maxStreamingBitrate"} {
+		if value := query.Get(key); value != "" {
+			bps, err := strconv.Atoi(value)
+			if err != nil || bps <= 0 {
+				return themesongs.Conversion{}, 0, unsupported, false
+			}
+			conversion.BitrateKbps = min(conversion.BitrateKbps, bps/1000)
+		}
+	}
+	if conversion.BitrateKbps < 32 {
+		return themesongs.Conversion{}, 0, "The requested bitrate is below the theme conversion minimum", false
+	}
+	seekSeconds := 0.0
+	if raw := query.Get("startTimeTicks"); raw != "" && raw != "0" {
+		ticks, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || ticks < 0 {
+			return themesongs.Conversion{}, 0, unsupported, false
+		}
+		seekSeconds = float64(ticks) / 1e7
+		if duration := float64(file.DurationSeconds); duration > 0 && seekSeconds > duration {
+			seekSeconds = duration
+		}
+	}
+	return conversion, seekSeconds, "", true
 }
 
 func writeThemeLookupError(w http.ResponseWriter, err error) {
