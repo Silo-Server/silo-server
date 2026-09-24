@@ -206,12 +206,22 @@ func overlayMissingPlexGuids(existing, metadata PlexGuids) PlexGuids {
 
 // plexUnresolvedIDsWarning is the shared wording for a best-effort id sweep that left
 // some items without a matchable identity. firstErr, when set, names the first upstream
-// failure so a systematic cause (auth, wrong URL) is visible in the run summary.
-func plexUnresolvedIDsWarning(scope, noun string, unresolved, attempted int, firstErr error) string {
-	msg := fmt.Sprintf("%s: could not resolve external ids for %d of %d %s; those items will remain unmatched",
-		scope, unresolved, attempted, noun)
+// failure so a systematic cause (auth, wrong URL) is visible in the run summary, and
+// aborted says the sweep stopped early rather than asking about every item.
+func plexUnresolvedIDsWarning(scope, noun string, unresolved, attempted int, firstErr error, aborted bool) string {
+	msg := fmt.Sprintf("%s: could not resolve external ids for %d of %d %s; those items will remain unmatched%s",
+		scope, unresolved, attempted, noun, plexSweepAbortedSuffix(aborted))
 	if firstErr != nil {
 		msg += fmt.Sprintf(" (first error: %v)", firstErr)
 	}
 	return msg
+}
+
+// plexSweepAbortedSuffix names the early stop in a run warning so the reader knows
+// the unresolved count came from giving up, not from Plex answering about every item.
+func plexSweepAbortedSuffix(aborted bool) string {
+	if !aborted {
+		return ""
+	}
+	return ", and the lookup stopped early after repeated server errors"
 }

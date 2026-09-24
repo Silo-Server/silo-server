@@ -127,7 +127,7 @@ func (p *PlexAdminProvider) fetchItemMetadata(
 	}
 	if unresolved > 0 {
 		*warnings = append(*warnings, plexUnresolvedIDsWarning(
-			"plex admin history", "unique items", unresolved, len(pending), sweep.firstErr))
+			"plex admin history", "unique items", unresolved, len(pending), sweep.firstErr, sweep.aborted))
 	}
 	return sweep.items, nil
 }

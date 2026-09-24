@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -341,8 +342,17 @@ func (c *PlexClient) FetchWatchlist(ctx context.Context, accountToken string) ([
 	var firstErr error
 	unresolved := 0
 	attempted := 0
+	failureStreak := 0
+	aborted := false
 	for i := range allItems {
 		if hasMatchablePlexGuid(allItems[i].Guid) {
+			continue
+		}
+		if aborted {
+			// The lookup gave up below; still count what it never asked about so
+			// the warning names every item that stays unmatched.
+			attempted++
+			unresolved++
 			continue
 		}
 		attempted++
@@ -352,16 +362,29 @@ func (c *PlexClient) FetchWatchlist(ctx context.Context, accountToken string) ([
 		}
 		if err != nil || detail == nil {
 			unresolved++
+			// A 404 means that one entry is gone; anything else (auth, outage,
+			// timeout) repeats on every remaining entry, so stop asking.
+			if err != nil && !isPlexHTTPStatus(err, http.StatusNotFound) {
+				failureStreak++
+				aborted = failureStreak >= plexMetadataFailureStreakLimit
+			} else {
+				failureStreak = 0
+			}
 			continue
 		}
+		failureStreak = 0
 		allItems[i].Guid, allItems[i].Year = applyPlexMetadataFallback(
 			allItems[i].Guid, allItems[i].Year, detail)
 		if !hasMatchablePlexGuid(allItems[i].Guid) {
 			unresolved++
 		}
 	}
+	if aborted {
+		slog.WarnContext(ctx, "plex history import: giving up on watchlist metadata after repeated failures",
+			"component", "historyimport", "unresolved", unresolved, "attempted", attempted, "error", firstErr)
+	}
 	if unresolved > 0 {
-		warnings = append(warnings, plexUnresolvedIDsWarning("watchlist", "items", unresolved, attempted, firstErr))
+		warnings = append(warnings, plexUnresolvedIDsWarning("watchlist", "items", unresolved, attempted, firstErr, aborted))
 	}
 	return allItems, warnings, nil
 }
