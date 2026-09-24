@@ -40,6 +40,11 @@ interface UseWatchTogetherPlaybackSyncResult {
   ) => TransportRequestResult;
   reportReady: () => TransportRequestResult;
   reportBuffering: (positionSeconds?: number, isPaused?: boolean) => TransportRequestResult;
+  /**
+   * The element is playing a stream's pre-roll up to a room seek target. Its
+   * mute and rate are temporary then, and are not the viewer's settings.
+   */
+  isPlayingPreroll: () => boolean;
 }
 
 const stateReportIntervalMs = 1_500;
@@ -60,7 +65,12 @@ const bufferingGraceMs = 2_000;
 // a pre-roll at the start of the stream, and no longer than this, is played.
 const maxPrerollSeconds = 20;
 // The pre-roll plays muted behind the syncing overlay, so it can run fast.
+// Close to the target it drops to normal speed and is checked often, so it
+// stops within the guest's one-second readiness tolerance: the stream cannot
+// seek back to a target it has passed.
 const prerollPlaybackRate = 4;
+const prerollFinalApproachSeconds = 1.5;
+const prerollCheckIntervalMs = 50;
 
 type ReadyCheck =
   | { ok: true; commandId: string; positionSeconds: number; isPaused: boolean }
@@ -195,14 +205,18 @@ export function useWatchTogetherPlaybackSync({
       ) {
         return;
       }
-      prerollRef.current = {
+      const preroll = {
         commandId: command.command_id,
         restoreMuted: video.muted,
         restoreRate: video.playbackRate,
       };
+      prerollRef.current = preroll;
       video.muted = true;
-      video.playbackRate = prerollPlaybackRate;
-      video.play().catch(() => endPreroll(false));
+      video.playbackRate = gap > prerollFinalApproachSeconds ? prerollPlaybackRate : 1;
+      video.play().catch(() => {
+        // A later pre-roll owns the element now; leave it alone.
+        if (prerollRef.current === preroll) endPreroll(false);
+      });
     },
     [
       appliedCommandIdRef,
@@ -222,18 +236,24 @@ export function useWatchTogetherPlaybackSync({
     }
     if (!video || !waitingSeekCommandId) return;
     const targetSeconds = transportCommand?.position_seconds ?? 0;
-    const onTimeUpdate = () => {
+    const checkProgress = () => {
       if (prerollRef.current?.commandId !== waitingSeekCommandId) return;
-      if (toMediaTime(video.currentTime, streamOriginRef.current) >= targetSeconds) {
+      const remaining = targetSeconds - toMediaTime(video.currentTime, streamOriginRef.current);
+      if (remaining <= 0) {
         endPreroll(true);
+      } else if (remaining <= prerollFinalApproachSeconds && video.playbackRate !== 1) {
+        video.playbackRate = 1;
       }
     };
+    // timeupdate may come only every 250 ms, so poll as well.
+    const intervalId = window.setInterval(checkProgress, prerollCheckIntervalMs);
     // A stream replaced mid-pre-roll starts over from its own position.
     const onEmptied = () => endPreroll(false);
-    video.addEventListener("timeupdate", onTimeUpdate);
+    video.addEventListener("timeupdate", checkProgress);
     video.addEventListener("emptied", onEmptied);
     return () => {
-      video.removeEventListener("timeupdate", onTimeUpdate);
+      window.clearInterval(intervalId);
+      video.removeEventListener("timeupdate", checkProgress);
       video.removeEventListener("emptied", onEmptied);
     };
   }, [
@@ -244,6 +264,7 @@ export function useWatchTogetherPlaybackSync({
     waitingSeekCommandId,
   ]);
   useEffect(() => () => endPreroll(false), [endPreroll]);
+  const isPlayingPreroll = useCallback(() => prerollRef.current !== null, []);
 
   // A new stream, room, selection, phase, or connection starts over.
   useEffect(() => {
@@ -548,6 +569,7 @@ export function useWatchTogetherPlaybackSync({
       requestTransport,
       reportReady,
       reportBuffering,
+      isPlayingPreroll,
     }),
     [
       attachedSessionId,
@@ -556,6 +578,7 @@ export function useWatchTogetherPlaybackSync({
       requestTransport,
       reportReady,
       reportBuffering,
+      isPlayingPreroll,
     ],
   );
 }

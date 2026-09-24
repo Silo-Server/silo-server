@@ -779,11 +779,16 @@ describe("VideoPlayer room catch-up", () => {
     expect(video.play).toHaveBeenCalledOnce();
     expect(video.muted).toBe(true);
     expect(video.playbackRate).toBe(4);
+    // The temporary mute is not saved as the viewer's preference.
+    fireEvent.volumeChange(video);
+    expect(localStorage.getItem("player-muted")).not.toBe("true");
 
-    // Still in the pre-roll: no acknowledgement yet.
+    // Still in the pre-roll: no acknowledgement yet. Close to the target it
+    // slows to normal speed, found by polling even without a timeupdate.
     video.currentTime = 1.8;
-    fireEvent.timeUpdate(video);
+    await act(() => vi.advanceTimersByTimeAsync(60));
     expect(paused).toBe(false);
+    expect(video.playbackRate).toBe(1);
     expect(connection.sendRoomMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "ready" }),
     );

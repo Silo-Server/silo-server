@@ -2026,6 +2026,9 @@ export function VideoPlayer({
     };
     const onProgress = () => setBuffered(video.buffered);
     const onVolumeChange = () => {
+      // The room seek pre-roll mutes the element for a moment; that is not
+      // the viewer's choice, so it is neither shown nor saved.
+      if (watchTogetherSync.isPlayingPreroll()) return;
       setVolume(video.volume);
       setMuted(video.muted);
       persistVolume(video.volume, video.muted);
