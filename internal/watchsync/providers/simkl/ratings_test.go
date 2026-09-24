@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -260,9 +261,12 @@ func TestRatingRowsFromListClassifiesAnimeByType(t *testing.T) {
 			if err := json.Unmarshal([]byte(body), &list); err != nil {
 				t.Fatalf("decode: %v", err)
 			}
-			rows, warnings := ratingRowsFromList(list, simklTypeAnime, "simkl")
+			rows, untyped, warnings := ratingRowsFromList(list, simklTypeAnime, "simkl")
 			if len(rows) != 1 || len(warnings) != 0 {
 				t.Fatalf("rows = %#v warnings = %v, want one row", rows, warnings)
+			}
+			if wantUntyped := tc.wantKind == historyimport.KindSeries && tc.wantTMDB == ""; untyped != wantUntyped {
+				t.Fatalf("untyped = %v, want %v", untyped, wantUntyped)
 			}
 			row := rows[0]
 			if row.Kind != tc.wantKind || row.TMDBID != tc.wantTMDB || row.ProviderItemKey != tc.wantKey {
@@ -284,7 +288,7 @@ func TestRatingRowsFromListUntypedAnimeWithOnlyTMDBHasNoExternalID(t *testing.T)
 	]}`), &list); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	rows, warnings := ratingRowsFromList(list, simklTypeAnime, "simkl")
+	rows, _, warnings := ratingRowsFromList(list, simklTypeAnime, "simkl")
 	// The OVA keeps only its Simkl id; the untyped entry has no id left.
 	if len(rows) != 1 || rows[0].ProviderItemKey != "simkl:9" || rows[0].Kind != historyimport.KindSeries ||
 		rows[0].TMDBID != "" || rows[0].IMDbID != "" || rows[0].TVDBID != "" {
@@ -466,5 +470,21 @@ func TestRatingExportRequiresWatchedForMoviesOnly(t *testing.T) {
 	}
 	if gate.RatingExportRequiresWatched(historyimport.KindSeries) {
 		t.Fatal("series ratings must not wait for a completed play")
+	}
+}
+
+func TestFetchRatingsUntypedAnimeIsNotAMovieSnapshot(t *testing.T) {
+	server := &ratingsServer{t: t, activities: ratingsActivitiesFixture, lists: map[string]string{
+		"movies": `{"movies":[]}`,
+		"shows":  `{"shows":[]}`,
+		// The documented ratings read carries no anime_type.
+		"anime": `{"anime":[{"user_rating":8,"show":{"title":"Akira","year":1988,"ids":{"simkl":3,"imdb":"tt0094625"}}}]}`,
+	}}
+	batch := fetchRatingsFrom(t, server, nil)
+	if slices.Contains(batch.SnapshotKinds, historyimport.KindMovie) {
+		t.Fatalf("snapshot kinds = %v; an untyped anime entry could be a movie", batch.SnapshotKinds)
+	}
+	if !slices.Contains(batch.SnapshotKinds, historyimport.KindSeries) || len(batch.Warnings) == 0 {
+		t.Fatalf("snapshot kinds = %v warnings = %v, want series kept and a warning", batch.SnapshotKinds, batch.Warnings)
 	}
 }
