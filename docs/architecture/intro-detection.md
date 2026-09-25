@@ -14,7 +14,9 @@ with marker detection enabled. Code lives in `internal/intromarkers`.
 2. **Chromaprint.** Remaining files are grouped by library, season, and
    presentation (edition and audio language). Each file's opening audio
    (25 percent of the runtime, at most ten minutes) is fingerprinted once and
-   cached. Each file is compared with the next eight episodes in episode order.
+   cached. Each file is compared with the next eight episodes in episode order,
+   and a file none of them matched with up to 48 more. Matches must last 12
+   seconds to 3 minutes.
    A file's intro is the median of the pair results that agree with its
    most-confirmed one (`chromaprint:v3`).
 3. **Dialogue.** When an external dialogue subtitle overlaps the first seconds
@@ -46,7 +48,8 @@ these values with each provider's minimum confidence.
 - `AlgorithmVersion` and `Config.ConfigHash` key the fingerprint cache.
   Changing either discards every cached fingerprint, and re-reading the audio
   of a large library takes days. Change them only when the fingerprint itself
-  changes.
+  changes. `ConfigHash` covers only the analysis window; the intro duration
+  bounds it once included are hashed as fixed legacy values.
 - `AnalysisBehaviorVersion` is part of the season state key. Bump it to
   re-run every season comparison over cached fingerprints.
 - Algorithm identifiers are stored with each marker. Between two scanner
