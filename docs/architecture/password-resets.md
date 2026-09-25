@@ -49,7 +49,8 @@ administrator revokes them separately. Concurrent completions of one link have
 exactly one winner. Sign-in afterwards is a separate effect: when it fails, the
 response still reports the committed reset (`sign_in_required`) and the caller must
 not replay it. The `OnUserSessionsRevoked` hook then drops Jellyfin-compatible
-sessions held in memory, the same as for administrator account edits.
+sessions held in memory, the same as for administrator account edits, on every
+replica: it announces the revocation on the admin event channel.
 
 **No link without an external URL.** Links are built on `server.public_url`
 (`mail.AccountLinkBase`, shared with invitations). Without one, issuing fails with
@@ -70,8 +71,9 @@ leaves a stale flag behind.
 completion, and refresh copy the flag from the account into the access-token claim
 `password_change_required`. The auth middleware already validates the token and its
 session on every request, so the restriction costs no extra read. An administrator
-setting a temporary password revokes the account's sessions in the same
-transaction, so every session opened afterwards carries the claim. Choosing the new
+setting a temporary password signs the account out everywhere in the same
+transaction, Audiobookshelf-compatible sessions included, so every session opened
+afterwards carries the claim. Choosing the new
 password revokes every other session of the account in the same transaction: each
 was opened with the temporary password, possibly by someone else, and its next
 refresh would otherwise lift the restriction. The session that chose the password

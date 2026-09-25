@@ -30,6 +30,9 @@ export default function ChoosePassword() {
   // Set once the password changed, so the settled account does not trip the
   // redirect below before this screen navigates on.
   const [changed, setChanged] = useState(false);
+  // The new password is saved but signing in with it did not finish; retrying
+  // must not resubmit the temporary password, which no longer works.
+  const [settleFailed, setSettleFailed] = useState(false);
   const busy = useRef(false);
   useDocumentTitle("Choose a New Password");
 
@@ -46,6 +49,19 @@ export default function ChoosePassword() {
     return <Navigate to={user ? redirectTarget || "/" : "/login"} replace />;
   }
 
+  async function settle() {
+    busy.current = true;
+    setSettleFailed(false);
+    try {
+      await settleTemporaryPassword();
+      await continueSignIn({ password_change_required: false });
+    } catch {
+      setSettleFailed(true);
+    } finally {
+      busy.current = false;
+    }
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (busy.current) return;
@@ -58,15 +74,40 @@ export default function ChoosePassword() {
     setError("");
     try {
       await changePassword.mutateAsync({ current_password: current, new_password: password });
-      setChanged(true);
-      await settleTemporaryPassword();
-      await continueSignIn({ password_change_required: false });
     } catch (err) {
-      setChanged(false);
       setError(passwordErrorMessage(err, "Could not change the password."));
-    } finally {
       busy.current = false;
+      return;
     }
+    busy.current = false;
+    setChanged(true);
+    await settle();
+  }
+
+  if (settleFailed) {
+    return (
+      <div className="auth-shell">
+        <AuthBackground />
+        <Card className="auth-card glass panel-border w-full max-w-sm border-0">
+          <CardHeader>
+            <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">
+              Password changed
+            </CardTitle>
+            <CardDescription className="mt-2 text-sm leading-6">
+              Your new password is saved, but signing you in did not finish.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Button className="w-full" onClick={() => void settle()}>
+              Try again
+            </Button>
+            <Button variant="outline" className="w-full" onClick={logout}>
+              Sign out and use the new password
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   const submitting = changePassword.isPending || changed;

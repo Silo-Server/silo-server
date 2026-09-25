@@ -62,6 +62,11 @@ const (
 	EventPluginsChanged = "plugins_changed"
 )
 
+// EventUserSessionsRevoked is published on ChannelAdmin with a user ID whose
+// login sessions were revoked, so every API replica drops that account's
+// in-memory Jellyfin-compatible sessions.
+const EventUserSessionsRevoked = "user_sessions_revoked"
+
 // ---------------------------------------------------------------------------
 // Event
 // ---------------------------------------------------------------------------

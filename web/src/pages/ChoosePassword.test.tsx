@@ -108,3 +108,14 @@ it("sends a signed-out visitor to sign in", async () => {
   mount();
   await screen.findByText("Ordinary login");
 });
+
+it("keeps a saved password when signing in afterwards fails, and retries only that", async () => {
+  auth.settleTemporaryPassword.mockRejectedValueOnce(new Error("offline"));
+  mount("/change-password?redirect=%2Flibrary");
+  await fill();
+  fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+  await screen.findByText("Library");
+  // The password change went out once; the retry only settled the session.
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(auth.settleTemporaryPassword).toHaveBeenCalledTimes(2);
+});

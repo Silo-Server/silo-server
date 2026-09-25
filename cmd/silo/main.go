@@ -3131,10 +3131,29 @@ func main() {
 	// Step 7: Build HTTP router with all dependencies.
 	// compatServer is populated after the compat server is constructed below;
 	// the closure captures the pointer so revocation calls reach the live instance.
-	var compatServer *jellycompat.Server
+	var compatServer atomic.Pointer[jellycompat.Server]
+	dropCompatSessions := func(userID int) {
+		if compat := compatServer.Load(); compat != nil {
+			compat.SessionStore().DeleteByUserID(userID)
+		}
+	}
+	// Every replica caches Jellyfin-compatible sessions in memory and serves a
+	// cached one without reading the database, so a revocation is announced on
+	// the admin channel for each replica to drop the account's sessions.
+	if err := eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+		if event.Type != cache.EventUserSessionsRevoked {
+			return
+		}
+		if userID, err := strconv.Atoi(event.Payload); err == nil {
+			dropCompatSessions(userID)
+		}
+	}); err != nil {
+		slog.Warn("subscribe session revocation failed", "error", err)
+	}
 	deps.OnUserSessionsRevoked = func(ctx context.Context, userID int) {
-		if compatServer != nil {
-			compatServer.SessionStore().DeleteByUserID(userID)
+		dropCompatSessions(userID)
+		if err := eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventUserSessionsRevoked, Payload: strconv.Itoa(userID)}); err != nil {
+			slog.WarnContext(ctx, "publish session revocation failed", "user_id", userID, "error", err)
 		}
 	}
 
@@ -3428,7 +3447,7 @@ func main() {
 		}
 
 		compat := jellycompat.NewServerWithDependencies(compatDeps)
-		compatServer = compat
+		compatServer.Store(compat)
 		compatTerminalRecoveryReady = compat.StartBackgroundTasks(context.Background())
 		compatSrv = compat.HTTPServer()
 		compatSrv.ReadTimeout = 30 * time.Second
