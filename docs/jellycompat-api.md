@@ -160,6 +160,17 @@ source and receive `PlaybackUnavailable` instead. Negotiated limits are kept
 with the playback session, so policy edits affect only new sessions.
 Query `StartTimeTicks` is honored. Remux-only URLs use `static=false`.
 
+Silo gives each version its own `MediaSources[i].Id`, while real Jellyfin reuses
+the item id. Some clients therefore send a media-source id where an item id
+belongs. `PlaybackInfo`, `GET /Items/{id}`, `MediaSegments`, `Download`, static
+`/Videos/{id}/stream`, and the user-data and played-state routes accept a
+media-source id there and resolve it to the item that owns its file (the
+episode for an episode file). On `PlaybackInfo` the id selects that version
+unless the body names a `MediaSourceId`. A stale body `MediaSourceId` falls back
+to the route's version, and a route version the item no longer has answers
+`404`. The negotiated session keeps the client's id as its route item id, so the
+stream URLs it hands out and later session reports can carry that id.
+
 The managed Jellyfin Web build opts into `SiloSeekReanchor=true` on
 `PlaybackInfo`. For a copied-video HLS source, the response echoes
 `SiloSeekReanchor=true`. The client can seek locally only within the available

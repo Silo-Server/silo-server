@@ -2163,6 +2163,25 @@ func (r *FileRepository) GetByID(ctx context.Context, id int) (*models.MediaFile
 	return scanMediaFile(r.pool.QueryRow(ctx, query, id))
 }
 
+// PlayableContentID returns the catalog item a media file plays as: its
+// episode, otherwise its content item, otherwise its local extra. It returns
+// ErrFileNotFound when no file has the id, and "" for an unlinked file.
+func (r *FileRepository) PlayableContentID(ctx context.Context, id int) (string, error) {
+	var contentID string
+	err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(NULLIF(episode_id, ''), NULLIF(content_id, ''), NULLIF(extra_id, ''), '')
+		FROM media_files
+		WHERE id = $1
+	`, id).Scan(&contentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrFileNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("querying playable content id for media file %d: %w", id, err)
+	}
+	return contentID, nil
+}
+
 // GetByIDs retrieves media files by primary key.
 func (r *FileRepository) GetByIDs(ctx context.Context, ids []int) ([]*models.MediaFile, error) {
 	if len(ids) == 0 {

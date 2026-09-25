@@ -618,9 +618,9 @@ func (h *PlaybackHandler) HandleDownload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	contentID, err := decodeContentID(h.codec, chiURLParam(r, "id"))
+	contentID, routeFileID, err := decodeContentOrMediaSourceID(r.Context(), h.codec, chiURLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		writeItemIDError(w, r, err)
 		return
 	}
 	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)
@@ -630,7 +630,11 @@ func (h *PlaybackHandler) HandleDownload(w http.ResponseWriter, r *http.Request)
 	}
 
 	version := detail.Versions[0]
-	if mediaSourceID := firstNonEmpty(r.URL.Query().Get("mediaSourceId"), r.URL.Query().Get("MediaSourceId")); mediaSourceID != "" {
+	mediaSourceID := firstNonEmpty(r.URL.Query().Get("mediaSourceId"), r.URL.Query().Get("MediaSourceId"))
+	if mediaSourceID == "" && routeFileID > 0 {
+		mediaSourceID = h.codec.EncodeIntID(EncodedIDMediaSource, routeFileID)
+	}
+	if mediaSourceID != "" {
 		if fileID, decodeErr := h.codec.DecodeIntID(EncodedIDMediaSource, mediaSourceID); decodeErr == nil {
 			for _, v := range detail.Versions {
 				if int64(v.FileID) == fileID {
@@ -3354,9 +3358,12 @@ func (h *PlaybackHandler) compatSegmentDuration() int {
 // is the client's own PlaySessionId (if it sent one) so later playback reports
 // carrying it can resolve this session directly.
 func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *Session, routeID, mediaSourceID, clientPlaySessionID string) (*PlaybackSession, *PlaybackMediaSource, error) {
-	contentID, err := decodeContentID(h.codec, routeID)
+	contentID, routeFileID, err := decodeContentOrMediaSourceID(ctx, h.codec, routeID)
 	if err != nil {
 		return nil, nil, ErrSessionNotFound
+	}
+	if mediaSourceID == "" && routeFileID > 0 {
+		mediaSourceID = h.codec.EncodeIntID(EncodedIDMediaSource, routeFileID)
 	}
 	detail, err := h.content.GetItemDetail(ctx, session, contentID, nil)
 	if err != nil || detail == nil || len(detail.Versions) == 0 {
@@ -3449,6 +3456,11 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 }
 
 func playbackRouteSource(session *PlaybackSession, mediaSourceID string, allowItemAlias, staticRequest bool) *PlaybackMediaSource {
+	// A session keyed on a media-source id has a RouteItemID that is also a
+	// source id, so an exact source match wins over the item alias.
+	if source := findMediaSource(session, mediaSourceID); source != nil {
+		return source
+	}
 	if mediaSourceID == "" || (allowItemAlias && mediaSourceIDsEqual(mediaSourceID, session.RouteItemID)) {
 		if staticRequest {
 			for _, source := range session.MediaSources {
@@ -3460,7 +3472,7 @@ func playbackRouteSource(session *PlaybackSession, mediaSourceID string, allowIt
 		}
 		return firstMediaSource(session)
 	}
-	return findMediaSource(session, mediaSourceID)
+	return nil
 }
 
 func firstMediaSource(session *PlaybackSession) *PlaybackMediaSource {

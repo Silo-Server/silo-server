@@ -241,8 +241,9 @@ func newSubtitleSelectionHandler(t *testing.T) (*PlaybackHandler, string) {
 	return handler, routeID
 }
 
-func postPlaybackInfo(t *testing.T, handler *PlaybackHandler, routeID, body string) playbackInfoResponseDTO {
-	t.Helper()
+// servePlaybackInfo posts body to /Items/{routeID}/PlaybackInfo as the
+// token-1 session and returns the recorded response.
+func servePlaybackInfo(handler *PlaybackHandler, routeID, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo", strings.NewReader(body))
 	routeCtx := chi.NewRouteContext()
 	routeCtx.URLParams.Add("id", routeID)
@@ -251,6 +252,12 @@ func postPlaybackInfo(t *testing.T, handler *PlaybackHandler, routeID, body stri
 
 	rr := httptest.NewRecorder()
 	handler.HandlePlaybackInfo(rr, req)
+	return rr
+}
+
+func postPlaybackInfo(t *testing.T, handler *PlaybackHandler, routeID, body string) playbackInfoResponseDTO {
+	t.Helper()
+	rr := servePlaybackInfo(handler, routeID, body)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
