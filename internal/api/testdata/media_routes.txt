@@ -380,6 +380,7 @@ GET /api/v2/calendar	non-media
 GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
+GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
@@ -597,6 +598,7 @@ GET /api/v2/onboarding/flow	non-media
 PUT /api/v2/onboarding/progress	non-media
 GET /api/v2/onboarding/state	non-media
 GET /api/v2/openapi.json	non-media
+POST /api/v2/password-resets	non-media
 GET /api/v2/password-resets/{token}	non-media
 POST /api/v2/password-resets/{token}/complete	non-media
 GET /api/v2/playback/capabilities	non-media
@@ -1541,6 +1543,7 @@ GET /api/v2/calendar	non-media
 GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
+GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
@@ -1758,6 +1761,7 @@ GET /api/v2/onboarding/flow	non-media
 PUT /api/v2/onboarding/progress	non-media
 GET /api/v2/onboarding/state	non-media
 GET /api/v2/openapi.json	non-media
+POST /api/v2/password-resets	non-media
 GET /api/v2/password-resets/{token}	non-media
 POST /api/v2/password-resets/{token}/complete	non-media
 GET /api/v2/playback/capabilities	non-media

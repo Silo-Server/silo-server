@@ -254,6 +254,10 @@ var adminSettingDefaults = map[string]string{
 	"signup.enabled":                  "false",
 	SetupCompletedSettingKey:          "false",
 
+	// Self-service password reset from the sign-in page; an administrator
+	// opts in.
+	"password_reset.self_service_enabled": "false",
+
 	"catalog.search.provider":                             "postgres",
 	"catalog.search.meilisearch.index":                    "silo_media_items",
 	"catalog.search.meilisearch.timeout_ms":               "800",
@@ -376,7 +380,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", "recommendations.enabled",
 		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled",
 		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
-		"email.enabled", "signup.enabled", SetupCompletedSettingKey,
+		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,
 		"scanner.empty_trash_after_scan", "matcher.enable_tv_series_root_queue",
 		"matcher.enable_tv_series_group_queue", "policy.editor_enabled",
 		"overlays.enabled", "notifications.release_events_enabled", "notifications.fanout_enabled",

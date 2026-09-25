@@ -53,6 +53,18 @@ func (h *PasswordResetHandler) IssuePasswordReset(ctx context.Context, input pas
 	return h.service.Issue(ctx, input)
 }
 
+// PasswordResetSelfService reports whether self-service reset is turned on
+// and whether the server can deliver it.
+func (h *PasswordResetHandler) PasswordResetSelfService(ctx context.Context) (enabled, configured bool, err error) {
+	return h.service.SelfService(ctx)
+}
+
+// RequestPasswordReset starts a reset the account holder asked for on the
+// sign-in page.
+func (h *PasswordResetHandler) RequestPasswordReset(ctx context.Context, login string) error {
+	return h.service.Request(ctx, login)
+}
+
 // LookupPasswordReset resolves a link for the public reset screen.
 func (h *PasswordResetHandler) LookupPasswordReset(ctx context.Context, token string) (*passwordreset.LookupResult, error) {
 	return h.service.Lookup(ctx, token)

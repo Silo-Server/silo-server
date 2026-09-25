@@ -220,3 +220,51 @@ func TestResetLinkConcurrentCompletionsHaveOneWinner(t *testing.T) {
 		t.Fatalf("%d completions succeeded, want exactly 1", won)
 	}
 }
+
+func TestIssueUnlessRecentHoldsTheCooldownDB(t *testing.T) {
+	d := newResetDB(t)
+	ctx := t.Context()
+	alice := d.account(t, "alice", true, true)
+	hashOf := func() string {
+		t.Helper()
+		var hash string
+		if err := d.pool.QueryRow(ctx, `SELECT token_hash FROM password_reset_tokens WHERE user_id = $1`, alice).Scan(&hash); err != nil {
+			t.Fatal(err)
+		}
+		return hash
+	}
+	expires := time.Now().Add(time.Hour)
+
+	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "first", expires, time.Minute); err != nil || !stored {
+		t.Fatalf("first request: %v, %v", stored, err)
+	}
+	// Inside the cooldown the live link survives, whoever asks.
+	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "second", expires, time.Minute); err != nil || stored || hashOf() != "first" {
+		t.Fatalf("request inside cooldown: %v, %v, link %q", stored, err, hashOf())
+	}
+	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET created_at = now() - interval '2 minutes' WHERE user_id = $1`, alice); err != nil {
+		t.Fatal(err)
+	}
+	var issuedBy *int
+	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "third", expires, time.Minute); err != nil || !stored || hashOf() != "third" {
+		t.Fatalf("request after cooldown: %v, %v, link %q", stored, err, hashOf())
+	}
+	if err := d.pool.QueryRow(ctx, `SELECT issued_by FROM password_reset_tokens WHERE user_id = $1`, alice).Scan(&issuedBy); err != nil || issuedBy != nil {
+		t.Fatalf("requested link has issuer %v, %v", issuedBy, err)
+	}
+	// An administrator's link is not subject to the cooldown.
+	admin := d.account(t, "admin", true, true)
+	if err := d.repo.Issue(ctx, alice, "admin-sent", &admin, expires); err != nil || hashOf() != "admin-sent" {
+		t.Fatalf("admin issue inside cooldown: %v, link %q", err, hashOf())
+	}
+
+	for name, id := range map[string]int{
+		"disabled":          d.account(t, "off", false, true),
+		"external provider": d.account(t, "sso", true, false),
+		"unknown":           999999,
+	} {
+		if stored, err := d.repo.IssueUnlessRecent(ctx, id, "never-"+name, expires, time.Minute); err != nil || stored {
+			t.Errorf("%s: stored=%v err=%v", name, stored, err)
+		}
+	}
+}

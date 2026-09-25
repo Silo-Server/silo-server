@@ -1,6 +1,8 @@
 // Package passwordreset implements password reset links: a single-use,
 // time-limited capability to replace one account's local password, so an
-// administrator can help a locked-out account without handling its password.
+// administrator can help a locked-out account without handling its password,
+// and, when the server allows it, an account holder can reset their own from
+// the sign-in page.
 //
 // Invariants: docs/architecture/password-resets.md
 package passwordreset
@@ -83,6 +85,31 @@ func (r *Repository) Issue(ctx context.Context, userID int, tokenHash string, is
 		return ErrNotEligible
 	}
 	return nil
+}
+
+// IssueUnlessRecent is Issue for a link the account holder asked for
+// themselves, with no issuer of record. It leaves the account's link alone
+// when that link is younger than minAge and reports whether it stored a new
+// one, so repeated requests can neither flood the mailbox nor keep replacing
+// a link that was just sent. The age check and the replacement are one
+// statement, so concurrent requests across nodes still store one link. It
+// reports false, not an error, for an account that cannot use a reset.
+func (r *Repository) IssueUnlessRecent(ctx context.Context, userID int, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
+		INSERT INTO password_reset_tokens (user_id, token_hash, password_fingerprint, issued_by, expires_at)
+		SELECT u.id, $2, `+passwordFingerprint+`, NULL, $3 FROM users u WHERE u.id = $1 AND `+eligibleAccount+`
+		ON CONFLICT (user_id) DO UPDATE SET
+			token_hash = EXCLUDED.token_hash,
+			password_fingerprint = EXCLUDED.password_fingerprint,
+			issued_by = NULL,
+			expires_at = EXCLUDED.expires_at,
+			created_at = now()
+		WHERE password_reset_tokens.created_at <= now() - make_interval(secs => $4)`,
+		userID, tokenHash, expiresAt, minAge.Seconds())
+	if err != nil {
+		return false, fmt.Errorf("issuing requested password reset link: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // Lookup resolves a usable link to its account.

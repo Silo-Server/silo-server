@@ -244,6 +244,7 @@ export const v2Operations = {
   "GET /api/v2/capabilities/downloads": "getDownloadCapability",
   "GET /api/v2/capabilities/ebooks": "getEbookCapability",
   "GET /api/v2/capabilities/metadata-ai": "getMetadataAICapability",
+  "GET /api/v2/capabilities/password-reset": "getPasswordResetCapability",
   "GET /api/v2/capabilities/trailers": "getTrailersCapability",
   "GET /api/v2/catalog": "listCatalogItems",
   "GET /api/v2/catalog/audiobook-groups": "listAudiobookGroups",
@@ -660,6 +661,7 @@ export const v2Operations = {
   "POST /api/v2/notifications/webhooks/{id}/rotate-secret": "rotateNotificationWebhookSecret",
   "POST /api/v2/notifications/webhooks/{id}/test": "testNotificationWebhook",
   "POST /api/v2/notifications/{id}/read": "markNotificationRead",
+  "POST /api/v2/password-resets": "requestPasswordReset",
   "POST /api/v2/password-resets/{token}/complete": "completePasswordReset",
   "POST /api/v2/playback/route-events": "reportPlaybackRouteEvent",
   "POST /api/v2/playback/sessions/{session_id}/control/ws-ticket":

@@ -60,3 +60,29 @@ export async function completePasswordReset(
     throw invalid();
   return result;
 }
+
+export type PasswordResetCapability = components["schemas"]["PasswordResetCapability"];
+
+/** Whether the sign-in page may offer self-service password reset. */
+export async function getPasswordResetCapability(
+  signal?: AbortSignal,
+): Promise<PasswordResetCapability> {
+  const result = await v2("GET /api/v2/capabilities/password-reset", {
+    signal,
+    retryAuthentication: false,
+  });
+  if (!result || typeof result.state !== "string") {
+    throw new V2TransportError("getPasswordResetCapability", 200, "Invalid capability response");
+  }
+  return result;
+}
+
+/** Asks for a reset link for the account `login` names. The server answers
+ * every accepted request alike, whether or not an account matched. */
+export async function requestPasswordReset(login: string, signal: AbortSignal): Promise<void> {
+  await v2("POST /api/v2/password-resets", {
+    body: { login },
+    signal,
+    retryAuthentication: false,
+  });
+}

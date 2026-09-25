@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,12 +17,35 @@ import (
 // DefaultTTL bounds how long a reset link stays usable.
 const DefaultTTL = 24 * time.Hour
 
+// SettingSelfService lets anyone ask for a reset link for their own account
+// from the sign-in page. Off by default: an administrator opts the server in.
+const SettingSelfService = "password_reset.self_service_enabled"
+
+// Self-service limits. Nobody vouches for a link requested from the sign-in
+// page, so it lives an hour rather than DefaultTTL, and an account gets at
+// most one per cooldown however often its name is typed into the form.
+const (
+	SelfServiceTTL      = time.Hour
+	selfServiceCooldown = 5 * time.Minute
+	// selfServiceTimeout bounds one background request, SMTP send included.
+	selfServiceTimeout = time.Minute
+	// maxPendingRequests bounds concurrent background requests on one node.
+	// Beyond it a request is dropped and logged; the requester can ask again.
+	maxPendingRequests = 8
+)
+
 // Errors surfaced to the API layer.
 var (
 	ErrAccountDisabled = errors.New("account is disabled")
 	ErrNoEmail         = errors.New("account has no usable email address")
 	ErrNoLinkBase      = errors.New("no external URL is configured for reset links")
 	ErrUnknownDelivery = errors.New("unknown reset link delivery")
+	// ErrSelfServiceDisabled reports that an administrator has not turned
+	// self-service reset on.
+	ErrSelfServiceDisabled = errors.New("self-service password reset is disabled")
+	// ErrSelfServiceNotConfigured reports a server that cannot email a link:
+	// it lacks an external URL or a configured mail server.
+	ErrSelfServiceNotConfigured = errors.New("self-service password reset needs email and a public URL")
 	// ErrSessionStart reports a completed reset whose sign-in failed; the new
 	// password is in place and the link is spent.
 	ErrSessionStart = errors.New("password reset but login failed")
@@ -40,12 +65,15 @@ const (
 // *Repository; an interface so tests can fake it).
 type repository interface {
 	Issue(ctx context.Context, userID int, tokenHash string, issuedBy *int, expiresAt time.Time) error
+	IssueUnlessRecent(ctx context.Context, userID int, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error)
 	Lookup(ctx context.Context, tokenHash string) (*Link, error)
 	Complete(ctx context.Context, tokenHash, newPassword string) (*models.User, error)
 }
 
-// userDirectory reads the account a link is issued for.
+// userDirectory reads the account a link is issued for, by ID or by the
+// sign-in name its holder types.
 type userDirectory interface {
+	auth.LoginDirectory
 	GetByID(ctx context.Context, id int) (*models.User, error)
 }
 
@@ -67,6 +95,10 @@ type Service struct {
 	// sessionsRevoked runs after a completed reset revoked the account's
 	// sessions, so state held outside auth_sessions is dropped too.
 	sessionsRevoked func(ctx context.Context, userID int)
+	// pending holds one slot per self-service request still running, and
+	// async runs it; tests replace async to run requests inline.
+	pending chan struct{}
+	async   func(func())
 }
 
 // NewService wires the reset link service. publicURL is the link-base
@@ -88,6 +120,8 @@ func NewService(
 		publicURL: publicURL,
 		ttl:       DefaultTTL,
 		now:       time.Now,
+		pending:   make(chan struct{}, maxPendingRequests),
+		async:     func(fn func()) { go fn() },
 	}
 }
 
@@ -178,7 +212,7 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 		result.URL = resetURL
 		return result, nil
 	}
-	content := composeResetEmail(user.Username, s.serverName(ctx), resetURL, expiresAt, s.now())
+	content := composeResetEmail(false, user.Username, s.serverName(ctx), resetURL, expiresAt, s.now())
 	err = s.mail.Send(ctx, mail.Message{
 		To:       []string{user.Email},
 		Subject:  content.Subject,
@@ -190,6 +224,94 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 	}
 	result.EmailSent = true
 	return result, nil
+}
+
+// SelfService reports whether an administrator turned self-service reset on,
+// and whether the server can deliver it: a link needs an external URL and
+// email needs a configured mail server.
+func (s *Service) SelfService(ctx context.Context) (enabled, configured bool, err error) {
+	value, err := s.settings.Get(ctx, SettingSelfService)
+	if err != nil {
+		return false, false, fmt.Errorf("reading %s: %w", SettingSelfService, err)
+	}
+	enabled, _ = strconv.ParseBool(strings.TrimSpace(value))
+	return enabled, s.Capabilities(ctx).Email, nil
+}
+
+// Request starts a reset the account holder asked for on the sign-in page,
+// naming the account by sign-in name or email address. Only availability is
+// answered here. The lookup, the link, and the email run in the background,
+// so neither the result nor its timing tells the caller whether an account
+// matched.
+func (s *Service) Request(ctx context.Context, login string) error {
+	enabled, configured, err := s.SelfService(ctx)
+	switch {
+	case err != nil:
+		return err
+	case !configured:
+		return ErrSelfServiceNotConfigured
+	case !enabled:
+		return ErrSelfServiceDisabled
+	}
+	select {
+	case s.pending <- struct{}{}:
+	default:
+		slog.WarnContext(ctx, "password reset request dropped: too many in flight", "component", "passwordreset")
+		return nil
+	}
+	s.async(func() {
+		defer func() { <-s.pending }()
+		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), selfServiceTimeout)
+		defer cancel()
+		if err := s.sendRequested(bg, strings.TrimSpace(login)); err != nil {
+			slog.WarnContext(bg, "password reset request failed", "component", "passwordreset", "error", err)
+		}
+	})
+	return nil
+}
+
+// sendRequested emails a new link to the account login names. Every reason
+// not to send (no such account, no usable address, an account that cannot
+// use a reset, a link sent moments ago) is a silent nil: the requester got
+// the same answer either way.
+func (s *Service) sendRequested(ctx context.Context, login string) error {
+	user, err := auth.LookupLogin(ctx, s.users, login)
+	if auth.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("looking up account: %w", err)
+	}
+	if !user.Enabled || !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
+		return nil
+	}
+	if _, err := auth.ValidateEmail(user.Email); errors.Is(err, auth.ErrInvalidEmail) {
+		return nil
+	}
+	linkBase := s.linkBase(ctx)
+	if linkBase == "" {
+		return ErrNoLinkBase
+	}
+	token, tokenHash, err := auth.NewLinkToken()
+	if err != nil {
+		return fmt.Errorf("generate password reset token: %w", err)
+	}
+	expiresAt := s.now().Add(SelfServiceTTL)
+	stored, err := s.repo.IssueUnlessRecent(ctx, user.ID, tokenHash, expiresAt, selfServiceCooldown)
+	if err != nil || !stored {
+		return err
+	}
+	content := composeResetEmail(true, user.Username, s.serverName(ctx), linkBase+"/reset-password/"+token, expiresAt, s.now())
+	if err := s.mail.Send(ctx, mail.Message{
+		To:       []string{user.Email},
+		Subject:  content.Subject,
+		TextBody: content.Text,
+		HTMLBody: content.HTML,
+	}); err != nil {
+		return fmt.Errorf("emailing requested reset link for account %d: %w", user.ID, err)
+	}
+	slog.InfoContext(ctx, "password reset link emailed on request", "component", "passwordreset", "user_id", user.ID)
+	return nil
 }
 
 // LookupResult is the reset screen's view of a link: only what it renders.
