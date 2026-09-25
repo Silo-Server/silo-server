@@ -269,3 +269,37 @@ func TestContributeMarkersTaskCountsEachProviderOnceAcrossRetries(t *testing.T) 
 		t.Fatalf("result = %v, want two submissions and no retry skips", data)
 	}
 }
+
+func TestContributeMarkersTaskCountsRetriedFailureByItsRetry(t *testing.T) {
+	// Provider a fails transiently, then provider b is rate-limited. The error
+	// released a's claim, so the retry submits a again; its success replaces
+	// the counted failure.
+	runner := &fakeContribRunner{
+		sequence: [][]markers.ContributionOutcome{
+			{
+				{Provider: "a", Segment: markers.MarkerKindIntro, Status: markers.OutcomeStatusError},
+				{Provider: "b", Segment: markers.MarkerKindIntro, Status: markers.OutcomeStatusRateLimited, RetryAfter: time.Second},
+			},
+			{
+				{Provider: "a", Segment: markers.MarkerKindIntro, Status: markers.SubmissionStatusPending},
+				{Provider: "b", Segment: markers.MarkerKindIntro, Status: markers.SubmissionStatusPending},
+			},
+		},
+	}
+	cands := &fakeCandidates{ids: []int{10}}
+	cfg := fakeAutoConfig{{Provider: "a", ContributeEnabled: true, ContributeAutoLocal: true}, {Provider: "b", ContributeEnabled: true, ContributeAutoLocal: true}}
+	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
+	task.wait = noWait
+
+	prog := &contribTestProgress{}
+	if err := task.Execute(context.Background(), prog); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var data map[string]int
+	if err := json.Unmarshal(prog.data, &data); err != nil {
+		t.Fatalf("decode result data: %v", err)
+	}
+	if data["submitted"] != 2 || data["failed"] != 0 {
+		t.Fatalf("result = %v, want two submissions and no failures", data)
+	}
+}
