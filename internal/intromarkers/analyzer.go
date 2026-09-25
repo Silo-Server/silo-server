@@ -335,6 +335,9 @@ func (a *Analyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (RunSum
 		if err != nil {
 			return summary, err
 		}
+		// Compare the same files the scheduled run would, so a file's result
+		// and confidence do not depend on how its analysis started.
+		groupCandidates = ownDetectionCandidates(groupCandidates)
 		if distinctEpisodeCount(groupCandidates) < 2 {
 			continue
 		}
@@ -971,6 +974,10 @@ func (a *Analyzer) refineChromaprintSegment(ctx context.Context, candidate Candi
 	}
 	if ok {
 		summary.DialogueRefinementsApplied++
+		// A later start can leave a short intro, which rates as one.
+		if refined.End-refined.Start < shortIntroSeconds {
+			refined.Confidence = min(refined.Confidence, chromaprintShortConfidence)
+		}
 		return refined, nil
 	}
 	return segment, nil

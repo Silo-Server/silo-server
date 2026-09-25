@@ -1061,3 +1061,49 @@ func sharedIntroPoints(offset uint32) []uint32 {
 	}
 	return points
 }
+
+func TestDialogueRefinementRatesShortenedIntroShort(t *testing.T) {
+	refiner := &fakeChromaprintStartRefiner{segments: map[int]Segment{
+		1: {Start: 45, End: 60, Confidence: chromaprintConsistentConfidence, Algorithm: ChromaprintDialogueAlgorithm},
+	}}
+	analyzer := &Analyzer{chromaprintRefiner: refiner, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
+	var summary RunSummary
+	refined, err := analyzer.refineChromaprintSegment(context.Background(), Candidate{FileID: 1},
+		Segment{Start: 35, End: 60, Confidence: chromaprintConsistentConfidence, Algorithm: ChromaprintAlgorithm}, &summary)
+	if err != nil {
+		t.Fatalf("refineChromaprintSegment: %v", err)
+	}
+	if refined.Confidence != chromaprintShortConfidence {
+		t.Fatalf("confidence after refinement to %.0fs = %.2f, want %.2f", refined.End-refined.Start, refined.Confidence, chromaprintShortConfidence)
+	}
+}
+
+func TestAnalyzeEpisodeComparesOnlyOwnDetectionFiles(t *testing.T) {
+	cfg := DefaultConfig("ffmpeg")
+	manual := models.MarkerSourceManual
+	start, end := 5.0, 40.0
+	target := Candidate{FileID: 1, EpisodeID: "ep1", SeasonID: "season1", MediaFolderID: 7, FileHash: "h1", FileSize: 1, DurationSeconds: 1200}
+	manualSibling := Candidate{FileID: 2, EpisodeID: "ep2", SeasonID: "season1", MediaFolderID: 7, FileHash: "h2", FileSize: 2, DurationSeconds: 1200,
+		IntroStart: &start, IntroEnd: &end, IntroMarkersSource: &manual}
+	group := groupKey(target.MediaFolderID, target.SeasonID, target.AnalysisGroupKey())
+	repo := &fakeIntroRepository{
+		episodeCandidates: map[string][]Candidate{"ep1": {target}},
+		groupCandidates:   map[string][]Candidate{group: {target, manualSibling}},
+		fingerprints: map[int]*Fingerprint{
+			target.FileID:        cachedFingerprint(target, cfg, sharedIntroPoints(1000)),
+			manualSibling.FileID: cachedFingerprint(manualSibling, cfg, sharedIntroPoints(5000)),
+		},
+	}
+	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: cfg}
+
+	summary, err := analyzer.AnalyzeEpisode(context.Background(), "ep1")
+	if err != nil {
+		t.Fatalf("AnalyzeEpisode: %v", err)
+	}
+	// The scheduled run leaves the manually marked sibling out of the season,
+	// so a single remaining episode has nothing to compare with.
+	if summary.SeasonGroupsConsidered != 0 || len(repo.patches) != 0 {
+		t.Fatalf("groups=%d patches=%d, want the manual sibling excluded as in the scheduled run",
+			summary.SeasonGroupsConsidered, len(repo.patches))
+	}
+}
