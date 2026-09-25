@@ -32,6 +32,8 @@ const mocks = vi.hoisted(() => ({
   beginImpersonation: vi.fn(),
   accessGroups: [] as AccessGroup[],
   accessGroupsLoaded: false,
+  accessGroupsFailed: false,
+  refetchAccessGroups: vi.fn(),
 }));
 
 vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
@@ -52,7 +54,12 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
 }));
 
 vi.mock("@/hooks/queries/admin/accessGroups", () => ({
-  useAccessGroups: () => ({ data: mocks.accessGroups, isSuccess: mocks.accessGroupsLoaded }),
+  useAccessGroups: () => ({
+    data: mocks.accessGroups,
+    isSuccess: mocks.accessGroupsLoaded,
+    isError: mocks.accessGroupsFailed,
+    refetch: mocks.refetchAccessGroups,
+  }),
 }));
 
 vi.mock("./admin-settings/InvitationsTab", () => ({
@@ -557,6 +564,20 @@ describe("AdminUsers access group column and filter", () => {
     );
     expect(within(rowFor("robin")).getByText("No group")).toBeInTheDocument();
     expect(within(rowFor("root")).getByText("—")).toBeInTheDocument();
+  });
+
+  it("reports a failed access group load and retries it", async () => {
+    mocks.accessGroups = [];
+    mocks.accessGroupsLoaded = false;
+    mocks.accessGroupsFailed = true;
+    mocks.refetchAccessGroups.mockClear();
+    const user = userEvent.setup();
+    renderPage();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Could not load access groups");
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(mocks.refetchAccessGroups).toHaveBeenCalled();
+    mocks.accessGroupsFailed = false;
   });
 
   it("filters users by access group", async () => {

@@ -122,7 +122,8 @@ function AdminUsersPage() {
   const [search, setSearch] = useState("");
   // "all", "none" (regular accounts outside every group), or a group id.
   const [groupFilter, setGroupFilter] = useState("all");
-  const { data: accessGroups = [] } = useAccessGroups();
+  const accessGroupsQuery = useAccessGroups();
+  const accessGroups = useMemo(() => accessGroupsQuery.data ?? [], [accessGroupsQuery.data]);
   const groupNames = useMemo(
     () => new Map(accessGroups.map((group) => [String(group.id), group.name])),
     [accessGroups],
@@ -351,6 +352,14 @@ function AdminUsersPage() {
               </SelectContent>
             </Select>
           </div>
+          {accessGroupsQuery.isError && (
+            <div role="alert" className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+              Could not load access groups, so group names and group filters are unavailable.
+              <Button variant="outline" size="sm" onClick={() => void accessGroupsQuery.refetch()}>
+                Retry
+              </Button>
+            </div>
+          )}
           <div className="surface-panel overflow-x-auto rounded-2xl border-0">
             <Table>
               <TableHeader>
