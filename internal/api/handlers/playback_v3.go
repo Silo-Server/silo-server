@@ -6245,7 +6245,7 @@ func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, 
 
 // subtitleVariantIndexV3 returns the combined index of the one deliverable
 // external or embedded subtitle in file with the given language and forced/SDH
-// flags, whatever its format, or -1. Several such tracks (main dialogue and
+// flags, whatever its format, or -1. Several such tracks (main dialog and
 // commentary, say) are narrowed by title; a match that stays ambiguous is not
 // treated as the same selection.
 func subtitleVariantIndexV3(file *models.MediaFile, language, title string, forced, hearingImpaired bool) int {
