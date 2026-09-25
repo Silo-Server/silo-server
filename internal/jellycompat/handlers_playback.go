@@ -33,6 +33,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -2079,25 +2080,48 @@ func (h *PlaybackHandler) HandleBitrateTest(w http.ResponseWriter, r *http.Reque
 }
 
 // HandlePlaybackInfo negotiates media sources for a Jellyfin item.
+// errPlaybackInfoItemNotFound reports a PlaybackInfo route id that names no
+// item or media source.
+var errPlaybackInfoItemNotFound = errors.New("playback info item not found")
+
 // resolvePlaybackInfoItem maps the PlaybackInfo route id to a content item.
 // Real Jellyfin gives a media source the same id as its item, so clients such
 // as Moonfin put MediaSources[i].Id in the item position of the URL. Silo
 // emits per-version ids, so a media-source id is resolved to its owning item
-// the same way GET /Items/{id} does, and returned so the negotiation selects
-// that version when the body names none.
-func (h *PlaybackHandler) resolvePlaybackInfoItem(rawID string) (contentID, mediaSourceID string, ok bool) {
+// and returned so the negotiation selects that version. The owner cache is
+// filled when this process emits an item's versions; after a restart, or on
+// another API node, the file row decides instead.
+func (h *PlaybackHandler) resolvePlaybackInfoItem(ctx context.Context, rawID string) (contentID, mediaSourceID string, err error) {
 	if contentID, err := decodeItemID(h.codec, rawID); err == nil {
-		return contentID, "", true
+		return contentID, "", nil
 	}
 	fileID, err := h.codec.DecodeIntID(EncodedIDMediaSource, rawID)
 	if err != nil {
-		return "", "", false
+		return "", "", errPlaybackInfoItemNotFound
 	}
-	contentID, ok = h.codec.LookupMediaSourceOwner(fileID)
-	if !ok {
-		return "", "", false
+	if contentID, ok := h.codec.LookupMediaSourceOwner(fileID); ok {
+		return contentID, rawID, nil
 	}
-	return contentID, rawID, true
+	if h.fileResolver == nil {
+		return "", "", errPlaybackInfoItemNotFound
+	}
+	file, err := h.fileResolver.GetByID(ctx, int(fileID))
+	if errors.Is(err, scanner.ErrFileNotFound) {
+		return "", "", errPlaybackInfoItemNotFound
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("resolving media source owner: %w", err)
+	}
+	// An episode file carries its series in ContentID; the episode is the item.
+	contentID = file.EpisodeID
+	if contentID == "" {
+		contentID = file.ContentID
+	}
+	if contentID == "" {
+		return "", "", errPlaybackInfoItemNotFound
+	}
+	h.codec.RegisterMediaSourceOwner(fileID, contentID)
+	return contentID, rawID, nil
 }
 
 func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Request) {
@@ -2107,10 +2131,14 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	rawID := chi.URLParam(r, "id")
-	contentID, pathMediaSourceID, ok := h.resolvePlaybackInfoItem(rawID)
-	if !ok {
+	contentID, pathMediaSourceID, err := h.resolvePlaybackInfoItem(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, errPlaybackInfoItemNotFound) {
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+	if err != nil {
+		slog.ErrorContext(r.Context(), "jellycompat playback info: resolving media source", "component", "jellycompat", "error", err)
+		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to resolve media source")
 		return
 	}
 
@@ -2119,7 +2147,10 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		writeDeviceProfileRequestError(w, err, "Invalid playback request")
 		return
 	}
-	if req.MediaSourceID == "" {
+	// sourceFromPath marks a version the route itself named: if it is gone,
+	// answer 404 rather than falling back to another version.
+	sourceFromPath := req.MediaSourceID == "" && pathMediaSourceID != ""
+	if sourceFromPath {
 		req.MediaSourceID = pathMediaSourceID
 	}
 	req.serverBitrateCapKbps, err = h.serverBitrateCap(r.Context(), session)
@@ -2170,6 +2201,10 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 				matched = true
 				break
 			}
+		}
+		if !matched && sourceFromPath {
+			writeError(w, http.StatusNotFound, "NotFound", "Media source not found")
+			return
 		}
 		if !matched {
 			// Continue Watching and autoplay clients can carry the previous

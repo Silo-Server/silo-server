@@ -11,7 +11,19 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 )
+
+// playbackInfoFiles resolves media files by id from a fixed set.
+type playbackInfoFiles map[int]*models.MediaFile
+
+func (f playbackInfoFiles) GetByID(_ context.Context, id int) (*models.MediaFile, error) {
+	if file, ok := f[id]; ok {
+		return file, nil
+	}
+	return nil, scanner.ErrFileNotFound
+}
 
 // recordingContentService records which content id PlaybackInfo resolved.
 type recordingContentService struct {
@@ -88,6 +100,48 @@ func TestHandlePlaybackInfoUnknownMediaSourceIDReturnsNotFound(t *testing.T) {
 	unknown := handler.codec.EncodeIntID(EncodedIDMediaSource, 999)
 
 	if rec := servePlaybackInfo(handler, unknown, `{}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandlePlaybackInfoResolvesUncachedMediaSourceFromFile covers a node that
+// never emitted the item (another API node, or after a restart): the owner
+// comes from the file row, and an episode file resolves to its episode.
+func TestHandlePlaybackInfoResolvesUncachedMediaSourceFromFile(t *testing.T) {
+	handler, _ := newSubtitleSelectionHandler(t)
+	version := subtitleSelectionVersion()
+	content := &recordingContentService{stubContentService: &stubContentService{detail: &upstreamItemDetail{
+		ContentID: "episode-tvdb-200-1-2",
+		Versions:  []catalog.FileVersion{version},
+	}}}
+	handler.content = content
+	handler.fileResolver = playbackInfoFiles{version.FileID: {ID: version.FileID, ContentID: "series-tvdb-200", EpisodeID: "episode-tvdb-200-1-2"}}
+	sourceID := handler.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
+
+	rec := servePlaybackInfo(handler, sourceID, `{}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(content.requested) != 1 || content.requested[0] != "episode-tvdb-200-1-2" {
+		t.Fatalf("resolved content ids = %v, want [episode-tvdb-200-1-2]", content.requested)
+	}
+
+	handler.fileResolver = playbackInfoFiles{}
+	missing := handler.codec.EncodeIntID(EncodedIDMediaSource, 777)
+	if rec := servePlaybackInfo(handler, missing, `{}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing file: status = %d, want 404, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandlePlaybackInfoRemovedPathSourceReturnsNotFound: a media-source id in
+// the route whose version the item no longer has must not fall back to a
+// different version.
+func TestHandlePlaybackInfoRemovedPathSourceReturnsNotFound(t *testing.T) {
+	handler, _ := newSubtitleSelectionHandler(t)
+	handler.codec.RegisterMediaSourceOwner(99, "movie-1")
+	removed := handler.codec.EncodeIntID(EncodedIDMediaSource, 99)
+
+	if rec := servePlaybackInfo(handler, removed, `{}`); rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404, body = %s", rec.Code, rec.Body.String())
 	}
 }
