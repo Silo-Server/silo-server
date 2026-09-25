@@ -1002,6 +1002,52 @@ func (d *DurableCompatPlaybackStore) FindFinalizableByClientPlaySessionID(
 	)
 }
 
+// FindStreamGrant finds candidate rows by client address across replicas, then
+// validates each through Get so cached and pending state stay authoritative.
+func (d *DurableCompatPlaybackStore) FindStreamGrant(routeItemID, mediaSourceID, clientIP, clientPeer string, maxIdle time.Duration) (*PlaybackSession, bool) {
+	if d.pool == nil {
+		return d.mem.FindStreamGrant(routeItemID, mediaSourceID, clientIP, clientPeer, maxIdle)
+	}
+	if routeItemID == "" || mediaSourceID == "" || clientIP == "" || clientPeer == "" {
+		return nil, false
+	}
+	activeSince := d.now().Add(-maxIdle)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	rows, err := d.pool.Query(ctx, `
+		SELECT id
+		FROM jellycompat_playback_sessions
+		WHERE expires_at > $1
+			AND data->>'ClientIP' = $2
+			AND COALESCE((data->>'Terminal')::boolean, false) = false
+			AND (data->>'UpdatedAt')::timestamptz >= $3
+		ORDER BY (data->>'UpdatedAt')::timestamptz DESC
+		LIMIT 32
+	`, d.now(), clientIP, activeSince)
+	if err != nil {
+		return d.mem.FindStreamGrant(routeItemID, mediaSourceID, clientIP, clientPeer, maxIdle)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	if rows.Err() != nil {
+		return d.mem.FindStreamGrant(routeItemID, mediaSourceID, clientIP, clientPeer, maxIdle)
+	}
+	now := d.now()
+	var match *PlaybackSession
+	for _, id := range ids {
+		if session, ok := d.Get(id); ok && streamGrantMatches(session, routeItemID, mediaSourceID, clientIP, clientPeer, activeSince, now) && (match == nil || session.UpdatedAt.After(match.UpdatedAt)) {
+			match = session
+		}
+	}
+	return match, match != nil
+}
+
 // FindByUpstreamSessionID serves process-local lifecycle callbacks. A local
 // ffmpeg crash can only belong to a session already present in this process's
 // cache, so no unindexed JSON scan of the durable table is needed.

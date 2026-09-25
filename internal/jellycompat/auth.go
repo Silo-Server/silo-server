@@ -3,12 +3,14 @@ package jellycompat
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/go-chi/chi/v5"
 )
@@ -220,7 +222,12 @@ func resolveCompatToken(ctx context.Context, sessions *SessionStore, keyAuth *Ad
 }
 
 // PlaybackSessionAuth accepts a login/API token or an unexpired PlaySessionId
-// scoped to the negotiated item and source. Catalog IDs are not credentials.
+// scoped to the negotiated item and source. Catalog IDs are not credentials:
+// the one credential-less path is a static video stream of a source that the
+// same client address negotiated through an authenticated PlaybackInfo that
+// is still live (staticStreamGrantIdle). Clients behind one shared address
+// (a household NAT, carrier-grade NAT) can therefore reuse each other's live
+// negotiation for that exact source.
 func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackStore, keyAuth *AdminAPIKeyAuthenticator) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -255,9 +262,90 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 				}
 			}
 
+			// Jellyfin for Android TV and Findroid open static direct-play and
+			// download URLs with no credentials at all (upstream Jellyfin serves
+			// them anonymously). Grant only a static stream of a source the same
+			// client address negotiated through an authenticated PlaybackInfo
+			// that is still live and recently active, so an item or source id is
+			// never a credential on its own.
+			if playbackStore != nil && isStaticStreamRequest(r) {
+				itemID := chi.URLParam(r, "id")
+				sourceID := newCaseInsensitiveQuery(r.URL.Query()).Get("MediaSourceId")
+				clientIP := clientip.FromContext(r.Context())
+				if grant, found := playbackStore.FindStreamGrant(itemID, sourceID, clientIP, requestPeerHost(r), staticStreamGrantIdle); found {
+					if session, ok := resolveCompatToken(r.Context(), sessions, keyAuth, grant.CompatToken); ok {
+						slog.InfoContext(r.Context(), "jellycompat static stream granted without credentials",
+							"play_session", grant.ID, "user_id", grant.UserID, "item_id", itemID, "media_source_id", sourceID, "client_ip", clientIP, "peer", requestPeerHost(r), "negotiated_peer", grant.ClientPeer)
+						serveWithSession(next, w, r, session)
+						return
+					}
+				}
+			}
+
 			writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		})
 	}
+}
+
+// staticStreamGrantIdle bounds how long after its last activity (PlaybackInfo,
+// progress report, or ping) a negotiation keeps granting credential-less static
+// streams. Playing clients report progress well within it; it also covers a
+// long pause followed by a seek.
+const staticStreamGrantIdle = 2 * time.Hour
+
+// isStaticStreamRequest reports a direct-file video stream read, using the
+// same Static=true test as HandleVideoStream. A request repeating Static or
+// MediaSourceId under different cases is refused, since the case-insensitive
+// lookup would pick one arbitrarily and auth and handler could disagree.
+func isStaticStreamRequest(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	pattern := chi.RouteContext(r.Context()).RoutePattern()
+	if !strings.HasSuffix(pattern, "/Videos/{id}/stream") && !strings.HasSuffix(pattern, "/Videos/{id}/stream.{container}") {
+		return false
+	}
+	query := r.URL.Query()
+	for _, name := range []string{"Static", "MediaSourceId"} {
+		values := 0
+		for key, vals := range query {
+			if strings.EqualFold(key, name) {
+				values += len(vals)
+			}
+		}
+		if values > 1 {
+			return false
+		}
+	}
+	return strings.EqualFold(newCaseInsensitiveQuery(query).Get("Static"), "true")
+}
+
+// requestPeerHost is the transport peer's host, before any forwarding header
+// was applied; see sameStreamPath.
+func requestPeerHost(r *http.Request) string {
+	peer := clientip.PeerFromContext(r.Context())
+	if peer == "" {
+		peer = r.RemoteAddr
+	}
+	if host, _, err := net.SplitHostPort(peer); err == nil {
+		return host
+	}
+	return peer
+}
+
+// staticStreamGrantTouchInterval throttles how often progress reports refresh
+// a grant's activity, so playback past staticStreamGrantIdle keeps seeking
+// without a store write on every report.
+const staticStreamGrantTouchInterval = 10 * time.Minute
+
+// touchStaticStreamGrant refreshes the activity of a started play that may
+// back a credential-less static stream. Best effort: a failed touch only
+// shortens the grant.
+func touchStaticStreamGrant(store CompatPlaybackStore, playSession *PlaybackSession, stop bool) {
+	if stop || store == nil || playSession == nil || playSession.ClientIP == "" || time.Since(playSession.UpdatedAt) < staticStreamGrantTouchInterval {
+		return
+	}
+	_ = store.Update(playSession.ID, func(*PlaybackSession) error { return nil })
 }
 
 func playbackGrantMatchesRequest(r *http.Request, session *PlaybackSession) bool {

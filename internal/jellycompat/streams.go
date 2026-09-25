@@ -2193,6 +2193,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	touchStaticStreamGrant(h.playbackStore, playSession, stop)
 
 	positionSeconds := 0.0
 	positionReported := req.PositionTicks != nil

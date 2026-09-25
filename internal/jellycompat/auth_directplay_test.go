@@ -2,12 +2,15 @@ package jellycompat
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/Silo-Server/silo-server/internal/clientip"
 )
 
 // directPlayRouter wraps the probe handler in PlaybackSessionAuth and mounts it
@@ -234,4 +237,95 @@ func requestWithCompatRouteItem(req *http.Request, itemID string) *http.Request 
 	routeCtx := chi.NewRouteContext()
 	routeCtx.URLParams.Add("id", itemID)
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+}
+
+// Jellyfin for Android TV and Findroid open static streams with no token and
+// no PlaySessionId. Only a live, recently active negotiation from the same
+// client address and transport peer for the same item and source grants one.
+func TestPlaybackSessionAuth_CredentialLessStaticStreamGrant(t *testing.T) {
+	const grantPath = "/Videos/item123/stream?static=true&mediaSourceId=src9"
+	for _, tc := range []struct {
+		name, method, path string
+		// peer is the transport address; forwarded is an X-Forwarded-For value.
+		peer, forwarded, token string
+		directNegotiation      bool
+		mutate                 func(now *time.Time, sessions *SessionStore, playback *PlaybackSessionStore)
+		want                   int
+	}{
+		{name: "negotiated source from same client", path: grantPath, want: http.StatusOK},
+		{name: "head", method: http.MethodHead, path: grantPath, want: http.StatusOK},
+		{name: "container route", path: "/Videos/item123/stream.mkv?Static=true&MediaSourceId=src9", want: http.StatusOK},
+		{name: "same client through trusted proxy", path: grantPath, peer: "10.0.0.1:443", forwarded: "192.0.2.1", want: http.StatusOK},
+		{name: "same client through another load-balanced proxy", path: grantPath, peer: "10.0.0.2:443", forwarded: "192.0.2.1", want: http.StatusOK},
+		{name: "not static", path: "/Videos/item123/stream?mediaSourceId=src9", want: http.StatusUnauthorized},
+		{name: "static=1 is not the handler's static", path: "/Videos/item123/stream?static=1&mediaSourceId=src9", want: http.StatusUnauthorized},
+		{name: "duplicate Static keys", path: "/Videos/item123/stream?static=true&Static=false&mediaSourceId=src9", want: http.StatusUnauthorized},
+		{name: "duplicate source keys", path: "/Videos/item123/stream?static=true&mediaSourceId=src9&MediaSourceId=other", want: http.StatusUnauthorized},
+		{name: "no source", path: "/Videos/item123/stream?static=true", want: http.StatusUnauthorized},
+		{name: "other source", path: "/Videos/item123/stream?static=true&mediaSourceId=other", want: http.StatusUnauthorized},
+		{name: "other item", path: "/Videos/other/stream?static=true&mediaSourceId=src9", want: http.StatusUnauthorized},
+		{name: "download route", path: "/Items/item123/Download?static=true&mediaSourceId=src9", want: http.StatusUnauthorized},
+		{name: "other address", path: grantPath, peer: "198.51.100.7:4000", want: http.StatusUnauthorized},
+		{name: "proxied request for a directly connected negotiation", path: grantPath, peer: "10.0.0.9:5000", forwarded: "192.0.2.1", directNegotiation: true, want: http.StatusUnauthorized},
+		{name: "invalid token is not rescued by a grant", path: grantPath, token: "invalid", want: http.StatusUnauthorized},
+		{name: "idle negotiation", path: grantPath, mutate: func(now *time.Time, _ *SessionStore, _ *PlaybackSessionStore) {
+			*now = now.Add(staticStreamGrantIdle + time.Minute)
+		}, want: http.StatusUnauthorized},
+		{name: "progress reports keep a long play granted", path: grantPath, mutate: func(now *time.Time, _ *SessionStore, playback *PlaybackSessionStore) {
+			for range 3 {
+				*now = now.Add(staticStreamGrantIdle - time.Minute)
+				session, _ := playback.Get("ps1")
+				session.UpdatedAt = now.Add(-staticStreamGrantTouchInterval)
+				touchStaticStreamGrant(playback, session, false)
+			}
+		}, want: http.StatusOK},
+		{name: "terminal negotiation", path: grantPath, mutate: func(_ *time.Time, _ *SessionStore, playback *PlaybackSessionStore) {
+			if err := playback.HideFromRouting("ps1", "compat-tok"); err != nil {
+				t.Fatal(err)
+			}
+		}, want: http.StatusUnauthorized},
+		{name: "revoked login", path: grantPath, mutate: func(_ *time.Time, sessions *SessionStore, _ *PlaybackSessionStore) {
+			sessions.Delete("compat-tok")
+		}, want: http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := fixedNow()
+			clock := func() time.Time { return now }
+			sessions := NewSessionStore(24*time.Hour, clock)
+			if err := sessions.Put(Session{Token: "compat-tok", StreamAppUserID: 7}); err != nil {
+				t.Fatal(err)
+			}
+			playback := NewPlaybackSessionStore(24*time.Hour, clock)
+			negotiatedPeer := "192.0.2.1"
+			if tc.forwarded != "" && !tc.directNegotiation {
+				negotiatedPeer = "10.0.0.1" // negotiated through the same proxy
+			}
+			playback.PutNegotiated(PlaybackSession{ID: "ps1", CompatToken: "compat-tok", ClientIP: "192.0.2.1", ClientPeer: negotiatedPeer, RouteItemID: "item123", MediaSources: []PlaybackMediaSource{{ID: "src9"}}})
+			if tc.mutate != nil {
+				tc.mutate(&now, sessions, playback)
+			}
+			_, trustedLAN, _ := net.ParseCIDR("10.0.0.0/8")
+			var reached bool
+			router := clientip.Middleware(clientip.NewResolver([]*net.IPNet{trustedLAN}))(directPlayRouter(t, sessions, playback, nil, &reached))
+			method := tc.method
+			if method == "" {
+				method = http.MethodGet
+			}
+			req := httptest.NewRequest(method, tc.path, nil)
+			if tc.peer != "" {
+				req.RemoteAddr = tc.peer
+			}
+			if tc.forwarded != "" {
+				req.Header.Set("X-Forwarded-For", tc.forwarded)
+			}
+			if tc.token != "" {
+				req.Header.Set("X-Emby-Token", tc.token)
+			}
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != tc.want || reached != (tc.want == http.StatusOK) {
+				t.Fatalf("status=%d reached=%v, want %d; %s", rec.Code, reached, tc.want, rec.Body.String())
+			}
+		})
+	}
 }
