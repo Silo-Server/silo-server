@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"sort"
 	"testing"
 )
 
@@ -536,5 +537,37 @@ func TestUsualIntroDurationPrefersLargestThenLongestCluster(t *testing.T) {
 	}
 	if usual, sharing = usualIntroDuration(versions); sharing != 2 || usual > 41 {
 		t.Fatalf("usualIntroDuration = (%.1f, %d), want the two-episode 40s cluster", usual, sharing)
+	}
+}
+
+func TestUsualIntroDurationMatchesPairwiseScan(t *testing.T) {
+	// The sliding window must agree with the direct definition: for each
+	// duration, count the distinct episodes within tolerance.
+	rng := rand.New(rand.NewPCG(3, 7))
+	for trial := 0; trial < 200; trial++ {
+		var durations []episodeDuration
+		for i := 0; i < 1+rng.IntN(40); i++ {
+			durations = append(durations, episodeDuration{
+				episode: fmt.Sprintf("e%d", rng.IntN(15)),
+				seconds: 20 + float64(rng.IntN(60))/4,
+			})
+		}
+		wantUsual, wantSharing := 0.0, 0
+		sorted := append([]episodeDuration(nil), durations...)
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].seconds < sorted[j].seconds })
+		for _, candidate := range sorted {
+			episodes := map[string]struct{}{}
+			for _, other := range sorted {
+				if math.Abs(other.seconds-candidate.seconds) <= seasonDurationToleranceSeconds {
+					episodes[other.episode] = struct{}{}
+				}
+			}
+			if len(episodes) >= wantSharing {
+				wantUsual, wantSharing = candidate.seconds, len(episodes)
+			}
+		}
+		if usual, sharing := usualIntroDuration(durations); usual != wantUsual || sharing != wantSharing {
+			t.Fatalf("trial %d: usualIntroDuration = (%.2f, %d), want (%.2f, %d)", trial, usual, sharing, wantUsual, wantSharing)
+		}
 	}
 }

@@ -240,20 +240,31 @@ type episodeDuration struct {
 
 // usualIntroDuration returns the intro duration the most episodes share within
 // seasonDurationToleranceSeconds, preferring the longer on a tie, and how many
-// episodes share it. Versions of one episode count once.
+// episodes share it. Versions of one episode count once. A window slides over
+// the sorted durations, so long seasons stay linear after the sort.
 func usualIntroDuration(durations []episodeDuration) (float64, int) {
 	sorted := append([]episodeDuration(nil), durations...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].seconds < sorted[j].seconds })
-	usual, sharing := 0.0, 0
-	for _, candidate := range sorted {
-		episodes := map[string]struct{}{}
-		for _, other := range sorted {
-			if math.Abs(other.seconds-candidate.seconds) <= seasonDurationToleranceSeconds {
-				episodes[other.episode] = struct{}{}
-			}
+	inWindow := map[string]int{}
+	add := func(d episodeDuration) { inWindow[d.episode]++ }
+	remove := func(d episodeDuration) {
+		if inWindow[d.episode]--; inWindow[d.episode] == 0 {
+			delete(inWindow, d.episode)
 		}
-		if len(episodes) >= sharing {
-			usual, sharing = candidate.seconds, len(episodes)
+	}
+	usual, sharing := 0.0, 0
+	lo, hi := 0, 0
+	for _, candidate := range sorted {
+		for hi < len(sorted) && sorted[hi].seconds-candidate.seconds <= seasonDurationToleranceSeconds {
+			add(sorted[hi])
+			hi++
+		}
+		for candidate.seconds-sorted[lo].seconds > seasonDurationToleranceSeconds {
+			remove(sorted[lo])
+			lo++
+		}
+		if len(inWindow) >= sharing {
+			usual, sharing = candidate.seconds, len(inWindow)
 		}
 	}
 	return usual, sharing
