@@ -76,6 +76,16 @@ type Service struct {
 	ffmpegPath  string
 	logger      *slog.Logger
 	runner      *jobrunner.Runner
+	// subtitleCache, when set, holds complete embedded text extracts shared
+	// with subtitle delivery, so a source track is demuxed once rather than
+	// on every translation of it. Optional; nil extracts every time.
+	subtitleCache *playback.SubtitleCache
+}
+
+// SetSubtitleCache shares the node's subtitle extract cache with translation
+// source loading. Call it before Recover or the first Enqueue.
+func (s *Service) SetSubtitleCache(cache *playback.SubtitleCache) {
+	s.subtitleCache = cache
 }
 
 // UpdateConfig swaps the service config. Safe for concurrent use; running
@@ -693,7 +703,17 @@ func (s *Service) loadSource(ctx context.Context, job *Job) ([]SubtitleCue, stri
 		if playback.NeedsBurnIn(track.Codec) {
 			return nil, "", fmt.Errorf("%w: bitmap track", ErrSourceUnsupported)
 		}
-		data, _, err := playback.ExtractSubtitle(ctx, file.FilePath, embeddedIndex, s.ffmpegPath)
+		extract := func(ctx context.Context) ([]byte, error) {
+			data, _, err := playback.ExtractSubtitle(ctx, file.FilePath, embeddedIndex, s.ffmpegPath)
+			return data, err
+		}
+		var data []byte
+		if s.subtitleCache != nil {
+			// ExtractSubtitle writes SRT for ffmpeg's 0:s:N, the cache's key.
+			data, err = s.subtitleCache.ExtractText(ctx, file.FilePath, embeddedIndex, "srt", extract)
+		} else {
+			data, err = extract(ctx)
+		}
 		if err != nil {
 			return nil, "", fmt.Errorf("extract embedded subtitle: %w", err)
 		}

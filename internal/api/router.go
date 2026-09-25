@@ -1642,6 +1642,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			slog.Default(),
 			aiSem,
 		)
+		if streamHandler != nil && streamHandler.SubtitleCache != nil {
+			aiService.SetSubtitleCache(streamHandler.SubtitleCache)
+		}
 		aiService.Recover()
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) {
