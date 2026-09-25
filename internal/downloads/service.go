@@ -480,7 +480,7 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 		if err != nil {
 			return nil, err
 		}
-		return s.repo.ConfirmReadyArtifactLink(ctx, d)
+		return s.repo.ConfirmArtifactLink(ctx, d)
 	}
 
 	resolvedTarget := decision.PrepareTarget
@@ -573,8 +573,8 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 		return nil, err
 	}
 	// Ensure read the artifact before this row existed. Recovery may have
-	// requeued it since; confirm a 'ready' link before returning it.
-	return s.repo.ConfirmReadyArtifactLink(ctx, d)
+	// requeued it since; return the reconciled row.
+	return s.repo.ConfirmArtifactLink(ctx, d)
 }
 
 // artifactRowStatus maps an ensured artifact to the download row status and

@@ -1175,9 +1175,9 @@ func TestRemoteMissingRequeuesArtifactWithActiveDownload(t *testing.T) {
 }
 
 // A create that read the artifact as ready can link a 'ready' download after
-// recovery requeued the artifact. ConfirmReadyArtifactLink must return that
+// recovery requeued the artifact. ConfirmArtifactLink must return that
 // download to preparing, and leave a link to a ready artifact alone.
-func TestConfirmReadyArtifactLinkResetsDownloadOfRequeuedArtifact(t *testing.T) {
+func TestConfirmArtifactLinkResetsDownloadOfRequeuedArtifact(t *testing.T) {
 	repo, pool, fileID := newArtifactTestRepo(t)
 	ctx := context.Background()
 	downloads := NewRepository(pool)
@@ -1187,7 +1187,7 @@ func TestConfirmReadyArtifactLinkResetsDownloadOfRequeuedArtifact(t *testing.T) 
 	if err := scanInto(pool.QueryRow(ctx, `SELECT `+downloadColumns+` FROM downloads WHERE artifact_id = $1`, ready.ID), &d); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := downloads.ConfirmReadyArtifactLink(ctx, &d); err != nil || got.Status != StatusReady {
+	if got, err := downloads.ConfirmArtifactLink(ctx, &d); err != nil || got.Status != StatusReady {
 		t.Fatalf("link to a ready artifact = %+v (%v), want unchanged", got, err)
 	}
 	// Simulate recovery requeuing the artifact after the create read it:
@@ -1196,9 +1196,30 @@ func TestConfirmReadyArtifactLinkResetsDownloadOfRequeuedArtifact(t *testing.T) 
 	if err := repo.Requeue(ctx, ready.ID); err != nil {
 		t.Fatal(err)
 	}
-	got, err := downloads.ConfirmReadyArtifactLink(ctx, &d)
+	got, err := downloads.ConfirmArtifactLink(ctx, &d)
 	if err != nil || got.Status != StatusPreparing || got.ID != d.ID {
 		t.Fatalf("link to a requeued artifact = %+v (%v), want preparing", got, err)
+	}
+}
+
+// A managed create that reuses an existing entry holds a copy read before
+// Ensure. If recovery reset the stored row since, ConfirmArtifactLink must
+// return the stored row instead of the stale copy.
+func TestConfirmArtifactLinkReturnsRowResetByRecovery(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	ready := readyArtifactForRecovery(t, repo, pool, fileID, "")
+	linkRecoveryDownload(t, pool, fileID, ready.ID, StatusCompleted)
+	var stale Download
+	if err := scanInto(pool.QueryRow(ctx, `SELECT `+downloadColumns+` FROM downloads WHERE artifact_id = $1`, ready.ID), &stale); err != nil {
+		t.Fatal(err)
+	}
+	if _, got, err := repo.RecoverMissing(ctx, ready.ID, missingArtifactRetireGrace); err != nil || got != artifactRequeued {
+		t.Fatalf("RecoverMissing = (%v, %v), want requeued", got, err)
+	}
+	got, err := NewRepository(pool).ConfirmArtifactLink(ctx, &stale)
+	if err != nil || got.Status != StatusPreparing || got.ID != stale.ID {
+		t.Fatalf("reused entry after recovery reset = %+v (%v), want the stored preparing row", got, err)
 	}
 }
 
