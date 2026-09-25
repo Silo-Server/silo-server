@@ -135,13 +135,15 @@ it("preserves tier draft on412 and changes tag only after explicit reload", asyn
     return baseline(op, options);
   });
   mount();
-  fireEvent.click(await screen.findByRole("button", { name: "Edit tier for Automation" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit rate limit for Automation" }));
   await screen.findByRole("dialog");
-  fireEvent.click(screen.getByRole("combobox", { name: "New tier" }));
+  fireEvent.click(screen.getByRole("combobox", { name: "New rate limit" }));
   fireEvent.click(await screen.findByRole("option", { name: "Elevated" }));
-  fireEvent.click(screen.getByRole("button", { name: "Save tier" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save rate limit" }));
   await screen.findByRole("alert");
-  expect(screen.getByRole("combobox", { name: "New tier" }).textContent).toContain("Elevated");
+  expect(screen.getByRole("combobox", { name: "New rate limit" }).textContent).toContain(
+    "Elevated",
+  );
   const writes = () =>
     vi.mocked(v2).mock.calls.filter(([op]) => op === "PUT /api/v2/admin/api-keys/{id}/tier");
   expect(writes()).toHaveLength(1);
@@ -152,12 +154,14 @@ it("preserves tier draft on412 and changes tag only after explicit reload", asyn
   });
   fireEvent.click(screen.getByRole("button", { name: "Reload current key" }));
   await waitFor(() =>
-    expect((screen.getByRole("button", { name: "Save tier" }) as HTMLButtonElement).disabled).toBe(
-      false,
-    ),
+    expect(
+      (screen.getByRole("button", { name: "Save rate limit" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
   );
-  expect(screen.getByRole("combobox", { name: "New tier" }).textContent).toContain("Elevated");
-  fireEvent.click(screen.getByRole("button", { name: "Save tier" }));
+  expect(screen.getByRole("combobox", { name: "New rate limit" }).textContent).toContain(
+    "Elevated",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Save rate limit" }));
   await waitFor(() => expect(writes()).toHaveLength(2));
   expect(writes()[1]![1]).toMatchObject({ headers: { "If-Match": '"reloaded"' } });
 });
@@ -175,9 +179,44 @@ it("retains failed revocation and never replays it", async () => {
 });
 it("discards the editor on profile change", async () => {
   const view = mount();
-  fireEvent.click(await screen.findByRole("button", { name: "Edit tier for Automation" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit rate limit for Automation" }));
   await screen.findByRole("dialog");
   state.profile = "other";
   view.refresh();
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+it("labels the key's tier as a rate limit and shows each option's limits", async () => {
+  vi.mocked(v2).mockImplementation((op, options) => {
+    if (op === "GET /api/v2/admin/rate-limits/config")
+      return reply(
+        options,
+        {
+          enabled: true,
+          tiers: {
+            standard: { requests_per_second: 20, requests_per_minute: 1200, burst: 20 },
+            elevated: { requests_per_second: 100, requests_per_minute: 6000, burst: 100 },
+          },
+        },
+        { ETag: '"limits"' },
+      );
+    if (op === "GET /api/v2/admin/rate-limits/status") return reply(options, { active: true });
+    return baseline(op, options);
+  });
+  mount();
+  const table = await screen.findByRole("table");
+  expect(within(table).getByRole("columnheader", { name: "Rate limit" })).toBeTruthy();
+  expect(within(table).queryByRole("columnheader", { name: "Tier" })).toBeNull();
+  expect(within(table).getByRole("cell", { name: "Standard" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit rate limit for Automation" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByText("Edit API key rate limit")).toBeTruthy();
+  expect(within(dialog).getByText(/current rate limit: Standard/)).toBeTruthy();
+  expect(within(dialog).getByText(/doesn't change what the key can access/)).toBeTruthy();
+  await waitFor(() =>
+    expect(within(dialog).getByRole("combobox", { name: "New rate limit" }).textContent).toContain(
+      "Standard — 20 requests/s, 1,200/min",
+    ),
+  );
+  expect(within(dialog).getByRole("button", { name: "Save rate limit" })).toBeTruthy();
 });

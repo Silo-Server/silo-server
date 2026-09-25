@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
+import { useRateLimitConfig } from "@/hooks/queries/admin/rateLimits";
 import {
   useAdminApiKeys,
   useAdminApiKeyCapabilities,
@@ -51,6 +52,23 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDate } from "@/lib/datetime";
 
 type Tier = AdminAPIKeyMetadata["rate_tier"];
+
+// `rate_tier` only selects which request rate limit the key's own counter
+// uses (Security & access → rate limits). It never changes what the key can
+// reach, so the page calls it a rate limit rather than a tier.
+const RATE_LIMIT_LABELS: Record<Tier, string> = {
+  standard: "Standard",
+  elevated: "Elevated",
+};
+
+function rateLimitLabel(tier: Tier): string {
+  return RATE_LIMIT_LABELS[tier] ?? tier;
+}
+
+function formatRateLimit(limit: { requests_per_second: number; requests_per_minute: number }) {
+  const format = new Intl.NumberFormat();
+  return `${format.format(limit.requests_per_second)} requests/s, ${format.format(limit.requests_per_minute)}/min`;
+}
 function message(error: unknown) {
   return error instanceof Error ? error.message : "The request could not be completed.";
 }
@@ -148,7 +166,7 @@ function ApiKeyManager() {
                     <TableHead>Label</TableHead>
                     <TableHead>User</TableHead>
                     <TableHead>Key prefix</TableHead>
-                    <TableHead>Tier</TableHead>
+                    <TableHead>Rate limit</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead>Last Used</TableHead>
                     <TableHead>Actions</TableHead>
@@ -167,7 +185,7 @@ function ApiKeyManager() {
                       <TableCell>
                         <code>{key.key_prefix ? `${key.key_prefix}…` : "Unavailable"}</code>
                       </TableCell>
-                      <TableCell>{key.rate_tier}</TableCell>
+                      <TableCell>{rateLimitLabel(key.rate_tier)}</TableCell>
                       <TableCell>{formatDate(key.created_at)}</TableCell>
                       <TableCell>
                         {key.last_used_at ? formatDate(key.last_used_at) : "Never"}
@@ -178,10 +196,10 @@ function ApiKeyManager() {
                             variant="outline"
                             size="sm"
                             disabled={opening}
-                            aria-label={`Edit tier for ${key.label}`}
+                            aria-label={`Edit rate limit for ${key.label}`}
                             onClick={() => void openEditor(key.id, "tier")}
                           >
-                            Edit tier<span className="sr-only"> for {key.label}</span>
+                            Edit rate limit<span className="sr-only"> for {key.label}</span>
                           </Button>
                           <Button
                             variant="ghost"
@@ -255,6 +273,13 @@ function ApiKeyEditor({
   const lock = useRef(false);
   const update = useAdminUpdateApiKeyTier();
   const revoke = useAdminDeleteApiKey();
+  // Shows each option's configured limits; the names alone still work if the
+  // limiter config can't be read.
+  const rateLimits = useRateLimitConfig();
+  const optionLabel = (option: Tier) => {
+    const limit = rateLimits.data?.tiers?.[option];
+    return limit ? `${rateLimitLabel(option)} — ${formatRateLimit(limit)}` : rateLimitLabel(option);
+  };
   async function act(reload: boolean) {
     if (lock.current) return;
     lock.current = true;
@@ -290,28 +315,34 @@ function ApiKeyEditor({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{mode === "tier" ? "Edit API key tier" : "Revoke API key"}</DialogTitle>
+          <DialogTitle>
+            {mode === "tier" ? "Edit API key rate limit" : "Revoke API key"}
+          </DialogTitle>
           <DialogDescription>
             {editor.body.label}
             {mode === "revoke"
               ? " — revocation cannot be undone."
-              : ` — current tier: ${editor.body.rate_tier}`}
+              : ` — current rate limit: ${rateLimitLabel(editor.body.rate_tier)}`}
           </DialogDescription>
         </DialogHeader>
         {mode === "tier" && (
           <div className="flex flex-col gap-2">
-            <Label htmlFor="key-tier">New tier</Label>
+            <Label htmlFor="key-tier">New rate limit</Label>
             <Select value={tier} onValueChange={(value) => setTier(value as Tier)} disabled={busy}>
               <SelectTrigger id="key-tier">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  <SelectItem value="standard">Standard</SelectItem>
-                  <SelectItem value="elevated">Elevated</SelectItem>
+                  <SelectItem value="standard">{optionLabel("standard")}</SelectItem>
+                  <SelectItem value="elevated">{optionLabel("elevated")}</SelectItem>
                 </SelectGroup>
               </SelectContent>
             </Select>
+            <p className="text-muted-foreground text-sm">
+              Sets how many requests this key can make. It doesn&apos;t change what the key can
+              access or its scopes.
+            </p>
           </div>
         )}
         {error && <p role="alert">{error}</p>}
@@ -329,7 +360,7 @@ function ApiKeyEditor({
             disabled={busy || reloadRequired}
             onClick={() => void act(false)}
           >
-            {busy ? "Working…" : mode === "revoke" ? "Revoke" : "Save tier"}
+            {busy ? "Working…" : mode === "revoke" ? "Revoke" : "Save rate limit"}
           </Button>
         </DialogFooter>
       </DialogContent>
