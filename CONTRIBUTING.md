@@ -163,6 +163,27 @@ omit session history, full logs, and private report links. Follow the
 [public-content and media rules](AGENTS.md#pull-requests). Screenshots and recordings
 are not routine PR requirements; attach them only when explicitly requested.
 
+### Write the description
+
+Write for a maintainer who knows Silo but has not seen your working session or
+the diff. The first paragraph should tell them what is broken and what this
+change does; the rest should help them decide how closely to review.
+
+- Open the Problem section with two to four plain sentences: what goes wrong,
+  who it affects, and what this change does about it. Identifiers, numbers, and
+  mechanism come after that.
+- Use the names the codebase already uses, or plain words. Do not carry over
+  terms you coined while working. If a new name is unavoidable, define it once
+  and keep using it.
+- Do not restate the diff. Skip per-test lists, walkthroughs of each function,
+  and paraphrases of code comments. Say what the tests cover and what they do
+  not.
+- Leave out how you got here: earlier designs, dead ends, and how an
+  investigation or replay was run. Mention a rejected alternative only when a
+  reviewer would otherwise ask about it, in one sentence.
+- Aim for 300 words above the AI disclosure. Go past that only for evidence a
+  reviewer needs, and put it in a `<details>` block after the summary.
+
 ## Review expectations
 
 Maintainers may ask for a smaller change, a different implementation, decline

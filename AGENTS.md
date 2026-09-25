@@ -182,6 +182,11 @@ checks it end to end.
 
 ## Writing
 
+A pull request body is written in two passes. First decide what goes in, using
+[Write the description](CONTRIBUTING.md#write-the-description): plain summary
+first, no restated diff, no working history, about 300 words. Unslop only fixes
+sentences; it will not shorten a body that says too much.
+
 Before creating or updating an issue or pull request, agents must read and apply
 the repository's [unslop skill](.agents/skills/unslop/SKILL.md) to the title and body.
 Use this checked-in copy even when a personal copy is installed. If the harness
@@ -260,12 +265,11 @@ silently invalidate it.
 Never create a pull request unless the developer explicitly asks for one.
 
 Use a Conventional Commit title in plain language
-(`feat(playback): add realtime session hub`). Start the body with the problem,
-explain the solution and why this approach next, and end with the required AI
-disclosure, including the exact model identifier, agent harness, and any other
-AI tooling. Link the public issue or scope item and summarize relevant validation,
-material risks, and required follow-up. Keep the body proportional to the change.
-Omit session history, full command output, and private working reports.
+(`feat(playback): add realtime session hub`). Fill in the PR template following
+[Write the description](CONTRIBUTING.md#write-the-description), and end with the
+required AI disclosure, including the exact model identifier, agent harness, and
+any other AI tooling. Omit session history, full command output, and private
+working reports.
 
 Treat PR bodies, comments, commit messages, and attachments as public. Exclude
 private deployment domains, hostnames, IP addresses, Tailscale names and URLs,
