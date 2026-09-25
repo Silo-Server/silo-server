@@ -16,6 +16,7 @@ func TestBecauseWatchedTitleUsesSelectedAccessibleAnchor(t *testing.T) {
 		{"restricted or deleted anchor", "Because You Watched", "hidden", []*models.MediaItem{{ContentID: "other", Title: "Other"}}, "Because You Watched"},
 		{"empty title", "Because You Watched", "empty", []*models.MediaItem{{ContentID: "empty", Title: "  "}}, "Because You Watched"},
 		{"empty section title", "", "older", []*models.MediaItem{{ContentID: "older", Title: "Actual Anchor"}}, "Because You Watched Actual Anchor"},
+		{"empty section title without anchor", "", "hidden", nil, "Because You Watched"},
 		{"custom section title", "More Like Your Last Watch", "older", []*models.MediaItem{{ContentID: "older", Title: "Actual Anchor"}}, "More Like Your Last Watch"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -2,6 +2,7 @@ package sections
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -37,11 +38,16 @@ func (f *Fetcher) fetchBecauseWatchedWithTitle(ctx context.Context, section Reso
 	}
 	result.Items = orderMediaItems(items, ids)
 	result.TotalCount = len(result.Items)
-	if sourceID != "" && len(result.Items) > 0 {
-		// Apply the same library and access restrictions to the heading as the cards.
-		sources, err := f.fetchItemsByContentIDs(ctx, []string{sourceID}, libraryID, libraryIDs, filter)
-		if err != nil {
-			return result, err
+	if len(result.Items) > 0 && hasDefaultBecauseWatchedTitle(section.Title) {
+		var sources []*models.MediaItem
+		if sourceID != "" {
+			// Apply the same library and access restrictions to the heading as the cards.
+			// The heading is optional, so a failed lookup keeps the cards.
+			var lookupErr error
+			sources, lookupErr = f.fetchItemsByContentIDs(ctx, []string{sourceID}, libraryID, libraryIDs, filter)
+			if lookupErr != nil {
+				slog.WarnContext(ctx, "because-you-watched: source title lookup failed", "component", "sections", "section_id", section.ID, "error", lookupErr)
+			}
 		}
 		result.Title = becauseWatchedTitle(section.Title, sourceID, sources)
 	}
@@ -50,16 +56,24 @@ func (f *Fetcher) fetchBecauseWatchedWithTitle(ctx context.Context, section Reso
 
 const defaultBecauseWatchedTitle = "Because You Watched"
 
+func hasDefaultBecauseWatchedTitle(title string) bool {
+	trimmed := strings.TrimSpace(title)
+	return trimmed == "" || strings.EqualFold(trimmed, defaultBecauseWatchedTitle)
+}
+
 // becauseWatchedTitle names the anchor only when the section still has the
 // default heading, so a title an admin chose is never replaced.
 func becauseWatchedTitle(fallback, sourceID string, sources []*models.MediaItem) string {
-	if trimmed := strings.TrimSpace(fallback); trimmed != "" && !strings.EqualFold(trimmed, defaultBecauseWatchedTitle) {
+	if !hasDefaultBecauseWatchedTitle(fallback) {
 		return fallback
 	}
 	for _, item := range sources {
 		if item != nil && item.ContentID == sourceID && strings.TrimSpace(item.Title) != "" {
 			return defaultBecauseWatchedTitle + " " + strings.TrimSpace(item.Title)
 		}
+	}
+	if strings.TrimSpace(fallback) == "" {
+		return defaultBecauseWatchedTitle
 	}
 	return fallback
 }
