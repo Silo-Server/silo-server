@@ -14,6 +14,11 @@
 -- legacy_duplicate row for it: the lowest account id holds the identifier,
 -- the others stay editable, and the next one takes it over when the holder
 -- releases it, so the old collision cannot spread to a new account.
+-- Block writes to users (reads continue) until the triggers exist, so an
+-- account written by a server still running the previous release cannot land
+-- between the backfill and the triggers without identifier rows.
+LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE;
+
 CREATE TABLE user_login_identifiers (
     identifier citext NOT NULL,
     user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
