@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -81,7 +82,7 @@ func TestQueryWorkGroupsDB(t *testing.T) {
 		exec(`INSERT INTO item_people(id,content_id,person_id,kind) VALUES($1,$2,$3,7)`, person+int64(i)+1, ids[i], person)
 		members = append(members, LibraryCollectionItemInput{MediaItemID: ids[i]})
 	}
-	access := AccessFilter{UserID: uid, ProfileID: profile, AllowedLibraryIDs: []int{lib}, MaxContentRating: "PG"}
+	access := AccessFilter{UserID: uid, ProfileID: profile, AllowedLibraryIDs: []int{lib}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
 	raw := &QueryExecutor{Pool: pool}
 	grouped := &QueryExecutor{Pool: pool, GroupByWork: true}
 	for _, sort := range []QuerySort{{Field: "title", Order: "asc"}, {Field: "title", Order: "desc"}, {Field: "rating_imdb", Order: "desc"}, {Field: "rating_imdb", Order: "asc"}, {Field: "date_viewed", Order: "desc"}} {

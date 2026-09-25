@@ -19,7 +19,7 @@ import (
 
 func TestBuildFilterAccessibleContentIDsSQL_AllowedLibrariesOnly(t *testing.T) {
 	sql, args := buildFilterAccessibleContentIDsSQL(
-		[]string{"a", "b"}, []int{1, 2}, nil, nil, false,
+		[]string{"a", "b"}, []int{1, 2}, nil, access.MaturityLimits{},
 	)
 
 	if len(args) != 2 {
@@ -54,12 +54,8 @@ func TestBuildFilterAccessibleContentIDsSQL_AllowedLibrariesOnly(t *testing.T) {
 }
 
 func TestBuildFilterAccessibleContentIDsSQL_RatingOnlyRequiresNoMembership(t *testing.T) {
-	ceiling, ok := access.AgeForCeiling("PG-13")
-	if !ok {
-		t.Fatal(`AgeForCeiling("PG-13") reported no age`)
-	}
 	sql, args := buildFilterAccessibleContentIDsSQL(
-		[]string{"a"}, nil, nil, ceiling, false,
+		[]string{"a"}, nil, nil, access.MaturityLimits{MaxContentRating: "PG-13"},
 	)
 
 	if len(args) != 2 {
@@ -84,7 +80,7 @@ func TestBuildFilterAccessibleContentIDsSQL_RatingOnlyRequiresNoMembership(t *te
 
 func TestBuildFilterAccessibleContentIDsSQL_DisabledLibrariesOnly(t *testing.T) {
 	sql, args := buildFilterAccessibleContentIDsSQL(
-		[]string{"a"}, nil, []int{9, 10}, nil, false,
+		[]string{"a"}, nil, []int{9, 10}, access.MaturityLimits{},
 	)
 
 	if len(args) != 2 {
@@ -101,12 +97,8 @@ func TestBuildFilterAccessibleContentIDsSQL_DisabledLibrariesOnly(t *testing.T) 
 }
 
 func TestBuildFilterAccessibleContentIDsSQL_AllowedDisabledAndRatingPlaceholders(t *testing.T) {
-	ceiling, ok := access.AgeForCeiling("R")
-	if !ok {
-		t.Fatal(`AgeForCeiling("R") reported no age`)
-	}
 	sql, args := buildFilterAccessibleContentIDsSQL(
-		[]string{"a"}, []int{1}, []int{9}, ceiling, false,
+		[]string{"a"}, []int{1}, []int{9}, access.MaturityLimits{MaxContentRating: "R"},
 	)
 
 	// $1 ids, $2 allowed, $3 disabled, $4 ceiling age — in append order.
@@ -126,5 +118,36 @@ func TestBuildFilterAccessibleContentIDsSQL_AllowedDisabledAndRatingPlaceholders
 	// folder placeholder appears once per branch (item + episode).
 	if got := strings.Count(sql, "mil.media_folder_id = ANY($2)"); got != 2 {
 		t.Errorf("expected allowed predicate in both branches; found %d occurrences", got)
+	}
+}
+
+// The advisory-age limit rides beside the content-rating ceiling: both are
+// bound once and ANDed into both branches, so an episode is gated on its
+// parent series' advisory age exactly as its item would be.
+func TestBuildFilterAccessibleContentIDsSQL_AdvisoryAgeLimit(t *testing.T) {
+	sql, args := buildFilterAccessibleContentIDsSQL(
+		[]string{"a"}, nil, nil, access.MaturityLimits{MaxContentRating: "PG-13", MaxAdvisoryAge: 10},
+	)
+
+	// $1 ids, $2 ceiling age, $3 advisory limit.
+	if len(args) != 3 || args[1] != 14 || args[2] != 10 {
+		t.Fatalf("expected args [ids 14 10]; got %v", args)
+	}
+	for _, want := range []string{
+		"(mi.content_rating_age IS NOT NULL AND mi.content_rating_age <= $2)",
+		"(mi.advisory_age IS NULL OR mi.advisory_age <= $3)",
+	} {
+		if got := strings.Count(sql, want); got != 2 {
+			t.Errorf("expected %q in both branches; found %d occurrences in %s", want, got, sql)
+		}
+	}
+
+	// An advisory limit alone needs no ceiling and no membership join.
+	sql, args = buildFilterAccessibleContentIDsSQL([]string{"a"}, nil, nil, access.MaturityLimits{MaxAdvisoryAge: 7})
+	if len(args) != 2 || args[1] != 7 {
+		t.Fatalf("expected args [ids 7]; got %v", args)
+	}
+	if strings.Contains(sql, "content_rating_age") || strings.Contains(sql, "media_item_libraries") {
+		t.Errorf("advisory-only scope must add only the advisory predicate; got %s", sql)
 	}
 }

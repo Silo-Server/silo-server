@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -61,7 +62,7 @@ func TestCatalogPersonalCursorDB(t *testing.T) {
 	exec(`INSERT INTO user_favorites(user_id,profile_id,media_item_id) VALUES($1,$2,$3)`, uid, p2, ids[3])
 	provider := pgstore.NewPostgresProvider(pool)
 	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool)).WithUserStoreProvider(provider)
-	access := AccessFilter{UserID: uid, ProfileID: p1, AllowedLibraryIDs: []int{lib}, MaxContentRating: "PG"}
+	access := AccessFilter{UserID: uid, ProfileID: p1, AllowedLibraryIDs: []int{lib}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
 	walk := func(req CatalogRequest, viewer AccessFilter) []string {
 		t.Helper()
 		var result []string

@@ -45,8 +45,7 @@ func NewScopeAccessFilter(resolver ScopeResolver) AccessFilterResolver {
 		return catalog.AccessFilter{
 			AllowedLibraryIDs:         scope.AllowedLibraryIDs,
 			DisabledLibraryIDs:        scope.DisabledLibraryIDs,
-			MaxContentRating:          scope.MaxContentRating,
-			AllowUnratedContent:       scope.AllowUnratedContent,
+			MaturityLimits:            scope.MaturityLimits,
 			MaxPlaybackQuality:        scope.MaxPlaybackQuality,
 			ProfilePreferredLanguage:  scope.PreferredMetadataLanguage,
 			MetadataLanguageOverrides: scope.MetadataLanguageOverrides,

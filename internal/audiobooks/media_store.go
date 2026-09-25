@@ -819,7 +819,7 @@ func (s *ABSMediaStore) ListLibraryAuthors(ctx context.Context, libraryID int64,
 	if offset < 0 {
 		offset = 0
 	}
-	if access.MaxContentRating != "" || len(access.ExcludedMediaTypes) > 0 {
+	if access.Active() || len(access.ExcludedMediaTypes) > 0 {
 		return s.listLibraryAuthorsLive(ctx, libraryID, limit, offset, sortBy, sortDesc, access)
 	}
 	var total int

@@ -118,6 +118,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 	if profile != nil {
 		policyInput.ProfilePresent = true
 		policyInput.ProfileMaxRating = profile.MaxContentRating
+		policyInput.ProfileMaxAdvisoryAge = profile.MaxAdvisoryAge
 		policyInput.ProfileMaxQuality = profile.MaxPlaybackQuality
 		policyInput.ProfileLibraryLimited = profile.LibraryRestrictionsEnabled
 		policyInput.ProfileLibraryIDs = slices.Clone(profile.AllowedLibraryIDs)
@@ -163,13 +164,16 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 	}
 
 	return access.Scope{
-		UserID:                     user.ID,
-		ProfileID:                  input.ProfileID,
-		AllowedLibraryIDs:          allowed,
-		DisabledLibraryIDs:         disabled,
-		LibrariesRestricted:        decision.LibrariesRestricted,
-		MaxContentRating:           access.StricterCeiling(decision.MaxContentRating, decision.MaxContentRatingOverride),
-		AllowUnratedContent:        allowUnrated,
+		UserID:              user.ID,
+		ProfileID:           input.ProfileID,
+		AllowedLibraryIDs:   allowed,
+		DisabledLibraryIDs:  disabled,
+		LibrariesRestricted: decision.LibrariesRestricted,
+		MaturityLimits: access.MaturityLimits{
+			MaxContentRating:    access.StricterCeiling(decision.MaxContentRating, decision.MaxContentRatingOverride),
+			AllowUnratedContent: allowUnrated,
+			MaxAdvisoryAge:      decision.MaxAdvisoryAge,
+		},
 		MaxPlaybackQuality:         decision.MaxPlaybackQuality,
 		MaxRemoteStreamBitrateKbps: effective.MaxRemoteStreamBitrateKbps,
 		MaxLocalStreamBitrateKbps:  effective.MaxLocalStreamBitrateKbps,

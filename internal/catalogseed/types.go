@@ -44,7 +44,7 @@ type ItemRecord struct {
 	Year          int      `json:"year"`
 	Genres        []string `json:"genres"`
 	ContentRating string   `json:"content_rating"`
-	// AdvisoryAge and AdvisorySource round-trip the display-only advisory.
+	// AdvisoryAge and AdvisorySource round-trip the item's advisory.
 	// Unlike content_rating_age they are not derivable from anything else in
 	// the bundle, and the providers that supply them are rate limited, so an
 	// import that dropped them would need a re-enrichment pass to recover.

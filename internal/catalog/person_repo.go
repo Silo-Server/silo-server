@@ -578,7 +578,7 @@ func (r *PersonRepository) search(ctx context.Context, query string, limit int, 
 		// Episode access follows the parent series, while scope and excluded
 		// media types describe the credited item itself.
 		appendLibraryAccessConditions("access_item.content_id", *filter, &conditions, &args, &argIdx)
-		applyAccessFilter("access_item", AccessFilter{MaxContentRating: filter.MaxContentRating, AllowUnratedContent: filter.AllowUnratedContent}, &conditions, &args, &argIdx)
+		applyAccessFilter("access_item", AccessFilter{MaturityLimits: filter.MaturityLimits}, &conditions, &args, &argIdx)
 		applyAccessFilter("mi", AccessFilter{ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 		where += ` AND EXISTS (
 			SELECT 1 FROM item_people ip

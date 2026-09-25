@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 )
@@ -199,7 +200,7 @@ func TestGetItemVersionsAccessAndMissing(t *testing.T) {
 	f := newVersionsFixture(t)
 	for _, kind := range []string{"movie", "series", "season", "episode", "extra"} {
 		for name, filter := range map[string]AccessFilter{
-			"empty allowlist": {AllowedLibraryIDs: []int{}}, "other library": {AllowedLibraryIDs: []int{f.library + 1}}, "disabled library": {DisabledLibraryIDs: []int{f.library}}, "rating": {MaxContentRating: "G"}, "wrong presentation library": {PresentationLibraryID: new(f.library + 1)},
+			"empty allowlist": {AllowedLibraryIDs: []int{}}, "other library": {AllowedLibraryIDs: []int{f.library + 1}}, "disabled library": {DisabledLibraryIDs: []int{f.library}}, "rating": {MaturityLimits: access.MaturityLimits{MaxContentRating: "G"}}, "wrong presentation library": {PresentationLibraryID: new(f.library + 1)},
 		} {
 			t.Run(kind+"/"+name, func(t *testing.T) {
 				_, oldErr := f.svc.GetItemDetail(t.Context(), f.ids[kind], filter)

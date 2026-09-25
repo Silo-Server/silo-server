@@ -657,7 +657,7 @@
       "label": "Show advisory age",
       "description": "Show a recommended minimum viewer age from an advisory service, such as Common Sense Media, on item detail.",
       "recommended_control": "switch",
-      "notes": "Profile scope because the reader is a household parent deciding what a child may watch, and they browse on their own profile. Default false: the advisory is extra chrome most viewers do not want, and only the profiles that ask for it should carry it. Display only. The advisory age never feeds content_rating_age, ApplyContentRatingCeiling, or any other parental control, so turning this on cannot change what a profile is allowed to watch, and turning it off hides nothing that was restricting anything. Coverage is partial by nature: the provider that supplies the advisory is rate limited per day, so on a large library some titles carry one and others do not."
+      "notes": "Profile scope because the reader is a household parent deciding what a child may watch, and they browse on their own profile. Default false: the advisory is extra chrome most viewers do not want, and only the profiles that ask for it should carry it. This setting only controls whether the badge is shown: turning it on or off never changes what a profile is allowed to watch. Restricting a profile by advisory age is a separate access field, the profile's max_advisory_age, which a household manager sets on the profile itself. Coverage is partial by nature: the provider that supplies the advisory is rate limited per day, so on a large library some titles carry one and others do not."
     },
     {
       "key": "player.hdr_enabled",

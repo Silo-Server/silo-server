@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -817,7 +818,7 @@ func TestSearchItemsUsesCatalogSearchProviderWithCompatScope(t *testing.T) {
 			return catalog.AccessFilter{
 				AllowedLibraryIDs:  []int{1, 2},
 				ExcludedMediaTypes: []string{"ebook"},
-				MaxContentRating:   "PG-13",
+				MaturityLimits:     access.MaturityLimits{MaxContentRating: "PG-13"},
 			}
 		},
 	}

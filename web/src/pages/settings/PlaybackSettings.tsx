@@ -592,7 +592,7 @@ export default function PlaybackSettings() {
 
         <SettingRow
           label="Show advisory age"
-          description="Show a suggested minimum viewer age, such as Common Sense Media's, on item detail. This is advice for you, not a restriction: it never changes what anyone can watch."
+          description="Show a suggested minimum viewer age, such as Common Sense Media's, on item detail. This only shows the age; a household manager can limit a profile by it in the profile's access settings."
           control={(id) => (
             <Switch
               id={id}

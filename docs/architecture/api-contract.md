@@ -1237,8 +1237,8 @@ Two findings from the pilot are now settled for every later section:
 
 - **PATCH semantics.** A v1 full-replacement `PUT` becomes a `PATCH` whose members are all
   optional: an omitted member is unchanged, and explicit `null` clears a member only where the
-  schema admits clearing (for `updateProfile`: avatar, PIN, content-rating ceiling, languages,
-  playback ceiling). `null` on any other member is a `422` `validation_failed` naming the member.
+  schema admits clearing (for `updateProfile`: avatar, PIN, content-rating ceiling, advisory-age
+  limit, languages, playback ceiling). `null` on any other member is a `422` `validation_failed` naming the member.
   Because Huma treats `null` on an optional member as absent, the distinction is enforced from the
   raw body. The pilot mutation is naturally idempotent and is not `If-Match` protected;
   optimistic concurrency stays opt-in per operation.

@@ -156,9 +156,9 @@ func TestPersonSearchViewerAccessPostgres(t *testing.T) {
 		{"access before ranking and limit", "movie", 1, AccessFilter{AllowedLibraryIDs: libraries[:1]}, []int64{ids[1]}},
 		{"no allowed libraries", "", 20, AccessFilter{AllowedLibraryIDs: []int{}}, nil},
 		{"disabled membership hides shared and orphan items", "movie", 20, AccessFilter{DisabledLibraryIDs: libraries[1:]}, []int64{ids[1], ids[3]}},
-		{"rating ceiling", "movie", 20, AccessFilter{AllowedLibraryIDs: libraries[:1], MaxContentRating: "PG-13"}, []int64{ids[1], ids[2]}},
+		{"rating ceiling", "movie", 20, AccessFilter{AllowedLibraryIDs: libraries[:1], MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}, []int64{ids[1], ids[2]}},
 		{"excluded type across all scopes", "", 20, AccessFilter{AllowedLibraryIDs: libraries[:1], ExcludedMediaTypes: []string{"ebook"}}, []int64{ids[1], ids[2], ids[3], ids[7]}},
-		{"combined restrictions across all scopes", "", 20, AccessFilter{AllowedLibraryIDs: libraries[:1], DisabledLibraryIDs: libraries[1:], MaxContentRating: "PG-13", ExcludedMediaTypes: []string{"ebook"}}, []int64{ids[1], ids[7]}},
+		{"combined restrictions across all scopes", "", 20, AccessFilter{AllowedLibraryIDs: libraries[:1], DisabledLibraryIDs: libraries[1:], MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}, ExcludedMediaTypes: []string{"ebook"}}, []int64{ids[1], ids[7]}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			people, err := repo.SearchScoped(t.Context(), prefix, tc.limit, tc.scope, tc.filter)
@@ -246,8 +246,8 @@ func TestPersonSearchEpisodeParentAccessPostgres(t *testing.T) {
 		}{
 			{"allowed library", AccessFilter{AllowedLibraryIDs: libraries[:1]}, 20, []int64{ids[1], ids[2], ids[3]}},
 			{"disabled library", AccessFilter{DisabledLibraryIDs: libraries[1:]}, 20, []int64{ids[1], ids[3]}},
-			{"parent rating", AccessFilter{AllowedLibraryIDs: libraries[:1], MaxContentRating: "PG-13"}, 20, []int64{ids[1], ids[2]}},
-			{"access before limit", AccessFilter{AllowedLibraryIDs: libraries[:1], DisabledLibraryIDs: libraries[1:], MaxContentRating: "PG-13"}, 1, []int64{ids[1]}},
+			{"parent rating", AccessFilter{AllowedLibraryIDs: libraries[:1], MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}, 20, []int64{ids[1], ids[2]}},
+			{"access before limit", AccessFilter{AllowedLibraryIDs: libraries[:1], DisabledLibraryIDs: libraries[1:], MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}, 1, []int64{ids[1]}},
 			{"excluded credit type", AccessFilter{ExcludedMediaTypes: []string{"episode"}}, 20, nil},
 			{"missing parent", AccessFilter{}, 20, ids[:5]},
 		} {

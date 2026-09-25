@@ -103,6 +103,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		}
 
 		scope.MaxContentRating = profile.MaxContentRating
+		scope.MaxAdvisoryAge = profile.MaxAdvisoryAge
 		scope.MaxPlaybackQuality = MinQuality(scope.MaxPlaybackQuality, NormalizePlaybackQuality(profile.MaxPlaybackQuality))
 		scope.PreferredMetadataLanguage = preferences.PreferredMetadataLanguage
 		scope.MetadataLanguageOverrides = preferences.MetadataLanguageOverrides

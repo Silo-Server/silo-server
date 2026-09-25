@@ -8,6 +8,8 @@ package catalog
 import (
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 // ---------------------------------------------------------------------------
@@ -235,7 +237,7 @@ func TestUnplayedHighRated_ContentRatingFilter(t *testing.T) {
 		MinRating: 6.0,
 		UserID:    2,
 		ProfileID: "p",
-		Filter:    AccessFilter{MaxContentRating: "PG-13"},
+		Filter:    AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}},
 	})
 
 	if !strings.Contains(query, "mi.content_rating_age IS NOT NULL AND mi.content_rating_age <= $") {

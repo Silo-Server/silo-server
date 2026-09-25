@@ -8,6 +8,7 @@
   "is_child": false,
   "is_primary": true,
   "max_content_rating": "",
+  "max_advisory_age": null,
   "quality_preference": "auto",
   "language": "en",
   "preferred_metadata_language": "",

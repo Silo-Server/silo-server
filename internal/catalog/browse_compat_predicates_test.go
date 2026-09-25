@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 func TestPlayedOnlyBrowseBindsEveryParameter(t *testing.T) {
@@ -24,7 +26,7 @@ func TestPlayedOnlyBrowseBindsEveryParameter(t *testing.T) {
 }
 
 func TestBrowseCombinedPredicatesPreserveProfileAndAccess(t *testing.T) {
-	filters := BrowseFilters{Type: "movie", Genres: []string{"Drama", "Comedy"}, Years: []int{2020, 2024}, SearchTerm: "100%", UserID: 7, ProfileID: "child", IsFavorite: true, IsPlayed: new(false), IsResumable: true, LibraryIDs: []int{3}, DisabledLibraryIDs: []int{9}, MaxContentRating: "PG", Limit: 1, Offset: 2}
+	filters := BrowseFilters{Type: "movie", Genres: []string{"Drama", "Comedy"}, Years: []int{2020, 2024}, SearchTerm: "100%", UserID: 7, ProfileID: "child", IsFavorite: true, IsPlayed: new(false), IsResumable: true, LibraryIDs: []int{3}, DisabledLibraryIDs: []int{9}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}, Limit: 1, Offset: 2}
 	plan, empty, err := (&BrowseRepository{}).buildBrowsePlan(filters)
 	if err != nil || empty {
 		t.Fatalf("build plan: empty=%v err=%v", empty, err)

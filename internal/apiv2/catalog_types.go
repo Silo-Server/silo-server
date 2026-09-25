@@ -30,7 +30,7 @@ type CatalogItem struct {
 	Studios           []string                  `json:"studios,omitempty"`
 	Networks          []string                  `json:"networks,omitempty"`
 	ContentRating     string                    `json:"content_rating,omitempty" example:"R"`
-	AdvisoryAge       *int                      `json:"advisory_age,omitempty" doc:"Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch" example:"13"`
+	AdvisoryAge       *int                      `json:"advisory_age,omitempty" doc:"Recommended minimum viewer age from an advisory service. A profile with max_advisory_age hides titles whose advisory age is above it; the age never changes the content-rating ceiling" example:"13"`
 	AdvisorySource    string                    `json:"advisory_source,omitempty" doc:"Who recommended advisory_age" enum:"commonsense,mdblist" example:"commonsense"`
 	Status            string                    `json:"status" doc:"Metadata match state of the item" example:"matched"`
 	ShowStatus        string                    `json:"show_status,omitempty" doc:"Airing state of a series"`

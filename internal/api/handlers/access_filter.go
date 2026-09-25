@@ -33,13 +33,12 @@ func AccessFilterFromContext(ctx context.Context, deviceID string) catalog.Acces
 // gates stored in ctx, use it so a new scope field reaches every filter.
 func accessFilterFromScope(scope access.Scope, userID int, profileID, deviceID string) catalog.AccessFilter {
 	return catalog.AccessFilter{
-		AllowedLibraryIDs:   scope.AllowedLibraryIDs,
-		DisabledLibraryIDs:  scope.DisabledLibraryIDs,
-		MaxContentRating:    scope.MaxContentRating,
-		AllowUnratedContent: scope.AllowUnratedContent,
-		MaxPlaybackQuality:  scope.MaxPlaybackQuality,
-		UserID:              userID,
-		ProfileID:           profileID,
-		DeviceID:            deviceID,
+		AllowedLibraryIDs:  scope.AllowedLibraryIDs,
+		DisabledLibraryIDs: scope.DisabledLibraryIDs,
+		MaturityLimits:     scope.MaturityLimits,
+		MaxPlaybackQuality: scope.MaxPlaybackQuality,
+		UserID:             userID,
+		ProfileID:          profileID,
+		DeviceID:           deviceID,
 	}
 }

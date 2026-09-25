@@ -1,7 +1,7 @@
 interface MetadataBadgesProps {
   year?: string;
   contentRating?: string;
-  /** Recommended minimum viewer age. Display only; never a restriction. */
+  /** Recommended minimum viewer age from an advisory service. */
   advisoryAge?: number;
   /** Who recommended advisoryAge, used to attribute the badge. */
   advisorySource?: string;
@@ -39,8 +39,8 @@ export default function MetadataBadges({
           className="metadata-badge"
           title={
             advisorySource && ADVISORY_SOURCE_LABELS[advisorySource]
-              ? `${ADVISORY_SOURCE_LABELS[advisorySource]} suggests age ${advisoryAge} and up. This is advice, not a restriction.`
-              : `Suggested for ages ${advisoryAge} and up. This is advice, not a restriction.`
+              ? `${ADVISORY_SOURCE_LABELS[advisorySource]} suggests age ${advisoryAge} and up.`
+              : `Suggested for ages ${advisoryAge} and up.`
           }
         >
           {advisorySource && ADVISORY_SOURCE_LABELS[advisorySource]

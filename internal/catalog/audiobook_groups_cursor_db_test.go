@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -61,7 +62,7 @@ func TestAudiobookGroupsCursorDB(t *testing.T) {
 			exec(`INSERT INTO user_watch_progress(user_id,profile_id,media_item_id,position_seconds,completed) VALUES($1,$2,$3,50,false),($1,$4,$3,100,true)`, uid, profile, id, other)
 		}
 	}
-	filter := AccessFilter{UserID: uid, ProfileID: profile, AllowedLibraryIDs: []int{lib}, MaxContentRating: "PG"}
+	filter := AccessFilter{UserID: uid, ProfileID: profile, AllowedLibraryIDs: []int{lib}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
 	for _, axis := range []AudiobookGroupBy{AudiobookGroupBySeries, AudiobookGroupByAuthor, AudiobookGroupByNarrator} {
 		for _, sort := range []string{"name", "count", "duration"} {
 			t.Run(string(axis)+"/"+sort, func(t *testing.T) {

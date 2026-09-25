@@ -15,6 +15,8 @@ export interface ProfileDraft {
   clearPin: boolean;
   isChild: boolean;
   maxContentRating: string;
+  /** Advisory-age limit; null means no limit. */
+  maxAdvisoryAge: number | null;
   maxPlaybackQuality: PlaybackQualityPreset;
   libraryRestrictionsEnabled: boolean;
   allowedLibraryIDs: number[];
@@ -28,6 +30,8 @@ export interface ContentRatingOption {
 
 export interface ProfileAccessSummary {
   contentRating: string;
+  /** "" when the profile has no advisory-age limit. */
+  advisoryAge: string;
   libraries: string;
   playbackQuality: string;
   text: string;
@@ -54,6 +58,26 @@ export const CONTENT_RATING_OPTIONS: ContentRatingOption[] = [
   { value: "R", label: "R / TV-MA / NC-17 / 18", summary: "R max" },
 ];
 
+export interface AdvisoryAgeOption {
+  /** null is "no limit". */
+  value: number | null;
+  label: string;
+}
+
+/**
+ * Advisory-age limits a profile can be given. Advisory services such as Common
+ * Sense Media recommend a minimum age from 2 up; a limit of N hides titles
+ * recommended for viewers older than N. Titles with no advisory age are not
+ * hidden by the limit, so the content rating still has to do its job.
+ */
+export const ADVISORY_AGE_OPTIONS: AdvisoryAgeOption[] = [
+  { value: null, label: "No limit" },
+  ...Array.from({ length: 16 }, (_, index) => {
+    const age = index + 2;
+    return { value: age, label: `Ages ${age} and under` };
+  }),
+];
+
 function sortUniqueLibraryIDs(ids: number[] | null | undefined): number[] {
   if (!ids || ids.length === 0) {
     return [];
@@ -70,6 +94,7 @@ export function createProfileDraft(profile?: Profile | null): ProfileDraft {
     clearPin: false,
     isChild: profile?.is_child ?? false,
     maxContentRating: profile?.max_content_rating ?? "",
+    maxAdvisoryAge: profile?.max_advisory_age ?? null,
     maxPlaybackQuality: playbackQualityPresetFromValue(profile?.max_playback_quality),
     libraryRestrictionsEnabled: profile?.library_restrictions_enabled ?? false,
     allowedLibraryIDs: sortUniqueLibraryIDs(profile?.allowed_library_ids),
@@ -98,6 +123,9 @@ export function buildProfileRequestFromDraft(draft: ProfileDraft): ProfileCreate
   if (draft.maxContentRating !== "") {
     body.max_content_rating = draft.maxContentRating;
   }
+  if (draft.maxAdvisoryAge !== null) {
+    body.max_advisory_age = draft.maxAdvisoryAge;
+  }
   if (maxPlaybackQuality === "1080p" || maxPlaybackQuality === "2160p") {
     body.max_playback_quality = maxPlaybackQuality;
   }
@@ -120,6 +148,7 @@ export function buildProfileUpdateFromDraft(draft: ProfileDraft): ProfileUpdate 
     avatar: draft.avatarPreset ? avatarPresetRef(draft.avatarPreset) : null,
     is_child: draft.isChild,
     max_content_rating: draft.maxContentRating === "" ? null : draft.maxContentRating,
+    max_advisory_age: draft.maxAdvisoryAge,
     max_playback_quality:
       maxPlaybackQuality === "1080p" || maxPlaybackQuality === "2160p" ? maxPlaybackQuality : null,
     library_restrictions_enabled: draft.libraryRestrictionsEnabled,
@@ -141,6 +170,7 @@ export function buildProfileAccessSummary(
   profile: Pick<
     Profile,
     | "max_content_rating"
+    | "max_advisory_age"
     | "library_restrictions_enabled"
     | "allowed_library_ids"
     | "max_playback_quality"
@@ -149,6 +179,9 @@ export function buildProfileAccessSummary(
   const contentRating =
     CONTENT_RATING_OPTIONS.find((option) => option.value === profile.max_content_rating)?.summary ??
     "Any content";
+  const advisoryAge = profile.max_advisory_age
+    ? `Advisory age ${profile.max_advisory_age} max`
+    : "";
   const libraryCount = sortUniqueLibraryIDs(profile.allowed_library_ids).length;
   const libraries = profile.library_restrictions_enabled
     ? `${libraryCount} ${libraryCount === 1 ? "library" : "libraries"}`
@@ -158,9 +191,10 @@ export function buildProfileAccessSummary(
 
   return {
     contentRating,
+    advisoryAge,
     libraries,
     playbackQuality,
-    text: [contentRating, libraries, playbackQuality].join(" · "),
+    text: [contentRating, advisoryAge, libraries, playbackQuality].filter(Boolean).join(" · "),
   };
 }
 
@@ -193,6 +227,7 @@ export function clearKidsPreset(draft: ProfileDraft): ProfileDraft {
     ...draft,
     isChild: false,
     maxContentRating: "",
+    maxAdvisoryAge: null,
     maxPlaybackQuality: "any",
     libraryRestrictionsEnabled: false,
     allowedLibraryIDs: [],

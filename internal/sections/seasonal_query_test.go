@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -92,7 +93,7 @@ func TestSeasonalThemedFiltersItemsAboveProfileRating(t *testing.T) {
 		SectionType: SectionSeasonalThemed,
 		ItemLimit:   10,
 		Config:      config,
-	}, &libraryID, nil, catalog.AccessFilter{MaxContentRating: "PG"})
+	}, &libraryID, nil, catalog.AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}})
 	if err != nil {
 		t.Fatalf("fetch seasonal section: %v", err)
 	}

@@ -239,7 +239,7 @@ func (r policyResolver) Resolve(ctx context.Context, in access.ResolveInput) (ac
 // so a cursor minted under one policy is refused once the policy changes;
 // otherwise rows that became visible before the key would be skipped.
 func TestListProgressCursorBoundToViewerPolicy(t *testing.T) {
-	policy := &access.Scope{AllowedLibraryIDs: []int{3, 1}, PolicyRevision: 7, MaxContentRating: "PG-13"}
+	policy := &access.Scope{AllowedLibraryIDs: []int{3, 1}, PolicyRevision: 7, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
 	deps := pilotDeps(&fakeProgress{entries: progressRows()}, nil)
 	deps.ViewerAccess = apimw.NewViewerAccessMiddleware(policyResolver{scope: policy})
 	h := newTestHandler(t, deps)

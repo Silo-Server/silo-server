@@ -25,9 +25,8 @@ func (r *ItemRepository) GetSearchItemsByIDsWithAccess(
 	mediaConditions := []string{"hydrated_mi.content_id = ANY($1)"}
 	appendLibraryAccessConditions("hydrated_mi.content_id", filter, &mediaConditions, &args, &argIdx)
 	applyAccessFilter("hydrated_mi", AccessFilter{
-		MaxContentRating:    filter.MaxContentRating,
-		AllowUnratedContent: filter.AllowUnratedContent,
-		ExcludedMediaTypes:  filter.ExcludedMediaTypes,
+		MaturityLimits:     filter.MaturityLimits,
+		ExcludedMediaTypes: filter.ExcludedMediaTypes,
 	}, &mediaConditions, &args, &argIdx)
 
 	episodeConditions := []string{"mi.content_id = ANY($1)"}
@@ -40,9 +39,8 @@ func (r *ItemRepository) GetSearchItemsByIDsWithAccess(
 		&argIdx,
 	)
 	applyAccessFilter("mi", AccessFilter{
-		MaxContentRating:    filter.MaxContentRating,
-		AllowUnratedContent: filter.AllowUnratedContent,
-		ExcludedMediaTypes:  filter.ExcludedMediaTypes,
+		MaturityLimits:     filter.MaturityLimits,
+		ExcludedMediaTypes: filter.ExcludedMediaTypes,
 	}, &episodeConditions, &args, &argIdx)
 
 	query := fmt.Sprintf(`
@@ -129,9 +127,8 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 		}
 		appendLibraryAccessConditions("mi.content_id", filter, &mediaConditions, &args, &argIdx)
 		applyAccessFilter("mi", AccessFilter{
-			MaxContentRating:    filter.MaxContentRating,
-			AllowUnratedContent: filter.AllowUnratedContent,
-			ExcludedMediaTypes:  filter.ExcludedMediaTypes,
+			MaturityLimits:     filter.MaturityLimits,
+			ExcludedMediaTypes: filter.ExcludedMediaTypes,
 		}, &mediaConditions, &args, &argIdx)
 		mediaConditions = append(mediaConditions, MangaChapterExclusionWhere("mi"))
 	}
@@ -142,9 +139,8 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 			"si.type = 'series'",
 		)
 		appendEpisodeCatalogSearchAccess("ece", filter, &episodeConditions, &args, &argIdx)
-		ApplyContentRatingCeiling("ece", AccessFilter{
-			MaxContentRating:    filter.MaxContentRating,
-			AllowUnratedContent: filter.AllowUnratedContent,
+		ApplyMaturityLimits("ece", AccessFilter{
+			MaturityLimits: filter.MaturityLimits,
 		}, &episodeConditions, &args, &argIdx)
 		if len(filter.ExcludedMediaTypes) > 0 {
 			episodeConditions = append(episodeConditions, fmt.Sprintf("NOT ('episode' = ANY($%d))", argIdx))

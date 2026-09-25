@@ -27,14 +27,14 @@ func TestContentRatingCeilingSQLShape(t *testing.T) {
 	}
 }
 
-// TestApplyContentRatingCeilingBindsTheCeilingAge checks the three cases the
+// TestApplyMaturityLimitsBindsTheCeilingAge checks the three cases the
 // helper distinguishes: no ceiling, an unusable ceiling, and a real one.
-func TestApplyContentRatingCeilingBindsTheCeilingAge(t *testing.T) {
+func TestApplyMaturityLimitsBindsTheCeilingAge(t *testing.T) {
 	t.Run("no ceiling emits no predicate", func(t *testing.T) {
 		var conditions []string
 		var args []any
 		argIdx := 1
-		ApplyContentRatingCeiling("mi", AccessFilter{}, &conditions, &args, &argIdx)
+		ApplyMaturityLimits("mi", AccessFilter{}, &conditions, &args, &argIdx)
 		if len(conditions) != 0 || len(args) != 0 || argIdx != 1 {
 			t.Fatalf("expected nothing emitted; got %v / %v / %d", conditions, args, argIdx)
 		}
@@ -45,7 +45,7 @@ func TestApplyContentRatingCeilingBindsTheCeilingAge(t *testing.T) {
 		var args []any
 		argIdx := 1
 		// "NR" is recognized but carries no age, so it cannot order anything.
-		ApplyContentRatingCeiling("mi", AccessFilter{MaxContentRating: "NR"}, &conditions, &args, &argIdx)
+		ApplyMaturityLimits("mi", AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "NR"}}, &conditions, &args, &argIdx)
 		if len(conditions) != 1 || conditions[0] != "1 = 0" {
 			t.Fatalf("expected a blocking predicate; got %v", conditions)
 		}
@@ -62,7 +62,7 @@ func TestApplyContentRatingCeilingBindsTheCeilingAge(t *testing.T) {
 			var conditions []string
 			var args []any
 			argIdx := 1
-			ApplyContentRatingCeiling("mi", AccessFilter{MaxContentRating: ceiling}, &conditions, &args, &argIdx)
+			ApplyMaturityLimits("mi", AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: ceiling}}, &conditions, &args, &argIdx)
 			if len(conditions) != 1 || conditions[0] != "1 = 0" {
 				t.Fatalf("ceiling %q: expected a blocking predicate; got %v", ceiling, conditions)
 			}
@@ -73,7 +73,7 @@ func TestApplyContentRatingCeilingBindsTheCeilingAge(t *testing.T) {
 		var conditions []string
 		var args []any
 		argIdx := 7
-		ApplyContentRatingCeiling("mi", AccessFilter{MaxContentRating: "FSK 16"}, &conditions, &args, &argIdx)
+		ApplyMaturityLimits("mi", AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "FSK 16"}}, &conditions, &args, &argIdx)
 		if len(args) != 1 || args[0] != 16 {
 			t.Fatalf("expected the FSK 16 ceiling to bind age 16; got %v", args)
 		}
@@ -152,7 +152,7 @@ func TestContentRatingCeilingAcrossSystemsDB(t *testing.T) {
 	repo := NewLibraryItemRepository(pool)
 	visible := func(t *testing.T, ceiling string, allowUnrated bool) map[string]bool {
 		t.Helper()
-		got, err := repo.FilterAccessibleContentIDs(ctx, all, []int{library}, nil, ceiling, allowUnrated)
+		got, err := repo.FilterAccessibleContentIDs(ctx, all, []int{library}, nil, access.MaturityLimits{MaxContentRating: ceiling, AllowUnratedContent: allowUnrated})
 		if err != nil {
 			t.Fatalf("FilterAccessibleContentIDs(%q): %v", ceiling, err)
 		}
@@ -223,7 +223,7 @@ func TestContentRatingCeilingAcrossSystemsDB(t *testing.T) {
 		// This is the path the progress list and sync take, so a stored " "
 		// reading as "no ceiling" here would let a restricted viewer read and
 		// write progress for titles browse hides. It must agree with
-		// ApplyContentRatingCeiling and block, however the setting is set.
+		// ApplyMaturityLimits and block, however the setting is set.
 		for _, allowUnrated := range []bool{false, true} {
 			got := visible(t, " ", allowUnrated)
 			if len(got) != 0 {

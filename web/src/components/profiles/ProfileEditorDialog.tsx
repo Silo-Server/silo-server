@@ -38,6 +38,7 @@ import {
 } from "@/lib/profile-avatars";
 import { PLAYBACK_QUALITY_OPTIONS, type PlaybackQualityPreset } from "@/lib/playback-quality";
 import {
+  ADVISORY_AGE_OPTIONS,
   applyKidsPreset,
   buildProfileRequestFromDraft,
   buildProfileUpdateFromDraft,
@@ -70,6 +71,7 @@ interface ValidationErrors {
 }
 
 const ANY_CONTENT_RATING_VALUE = "__any_content__";
+const NO_ADVISORY_AGE_VALUE = "__no_advisory_limit__";
 
 function sortLibraryIDs(ids: number[]) {
   return [...new Set(ids)].sort((left, right) => left - right);
@@ -162,6 +164,8 @@ function ProfileEditorForm({
   const nameId = useId();
   const pinId = useId();
   const contentRatingId = useId();
+  const advisoryAgeId = useId();
+  const advisoryAgeHelpId = useId();
   const playbackQualityId = useId();
   const restrictLibrariesId = useId();
   const selectedContentRatingValue =
@@ -557,6 +561,43 @@ function ProfileEditorForm({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor={advisoryAgeId}>Maximum advisory age</Label>
+            <Select
+              value={
+                draft.maxAdvisoryAge === null ? NO_ADVISORY_AGE_VALUE : String(draft.maxAdvisoryAge)
+              }
+              onValueChange={(value) =>
+                updateDraft(
+                  "maxAdvisoryAge",
+                  value === NO_ADVISORY_AGE_VALUE ? null : Number(value),
+                )
+              }
+            >
+              <SelectTrigger
+                id={advisoryAgeId}
+                className="w-full"
+                aria-describedby={advisoryAgeHelpId}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ADVISORY_AGE_OPTIONS.map((option) => (
+                  <SelectItem
+                    key={option.value ?? NO_ADVISORY_AGE_VALUE}
+                    value={option.value === null ? NO_ADVISORY_AGE_VALUE : String(option.value)}
+                  >
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p id={advisoryAgeHelpId} className="text-muted-foreground text-xs">
+              Hides titles an advisory service such as Common Sense Media recommends for older
+              viewers. Titles without an advisory age are limited by the content rating alone.
+            </p>
           </div>
 
           <div className="space-y-2">

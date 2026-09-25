@@ -155,6 +155,7 @@ func guardBenchmarkInput(domain string) (any, error) {
 			AccountMaxQuality: "2160p", AccessPolicyRevision: 1,
 			DisabledLibraryIDs: []int{4}, ProfilePresent: true,
 			ProfileMaxRating: "PG-13", ProfileMaxQuality: "1080p",
+			ProfileMaxAdvisoryAge: 12,
 			ProfileLibraryLimited: true, ProfileLibraryIDs: []int{1, 2},
 			ProfileHasPIN: true, ProfileVerified: true, RequestTime: benchTime,
 		}

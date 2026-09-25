@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { Profile } from "@/api/types";
 import { avatarPresetRef } from "@/lib/profile-avatars";
 import {
+  ADVISORY_AGE_OPTIONS,
   applyKidsPreset,
   buildProfileAccessSummary,
+  buildProfileRequestFromDraft,
   buildProfileUpdateFromDraft,
   clearKidsPreset,
   createProfileDraft,
@@ -48,6 +50,7 @@ describe("profile-management", () => {
       ),
     ).toEqual({
       contentRating: "PG max",
+      advisoryAge: "",
       libraries: "2 libraries",
       playbackQuality: "Standard quality",
       text: "PG max · 2 libraries · Standard quality",
@@ -137,6 +140,7 @@ describe("profile-management", () => {
       avatar: null,
       is_child: false,
       max_content_rating: null,
+      max_advisory_age: null,
       max_playback_quality: null,
       library_restrictions_enabled: true,
       allowed_library_ids: ["1", "3"],
@@ -152,5 +156,47 @@ describe("profile-management", () => {
       max_playback_quality: "1080p",
       allowed_library_ids: ["1", "3"],
     });
+  });
+
+  it("carries the advisory-age limit through drafts, requests and the summary", () => {
+    const draft = createProfileDraft(makeProfile({ max_advisory_age: 10 }));
+    expect(draft.maxAdvisoryAge).toBe(10);
+    expect(buildProfileUpdateFromDraft(draft).max_advisory_age).toBe(10);
+    // The editor always sends the member, so clearing it reaches the server.
+    expect(buildProfileUpdateFromDraft({ ...draft, maxAdvisoryAge: null }).max_advisory_age).toBe(
+      null,
+    );
+
+    // A create body omits "no limit": the contract admits no null there.
+    expect(buildProfileRequestFromDraft({ ...draft, name: "Kid" }).max_advisory_age).toBe(10);
+    expect(
+      "max_advisory_age" in buildProfileRequestFromDraft({ ...draft, maxAdvisoryAge: null }),
+    ).toBe(false);
+
+    expect(
+      buildProfileAccessSummary(makeProfile({ max_content_rating: "PG", max_advisory_age: 10 }))
+        .text,
+    ).toBe("PG max · Advisory age 10 max · All libraries · Any quality");
+    expect(createProfileDraft(makeProfile()).maxAdvisoryAge).toBeNull();
+  });
+
+  it("clears the advisory-age limit with the other kids restrictions", () => {
+    const draft = createProfileDraft(makeProfile({ is_child: true, max_advisory_age: 8 }));
+    expect(clearKidsPreset(draft).maxAdvisoryAge).toBeNull();
+    // Turning the kids preset on leaves the limit to the manager.
+    expect(
+      applyKidsPreset(createProfileDraft(), {
+        contentRatingTouched: false,
+        libraryAccessTouched: false,
+      }).maxAdvisoryAge,
+    ).toBeNull();
+  });
+
+  it("offers only limits the server accepts", () => {
+    const ages = ADVISORY_AGE_OPTIONS.flatMap((option) =>
+      option.value === null ? [] : [option.value],
+    );
+    expect(ADVISORY_AGE_OPTIONS[0]).toEqual({ value: null, label: "No limit" });
+    expect(ages.every((age) => Number.isInteger(age) && age >= 1 && age <= 21)).toBe(true);
   });
 });

@@ -229,8 +229,9 @@ func (r *LibraryItemRepository) GetItemsInFolders(ctx context.Context, contentID
 //     library restriction is set, so a rating-only viewer is gated on rating
 //     alone).
 //
-// A non-nil but empty allowedFolderIDs, or a maxContentRating that permits no
-// ratings, means nothing is accessible. ExcludedMediaTypes is intentionally
+// A non-nil but empty allowedFolderIDs, or a content-rating ceiling that
+// permits no ratings, means nothing is accessible. limits carries the viewer's
+// maturity limits (access.Scope.MaturityLimits); every one of them applies. ExcludedMediaTypes is intentionally
 // omitted: the viewer access.Scope does not carry it and the native request
 // path never sets it (only the jellycompat layer populates it), so it is a
 // no-op here.
@@ -238,18 +239,18 @@ func (r *LibraryItemRepository) GetItemsInFolders(ctx context.Context, contentID
 // The emitted SQL is built by buildFilterAccessibleContentIDsSQL so its shape
 // (placeholder numbering, the parent-series join for episodes, the optional
 // rating predicate) is unit-testable without a database.
-func (r *LibraryItemRepository) FilterAccessibleContentIDs(ctx context.Context, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, maxContentRating string, allowUnratedContent bool) (map[string]bool, error) {
-	return filterAccessibleContentIDs(ctx, r.pool, contentIDs, allowedFolderIDs, disabledFolderIDs, maxContentRating, allowUnratedContent)
+func (r *LibraryItemRepository) FilterAccessibleContentIDs(ctx context.Context, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, limits access.MaturityLimits) (map[string]bool, error) {
+	return filterAccessibleContentIDs(ctx, r.pool, contentIDs, allowedFolderIDs, disabledFolderIDs, limits)
 }
 
 // FilterAccessibleContentIDsInTransaction uses the same catalog visibility query
 // as ordinary reads, in the caller's consistent snapshot.
-func FilterAccessibleContentIDsInTransaction(ctx context.Context, tx pgx.Tx, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, maxContentRating string, allowUnratedContent bool) (map[string]bool, error) {
-	return filterAccessibleContentIDs(ctx, tx, contentIDs, allowedFolderIDs, disabledFolderIDs, maxContentRating, allowUnratedContent)
+func FilterAccessibleContentIDsInTransaction(ctx context.Context, tx pgx.Tx, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, limits access.MaturityLimits) (map[string]bool, error) {
+	return filterAccessibleContentIDs(ctx, tx, contentIDs, allowedFolderIDs, disabledFolderIDs, limits)
 }
 func filterAccessibleContentIDs(ctx context.Context, db interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
-}, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, maxContentRating string, allowUnratedContent bool) (map[string]bool, error) {
+}, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, limits access.MaturityLimits) (map[string]bool, error) {
 	result := make(map[string]bool, len(contentIDs))
 	if len(contentIDs) == 0 {
 		return result, nil
@@ -259,22 +260,19 @@ func filterAccessibleContentIDs(ctx context.Context, db interface {
 		return result, nil
 	}
 
-	var ceilingAge *int
 	// access.HasCeiling, not a trimmed emptiness test, so this agrees with
-	// ApplyContentRatingCeiling: a stored " " is a set ceiling that resolves to
+	// ApplyMaturityLimits: a stored " " is a set ceiling that resolves to
 	// nothing, and it must block here too. These callers are the progress list
 	// and sync paths, so treating it as absent would let a viewer read and
 	// write progress for titles the catalog hides from them.
-	if access.HasCeiling(maxContentRating) {
-		age, ok := access.AgeForCeiling(maxContentRating)
-		if !ok {
+	if access.HasCeiling(limits.MaxContentRating) {
+		if _, ok := access.AgeForCeiling(limits.MaxContentRating); !ok {
 			// Ceiling names no usable age → nothing is accessible.
 			return result, nil
 		}
-		ceilingAge = age
 	}
 
-	query, args := buildFilterAccessibleContentIDsSQL(contentIDs, allowedFolderIDs, disabledFolderIDs, ceilingAge, allowUnratedContent)
+	query, args := buildFilterAccessibleContentIDsSQL(contentIDs, allowedFolderIDs, disabledFolderIDs, limits)
 
 	rows, err := db.Query(ctx, query, args...)
 	if err != nil {
@@ -297,18 +295,17 @@ func filterAccessibleContentIDs(ctx context.Context, db interface {
 
 // buildFilterAccessibleContentIDsSQL builds the membership/rating query used by
 // FilterAccessibleContentIDs. It is a pure function (no DB access) so the query
-// shape can be unit-tested. allowedRatings must already be resolved via
-// access.AgeForCeiling (nil means no rating ceiling); the caller handles the
-// "permits nothing" early-outs.
+// shape can be unit-tested. The maturity predicates come from
+// ApplyMaturityLimits; the caller handles the "permits nothing" early-outs.
 //
 // The structure mirrors ItemRepository.EnsureAccessible: select FROM the owning
 // media_items row, gate library membership through the shared per-item
 // EXISTS / NOT EXISTS predicates (libraryAccessConditions), and resolve
 // episodes through their parent series so an episode is gated on
 // EnsureAccessible(series_id)-equivalent membership.
-func buildFilterAccessibleContentIDsSQL(contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, ceilingAge *int, allowUnratedContent bool) (string, []any) {
+func buildFilterAccessibleContentIDsSQL(contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, limits access.MaturityLimits) (string, []any) {
 	args := []any{contentIDs}
-	var allowedIdx, disabledIdx, ratingIdx int
+	var allowedIdx, disabledIdx int
 	if allowedFolderIDs != nil {
 		args = append(args, allowedFolderIDs)
 		allowedIdx = len(args)
@@ -317,10 +314,12 @@ func buildFilterAccessibleContentIDsSQL(contentIDs []string, allowedFolderIDs, d
 		args = append(args, disabledFolderIDs)
 		disabledIdx = len(args)
 	}
-	if ceilingAge != nil {
-		args = append(args, *ceilingAge)
-		ratingIdx = len(args)
-	}
+	// Both branches alias the gating media_items row as "mi" (the item itself,
+	// or the episode's parent series), so one set of maturity predicates and
+	// placeholders serves both.
+	var maturityConds []string
+	argIdx := len(args) + 1
+	ApplyMaturityLimits("mi", AccessFilter{MaturityLimits: limits}, &maturityConds, &args, &argIdx)
 
 	// Item branch gates the media item directly; episode branch resolves the
 	// parent series and gates on it (mirroring EnsureAccessible(series_id)).
@@ -332,11 +331,8 @@ func buildFilterAccessibleContentIDsSQL(contentIDs []string, allowedFolderIDs, d
 
 	itemConds = append(itemConds, libraryAccessConditions("mi.content_id", allowedIdx, disabledIdx)...)
 	episodeConds = append(episodeConds, libraryAccessConditions("e.series_id", allowedIdx, disabledIdx)...)
-	if ratingIdx > 0 {
-		rc := contentRatingCeilingSQL("mi", allowUnratedContent, ratingIdx)
-		itemConds = append(itemConds, rc)
-		episodeConds = append(episodeConds, rc)
-	}
+	itemConds = append(itemConds, maturityConds...)
+	episodeConds = append(episodeConds, maturityConds...)
 
 	query := fmt.Sprintf(`
 		SELECT req.content_id

@@ -261,9 +261,9 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 		MetadataLanguageOverrides: map[string]string{
 			"no": access.OriginalMetadataLanguage,
 		},
-		MaxContentRating: "PG-13",
-		UserID:           1,
-		ProfileID:        "profile-1",
+		MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"},
+		UserID:         1,
+		ProfileID:      "profile-1",
 	}
 
 	visibleIDs := []string{movieA, movieB, series}

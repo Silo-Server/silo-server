@@ -228,6 +228,11 @@ export interface Profile {
   is_child: boolean;
   is_primary: boolean;
   max_content_rating: string;
+  /**
+   * Advisory-age limit: titles whose advisory age (e.g. Common Sense Media's
+   * "13+") is above it are hidden. Null or absent means no limit.
+   */
+  max_advisory_age?: number | null;
   quality_preference: string;
   language: string;
   preferred_metadata_language?: string;
@@ -1127,10 +1132,10 @@ export interface ItemDetail {
   content_rating: string;
   /**
    * Recommended minimum viewer age from an advisory service, with
-   * advisory_source naming who recommended it. Display only: the advisory
-   * never restricts anything, and content_rating remains the certification
-   * that drives the server's content-rating ceiling. Absent means "no
-   * advisory fetched", never "suitable for everyone".
+   * advisory_source naming who recommended it. It is not the certification:
+   * content_rating still drives the content-rating ceiling, and a profile's
+   * separate max_advisory_age limit compares against this age. Absent means
+   * "no advisory fetched", never "suitable for everyone".
    */
   advisory_age?: number | null;
   advisory_source?: string;
@@ -2456,6 +2461,8 @@ export interface AdminStats {
   total_movie_files?: number;
   total_shows: number;
   total_show_files?: number;
+  /** Movies and series that carry an advisory age. */
+  advisory_titles?: number;
   active_streams: number;
   total_storage_bytes: number;
   /**

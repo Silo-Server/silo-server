@@ -11685,6 +11685,11 @@ export interface components {
     AdminDashboardStats: {
       /** Format: int64 */
       active_streams: number;
+      /**
+       * Format: int64
+       * @description Movies and series that carry an advisory age, the coverage a profile's max_advisory_age limit acts on; compare with total_movies + total_shows
+       */
+      advisory_titles: number;
       /** Format: int64 */
       total_files: number;
       /** Format: int64 */
@@ -16190,7 +16195,7 @@ export interface components {
       added_at?: string;
       /**
        * Format: int64
-       * @description Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch
+       * @description Recommended minimum viewer age from an advisory service. A profile with max_advisory_age hides titles whose advisory age is above it; the age never changes the content-rating ceiling
        * @example 13
        */
       advisory_age?: number;
@@ -16320,7 +16325,7 @@ export interface components {
       added_at?: string;
       /**
        * Format: int64
-       * @description Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch
+       * @description Recommended minimum viewer age from an advisory service. A profile with max_advisory_age hides titles whose advisory age is above it; the age never changes the content-rating ceiling
        * @example 13
        */
       advisory_age?: number;
@@ -18855,7 +18860,7 @@ export interface components {
       added_at?: string;
       /**
        * Format: int64
-       * @description Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch
+       * @description Recommended minimum viewer age from an advisory service. A profile with max_advisory_age hides titles whose advisory age is above it; the age never changes the content-rating ceiling
        * @example 13
        */
       advisory_age?: number;
@@ -22652,6 +22657,12 @@ export interface components {
       /** @example false */
       library_restrictions_enabled: boolean;
       /**
+       * Format: int64
+       * @description Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone; null means no limit
+       * @example 12
+       */
+      max_advisory_age: number | null;
+      /**
        * @description Content-rating ceiling; empty means none
        * @example PG-13
        */
@@ -22707,6 +22718,11 @@ export interface components {
       avatar_upload_enabled: boolean;
       /** @description The page's items; empty, never null */
       items: components["schemas"]["Profile"][];
+      /**
+       * @description Whether profiles accept max_advisory_age and the server enforces it
+       * @example true
+       */
+      max_advisory_age_supported: boolean;
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
     };
@@ -22741,6 +22757,12 @@ export interface components {
       language?: string;
       /** @example false */
       library_restrictions_enabled?: boolean;
+      /**
+       * Format: int64
+       * @description Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone
+       * @example 12
+       */
+      max_advisory_age?: number;
       /**
        * @description Content-rating ceiling
        * @example PG-13
@@ -22881,6 +22903,12 @@ export interface components {
       language?: string | null;
       /** @example false */
       library_restrictions_enabled?: boolean;
+      /**
+       * Format: int64
+       * @description Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone; null removes it
+       * @example 12
+       */
+      max_advisory_age?: number | null;
       /**
        * @description Content-rating ceiling; null removes it
        * @example PG-13
@@ -26268,7 +26296,7 @@ export interface components {
       added_at?: string;
       /**
        * Format: int64
-       * @description Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch
+       * @description Recommended minimum viewer age from an advisory service. A profile with max_advisory_age hides titles whose advisory age is above it; the age never changes the content-rating ceiling
        * @example 13
        */
       advisory_age?: number;
@@ -26427,7 +26455,7 @@ export interface components {
       added_at?: string;
       /**
        * Format: int64
-       * @description Recommended minimum viewer age from an advisory service. Display only: it is never enforced and never narrows what a profile may watch
+       * @description Recommended minimum viewer age from an advisory service. A profile with max_advisory_age hides titles whose advisory age is above it; the age never changes the content-rating ceiling
        * @example 13
        */
       advisory_age?: number;

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
@@ -62,7 +63,7 @@ func TestCatalogManualCollectionCursorDB(t *testing.T) {
 	}
 	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool))
 	req := CatalogRequest{Source: CatalogSourceLibraryCollection, CollectionID: c.ID, CursorPaging: true, UseSourceOrder: true, Limit: 2}
-	access := AccessFilter{AllowedLibraryIDs: []int{library}, MaxContentRating: "PG"}
+	access := AccessFilter{AllowedLibraryIDs: []int{library}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
 	page, err := resolver.Resolve(ctx, req, access)
 	if err != nil {
 		t.Fatal(err)

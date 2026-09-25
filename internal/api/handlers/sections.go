@@ -357,7 +357,7 @@ type sectionItemResponse struct {
 	Studios       []string `json:"studios,omitempty"`
 	Networks      []string `json:"networks,omitempty"`
 	ContentRating string   `json:"content_rating,omitempty"`
-	// AdvisoryAge and AdvisorySource carry the display-only advisory to the
+	// AdvisoryAge and AdvisorySource carry the item's advisory to the
 	// v2 card renderer. json:"-" because /api/v1 is frozen: the fields exist on
 	// the Go struct only, and apiv2 emits them under its own names.
 	AdvisoryAge       *int                   `json:"-"`
@@ -558,8 +558,7 @@ func (h *SectionHandler) loadResolvedHomeSections(ctx context.Context) ([]sectio
 		libraryIDs = scope.AllowedLibraryIDs
 		accessFilter.AllowedLibraryIDs = scope.AllowedLibraryIDs
 		accessFilter.DisabledLibraryIDs = scope.DisabledLibraryIDs
-		accessFilter.MaxContentRating = scope.MaxContentRating
-		accessFilter.AllowUnratedContent = scope.AllowUnratedContent
+		accessFilter.MaturityLimits = scope.MaturityLimits
 	} else if h.UserRepo != nil {
 		// Fail closed: an unresolved policy must not serve unrestricted
 		// sections, so a lookup failure becomes an error for the caller
@@ -624,8 +623,7 @@ func (h *SectionHandler) loadResolvedLibrarySections(ctx context.Context, librar
 	if scope, ok := access.GetScope(ctx); ok {
 		accessFilter.AllowedLibraryIDs = scope.AllowedLibraryIDs
 		accessFilter.DisabledLibraryIDs = scope.DisabledLibraryIDs
-		accessFilter.MaxContentRating = scope.MaxContentRating
-		accessFilter.AllowUnratedContent = scope.AllowUnratedContent
+		accessFilter.MaturityLimits = scope.MaturityLimits
 	}
 
 	return resolved, accessFilter, profileID, nil

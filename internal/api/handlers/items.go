@@ -312,7 +312,7 @@ type itemListResponse struct {
 	Studios       []string `json:"studios,omitempty"`
 	Networks      []string `json:"networks,omitempty"`
 	ContentRating string   `json:"content_rating,omitempty"`
-	// AdvisoryAge and AdvisorySource carry the display-only advisory to the
+	// AdvisoryAge and AdvisorySource carry the item's advisory to the
 	// v2 card renderer. json:"-" because /api/v1 is frozen: the fields exist on
 	// the Go struct only, and apiv2 emits them under its own names.
 	AdvisoryAge       *int                        `json:"-"`
@@ -2211,8 +2211,7 @@ func (h *ItemsHandler) ContextAccessFilter(ctx context.Context, opts AccessFilte
 		return catalog.AccessFilter{
 			AllowedLibraryIDs:         scope.AllowedLibraryIDs,
 			DisabledLibraryIDs:        scope.DisabledLibraryIDs,
-			MaxContentRating:          scope.MaxContentRating,
-			AllowUnratedContent:       scope.AllowUnratedContent,
+			MaturityLimits:            scope.MaturityLimits,
 			MaxPlaybackQuality:        scope.MaxPlaybackQuality,
 			PresentationLibraryID:     opts.PresentationLibraryID,
 			ScopeFilesToLibrary:       opts.ScopeFilesToLibrary,

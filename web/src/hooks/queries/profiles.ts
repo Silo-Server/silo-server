@@ -53,6 +53,7 @@ export function profileFromV2(profile: components["schemas"]["Profile"]): Profil
     is_child: profile.is_child,
     is_primary: profile.is_primary,
     max_content_rating: profile.max_content_rating,
+    max_advisory_age: profile.max_advisory_age ?? null,
     quality_preference: profile.quality_preference,
     language: profile.language,
     preferred_metadata_language: profile.preferred_metadata_language,

@@ -47,7 +47,7 @@ func TestThemeGrantRechecksCurrentAuthorityAndFile(t *testing.T) {
 	svc := themesongs.NewService(store, "test secret")
 	sessions := &socketSessionFixture{valid: true}
 	users := &socketUserFixture{user: models.User{ID: 7, Enabled: true, AccessPolicyRevision: 2}}
-	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "profile", ProfileVerified: true, AllowedLibraryIDs: []int{3}, MaxContentRating: "PG-13", AllowUnratedContent: true}}
+	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "profile", ProfileVerified: true, AllowedLibraryIDs: []int{3}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13", AllowUnratedContent: true}}}
 	h := &ThemeSongsHandler{Service: svc, Sessions: sessions, Users: users, Resolver: viewer}
 	authorization, err := h.Authorize(t.Context(), themesongs.Identity{UserID: 7, ProfileID: "profile", SessionID: "session", PolicyRevision: 2}, "movie", "7", catalog.AccessFilter{}, nil, time.Now().Add(time.Minute))
 	if err != nil {

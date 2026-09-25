@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 26
+const schemaVersion = 27
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -253,6 +253,18 @@ func runMigrations(db *sql.DB) error {
 			return fmt.Errorf("migration v26 failed: %w", err)
 		}
 		if _, err := tx.Exec("PRAGMA user_version = 26"); err != nil {
+			return err
+		}
+	}
+	if version < 27 {
+		// InitSchema runs before migrations and already creates the column in
+		// a fresh profiles table, so only older stores need it added.
+		if !columnExists(tx, "profiles", "max_advisory_age") {
+			if _, err := tx.Exec(`ALTER TABLE profiles ADD COLUMN max_advisory_age INTEGER CHECK (max_advisory_age BETWEEN 1 AND 21)`); err != nil {
+				return fmt.Errorf("migration v27 failed: %w", err)
+			}
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 27"); err != nil {
 			return err
 		}
 	}

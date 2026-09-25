@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -55,7 +56,7 @@ func TestCatalogSectionCursorDB(t *testing.T) {
 		}
 	}
 	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool))
-	access := AccessFilter{AllowedLibraryIDs: []int{lib}, MaxContentRating: "PG"}
+	access := AccessFilter{AllowedLibraryIDs: []int{lib}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
 	seed := time.Date(2026, 1, 2, 3, 4, 5, 123456789, time.FixedZone("seed", 3600))
 	for _, spec := range []struct{ kind, sort string }{{"recently_added", "added_at"}, {"recently_released", "release_date"}, {"random", "random"}} {
 		sectionID := prefix + "-" + spec.kind

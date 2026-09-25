@@ -458,7 +458,7 @@ func rankForAge(age int) int {
 // Text that is nothing but whitespace is deliberately NOT "no ceiling": it is a
 // ceiling no rating can be compared against, and an unusable parental control
 // blocks everything rather than admitting the whole catalog (see
-// catalog.ApplyContentRatingCeiling). max_content_rating is free text on both
+// catalog.ApplyMaturityLimits). max_content_rating is free text on both
 // profile APIs, so a stored " " is reachable; trimming before the emptiness
 // test would turn a deny-all control into an allow-all one, which is the one
 // direction a parental control must never fail in. Callers that clear a
@@ -569,7 +569,7 @@ func hasRatingText(raw string) bool {
 //
 // A non-empty ceiling that resolves to no age at all is unusable, and an
 // unusable parental control blocks everything (see
-// catalog.ApplyContentRatingCeiling) — so it is the most restrictive value
+// catalog.ApplyMaturityLimits) — so it is the most restrictive value
 // there is and wins. That is what makes this safe to apply to a ceiling
 // produced somewhere Silo's ladder is not available, such as an
 // administrator-authored policy override: combining can only tighten.

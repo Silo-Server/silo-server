@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -42,24 +43,23 @@ type BrowseFilters struct {
 	LibraryID          int      // filter by specific library
 	LibraryIDs         []int    // accessible library IDs (nil = all)
 	DisabledLibraryIDs []int    // libraries whose membership globally hides an item
-	MaxContentRating   string   // maximum allowed content rating ceiling
-	// AllowUnratedContent mirrors AccessFilter.AllowUnratedContent.
-	AllowUnratedContent bool
-	YearMin             int      // minimum year (inclusive)
-	YearMax             int      // maximum year (inclusive)
-	ContentRating       []string // comma-separated content ratings (e.g., PG-13, TV-MA)
-	Status              string   // pending, matched, unmatched (optional filter)
-	PersonID            int64    // filter items by person (joins item_people)
-	Sort                string   // created_at, release_date, rating_imdb, rating_tmdb, year, sort_title, recently_added
-	Order               string   // asc, desc
-	Limit               int
-	MaxLimit            int // optional caller-specific cap; zero keeps the default browse cap
-	Offset              int
-	SnapshotAt          *time.Time // pagination fence: exclude items created after this timestamp
-	RequireBackdrop     bool       // only return items with a non-empty backdrop_path (Jellyfin ImageTypes=Backdrop filter)
-	AudioLanguages      []string   // any accessible file has an audio track in one of these languages
-	SubtitleLanguages   []string   // any accessible file has an embedded or external subtitle in one of these languages
-	MaxPlaybackQuality  string     // viewer quality ceiling for file-level language predicates and facets
+	// MaturityLimits mirrors AccessFilter.MaturityLimits.
+	access.MaturityLimits
+	YearMin            int      // minimum year (inclusive)
+	YearMax            int      // maximum year (inclusive)
+	ContentRating      []string // comma-separated content ratings (e.g., PG-13, TV-MA)
+	Status             string   // pending, matched, unmatched (optional filter)
+	PersonID           int64    // filter items by person (joins item_people)
+	Sort               string   // created_at, release_date, rating_imdb, rating_tmdb, year, sort_title, recently_added
+	Order              string   // asc, desc
+	Limit              int
+	MaxLimit           int // optional caller-specific cap; zero keeps the default browse cap
+	Offset             int
+	SnapshotAt         *time.Time // pagination fence: exclude items created after this timestamp
+	RequireBackdrop    bool       // only return items with a non-empty backdrop_path (Jellyfin ImageTypes=Backdrop filter)
+	AudioLanguages     []string   // any accessible file has an audio track in one of these languages
+	SubtitleLanguages  []string   // any accessible file has an embedded or external subtitle in one of these languages
+	MaxPlaybackQuality string     // viewer quality ceiling for file-level language predicates and facets
 	// ScopeFacetFilesToAccess limits the audio/subtitle language facets to
 	// files the viewer may play (library lists and MaxPlaybackQuality), as the
 	// Jellyfin-compat Filters2 languages must agree with its language filters.
@@ -538,7 +538,7 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 		argIdx++
 	}
 
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filters.MaxContentRating, AllowUnratedContent: filters.AllowUnratedContent}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaturityLimits: filters.MaturityLimits}, &conditions, &args, &argIdx)
 
 	// Manga chapters (type='ebook' rows linked into a manga series) are internal
 	// sub-units and must never surface as standalone catalog items.
@@ -734,7 +734,7 @@ func filterWhereClauseForSource(filters BrowseFilters, baseRelation string, medi
 		appendEpisodeParentLibraryAccessByEpisodeID(libraryContentExpr, parentAccess, &conditions, &args, &argIdx)
 	}
 
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filters.MaxContentRating, AllowUnratedContent: filters.AllowUnratedContent}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaturityLimits: filters.MaturityLimits}, &conditions, &args, &argIdx)
 
 	fromClause = baseRelation
 	if filters.PersonID > 0 {

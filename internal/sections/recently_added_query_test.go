@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
@@ -14,7 +15,7 @@ func TestBuildRecentlyAddedQueryUsesLibraryMembershipFastPathForSingleLibrary(t 
 	query, args := buildRecentlyAddedQuery(ResolvedSection{
 		ItemLimit: 12,
 		Config:    json.RawMessage(`{"generated_source":"home_library_recent","filter_library_id":1,"filter_type":"movie"}`),
-	}, nil, []int{1, 2}, catalog.AccessFilter{MaxContentRating: "PG-13"})
+	}, nil, []int{1, 2}, catalog.AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}})
 
 	for _, want := range []string{
 		"FROM media_item_libraries mil JOIN media_items mi ON mi.content_id = mil.content_id",

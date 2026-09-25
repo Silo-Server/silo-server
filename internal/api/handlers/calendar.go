@@ -225,15 +225,14 @@ func (h *CalendarHandler) calendarScope(ctx context.Context, filter string, af c
 // events by the viewer's local day.
 func (h *CalendarHandler) calendarEvents(ctx context.Context, q CalendarQuery, af catalog.AccessFilter, scope calendarScope) (CalendarView, error) {
 	cf := catalog.CalendarFilter{
-		Start:               q.Start.AddDate(0, 0, -2),
-		End:                 q.End.AddDate(0, 0, 2),
-		AllowedLibraryIDs:   af.AllowedLibraryIDs,
-		DisabledLibraryIDs:  af.DisabledLibraryIDs,
-		MaxContentRating:    af.MaxContentRating,
-		AllowUnratedContent: af.AllowUnratedContent,
-		RestrictByIDs:       scope.restrict,
-		RestrictToIDs:       scope.ids,
-		LibraryID:           q.LibraryID,
+		Start:              q.Start.AddDate(0, 0, -2),
+		End:                q.End.AddDate(0, 0, 2),
+		AllowedLibraryIDs:  af.AllowedLibraryIDs,
+		DisabledLibraryIDs: af.DisabledLibraryIDs,
+		MaturityLimits:     af.MaturityLimits,
+		RestrictByIDs:      scope.restrict,
+		RestrictToIDs:      scope.ids,
+		LibraryID:          q.LibraryID,
 	}
 
 	events, err := h.repo.ListEvents(ctx, cf)

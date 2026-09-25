@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -181,7 +182,7 @@ func TestItemRepo_GetByIDsWithAccess_AllowedListSkipsRedundantMembershipCheck(t 
 func TestItemRepo_GetByIDsWithAccess_MaxContentRatingProducesINClause(t *testing.T) {
 	repo := &ItemRepository{}
 	sql, args := repo.buildGetByIDsWithAccessSQL([]string{"a"}, AccessFilter{
-		MaxContentRating: "PG-13",
+		MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"},
 	})
 	if !strings.Contains(sql, "mi.content_rating_age IS NOT NULL AND mi.content_rating_age <= $") {
 		t.Fatalf("expected stored-age ceiling clause; got %s", sql)
@@ -203,7 +204,7 @@ func TestItemRepo_GetByIDsWithAccess_CombinedClausesIndexCorrectly(t *testing.T)
 	sql, args := repo.buildGetByIDsWithAccessSQL([]string{"a"}, AccessFilter{
 		AllowedLibraryIDs:  []int{1, 2},
 		DisabledLibraryIDs: []int{9},
-		MaxContentRating:   "PG-13",
+		MaturityLimits:     access.MaturityLimits{MaxContentRating: "PG-13"},
 	})
 	// Expect: $1 = ids, $2 = allowed libs, $3 = disabled libs, $4 = ceiling age.
 	if !strings.Contains(sql, "media_folder_id = ANY($2)") {

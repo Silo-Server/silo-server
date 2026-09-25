@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 func TestQueryExecutorGroupQueryPreservesAccessFilters(t *testing.T) {
@@ -20,7 +22,7 @@ func TestQueryExecutorGroupQueryPreservesAccessFilters(t *testing.T) {
 		}},
 	}
 
-	sql, args, err := executor.buildPreviewPageSQL(def, AccessFilter{MaxContentRating: "PG"}, 20, 0, false)
+	sql, args, err := executor.buildPreviewPageSQL(def, AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}, 20, 0, false)
 	if err != nil {
 		t.Fatalf("build preview SQL: %v", err)
 	}

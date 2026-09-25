@@ -57,11 +57,14 @@ func NewProfileHandler(provider userstore.UserStoreProvider) *ProfileHandler {
 // ProfileCreateRequest is the v1 POST /profiles body; v2 createProfile lowers
 // its own body onto it.
 type ProfileCreateRequest struct {
-	Name                       string `json:"name"`
-	Avatar                     string `json:"avatar,omitempty"`
-	PIN                        string `json:"pin,omitempty"`
-	IsChild                    bool   `json:"is_child"`
-	MaxContentRating           string `json:"max_content_rating,omitempty"`
+	Name             string `json:"name"`
+	Avatar           string `json:"avatar,omitempty"`
+	PIN              string `json:"pin,omitempty"`
+	IsChild          bool   `json:"is_child"`
+	MaxContentRating string `json:"max_content_rating,omitempty"`
+	// MaxAdvisoryAge is the advisory-age limit, 0 for none. /api/v1 is frozen,
+	// so only v2 createProfile sets it (json:"-").
+	MaxAdvisoryAge             int    `json:"-"`
 	QualityPreference          string `json:"quality_preference,omitempty"`
 	Language                   string `json:"language,omitempty"`
 	PreferredMetadataLanguage  string `json:"preferred_metadata_language,omitempty"`
@@ -78,11 +81,15 @@ type ProfileCreateRequest struct {
 }
 
 type ProfileUpdateRequest struct {
-	Name                       *string `json:"name,omitempty"`
-	Avatar                     *string `json:"avatar,omitempty"`
-	PIN                        *string `json:"pin,omitempty"`
-	IsChild                    *bool   `json:"is_child,omitempty"`
-	MaxContentRating           *string `json:"max_content_rating,omitempty"`
+	Name             *string `json:"name,omitempty"`
+	Avatar           *string `json:"avatar,omitempty"`
+	PIN              *string `json:"pin,omitempty"`
+	IsChild          *bool   `json:"is_child,omitempty"`
+	MaxContentRating *string `json:"max_content_rating,omitempty"`
+	// MaxAdvisoryAge: nil leaves the limit untouched, 0 clears it, and a
+	// positive age sets it. /api/v1 is frozen, so only v2 updateProfile sets
+	// it (json:"-").
+	MaxAdvisoryAge             *int    `json:"-"`
 	QualityPreference          *string `json:"quality_preference,omitempty"`
 	Language                   *string `json:"language,omitempty"`
 	PreferredMetadataLanguage  *string `json:"preferred_metadata_language,omitempty"`
@@ -103,15 +110,18 @@ type verifyPINRequest struct {
 }
 
 type ProfileView struct {
-	ID                         string `json:"id"`
-	Name                       string `json:"name"`
-	Avatar                     string `json:"avatar,omitempty"`
-	AvatarURL                  string `json:"avatar_url,omitempty"`
-	AvatarSource               string `json:"avatar_source,omitempty"`
-	HasPIN                     bool   `json:"has_pin"`
-	IsChild                    bool   `json:"is_child"`
-	IsPrimary                  bool   `json:"is_primary"`
-	MaxContentRating           string `json:"max_content_rating,omitempty"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Avatar           string `json:"avatar,omitempty"`
+	AvatarURL        string `json:"avatar_url,omitempty"`
+	AvatarSource     string `json:"avatar_source,omitempty"`
+	HasPIN           bool   `json:"has_pin"`
+	IsChild          bool   `json:"is_child"`
+	IsPrimary        bool   `json:"is_primary"`
+	MaxContentRating string `json:"max_content_rating,omitempty"`
+	// MaxAdvisoryAge is the advisory-age limit, 0 for none. /api/v1 is frozen,
+	// so only v2 emits it (json:"-").
+	MaxAdvisoryAge             int    `json:"-"`
 	QualityPreference          string `json:"quality_preference,omitempty"`
 	Language                   string `json:"language,omitempty"`
 	PreferredMetadataLanguage  string `json:"preferred_metadata_language,omitempty"`
@@ -196,13 +206,22 @@ func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) 
 	return false
 }
 
+// invalidAdvisoryAgeLimit is the field error for an advisory-age limit outside
+// the storable range.
+func invalidAdvisoryAgeLimit() *APIError {
+	return fieldError("max_advisory_age", fmt.Sprintf(
+		"max_advisory_age must be between %d and %d", access.MinAdvisoryAgeLimit, access.MaxAdvisoryAgeLimit))
+}
+
 // isAllowedSelfServiceProfileUpdate reports whether a non-admin update request
 // only touches fields the user is allowed to change on their own profiles.
 // Admin-only fields (access policy: library restrictions, content rating,
-// playback-quality cap, child-profile flag) must be rejected for non-admins.
+// advisory-age limit, playback-quality cap, child-profile flag) must be
+// rejected for non-admins.
 func isAllowedSelfServiceProfileUpdate(req ProfileUpdateRequest) bool {
 	return req.IsChild == nil &&
 		req.MaxContentRating == nil &&
+		req.MaxAdvisoryAge == nil &&
 		req.LibraryRestrictionsEnabled == nil &&
 		req.AllowedLibraryIDs == nil &&
 		req.MaxPlaybackQuality == nil
@@ -310,6 +329,9 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	if !ok {
 		return none, fieldError("max_playback_quality", "Invalid max_playback_quality")
 	}
+	if req.MaxAdvisoryAge != 0 && !access.ValidAdvisoryAgeLimit(req.MaxAdvisoryAge) {
+		return none, invalidAdvisoryAgeLimit()
+	}
 
 	// Planned before anything is written: a preference value the canonical
 	// store would refuse must fail the request while it is still a no-op.
@@ -344,7 +366,7 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	// profile. On bootstrap the caller is becoming primary themselves, so non-
 	// admin bootstrap creations must leave those fields at their defaults.
 	if isBootstrap && !apimw.IsAdmin(ctx) &&
-		(req.IsChild || req.MaxContentRating != "" ||
+		(req.IsChild || req.MaxContentRating != "" || req.MaxAdvisoryAge != 0 ||
 			req.LibraryRestrictionsEnabled || len(req.AllowedLibraryIDs) > 0 ||
 			req.MaxPlaybackQuality != "") {
 		return none, apiError(http.StatusForbidden, "forbidden", "Profile access settings require the primary profile or admin access")
@@ -378,6 +400,7 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		Avatar:                     avatarRef,
 		IsChild:                    req.IsChild,
 		MaxContentRating:           req.MaxContentRating,
+		MaxAdvisoryAge:             req.MaxAdvisoryAge,
 		QualityPreference:          req.QualityPreference,
 		Language:                   req.Language,
 		PreferredMetadataLanguage:  req.PreferredMetadataLanguage,
@@ -516,6 +539,9 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		}
 		maxPlaybackQuality = &normalized
 	}
+	if req.MaxAdvisoryAge != nil && *req.MaxAdvisoryAge != 0 && !access.ValidAdvisoryAgeLimit(*req.MaxAdvisoryAge) {
+		return none, invalidAdvisoryAgeLimit()
+	}
 
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
@@ -571,6 +597,7 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		PIN:                        req.PIN,
 		IsChild:                    req.IsChild,
 		MaxContentRating:           req.MaxContentRating,
+		MaxAdvisoryAge:             req.MaxAdvisoryAge,
 		QualityPreference:          req.QualityPreference,
 		Language:                   req.Language,
 		PreferredMetadataLanguage:  req.PreferredMetadataLanguage,
@@ -873,6 +900,7 @@ func (h *ProfileHandler) profileResponseWith(
 		IsChild:                    p.IsChild,
 		IsPrimary:                  p.IsPrimary,
 		MaxContentRating:           p.MaxContentRating,
+		MaxAdvisoryAge:             p.MaxAdvisoryAge,
 		QualityPreference:          p.QualityPreference,
 		Language:                   prefs.AudioLanguage,
 		PreferredMetadataLanguage:  prefs.MetadataLanguage,

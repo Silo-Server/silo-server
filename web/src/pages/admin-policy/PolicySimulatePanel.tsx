@@ -67,9 +67,14 @@ function SimulateVerdict({ decision }: { decision: unknown }) {
     );
     const quality =
       typeof record.max_playback_quality === "string" ? record.max_playback_quality : "";
+    const advisoryAge =
+      typeof record.max_advisory_age === "number" && record.max_advisory_age > 0
+        ? record.max_advisory_age
+        : 0;
     const parts = [
       record.unrestricted ? "All libraries" : "Restricted libraries",
       ratings.length > 0 ? ratings.map((rating) => `rating ≤ ${rating}`).join(" · ") : "any rating",
+      ...(advisoryAge ? [`advisory age ≤ ${advisoryAge}`] : []),
       quality ? `quality ≤ ${quality}` : "any quality",
     ];
     return (

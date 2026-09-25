@@ -20,13 +20,17 @@ const (
 
 // AdminStats represents system statistics for the admin dashboard.
 type AdminStats struct {
-	TotalItems        int                  `json:"total_items"`
-	TotalFiles        int                  `json:"total_files"`
-	TotalUsers        int                  `json:"total_users"`
-	TotalMovies       int                  `json:"total_movies"`
-	TotalMovieFiles   int                  `json:"total_movie_files"`
-	TotalShows        int                  `json:"total_shows"`
-	TotalShowFiles    int                  `json:"total_show_files"`
+	TotalItems      int `json:"total_items"`
+	TotalFiles      int `json:"total_files"`
+	TotalUsers      int `json:"total_users"`
+	TotalMovies     int `json:"total_movies"`
+	TotalMovieFiles int `json:"total_movie_files"`
+	TotalShows      int `json:"total_shows"`
+	TotalShowFiles  int `json:"total_show_files"`
+	// AdvisoryTitles counts movies and series that carry an advisory age, the
+	// coverage behind a profile's advisory-age limit. /api/v1 is frozen, so
+	// only v2 emits it (json:"-").
+	AdvisoryTitles    int                  `json:"-"`
 	ActiveStreams     int                  `json:"active_streams"`
 	TotalStorageBytes int64                `json:"total_storage_bytes"`
 	WatchProviders    []WatchProviderStats `json:"watch_providers"`
@@ -170,6 +174,7 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool, providers WatchPro
 		totalMovieFiles int64
 		totalShows      int64
 		totalShowFiles  int64
+		advisoryTitles  int64
 		activeStreams   int64
 		totalStorage    int64
 	)
@@ -183,7 +188,8 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool, providers WatchPro
 			SELECT
 				COUNT(*)::bigint AS total_items,
 				COUNT(*) FILTER (WHERE type = 'movie')::bigint AS total_movies,
-				COUNT(*) FILTER (WHERE type = 'series')::bigint AS total_shows
+				COUNT(*) FILTER (WHERE type = 'series')::bigint AS total_shows,
+				COUNT(*) FILTER (WHERE type IN ('movie', 'series') AND advisory_age IS NOT NULL)::bigint AS advisory_titles
 			FROM media_items
 		),
 		file_stats AS (
@@ -230,6 +236,7 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool, providers WatchPro
 			file_stats.total_movie_files,
 			item_stats.total_shows,
 			file_stats.total_show_files,
+			item_stats.advisory_titles,
 			session_stats.active_streams,
 			file_stats.total_storage_bytes
 		FROM user_stats
@@ -245,6 +252,7 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool, providers WatchPro
 		&totalMovieFiles,
 		&totalShows,
 		&totalShowFiles,
+		&advisoryTitles,
 		&activeStreams,
 		&totalStorage,
 	); err != nil {
@@ -265,6 +273,7 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool, providers WatchPro
 		TotalMovieFiles:   int(totalMovieFiles),
 		TotalShows:        int(totalShows),
 		TotalShowFiles:    int(totalShowFiles),
+		AdvisoryTitles:    int(advisoryTitles),
 		ActiveStreams:     int(activeStreams),
 		TotalStorageBytes: totalStorage,
 		WatchProviders:    mergeWatchProviderStats(listWatchProviders(providers), activity),

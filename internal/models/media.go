@@ -600,9 +600,11 @@ type MediaItem struct {
 	ContentRating           string // PG-13, TV-MA
 	// AdvisoryAge is a recommended minimum viewer age from an advisory service
 	// (Common Sense Media), distinct from the certification in ContentRating.
-	// Display only: it feeds no ceiling or other parental control. Nil means no
-	// advisory; the column is nullable and a stored age is always positive,
-	// since providers spell "unknown" as zero.
+	// It never feeds ContentRating or content_rating_age; a profile's
+	// separate advisory-age limit (access.MaturityLimits.MaxAdvisoryAge)
+	// compares against it, and a nil age never hides a title from that limit.
+	// Nil means no advisory; the column is nullable and a stored age is always
+	// positive, since providers spell "unknown" as zero.
 	AdvisoryAge *int
 	// AdvisorySource attributes AdvisoryAge so the UI can name who recommended
 	// it. Empty when AdvisoryAge is nil.

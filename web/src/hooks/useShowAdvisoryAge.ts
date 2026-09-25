@@ -17,8 +17,8 @@ const ADVISORY_KEY = SETTING_KEYS.CATALOG_SHOW_ADVISORY_AGE;
  *
  * Off for every profile that has not opted in, and off against a server whose
  * manifest predates the setting, so an older server renders nothing rather
- * than a badge it never described. The advisory is display only: this decides
- * what a profile *sees*, never what it is allowed to watch.
+ * than a badge it never described. This decides only whether the badge shows;
+ * the separate profile advisory-age limit decides what a profile may watch.
  */
 export function useShowAdvisoryAge(enabled = true): boolean {
   const capabilitiesQuery = useSettingsCapabilities({ enabled });

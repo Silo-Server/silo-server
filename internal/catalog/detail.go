@@ -188,7 +188,7 @@ type ItemDetail struct {
 	PendingTranslationLanguage string `json:"pending_translation_language,omitempty"`
 	Runtime                    int    `json:"runtime,omitempty"`
 	ContentRating              string `json:"content_rating,omitempty"`
-	// AdvisoryAge and AdvisorySource carry the display-only advisory to the
+	// AdvisoryAge and AdvisorySource carry the item's advisory to the
 	// v2 renderer. Kept out of this JSON contract the way OriginalLanguage is:
 	// /api/v1 is frozen, so the fields ride the Go struct and apiv2 emits them
 	// under its own names.
@@ -2481,7 +2481,7 @@ func appendAudiobookItemAccessConditions(
 		*args = append(*args, filter.DisabledLibraryIDs)
 		*argIdx = *argIdx + 1
 	}
-	ApplySectionAccessFilter(alias, AccessFilter{MaxContentRating: filter.MaxContentRating, AllowUnratedContent: filter.AllowUnratedContent}, conditions, args, argIdx)
+	ApplySectionAccessFilter(alias, AccessFilter{MaturityLimits: filter.MaturityLimits}, conditions, args, argIdx)
 	return true
 }
 

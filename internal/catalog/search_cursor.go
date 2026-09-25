@@ -598,7 +598,7 @@ func (r *ItemRepository) searchCandidatesExecutor(def QueryDefinition, access Ac
 	outerAccess.DisabledLibraryIDs = nil
 	outerAccess.AllowedContentIDs = nil
 	outerAccess.NamePrefix = ""
-	outerAccess.MaxContentRating = ""
+	outerAccess.MaturityLimits = AccessFilter{}.MaturityLimits
 	outerAccess.ExcludedMediaTypes = nil
 	return executor, outer, outerAccess, nil
 }

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 func TestBuildHistoryDisplayBaseQueryIncludesSnapshotAndLibraryAccess(t *testing.T) {
@@ -15,7 +17,7 @@ func TestBuildHistoryDisplayBaseQueryIncludesSnapshotAndLibraryAccess(t *testing
 		ProfileID:          "profile-1",
 		AllowedLibraryIDs:  []int{11, 12},
 		DisabledLibraryIDs: []int{99},
-		MaxContentRating:   "PG-13",
+		MaturityLimits:     access.MaturityLimits{MaxContentRating: "PG-13"},
 	}, &snapshot, false)
 
 	expectedFragments := []string{

@@ -1868,7 +1868,7 @@ func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *htt
 			sortKey = query.sort
 			order = query.order
 		}
-		filters := catalog.BrowseFilters{UserID: session.StreamAppUserID, AllowUnratedContent: filter.AllowUnratedContent, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, AudioLanguages: query.audioLanguages, SubtitleLanguages: query.subtitleLanguages, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
+		filters := catalog.BrowseFilters{UserID: session.StreamAppUserID, MaturityLimits: filter.MaturityLimits, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, AudioLanguages: query.audioLanguages, SubtitleLanguages: query.subtitleLanguages, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
 		if !h.catalogUserState && (filters.IsFavorite || filters.IsPlayed != nil || filters.IsResumable) {
 			content, ok := h.content.(interface {
 				browseConfiguredUserState(context.Context, *Session, catalog.BrowseFilters, bool, func(catalog.BrowseFilters) ([]upstreamListItem, bool, error)) (*upstreamBrowseResponse, error)
@@ -2553,21 +2553,20 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 	if favoriteItemsNeedBrowseFilters(query) && h.browseRepo != nil && favoriteBrowseFiltersSupportedBySQL(query) {
 		access := h.resolveAccessFilter(r.Context(), session)
 		filters := catalog.BrowseFavoritesFilters{
-			UserID:              session.StreamAppUserID,
-			ProfileID:           session.ProfileID,
-			ItemType:            strings.Join(query.itemTypes, ","),
-			Genre:               query.genreName,
-			NamePrefix:          query.namePrefix,
-			LibraryID:           query.parentLibraryID,
-			AllowedLibraryIDs:   access.AllowedLibraryIDs,
-			DisabledLibraryIDs:  access.DisabledLibraryIDs,
-			MaxContentRating:    clampMaxContentRating(access.MaxContentRating, query.maxOfficialRating),
-			AllowUnratedContent: access.AllowUnratedContent,
-			ExcludedMediaTypes:  access.ExcludedMediaTypes,
-			SortField:           query.sort,
-			SortOrder:           query.order,
-			Limit:               query.limit,
-			Offset:              query.startIndex,
+			UserID:             session.StreamAppUserID,
+			ProfileID:          session.ProfileID,
+			ItemType:           strings.Join(query.itemTypes, ","),
+			Genre:              query.genreName,
+			NamePrefix:         query.namePrefix,
+			LibraryID:          query.parentLibraryID,
+			AllowedLibraryIDs:  access.AllowedLibraryIDs,
+			DisabledLibraryIDs: access.DisabledLibraryIDs,
+			MaturityLimits:     clampMaturityLimits(access.MaturityLimits, query.maxOfficialRating),
+			ExcludedMediaTypes: access.ExcludedMediaTypes,
+			SortField:          query.sort,
+			SortOrder:          query.order,
+			Limit:              query.limit,
+			Offset:             query.startIndex,
 		}
 		result, err := h.browseRepo.BrowseFavorites(r.Context(), filters)
 		if err != nil {

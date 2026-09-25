@@ -122,4 +122,30 @@ describe("ProfileEditorDialog", () => {
     expect(document.body.textContent).toContain("Edit profile");
     expect(document.body.textContent).toContain("Any content");
   });
+
+  it("shows the profile's advisory-age limit", async () => {
+    await act(async () => {
+      root.render(
+        <ProfileEditorDialog
+          open
+          profile={makeProfile({ max_advisory_age: 10 })}
+          libraries={[]}
+          onOpenChange={() => {}}
+        />,
+      );
+    });
+
+    expect(document.body.textContent).toContain("Maximum advisory age");
+    expect(document.body.textContent).toContain("Ages 10 and under");
+  });
+
+  it("offers no advisory-age limit by default", async () => {
+    await act(async () => {
+      root.render(
+        <ProfileEditorDialog open profile={makeProfile()} libraries={[]} onOpenChange={() => {}} />,
+      );
+    });
+
+    expect(document.body.textContent).toContain("No limit");
+  });
 });

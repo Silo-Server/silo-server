@@ -119,6 +119,12 @@ func TestResolveViewerScopeParity(t *testing.T) {
 									if profile != nil {
 										profile.MaxPlaybackQuality = profileQualityCase.value
 										profile.MaxContentRating = ratingCase.value
+										// The maturity limits travel together: the
+										// unrestricted rating case also drops the
+										// advisory-age limit.
+										if ratingCase.value == "" {
+											profile.MaxAdvisoryAge = 0
+										}
 									}
 									store := parityStore{
 										profile:       profile,
@@ -210,6 +216,7 @@ func parityProfile(restricted bool, allowed []int) *userstore.Profile {
 		ID:                 "prof-1",
 		PINHash:            "pin-hash",
 		MaxContentRating:   "PG-13",
+		MaxAdvisoryAge:     12,
 		MaxPlaybackQuality: "720p",
 		// A decoy: the canonical value is parityMetadataLang, stored through
 		// parityPreferenceValues. This column must no longer be read.
@@ -238,6 +245,7 @@ func scopeInputFromParity(user *models.User, profile *userstore.Profile, disable
 		input.ProfileID = profile.ID
 		input.ProfilePresent = true
 		input.ProfileMaxRating = profile.MaxContentRating
+		input.ProfileMaxAdvisoryAge = profile.MaxAdvisoryAge
 		input.ProfileMaxQuality = profile.MaxPlaybackQuality
 		input.ProfileLibraryLimited = profile.LibraryRestrictionsEnabled
 		input.ProfileLibraryIDs = cloneParityInts(profile.AllowedLibraryIDs)
@@ -266,12 +274,15 @@ func decisionToAccessScope(input ScopeInput, decision ScopeDecision) access.Scop
 		disabled = nil
 	}
 	return access.Scope{
-		UserID:                    input.UserID,
-		ProfileID:                 input.ProfileID,
-		AllowedLibraryIDs:         allowed,
-		DisabledLibraryIDs:        disabled,
-		LibrariesRestricted:       decision.LibrariesRestricted,
-		MaxContentRating:          access.StricterCeiling(decision.MaxContentRating, decision.MaxContentRatingOverride),
+		UserID:              input.UserID,
+		ProfileID:           input.ProfileID,
+		AllowedLibraryIDs:   allowed,
+		DisabledLibraryIDs:  disabled,
+		LibrariesRestricted: decision.LibrariesRestricted,
+		MaturityLimits: access.MaturityLimits{
+			MaxContentRating: access.StricterCeiling(decision.MaxContentRating, decision.MaxContentRatingOverride),
+			MaxAdvisoryAge:   decision.MaxAdvisoryAge,
+		},
 		MaxPlaybackQuality:        decision.MaxPlaybackQuality,
 		PreferredMetadataLanguage: decision.PreferredMetadataLanguage,
 		PolicyRevision:            decision.PolicyRevision,

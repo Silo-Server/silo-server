@@ -4,13 +4,17 @@ import "time"
 
 // Profile represents a user profile.
 type Profile struct {
-	ID                         string
-	Name                       string
-	Avatar                     string
-	PINHash                    string
-	IsChild                    bool
-	IsPrimary                  bool
-	MaxContentRating           string
+	ID               string
+	Name             string
+	Avatar           string
+	PINHash          string
+	IsChild          bool
+	IsPrimary        bool
+	MaxContentRating string
+	// MaxAdvisoryAge is the profile's advisory-age limit (see
+	// access.MaturityLimits.MaxAdvisoryAge); 0 means no limit and is stored
+	// as NULL.
+	MaxAdvisoryAge             int
 	QualityPreference          string
 	Language                   string
 	PreferredMetadataLanguage  string // ISO 639-1; "" = inherit library metadata language
@@ -54,11 +58,14 @@ type DeviceEntry struct {
 
 // UpdateProfileInput holds optional fields for updating a profile.
 type UpdateProfileInput struct {
-	Name                       *string
-	Avatar                     *string
-	PIN                        *string
-	IsChild                    *bool
-	MaxContentRating           *string
+	Name             *string
+	Avatar           *string
+	PIN              *string
+	IsChild          *bool
+	MaxContentRating *string
+	// MaxAdvisoryAge: nil leaves the limit untouched, 0 clears it, and a
+	// positive age sets it.
+	MaxAdvisoryAge             *int
 	QualityPreference          *string
 	Language                   *string
 	PreferredMetadataLanguage  *string

@@ -27,9 +27,9 @@ describe("MetadataBadges advisory age", () => {
     expect(screen.queryByText(/Common Sense/)).toBeNull();
   });
 
-  it("says the age is advice, not a restriction", () => {
+  it("names who suggested the age in the tooltip", () => {
     render(<MetadataBadges advisoryAge={13} advisorySource="commonsense" />);
     const badge = screen.getByText("Common Sense 13+");
-    expect(badge.getAttribute("title")).toContain("not a restriction");
+    expect(badge.getAttribute("title")).toBe("Common Sense suggests age 13 and up.");
   });
 });

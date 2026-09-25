@@ -282,25 +282,50 @@ advisory service such as Common Sense Media, and `advisory_source`, which names
 who recommended it (`commonsense` or `mdblist`). Both are optional and appear
 only together; an item with no advisory omits both.
 
-**The advisory is display only and clients must treat it that way.** It is not a
-certification and it never restricts anything. `content_rating` remains the
-certification a rating body issued, and it alone drives the server's
-content-rating ceiling, so a profile's access is identical whether or not an
-advisory is present. Do not filter, gate, or hide content on `advisory_age`, and
-do not present it as a rating a viewer has to satisfy.
+The advisory is not a certification. `content_rating` remains the certification a
+rating body issued, and it alone drives the content-rating ceiling
+(`max_content_rating`). Do not present the advisory as a rating a viewer has to
+satisfy.
 
 Coverage is partial by design. The providers that supply advisory ages are rate
 limited per day, so on a large library some titles carry one and others do not,
 and the set grows over time. Absence means "not fetched yet", never "suitable
-for everyone". That unpredictability is exactly why the value is kept out of
-parental controls: a ceiling that tightened or loosened based on which titles a
-provider happened to reach that day would be impossible for an administrator to
-predict or reproduce.
+for everyone".
 
 Whether to show the badge is a per-profile choice, `catalog.show_advisory_age`
 in the settings contract, default off. The field is served regardless; the
-setting decides whether a client renders it. Detect support by reading the
-setting from the settings contract capabilities rather than sniffing versions.
+setting decides whether a client renders it and never changes what a profile may
+watch. Detect support by reading the setting from the settings contract
+capabilities rather than sniffing versions.
+
+### Advisory-age limit
+
+A household manager can also limit a profile by advisory age with the profile's
+`max_advisory_age` (an integer from 1 to 21, or `null` for no limit) on the v2
+profile operations. The server hides every title whose `advisory_age` is above
+the limit, everywhere the content-rating ceiling applies: browse, search, detail,
+episodes, sections, progress, recommendations and the Jellyfin-compatible API.
+Episodes use their series' advisory age.
+
+- The limit only ever tightens. It is ANDed with `max_content_rating`, and a
+  title must pass both.
+- A title with no advisory age is **not** hidden by the limit; the content-rating
+  ceiling alone decides it. `access.unrated_content` does not apply to the
+  advisory limit.
+- Because coverage grows as the provider enriches the library, the set of titles
+  a limited profile sees can shrink over time, for example when a title a child
+  could see gains an advisory age above the limit. `advisory_titles` on
+  `getAdminDashboardStats` reports how many movies and series carry an advisory
+  age, next to `total_movies` and `total_shows`.
+- Media-request discovery cannot apply the limit, because titles outside the
+  library carry no advisory age.
+- Only a household manager (a server admin, or the primary profile) can set or
+  clear it; a restricted profile cannot change its own limit. Changing it bumps
+  the account's access policy revision, the same as changing
+  `max_content_rating`.
+- Detect support with `max_advisory_age_supported` on the `listProfiles`
+  response. The profile operations reject unknown members, so do not send
+  `max_advisory_age` to a server that does not report it.
 
 Frozen v1 responses do not expose these fields.
 

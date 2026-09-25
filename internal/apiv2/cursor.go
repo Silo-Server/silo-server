@@ -70,14 +70,21 @@ func viewerScopeDigest(ctx context.Context) string {
 	if scope.LibrariesRestricted {
 		restricted = "1"
 	}
-	canonical := strings.Join([]string{
+	parts := []string{
 		strconv.FormatInt(scope.PolicyRevision, 10),
 		restricted,
 		ids(scope.AllowedLibraryIDs),
 		ids(scope.DisabledLibraryIDs),
 		scope.MaxContentRating,
 		strconv.FormatBool(scope.AllowUnratedContent),
-	}, "\x00")
+	}
+	// Appended only when set, so a scope without an advisory-age limit keeps
+	// the digest it had before the limit existed and its in-flight cursors
+	// survive the upgrade.
+	if scope.MaxAdvisoryAge > 0 {
+		parts = append(parts, "advisory="+strconv.Itoa(scope.MaxAdvisoryAge))
+	}
+	canonical := strings.Join(parts, "\x00")
 	sum := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(sum[:8])
 }

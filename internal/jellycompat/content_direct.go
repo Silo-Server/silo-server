@@ -289,6 +289,15 @@ func clampMaxContentRating(existing, requested string) string {
 	return access.StricterCeiling(existing, requested)
 }
 
+// clampMaturityLimits returns the viewer's maturity limits with the content
+// rating ceiling clamped to a Jellyfin client's MaxOfficialRating (see
+// clampMaxContentRating). Every other limit passes through unchanged, so a
+// client can tighten the ceiling but never drop the advisory-age limit.
+func clampMaturityLimits(limits access.MaturityLimits, requested string) access.MaturityLimits {
+	limits.MaxContentRating = clampMaxContentRating(limits.MaxContentRating, requested)
+	return limits
+}
+
 func (s *directContentService) ListUserLibraries(ctx context.Context, session *Session) ([]upstreamUserLibrary, error) {
 	filter := s.resolveFilter(ctx, session)
 
@@ -406,33 +415,32 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 	}
 
 	filters := catalog.BrowseFilters{
-		Type:                compatScopedTypes(params.Get("type")),
-		UserID:              session.StreamAppUserID,
-		ProfileID:           session.ProfileID,
-		IsPlayed:            played,
-		IsFavorite:          parseBool(params.Get("is_favorite"), false),
-		IsResumable:         parseBool(params.Get("is_resumable"), false),
-		Genre:               params.Get("genre"),
-		Genres:              splitNonemptyGenres(params.Get("genres")),
-		Years:               parseBrowseYears(params.Get("years")),
-		SearchTerm:          params.Get("search_term"),
-		NamePrefix:          params.Get("name_prefix"),
-		ContentIDs:          contentIDs,
-		LibraryID:           catalog.ParseIntParam(params.Get("library_id")),
-		LibraryIDs:          filter.AllowedLibraryIDs,
-		DisabledLibraryIDs:  filter.DisabledLibraryIDs,
-		MaxContentRating:    clampMaxContentRating(filter.MaxContentRating, params.Get("max_content_rating")),
-		AllowUnratedContent: filter.AllowUnratedContent,
-		PersonID:            catalog.ParseInt64Param(params.Get("person_id")),
-		Sort:                params.Get("sort"),
-		Order:               params.Get("order"),
-		Limit:               fetchLimit,
-		MaxLimit:            compatBrowseMaxLimit,
-		Offset:              requestedOffset,
-		RequireBackdrop:     parseBool(params.Get("require_backdrop"), false),
-		AudioLanguages:      splitCommaValues([]string{params.Get("audio_languages")}),
-		SubtitleLanguages:   splitCommaValues([]string{params.Get("subtitle_languages")}),
-		MaxPlaybackQuality:  filter.MaxPlaybackQuality,
+		Type:               compatScopedTypes(params.Get("type")),
+		UserID:             session.StreamAppUserID,
+		ProfileID:          session.ProfileID,
+		IsPlayed:           played,
+		IsFavorite:         parseBool(params.Get("is_favorite"), false),
+		IsResumable:        parseBool(params.Get("is_resumable"), false),
+		Genre:              params.Get("genre"),
+		Genres:             splitNonemptyGenres(params.Get("genres")),
+		Years:              parseBrowseYears(params.Get("years")),
+		SearchTerm:         params.Get("search_term"),
+		NamePrefix:         params.Get("name_prefix"),
+		ContentIDs:         contentIDs,
+		LibraryID:          catalog.ParseIntParam(params.Get("library_id")),
+		LibraryIDs:         filter.AllowedLibraryIDs,
+		DisabledLibraryIDs: filter.DisabledLibraryIDs,
+		MaturityLimits:     clampMaturityLimits(filter.MaturityLimits, params.Get("max_content_rating")),
+		PersonID:           catalog.ParseInt64Param(params.Get("person_id")),
+		Sort:               params.Get("sort"),
+		Order:              params.Get("order"),
+		Limit:              fetchLimit,
+		MaxLimit:           compatBrowseMaxLimit,
+		Offset:             requestedOffset,
+		RequireBackdrop:    parseBool(params.Get("require_backdrop"), false),
+		AudioLanguages:     splitCommaValues([]string{params.Get("audio_languages")}),
+		SubtitleLanguages:  splitCommaValues([]string{params.Get("subtitle_languages")}),
+		MaxPlaybackQuality: filter.MaxPlaybackQuality,
 	}
 	if !s.catalogUserState && (filters.IsFavorite || filters.IsPlayed != nil || filters.IsResumable || isPlayedFilter != "") {
 		if isPlayedFilter != "" {
@@ -1021,12 +1029,11 @@ func (s *directContentService) ListItemFilters(ctx context.Context, session *Ses
 	filter := s.resolveFilter(ctx, session)
 
 	filters := catalog.BrowseFilters{
-		Type:                compatScopedTypes(params.Get("type")),
-		LibraryID:           catalog.ParseIntParam(params.Get("library_id")),
-		LibraryIDs:          filter.AllowedLibraryIDs,
-		DisabledLibraryIDs:  filter.DisabledLibraryIDs,
-		MaxContentRating:    clampMaxContentRating(filter.MaxContentRating, params.Get("max_content_rating")),
-		AllowUnratedContent: filter.AllowUnratedContent,
+		Type:               compatScopedTypes(params.Get("type")),
+		LibraryID:          catalog.ParseIntParam(params.Get("library_id")),
+		LibraryIDs:         filter.AllowedLibraryIDs,
+		DisabledLibraryIDs: filter.DisabledLibraryIDs,
+		MaturityLimits:     clampMaturityLimits(filter.MaturityLimits, params.Get("max_content_rating")),
 	}
 
 	genres, err := s.browseRepo.ListGenres(ctx, filters)
