@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { FormEvent } from "react";
 import { Link, useParams } from "react-router";
 import { captureSessionIdentity, getAccessToken, isSessionIdentityCurrent } from "@/api/client";
 import {
@@ -12,13 +12,13 @@ import { V2ProblemError } from "@/api/v2/request";
 import { useAuth } from "@/hooks/useAuth";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { usePostSignInNavigation } from "@/hooks/usePostSignInNavigation";
+import { usePasswordResetAvailable } from "@/hooks/queries/passwordReset";
 import { formatDateTime } from "@/lib/datetime";
 import { newPasswordProblem, passwordErrorMessage } from "@/lib/newPassword";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { AuthBackground } from "@/components/auth/AuthBackground";
+import { AuthCard, SignInHint } from "@/components/auth/AuthCard";
 
 export default function PasswordReset() {
   const { token = "" } = useParams();
@@ -45,6 +45,8 @@ function ResetForm({ token }: { token: string }) {
     unavailable?: boolean;
   }>({ pending: true });
   const [reload, setReload] = useState(0);
+  // Offering a new link matters only once this one proved unusable.
+  const { available: canRequestLink } = usePasswordResetAvailable(lookup.unavailable === true);
   const busy = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
   useDocumentTitle("Reset Password");
@@ -84,14 +86,14 @@ function ResetForm({ token }: { token: string }) {
   // their session with the reset account's, so they sign out first.
   if (!loading && user && !completed) {
     return (
-      <ResetCard title="Reset password">
+      <AuthCard title="Reset password">
         <p className="mb-4 text-sm">
           You&apos;re signed in as {user.username}. Sign out to use this reset link.
         </p>
         <Button className="w-full" onClick={logout}>
           Sign out
         </Button>
-      </ResetCard>
+      </AuthCard>
     );
   }
   if (loading || lookup.pending) {
@@ -103,23 +105,25 @@ function ResetForm({ token }: { token: string }) {
   }
   if (signInAs) {
     return (
-      <ResetCard title="Password changed">
+      <AuthCard title="Password changed">
         <p role="status" className="mb-4 text-sm">
           Sign in as {signInAs} with your new password.
         </p>
         <Button asChild className="w-full">
           <Link to="/login">Sign in</Link>
         </Button>
-      </ResetCard>
+      </AuthCard>
     );
   }
   if (!lookup.data) {
     return (
-      <ResetCard
+      <AuthCard
         title={lookup.unavailable ? "Link unavailable" : "Could not load link"}
         description={
           lookup.unavailable
-            ? "This link was already used, replaced by a newer one, or expired. Ask your admin for a new link."
+            ? canRequestLink
+              ? "This link was already used, replaced by a newer one, or expired. Request a new link, or ask your admin for one."
+              : "This link was already used, replaced by a newer one, or expired. Ask your admin for a new link."
             : "The server could not confirm this link. Try loading it again."
         }
       >
@@ -128,8 +132,13 @@ function ResetForm({ token }: { token: string }) {
             Reload link
           </Button>
         )}
+        {lookup.unavailable && canRequestLink && (
+          <Button asChild className="mb-4 w-full">
+            <Link to="/forgot-password">Request a new link</Link>
+          </Button>
+        )}
         <SignInHint />
-      </ResetCard>
+      </AuthCard>
     );
   }
   const reset = lookup.data;
@@ -179,7 +188,7 @@ function ResetForm({ token }: { token: string }) {
   }
 
   return (
-    <ResetCard
+    <AuthCard
       eyebrow={reset.server_name}
       title="Choose a new password"
       description={`For ${reset.username}. The link expires ${formatDateTime(reset.expires_at)}. Saving signs this account out on every device.`}
@@ -230,49 +239,6 @@ function ResetForm({ token }: { token: string }) {
         </Button>
       </form>
       <SignInHint />
-    </ResetCard>
-  );
-}
-
-function ResetCard({
-  eyebrow,
-  title,
-  description,
-  children,
-}: {
-  eyebrow?: string;
-  title: string;
-  description?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="auth-shell">
-      <AuthBackground />
-      <Card className="auth-card glass panel-border w-full max-w-sm border-0">
-        <CardHeader>
-          {eyebrow && (
-            <p className="text-muted-foreground font-mono text-[11px] font-semibold tracking-[0.1em] uppercase">
-              {eyebrow}
-            </p>
-          )}
-          <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">{title}</CardTitle>
-          {description && (
-            <CardDescription className="mt-2 text-sm leading-6">{description}</CardDescription>
-          )}
-        </CardHeader>
-        <CardContent>{children}</CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function SignInHint() {
-  return (
-    <p className="text-muted-foreground mt-4 text-center text-sm">
-      Remembered it?{" "}
-      <Link to="/login" className="text-foreground underline hover:no-underline">
-        Sign in
-      </Link>
-    </p>
+    </AuthCard>
   );
 }

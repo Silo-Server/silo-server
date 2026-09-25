@@ -14,23 +14,42 @@ with marker detection enabled. Code lives in `internal/intromarkers`.
 2. **Chromaprint.** Remaining files are grouped by library, season, and
    presentation (edition and audio language). Each file's opening audio
    (25 percent of the runtime, at most ten minutes) is fingerprinted once and
-   cached. Each file is compared with the next eight episodes in episode order.
+   cached. Each file is compared with the next eight episodes in episode order,
+   and a file none of them matched with up to 48 more. Matches must last 12
+   seconds to 3 minutes.
    A file's intro is the median of the pair results that agree with its
-   most-confirmed one (`chromaprint:v2`).
+   most-confirmed one (`chromaprint:v4`).
 3. **Dialogue.** When an external dialogue subtitle overlaps the first seconds
    of a Chromaprint intro, the start moves to the end of that dialogue
-   (`chromaprint:dialogue:v2`).
+   (`chromaprint:dialogue:v4`).
 
 Chromaprint points summarize a window that starts at the point's timestamp,
 so raw matches start and end early. Fixed leads measured against authored
 intro chapters move both boundaries back.
+
+## Confidence
+
+Chromaprint confidence is the rate at which markers of the same kind covered
+at least 80 percent of the authored intro chapter in replay:
+
+| Marker | Confidence |
+|---|---|
+| At least 20 seconds, confirmed by two or more pairs, and within 1.5 seconds of the season's usual intro duration, which at least half the season's episodes share | 0.90 |
+| Other markers of at least 20 seconds | 0.65 |
+| Shorter than 20 seconds | 0.30 |
+
+Recurring music cues mistaken for intros are short and rarely shared by most
+of a season, so they fall in the lower rows. Chapter-based markers keep 0.95,
+and silence-extended chapters 0.98. Contribution to online providers compares
+these values with each provider's minimum confidence.
 
 ## Versions and caches
 
 - `AlgorithmVersion` and `Config.ConfigHash` key the fingerprint cache.
   Changing either discards every cached fingerprint, and re-reading the audio
   of a large library takes days. Change them only when the fingerprint itself
-  changes.
+  changes. `ConfigHash` covers only the analysis window; the intro duration
+  bounds it once included are hashed as fixed legacy values.
 - `AnalysisBehaviorVersion` is part of the season state key. Bump it to
   re-run every season comparison over cached fingerprints.
 - Algorithm identifiers are stored with each marker. Between two scanner

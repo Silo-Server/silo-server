@@ -40,11 +40,35 @@ const compareFallbackEpisodes = 48
 // result needs with a file's anchor segment to count toward its consensus.
 const minimumConsensusOverlap = 0.3
 
+// Confidence reflects how often markers of each kind covered at least 80
+// percent of the authored intro chapter in replay: season-consistent intros
+// did about nine times in ten, other intros of 20 seconds or more about two
+// times in three, and shorter matches, which include recurring music cues
+// mistaken for intros, under one time in three.
+const (
+	chromaprintConsistentConfidence   = 0.90
+	chromaprintInconsistentConfidence = 0.65
+	chromaprintShortConfidence        = 0.30
+
+	// shortIntroSeconds is the duration below which a match is treated as
+	// short.
+	shortIntroSeconds = 20.0
+	// seasonDurationToleranceSeconds is how far a file's intro duration may
+	// be from the season's usual intro duration and still agree with it.
+	seasonDurationToleranceSeconds = 1.5
+	// minimumSeasonCoverage is the share of a season's fingerprinted episodes
+	// that must share the usual intro duration for any file to count as
+	// season-consistent.
+	minimumSeasonCoverage = 0.5
+)
+
 // CompareFingerprints matches each file against its neighboring episodes, and
 // an unmatched file against a wider set of the season, and
 // reduces the pair results for a file to a consensus: the median boundaries of
 // the results that agree with the most-confirmed one. Taking the longest pair
-// result instead let a single over-extended match set the boundaries.
+// result instead let a single over-extended match set the boundaries. A file's
+// confidence depends on whether its intro agrees with the season: a real intro
+// runs the same length in most episodes.
 func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment {
 	cfg = cfg.normalized()
 	ordered := append([]fingerprintInput(nil), inputs...)
@@ -156,23 +180,38 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 		}
 	}
 
-	best := make(map[int]Segment, len(results))
+	type fileResult struct {
+		segment       Segment
+		confirmations int
+	}
+	episodeOf := make(map[int]string, len(inputs))
+	for _, input := range inputs {
+		episodeOf[input.Candidate.FileID] = input.Candidate.EpisodeID
+	}
+	scored := make(map[int]fileResult, len(results))
+	durations := make([]episodeDuration, 0, len(results))
 	for fileID, byPartner := range results {
 		segment, confirmations := consensusSegment(byPartner)
-		confidence := 0.65
-		if segment.End-segment.Start >= 30 {
-			confidence += 0.10
+		scored[fileID] = fileResult{segment: segment, confirmations: confirmations}
+		durations = append(durations, episodeDuration{episode: episodeOf[fileID], seconds: segment.End - segment.Start})
+	}
+	usualDuration, sharing := usualIntroDuration(durations)
+	episodes := distinctFingerprintEpisodeCount(inputs)
+	seasonConsistent := episodes > 0 && float64(sharing)/float64(episodes) >= minimumSeasonCoverage
+
+	best := make(map[int]Segment, len(scored))
+	for fileID, result := range scored {
+		segment := result.segment
+		duration := segment.End - segment.Start
+		switch {
+		case duration < shortIntroSeconds:
+			segment.Confidence = chromaprintShortConfidence
+		case seasonConsistent && result.confirmations >= 2 &&
+			math.Abs(duration-usualDuration) <= seasonDurationToleranceSeconds:
+			segment.Confidence = chromaprintConsistentConfidence
+		default:
+			segment.Confidence = chromaprintInconsistentConfidence
 		}
-		if confirmations >= 2 {
-			confidence += 0.10
-		}
-		if segment.Start == 0 {
-			confidence += 0.05
-		}
-		if confidence > 0.90 {
-			confidence = 0.90
-		}
-		segment.Confidence = confidence
 		segment.Algorithm = ChromaprintAlgorithm
 		best[fileID] = segment
 	}
@@ -192,6 +231,43 @@ func episodeGroups(ordered []fingerprintInput) [][2]int {
 		groups = append(groups, [2]int{i, i + 1})
 	}
 	return groups
+}
+
+type episodeDuration struct {
+	episode string
+	seconds float64
+}
+
+// usualIntroDuration returns the intro duration the most episodes share within
+// seasonDurationToleranceSeconds, preferring the longer on a tie, and how many
+// episodes share it. Versions of one episode count once. A window slides over
+// the sorted durations, so long seasons stay linear after the sort.
+func usualIntroDuration(durations []episodeDuration) (float64, int) {
+	sorted := append([]episodeDuration(nil), durations...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].seconds < sorted[j].seconds })
+	inWindow := map[string]int{}
+	add := func(d episodeDuration) { inWindow[d.episode]++ }
+	remove := func(d episodeDuration) {
+		if inWindow[d.episode]--; inWindow[d.episode] == 0 {
+			delete(inWindow, d.episode)
+		}
+	}
+	usual, sharing := 0.0, 0
+	lo, hi := 0, 0
+	for _, candidate := range sorted {
+		for hi < len(sorted) && sorted[hi].seconds-candidate.seconds <= seasonDurationToleranceSeconds {
+			add(sorted[hi])
+			hi++
+		}
+		for candidate.seconds-sorted[lo].seconds > seasonDurationToleranceSeconds {
+			remove(sorted[lo])
+			lo++
+		}
+		if len(inWindow) >= sharing {
+			usual, sharing = candidate.seconds, len(inWindow)
+		}
+	}
+	return usual, sharing
 }
 
 // consensusSegment picks the pair result that the most partner episodes agree

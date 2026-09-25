@@ -65,10 +65,13 @@ func (h *AuthHandler) resolvedUserDTO(ctx context.Context, session *Session) (us
 			_ = json.Unmarshal(value.Value, &dto.Configuration.AudioLanguagePreference)
 			if playback.IsOriginalLanguagePreference(dto.Configuration.AudioLanguagePreference) {
 				dto.Configuration.AudioLanguagePreference = compatAudioOriginalLanguage
+			} else {
+				dto.Configuration.AudioLanguagePreference = compatLanguagePreference(dto.Configuration.AudioLanguagePreference)
 			}
 		case settingskeys.PlaybackSubtitleLanguage:
 			dto.Configuration.SubtitleLanguagePreference = ""
 			_ = json.Unmarshal(value.Value, &dto.Configuration.SubtitleLanguagePreference)
+			dto.Configuration.SubtitleLanguagePreference = compatLanguagePreference(dto.Configuration.SubtitleLanguagePreference)
 		case settingskeys.PlaybackAutoPlayNext:
 			_ = json.Unmarshal(value.Value, &dto.Configuration.EnableNextEpisodeAutoPlay)
 		case settingskeys.PlaybackSubtitleMode:
@@ -80,6 +83,21 @@ func (h *AuthHandler) resolvedUserDTO(ctx context.Context, session *Session) (us
 	}
 	dto.Configuration.SubtitleMode = compatJellyfinSubtitleMode(nativeSubtitleMode, subtitleModeSet, showForced, savedSubtitleMode)
 	return dto, nil
+}
+
+// compatLanguagePreference converts recognized languages to ISO three-letter codes.
+// Keep unrecognized tags intact and never infer a language for an undefined tag.
+func compatLanguagePreference(value string) string {
+	tag, err := language.Parse(value)
+	if value == "" || err != nil {
+		return value
+	}
+	base, _, _ := tag.Raw()
+	undefined, _, _ := language.Und.Raw()
+	if base == undefined {
+		return value
+	}
+	return base.ISO3()
 }
 
 func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.Request) {
@@ -138,6 +156,10 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 	// "auto" with forced subtitles hidden reads as Smart, which writes back as
 	// auto with forced subtitles shown.
 	currentSubtitleMode := dto.Configuration.SubtitleMode
+	currentLanguages := map[string]string{
+		"audiolanguagepreference":    dto.Configuration.AudioLanguagePreference,
+		"subtitlelanguagepreference": dto.Configuration.SubtitleLanguagePreference,
+	}
 	raw, _ := json.Marshal(patch)
 	if err := json.Unmarshal(raw, &dto.Configuration); err != nil {
 		writeError(w, 400, "BadRequest", "Invalid configuration")
@@ -167,6 +189,11 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 			if err := json.Unmarshal(value, &tag); err != nil {
 				writeError(w, 400, "BadRequest", "Invalid language")
 				return
+			}
+			// Echoing a base-language choice must not flatten a native region or
+			// script preference when Jellyfin Web saves an unrelated setting.
+			if tag != "" && tag == currentLanguages[field] {
+				continue
 			}
 			if tag == "" {
 				value = json.RawMessage("null")

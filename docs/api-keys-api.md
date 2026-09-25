@@ -93,7 +93,10 @@ profile.
 | DELETE | `/api/v2/api-keys/{id}` | Owner-only revocation returning `204` |
 
 Listing, creation, and revocation require JWT authentication; API-key credentials
-receive `403`. Scope discovery retains its availability to unscoped API keys.
+receive `403`. Creation also requires a server admin account: a regular account's
+login session receives `403` and no key is created. Body validation runs first, so
+an invalid body still answers `422`. Any account can still list and revoke keys it
+already owns. Scope discovery retains its availability to unscoped API keys.
 Creation and revocation retain the demo restriction; listing and scope discovery
 do not. An unavailable store reports
 `available: false` in scope discovery and `503` for management operations.
@@ -140,4 +143,5 @@ uses integer IDs, spells the tier field `tier` rather than `rate_tier`, has no
 cursor pagination, and does not use `ETag`/`If-Match` preconditions. Those routes are
 frozen: no feature work lands on them, and Silo 1.0 answers the whole `/api/v1`
 namespace with `410 Gone` and the `client_upgrade_required` problem code. Build
-against `/api/v2`.
+against `/api/v2`. `POST /api/v1/api-keys` keeps its frozen behavior and still lets
+any login account create a key; only the v2 route requires an admin account.

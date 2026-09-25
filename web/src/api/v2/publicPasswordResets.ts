@@ -60,3 +60,13 @@ export async function completePasswordReset(
     throw invalid();
   return result;
 }
+
+/** Asks for a reset link for the account `login` names. The server answers
+ * every accepted request alike, whether or not an account matched. */
+export async function requestPasswordReset(login: string, signal: AbortSignal): Promise<void> {
+  await v2("POST /api/v2/password-resets", {
+    body: { login },
+    signal,
+    retryAuthentication: false,
+  });
+}

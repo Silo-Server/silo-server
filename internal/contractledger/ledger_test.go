@@ -1209,6 +1209,7 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 var mutationWithoutLegacyRow = map[string]string{
 	"createAdminUserPasswordReset":         "V2-only password reset link issue (issue #1442): v1 had no reset links. Each call replaces the account's single live link, so a replay only supersedes the previous link; it is non-retryable because an emailed link may already have been delivered.",
 	"completePasswordReset":                "V2-only public password reset completion (issue #1442): v1 had no reset links. Deleting the single-use link commits in the same transaction as the new password, so a replay finds no link and changes nothing.",
+	"requestPasswordReset":                 "V2-only self-service password reset request (issue #1443): v1 had no reset links. A replay inside the per-account cooldown changes nothing; after it, the replay replaces the link and sends another email, so it is non-retryable.",
 	"cancelAdminJob":                       "V2-only cancellation command for managed background jobs. The job state machine makes repeated requests converge on the same terminal cancellation state.",
 	"createAdminStorageTransition":         "V2-only managed artwork storage transition. The active-transition constraint rejects concurrent or replayed starts instead of creating duplicate transition work.",
 	"createThemeSongPlayback":              "V2-only routed theme playback from issue #937; minting a bounded grant or worker token changes no persistent state and can be retried after reauthorization.",

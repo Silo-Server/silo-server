@@ -2,7 +2,8 @@
 
 An administrator can help a locked-out account in two ways without handling its
 password: issue a single-use reset link, or set a temporary password the account
-must replace at its next sign-in. Reset links live in `internal/passwordreset`.
+must replace at its next sign-in. When the server allows it, an account holder can
+also request a reset link from the sign-in page. Reset links live in `internal/passwordreset`.
 The temporary-password state lives in `internal/auth` and the auth middleware. The
 wire contract is in [admin-users-api.md](../admin-users-api.md#passwords) and
 [auth-api.md](../auth-api.md#temporary-passwords).
@@ -57,6 +58,40 @@ replica: it announces the revocation on the admin event channel.
 `capability_not_configured`, and the capability document reports it up front. Email
 delivery also refuses before minting when mail is unconfigured. A link nobody
 receives would still replace the one the account may already hold.
+
+## Self-service reset
+
+**Off until an administrator opts in.** `password_reset.self_service_enabled`
+defaults to false. The public capability document reports `available` only when
+the setting is on and the server can email a link (external URL and mail server);
+the sign-in page offers the request from that document alone.
+
+**The answer says nothing about accounts.** `POST /api/v2/password-resets` checks
+only availability before answering `202`. The lookup, link, and email run
+afterwards in a background task, so neither the response nor its latency reveals
+whether an account matched. Every reason not to send (no match, disabled account,
+external provider, no valid address, cooldown, a live administrator's link) is a
+silent no-op. The background work is bounded per node (`maxPendingRequests`) and
+recovers from panics; beyond the bound a request is dropped and logged, and the
+requester can ask again. A send that certainly failed, because the mail server
+was never reached (`mail.ErrNotSent`), withdraws the link so asking again works at
+once. An uncertain failure keeps the link and its cooldown: the message may have
+arrived, and withdrawing would let repeated requests send more mail. A node dying
+mid-send also leaves the link holding the cooldown, so the requester can ask again
+after five minutes.
+
+**Same link, shorter life, bounded rate.** A requested link is an ordinary row in
+`password_reset_tokens` that names the account as its own issuer, completed through the same screen and
+transaction as an administrator's. It lives `SelfServiceTTL` (an hour), not
+`DefaultTTL`, because nobody vouched for the request. `IssueUnlessRecent` replaces
+the account's link only when that link is older than the cooldown and is not a
+live link an administrator issued, as one upsert. Any other issuer, or none once
+that administrator is deleted, marks the link as an administrator's. That caps mail to one address
+across every node and client IP, stops repeated requests from continually
+replacing a link just sent, and keeps anyone who knows an account name from
+retiring the link an administrator shared. An administrator's `Issue` ignores
+both rules. The per-IP limit is the `password_reset_request` rate-limit
+budget.
 
 ## Temporary passwords
 

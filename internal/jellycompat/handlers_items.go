@@ -349,10 +349,10 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if mediaSourceID, err := h.codec.DecodeIntID(EncodedIDMediaSource, rawID); err == nil {
-		contentID, ok := h.codec.LookupMediaSourceOwner(mediaSourceID)
-		if !ok {
-			writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+	if fileID, err := h.codec.DecodeIntID(EncodedIDMediaSource, rawID); err == nil {
+		contentID, err := h.codec.ResolveMediaSourceOwner(r.Context(), fileID)
+		if err != nil {
+			writeItemIDError(w, r, err)
 			return
 		}
 		rawID = h.codec.EncodeStringID(EncodedIDItem, contentID)
@@ -784,21 +784,17 @@ func (h *ItemsHandler) HandleMediaSegments(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "BadRequest", "Missing item id")
 		return
 	}
-	contentID, err := h.codec.DecodeStringID(EncodedIDItem, raw)
-	var requestedFileID int
-	if err != nil {
-		if fileID, fileErr := h.codec.DecodeIntID(EncodedIDMediaSource, raw); fileErr == nil {
-			if owner, ok := h.codec.LookupMediaSourceOwner(fileID); ok {
-				contentID = owner
-				requestedFileID = int(fileID)
-			}
-		}
+	contentID, fileID, err := decodeItemOrMediaSourceID(r.Context(), h.codec, raw)
+	if err != nil && !errors.Is(err, errMediaSourceOwnerNotFound) {
+		writeItemIDError(w, r, err)
+		return
 	}
-	if contentID == "" {
-		slog.DebugContext(r.Context(), "jellycompat: media segments lookup with undecodable id", "component", "jellycompat", "raw_id", raw)
+	if err != nil {
+		slog.DebugContext(r.Context(), "jellycompat: media segments lookup with unresolvable id", "component", "jellycompat", "raw_id", raw, "error", err)
 		writeJSON(w, http.StatusOK, mediaSegmentsResultDTO{Items: []mediaSegmentDTO{}})
 		return
 	}
+	requestedFileID := int(fileID)
 
 	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)
 	if err != nil {
@@ -3546,6 +3542,47 @@ func decodeContentID(codec *ResourceIDCodec, raw string) (string, error) {
 
 func decodeItemID(codec *ResourceIDCodec, raw string) (string, error) {
 	return codec.DecodeStringID(EncodedIDItem, raw)
+}
+
+// decodeItemOrMediaSourceID decodes an id a client sent where an item id
+// belongs. Real Jellyfin gives a media source the same id as its item, so
+// clients such as Moonfin send MediaSources[i].Id there. A media-source id
+// resolves to the item that owns its file, and fileID names that file so the
+// caller can select its version; fileID is 0 for an item id. An id that names
+// no item or media source returns errMediaSourceOwnerNotFound.
+func decodeItemOrMediaSourceID(ctx context.Context, codec *ResourceIDCodec, raw string) (contentID string, fileID int64, err error) {
+	if contentID, err := decodeItemID(codec, raw); err == nil {
+		return contentID, 0, nil
+	}
+	fileID, err = codec.DecodeIntID(EncodedIDMediaSource, raw)
+	if err != nil {
+		return "", 0, errMediaSourceOwnerNotFound
+	}
+	contentID, err = codec.ResolveMediaSourceOwner(ctx, fileID)
+	if err != nil {
+		return "", 0, err
+	}
+	return contentID, fileID, nil
+}
+
+// decodeContentOrMediaSourceID is decodeContentID that also accepts a
+// media-source id, as decodeItemOrMediaSourceID describes.
+func decodeContentOrMediaSourceID(ctx context.Context, codec *ResourceIDCodec, raw string) (contentID string, fileID int64, err error) {
+	if seasonID, err := codec.DecodeStringID(EncodedIDSeason, raw); err == nil {
+		return seasonID, 0, nil
+	}
+	return decodeItemOrMediaSourceID(ctx, codec, raw)
+}
+
+// writeItemIDError answers an item-position id that failed to decode: 404 when
+// it names nothing, 500 when the media-source lookup itself failed.
+func writeItemIDError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, errMediaSourceOwnerNotFound) {
+		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+	slog.ErrorContext(r.Context(), "jellycompat: resolving media source owner failed", "component", "jellycompat", "error", err)
+	writeError(w, http.StatusInternalServerError, "ServerError", "Failed to resolve media source")
 }
 
 func validatePseudoUser(w http.ResponseWriter, userID string, session *Session) bool {

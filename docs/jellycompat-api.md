@@ -68,6 +68,14 @@ A profile with no stored subtitle mode reads as `Default`, Jellyfin's default.
 Modes set outside a Jellyfin client read as the matching row (`off` with forced
 subtitles shown reads as `OnlyForced`).
 
+Audio and subtitle language preferences use three-letter ISO codes for recognized
+languages (for example, `eng`). They match Jellyfin Web's selector only when
+`/Localization/Cultures` offers that language; `fil`, for example, has no option.
+Unrecognized and undefined tags are preserved. Native settings retain canonical
+BCP 47 tags. Returning an unchanged language choice preserves a native region or
+script preference, such as `pt-BR`; selecting a different language replaces it,
+and an empty or null preference clears it.
+
 `AudioLanguagePreference` `OriginalLanguage` stores the settings-contract tag
 `x-silo-original` and reads back as `OriginalLanguage`; playback then prefers
 each item's original-language audio, as native clients do.
@@ -167,6 +175,17 @@ Static direct-play requests without PlaybackInfo cannot transcode an over-limit
 source and receive `PlaybackUnavailable` instead. Negotiated limits are kept
 with the playback session, so policy edits affect only new sessions.
 Query `StartTimeTicks` is honored. Remux-only URLs use `static=false`.
+
+Silo gives each version its own `MediaSources[i].Id`, while real Jellyfin reuses
+the item id. Some clients therefore send a media-source id where an item id
+belongs. `PlaybackInfo`, `GET /Items/{id}`, `MediaSegments`, `Download`, static
+`/Videos/{id}/stream`, and the user-data and played-state routes accept a
+media-source id there and resolve it to the item that owns its file (the
+episode for an episode file). On `PlaybackInfo` the id selects that version
+unless the body names a `MediaSourceId`. A stale body `MediaSourceId` falls back
+to the route's version, and a route version the item no longer has answers
+`404`. The negotiated session keeps the client's id as its route item id, so the
+stream URLs it hands out and later session reports can carry that id.
 
 The managed Jellyfin Web build opts into `SiloSeekReanchor=true` on
 `PlaybackInfo`. For a copied-video HLS source, the response echoes

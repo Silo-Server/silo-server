@@ -17,6 +17,8 @@ import (
 type PasswordResetService interface {
 	PasswordResetCapabilities(context.Context) passwordreset.Capabilities
 	IssuePasswordReset(context.Context, passwordreset.IssueInput) (*passwordreset.IssueResult, error)
+	PasswordResetSelfService(context.Context) (enabled, configured bool, err error)
+	RequestPasswordReset(context.Context, string) error
 	LookupPasswordReset(context.Context, string) (*passwordreset.LookupResult, error)
 	CompletePasswordReset(context.Context, string, string, string, string) (handlers.PasswordResetCompletionView, error)
 }
@@ -27,6 +29,14 @@ const passwordResetCompleted = "completed"
 // bucketPasswordReset is the per-client-IP budget of the public reset
 // screen's operations (ratelimit.auth.password_reset.*).
 const bucketPasswordReset = "password_reset"
+
+// bucketPasswordResetRequest is the tighter per-client-IP budget of the
+// sign-in page's reset request, which can send email
+// (ratelimit.auth.password_reset_request.*).
+const bucketPasswordResetRequest = "password_reset_request"
+
+// selfServiceResetDomain names the capability in problem details.
+const selfServiceResetDomain = "self-service password reset"
 
 // AdminPasswordResetInput issues a reset link for one account.
 type AdminPasswordResetInput struct {
@@ -48,6 +58,29 @@ type AdminPasswordReset struct {
 // AdminPasswordResetOutput is the createAdminUserPasswordReset response.
 type AdminPasswordResetOutput struct {
 	Body AdminPasswordReset
+}
+
+// PasswordResetCapability reports whether the sign-in page may offer
+// self-service password reset. The state is available only when an
+// administrator turned it on and the server can email a link; disabled when
+// it is off; not_configured when email or the server's public URL is missing.
+type PasswordResetCapability struct {
+	Capability
+}
+
+// PasswordResetCapabilityOutput is the getPasswordResetCapability response.
+type PasswordResetCapabilityOutput struct {
+	Status       int
+	ETag         string `header:"ETag"`
+	CacheControl string `header:"Cache-Control"`
+	Body         PasswordResetCapability
+}
+
+// PasswordResetRequestInput asks for a reset link for one's own account.
+type PasswordResetRequestInput struct {
+	Body struct {
+		Login string `json:"login" minLength:"1" maxLength:"320" doc:"The account's sign-in name or email address" example:"alice"`
+	}
 }
 
 // PasswordResetTokenInput names a link by its token.
@@ -145,6 +178,18 @@ func registerPasswordResets(reg *Registry) {
 		}
 		return op
 	}
+	Register(reg, Operation{
+		Operation: humaOp(http.MethodGet, Prefix+"/capabilities/password-reset", "getPasswordResetCapability", "auth",
+			"Discover whether the sign-in page may offer self-service password reset."),
+		Class: ClassPublic, ServiceBacked: true,
+	}, reg.getPasswordResetCapability)
+	request := humaOp(http.MethodPost, Prefix+"/password-resets", "requestPasswordReset", "auth",
+		"Email a reset link to the account a sign-in name or email address names, if one matches.")
+	request.DefaultStatus = http.StatusAccepted
+	// Every accepted request is 202 alike, matched or not; only the
+	// capability state (409) or the rate limit (429) refuses one.
+	request.Errors = []int{http.StatusConflict, http.StatusTooManyRequests}
+	Register(reg, Operation{Operation: request, RetrySafety: RetrySafetyNonRetryable, Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketPasswordResetRequest}, reg.requestPasswordReset)
 	Register(reg, public(http.MethodGet, "/password-resets/{token}", "lookupPasswordReset",
 		"Describe a usable password reset link for the reset screen."), reg.lookupPasswordReset)
 	Register(reg, public(http.MethodPost, "/password-resets/{token}/complete", "completePasswordReset",
@@ -173,6 +218,36 @@ func (reg *Registry) createAdminUserPasswordReset(ctx context.Context, in *Admin
 		}
 	}
 	return &AdminPasswordResetOutput{Body: out}, nil
+}
+
+func (reg *Registry) getPasswordResetCapability(ctx context.Context, _ *CapabilityInput) (*PasswordResetCapabilityOutput, error) {
+	out := &PasswordResetCapabilityOutput{Body: PasswordResetCapability{Capability{State: StateNotConfigured}}}
+	if reg.deps.PasswordResets == nil {
+		return out, nil
+	}
+	enabled, configured, err := reg.deps.PasswordResets.PasswordResetSelfService(ctx)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	out.Body.State = configuredEnabledCapabilityState(configured, enabled)
+	return out, nil
+}
+
+func (reg *Registry) requestPasswordReset(ctx context.Context, in *PasswordResetRequestInput) (*struct{}, error) {
+	svc, p := reg.passwordResets()
+	if p != nil {
+		return nil, p
+	}
+	switch err := svc.RequestPasswordReset(ctx, in.Body.Login); {
+	case err == nil:
+		return &struct{}{}, nil
+	case errors.Is(err, passwordreset.ErrSelfServiceDisabled):
+		return nil, CapabilityProblem(StateDisabled, selfServiceResetDomain)
+	case errors.Is(err, passwordreset.ErrSelfServiceNotConfigured):
+		return nil, CapabilityProblem(StateNotConfigured, selfServiceResetDomain)
+	default:
+		return nil, serviceProblem(err)
+	}
 }
 
 func (reg *Registry) lookupPasswordReset(ctx context.Context, in *PasswordResetTokenInput) (*PasswordResetLookupOutput, error) {

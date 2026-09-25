@@ -349,23 +349,16 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		if wantMediaSources {
 			dto.MediaSources = make([]mediaSourceDTO, 0, len(item.Versions))
 		}
-		// Register every version's file ID as owned by this item, even when the
-		// caller didn't ask for MediaSources/MediaStreams. Skipping this breaks
-		// later /Items/{mediaSourceId} lookups (LookupMediaSourceOwner returns
-		// ok=false → 404) whenever the detail was first materialized through a
-		// list endpoint without those Fields.
-		for _, version := range item.Versions {
-			m.codec.RegisterMediaSourceOwner(int64(version.FileID), item.ContentID)
-			if !wantMediaSources && !wantMediaStreams {
-				continue
-			}
-			sourceID := m.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
-			streams := buildMediaStreams(routeItemID, sourceID, version)
-			if wantMediaStreams {
-				dto.MediaStreams = append(dto.MediaStreams, streams...)
-			}
-			if wantMediaSources {
-				dto.MediaSources = append(dto.MediaSources, detailMediaSourceDTO(sourceID, version, streams))
+		if wantMediaSources || wantMediaStreams {
+			for _, version := range item.Versions {
+				sourceID := m.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
+				streams := buildMediaStreams(routeItemID, sourceID, version)
+				if wantMediaStreams {
+					dto.MediaStreams = append(dto.MediaStreams, streams...)
+				}
+				if wantMediaSources {
+					dto.MediaSources = append(dto.MediaSources, detailMediaSourceDTO(sourceID, version, streams))
+				}
 			}
 		}
 		if wantField("chapters") {

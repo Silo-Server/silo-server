@@ -146,6 +146,31 @@ Never replay a completion, since the link is already spent.
 Links are stored only as SHA-256 digests, and the request log redacts the `{token}`
 path segment.
 
+### Self-service password reset
+
+When an administrator turns on `password_reset.self_service_enabled` (off by
+default), an account holder can request a reset link from the sign-in page. Clients
+read `GET /capabilities/password-reset`, a public server-wide capability document,
+and offer the request only when `state` is `available`. The state is `disabled`
+while the setting is off, and `not_configured` while the server lacks a configured
+mail server or `server.public_url`.
+
+`POST /password-resets` with `{ "login": "..." }` names the account by username or
+email address, the same way sign-in does. Every accepted request returns `202` with
+no body, whether or not an account matched. The server looks the account up and
+sends the email in the background, so neither the answer nor its timing reveals
+whether the account exists. The request fails only when the capability is off
+(`409 capability_disabled`), not configured (`409 capability_not_configured`), or
+rate limited (`429`, the `password_reset_request` budget: 5 requests per minute per
+client IP by default).
+
+The server emails a link only to an enabled account that signs in with a local
+password and has a valid email address. The link opens the same
+`/reset-password/{token}` screen as an administrator's link and expires after an
+hour. An account gets at most one requested link every five minutes. A requested
+link replaces the account's earlier requested link, but never a live link an
+administrator issued; while one exists, requests send nothing.
+
 ## Email addresses
 
 Every v2 write that stores an account address (`setupServer`, `signup`,

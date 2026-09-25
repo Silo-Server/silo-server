@@ -563,7 +563,8 @@ func (r *Repository) LoadSeasonState(ctx context.Context, state SeasonState, cfg
 		       file_count,
 		       status,
 		       markers_written,
-		       COALESCE(last_error, '')
+		       COALESCE(last_error, ''),
+		       analyzed_at
 		FROM intro_season_analysis_state
 		WHERE season_id = $1
 		  AND media_folder_id = $2
@@ -585,6 +586,7 @@ func (r *Repository) LoadSeasonState(ctx context.Context, state SeasonState, cfg
 		&existing.Status,
 		&existing.MarkersWritten,
 		&existing.LastError,
+		&existing.AnalyzedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

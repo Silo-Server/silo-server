@@ -109,6 +109,7 @@ type Dependencies struct {
 	SessionSyncer          PlaybackSessionSyncer
 	MarkerPopulation       MarkerPopulationService
 	FileResolver           FilePathResolver
+	MediaSourceOwners      MediaSourceOwnerLookup // optional; resolves media-source ids sent as item ids
 	UserStoreProvider      userstore.UserStoreProvider
 	WatchScrobbler         PlaybackWatchScrobbler
 	StableIdentityResolver watchsync.ScrobbleIdentityResolver

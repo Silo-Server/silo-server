@@ -6,7 +6,8 @@ import {
   type MutableRefObject,
   type RefObject,
 } from "react";
-import { toMediaTime } from "../utils/mediaTimeline";
+import { toMediaTime, toPlayerTime } from "../utils/mediaTimeline";
+import { isNativePositionInRanges } from "../utils/roomSyncCatchup";
 import type { WatchTogetherRoomConnectionResult } from "./useWatchTogetherRoomConnection";
 
 interface UseWatchTogetherPlaybackSyncOptions {
@@ -39,6 +40,14 @@ interface UseWatchTogetherPlaybackSyncResult {
   ) => TransportRequestResult;
   reportReady: () => TransportRequestResult;
   reportBuffering: (positionSeconds?: number, isPaused?: boolean) => TransportRequestResult;
+  /**
+   * While the element plays a stream's pre-roll up to a room seek target it
+   * is muted for the pre-roll, not by the viewer. This is the viewer's mute
+   * setting then, restored when the pre-roll ends; null when no pre-roll runs.
+   */
+  prerollMutedPreference: () => boolean | null;
+  /** Records the viewer's mute choice during a pre-roll. False when none runs. */
+  setPrerollMutedPreference: (muted: boolean) => boolean;
 }
 
 const stateReportIntervalMs = 1_500;
@@ -53,6 +62,58 @@ const hostReadySeekToleranceSeconds = 15;
 // Stalls shorter than the room catch-up band stay local: the viewer converges
 // by playback rate instead of pausing everyone.
 const bufferingGraceMs = 2_000;
+// A rebuilt stream can begin short of a room seek target: a copy remux starts
+// at the preceding keyframe, and a progressive response cannot seek inside
+// itself, so the plan expects the player to play through that pre-roll. Only
+// a pre-roll at the start of the stream, and no longer than this, is played.
+const maxPrerollSeconds = 20;
+// The pre-roll plays muted behind the syncing overlay, so it can run fast.
+// Close to the target it drops to normal speed, which leaves a late check the
+// most room: the stream cannot seek back to a target it has passed.
+const prerollPlaybackRate = 4;
+const prerollFinalApproachSeconds = 1.5;
+const prerollCheckIntervalMs = 50;
+// Nothing in the element stops it at a position; only a check on the main
+// thread can, and checks are as regular as that thread allows. A hidden tab
+// throttles timers to about one a second, so the estimate of how late the next
+// check may be starts there and then follows the delays actually seen. Both
+// the rate and the stopping point answer to it.
+const visiblePrerollWakeupSeconds = 0.3;
+const hiddenPrerollWakeupSeconds = 1.5;
+
+/** How late the next check may be, given this tab and the delays seen so far. */
+function prerollWakeupSeconds(observedSeconds: number): number {
+  const floor =
+    document.visibilityState === "visible"
+      ? visiblePrerollWakeupSeconds
+      : hiddenPrerollWakeupSeconds;
+  return Math.max(floor, observedSeconds);
+}
+
+/** Playback rate for a pre-roll this far short of the room's seek target. */
+function prerollRateFor(remainingSeconds: number, wakeupSeconds: number): number {
+  if (remainingSeconds <= prerollFinalApproachSeconds) return 1;
+  return Math.min(prerollPlaybackRate, Math.max(1, remainingSeconds / wakeupSeconds));
+}
+
+/**
+ * Whether to stop the pre-roll here. Stopping short of the target is safe: the
+ * room acknowledges a position inside its tolerance and absorbs the rest by
+ * rate. Stopping past it is not, so the pre-roll gives up the last of the gap
+ * once a late check could carry the element out of that tolerance.
+ */
+function prerollLanded(
+  remainingSeconds: number,
+  rate: number,
+  wakeupSeconds: number,
+  toleranceSeconds: number,
+): boolean {
+  if (remainingSeconds <= 0) return true;
+  return (
+    remainingSeconds <= toleranceSeconds &&
+    rate * wakeupSeconds > remainingSeconds + toleranceSeconds
+  );
+}
 
 type ReadyCheck =
   | { ok: true; commandId: string; positionSeconds: number; isPaused: boolean }
@@ -89,6 +150,10 @@ export function useWatchTogetherPlaybackSync({
     (room?.self_ignore_wait === true || selfMember?.is_buffering === true);
   const readinessPending =
     (roomPlaybackState === "waiting" || catchingUp) && !readinessAcknowledged;
+  const waitingSeekCommandId =
+    roomPlaybackState === "waiting" && transportCommand?.action === "seek"
+      ? transportCommand.command_id
+      : null;
   const lastReadyRejectReasonRef = useRef<string | null>(null);
   const sendRoomMessage = roomConnection.sendRoomMessage;
   const waitingStateRef = useRef<"idle" | "buffering" | "ready">("idle");
@@ -136,6 +201,144 @@ export function useWatchTogetherPlaybackSync({
     transportCommand?.command_id,
     videoRef,
   ]);
+
+  // A waiting room holds this viewer paused, so a stream that begins in the
+  // pre-roll before the seek target would never reach it and the room would
+  // wait out its deadline. Play the pre-roll through, muted and fast, and stop
+  // at the target; the readiness check then acknowledges the seek.
+  const prerollRef = useRef<{
+    commandId: string;
+    restoreMuted: boolean;
+    restoreRate: number;
+    /** When the pre-roll was last checked, to measure how late checks run. */
+    lastCheckMs: number;
+  } | null>(null);
+  // The command whose seek rebuilt the current stream. Until the rebuilt
+  // stream loads, the element still holds the stream the seek replaces.
+  const rebuiltForCommandRef = useRef<string | null>(null);
+  const endPreroll = useCallback(
+    (pause: boolean) => {
+      const preroll = prerollRef.current;
+      prerollRef.current = null;
+      const video = videoRef.current;
+      if (!preroll || !video) return;
+      if (pause) video.pause();
+      video.muted = preroll.restoreMuted;
+      video.playbackRate = preroll.restoreRate;
+    },
+    [videoRef],
+  );
+  const advanceThroughPreroll = useCallback(
+    (video: HTMLVideoElement) => {
+      const command = transportCommand;
+      if (
+        prerollRef.current ||
+        !command ||
+        command.command_id !== waitingSeekCommandId ||
+        appliedCommandIdRef.current !== command.command_id ||
+        rebuiltForCommandRef.current !== command.command_id ||
+        !video.paused ||
+        video.seeking ||
+        video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
+        video.currentTime > maxPrerollSeconds
+      ) {
+        return;
+      }
+      const origin = streamOriginRef.current;
+      const gap = command.position_seconds - toMediaTime(video.currentTime, origin);
+      const tolerance = isHost ? hostReadySeekToleranceSeconds : readySeekToleranceSeconds;
+      if (gap <= tolerance || gap > maxPrerollSeconds) return;
+      // A target the element can seek to does not need the pre-roll.
+      if (
+        isNativePositionInRanges(video.seekable, toPlayerTime(command.position_seconds, origin))
+      ) {
+        return;
+      }
+      const preroll = {
+        commandId: command.command_id,
+        restoreMuted: video.muted,
+        restoreRate: video.playbackRate,
+        lastCheckMs: performance.now(),
+      };
+      prerollRef.current = preroll;
+      video.muted = true;
+      video.playbackRate = prerollRateFor(gap, prerollWakeupSeconds(0));
+      video.play().catch(() => {
+        // A later pre-roll owns the element now; leave it alone.
+        if (prerollRef.current === preroll) endPreroll(false);
+      });
+    },
+    [
+      appliedCommandIdRef,
+      endPreroll,
+      isHost,
+      streamOriginRef,
+      transportCommand,
+      waitingSeekCommandId,
+    ],
+  );
+  useEffect(() => {
+    const video = videoRef.current;
+    const preroll = prerollRef.current;
+    // Stop before restoring audio. A new command takes over playback at its
+    // scheduled execution time, which may still be in the future.
+    if (preroll && preroll.commandId !== waitingSeekCommandId) {
+      endPreroll(true);
+    }
+    if (!video || !waitingSeekCommandId) return;
+    const targetSeconds = transportCommand?.position_seconds ?? 0;
+    const tolerance = isHost ? hostReadySeekToleranceSeconds : readySeekToleranceSeconds;
+    const checkProgress = () => {
+      const preroll = prerollRef.current;
+      if (preroll?.commandId !== waitingSeekCommandId) return;
+      const nowMs = performance.now();
+      const wakeup = prerollWakeupSeconds((nowMs - preroll.lastCheckMs) / 1000);
+      preroll.lastCheckMs = nowMs;
+      const remaining = targetSeconds - toMediaTime(video.currentTime, streamOriginRef.current);
+      const rate = prerollRateFor(remaining, wakeup);
+      if (prerollLanded(remaining, rate, wakeup, tolerance)) {
+        endPreroll(true);
+        return;
+      }
+      if (video.playbackRate !== rate) video.playbackRate = rate;
+    };
+    // timeupdate may come only every 250 ms, so poll as well.
+    const intervalId = window.setInterval(checkProgress, prerollCheckIntervalMs);
+    // A stream replaced mid-pre-roll starts over from its own position.
+    const onEmptied = () => endPreroll(false);
+    const onLoadStart = () => {
+      if (appliedCommandIdRef.current === waitingSeekCommandId) {
+        rebuiltForCommandRef.current = waitingSeekCommandId;
+      }
+    };
+    video.addEventListener("timeupdate", checkProgress);
+    video.addEventListener("emptied", onEmptied);
+    video.addEventListener("loadstart", onLoadStart);
+    document.addEventListener("visibilitychange", checkProgress);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", checkProgress);
+      video.removeEventListener("timeupdate", checkProgress);
+      video.removeEventListener("emptied", onEmptied);
+      video.removeEventListener("loadstart", onLoadStart);
+    };
+  }, [
+    appliedCommandIdRef,
+    endPreroll,
+    isHost,
+    streamOriginRef,
+    transportCommand?.position_seconds,
+    videoRef,
+    waitingSeekCommandId,
+  ]);
+  useEffect(() => () => endPreroll(false), [endPreroll]);
+  const prerollMutedPreference = useCallback(() => prerollRef.current?.restoreMuted ?? null, []);
+  const setPrerollMutedPreference = useCallback((muted: boolean) => {
+    const preroll = prerollRef.current;
+    if (!preroll) return false;
+    preroll.restoreMuted = muted;
+    return true;
+  }, []);
 
   // A new stream, room, selection, phase, or connection starts over.
   useEffect(() => {
@@ -197,6 +400,9 @@ export function useWatchTogetherPlaybackSync({
     }
     if (video.seeking) {
       return { ok: false, reason: "element still seeking" };
+    }
+    if (prerollRef.current) {
+      return { ok: false, reason: "playing through the stream pre-roll" };
     }
     if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
       return { ok: false, reason: `element readyState ${video.readyState} < HAVE_FUTURE_DATA` };
@@ -282,6 +488,7 @@ export function useWatchTogetherPlaybackSync({
             return;
           }
           noteReadyReject(check.reason);
+          advanceThroughPreroll(video);
         }
 
         // A stalled element reports where it stopped, not a decision. Stay
@@ -310,6 +517,7 @@ export function useWatchTogetherPlaybackSync({
       window.clearInterval(intervalId);
     };
   }, [
+    advanceThroughPreroll,
     attachedSessionId,
     catchingUp,
     checkReady,
@@ -435,6 +643,8 @@ export function useWatchTogetherPlaybackSync({
       requestTransport,
       reportReady,
       reportBuffering,
+      prerollMutedPreference,
+      setPrerollMutedPreference,
     }),
     [
       attachedSessionId,
@@ -443,6 +653,8 @@ export function useWatchTogetherPlaybackSync({
       requestTransport,
       reportReady,
       reportBuffering,
+      prerollMutedPreference,
+      setPrerollMutedPreference,
     ],
   );
 }

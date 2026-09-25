@@ -128,6 +128,7 @@ const Calendar = lazy(() => import("@/pages/Calendar"));
 const Signup = lazy(() => import("@/pages/Signup"));
 const InviteClaim = lazy(() => import("@/pages/InviteClaim"));
 const PasswordReset = lazy(() => import("@/pages/PasswordReset"));
+const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
 const ChoosePassword = lazy(() => import("@/pages/ChoosePassword"));
 const HouseholdSetup = lazy(() => import("@/pages/HouseholdSetup"));
 const TasteSeed = lazy(() => import("@/pages/TasteSeed"));
@@ -456,6 +457,7 @@ function AppRoutes() {
       <Route path="/signup" element={<Signup />} />
       <Route path="/invite/:token" element={<InviteClaim />} />
       <Route path="/reset-password/:token" element={<PasswordReset />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path={CHANGE_PASSWORD_PATH} element={<ChoosePassword />} />
       {/* Shared Watch Party links: offers the native app on phones, else forwards to /rooms. */}
       <Route path="/rooms/join" element={<WatchPartyInvite />} />

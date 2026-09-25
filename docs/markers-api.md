@@ -30,6 +30,16 @@ Existing installations retain their configured marker mode, which accepts `off`,
   still shared through the database. Previously stored markers remain available.
 
 Both paths honor provider priority, manual edits, and provider quota limits.
+
+`markers.detection_workers` sizes local detection: how many seasons the
+**Detect markers on this server** task analyzes at once, which also bounds how
+many ffmpeg processes read audio. It defaults to `1` and accepts 1 to 64.
+Detection mostly waits on reading each file's opening minutes, so a higher
+value finishes a large library sooner on fast storage, at the cost of load
+that competes with playback. Analysis started from playback always has one
+extra ffmpeg slot of its own. A change applies without a restart; extractions
+already running finish first.
+
 Replicas coordinate fetches with expiring database leases. File replacement or
 rematching invalidates derived markers; a result fetched for the previous file
 identity cannot overwrite the new one. Successful provider refreshes can correct

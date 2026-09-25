@@ -4,15 +4,18 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/passwordreset"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
 type fakePasswordResets struct {
@@ -20,10 +23,29 @@ type fakePasswordResets struct {
 	issued    *passwordreset.IssueInput
 	issueErr  error
 	completed int
+	// Self-service reset: whether it is on and deliverable, and the logins
+	// requested so far.
+	selfEnabled, selfConfigured bool
+	requested                   []string
 }
 
 func fixturePasswordResets() *fakePasswordResets {
-	return &fakePasswordResets{caps: passwordreset.Capabilities{Link: true, Email: true}}
+	return &fakePasswordResets{caps: passwordreset.Capabilities{Link: true, Email: true}, selfEnabled: true, selfConfigured: true}
+}
+
+func (f *fakePasswordResets) PasswordResetSelfService(context.Context) (bool, bool, error) {
+	return f.selfEnabled, f.selfConfigured, nil
+}
+
+func (f *fakePasswordResets) RequestPasswordReset(_ context.Context, login string) error {
+	switch {
+	case !f.selfConfigured:
+		return passwordreset.ErrSelfServiceNotConfigured
+	case !f.selfEnabled:
+		return passwordreset.ErrSelfServiceDisabled
+	}
+	f.requested = append(f.requested, login)
+	return nil
 }
 
 func (f *fakePasswordResets) PasswordResetCapabilities(context.Context) passwordreset.Capabilities {
@@ -155,6 +177,96 @@ func TestPasswordResetsNotConfigured(t *testing.T) {
 	h := NewHandler(requestDeps(fixtureRequests()))
 	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/password-resets/live", "", nil), TypeCapabilityNotConfigured)
 	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/admin/users/7/password-reset", `{"delivery":"link"}`, actingRequestAdmin), TypeCapabilityNotConfigured)
+	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/password-resets", `{"login":"alice"}`, nil), TypeCapabilityNotConfigured)
+	if r := do(t, h, http.MethodGet, Prefix+"/capabilities/password-reset", "", nil); r.Code != http.StatusOK || !strings.Contains(r.Body.String(), `"state":"not_configured"`) {
+		t.Fatal(r.Code, r.Body.String())
+	}
+}
+
+func TestPasswordResetSelfServiceCapability(t *testing.T) {
+	for _, tc := range []struct {
+		enabled, configured bool
+		state               string
+	}{
+		{true, true, StateAvailable},
+		{false, true, StateDisabled},
+		{true, false, StateNotConfigured},
+		{false, false, StateNotConfigured},
+	} {
+		f := fixturePasswordResets()
+		f.selfEnabled, f.selfConfigured = tc.enabled, tc.configured
+		r := do(t, passwordResetTestHandler(f), http.MethodGet, Prefix+"/capabilities/password-reset", "", nil)
+		// A public, server-wide document: no per-principal allowed answer.
+		if r.Code != http.StatusOK || !strings.Contains(r.Body.String(), `"state":"`+tc.state+`"`) || strings.Contains(r.Body.String(), "allowed") || r.Header().Get("ETag") == "" {
+			t.Fatal(tc, r.Code, r.Body.String())
+		}
+	}
+}
+
+func TestRequestPasswordResetAnswersAlike(t *testing.T) {
+	f := fixturePasswordResets()
+	h := passwordResetTestHandler(f)
+	path := Prefix + "/password-resets"
+
+	// Whatever the login names, the answer is the same empty 202; the service
+	// decides in the background whether anything is sent.
+	for _, login := range []string{"alice", "nobody@example.test"} {
+		r := do(t, h, http.MethodPost, path, `{"login":"`+login+`"}`, nil)
+		if r.Code != http.StatusAccepted || strings.TrimSpace(r.Body.String()) != "" {
+			t.Fatal(login, r.Code, r.Body.String())
+		}
+	}
+	if len(f.requested) != 2 || f.requested[0] != "alice" || f.requested[1] != "nobody@example.test" {
+		t.Fatalf("requested %q", f.requested)
+	}
+	requireProblem(t, do(t, h, http.MethodPost, path, `{"login":""}`, nil), TypeValidationFailed)
+
+	f.selfEnabled = false
+	requireProblem(t, do(t, h, http.MethodPost, path, `{"login":"alice"}`, nil), TypeCapabilityDisabled)
+	f.selfConfigured = false
+	requireProblem(t, do(t, h, http.MethodPost, path, `{"login":"alice"}`, nil), TypeCapabilityNotConfigured)
+	if len(f.requested) != 2 {
+		t.Fatalf("refused requests reached the service: %q", f.requested)
+	}
+}
+
+func TestRequestPasswordResetRateGate(t *testing.T) {
+	f := fixturePasswordResets()
+	deps := requestDeps(fixtureRequests())
+	deps.PasswordResets = f
+	limiter := ratelimit.NewMiddleware(ratelimit.NewMemoryLimiter(), ratelimit.NewMemoryLimiter(), fakeSettings{}, true)
+	if err := limiter.Reload(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	deps.BucketRateLimit = func(bucket string) func(http.Handler) http.Handler {
+		if bucket != bucketPasswordResetRequest {
+			return func(h http.Handler) http.Handler { return h }
+		}
+		return limiter.Handler
+	}
+	h := NewHandler(deps)
+	limited := false
+	for range 5 {
+		req := httptest.NewRequest(http.MethodPost, Prefix+"/password-resets", strings.NewReader(`{"login":"alice"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(clientip.SetContext(req.Context(), "203.0.113.9"))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code == http.StatusTooManyRequests {
+			requireProblem(t, rec, TypeRateLimited)
+			if rec.Header().Get("Retry-After") == "" {
+				t.Fatal("rate limit missing retry header")
+			}
+			limited = true
+			break
+		}
+		if rec.Code != http.StatusAccepted {
+			t.Fatal(rec.Code, rec.Body.String())
+		}
+	}
+	if !limited || len(f.requested) >= 5 {
+		t.Fatal("reset request limiter did not stop requests", len(f.requested))
+	}
 }
 
 func TestAdminAccountTemporaryPassword(t *testing.T) {

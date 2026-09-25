@@ -2086,16 +2086,25 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	contentID, err := decodeItemID(h.codec, chi.URLParam(r, "id"))
+	contentID, pathFileID, err := decodeItemOrMediaSourceID(r.Context(), h.codec, chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		writeItemIDError(w, r, err)
 		return
+	}
+	// pathMediaSourceID is set when the route named a media source rather than
+	// an item. That version is the one the client asked for.
+	var pathMediaSourceID string
+	if pathFileID > 0 {
+		pathMediaSourceID = h.codec.EncodeIntID(EncodedIDMediaSource, pathFileID)
 	}
 
 	req, profile, err := h.parsePlaybackRequest(r, session.Token)
 	if err != nil {
 		writeDeviceProfileRequestError(w, err, "Invalid playback request")
 		return
+	}
+	if req.MediaSourceID == "" {
+		req.MediaSourceID = pathMediaSourceID
 	}
 	req.serverBitrateCapKbps, err = h.serverBitrateCap(r.Context(), session)
 	if err != nil {
@@ -2119,6 +2128,12 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	}
 
 	routeItemID := h.codec.EncodeStringID(EncodedIDItem, detail.ContentID)
+	if pathMediaSourceID != "" {
+		// A client that sent a media-source id as the item id keeps using it as
+		// the item id in stream URLs and session reports, so key the session and
+		// the URLs it hands out on that id.
+		routeItemID = pathMediaSourceID
+	}
 	playSessionID := h.codec.EncodeStringID(EncodedIDPlaySession, uuidNewString())
 	savedSubtitleMode := savedCompatSubtitleMode(r.Context(), h.storeProvider, session)
 	subtitleMode := compatJellyfinSubtitleMode(detail.SubtitleMode, detail.SubtitleModeSet, detail.ShowForcedSubtitles, savedSubtitleMode)
@@ -2135,21 +2150,25 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	var toneMapCapabilityErr error
 	toneMapCapabilitiesLoaded := false
 	if req.MediaSourceID != "" {
-		matched := false
-		for _, version := range detail.Versions {
-			candidate := h.buildPlaybackSource(routeItemID, playSessionID, version, profile, req, allow4KTranscode)
-			if mediaSourceIDsEqual(candidate.ID, req.MediaSourceID) {
-				matched = true
-				break
-			}
+		hasSource := func(mediaSourceID string) bool {
+			return slices.ContainsFunc(detail.Versions, func(version catalog.FileVersion) bool {
+				return mediaSourceIDsEqual(h.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID)), mediaSourceID)
+			})
 		}
-		if !matched {
+		if !hasSource(req.MediaSourceID) {
+			if pathMediaSourceID != "" && !hasSource(pathMediaSourceID) {
+				// The route named a version the item no longer has. Answer 404
+				// rather than substituting a different version.
+				writeError(w, http.StatusNotFound, "NotFound", "Media source not found")
+				return
+			}
 			// Continue Watching and autoplay clients can carry the previous
 			// episode's MediaSourceId into the next PlaybackInfo request. The
-			// authenticated item route remains authoritative; fall back to its
-			// available versions instead of returning a misleading 404.
+			// authenticated route remains authoritative; fall back to the version
+			// it names, or to all of the item's versions, instead of returning a
+			// misleading 404.
 			slog.InfoContext(r.Context(), "jellycompat ignored stale playback media source", "component", "jellycompat")
-			req.MediaSourceID = ""
+			req.MediaSourceID = pathMediaSourceID
 		}
 	}
 	for _, version := range detail.Versions {

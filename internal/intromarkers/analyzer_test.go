@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 )
 
 type fakeIntroRepository struct {
+	mu                 sync.Mutex
 	enabledLibraries   int
 	eligibleCandidates []Candidate
 	episodeCandidates  map[string][]Candidate
@@ -26,27 +28,39 @@ type fakeIntroRepository struct {
 }
 
 func (f *fakeIntroRepository) CountEnabledLibraries(context.Context) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.enabledLibraries, nil
 }
 
 func (f *fakeIntroRepository) ListEligibleCandidates(context.Context) ([]Candidate, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return append([]Candidate(nil), f.eligibleCandidates...), nil
 }
 
 func (f *fakeIntroRepository) ListCandidatesForEpisode(_ context.Context, episodeID string) ([]Candidate, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return append([]Candidate(nil), f.episodeCandidates[episodeID]...), nil
 }
 
 func (f *fakeIntroRepository) ListCandidatesForGroup(_ context.Context, mediaFolderID int, seasonID, analysisGroupKey string) ([]Candidate, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	key := groupKey(mediaFolderID, seasonID, analysisGroupKey)
 	return append([]Candidate(nil), f.groupCandidates[key]...), nil
 }
 
 func (f *fakeIntroRepository) ListChapterSilenceBackfillCandidates(context.Context, int, Config, string) ([]Candidate, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return append([]Candidate(nil), f.backfillCandidates...), nil
 }
 
 func (f *fakeIntroRepository) LoadSilenceRefinementAttempt(_ context.Context, fileID int) (*SilenceRefinementAttempt, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	attempt, ok := f.silenceAttempts[fileID]
 	if !ok {
 		return nil, nil
@@ -55,6 +69,8 @@ func (f *fakeIntroRepository) LoadSilenceRefinementAttempt(_ context.Context, fi
 }
 
 func (f *fakeIntroRepository) UpsertSilenceRefinementAttempt(_ context.Context, attempt SilenceRefinementAttempt) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.silenceAttempts == nil {
 		f.silenceAttempts = map[int]SilenceRefinementAttempt{}
 	}
@@ -64,11 +80,15 @@ func (f *fakeIntroRepository) UpsertSilenceRefinementAttempt(_ context.Context, 
 }
 
 func (f *fakeIntroRepository) PatchIntroMarker(_ context.Context, patch IntroMarkerPatch) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.patches = append(f.patches, patch)
 	return true, nil
 }
 
 func (f *fakeIntroRepository) LoadSeasonState(context.Context, SeasonState, Config) (*SeasonState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.seasonState == nil {
 		return nil, nil
 	}
@@ -77,11 +97,15 @@ func (f *fakeIntroRepository) LoadSeasonState(context.Context, SeasonState, Conf
 }
 
 func (f *fakeIntroRepository) UpsertSeasonState(_ context.Context, state SeasonState, _ Config) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.upsertedStates = append(f.upsertedStates, state)
 	return nil
 }
 
 func (f *fakeIntroRepository) LoadFingerprint(_ context.Context, candidate Candidate, _ Config) (*Fingerprint, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	fp := f.fingerprints[candidate.FileID]
 	if fp == nil {
 		return nil, nil
@@ -92,31 +116,41 @@ func (f *fakeIntroRepository) LoadFingerprint(_ context.Context, candidate Candi
 }
 
 func (f *fakeIntroRepository) UpsertFingerprint(context.Context, Fingerprint) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return nil
 }
 
 type fakeFingerprintExtractor struct {
+	mu             sync.Mutex
 	preflightCalls int
 	extractCalls   int
 }
 
 func (f *fakeFingerprintExtractor) Preflight(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.preflightCalls++
 	return nil
 }
 
 func (f *fakeFingerprintExtractor) Extract(context.Context, Candidate) (Fingerprint, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.extractCalls++
 	return Fingerprint{}, false, nil
 }
 
 type fakeBoundaryRefiner struct {
+	mu       sync.Mutex
 	calls    int
 	segments map[int]Segment
 	errors   map[int]error
 }
 
 func (f *fakeBoundaryRefiner) RefineChapterEnd(_ context.Context, candidate Candidate, segment Segment) (Segment, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls++
 	if err := f.errors[candidate.FileID]; err != nil {
 		return segment, false, err
@@ -129,12 +163,15 @@ func (f *fakeBoundaryRefiner) RefineChapterEnd(_ context.Context, candidate Cand
 }
 
 type fakeChromaprintStartRefiner struct {
+	mu       sync.Mutex
 	calls    int
 	segments map[int]Segment
 	errors   map[int]error
 }
 
 func (f *fakeChromaprintStartRefiner) RefineChromaprintStart(_ context.Context, candidate Candidate, segment Segment) (Segment, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls++
 	if err := f.errors[candidate.FileID]; err != nil {
 		return segment, false, err
@@ -1023,4 +1060,50 @@ func sharedIntroPoints(offset uint32) []uint32 {
 		points[i] = uint32(i)
 	}
 	return points
+}
+
+func TestDialogueRefinementRatesShortenedIntroShort(t *testing.T) {
+	refiner := &fakeChromaprintStartRefiner{segments: map[int]Segment{
+		1: {Start: 45, End: 60, Confidence: chromaprintConsistentConfidence, Algorithm: ChromaprintDialogueAlgorithm},
+	}}
+	analyzer := &Analyzer{chromaprintRefiner: refiner, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
+	var summary RunSummary
+	refined, err := analyzer.refineChromaprintSegment(context.Background(), Candidate{FileID: 1},
+		Segment{Start: 35, End: 60, Confidence: chromaprintConsistentConfidence, Algorithm: ChromaprintAlgorithm}, &summary)
+	if err != nil {
+		t.Fatalf("refineChromaprintSegment: %v", err)
+	}
+	if refined.Confidence != chromaprintShortConfidence {
+		t.Fatalf("confidence after refinement to %.0fs = %.2f, want %.2f", refined.End-refined.Start, refined.Confidence, chromaprintShortConfidence)
+	}
+}
+
+func TestAnalyzeEpisodeComparesOnlyOwnDetectionFiles(t *testing.T) {
+	cfg := DefaultConfig("ffmpeg")
+	manual := models.MarkerSourceManual
+	start, end := 5.0, 40.0
+	target := Candidate{FileID: 1, EpisodeID: "ep1", SeasonID: "season1", MediaFolderID: 7, FileHash: "h1", FileSize: 1, DurationSeconds: 1200}
+	manualSibling := Candidate{FileID: 2, EpisodeID: "ep2", SeasonID: "season1", MediaFolderID: 7, FileHash: "h2", FileSize: 2, DurationSeconds: 1200,
+		IntroStart: &start, IntroEnd: &end, IntroMarkersSource: &manual}
+	group := groupKey(target.MediaFolderID, target.SeasonID, target.AnalysisGroupKey())
+	repo := &fakeIntroRepository{
+		episodeCandidates: map[string][]Candidate{"ep1": {target}},
+		groupCandidates:   map[string][]Candidate{group: {target, manualSibling}},
+		fingerprints: map[int]*Fingerprint{
+			target.FileID:        cachedFingerprint(target, cfg, sharedIntroPoints(1000)),
+			manualSibling.FileID: cachedFingerprint(manualSibling, cfg, sharedIntroPoints(5000)),
+		},
+	}
+	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: cfg}
+
+	summary, err := analyzer.AnalyzeEpisode(context.Background(), "ep1")
+	if err != nil {
+		t.Fatalf("AnalyzeEpisode: %v", err)
+	}
+	// The scheduled run leaves the manually marked sibling out of the season,
+	// so a single remaining episode has nothing to compare with.
+	if summary.SeasonGroupsConsidered != 0 || len(repo.patches) != 0 {
+		t.Fatalf("groups=%d patches=%d, want the manual sibling excluded as in the scheduled run",
+			summary.SeasonGroupsConsidered, len(repo.patches))
+	}
 }

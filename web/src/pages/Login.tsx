@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { sessionFromTokenPair } from "@/api/v2/account";
 import { v2, type V2Result } from "@/api/v2/request";
 import { useAuth } from "@/hooks/useAuth";
+import { usePasswordResetAvailable } from "@/hooks/queries/passwordReset";
 import { CHANGE_PASSWORD_PATH, usePostSignInNavigation } from "@/hooks/usePostSignInNavigation";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
@@ -102,6 +103,7 @@ export default function Login() {
     signupStatusQuery.isSuccess &&
     signupStatusQuery.isFetchedAfterMount &&
     signupStatusQuery.data.enabled;
+  const { available: passwordResetAvailable } = usePasswordResetAvailable();
 
   useDocumentTitle("Sign In");
 
@@ -250,6 +252,12 @@ export default function Login() {
   const signupHref = redirectTarget
     ? `/signup?redirect=${encodeURIComponent(redirectTarget)}`
     : "/signup";
+  // Only a local password can be reset here; an external provider owns its own.
+  const forgotPasswordShown =
+    passwordResetAvailable && (!selectedProvider || selectedProvider === "local");
+  const forgotPasswordHref = username.trim()
+    ? `/forgot-password?login=${encodeURIComponent(username.trim())}`
+    : "/forgot-password";
 
   return (
     <main className="auth-shell">
@@ -300,7 +308,17 @@ export default function Login() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-baseline justify-between gap-2">
+                <Label htmlFor="password">Password</Label>
+                {forgotPasswordShown && (
+                  <Link
+                    to={forgotPasswordHref}
+                    className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
+                  >
+                    Forgot password?
+                  </Link>
+                )}
+              </div>
               <PasswordInput
                 id="password"
                 value={password}

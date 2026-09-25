@@ -618,9 +618,9 @@ func (h *PlaybackHandler) HandleDownload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	contentID, err := decodeContentID(h.codec, chiURLParam(r, "id"))
+	contentID, routeFileID, err := decodeContentOrMediaSourceID(r.Context(), h.codec, chiURLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		writeItemIDError(w, r, err)
 		return
 	}
 	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)
@@ -630,14 +630,27 @@ func (h *PlaybackHandler) HandleDownload(w http.ResponseWriter, r *http.Request)
 	}
 
 	version := detail.Versions[0]
-	if mediaSourceID := firstNonEmpty(r.URL.Query().Get("mediaSourceId"), r.URL.Query().Get("MediaSourceId")); mediaSourceID != "" {
+	mediaSourceID := firstNonEmpty(r.URL.Query().Get("mediaSourceId"), r.URL.Query().Get("MediaSourceId"))
+	sourceFromRoute := mediaSourceID == "" && routeFileID > 0
+	if sourceFromRoute {
+		mediaSourceID = h.codec.EncodeIntID(EncodedIDMediaSource, routeFileID)
+	}
+	if mediaSourceID != "" {
+		matched := false
 		if fileID, decodeErr := h.codec.DecodeIntID(EncodedIDMediaSource, mediaSourceID); decodeErr == nil {
 			for _, v := range detail.Versions {
 				if int64(v.FileID) == fileID {
 					version = v
+					matched = true
 					break
 				}
 			}
+		}
+		if !matched && sourceFromRoute {
+			// The route named a version the item no longer has; do not serve
+			// a different file.
+			writeError(w, http.StatusNotFound, "NotFound", "Media source not found")
+			return
 		}
 	}
 
@@ -3354,9 +3367,13 @@ func (h *PlaybackHandler) compatSegmentDuration() int {
 // is the client's own PlaySessionId (if it sent one) so later playback reports
 // carrying it can resolve this session directly.
 func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *Session, routeID, mediaSourceID, clientPlaySessionID string) (*PlaybackSession, *PlaybackMediaSource, error) {
-	contentID, err := decodeContentID(h.codec, routeID)
+	contentID, routeFileID, err := decodeContentOrMediaSourceID(ctx, h.codec, routeID)
 	if err != nil {
 		return nil, nil, ErrSessionNotFound
+	}
+	sourceFromRoute := mediaSourceID == "" && routeFileID > 0
+	if sourceFromRoute {
+		mediaSourceID = h.codec.EncodeIntID(EncodedIDMediaSource, routeFileID)
 	}
 	detail, err := h.content.GetItemDetail(ctx, session, contentID, nil)
 	if err != nil || detail == nil || len(detail.Versions) == 0 {
@@ -3371,6 +3388,11 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 	}
 	allow4KTranscode := h.allow4KVideoTranscode(ctx)
 	for _, version := range detail.Versions {
+		// Reused requests and reports may omit MediaSourceId. Keep their
+		// default source bound to the file selected by the route.
+		if sourceFromRoute && int64(version.FileID) != routeFileID {
+			continue
+		}
 		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps, streamLocation: string(streamlocation.FromContext(ctx))}, allow4KTranscode)
 		sources = append(sources, source)
 	}
@@ -3383,6 +3405,11 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 		ClientPlaySessionID: clientPlaySessionID,
 		UserID:              session.PseudoUserID.String(),
 		MediaSources:        sources,
+	}
+	if sourceFromRoute && findMediaSource(ps, mediaSourceID) == nil {
+		// The route named a version the item no longer has. Without this, the
+		// item alias below would match RouteItemID and play the first version.
+		return nil, nil, ErrSessionNotFound
 	}
 	matched := playbackRouteSource(ps, mediaSourceID, true, true)
 	if matched != nil {
@@ -3449,6 +3476,11 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 }
 
 func playbackRouteSource(session *PlaybackSession, mediaSourceID string, allowItemAlias, staticRequest bool) *PlaybackMediaSource {
+	// A session keyed on a media-source id has a RouteItemID that is also a
+	// source id, so an exact source match wins over the item alias.
+	if source := findMediaSource(session, mediaSourceID); source != nil {
+		return source
+	}
 	if mediaSourceID == "" || (allowItemAlias && mediaSourceIDsEqual(mediaSourceID, session.RouteItemID)) {
 		if staticRequest {
 			for _, source := range session.MediaSources {
@@ -3460,7 +3492,7 @@ func playbackRouteSource(session *PlaybackSession, mediaSourceID string, allowIt
 		}
 		return firstMediaSource(session)
 	}
-	return findMediaSource(session, mediaSourceID)
+	return nil
 }
 
 func firstMediaSource(session *PlaybackSession) *PlaybackMediaSource {

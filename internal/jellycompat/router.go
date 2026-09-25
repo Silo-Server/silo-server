@@ -415,6 +415,9 @@ func withDefaults(deps Dependencies) Dependencies {
 	if deps.IDCodec == nil {
 		deps.IDCodec = NewResourceIDCodec()
 	}
+	if deps.MediaSourceOwners != nil {
+		deps.IDCodec.SetMediaSourceOwnerLookup(deps.MediaSourceOwners)
+	}
 	if deps.ImageCache == nil {
 		cacheTTL := 24 * time.Hour
 		if deps.Config != nil && deps.Config.JellyfinCompat.SessionTTL > 0 {

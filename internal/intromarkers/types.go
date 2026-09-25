@@ -19,12 +19,12 @@ import (
 // or re-analysis cannot overwrite markers the old version wrote.
 const (
 	AlgorithmVersion             = 1
-	AnalysisBehaviorVersion      = 3
+	AnalysisBehaviorVersion      = 4
 	ChapterAlgorithm             = "chapter:v1"
 	ChapterSilenceAlgorithm      = "chapter:silence:v2"
 	EpisodeVersionCopyAlgorithm  = "episode-version-copy:v1"
-	ChromaprintAlgorithm         = "chromaprint:v2"
-	ChromaprintDialogueAlgorithm = "chromaprint:dialogue:v2" //nolint:misspell // Persisted algorithm identifier.
+	ChromaprintAlgorithm         = "chromaprint:v4"
+	ChromaprintDialogueAlgorithm = "chromaprint:dialogue:v4" //nolint:misspell // Persisted algorithm identifier.
 	ChromaprintFormat            = "chromaprint:raw:uint32le"
 	DefaultPointHopSeconds       = 0.123
 
@@ -59,11 +59,34 @@ type Config struct {
 	DialogueRefinementMinimumRemainingSeconds float64
 }
 
+// Intro duration bounds for a Chromaprint match. Twelve seconds keeps most
+// short title cards: in replay against authored chapters, lowering the bound
+// further mostly added matches in the wrong place. Three minutes covers long
+// drama openings, inside TheIntroDB's limit.
+const (
+	defaultMinimumIntroDurationSeconds = 12
+	defaultMaximumIntroDurationSeconds = 180
+)
+
+// The fingerprint cache key once hashed the intro duration bounds, which do not
+// shape a fingerprint. They are hashed as these fixed values so the bounds can
+// change without discarding every cached fingerprint.
+const (
+	fingerprintKeyMinimumIntroSeconds = 15
+	fingerprintKeyMaximumIntroSeconds = 120
+)
+
 // defaultSilenceMaximumExtensionSeconds bounds how far a silence may move an
 // authored intro chapter's end. Short extensions catch music that rings past
 // the chapter mark; against Chromaprint's audio match, extensions of five
 // seconds or more mostly overshot the chapter end into the episode.
 const defaultSilenceMaximumExtensionSeconds = 5
+
+// DefaultDetectionWorkers is how many seasons intro detection analyzes at
+// once, and so how many ffmpeg processes it runs, unless an administrator
+// raises markers.detection_workers. One keeps a shared server's storage and
+// CPU free for playback.
+const DefaultDetectionWorkers = 1
 
 func DefaultConfig(ffmpegPath string) Config {
 	if strings.TrimSpace(ffmpegPath) == "" {
@@ -71,11 +94,11 @@ func DefaultConfig(ffmpegPath string) Config {
 	}
 	return Config{
 		FFmpegPath:                                ffmpegPath,
-		MaxParallelFFmpeg:                         1,
+		MaxParallelFFmpeg:                         DefaultDetectionWorkers,
 		AnalysisPercent:                           25,
 		AnalysisLengthLimitMinutes:                10,
-		MinimumIntroDurationSeconds:               15,
-		MaximumIntroDurationSeconds:               120,
+		MinimumIntroDurationSeconds:               defaultMinimumIntroDurationSeconds,
+		MaximumIntroDurationSeconds:               defaultMaximumIntroDurationSeconds,
 		SilenceRefinementEnabled:                  true,
 		SilenceWindowBeforeSeconds:                3,
 		SilenceWindowAfterSeconds:                 30,
@@ -88,7 +111,7 @@ func DefaultConfig(ffmpegPath string) Config {
 		DialogueRefinementEnabled:                 true,
 		DialogueRefinementWindowSeconds:           15,
 		DialogueRefinementMaxShiftSeconds:         20,
-		DialogueRefinementMinimumRemainingSeconds: 15,
+		DialogueRefinementMinimumRemainingSeconds: defaultMinimumIntroDurationSeconds,
 	}
 }
 
@@ -106,10 +129,10 @@ func (c Config) normalized() Config {
 		c.AnalysisLengthLimitMinutes = 10
 	}
 	if c.MinimumIntroDurationSeconds <= 0 {
-		c.MinimumIntroDurationSeconds = 15
+		c.MinimumIntroDurationSeconds = defaultMinimumIntroDurationSeconds
 	}
 	if c.MaximumIntroDurationSeconds <= 0 {
-		c.MaximumIntroDurationSeconds = 120
+		c.MaximumIntroDurationSeconds = defaultMaximumIntroDurationSeconds
 	}
 	if c.SilenceWindowBeforeSeconds <= 0 {
 		c.SilenceWindowBeforeSeconds = 3
@@ -151,26 +174,33 @@ func intPtr(value int) *int {
 	return &value
 }
 
+// ConfigHash keys the fingerprint cache. Only the analysis window shapes a
+// fingerprint.
 func (c Config) ConfigHash() string {
 	c = c.normalized()
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%d:%d",
 		c.AnalysisPercent,
 		c.AnalysisLengthLimitMinutes,
-		c.MinimumIntroDurationSeconds,
-		c.MaximumIntroDurationSeconds,
+		fingerprintKeyMinimumIntroSeconds,
+		fingerprintKeyMaximumIntroSeconds,
 	)))
 	return hex.EncodeToString(sum[:])[:16]
 }
 
+// AnalysisConfigHash keys season analysis state: the fingerprint key plus
+// every setting that changes a season's result without changing its
+// fingerprints.
 func (c Config) AnalysisConfigHash() string {
 	c = c.normalized()
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%t:%.3f:%.3f:%.3f",
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%t:%.3f:%.3f:%.3f:%d:%d",
 		c.ConfigHash(),
 		AnalysisBehaviorVersion,
 		c.DialogueRefinementEnabled,
 		c.DialogueRefinementWindowSeconds,
 		c.DialogueRefinementMaxShiftSeconds,
 		c.DialogueRefinementMinimumRemainingSeconds,
+		c.MinimumIntroDurationSeconds,
+		c.MaximumIntroDurationSeconds,
 	)))
 	return hex.EncodeToString(sum[:])[:16]
 }
@@ -314,6 +344,32 @@ type SeasonState struct {
 	Status           string
 	MarkersWritten   int
 	LastError        string
+	AnalyzedAt       time.Time
+}
+
+const (
+	seasonStatusComplete = "complete"
+	seasonStatusNotFound = "not_found"
+	seasonStatusFailed   = "failed"
+	// seasonStatusPartial marks a group analyzed while some fingerprint
+	// extractions failed. It is retried after partialSeasonRetryInterval
+	// even when its inputs have not changed.
+	seasonStatusPartial = "partial"
+
+	partialSeasonRetryInterval = 7 * 24 * time.Hour
+)
+
+// settled reports whether a stored analysis still stands for unchanged
+// inputs at now.
+func (s SeasonState) settled(now time.Time) bool {
+	switch s.Status {
+	case seasonStatusComplete, seasonStatusNotFound:
+		return true
+	case seasonStatusPartial:
+		return now.Sub(s.AnalyzedAt) < partialSeasonRetryInterval
+	default:
+		return false
+	}
 }
 
 const (
@@ -357,6 +413,7 @@ type RunSummary struct {
 	SeasonGroupsConsidered       int      `json:"season_groups_considered"`
 	FingerprintsComputed         int      `json:"fingerprints_computed"`
 	FingerprintCacheHits         int      `json:"fingerprint_cache_hits"`
+	FingerprintExtractionErrors  int      `json:"fingerprint_extraction_errors"`
 	ChapterMarkersWritten        int      `json:"chapter_markers_written"`
 	ChromaprintMarkersWritten    int      `json:"chromaprint_markers_written"`
 	GroupsNotFound               int      `json:"groups_not_found"`

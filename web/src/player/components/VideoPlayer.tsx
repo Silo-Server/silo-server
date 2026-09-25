@@ -2178,9 +2178,21 @@ export function VideoPlayer({
     };
     const onProgress = () => setBuffered(video.buffered);
     const onVolumeChange = () => {
+      // A room seek pre-roll mutes the element for a moment. That mute is not
+      // the viewer's, so it is neither shown nor saved; a viewer unmuting
+      // meanwhile is kept for when the pre-roll ends.
+      let viewerMuted = video.muted;
+      const prerollMuted = watchTogetherSync.prerollMutedPreference();
+      if (prerollMuted !== null) {
+        if (!video.muted) {
+          watchTogetherSync.setPrerollMutedPreference(false);
+          video.muted = true;
+        }
+        viewerMuted = watchTogetherSync.prerollMutedPreference() ?? prerollMuted;
+      }
       setVolume(video.volume);
-      setMuted(video.muted);
-      persistVolume(video.volume, video.muted);
+      setMuted(viewerMuted);
+      persistVolume(video.volume, viewerMuted);
     };
     const onWaiting = () => {
       // Delay showing the spinner so brief buffering between segments
@@ -3117,18 +3129,34 @@ export function VideoPlayer({
     resetRoomCatchupRate,
   ]);
 
-  const handleVolumeChange = useCallback((v: number) => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.volume = v;
-    if (v > 0 && video.muted) video.muted = false;
-  }, []);
+  const handleMutedChange = useCallback(
+    (m: boolean) => {
+      const video = videoRef.current;
+      if (!video) return;
+      // During a room seek pre-roll the element stays muted until it ends.
+      if (watchTogetherSync.setPrerollMutedPreference(m)) {
+        setMuted(m);
+        persistVolume(video.volume, m);
+        return;
+      }
+      video.muted = m;
+    },
+    [watchTogetherSync],
+  );
 
-  const handleMutedChange = useCallback((m: boolean) => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.muted = m;
-  }, []);
+  const handleVolumeChange = useCallback(
+    (v: number) => {
+      const video = videoRef.current;
+      if (!video) return;
+      video.volume = v;
+      if (v > 0 && video.muted) handleMutedChange(false);
+    },
+    [handleMutedChange],
+  );
+
+  const handleToggleMuted = useCallback(() => {
+    handleMutedChange(!muted);
+  }, [handleMutedChange, muted]);
 
   // -- Keyboard shortcuts --
   useKeyboardShortcuts(
@@ -3137,6 +3165,7 @@ export function VideoPlayer({
     handlePlayPause,
     skipActions,
     toggleCaptions,
+    handleToggleMuted,
     handleTogglePiP,
     displayMode === "foreground",
   );
@@ -3336,10 +3365,7 @@ export function VideoPlayer({
           if (nextVolume === null || !video) {
             throw new Error("missing_volume");
           }
-          video.volume = Math.min(1, Math.max(0, nextVolume));
-          if (video.volume > 0 && video.muted) {
-            video.muted = false;
-          }
+          handleVolumeChange(Math.min(1, Math.max(0, nextVolume)));
           return;
         }
         case "display_message":
@@ -3410,7 +3436,7 @@ export function VideoPlayer({
           throw new Error("unsupported");
       }
     },
-    [handleExit, onPlanInvalidated, performPlayerSeek],
+    [handleExit, handleVolumeChange, onPlanInvalidated, performPlayerSeek],
   );
 
   const realtime = usePlaybackRealtime({

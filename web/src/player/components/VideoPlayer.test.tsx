@@ -10,6 +10,7 @@ import type {
   PlaybackRealtimeEventEnvelope,
 } from "../realtime-protocol";
 import type { PlayerSubtitleInfo, VideoFitMode } from "../types";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { HLS_STARTUP_TIMEOUT_MS } from "../utils/hlsStartupGuard";
 import { VideoPlayer } from "./VideoPlayer";
 
@@ -34,6 +35,8 @@ const controls = vi.hoisted(() => ({
     videoFit?: VideoFitMode;
     onVideoFitToggle?: () => void;
     onSubtitleJobAccepted?: (jobId: string) => void;
+    onMutedChange?: (muted: boolean) => void;
+    onVolumeChange?: (volume: number) => void;
   },
 }));
 const playerV2Mock = vi.hoisted(() => vi.fn());
@@ -860,6 +863,248 @@ describe("VideoPlayer room catch-up", () => {
       position_seconds: 1500.3,
       is_paused: true,
     });
+  });
+
+  it.each(["target", "play", "pause"] as const)(
+    "ends a guest seek pre-roll on %s",
+    async (ending) => {
+      const { connection, video, command, rerenderPlayer } = setup(100);
+      let paused = true;
+      Object.defineProperty(video, "paused", { configurable: true, get: () => paused });
+      Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+      vi.mocked(video.play).mockImplementation(async () => {
+        paused = false;
+      });
+      vi.mocked(video.pause).mockImplementation(() => {
+        paused = true;
+      });
+      const waitingConnection = {
+        ...connection,
+        room: { ...connection.room!, playback_state: "waiting" as const },
+        transportCommand: {
+          ...command,
+          action: "seek" as const,
+          playback_state: "waiting" as const,
+          position_seconds: 1500,
+        },
+      };
+      rerenderPlayer({ watchTogetherConnection: waitingConnection });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+
+      // The copy remux starts at the keyframe 2.5 s before the target, and the
+      // progressive response cannot seek to the plan's player start.
+      rerenderPlayer({
+        watchTogetherConnection: waitingConnection,
+        planRevision: 2,
+        plan: fixturePlanV3({
+          ...directPlan,
+          delivery: "server_remux_progressive",
+          timeline: {
+            ...directPlan.timeline,
+            source_start_seconds: 1500,
+            stream_origin_seconds: 1497.5,
+            timeline_offset_seconds: 1497.5,
+            player_start_seconds: 2.5,
+            can_seek_anywhere: false,
+          },
+        }),
+      });
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 1, start: () => 0, end: () => 0 },
+      });
+      video.currentTime = 0.05;
+      vi.mocked(video.play).mockClear();
+      vi.mocked(connection.sendRoomMessage).mockClear();
+
+      // Until the rebuilt stream loads, the element still holds the old one.
+      await act(() => vi.advanceTimersByTimeAsync(600));
+      expect(video.play).not.toHaveBeenCalled();
+      fireEvent(video, new Event("loadstart"));
+
+      await act(() => vi.advanceTimersByTimeAsync(600));
+      expect(video.play).toHaveBeenCalledOnce();
+      expect(video.muted).toBe(true);
+      expect(video.playbackRate).toBe(4);
+      // The temporary mute is not saved as the viewer's preference, while a
+      // viewer's volume change still is.
+      const setMuted = vi.spyOn(video, "muted", "set");
+      act(() => controls.current!.onVolumeChange!(0.4));
+      expect(setMuted).not.toHaveBeenCalledWith(false);
+      expect(video.muted).toBe(true);
+      fireEvent.volumeChange(video);
+      expect(localStorage.getItem("player-muted")).not.toBe("true");
+      expect(localStorage.getItem("player-volume")).toBe("0.4");
+      setMuted.mockClear();
+      await act(async () => {
+        await realtimeOptions.current!.onCommand({
+          type: "command",
+          command_id: "volume-command",
+          session_id: "session-1",
+          name: "set_volume",
+          deadline_ms: 8_000,
+          payload: { volume: 0.6 },
+        });
+      });
+      expect(setMuted).not.toHaveBeenCalledWith(false);
+      expect(video.muted).toBe(true);
+      expect(localStorage.getItem("player-volume")).toBe("0.6");
+
+      // The mute shortcut flips the viewer's choice rather than the element's
+      // temporary pre-roll mute, which it could only ever turn off.
+      const toggleMuted = vi.mocked(useKeyboardShortcuts).mock.lastCall![5];
+      act(() => toggleMuted());
+      expect(localStorage.getItem("player-muted")).toBe("true");
+      expect(video.muted).toBe(true);
+      act(() => vi.mocked(useKeyboardShortcuts).mock.lastCall![5]());
+      expect(localStorage.getItem("player-muted")).toBe("false");
+      expect(video.muted).toBe(true);
+
+      // A mute chosen during the pre-roll holds; the element stays muted until
+      // the pre-roll ends and then keeps the viewer's choice.
+      act(() => controls.current!.onMutedChange!(true));
+      expect(video.muted).toBe(true);
+      expect(localStorage.getItem("player-muted")).toBe("true");
+
+      if (ending !== "target") {
+        act(() => controls.current!.onMutedChange!(false));
+        rerenderPlayer({
+          watchTogetherConnection: {
+            ...waitingConnection,
+            room: {
+              ...waitingConnection.room!,
+              playback_state: ending === "play" ? "playing" : "paused",
+            },
+            transportCommand: {
+              ...waitingConnection.transportCommand,
+              command_id: "next-command",
+              action: ending,
+              playback_state: ending === "play" ? "playing" : "paused",
+              execute_at: new Date(Date.now() + 500).toISOString(),
+            },
+          },
+        });
+        // The new command owns playback at its scheduled time. The muted
+        // pre-roll must stop before its mute and speed are restored.
+        expect(paused).toBe(true);
+        expect(video.muted).toBe(false);
+        expect(video.playbackRate).toBe(1);
+        await act(() => vi.advanceTimersByTimeAsync(500));
+        expect(paused).toBe(ending === "pause");
+        return;
+      }
+
+      // Still in the pre-roll: no acknowledgement yet. Close to the target it
+      // slows to normal speed, found by polling even without a timeupdate.
+      video.currentTime = 1.8;
+      await act(() => vi.advanceTimersByTimeAsync(60));
+      expect(paused).toBe(false);
+      expect(video.playbackRate).toBe(1);
+      expect(connection.sendRoomMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "ready" }),
+      );
+
+      video.currentTime = 2.6;
+      fireEvent.timeUpdate(video);
+      expect(paused).toBe(true);
+      expect(video.muted).toBe(true);
+      expect(video.playbackRate).toBe(1);
+      expect(connection.sendRoomMessage).toHaveBeenCalledWith({
+        type: "ready",
+        session_id: "session-1",
+        command_id: command.command_id,
+        position_seconds: 1500.1,
+        is_paused: true,
+      });
+    },
+  );
+
+  it("holds a hidden tab's seek pre-roll to the gap a throttled check can spend", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100);
+    let paused = true;
+    Object.defineProperty(video, "paused", { configurable: true, get: () => paused });
+    Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+    vi.mocked(video.play).mockImplementation(async () => {
+      paused = false;
+    });
+    vi.mocked(video.pause).mockImplementation(() => {
+      paused = true;
+    });
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    try {
+      const waitingConnection = {
+        ...connection,
+        room: { ...connection.room!, playback_state: "waiting" as const },
+        transportCommand: {
+          ...command,
+          action: "seek" as const,
+          playback_state: "waiting" as const,
+          position_seconds: 1500,
+        },
+      };
+      rerenderPlayer({ watchTogetherConnection: waitingConnection });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      // A 12 s pre-roll at normal speed would outlast the room's 10 s waiting
+      // deadline, so a hidden tab still starts fast and slows as it closes in.
+      rerenderPlayer({
+        watchTogetherConnection: waitingConnection,
+        planRevision: 2,
+        plan: fixturePlanV3({
+          ...directPlan,
+          delivery: "server_remux_progressive",
+          timeline: {
+            ...directPlan.timeline,
+            source_start_seconds: 1500,
+            stream_origin_seconds: 1488,
+            timeline_offset_seconds: 1488,
+            player_start_seconds: 12,
+            can_seek_anywhere: false,
+          },
+        }),
+      });
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 1, start: () => 0, end: () => 0 },
+      });
+      video.currentTime = 0.05;
+      vi.mocked(video.play).mockClear();
+      vi.mocked(connection.sendRoomMessage).mockClear();
+      fireEvent(video, new Event("loadstart"));
+      await act(() => vi.advanceTimersByTimeAsync(600));
+      expect(video.play).toHaveBeenCalledOnce();
+      expect(video.playbackRate).toBe(4);
+
+      // Within three seconds of the target a throttled check, up to about 1.5 s
+      // late, must not carry the element past the one-second tolerance.
+      video.currentTime = 9;
+      await act(() => vi.advanceTimersByTimeAsync(60));
+      expect(video.playbackRate).toBe(2);
+      expect(paused).toBe(false);
+
+      video.currentTime = 10.6;
+      await act(() => vi.advanceTimersByTimeAsync(60));
+      expect(video.playbackRate).toBe(1);
+      expect(paused).toBe(false);
+      expect(connection.sendRoomMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "ready" }),
+      );
+
+      // Inside the last half second a throttled check could carry the element
+      // out of the room's tolerance, so the pre-roll gives up the rest of the
+      // gap and acknowledges from where it stopped.
+      video.currentTime = 11.6;
+      fireEvent.timeUpdate(video);
+      expect(paused).toBe(true);
+      expect(connection.sendRoomMessage).toHaveBeenCalledWith({
+        type: "ready",
+        session_id: "session-1",
+        command_id: command.command_id,
+        position_seconds: 1499.6,
+        is_paused: true,
+      });
+    } finally {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    }
   });
 
   it("lets the host acknowledge a seek that landed short of the target", async () => {

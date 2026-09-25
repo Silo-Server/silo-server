@@ -159,6 +159,7 @@ describe("LibraryMetadataSettings", () => {
         "markers.mode",
         "markers.lazy_playback",
         "markers.online_storage",
+        "markers.detection_workers",
         "catalog.search.provider",
         "catalog.search.meilisearch.url",
         "catalog.search.meilisearch.api_key",
@@ -234,9 +235,21 @@ describe("LibraryMetadataSettings", () => {
     expect(toggleDisabled(rendered, "Keep provider artwork")).toBe(false);
   });
 
+  it("shows detection workers only while this server detects markers", () => {
+    expect(text(render({ "markers.mode": "local" }))).toContain("Detection workers");
+    expect(text(render({ "markers.mode": "both" }))).toContain("Detection workers");
+    expect(text(render({ "markers.mode": "online" }))).not.toContain("Detection workers");
+    expect(text(render({ "markers.mode": "off" }))).not.toContain("Detection workers");
+  });
+
   it("says it once for a group where every field needs a restart", () => {
     useRestartKeysMock.mockReturnValue(
-      new Set(["markers.mode", "markers.lazy_playback", "markers.online_storage"]),
+      new Set([
+        "markers.mode",
+        "markers.lazy_playback",
+        "markers.online_storage",
+        "markers.detection_workers",
+      ]),
     );
 
     const rendered = render({ "catalog.search.provider": "postgres" });

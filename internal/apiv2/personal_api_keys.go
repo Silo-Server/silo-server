@@ -122,6 +122,11 @@ func registerPersonalAPIKeys(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
+		// Only server admins create API keys (#1189 AC2). Listing and revocation
+		// stay open so any account can still see and revoke keys it already owns.
+		if claimsFrom(ctx).Role != models.RoleAdmin {
+			return nil, NewProblem(TypePermissionDenied, "Only server admins can create API keys.")
+		}
 		if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
 			return nil, p
 		}

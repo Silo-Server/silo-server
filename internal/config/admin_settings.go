@@ -81,6 +81,10 @@ const ArtworkStorageSweepCheckpointKey = "artwork.storage_sweep_checkpoint"
 // worker per CPU core, resolved when the task runs.
 const MetadataImageWorkersSettingKey = "metadata.image_workers"
 
+// MarkersDetectionWorkersSettingKey sizes local intro detection: how many
+// seasons are analyzed at once and how many ffmpeg processes read audio.
+const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
+
 // adminSettingDefaults is the effective value shown by the Admin UI when no
 // row exists in server_settings. Keep these values aligned with the runtime
 // readers that own each setting. The UI must never invent a second set of
@@ -128,6 +132,7 @@ var adminSettingDefaults = map[string]string{
 	"artwork.local_path":                   "/var/lib/silo/artwork",
 	"markers.mode":                         "both",
 	"markers.lazy_playback":                "true",
+	MarkersDetectionWorkersSettingKey:      "1",
 	"markers.online_storage":               "stored",
 
 	"playback.ffmpeg_path":                           "",
@@ -254,6 +259,10 @@ var adminSettingDefaults = map[string]string{
 	"signup.enabled":                  "false",
 	SetupCompletedSettingKey:          "false",
 
+	// Self-service password reset from the sign-in page; an administrator
+	// opts in.
+	"password_reset.self_service_enabled": "false",
+
 	"catalog.search.provider":                             "postgres",
 	"catalog.search.meilisearch.index":                    "silo_media_items",
 	"catalog.search.meilisearch.timeout_ms":               "800",
@@ -376,7 +385,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", "recommendations.enabled",
 		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled",
 		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
-		"email.enabled", "signup.enabled", SetupCompletedSettingKey,
+		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,
 		"scanner.empty_trash_after_scan", "matcher.enable_tv_series_root_queue",
 		"matcher.enable_tv_series_group_queue", "policy.editor_enabled",
 		"overlays.enabled", "notifications.release_events_enabled", "notifications.fanout_enabled",
@@ -412,6 +421,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 100000)
 	case MetadataImageWorkersSettingKey:
 		return normalizeAdminInt(key, value, 0, 256)
+	case MarkersDetectionWorkersSettingKey:
+		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.chapter_thumbnail_workers", "playback.chapter_thumbnail_node_capacity":
 		return normalizeAdminInt(key, value, 1, 1024)
 	case "playback.watched_threshold":

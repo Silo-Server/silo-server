@@ -15,6 +15,7 @@ it("delegates arrows to directional actions and updates callbacks", () => {
         vi.fn(),
         { back, forward: next },
         vi.fn(),
+        vi.fn(),
         undefined,
         true,
       ),

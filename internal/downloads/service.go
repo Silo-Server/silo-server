@@ -476,7 +476,11 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 		}
 		status, size := artifactRowStatus(artifact, file)
 		replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
-		return s.reuseOrReplaceManaged(ctx, existing, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
+		d, err := s.reuseOrReplaceManaged(ctx, existing, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
+		if err != nil {
+			return nil, err
+		}
+		return s.confirmArtifactLink(ctx, d), nil
 	}
 
 	resolvedTarget := decision.PrepareTarget
@@ -568,7 +572,22 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	if err != nil {
 		return nil, err
 	}
-	return d, nil
+	// Ensure read the artifact before this row existed. Recovery may have
+	// requeued it since; return the reconciled row.
+	return s.confirmArtifactLink(ctx, d), nil
+}
+
+// confirmArtifactLink reconciles a committed create with missing-output
+// recovery. The create has already succeeded, so a failed check is logged
+// and the caller's row returned: reporting an error would invite a retry
+// that duplicates the download or conflicts on its revision.
+func (s *Service) confirmArtifactLink(ctx context.Context, d *Download) *Download {
+	confirmed, err := s.repo.ConfirmArtifactLink(ctx, d)
+	if err != nil {
+		slog.WarnContext(ctx, "confirming download artifact link failed", "component", "downloads", "download_id", d.ID, "artifact_id", d.ArtifactID, "error", err)
+		return d
+	}
+	return confirmed
 }
 
 // artifactRowStatus maps an ensured artifact to the download row status and

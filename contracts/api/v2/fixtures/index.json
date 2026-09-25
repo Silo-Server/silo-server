@@ -10300,6 +10300,23 @@
       "body_file": "notification_webhooks.json"
     },
     {
+      "name": "password_reset_capability",
+      "operation_id": "getPasswordResetCapability",
+      "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/capabilities/password-reset"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PasswordResetCapability",
+      "body_file": "password_reset_capability.json"
+    },
+    {
       "name": "password_reset_completed",
       "operation_id": "completePasswordReset",
       "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
