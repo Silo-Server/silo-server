@@ -116,12 +116,12 @@ func TestEventsSocketV2TraefikWebSocketForwardedProto(t *testing.T) {
 	headers := http.Header{"Origin": []string{origin}, "X-Forwarded-Proto": []string{"wss"}, "X-Forwarded-For": []string{"198.51.100.1"}}
 	conn, resp, err := dialer.DialContext(t.Context(), endpoint, headers)
 	if resp != nil {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 	}
 	if err != nil {
 		t.Fatalf("wss-forwarded handshake: %v, %v", resp, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}

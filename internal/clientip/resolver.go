@@ -124,6 +124,13 @@ func (r *Resolver) ReloadTrustedCIDRs(ctx context.Context, store SettingsStore) 
 	return nil
 }
 
+// Forwarded protocols Traefik sends on a WebSocket upgrade in place of
+// http and https.
+const (
+	forwardedProtoWS  = "ws"
+	forwardedProtoWSS = "wss"
+)
+
 // requestScheme must run before Middleware replaces the transport peer address.
 // Proxies must preserve Host and overwrite X-Forwarded-Proto, never append it.
 // On a WebSocket upgrade, Traefik sends "wss" or "ws" instead of "https" or
@@ -157,9 +164,13 @@ func (r *Resolver) requestScheme(req *http.Request) string {
 	switch values[0] {
 	case "http", "https":
 		return values[0]
-	case "ws", "wss":
+	case forwardedProtoWS:
 		if isWebSocketUpgrade(req) {
-			return map[string]string{"ws": "http", "wss": "https"}[values[0]]
+			return "http"
+		}
+	case forwardedProtoWSS:
+		if isWebSocketUpgrade(req) {
+			return "https"
 		}
 	}
 	return ""
