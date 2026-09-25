@@ -36,6 +36,7 @@ import {
   PolicyAccessFields,
   PolicyLimitFields,
   effectiveAccessGroupID,
+  policyDefaultSource,
   policyInheritHints,
   policyStateFromUser,
   policyUpdateFields,
@@ -1169,6 +1170,7 @@ function EditUserForm({
   // An admin inherits from no group, so preview the no-group policy while the
   // picked group is kept for toggling the role back.
   const hintGroupID = effectiveAccessGroupID(role, accessGroupID);
+  const hintSource = policyDefaultSource(role, hintGroupID);
   const inheritHints =
     policyInheritHints(hintGroupID, accessGroups) ??
     (hintGroupID === user.access_group_id ? user.effective_policy : undefined);
@@ -1352,13 +1354,19 @@ function EditUserForm({
             <PolicyAccessFields
               state={policy}
               onChange={setPolicy}
+              source={hintSource}
               effective={inheritHints}
               libraries={libraries}
             />
           </TabsContent>
 
           <TabsContent value="limits" className="mt-0 space-y-4">
-            <PolicyLimitFields state={policy} onChange={setPolicy} effective={inheritHints} />
+            <PolicyLimitFields
+              state={policy}
+              onChange={setPolicy}
+              source={hintSource}
+              effective={inheritHints}
+            />
             <div className="space-y-1">
               <Label>Max Profiles</Label>
               <Input

@@ -381,3 +381,51 @@ describe("AdminUsers row actions", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("/admin/users");
   });
 });
+
+describe("AdminUsers create dialog policy hints", () => {
+  beforeEach(() => {
+    setAccessToken("account");
+    setProfileId("owner");
+    setProfileToken(null);
+    mocks.users = [];
+    mocks.available = true;
+    mocks.useAdminServerSettings.mockReturnValue({ data: {}, isLoading: false });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    // Radix Select reads pointer capture and scrolls options into view, which
+    // jsdom does not implement.
+    Object.defineProperties(Element.prototype, {
+      hasPointerCapture: { configurable: true, value: () => false },
+      setPointerCapture: { configurable: true, value: () => {} },
+      releasePointerCapture: { configurable: true, value: () => {} },
+      scrollIntoView: { configurable: true, value: () => {} },
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("keeps a new user's hints on its group while the default group is unknown", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /Add User/ }));
+    const dialog = await screen.findByRole("dialog");
+
+    // A new regular account always joins the default group, so with the group
+    // list still empty its values are unknown, not the server's no-group ones.
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    expect(within(dialog).getAllByText("Inherited from group").length).toBeGreaterThan(0);
+    expect(within(dialog).queryByText(/Server default|Unlimited/)).not.toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.click(within(dialog).getByRole("combobox", { name: "Role" }));
+    await user.click(await screen.findByRole("option", { name: "Admin" }));
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    expect(within(dialog).getAllByText("Admin default: Unlimited")).toHaveLength(4);
+    expect(within(dialog).queryByText(/Inherit/)).not.toBeInTheDocument();
+  });
+});

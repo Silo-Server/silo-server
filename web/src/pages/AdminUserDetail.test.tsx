@@ -409,8 +409,8 @@ describe("AdminUserDetail transcode limits", () => {
     await user.click(screen.getByRole("button", { name: /edit/i }));
     await user.click(screen.getByRole("tab", { name: "Limits" }));
 
-    // Inheriting fields show the group-derived effective value.
-    expect(screen.getAllByText("Inherited: Unlimited").length).toBeGreaterThan(0);
+    // Fields left on their default show the value they resolve to.
+    expect(screen.getAllByText("Server default: Unlimited").length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("combobox", { name: "Video Transcoding" }));
     await user.click(screen.getByRole("option", { name: "Not allowed" }));
@@ -456,8 +456,10 @@ describe("AdminUserDetail inherit hints", () => {
     renderUserDetail();
 
     await openLimitsTab(user);
-    // Ungrouped: the no-group layer leaves all four ceilings uncapped.
-    expect(screen.getAllByText("Inherited: Unlimited")).toHaveLength(4);
+    // Ungrouped: the server's no-group defaults leave all four ceilings
+    // uncapped, and nothing claims to come from a group.
+    expect(screen.getAllByText("Server default: Unlimited")).toHaveLength(4);
+    expect(screen.queryByText(/Inherited/)).not.toBeInTheDocument();
 
     await selectGuestsGroup(user);
     // The access tab's hints follow the picker straight away.
@@ -500,7 +502,9 @@ describe("AdminUserDetail inherit hints", () => {
 
     await user.clear(maxStreams);
     expect(maxStreams).toHaveValue(null);
-    expect(screen.getByText(/Enter a whole number/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Enter a whole number, or turn Override off to use the server default."),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(mocks.updateUserMutate).not.toHaveBeenCalled();
@@ -510,6 +514,44 @@ describe("AdminUserDetail inherit hints", () => {
     await waitFor(() => expect(mocks.updateUserMutate).toHaveBeenCalled());
     const call = mocks.updateUserMutate.mock.calls[0]?.[0] as UpdateUserMutationArg | undefined;
     expect(call?.body.max_streams).toBe(3);
+  });
+
+  it("labels an admin's defaults as admin defaults, never as inherited", async () => {
+    const user = userEvent.setup();
+    mocks.user = { ...adminUser, role: "admin" };
+    renderUserDetail();
+
+    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.click(screen.getByRole("tab", { name: "Access" }));
+    expect(screen.getByText("Admin default: All libraries")).toBeInTheDocument();
+    await user.click(screen.getByRole("combobox", { name: "Download Transcodes" }));
+    expect(await screen.findByRole("option", { name: "Admin default: Not allowed" })).toBeVisible();
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByRole("tab", { name: "Limits" }));
+    expect(screen.getAllByText("Admin default: Unlimited")).toHaveLength(4);
+    expect(screen.getByText("Uses the admin default quality ceiling.")).toBeInTheDocument();
+    expect(screen.queryByText(/Inherit/)).not.toBeInTheDocument();
+  });
+
+  it("follows the role and group pickers from admin default to inherited", async () => {
+    const user = userEvent.setup();
+    mocks.user = { ...adminUser, role: "admin" };
+    renderUserDetail();
+
+    await openLimitsTab(user);
+    expect(screen.getAllByText("Admin default: Unlimited")).toHaveLength(4);
+
+    await user.click(screen.getByRole("tab", { name: "Account" }));
+    await user.click(screen.getByRole("combobox", { name: "Role" }));
+    await user.click(await screen.findByRole("option", { name: "User" }));
+    await user.click(screen.getByRole("tab", { name: "Limits" }));
+    expect(screen.getAllByText("Server default: Unlimited")).toHaveLength(4);
+
+    await selectGuestsGroup(user);
+    await user.click(screen.getByRole("tab", { name: "Limits" }));
+    expect(screen.getByText("Inherited: 1")).toBeInTheDocument();
+    expect(screen.queryByText(/default/)).not.toBeInTheDocument();
   });
 });
 

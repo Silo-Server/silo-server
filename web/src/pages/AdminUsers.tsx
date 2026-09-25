@@ -16,6 +16,7 @@ import {
   PolicyLimitFields,
   effectiveAccessGroupID,
   policyCreateFields,
+  policyDefaultSource,
   policyInheritHints,
   policyStateFromUser,
   policyUpdateFields,
@@ -714,9 +715,15 @@ function UserForm({
   // deliberately leaves ungrouped (auth.Repository.CreateUser).
   const defaultGroupID = accessGroups.find((group) => group.is_default)?.id ?? null;
   const inheritGroupID = effectiveAccessGroupID(role, user ? user.access_group_id : defaultGroupID);
-  const inheritHints =
-    policyInheritHints(inheritGroupID, accessGroups) ??
-    (role === "admin" ? undefined : user?.effective_policy);
+  // A new regular account is grouped even before the list naming its default
+  // group has loaded; until then what it inherits is unknown, not the no-group
+  // defaults.
+  const awaitingDefaultGroup = !user && role !== "admin" && defaultGroupID === null;
+  const hintSource = awaitingDefaultGroup ? "group" : policyDefaultSource(role, inheritGroupID);
+  const inheritHints = awaitingDefaultGroup
+    ? undefined
+    : (policyInheritHints(inheritGroupID, accessGroups) ??
+      (role === "admin" ? undefined : user?.effective_policy));
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -920,13 +927,19 @@ function UserForm({
             <PolicyAccessFields
               state={policy}
               onChange={setPolicy}
+              source={hintSource}
               effective={inheritHints}
               libraries={libraries}
             />
           </TabsContent>
 
           <TabsContent value="limits" className="mt-0 space-y-4">
-            <PolicyLimitFields state={policy} onChange={setPolicy} effective={inheritHints} />
+            <PolicyLimitFields
+              state={policy}
+              onChange={setPolicy}
+              source={hintSource}
+              effective={inheritHints}
+            />
             <div className="space-y-1">
               <Label htmlFor={maxProfilesId}>Max Profiles</Label>
               <Input
