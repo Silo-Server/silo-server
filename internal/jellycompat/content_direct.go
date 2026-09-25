@@ -415,32 +415,54 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 	}
 
 	filters := catalog.BrowseFilters{
-		Type:               compatScopedTypes(params.Get("type")),
-		UserID:             session.StreamAppUserID,
-		ProfileID:          session.ProfileID,
-		IsPlayed:           played,
-		IsFavorite:         parseBool(params.Get("is_favorite"), false),
-		IsResumable:        parseBool(params.Get("is_resumable"), false),
-		Genre:              params.Get("genre"),
-		Genres:             splitNonemptyGenres(params.Get("genres")),
-		Years:              parseBrowseYears(params.Get("years")),
-		SearchTerm:         params.Get("search_term"),
-		NamePrefix:         params.Get("name_prefix"),
-		ContentIDs:         contentIDs,
-		LibraryID:          catalog.ParseIntParam(params.Get("library_id")),
-		LibraryIDs:         filter.AllowedLibraryIDs,
-		DisabledLibraryIDs: filter.DisabledLibraryIDs,
-		MaturityLimits:     clampMaturityLimits(filter.MaturityLimits, params.Get("max_content_rating")),
-		PersonID:           catalog.ParseInt64Param(params.Get("person_id")),
-		Sort:               params.Get("sort"),
-		Order:              params.Get("order"),
-		Limit:              fetchLimit,
-		MaxLimit:           compatBrowseMaxLimit,
-		Offset:             requestedOffset,
-		RequireBackdrop:    parseBool(params.Get("require_backdrop"), false),
-		AudioLanguages:     splitCommaValues([]string{params.Get("audio_languages")}),
-		SubtitleLanguages:  splitCommaValues([]string{params.Get("subtitle_languages")}),
-		MaxPlaybackQuality: filter.MaxPlaybackQuality,
+		Type:                    compatScopedTypes(params.Get("type")),
+		UserID:                  session.StreamAppUserID,
+		ProfileID:               session.ProfileID,
+		IsPlayed:                played,
+		IsFavorite:              parseBool(params.Get("is_favorite"), false),
+		IsResumable:             parseBool(params.Get("is_resumable"), false),
+		Genre:                   params.Get("genre"),
+		Genres:                  splitNonemptyGenres(params.Get("genres")),
+		Years:                   parseBrowseYears(params.Get("years")),
+		SearchTerm:              params.Get("search_term"),
+		NamePrefix:              params.Get("name_prefix"),
+		ContentIDs:              contentIDs,
+		NameLessThan:            params.Get("name_less_than"),
+		NameStartsWithOrGreater: params.Get("name_at_least"),
+		ExcludeContentIDs:       parseContentIDParam(params.Get("exclude_content_ids")),
+		Studios:                 splitNonemptyGenres(params.Get("studios")),
+		OfficialRatings:         splitNonemptyGenres(params.Get("official_ratings")),
+		MinCommunityRating:      parseFloatParam(params.Get("min_community_rating")),
+		MinPremiereDate:         params.Get("min_premiere_date"),
+		MaxPremiereDate:         params.Get("max_premiere_date"),
+		LibraryID:               catalog.ParseIntParam(params.Get("library_id")),
+		LibraryIDs:              filter.AllowedLibraryIDs,
+		DisabledLibraryIDs:      filter.DisabledLibraryIDs,
+		MaturityLimits:          clampMaturityLimits(filter.MaturityLimits, params.Get("max_content_rating")),
+		PersonID:                catalog.ParseInt64Param(params.Get("person_id")),
+		Sort:                    params.Get("sort"),
+		Order:                   params.Get("order"),
+		Limit:                   fetchLimit,
+		MaxLimit:                compatBrowseMaxLimit,
+		Offset:                  requestedOffset,
+		RequireBackdrop:         parseBool(params.Get("require_backdrop"), false),
+		AudioLanguages:          splitCommaValues([]string{params.Get("audio_languages")}),
+		SubtitleLanguages:       splitCommaValues([]string{params.Get("subtitle_languages")}),
+		MaxPlaybackQuality:      filter.MaxPlaybackQuality,
+	}
+	// Limit=0 wants only the total. Count directly unless played state is a
+	// profile overlay applied after the catalog query.
+	if parseBool(params.Get("count_only"), false) && isPlayedFilter == "" &&
+		(s.catalogUserState || (!filters.IsFavorite && filters.IsPlayed == nil && !filters.IsResumable)) {
+		if counter, ok := s.browseRepo.(interface {
+			BrowseCount(context.Context, catalog.BrowseFilters) (int, error)
+		}); ok {
+			total, err := counter.BrowseCount(ctx, filters)
+			if err != nil {
+				return nil, fmt.Errorf("browse items: %w", err)
+			}
+			return &upstreamBrowseResponse{Total: total, Items: []upstreamListItem{}}, nil
+		}
 	}
 	if !s.catalogUserState && (filters.IsFavorite || filters.IsPlayed != nil || filters.IsResumable || isPlayedFilter != "") {
 		if isPlayedFilter != "" {
@@ -1561,6 +1583,14 @@ func wrapCatalogError(err error) error {
 		return &HTTPError{StatusCode: 404, Message: errMsg}
 	}
 	return err
+}
+
+func parseFloatParam(raw string) float64 {
+	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || value < 0 {
+		return 0
+	}
+	return value
 }
 
 func splitNonemptyGenres(raw string) []string {

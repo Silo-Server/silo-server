@@ -118,3 +118,37 @@ func TestBrowseLanguagePredicateJoinsEpisodeFiles(t *testing.T) {
 		t.Fatalf("episode scope should join media files by episode_id: %v", conditions)
 	}
 }
+
+func TestBrowseJellyfinGridFiltersBindEveryParameter(t *testing.T) {
+	filters := BrowseFilters{
+		Type:                    "movie",
+		NameLessThan:            "M",
+		NameStartsWithOrGreater: "C",
+		ExcludeContentIDs:       []string{"movie-9"},
+		Studios:                 []string{"A24"},
+		OfficialRatings:         []string{"PG-13", "R"},
+		MinCommunityRating:      7.5,
+		MinPremiereDate:         "2020-01-02",
+		MaxPremiereDate:         "2024-12-31",
+		Limit:                   1,
+	}
+	plan, empty, err := (&BrowseRepository{}).buildBrowsePlan(filters)
+	if err != nil || empty {
+		t.Fatalf("build plan: empty=%v err=%v", empty, err)
+	}
+	sql, args := plan.pagedSQL(false)
+	for _, predicate := range []string{
+		sortTitleKeyExpr + " < LOWER(", sortTitleKeyExpr + " >= LOWER(",
+		"NOT (mi.content_id = ANY(", "mi.studios &&", "mi.content_rating = ANY(", "mi.rating_imdb >=",
+		premiereDateKeyExpr + " >=", premiereDateKeyExpr + " <=",
+	} {
+		if !strings.Contains(sql, predicate) {
+			t.Errorf("missing %q in %s", predicate, sql)
+		}
+	}
+	for i := range args {
+		if !regexp.MustCompile(fmt.Sprintf(`\$%d\b`, i+1)).MatchString(sql) {
+			t.Fatalf("parameter $%d has no SQL reference: %s", i+1, sql)
+		}
+	}
+}

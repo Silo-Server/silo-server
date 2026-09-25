@@ -60,6 +60,17 @@ type BrowseFilters struct {
 	AudioLanguages     []string   // any accessible file has an audio track in one of these languages
 	SubtitleLanguages  []string   // any accessible file has an embedded or external subtitle in one of these languages
 	MaxPlaybackQuality string     // viewer quality ceiling for file-level language predicates and facets
+	// Jellyfin-compat predicates, applied by appendCompatBrowsePredicates.
+	// NameLessThan and NameStartsWithOrGreater compare the sort_title order key
+	// so a count of the preceding rows is a grid position (letter jump).
+	NameLessThan            string
+	NameStartsWithOrGreater string
+	ExcludeContentIDs       []string
+	Studios                 []string // any matching studio name
+	OfficialRatings         []string // exact content ratings
+	MinCommunityRating      float64  // minimum rating_imdb, the compat CommunityRating
+	MinPremiereDate         string   // inclusive YYYY-MM-DD on release/first-air date
+	MaxPremiereDate         string   // inclusive YYYY-MM-DD on release/first-air date
 	// ScopeFacetFilesToAccess limits the audio/subtitle language facets to
 	// files the viewer may play (library lists and MaxPlaybackQuality), as the
 	// Jellyfin-compat Filters2 languages must agree with its language filters.
@@ -152,6 +163,24 @@ func (r *BrowseRepository) browse(ctx context.Context, filters BrowseFilters, in
 		Total:   total,
 		HasMore: hasMore,
 	}, nil
+}
+
+// BrowseCount returns the total a browse of filters would report without
+// fetching a page (Jellyfin's Limit=0).
+func (r *BrowseRepository) BrowseCount(ctx context.Context, filters BrowseFilters) (int, error) {
+	plan, earlyEmpty, err := r.buildBrowsePlan(filters)
+	if err != nil {
+		return 0, err
+	}
+	if earlyEmpty {
+		return 0, nil
+	}
+	countSQL, countArgs := plan.countSQL()
+	var total int
+	if err := r.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count browse: %w", err)
+	}
+	return total, nil
 }
 
 // BrowseRecentlyAddedAcrossLibraries serves a recently_added browse spanning
@@ -1710,6 +1739,13 @@ func splitTypes(s string) []string {
 	return result
 }
 
+// sortTitleKeyExpr is the sort_title order key (see the sort_title ORDER BY).
+const sortTitleKeyExpr = "LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title))"
+
+// premiereDateKeyExpr is the release_date order key; first_air_date is text, so
+// both sides compare as ISO dates.
+const premiereDateKeyExpr = "COALESCE(mi.release_date::text, NULLIF(BTRIM(mi.first_air_date), ''))"
+
 func appendCompatBrowsePredicates(filters BrowseFilters, conditions *[]string, args *[]any, argIdx *int) {
 	add := func(sql string, value any) {
 		*conditions = append(*conditions, fmt.Sprintf(sql, *argIdx))
@@ -1724,6 +1760,30 @@ func appendCompatBrowsePredicates(filters BrowseFilters, conditions *[]string, a
 	}
 	if filters.SearchTerm != "" {
 		add("mi.title ILIKE $%d ESCAPE '\\'", "%"+strings.TrimSuffix(likePrefixPattern(filters.SearchTerm), "%")+"%")
+	}
+	if value := strings.TrimSpace(filters.NameLessThan); value != "" {
+		add(sortTitleKeyExpr+" < LOWER($%d)", value)
+	}
+	if value := strings.TrimSpace(filters.NameStartsWithOrGreater); value != "" {
+		add(sortTitleKeyExpr+" >= LOWER($%d)", value)
+	}
+	if len(filters.ExcludeContentIDs) > 0 {
+		add("NOT (mi.content_id = ANY($%d::text[]))", filters.ExcludeContentIDs)
+	}
+	if len(filters.Studios) > 0 {
+		add("mi.studios && $%d::text[]", filters.Studios)
+	}
+	if len(filters.OfficialRatings) > 0 {
+		add("mi.content_rating = ANY($%d::text[])", filters.OfficialRatings)
+	}
+	if filters.MinCommunityRating > 0 {
+		add("mi.rating_imdb >= $%d", filters.MinCommunityRating)
+	}
+	if filters.MinPremiereDate != "" {
+		add(premiereDateKeyExpr+" >= $%d", filters.MinPremiereDate)
+	}
+	if filters.MaxPremiereDate != "" {
+		add(premiereDateKeyExpr+" <= $%d", filters.MaxPremiereDate)
 	}
 	audioCodes := languageFilterCodes(filters.AudioLanguages)
 	subtitleCodes := languageFilterCodes(filters.SubtitleLanguages)

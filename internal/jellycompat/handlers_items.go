@@ -1066,12 +1066,24 @@ func (h *ItemsHandler) HandleStudios(w http.ResponseWriter, r *http.Request) {
 		if q.searchTerm != "" && !strings.Contains(strings.ToLower(studio), strings.ToLower(q.searchTerm)) {
 			continue
 		}
-		if q.namePrefix != "" && !strings.HasPrefix(strings.ToLower(studio), strings.ToLower(q.namePrefix)) {
+		name := strings.ToLower(studio)
+		if q.namePrefix != "" && !strings.HasPrefix(name, strings.ToLower(q.namePrefix)) {
+			continue
+		}
+		if q.nameLessThan != "" && name >= strings.ToLower(q.nameLessThan) {
+			continue
+		}
+		if q.nameStartsWithOrGreater != "" && name < strings.ToLower(q.nameStartsWithOrGreater) {
 			continue
 		}
 		items = append(items, baseItemDTO{ID: h.codec.EncodeStringID(EncodedIDStudio, studio), Name: studio, Type: "Studio"})
 	}
 	total := len(items)
+	// Jellyfin returns every studio when Limit is absent; parseItemsQuery's
+	// default page size is for item browsing.
+	if newCaseInsensitiveQuery(r.URL.Query()).Get("Limit") == "" {
+		q.limit = total
+	}
 	items = slicePage(items, q.startIndex, q.limit)
 	if q.limit == 0 {
 		items = []baseItemDTO{}
@@ -2467,9 +2479,23 @@ func (h *ItemsHandler) batchListItemDetails(ctx context.Context, session *Sessio
 }
 
 func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
+	// Limit=0 asks only for TotalRecordCount (Wholphin's letter jump); the
+	// catalog treats a zero limit as its default page, so fetch one row.
+	countOnly := query.countOnly
+	if countOnly {
+		query.limit = 1
+	}
 	result, err := h.content.BrowseItems(r.Context(), session, buildBrowseParams(query))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
+		return
+	}
+	if countOnly {
+		total := result.Total
+		if !query.enableTotalRecordCount {
+			total = 0
+		}
+		writeJSON(w, http.StatusOK, queryResultDTO{Items: []baseItemDTO{}, TotalRecordCount: total, StartIndex: query.startIndex})
 		return
 	}
 	h.rememberListImages(result.Items)

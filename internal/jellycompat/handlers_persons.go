@@ -64,6 +64,14 @@ func (h *PersonsHandler) HandleGetPersons(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// Silo favorites are content items only (see handleFavoriteMutation), so
+	// no person is a favorite. Listing everyone would fill a client's
+	// Favorites > People tab with the whole catalog.
+	if isFavorite := q.Get("IsFavorite"); isFavorite != "" && parseBool(isFavorite, false) || hasFilter(q.Get("Filters"), "IsFavorite") {
+		writeJSON(w, http.StatusOK, emptyQueryResult(parsePositiveInt(q.Get("StartIndex"), 0)))
+		return
+	}
+
 	filter := catalog.AccessFilter{AllowedLibraryIDs: []int{}}
 	if service, ok := h.content.(*directContentService); ok {
 		filter = service.resolveFilter(r.Context(), session)

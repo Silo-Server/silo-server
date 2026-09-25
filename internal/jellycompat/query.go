@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
@@ -59,6 +60,16 @@ type itemsQuery struct {
 	fieldsExplicit         bool            // true when Fields was in the request
 	startItemID            string          // raw encoded ID from StartItemId param
 	adjacentTo             string          // raw encoded ID from AdjacentTo param
+	// Jellyfin browse filters served by catalog compat predicates.
+	nameLessThan            string
+	nameStartsWithOrGreater string
+	excludeIDs              []string // decoded content IDs from ExcludeItemIds
+	studios                 []string // decoded studio names from StudioIds
+	officialRatings         []string
+	minCommunityRating      float64
+	minPremiereDate         string // YYYY-MM-DD
+	maxPremiereDate         string // YYYY-MM-DD
+	countOnly               bool   // Limit=0 was sent: only TotalRecordCount is wanted
 }
 
 func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
@@ -147,6 +158,31 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 			result.unmatchedIDFilter = true
 		}
 	}
+
+	result.countOnly = strings.TrimSpace(q.Get("Limit")) == "0"
+	result.nameLessThan = strings.TrimSpace(q.Get("NameLessThan"))
+	result.nameStartsWithOrGreater = strings.TrimSpace(q.Get("NameStartsWithOrGreater"))
+	for _, raw := range splitCommaValues(q.Values("ExcludeItemIds")) {
+		if decoded, err := decodeItemID(codec, raw); err == nil && decoded != "" {
+			result.excludeIDs = append(result.excludeIDs, decoded)
+		}
+	}
+	if studioIDs := splitPipeOrCommaValues(q.Values("StudioIds")); len(studioIDs) > 0 {
+		for _, raw := range studioIDs {
+			if decoded, err := codec.DecodeStringID(EncodedIDStudio, raw); err == nil && decoded != "" {
+				result.studios = append(result.studios, decoded)
+			}
+		}
+		if len(result.studios) == 0 {
+			result.unmatchedIDFilter = true
+		}
+	}
+	result.officialRatings = splitPipeOrCommaValues(q.Values("OfficialRatings"))
+	if rating, err := strconv.ParseFloat(strings.TrimSpace(q.Get("MinCommunityRating")), 64); err == nil && rating > 0 {
+		result.minCommunityRating = rating
+	}
+	result.minPremiereDate = parsePremiereDateBound(q.Get("MinPremiereDate"), true)
+	result.maxPremiereDate = parsePremiereDateBound(q.Get("MaxPremiereDate"), false)
 
 	rawItemTypes := q.Values("IncludeItemTypes")
 	rawExcludedItemTypes := q.Values("ExcludeItemTypes")
@@ -310,6 +346,30 @@ func buildBrowseParams(query itemsQuery) url.Values {
 	if query.namePrefix != "" {
 		params.Set("name_prefix", query.namePrefix)
 	}
+	if query.nameLessThan != "" {
+		params.Set("name_less_than", query.nameLessThan)
+	}
+	if query.nameStartsWithOrGreater != "" {
+		params.Set("name_at_least", query.nameStartsWithOrGreater)
+	}
+	if len(query.excludeIDs) > 0 {
+		params.Set("exclude_content_ids", strings.Join(query.excludeIDs, ","))
+	}
+	if len(query.studios) > 0 {
+		params.Set("studios", strings.Join(query.studios, "|"))
+	}
+	if len(query.officialRatings) > 0 {
+		params.Set("official_ratings", strings.Join(query.officialRatings, "|"))
+	}
+	if query.minCommunityRating > 0 {
+		params.Set("min_community_rating", strconv.FormatFloat(query.minCommunityRating, 'f', -1, 64))
+	}
+	if query.minPremiereDate != "" {
+		params.Set("min_premiere_date", query.minPremiereDate)
+	}
+	if query.maxPremiereDate != "" {
+		params.Set("max_premiere_date", query.maxPremiereDate)
+	}
 	if query.sort != "" {
 		params.Set("sort", query.sort)
 	}
@@ -317,6 +377,9 @@ func buildBrowseParams(query itemsQuery) url.Values {
 		params.Set("order", query.order)
 	}
 	params.Set("include_total", strconv.FormatBool(query.enableTotalRecordCount))
+	if query.countOnly {
+		params.Set("count_only", "true")
+	}
 	if query.isFavorite {
 		params.Set("is_favorite", "true")
 	}
@@ -394,6 +457,16 @@ func splitCommaValues(values []string) []string {
 				out = append(out, part)
 			}
 		}
+	}
+	return out
+}
+
+// splitPipeOrCommaValues flattens repeated values delimited by either '|'
+// (Jellyfin's binder for StudioIds and OfficialRatings) or ','.
+func splitPipeOrCommaValues(values []string) []string {
+	var out []string
+	for _, raw := range values {
+		out = append(out, splitCommaValues(strings.Split(raw, "|"))...)
 	}
 	return out
 }
@@ -741,8 +814,44 @@ func (q caseInsensitiveQuery) Values(key string) []string {
 	return nil
 }
 
+// hasCompatBrowseFilters reports Jellyfin filters that only the catalog browse
+// path applies.
+func (q itemsQuery) hasCompatBrowseFilters() bool {
+	return q.nameLessThan != "" || q.nameStartsWithOrGreater != "" || len(q.excludeIDs) > 0 || len(q.studios) > 0 ||
+		len(q.officialRatings) > 0 || q.minCommunityRating > 0 || q.minPremiereDate != "" || q.maxPremiereDate != ""
+}
+
+// parsePremiereDateBound converts a Jellyfin Min/MaxPremiereDate instant to
+// the inclusive YYYY-MM-DD bound the catalog compares. Jellyfin compares the
+// instant with premiere dates at midnight UTC, so a minimum with a time of day
+// starts the next UTC day and a maximum ends on its own UTC day.
+func parsePremiereDateBound(raw string, isMin bool) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999Z0700", "2006-01-02T15:04:05.999999999", "2006-01-02 15:04:05", "2006-01-02"} {
+		t, err := time.Parse(layout, raw)
+		if err != nil {
+			continue
+		}
+		t = t.UTC()
+		day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+		if isMin && t.After(day) {
+			day = day.AddDate(0, 0, 1)
+		}
+		return day.Format("2006-01-02")
+	}
+	if len(raw) >= 10 {
+		if _, err := time.Parse("2006-01-02", raw[:10]); err == nil {
+			return raw[:10]
+		}
+	}
+	return ""
+}
+
 // hasIntersectingFilters selects catalog predicate composition before specialized
 // rails can discard filters. Unfiltered rails keep their episode-aware semantics.
 func (q itemsQuery) hasIntersectingFilters() bool {
-	return len(q.genres) > 0 || len(q.years) > 0 || q.genreName != "" || q.personID > 0 || q.requireBackdrop || len(q.audioLanguages) > 0 || len(q.subtitleLanguages) > 0 || q.maxOfficialRating != "" || q.namePrefix != "" || (q.searchTerm != "" && (q.isFavorite || q.isPlayed != nil || q.isResumable || q.sortExplicit)) || (q.isFavorite && (q.isPlayed != nil || q.isResumable)) || (q.isResumable && q.isPlayed != nil)
+	return len(q.genres) > 0 || len(q.years) > 0 || q.hasCompatBrowseFilters() || q.genreName != "" || q.personID > 0 || q.requireBackdrop || len(q.audioLanguages) > 0 || len(q.subtitleLanguages) > 0 || q.maxOfficialRating != "" || q.namePrefix != "" || (q.searchTerm != "" && (q.isFavorite || q.isPlayed != nil || q.isResumable || q.sortExplicit)) || (q.isFavorite && (q.isPlayed != nil || q.isResumable)) || (q.isResumable && q.isPlayed != nil)
 }
