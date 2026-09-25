@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -327,5 +328,122 @@ func TestSweepWithoutAPoolSkipsClusterLocking(t *testing.T) {
 	}
 	if stats.Referenced != 2 {
 		t.Fatalf("referenced = %d, want 2", stats.Referenced)
+	}
+}
+
+// sweepWithDisplacedRecord is sweepWithoutDatabase plus a stubbed record of
+// the revisions the artwork GC holds as displaced. calls counts how often the
+// sweep consulted that record.
+func sweepWithDisplacedRecord(t *testing.T, storage *fakeArtworkStorage, referenced, displaced map[string]struct{}, displacedErr error, calls *int) (ArtworkStorageSweepStats, error) {
+	t.Helper()
+	sweeper := &ArtworkStorageSweeper{store: storage, now: time.Now}
+	sweeper.lookup = func(_ context.Context, paths []string) (map[string]struct{}, error) {
+		found := make(map[string]struct{})
+		for _, p := range paths {
+			if _, ok := referenced[p]; ok {
+				found[p] = struct{}{}
+			}
+		}
+		return found, nil
+	}
+	sweeper.displaced = func(_ context.Context, paths []string) (map[string]struct{}, error) {
+		*calls++
+		if displacedErr != nil {
+			return nil, displacedErr
+		}
+		found := make(map[string]struct{})
+		for _, p := range paths {
+			if _, ok := displaced[p]; ok {
+				found[p] = struct{}{}
+			}
+		}
+		return found, nil
+	}
+	return sweeper.SweepPrefix(context.Background(), "local/", "", 1)
+}
+
+func displacedOriginalsFor(n int) map[string]struct{} {
+	out := make(map[string]struct{}, n)
+	for i := 0; i < n; i++ {
+		out[fmt.Sprintf("local/item%d/poster/original.hash%d.webp", i, i)] = struct{}{}
+	}
+	return out
+}
+
+// Artwork replaced in bulk leaves its old revisions next to each other in key
+// order, so a whole page can be genuinely unreferenced. When the GC's record
+// of displaced revisions accounts for them, the page is garbage, not a broken
+// reference check, and the sweep must reclaim it instead of stopping.
+func TestSweepDeletesADensePageOfDisplacedRevisions(t *testing.T) {
+	t.Parallel()
+	storage := &fakeArtworkStorage{
+		pages:  [][]blobstore.ObjectInfo{ageingObjects("local", 200, 72*time.Hour)},
+		tokens: []string{""},
+	}
+	calls := 0
+	stats, err := sweepWithDisplacedRecord(t, storage, map[string]struct{}{}, displacedOriginalsFor(200), nil, &calls)
+	if err != nil {
+		t.Fatalf("sweep stopped on a page the GC record fully explains: %v", err)
+	}
+	if stats.StoppedOnAnomaly {
+		t.Fatal("stats must not record an anomaly for explained orphans")
+	}
+	if len(storage.deleted) != 200 || stats.Corroborated != 200 {
+		t.Fatalf("deleted %d, corroborated %d; want 200 of each", len(storage.deleted), stats.Corroborated)
+	}
+}
+
+// The record only counts for the objects it names. A lopsided page it barely
+// explains still looks like a broken reference check.
+func TestSweepStillStopsWhenTheDisplacedRecordDoesNotExplainThePage(t *testing.T) {
+	t.Parallel()
+	storage := &fakeArtworkStorage{
+		pages:  [][]blobstore.ObjectInfo{ageingObjects("local", 200, 72*time.Hour)},
+		tokens: []string{"next"},
+	}
+	calls := 0
+	stats, err := sweepWithDisplacedRecord(t, storage, map[string]struct{}{}, displacedOriginalsFor(10), nil, &calls)
+	if err == nil || !stats.StoppedOnAnomaly {
+		t.Fatalf("expected the anomaly guard to stop the sweep; err=%v", err)
+	}
+	if len(storage.deleted) != 0 {
+		t.Fatalf("deleted %v; nothing on a refused page may be deleted, explained or not", storage.deleted)
+	}
+}
+
+func TestSweepStopsWhenTheDisplacedCheckFails(t *testing.T) {
+	t.Parallel()
+	storage := &fakeArtworkStorage{
+		pages:  [][]blobstore.ObjectInfo{ageingObjects("local", 200, 72*time.Hour)},
+		tokens: []string{"next"},
+	}
+	calls := 0
+	_, err := sweepWithDisplacedRecord(t, storage, map[string]struct{}{}, displacedOriginalsFor(200), errors.New("db down"), &calls)
+	if err == nil {
+		t.Fatal("a failed displaced-revision check must stop the sweep")
+	}
+	if len(storage.deleted) != 0 {
+		t.Fatalf("deleted %v after the displaced-revision check failed", storage.deleted)
+	}
+}
+
+// The extra query is only for pages the ratio would otherwise refuse.
+func TestSweepConsultsTheDisplacedRecordOnlyForLopsidedPages(t *testing.T) {
+	t.Parallel()
+	referenced := displacedOriginalsFor(150)
+	storage := &fakeArtworkStorage{
+		pages:  [][]blobstore.ObjectInfo{ageingObjects("local", 200, 72*time.Hour)},
+		tokens: []string{""},
+	}
+	calls := 0
+	stats, err := sweepWithDisplacedRecord(t, storage, referenced, map[string]struct{}{}, nil, &calls)
+	if err != nil {
+		t.Fatalf("sweep failed: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("displaced record consulted %d times for a page that was 25%% unreferenced", calls)
+	}
+	if len(storage.deleted) != 50 || stats.Corroborated != 0 {
+		t.Fatalf("deleted %d, corroborated %d; want 50 and 0", len(storage.deleted), stats.Corroborated)
 	}
 }
