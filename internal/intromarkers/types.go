@@ -23,8 +23,8 @@ const (
 	ChapterAlgorithm             = "chapter:v1"
 	ChapterSilenceAlgorithm      = "chapter:silence:v2"
 	EpisodeVersionCopyAlgorithm  = "episode-version-copy:v1"
-	ChromaprintAlgorithm         = "chromaprint:v3"
-	ChromaprintDialogueAlgorithm = "chromaprint:dialogue:v3" //nolint:misspell // Persisted algorithm identifier.
+	ChromaprintAlgorithm         = "chromaprint:v4"
+	ChromaprintDialogueAlgorithm = "chromaprint:dialogue:v4" //nolint:misspell // Persisted algorithm identifier.
 	ChromaprintFormat            = "chromaprint:raw:uint32le"
 	DefaultPointHopSeconds       = 0.123
 
@@ -111,7 +111,7 @@ func DefaultConfig(ffmpegPath string) Config {
 		DialogueRefinementEnabled:                 true,
 		DialogueRefinementWindowSeconds:           15,
 		DialogueRefinementMaxShiftSeconds:         20,
-		DialogueRefinementMinimumRemainingSeconds: 15,
+		DialogueRefinementMinimumRemainingSeconds: defaultMinimumIntroDurationSeconds,
 	}
 }
 

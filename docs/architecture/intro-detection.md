@@ -18,10 +18,10 @@ with marker detection enabled. Code lives in `internal/intromarkers`.
    and a file none of them matched with up to 48 more. Matches must last 12
    seconds to 3 minutes.
    A file's intro is the median of the pair results that agree with its
-   most-confirmed one (`chromaprint:v3`).
+   most-confirmed one (`chromaprint:v4`).
 3. **Dialogue.** When an external dialogue subtitle overlaps the first seconds
    of a Chromaprint intro, the start moves to the end of that dialogue
-   (`chromaprint:dialogue:v3`).
+   (`chromaprint:dialogue:v4`).
 
 Chromaprint points summarize a window that starts at the point's timestamp,
 so raw matches start and end early. Fixed leads measured against authored

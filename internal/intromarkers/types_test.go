@@ -54,3 +54,11 @@ func TestAnalysisConfigHashTracksDurationBounds(t *testing.T) {
 		t.Fatal("changing the minimum intro duration must re-run season analysis")
 	}
 }
+
+func TestDialogueRefinementKeepsTheMinimumIntroDuration(t *testing.T) {
+	cfg := DefaultConfig("ffmpeg")
+	if cfg.DialogueRefinementMinimumRemainingSeconds != float64(cfg.MinimumIntroDurationSeconds) {
+		t.Fatalf("dialogue refinement minimum = %.0fs, want the %ds intro minimum so every detectable intro can be refined",
+			cfg.DialogueRefinementMinimumRemainingSeconds, cfg.MinimumIntroDurationSeconds)
+	}
+}

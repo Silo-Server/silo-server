@@ -267,6 +267,7 @@ func TestCanWriteMarkerUpdateLetsReplacementVersionsOverwrite(t *testing.T) {
 		{"chromaprint v3 over dialogue v2", payload("chromaprint:dialogue:v2", 0.9, 10, 70), payload("chromaprint:v3", 0.3, 12, 70), true},            //nolint:misspell // Persisted algorithm identifier.
 		{"dialogue v3 over chromaprint v3", payload("chromaprint:v3", 0.9, 10, 70), payload("chromaprint:dialogue:v3", 0.65, 12, 70), true},           //nolint:misspell // Persisted algorithm identifier.
 		{"episode copy over chromaprint v3", payload("chromaprint:dialogue:v3", 0.9, 10, 70), payload("episode-version-copy:v1", 0.85, 12, 70), true}, //nolint:misspell // Persisted algorithm identifier.
+		{"chromaprint v4 over dialogue v3", payload("chromaprint:dialogue:v3", 0.9, 10, 70), payload("chromaprint:v4", 0.65, 12, 70), true}, //nolint:misspell // Persisted algorithm identifier.
 		{"legacy chromaprint cannot replace v2", payload("chromaprint:v2", 0.75, 12, 70), payload("chromaprint:dialogue:v1", 0.9, 10, 70), false},     //nolint:misspell // Persisted algorithm identifier.
 	}
 	for _, tc := range cases {
