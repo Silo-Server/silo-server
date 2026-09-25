@@ -196,3 +196,38 @@ func TestCompareFingerprintsLimitsComparisonsToNeighbors(t *testing.T) {
 		}
 	}
 }
+
+func TestCompareFingerprintsWidensSearchForUnmatchedFiles(t *testing.T) {
+	// Episode 1 shares its intro only with episode 12, beyond its eight
+	// neighbors; the other episodes share nothing.
+	intro := make([]uint32, 300)
+	introRNG := rand.New(rand.NewPCG(0, 1))
+	for i := range intro {
+		intro[i] = introRNG.Uint32()
+	}
+	inputs := make([]fingerprintInput, 0, 12)
+	for e := 1; e <= 12; e++ {
+		points := make([]uint32, 500)
+		rng := rand.New(rand.NewPCG(uint64(e), 3))
+		for i := range points {
+			points[i] = rng.Uint32()
+		}
+		if e == 1 || e == 12 {
+			copy(points[100:], intro)
+		}
+		inputs = append(inputs, fingerprintInput{
+			Candidate: Candidate{FileID: e, EpisodeID: string(rune('a' + e)), EpisodeNumber: e, DurationSeconds: 1800},
+			Points:    points,
+		})
+	}
+	segments := CompareFingerprints(inputs, DefaultConfig("ffmpeg"))
+	if _, ok := segments[1]; !ok {
+		t.Fatal("episode 1 should match episode 12 through the wider search")
+	}
+	if _, ok := segments[12]; !ok {
+		t.Fatal("episode 12 should match episode 1")
+	}
+	if len(segments) != 2 {
+		t.Fatalf("matched %d files, want only the two that share an intro", len(segments))
+	}
+}

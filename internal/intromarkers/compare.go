@@ -31,11 +31,17 @@ const zeroStartSnapSeconds = 2.0
 // linear rather than quadratic.
 const compareNeighborEpisodes = 8
 
+// compareFallbackEpisodes bounds the second pass for a file no neighbor
+// matched: it is compared with up to this many more episodes, nearest first,
+// which finds partners elsewhere in a season without comparing every pair.
+const compareFallbackEpisodes = 48
+
 // minimumConsensusOverlap is the overlap, as intersection over union, a pair
 // result needs with a file's anchor segment to count toward its consensus.
 const minimumConsensusOverlap = 0.3
 
-// CompareFingerprints matches each file against its neighboring episodes and
+// CompareFingerprints matches each file against its neighboring episodes, and
+// an unmatched file against a wider set of the season, and
 // reduces the pair results for a file to a consensus: the median boundaries of
 // the results that agree with the most-confirmed one. Taking the longest pair
 // result instead let a single over-extended match set the boundaries.
@@ -54,29 +60,53 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 	})
 
 	matches := map[int][]Segment{}
+	compared := map[[2]int]struct{}{}
+	compare := func(i, j int) {
+		left, right := ordered[min(i, j)], ordered[max(i, j)]
+		compared[[2]int{min(i, j), max(i, j)}] = struct{}{}
+		leftSeg, rightSeg, ok := comparePair(left.Points, right.Points, cfg)
+		if !ok {
+			return
+		}
+		leftSeg = adjustSegment(leftSeg, left.Candidate)
+		rightSeg = adjustSegment(rightSeg, right.Candidate)
+		if validAdjustedSegment(leftSeg) {
+			matches[left.Candidate.FileID] = append(matches[left.Candidate.FileID], leftSeg)
+		}
+		if validAdjustedSegment(rightSeg) {
+			matches[right.Candidate.FileID] = append(matches[right.Candidate.FileID], rightSeg)
+		}
+	}
+	comparable := func(i, j int) bool {
+		a, b := ordered[i].Candidate.EpisodeID, ordered[j].Candidate.EpisodeID
+		return a != "" && b != "" && a != b
+	}
 	for i := range ordered {
-		left := ordered[i]
-		if left.Candidate.EpisodeID == "" {
+		neighbors := 0
+		for j := i + 1; j < len(ordered) && neighbors < compareNeighborEpisodes; j++ {
+			if comparable(i, j) {
+				neighbors++
+				compare(i, j)
+			}
+		}
+	}
+	// A file whose intro its neighbors lack, such as one sharing an opening
+	// with episodes elsewhere in the season, gets a wider search.
+	for i := range ordered {
+		if len(matches[ordered[i].Candidate.FileID]) > 0 {
 			continue
 		}
-		compared := 0
-		for j := i + 1; j < len(ordered) && compared < compareNeighborEpisodes; j++ {
-			right := ordered[j]
-			if right.Candidate.EpisodeID == "" || right.Candidate.EpisodeID == left.Candidate.EpisodeID {
-				continue
-			}
-			compared++
-			leftSeg, rightSeg, ok := comparePair(left.Points, right.Points, cfg)
-			if !ok {
-				continue
-			}
-			leftSeg = adjustSegment(leftSeg, left.Candidate)
-			rightSeg = adjustSegment(rightSeg, right.Candidate)
-			if validAdjustedSegment(leftSeg) {
-				matches[left.Candidate.FileID] = append(matches[left.Candidate.FileID], leftSeg)
-			}
-			if validAdjustedSegment(rightSeg) {
-				matches[right.Candidate.FileID] = append(matches[right.Candidate.FileID], rightSeg)
+		extra := 0
+		for distance := 1; distance < len(ordered) && extra < compareFallbackEpisodes; distance++ {
+			for _, j := range [2]int{i - distance, i + distance} {
+				if j < 0 || j >= len(ordered) || extra >= compareFallbackEpisodes || !comparable(i, j) {
+					continue
+				}
+				if _, done := compared[[2]int{min(i, j), max(i, j)}]; done {
+					continue
+				}
+				extra++
+				compare(i, j)
 			}
 		}
 	}
