@@ -2,7 +2,7 @@ import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,24 @@ import { installPolicyStorageMocks, jsonResponse } from "./admin-policy/policyTe
 import AdminAccessGroups from "./AdminAccessGroups";
 
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({}) }));
+const adminUsers = vi.hoisted(() => ({
+  data: [] as Array<{
+    id: number;
+    username: string;
+    email: string;
+    role: string;
+    access_group_id: number | null;
+  }>,
+}));
+vi.mock("@/hooks/queries/admin/users", () => ({
+  useAdminUsers: () => ({
+    data: adminUsers.data,
+    isPending: false,
+    isError: false,
+    isSuccess: true,
+    refetch: vi.fn(),
+  }),
+}));
 
 // Radix Select needs these to open under jsdom.
 class ResizeObserverStub {
@@ -155,6 +173,32 @@ describe("AdminAccessGroups", () => {
         is_default: true,
       });
     });
+  });
+
+  it("lists the group's members with links to their user pages", async () => {
+    const user = (id: number, username: string, role: string, group: number | null) => ({
+      id,
+      username,
+      email: `${username}@example.test`,
+      role,
+      access_group_id: group,
+    });
+    adminUsers.data = [
+      user(7, "taylor", "user", 1),
+      user(8, "sam", "user", 2),
+      user(9, "robin", "user", null),
+      user(10, "root", "admin", null),
+    ];
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+    expect(within(members).getByRole("link", { name: "taylor" })).toHaveAttribute(
+      "href",
+      "/admin/users/7",
+    );
+    expect(within(members).queryByRole("link", { name: "sam" })).toBeNull();
+    expect(within(members).queryByRole("link", { name: "robin" })).toBeNull();
+    expect(within(members).queryByRole("link", { name: "root" })).toBeNull();
+    adminUsers.data = [];
   });
 
   it("opens a group at its own URL so Back returns to the group list", async () => {
