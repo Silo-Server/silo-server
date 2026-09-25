@@ -111,7 +111,10 @@ function AdminUserDetailPage() {
   const userId = Number(id);
   const navigate = useNavigate();
   const location = useLocation();
-  const { data: user, isLoading, isFetching, error, refetch } = useAdminUser(userId);
+  const { data: cachedUser, isLoading, isFetching, error, refetch } = useAdminUser(userId);
+  // A background read that fails leaves the loaded account up, but a 404 means
+  // it is gone (another admin deleted it) and outranks the cached copy.
+  const user = isNotFoundProblem(error) ? undefined : cachedUser;
   const [editOpen, setEditOpen] = useState(false);
   const [deleteEditor, setDeleteEditor] = useState<AdminUserEditor | null>(null);
   const [editEditor, setEditEditor] = useState<AdminUserEditor | null>(null);

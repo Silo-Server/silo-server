@@ -799,3 +799,9 @@ it("asks for a profile instead of calling an unread account missing", () => {
   );
   expect(screen.queryByText("User not found")).not.toBeInTheDocument();
 });
+
+it("lets a 404 from a background read replace a loaded account", () => {
+  mocks.userError = userProblem(404);
+  renderUserDetail();
+  expect(screen.getByRole("heading", { level: 1, name: "User not found" })).toBeInTheDocument();
+});
