@@ -59,21 +59,19 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 		return a.FileID < b.FileID
 	})
 
-	// Each partner episode casts one vote per file, however many versions of
-	// it the season holds.
-	votes := map[int]map[string]Segment{}
-	vote := func(input fingerprintInput, partner string, segment Segment) {
+	// Results are kept per partner episode so a partner with several versions
+	// still casts a single vote in the consensus.
+	results := map[int]map[string][]Segment{}
+	record := func(input fingerprintInput, partner string, segment Segment) {
 		if !validAdjustedSegment(segment) {
 			return
 		}
-		fileVotes := votes[input.Candidate.FileID]
-		if fileVotes == nil {
-			fileVotes = map[string]Segment{}
-			votes[input.Candidate.FileID] = fileVotes
+		byPartner := results[input.Candidate.FileID]
+		if byPartner == nil {
+			byPartner = map[string][]Segment{}
+			results[input.Candidate.FileID] = byPartner
 		}
-		if _, ok := fileVotes[partner]; !ok {
-			fileVotes[partner] = segment
-		}
+		byPartner[partner] = append(byPartner[partner], segment)
 	}
 	compared := map[[2]int]struct{}{}
 	compare := func(i, j int) {
@@ -83,27 +81,33 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 		if !ok {
 			return
 		}
-		vote(left, right.Candidate.EpisodeID, adjustSegment(leftSeg, left.Candidate))
-		vote(right, left.Candidate.EpisodeID, adjustSegment(rightSeg, right.Candidate))
+		record(left, right.Candidate.EpisodeID, adjustSegment(leftSeg, left.Candidate))
+		record(right, left.Candidate.EpisodeID, adjustSegment(rightSeg, right.Candidate))
 	}
 	comparable := func(i, j int) bool {
 		a, b := ordered[i].Candidate.EpisodeID, ordered[j].Candidate.EpisodeID
 		return a != "" && b != "" && a != b
 	}
+	// Windows count episodes, not files: every version of an episode in reach
+	// is compared, but they share one place.
+	within := func(episodes map[string]struct{}, limit int, episode string) bool {
+		if _, seen := episodes[episode]; seen {
+			return true
+		}
+		if len(episodes) == limit {
+			return false
+		}
+		episodes[episode] = struct{}{}
+		return true
+	}
 	for i := range ordered {
-		// Count neighboring episodes, not files: every version of a
-		// neighbor is compared, but they share one place in the window.
 		neighbors := map[string]struct{}{}
 		for j := i + 1; j < len(ordered); j++ {
 			if !comparable(i, j) {
 				continue
 			}
-			episode := ordered[j].Candidate.EpisodeID
-			if _, seen := neighbors[episode]; !seen {
-				if len(neighbors) == compareNeighborEpisodes {
-					break
-				}
-				neighbors[episode] = struct{}{}
+			if !within(neighbors, compareNeighborEpisodes, ordered[j].Candidate.EpisodeID) {
+				break
 			}
 			compare(i, j)
 		}
@@ -111,41 +115,28 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 	// A file whose intro its neighbors lack, such as one sharing an opening
 	// with episodes elsewhere in the season, gets a wider search.
 	for i := range ordered {
-		if len(votes[ordered[i].Candidate.FileID]) > 0 {
+		if len(results[ordered[i].Candidate.FileID]) > 0 {
 			continue
 		}
-		extra := 0
-		for distance := 1; distance < len(ordered) && extra < compareFallbackEpisodes; distance++ {
+		extra := map[string]struct{}{}
+		for distance := 1; distance < len(ordered); distance++ {
 			for _, j := range [2]int{i - distance, i + distance} {
-				if j < 0 || j >= len(ordered) || extra >= compareFallbackEpisodes || !comparable(i, j) {
+				if j < 0 || j >= len(ordered) || !comparable(i, j) {
 					continue
 				}
 				if _, done := compared[[2]int{min(i, j), max(i, j)}]; done {
 					continue
 				}
-				extra++
-				compare(i, j)
+				if within(extra, compareFallbackEpisodes, ordered[j].Candidate.EpisodeID) {
+					compare(i, j)
+				}
 			}
 		}
 	}
 
-	matches := make(map[int][]Segment, len(votes))
-	for fileID, fileVotes := range votes {
-		partners := make([]string, 0, len(fileVotes))
-		for partner := range fileVotes {
-			partners = append(partners, partner)
-		}
-		sort.Strings(partners)
-		segments := make([]Segment, 0, len(partners))
-		for _, partner := range partners {
-			segments = append(segments, fileVotes[partner])
-		}
-		matches[fileID] = segments
-	}
-
-	best := make(map[int]Segment, len(matches))
-	for fileID, segments := range matches {
-		segment, confirmations := consensusSegment(segments)
+	best := make(map[int]Segment, len(results))
+	for fileID, byPartner := range results {
+		segment, confirmations := consensusSegment(byPartner)
 		confidence := 0.65
 		if segment.End-segment.Start >= 30 {
 			confidence += 0.10
@@ -166,29 +157,52 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 	return best
 }
 
-// consensusSegment picks the pair result that the most other results overlap,
-// preferring the longer one on a tie, and returns the median boundaries of the
-// results that overlap it together with how many there were.
-func consensusSegment(segments []Segment) (Segment, int) {
-	anchor, anchorVotes := 0, -1
-	for i, candidate := range segments {
+// consensusSegment picks the pair result that the most partner episodes agree
+// with, preferring the longer one on a tie. Each partner then contributes its
+// result closest to that anchor, and the consensus is the median of those
+// boundaries, together with how many partners agreed.
+func consensusSegment(byPartner map[string][]Segment) (Segment, int) {
+	partners := make([]string, 0, len(byPartner))
+	for partner := range byPartner {
+		partners = append(partners, partner)
+	}
+	sort.Strings(partners)
+
+	agreeing := func(candidate Segment) int {
 		votes := 0
-		for _, other := range segments {
-			if segmentOverlap(candidate, other) >= minimumConsensusOverlap {
-				votes++
+		for _, partner := range partners {
+			for _, other := range byPartner[partner] {
+				if segmentOverlap(candidate, other) >= minimumConsensusOverlap {
+					votes++
+					break
+				}
 			}
 		}
-		if votes > anchorVotes || (votes == anchorVotes &&
-			candidate.End-candidate.Start > segments[anchor].End-segments[anchor].Start) {
-			anchor, anchorVotes = i, votes
+		return votes
+	}
+	var anchor Segment
+	anchorVotes := -1
+	for _, partner := range partners {
+		for _, candidate := range byPartner[partner] {
+			votes := agreeing(candidate)
+			if votes > anchorVotes || (votes == anchorVotes && candidate.End-candidate.Start > anchor.End-anchor.Start) {
+				anchor, anchorVotes = candidate, votes
+			}
 		}
 	}
-	starts := make([]float64, 0, anchorVotes)
-	ends := make([]float64, 0, anchorVotes)
-	for _, other := range segments {
-		if segmentOverlap(segments[anchor], other) >= minimumConsensusOverlap {
-			starts = append(starts, other.Start)
-			ends = append(ends, other.End)
+
+	starts := make([]float64, 0, len(partners))
+	ends := make([]float64, 0, len(partners))
+	for _, partner := range partners {
+		best, bestOverlap := Segment{}, 0.0
+		for _, candidate := range byPartner[partner] {
+			if overlap := segmentOverlap(anchor, candidate); overlap > bestOverlap {
+				best, bestOverlap = candidate, overlap
+			}
+		}
+		if bestOverlap >= minimumConsensusOverlap {
+			starts = append(starts, best.Start)
+			ends = append(ends, best.End)
 		}
 	}
 	return Segment{Start: medianSeconds(starts), End: medianSeconds(ends)}, len(starts)

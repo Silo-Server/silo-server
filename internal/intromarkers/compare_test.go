@@ -135,12 +135,12 @@ func TestComparePairAtShiftAllowsSmallBackwardJitter(t *testing.T) {
 }
 
 func TestConsensusSegmentUsesMedianOfAgreeingPairs(t *testing.T) {
-	segment, confirmations := consensusSegment([]Segment{
-		{Start: 60, End: 150}, // One pair ran long into shared music after the intro.
-		{Start: 60, End: 120},
-		{Start: 61, End: 121},
-		{Start: 59, End: 119},
-		{Start: 600, End: 640}, // An unrelated shared cue elsewhere in the episode.
+	segment, confirmations := consensusSegment(map[string][]Segment{
+		"e2": {{Start: 60, End: 150}}, // One pair ran long into shared music after the intro.
+		"e3": {{Start: 60, End: 120}},
+		"e4": {{Start: 61, End: 121}},
+		"e5": {{Start: 59, End: 119}},
+		"e6": {{Start: 600, End: 640}}, // An unrelated shared cue elsewhere in the episode.
 	})
 	if confirmations != 4 {
 		t.Fatalf("confirmations = %d, want the four overlapping results", confirmations)
@@ -304,5 +304,56 @@ func TestCompareFingerprintsWindowCountsEpisodesNotVersions(t *testing.T) {
 	segments := CompareFingerprints(inputs, DefaultConfig("ffmpeg"))
 	if _, ok := segments[1]; !ok {
 		t.Fatal("episode 1 should match episode 10")
+	}
+}
+
+func TestConsensusSegmentPicksEachPartnersAgreeingVersion(t *testing.T) {
+	// Episode e2's first version matched an unrelated cue and its second the
+	// intro; the intro version is the one that agrees with the other partners.
+	segment, confirmations := consensusSegment(map[string][]Segment{
+		"e2": {{Start: 600, End: 640}, {Start: 60, End: 120}},
+		"e3": {{Start: 61, End: 121}},
+		"e4": {{Start: 59, End: 119}},
+	})
+	if confirmations != 3 || segment.Start != 60 || segment.End != 120 {
+		t.Fatalf("consensus = %+v with %d partners, want 60-120 from all three", segment, confirmations)
+	}
+}
+
+func TestCompareFingerprintsFallbackCountsEpisodesNotVersions(t *testing.T) {
+	// Episode 1's only partner is episode 11. Episodes 2-9 fill the neighbor
+	// window and episode 10 has 60 versions, more than the fallback budget
+	// if versions were counted separately.
+	intro := make([]uint32, 300)
+	introRNG := rand.New(rand.NewPCG(0, 1))
+	for i := range intro {
+		intro[i] = introRNG.Uint32()
+	}
+	var inputs []fingerprintInput
+	add := func(fileID, number int, shared bool) {
+		points := make([]uint32, 500)
+		rng := rand.New(rand.NewPCG(uint64(fileID), 11))
+		for i := range points {
+			points[i] = rng.Uint32()
+		}
+		if shared {
+			copy(points[100:], intro)
+		}
+		inputs = append(inputs, fingerprintInput{
+			Candidate: Candidate{FileID: fileID, EpisodeID: fmt.Sprintf("e%d", number), EpisodeNumber: number, DurationSeconds: 1800},
+			Points:    points,
+		})
+	}
+	add(1, 1, true)
+	for e := 2; e <= 9; e++ {
+		add(e, e, false)
+	}
+	for v := 0; v < 60; v++ {
+		add(1000+v, 10, false)
+	}
+	add(11, 11, true)
+	segments := CompareFingerprints(inputs, DefaultConfig("ffmpeg"))
+	if _, ok := segments[1]; !ok {
+		t.Fatal("episode 1 should reach episode 11 through the fallback")
 	}
 }
