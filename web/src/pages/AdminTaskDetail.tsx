@@ -602,7 +602,10 @@ function HistoryRow({
 
 export default function AdminTaskDetail() {
   const { key } = useParams<{ key: string }>();
-  const { data: task, isLoading, isFetching, error, refetch } = useTask(key!);
+  const { data: cachedTask, isLoading, isFetching, error, refetch } = useTask(key!);
+  // A 404 outranks a cached task: a refetch that finds it gone must not leave
+  // its old runtime state on screen.
+  const task = isNotFoundProblem(error) ? undefined : cachedTask;
   const historyQuery = useTaskHistory(key!);
   const history = historyQuery.data;
   const { data: metrics } = useTaskMetrics(key!);

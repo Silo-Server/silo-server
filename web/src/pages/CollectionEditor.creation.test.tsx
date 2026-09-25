@@ -225,3 +225,18 @@ it("offers a retry when an admin collection fails to load", () => {
   ).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
 });
+
+it("lets a 404 replace an admin collection that was already loaded", () => {
+  mocks.collection = {
+    id: "collection-1",
+    title: "Staff picks",
+    collection_type: "manual",
+    library_ids: [1],
+  } as LibraryCollection;
+  mocks.adminSnapshotError = collectionProblem(404);
+  show(true, true);
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Collection not found" }),
+  ).toBeInTheDocument();
+  expect(screen.queryByTestId("manual-items")).not.toBeInTheDocument();
+});

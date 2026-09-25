@@ -57,7 +57,12 @@ export default function AdminCollectionEditor() {
       },
     });
   }
-  const collection = frozen && frozen.collection.id === id ? frozen.collection : null;
+  // The frozen copy survives background refetches so an edit is never
+  // clobbered, but a 404 means the collection is gone and outranks it.
+  const collection =
+    frozen && frozen.collection.id === id && !isNotFoundProblem(snapshot.error)
+      ? frozen.collection
+      : null;
   const [sourceType, setSourceType] = useState<CollectionSourceType | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false);
 
