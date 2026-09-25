@@ -29,6 +29,8 @@ const (
 	selfServiceCooldown = 5 * time.Minute
 	// selfServiceTimeout bounds one background request, SMTP send included.
 	selfServiceTimeout = time.Minute
+	// withdrawTimeout bounds retracting a link whose email failed.
+	withdrawTimeout = 5 * time.Second
 	// maxPendingRequests bounds concurrent background requests on one node.
 	// Beyond it a request is dropped and logged; the requester can ask again.
 	maxPendingRequests = 8
@@ -66,6 +68,7 @@ const (
 type repository interface {
 	Issue(ctx context.Context, userID int, tokenHash string, issuedBy *int, expiresAt time.Time) error
 	IssueUnlessRecent(ctx context.Context, userID int, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error)
+	Withdraw(ctx context.Context, userID int, tokenHash string) error
 	Lookup(ctx context.Context, tokenHash string) (*Link, error)
 	Complete(ctx context.Context, tokenHash, newPassword string) (*models.User, error)
 }
@@ -261,6 +264,12 @@ func (s *Service) Request(ctx context.Context, login string) error {
 	}
 	s.async(func() {
 		defer func() { <-s.pending }()
+		// Nothing waits on this task, so a panic here would take the server down.
+		defer func() {
+			if r := recover(); r != nil {
+				slog.ErrorContext(ctx, "password reset request panicked", "component", "passwordreset", "panic", r)
+			}
+		}()
 		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), selfServiceTimeout)
 		defer cancel()
 		if err := s.sendRequested(bg, strings.TrimSpace(login)); err != nil {
@@ -272,8 +281,8 @@ func (s *Service) Request(ctx context.Context, login string) error {
 
 // sendRequested emails a new link to the account login names. Every reason
 // not to send (no such account, no usable address, an account that cannot
-// use a reset, a link sent moments ago) is a silent nil: the requester got
-// the same answer either way.
+// use a reset, a link sent moments ago, a live link from an administrator)
+// is a silent nil: the requester got the same answer either way.
 func (s *Service) sendRequested(ctx context.Context, login string) error {
 	user, err := auth.LookupLogin(ctx, s.users, login)
 	if auth.IsNotFound(err) {
@@ -308,6 +317,13 @@ func (s *Service) sendRequested(ctx context.Context, login string) error {
 		TextBody: content.Text,
 		HTMLBody: content.HTML,
 	}); err != nil {
+		// Withdraw the undelivered link, so the requester can ask again now
+		// rather than after the cooldown. The send may have used up ctx.
+		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), withdrawTimeout)
+		defer cancel()
+		if werr := s.repo.Withdraw(wctx, user.ID, tokenHash); werr != nil {
+			err = errors.Join(err, werr)
+		}
 		return fmt.Errorf("emailing requested reset link for account %d: %w", user.ID, err)
 	}
 	slog.InfoContext(ctx, "password reset link emailed on request", "component", "passwordreset", "user_id", user.ID)

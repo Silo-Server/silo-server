@@ -167,8 +167,9 @@ client IP by default).
 The server emails a link only to an enabled account that signs in with a local
 password and has a valid email address. The link opens the same
 `/reset-password/{token}` screen as an administrator's link and expires after an
-hour. An account gets at most one requested link every five minutes. A newer link
-replaces the account's earlier one, including one an administrator sent.
+hour. An account gets at most one requested link every five minutes. A requested
+link replaces the account's earlier requested link, but never a live link an
+administrator issued; while one exists, requests send nothing.
 
 ## Email addresses
 

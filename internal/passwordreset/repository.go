@@ -88,12 +88,14 @@ func (r *Repository) Issue(ctx context.Context, userID int, tokenHash string, is
 }
 
 // IssueUnlessRecent is Issue for a link the account holder asked for
-// themselves, with no issuer of record. It leaves the account's link alone
-// when that link is younger than minAge and reports whether it stored a new
-// one, so repeated requests can neither flood the mailbox nor keep replacing
-// a link that was just sent. The age check and the replacement are one
-// statement, so concurrent requests across nodes still store one link. It
-// reports false, not an error, for an account that cannot use a reset.
+// themselves, with no issuer of record. It reports whether it stored a new
+// link, and leaves the account's link alone when that link is younger than
+// minAge, so repeated requests can neither flood the mailbox nor keep
+// replacing a link that was just sent. Nor does it replace a live link an
+// administrator issued, which anyone who knows the account name could
+// otherwise retire. The checks and the replacement are one statement, so
+// concurrent requests across nodes still store one link. It reports false,
+// not an error, for an account that cannot use a reset.
 func (r *Repository) IssueUnlessRecent(ctx context.Context, userID int, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		INSERT INTO password_reset_tokens (user_id, token_hash, password_fingerprint, issued_by, expires_at)
@@ -104,12 +106,24 @@ func (r *Repository) IssueUnlessRecent(ctx context.Context, userID int, tokenHas
 			issued_by = NULL,
 			expires_at = EXCLUDED.expires_at,
 			created_at = now()
-		WHERE password_reset_tokens.created_at <= now() - make_interval(secs => $4)`,
+		WHERE password_reset_tokens.created_at <= now() - make_interval(secs => $4)
+			AND (password_reset_tokens.issued_by IS NULL
+				OR password_reset_tokens.expires_at <= now()
+				OR password_reset_tokens.password_fingerprint <> EXCLUDED.password_fingerprint)`,
 		userID, tokenHash, expiresAt, minAge.Seconds())
 	if err != nil {
 		return false, fmt.Errorf("issuing requested password reset link: %w", err)
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+// Withdraw deletes the account's link if it is still the one with digest
+// tokenHash, so a link whose email was never sent does not hold the cooldown.
+func (r *Repository) Withdraw(ctx context.Context, userID int, tokenHash string) error {
+	if _, err := r.pool.Exec(ctx, `DELETE FROM password_reset_tokens WHERE user_id = $1 AND token_hash = $2`, userID, tokenHash); err != nil {
+		return fmt.Errorf("withdrawing password reset link: %w", err)
+	}
+	return nil
 }
 
 // Lookup resolves a usable link to its account.

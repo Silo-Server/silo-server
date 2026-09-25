@@ -257,6 +257,40 @@ func TestIssueUnlessRecentHoldsTheCooldownDB(t *testing.T) {
 	if err := d.repo.Issue(ctx, alice, "admin-sent", &admin, expires); err != nil || hashOf() != "admin-sent" {
 		t.Fatalf("admin issue inside cooldown: %v, link %q", err, hashOf())
 	}
+	// A request never retires a live admin link, however old.
+	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET created_at = now() - interval '2 hours' WHERE user_id = $1`, alice); err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "over-admin", expires, time.Minute); err != nil || stored || hashOf() != "admin-sent" {
+		t.Fatalf("request replaced a live admin link: %v, %v, link %q", stored, err, hashOf())
+	}
+	// Once that link is dead, expired or outdated by a password change, it can.
+	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET password_fingerprint = 'outdated' WHERE user_id = $1`, alice); err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "after-outdated", expires, time.Minute); err != nil || !stored || hashOf() != "after-outdated" {
+		t.Fatalf("request after an outdated admin link: %v, %v, link %q", stored, err, hashOf())
+	}
+	if err := d.repo.Issue(ctx, alice, "admin-again", &admin, expires); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET created_at = now() - interval '2 hours', expires_at = now() - interval '1 minute' WHERE user_id = $1`, alice); err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "after-expired", expires, time.Minute); err != nil || !stored || hashOf() != "after-expired" {
+		t.Fatalf("request after an expired admin link: %v, %v, link %q", stored, err, hashOf())
+	}
+	// Withdrawing takes only the named link.
+	if err := d.repo.Withdraw(ctx, alice, "someone-else"); err != nil || hashOf() != "after-expired" {
+		t.Fatalf("withdraw of another digest: %v, link %q", err, hashOf())
+	}
+	if err := d.repo.Withdraw(ctx, alice, "after-expired"); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := d.pool.QueryRow(ctx, `SELECT count(*) FROM password_reset_tokens WHERE user_id = $1`, alice).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("withdrawn link still stored: %d, %v", left, err)
+	}
 
 	for name, id := range map[string]int{
 		"disabled":          d.account(t, "off", false, true),

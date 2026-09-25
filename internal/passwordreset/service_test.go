@@ -20,6 +20,7 @@ type fakeRepo struct {
 	// link younger than the cooldown.
 	requested []requestedLink
 	recent    bool
+	withdrawn []string
 }
 
 type requestedLink struct {
@@ -31,6 +32,11 @@ type requestedLink struct {
 
 func (f *fakeRepo) Issue(_ context.Context, _ int, tokenHash string, _ *int, _ time.Time) error {
 	f.issued = append(f.issued, tokenHash)
+	return nil
+}
+
+func (f *fakeRepo) Withdraw(_ context.Context, _ int, tokenHash string) error {
+	f.withdrawn = append(f.withdrawn, tokenHash)
 	return nil
 }
 
@@ -195,10 +201,21 @@ func TestRequestIsSilentWhenNothingShouldBeSent(t *testing.T) {
 		t.Fatalf("cooldown: %v, stored %d, sent %d", err, len(repo.requested), len(sender.sent))
 	}
 
-	// A failed send is logged, not reported: the caller already has its answer.
-	sender = &fakeMail{enabled: true, err: errors.New("smtp timeout")}
-	if err := newTestService(&fakeRepo{}, sender, selfServiceSettings()).Request(t.Context(), "alice"); err != nil || len(sender.sent) != 1 {
+	// A failed send is logged, not reported: the caller already has its
+	// answer. The undelivered link is withdrawn so asking again works now.
+	repo, sender = &fakeRepo{}, &fakeMail{enabled: true, err: errors.New("smtp timeout")}
+	if err := newTestService(repo, sender, selfServiceSettings()).Request(t.Context(), "alice"); err != nil || len(sender.sent) != 1 {
 		t.Fatalf("failed send: %v, attempted %d", err, len(sender.sent))
+	}
+	if len(repo.withdrawn) != 1 || repo.withdrawn[0] != repo.requested[0].tokenHash {
+		t.Fatalf("undelivered link withdrawn %q, stored %+v", repo.withdrawn, repo.requested)
+	}
+
+	// A panic in the background work is contained and frees its slot.
+	panicky := newTestService(&fakeRepo{}, &fakeMail{enabled: true}, selfServiceSettings())
+	panicky.users = nil
+	if err := panicky.Request(t.Context(), "alice"); err != nil || len(panicky.pending) != 0 {
+		t.Fatalf("panicking request: %v, %d slots held", err, len(panicky.pending))
 	}
 }
 

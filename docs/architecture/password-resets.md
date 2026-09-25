@@ -70,19 +70,23 @@ the sign-in page offers the request from that document alone.
 only availability before answering `202`. The lookup, link, and email run
 afterwards in a background task, so neither the response nor its latency reveals
 whether an account matched. Every reason not to send (no match, disabled account,
-external provider, no valid address, cooldown) is a silent no-op. The background
-work is bounded per node (`maxPendingRequests`); beyond it a request is dropped
-and logged, and the requester can ask again. A node dying mid-send loses that one
-email, which the requester recovers from the same way.
+external provider, no valid address, cooldown, a live administrator's link) is a
+silent no-op. The background work is bounded per node (`maxPendingRequests`) and
+recovers from panics; beyond the bound a request is dropped and logged, and the
+requester can ask again. A failed send withdraws the undelivered link, so asking
+again works at once. A node dying mid-send loses that email and leaves its link
+holding the cooldown, so the requester can ask again after five minutes.
 
 **Same link, shorter life, bounded rate.** A requested link is an ordinary row in
 `password_reset_tokens` with no issuer, completed through the same screen and
 transaction as an administrator's. It lives `SelfServiceTTL` (an hour), not
 `DefaultTTL`, because nobody vouched for the request. `IssueUnlessRecent` replaces
-the account's link only when that link is older than the cooldown, as one upsert.
-That caps mail to one address across every node and client IP, and stops repeated
-requests from continually replacing a link just sent. An administrator's `Issue`
-ignores the cooldown. The per-IP limit is the `password_reset_request` rate-limit
+the account's link only when that link is older than the cooldown and is not a
+live link an administrator issued, as one upsert. That caps mail to one address
+across every node and client IP, stops repeated requests from continually
+replacing a link just sent, and keeps anyone who knows an account name from
+retiring the link an administrator shared. An administrator's `Issue` ignores
+both rules. The per-IP limit is the `password_reset_request` rate-limit
 budget.
 
 ## Temporary passwords
