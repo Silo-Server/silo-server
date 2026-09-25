@@ -22,6 +22,8 @@ const (
 	BrowseSortTitle         = "sort_title"
 	BrowseSortReleaseDate   = "release_date"
 	BrowseSortCreatedAt     = "created_at"
+	BrowseSortYear          = "year"
+	BrowseSortRatingIMDB    = "rating_imdb"
 	BrowseOrderDescending   = "desc"
 )
 

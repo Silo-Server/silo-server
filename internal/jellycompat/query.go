@@ -70,12 +70,12 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 		searchTerm:             strings.TrimSpace(q.Get("SearchTerm")),
 		namePrefix:             strings.TrimSpace(firstNonEmpty(q.Get("NameStartsWith"), q.Get("StartsWith"))),
 		maxOfficialRating:      strings.TrimSpace(q.Get("MaxOfficialRating")),
-		sort:                   mapSortBy(q.Get("SortBy")),
-		recursive:              parseBool(q.Get("Recursive"), false),
-		disableImages:          !parseBool(q.Get("EnableImages"), true),
-		disableUserData:        !parseBool(q.Get("EnableUserData"), true),
-		order:                  mapSortOrder(q.Get("SortOrder")),
+
+		recursive:       parseBool(q.Get("Recursive"), false),
+		disableImages:   !parseBool(q.Get("EnableImages"), true),
+		disableUserData: !parseBool(q.Get("EnableUserData"), true),
 	}
+	result.sort, result.order = parseSort(q.Get("SortBy"), q.Get("SortOrder"))
 
 	result.genres = splitNonemptyGenres(q.Get("Genres"))
 	for year := range strings.SplitSeq(q.Get("Years"), ",") {
@@ -558,36 +558,80 @@ func parseMediaTypes(rawValues []string) []string {
 	return result
 }
 
+// parseSort maps Jellyfin's parallel SortBy/SortOrder lists to one browse sort
+// and order. The catalog sorts by one key, so the first key Silo maps wins and
+// takes the SortOrder entry at the same position. Jellyfin sorts ascending
+// when that entry is absent; without SortBy, Silo keeps its newest-first rail
+// default. Unmapped keys alone fall back to created_at.
+func parseSort(sortBy, sortOrder string) (sort, order string) {
+	keys := strings.Split(sortBy, ",")
+	orders := strings.Split(sortOrder, ",")
+	position := 0
+	sort = catalog.BrowseSortCreatedAt
+	for i, key := range keys {
+		if mapped, ok := sortKey(key); ok {
+			sort, position = mapped, i
+			break
+		}
+	}
+	orderRaw := ""
+	if position < len(orders) {
+		orderRaw = orders[position]
+	}
+	return sort, mapSortOrder(orderRaw, strings.TrimSpace(sortBy) != "")
+}
+
+// mapSortBy returns the browse sort parseSort selects for a SortBy list.
 func mapSortBy(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(strings.Split(raw, ",")[0])) {
+	sort, _ := parseSort(raw, "")
+	return sort
+}
+
+// sortKey maps one Jellyfin SortBy key. Episode-order keys map to "" — the
+// natural season/episode order episode browses already use — rather than to
+// created_at.
+func sortKey(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "sortname", "name":
-		return "sort_title"
+		return catalog.BrowseSortTitle, true
 	case "datecreated":
-		return "created_at"
+		return catalog.BrowseSortCreatedAt, true
 	case "premiered", "premieredate":
-		return "release_date"
+		return catalog.BrowseSortReleaseDate, true
 	case "productionyear":
-		return "year"
+		return catalog.BrowseSortYear, true
 	case "communityrating":
-		return "rating_imdb"
+		return catalog.BrowseSortRatingIMDB, true
 	case "random":
-		return "random"
+		return "random", true
 	case "dateplayed":
-		return "created_at"
+		return catalog.BrowseSortCreatedAt, true
 	case "datelastcontentadded":
 		// Jellyfin's standard "Latest" sort for TV libraries: shows ordered
 		// by their most recently added episode (issue #202).
-		return "latest_episode_added"
+		return "latest_episode_added", true
+	case "indexnumber", "parentindexnumber", "airedepisodeorder":
+		return "", true
 	default:
-		return "created_at"
+		return "", false
 	}
 }
 
-func mapSortOrder(raw string) string {
-	if strings.EqualFold(raw, "Ascending") {
+// mapSortOrder maps one Jellyfin SortOrder entry to a browse order. Jellyfin
+// sorts an explicit SortBy ascending when SortOrder is absent (Wholphin relies
+// on this for episode lists); requests without SortBy keep Silo's
+// newest-first rail default.
+func mapSortOrder(raw string, explicitSort bool) string {
+	switch raw = strings.TrimSpace(raw); {
+	case strings.EqualFold(raw, "Ascending"):
 		return "asc"
+	case strings.EqualFold(raw, "Descending"):
+		return catalog.BrowseOrderDescending
+	case explicitSort:
+		return "asc"
+	default:
+		return catalog.BrowseOrderDescending
 	}
-	return "desc"
 }
 
 func parseRequestedFields(raw string) map[string]bool {
