@@ -4,70 +4,75 @@
 -- username must never be another account's email. users_username_key and
 -- users_email_key only enforce uniqueness within each column.
 --
--- user_login_identifiers holds every account's username and email in one
--- unique column, so its primary key closes the gap across the two. A unique
--- index sees concurrent uncommitted claims at every isolation level, which a
+-- user_login_identifiers records every account's username and email in one
+-- column. The partial unique index lets only one account hold an identifier,
+-- and it sees concurrent uncommitted claims at every isolation level, which a
 -- trigger-side existence check cannot. The violation is an ordinary
 -- unique_violation, which callers already map to "username or email taken".
+--
+-- Accounts that already shared an identifier before this migration keep a
+-- legacy_duplicate row for it: the lowest account id holds the identifier,
+-- the others stay editable, and the next one takes it over when the holder
+-- releases it, so the old collision cannot spread to a new account.
 CREATE TABLE user_login_identifiers (
-    identifier citext PRIMARY KEY,
-    user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE
+    identifier citext NOT NULL,
+    user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    legacy_duplicate boolean NOT NULL DEFAULT false,
+    PRIMARY KEY (identifier, user_id)
 );
+CREATE UNIQUE INDEX user_login_identifiers_holder_key ON user_login_identifiers (identifier)
+WHERE NOT legacy_duplicate;
 CREATE INDEX user_login_identifiers_user_id_idx ON user_login_identifiers (user_id);
 
--- Rows written before this migration can already collide. The lower account
--- id keeps the shared identifier; the other account keeps its value in users
--- but does not own it here, and stays editable (see the trigger below).
-INSERT INTO user_login_identifiers (identifier, user_id)
-SELECT identifier, user_id FROM (
+INSERT INTO user_login_identifiers (identifier, user_id, legacy_duplicate)
+SELECT identifier, user_id, row_number() OVER (PARTITION BY identifier ORDER BY user_id) > 1
+FROM (
     SELECT username AS identifier, id AS user_id FROM users WHERE username IS NOT NULL
-    UNION ALL
+    UNION
     SELECT email, id FROM users WHERE email IS NOT NULL
-) AS claimed
-ORDER BY user_id
-ON CONFLICT (identifier) DO NOTHING;
+) AS held;
 
 -- +goose StatementBegin
--- Only values a write sets or changes are claimed, so an existing collision
--- does not block unrelated edits to the account that lost the backfill.
 CREATE FUNCTION users_sync_login_identifiers() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
-    username_changed boolean := TG_OP = 'INSERT' OR NEW.username IS DISTINCT FROM OLD.username;
-    email_changed boolean := TG_OP = 'INSERT' OR NEW.email IS DISTINCT FROM OLD.email;
+    old_identifiers citext[] := CASE WHEN TG_OP = 'INSERT' THEN '{}' ELSE ARRAY[OLD.username, OLD.email] END;
+    new_identifiers citext[] := CASE WHEN TG_OP = 'DELETE' THEN '{}' ELSE ARRAY[NEW.username, NEW.email] END;
     released citext[];
-    released_identifier citext;
-    heir integer;
+    lock_key bigint;
 BEGIN
-    IF TG_OP IN ('UPDATE', 'DELETE') THEN
-        -- Release what this account no longer holds.
+    -- Every change to an identifier's rows happens under this lock, taken for
+    -- old and new identifiers in one global order, so writers exchanging
+    -- identifiers wait for each other instead of deadlocking.
+    FOR lock_key IN
+        SELECT DISTINCT hashtextextended('user-login-identifier:' || lower(identifier::text), 0)
+        FROM unnest(old_identifiers || new_identifiers) AS identifier
+        WHERE identifier IS NOT NULL
+        ORDER BY 1
+    LOOP
+        PERFORM pg_advisory_xact_lock(lock_key);
+    END LOOP;
+
+    IF TG_OP <> 'INSERT' THEN
+        -- Release what this account no longer uses.
         WITH dropped AS (
             DELETE FROM user_login_identifiers
             WHERE user_id = OLD.id
               AND (TG_OP = 'DELETE' OR (identifier IS DISTINCT FROM NEW.username
                                         AND identifier IS DISTINCT FROM NEW.email))
-            RETURNING identifier
+            RETURNING identifier, legacy_duplicate
         )
-        SELECT array_agg(identifier ORDER BY identifier) INTO released FROM dropped;
+        SELECT array_agg(identifier) INTO released FROM dropped WHERE NOT legacy_duplicate;
 
-        -- An account from an older collision may still hold a released
-        -- identifier; hand it over so the collision cannot spread. Locking the
-        -- heir rechecks it against its current row, so an account renamed or
-        -- deleted concurrently is skipped (REPEATABLE READ writers get a
-        -- serialization failure instead of a stale heir).
-        FOREACH released_identifier IN ARRAY coalesce(released, '{}') LOOP
-            FOR heir IN
-                SELECT holder.id FROM users holder
-                WHERE holder.id <> OLD.id
-                  AND (holder.username = released_identifier OR holder.email = released_identifier)
-                ORDER BY holder.id
-                FOR SHARE
-            LOOP
-                INSERT INTO user_login_identifiers (identifier, user_id)
-                VALUES (released_identifier, heir)
-                ON CONFLICT (identifier) DO NOTHING;
-                EXIT;
-            END LOOP;
-        END LOOP;
+        -- Pass a released identifier to the next account that still shares it
+        -- from before the migration.
+        UPDATE user_login_identifiers heir SET legacy_duplicate = false
+        FROM (
+            SELECT DISTINCT ON (identifier) identifier, user_id
+            FROM user_login_identifiers
+            WHERE identifier = ANY (released) AND legacy_duplicate
+            ORDER BY identifier, user_id
+        ) next_holder
+        WHERE heir.identifier = next_holder.identifier AND heir.user_id = next_holder.user_id;
     END IF;
     IF TG_OP = 'DELETE' THEN
         -- BEFORE DELETE, so the hand-over runs before the foreign key's
@@ -75,18 +80,13 @@ BEGIN
         RETURN OLD;
     END IF;
 
-    -- Claims are inserted in a fixed order, so two writers claiming the same
-    -- pair of identifiers wait on each other instead of deadlocking.
     INSERT INTO user_login_identifiers (identifier, user_id)
     SELECT DISTINCT claimed.identifier, NEW.id
-    FROM unnest(ARRAY[
-        CASE WHEN username_changed THEN NEW.username END,
-        CASE WHEN email_changed THEN NEW.email END
-    ]) AS claimed(identifier)
+    FROM unnest(new_identifiers) AS claimed(identifier)
     WHERE claimed.identifier IS NOT NULL
       AND NOT EXISTS (
-          SELECT 1 FROM user_login_identifiers owned
-          WHERE owned.identifier = claimed.identifier AND owned.user_id = NEW.id
+          SELECT 1 FROM user_login_identifiers held
+          WHERE held.identifier = claimed.identifier AND held.user_id = NEW.id
       )
     ORDER BY claimed.identifier;
     RETURN NULL;

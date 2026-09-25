@@ -56,13 +56,14 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 		if !IsDuplicate(err) {
 			t.Fatalf("err = %v, want ErrDuplicate", err)
 		}
-		if !strings.Contains(err.Error(), "user_login_identifiers_pkey") {
-			t.Fatalf("err = %v, want the user_login_identifiers_pkey constraint", err)
+		if !strings.Contains(err.Error(), "user_login_identifiers_holder_key") {
+			t.Fatalf("err = %v, want the user_login_identifiers_holder_key index", err)
 		}
 	}
 	// seedLegacyCollision writes an account whose username is owner's email
 	// with the sync trigger bypassed, as rows written before the migration can
-	// be; the backfill leaves such an identifier owned by the lower account id.
+	// be, and records it the way the backfill does: owner holds the shared
+	// identifier and the new account keeps a legacy_duplicate row for it.
 	seedLegacyCollision := func(t *testing.T, owner *models.User, email string) int {
 		t.Helper()
 		tx, err := pool.Begin(ctx)
@@ -77,7 +78,7 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 		if err := tx.QueryRow(ctx, `INSERT INTO users (username,email,password_hash,role,enabled) VALUES ($1,$2,'x','user',true) RETURNING id`, owner.Email, email).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO user_login_identifiers (identifier, user_id) VALUES ($1, $2)`, email, id); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO user_login_identifiers (identifier, user_id, legacy_duplicate) VALUES ($1, $2, false), ($3, $2, true)`, email, id, owner.Email); err != nil {
 			t.Fatal(err)
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -344,5 +345,31 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 			t.Fatalf("retrying the release: %v", err)
 		}
 		mustCreate(t, owner.Email, prefix+"-other11@example.invalid")
+	})
+
+	t.Run("accounts exchanging identifiers concurrently do not deadlock", func(t *testing.T) {
+		for i := range 20 {
+			x := fmt.Sprintf("%s-swap%d-x@example.invalid", prefix, i)
+			y := fmt.Sprintf("%s-swap%d-y@example.invalid", prefix, i)
+			a := mustCreate(t, fmt.Sprintf("%s-swap%d-a", prefix, i), x)
+			b := mustCreate(t, y, fmt.Sprintf("%s-swap%d-b@example.invalid", prefix, i))
+
+			start := make(chan struct{})
+			results := make(chan error, 2)
+			go func() {
+				<-start
+				results <- users.Update(ctx, a.ID, models.UpdateUserInput{Email: &y})
+			}()
+			go func() {
+				<-start
+				results <- users.Update(ctx, b.ID, models.UpdateUserInput{Username: &x})
+			}()
+			close(start)
+			for range 2 {
+				if err := <-results; err != nil && !IsDuplicate(err) {
+					t.Fatalf("exchange %d: %v", i, err)
+				}
+			}
+		}
 	})
 }

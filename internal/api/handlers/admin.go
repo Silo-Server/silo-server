@@ -996,6 +996,10 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusNotFound, "not_found", "User not found")
 			return
 		}
+		if auth.IsDuplicate(err) {
+			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
 		return
 	}
