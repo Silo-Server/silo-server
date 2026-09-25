@@ -2079,6 +2079,27 @@ func (h *PlaybackHandler) HandleBitrateTest(w http.ResponseWriter, r *http.Reque
 }
 
 // HandlePlaybackInfo negotiates media sources for a Jellyfin item.
+// resolvePlaybackInfoItem maps the PlaybackInfo route id to a content item.
+// Real Jellyfin gives a media source the same id as its item, so clients such
+// as Moonfin put MediaSources[i].Id in the item position of the URL. Silo
+// emits per-version ids, so a media-source id is resolved to its owning item
+// the same way GET /Items/{id} does, and returned so the negotiation selects
+// that version when the body names none.
+func (h *PlaybackHandler) resolvePlaybackInfoItem(rawID string) (contentID, mediaSourceID string, ok bool) {
+	if contentID, err := decodeItemID(h.codec, rawID); err == nil {
+		return contentID, "", true
+	}
+	fileID, err := h.codec.DecodeIntID(EncodedIDMediaSource, rawID)
+	if err != nil {
+		return "", "", false
+	}
+	contentID, ok = h.codec.LookupMediaSourceOwner(fileID)
+	if !ok {
+		return "", "", false
+	}
+	return contentID, rawID, true
+}
+
 func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Request) {
 	session := SessionFromContext(r.Context())
 	if session == nil {
@@ -2086,8 +2107,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	contentID, err := decodeItemID(h.codec, chi.URLParam(r, "id"))
-	if err != nil {
+	rawID := chi.URLParam(r, "id")
+	contentID, pathMediaSourceID, ok := h.resolvePlaybackInfoItem(rawID)
+	if !ok {
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
 		return
 	}
@@ -2096,6 +2118,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		writeDeviceProfileRequestError(w, err, "Invalid playback request")
 		return
+	}
+	if req.MediaSourceID == "" {
+		req.MediaSourceID = pathMediaSourceID
 	}
 	req.serverBitrateCapKbps, err = h.serverBitrateCap(r.Context(), session)
 	if err != nil {
