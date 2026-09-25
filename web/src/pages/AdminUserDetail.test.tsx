@@ -792,6 +792,10 @@ it("asks for a profile instead of calling an unread account missing", () => {
   expect(
     screen.getByRole("heading", { level: 1, name: "Choose a profile first" }),
   ).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Choose profile" })).toHaveAttribute("href", "/profiles");
+  // Choosing a profile returns to this account, as the profile guard does.
+  expect(screen.getByRole("link", { name: "Choose profile" })).toHaveAttribute(
+    "href",
+    "/profiles?redirect=%2Fadmin%2Fusers%2F7",
+  );
   expect(screen.queryByText("User not found")).not.toBeInTheDocument();
 });

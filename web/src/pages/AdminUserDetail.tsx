@@ -7,10 +7,11 @@ import {
 } from "@/api/v2/adminUsers";
 import { isNotFoundProblem, V2ProblemError } from "@/api/v2/request";
 import PageUnavailable from "@/components/PageUnavailable";
+import { guardRedirectTarget } from "@/lib/authRedirect";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useId, useMemo, useState, useRef } from "react";
 import type { FormEvent } from "react";
-import { useParams, Link } from "react-router";
+import { useLocation, useParams, Link } from "react-router";
 import {
   type AdminDeviceSetting,
   type AdminSettingIdentity,
@@ -109,6 +110,7 @@ function AdminUserDetailPage() {
   const { id } = useParams<{ id: string }>();
   const userId = Number(id);
   const navigate = useNavigate();
+  const location = useLocation();
   const { data: user, isLoading, isFetching, error, refetch } = useAdminUser(userId);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteEditor, setDeleteEditor] = useState<AdminUserEditor | null>(null);
@@ -142,7 +144,9 @@ function AdminUserDetailPage() {
           description="Managing accounts acts as one of your profiles. Choose a profile, then open this account again."
         >
           <Button asChild variant="outline">
-            <ViewTransitionLink to="/profiles">Choose profile</ViewTransitionLink>
+            <ViewTransitionLink to={guardRedirectTarget("/profiles", location)}>
+              Choose profile
+            </ViewTransitionLink>
           </Button>
         </PageUnavailable>
       );

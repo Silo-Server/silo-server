@@ -62,6 +62,7 @@ import {
 } from "@/pages/catalogSearchParams";
 import { buildLegacyAutoscanRedirectTarget } from "@/pages/autoscanSearchParams";
 import { buildLegacyWebhookSyncRedirectTarget } from "@/lib/webhookSync";
+import { guardRedirectTarget } from "@/lib/authRedirect";
 import { toast } from "sonner";
 import { prewarmCodecDetection } from "@/player/hooks/useCodecDetection";
 import { prefetchRouteChunks, type RouteChunkImport } from "@/lib/routeChunkPrefetch";
@@ -225,18 +226,6 @@ function RouteLoading() {
       Loading...
     </div>
   );
-}
-
-/**
- * Builds a guard redirect target (e.g. "/login") that preserves the current
- * location so the user returns to it after authenticating.
- */
-function guardRedirectTarget(base: string, location: ReturnType<typeof useLocation>): string {
-  const destination = `${location.pathname}${location.search}`;
-  if (destination === "/" || destination === "") {
-    return base;
-  }
-  return `${base}?redirect=${encodeURIComponent(destination)}`;
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
