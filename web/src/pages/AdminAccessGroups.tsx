@@ -1,5 +1,5 @@
 import { ArrowLeft, Plus, Trash2, UsersRound } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -93,7 +93,7 @@ function AccessGroupsPage() {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const mounted = useRef(true);
   // One page instance serves the list and every group URL, so a finished create
-  // compares history entries to tell whether the admin moved on meanwhile.
+  // or delete compares history entries to tell whether the admin moved on meanwhile.
   const location = useLocation();
   const locationKey = useRef(location.key);
   const createGroup = useCreateAccessGroup();
@@ -105,9 +105,13 @@ function AccessGroupsPage() {
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     locationKey.current = location.key;
   }, [location.key]);
+
+  function stillOn(key: string) {
+    return mounted.current && locationKey.current === key;
+  }
 
   useEffect(() => {
     setSelected(null);
@@ -155,7 +159,7 @@ function AccessGroupsPage() {
       setCreating(false);
       // Don't pull the admin away if they opened another group or left the page
       // while the group was created.
-      if (mounted.current && locationKey.current === startedAt) select(group.id);
+      if (stillOn(startedAt)) select(group.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create group.");
     } finally {
@@ -179,7 +183,9 @@ function AccessGroupsPage() {
         <AccessGroupEditor
           key={selected.group.id}
           initialEditor={selected}
-          onDeleted={() => navigate("/admin/access-groups", { replace: true })}
+          onDeleted={() => {
+            if (stillOn(location.key)) navigate("/admin/access-groups", { replace: true });
+          }}
         />
       </div>
     );

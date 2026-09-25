@@ -230,6 +230,43 @@ describe("AdminAccessGroups", () => {
     expect(screen.getByLabelText("Name")).toHaveValue("Kids");
   });
 
+  it("keeps the admin on a group they reopened while it was being deleted", async () => {
+    const serve = globalThis.fetch;
+    let finish: () => void = () => {};
+    const deleted = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const method = init?.method ?? "GET";
+        if (String(input) === "/api/v2/admin/access-groups/1" && method === "GET") {
+          return new Response(JSON.stringify({ ...GROUP, is_default: false }), {
+            headers: { "Content-Type": "application/json", ETag: '"initial"' },
+          });
+        }
+        if (method === "DELETE") {
+          await deleted;
+          return new Response(null, { status: 204 });
+        }
+        return serve(input, init);
+      }),
+    );
+    const router = renderPage("/admin/access-groups/1");
+    fireEvent.click(await screen.findByRole("button", { name: "Delete group" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await router.navigate("/admin/access-groups");
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    expect(await screen.findByLabelText("Name")).toHaveValue("Kids");
+    const reopened = router.state.location.key;
+
+    finish();
+    await deleted;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(router.state.location.key).toBe(reopened);
+    expect(router.state.location.pathname).toBe("/admin/access-groups/1");
+  });
+
   it("opens the group editor when loaded from a group URL", async () => {
     const router = renderPage("/admin/access-groups/1");
     expect(await screen.findByLabelText("Name")).toHaveValue("Kids");
