@@ -19,12 +19,12 @@ import (
 // or re-analysis cannot overwrite markers the old version wrote.
 const (
 	AlgorithmVersion             = 1
-	AnalysisBehaviorVersion      = 3
+	AnalysisBehaviorVersion      = 4
 	ChapterAlgorithm             = "chapter:v1"
 	ChapterSilenceAlgorithm      = "chapter:silence:v2"
 	EpisodeVersionCopyAlgorithm  = "episode-version-copy:v1"
-	ChromaprintAlgorithm         = "chromaprint:v2"
-	ChromaprintDialogueAlgorithm = "chromaprint:dialogue:v2" //nolint:misspell // Persisted algorithm identifier.
+	ChromaprintAlgorithm         = "chromaprint:v3"
+	ChromaprintDialogueAlgorithm = "chromaprint:dialogue:v3" //nolint:misspell // Persisted algorithm identifier.
 	ChromaprintFormat            = "chromaprint:raw:uint32le"
 	DefaultPointHopSeconds       = 0.123
 

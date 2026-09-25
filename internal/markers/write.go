@@ -139,7 +139,11 @@ func scannerAlgorithmPriority(algorithm string) int {
 	case "chapter:silence:v1": // Extended chapter ends too far; below chapter:v1.
 		return 25
 	case "episode-version-copy:v1":
+		return 22
+	case "chromaprint:dialogue:v3": //nolint:misspell // Persisted algorithm identifier.
 		return 20
+	case "chromaprint:v3":
+		return 19
 	case "chromaprint:dialogue:v2": //nolint:misspell // Persisted algorithm identifier.
 		return 18
 	case "chromaprint:v2":

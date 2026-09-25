@@ -16,14 +16,30 @@ with marker detection enabled. Code lives in `internal/intromarkers`.
    (25 percent of the runtime, at most ten minutes) is fingerprinted once and
    cached. Each file is compared with the next eight episodes in episode order.
    A file's intro is the median of the pair results that agree with its
-   most-confirmed one (`chromaprint:v2`).
+   most-confirmed one (`chromaprint:v3`).
 3. **Dialogue.** When an external dialogue subtitle overlaps the first seconds
    of a Chromaprint intro, the start moves to the end of that dialogue
-   (`chromaprint:dialogue:v2`).
+   (`chromaprint:dialogue:v3`).
 
 Chromaprint points summarize a window that starts at the point's timestamp,
 so raw matches start and end early. Fixed leads measured against authored
 intro chapters move both boundaries back.
+
+## Confidence
+
+Chromaprint confidence is the rate at which markers of the same kind covered
+at least 80 percent of the authored intro chapter in replay:
+
+| Marker | Confidence |
+|---|---|
+| At least 20 seconds, confirmed by two or more pairs, and within 1.5 seconds of the season's usual intro duration, which at least half the season's episodes share | 0.90 |
+| Other markers of at least 20 seconds | 0.65 |
+| Shorter than 20 seconds | 0.30 |
+
+Recurring music cues mistaken for intros are short and rarely shared by most
+of a season, so they fall in the lower rows. Chapter-based markers keep 0.95,
+and silence-extended chapters 0.98. Contribution to online providers compares
+these values with each provider's minimum confidence.
 
 ## Versions and caches
 

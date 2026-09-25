@@ -457,3 +457,84 @@ func TestCompareFingerprintsFallbackSearchesNearestEpisodesFirst(t *testing.T) {
 		t.Fatalf("episode 10 start = %.2f, want the shared intro at %.2f", got.Start, want)
 	}
 }
+
+// seasonInputs builds episodes whose fingerprints share intro[:introLen[i]] at
+// point 100, over random per-episode audio.
+func seasonInputs(introLen []int) []fingerprintInput {
+	intro := make([]uint32, 400)
+	introRNG := rand.New(rand.NewPCG(0, 1))
+	for i := range intro {
+		intro[i] = introRNG.Uint32()
+	}
+	inputs := make([]fingerprintInput, 0, len(introLen))
+	for e, length := range introLen {
+		points := make([]uint32, 700)
+		rng := rand.New(rand.NewPCG(uint64(e+1), 7))
+		for i := range points {
+			points[i] = rng.Uint32()
+		}
+		copy(points[100:], intro[:length])
+		inputs = append(inputs, fingerprintInput{
+			Candidate: Candidate{FileID: e + 1, EpisodeID: fmt.Sprintf("e%d", e+1), EpisodeNumber: e + 1, DurationSeconds: 1800},
+			Points:    points,
+		})
+	}
+	return inputs
+}
+
+func TestCompareFingerprintsRatesSeasonConsistentIntrosHighest(t *testing.T) {
+	// Five episodes share a 300-point intro; the sixth carries only its first
+	// 220 points, so its intro is shorter than the season's.
+	segments := CompareFingerprints(seasonInputs([]int{300, 300, 300, 300, 300, 220}), DefaultConfig("ffmpeg"))
+	if len(segments) != 6 {
+		t.Fatalf("matched %d files, want 6", len(segments))
+	}
+	for fileID := 1; fileID <= 5; fileID++ {
+		if got := segments[fileID].Confidence; got != chromaprintConsistentConfidence {
+			t.Errorf("file %d confidence = %.2f, want season-consistent %.2f", fileID, got, chromaprintConsistentConfidence)
+		}
+	}
+	if got := segments[6].Confidence; got != chromaprintInconsistentConfidence {
+		t.Errorf("off-length file confidence = %.2f, want %.2f", got, chromaprintInconsistentConfidence)
+	}
+}
+
+func TestCompareFingerprintsRatesShortMatchesLowest(t *testing.T) {
+	// 140 points is about 17 seconds: long enough to match, short enough to be
+	// a recurring music cue.
+	segments := CompareFingerprints(seasonInputs([]int{140, 140, 140, 140}), DefaultConfig("ffmpeg"))
+	if len(segments) != 4 {
+		t.Fatalf("matched %d files, want 4", len(segments))
+	}
+	for fileID, segment := range segments {
+		if segment.Confidence != chromaprintShortConfidence {
+			t.Errorf("file %d confidence = %.2f, want %.2f", fileID, segment.Confidence, chromaprintShortConfidence)
+		}
+	}
+}
+
+func TestUsualIntroDurationPrefersLargestThenLongestCluster(t *testing.T) {
+	durations := func(values ...float64) []episodeDuration {
+		out := make([]episodeDuration, len(values))
+		for i, v := range values {
+			out[i] = episodeDuration{episode: fmt.Sprintf("e%d", i), seconds: v}
+		}
+		return out
+	}
+	usual, sharing := usualIntroDuration(durations(40, 40.5, 41, 90, 90.2, 90.4))
+	if sharing != 3 || usual < 90 {
+		t.Fatalf("usualIntroDuration = (%.1f, %d), want the longer of two equal clusters", usual, sharing)
+	}
+	usual, sharing = usualIntroDuration(durations(40, 40.5, 41, 41.2, 90))
+	if sharing != 4 || usual < 40 || usual > 41.5 {
+		t.Fatalf("usualIntroDuration = (%.1f, %d), want the 40-41s cluster of four", usual, sharing)
+	}
+	// Four versions of one episode count once against two other episodes.
+	versions := []episodeDuration{
+		{"e1", 90}, {"e1", 90.1}, {"e1", 90.2}, {"e1", 90.3},
+		{"e2", 40}, {"e3", 40.4},
+	}
+	if usual, sharing = usualIntroDuration(versions); sharing != 2 || usual > 41 {
+		t.Fatalf("usualIntroDuration = (%.1f, %d), want the two-episode 40s cluster", usual, sharing)
+	}
+}
