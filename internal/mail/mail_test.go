@@ -3,6 +3,8 @@ package mail
 import (
 	"context"
 	"errors"
+	"net"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -117,5 +119,30 @@ func TestBuildMessageMultipart(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("rendered message missing %q:\n%s", want, output)
 		}
+	}
+}
+
+// A mail server that cannot be reached certainly received nothing, so the
+// error says so; callers may then retract whatever the message carried.
+func TestSendReportsUnreachableServerAsNotSent(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sender := NewSMTPSender(stubSettings{
+		SettingEnabled:      "true",
+		SettingSMTPHost:     "127.0.0.1",
+		SettingSMTPPort:     strconv.Itoa(port),
+		SettingSMTPSecurity: "none",
+		SettingFromAddress:  "silo@example.test",
+	})
+	err = sender.Send(t.Context(), Message{To: []string{"user@example.test"}, Subject: "s", TextBody: "b"})
+	if !errors.Is(err, ErrNotSent) {
+		t.Fatalf("send to a closed port = %v, want ErrNotSent", err)
 	}
 }

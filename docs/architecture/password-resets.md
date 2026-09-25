@@ -73,9 +73,12 @@ whether an account matched. Every reason not to send (no match, disabled account
 external provider, no valid address, cooldown, a live administrator's link) is a
 silent no-op. The background work is bounded per node (`maxPendingRequests`) and
 recovers from panics; beyond the bound a request is dropped and logged, and the
-requester can ask again. A failed send withdraws the undelivered link, so asking
-again works at once. A node dying mid-send loses that email and leaves its link
-holding the cooldown, so the requester can ask again after five minutes.
+requester can ask again. A send that certainly failed, because the mail server
+was never reached (`mail.ErrNotSent`), withdraws the link so asking again works at
+once. An uncertain failure keeps the link and its cooldown: the message may have
+arrived, and withdrawing would let repeated requests send more mail. A node dying
+mid-send also leaves the link holding the cooldown, so the requester can ask again
+after five minutes.
 
 **Same link, shorter life, bounded rate.** A requested link is an ordinary row in
 `password_reset_tokens` with no issuer, completed through the same screen and

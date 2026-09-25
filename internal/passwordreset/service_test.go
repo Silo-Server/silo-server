@@ -202,13 +202,18 @@ func TestRequestIsSilentWhenNothingShouldBeSent(t *testing.T) {
 	}
 
 	// A failed send is logged, not reported: the caller already has its
-	// answer. The undelivered link is withdrawn so asking again works now.
-	repo, sender = &fakeRepo{}, &fakeMail{enabled: true, err: errors.New("smtp timeout")}
+	// answer. A link that certainly was not sent is withdrawn so asking again
+	// works now; one whose delivery is uncertain keeps its cooldown.
+	repo, sender = &fakeRepo{}, &fakeMail{enabled: true, err: errors.Join(mail.ErrNotSent, errors.New("dial refused"))}
 	if err := newTestService(repo, sender, selfServiceSettings()).Request(t.Context(), "alice"); err != nil || len(sender.sent) != 1 {
 		t.Fatalf("failed send: %v, attempted %d", err, len(sender.sent))
 	}
 	if len(repo.withdrawn) != 1 || repo.withdrawn[0] != repo.requested[0].tokenHash {
 		t.Fatalf("undelivered link withdrawn %q, stored %+v", repo.withdrawn, repo.requested)
+	}
+	repo, sender = &fakeRepo{}, &fakeMail{enabled: true, err: errors.New("smtp send: timeout after DATA")}
+	if err := newTestService(repo, sender, selfServiceSettings()).Request(t.Context(), "alice"); err != nil || len(repo.withdrawn) != 0 {
+		t.Fatalf("uncertain send: %v, withdrawn %q", err, repo.withdrawn)
 	}
 
 	// A panic in the background work is contained and frees its slot.

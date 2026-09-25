@@ -317,12 +317,17 @@ func (s *Service) sendRequested(ctx context.Context, login string) error {
 		TextBody: content.Text,
 		HTMLBody: content.HTML,
 	}); err != nil {
-		// Withdraw the undelivered link, so the requester can ask again now
-		// rather than after the cooldown. The send may have used up ctx.
-		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), withdrawTimeout)
-		defer cancel()
-		if werr := s.repo.Withdraw(wctx, user.ID, tokenHash); werr != nil {
-			err = errors.Join(err, werr)
+		// A link that certainly was not sent is withdrawn, so the requester
+		// can ask again now rather than after the cooldown. When delivery is
+		// uncertain the link and its cooldown stay: it may have arrived, and
+		// withdrawing would let repeated requests send more mail at once.
+		if errors.Is(err, mail.ErrNotSent) || errors.Is(err, mail.ErrNotConfigured) {
+			// The send may have used up ctx.
+			wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), withdrawTimeout)
+			defer cancel()
+			if werr := s.repo.Withdraw(wctx, user.ID, tokenHash); werr != nil {
+				err = errors.Join(err, werr)
+			}
 		}
 		return fmt.Errorf("emailing requested reset link for account %d: %w", user.ID, err)
 	}
