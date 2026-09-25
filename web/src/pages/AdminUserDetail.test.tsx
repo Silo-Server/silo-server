@@ -451,6 +451,63 @@ async function selectGuestsGroup(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("AdminUserDetail inherit hints", () => {
+  it("uses the saved account's resolved policy when the group list is stale", async () => {
+    const user = userEvent.setup();
+    mocks.user = {
+      ...adminUser,
+      access_group_id: 5,
+      effective_policy: {
+        ...adminUser.effective_policy,
+        max_remote_stream_bitrate_kbps: 30_720,
+      },
+    };
+    renderUserDetail();
+
+    await openLimitsTab(user);
+
+    expect(screen.getByText("Inherited: 30720")).toBeInTheDocument();
+  });
+
+  it("uses the group policy after clearing an account override", async () => {
+    const user = userEvent.setup();
+    mocks.user = {
+      ...adminUser,
+      access_group_id: 5,
+      max_remote_stream_bitrate_kbps: 2_000,
+      effective_policy: {
+        ...adminUser.effective_policy,
+        max_remote_stream_bitrate_kbps: 2_000,
+      },
+    };
+    renderUserDetail();
+
+    await openLimitsTab(user);
+    await user.click(overrideSwitch(2));
+
+    expect(screen.getAllByText("Inherited: Unlimited")).toHaveLength(4);
+    expect(screen.queryByText("Inherited: 2000")).not.toBeInTheDocument();
+  });
+
+  it("omits the hint for a cleared override when the group is not loaded", async () => {
+    const user = userEvent.setup();
+    mocks.user = {
+      ...adminUser,
+      access_group_id: 99,
+      max_remote_stream_bitrate_kbps: 2_000,
+      effective_policy: {
+        ...adminUser.effective_policy,
+        max_remote_stream_bitrate_kbps: 2_000,
+      },
+    };
+    renderUserDetail();
+
+    await openLimitsTab(user);
+    await user.click(overrideSwitch(2));
+
+    expect(screen.getByText("Inherited from group")).toBeInTheDocument();
+    expect(screen.queryByText("Inherited: 2000")).not.toBeInTheDocument();
+  });
+
   it("derives hints from the group selected in the dialog, on both tabs", async () => {
     const user = userEvent.setup();
     renderUserDetail();

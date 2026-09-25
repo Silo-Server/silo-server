@@ -86,11 +86,11 @@ export function policyCreateFields(state: UserPolicyState): PolicyCreatePayload 
 
 // What an inheriting field resolves to. Same shape as the server's resolved
 // policy minus permissions, which have no inherit control here.
-export type PolicyInheritHints = Omit<AdminUserEffectivePolicy, "permissions">;
+export type PolicyInheritHints = Partial<Omit<AdminUserEffectivePolicy, "permissions">>;
 
 // Mirrors access.NoGroupPolicy(): the layer under an account that belongs to
 // no access group. Keep in sync with internal/access/groups.go.
-const NO_GROUP_POLICY: PolicyInheritHints = {
+const NO_GROUP_POLICY = {
   library_ids: null,
   max_playback_quality: "",
   max_streams: 0,
@@ -102,7 +102,7 @@ const NO_GROUP_POLICY: PolicyInheritHints = {
   download_allowed: true,
   download_transcode_allowed: false,
   requests_allowed: true,
-};
+} satisfies Required<PolicyInheritHints>;
 
 // Inherit hints for the group currently selected in the form — not the group
 // the account was last saved with, so the hints follow the picker instead of
@@ -128,6 +128,21 @@ export function policyInheritHints(
     download_transcode_allowed: group.download_transcode_allowed,
     requests_allowed: group.requests_allowed,
   };
+}
+
+// For the account's saved group, effective_policy is the freshest resolved
+// value for fields that already inherit. An overridden field instead needs
+// the group-only value it would inherit after the override is cleared.
+export function savedUserPolicyInheritHints(
+  user: AdminUser,
+  groupHints: PolicyInheritHints | undefined,
+): PolicyInheritHints {
+  return Object.fromEntries(
+    Object.values(POLICY_FIELDS).flatMap((field) => {
+      const value = user[field] === null ? user.effective_policy[field] : groupHints?.[field];
+      return value === undefined ? [] : [[field, value]];
+    }),
+  ) as PolicyInheritHints;
 }
 
 // Admins are never grouped: the server clears access_group_id for the admin
@@ -301,7 +316,7 @@ export function PolicyAccessFields({
         onChange={(libraryIDs) => onChange({ ...state, libraryIDs })}
         allLabel="Inherit from group"
         emptyHint={inheritHint(
-          effective === undefined
+          effective?.library_ids === undefined
             ? undefined
             : effective.library_ids === null
               ? "All libraries"
@@ -409,7 +424,7 @@ export function PolicyLimitFields({ state, onChange, effective }: PolicyContext)
           <SelectContent>
             <SelectItem value={INHERIT}>
               {inheritHint(
-                effective === undefined
+                effective?.max_playback_quality === undefined
                   ? undefined
                   : formatPlaybackQualityPreset(effective.max_playback_quality),
               )}

@@ -39,6 +39,7 @@ import {
   policyInheritHints,
   policyStateFromUser,
   policyUpdateFields,
+  savedUserPolicyInheritHints,
 } from "@/components/UserPolicyFields";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1162,16 +1163,17 @@ function EditUserForm({
   const metadataCurationId = useId();
   const updateMutation = useUpdateUser();
   const accessGroupValue = accessGroupID === null ? "none" : String(accessGroupID);
-  // Hints come from the group selected right now, so they follow the picker
-  // instead of describing the group the account was last saved with. When that
-  // group is not in the loaded list, fall back to the resolved policy the
-  // server sent — but only while the saved group is still the selected one.
-  // An admin inherits from no group, so preview the no-group policy while the
-  // picked group is kept for toggling the role back.
+  // The account response is authoritative for its saved group and cannot be
+  // made stale by an older access-group list. Once the picker changes, preview
+  // that unsaved selection from the group list instead. An admin inherits from
+  // no group, so preview the no-group policy while the picked group is kept for
+  // toggling the role back.
   const hintGroupID = effectiveAccessGroupID(role, accessGroupID);
+  const groupInheritHints = policyInheritHints(hintGroupID, accessGroups);
   const inheritHints =
-    policyInheritHints(hintGroupID, accessGroups) ??
-    (hintGroupID === user.access_group_id ? user.effective_policy : undefined);
+    hintGroupID === user.access_group_id
+      ? savedUserPolicyInheritHints(user, groupInheritHints)
+      : groupInheritHints;
   const selectedGroupMissing =
     accessGroupID !== null && !accessGroups.some((group) => group.id === accessGroupID);
 
