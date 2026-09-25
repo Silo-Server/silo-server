@@ -12,13 +12,14 @@ const mocks = vi.hoisted(() => ({
   refetchLibraries: vi.fn(),
   toastError: vi.fn(),
   search: "",
+  id: "movie-123",
 }));
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
   return {
     ...actual,
-    useParams: () => ({ id: "movie-123" }),
+    useParams: () => ({ id: mocks.id }),
     useSearchParams: () => [new URLSearchParams(mocks.search)],
   };
 });
@@ -106,6 +107,7 @@ describe("ItemDetail", () => {
     mocks.refetchLibraries.mockReset();
     mocks.toastError.mockReset();
     mocks.search = "";
+    mocks.id = "movie-123";
     mocks.useCatalogItemDetail.mockReturnValue({
       data: { content_id: "movie-123", title: "Catalog Detail", type: "movie" },
       isLoading: false,
@@ -369,6 +371,47 @@ describe("ItemDetail", () => {
         screen.getByRole("heading", { name: "This item isn't available" }),
       ).toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Browse library" })).not.toBeInTheDocument();
+    });
+
+    it("starts a new confirmation when the URL moves to another unavailable item", () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(1_000_000);
+        mocks.search = "libraryId=4";
+        mocks.useCatalogItemDetail.mockReturnValue({
+          data: undefined,
+          isLoading: false,
+          error: itemProblem(404),
+        });
+        // The list was read after the first page appeared, and now names library 5 too.
+        mocks.useUserLibraries.mockReturnValue(
+          libraryList({
+            data: [
+              { id: 4, name: "Movies", type: "movies" },
+              { id: 5, name: "Shows", type: "series" },
+            ],
+            dataUpdatedAt: 1_000_500,
+          }),
+        );
+        const view = renderInRouter(<ItemDetail />);
+        expect(screen.getByRole("link", { name: "Browse library" })).toHaveAttribute(
+          "href",
+          "/library/4",
+        );
+
+        // Another cached 404 keeps the page mounted; that old read must not vouch for library 5.
+        vi.setSystemTime(2_000_000);
+        mocks.id = "movie-456";
+        mocks.search = "libraryId=5";
+        view.rerender(
+          <MemoryRouter initialEntries={["/item/movie-456?libraryId=5"]}>
+            <ItemDetail />
+          </MemoryRouter>,
+        );
+        expect(screen.queryByRole("link", { name: "Browse library" })).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("drops Browse library for a library the viewer can no longer open", () => {

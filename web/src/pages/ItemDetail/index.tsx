@@ -253,7 +253,9 @@ export default function ItemDetail() {
         />
       );
     }
-    return <ItemUnavailable libraryId={libraryId} />;
+    // Keyed by the URL so a new item or library starts a new confirmation
+    // window; a cached 404 lets navigation reuse this view without a remount.
+    return <ItemUnavailable key={`${id}:${libraryId ?? ""}`} libraryId={libraryId} />;
   }
 
   switch (item.type) {
