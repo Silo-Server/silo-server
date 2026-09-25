@@ -32,10 +32,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/themedelivery"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // ItemsHandler serves Jellyfin browse/search/item endpoints.
 type ItemsHandler struct {
+	storeProvider    userstore.UserStoreProvider
 	themeSongs       themeSongStore
 	themeRouter      *themedelivery.Router
 	themeFFmpegPath  func() string
@@ -380,7 +382,7 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dto := h.mapper.itemFromDetail(*detail, favorites[detail.ContentID], progress[detail.ContentID])
-	h.appendDownloadedSubtitlesToDetailDTO(r.Context(), detail.ContentID, detail.Versions, &dto)
+	h.populateDetailSubtitles(r.Context(), detail, &dto, savedCompatSubtitleMode(r.Context(), h.storeProvider, session))
 	if strings.EqualFold(detail.Type, "series") {
 		if seasons, seasonErr := h.content.ListSeasons(r.Context(), session, detail.ContentID, nil); seasonErr == nil {
 			browsableSeasons := filterBrowsableSeasons(seasons)
@@ -412,22 +414,27 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dto)
 }
 
-func (h *ItemsHandler) appendDownloadedSubtitlesToDetailDTO(ctx context.Context, contentID string, versions []catalog.FileVersion, dto *baseItemDTO) {
-	if h == nil || h.subtitleRepo == nil || dto == nil || len(dto.MediaSources) == 0 || len(versions) == 0 {
+func (h *ItemsHandler) populateDetailSubtitles(ctx context.Context, detail *upstreamItemDetail, dto *baseItemDTO, savedMode string) {
+	if h == nil || dto == nil || len(dto.MediaSources) == 0 || len(detail.Versions) == 0 {
 		return
 	}
 
-	routeItemID := h.codec.EncodeStringID(EncodedIDItem, contentID)
+	routeItemID := h.codec.EncodeStringID(EncodedIDItem, detail.ContentID)
 	appendedAny := false
 
-	for i, version := range versions {
+	for i, version := range detail.Versions {
 		if i >= len(dto.MediaSources) {
 			break
 		}
-		downloaded, err := h.subtitleRepo.ListDownloadedSubtitles(ctx, version.FileID)
-		if err != nil || len(downloaded) == 0 {
-			continue
+		var downloaded []subtitles.DownloadedSubtitle
+		if h.subtitleRepo != nil {
+			var err error
+			downloaded, err = h.subtitleRepo.ListDownloadedSubtitles(ctx, version.FileID)
+			if err != nil {
+				downloaded = nil
+			}
 		}
+		dto.MediaSources[i].DefaultSubtitleStreamIndex = compatDetailSubtitleStreamIndex(detail, version, downloaded, savedMode, dto.MediaSources[i].DefaultAudioStreamIndex)
 
 		sourceID := h.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
 		baseIndex := nextDownloadedSubtitleIndex(version)
@@ -2779,6 +2786,7 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 	}
 
 	items := make([]baseItemDTO, 0, len(query.specificIDs))
+	savedMode := savedCompatSubtitleMode(r.Context(), h.storeProvider, session)
 	for _, contentID := range query.specificIDs {
 		detail, itemErr := h.content.GetItemDetail(r.Context(), session, contentID, libraryIDPtr(query.parentLibraryID))
 		if itemErr != nil {
@@ -2793,7 +2801,7 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 		if query.mediaTypesExplicit && !query.mediaTypesSet[strings.ToLower(dto.MediaType)] {
 			continue
 		}
-		h.appendDownloadedSubtitlesToDetailDTO(r.Context(), detail.ContentID, detail.Versions, &dto)
+		h.populateDetailSubtitles(r.Context(), detail, &dto, savedMode)
 		items = append(items, dto)
 	}
 

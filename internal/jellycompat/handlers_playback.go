@@ -2120,11 +2120,8 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 
 	routeItemID := h.codec.EncodeStringID(EncodedIDItem, detail.ContentID)
 	playSessionID := h.codec.EncodeStringID(EncodedIDPlaySession, uuidNewString())
-	subtitleMode := compatJellyfinSubtitleMode(detail.SubtitleMode, detail.SubtitleModeSet, detail.ShowForcedSubtitles, h.savedCompatSubtitleMode(r.Context(), session))
-	var preferredSubtitleLanguages []string
-	if language := strings.TrimSpace(detail.SubtitleLanguage); language != "" {
-		preferredSubtitleLanguages = []string{language}
-	}
+	savedSubtitleMode := savedCompatSubtitleMode(r.Context(), h.storeProvider, session)
+	subtitleMode := compatJellyfinSubtitleMode(detail.SubtitleMode, detail.SubtitleModeSet, detail.ShowForcedSubtitles, savedSubtitleMode)
 	sources := make([]PlaybackMediaSource, 0, len(detail.Versions))
 	sourceDTOs := make([]mediaSourceDTO, 0, len(detail.Versions))
 	warmSubtitles := make([]bool, 0, len(detail.Versions))
@@ -2182,18 +2179,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 				)
 			}
 		}
-		// As Jellyfin does, the default subtitle follows the viewer's subtitle
-		// mode and language, judged against the audio the client starts with.
-		subtitleCandidates := compatSubtitleCandidates(source.Version, downloaded)
-		if !detail.ShowForcedSubtitles {
-			subtitleCandidates = compatWithoutForcedSubtitles(subtitleCandidates)
-		}
-		source.DefaultSubtitleStreamIndex = compatDefaultSubtitleStreamIndex(
-			subtitleCandidates,
-			preferredSubtitleLanguages,
-			subtitleMode,
-			compatAudioTrack(source.Version, effectiveCompatAudioStreamIndex(source)).Language,
-		)
+		source.DefaultSubtitleStreamIndex = compatDetailSubtitleStreamIndex(detail, source.Version, downloaded, savedSubtitleMode, effectiveCompatAudioStreamIndex(source))
 		var requestedSubtitleIndex *int
 		if req.SubtitleStreamIndex != nil {
 			requestedSubtitleIndex = intPtr(int(*req.SubtitleStreamIndex))
@@ -3735,26 +3721,4 @@ func compatSubtitleProfileFormat(codec string) string {
 	default:
 		return strings.ToLower(strings.TrimSpace(codec))
 	}
-}
-
-// savedCompatSubtitleMode returns the SubtitleMode the viewer's Jellyfin
-// client last saved, or "" when none is stored or it cannot be read. It only
-// tells Jellyfin's Default apart from Smart, which share Silo's "auto".
-func (h *PlaybackHandler) savedCompatSubtitleMode(ctx context.Context, session *Session) string {
-	if h.storeProvider == nil || session == nil || session.ProfileID == "" {
-		return ""
-	}
-	store, err := h.storeProvider.ForUser(ctx, session.StreamAppUserID)
-	if err != nil || store == nil {
-		return ""
-	}
-	raw, err := store.GetSetting(ctx, configurationKey(session.ProfileID))
-	if err != nil || raw == "" {
-		return ""
-	}
-	var saved struct{ SubtitleMode string }
-	if json.Unmarshal([]byte(raw), &saved) != nil {
-		return ""
-	}
-	return saved.SubtitleMode
 }

@@ -72,6 +72,11 @@ subtitles shown reads as `OnlyForced`).
 `x-silo-original` and reads back as `OriginalLanguage`; playback then prefers
 each item's original-language audio, as native clients do.
 
+Movie and episode detail responses select `DefaultSubtitleStreamIndex` from the
+viewer's effective subtitle mode and language, including downloaded subtitles.
+The detail-page selection therefore carries into playback instead of sending
+an unintended Off choice. Explicit playback choices, including Off, still win.
+
 `PlaybackInfo` defaults follow the viewer's settings. `DefaultAudioStreamIndex`
 is the audio track Silo selects for the viewer (audio language preference,
 original language, and the series' remembered track), falling back to the
