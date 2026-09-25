@@ -34,4 +34,12 @@ describe("query retry policy", () => {
   ])("does not retry %s that refuses the caller", (_kind, error) => {
     expect(retry(0, error)).toBe(false);
   });
+
+  it("does not retry a 404 problem, which answers the same every time", () => {
+    expect(retry(0, problem(404))).toBe(false);
+  });
+
+  it("retries a 404 without a problem document, which says nothing about the resource", () => {
+    expect(retry(0, new V2TransportError("listProfiles", 404, "not a problem"))).toBe(true);
+  });
 });
