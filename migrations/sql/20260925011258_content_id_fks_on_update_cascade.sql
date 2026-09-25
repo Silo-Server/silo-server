@@ -32,6 +32,9 @@ BEGIN
         WHERE con.contype = 'f'
           AND con.confrelid IN ('media_items'::regclass, 'seasons'::regclass, 'episodes'::regclass)
           AND position('ON UPDATE' IN pg_get_constraintdef(con.oid)) = 0
+          -- Only top-level constraints: a partition's inherited clone cannot be
+          -- dropped directly and is rebuilt with its parent constraint.
+          AND con.conparentid = 0
     LOOP
         EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', r.rel, r.conname);
         EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I %s ON UPDATE CASCADE',
