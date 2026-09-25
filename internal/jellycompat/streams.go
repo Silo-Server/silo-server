@@ -2236,6 +2236,16 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			)
 		}
 	}
+	// An ID-less Stopped report can't end the play (see below), but it must not
+	// leave the native session paused either: a paused session keeps the long
+	// paused grace, so the admin view shows the stopped play as paused for up
+	// to 30 minutes. Record it as not paused so idle cleanup applies the
+	// active grace once the client goes quiet. A play that is still running
+	// keeps reporting its real pause state and heartbeats.
+	reportedPaused := req.IsPaused
+	if stop && unidentified {
+		reportedPaused = false
+	}
 	var previousSession *playback.Session
 	progressUpdated := false
 	if positionReported && h.sessionMgr != nil {
@@ -2243,7 +2253,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			copy := *current
 			previousSession = &copy
 		}
-		err := h.sessionMgr.UpdateProgress(playSession.UpstreamSessionID, positionSeconds, req.IsPaused)
+		err := h.sessionMgr.UpdateProgress(playSession.UpstreamSessionID, positionSeconds, reportedPaused)
 		progressUpdated = err == nil
 		if errors.Is(err, playback.ErrSessionNotFound) && !stop {
 			// The upstream session was reaped as stale (e.g. the client buffered
