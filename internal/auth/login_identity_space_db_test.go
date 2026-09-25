@@ -8,15 +8,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// TestLoginIdentitySpaceDB pins the users_login_identity_space trigger: no
-// account's username may equal another account's email, because LookupLogin
-// resolves a typed identifier against the username column before the email
-// column and would otherwise sign in or reset the wrong account.
+// TestLoginIdentitySpaceDB pins user_login_identifiers: no account's username
+// may equal another account's email, because LookupLogin resolves a typed
+// identifier against the username column before the email column and would
+// otherwise sign in or reset the wrong account.
 func TestLoginIdentitySpaceDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -33,9 +34,12 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 		_, _ = pool.Exec(context.WithoutCancel(ctx), "DELETE FROM users WHERE username LIKE $1 OR email LIKE $1", prefix+"%")
 	})
 	users := NewUserRepository(pool)
+	input := func(username, email string) models.CreateUserInput {
+		return models.CreateUserInput{Username: username, Email: email, Password: "test-password", Role: "user"}
+	}
 	create := func(t *testing.T, username, email string) (*models.User, error) {
 		t.Helper()
-		return users.Create(ctx, models.CreateUserInput{Username: username, Email: email, Password: "test-password", Role: "user"})
+		return users.Create(ctx, input(username, email))
 	}
 	mustCreate := func(t *testing.T, username, email string) *models.User {
 		t.Helper()
@@ -50,9 +54,34 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 		if !IsDuplicate(err) {
 			t.Fatalf("err = %v, want ErrDuplicate", err)
 		}
-		if !strings.Contains(err.Error(), "users_login_identity_space") {
-			t.Fatalf("err = %v, want the users_login_identity_space constraint", err)
+		if !strings.Contains(err.Error(), "user_login_identifiers_pkey") {
+			t.Fatalf("err = %v, want the user_login_identifiers_pkey constraint", err)
 		}
+	}
+	// seedLegacyCollision writes an account whose username is owner's email
+	// with the sync trigger bypassed, as rows written before the migration can
+	// be; the backfill leaves such an identifier owned by the lower account id.
+	seedLegacyCollision := func(t *testing.T, owner *models.User, email string) int {
+		t.Helper()
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, "SET LOCAL session_replication_role = replica"); err != nil {
+			t.Skipf("cannot bypass triggers to seed a legacy collision: %v", err)
+		}
+		var id int
+		if err := tx.QueryRow(ctx, `INSERT INTO users (username,email,password_hash,role,enabled) VALUES ($1,$2,'x','user',true) RETURNING id`, owner.Email, email).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO user_login_identifiers (identifier, user_id) VALUES ($1, $2)`, email, id); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return id
 	}
 
 	t.Run("username cannot be another account's email", func(t *testing.T) {
@@ -75,6 +104,17 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 		requireDuplicate(t, users.Update(ctx, other.ID, models.UpdateUserInput{Email: &email}))
 	})
 
+	t.Run("renamed identifiers are released", func(t *testing.T) {
+		first := mustCreate(t, prefix+"-first3", prefix+"-erin@example.invalid")
+		email := prefix + "-erin-new@example.invalid"
+		if err := users.Update(ctx, first.ID, models.UpdateUserInput{Email: &email}); err != nil {
+			t.Fatal(err)
+		}
+		mustCreate(t, prefix+"-erin@example.invalid", prefix+"-second3@example.invalid")
+		_, err := create(t, email, prefix+"-third3@example.invalid")
+		requireDuplicate(t, err)
+	})
+
 	t.Run("an account may use its own email as its username", func(t *testing.T) {
 		invited := mustCreate(t, prefix+"-invited@example.invalid", prefix+"-invited@example.invalid")
 		username, email := invited.Username, invited.Email
@@ -85,46 +125,71 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 		if err := users.Update(ctx, invited.ID, models.UpdateUserInput{Email: &swappedEmail}); err != nil {
 			t.Fatalf("changing email away from username: %v", err)
 		}
+		_, err := create(t, prefix+"-other4", invited.Username)
+		requireDuplicate(t, err)
 	})
 
 	t.Run("an existing collision stays editable", func(t *testing.T) {
-		owner := mustCreate(t, prefix+"-owner4", prefix+"-carol@example.invalid")
-		// Rows written before the trigger existed can already collide.
-		tx, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = tx.Rollback(ctx) }()
-		if _, err := tx.Exec(ctx, "SET LOCAL session_replication_role = replica"); err != nil {
-			t.Skipf("cannot bypass triggers to seed a legacy collision: %v", err)
-		}
-		var legacyID int
-		if err := tx.QueryRow(ctx, `INSERT INTO users (username,email,password_hash,role,enabled) VALUES ($1,$2,'x','user',true) RETURNING id`, owner.Email, prefix+"-legacy@example.invalid").Scan(&legacyID); err != nil {
-			t.Fatal(err)
-		}
-		if err := tx.Commit(ctx); err != nil {
-			t.Fatal(err)
-		}
+		owner := mustCreate(t, prefix+"-owner5", prefix+"-carol@example.invalid")
+		legacyID := seedLegacyCollision(t, owner, prefix+"-legacy5@example.invalid")
 
 		username := owner.Email
 		enabled := false
 		if err := users.Update(ctx, legacyID, models.UpdateUserInput{Username: &username, Enabled: &enabled}); err != nil {
 			t.Fatalf("editing a legacy collision without changing identifiers: %v", err)
 		}
-		fixed := prefix + "-legacy"
+		email := prefix + "-legacy5-new@example.invalid"
+		if err := users.Update(ctx, legacyID, models.UpdateUserInput{Email: &email}); err != nil {
+			t.Fatalf("changing the other identifier of a legacy collision: %v", err)
+		}
+		fixed := prefix + "-legacy5"
 		if err := users.Update(ctx, legacyID, models.UpdateUserInput{Username: &fixed}); err != nil {
 			t.Fatalf("renaming a legacy collision away: %v", err)
 		}
 	})
 
-	t.Run("concurrent writers claiming one identifier serialize", func(t *testing.T) {
+	t.Run("a released identifier passes to a legacy holder", func(t *testing.T) {
+		owner := mustCreate(t, prefix+"-owner6", prefix+"-frank@example.invalid")
+		seedLegacyCollision(t, owner, prefix+"-legacy6@example.invalid")
+		email := prefix + "-frank-new@example.invalid"
+		if err := users.Update(ctx, owner.ID, models.UpdateUserInput{Email: &email}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := create(t, prefix+"-other6", prefix+"-frank@example.invalid")
+		requireDuplicate(t, err)
+
+		deleted := mustCreate(t, prefix+"-owner6b", prefix+"-grace@example.invalid")
+		seedLegacyCollision(t, deleted, prefix+"-legacy6b@example.invalid")
+		if err := users.Delete(ctx, deleted.ID); err != nil {
+			t.Fatal(err)
+		}
+		_, err = create(t, prefix+"-other6b", prefix+"-grace@example.invalid")
+		requireDuplicate(t, err)
+	})
+
+	t.Run("a repeatable-read writer sees a claim committed after its snapshot", func(t *testing.T) {
+		identifier := prefix + "-heidi@example.invalid"
+		tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, "SELECT count(*) FROM users"); err != nil {
+			t.Fatal(err)
+		}
+		mustCreate(t, prefix+"-owner7", identifier)
+		_, err = createUser(ctx, tx, input(identifier, prefix+"-other7@example.invalid"))
+		requireDuplicate(t, err)
+	})
+
+	t.Run("a concurrent writer waits for an uncommitted claim", func(t *testing.T) {
 		identifier := prefix + "-dave@example.invalid"
 		first, err := pool.Begin(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer func() { _ = first.Rollback(ctx) }()
-		if _, err := createUser(ctx, first, models.CreateUserInput{Username: prefix + "-owner5", Email: identifier, Password: "test-password", Role: "user"}); err != nil {
+		if _, err := createUser(ctx, first, input(prefix+"-owner8", identifier)); err != nil {
 			t.Fatal(err)
 		}
 
@@ -139,7 +204,7 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 		}
 		second := make(chan error, 1)
 		go func() {
-			_, err := createUser(ctx, conn, models.CreateUserInput{Username: strings.ToUpper(identifier), Email: prefix + "-other5@example.invalid", Password: "test-password", Role: "user"})
+			_, err := createUser(ctx, conn, input(strings.ToUpper(identifier), prefix+"-other8@example.invalid"))
 			second <- err
 		}()
 

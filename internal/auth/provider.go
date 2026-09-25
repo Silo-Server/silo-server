@@ -66,9 +66,9 @@ type LoginDirectory interface {
 // lookup misses and the input parses as an email, the email column is tried.
 // Invited accounts have username == email, but someone who signed up with a
 // separate username should still be able to type the address they remember.
-// Both columns are citext UNIQUE, and the users_login_identity_space trigger
-// keeps them one identity space (no username equals another account's email),
-// so the fallback cannot resolve ambiguously for accounts written since then.
+// Both columns are citext UNIQUE, and the user_login_identifiers table keeps
+// them one identity space (no username equals another account's email), so
+// the fallback cannot resolve ambiguously for accounts written since then.
 func LookupLogin(ctx context.Context, users LoginDirectory, identifier string) (*models.User, error) {
 	user, err := users.GetByUsername(ctx, identifier)
 	if err != nil && IsNotFound(err) && looksLikeEmail(identifier) {
