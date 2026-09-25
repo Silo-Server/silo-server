@@ -39,7 +39,7 @@ export default function PersonDetail() {
   const refreshMutation = useRefreshPerson(id, isAdmin);
 
   const {
-    data: person,
+    data: cachedPerson,
     isLoading: personLoading,
     isFetching: personFetching,
     error: personError,
@@ -53,7 +53,12 @@ export default function PersonDetail() {
     refetchOnMount: "always",
   });
 
-  useDocumentTitle(person?.name ?? (isNotFoundProblem(personError) ? "Not found" : "Person"));
+  // A 404 outranks a cached person: the view read runs even over prefetched
+  // data, and a person it finds gone must not keep their old page.
+  const personNotFound = isNotFoundProblem(personError);
+  const person = personNotFound ? undefined : cachedPerson;
+
+  useDocumentTitle(personNotFound ? "Not found" : (person?.name ?? "Person"));
 
   const hasPerson = !!person;
   useEffect(() => {

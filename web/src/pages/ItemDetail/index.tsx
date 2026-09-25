@@ -207,13 +207,17 @@ export default function ItemDetail() {
   const [searchParams] = useSearchParams();
   const libraryId = parseOptionalLibraryId(searchParams.get("libraryId"));
   const {
-    data: item,
+    data: cachedItem,
     isLoading: loading,
     isFetching,
     error: itemError,
     refetch,
   } = useCatalogItemDetail(id, libraryId);
   const itemNotFound = isNotFoundProblem(itemError);
+  // A 404 outranks cached detail. A refetch that finds the item gone, or out
+  // of the viewer's reach, leaves the old item in the cache, and that page
+  // must not stay up.
+  const item = itemNotFound ? undefined : cachedItem;
   const itemDetailsReady = useSidebarItemDetailsReady();
   // Resolved once here rather than in each content component: the badge is a
   // display choice, and a leaf component should not have to fetch to render.
@@ -221,7 +225,7 @@ export default function ItemDetail() {
   const showAdvisoryAge = useShowAdvisoryAge(item?.advisory_age != null);
   const enteredItemFromHome = useSidebarItemEnteredFromHome();
 
-  useDocumentTitle(item?.title ?? (itemNotFound ? "Not found" : "Item"));
+  useDocumentTitle(itemNotFound ? "Not found" : (item?.title ?? "Item"));
   useThemeMusic(item, loading);
 
   useEffect(() => {

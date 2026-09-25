@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 
 import { getPerson } from "@/api/v2/people";
 import { V2ProblemError } from "@/api/v2/request";
+import { personKeys } from "@/hooks/queries/keys";
 import PersonDetail from "./PersonDetail";
 
 vi.mock("@/api/v2/people", () => ({
@@ -35,9 +36,10 @@ function personProblem(status: number) {
   });
 }
 
-function renderPerson() {
+function renderPerson(prefetched?: { id: string; name: string }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.push(client);
+  if (prefetched) client.setQueryData(personKeys.detail(prefetched.id), prefetched);
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/person/7"]}>
@@ -76,4 +78,16 @@ it("offers a retry rather than calling a failed read missing", async () => {
     expect(screen.getByRole("heading", { level: 1, name: "Found Again" })).toBeInTheDocument(),
   );
   expect(screen.queryByText("This person isn't available")).not.toBeInTheDocument();
+});
+
+it("replaces a prefetched person when the view read finds them gone", async () => {
+  vi.mocked(getPerson).mockRejectedValue(personProblem(404));
+
+  renderPerson({ id: "7", name: "Prefetched Actor" });
+
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "This person isn't available" }),
+  ).toBeInTheDocument();
+  expect(screen.queryByText("Prefetched Actor")).not.toBeInTheDocument();
+  expect(document.title).toContain("Not found");
 });

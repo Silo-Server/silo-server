@@ -313,6 +313,23 @@ describe("ItemDetail", () => {
       expect(document.title).toContain("Not found");
     });
 
+    it("lets a refetch's 404 replace an item that was already cached", () => {
+      mocks.useCatalogItemDetail.mockReturnValue({
+        data: { content_id: "movie-123", title: "Catalog Detail", type: "movie" },
+        isLoading: false,
+        error: itemProblem(404),
+      });
+
+      renderInRouter(<ItemDetail />);
+
+      expect(
+        screen.getByRole("heading", { level: 1, name: "This item isn't available" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Catalog Detail")).not.toBeInTheDocument();
+      expect(document.title).toContain("Not found");
+      expect(mocks.toastError).not.toHaveBeenCalled();
+    });
+
     it("offers the link's library while the viewer can still open it", () => {
       mocks.search = "libraryId=4";
       mocks.useCatalogItemDetail.mockReturnValue({
