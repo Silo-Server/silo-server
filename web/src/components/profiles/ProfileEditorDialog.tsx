@@ -56,6 +56,8 @@ interface ProfileEditorDialogProps {
   avatarUploadEnabled?: boolean;
   /** The server accepts `max_advisory_age`; hides the control when false. */
   advisoryAgeSupported?: boolean;
+  /** The server accepts `require_advisory_age`; hides the switch when false. */
+  requireAdvisoryAgeSupported?: boolean;
   onOpenChange: (open: boolean) => void;
   onSaveSuccess?: (
     profile: Profile,
@@ -85,6 +87,7 @@ export function ProfileEditorDialog({
   libraries,
   avatarUploadEnabled = false,
   advisoryAgeSupported = false,
+  requireAdvisoryAgeSupported = false,
   onOpenChange,
   onSaveSuccess,
 }: ProfileEditorDialogProps) {
@@ -111,6 +114,7 @@ export function ProfileEditorDialog({
             libraries={sortedLibraries}
             avatarUploadEnabled={avatarUploadEnabled}
             advisoryAgeSupported={advisoryAgeSupported}
+            requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
             onOpenChange={onOpenChange}
             onSaveSuccess={onSaveSuccess}
           />
@@ -126,6 +130,7 @@ function ProfileEditorForm({
   libraries,
   avatarUploadEnabled,
   advisoryAgeSupported,
+  requireAdvisoryAgeSupported,
   onOpenChange,
   onSaveSuccess,
 }: {
@@ -134,6 +139,7 @@ function ProfileEditorForm({
   libraries: UserLibrary[];
   avatarUploadEnabled: boolean;
   advisoryAgeSupported: boolean;
+  requireAdvisoryAgeSupported: boolean;
   onOpenChange: (open: boolean) => void;
   onSaveSuccess?: (
     profile: Profile,
@@ -172,6 +178,8 @@ function ProfileEditorForm({
   const contentRatingId = useId();
   const advisoryAgeId = useId();
   const advisoryAgeHelpId = useId();
+  const requireAdvisoryAgeId = useId();
+  const requireAdvisoryAgeHelpId = useId();
   const playbackQualityId = useId();
   const restrictLibrariesId = useId();
   const selectedContentRatingValue =
@@ -284,14 +292,20 @@ function ProfileEditorForm({
     let savedProfile: Profile;
     try {
       if (mode === "edit" && profile) {
-        const body = buildProfileUpdateFromDraft(draft, { advisoryAgeSupported });
+        const body = buildProfileUpdateFromDraft(draft, {
+          advisoryAgeSupported,
+          requireAdvisoryAgeSupported,
+        });
         if (preserveExistingUpload || deleteExistingUpload) {
           delete body.avatar;
         }
         savedProfile = await updateMutation.mutateAsync({ id: profile.id, body });
       } else {
         savedProfile = await createMutation.mutateAsync(
-          buildProfileRequestFromDraft(draft, { advisoryAgeSupported }),
+          buildProfileRequestFromDraft(draft, {
+            advisoryAgeSupported,
+            requireAdvisoryAgeSupported,
+          }),
         );
       }
     } catch {
@@ -607,8 +621,32 @@ function ProfileEditorForm({
               </Select>
               <p id={advisoryAgeHelpId} className="text-muted-foreground text-xs">
                 Hides titles an advisory service such as Common Sense Media recommends for older
-                viewers. Titles without an advisory age are limited by the content rating alone.
+                viewers.
+                {requireAdvisoryAgeSupported &&
+                draft.maxAdvisoryAge !== null &&
+                draft.requireAdvisoryAge
+                  ? null
+                  : " Titles without an advisory age are limited by the content rating alone."}
               </p>
+              {requireAdvisoryAgeSupported && draft.maxAdvisoryAge !== null ? (
+                <div className="flex items-start justify-between gap-3 pt-1">
+                  <div className="space-y-0.5">
+                    <Label htmlFor={requireAdvisoryAgeId}>
+                      Hide titles without an advisory age
+                    </Label>
+                    <p id={requireAdvisoryAgeHelpId} className="text-muted-foreground text-xs">
+                      Shows only titles rated at or under this age. Ages are looked up over time, so
+                      this profile may see few titles at first.
+                    </p>
+                  </div>
+                  <Switch
+                    id={requireAdvisoryAgeId}
+                    aria-describedby={requireAdvisoryAgeHelpId}
+                    checked={draft.requireAdvisoryAge}
+                    onCheckedChange={(checked) => updateDraft("requireAdvisoryAge", checked)}
+                  />
+                </div>
+              ) : null}
             </div>
           ) : null}
 

@@ -119,13 +119,18 @@ func contentRatingCeilingSQL(alias string, allowUnrated bool, argIdx int) string
 }
 
 // advisoryAgeLimitSQL renders an advisory-age limit as a SQL condition over
-// alias. A title with no advisory age passes: advisory coverage is partial
-// (the provider that supplies it is rate limited), so a missing advisory means
-// "not looked up yet", and the content-rating ceiling alone decides such a
-// title. media_items.advisory_age and its episode_catalog_entries copy hold
-// the age.
-func advisoryAgeLimitSQL(alias string, argIdx int) string {
+// alias. By default a title with no advisory age passes: advisory coverage is
+// partial (the provider that supplies it is rate limited), so a missing
+// advisory means "not looked up yet", and the content-rating ceiling alone
+// decides such a title. A profile that requires an advisory age fails closed
+// instead and sees only titles rated at or under the limit, the same shape
+// contentRatingCeilingSQL gives an unrated title under a ceiling.
+// media_items.advisory_age and its episode_catalog_entries copy hold the age.
+func advisoryAgeLimitSQL(alias string, hideUnadvised bool, argIdx int) string {
 	column := alias + ".advisory_age"
+	if hideUnadvised {
+		return fmt.Sprintf("(%s IS NOT NULL AND %s <= $%d)", column, column, argIdx)
+	}
 	return fmt.Sprintf("(%s IS NULL OR %s <= $%d)", column, column, argIdx)
 }
 
@@ -154,7 +159,7 @@ func ApplyMaturityLimits(alias string, filter AccessFilter, conditions *[]string
 		*argIdx = *argIdx + 1
 	}
 	if limits.MaxAdvisoryAge > 0 {
-		*conditions = append(*conditions, advisoryAgeLimitSQL(alias, *argIdx))
+		*conditions = append(*conditions, advisoryAgeLimitSQL(alias, limits.HidesUnadvised(), *argIdx))
 		*args = append(*args, limits.MaxAdvisoryAge)
 		*argIdx = *argIdx + 1
 	}

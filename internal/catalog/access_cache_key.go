@@ -19,7 +19,8 @@ import (
 // to be captured here — never in per-cache copies that can silently drift.
 //
 // Included: AllowedLibraryIDs, DisabledLibraryIDs, every MaturityLimits field
-// (MaxContentRating, AllowUnratedContent, MaxAdvisoryAge), ExcludedMediaTypes,
+// (MaxContentRating, AllowUnratedContent, MaxAdvisoryAge, RequireAdvisoryAge),
+// ExcludedMediaTypes,
 // NamePrefix, AllowedContentIDs. AllowedLibraryIDs and
 // AllowedContentIDs preserve the nil (unrestricted) vs empty (restrict to
 // nothing) distinction the access layer branches on; AllowedContentIDs is
@@ -50,6 +51,14 @@ func (f AccessFilter) WriteAccessScopeCacheKey(b *strings.Builder) {
 	// 0 is "no limit", the only value ApplyMaturityLimits skips.
 	b.WriteString("|advisory=")
 	b.WriteString(strconv.Itoa(f.MaxAdvisoryAge))
+
+	// Keyed raw, like the unrated setting, not as HidesUnadvised: that can
+	// only split an entry, never merge two scopes that render different SQL,
+	// and it keeps every field independently visible to the drift guard in
+	// access_cache_key_test.go. The resolvers already fold the flag to false
+	// without a limit, so the extra split does not arise in practice.
+	b.WriteString("|requireadvisory=")
+	b.WriteString(strconv.FormatBool(f.RequireAdvisoryAge))
 
 	b.WriteString("|excludedtypes=")
 	writeSortedStringsKey(b, f.ExcludedMediaTypes)

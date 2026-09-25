@@ -14,7 +14,11 @@ type Profile struct {
 	// MaxAdvisoryAge is the profile's advisory-age limit (see
 	// access.MaturityLimits.MaxAdvisoryAge); 0 means no limit and is stored
 	// as NULL.
-	MaxAdvisoryAge             int
+	MaxAdvisoryAge int
+	// RequireAdvisoryAge hides titles with no advisory age from the profile
+	// (see access.MaturityLimits.RequireAdvisoryAge). It only takes effect
+	// with a MaxAdvisoryAge limit.
+	RequireAdvisoryAge         bool
 	QualityPreference          string
 	Language                   string
 	PreferredMetadataLanguage  string // ISO 639-1; "" = inherit library metadata language
@@ -65,7 +69,9 @@ type UpdateProfileInput struct {
 	MaxContentRating *string
 	// MaxAdvisoryAge: nil leaves the limit untouched, 0 clears it, and a
 	// positive age sets it.
-	MaxAdvisoryAge             *int
+	MaxAdvisoryAge *int
+	// RequireAdvisoryAge: nil leaves it untouched.
+	RequireAdvisoryAge         *bool
 	QualityPreference          *string
 	Language                   *string
 	PreferredMetadataLanguage  *string

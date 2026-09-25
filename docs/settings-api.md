@@ -1007,7 +1007,8 @@ server-wide and applies within seconds, without a restart. Ceilings compare
 minimum viewer ages, so a ceiling from any national system limits titles rated
 in any other; a US ceiling admits its whole tier (`PG-13` admits `TV-14`, `R`
 admits `NC-17`). The setting does not apply to a profile's advisory-age limit
-(`max_advisory_age`), which never hides a title that has no advisory age; see
+(`max_advisory_age`). Whether that limit hides a title with no advisory age is
+a per-profile choice, `require_advisory_age`, not this server-wide setting; see
 "Advisory age" in [catalog-api.md](catalog-api.md).
 
 ## Forward and rewind intervals

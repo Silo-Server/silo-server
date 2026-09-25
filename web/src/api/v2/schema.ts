@@ -22658,7 +22658,7 @@ export interface components {
       library_restrictions_enabled: boolean;
       /**
        * Format: int64
-       * @description Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone; null means no limit
+       * @description Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null means no limit
        * @example 12
        */
       max_advisory_age: number | null;
@@ -22684,6 +22684,11 @@ export interface components {
        * @example auto
        */
       quality_preference: string;
+      /**
+       * @description Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age
+       * @example false
+       */
+      require_advisory_age: boolean;
       /** @example false */
       show_forced_subtitles: boolean;
       /**
@@ -22725,6 +22730,11 @@ export interface components {
       max_advisory_age_supported: boolean;
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
+      /**
+       * @description Whether profiles accept require_advisory_age and the server enforces it
+       * @example true
+       */
+      require_advisory_age_supported: boolean;
     };
     ProfileCreate: {
       /**
@@ -22759,7 +22769,7 @@ export interface components {
       library_restrictions_enabled?: boolean;
       /**
        * Format: int64
-       * @description Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone
+       * @description Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set
        * @example 12
        */
       max_advisory_age?: number;
@@ -22794,6 +22804,11 @@ export interface components {
        * @example auto
        */
       quality_preference?: string;
+      /**
+       * @description Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age
+       * @example true
+       */
+      require_advisory_age?: boolean;
       /**
        * @description Defaults to true when omitted
        * @example true
@@ -22905,7 +22920,7 @@ export interface components {
       library_restrictions_enabled?: boolean;
       /**
        * Format: int64
-       * @description Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone; null removes it
+       * @description Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null removes it
        * @example 12
        */
       max_advisory_age?: number | null;
@@ -22940,6 +22955,11 @@ export interface components {
        * @example auto
        */
       quality_preference?: string;
+      /**
+       * @description Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age
+       * @example true
+       */
+      require_advisory_age?: boolean;
       /** @example false */
       show_forced_subtitles?: boolean;
       /**

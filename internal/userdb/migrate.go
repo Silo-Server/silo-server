@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 27
+const schemaVersion = 28
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -265,6 +265,17 @@ func runMigrations(db *sql.DB) error {
 			}
 		}
 		if _, err := tx.Exec("PRAGMA user_version = 27"); err != nil {
+			return err
+		}
+	}
+	if version < 28 {
+		// Same reasoning as v27: a fresh profiles table already has the column.
+		if !columnExists(tx, "profiles", "require_advisory_age") {
+			if _, err := tx.Exec(`ALTER TABLE profiles ADD COLUMN require_advisory_age BOOLEAN NOT NULL DEFAULT false`); err != nil {
+				return fmt.Errorf("migration v28 failed: %w", err)
+			}
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 28"); err != nil {
 			return err
 		}
 	}

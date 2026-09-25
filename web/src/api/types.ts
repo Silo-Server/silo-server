@@ -233,6 +233,11 @@ export interface Profile {
    * "13+") is above it are hidden. Null or absent means no limit.
    */
   max_advisory_age?: number | null;
+  /**
+   * Hide titles with no advisory age as well, so only titles rated at or under
+   * max_advisory_age are shown. No effect without a limit.
+   */
+  require_advisory_age?: boolean;
   quality_preference: string;
   language: string;
   preferred_metadata_language?: string;
