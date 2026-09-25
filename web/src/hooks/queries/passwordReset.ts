@@ -1,5 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
-import { getPasswordResetCapability } from "@/api/v2/publicPasswordResets";
+import { v2, V2TransportError } from "@/api/v2/request";
+
+// The capability read lives here rather than in api/v2/publicPasswordResets:
+// the sign-in page loads eagerly and must not pull in the reset screen's code.
+async function getPasswordResetCapability(signal?: AbortSignal) {
+  const result = await v2("GET /api/v2/capabilities/password-reset", {
+    signal,
+    retryAuthentication: false,
+  });
+  if (!result || typeof result.state !== "string") {
+    throw new V2TransportError("getPasswordResetCapability", 200, "Invalid capability response");
+  }
+  return result;
+}
 
 export const PASSWORD_RESET_CAPABILITY_KEY = ["auth", "password-reset-capability"] as const;
 
