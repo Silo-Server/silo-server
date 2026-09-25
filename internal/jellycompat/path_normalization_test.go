@@ -12,6 +12,9 @@ func TestCanonicalizeCompatPathLocalTrailers(t *testing.T) {
 		"/emby/items/abc123/localtrailers":         "/Items/abc123/LocalTrailers",
 		"/users/u1/items/abc123/localtrailers":     "/Users/u1/Items/abc123/LocalTrailers",
 		"/jellyfin/Users/U1/Items/X/localTrailers": "/Users/U1/Items/X/LocalTrailers",
+		// Outside the route position the word is an opaque id and keeps its case.
+		"/DisplayPreferences/localtrailers": "/DisplayPreferences/localtrailers",
+		"/items/localtrailers":              "/Items/localtrailers",
 	} {
 		if got := canonicalizeCompatPath(in); got != want {
 			t.Errorf("canonicalizeCompatPath(%q) = %q, want %q", in, got, want)
