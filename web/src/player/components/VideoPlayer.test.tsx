@@ -935,6 +935,21 @@ describe("VideoPlayer room catch-up", () => {
       fireEvent.volumeChange(video);
       expect(localStorage.getItem("player-muted")).not.toBe("true");
       expect(localStorage.getItem("player-volume")).toBe("0.4");
+      setMuted.mockClear();
+      await act(async () => {
+        await realtimeOptions.current!.onCommand({
+          type: "command",
+          command_id: "volume-command",
+          session_id: "session-1",
+          name: "set_volume",
+          deadline_ms: 8_000,
+          payload: { volume: 0.6 },
+        });
+      });
+      expect(setMuted).not.toHaveBeenCalledWith(false);
+      expect(video.muted).toBe(true);
+      expect(localStorage.getItem("player-volume")).toBe("0.6");
+
       // The mute shortcut flips the viewer's choice rather than the element's
       // temporary pre-roll mute, which it could only ever turn off.
       const toggleMuted = vi.mocked(useKeyboardShortcuts).mock.lastCall![5];

@@ -3365,10 +3365,7 @@ export function VideoPlayer({
           if (nextVolume === null || !video) {
             throw new Error("missing_volume");
           }
-          video.volume = Math.min(1, Math.max(0, nextVolume));
-          if (video.volume > 0 && video.muted) {
-            video.muted = false;
-          }
+          handleVolumeChange(Math.min(1, Math.max(0, nextVolume)));
           return;
         }
         case "display_message":
@@ -3439,7 +3436,7 @@ export function VideoPlayer({
           throw new Error("unsupported");
       }
     },
-    [handleExit, onPlanInvalidated, performPlayerSeek],
+    [handleExit, handleVolumeChange, onPlanInvalidated, performPlayerSeek],
   );
 
   const realtime = usePlaybackRealtime({
