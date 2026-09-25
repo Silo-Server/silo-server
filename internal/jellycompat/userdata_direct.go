@@ -20,6 +20,8 @@ type directUserDataService struct {
 	resumeFilter            *catalog.ContinueWatchingProgressFilter
 	profileStaler           profileStaler
 	profileRefreshRequester profileRefreshRequester
+	// events announces watched-state changes to other surfaces and replicas.
+	events UserStateEvents
 }
 
 func newDirectUserDataService(
@@ -293,6 +295,7 @@ func (s *directUserDataService) MarkPlayed(ctx context.Context, session *Session
 		return err
 	}
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	publishWatchedChange(ctx, s.events, session, []string{contentID}, true)
 	return nil
 }
 
@@ -307,6 +310,7 @@ func (s *directUserDataService) MarkPlayedBatch(ctx context.Context, session *Se
 		return err
 	}
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	publishWatchedChange(ctx, s.events, session, contentIDs, true)
 	return nil
 }
 
@@ -318,6 +322,7 @@ func (s *directUserDataService) MarkUnplayed(ctx context.Context, session *Sessi
 		return err
 	}
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	publishWatchedChange(ctx, s.events, session, []string{contentID}, false)
 	return nil
 }
 
@@ -332,6 +337,7 @@ func (s *directUserDataService) MarkUnplayedBatch(ctx context.Context, session *
 		return err
 	}
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	publishWatchedChange(ctx, s.events, session, contentIDs, false)
 	return nil
 }
 
@@ -363,6 +369,7 @@ func (s *directUserDataService) MarkPlayedBatchAt(ctx context.Context, session *
 		return err
 	}
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	publishWatchedChange(ctx, s.events, session, ids, true)
 	return nil
 }
 

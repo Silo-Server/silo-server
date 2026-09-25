@@ -310,7 +310,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Delete("/Videos/ActiveEncodings", playbackHandler.HandleDeleteActiveEncodings)
 			r.Post("/Sessions/Logout", authHandler.HandleLogout)
 			r.Post("/ClientLog/Document", HandleClientLogDocument)
-			r.Get("/socket", NewSocketHandler(deps.SessionStore, adminAPIKeyAuth))
+			r.Get("/socket", NewSocketHandlerWithUserData(deps.SessionStore, adminAPIKeyAuth, deps.UserStateEvents, deps.IDCodec))
 		})
 	}
 
@@ -483,7 +483,7 @@ func withDefaults(deps Dependencies) Dependencies {
 		if deps.BrowseRepo != nil {
 			pool = deps.BrowseRepo.Pool()
 		}
-		deps.UserDataService = newDirectUserDataService(
+		svc := newDirectUserDataService(
 			deps.UserStoreProvider,
 			deps.ItemRepo,
 			deps.EpisodeRepo,
@@ -494,6 +494,8 @@ func withDefaults(deps Dependencies) Dependencies {
 			deps.RecWorker,
 			deps.WatchCompletionObserver,
 		)
+		svc.events = deps.UserStateEvents
+		deps.UserDataService = svc
 	}
 
 	// Build LoginResolver from auth service if not provided

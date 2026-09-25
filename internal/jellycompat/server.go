@@ -78,6 +78,11 @@ type Dependencies struct {
 	// completes a watch, so fully-watched items leave the watchlist. Optional.
 	WatchCompletionObserver watchstate.CompletionObserver
 
+	// UserStateEvents, when set, carries watched-state changes between the
+	// compatibility layer, first-party clients and API replicas, and feeds the
+	// socket's UserDataChanged notifications.
+	UserStateEvents UserStateEvents
+
 	// Autoscan / admin compatibility support.
 	APIKeyValidator  apiKeyValidator
 	APIKeyUserLoader apiKeyUserLoader

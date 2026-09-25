@@ -3371,6 +3371,9 @@ func main() {
 			}
 			compatDeps.UserStoreProvider = userStoreProvider
 			compatDeps.WatchCompletionObserver = deps.WatchCompletionObserver
+			if eventsHub != nil {
+				compatDeps.UserStateEvents = eventsHub
+			}
 			compatDeps.SettingsRepo = settingsRepo
 			compatDeps.PersonRepo = personRepo
 			if watchProviderService != nil {
