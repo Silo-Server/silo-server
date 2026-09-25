@@ -1,6 +1,7 @@
 package intromarkers
 
 import (
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"testing"
@@ -229,5 +230,79 @@ func TestCompareFingerprintsWidensSearchForUnmatchedFiles(t *testing.T) {
 	}
 	if len(segments) != 2 {
 		t.Fatalf("matched %d files, want only the two that share an intro", len(segments))
+	}
+}
+
+func TestCompareFingerprintsCountsEpisodeVersionsOnce(t *testing.T) {
+	// Episode 2 has five versions whose shared audio runs 40 points past the
+	// intro; episodes 3 and 4 carry only the intro. Five votes from one
+	// episode must not outweigh two from others.
+	intro := make([]uint32, 340)
+	introRNG := rand.New(rand.NewPCG(0, 1))
+	for i := range intro {
+		intro[i] = introRNG.Uint32()
+	}
+	build := func(fileID int, episode string, number, length int) fingerprintInput {
+		points := make([]uint32, 600)
+		rng := rand.New(rand.NewPCG(uint64(fileID), 5))
+		for i := range points {
+			points[i] = rng.Uint32()
+		}
+		copy(points[100:], intro[:length])
+		return fingerprintInput{
+			Candidate: Candidate{FileID: fileID, EpisodeID: episode, EpisodeNumber: number, DurationSeconds: 1800},
+			Points:    points,
+		}
+	}
+	inputs := []fingerprintInput{build(1, "e1", 1, 340)}
+	for v := 0; v < 5; v++ {
+		inputs = append(inputs, build(20+v, "e2", 2, 340))
+	}
+	inputs = append(inputs, build(3, "e3", 3, 300), build(4, "e4", 4, 300))
+
+	segments := CompareFingerprints(inputs, DefaultConfig("ffmpeg"))
+	got := segments[1].End - segments[1].Start
+	want := 300*DefaultPointHopSeconds + chromaprintEndLeadSeconds - chromaprintStartLeadSeconds
+	longer := 340*DefaultPointHopSeconds + chromaprintEndLeadSeconds - chromaprintStartLeadSeconds
+	if math.Abs(got-want) > math.Abs(got-longer) && math.Abs(got-want) > 1 {
+		t.Fatalf("episode 1 intro = %.1fs, want the median of three episodes (%.1fs), not one episode's five versions (%.1fs)", got, want, longer)
+	}
+}
+
+func TestCompareFingerprintsWindowCountsEpisodesNotVersions(t *testing.T) {
+	// Episode 1's only partner is episode 10. Episode 2 has nine versions;
+	// counted as one neighbor, the window still reaches episodes 3-9 and the
+	// fallback reaches episode 10.
+	intro := make([]uint32, 300)
+	introRNG := rand.New(rand.NewPCG(0, 1))
+	for i := range intro {
+		intro[i] = introRNG.Uint32()
+	}
+	var inputs []fingerprintInput
+	add := func(fileID, number int, shared bool) {
+		points := make([]uint32, 500)
+		rng := rand.New(rand.NewPCG(uint64(fileID), 9))
+		for i := range points {
+			points[i] = rng.Uint32()
+		}
+		if shared {
+			copy(points[100:], intro)
+		}
+		inputs = append(inputs, fingerprintInput{
+			Candidate: Candidate{FileID: fileID, EpisodeID: fmt.Sprintf("e%d", number), EpisodeNumber: number, DurationSeconds: 1800},
+			Points:    points,
+		})
+	}
+	add(1, 1, true)
+	for v := 0; v < 9; v++ {
+		add(200+v, 2, false)
+	}
+	for e := 3; e <= 9; e++ {
+		add(e, e, false)
+	}
+	add(10, 10, true)
+	segments := CompareFingerprints(inputs, DefaultConfig("ffmpeg"))
+	if _, ok := segments[1]; !ok {
+		t.Fatal("episode 1 should match episode 10")
 	}
 }
