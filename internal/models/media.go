@@ -597,8 +597,14 @@ func AdvisoryColumns(itemType string, age *int, source string) (*int, *string) {
 // age. Only movies and series do: those are the types advisory services rate
 // and the only ones the profile advisory-age limit is meant for.
 func AdvisoryAgeApplies(itemType string) bool {
-	return itemType == "movie" || itemType == "series"
+	return itemType == advisoryItemTypeMovie || itemType == advisoryItemTypeSeries
 }
+
+// The media_items.type values that may carry an advisory age.
+const (
+	advisoryItemTypeMovie  = "movie"
+	advisoryItemTypeSeries = "series"
+)
 
 type MediaItem struct {
 	ContentID               string // Sonyflake ID (PK)
