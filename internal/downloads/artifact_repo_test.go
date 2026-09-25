@@ -1247,6 +1247,22 @@ func TestConfirmArtifactLinkIgnoresRowRelinkedConcurrently(t *testing.T) {
 	}
 }
 
+// The create has already committed when the link is confirmed, so a failed
+// check must return the created row rather than fail the request.
+func TestServiceConfirmArtifactLinkReturnsCreatedRowOnError(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ready := readyArtifactForRecovery(t, repo, pool, fileID, "")
+	created := &Download{ID: "created-download", Status: StatusReady, ArtifactID: ready.ID}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	got := (&Service{repo: NewRepository(pool)}).confirmArtifactLink(canceled, created)
+
+	if got != created {
+		t.Fatalf("confirmArtifactLink after a failed check = %+v, want the created row", got)
+	}
+}
+
 // A stat failure other than "not found" is not proof the output is gone, so
 // recovery must leave the row alone rather than retire it and orphan the file.
 func TestRecoverReadyArtifactsSkipsIndeterminateStatErrors(t *testing.T) {
