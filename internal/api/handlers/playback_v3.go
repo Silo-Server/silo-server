@@ -6192,12 +6192,12 @@ func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, 
 	targetIndex := -1
 	// The selection's identity, for the cross-format fallback below. Downloaded
 	// subtitles carry no forced/SDH flags, so they only match exactly.
-	var wantLanguage string
+	var wantLanguage, wantTitle string
 	var wantForced, wantHearingImpaired bool
 	switch {
 	case index < len(source.ExternalSubtitles):
 		wanted := source.ExternalSubtitles[index]
-		wantLanguage, wantForced, wantHearingImpaired = wanted.Language, wanted.Forced, wanted.HearingImpaired
+		wantLanguage, wantTitle, wantForced, wantHearingImpaired = wanted.Language, wanted.Title, wanted.Forced, wanted.HearingImpaired
 		for candidateIndex, candidate := range target.ExternalSubtitles {
 			if strings.EqualFold(candidate.Language, wanted.Language) && strings.EqualFold(candidate.Format, wanted.Format) && candidate.Forced == wanted.Forced && candidate.HearingImpaired == wanted.HearingImpaired {
 				targetIndex = candidateIndex
@@ -6206,7 +6206,7 @@ func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, 
 		}
 	case index < len(source.ExternalSubtitles)+len(source.SubtitleTracks):
 		wanted := source.SubtitleTracks[index-len(source.ExternalSubtitles)]
-		wantLanguage, wantForced, wantHearingImpaired = wanted.Language, wanted.Forced, wanted.HearingImpaired
+		wantLanguage, wantTitle, wantForced, wantHearingImpaired = wanted.Language, wanted.Title, wanted.Forced, wanted.HearingImpaired
 		for candidateIndex, candidate := range target.SubtitleTracks {
 			if strings.EqualFold(candidate.Language, wanted.Language) && strings.EqualFold(candidate.Codec, wanted.Codec) && candidate.Forced == wanted.Forced && candidate.HearingImpaired == wanted.HearingImpaired {
 				targetIndex = len(target.ExternalSubtitles) + candidateIndex
@@ -6233,7 +6233,7 @@ func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, 
 		// Editions often carry the same subtitle in different formats (PGS on
 		// an HDR remux, SRT on an SDR encode). Keep the viewer's language and
 		// forced/SDH variant in whatever format the effective file has.
-		targetIndex = subtitleVariantIndexV3(target, wantLanguage, wantForced, wantHearingImpaired)
+		targetIndex = subtitleVariantIndexV3(target, wantLanguage, wantTitle, wantForced, wantHearingImpaired)
 	}
 	if targetIndex < 0 {
 		return errors.New("The selected subtitle track is unavailable in the effective file version.")
@@ -6243,21 +6243,44 @@ func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, 
 	return nil
 }
 
-// subtitleVariantIndexV3 returns the combined index of the first external or
-// embedded subtitle in file with the given language and forced/SDH flags,
-// whatever its format, or -1.
-func subtitleVariantIndexV3(file *models.MediaFile, language string, forced, hearingImpaired bool) int {
-	for i, candidate := range file.ExternalSubtitles {
-		if strings.EqualFold(candidate.Language, language) && candidate.Forced == forced && candidate.HearingImpaired == hearingImpaired {
-			return i
+// subtitleVariantIndexV3 returns the combined index of the one deliverable
+// external or embedded subtitle in file with the given language and forced/SDH
+// flags, whatever its format, or -1. Several such tracks (main dialogue and
+// commentary, say) are narrowed by title; a match that stays ambiguous is not
+// treated as the same selection.
+func subtitleVariantIndexV3(file *models.MediaFile, language, title string, forced, hearingImpaired bool) int {
+	type candidate struct {
+		index int
+		title string
+	}
+	var candidates []candidate
+	for i, track := range file.ExternalSubtitles {
+		if strings.EqualFold(track.Language, language) && track.Forced == forced && track.HearingImpaired == hearingImpaired && playback.SubtitleFormatDeliverableV3(track.Format) {
+			candidates = append(candidates, candidate{index: i, title: track.Title})
 		}
 	}
-	for i, candidate := range file.SubtitleTracks {
-		if strings.EqualFold(candidate.Language, language) && candidate.Forced == forced && candidate.HearingImpaired == hearingImpaired {
-			return len(file.ExternalSubtitles) + i
+	for i, track := range file.SubtitleTracks {
+		if strings.EqualFold(track.Language, language) && track.Forced == forced && track.HearingImpaired == hearingImpaired && playback.SubtitleFormatDeliverableV3(track.Codec) {
+			candidates = append(candidates, candidate{index: len(file.ExternalSubtitles) + i, title: track.Title})
 		}
 	}
-	return -1
+	if len(candidates) == 1 {
+		return candidates[0].index
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return -1
+	}
+	match := -1
+	for _, c := range candidates {
+		if strings.EqualFold(strings.TrimSpace(c.title), title) {
+			if match >= 0 {
+				return -1
+			}
+			match = c.index
+		}
+	}
+	return match
 }
 
 func sessionStartErrorV3(err error) *transportErrorV3 {

@@ -162,3 +162,42 @@ func TestRemapSubtitleSelectionAcrossSubtitleFormats(t *testing.T) {
 		t.Fatal("a language the effective file lacks was remapped")
 	}
 }
+
+// TestRemapSubtitleSelectionAcrossFormatsNeedsOneDeliverableMatch: the
+// cross-format fallback skips formats the subtitle policy cannot deliver, and
+// refuses a match it cannot tell apart from another track by title.
+func TestRemapSubtitleSelectionAcrossFormatsNeedsOneDeliverableMatch(t *testing.T) {
+	remap := func(source, target *models.MediaFile, from int) (int, error) {
+		request := playback.StartRequestV3{SubtitleTrackIndex: new(from)}
+		err := (&PlaybackHandler{}).remapSubtitleSelectionV3(t.Context(), source, target, &request)
+		if err != nil {
+			return -1, err
+		}
+		return *request.SubtitleTrackIndex, nil
+	}
+	pgs := &models.MediaFile{ID: 1, SubtitleTracks: []models.SubtitleTrack{{Language: "fre", Codec: "hdmv_pgs_subtitle"}}}
+
+	undeliverableFirst := &models.MediaFile{ID: 2,
+		ExternalSubtitles: []models.ExternalSubtitle{{Language: "fre", Format: "sub"}},
+		SubtitleTracks:    []models.SubtitleTrack{{Language: "fre", Codec: "subrip"}},
+	}
+	if got, err := remap(pgs, undeliverableFirst, 0); err != nil || got != 1 {
+		t.Fatalf("undeliverable external first: got %d, %v; want embedded SRT at 1", got, err)
+	}
+
+	ambiguous := &models.MediaFile{ID: 2, SubtitleTracks: []models.SubtitleTrack{
+		{Language: "fre", Codec: "subrip"},
+		{Language: "fre", Codec: "subrip", Title: "Commentary"},
+	}}
+	if _, err := remap(pgs, ambiguous, 0); err == nil {
+		t.Fatal("an untitled selection was remapped to one of two same-language tracks")
+	}
+
+	commentary := &models.MediaFile{ID: 1, SubtitleTracks: []models.SubtitleTrack{
+		{Language: "fre", Codec: "hdmv_pgs_subtitle"},
+		{Language: "fre", Codec: "hdmv_pgs_subtitle", Title: "Commentary"},
+	}}
+	if got, err := remap(commentary, ambiguous, 1); err != nil || got != 1 {
+		t.Fatalf("title disambiguation: got %d, %v; want the Commentary track at 1", got, err)
+	}
+}
