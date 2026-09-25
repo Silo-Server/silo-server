@@ -113,9 +113,15 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 		}
 	}
 	// A file whose intro its neighbors lack, such as one sharing an opening
-	// with episodes elsewhere in the season, gets a wider search.
+	// with episodes elsewhere in the season, gets a wider search. Eligibility
+	// is fixed after the neighbor pass: a result another file's wider search
+	// records for this one must not cancel its own.
+	neighborMatched := make(map[int]bool, len(results))
+	for fileID := range results {
+		neighborMatched[fileID] = true
+	}
 	for i := range ordered {
-		if len(results[ordered[i].Candidate.FileID]) > 0 {
+		if neighborMatched[ordered[i].Candidate.FileID] {
 			continue
 		}
 		extra := map[string]struct{}{}

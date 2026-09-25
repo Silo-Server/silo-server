@@ -357,3 +357,47 @@ func TestCompareFingerprintsFallbackCountsEpisodesNotVersions(t *testing.T) {
 		t.Fatal("episode 1 should reach episode 11 through the fallback")
 	}
 }
+
+func TestCompareFingerprintsWidensSearchForFilesOnlyAnotherSearchReached(t *testing.T) {
+	// Episodes 1 and 12 share a short cue; episodes 12, 30, and 31 share the
+	// intro. Episodes 30 and 31 match each other as neighbors, so only
+	// episode 12's own wider search can reach them. Episode 1's wider search
+	// records the cue for episode 12 first, which must not cancel it.
+	rng := rand.New(rand.NewPCG(0, 13))
+	shared := func(n int) []uint32 {
+		out := make([]uint32, n)
+		for i := range out {
+			out[i] = rng.Uint32()
+		}
+		return out
+	}
+	cue, intro := shared(140), shared(300)
+	var inputs []fingerprintInput
+	for e := 1; e <= 31; e++ {
+		points := make([]uint32, 900)
+		prng := rand.New(rand.NewPCG(uint64(e), 17))
+		for i := range points {
+			points[i] = prng.Uint32()
+		}
+		switch e {
+		case 1:
+			copy(points[600:], cue)
+		case 12:
+			copy(points[600:], cue)
+			copy(points[100:], intro)
+		case 30, 31:
+			copy(points[100:], intro)
+		}
+		inputs = append(inputs, fingerprintInput{
+			Candidate: Candidate{FileID: e, EpisodeID: fmt.Sprintf("e%d", e), EpisodeNumber: e, DurationSeconds: 3600},
+			Points:    points,
+		})
+	}
+	segments := CompareFingerprints(inputs, DefaultConfig("ffmpeg"))
+	if _, ok := segments[30]; !ok {
+		t.Fatal("episode 30 should match episode 12's intro")
+	}
+	if got := segments[12]; got.End-got.Start < 30 {
+		t.Fatalf("episode 12 = %+v, want its 37s intro to win over the 17s cue", got)
+	}
+}
