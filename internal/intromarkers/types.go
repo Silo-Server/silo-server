@@ -28,6 +28,10 @@ const (
 	ChromaprintFormat            = "chromaprint:raw:uint32le"
 	DefaultPointHopSeconds       = 0.123
 
+	// chromaprintDialogueAlgorithmPrefix matches every version of the
+	// subtitle-refined Chromaprint identifier.
+	chromaprintDialogueAlgorithmPrefix = "chromaprint:dialogue:" //nolint:misspell // Persisted algorithm identifier.
+
 	// legacyChapterSilenceAlgorithm extended chapter ends by up to 30 seconds.
 	// The silence backfill revisits its markers under the current limit.
 	legacyChapterSilenceAlgorithm = "chapter:silence:v1"

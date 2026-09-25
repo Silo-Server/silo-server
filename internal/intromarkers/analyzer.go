@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -683,12 +684,27 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 	for _, candidate := range group.Candidates {
 		byFileID[candidate.FileID] = candidate
 	}
+	// When subtitle refinement fails, a file that already has a
+	// subtitle-refined marker keeps it: the unrefined result would outrank it.
+	// Other files still get the unrefined marker. Either way the group is
+	// recorded as failed so the next run retries the refinement.
+	refinementFailures := 0
 	for fileID, segment := range segments {
 		if !shouldPatchGroupFile(fileID, opts.patchFileIDs) {
 			continue
 		}
 		candidate := byFileID[fileID]
-		segment = a.refineChromaprintSegment(ctx, candidate, segment, &summary)
+		var refineErr error
+		segment, refineErr = a.refineChromaprintSegment(ctx, candidate, segment, &summary)
+		if refineErr != nil {
+			if err := ctx.Err(); err != nil {
+				return summary, err
+			}
+			refinementFailures++
+			if candidate.hasSubtitleRefinedIntro() {
+				continue
+			}
+		}
 		applied, patchErr := a.repo.PatchIntroMarker(ctx, IntroMarkerPatch{
 			ExpectedFile: candidate.expectedFile(),
 			FileID:       fileID,
@@ -712,6 +728,10 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 
 	if opts.persistState {
 		state.Status = "complete"
+		if refinementFailures > 0 {
+			state.Status = "failed"
+			state.LastError = fmt.Sprintf("subtitle refinement failed for %d file(s)", refinementFailures)
+		}
 		state.MarkersWritten = summary.ChromaprintMarkersWritten
 		if err := a.repo.UpsertSeasonState(ctx, state, a.config); err != nil {
 			return summary, err
@@ -720,22 +740,31 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 	return summary, nil
 }
 
-func (a *Analyzer) refineChromaprintSegment(ctx context.Context, candidate Candidate, segment Segment, summary *RunSummary) Segment {
+// refineChromaprintSegment returns the segment to write, unchanged when
+// refinement is disabled or does not apply, and the refinement error if any.
+func (a *Analyzer) refineChromaprintSegment(ctx context.Context, candidate Candidate, segment Segment, summary *RunSummary) (Segment, error) {
 	if a.chromaprintRefiner == nil || !a.config.normalized().DialogueRefinementEnabled {
-		return segment
+		return segment, nil
 	}
 	summary.DialogueRefinementsAttempted++
 	refined, ok, err := a.chromaprintRefiner.RefineChromaprintStart(ctx, candidate, segment)
 	if err != nil {
 		summary.DialogueRefinementErrors++
 		a.logger.WarnContext(ctx, "intro marker dialogue refinement failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
-		return segment
+		return segment, err
 	}
 	if ok {
 		summary.DialogueRefinementsApplied++
-		return refined
+		return refined, nil
 	}
-	return segment
+	return segment, nil
+}
+
+// hasSubtitleRefinedIntro reports whether the file's current intro came from
+// Chromaprint with subtitle refinement, in any version.
+func (c Candidate) hasSubtitleRefinedIntro() bool {
+	return c.IntroMarkersAlgorithm != nil &&
+		strings.HasPrefix(*c.IntroMarkersAlgorithm, chromaprintDialogueAlgorithmPrefix)
 }
 
 func candidateFileIDs(candidates []Candidate) map[int]struct{} {
