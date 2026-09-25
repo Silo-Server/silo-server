@@ -139,13 +139,16 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 			if file == nil {
 				continue
 			}
+			// A retry after a rate limit runs every provider again; the ones
+			// that already finished report skips that must not be counted twice.
+			tallied := map[string]bool{}
 			for {
 				outcomes, err := t.service.ContributeFile(ctx, file, markers.ContributeOptions{Auto: true})
 				if err != nil {
 					counts.failed++
 					break
 				}
-				retryAfter, limited := counts.add(outcomes)
+				retryAfter, limited := counts.add(outcomes, tallied)
 				if !limited {
 					rateLimitWaits = 0
 					break
@@ -176,17 +179,24 @@ type contributionCounts struct {
 	submitted, skipped, invalid, failed int
 }
 
-// add tallies one file's outcomes. A rate-limited outcome ends the file's
-// attempt; its reset is returned so the caller can wait or stop.
-func (c *contributionCounts) add(outcomes []markers.ContributionOutcome) (time.Duration, bool) {
+// add tallies one file's outcomes, once per provider and segment across the
+// file's retries (tallied). A rate-limited outcome ends the file's attempt;
+// its reset is returned so the caller can wait or stop.
+func (c *contributionCounts) add(outcomes []markers.ContributionOutcome, tallied map[string]bool) (time.Duration, bool) {
 	for _, o := range outcomes {
+		if o.Status == markers.OutcomeStatusRateLimited {
+			return o.RetryAfter, true
+		}
+		key := fmt.Sprintf("%s|%d", o.Provider, o.Segment)
+		if tallied[key] {
+			continue
+		}
+		tallied[key] = true
 		switch o.Status {
 		case markers.OutcomeStatusSkipped, markers.OutcomeStatusConflict:
 			c.skipped++
 		case markers.OutcomeStatusInvalid:
 			c.invalid++
-		case markers.OutcomeStatusRateLimited:
-			return o.RetryAfter, true
 		case markers.OutcomeStatusError:
 			c.failed++
 		default:
