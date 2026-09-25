@@ -90,16 +90,17 @@ func TestSocketKeepAliveAndRevocation(t *testing.T) {
 	if err := conn.ReadJSON(&msg); err != nil {
 		t.Fatal(err)
 	}
-	if msg.MessageType != "ForceKeepAlive" || string(msg.Data) != "60" {
+	if msg.MessageType != "ForceKeepAlive" || string(msg.Data) != "60" || uuid.Validate(msg.MessageID) != nil {
 		t.Fatalf("initial message %+v", msg)
 	}
+	forceID := msg.MessageID
 	if err := conn.WriteJSON(wsMessage{MessageType: "KeepAlive"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := conn.ReadJSON(&msg); err != nil {
 		t.Fatal(err)
 	}
-	if msg.MessageType != "KeepAlive" {
+	if msg.MessageType != "KeepAlive" || uuid.Validate(msg.MessageID) != nil || msg.MessageID == forceID {
 		t.Fatalf("response %+v", msg)
 	}
 	valid.Store(false)

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -15,9 +16,12 @@ const wsKeepAlive = "KeepAlive"
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 
+// wsMessage is one socket frame. Jellyfin stamps every outbound message with
+// a fresh MessageId, and jellyfin-sdk-kotlin rejects messages without one.
 type wsMessage struct {
 	MessageType string          `json:"MessageType"`
 	Data        json.RawMessage `json:"Data,omitempty"`
+	MessageID   string          `json:"MessageId,omitempty"`
 }
 
 // NewSocketHandler implements Jellyfin's application KeepAlive protocol without
@@ -85,6 +89,7 @@ func serveCompatSocket(w http.ResponseWriter, r *http.Request, validate func(con
 		if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 			return err
 		}
+		message.MessageID = uuid.NewString()
 		return conn.WriteJSON(message)
 	}
 	force := wsMessage{MessageType: "ForceKeepAlive", Data: json.RawMessage("60")}
