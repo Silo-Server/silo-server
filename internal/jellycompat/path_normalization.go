@@ -33,6 +33,7 @@ var compatPathSegments = map[string]string{
 	"themesongs":         "ThemeSongs",
 	"specialfeatures":    "SpecialFeatures",
 	"intros":             "Intros",
+	"localtrailers":      "LocalTrailers",
 	"download":           "Download",
 	"images":             "Images",
 	"primary":            "Primary",
