@@ -569,14 +569,6 @@ func (m *ArtifactManager) recoverQueueState(ctx context.Context) {
 		workmetrics.Recovered("downloads", int64(len(count)))
 	}
 
-	if reset, err := m.downloads.ResetReadyDownloadsOfRequeuedArtifacts(ctx); err != nil {
-		slog.WarnContext(ctx, "resetting ready downloads of requeued artifacts failed", "component", "downloads", "error", err)
-	} else {
-		for _, d := range reset {
-			m.publish(ctx, d)
-		}
-	}
-
 	// Reconcile downloads stranded in 'preparing' against their artifact's
 	// terminal state: this closes the non-transactional window between an
 	// artifact's MarkReady and its MarkLinkedDownloadsReady, and fails the links
@@ -617,12 +609,15 @@ func (m *ArtifactManager) recoverReadyArtifacts(ctx context.Context) {
 		}
 		if a.OutputPath != "" {
 			if _, statErr := os.Stat(a.OutputPath); statErr != nil {
-				switch result, err := m.repo.RecoverMissing(ctx, a.ID, missingArtifactRetireGrace); {
+				switch linked, result, err := m.repo.RecoverMissing(ctx, a.ID, missingArtifactRetireGrace); {
 				case err != nil:
 					slog.WarnContext(ctx, "recovering missing download artifact failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 				case result == artifactRetired:
 					slog.InfoContext(ctx, "download artifact output missing and unused, retired", "component", "downloads", "artifact_id", a.ID, "path", a.OutputPath)
-				default:
+				case result == artifactRequeued:
+					for _, download := range linked {
+						m.publish(ctx, download)
+					}
 					slog.WarnContext(ctx, "download artifact output missing, re-queued", "component", "downloads", "artifact_id", a.ID, "path", a.OutputPath)
 				}
 			}

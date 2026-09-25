@@ -476,7 +476,11 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 		}
 		status, size := artifactRowStatus(artifact, file)
 		replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
-		return s.reuseOrReplaceManaged(ctx, existing, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
+		d, err := s.reuseOrReplaceManaged(ctx, existing, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
+		if err != nil {
+			return nil, err
+		}
+		return s.repo.ConfirmReadyArtifactLink(ctx, d)
 	}
 
 	resolvedTarget := decision.PrepareTarget
@@ -568,7 +572,9 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	if err != nil {
 		return nil, err
 	}
-	return d, nil
+	// Ensure read the artifact before this row existed. Recovery may have
+	// requeued it since; confirm a 'ready' link before returning it.
+	return s.repo.ConfirmReadyArtifactLink(ctx, d)
 }
 
 // artifactRowStatus maps an ensured artifact to the download row status and

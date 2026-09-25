@@ -1087,9 +1087,15 @@ func TestRecoverMissingRetiresOnlyUnusedLocalArtifacts(t *testing.T) {
 					t.Fatalf("TouchReady = (%v, %v)", touched, err)
 				}
 			}
-			got, err := repo.RecoverMissing(ctx, ready.ID, missingArtifactRetireGrace)
+			linked, got, err := repo.RecoverMissing(ctx, ready.ID, missingArtifactRetireGrace)
 			if err != nil || got != tc.want {
 				t.Fatalf("RecoverMissing = (%v, %v), want %v", got, err, tc.want)
+			}
+			// A requeue returns the live download to preparing in the same
+			// transaction.
+			wantReset := tc.want == artifactRequeued && tc.downloadStatus == StatusCompleted
+			if gotReset := len(linked) == 1 && linked[0].Status == StatusPreparing; gotReset != wantReset || len(linked) > 1 {
+				t.Fatalf("reset downloads = %+v, want reset=%v", linked, wantReset)
 			}
 			row, err := repo.GetByID(ctx, ready.ID)
 			switch tc.want {
@@ -1167,40 +1173,29 @@ func TestRemoteMissingRequeuesArtifactWithActiveDownload(t *testing.T) {
 }
 
 // A create that read the artifact as ready can link a 'ready' download after
-// recovery requeued the artifact. The next recovery tick must return that
-// download to preparing so it is flipped ready again by the new output.
-func TestRecoveryResetsReadyDownloadLinkedToRequeuedArtifact(t *testing.T) {
+// recovery requeued the artifact. ConfirmReadyArtifactLink must return that
+// download to preparing, and leave a link to a ready artifact alone.
+func TestConfirmReadyArtifactLinkResetsDownloadOfRequeuedArtifact(t *testing.T) {
 	repo, pool, fileID := newArtifactTestRepo(t)
 	ctx := context.Background()
+	downloads := NewRepository(pool)
 	ready := readyArtifactForRecovery(t, repo, pool, fileID, "")
-	linkRecoveryDownload(t, pool, fileID, ready.ID, StatusCompleted)
-	if got, err := repo.RecoverMissing(ctx, ready.ID, missingArtifactRetireGrace); err != nil || got != artifactRequeued {
-		t.Fatalf("RecoverMissing = (%v, %v), want requeued", got, err)
-	}
 	linkRecoveryDownload(t, pool, fileID, ready.ID, StatusReady)
-	var published []*Download
-	manager := NewArtifactManager(repo, NewRepository(pool), nil, nil, "recovery-test", nil,
-		func(_ context.Context, d *Download) { published = append(published, d) })
-
-	manager.recoverQueueState(ctx)
-
-	var statuses []string
-	rows, err := pool.Query(ctx, `SELECT status FROM downloads WHERE artifact_id = $1 ORDER BY created_at, id`, ready.ID)
-	if err != nil {
+	var d Download
+	if err := scanInto(pool.QueryRow(ctx, `SELECT `+downloadColumns+` FROM downloads WHERE artifact_id = $1`, ready.ID), &d); err != nil {
 		t.Fatal(err)
 	}
-	for rows.Next() {
-		var status string
-		if err := rows.Scan(&status); err != nil {
-			t.Fatal(err)
-		}
-		statuses = append(statuses, status)
+	if got, err := downloads.ConfirmReadyArtifactLink(ctx, &d); err != nil || got.Status != StatusReady {
+		t.Fatalf("link to a ready artifact = %+v (%v), want unchanged", got, err)
 	}
-	rows.Close()
-	if len(statuses) != 2 || statuses[0] != StatusCompleted || statuses[1] != StatusPreparing {
-		t.Fatalf("download statuses = %v, want [completed preparing]", statuses)
+	// Simulate recovery requeuing the artifact after the create read it:
+	// requeue without the linked-download reset, as a racing requeue whose
+	// reset ran before this row was inserted would leave it.
+	if err := repo.Requeue(ctx, ready.ID); err != nil {
+		t.Fatal(err)
 	}
-	if len(published) != 1 || published[0].Status != StatusPreparing {
-		t.Fatalf("published = %+v, want the reset download", published)
+	got, err := downloads.ConfirmReadyArtifactLink(ctx, &d)
+	if err != nil || got.Status != StatusPreparing || got.ID != d.ID {
+		t.Fatalf("link to a requeued artifact = %+v (%v), want preparing", got, err)
 	}
 }

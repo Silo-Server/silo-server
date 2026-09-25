@@ -763,26 +763,55 @@ func (r *Repository) MarkLinkedDownloadsFailed(ctx context.Context, artifactID, 
 	return scanDownloads(rows)
 }
 
-// ResetReadyDownloadsOfRequeuedArtifacts returns 'ready' downloads to
-// 'preparing' when their artifact is back in the prepare queue. A download
-// create can read a ready artifact, then link to it after missing-output
-// recovery requeued it; this pass catches that row so it is published as
-// preparing and flipped ready again when the new output lands.
-func (r *Repository) ResetReadyDownloadsOfRequeuedArtifacts(ctx context.Context) ([]*Download, error) {
-	rows, err := r.pool.Query(ctx,
+// ConfirmReadyArtifactLink returns a just-linked 'ready' download to
+// 'preparing' when missing-output recovery requeued its artifact after the
+// create read it as ready. FOR SHARE waits for an in-flight requeue to commit,
+// so either this read sees the queued artifact or the requeue's linked-download
+// reset sees this already-committed row. Returns the row unchanged otherwise.
+func (r *Repository) ConfirmReadyArtifactLink(ctx context.Context, d *Download) (*Download, error) {
+	if d == nil || d.Status != StatusReady || d.ArtifactID == "" {
+		return d, nil
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("beginning ready artifact link check: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var artifactStatus string
+	err = tx.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1 FOR SHARE`, d.ArtifactID).Scan(&artifactStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return d, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("checking linked artifact status: %w", err)
+	}
+	switch artifactStatus {
+	case "queued", "tone_map_queued", "audio_v2_queued", "running", "tone_map_running", "audio_v2_running":
+	default:
+		return d, nil
+	}
+	rows, err := tx.Query(ctx,
 		`UPDATE downloads SET status = 'preparing', bytes_sent = 0, completed_at = NULL,
 		     error_message = '', updated_at = now()
-		 WHERE status = 'ready' AND artifact_id IS NOT NULL
-		   AND artifact_id IN (SELECT id FROM download_artifacts
-		                       WHERE status IN ('queued', 'tone_map_queued', 'audio_v2_queued',
-		                                        'running', 'tone_map_running', 'audio_v2_running'))
+		 WHERE id = $1 AND status = 'ready'
 		 RETURNING `+downloadColumns,
+		d.ID,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("resetting ready downloads of requeued artifacts: %w", err)
+		return nil, fmt.Errorf("resetting download of requeued artifact: %w", err)
 	}
-	defer rows.Close()
-	return scanDownloads(rows)
+	reset, err := scanDownloads(rows)
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing ready artifact link check: %w", err)
+	}
+	if len(reset) == 0 {
+		return d, nil
+	}
+	return reset[0], nil
 }
 
 // ReconcileLinkedDownloads repairs downloads stranded in 'preparing' against a

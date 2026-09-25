@@ -325,24 +325,75 @@ const unusedReadyArtifactPredicate = `a.status IN ('ready', 'tone_map_ready', 'a
 	                WHERE d.artifact_id = a.id AND d.status NOT IN ('cancelled', 'failed', 'revoked'))`
 
 // RecoverMissing resolves a ready local artifact whose output file vanished.
-// It requeues the artifact while a download can still use it and otherwise
-// deletes the row, so lost output is never rebuilt for nobody. Returns
-// ErrNotFound when the row no longer exists.
-func (r *ArtifactRepository) RecoverMissing(ctx context.Context, id string, grace time.Duration) (artifactRecovery, error) {
-	tag, err := r.pool.Exec(ctx,
+// It deletes the row when no download can use it, so lost output is never
+// rebuilt for nobody. Otherwise it requeues the artifact and returns its
+// linked downloads to preparing in the same transaction, so the caller can
+// publish them. The result is artifactUnchanged when the row is no longer ready.
+func (r *ArtifactRepository) RecoverMissing(ctx context.Context, id string, grace time.Duration) (linked []*Download, result artifactRecovery, err error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, artifactUnchanged, fmt.Errorf("beginning missing artifact recovery: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx,
 		`DELETE FROM download_artifacts a WHERE a.id = $1 AND `+unusedReadyArtifactPredicate,
 		id, grace.Seconds(),
 	)
 	if err != nil {
-		return artifactUnchanged, fmt.Errorf("retiring unused artifact: %w", err)
+		return nil, artifactUnchanged, fmt.Errorf("retiring unused artifact: %w", err)
 	}
-	if tag.RowsAffected() > 0 {
-		return artifactRetired, nil
+	result = artifactRetired
+	if tag.RowsAffected() == 0 {
+		tag, err = tx.Exec(ctx,
+			`UPDATE download_artifacts
+			 SET status = CASE
+			                  WHEN audio_recipe_version <> '' THEN 'audio_v2_queued'
+			                  WHEN tone_map_mode <> '' THEN 'tone_map_queued'
+			                  ELSE 'queued'
+			              END,
+			     attempts = 0, error_message = '', next_retry_at = NULL,
+			     lease_owner = NULL, lease_expires_at = NULL, completed_at = NULL
+			 WHERE id = $1 AND status IN ('ready', 'tone_map_ready', 'audio_v2_ready')`,
+			id,
+		)
+		if err != nil {
+			return nil, artifactUnchanged, fmt.Errorf("requeuing missing artifact: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return nil, artifactUnchanged, nil
+		}
+		if linked, err = resetLinkedDownloadsForRequeue(ctx, tx, id); err != nil {
+			return nil, artifactUnchanged, err
+		}
+		result = artifactRequeued
 	}
-	if err := r.Requeue(ctx, id); err != nil {
-		return artifactUnchanged, err
+	if err := tx.Commit(ctx); err != nil {
+		return nil, artifactUnchanged, fmt.Errorf("committing missing artifact recovery: %w", err)
 	}
-	return artifactRequeued, nil
+	return linked, result, nil
+}
+
+// resetLinkedDownloadsForRequeue returns every live download of a requeued
+// artifact to preparing. It runs in the requeue transaction so a download is
+// never left ready while its artifact is back in the prepare queue.
+func resetLinkedDownloadsForRequeue(ctx context.Context, tx pgx.Tx, artifactID string) ([]*Download, error) {
+	rows, err := tx.Query(ctx,
+		`UPDATE downloads
+		 SET status = 'preparing', bytes_sent = 0, completed_at = NULL,
+		     error_message = '', updated_at = now()
+		 WHERE artifact_id = $1 AND status NOT IN ('cancelled', 'failed', 'revoked')
+		 RETURNING `+downloadColumns,
+		artifactID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("resetting linked downloads for artifact requeue: %w", err)
+	}
+	linked, err := scanDownloads(rows)
+	rows.Close()
+	if err != nil {
+		return nil, fmt.Errorf("scanning reset downloads for artifact requeue: %w", err)
+	}
+	return linked, nil
 }
 
 // RequeueRemote atomically transfers a ready remote locator into the cleanup
@@ -415,21 +466,8 @@ func (r *ArtifactRepository) requeueRemote(ctx context.Context, artifact *Artifa
 	if tag.RowsAffected() == 0 {
 		return nil, artifactUnchanged, nil
 	}
-	rows, err := tx.Query(ctx,
-		`UPDATE downloads
-		 SET status = 'preparing', bytes_sent = 0, completed_at = NULL,
-		     error_message = '', updated_at = now()
-		 WHERE artifact_id = $1 AND status NOT IN ('cancelled', 'failed', 'revoked')
-		 RETURNING `+downloadColumns,
-		artifact.ID,
-	)
-	if err != nil {
-		return nil, artifactUnchanged, fmt.Errorf("resetting linked downloads for remote artifact requeue: %w", err)
-	}
-	linked, err = scanDownloads(rows)
-	rows.Close()
-	if err != nil {
-		return nil, artifactUnchanged, fmt.Errorf("scanning reset downloads for remote artifact requeue: %w", err)
+	if linked, err = resetLinkedDownloadsForRequeue(ctx, tx, artifact.ID); err != nil {
+		return nil, artifactUnchanged, err
 	}
 	if err := enqueueRemoteArtifactCleanup(ctx, tx, artifact); err != nil {
 		return nil, artifactUnchanged, err
