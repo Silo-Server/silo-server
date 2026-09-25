@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -82,6 +84,46 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 			t.Fatal(err)
 		}
 		return id
+	}
+
+	// session starts a dedicated connection and returns it with its backend
+	// pid, so a test can see when a statement on it blocks.
+	session := func(t *testing.T) (*pgxpool.Conn, int) {
+		t.Helper()
+		conn, err := pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(conn.Release)
+		var pid int
+		if err := conn.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid); err != nil {
+			t.Fatal(err)
+		}
+		return conn, pid
+	}
+	// waitBlocked returns once the backend is waiting on a lock, and fails if
+	// the pending statement finishes first.
+	waitBlocked := func(t *testing.T, pid int, done <-chan error) {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			var waiting bool
+			if err := pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid = $1 AND NOT granted)", pid).Scan(&waiting); err != nil {
+				t.Fatal(err)
+			}
+			if waiting {
+				return
+			}
+			select {
+			case err := <-done:
+				t.Fatalf("statement finished before it blocked: %v", err)
+			default:
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("statement never blocked")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 
 	t.Run("username cannot be another account's email", func(t *testing.T) {
@@ -193,45 +235,114 @@ func TestLoginIdentitySpaceDB(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		conn, err := pool.Acquire(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer conn.Release()
-		var pid int
-		if err := conn.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid); err != nil {
-			t.Fatal(err)
-		}
+		conn, pid := session(t)
 		second := make(chan error, 1)
 		go func() {
 			_, err := createUser(ctx, conn, input(strings.ToUpper(identifier), prefix+"-other8@example.invalid"))
 			second <- err
 		}()
-
-		// The second writer must wait on the first's uncommitted claim rather
-		// than miss it; commit only once it is blocked.
-		deadline := time.Now().Add(10 * time.Second)
-		for {
-			var waiting bool
-			if err := pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid = $1 AND NOT granted)", pid).Scan(&waiting); err != nil {
-				t.Fatal(err)
-			}
-			if waiting {
-				break
-			}
-			select {
-			case err := <-second:
-				t.Fatalf("second writer finished before the first committed: %v", err)
-			default:
-			}
-			if time.Now().After(deadline) {
-				t.Fatal("second writer never blocked on the first writer's claim")
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
+		waitBlocked(t, pid, second)
 		if err := first.Commit(ctx); err != nil {
 			t.Fatal(err)
 		}
 		requireDuplicate(t, <-second)
+	})
+
+	t.Run("writers claiming a swapped pair do not deadlock", func(t *testing.T) {
+		a, b := prefix+"-pair-a@example.invalid", prefix+"-pair-b@example.invalid"
+		anchor := mustCreate(t, prefix+"-anchor9", prefix+"-anchor9@example.invalid")
+		// Hold b so the first writer stops between its two claims.
+		hold, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = hold.Rollback(ctx) }()
+		if _, err := hold.Exec(ctx, "INSERT INTO user_login_identifiers (identifier, user_id) VALUES ($1, $2)", b, anchor.ID); err != nil {
+			t.Fatal(err)
+		}
+
+		firstConn, firstPID := session(t)
+		first := make(chan error, 1)
+		go func() {
+			_, err := createUser(ctx, firstConn, input(a, b))
+			first <- err
+		}()
+		waitBlocked(t, firstPID, first)
+
+		secondConn, secondPID := session(t)
+		second := make(chan error, 1)
+		go func() {
+			_, err := createUser(ctx, secondConn, input(b, a))
+			second <- err
+		}()
+		waitBlocked(t, secondPID, second)
+
+		if err := hold.Rollback(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-first; err != nil {
+			t.Fatalf("first writer: %v", err)
+		}
+		requireDuplicate(t, <-second)
+	})
+
+	t.Run("a hand-over skips a holder renamed concurrently", func(t *testing.T) {
+		owner := mustCreate(t, prefix+"-owner10", prefix+"-ivan@example.invalid")
+		legacyID := seedLegacyCollision(t, owner, prefix+"-legacy10@example.invalid")
+
+		rename, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rename.Rollback(ctx) }()
+		renamed := prefix + "-legacy10"
+		if err := updateUser(ctx, rename, legacyID, models.UpdateUserInput{Username: &renamed}); err != nil {
+			t.Fatal(err)
+		}
+
+		conn, pid := session(t)
+		released := make(chan error, 1)
+		go func() {
+			email := prefix + "-ivan-new@example.invalid"
+			released <- updateUser(ctx, conn, owner.ID, models.UpdateUserInput{Email: &email})
+		}()
+		waitBlocked(t, pid, released)
+		if err := rename.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-released; err != nil {
+			t.Fatalf("releasing the shared identifier: %v", err)
+		}
+		mustCreate(t, owner.Email, prefix+"-other10@example.invalid")
+	})
+
+	t.Run("a repeatable-read hand-over refuses a stale holder", func(t *testing.T) {
+		owner := mustCreate(t, prefix+"-owner11", prefix+"-judy@example.invalid")
+		legacyID := seedLegacyCollision(t, owner, prefix+"-legacy11@example.invalid")
+
+		tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, "SELECT count(*) FROM users"); err != nil {
+			t.Fatal(err)
+		}
+		renamed := prefix + "-legacy11"
+		if err := users.Update(ctx, legacyID, models.UpdateUserInput{Username: &renamed}); err != nil {
+			t.Fatal(err)
+		}
+		email := prefix + "-judy-new@example.invalid"
+		err = updateUser(ctx, tx, owner.ID, models.UpdateUserInput{Email: &email})
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "40001" {
+			t.Fatalf("err = %v, want a serialization failure", err)
+		}
+		_ = tx.Rollback(ctx)
+
+		if err := users.Update(ctx, owner.ID, models.UpdateUserInput{Email: &email}); err != nil {
+			t.Fatalf("retrying the release: %v", err)
+		}
+		mustCreate(t, owner.Email, prefix+"-other11@example.invalid")
 	})
 }

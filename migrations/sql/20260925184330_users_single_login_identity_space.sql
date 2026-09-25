@@ -34,25 +34,40 @@ CREATE FUNCTION users_sync_login_identifiers() RETURNS trigger LANGUAGE plpgsql 
 DECLARE
     username_changed boolean := TG_OP = 'INSERT' OR NEW.username IS DISTINCT FROM OLD.username;
     email_changed boolean := TG_OP = 'INSERT' OR NEW.email IS DISTINCT FROM OLD.email;
+    released citext[];
+    released_identifier citext;
+    heir integer;
 BEGIN
     IF TG_OP IN ('UPDATE', 'DELETE') THEN
-        -- Release what this account no longer holds. An account from an older
-        -- collision may still hold a released identifier; hand it over so the
-        -- identifier stays claimed and the collision cannot spread.
-        WITH released AS (
+        -- Release what this account no longer holds.
+        WITH dropped AS (
             DELETE FROM user_login_identifiers
             WHERE user_id = OLD.id
               AND (TG_OP = 'DELETE' OR (identifier IS DISTINCT FROM NEW.username
                                         AND identifier IS DISTINCT FROM NEW.email))
             RETURNING identifier
         )
-        INSERT INTO user_login_identifiers (identifier, user_id)
-        SELECT DISTINCT ON (released.identifier) released.identifier, holder.id
-        FROM released
-        JOIN users holder ON holder.id <> OLD.id
-            AND (holder.username = released.identifier OR holder.email = released.identifier)
-        ORDER BY released.identifier, holder.id
-        ON CONFLICT (identifier) DO NOTHING;
+        SELECT array_agg(identifier ORDER BY identifier) INTO released FROM dropped;
+
+        -- An account from an older collision may still hold a released
+        -- identifier; hand it over so the collision cannot spread. Locking the
+        -- heir rechecks it against its current row, so an account renamed or
+        -- deleted concurrently is skipped (REPEATABLE READ writers get a
+        -- serialization failure instead of a stale heir).
+        FOREACH released_identifier IN ARRAY coalesce(released, '{}') LOOP
+            FOR heir IN
+                SELECT holder.id FROM users holder
+                WHERE holder.id <> OLD.id
+                  AND (holder.username = released_identifier OR holder.email = released_identifier)
+                ORDER BY holder.id
+                FOR SHARE
+            LOOP
+                INSERT INTO user_login_identifiers (identifier, user_id)
+                VALUES (released_identifier, heir)
+                ON CONFLICT (identifier) DO NOTHING;
+                EXIT;
+            END LOOP;
+        END LOOP;
     END IF;
     IF TG_OP = 'DELETE' THEN
         -- BEFORE DELETE, so the hand-over runs before the foreign key's
@@ -60,6 +75,8 @@ BEGIN
         RETURN OLD;
     END IF;
 
+    -- Claims are inserted in a fixed order, so two writers claiming the same
+    -- pair of identifiers wait on each other instead of deadlocking.
     INSERT INTO user_login_identifiers (identifier, user_id)
     SELECT DISTINCT claimed.identifier, NEW.id
     FROM unnest(ARRAY[
@@ -70,7 +87,8 @@ BEGIN
       AND NOT EXISTS (
           SELECT 1 FROM user_login_identifiers owned
           WHERE owned.identifier = claimed.identifier AND owned.user_id = NEW.id
-      );
+      )
+    ORDER BY claimed.identifier;
     RETURN NULL;
 END;
 $$;
