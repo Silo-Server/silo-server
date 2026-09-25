@@ -126,6 +126,8 @@ func (r *Resolver) ReloadTrustedCIDRs(ctx context.Context, store SettingsStore) 
 
 // requestScheme must run before Middleware replaces the transport peer address.
 // Proxies must preserve Host and overwrite X-Forwarded-Proto, never append it.
+// On a WebSocket upgrade, Traefik sends "wss" or "ws" instead of "https" or
+// "http"; those name the same transport security and are accepted there only.
 func (r *Resolver) requestScheme(req *http.Request) string {
 	scheme := "http"
 	if req.TLS != nil {
@@ -149,8 +151,32 @@ func (r *Resolver) requestScheme(req *http.Request) string {
 	if len(values) == 0 {
 		return scheme
 	}
-	if len(values) != 1 || (values[0] != "http" && values[0] != "https") {
+	if len(values) != 1 {
 		return ""
 	}
-	return values[0]
+	switch values[0] {
+	case "http", "https":
+		return values[0]
+	case "ws", "wss":
+		if isWebSocketUpgrade(req) {
+			return map[string]string{"ws": "http", "wss": "https"}[values[0]]
+		}
+	}
+	return ""
+}
+
+// isWebSocketUpgrade reports whether req asks to upgrade to WebSocket: a
+// Connection header carrying the "upgrade" token and Upgrade: websocket.
+func isWebSocketUpgrade(req *http.Request) bool {
+	if !strings.EqualFold(strings.TrimSpace(req.Header.Get("Upgrade")), "websocket") {
+		return false
+	}
+	for _, value := range req.Header.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+				return true
+			}
+		}
+	}
+	return false
 }
