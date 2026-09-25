@@ -778,6 +778,10 @@ func (h *ItemsHandler) HandleMediaSegments(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	contentID, fileID, err := decodeItemOrMediaSourceID(r.Context(), h.codec, raw)
+	if err != nil && !errors.Is(err, errMediaSourceOwnerNotFound) {
+		writeItemIDError(w, r, err)
+		return
+	}
 	if err != nil {
 		slog.DebugContext(r.Context(), "jellycompat: media segments lookup with unresolvable id", "component", "jellycompat", "raw_id", raw, "error", err)
 		writeJSON(w, http.StatusOK, mediaSegmentsResultDTO{Items: []mediaSegmentDTO{}})

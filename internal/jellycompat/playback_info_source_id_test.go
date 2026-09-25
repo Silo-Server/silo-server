@@ -313,3 +313,65 @@ func TestCreateStaticPlaySessionSelectsRouteMediaSource(t *testing.T) {
 		t.Fatalf("reused source = %+v, err = %v; want file 43", reused, err)
 	}
 }
+
+// TestMediaSourceRouteMissingVersionIsNotFound: when the route names a version
+// the item no longer has, static streams and downloads refuse rather than
+// serving a different file, as PlaybackInfo does.
+func TestMediaSourceRouteMissingVersionIsNotFound(t *testing.T) {
+	h, _, _ := newStaticDirectPlayHandler(t)
+	h.codec.SetMediaSourceOwnerLookup(mediaSourceOwners{42: "movie-1", 99: "movie-1"})
+	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
+	removed := h.codec.EncodeIntID(EncodedIDMediaSource, 99)
+
+	if _, _, err := h.createStaticPlaySession(t.Context(), session, removed, "", ""); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("static session err = %v, want ErrSessionNotFound", err)
+	}
+	if rec := serveStaticStream(h, removed, "Static=true"); rec.Code != http.StatusNotFound {
+		t.Fatalf("static stream status = %d, want 404, body = %s", rec.Code, rec.Body.String())
+	}
+
+	download := func(rawID string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/Items/"+rawID+"/Download", nil)
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("id", rawID)
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+		ctx = context.WithValue(ctx, compatSessionKey, session)
+		rec := httptest.NewRecorder()
+		h.HandleDownload(rec, req.WithContext(ctx))
+		return rec
+	}
+	if rec := download(removed); rec.Code != http.StatusNotFound {
+		t.Fatalf("download status = %d, want 404, body = %s", rec.Code, rec.Body.String())
+	}
+	if rec := download(h.codec.EncodeIntID(EncodedIDMediaSource, 42)); rec.Code != http.StatusOK {
+		t.Fatalf("download of present version status = %d, want 200, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleMediaSegmentsMediaSourceLookupErrors: an unknown media-source id
+// keeps the lenient empty answer, but a failed lookup is reported as 500
+// instead of being mistaken for "no segments".
+func TestHandleMediaSegmentsMediaSourceLookupErrors(t *testing.T) {
+	codec := NewResourceIDCodec()
+	h := &ItemsHandler{codec: codec, content: &stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1"}}}
+	serve := func(rawID string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/MediaSegments/"+rawID, nil)
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("id", rawID)
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+		ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1"})
+		rec := httptest.NewRecorder()
+		h.HandleMediaSegments(rec, req.WithContext(ctx))
+		return rec
+	}
+	sourceID := codec.EncodeIntID(EncodedIDMediaSource, 7)
+
+	codec.SetMediaSourceOwnerLookup(mediaSourceOwners{})
+	if rec := serve(sourceID); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"Items":[]`) {
+		t.Fatalf("unknown media source: status = %d, body = %s; want 200 with no items", rec.Code, rec.Body.String())
+	}
+	codec.SetMediaSourceOwnerLookup(failingMediaSourceOwners{})
+	if rec := serve(sourceID); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("lookup failure: status = %d, want 500, body = %s", rec.Code, rec.Body.String())
+	}
+}

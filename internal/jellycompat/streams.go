@@ -631,17 +631,26 @@ func (h *PlaybackHandler) HandleDownload(w http.ResponseWriter, r *http.Request)
 
 	version := detail.Versions[0]
 	mediaSourceID := firstNonEmpty(r.URL.Query().Get("mediaSourceId"), r.URL.Query().Get("MediaSourceId"))
-	if mediaSourceID == "" && routeFileID > 0 {
+	sourceFromRoute := mediaSourceID == "" && routeFileID > 0
+	if sourceFromRoute {
 		mediaSourceID = h.codec.EncodeIntID(EncodedIDMediaSource, routeFileID)
 	}
 	if mediaSourceID != "" {
+		matched := false
 		if fileID, decodeErr := h.codec.DecodeIntID(EncodedIDMediaSource, mediaSourceID); decodeErr == nil {
 			for _, v := range detail.Versions {
 				if int64(v.FileID) == fileID {
 					version = v
+					matched = true
 					break
 				}
 			}
+		}
+		if !matched && sourceFromRoute {
+			// The route named a version the item no longer has; do not serve
+			// a different file.
+			writeError(w, http.StatusNotFound, "NotFound", "Media source not found")
+			return
 		}
 	}
 
@@ -3362,7 +3371,8 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 	if err != nil {
 		return nil, nil, ErrSessionNotFound
 	}
-	if mediaSourceID == "" && routeFileID > 0 {
+	sourceFromRoute := mediaSourceID == "" && routeFileID > 0
+	if sourceFromRoute {
 		mediaSourceID = h.codec.EncodeIntID(EncodedIDMediaSource, routeFileID)
 	}
 	detail, err := h.content.GetItemDetail(ctx, session, contentID, nil)
@@ -3390,6 +3400,11 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 		ClientPlaySessionID: clientPlaySessionID,
 		UserID:              session.PseudoUserID.String(),
 		MediaSources:        sources,
+	}
+	if sourceFromRoute && findMediaSource(ps, mediaSourceID) == nil {
+		// The route named a version the item no longer has. Without this, the
+		// item alias below would match RouteItemID and play the first version.
+		return nil, nil, ErrSessionNotFound
 	}
 	matched := playbackRouteSource(ps, mediaSourceID, true, true)
 	if matched != nil {
