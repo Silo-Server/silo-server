@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -61,7 +62,7 @@ func TestQueryWorkGroupsDB(t *testing.T) {
 		if i == 207 {
 			mediaType = "comic"
 		}
-		exec(`INSERT INTO media_items(content_id,type,title,status,genres,content_rating,rating_imdb,created_at) VALUES($1,$2,'Tied title','released','{}',$3,$4,'2025-01-01'::timestamptz)`, ids[i], mediaType, map[bool]string{true: "R", false: "PG"}[i == 0], map[bool]any{true: nil, false: float64(i % 3)}[i%4 == 0])
+		exec(`INSERT INTO media_items(content_id,type,title,status,genres,content_rating,content_rating_age,rating_imdb,created_at) VALUES($1,$2,'Tied title','released','{}',$3,$5,$4,'2025-01-01'::timestamptz)`, ids[i], mediaType, map[bool]string{true: "R", false: "PG"}[i == 0], map[bool]any{true: nil, false: float64(i % 3)}[i%4 == 0], map[bool]int{true: 17, false: 8}[i == 0])
 		exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, ids[i], lib)
 		work := 0
 		if i == 205 {
@@ -81,7 +82,7 @@ func TestQueryWorkGroupsDB(t *testing.T) {
 		exec(`INSERT INTO item_people(id,content_id,person_id,kind) VALUES($1,$2,$3,7)`, person+int64(i)+1, ids[i], person)
 		members = append(members, LibraryCollectionItemInput{MediaItemID: ids[i]})
 	}
-	access := AccessFilter{UserID: uid, ProfileID: profile, AllowedLibraryIDs: []int{lib}, MaxContentRating: "PG"}
+	access := AccessFilter{UserID: uid, ProfileID: profile, AllowedLibraryIDs: []int{lib}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
 	raw := &QueryExecutor{Pool: pool}
 	grouped := &QueryExecutor{Pool: pool, GroupByWork: true}
 	for _, sort := range []QuerySort{{Field: "title", Order: "asc"}, {Field: "title", Order: "desc"}, {Field: "rating_imdb", Order: "desc"}, {Field: "rating_imdb", Order: "asc"}, {Field: "date_viewed", Order: "desc"}} {

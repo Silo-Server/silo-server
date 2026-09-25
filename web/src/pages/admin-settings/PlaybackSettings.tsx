@@ -325,7 +325,7 @@ export default function PlaybackSettings() {
             label="Hardware acceleration"
             type="select"
             options={HW_ACCEL_OPTIONS}
-            description="Auto picks the best device this server can see."
+            description="Auto picks the best device. If startup fails, it keeps GPU encoding with CPU decoding before falling back to software."
             status={hwAccelStatus}
             value={hwAccel}
             onChange={(v) => form.setValue("playback.hw_accel", v)}

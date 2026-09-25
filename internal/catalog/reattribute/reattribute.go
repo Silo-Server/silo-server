@@ -258,6 +258,33 @@ func movePairs(ctx context.Context, tx pgx.Tx, pairs []IDPair, report *Report) (
 		}
 		report.IntentMoved += movedRows
 	}
+	return moveRatingSyncPairs(ctx, tx, fromIDs, toIDs)
+}
+
+// moveRatingSyncPairs moves watch-provider agreed ratings along with the
+// user_ratings rows they describe; the destination's row wins a collision. A
+// moved row is unconfirmed and forgets its provider key: when the destination
+// is the same title the next sync reads the rating again and confirms it, and
+// when it is a different title the rating is sent for that title. Either way
+// the move never reads as a provider removal. The rows are not counted in
+// IntentMoved, which reports user data.
+func moveRatingSyncPairs(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []string) error {
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM watch_provider_rating_items src
+		USING `+pairsCTE+`, watch_provider_rating_items dest
+		WHERE src.media_item_id = p.from_id
+		  AND dest.media_item_id = p.to_id
+		  AND dest.connection_id = src.connection_id
+	`, fromIDs, toIDs); err != nil {
+		return fmt.Errorf("reattribute: watch_provider_rating_items dedupe: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE watch_provider_rating_items t
+		SET media_item_id = p.to_id, remote_seen = false, provider_item_key = '', updated_at = now()
+		FROM `+pairsCTE+` WHERE t.media_item_id = p.from_id
+	`, fromIDs, toIDs); err != nil {
+		return fmt.Errorf("reattribute: watch_provider_rating_items move: %w", err)
+	}
 	return nil
 }
 
@@ -397,6 +424,9 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 				return err
 			}
 			report.IntentMoved += movedRows
+		}
+		if err := moveRatingSyncPairs(ctx, tx, []string{opts.FromContentID}, []string{opts.ToContentID}); err != nil {
+			return err
 		}
 	}
 	return nil

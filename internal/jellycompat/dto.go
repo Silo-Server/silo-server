@@ -1,5 +1,7 @@
 package jellycompat
 
+import "encoding/json"
+
 // queryResultDTO mirrors Jellyfin's common paged result envelope.
 type queryResultDTO struct {
 	Items            []baseItemDTO `json:"Items"`
@@ -84,7 +86,7 @@ type baseItemDTO struct {
 	ProductionLocations      []string                     `json:"ProductionLocations,omitempty"`
 	ImageTags                map[string]string            `json:"ImageTags"`
 	PrimaryImageItemID       string                       `json:"PrimaryImageItemId,omitempty"`
-	BackdropImageTags        []string                     `json:"BackdropImageTags,omitempty"`
+	BackdropImageTags        jsonStringArray              `json:"BackdropImageTags"`
 	PrimaryImageAspectRatio  *float64                     `json:"PrimaryImageAspectRatio,omitempty"`
 	ImageBlurHashes          map[string]map[string]string `json:"ImageBlurHashes,omitempty"`
 	UserData                 *itemUserDataDTO             `json:"UserData,omitempty"`
@@ -122,6 +124,21 @@ type baseItemDTO struct {
 	MediaStreams             []mediaStreamDTO             `json:"MediaStreams,omitempty"`
 	Width                    int                          `json:"Width,omitempty"`
 	Height                   int                          `json:"Height,omitempty"`
+}
+
+// jsonStringArray encodes a nil slice as [] instead of null. BackdropImageTags
+// uses it because real Jellyfin always sends an array there, and Roku
+// (BrightScript) clients index the field without checking for it, crashing
+// right after login when it is absent or null. Image filters and
+// ImageTypeLimit=0 still clear the field, so a nil slice is normalized at
+// encode time rather than at every assignment.
+type jsonStringArray []string
+
+func (a jsonStringArray) MarshalJSON() ([]byte, error) {
+	if a == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal([]string(a))
 }
 
 type itemUserDataDTO struct {

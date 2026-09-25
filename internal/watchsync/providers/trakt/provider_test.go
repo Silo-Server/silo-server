@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -34,6 +35,8 @@ func TestProviderIdentityAndCapabilities(t *testing.T) {
 		ExportWatchlist:  true,
 		RemoveWatchlist:  true,
 		ScrobblePlayback: true,
+		ImportRatings:    true,
+		ExportRatings:    true,
 	}) {
 		t.Fatalf("unexpected capabilities: %#v", provider.Capabilities())
 	}
@@ -226,6 +229,7 @@ func TestFetchFavoritesGetsMoviesAndShows(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Pagination-Page-Count", "1")
 		switch r.URL.Path {
 		case "/users/me/favorites/movies/added":
 			_, _ = w.Write([]byte(`[{"listed_at":"2026-05-04T12:00:00Z","movie":{"title":"Movie","year":2026,"ids":{"imdb":"tt123","tmdb":456}}}]`))
@@ -327,6 +331,159 @@ func TestRemoveFavoritesCanUseProviderItemKeys(t *testing.T) {
 	shows, _ := gotBody["shows"].([]any)
 	if len(shows) != 1 {
 		t.Fatalf("shows payload = %#v", gotBody["shows"])
+	}
+}
+
+type listSyncCall func(*Provider, context.Context, watchsync.ServerConfig, watchsync.Connection, []watchsync.LocalFavorite) (watchsync.ExportResult, error)
+
+// runListSync sends items through call against a fake Trakt that answers
+// wantPath with the given not_found body.
+func runListSync(t *testing.T, call listSyncCall, wantPath, notFound string, items []watchsync.LocalFavorite) watchsync.ExportResult {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != wantPath {
+			t.Errorf("got path %q, want %s", r.URL.Path, wantPath)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"not_found":` + notFound + `}`))
+	}))
+	defer server.Close()
+
+	result, err := call(NewProvider(server.Client(), server.URL), context.Background(), watchsync.ServerConfig{
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+	}, watchsync.Connection{AccessToken: "token"}, items)
+	if err != nil {
+		t.Fatalf("list sync: %v", err)
+	}
+	return result
+}
+
+func TestListSyncMatchesNotFoundShowByAnySharedID(t *testing.T) {
+	// Silo keys the show by IMDb, as providerItemKeyForLocalFavorite does;
+	// Trakt echoes it back by TVDB alone.
+	show := watchsync.LocalFavorite{
+		MediaItemID:     "show-1",
+		Kind:            historyimport.KindSeries,
+		ProviderItemKey: "imdb:tt0903747",
+		IMDbID:          "tt0903747",
+		TVDBID:          "81189",
+	}
+	notFound := `{"movies":[],"shows":[{"ids":{"trakt":0,"slug":"","imdb":"","tmdb":0,"tvdb":81189}}]}`
+
+	for _, tc := range []struct {
+		name string
+		path string
+		call listSyncCall
+	}{
+		{"export favorites", "/sync/favorites", (*Provider).ExportFavorites},
+		{"remove favorites", "/sync/favorites/remove", (*Provider).RemoveFavorites},
+		{"export watchlist", "/sync/watchlist", (*Provider).ExportWatchlist},
+		{"remove watchlist", "/sync/watchlist/remove", (*Provider).RemoveWatchlist},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := runListSync(t, tc.call, tc.path, notFound, []watchsync.LocalFavorite{show})
+			if !slices.Equal(result.NotFound, []string{"show-1", "imdb:tt0903747"}) {
+				t.Fatalf("not found = %#v, want show-1 and its provider key", result.NotFound)
+			}
+			if len(result.Sent) != 0 {
+				t.Fatalf("sent = %#v, want none", result.Sent)
+			}
+		})
+	}
+}
+
+func TestExportFavoritesMatchesNotFoundTMDBOnlyMovie(t *testing.T) {
+	result := runListSync(t, (*Provider).ExportFavorites, "/sync/favorites",
+		`{"movies":[{"ids":{"trakt":0,"slug":"","imdb":"","tmdb":550,"tvdb":0}}],"shows":[]}`,
+		[]watchsync.LocalFavorite{{MediaItemID: "movie-1", Kind: historyimport.KindMovie, TMDBID: "550"}})
+	if !slices.Equal(result.NotFound, []string{"movie-1", "tmdb:550"}) {
+		t.Fatalf("not found = %#v, want movie-1 and tmdb:550", result.NotFound)
+	}
+	if len(result.Sent) != 0 {
+		t.Fatalf("sent = %#v, want none", result.Sent)
+	}
+}
+
+func TestExportFavoritesMixedBatchReportsOnlyTheMissingItem(t *testing.T) {
+	result := runListSync(t, (*Provider).ExportFavorites, "/sync/favorites",
+		`{"movies":[{"ids":{"tmdb":550}}],"shows":[]}`,
+		[]watchsync.LocalFavorite{
+			{MediaItemID: "movie-found", Kind: historyimport.KindMovie, ProviderItemKey: "imdb:tt0133093", IMDbID: "tt0133093", TMDBID: "603"},
+			{MediaItemID: "movie-missing", Kind: historyimport.KindMovie, ProviderItemKey: "tmdb:550", TMDBID: "550"},
+			// Same TMDB number as the missing movie, but TMDB numbers shows
+			// separately, so the movie echo must not match it.
+			{MediaItemID: "show-found", Kind: historyimport.KindSeries, ProviderItemKey: "tmdb:550", TMDBID: "550", TVDBID: "81189"},
+			// No usable ids or key: not sent, and reported in neither list.
+			{MediaItemID: "movie-no-ids", Kind: historyimport.KindMovie},
+		})
+	if !slices.Equal(result.NotFound, []string{"movie-missing", "tmdb:550"}) {
+		t.Fatalf("not found = %#v, want only movie-missing", result.NotFound)
+	}
+	wantSent := []string{"movie-found", "imdb:tt0133093", "show-found", "tmdb:550"}
+	if !slices.Equal(result.Sent, wantSent) {
+		t.Fatalf("sent = %#v, want %#v", result.Sent, wantSent)
+	}
+}
+
+func TestExportFavoritesEchoWithOnlyUnknownIDStaysSent(t *testing.T) {
+	// Documented traktIDIndex limitation: the echo shares no id with the
+	// item, so it cannot be attributed and the item counts as sent.
+	result := runListSync(t, (*Provider).ExportFavorites, "/sync/favorites",
+		`{"movies":[{"ids":{"trakt":12601}}],"shows":[]}`,
+		[]watchsync.LocalFavorite{{MediaItemID: "movie-1", Kind: historyimport.KindMovie, IMDbID: "tt0133093"}})
+	if len(result.NotFound) != 0 {
+		t.Fatalf("not found = %#v, want none", result.NotFound)
+	}
+	if !slices.Equal(result.Sent, []string{"movie-1", "imdb:tt0133093"}) {
+		t.Fatalf("sent = %#v, want movie-1 and imdb:tt0133093", result.Sent)
+	}
+}
+
+func TestRemoveFavoritesSendsItemsKnownOnlyByTraktID(t *testing.T) {
+	var gotBody map[string][]map[string]map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"deleted":{"movies":1},"not_found":{"movies":[],"shows":[]}}`))
+	}))
+	defer server.Close()
+
+	result, err := NewProvider(server.Client(), server.URL).RemoveFavorites(context.Background(),
+		watchsync.ServerConfig{ClientID: "client-id"}, watchsync.Connection{AccessToken: "token"},
+		[]watchsync.LocalFavorite{{MediaItemID: "movie-1", Kind: historyimport.KindMovie, ProviderItemKey: "trakt:5"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotBody["movies"]) != 1 || gotBody["movies"][0]["ids"]["trakt"] != float64(5) {
+		t.Fatalf("payload = %#v, want the movie by its Trakt id", gotBody)
+	}
+	if !slices.Equal(result.Sent, []string{"movie-1", "trakt:5"}) {
+		t.Fatalf("sent = %#v", result.Sent)
+	}
+}
+
+func TestTraktIDIndexMatchesAnySharedIDPerKind(t *testing.T) {
+	idx := traktIDIndex{}
+	idx.add(historyimport.KindSeries, traktIDs{TVDB: 81189, Slug: "breaking-bad"})
+	idx.add(historyimport.KindMovie, traktIDs{})
+
+	for _, tc := range []struct {
+		name string
+		kind string
+		ids  traktIDs
+		want bool
+	}{
+		{"shared tvdb", historyimport.KindSeries, traktIDs{IMDb: "tt0903747", TVDB: 81189}, true},
+		{"shared slug", historyimport.KindSeries, traktIDs{Slug: "breaking-bad"}, true},
+		{"other kind", historyimport.KindEpisode, traktIDs{TVDB: 81189}, false},
+		{"no shared id", historyimport.KindSeries, traktIDs{IMDb: "tt0903747"}, false},
+		{"zero ids never match", historyimport.KindMovie, traktIDs{}, false},
+	} {
+		if got := idx.matches(tc.kind, tc.ids); got != tc.want {
+			t.Errorf("%s: matches = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

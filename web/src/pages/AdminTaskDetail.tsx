@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router";
 import { Play, Square, Plus, Trash2, ChevronRight, ChevronDown } from "lucide-react";
+import { isNotFoundProblem } from "@/api/v2/request";
 import { Button } from "@/components/ui/button";
+import PageUnavailable from "@/components/PageUnavailable";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { Badge } from "@/components/ui/badge";
 import { TaskStatusBadge } from "@/components/admin/TaskStatusBadge";
 import { Input } from "@/components/ui/input";
@@ -599,7 +602,10 @@ function HistoryRow({
 
 export default function AdminTaskDetail() {
   const { key } = useParams<{ key: string }>();
-  const { data: task, isLoading } = useTask(key!);
+  const { data: cachedTask, isLoading, isFetching, error, refetch } = useTask(key!);
+  // A 404 outranks a cached task: a refetch that finds it gone must not leave
+  // its old runtime state on screen.
+  const task = isNotFoundProblem(error) ? undefined : cachedTask;
   const historyQuery = useTaskHistory(key!);
   const history = historyQuery.data;
   const { data: metrics } = useTaskMetrics(key!);
@@ -617,8 +623,34 @@ export default function AdminTaskDetail() {
     });
   };
 
-  if (isLoading || !task) {
+  if (isLoading) {
     return <p className="page-shell text-muted-foreground py-8 text-sm">Loading...</p>;
+  }
+
+  // A key that names no task used to leave this on "Loading..." for good.
+  if (!task) {
+    if (error && !isNotFoundProblem(error)) {
+      return (
+        <PageUnavailable
+          title="Couldn't load this task"
+          description="Something went wrong while loading it. Try again in a moment."
+          onRetry={() => void refetch()}
+          retrying={isFetching}
+        />
+      );
+    }
+    return (
+      <PageUnavailable
+        title="Task not found"
+        description="No scheduled task uses this key. It may have been removed, or the link may be wrong."
+      >
+        <Button asChild variant="outline">
+          <ViewTransitionLink to="/admin/tasks" up>
+            All tasks
+          </ViewTransitionLink>
+        </Button>
+      </PageUnavailable>
+    );
   }
 
   const isRunning = task.state === "running" || task.state === "cancelling";

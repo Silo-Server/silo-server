@@ -7308,6 +7308,25 @@ func intSliceToFields(ints []int) []MetadataField {
 	return fields
 }
 
+// advisoryAgeValue flattens a stored advisory age for merging. The stored
+// column is nullable and MetadataResult uses 0 for "none", so a missing
+// advisory and a zero both mean the same thing to the merge.
+func advisoryAgeValue(age *int) int {
+	if age == nil || *age <= 0 {
+		return 0
+	}
+	return *age
+}
+
+// advisoryAgePointer is the inverse: a non-positive age stores NULL rather
+// than a zero row, so "no advisory" is one state in the column, not two.
+func advisoryAgePointer(age int) *int {
+	if age <= 0 {
+		return nil
+	}
+	return &age
+}
+
 func itemToMetadataResult(item *models.MediaItem) *MetadataResult {
 	result := &MetadataResult{
 		HasMetadata:       true,
@@ -7319,6 +7338,8 @@ func itemToMetadataResult(item *models.MediaItem) *MetadataResult {
 		Year:              item.Year,
 		Runtime:           item.Runtime,
 		ContentRating:     item.ContentRating,
+		AdvisoryAge:       advisoryAgeValue(item.AdvisoryAge),
+		AdvisorySource:    item.AdvisorySource,
 		Genres:            item.Genres,
 		Studios:           item.Studios,
 		Networks:          item.Networks,
@@ -7391,6 +7412,8 @@ func metadataResultToItem(r *MetadataResult, contentType string) *models.MediaIt
 		Year:              r.Year,
 		Runtime:           r.Runtime,
 		ContentRating:     r.ContentRating,
+		AdvisoryAge:       advisoryAgePointer(r.AdvisoryAge),
+		AdvisorySource:    r.AdvisorySource,
 		Genres:            r.Genres,
 		Studios:           r.Studios,
 		Networks:          r.Networks,

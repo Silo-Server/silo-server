@@ -27,7 +27,6 @@ const mocks = vi.hoisted(() => {
     useWatchedStateMutation: vi.fn(),
     useSeasons: vi.fn(),
     useItemEpisodes: vi.fn(),
-    useContinueWatching: vi.fn(),
     useSimilarItems: vi.fn(),
     useSetRating: vi.fn(),
     useDeleteRating: vi.fn(),
@@ -66,10 +65,6 @@ vi.mock("@/hooks/queries/items", () => ({
 vi.mock("@/hooks/queries/episodes", () => ({
   useSeasons: mocks.useSeasons,
   useItemEpisodes: mocks.useItemEpisodes,
-}));
-
-vi.mock("@/hooks/queries/progress", () => ({
-  useContinueWatching: mocks.useContinueWatching,
 }));
 
 vi.mock("@/hooks/queries/recommendations", () => ({
@@ -198,11 +193,26 @@ describe("SeriesContent", () => {
     mocks.useItemEpisodes.mockReturnValue({
       data: { episodes: [{ content_id: "episode-1" }] },
     });
-    mocks.useContinueWatching.mockReturnValue({ items: [] });
     mocks.useSimilarItems.mockReturnValue({ data: undefined, isLoading: false });
     mocks.useSetRating.mockReturnValue({ mutate: mocks.setRatingMutate });
     mocks.useDeleteRating.mockReturnValue({ mutate: mocks.deleteRatingMutate });
   });
+
+  it.each([false, true])(
+    "only reserves empty season navigation while loading (%s)",
+    (isLoading) => {
+      mocks.useSeasons.mockReturnValue({ data: { seasons: [] }, isLoading });
+      const markup = renderToStaticMarkup(
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter>
+            <SeriesContent item={makeSeriesItem()} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      expect(markup.includes("series-detail-navigation")).toBe(isLoading);
+      expect(markup.includes('role="region" aria-label="Seasons and episodes"')).toBe(isLoading);
+    },
+  );
 
   it("passes rating state and change handler to ActionBar", () => {
     renderToStaticMarkup(

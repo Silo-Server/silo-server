@@ -71,6 +71,8 @@ func init() {
 // operations. Every field is optional: a missing gate never removes a route,
 // it makes the operations behind that gate fail closed with a typed problem.
 type Dependencies struct {
+	ThemeSongs        ThemeSongService
+	ObserveThemeAudio func(string, http.Handler) http.Handler
 	// ObserveRoutes receives detached method/path values after this actual router
 	// is fully registered. It cannot mutate or recover the sealed router.
 	ObserveRoutes func([]streamtelemetry.WalkedRoute)
@@ -376,6 +378,7 @@ type Dependencies struct {
 	ThemeOverrides                     ThemeOverrideService
 	AdminInviteCodes                   AdminInviteCodeService
 	Invitations                        InvitationService
+	PasswordResets                     PasswordResetService
 	ThemeCatalog                       ThemeCatalogService
 	AdminSubtitleProviderConfiguration AdminSubtitleProviderConfigurationService
 	// PersonalCollections manages a profile's own collections and groups

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -115,7 +116,7 @@ func TestUpcomingUsesPremiereWindowAndProfileScope(t *testing.T) {
 	codec := NewResourceIDCodec()
 	repo := &upcomingContractRepo{}
 	h := &ItemsHandler{episodeRepo: repo, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, accessFilter: func(context.Context, int, string) catalog.AccessFilter {
-		return catalog.AccessFilter{AllowedLibraryIDs: []int{3}, MaxContentRating: "PG"}
+		return catalog.AccessFilter{AllowedLibraryIDs: []int{3}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
 	}}
 	req := httptest.NewRequest("GET", "/Shows/Upcoming?StartIndex=2&Limit=1&EnableUserData=false", nil)
 	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
@@ -216,7 +217,7 @@ func TestParentEpisodesComposeFiltersBeforePage(t *testing.T) {
 				repo := &boundedEpisodeContractRepo{}
 				svc := &countingContentService{seasons: []upstreamSeason{{ContentID: "season2", SeasonNumber: 2, EpisodeCount: 20}}}
 				h := &ItemsHandler{catalogUserState: true, content: svc, episodeRepo: repo, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, images: NewImageCache(time.Hour, time.Now), accessFilter: func(context.Context, int, string) catalog.AccessFilter {
-					return catalog.AccessFilter{AllowedLibraryIDs: []int{3}, MaxContentRating: "PG"}
+					return catalog.AccessFilter{AllowedLibraryIDs: []int{3}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
 				}}
 				seriesID := codec.EncodeStringID(EncodedIDItem, "series")
 				params := "IncludeItemTypes=Episode&Genres=Drama&Years=2024&IsFavorite=true&IsPlayed=false&StartIndex=3&Limit=1&Season=2" + tc.totalParam

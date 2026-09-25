@@ -27,6 +27,8 @@ const controls = vi.hoisted(() => ({
     activeSubtitleIndex: number | null;
     subtitleTracks: PlayerSubtitleInfo[];
     visible: boolean;
+    onSkip?: { back: () => void; forward: () => void };
+    skipSeconds?: { back: number; forward: number };
     onSurfaceTap?: (event: React.MouseEvent<HTMLElement>) => void;
     isFullscreen?: boolean;
     onFullscreenToggle?: () => void;
@@ -168,6 +170,7 @@ function playerProps(overrides: Partial<Parameters<typeof VideoPlayer>[0]> = {})
     credits: null,
     qualityPreference: "original",
     onExit: vi.fn(),
+    seekIntervals: { back: 10, forward: 30 },
     ...overrides,
   };
 }
@@ -197,6 +200,22 @@ function planInvalidatedCommand(
     deadline_ms: 8_000,
     payload,
   };
+}
+
+/**
+ * Fires the `timeupdate` of a source that has data for its position. jsdom
+ * keeps readyState at HAVE_NOTHING, where the player ignores the event as the
+ * one a transport teardown queues.
+ */
+function fireFrameTimeUpdate(video: HTMLVideoElement) {
+  const own = Object.getOwnPropertyDescriptor(video, "readyState");
+  Object.defineProperty(video, "readyState", {
+    configurable: true,
+    value: Math.max(video.readyState, HTMLMediaElement.HAVE_CURRENT_DATA),
+  });
+  fireEvent.timeUpdate(video);
+  if (own) Object.defineProperty(video, "readyState", own);
+  else Reflect.deleteProperty(video, "readyState");
 }
 
 function setMediaError(video: HTMLVideoElement, message: string) {
@@ -256,6 +275,8 @@ function roomConnection(
   };
 }
 
+const reconnectingMessage = "Reconnecting to room. Controls are temporarily unavailable.";
+
 describe("VideoPlayer room catch-up", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -292,7 +313,7 @@ describe("VideoPlayer room catch-up", () => {
     });
     const video = rendered.container.querySelector("video")!;
     video.currentTime = localPosition - timelineOffset;
-    fireEvent.timeUpdate(video);
+    fireFrameTimeUpdate(video);
     const command = {
       command_id: "room-command-1",
       session_id: "session-1",
@@ -306,7 +327,7 @@ describe("VideoPlayer room catch-up", () => {
     return { ...rendered, connection, video, command, onReanchorSeek };
   }
 
-  it("pauses displaced playback and offers an explicit room rejoin", () => {
+  it("pauses displaced playback and offers an explicit room rejoin", async () => {
     const { connection, video, rerenderPlayer } = setup(100);
     vi.mocked(video.pause).mockClear();
     rerenderPlayer({
@@ -316,6 +337,7 @@ describe("VideoPlayer room catch-up", () => {
         replacementReason: "This profile joined the Watch Party on another device.",
       },
     });
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
     expect(video.pause).toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "This profile joined the Watch Party on another device.",
@@ -331,6 +353,121 @@ describe("VideoPlayer room catch-up", () => {
     expect(video.pause).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Rejoin Watch Party" }));
     expect(connection.rejoinRoom).toHaveBeenCalledOnce();
+  });
+
+  it("does not warn about a room socket that reconnects quickly", async () => {
+    const { connection, rerenderPlayer } = setup(100);
+    rerenderPlayer({ watchTogetherConnection: { ...connection, connectionState: "disconnected" } });
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    rerenderPlayer({ watchTogetherConnection: { ...connection, connectionState: "connecting" } });
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    rerenderPlayer({ watchTogetherConnection: connection });
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+    expect(screen.queryByText(reconnectingMessage)).toBeNull();
+  });
+
+  it("warns during a sustained room outage and clears the warning on reconnect", async () => {
+    const { connection, rerenderPlayer } = setup(100);
+    for (let outage = 0; outage < 2; outage++) {
+      rerenderPlayer({
+        watchTogetherConnection: { ...connection, connectionState: "disconnected" },
+      });
+      await act(() => vi.advanceTimersByTimeAsync(1_000));
+      // Backoff moves between disconnected and connecting without restarting the delay.
+      rerenderPlayer({ watchTogetherConnection: { ...connection, connectionState: "connecting" } });
+      await act(() => vi.advanceTimersByTimeAsync(999));
+      expect(screen.queryByText(reconnectingMessage)).toBeNull();
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(screen.getByText(reconnectingMessage)).toBeInTheDocument();
+      // The warning outlasts the usual notice lifetime while the outage lasts.
+      await act(() => vi.advanceTimersByTimeAsync(30_000));
+      expect(screen.getByText(reconnectingMessage)).toBeInTheDocument();
+      rerenderPlayer({ watchTogetherConnection: connection });
+      expect(screen.queryByText(reconnectingMessage)).toBeNull();
+      await act(() => vi.advanceTimersByTimeAsync(60_000));
+    }
+  });
+
+  it("lets the reconnect warning expire once the room has closed", async () => {
+    const { connection, rerenderPlayer } = setup(100);
+    const disconnected = { ...connection, connectionState: "disconnected" as const };
+    rerenderPlayer({ watchTogetherConnection: disconnected });
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    expect(screen.getByText(reconnectingMessage)).toBeInTheDocument();
+    rerenderPlayer({ watchTogetherConnection: { ...disconnected, closedReason: "ended" } });
+    await act(() => vi.advanceTimersByTimeAsync(8_000));
+    expect(screen.queryByText(reconnectingMessage)).toBeNull();
+  });
+
+  it("shows the reconnect warning after a notice raised during the delay", async () => {
+    const { connection, rerenderPlayer } = setup(100);
+    rerenderPlayer({ watchTogetherConnection: { ...connection, connectionState: "disconnected" } });
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    const onCommand = realtimeOptions.current?.onCommand;
+    if (!onCommand) throw new Error("expected the realtime command handler");
+    await act(async () => {
+      await onCommand({
+        type: "command",
+        command_id: "cmd-message-1",
+        session_id: "session-1",
+        name: "display_message",
+        deadline_ms: 8_000,
+        payload: { title: "Admin", message: "Server maintenance at midnight." },
+      });
+    });
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(screen.getByText("Server maintenance at midnight.")).toBeInTheDocument();
+    expect(screen.queryByText(reconnectingMessage)).toBeNull();
+    // The outage outlasts the message, so the warning takes its place.
+    await act(() => vi.advanceTimersByTimeAsync(7_000));
+    expect(screen.queryByText("Server maintenance at midnight.")).toBeNull();
+    expect(screen.getByText(reconnectingMessage)).toBeInTheDocument();
+  });
+
+  it("does not extend an admin notice through a routine room reconnect", async () => {
+    const { connection, rerenderPlayer } = setup(100);
+    const onCommand = realtimeOptions.current?.onCommand;
+    if (!onCommand) throw new Error("expected the realtime command handler");
+    await act(async () => {
+      await onCommand({
+        type: "command",
+        command_id: "cmd-message-brief-reconnect",
+        session_id: "session-1",
+        name: "display_message",
+        deadline_ms: 8_000,
+        payload: { title: "Admin", message: "Server maintenance at midnight." },
+      });
+    });
+
+    await act(() => vi.advanceTimersByTimeAsync(7_500));
+    rerenderPlayer({ watchTogetherConnection: { ...connection, connectionState: "disconnected" } });
+    await act(() => vi.advanceTimersByTimeAsync(499));
+    rerenderPlayer({ watchTogetherConnection: connection });
+    expect(screen.getByText("Server maintenance at midnight.")).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(screen.queryByText("Server maintenance at midnight.")).toBeNull();
+    expect(screen.queryByText(reconnectingMessage)).toBeNull();
+  });
+
+  it("shows a repeated notice again after the previous one expired", async () => {
+    setup(100);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      act(() => controls.current!.onSeek(50));
+      expect(screen.getByText("Only the host can seek the room.")).toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(8_000));
+      expect(screen.queryByText("Only the host can seek the room.")).toBeNull();
+    }
+  });
+
+  it("keeps a notice raised while minimized until the player is shown again", async () => {
+    const { rerenderPlayer } = setup(100);
+    rerenderPlayer({ displayMode: "detached" });
+    act(() => controls.current!.onSeek(50));
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    rerenderPlayer({ displayMode: "foreground" });
+    expect(screen.getByText("Only the host can seek the room.")).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(8_000));
+    expect(screen.queryByText("Only the host can seek the room.")).toBeNull();
   });
 
   it("keeps displaced playback stopped on a late lobby read and leaves through the hub", async () => {
@@ -1957,6 +2094,234 @@ describe("VideoPlayer plan failure recovery", () => {
     vi.restoreAllMocks();
   });
 
+  it("uses profile intervals for controls and detached transport, and updates without restarting", async () => {
+    const ready = vi.fn();
+    const { container, rerenderPlayer } = renderPlayer({
+      shouldAutoPlay: false,
+      plan: { ...directPlan, source: { ...directPlan.source, duration_seconds: 1000 } },
+      seekIntervals: { back: 15, forward: 60 },
+      onPlaybackTransportReady: ready,
+    });
+    const video = container.querySelector("video")!;
+    // The element reaching a seek target settles it, as a real timeupdate would.
+    const settleAt = (seconds: number) => {
+      Object.defineProperty(video, "currentTime", { configurable: true, value: seconds });
+      fireEvent.timeUpdate(video);
+    };
+    Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+    settleAt(100);
+    fireEvent.canPlay(video);
+    await waitFor(() => expect(controls.current?.skipSeconds?.forward).toBe(60));
+    act(() => controls.current?.onSkip?.back());
+    expect(playerSeek).toHaveBeenLastCalledWith(85);
+    settleAt(85);
+    act(() => ready.mock.lastCall![0].skipForward());
+    expect(playerSeek).toHaveBeenLastCalledWith(145);
+    settleAt(145);
+    const callsBeforeTick = ready.mock.calls.length;
+    fireEvent.timeUpdate(video);
+    expect(ready.mock.calls.length).toBe(callsBeforeTick);
+    const load = vi.mocked(HTMLMediaElement.prototype.load);
+    load.mockClear();
+    rerenderPlayer({ seekIntervals: { back: 5, forward: 90 } });
+    // An interval change neither reloads media nor re-publishes the transport.
+    expect(ready.mock.calls.length).toBe(callsBeforeTick);
+    act(() => controls.current?.onSkip?.forward());
+    expect(playerSeek).toHaveBeenLastCalledWith(235);
+    expect(load).not.toHaveBeenCalled();
+    settleAt(235);
+    settleAt(998);
+    act(() => ready.mock.lastCall![0].skipForward());
+    expect(playerSeek).toHaveBeenLastCalledWith(1000);
+    settleAt(1000);
+    settleAt(2);
+    act(() => ready.mock.lastCall![0].skipBack());
+    expect(playerSeek).toHaveBeenLastCalledWith(0);
+  });
+
+  it("chains skips from a pending seek instead of the element's stale clock", async () => {
+    const ready = vi.fn();
+    const { container } = renderPlayer({
+      shouldAutoPlay: false,
+      plan: { ...directPlan, source: { ...directPlan.source, duration_seconds: 1000 } },
+      seekIntervals: { back: 15, forward: 60 },
+      onPlaybackTransportReady: ready,
+    });
+    const video = container.querySelector("video")!;
+    Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+    Object.defineProperty(video, "currentTime", { configurable: true, value: 100 });
+    fireEvent.canPlay(video);
+    await waitFor(() => expect(ready).toHaveBeenCalled());
+    // Two quick taps before the element catches up: 100 → 160 → 220, not 160 twice.
+    act(() => ready.mock.lastCall![0].skipForward());
+    act(() => ready.mock.lastCall![0].skipForward());
+    expect(playerSeek).toHaveBeenLastCalledWith(220);
+    // A scrub far ahead followed by a skip extends the scrub.
+    act(() => ready.mock.lastCall![0].seekTo(700));
+    act(() => ready.mock.lastCall![0].skipBack());
+    expect(playerSeek).toHaveBeenLastCalledWith(685);
+  });
+
+  it("returns relative skips to the media clock after a reanchor fails", () => {
+    const ready = vi.fn();
+    // The replan is still in flight when it fails.
+    const reanchor = vi.fn((_seconds: number) => new Promise<boolean>(() => {}));
+    const { container, rerenderPlayer } = renderPlayer({
+      shouldAutoPlay: false,
+      plan: {
+        ...directPlan,
+        timeline: { ...directPlan.timeline, can_seek_anywhere: false },
+      },
+      onPlaybackTransportReady: ready,
+      onReanchorSeek: reanchor,
+    });
+    const video = container.querySelector("video")!;
+    Object.defineProperty(video, "currentTime", { configurable: true, value: 100 });
+    Object.defineProperty(video, "seekable", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => 110 },
+    });
+    const transport = ready.mock.lastCall![0];
+    act(() => transport.skipForward());
+    expect(reanchor).toHaveBeenLastCalledWith(130);
+    rerenderPlayer({ replanning: true });
+    rerenderPlayer({ replanning: false, replanError: "Reanchor request failed." });
+    act(() => transport.skipBack());
+    expect(playerSeek).toHaveBeenLastCalledWith(90);
+    expect(reanchor).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns relative skips to the media clock when a replan refuses a reanchor", async () => {
+    const ready = vi.fn();
+    const replans: Array<(accepted: boolean) => void> = [];
+    const reanchor = vi.fn(
+      (_seconds: number) => new Promise<boolean>((resolve) => replans.push(resolve)),
+    );
+    const { container } = renderPlayer({
+      shouldAutoPlay: false,
+      plan: {
+        ...directPlan,
+        timeline: { ...directPlan.timeline, can_seek_anywhere: false },
+      },
+      onPlaybackTransportReady: ready,
+      onReanchorSeek: reanchor,
+    });
+    const video = container.querySelector("video")!;
+    Object.defineProperty(video, "currentTime", { configurable: true, value: 100 });
+    Object.defineProperty(video, "seekable", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => 110 },
+    });
+    const transport = ready.mock.lastCall![0];
+    act(() => transport.skipForward());
+    act(() => transport.skipForward());
+    expect(reanchor).toHaveBeenLastCalledWith(160);
+    // The superseded replan resolving false must not drop the newer target.
+    await act(async () => replans[0]!(false));
+    act(() => transport.skipBack());
+    expect(playerSeek).not.toHaveBeenCalled();
+    expect(reanchor).toHaveBeenLastCalledWith(150);
+    // Refusing the current target releases it without a replan error.
+    await act(async () => replans[2]!(false));
+    act(() => transport.skipBack());
+    expect(playerSeek).toHaveBeenLastCalledWith(90);
+    expect(reanchor).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps rejected local seeks out of the next skip origin", () => {
+    const ready = vi.fn();
+    const { container } = renderPlayer({
+      shouldAutoPlay: false,
+      plan: {
+        ...directPlan,
+        timeline: { ...directPlan.timeline, can_seek_anywhere: false },
+      },
+      onPlaybackTransportReady: ready,
+    });
+    const video = container.querySelector("video")!;
+    Object.defineProperty(video, "currentTime", { configurable: true, value: 100 });
+    Object.defineProperty(video, "seekable", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => 200 },
+    });
+    const transport = ready.mock.lastCall![0];
+    act(() => transport.seekTo(500));
+    act(() => transport.skipForward());
+    expect(playerSeek).toHaveBeenLastCalledWith(130);
+    act(() => transport.seekTo(500));
+    act(() => transport.skipForward());
+    expect(playerSeek.mock.calls).toEqual([[130], [160]]);
+  });
+
+  it("chains accepted room requests while rejected requests preserve the pending target", () => {
+    const ready = vi.fn();
+    const sendRoomMessage = vi.fn((_message: Record<string, unknown>) => ({ ok: true }));
+    const { container } = renderPlayer({
+      shouldAutoPlay: false,
+      onPlaybackTransportReady: ready,
+      watchTogetherConnection: roomConnection({
+        room: {
+          ...roomConnection().room!,
+          playback_state: "paused",
+          is_paused: true,
+          member_count: 1,
+          self_role: "host",
+          self_can_control_transport: true,
+          self_can_manage_room: true,
+        },
+        sendRoomMessage,
+      }),
+    });
+    const video = container.querySelector("video")!;
+    Object.defineProperty(video, "currentTime", { configurable: true, value: 100 });
+    const transport = ready.mock.lastCall![0];
+    sendRoomMessage.mockClear();
+    sendRoomMessage.mockReturnValueOnce({ ok: false });
+    act(() => transport.skipForward());
+    act(() => transport.skipForward());
+    act(() => transport.skipForward());
+    sendRoomMessage.mockReturnValueOnce({ ok: false });
+    act(() => transport.seekTo(500));
+    act(() => transport.skipBack());
+    expect(sendRoomMessage.mock.calls.map(([message]) => message)).toEqual(
+      [130, 130, 160, 500, 150].map((position_seconds) => ({
+        type: "transport_request",
+        action: "seek",
+        position_seconds,
+        is_paused: true,
+      })),
+    );
+    expect(playerSeek).not.toHaveBeenCalled();
+    expect(video.currentTime).toBe(100);
+  });
+
+  it("reanchors configured skips on the media timeline across a remux window boundary", () => {
+    const ready = vi.fn();
+    const reanchor = vi.fn((_seconds: number) => new Promise<boolean>(() => {}));
+    const { container } = renderPlayer({
+      shouldAutoPlay: false,
+      plan: {
+        ...directPlan,
+        timeline: {
+          ...directPlan.timeline,
+          timeline_offset_seconds: 400,
+          can_seek_anywhere: false,
+        },
+      },
+      seekIntervals: { back: 15, forward: 60 },
+      onPlaybackTransportReady: ready,
+      onReanchorSeek: reanchor,
+    });
+    const video = container.querySelector("video")!;
+    Object.defineProperty(video, "currentTime", { configurable: true, value: 10 });
+    act(() => ready.mock.lastCall![0].skipBack());
+    expect(reanchor).toHaveBeenLastCalledWith(395);
+    // The reanchor is still being replanned: the next skip continues from its
+    // target rather than from the element, which still sits at media time 410.
+    act(() => controls.current?.onSkip?.forward());
+    expect(reanchor).toHaveBeenLastCalledWith(455);
+  });
+
   it("toggles play on a mouse single click and fullscreen on a double click", async () => {
     vi.useFakeTimers();
     const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
@@ -2040,7 +2405,10 @@ describe("VideoPlayer plan failure recovery", () => {
       })),
     );
     try {
-      const { container } = renderPlayer({ shouldAutoPlay: false });
+      const { container } = renderPlayer({
+        shouldAutoPlay: false,
+        seekIntervals: { back: 15, forward: 60 },
+      });
       const video = container.querySelector("video");
       if (!video) throw new Error("expected video element");
       Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
@@ -2065,7 +2433,7 @@ describe("VideoPlayer plan failure recovery", () => {
         controls.current?.onSurfaceTap?.(leftTap);
         controls.current?.onSurfaceTap?.(leftTap);
       });
-      expect(playerSeek).toHaveBeenCalledWith(40);
+      expect(playerSeek).toHaveBeenCalledWith(35);
     } finally {
       vi.useRealTimers();
       vi.unstubAllGlobals();
@@ -2309,6 +2677,64 @@ describe("VideoPlayer plan failure recovery", () => {
   });
 });
 
+describe("VideoPlayer first frame", () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("reports the first frame of each transport once", async () => {
+    const onFirstFrame = vi.fn();
+    const { container, rerenderPlayer } = renderPlayer({ onFirstFrame });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    expect(onFirstFrame).not.toHaveBeenCalled();
+
+    fireEvent.playing(video);
+    fireFrameTimeUpdate(video);
+    fireFrameTimeUpdate(video);
+    expect(onFirstFrame).toHaveBeenCalledTimes(1);
+
+    // A replan loads a new transport, which has a first frame of its own.
+    rerenderPlayer({ planRevision: 2 });
+    expect(onFirstFrame).toHaveBeenCalledTimes(1);
+    fireEvent.playing(video);
+    expect(onFirstFrame).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores the timeupdate a transport teardown queues", async () => {
+    const onFirstFrame = vi.fn();
+    const { container, rerenderPlayer } = renderPlayer({ onFirstFrame });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    fireEvent.playing(video);
+    expect(onFirstFrame).toHaveBeenCalledTimes(1);
+
+    // Switching transports empties the element with load(), which resets the
+    // position and queues a timeupdate while no source has data. It is not the
+    // new transport's first frame, and the loading overlay stays up for it.
+    rerenderPlayer({ planRevision: 2 });
+    fireEvent.timeUpdate(video);
+    fireEvent.seeked(video);
+    expect(onFirstFrame).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status", { name: "Loading video" })).toBeInTheDocument();
+
+    fireEvent.playing(video);
+    expect(onFirstFrame).toHaveBeenCalledTimes(2);
+    fireFrameTimeUpdate(video);
+    expect(onFirstFrame).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("VideoPlayer intro skip prompt", () => {
   beforeEach(() => {
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
@@ -2330,7 +2756,7 @@ describe("VideoPlayer intro skip prompt", () => {
     if (!video) throw new Error("expected video element");
 
     video.currentTime = 12;
-    fireEvent.timeUpdate(video);
+    fireFrameTimeUpdate(video);
     await act(async () => Promise.resolve());
     return rendered;
   }

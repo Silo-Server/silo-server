@@ -7,7 +7,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 	"github.com/Silo-Server/silo-server/internal/onboarding"
-	"github.com/Silo-Server/silo-server/internal/watchsync"
 	"github.com/danielgtaylor/huma/v2"
 )
 
@@ -19,7 +18,6 @@ var domainSchemaNames = map[reflect.Type]string{
 	reflect.TypeFor[templates.Template]():       "CollectionTemplate",
 	reflect.TypeFor[onboarding.Step]():          "OnboardingStep",
 	reflect.TypeFor[onboarding.Flow]():          "OnboardingFlow",
-	reflect.TypeFor[watchsync.Capabilities]():   "WatchProviderCapabilities",
 	reflect.TypeFor[diagnostics.IngestResult](): "DiagnosticsIngestResult",
 	reflect.TypeFor[catalogseed.PathRewrite]():  "CatalogImportPathRewrite",
 }

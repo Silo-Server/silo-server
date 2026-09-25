@@ -24,7 +24,7 @@ import { WORKER_SETTING_DEFAULTS, hasWorkerOverrides } from "./settingsWorkerDef
 
 const ARTWORK_KEYS = ["metadata.cache_images"];
 
-const BROWSING_KEYS = ["catalog.scope_versions_to_library"];
+const BROWSING_KEYS = ["catalog.scope_versions_to_library", "access.unrated_content"];
 
 const SCANNER_KEYS = [
   "scanner.workers",
@@ -33,7 +33,12 @@ const SCANNER_KEYS = [
   "metadata.image_workers",
 ];
 
-const MARKER_KEYS = ["markers.mode", "markers.lazy_playback", "markers.online_storage"];
+const MARKER_KEYS = [
+  "markers.mode",
+  "markers.lazy_playback",
+  "markers.online_storage",
+  "markers.detection_workers",
+];
 
 const MEILI_URL_KEY = "catalog.search.meilisearch.url";
 const MEILI_API_KEY = "catalog.search.meilisearch.api_key";
@@ -149,6 +154,18 @@ export default function LibraryMetadataSettings() {
             value={form.getValue("catalog.scope_versions_to_library") || "false"}
             onChange={(value) => form.setValue("catalog.scope_versions_to_library", value)}
             restartRequired={restartKeys.has("catalog.scope_versions_to_library")}
+          />
+          <SettingField
+            label="Titles with no age rating"
+            type="select"
+            description="Applies to profiles with a maturity ceiling: whether they see titles with no rating, or marked Not Rated. A rating the server cannot read stays hidden from them either way. Profiles without a ceiling always see these titles."
+            value={form.getValue("access.unrated_content") || "hide"}
+            onChange={(value) => form.setValue("access.unrated_content", value)}
+            options={[
+              { value: "hide", label: "Hide from profiles with a ceiling" },
+              { value: "allow", label: "Show to every profile" },
+            ]}
+            restartRequired={restartKeys.has("access.unrated_content")}
           />
         </FieldGroup>
 
@@ -282,6 +299,17 @@ export default function LibraryMetadataSettings() {
               value={form.getValue("markers.lazy_playback") || "true"}
               onChange={(value) => form.setValue("markers.lazy_playback", value)}
               restartRequired={restartKeys.has("markers.lazy_playback")}
+            />
+          )}
+
+          {(markerMode === "local" || markerMode === "both") && (
+            <SettingField
+              label="Detection workers"
+              type="number"
+              description="How many seasons Silo analyzes for intros at once, each reading audio with its own ffmpeg process. Defaults to 1. Raise it to finish a large library sooner if your storage and CPU have room."
+              value={form.getValue("markers.detection_workers")}
+              onChange={(value) => form.setValue("markers.detection_workers", value)}
+              restartRequired={restartKeys.has("markers.detection_workers")}
             />
           )}
 

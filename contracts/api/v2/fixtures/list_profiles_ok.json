@@ -10,6 +10,8 @@
       "is_child": false,
       "is_primary": true,
       "max_content_rating": "",
+      "max_advisory_age": null,
+      "require_advisory_age": false,
       "quality_preference": "auto",
       "language": "en",
       "preferred_metadata_language": "",
@@ -29,5 +31,7 @@
       "updated_at": "2026-01-02T03:04:05.000Z"
     }
   ],
-  "avatar_upload_enabled": false
+  "avatar_upload_enabled": false,
+  "max_advisory_age_supported": true,
+  "require_advisory_age_supported": true
 }

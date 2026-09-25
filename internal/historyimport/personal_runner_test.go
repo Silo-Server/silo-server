@@ -84,9 +84,11 @@ func TestPersonalRunnerRestartsEveryAuthenticationPath(t *testing.T) {
 					case "/library/sections":
 						_, _ = w.Write([]byte(`{"MediaContainer":{"Directory":[{"key":"1","type":"movie"}]}}`))
 					case "/library/sections/1/all":
+						if r.URL.Query().Get("inProgress") == "1" {
+							_, _ = w.Write([]byte(`{"MediaContainer":{"totalSize":0,"Metadata":[]}}`))
+							return
+						}
 						_, _ = w.Write([]byte(`{"MediaContainer":{"totalSize":1,"Metadata":[{"ratingKey":"external","type":"movie","title":"Movie","year":2026,"Guid":[{"id":"imdb://tt1234567"}],"duration":100000,"viewCount":1,"lastViewedAt":1788220800}]}}`))
-					case "/library/onDeck":
-						_, _ = w.Write([]byte(`{"MediaContainer":{"Metadata":[]}}`))
 					default:
 						t.Errorf("unexpected PMS path %s", r.URL.Path)
 						http.NotFound(w, r)

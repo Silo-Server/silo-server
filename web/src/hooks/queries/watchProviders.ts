@@ -1,7 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { captureProfileRequestContext } from "@/api/client";
 import { v2, V2ProblemError } from "@/api/v2/request";
 import { favoriteKeys, watchlistKeys, watchProviderKeys } from "./keys";
+import { invalidateAllRatingSurfaceQueries } from "./ratingsSurfaceRefresh";
 import { toast } from "sonner";
 import { storage } from "@/utils/storage";
 import type { PluginConfigSchema } from "@/api/types";
@@ -35,6 +37,8 @@ export interface WatchProviderCapabilities {
   remove_watchlist: boolean;
   provides_watchlist_order: boolean;
   scrobble_playback: boolean;
+  import_ratings: boolean;
+  export_ratings: boolean;
 }
 
 export interface WatchProviderConnection {
@@ -57,6 +61,8 @@ export interface WatchProviderConnection {
   sync_watchlist_removals_enabled: boolean;
   sync_watchlist_order_enabled: boolean;
   scrobble_enabled: boolean;
+  import_ratings_enabled: boolean;
+  export_ratings_enabled: boolean;
   credentials_configured: boolean;
   connection_config_schema?: PluginConfigSchema[];
   last_inbound_sync_at?: string;
@@ -99,6 +105,10 @@ export interface WatchProviderSyncRun {
   outbound_watchlist_found: number;
   outbound_watchlist_sent: number;
   watchlist_removals_sent: number;
+  inbound_ratings_found: number;
+  inbound_ratings_imported: number;
+  outbound_ratings_found: number;
+  outbound_ratings_sent: number;
   warning?: string;
   error?: string;
   started_at: string;
@@ -126,6 +136,8 @@ export type UpdateWatchProviderConnection = Partial<
     | "sync_watchlist_removals_enabled"
     | "sync_watchlist_order_enabled"
     | "scrobble_enabled"
+    | "import_ratings_enabled"
+    | "export_ratings_enabled"
   >
 >;
 
@@ -236,15 +248,53 @@ export function useWatchProviderConnection(provider: string) {
 
 export function useWatchProviderSyncRuns(provider: string, enabled = true) {
   const profileId = getActiveProfileId();
-  return useQuery({
+  const queryClient = useQueryClient();
+  const query = useQuery({
     queryKey: watchProviderKeys.syncRuns(profileId, provider),
     queryFn: () => fetchWatchProviderSyncRuns(provider),
     enabled: enabled && Boolean(profileId),
     refetchInterval: (query) => {
       const latest = query.state.data?.runs?.[0];
-      return latest?.status === "queued" || latest?.status === "running" ? 4_000 : false;
+      return latest && isActiveSyncRun(latest) ? 4_000 : false;
     },
   });
+  // A sync imports favorites, watchlist entries and ratings while it runs, so
+  // the surfaces showing them refresh once the run this page watched finishes.
+  const latest = query.data?.runs?.[0];
+  const observed = useRef<WatchProviderSyncRun | undefined>(undefined);
+  useEffect(() => {
+    if (!latest) return;
+    const previous = observed.current;
+    observed.current = latest;
+    if (syncRunFinished(previous, latest)) {
+      void invalidateSyncedSurfaces(queryClient);
+    }
+  }, [latest, queryClient]);
+  return query;
+}
+
+function isActiveSyncRun(run: WatchProviderSyncRun) {
+  return run.status === "queued" || run.status === "running";
+}
+
+// syncRunFinished reports whether latest is a run that finished since previous
+// was seen: either the run previously seen as queued or running, or a newer
+// run already final when first seen, such as a scheduled run that started and
+// ended between two reads. The first read of the page is never a completion.
+export function syncRunFinished(
+  previous: WatchProviderSyncRun | undefined,
+  latest: WatchProviderSyncRun,
+) {
+  if (previous === undefined || isActiveSyncRun(latest)) return false;
+  return previous.id === latest.id ? isActiveSyncRun(previous) : true;
+}
+
+async function invalidateSyncedSurfaces(queryClient: QueryClient) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: favoriteKeys.all }),
+    queryClient.invalidateQueries({ queryKey: watchlistKeys.list() }),
+    invalidateAllRatingSurfaceQueries(queryClient),
+  ]);
 }
 
 export function useStartWatchProviderDeviceAuth(provider: string) {
@@ -357,7 +407,7 @@ export function useTriggerWatchProviderSync(provider: string) {
       queryClient.invalidateQueries({
         queryKey: watchProviderKeys.connection(profileId, provider),
       });
-      queryClient.invalidateQueries({ queryKey: favoriteKeys.list() });
+      queryClient.invalidateQueries({ queryKey: favoriteKeys.all });
       queryClient.invalidateQueries({ queryKey: watchlistKeys.list() });
       toast.success("Watch provider sync started");
     },

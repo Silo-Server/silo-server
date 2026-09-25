@@ -389,6 +389,9 @@ export function useCatalogWindow(
     isError: page0Result.isError || failedVisibleResults.length > 0,
     isPlaceholderData: page0Result.isPlaceholderData,
     error: page0Result.error ?? remainingError,
+    // Only the first page speaks for the source itself; a later page failing
+    // says nothing about whether the collection or section exists.
+    sourceError: page0Result.error,
     refetch: async () => {
       // Page 0 owns the snapshot and total, so refresh it together with every
       // failed visible page. Retrying only page 0 leaves a timed-out later page

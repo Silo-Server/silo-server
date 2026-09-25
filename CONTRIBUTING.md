@@ -92,6 +92,7 @@ pnpm install --frozen-lockfile
 pnpm run lint
 pnpm run format:check
 pnpm run build
+pnpm run budget:check           # launch bundle size against perf-budget.json
 cd ..
 make test-web
 
@@ -112,6 +113,24 @@ make verify-local-paths
 Touching `internal/apiv2` registrations? Run `make apiv2-openapi` and
 `make apiv2-fixtures` and commit what they write; the gates above fail on a
 stale artifact or fixture tree.
+
+`make test-go` has no database, so every DB-backed test in it skips. The
+`Go DB pins` CI job covers the query-budget pins listed in
+[scripts/ci/db-pins.txt](scripts/ci/db-pins.txt): it migrates a fresh database
+and runs `make test-db-pins`, which fails when a listed test is missing,
+skipped or failing. A test that pins a statement count or query plan belongs in
+that list, added in the same change. Run it yourself when you change database
+or query code or add a pin. It needs a disposable, migrated database; with the
+PostgreSQL service from [DEVELOPMENT.md](DEVELOPMENT.md#local-development)
+running under the Compose defaults:
+
+```sh
+docker compose exec postgres createdb -U silo silo_pins
+export SILO_TEST_DATABASE_URL='postgres://silo:silo@localhost:5432/silo_pins?sslmode=disable'
+DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" \
+  go run ./cmd/silo/ --migrate-only
+make test-db-pins
+```
 
 `make lint` runs `golangci-lint` over the whole tree and reports inherited
 findings the repository does not pass yet; CI only gates the lines your branch
@@ -143,6 +162,29 @@ limited to the stated problem. Keep the description proportional to the change;
 omit session history, full logs, and private report links. Follow the
 [public-content and media rules](AGENTS.md#pull-requests). Screenshots and recordings
 are not routine PR requirements; attach them only when explicitly requested.
+
+### Write the description
+
+Write for a maintainer who knows Silo but has not seen your working session or
+the diff. The first paragraph should tell them what is broken and what this
+change does; the rest should help them decide how closely to review.
+
+- Open the Problem section with a short plain-language summary: what goes
+  wrong, who it affects, and what this change does about it. Identifiers,
+  numbers, and mechanism come after that.
+- Use the names the codebase already uses, or plain words. Do not carry over
+  terms you coined while working. If a new name is unavoidable, define it once
+  and keep using it.
+- Do not restate the diff. Skip per-test lists, walkthroughs of each function,
+  and paraphrases of code comments. Say what the tests cover and what they do
+  not.
+- Leave out how you got here: earlier designs, dead ends, and how an
+  investigation or replay was run. Mention a rejected alternative only when a
+  reviewer would otherwise ask about it, in one sentence.
+- Let the change set the length. A small fix needs a few lines; a risky or
+  subtle change can take more. There is no word limit, so do not count words
+  or trim to a target. Long supporting evidence, such as tables or
+  measurements, can go in a `<details>` block after the summary.
 
 ## Review expectations
 

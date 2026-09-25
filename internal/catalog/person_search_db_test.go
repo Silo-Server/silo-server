@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 func TestPersonSearchScopeAndRankingPostgres(t *testing.T) {
@@ -130,7 +132,7 @@ func TestPersonSearchViewerAccessPostgres(t *testing.T) {
 		if i == 7 {
 			itemType = "series"
 		}
-		exec(`INSERT INTO media_items(content_id,type,title,content_rating) VALUES($1,$2,'Synthetic title',$3)`, contentID, itemType, rating)
+		exec(`INSERT INTO media_items(content_id,type,title,content_rating,content_rating_age) VALUES($1,$2,'Synthetic title',$3,$4)`, contentID, itemType, rating, access.StoredRating(rating))
 		exec(`INSERT INTO item_people(id,content_id,person_id,kind) VALUES($1,$2,$1,1)`, ids[i], contentID)
 		if i != 5 { // Orphan item has no library membership.
 			library := libraries[0]
@@ -154,9 +156,9 @@ func TestPersonSearchViewerAccessPostgres(t *testing.T) {
 		{"access before ranking and limit", "movie", 1, AccessFilter{AllowedLibraryIDs: libraries[:1]}, []int64{ids[1]}},
 		{"no allowed libraries", "", 20, AccessFilter{AllowedLibraryIDs: []int{}}, nil},
 		{"disabled membership hides shared and orphan items", "movie", 20, AccessFilter{DisabledLibraryIDs: libraries[1:]}, []int64{ids[1], ids[3]}},
-		{"rating ceiling", "movie", 20, AccessFilter{AllowedLibraryIDs: libraries[:1], MaxContentRating: "PG-13"}, []int64{ids[1], ids[2]}},
+		{"rating ceiling", "movie", 20, AccessFilter{AllowedLibraryIDs: libraries[:1], MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}, []int64{ids[1], ids[2]}},
 		{"excluded type across all scopes", "", 20, AccessFilter{AllowedLibraryIDs: libraries[:1], ExcludedMediaTypes: []string{"ebook"}}, []int64{ids[1], ids[2], ids[3], ids[7]}},
-		{"combined restrictions across all scopes", "", 20, AccessFilter{AllowedLibraryIDs: libraries[:1], DisabledLibraryIDs: libraries[1:], MaxContentRating: "PG-13", ExcludedMediaTypes: []string{"ebook"}}, []int64{ids[1], ids[7]}},
+		{"combined restrictions across all scopes", "", 20, AccessFilter{AllowedLibraryIDs: libraries[:1], DisabledLibraryIDs: libraries[1:], MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}, ExcludedMediaTypes: []string{"ebook"}}, []int64{ids[1], ids[7]}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			people, err := repo.SearchScoped(t.Context(), prefix, tc.limit, tc.scope, tc.filter)
@@ -208,7 +210,7 @@ func TestPersonSearchEpisodeParentAccessPostgres(t *testing.T) {
 		}
 		exec(`INSERT INTO people(id,name) VALUES($1,$2)`, ids[i], name)
 		episodeID := fmt.Sprintf("%s-episode-%d", prefix, i)
-		exec(`INSERT INTO media_items(content_id,type,title,content_rating) VALUES($1,'episode','Synthetic episode','G')`, episodeID)
+		exec(`INSERT INTO media_items(content_id,type,title,content_rating,content_rating_age) VALUES($1,'episode','Synthetic episode','G',0)`, episodeID)
 		exec(`INSERT INTO item_people(id,content_id,person_id,kind) VALUES($1,$2,$1,1)`, ids[i], episodeID)
 		if i != 1 { // Accessible episode has no independent library membership.
 			exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, episodeID, libraries[0])
@@ -221,7 +223,7 @@ func TestPersonSearchEpisodeParentAccessPostgres(t *testing.T) {
 		if i == 3 {
 			rating = "R"
 		}
-		exec(`INSERT INTO media_items(content_id,type,title,content_rating) VALUES($1,'series','Synthetic series',$2)`, seriesID, rating)
+		exec(`INSERT INTO media_items(content_id,type,title,content_rating,content_rating_age) VALUES($1,'series','Synthetic series',$2,$3)`, seriesID, rating, access.StoredRating(rating))
 		exec(`INSERT INTO episodes(content_id,series_id,season_number,episode_number,title) VALUES($1,$2,1,1,'Synthetic episode')`, episodeID, seriesID)
 		if i != 4 { // Orphan parent, despite the child's permissive membership.
 			library := libraries[0]
@@ -244,8 +246,8 @@ func TestPersonSearchEpisodeParentAccessPostgres(t *testing.T) {
 		}{
 			{"allowed library", AccessFilter{AllowedLibraryIDs: libraries[:1]}, 20, []int64{ids[1], ids[2], ids[3]}},
 			{"disabled library", AccessFilter{DisabledLibraryIDs: libraries[1:]}, 20, []int64{ids[1], ids[3]}},
-			{"parent rating", AccessFilter{AllowedLibraryIDs: libraries[:1], MaxContentRating: "PG-13"}, 20, []int64{ids[1], ids[2]}},
-			{"access before limit", AccessFilter{AllowedLibraryIDs: libraries[:1], DisabledLibraryIDs: libraries[1:], MaxContentRating: "PG-13"}, 1, []int64{ids[1]}},
+			{"parent rating", AccessFilter{AllowedLibraryIDs: libraries[:1], MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}, 20, []int64{ids[1], ids[2]}},
+			{"access before limit", AccessFilter{AllowedLibraryIDs: libraries[:1], DisabledLibraryIDs: libraries[1:], MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}, 1, []int64{ids[1]}},
 			{"excluded credit type", AccessFilter{ExcludedMediaTypes: []string{"episode"}}, 20, nil},
 			{"missing parent", AccessFilter{}, 20, ids[:5]},
 		} {

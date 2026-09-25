@@ -1,14 +1,18 @@
 import { AdminUserDeleteDialog } from "@/components/AdminUserDeleteDialog";
+import { AdminUserPasswordResetDialog } from "@/components/AdminUserPasswordResetDialog";
 import {
   adminUserScope,
   captureAdminUserAuthority,
   getAdminUser,
   type AdminUserEditor,
 } from "@/api/v2/adminUsers";
-import { V2ProblemError } from "@/api/v2/request";
+import { isNotFoundProblem, V2ProblemError } from "@/api/v2/request";
+import PageUnavailable from "@/components/PageUnavailable";
+import { guardRedirectTarget } from "@/lib/authRedirect";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useId, useMemo, useState, useRef } from "react";
 import type { FormEvent } from "react";
-import { useParams, Link } from "react-router";
+import { useLocation, useParams, Link } from "react-router";
 import {
   type AdminDeviceSetting,
   type AdminSettingIdentity,
@@ -36,6 +40,7 @@ import {
   PolicyAccessFields,
   PolicyLimitFields,
   effectiveAccessGroupID,
+  policyDefaultSource,
   policyInheritHints,
   policyStateFromUser,
   policyUpdateFields,
@@ -60,12 +65,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowUpRight, ChevronRight, Pencil, RotateCcw, Settings2, UserCircle } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronRight,
+  KeyRound,
+  Pencil,
+  RotateCcw,
+  Settings2,
+  UserCircle,
+} from "lucide-react";
 import { useNavigate } from "react-router";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { formatPlaybackQualityPreset } from "@/lib/playback-quality";
+import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import {
   PERMISSION_MARKER_EDIT,
@@ -105,7 +119,11 @@ function AdminUserDetailPage() {
   const { id } = useParams<{ id: string }>();
   const userId = Number(id);
   const navigate = useNavigate();
-  const { data: user, isLoading, error } = useAdminUser(userId);
+  const location = useLocation();
+  const { data: cachedUser, isLoading, isFetching, error, refetch } = useAdminUser(userId);
+  // A background read that fails leaves the loaded account up, but a 404 means
+  // it is gone (another admin deleted it) and outranks the cached copy.
+  const user = isNotFoundProblem(error) ? undefined : cachedUser;
   const [editOpen, setEditOpen] = useState(false);
   const [deleteEditor, setDeleteEditor] = useState<AdminUserEditor | null>(null);
   const [editEditor, setEditEditor] = useState<AdminUserEditor | null>(null);
@@ -116,10 +134,49 @@ function AdminUserDetailPage() {
   const capabilities = useAdminUserCapabilities();
   const available = capabilities.data?.available === true;
   const [confirmImpersonateOpen, setConfirmImpersonateOpen] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
 
   if (isLoading) return <div className="page-shell py-8">Loading user...</div>;
-  if (error || !user)
-    return <div className="page-shell text-destructive py-8">User not found.</div>;
+  if (!user) {
+    if (error && !isNotFoundProblem(error)) {
+      return (
+        <PageUnavailable
+          title="Couldn't load this user"
+          description="Something went wrong while loading the account. Try again in a moment."
+          onRetry={() => void refetch()}
+          retrying={isFetching}
+        />
+      );
+    }
+    // With a valid id and no error, the read never ran: account reads act as a
+    // profile, and none is selected. Nothing says the account is gone.
+    if (!error && Number.isSafeInteger(userId) && userId > 0) {
+      return (
+        <PageUnavailable
+          title="Choose a profile first"
+          description="Managing accounts acts as one of your profiles. Choose a profile, then open this account again."
+        >
+          <Button asChild variant="outline">
+            <ViewTransitionLink to={guardRedirectTarget("/profiles", location)}>
+              Choose profile
+            </ViewTransitionLink>
+          </Button>
+        </PageUnavailable>
+      );
+    }
+    return (
+      <PageUnavailable
+        title="User not found"
+        description="The account may have been deleted, or the link may be wrong."
+      >
+        <Button asChild variant="outline">
+          <ViewTransitionLink to="/admin/users" up>
+            All users
+          </ViewTransitionLink>
+        </Button>
+      </PageUnavailable>
+    );
+  }
 
   const impersonationDisabled = user.role === "admin" || !user.enabled;
 
@@ -171,6 +228,7 @@ function AdminUserDetailPage() {
             <Badge variant={user.enabled ? "outline" : "destructive"}>
               {user.enabled ? "Active" : "Disabled"}
             </Badge>
+            {user.password_change_required && <Badge variant="outline">Temporary password</Badge>}
           </div>
           <p className="page-subtitle text-sm sm:text-base">{user.email}</p>
         </div>
@@ -214,6 +272,18 @@ function AdminUserDetailPage() {
               )}
             </DialogContent>
           </Dialog>
+          {/* An external provider manages this account's sign-in: it has no password to reset. */}
+          {user.password_login && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 sm:flex-none"
+              onClick={() => setResetOpen(true)}
+              disabled={!available || !user.enabled}
+            >
+              <KeyRound className="mr-1 h-3.5 w-3.5" /> Reset password
+            </Button>
+          )}
           <Button
             variant="destructive"
             size="sm"
@@ -264,6 +334,14 @@ function AdminUserDetailPage() {
           returnPath={`/admin/users/${user.id}`}
           onClose={() => setConfirmImpersonateOpen(false)}
           onError={setActionError}
+        />
+      )}
+      {resetOpen && (
+        <AdminUserPasswordResetDialog
+          user={user}
+          emailAvailable={capabilities.data?.password_reset_email === true}
+          linkAvailable={capabilities.data?.password_reset_link === true}
+          onClose={() => setResetOpen(false)}
         />
       )}
       {deleteEditor && (
@@ -370,18 +448,14 @@ function OverviewTab({ user }: { user: AdminUser }) {
           <DetailRow
             label="Max remote stream bitrate"
             value={
-              (effective.max_remote_stream_bitrate_kbps === 0
-                ? "Unlimited"
-                : `${effective.max_remote_stream_bitrate_kbps} kbps`) +
+              formatStreamBitrateLimit(effective.max_remote_stream_bitrate_kbps) +
               overridden(user.max_remote_stream_bitrate_kbps !== null)
             }
           />
           <DetailRow
             label="Max local stream bitrate"
             value={
-              (effective.max_local_stream_bitrate_kbps === 0
-                ? "Unlimited"
-                : `${effective.max_local_stream_bitrate_kbps} kbps`) +
+              formatStreamBitrateLimit(effective.max_local_stream_bitrate_kbps) +
               overridden(user.max_local_stream_bitrate_kbps !== null)
             }
           />
@@ -1150,6 +1224,7 @@ function EditUserForm({
   const [username, setUsername] = useState(user.username);
   const [email, setEmail] = useState(user.email);
   const [password, setPassword] = useState("");
+  const [requirePasswordChange, setRequirePasswordChange] = useState(false);
   const [role, setRole] = useState(user.role);
   const [enabled, setEnabled] = useState(user.enabled);
   const [permissions, setPermissions] = useState<string[]>(user.permissions ?? []);
@@ -1158,6 +1233,8 @@ function EditUserForm({
   const [maxProfiles, setMaxProfiles] = useState(user.max_profiles);
   const accessGroupSelectId = useId();
   const roleSelectId = useId();
+  const passwordInputId = useId();
+  const requireChangeId = useId();
   const markerEditId = useId();
   const metadataCurationId = useId();
   const updateMutation = useUpdateUser();
@@ -1169,6 +1246,7 @@ function EditUserForm({
   // An admin inherits from no group, so preview the no-group policy while the
   // picked group is kept for toggling the role back.
   const hintGroupID = effectiveAccessGroupID(role, accessGroupID);
+  const hintSource = policyDefaultSource(role, hintGroupID);
   const inheritHints =
     policyInheritHints(hintGroupID, accessGroups) ??
     (hintGroupID === user.access_group_id ? user.effective_policy : undefined);
@@ -1197,7 +1275,10 @@ function EditUserForm({
       max_profiles: maxProfiles,
       ...policyUpdateFields(policy),
     };
-    if (password) body.password = password;
+    if (password) {
+      body.password = password;
+      if (requirePasswordChange) body.require_password_change = true;
+    }
     try {
       await updateMutation.mutateAsync({ editor, body });
       setSaved(true);
@@ -1254,14 +1335,36 @@ function EditUserForm({
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Password (leave blank to keep current)</Label>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
+              {user.password_login ? (
+                <div className="space-y-2">
+                  <Label htmlFor={passwordInputId}>Password (leave blank to keep current)</Label>
+                  <Input
+                    id={passwordInputId}
+                    type="password"
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id={requireChangeId}
+                      checked={requirePasswordChange && password !== ""}
+                      disabled={password === ""}
+                      onCheckedChange={setRequirePasswordChange}
+                    />
+                    <Label htmlFor={requireChangeId} className="text-xs font-normal">
+                      Require change at next sign-in
+                    </Label>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label>Password</Label>
+                  <p className="text-muted-foreground text-xs">
+                    An external sign-in provider manages this account's password.
+                  </p>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor={roleSelectId}>Role</Label>
                 <Select value={role} onValueChange={setRole}>
@@ -1352,13 +1455,19 @@ function EditUserForm({
             <PolicyAccessFields
               state={policy}
               onChange={setPolicy}
+              source={hintSource}
               effective={inheritHints}
               libraries={libraries}
             />
           </TabsContent>
 
           <TabsContent value="limits" className="mt-0 space-y-4">
-            <PolicyLimitFields state={policy} onChange={setPolicy} effective={inheritHints} />
+            <PolicyLimitFields
+              state={policy}
+              onChange={setPolicy}
+              source={hintSource}
+              effective={inheritHints}
+            />
             <div className="space-y-1">
               <Label>Max Profiles</Label>
               <Input

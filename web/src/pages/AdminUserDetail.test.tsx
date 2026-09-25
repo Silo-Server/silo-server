@@ -29,6 +29,8 @@ const mocks = vi.hoisted(() => ({
   userSettings: [] as unknown[],
   /** The account the detail page renders, reset to `adminUser` per test. */
   user: null as AdminUser | null,
+  userError: null as Error | null,
+  refetchUser: vi.fn(),
 }));
 
 const adminUser: AdminUser = {
@@ -51,6 +53,8 @@ const adminUser: AdminUser = {
   download_allowed: null,
   download_transcode_allowed: null,
   requests_allowed: null,
+  password_login: true,
+  password_change_required: false,
   effective_policy: {
     library_ids: null,
     max_playback_quality: "",
@@ -106,10 +110,17 @@ vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
   useAdminUserCapabilities: () => ({ data: { available: true, default_profile: true } }),
-  useAdminUser: () => ({ data: mocks.user, isLoading: false, error: null }),
+  useAdminUser: () => ({
+    data: mocks.user ?? undefined,
+    isLoading: false,
+    isFetching: false,
+    error: mocks.userError,
+    refetch: mocks.refetchUser,
+  }),
   useUpdateUser: () => ({ mutateAsync: mocks.updateUserMutate, isPending: false }),
   useDeleteUser: () => ({ mutate: vi.fn(), isPending: false }),
   useImpersonateUser: () => ({ mutateAsync: mocks.impersonate, reset: vi.fn(), isPending: false }),
+  useIssuePasswordReset: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAdminUserDeviceSettings: () => ({ data: [], isLoading: false }),
   useAdminUserSettings: () => ({ data: mocks.userSettings, isLoading: false }),
   useDeleteAdminUserDeviceSetting: () => ({ mutate: vi.fn(), isPending: false }),
@@ -154,7 +165,7 @@ vi.mock("@/hooks/queries/admin/accessGroups", () => ({
         audio_transcode_allowed: true,
         max_streams: 1,
         max_transcodes: 0,
-        max_remote_stream_bitrate_kbps: 0,
+        max_remote_stream_bitrate_kbps: 8000,
         max_local_stream_bitrate_kbps: 0,
         allowed_permissions: [],
         requests_allowed: false,
@@ -207,6 +218,8 @@ beforeEach(() => {
   mocks.deleteSettingMutate.mockReset();
   mocks.userSettings = [];
   mocks.user = adminUser;
+  mocks.userError = null;
+  mocks.refetchUser.mockReset();
 });
 
 afterEach(() => {
@@ -409,8 +422,8 @@ describe("AdminUserDetail transcode limits", () => {
     await user.click(screen.getByRole("button", { name: /edit/i }));
     await user.click(screen.getByRole("tab", { name: "Limits" }));
 
-    // Inheriting fields show the group-derived effective value.
-    expect(screen.getAllByText("Inherited: Unlimited").length).toBeGreaterThan(0);
+    // Fields left on their default show the value they resolve to.
+    expect(screen.getAllByText("Server default: Unlimited").length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("combobox", { name: "Video Transcoding" }));
     await user.click(screen.getByRole("option", { name: "Not allowed" }));
@@ -456,8 +469,10 @@ describe("AdminUserDetail inherit hints", () => {
     renderUserDetail();
 
     await openLimitsTab(user);
-    // Ungrouped: the no-group layer leaves all four ceilings uncapped.
-    expect(screen.getAllByText("Inherited: Unlimited")).toHaveLength(4);
+    // Ungrouped: the server's no-group defaults leave all four ceilings
+    // uncapped, and nothing claims to come from a group.
+    expect(screen.getAllByText("Server default: Unlimited")).toHaveLength(4);
+    expect(screen.queryByText(/Inherited/)).not.toBeInTheDocument();
 
     await selectGuestsGroup(user);
     // The access tab's hints follow the picker straight away.
@@ -469,7 +484,8 @@ describe("AdminUserDetail inherit hints", () => {
     // effective_policy resolved against the account's saved group.
     await user.click(screen.getByRole("tab", { name: "Limits" }));
     expect(screen.getByText("Inherited: 1")).toBeInTheDocument();
-    expect(screen.getAllByText("Inherited: Unlimited")).toHaveLength(3);
+    expect(screen.getByText("Inherited: 8 Mbps")).toBeInTheDocument();
+    expect(screen.getAllByText("Inherited: Unlimited")).toHaveLength(2);
   });
 
   it("seeds a limit override from the inherited value, not from unlimited", async () => {
@@ -500,7 +516,9 @@ describe("AdminUserDetail inherit hints", () => {
 
     await user.clear(maxStreams);
     expect(maxStreams).toHaveValue(null);
-    expect(screen.getByText(/Enter a whole number/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Enter a whole number, or turn Override off to use the server default."),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(mocks.updateUserMutate).not.toHaveBeenCalled();
@@ -510,6 +528,116 @@ describe("AdminUserDetail inherit hints", () => {
     await waitFor(() => expect(mocks.updateUserMutate).toHaveBeenCalled());
     const call = mocks.updateUserMutate.mock.calls[0]?.[0] as UpdateUserMutationArg | undefined;
     expect(call?.body.max_streams).toBe(3);
+  });
+
+  it("labels an admin's defaults as admin defaults, never as inherited", async () => {
+    const user = userEvent.setup();
+    mocks.user = { ...adminUser, role: "admin" };
+    renderUserDetail();
+
+    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.click(screen.getByRole("tab", { name: "Access" }));
+    expect(screen.getByText("Admin default: All libraries")).toBeInTheDocument();
+    await user.click(screen.getByRole("combobox", { name: "Download Transcodes" }));
+    expect(await screen.findByRole("option", { name: "Admin default: Not allowed" })).toBeVisible();
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByRole("tab", { name: "Limits" }));
+    expect(screen.getAllByText("Admin default: Unlimited")).toHaveLength(4);
+    expect(screen.getByText("Uses the admin default quality ceiling.")).toBeInTheDocument();
+    expect(screen.queryByText(/Inherit/)).not.toBeInTheDocument();
+  });
+
+  it("follows the role and group pickers from admin default to inherited", async () => {
+    const user = userEvent.setup();
+    mocks.user = { ...adminUser, role: "admin" };
+    renderUserDetail();
+
+    await openLimitsTab(user);
+    expect(screen.getAllByText("Admin default: Unlimited")).toHaveLength(4);
+
+    await user.click(screen.getByRole("tab", { name: "Account" }));
+    await user.click(screen.getByRole("combobox", { name: "Role" }));
+    await user.click(await screen.findByRole("option", { name: "User" }));
+    await user.click(screen.getByRole("tab", { name: "Limits" }));
+    expect(screen.getAllByText("Server default: Unlimited")).toHaveLength(4);
+
+    await selectGuestsGroup(user);
+    await user.click(screen.getByRole("tab", { name: "Limits" }));
+    expect(screen.getByText("Inherited: 1")).toBeInTheDocument();
+    expect(screen.queryByText(/default/)).not.toBeInTheDocument();
+  });
+});
+
+describe("AdminUserDetail stream bitrate limits", () => {
+  it("overrides a bitrate limit in Mbps, seeded from the inherited cap", async () => {
+    const user = userEvent.setup();
+    renderUserDetail();
+
+    await openLimitsTab(user);
+    await selectGuestsGroup(user);
+    await user.click(screen.getByRole("tab", { name: "Limits" }));
+
+    await user.click(overrideSwitch(2));
+    const remote = screen.getByRole("combobox", { name: "Max remote stream bitrate" });
+    expect(remote).toHaveTextContent("8 Mbps");
+
+    await user.click(remote);
+    await user.click(await screen.findByRole("option", { name: "Custom" }));
+    const custom = screen.getByLabelText("Max remote stream bitrate in Mbps");
+    expect(custom).toHaveValue("8");
+    await user.clear(custom);
+    await user.type(custom, "2.5");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.updateUserMutate).toHaveBeenCalled());
+    const call = mocks.updateUserMutate.mock.calls[0]?.[0] as UpdateUserMutationArg | undefined;
+    expect(call?.body.max_remote_stream_bitrate_kbps).toBe(2500);
+    expect(call?.body.max_local_stream_bitrate_kbps).toBeNull();
+  });
+
+  it("does not save a custom bitrate box until it holds a cap above 0", async () => {
+    const user = userEvent.setup();
+    renderUserDetail();
+
+    await openLimitsTab(user);
+    await user.click(overrideSwitch(3));
+    await user.click(screen.getByRole("combobox", { name: "Max local stream bitrate" }));
+    await user.click(await screen.findByRole("option", { name: "Custom" }));
+    const custom = screen.getByLabelText("Max local stream bitrate in Mbps");
+    expect(custom).toHaveValue("");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(mocks.updateUserMutate).not.toHaveBeenCalled();
+
+    // "0" would be unlimited; the custom box only takes a real cap.
+    await user.type(custom, "0");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(mocks.updateUserMutate).not.toHaveBeenCalled();
+
+    await user.clear(custom);
+    await user.type(custom, "0.75");
+    expect(screen.getByText(/Below 1 Mbps/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.updateUserMutate).toHaveBeenCalled());
+    const call = mocks.updateUserMutate.mock.calls[0]?.[0] as UpdateUserMutationArg | undefined;
+    expect(call?.body.max_local_stream_bitrate_kbps).toBe(750);
+  });
+
+  it("shows the effective caps in Mbps", () => {
+    mocks.user = {
+      ...adminUser,
+      max_local_stream_bitrate_kbps: 1500,
+      effective_policy: {
+        ...adminUser.effective_policy,
+        max_remote_stream_bitrate_kbps: 8000,
+        max_local_stream_bitrate_kbps: 1500,
+      },
+    };
+    renderUserDetail();
+
+    expect(rowValue("Max remote stream bitrate")).toBe("8 Mbps");
+    expect(rowValue("Max local stream bitrate")).toBe("1.5 Mbps (override)");
   });
 });
 
@@ -548,6 +676,45 @@ describe("AdminUserDetail effective values", () => {
 function rowValue(label: string): string | undefined {
   return screen.getByText(label).nextElementSibling?.textContent ?? undefined;
 }
+
+it("sends a temporary password when the admin requires a change", async () => {
+  const user = userEvent.setup();
+  mocks.updateUserMutate.mockResolvedValue(undefined);
+  renderUserDetail();
+  await user.click(screen.getByRole("button", { name: /edit/i }));
+  const dialog = await screen.findByRole("dialog");
+  const toggle = within(dialog).getByRole("switch", { name: "Require change at next sign-in" });
+  expect(toggle).toBeDisabled();
+  await user.type(
+    within(dialog).getByLabelText("Password (leave blank to keep current)"),
+    "temporary-pass",
+  );
+  await user.click(toggle);
+  await user.click(within(dialog).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(mocks.updateUserMutate).toHaveBeenCalledTimes(1));
+  expect(mocks.updateUserMutate.mock.calls[0]![0].body).toMatchObject({
+    password: "temporary-pass",
+    require_password_change: true,
+  });
+});
+
+it("hides password actions for an account an external provider manages", async () => {
+  const user = userEvent.setup();
+  mocks.user = { ...adminUser, password_login: false };
+  renderUserDetail();
+  expect(screen.queryByRole("button", { name: /reset password/i })).toBeNull();
+  await user.click(screen.getByRole("button", { name: /edit/i }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).queryByLabelText(/Password \(leave blank/)).toBeNull();
+  expect(within(dialog).getByText(/external sign-in provider/)).toBeInTheDocument();
+});
+
+it("offers a password reset for an account that signs in with a password", async () => {
+  const user = userEvent.setup();
+  renderUserDetail();
+  await user.click(screen.getByRole("button", { name: /reset password/i }));
+  expect(await screen.findByRole("dialog", { name: "Reset password" })).toBeInTheDocument();
+});
 
 it("preserves user draft and frozen guard after conflict until explicit reload", async () => {
   const user = userEvent.setup();
@@ -620,4 +787,63 @@ it.each([
   mocks.user = { ...adminUser, ...eligibility };
   renderUserDetail();
   expect(screen.getByRole("button", { name: "View as user" })).toBeDisabled();
+});
+
+function userProblem(status: number) {
+  return new V2ProblemError("getAdminUser", {
+    type: `https://silo.example/problems/${status === 404 ? "not_found" : "internal_error"}`,
+    title: status === 404 ? "Not Found" : "Internal Server Error",
+    status,
+    detail: status === 404 ? "User not found" : "Users are unavailable",
+    instance: "/api/v2/admin/users/7",
+  });
+}
+
+it("points a missing account back to the user list", () => {
+  mocks.user = null;
+  mocks.userError = userProblem(404);
+  renderUserDetail();
+  expect(screen.getByRole("heading", { level: 1, name: "User not found" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "All users" })).toHaveAttribute("href", "/admin/users");
+});
+
+it("offers a retry instead of calling a failed account read missing", async () => {
+  mocks.user = null;
+  mocks.userError = userProblem(500);
+  renderUserDetail();
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Couldn't load this user" }),
+  ).toBeInTheDocument();
+  expect(screen.queryByText("User not found")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(mocks.refetchUser).toHaveBeenCalledTimes(1);
+});
+
+it("keeps showing a loaded account when a background read fails", () => {
+  mocks.userError = userProblem(500);
+  renderUserDetail();
+  expect(
+    screen.queryByRole("heading", { name: "Couldn't load this user" }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText("User not found")).not.toBeInTheDocument();
+});
+
+it("asks for a profile instead of calling an unread account missing", () => {
+  mocks.user = null;
+  renderUserDetail();
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Choose a profile first" }),
+  ).toBeInTheDocument();
+  // Choosing a profile returns to this account, as the profile guard does.
+  expect(screen.getByRole("link", { name: "Choose profile" })).toHaveAttribute(
+    "href",
+    "/profiles?redirect=%2Fadmin%2Fusers%2F7",
+  );
+  expect(screen.queryByText("User not found")).not.toBeInTheDocument();
+});
+
+it("lets a 404 from a background read replace a loaded account", () => {
+  mocks.userError = userProblem(404);
+  renderUserDetail();
+  expect(screen.getByRole("heading", { level: 1, name: "User not found" })).toBeInTheDocument();
 });

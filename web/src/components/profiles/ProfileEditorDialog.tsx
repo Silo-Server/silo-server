@@ -38,6 +38,7 @@ import {
 } from "@/lib/profile-avatars";
 import { PLAYBACK_QUALITY_OPTIONS, type PlaybackQualityPreset } from "@/lib/playback-quality";
 import {
+  ADVISORY_AGE_OPTIONS,
   applyKidsPreset,
   buildProfileRequestFromDraft,
   buildProfileUpdateFromDraft,
@@ -53,6 +54,10 @@ interface ProfileEditorDialogProps {
   profile?: Profile | null;
   libraries: UserLibrary[];
   avatarUploadEnabled?: boolean;
+  /** The server accepts `max_advisory_age`; hides the control when false. */
+  advisoryAgeSupported?: boolean;
+  /** The server accepts `require_advisory_age`; hides the switch when false. */
+  requireAdvisoryAgeSupported?: boolean;
   onOpenChange: (open: boolean) => void;
   onSaveSuccess?: (
     profile: Profile,
@@ -70,6 +75,7 @@ interface ValidationErrors {
 }
 
 const ANY_CONTENT_RATING_VALUE = "__any_content__";
+const NO_ADVISORY_AGE_VALUE = "__no_advisory_limit__";
 
 function sortLibraryIDs(ids: number[]) {
   return [...new Set(ids)].sort((left, right) => left - right);
@@ -80,6 +86,8 @@ export function ProfileEditorDialog({
   profile = null,
   libraries,
   avatarUploadEnabled = false,
+  advisoryAgeSupported = false,
+  requireAdvisoryAgeSupported = false,
   onOpenChange,
   onSaveSuccess,
 }: ProfileEditorDialogProps) {
@@ -105,6 +113,8 @@ export function ProfileEditorDialog({
             profile={profile}
             libraries={sortedLibraries}
             avatarUploadEnabled={avatarUploadEnabled}
+            advisoryAgeSupported={advisoryAgeSupported}
+            requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
             onOpenChange={onOpenChange}
             onSaveSuccess={onSaveSuccess}
           />
@@ -119,6 +129,8 @@ function ProfileEditorForm({
   profile,
   libraries,
   avatarUploadEnabled,
+  advisoryAgeSupported,
+  requireAdvisoryAgeSupported,
   onOpenChange,
   onSaveSuccess,
 }: {
@@ -126,6 +138,8 @@ function ProfileEditorForm({
   profile: Profile | null;
   libraries: UserLibrary[];
   avatarUploadEnabled: boolean;
+  advisoryAgeSupported: boolean;
+  requireAdvisoryAgeSupported: boolean;
   onOpenChange: (open: boolean) => void;
   onSaveSuccess?: (
     profile: Profile,
@@ -162,6 +176,10 @@ function ProfileEditorForm({
   const nameId = useId();
   const pinId = useId();
   const contentRatingId = useId();
+  const advisoryAgeId = useId();
+  const advisoryAgeHelpId = useId();
+  const requireAdvisoryAgeId = useId();
+  const requireAdvisoryAgeHelpId = useId();
   const playbackQualityId = useId();
   const restrictLibrariesId = useId();
   const selectedContentRatingValue =
@@ -274,13 +292,21 @@ function ProfileEditorForm({
     let savedProfile: Profile;
     try {
       if (mode === "edit" && profile) {
-        const body = buildProfileUpdateFromDraft(draft);
+        const body = buildProfileUpdateFromDraft(draft, {
+          advisoryAgeSupported,
+          requireAdvisoryAgeSupported,
+        });
         if (preserveExistingUpload || deleteExistingUpload) {
           delete body.avatar;
         }
         savedProfile = await updateMutation.mutateAsync({ id: profile.id, body });
       } else {
-        savedProfile = await createMutation.mutateAsync(buildProfileRequestFromDraft(draft));
+        savedProfile = await createMutation.mutateAsync(
+          buildProfileRequestFromDraft(draft, {
+            advisoryAgeSupported,
+            requireAdvisoryAgeSupported,
+          }),
+        );
       }
     } catch {
       return;
@@ -558,6 +584,71 @@ function ProfileEditorForm({
               </SelectContent>
             </Select>
           </div>
+
+          {advisoryAgeSupported ? (
+            <div className="space-y-2">
+              <Label htmlFor={advisoryAgeId}>Maximum advisory age</Label>
+              <Select
+                value={
+                  draft.maxAdvisoryAge === null
+                    ? NO_ADVISORY_AGE_VALUE
+                    : String(draft.maxAdvisoryAge)
+                }
+                onValueChange={(value) =>
+                  updateDraft(
+                    "maxAdvisoryAge",
+                    value === NO_ADVISORY_AGE_VALUE ? null : Number(value),
+                  )
+                }
+              >
+                <SelectTrigger
+                  id={advisoryAgeId}
+                  className="w-full"
+                  aria-describedby={advisoryAgeHelpId}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ADVISORY_AGE_OPTIONS.map((option) => (
+                    <SelectItem
+                      key={option.value ?? NO_ADVISORY_AGE_VALUE}
+                      value={option.value === null ? NO_ADVISORY_AGE_VALUE : String(option.value)}
+                    >
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p id={advisoryAgeHelpId} className="text-muted-foreground text-xs">
+                Hides titles an advisory service such as Common Sense Media recommends for older
+                viewers.
+                {requireAdvisoryAgeSupported &&
+                draft.maxAdvisoryAge !== null &&
+                draft.requireAdvisoryAge
+                  ? null
+                  : " Titles without an advisory age are limited by the content rating alone."}
+              </p>
+              {requireAdvisoryAgeSupported && draft.maxAdvisoryAge !== null ? (
+                <div className="flex items-start justify-between gap-3 pt-1">
+                  <div className="space-y-0.5">
+                    <Label htmlFor={requireAdvisoryAgeId}>
+                      Hide titles without an advisory age
+                    </Label>
+                    <p id={requireAdvisoryAgeHelpId} className="text-muted-foreground text-xs">
+                      Shows only titles rated at or under this age. Ages are looked up over time, so
+                      this profile may see few titles at first.
+                    </p>
+                  </div>
+                  <Switch
+                    id={requireAdvisoryAgeId}
+                    aria-describedby={requireAdvisoryAgeHelpId}
+                    checked={draft.requireAdvisoryAge}
+                    onCheckedChange={(checked) => updateDraft("requireAdvisoryAge", checked)}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="space-y-2">
             <Label htmlFor={playbackQualityId}>Maximum playback quality</Label>

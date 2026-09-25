@@ -76,8 +76,9 @@ func TestProxyCapabilitiesPublishCapabilityHash(t *testing.T) {
 	if info.CapabilityHash == "" {
 		t.Fatal("served capability report carries no capability_hash")
 	}
-	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureProgressiveRemuxRelayV1) {
-		t.Fatalf("transport features = %v, want progressive remux relay", info.TransportFeatures)
+	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureProgressiveRemuxRelayV1) ||
+		!slices.Contains(info.TransportFeatures, playback.TransportFeatureThemeAudioEgressV1) {
+		t.Fatalf("transport features = %v, want progressive remux relay and theme audio egress", info.TransportFeatures)
 	}
 	served := info
 	served.CapabilityHash = ""

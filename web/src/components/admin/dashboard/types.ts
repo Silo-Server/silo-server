@@ -7,6 +7,7 @@ export type WidgetId =
   | "stat-profiles-active"
   | "stat-movies"
   | "stat-shows"
+  | "stat-advisory-coverage"
   | "stat-users"
   | "stat-storage"
   | "health-strip"

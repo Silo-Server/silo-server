@@ -2641,6 +2641,8 @@ func (h *LibraryCollectionHandler) itemListResponseOf(ctx context.Context, item 
 		Year:              item.Year,
 		Genres:            item.Genres,
 		ContentRating:     item.ContentRating,
+		AdvisoryAge:       item.AdvisoryAge,
+		AdvisorySource:    item.AdvisorySource,
 		Status:            item.Status,
 		RatingIMDB:        item.RatingIMDB,
 		Overview:          item.Overview,

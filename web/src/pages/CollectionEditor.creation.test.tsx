@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { LibraryCollection } from "@/api/types";
+import { V2ProblemError } from "@/api/v2/request";
 import type { CollectionBuilderProps } from "@/components/collections/CollectionBuilder";
 import CollectionEditor from "./CollectionEditor";
 import AdminCollectionEditor from "./AdminCollectionEditor";
@@ -11,10 +12,18 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   adminCreate: vi.fn(),
   collection: null as LibraryCollection | null,
+  editSnapshotError: null as Error | null,
+  adminSnapshotError: null as Error | null,
 }));
 vi.mock("@/hooks/queries/collections", () => ({
   useCollections: () => ({ data: [] }),
-  useCollectionEditSnapshot: () => ({ data: undefined, isLoading: false }),
+  useCollectionEditSnapshot: () => ({
+    data: undefined,
+    isLoading: false,
+    isFetching: false,
+    error: mocks.editSnapshotError,
+    refetch: vi.fn(),
+  }),
   useCollectionCapabilities: () => ({ data: {} }),
   useCreateCollection: () => ({ mutate: mocks.create }),
   useUpdateCollection: () => ({}),
@@ -28,6 +37,9 @@ vi.mock("@/hooks/queries/admin/collections", () => ({
   useAdminCollectionSnapshot: () => ({
     data: mocks.collection ? { collection: mocks.collection, etag: '"revision"' } : undefined,
     isLoading: false,
+    isFetching: false,
+    error: mocks.adminSnapshotError,
+    refetch: vi.fn(),
   }),
   useAdminCollectionCapabilities: () => ({ data: {} }),
   useCreateAdminCollection: () => ({ mutate: mocks.adminCreate }),
@@ -87,6 +99,8 @@ vi.mock("@/components/collections/ManualCollectionItemsEditor", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.collection = null;
+  mocks.editSnapshotError = null;
+  mocks.adminSnapshotError = null;
 });
 function show(admin = false, edit = false) {
   render(
@@ -146,4 +160,83 @@ it("mounts the library item picker outside the metadata form for a saved manual 
   expect(editor).toHaveAttribute("data-source", "library");
   expect(editor).toHaveAttribute("data-collection", "collection-1");
   expect(editor.closest("form")).toBeNull();
+});
+
+function showPersonalEdit() {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={["/collections/collection-1/edit"]}>
+        <Routes>
+          <Route path="/collections/:id/edit" element={<CollectionEditor />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+function collectionProblem(status: number) {
+  return new V2ProblemError("getPersonalCollection", {
+    type: `https://silo.example/problems/${status === 404 ? "not_found" : "internal_error"}`,
+    title: status === 404 ? "Not Found" : "Internal Server Error",
+    status,
+    detail: status === 404 ? "Collection not found." : "Collections are unavailable.",
+    instance: "/api/v2/collections/collection-1",
+  });
+}
+
+it("points a missing personal collection back to the collection list", () => {
+  mocks.editSnapshotError = collectionProblem(404);
+  showPersonalEdit();
+  expect(
+    screen.getByRole("heading", { level: 1, name: "This collection isn't available" }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "All collections" })).toHaveAttribute(
+    "href",
+    "/collections",
+  );
+});
+
+it("offers a retry when a personal collection fails to load", () => {
+  mocks.editSnapshotError = collectionProblem(500);
+  showPersonalEdit();
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Couldn't load this collection" }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+});
+
+it("points a missing admin collection back to the collection board", () => {
+  mocks.adminSnapshotError = collectionProblem(404);
+  show(true, true);
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Collection not found" }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "All collections" })).toHaveAttribute(
+    "href",
+    "/admin/collections",
+  );
+});
+
+it("offers a retry when an admin collection fails to load", () => {
+  mocks.adminSnapshotError = collectionProblem(500);
+  show(true, true);
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Couldn't load this collection" }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+});
+
+it("lets a 404 replace an admin collection that was already loaded", () => {
+  mocks.collection = {
+    id: "collection-1",
+    title: "Staff picks",
+    collection_type: "manual",
+    library_ids: [1],
+  } as LibraryCollection;
+  mocks.adminSnapshotError = collectionProblem(404);
+  show(true, true);
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Collection not found" }),
+  ).toBeInTheDocument();
+  expect(screen.queryByTestId("manual-items")).not.toBeInTheDocument();
 });

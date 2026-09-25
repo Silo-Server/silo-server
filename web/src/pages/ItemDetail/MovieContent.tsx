@@ -42,7 +42,13 @@ import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
 import { useDetailWatchTogether } from "@/pages/watchtogether/DetailWatchTogether";
 
-export default function MovieContent({ item }: { item: ItemDetail & { type: "movie" } }) {
+export default function MovieContent({
+  item,
+  showAdvisoryAge,
+}: {
+  item: ItemDetail & { type: "movie" };
+  showAdvisoryAge?: boolean;
+}) {
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(item);
   const navigate = useNavigate();
@@ -235,6 +241,8 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
             <MetadataBadges
               year={year || undefined}
               contentRating={item.content_rating || undefined}
+              advisoryAge={showAdvisoryAge ? (item.advisory_age ?? undefined) : undefined}
+              advisorySource={item.advisory_source || undefined}
               duration={formatRuntimeMinutes(selectedMediaSummary.durationMinutes) || undefined}
             />
             <QualityBadges summary={selectedMediaSummary} />

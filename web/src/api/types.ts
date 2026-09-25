@@ -108,6 +108,8 @@ export interface User {
   role: string;
   permissions: string[];
   download_allowed: boolean;
+  /** The account holds a temporary password: until it is changed, the session may only change it. */
+  password_change_required?: boolean;
   impersonation?: ImpersonationInfo | null;
 }
 
@@ -228,6 +230,16 @@ export interface Profile {
   is_child: boolean;
   is_primary: boolean;
   max_content_rating: string;
+  /**
+   * Advisory-age limit: titles whose advisory age (e.g. Common Sense Media's
+   * "13+") is above it are hidden. Null or absent means no limit.
+   */
+  max_advisory_age?: number | null;
+  /**
+   * Hide titles with no advisory age as well, so only titles rated at or under
+   * max_advisory_age are shown. No effect without a limit.
+   */
+  require_advisory_age?: boolean;
   quality_preference: string;
   language: string;
   preferred_metadata_language?: string;
@@ -1101,6 +1113,10 @@ export interface ItemExtra {
 }
 
 export interface ItemDetail {
+  themes?: {
+    owner_id: string;
+    items: { id: string; title: string; duration_seconds: number; container: string }[];
+  };
   content_id: string;
   play_content_id?: string;
   type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "podcast";
@@ -1121,6 +1137,15 @@ export interface ItemDetail {
   pending_translation_language?: string;
   runtime: number;
   content_rating: string;
+  /**
+   * Recommended minimum viewer age from an advisory service, with
+   * advisory_source naming who recommended it. It is not the certification:
+   * content_rating still drives the content-rating ceiling, and a profile's
+   * separate max_advisory_age limit compares against this age. Absent means
+   * "no advisory fetched", never "suitable for everyone".
+   */
+  advisory_age?: number | null;
+  advisory_source?: string;
   genres: string[];
   rating_imdb: number | null;
   rating_tmdb: number | null;
@@ -2381,6 +2406,10 @@ export interface AdminUser {
   download_allowed: boolean | null;
   download_transcode_allowed: boolean | null;
   requests_allowed: boolean | null;
+  /** Signs in with a local password; false when an external provider manages sign-in. */
+  password_login: boolean;
+  /** Holds a temporary password it must replace at its next sign-in. */
+  password_change_required: boolean;
   effective_policy: AdminUserEffectivePolicy;
   created_at: string;
   updated_at: string;
@@ -2392,6 +2421,8 @@ export interface CreateUserRequest {
   username: string;
   email: string;
   password: string;
+  /** The password is temporary: the account must replace it at its first sign-in. */
+  require_password_change?: boolean;
   role: string;
   permissions?: string[];
   create_default_profile?: boolean;
@@ -2417,6 +2448,8 @@ export interface UpdateUserRequest {
   username?: string;
   email?: string;
   password?: string;
+  /** Only with password: make it temporary, replaced at the next sign-in. */
+  require_password_change?: boolean;
   role?: string;
   permissions?: string[];
   enabled?: boolean;
@@ -2443,6 +2476,8 @@ export interface AdminStats {
   total_movie_files?: number;
   total_shows: number;
   total_show_files?: number;
+  /** Movies and series that carry an advisory age. */
+  advisory_titles?: number;
   active_streams: number;
   total_storage_bytes: number;
   /**

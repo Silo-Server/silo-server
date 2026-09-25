@@ -47,7 +47,7 @@ func adminAccountsDB(t *testing.T) *UserRepository {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	_, err = pool.Exec(t.Context(), `CREATE TABLE access_groups (LIKE public.access_groups INCLUDING ALL); CREATE TABLE users (LIKE public.users INCLUDING ALL EXCLUDING IDENTITY); ALTER TABLE users DROP COLUMN IF EXISTS admin_revision; CREATE SEQUENCE test_user_ids; ALTER TABLE users ALTER COLUMN id SET DEFAULT nextval('test_user_ids'); CREATE TABLE auth_sessions (LIKE public.auth_sessions INCLUDING ALL)`)
+	_, err = pool.Exec(t.Context(), `CREATE TABLE access_groups (LIKE public.access_groups INCLUDING ALL); CREATE TABLE users (LIKE public.users INCLUDING ALL EXCLUDING IDENTITY); ALTER TABLE users DROP COLUMN IF EXISTS admin_revision; CREATE SEQUENCE test_user_ids; ALTER TABLE users ALTER COLUMN id SET DEFAULT nextval('test_user_ids'); CREATE TABLE auth_sessions (LIKE public.auth_sessions INCLUDING ALL); CREATE TABLE abs_sessions (LIKE public.abs_sessions INCLUDING ALL); CREATE TABLE device_login_requests (LIKE public.device_login_requests INCLUDING ALL)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +103,9 @@ func TestAdminAccountMutationAtomicGuardAndSessionRevocation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if _, err := r.pool.Exec(t.Context(), `INSERT INTO abs_sessions(user_id, token_hash, device_id) VALUES ($1, 'abs-token', 'abs-device')`, u.ID); err != nil {
+		t.Fatal(err)
+	}
 	before, err := r.GetAdminSnapshot(t.Context(), u.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -135,6 +138,10 @@ func TestAdminAccountMutationAtomicGuardAndSessionRevocation(t *testing.T) {
 		if err != nil || valid {
 			t.Fatalf("session %s valid=%v err=%v", id, valid, err)
 		}
+	}
+	var liveABS int
+	if err := r.pool.QueryRow(t.Context(), `SELECT count(*) FROM abs_sessions WHERE user_id = $1 AND revoked_at IS NULL`, u.ID).Scan(&liveABS); err != nil || liveABS != 0 {
+		t.Fatalf("%d Audiobookshelf sessions survived (%v)", liveABS, err)
 	}
 	fresh := uuid.NewString()
 	if err := NewSessionRepository(r.pool).Create(t.Context(), models.AuthSession{ID: fresh, UserID: u.ID, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {

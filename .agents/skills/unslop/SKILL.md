@@ -19,7 +19,7 @@ Make the writing sound like a thoughtful person wrote it. Protect accuracy befor
 
 1. Identify the audience, purpose, and expected tone from context.
 2. Read [references/patterns.md](references/patterns.md).
-3. Cut filler, generic framing, repetition, and promotional puffery. Preserve substantive claims; style editing is not fact-checking or permission to delete them.
+3. Cut filler, generic framing, repetition, and promotional puffery. Preserve substantive claims; style editing is not fact-checking or permission to delete them. Removing a restatement of material the reader already has, such as a diff or a code comment, is not deleting a claim.
 4. Replace vague language with the concrete fact, mechanism, number, or action when the source supports it.
 5. Prefer plain words and active voice. Keep necessary domain terminology consistent rather than cycling synonyms.
 6. Vary sentence length naturally. Use formatting only when it makes the content easier to scan.

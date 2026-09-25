@@ -122,4 +122,108 @@ describe("ProfileEditorDialog", () => {
     expect(document.body.textContent).toContain("Edit profile");
     expect(document.body.textContent).toContain("Any content");
   });
+
+  it("shows the profile's advisory-age limit", async () => {
+    await act(async () => {
+      root.render(
+        <ProfileEditorDialog
+          open
+          profile={makeProfile({ max_advisory_age: 10 })}
+          libraries={[]}
+          advisoryAgeSupported
+          onOpenChange={() => {}}
+        />,
+      );
+    });
+
+    expect(document.body.textContent).toContain("Maximum advisory age");
+    expect(document.body.textContent).toContain("Ages 10 and under");
+  });
+
+  it("offers no advisory-age limit by default", async () => {
+    await act(async () => {
+      root.render(
+        <ProfileEditorDialog
+          open
+          profile={makeProfile()}
+          libraries={[]}
+          advisoryAgeSupported
+          onOpenChange={() => {}}
+        />,
+      );
+    });
+
+    expect(document.body.textContent).toContain("No limit");
+  });
+
+  it("offers the require-advisory-age switch once a limit is set", async () => {
+    await act(async () => {
+      root.render(
+        <ProfileEditorDialog
+          open
+          profile={makeProfile({ max_advisory_age: 10, require_advisory_age: true })}
+          libraries={[]}
+          advisoryAgeSupported
+          requireAdvisoryAgeSupported
+          onOpenChange={() => {}}
+        />,
+      );
+    });
+
+    const toggle = document.querySelector<HTMLButtonElement>(
+      'button[role="switch"][aria-describedby]',
+    );
+    expect(document.body.textContent).toContain("Hide titles without an advisory age");
+    expect(toggle?.getAttribute("aria-checked")).toBe("true");
+    // The lenient explanation would be wrong for a strict profile.
+    expect(document.body.textContent).not.toContain(
+      "Titles without an advisory age are limited by the content rating alone.",
+    );
+  });
+
+  it("hides the require-advisory-age switch without a limit or support", async () => {
+    await act(async () => {
+      root.render(
+        <ProfileEditorDialog
+          open
+          profile={makeProfile()}
+          libraries={[]}
+          advisoryAgeSupported
+          requireAdvisoryAgeSupported
+          onOpenChange={() => {}}
+        />,
+      );
+    });
+    expect(document.body.textContent).not.toContain("Hide titles without an advisory age");
+
+    await act(async () => {
+      root.render(
+        <ProfileEditorDialog
+          open
+          profile={makeProfile({ max_advisory_age: 10 })}
+          libraries={[]}
+          advisoryAgeSupported
+          onOpenChange={() => {}}
+        />,
+      );
+    });
+    expect(document.body.textContent).toContain("Maximum advisory age");
+    expect(document.body.textContent).not.toContain("Hide titles without an advisory age");
+  });
+
+  it("hides the advisory-age control on a server without it", async () => {
+    await act(async () => {
+      root.render(
+        <ProfileEditorDialog
+          open
+          profile={makeProfile({ max_advisory_age: 10 })}
+          libraries={[]}
+          onOpenChange={() => {}}
+        />,
+      );
+    });
+
+    expect(document.body.textContent).toContain("Maximum content rating");
+    expect(document.body.textContent).not.toContain("Maximum advisory age");
+  });
 });

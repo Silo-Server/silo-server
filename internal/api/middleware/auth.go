@@ -40,8 +40,7 @@ type APIKeyUserLoader interface {
 	GetByID(ctx context.Context, id int) (*models.User, error)
 }
 
-// AuthMiddleware provides HTTP middleware for JWT-based authentication with
-// session validity caching.
+// AuthMiddleware provides HTTP middleware for JWT and API key authentication.
 type AuthMiddleware struct {
 	tokenValidator   TokenValidator
 	sessionValidator SessionValidator
@@ -65,8 +64,10 @@ func NewAuthMiddleware(tv TokenValidator, sv SessionValidator, akv APIKeyValidat
 
 // RequireAuth is an HTTP middleware that enforces JWT authentication.
 // It extracts the Bearer token from the Authorization header, validates the
-// JWT, checks session validity (with an in-memory cache), and sets the
-// parsed claims in the request context for downstream handlers.
+// JWT, checks session validity with the SessionValidator on every request (the
+// middleware keeps no cache, so a revocation applies to the session's next
+// request), and sets the parsed claims in the request context for downstream
+// handlers.
 func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := extractBearerToken(r)
@@ -145,9 +146,31 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			lc.SessionID = claims.SessionID
 		}
 
+		// Attributed above, so the audit log shows whose restricted session
+		// was refused.
+		if claims.PasswordChangeRequired && !passwordChangeRoutes[r.Method+" "+r.URL.Path] {
+			writePasswordChangeRequired(w)
+			return
+		}
+
 		ctx := context.WithValue(r.Context(), claimsKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// passwordChangeRoutes are the only routes a session holding a temporary
+// password may call: enough to read the account, replace the password, and
+// sign out. Refreshing the session afterwards is a public route; the refreshed
+// tokens drop the restriction once the account has a new password.
+var passwordChangeRoutes = map[string]bool{
+	"GET /api/v1/auth/me":                     true,
+	"GET /api/v1/auth/account/capability":     true,
+	"POST /api/v1/auth/account/password":      true,
+	"POST /api/v1/auth/logout":                true,
+	"GET /api/v2/account/me":                  true,
+	"GET /api/v2/account/password/capability": true,
+	"POST /api/v2/account/password":           true,
+	"POST /api/v2/auth/logout":                true,
 }
 
 // RequireAdmin is a standalone HTTP middleware that checks if the authenticated
@@ -367,6 +390,22 @@ func writeUnauthorized(w http.ResponseWriter, message, reason string) {
 	_ = json.NewEncoder(w).Encode(errorResponse{
 		Error:   "unauthorized",
 		Message: message,
+	})
+}
+
+// CodePasswordChangeRequired is the error code of a request a session made
+// before replacing its temporary password. internal/apiv2 renders it as the
+// password_change_required problem type.
+const CodePasswordChangeRequired = "password_change_required"
+
+// writePasswordChangeRequired writes the 403 a restricted session gets for
+// any route outside passwordChangeRoutes.
+func writePasswordChangeRequired(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(errorResponse{
+		Error:   CodePasswordChangeRequired,
+		Message: "Choose a new password to continue",
 	})
 }
 

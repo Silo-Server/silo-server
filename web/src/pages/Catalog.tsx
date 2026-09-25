@@ -4,7 +4,10 @@ import { CheckSquare, RefreshCw, Search, Trash2, X } from "lucide-react";
 
 import { captureProfileRequestContext } from "@/api/client";
 import type { BrowseItem } from "@/api/types";
+import { isNotFoundProblem } from "@/api/v2/request";
 import ItemGrid from "@/components/ItemGrid";
+import PageUnavailable from "@/components/PageUnavailable";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import CastCarousel from "@/components/CastCarousel";
 import { RequestToAddSection } from "@/components/RequestToAddSection";
 import { Button } from "@/components/ui/button";
@@ -58,27 +61,32 @@ export default function Catalog() {
   const [searchParams, setSearchParams] = useSearchParams();
   const state = useMemo(() => parseCatalogSearchParams(searchParams), [searchParams]);
   const isEmptySearch = state.source === "query" && !state.q && !state.library_id;
-  const emptySearchTitle = isEmptySearch ? "Search" : defaultCatalogTitle(state.source, state.q);
 
-  useDocumentTitle(emptySearchTitle);
-
+  // Each view owns its tab title. A title set here too would run after the
+  // results' own on mount and replace it whenever the results were cached.
   if (isEmptySearch) {
-    return (
-      <section className="page-shell flex min-h-[calc(100dvh-10rem)] flex-col items-center justify-center py-16 text-center">
-        <div className="text-muted-foreground mb-6">
-          <Search className="h-10 w-10" strokeWidth={1.5} />
-        </div>
-        <h1 className="page-title mb-4">Search</h1>
-        <p className="page-subtitle mb-8 max-w-xl text-sm sm:text-base">
-          Find films, series, performances, and rediscover things you forgot you saved.
-        </p>
-        <SearchBar autoFocus prominent />
-      </section>
-    );
+    return <EmptySearch />;
   }
 
   return (
     <CatalogResults searchParams={searchParams} setSearchParams={setSearchParams} state={state} />
+  );
+}
+
+function EmptySearch() {
+  useDocumentTitle("Search");
+
+  return (
+    <section className="page-shell flex min-h-[calc(100dvh-10rem)] flex-col items-center justify-center py-16 text-center">
+      <div className="text-muted-foreground mb-6">
+        <Search className="h-10 w-10" strokeWidth={1.5} />
+      </div>
+      <h1 className="page-title mb-4">Search</h1>
+      <p className="page-subtitle mb-8 max-w-xl text-sm sm:text-base">
+        Find films, series, performances, and rediscover things you forgot you saved.
+      </p>
+      <SearchBar autoFocus prominent />
+    </section>
   );
 }
 
@@ -281,8 +289,12 @@ function CatalogResults({
     () => selectedHistoryItems.map((item) => buildHistoryRemovalTarget(item.content_id, item.type)),
     [selectedHistoryItems],
   );
-  const title =
-    catalogQuery.data?.title ?? state.title ?? defaultCatalogTitle(state.source, state.q);
+  // A collection the viewer cannot reach answers 404, the same for a deleted
+  // collection and one they were never shown, so the page says neither.
+  const collectionUnavailable = isCollectionSource && isNotFoundProblem(catalogQuery.sourceError);
+  const title = collectionUnavailable
+    ? "Not found"
+    : (catalogQuery.data?.title ?? state.title ?? defaultCatalogTitle(state.source, state.q));
 
   useDocumentTitle(title);
 
@@ -310,6 +322,21 @@ function CatalogResults({
   // reading while an outside-library result is visible.
   const resultNoun =
     state.source === "query" ? "in library" : `result${totalItems === 1 ? "" : "s"}`;
+
+  if (collectionUnavailable) {
+    return (
+      <PageUnavailable
+        title="This collection isn't available"
+        description="It may have been deleted, or you may not have access to it."
+      >
+        <Button asChild variant="outline">
+          <ViewTransitionLink to="/collections" up>
+            All collections
+          </ViewTransitionLink>
+        </Button>
+      </PageUnavailable>
+    );
+  }
 
   return (
     <div className="page-shell space-y-6 py-4 sm:py-6">

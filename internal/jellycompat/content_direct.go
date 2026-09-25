@@ -271,21 +271,31 @@ func applyCompatPresentationLibrary(filter catalog.AccessFilter, libraryID *int)
 	return filter
 }
 
+// clampMaxContentRating combines the profile's ceiling with the MaxOfficialRating
+// a Jellyfin client asked for, keeping whichever admits less. A client value
+// that sets no usable age is ignored rather than allowed to hide the whole
+// library.
 func clampMaxContentRating(existing, requested string) string {
-	existing = strings.TrimSpace(existing)
-	requested = strings.TrimSpace(requested)
-	switch {
-	case existing == "":
-		return requested
-	case requested == "":
-		return existing
-	case access.RatingAllowed(existing, requested):
-		return existing
-	case access.RatingAllowed(requested, existing):
-		return requested
-	default:
+	// The client's value is vetted FIRST, before the profile's ceiling is even
+	// looked at: an absent, blank or unrecognized MaxOfficialRating is dropped
+	// here, so it can never reach StricterCeiling and become a
+	// deny-everything ceiling the profile never had.
+	if _, ok := access.AgeForCeiling(requested); !ok {
 		return existing
 	}
+	if !access.HasCeiling(existing) {
+		return requested
+	}
+	return access.StricterCeiling(existing, requested)
+}
+
+// clampMaturityLimits returns the viewer's maturity limits with the content
+// rating ceiling clamped to a Jellyfin client's MaxOfficialRating (see
+// clampMaxContentRating). Every other limit passes through unchanged, so a
+// client can tighten the ceiling but never drop the advisory-age limit.
+func clampMaturityLimits(limits access.MaturityLimits, requested string) access.MaturityLimits {
+	limits.MaxContentRating = clampMaxContentRating(limits.MaxContentRating, requested)
+	return limits
 }
 
 func (s *directContentService) ListUserLibraries(ctx context.Context, session *Session) ([]upstreamUserLibrary, error) {
@@ -420,7 +430,7 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		LibraryID:          catalog.ParseIntParam(params.Get("library_id")),
 		LibraryIDs:         filter.AllowedLibraryIDs,
 		DisabledLibraryIDs: filter.DisabledLibraryIDs,
-		MaxContentRating:   clampMaxContentRating(filter.MaxContentRating, params.Get("max_content_rating")),
+		MaturityLimits:     clampMaturityLimits(filter.MaturityLimits, params.Get("max_content_rating")),
 		PersonID:           catalog.ParseInt64Param(params.Get("person_id")),
 		Sort:               params.Get("sort"),
 		Order:              params.Get("order"),
@@ -1023,7 +1033,7 @@ func (s *directContentService) ListItemFilters(ctx context.Context, session *Ses
 		LibraryID:          catalog.ParseIntParam(params.Get("library_id")),
 		LibraryIDs:         filter.AllowedLibraryIDs,
 		DisabledLibraryIDs: filter.DisabledLibraryIDs,
-		MaxContentRating:   clampMaxContentRating(filter.MaxContentRating, params.Get("max_content_rating")),
+		MaturityLimits:     clampMaturityLimits(filter.MaturityLimits, params.Get("max_content_rating")),
 	}
 
 	genres, err := s.browseRepo.ListGenres(ctx, filters)

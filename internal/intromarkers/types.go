@@ -10,16 +10,31 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// AlgorithmVersion keys the fingerprint cache; changing it discards every
+// stored fingerprint. Bump AnalysisBehaviorVersion instead to re-run season
+// comparisons over cached fingerprints.
+//
+// The algorithm identifiers are persisted with each marker. A new version
+// needs a rank in markers.scannerAlgorithmPriority above the one it replaces,
+// or re-analysis cannot overwrite markers the old version wrote.
 const (
 	AlgorithmVersion             = 1
-	AnalysisBehaviorVersion      = 2
+	AnalysisBehaviorVersion      = 4
 	ChapterAlgorithm             = "chapter:v1"
-	ChapterSilenceAlgorithm      = "chapter:silence:v1"
+	ChapterSilenceAlgorithm      = "chapter:silence:v2"
 	EpisodeVersionCopyAlgorithm  = "episode-version-copy:v1"
-	ChromaprintAlgorithm         = "chromaprint:v1"
-	ChromaprintDialogueAlgorithm = "chromaprint:dialogue:v1"
+	ChromaprintAlgorithm         = "chromaprint:v4"
+	ChromaprintDialogueAlgorithm = "chromaprint:dialogue:v4" //nolint:misspell // Persisted algorithm identifier.
 	ChromaprintFormat            = "chromaprint:raw:uint32le"
 	DefaultPointHopSeconds       = 0.123
+
+	// chromaprintDialogueAlgorithmPrefix matches every version of the
+	// subtitle-refined Chromaprint identifier.
+	chromaprintDialogueAlgorithmPrefix = "chromaprint:dialogue:" //nolint:misspell // Persisted algorithm identifier.
+
+	// legacyChapterSilenceAlgorithm extended chapter ends by up to 30 seconds.
+	// The silence backfill revisits its markers under the current limit.
+	legacyChapterSilenceAlgorithm = "chapter:silence:v1"
 )
 
 type Config struct {
@@ -44,30 +59,59 @@ type Config struct {
 	DialogueRefinementMinimumRemainingSeconds float64
 }
 
+// Intro duration bounds for a Chromaprint match. Twelve seconds keeps most
+// short title cards: in replay against authored chapters, lowering the bound
+// further mostly added matches in the wrong place. Three minutes covers long
+// drama openings, inside TheIntroDB's limit.
+const (
+	defaultMinimumIntroDurationSeconds = 12
+	defaultMaximumIntroDurationSeconds = 180
+)
+
+// The fingerprint cache key once hashed the intro duration bounds, which do not
+// shape a fingerprint. They are hashed as these fixed values so the bounds can
+// change without discarding every cached fingerprint.
+const (
+	fingerprintKeyMinimumIntroSeconds = 15
+	fingerprintKeyMaximumIntroSeconds = 120
+)
+
+// defaultSilenceMaximumExtensionSeconds bounds how far a silence may move an
+// authored intro chapter's end. Short extensions catch music that rings past
+// the chapter mark; against Chromaprint's audio match, extensions of five
+// seconds or more mostly overshot the chapter end into the episode.
+const defaultSilenceMaximumExtensionSeconds = 5
+
+// DefaultDetectionWorkers is how many seasons intro detection analyzes at
+// once, and so how many ffmpeg processes it runs, unless an administrator
+// raises markers.detection_workers. One keeps a shared server's storage and
+// CPU free for playback.
+const DefaultDetectionWorkers = 1
+
 func DefaultConfig(ffmpegPath string) Config {
 	if strings.TrimSpace(ffmpegPath) == "" {
 		ffmpegPath = "ffmpeg"
 	}
 	return Config{
 		FFmpegPath:                                ffmpegPath,
-		MaxParallelFFmpeg:                         1,
+		MaxParallelFFmpeg:                         DefaultDetectionWorkers,
 		AnalysisPercent:                           25,
 		AnalysisLengthLimitMinutes:                10,
-		MinimumIntroDurationSeconds:               15,
-		MaximumIntroDurationSeconds:               120,
+		MinimumIntroDurationSeconds:               defaultMinimumIntroDurationSeconds,
+		MaximumIntroDurationSeconds:               defaultMaximumIntroDurationSeconds,
 		SilenceRefinementEnabled:                  true,
 		SilenceWindowBeforeSeconds:                3,
 		SilenceWindowAfterSeconds:                 30,
 		SilenceMinimumDurationSeconds:             0.33,
 		SilenceNoiseThresholdDB:                   intPtr(-50),
 		SilenceMinimumExtensionSeconds:            0.5,
-		SilenceMaximumExtensionSeconds:            30,
+		SilenceMaximumExtensionSeconds:            defaultSilenceMaximumExtensionSeconds,
 		SilenceBackfillLimit:                      2000,
 		SilenceBackfillMaxDuration:                45 * time.Minute,
 		DialogueRefinementEnabled:                 true,
 		DialogueRefinementWindowSeconds:           15,
 		DialogueRefinementMaxShiftSeconds:         20,
-		DialogueRefinementMinimumRemainingSeconds: 15,
+		DialogueRefinementMinimumRemainingSeconds: defaultMinimumIntroDurationSeconds,
 	}
 }
 
@@ -85,10 +129,10 @@ func (c Config) normalized() Config {
 		c.AnalysisLengthLimitMinutes = 10
 	}
 	if c.MinimumIntroDurationSeconds <= 0 {
-		c.MinimumIntroDurationSeconds = 15
+		c.MinimumIntroDurationSeconds = defaultMinimumIntroDurationSeconds
 	}
 	if c.MaximumIntroDurationSeconds <= 0 {
-		c.MaximumIntroDurationSeconds = 120
+		c.MaximumIntroDurationSeconds = defaultMaximumIntroDurationSeconds
 	}
 	if c.SilenceWindowBeforeSeconds <= 0 {
 		c.SilenceWindowBeforeSeconds = 3
@@ -106,7 +150,7 @@ func (c Config) normalized() Config {
 		c.SilenceMinimumExtensionSeconds = 0.5
 	}
 	if c.SilenceMaximumExtensionSeconds <= 0 {
-		c.SilenceMaximumExtensionSeconds = 30
+		c.SilenceMaximumExtensionSeconds = defaultSilenceMaximumExtensionSeconds
 	}
 	if c.SilenceBackfillLimit <= 0 {
 		c.SilenceBackfillLimit = 2000
@@ -130,26 +174,51 @@ func intPtr(value int) *int {
 	return &value
 }
 
+// ConfigHash keys the fingerprint cache. Only the analysis window shapes a
+// fingerprint.
 func (c Config) ConfigHash() string {
 	c = c.normalized()
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%d:%d",
 		c.AnalysisPercent,
 		c.AnalysisLengthLimitMinutes,
-		c.MinimumIntroDurationSeconds,
-		c.MaximumIntroDurationSeconds,
+		fingerprintKeyMinimumIntroSeconds,
+		fingerprintKeyMaximumIntroSeconds,
 	)))
 	return hex.EncodeToString(sum[:])[:16]
 }
 
+// AnalysisConfigHash keys season analysis state: the fingerprint key plus
+// every setting that changes a season's result without changing its
+// fingerprints.
 func (c Config) AnalysisConfigHash() string {
 	c = c.normalized()
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%t:%.3f:%.3f:%.3f",
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%t:%.3f:%.3f:%.3f:%d:%d",
 		c.ConfigHash(),
 		AnalysisBehaviorVersion,
 		c.DialogueRefinementEnabled,
 		c.DialogueRefinementWindowSeconds,
 		c.DialogueRefinementMaxShiftSeconds,
 		c.DialogueRefinementMinimumRemainingSeconds,
+		c.MinimumIntroDurationSeconds,
+		c.MaximumIntroDurationSeconds,
+	)))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// SilenceConfigHash identifies the settings a chapter silence refinement runs
+// with, so a recorded attempt stops matching when any of them change. It does
+// not cover the refiner's code: bump ChapterSilenceAlgorithm when a change to
+// RefineChapterEnd should re-run files already recorded as no improvement.
+func (c Config) SilenceConfigHash() string {
+	c = c.normalized()
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%.3f:%.3f:%.3f:%d:%.3f:%.3f",
+		ChapterSilenceAlgorithm,
+		c.SilenceWindowBeforeSeconds,
+		c.SilenceWindowAfterSeconds,
+		c.SilenceMinimumDurationSeconds,
+		*c.SilenceNoiseThresholdDB,
+		c.SilenceMinimumExtensionSeconds,
+		c.SilenceMaximumExtensionSeconds,
 	)))
 	return hex.EncodeToString(sum[:])[:16]
 }
@@ -172,6 +241,7 @@ type Candidate struct {
 	EditionKey             string
 	AudioLanguage          string
 	Chapters               []models.MediaChapter
+	ChaptersHash           string
 	SubtitleTracks         []models.SubtitleTrack
 	ExternalSubtitles      []models.ExternalSubtitle
 	IntroStart             *float64
@@ -274,6 +344,67 @@ type SeasonState struct {
 	Status           string
 	MarkersWritten   int
 	LastError        string
+	AnalyzedAt       time.Time
+}
+
+const (
+	seasonStatusComplete = "complete"
+	seasonStatusNotFound = "not_found"
+	seasonStatusFailed   = "failed"
+	// seasonStatusPartial marks a group analyzed while some fingerprint
+	// extractions failed. It is retried after partialSeasonRetryInterval
+	// even when its inputs have not changed.
+	seasonStatusPartial = "partial"
+
+	partialSeasonRetryInterval = 7 * 24 * time.Hour
+)
+
+// settled reports whether a stored analysis still stands for unchanged
+// inputs at now.
+func (s SeasonState) settled(now time.Time) bool {
+	switch s.Status {
+	case seasonStatusComplete, seasonStatusNotFound:
+		return true
+	case seasonStatusPartial:
+		return now.Sub(s.AnalyzedAt) < partialSeasonRetryInterval
+	default:
+		return false
+	}
+}
+
+const (
+	silenceAttemptNoImprovement = "no_improvement"
+	silenceAttemptFailed        = "failed"
+)
+
+// SilenceRefinementAttempt records a chapter silence refinement that kept the
+// chapter boundary, together with the inputs it ran against.
+type SilenceRefinementAttempt struct {
+	MediaFileID     int
+	ConfigHash      string
+	FileHash        string
+	FileSize        int64
+	DurationSeconds float64
+	ChaptersHash    string
+	IntroStart      float64
+	IntroEnd        float64
+	Status          string
+	RecordedBy      string
+	FailureCount    int
+	LastError       string
+	AttemptedAt     time.Time
+	RetryAfter      *time.Time
+}
+
+func (a SilenceRefinementAttempt) sameInputs(other SilenceRefinementAttempt) bool {
+	return a.MediaFileID == other.MediaFileID &&
+		a.ConfigHash == other.ConfigHash &&
+		a.FileHash == other.FileHash &&
+		a.FileSize == other.FileSize &&
+		a.DurationSeconds == other.DurationSeconds &&
+		a.ChaptersHash == other.ChaptersHash &&
+		a.IntroStart == other.IntroStart &&
+		a.IntroEnd == other.IntroEnd
 }
 
 type RunSummary struct {
@@ -282,6 +413,7 @@ type RunSummary struct {
 	SeasonGroupsConsidered       int      `json:"season_groups_considered"`
 	FingerprintsComputed         int      `json:"fingerprints_computed"`
 	FingerprintCacheHits         int      `json:"fingerprint_cache_hits"`
+	FingerprintExtractionErrors  int      `json:"fingerprint_extraction_errors"`
 	ChapterMarkersWritten        int      `json:"chapter_markers_written"`
 	ChromaprintMarkersWritten    int      `json:"chromaprint_markers_written"`
 	GroupsNotFound               int      `json:"groups_not_found"`

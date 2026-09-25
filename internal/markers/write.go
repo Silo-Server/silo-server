@@ -45,6 +45,18 @@ func CanWriteMarkerUpdate(existing, incoming SegmentPayload) bool {
 		if existing.Confidence == nil || existing.Algorithm == "" {
 			return true
 		}
+		// Chromaprint results are scored against the whole season on every
+		// analysis, so the latest result of the same detector version
+		// replaces the stored one even at lower confidence: a season that no
+		// longer agrees must not keep an older, higher score. A plain and a
+		// subtitle-refined result of one version count as the same detector,
+		// so a file that loses its subtitle also loses the refined score.
+		if sameChromaprintVersion(existing.Algorithm, incoming.Algorithm) {
+			return incoming.Algorithm != existing.Algorithm ||
+				confidenceGreater(incoming.Confidence, existing.Confidence) ||
+				confidenceGreater(existing.Confidence, incoming.Confidence) ||
+				!sameMarkerRanges(existing, incoming)
+		}
 		currentRank, nextRank := scannerAlgorithmPriority(existing.Algorithm), scannerAlgorithmPriority(incoming.Algorithm)
 		if currentRank != nextRank {
 			return nextRank > currentRank
@@ -128,14 +140,47 @@ func markerRanges(payload SegmentPayload) []models.MarkerSegment {
 	return ranges
 }
 
+// sameChromaprintVersion reports whether two scanner algorithms are the plain
+// or subtitle-refined result of one Chromaprint version, whose confidence is
+// recomputed from the whole season each time it is analyzed.
+func sameChromaprintVersion(a, b string) bool {
+	const family, refined = "chromaprint:", "dialogue:" //nolint:misspell // Persisted algorithm identifier.
+	version := func(algorithm string) (string, bool) {
+		rest, ok := strings.CutPrefix(algorithm, family)
+		if !ok {
+			return "", false
+		}
+		return strings.TrimPrefix(rest, refined), true
+	}
+	va, okA := version(a)
+	vb, okB := version(b)
+	return okA && okB && va == vb
+}
+
+// scannerAlgorithmPriority ranks local detector outputs. A superseded version
+// ranks below its replacement so re-analysis can overwrite what it wrote.
 func scannerAlgorithmPriority(algorithm string) int {
 	switch algorithm {
-	case "chapter:silence:v1":
+	case "chapter:silence:v2":
 		return 40
 	case "chapter:v1":
 		return 30
+	case "chapter:silence:v1": // Extended chapter ends too far; below chapter:v1.
+		return 25
 	case "episode-version-copy:v1":
+		return 24
+	case "chromaprint:dialogue:v4": //nolint:misspell // Persisted algorithm identifier.
+		return 22
+	case "chromaprint:v4":
+		return 21
+	case "chromaprint:dialogue:v3": //nolint:misspell // Persisted algorithm identifier.
 		return 20
+	case "chromaprint:v3":
+		return 19
+	case "chromaprint:dialogue:v2": //nolint:misspell // Persisted algorithm identifier.
+		return 18
+	case "chromaprint:v2":
+		return 17
 	case "chromaprint:dialogue:v1": //nolint:misspell // Persisted algorithm identifier.
 		return 15
 	case "chromaprint:v1":

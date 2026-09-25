@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,11 +23,44 @@ import (
 
 const defaultBaseURL = "https://api.trakt.tv"
 
-const traktMediaShows = "shows"
+// traktExtendedProgress asks watched shows for per-episode season progress.
+const traktExtendedProgress = "progress"
+
+// Trakt rate limits, from its API rate-limiting guide: authenticated users get
+// one POST/PUT/DELETE per second (AUTHED_API_POST_LIMIT) and 500 GETs per
+// five minutes (AUTHED_API_GET_LIMIT). Writes are paced to one per second.
+// Paged reads, which a large history can stretch to hundreds of pages (read
+// twice for consistency), are paced so any five-minute window stays inside the
+// GET budget: a burst of 50 covers ordinary accounts at full speed, and the
+// refill keeps burst plus five minutes of refill under 500.
+const (
+	writeInterval = time.Second
+	writeBurst    = 1
+	pageInterval  = 675 * time.Millisecond
+	pageBurst     = 50
+
+	// A 429 whose Retry-After is this short, which is typical of the
+	// one-second write limit, is retried in place. Longer waits defer the
+	// connection instead of holding a sync run or scrobble open.
+	maxInPlaceRetryWait = 10 * time.Second
+	maxRetryAttempts    = 2
+
+	// Trakt's limiter sends Retry-After, but 429s from its security layer may
+	// not. Without a hint, wait out one full window of the longest documented
+	// bucket (AUTHED_API_GET_LIMIT, 300 seconds) so whichever bucket tripped
+	// has reset. Trakt has no daily quota that would call for longer.
+	defaultRetryAfter = 5 * time.Minute
+)
 
 type Provider struct {
 	client  *http.Client
 	baseURL string
+	// writes paces authenticated writes per access token.
+	writes *watchsync.CredentialLimiter
+	// pages paces paginated reads per Trakt account (see pageLimiterKey).
+	pages *watchsync.CredentialLimiter
+	// sleep waits between in-place rate-limit retries; tests replace it.
+	sleep func(context.Context, time.Duration) error
 }
 
 func NewProvider(client *http.Client, baseURL string) *Provider {
@@ -39,6 +74,9 @@ func NewProvider(client *http.Client, baseURL string) *Provider {
 	return &Provider{
 		client:  client,
 		baseURL: strings.TrimRight(baseURL, "/"),
+		writes:  watchsync.NewCredentialLimiter(writeInterval, writeBurst),
+		pages:   watchsync.NewCredentialLimiter(pageInterval, pageBurst),
+		sleep:   watchsync.SleepContext,
 	}
 }
 
@@ -63,6 +101,8 @@ func (p *Provider) Capabilities() watchsync.Capabilities {
 		ExportWatchlist:  true,
 		RemoveWatchlist:  true,
 		ScrobblePlayback: true,
+		ImportRatings:    true,
+		ExportRatings:    true,
 	}
 }
 
@@ -102,6 +142,13 @@ func (p *Provider) StartDeviceAuth(
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		wait, ok := watchsync.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		if !ok {
+			wait = defaultRetryAfter
+		}
+		return watchsync.DeviceAuthSession{}, watchsync.RateLimitedError{Provider: p.Key(), RetryAfter: wait}
+	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return watchsync.DeviceAuthSession{}, fmt.Errorf("trakt device auth request failed: status %d", resp.StatusCode)
 	}
@@ -212,11 +259,12 @@ func (p *Provider) FetchWatched(
 	cfg watchsync.ServerConfig,
 	conn watchsync.Connection,
 ) ([]watchsync.RemoteWatch, error) {
-	movies, err := fetchWatchedPages[traktWatchedMovie](ctx, p, cfg, conn, "movies")
+	movies, err := fetchTraktPages[traktWatchedMovie](ctx, p, cfg, conn, "/sync/watched/movies", nil)
 	if err != nil {
 		return nil, err
 	}
-	shows, err := fetchWatchedPages[traktWatchedShow](ctx, p, cfg, conn, traktMediaShows)
+	// Season and episode watched data is no longer included by default.
+	shows, err := fetchTraktPages[traktWatchedShow](ctx, p, cfg, conn, "/sync/watched/shows", url.Values{"extended": {traktExtendedProgress}})
 	if err != nil {
 		return nil, err
 	}
@@ -261,27 +309,132 @@ func (p *Provider) FetchWatched(
 	return rows, nil
 }
 
-// fetchWatchedPages requests explicit pagination for Trakt's watched endpoints.
-// Stop on an empty page: Trakt may apply a smaller limit than requested,
-// particularly for shows with season progress, so a short page is not the end.
-func fetchWatchedPages[T any](ctx context.Context, p *Provider, cfg watchsync.ServerConfig, conn watchsync.Connection, kind string) ([]T, error) {
-	query := url.Values{"limit": {"250"}}
-	if kind == traktMediaShows {
-		// Season and episode watched data is no longer included by default.
-		query.Set("extended", "progress")
+const (
+	// traktPageLimit is Trakt's maximum page size. Larger limits are clamped.
+	traktPageLimit = 250
+	// traktMaxPages bounds a listing whose last page is never detected, such
+	// as a server that ignores page and sends no pagination headers.
+	traktMaxPages = 1000
+)
+
+// fetchTraktPages loads every page of a paginated Trakt GET endpoint. Trakt
+// serves only a short first page when page and limit are omitted, so both are
+// always sent; they replace any page or limit in query, and other parameters
+// such as extended are kept. A failure on any page returns an error and no
+// rows, so callers never import a partial listing.
+//
+// Offset pages shift when the list changes mid-read, which can skip or repeat
+// a row, and callers treat a skipped row as removed. A listing that spans
+// several pages is therefore read twice, and the read fails unless both
+// passes return the same rows; the next sync retries it.
+func fetchTraktPages[T any](
+	ctx context.Context,
+	p *Provider,
+	cfg watchsync.ServerConfig,
+	conn watchsync.Connection,
+	path string,
+	query url.Values,
+) ([]T, error) {
+	raw, pages, err := fetchTraktPass(ctx, p, cfg, conn, path, query)
+	if err != nil {
+		return nil, err
 	}
-	var rows []T
-	for page := 1; ; page++ {
-		query.Set("page", strconv.Itoa(page))
-		var batch []T
-		if err := p.do(ctx, http.MethodGet, "/sync/watched/"+kind+"?"+query.Encode(), cfg, conn.AccessToken, nil, &batch); err != nil {
+	if pages > 1 {
+		again, _, err := fetchTraktPass(ctx, p, cfg, conn, path, query)
+		if err != nil {
 			return nil, err
 		}
-		if len(batch) == 0 {
-			return rows, nil
+		if !slices.EqualFunc(raw, again, func(a, b json.RawMessage) bool { return bytes.Equal(a, b) }) {
+			return nil, fmt.Errorf("trakt %s changed while it was read", path)
+		}
+	}
+	rows := make([]T, 0, len(raw))
+	for _, item := range raw {
+		var row T
+		if err := json.Unmarshal(item, &row); err != nil {
+			return nil, fmt.Errorf("decode trakt response: %w", err)
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+// pageLimiterKey identifies whose GET budget a paged read spends. Trakt counts
+// requests per user, so profiles linked to one Trakt account with different
+// tokens share a budget; the token is the fallback before the account is known.
+func pageLimiterKey(conn watchsync.Connection) string {
+	if account := strings.TrimSpace(conn.ProviderAccountID); account != "" {
+		return "account:" + account
+	}
+	return "token:" + conn.AccessToken
+}
+
+// fetchTraktPass reads every page of a listing once and reports how many pages
+// it took. A changed X-Pagination-Item-Count between pages fails the pass.
+func fetchTraktPass(
+	ctx context.Context,
+	p *Provider,
+	cfg watchsync.ServerConfig,
+	conn watchsync.Connection,
+	path string,
+	query url.Values,
+) ([]json.RawMessage, int, error) {
+	params := url.Values{}
+	maps.Copy(params, query)
+	params.Set("limit", strconv.Itoa(traktPageLimit))
+	var rows []json.RawMessage
+	itemCount := 0
+	for page := 1; page <= traktMaxPages; page++ {
+		params.Set("page", strconv.Itoa(page))
+		if conn.AccessToken != "" {
+			if err := p.pages.Wait(ctx, pageLimiterKey(conn)); err != nil {
+				return nil, 0, watchsync.LimiterWaitError(ctx, p.Key(), pageInterval, err)
+			}
+		}
+		var batch []json.RawMessage
+		header, err := p.doWithHeader(ctx, http.MethodGet, path+"?"+params.Encode(), cfg, conn.AccessToken, nil, &batch)
+		if err != nil {
+			return nil, 0, err
+		}
+		if count, ok := positiveHeaderInt(header, "X-Pagination-Item-Count"); ok {
+			if itemCount != 0 && count != itemCount {
+				return nil, 0, fmt.Errorf("trakt %s changed while it was read (%d items, then %d)", path, itemCount, count)
+			}
+			itemCount = count
 		}
 		rows = append(rows, batch...)
+		if lastTraktPage(header, page, len(batch)) {
+			return rows, page, nil
+		}
 	}
+	return nil, 0, fmt.Errorf("trakt %s did not reach its last page within %d pages", path, traktMaxPages)
+}
+
+// lastTraktPage reports whether page, holding items rows, ends the listing.
+// X-Pagination-Page-Count is authoritative when present. Otherwise a page
+// shorter than the applied X-Pagination-Limit is the last one. The requested
+// limit is not a safe comparison: Trakt can apply a smaller one, particularly
+// for shows with season progress, so without headers only an empty page ends
+// the listing.
+func lastTraktPage(header http.Header, page, items int) bool {
+	if items == 0 {
+		return true
+	}
+	if count, ok := positiveHeaderInt(header, "X-Pagination-Page-Count"); ok {
+		return page >= count
+	}
+	if limit, ok := positiveHeaderInt(header, "X-Pagination-Limit"); ok {
+		return items < limit
+	}
+	return false
+}
+
+func positiveHeaderInt(header http.Header, key string) (int, bool) {
+	value, err := strconv.Atoi(strings.TrimSpace(header.Get(key)))
+	if err != nil || value <= 0 {
+		return 0, false
+	}
+	return value, true
 }
 
 func (p *Provider) FetchProgress(
@@ -339,12 +492,12 @@ func (p *Provider) FetchFavorites(
 	cfg watchsync.ServerConfig,
 	conn watchsync.Connection,
 ) ([]watchsync.RemoteFavorite, error) {
-	var movies []traktFavoriteMovie
-	if err := p.do(ctx, http.MethodGet, "/users/me/favorites/movies/added", cfg, conn.AccessToken, nil, &movies); err != nil {
+	movies, err := fetchTraktPages[traktFavoriteMovie](ctx, p, cfg, conn, "/users/me/favorites/movies/added", nil)
+	if err != nil {
 		return nil, err
 	}
-	var shows []traktFavoriteShow
-	if err := p.do(ctx, http.MethodGet, "/users/me/favorites/shows/added", cfg, conn.AccessToken, nil, &shows); err != nil {
+	shows, err := fetchTraktPages[traktFavoriteShow](ctx, p, cfg, conn, "/users/me/favorites/shows/added", nil)
+	if err != nil {
 		return nil, err
 	}
 	return p.remoteListItems(movies, shows), nil
@@ -357,12 +510,12 @@ func (p *Provider) FetchWatchlist(
 	cfg watchsync.ServerConfig,
 	conn watchsync.Connection,
 ) ([]watchsync.RemoteFavorite, error) {
-	var movies []traktFavoriteMovie
-	if err := p.do(ctx, http.MethodGet, "/sync/watchlist/movies", cfg, conn.AccessToken, nil, &movies); err != nil {
+	movies, err := fetchTraktPages[traktFavoriteMovie](ctx, p, cfg, conn, "/sync/watchlist/movies", nil)
+	if err != nil {
 		return nil, err
 	}
-	var shows []traktFavoriteShow
-	if err := p.do(ctx, http.MethodGet, "/sync/watchlist/shows", cfg, conn.AccessToken, nil, &shows); err != nil {
+	shows, err := fetchTraktPages[traktFavoriteShow](ctx, p, cfg, conn, "/sync/watchlist/shows", nil)
+	if err != nil {
 		return nil, err
 	}
 	return p.remoteListItems(movies, shows), nil
@@ -406,8 +559,10 @@ func (p *Provider) FetchHistory(
 	cfg watchsync.ServerConfig,
 	conn watchsync.Connection,
 ) ([]watchsync.RemotePlay, error) {
-	var payload []traktHistoryItem
-	if err := p.do(ctx, http.MethodGet, "/sync/history", cfg, conn.AccessToken, nil, &payload); err != nil {
+	// ExportWatched reconciles against every remote play, so a missing page
+	// would resend plays Trakt already has; Trakt does not deduplicate them.
+	payload, err := fetchTraktPages[traktHistoryItem](ctx, p, cfg, conn, "/sync/history", nil)
+	if err != nil {
 		return nil, err
 	}
 	rows := make([]watchsync.RemotePlay, 0, len(payload))
@@ -605,26 +760,102 @@ func (p *Provider) do(
 	body io.Reader,
 	out any,
 ) error {
+	_, err := p.doWithHeader(ctx, method, path, cfg, token, body, out)
+	return err
+}
+
+// doWithHeader is do that also returns the response headers, which carry
+// Trakt's X-Pagination-* values.
+func (p *Provider) doWithHeader(
+	ctx context.Context,
+	method string,
+	path string,
+	cfg watchsync.ServerConfig,
+	token string,
+	body io.Reader,
+	out any,
+) (http.Header, error) {
+	// Buffer the body so a rate-limited request can be replayed.
+	var payload []byte
+	if body != nil {
+		buffered, err := io.ReadAll(body)
+		if err != nil {
+			return nil, fmt.Errorf("read trakt request body: %w", err)
+		}
+		payload = buffered
+	}
+	// Trakt's write limit is per authenticated user. The OAuth endpoints are
+	// unauthenticated and count against the application instead.
+	paced := token != "" && method != http.MethodGet
+	for attempt := 0; ; attempt++ {
+		if paced {
+			if err := p.writes.Wait(ctx, token); err != nil {
+				return nil, watchsync.LimiterWaitError(ctx, p.Key(), writeInterval, err)
+			}
+		}
+		header, wait, limited, err := p.doOnce(ctx, method, path, cfg, token, payload, out)
+		if !limited {
+			return header, err
+		}
+		if attempt < maxRetryAttempts && wait <= maxInPlaceRetryWait {
+			if err := p.sleep(ctx, wait); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		// Repeated short hints that still end in 429 are not trustworthy, so
+		// back off for a full fallback window rather than the last hint.
+		if attempt >= maxRetryAttempts && wait < defaultRetryAfter {
+			wait = defaultRetryAfter
+		}
+		return nil, watchsync.RateLimitedError{Provider: p.Key(), RetryAfter: wait}
+	}
+}
+
+// doOnce performs a single HTTP attempt and returns the response headers. A
+// 429 reports limited with the wait from Retry-After, or defaultRetryAfter
+// when the header is absent or malformed; every other outcome reports its
+// error, if any.
+func (p *Provider) doOnce(
+	ctx context.Context,
+	method string,
+	path string,
+	cfg watchsync.ServerConfig,
+	token string,
+	payload []byte,
+	out any,
+) (header http.Header, wait time.Duration, limited bool, err error) {
+	var body io.Reader
+	if payload != nil {
+		body = bytes.NewReader(payload)
+	}
 	req, err := http.NewRequestWithContext(ctx, method, p.baseURL+path, body)
 	if err != nil {
-		return fmt.Errorf("create trakt request: %w", err)
+		return nil, 0, false, fmt.Errorf("create trakt request: %w", err)
 	}
 	p.addHeaders(req, cfg, token)
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("send trakt request: %w", err)
+		return nil, 0, false, fmt.Errorf("send trakt request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		wait, ok := watchsync.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		if !ok {
+			wait = defaultRetryAfter
+		}
+		return nil, wait, true, nil
+	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("trakt request %s %s failed: status %d", method, path, resp.StatusCode)
+		return nil, 0, false, fmt.Errorf("trakt request %s %s failed: status %d", method, path, resp.StatusCode)
 	}
 	if out == nil {
-		return nil
+		return resp.Header, 0, false, nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode trakt response: %w", err)
+		return nil, 0, false, fmt.Errorf("decode trakt response: %w", err)
 	}
-	return nil
+	return resp.Header, 0, false, nil
 }
 
 type tokenResponse struct {
@@ -652,6 +883,72 @@ type traktIDs struct {
 	IMDb  string `json:"imdb"`
 	TMDB  int    `json:"tmdb"`
 	TVDB  int    `json:"tvdb"`
+}
+
+// traktIDIndex matches items Trakt echoes back in a response, such as its
+// not_found lists, to the request items that produced them. An echo matches an
+// item when the two share ANY identifier (Trakt id, slug, IMDb, TMDB, or TVDB):
+// Trakt may echo a different id subset than Silo sent, and Silo keys an item by
+// its own preferred id, so comparing one derived key per side misses matches.
+// Identifiers are namespaced by Silo item kind (historyimport.Kind*) because
+// TMDB and TVDB number movies, shows, and episodes independently. Zero ids
+// never match. Create one with traktIDIndex{}.
+//
+// Limitation: an echo that carries only identifiers the item lacks (for
+// example a bare Trakt id for an item Silo knows only by IMDb) cannot be
+// matched, so callers treat that item as accepted.
+type traktIDIndex map[traktIDRef]struct{}
+
+// ID schemes, as used in provider item keys ("tmdb:949") and traktIDRef.
+const (
+	idSchemeTrakt = "trakt"
+	idSchemeSlug  = "slug"
+	idSchemeIMDb  = "imdb"
+	idSchemeTMDB  = "tmdb"
+	idSchemeTVDB  = "tvdb"
+)
+
+type traktIDRef struct {
+	kind   string
+	scheme string
+	value  string
+}
+
+// add records every non-zero identifier in ids under kind.
+func (idx traktIDIndex) add(kind string, ids traktIDs) {
+	for _, ref := range traktIDRefs(kind, ids) {
+		idx[ref] = struct{}{}
+	}
+}
+
+// matches reports whether any non-zero identifier in ids was added under kind.
+func (idx traktIDIndex) matches(kind string, ids traktIDs) bool {
+	for _, ref := range traktIDRefs(kind, ids) {
+		if _, ok := idx[ref]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func traktIDRefs(kind string, ids traktIDs) []traktIDRef {
+	refs := make([]traktIDRef, 0, 5)
+	if ids.Trakt > 0 {
+		refs = append(refs, traktIDRef{kind: kind, scheme: idSchemeTrakt, value: strconv.Itoa(ids.Trakt)})
+	}
+	if ids.Slug != "" {
+		refs = append(refs, traktIDRef{kind: kind, scheme: idSchemeSlug, value: ids.Slug})
+	}
+	if ids.IMDb != "" {
+		refs = append(refs, traktIDRef{kind: kind, scheme: idSchemeIMDb, value: ids.IMDb})
+	}
+	if ids.TMDB > 0 {
+		refs = append(refs, traktIDRef{kind: kind, scheme: idSchemeTMDB, value: strconv.Itoa(ids.TMDB)})
+	}
+	if ids.TVDB > 0 {
+		refs = append(refs, traktIDRef{kind: kind, scheme: idSchemeTVDB, value: strconv.Itoa(ids.TVDB)})
+	}
+	return refs
 }
 
 type traktMovie struct {
@@ -994,11 +1291,8 @@ func appendNestedRemoveEpisode(shows []traktHistoryRemoveShow, showIDs traktIDs,
 func buildFavoritesPayload(favorites []watchsync.LocalFavorite) traktFavoritesPayload {
 	var payload traktFavoritesPayload
 	for _, favorite := range favorites {
-		ids := traktIDs{IMDb: favorite.IMDbID, TMDB: parseInt(favorite.TMDBID), TVDB: parseInt(favorite.TVDBID)}
-		if ids.IMDb == "" && ids.TMDB == 0 && ids.TVDB == 0 {
-			ids = idsFromProviderItemKey(favorite.ProviderItemKey)
-		}
-		if ids.IMDb == "" && ids.TMDB == 0 && ids.TVDB == 0 {
+		ids := favoriteIDs(favorite)
+		if !sendableIDs(ids) {
 			continue
 		}
 		switch favorite.Kind {
@@ -1011,24 +1305,32 @@ func buildFavoritesPayload(favorites []watchsync.LocalFavorite) traktFavoritesPa
 	return payload
 }
 
+// favoriteExportResult maps a favorites or watchlist response back to the
+// request items as (MediaItemID, key) pairs. An item goes to NotFound when a
+// not_found echo of the same kind shares any id with the ids it was sent with
+// (see traktIDIndex for the limitation), otherwise to Sent. Items with no key
+// are left out of both lists.
 func favoriteExportResult(favorites []watchsync.LocalFavorite, notFound traktFavoritesPayload) watchsync.ExportResult {
 	result := watchsync.ExportResult{Sent: make([]string, 0, len(favorites))}
-	notFoundKeys := map[string]bool{}
+	missing := traktIDIndex{}
 	for _, movie := range notFound.Movies {
-		notFoundKeys[movieKey(movie.IDs)] = true
+		missing.add(historyimport.KindMovie, movie.IDs)
 	}
 	for _, show := range notFound.Shows {
-		notFoundKeys[showKey(show.IDs)] = true
+		missing.add(historyimport.KindSeries, show.IDs)
 	}
 	for _, favorite := range favorites {
 		key := favorite.ProviderItemKey
 		if key == "" {
 			key = favoriteKey(favorite)
 		}
-		if key == "" {
+		ids := favoriteIDs(favorite)
+		// An item without a sendable id was left out of the request, so it
+		// is neither sent nor reported missing.
+		if key == "" || !sendableIDs(ids) {
 			continue
 		}
-		if notFoundKeys[key] {
+		if missing.matches(favorite.Kind, ids) {
 			result.NotFound = append(result.NotFound, favorite.MediaItemID, key)
 			continue
 		}
@@ -1037,11 +1339,25 @@ func favoriteExportResult(favorites []watchsync.LocalFavorite, notFound traktFav
 	return result
 }
 
-func favoriteKey(favorite watchsync.LocalFavorite) string {
+// favoriteIDs returns the ids a favorite or watchlist item is sent to Trakt
+// with: its own external ids, falling back to the id its provider item key
+// encodes.
+func favoriteIDs(favorite watchsync.LocalFavorite) traktIDs {
 	ids := traktIDs{IMDb: favorite.IMDbID, TMDB: parseInt(favorite.TMDBID), TVDB: parseInt(favorite.TVDBID)}
 	if ids.IMDb == "" && ids.TMDB == 0 && ids.TVDB == 0 {
 		ids = idsFromProviderItemKey(favorite.ProviderItemKey)
 	}
+	return ids
+}
+
+// sendableIDs reports whether ids can identify a title in a Trakt sync write.
+// Trakt accepts its own id as well as IMDb, TMDB, and TVDB ids.
+func sendableIDs(ids traktIDs) bool {
+	return hasAnyID(ids) || ids.Trakt > 0
+}
+
+func favoriteKey(favorite watchsync.LocalFavorite) string {
+	ids := favoriteIDs(favorite)
 	if favorite.Kind == historyimport.KindSeries {
 		return showKey(ids)
 	}
@@ -1054,13 +1370,13 @@ func idsFromProviderItemKey(key string) traktIDs {
 		return traktIDs{}
 	}
 	switch prefix {
-	case "imdb":
+	case idSchemeIMDb:
 		return traktIDs{IMDb: value}
-	case "tmdb":
+	case idSchemeTMDB:
 		return traktIDs{TMDB: parseInt(value)}
-	case "tvdb":
+	case idSchemeTVDB:
 		return traktIDs{TVDB: parseInt(value)}
-	case "trakt":
+	case idSchemeTrakt:
 		return traktIDs{Trakt: parseInt(value)}
 	default:
 		return traktIDs{}

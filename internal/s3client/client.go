@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -341,31 +342,77 @@ func (c *Client) UploadFile(ctx context.Context, bucket, key, path, contentType 
 	return info.Size(), nil
 }
 
+// maxPresignLifetime is the longest X-Amz-Expires that SigV4 accepts.
+const maxPresignLifetime = 7 * 24 * time.Hour
+
 // PresignGetURL generates a read URL for the given object. The strategy depends
 // on the configured URLAuth:
 //   - "cloudflare_token": HMAC-signed URL via the public endpoint
 //   - "public": unsigned URL via the public endpoint
 //   - "presigned" (default): standard S3 presigned URL
 func (c *Client) PresignGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error) {
+	u, _, err := c.PresignGetURLAt(ctx, bucket, key, time.Now(), expiry, 0)
+	return u, err
+}
+
+// PresignGetURLAt is PresignGetURL issued for the window containing now, and
+// it also reports when the URL stops working. Every call in the same window,
+// on any replica, returns the same URL, so clients and CDNs that cache by URL
+// keep hitting. A zero window issues a fresh URL, as PresignGetURL does.
+//
+// A presigned URL is signed at the window start and stays valid for window
+// plus expiry, so it outlives now by at least expiry; SigV4's seven-day limit
+// shortens the window, never the expiry. The WAF rule fixes a Cloudflare
+// token's lifetime from its timestamp, so the window is capped to a quarter of
+// the token TTL and the URL stays valid for at least three quarters of it.
+func (c *Client) PresignGetURLAt(ctx context.Context, bucket, key string, now time.Time, expiry, window time.Duration) (string, time.Time, error) {
 	objectKey := c.prefixedKey(key)
 	if c.publicEndpoint != "" {
 		switch c.urlAuth {
 		case URLAuthCloudflareToken:
-			return c.cloudflareTokenURL(objectKey), nil
+			tokenTTL := time.Duration(c.tokenTTL) * time.Second
+			issued := now.Truncate(min(window, tokenTTL/4))
+			return c.cloudflareTokenURL(objectKey, issued), issued.Add(tokenTTL), nil
 		case URLAuthPublic:
-			return c.PublicURL(bucket, key)
+			u, err := c.PublicURL(bucket, key)
+			if err != nil {
+				return "", time.Time{}, err
+			}
+			return u, now.Add(expiry), nil
 		}
 	}
 
+	window = max(0, min(window, maxPresignLifetime-expiry))
+	issued := now.Truncate(window)
+	lifetime := window + expiry
 	req, err := c.presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(objectKey),
-	}, s3.WithPresignExpires(expiry))
+	}, s3.WithPresignExpires(lifetime), signAt(issued))
 	if err != nil {
-		return "", fmt.Errorf("s3 PresignGetObject %s/%s: %w", bucket, key, err)
+		return "", time.Time{}, fmt.Errorf("s3 PresignGetObject %s/%s: %w", bucket, key, err)
 	}
 
-	return req.URL, nil
+	return req.URL, issued.Add(lifetime), nil
+}
+
+// signAt makes a presign use a fixed signing time instead of the SDK clock.
+func signAt(at time.Time) func(*s3.PresignOptions) {
+	return func(o *s3.PresignOptions) {
+		o.Presigner = fixedTimePresigner{inner: o.Presigner, at: at}
+	}
+}
+
+type fixedTimePresigner struct {
+	inner s3.HTTPPresignerV4
+	at    time.Time
+}
+
+func (p fixedTimePresigner) PresignHTTP(
+	ctx context.Context, credentials aws.Credentials, r *http.Request,
+	payloadHash, service, region string, _ time.Time, optFns ...func(*v4.SignerOptions),
+) (string, http.Header, error) {
+	return p.inner.PresignHTTP(ctx, credentials, r, payloadHash, service, region, p.at, optFns...)
 }
 
 // EffectivePresignTTL returns the longest validity window that the client can
@@ -383,12 +430,13 @@ func (c *Client) EffectivePresignTTL(requested time.Duration) time.Duration {
 	return requested
 }
 
-// cloudflareTokenURL generates a Cloudflare WAF token-authenticated URL.
+// cloudflareTokenURL generates a Cloudflare WAF token-authenticated URL issued
+// at the given time.
 // Format: {publicEndpoint}/{key}?{param}={timestamp}-{base64_hmac}
 // The HMAC is SHA256(secret, "/{key}" + timestamp).
-func (c *Client) cloudflareTokenURL(key string) string {
+func (c *Client) cloudflareTokenURL(key string, issued time.Time) string {
 	path := "/" + key
-	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	ts := strconv.FormatInt(issued.Unix(), 10)
 
 	mac := hmac.New(sha256.New, []byte(c.tokenSecret))
 	mac.Write([]byte(path))

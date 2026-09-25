@@ -1,4 +1,13 @@
-import { startTransition, useCallback, useEffect, useLayoutEffect, useState } from "react";
+import {
+  lazy,
+  startTransition,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Link, useLocation } from "react-router";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Menu, Search } from "lucide-react";
@@ -8,11 +17,12 @@ import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import AppSidebar from "@/components/AppSidebar";
-import ServerActivity from "@/components/ServerActivity";
+import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import { SiloBrand } from "@/components/SiloBrand";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { buildQueryCatalogHref, parseCatalogSearchParams } from "@/pages/catalogSearchParams";
+import { prefetchCatalog } from "@/pages/catalogRoute";
 import type { ReactNode, TransitionEvent as ReactTransitionEvent } from "react";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
@@ -33,11 +43,48 @@ import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 
+// Only admins see the activity indicator, so everyone else skips downloading it.
+const ServerActivity = lazy(() => import("@/components/ServerActivity"));
+
+/**
+ * The lazily loaded activity indicator. Layout wraps every page, so a chunk
+ * that fails to load leaves the indicator out instead of breaking the page.
+ */
+function AdminActivityIndicator() {
+  return (
+    <LocalErrorBoundary>
+      <Suspense fallback={null}>
+        <ServerActivity hideWhenEmpty />
+      </Suspense>
+    </LocalErrorBoundary>
+  );
+}
+
 interface LayoutProps {
   children: ReactNode;
 }
 
 export default function Layout({ children }: LayoutProps) {
+  const shellRef = useRef<HTMLDivElement>(null);
+  const mobileHeaderRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    const header = mobileHeaderRef.current;
+    if (!shell || !header) return;
+    const measureHeader = () => {
+      const height = header.getBoundingClientRect().height;
+      const margin = height ? parseFloat(getComputedStyle(header).marginTop) || 0 : 0;
+      shell.style.setProperty("--detail-header-height", `${height + margin}px`);
+    };
+    const observer = new ResizeObserver(measureHeader);
+    observer.observe(header);
+    window.addEventListener("resize", measureHeader);
+    measureHeader();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measureHeader);
+    };
+  }, []);
   const location = useLocation();
   const navigate = useViewTransitionNavigate();
   const queryClient = useQueryClient();
@@ -312,7 +359,7 @@ export default function Layout({ children }: LayoutProps) {
       itemDetailsReady={itemDetailsReady}
       enteredItemFromHome={enteredItemFromHome}
     >
-      <div className="bg-background relative min-h-[100dvh] overflow-x-clip">
+      <div ref={shellRef} className="bg-background relative min-h-[100dvh] overflow-x-clip">
         <a
           href="#main-content"
           className="focus:bg-background focus:text-foreground focus:ring-ring sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:rounded-lg focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:ring-2 focus:outline-none"
@@ -331,6 +378,7 @@ export default function Layout({ children }: LayoutProps) {
         {/* Mobile header — visible below lg. Slides up on scroll-down within
           the Calendar route to free vertical space; pulling up reveals it. */}
         <div
+          ref={mobileHeaderRef}
           className={`mobile-header glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 transition-transform duration-200 ease-out lg:hidden ${
             mobileHeaderHidden ? "-translate-y-[140%]" : "translate-y-0"
           }`}
@@ -350,11 +398,13 @@ export default function Layout({ children }: LayoutProps) {
           <div className="flex items-center gap-2">
             <ViewTransitionLink
               to={buildQueryCatalogHref()}
+              onPointerDown={prefetchCatalog}
+              onFocus={prefetchCatalog}
               className="text-muted-foreground hover:text-foreground hover:bg-accent/60 flex h-10 w-10 items-center justify-center rounded-xl transition-all active:scale-[0.98]"
             >
               <Search className="h-5 w-5" />
             </ViewTransitionLink>
-            {showAdminActivity && <ServerActivity hideWhenEmpty />}
+            {showAdminActivity && <AdminActivityIndicator />}
             <Link
               to="/settings"
               aria-label={`${profile?.name ?? user?.username ?? "User"} settings`}
@@ -387,7 +437,7 @@ export default function Layout({ children }: LayoutProps) {
         {/* Desktop admin activity indicator (top-right, hidden on mobile) */}
         {showAdminActivity && (
           <div className="fixed top-6 right-5 z-40 hidden lg:block">
-            <ServerActivity hideWhenEmpty />
+            <AdminActivityIndicator />
           </div>
         )}
 

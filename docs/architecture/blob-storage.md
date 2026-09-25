@@ -364,13 +364,37 @@ retained `/api/v1/ready` contract, which previously answered 503 on an S3
 
 Local URLs use an HMAC derived from the JWT secret and the fixed domain
 `silo-artwork-url-v1`. The signature covers `artwork-v1`, the logical key, and
-the expiry. URLs stay stable within issuance buckets of 15 minutes, reduced to
-the TTL for shorter URLs. Their remaining lifetime is at least the configured
-TTL, with up to one bucket added. Invalid or expired capabilities return 404 so
-the route does not reveal whether a key exists.
-Revisioned URLs are cacheable for their remaining lifetime and marked immutable;
-mutable uploads use private caching. S3 installations continue to use direct
-presigned or public URLs.
+the expiry. Invalid or expired capabilities return 404 so the route does not
+reveal whether a key exists.
+
+For artwork, the path is the identity and the query is the authorization.
+Clients and CDNs cache images by full URL, so a new URL for unchanged bytes
+costs a download the client already has. A revisioned key names immutable bytes,
+so at the default lifetime (`s3.metadata_presign_expiry`) its URL stays the same
+for a UTC day on every replica and is valid for at least the TTL. A leaked
+revisioned URL therefore works for up to a day plus the TTL; lowering the
+setting shortens the TTL but not the day.
+
+Every other URL is stable within a 15-minute issuance bucket, or a bucket as
+long as the TTL when that is shorter, and is valid for at least its TTL and at
+most one bucket longer. A mutable key, such as a library poster or collection
+image replaced in place, must get a new URL soon after its bytes change. A
+capability requested for less than the default, such as an avatar or a chapter
+thumbnail, keeps its extra lifetime within its own TTL. Revisioned responses are
+cacheable for the URL's remaining lifetime and marked immutable; mutable keys
+use private caching and revalidate with the ETag.
+
+S3 installations use direct presigned or public URLs. A revisioned key's
+presigned URL at the default lifetime is signed at the start of its UTC day and
+expires a day plus the TTL later, so every replica mints the same URL. That
+relies on every replica signing with the same static access key, the only
+credential mode the S3 client uses; rotating session credentials would change
+the URL at each rotation and end it when the credential expires. A TTL
+near the SigV4 seven-day limit shortens that window rather than the TTL. The
+Cloudflare WAF rule fixes a token's lifetime from its timestamp, so token
+timestamps are truncated to a quarter of the token TTL instead, which leaves
+each URL valid for at least three quarters of it. Other presigned and token
+URLs are issued fresh on every resolve, and public URLs never change.
 
 Local storage publishes each object with an atomic rename, and direct S3 reads
 see an object as soon as its upload returns, so catalog responses resolve the
@@ -392,7 +416,12 @@ renaming it into place, and syncing the containing directory, so a crash after
 show.
 
 Intro and credits markers that an external process places under
-`markers/<file hash>.json` are read through the same store.
+`markers/<file hash>.json` are read through the same store. The scanner reads
+them for new and changed files only. It lists the prefix at most once a minute
+per node and skips the per-file read while the prefix is empty, so a
+producer's first markers apply to files scanned after the next check. A LIST
+that fails or runs longer than five seconds counts as non-empty, and the
+scanner reads markers for every file until the next check.
 
 Profile avatars live in the operational store, so private S3 keeps existing
 uploads and their presigned delivery even when artwork is local, and a local

@@ -26,7 +26,7 @@ var approvedDomainSchemaTypes = map[string]string{
 	"github.com/Silo-Server/silo-server/internal/requests":              "FeatureStatus RouterOption",
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry":       "ParityMismatch ParityReport",
 	"github.com/Silo-Server/silo-server/internal/subtitles/ai":          "QuotaStatus",
-	"github.com/Silo-Server/silo-server/internal/watchsync":             "Capabilities ConnectionUpdate",
+	"github.com/Silo-Server/silo-server/internal/watchsync":             "ConnectionUpdate",
 	"github.com/Silo-Server/silo-server/internal/webhooksync":           "DiscoveredUser RotateWebhookResult UpdateConnectionInput",
 	"github.com/danielgtaylor/huma/v2":                                  "FormFile",
 }

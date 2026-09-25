@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -342,6 +343,7 @@ type PlaybackVariantPart struct {
 // CatalogItemDetail is the detail page of an item: the card plus everything
 // the page shows.
 type CatalogItemDetail struct {
+	Themes *ThemeSongSet `json:"themes,omitempty"`
 	CatalogItem
 	SortTitle                       string                               `json:"sort_title,omitempty"`
 	OriginalTitle                   string                               `json:"original_title,omitempty"`
@@ -495,6 +497,7 @@ const (
 
 func registerCatalogItems(reg *Registry) {
 	registerCatalogSearchCapabilities(reg)
+	registerThemeSongs(reg)
 	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog", opListCatalogItems, "catalog",
 		"Page the catalog, a section, a collection, a personal list, or a person's credits, filtered and sorted.")),
@@ -1019,7 +1022,19 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemInput) (
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &CatalogItemDetailOutput{Body: catalogItemDetailOf(detail)}, nil
+	out := catalogItemDetailOf(detail)
+	if reg.deps.ThemeSongs != nil && (detail.Type == themeOwnerMovie || detail.Type == themeOwnerSeries || detail.Type == themeOwnerSeason || detail.Type == themeOwnerEpisode) {
+		themes, err := reg.deps.ThemeSongs.Discover(ctx, in.ID, true, viewer.Access)
+		if err != nil {
+			slog.WarnContext(ctx, "catalog theme lookup failed", "component", "apiv2", "item_id", in.ID, "error", err)
+			return &CatalogItemDetailOutput{Body: out}, nil
+		}
+		out.Themes = &ThemeSongSet{OwnerID: themes.OwnerID, Items: []ThemeSong{}}
+		for _, song := range themes.Items {
+			out.Themes.Items = append(out.Themes.Items, ThemeSong(song))
+		}
+	}
+	return &CatalogItemDetailOutput{Body: out}, nil
 }
 
 func (reg *Registry) listCatalogItemVersions(ctx context.Context, in *CatalogItemInput) (*FileVersionCollectionOutput, error) {
@@ -1194,7 +1209,8 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail) CatalogItemDetail {
 		ContentID: d.ContentID, PlayContentID: d.PlayContentID, Type: d.Type, Title: d.Title,
 		SeriesID: d.SeriesID, SeriesTitle: d.SeriesTitle, SeasonNumber: d.SeasonNumber, EpisodeNumber: d.EpisodeNumber,
 		Year: d.Year, Runtime: d.Runtime, Genres: NonNil(d.Genres), Keywords: []string{}, Studios: d.Studios, Networks: d.Networks,
-		ContentRating: d.ContentRating, ShowStatus: d.ShowStatus,
+		ContentRating: d.ContentRating, AdvisoryAge: d.AdvisoryAge, AdvisorySource: d.AdvisorySource,
+		ShowStatus: d.ShowStatus,
 		RatingIMDB: d.RatingIMDB, RatingTMDB: d.RatingTMDB, RatingRTCritic: d.RatingRTCritic, RatingRTAudience: d.RatingRTAudience,
 		Overview: d.Overview, ReleaseDate: d.ReleaseDate, LastAirDate: d.LastAirDate,
 		PosterURL: d.PosterURL, PosterThumbhash: d.PosterThumbhash, BackdropURL: d.BackdropURL, BackdropThumbhash: d.BackdropThumbhash, LogoURL: d.LogoURL,

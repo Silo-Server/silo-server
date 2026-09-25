@@ -20,6 +20,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
@@ -89,6 +90,8 @@ func (p *Provider) Capabilities() watchsync.Capabilities {
 		RemoveWatchlist:        true,
 		ProvidesWatchlistOrder: true,
 		ScrobblePlayback:       true,
+		ImportRatings:          true,
+		ExportRatings:          true,
 	}
 }
 
@@ -454,34 +457,73 @@ func (p *Provider) sendWatchlist(ctx context.Context, conn watchsync.Connection,
 }
 
 func watchlistExportResult(favorites []watchsync.LocalFavorite, responseHasNotFound, removing bool) watchsync.ExportResult {
-	result := watchsync.ExportResult{
-		Sent:     make([]string, 0, len(favorites)),
-		NotFound: make([]string, 0, len(favorites)),
-		Failed:   make(map[string]string),
-	}
+	result := newSyncWriteResult("watchlist items", removing, len(favorites))
+	requested := make([]string, 0, len(favorites))
 	for _, fav := range favorites {
-		if fav.MediaItemID == "" {
+		if _, ok := listItemIDs(fav); !ok {
+			result.skip(fav.MediaItemID, "MDBList watchlist export requires a movie or series with an external ID")
 			continue
 		}
-		if !watchlistFavoriteSupported(fav) {
-			result.Failed[fav.MediaItemID] = "MDBList watchlist export requires a movie or series with an external ID"
-			continue
-		}
-		if responseHasNotFound {
-			if removing {
-				// A successful removal leaves both removed and already-absent items
-				// absent remotely. MDBList returns only aggregate counts, so mark
-				// the batch reconciled without trying to attribute individual rows.
-				result.NotFound = append(result.NotFound, fav.MediaItemID)
-				continue
-			}
-			// Adds still need item-level identity that the aggregate response
-			// does not provide, so never claim that any item in the batch sent.
-			result.Failed[fav.MediaItemID] = "MDBList did not accept one or more watchlist items in the batch"
-			continue
-		}
-		result.Sent = append(result.Sent, fav.MediaItemID)
+		requested = append(requested, fav.MediaItemID)
 	}
+	result.request(requested, responseHasNotFound, false)
+	return result.exportResult()
+}
+
+// syncWriteResult builds the ExportResult of MDBList watchlist and rating
+// writes, keyed by media item. MDBList answers a write with per-kind counts
+// and never names the items it did not accept, so every item of one request
+// shares that request's outcome:
+//   - a set with any not_found entry fails as a whole, because no single item
+//     can be shown to have been accepted;
+//   - a removal with any not_found entry is reconciled as a whole, because
+//     removed and already-absent items both end up absent;
+//   - a request that reports errors fails as a whole, set or removal;
+//   - an item MDBList cannot identify is left out of the request and fails.
+type syncWriteResult struct {
+	// noun names the batch's items in failure reasons, such as "ratings".
+	noun     string
+	removing bool
+	sent     []string
+	notFound []string
+	failed   map[string]string
+}
+
+func newSyncWriteResult(noun string, removing bool, size int) *syncWriteResult {
+	return &syncWriteResult{
+		noun:     noun,
+		removing: removing,
+		sent:     make([]string, 0, size),
+		failed:   make(map[string]string),
+	}
+}
+
+// skip fails an item that was left out of the request.
+func (r *syncWriteResult) skip(mediaItemID, reason string) {
+	if mediaItemID != "" {
+		r.failed[mediaItemID] = reason
+	}
+}
+
+// request records the outcome of one request that carried the given items.
+func (r *syncWriteResult) request(mediaItemIDs []string, responseHasNotFound, responseHasErrors bool) {
+	for _, id := range mediaItemIDs {
+		switch {
+		case id == "":
+		case responseHasErrors:
+			r.failed[id] = "MDBList reported errors for the " + r.noun + " in the batch"
+		case !responseHasNotFound:
+			r.sent = append(r.sent, id)
+		case r.removing:
+			r.notFound = append(r.notFound, id)
+		default:
+			r.failed[id] = "MDBList did not accept one or more " + r.noun + " in the batch"
+		}
+	}
+}
+
+func (r *syncWriteResult) exportResult() watchsync.ExportResult {
+	result := watchsync.ExportResult{Sent: r.sent, NotFound: r.notFound, Failed: r.failed}
 	if len(result.Failed) == 0 {
 		result.Failed = nil
 	}
@@ -534,12 +576,6 @@ func (p *Provider) do(ctx context.Context, method string, path string, apiKey st
 	if strings.TrimSpace(apiKey) == "" {
 		return errors.New("mdblist api key is missing")
 	}
-	target := p.baseURL + path
-	separator := "?"
-	if strings.Contains(path, "?") {
-		separator = "&"
-	}
-	target += separator + "apikey=" + url.QueryEscape(apiKey)
 
 	// Buffer the body so rate-limited attempts can be replayed.
 	var payload []byte
@@ -554,9 +590,9 @@ func (p *Provider) do(ctx context.Context, method string, path string, apiKey st
 	limiter := p.limiter(apiKey)
 	for attempt := 0; ; attempt++ {
 		if err := limiter.Wait(ctx); err != nil {
-			return fmt.Errorf("wait for mdblist rate limiter: %w", err)
+			return watchsync.LimiterWaitError(ctx, p.Key(), requestInterval, err)
 		}
-		retryAfter, err := p.doOnce(ctx, method, path, target, payload, out)
+		retryAfter, err := p.doOnce(ctx, method, path, apiKey, payload, out)
 		if err == nil {
 			return nil
 		}
@@ -588,14 +624,18 @@ func (p *Provider) do(ctx context.Context, method string, path string, apiKey st
 // doOnce performs a single HTTP attempt. On a 429 it returns the wait hinted
 // by Retry-After (0 when absent) alongside the error; every other failure
 // returns -1 to signal "not retryable".
-func (p *Provider) doOnce(ctx context.Context, method, path, target string, payload []byte, out any) (time.Duration, error) {
+//
+// The request URL carries the API key, so it must stay inside this function:
+// errors returned here name the request by method and path, or by a
+// sanitized URL.
+func (p *Provider) doOnce(ctx context.Context, method, path, apiKey string, payload []byte, out any) (time.Duration, error) {
 	var body io.Reader
 	if payload != nil {
 		body = bytes.NewReader(payload)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, target, body)
+	req, err := http.NewRequestWithContext(ctx, method, p.requestURL(path, apiKey), body)
 	if err != nil {
-		return -1, fmt.Errorf("create mdblist request: %w", err)
+		return -1, requestError("create", apiKey, err)
 	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -604,18 +644,20 @@ func (p *Provider) doOnce(ctx context.Context, method, path, target string, payl
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return -1, fmt.Errorf("send mdblist request: %w", err)
+		return -1, requestError("send", apiKey, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
-			fmt.Errorf("mdblist request %s %s rate limited: status 429", method, path)
+		// An absent, malformed, or elapsed Retry-After yields 0, which do
+		// replaces with defaultRetryAfter.
+		wait, _ := watchsync.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		return wait, fmt.Errorf("mdblist request %s %s rate limited: status 429", method, path)
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return -1, fmt.Errorf("mdblist request %s %s rejected: status %d (check api key): %w", method, path, resp.StatusCode, watchsync.ErrInvalidCredential)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		detail := responseErrorDetail(resp.Body)
+		detail := responseErrorDetail(resp.Body, apiKey)
 		if detail != "" {
 			return -1, fmt.Errorf("mdblist request %s %s failed: status %d: %s", method, path, resp.StatusCode, detail)
 		}
@@ -630,12 +672,94 @@ func (p *Provider) doOnce(ctx context.Context, method, path, target string, payl
 	return -1, nil
 }
 
-func responseErrorDetail(body io.Reader) string {
-	raw, err := io.ReadAll(io.LimitReader(body, maxErrorBodyBytes))
+// requestURL appends the API key MDBList expects as a query parameter. The
+// result is a credential and must never reach error text or logs.
+func (p *Provider) requestURL(path, apiKey string) string {
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return p.baseURL + path + separator + "apikey=" + url.QueryEscape(apiKey)
+}
+
+// requestError reports a failure to build or send a request without the API
+// key. http.NewRequestWithContext and http.Client.Do both return a *url.Error
+// whose message embeds the request URL, key included; SanitizeURLError drops
+// the query string while keeping the cause chain, so errors.Is still matches
+// context.Canceled and context.DeadlineExceeded and errors.As still finds
+// net.Error timeouts.
+func requestError(stage, apiKey string, err error) error {
+	err = logredact.SanitizeURLError(err)
+	// The cause can still quote a URL outside the *url.Error field: a
+	// redirect with an unparseable Location header reports that
+	// server-supplied value verbatim.
+	if msg := err.Error(); redactAPIKey(msg, apiKey) != msg {
+		err = redactedError{message: redactAPIKey(msg, apiKey), cause: err}
+	}
+	return fmt.Errorf("%s mdblist request: %w", stage, err)
+}
+
+// redactedError carries a message with the API key masked. It answers
+// errors.Is and errors.As from the original error, so cancellations and
+// timeouts stay classifiable, but has no Unwrap: walking the chain never
+// reaches the original, key-bearing message.
+type redactedError struct {
+	message string
+	cause   error
+}
+
+func (e redactedError) Error() string        { return e.message }
+func (e redactedError) Is(target error) bool { return errors.Is(e.cause, target) }
+func (e redactedError) As(target any) bool   { return errors.As(e.cause, target) }
+
+// redactAPIKey masks every occurrence of the API key, raw or query-escaped.
+func redactAPIKey(text, apiKey string) string {
+	for _, form := range apiKeyForms(apiKey) {
+		text = strings.ReplaceAll(text, form, logredact.Placeholder)
+	}
+	return text
+}
+
+// trimPartialAPIKey drops a trailing fragment of the API key that truncation
+// separated from the rest of the key, which redactAPIKey cannot recognize.
+func trimPartialAPIKey(text, apiKey string) string {
+	for _, form := range apiKeyForms(apiKey) {
+		for n := len(form) - 1; n > 0; n-- {
+			if strings.HasSuffix(text, form[:n]) {
+				text = text[:len(text)-n]
+				break
+			}
+		}
+	}
+	return text
+}
+
+func apiKeyForms(apiKey string) []string {
+	if apiKey == "" {
+		return nil
+	}
+	if escaped := url.QueryEscape(apiKey); escaped != apiKey {
+		return []string{apiKey, escaped}
+	}
+	return []string{apiKey}
+}
+
+// responseErrorDetail returns a bounded excerpt of an error response body with
+// the API key masked, since a server error page can echo the request URL.
+func responseErrorDetail(body io.Reader, apiKey string) string {
+	raw, err := io.ReadAll(io.LimitReader(body, maxErrorBodyBytes+1))
 	if err != nil {
 		return ""
 	}
-	raw = bytes.TrimSpace(raw)
+	truncated := len(raw) > maxErrorBodyBytes
+	if truncated {
+		raw = raw[:maxErrorBodyBytes]
+	}
+	text := redactAPIKey(string(raw), apiKey)
+	if truncated {
+		text = trimPartialAPIKey(text, apiKey)
+	}
+	raw = bytes.TrimSpace([]byte(text))
 	if len(raw) == 0 {
 		return ""
 	}
@@ -650,27 +774,6 @@ func responseErrorDetail(body io.Reader) string {
 		return compact.String()
 	}
 	return strings.Join(strings.Fields(string(raw)), " ")
-}
-
-// parseRetryAfter reads an RFC 7231 Retry-After value (delay-seconds or
-// HTTP-date). It returns 0 when the header is absent or unparseable.
-func parseRetryAfter(value string, now time.Time) time.Duration {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0
-	}
-	if seconds, err := strconv.Atoi(value); err == nil {
-		if seconds < 0 {
-			return 0
-		}
-		return time.Duration(seconds) * time.Second
-	}
-	if at, err := http.ParseTime(value); err == nil {
-		if wait := at.Sub(now); wait > 0 {
-			return wait
-		}
-	}
-	return 0
 }
 
 // --- ID & payload helpers ---
@@ -1132,33 +1235,32 @@ func watchedPlaySupported(play watchsync.LocalPlay) bool {
 func buildWatchlistPayload(favorites []watchsync.LocalFavorite) mdblistWatchlistPayload {
 	var payload mdblistWatchlistPayload
 	for _, fav := range favorites {
-		ids := idsFromLocal(fav.IMDbID, fav.TMDBID, fav.TVDBID)
-		if ids == (mdblistIDs{}) {
-			ids = idsFromProviderItemKey(fav.ProviderItemKey)
-		}
-		if ids == (mdblistIDs{}) {
+		ids, ok := listItemIDs(fav)
+		if !ok {
 			continue
 		}
 		ref := mdblistWatchlistRef{IDs: ids}
-		switch fav.Kind {
-		case historyimport.KindMovie:
+		if fav.Kind == historyimport.KindMovie {
 			payload.Movies = append(payload.Movies, ref)
-		case historyimport.KindSeries:
+		} else {
 			payload.Shows = append(payload.Shows, ref)
 		}
 	}
 	return payload
 }
 
-func watchlistFavoriteSupported(fav watchsync.LocalFavorite) bool {
+// listItemIDs returns the ids that identify a movie or series in a watchlist
+// or rating write: its external ids, or else the id in its provider item key.
+// It reports false for any other kind and for an item with no id.
+func listItemIDs(fav watchsync.LocalFavorite) (mdblistIDs, bool) {
 	if fav.Kind != historyimport.KindMovie && fav.Kind != historyimport.KindSeries {
-		return false
+		return mdblistIDs{}, false
 	}
 	ids := idsFromLocal(fav.IMDbID, fav.TMDBID, fav.TVDBID)
 	if ids == (mdblistIDs{}) {
 		ids = idsFromProviderItemKey(fav.ProviderItemKey)
 	}
-	return ids != (mdblistIDs{})
+	return ids, ids != (mdblistIDs{})
 }
 
 func buildScrobblePayload(event watchsync.ScrobbleEvent) map[string]any {

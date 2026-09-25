@@ -526,7 +526,7 @@ func appendWorkItemsAccessFilters(conditions *[]string, args *[]any, argIdx *int
 		*args = append(*args, filter.DisabledLibraryIDs)
 		*argIdx = *argIdx + 1
 	}
-	catalog.ApplySectionAccessFilter("mi", catalog.AccessFilter{MaxContentRating: filter.MaxContentRating}, conditions, args, argIdx)
+	catalog.ApplySectionAccessFilter("mi", catalog.AccessFilter{MaturityLimits: filter.MaturityLimits}, conditions, args, argIdx)
 }
 
 func (r *Repository) ListFiles(ctx context.Context, contentID string, filter catalog.AccessFilter) ([]WorkFile, error) {

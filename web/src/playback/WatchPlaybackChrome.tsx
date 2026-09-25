@@ -1,9 +1,12 @@
+import { usePlaybackBarHeight } from "@/hooks/usePlaybackBarHeight";
+import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
 import {
   lazy,
   Suspense,
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -22,6 +25,7 @@ import {
   getProfileToken,
   refreshAuthentication,
 } from "@/api/client";
+import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -45,16 +49,22 @@ import type {
   EpisodeRef,
   IntroSkipMode,
   PlaybackExitState,
+  PlaybackStartTrigger,
   PlayerPictureInPictureChange,
 } from "@/player/types";
 import { useSeriesEpisodes } from "@/player/hooks/useSeriesEpisodes";
-import { PlayingNextScreen } from "@/player/components/PlayingNextScreen";
 import { formatTime } from "@/player/components/SeekBar";
 import { storage } from "@/utils/storage";
 import { WatchPlaybackControllerContext } from "./watchPlaybackContext";
 import type { WatchPlaybackControllerValue } from "./watchPlaybackContext";
-import type { WatchPlaybackSnapshot, WatchPlaybackTransportControls } from "./watchPlaybackReducer";
+import type { WatchPlaybackTransportControls } from "./watchPlaybackReducer";
 import { createEmptyPlaybackState, watchPlaybackReducer } from "./watchPlaybackReducer";
+import {
+  createWatchPlaybackSnapshotStore,
+  useWatchPlaybackSnapshot,
+  WatchPlaybackSnapshotStoreContext,
+  type WatchPlaybackSnapshot,
+} from "./watchPlaybackSnapshotStore";
 import {
   buildWatchHref,
   buildWatchItemHref,
@@ -64,10 +74,29 @@ import {
   type WatchRouteRequest,
 } from "@/pages/watchRouteHelpers";
 import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
+import { markPlaybackIntent } from "@/player/first-frame";
 
 const WatchPage = lazy(() =>
   import("@/player/components/WatchPage").then((module) => ({ default: module.WatchPage })),
 );
+
+// The post-roll screen animates with framer-motion, which is too large to load
+// on every launch for a screen that only appears at the end of an episode. The
+// host fetches it once an episode is playing, well before post-roll can begin.
+const importPlayingNextScreen = () => import("@/player/components/PlayingNextScreen");
+const PlayingNextScreen = lazy(() =>
+  importPlayingNextScreen().then((module) => ({ default: module.PlayingNextScreen })),
+);
+
+let playingNextScreenPrefetched = false;
+
+function prefetchPlayingNextScreen() {
+  if (playingNextScreenPrefetched) return;
+  playingNextScreenPrefetched = true;
+  // Nothing to report here: post-roll imports the chunk again when it renders,
+  // and its error boundary handles a failure.
+  importPlayingNextScreen().catch(() => undefined);
+}
 
 function normalizeWatchPlaybackRequest(
   input: WatchPlaybackStartInput | WatchRouteRequest,
@@ -199,6 +228,7 @@ function PlaybackPreparingScreen() {
 export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
   const navigate = useViewTransitionNavigate();
   const [state, dispatch] = useReducer(watchPlaybackReducer, undefined, createEmptyPlaybackState);
+  const [snapshotStore] = useState(createWatchPlaybackSnapshotStore);
   const stateRef = useRef(state);
   const suppressNextPictureInPictureExitRef = useRef<string | null>(null);
   const { profile } = useCurrentProfile();
@@ -248,8 +278,14 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const startPlayback = useCallback(
-    (input: WatchPlaybackStartInput | WatchRouteRequest) => {
+    (input: WatchPlaybackStartInput | WatchRouteRequest, trigger: PlaybackStartTrigger) => {
       const request = normalizeWatchPlaybackRequest(input);
+      // Press-play-to-first-frame starts here, before any navigation or
+      // Picture-in-Picture exit the viewer also waits for. The route rebuilds
+      // the same request key, so the player's session can claim the mark.
+      // Nobody pressed Play for an automatic start, so it leaves no mark and
+      // its first_frame goes out without a duration.
+      if (trigger === "viewer") markPlaybackIntent(request.requestKey);
       const current = stateRef.current;
       const currentRequestKey = current.request?.requestKey ?? null;
       const hasActivePictureInPicture =
@@ -388,11 +424,20 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "CLEAR_PENDING_RETURN_NAVIGATION", requestKey });
   }, []);
 
+  // A layout effect, so the store knows a new request before the passive
+  // effects of the commit that starts it. The host can mount an already loaded
+  // title's player in that commit, and the player reports from its first effect.
+  useLayoutEffect(() => {
+    snapshotStore.setRequest(state.request);
+  }, [snapshotStore, state.request]);
+
+  // Time updates go to the snapshot store, not the reducer, so they leave the
+  // controller value (and every component that reads it) untouched.
   const updatePlaybackSnapshot = useCallback(
     (requestKey: string, snapshot: WatchPlaybackSnapshot) => {
-      dispatch({ type: "UPDATE_SNAPSHOT", requestKey, snapshot });
+      snapshotStore.report(requestKey, snapshot);
     },
-    [],
+    [snapshotStore],
   );
 
   const setTransportControls = useCallback(
@@ -440,13 +485,20 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <WatchPlaybackControllerContext.Provider value={value}>
-      {children}
-    </WatchPlaybackControllerContext.Provider>
+    <WatchPlaybackSnapshotStoreContext.Provider value={snapshotStore}>
+      <WatchPlaybackControllerContext.Provider value={value}>
+        {children}
+      </WatchPlaybackControllerContext.Provider>
+    </WatchPlaybackSnapshotStoreContext.Provider>
   );
 }
 
 export function WatchPlaybackHost() {
+  // The host is mounted on every screen, the login screen included; its
+  // settings reads wait for a session instead of answering 401.
+  const { user } = useAuth();
+  const signedIn = user !== null;
+  const seekPreferences = useSeekPreferences("video", { enabled: signedIn });
   const controller = useContext(WatchPlaybackControllerContext);
   if (!controller) {
     throw new Error("Watch playback host is unavailable outside WatchPlaybackProvider");
@@ -465,10 +517,9 @@ export function WatchPlaybackHost() {
   const queryClient = useQueryClient();
   const location = useLocation();
   const navigate = useViewTransitionNavigate();
-  const { user } = useAuth();
   const { profile: currentProfile } = useCurrentProfile();
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
-  const settingsCapabilities = useSettingsCapabilities();
+  const settingsCapabilities = useSettingsCapabilities({ enabled: signedIn });
   // Three answers, not two: the connected server defines the enum, it provably
   // does not, or nobody knows yet. settingsCapabilitiesSupportKey collapses the
   // last two into false, so the query's own state is what separates them.
@@ -502,6 +553,7 @@ export function WatchPlaybackHost() {
       // tier under this so the setting does what its label says.
       SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS,
     ],
+    enabled: signedIn,
   });
   const request = state.request;
   const isForegroundMode = request != null && state.mode === "foreground";
@@ -709,7 +761,7 @@ export function WatchPlaybackHost() {
   );
 
   const handleNavigateEpisode = useCallback(
-    (nextContentId: string) => {
+    (nextContentId: string, trigger: PlaybackStartTrigger) => {
       if (!activeRequest) return;
       if (activeRequest.roomId && activeRequest.roomToken) {
         const roomReturn = buildRoomReturnNavigation(activeRequest);
@@ -717,10 +769,13 @@ export function WatchPlaybackHost() {
         return;
       }
 
-      controller.startPlayback({
-        contentId: nextContentId,
-        libraryId: activeRequest.libraryId,
-      });
+      controller.startPlayback(
+        {
+          contentId: nextContentId,
+          libraryId: activeRequest.libraryId,
+        },
+        trigger,
+      );
     },
     [activeRequest, controller, navigate],
   );
@@ -792,14 +847,18 @@ export function WatchPlaybackHost() {
       );
       if (nextPartFileId && activeRequest) {
         applyExitStateToCache(exitState);
-        controller.startPlayback({
-          contentId: activeRequest.contentId,
-          fileId: nextPartFileId,
-          libraryId: activeRequest.libraryId,
-          roomId: activeRequest.roomId,
-          roomToken: activeRequest.roomToken,
-          returnHref: activeRequest.returnHref,
-        });
+        // The next part follows the end of this one; nobody pressed Play.
+        controller.startPlayback(
+          {
+            contentId: activeRequest.contentId,
+            fileId: nextPartFileId,
+            libraryId: activeRequest.libraryId,
+            roomId: activeRequest.roomId,
+            roomToken: activeRequest.roomToken,
+            returnHref: activeRequest.returnHref,
+          },
+          "automatic",
+        );
         return;
       }
 
@@ -856,6 +915,10 @@ export function WatchPlaybackHost() {
       if (!requestKeyValue) return;
       updatePlaybackSnapshot(requestKeyValue, snapshot);
 
+      // Only series episodes reach post-roll. Waiting until the episode plays
+      // keeps the screen's download out of the way of the first frame.
+      if (seriesIdRef.current && snapshot.playing) prefetchPlayingNextScreen();
+
       // Enter post-roll early when approaching end of a series episode.
       // Fires regardless of whether a next episode exists so the end-of-
       // series case still gets a graceful overlay instead of an HLS tail loop.
@@ -889,6 +952,17 @@ export function WatchPlaybackHost() {
     setPostRollVideoEnded(false);
     controller.syncRouteRequest(activeRequest);
   }, [activeRequest, controller]);
+
+  // Without the post-roll screen, whose chunk failed to load, act as if the
+  // viewer dismissed it: back to the full player while the episode still plays,
+  // or on to the detail page once it has ended.
+  const handlePostRollUnavailable = useCallback(() => {
+    if (postRollVideoEnded) {
+      handlePostRollClose();
+    } else {
+      handleReturnFromPostRoll();
+    }
+  }, [postRollVideoEnded, handlePostRollClose, handleReturnFromPostRoll]);
 
   if (!request) {
     return null;
@@ -1005,28 +1079,36 @@ export function WatchPlaybackHost() {
           onPictureInPictureChange={handlePictureInPictureChange}
           onPlaybackStateChange={handlePlaybackStateChange}
           onPlaybackTransportReady={handlePlaybackTransportReady}
+          seekIntervals={{ back: seekPreferences.skipBack, forward: seekPreferences.skipForward }}
           onReturnFromPostRoll={isPostRoll ? handleReturnFromPostRoll : undefined}
         />
       </Suspense>
       {isPostRoll && (
-        <PlayingNextScreen
-          seriesId={activeItem.series_id}
-          seriesTitle={activeItem.series_title}
-          nextEpisode={nextEpisodeRef ?? undefined}
-          continueWatchingItems={continueWatchingItems}
-          videoEnded={postRollVideoEnded}
-          onPlayNow={
-            nextEpisodeRef ? () => handleNavigateEpisode(nextEpisodeRef.contentId) : undefined
-          }
-          onPlayItem={(contentId: string) => handleNavigateEpisode(contentId)}
-          onClose={handlePostRollClose}
-        />
+        <LocalErrorBoundary onError={handlePostRollUnavailable}>
+          <Suspense fallback={null}>
+            <PlayingNextScreen
+              seriesId={activeItem.series_id}
+              seriesTitle={activeItem.series_title}
+              nextEpisode={nextEpisodeRef ?? undefined}
+              continueWatchingItems={continueWatchingItems}
+              videoEnded={postRollVideoEnded}
+              onPlayNow={
+                nextEpisodeRef
+                  ? (trigger) => handleNavigateEpisode(nextEpisodeRef.contentId, trigger)
+                  : undefined
+              }
+              onPlayItem={(contentId: string) => handleNavigateEpisode(contentId, "viewer")}
+              onClose={handlePostRollClose}
+            />
+          </Suspense>
+        </LocalErrorBoundary>
       )}
     </PlayerConfigProvider>
   );
 }
 
 export function WatchPlaybackBar() {
+  const barRef = usePlaybackBarHeight("watch");
   const controller = useContext(WatchPlaybackControllerContext);
   if (!controller) {
     throw new Error("Watch playback bar is unavailable outside WatchPlaybackProvider");
@@ -1034,8 +1116,10 @@ export function WatchPlaybackBar() {
 
   const { state, isBackgroundBarVisible, returnToWatch, stopPlayback } = controller;
   const request = state.request;
-  const snapshot = state.snapshot;
+  const snapshot = useWatchPlaybackSnapshot(isBackgroundBarVisible ? request : null);
   const transport = state.transport;
+  const { user } = useAuth();
+  const seekPreferences = useSeekPreferences("video", { enabled: user !== null });
   const { data: item } = useWatchDetail(request?.contentId, request?.fileId, request?.libraryId);
   const [scrubValue, setScrubValue] = useState<number | null>(null);
 
@@ -1048,7 +1132,10 @@ export function WatchPlaybackBar() {
   const displayedTime = scrubValue ?? snapshot?.currentTime ?? 0;
 
   return (
-    <div className="pointer-events-none fixed inset-x-3 bottom-3 z-40 flex justify-center">
+    <div
+      ref={barRef}
+      className="pointer-events-none fixed inset-x-3 bottom-3 z-40 flex justify-center"
+    >
       <div className="glass-dark border-border/70 pointer-events-auto w-full max-w-4xl rounded-2xl border px-4 py-3 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.7)] backdrop-blur-xl">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1">
@@ -1077,6 +1164,18 @@ export function WatchPlaybackBar() {
                 max={Math.max(snapshot?.duration ?? 0, 0)}
                 step={1}
                 thumbLabels={["Playback position"]}
+                onKeyDownCapture={(event) => {
+                  // Unmodified arrows skip by the profile's intervals; the
+                  // slider keeps its own Shift+Arrow page step and modifier
+                  // shortcuts.
+                  if (!transport) return;
+                  if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
+                  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (event.key === "ArrowLeft") transport.skipBack();
+                  else transport.skipForward();
+                }}
                 disabled={!transport || !snapshot || snapshot.duration <= 0}
                 className="[&_[data-slot=slider-range]]:bg-primary -my-2 py-2 [&_[data-slot=slider-thumb]]:size-4 [&_[data-slot=slider-thumb]]:border-white/60 [&_[data-slot=slider-thumb]]:bg-white [&_[data-slot=slider-thumb]]:shadow-[0_2px_10px_rgba(0,0,0,0.35)] [&_[data-slot=slider-track]]:h-1.5 [&_[data-slot=slider-track]]:bg-white/10"
                 onValueChange={([value]) => {
@@ -1100,9 +1199,9 @@ export function WatchPlaybackBar() {
               variant="glass"
               size="icon"
               className="h-10 w-10 rounded-full"
-              onClick={() => transport?.seekBy(-10)}
+              onClick={() => transport?.skipBack()}
               disabled={!transport}
-              title="Back 10 seconds"
+              title={`Back ${seekPreferences.skipBack} seconds`}
             >
               <SkipBack className="h-4 w-4" />
             </Button>
@@ -1122,9 +1221,9 @@ export function WatchPlaybackBar() {
               variant="glass"
               size="icon"
               className="h-10 w-10 rounded-full"
-              onClick={() => transport?.seekBy(10)}
+              onClick={() => transport?.skipForward()}
               disabled={!transport}
-              title="Forward 10 seconds"
+              title={`Forward ${seekPreferences.skipForward} seconds`}
             >
               <SkipForward className="h-4 w-4" />
             </Button>

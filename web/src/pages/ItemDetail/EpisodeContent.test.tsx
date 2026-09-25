@@ -481,6 +481,7 @@ describe("EpisodeContent", () => {
     );
 
     expect(markup).not.toContain("More Episodes");
+    expect(markup).not.toContain("episode-detail-navigation");
     expect(markup).not.toContain("episode-carousel");
   });
 

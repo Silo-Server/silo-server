@@ -51,6 +51,58 @@ requires starting a new listing. Account capabilities advertise
 An identity lookup does not reserve an identity or authorize a change. Conditional
 account updates and database uniqueness remain authoritative at write time.
 
+## Passwords
+
+Account editor and list rows carry `password_login` and `password_change_required`.
+`password_login` is false when an external authentication provider manages the
+account's sign-in. Password actions do not apply to such an account, and clients
+hide them. `password_change_required` is true while the account holds a temporary
+password.
+
+Create and update accept `require_password_change` to make the password in the same
+request temporary. At its next sign-in the account must choose a new password before
+its session can do anything else (see
+[temporary passwords](auth-api.md#temporary-passwords)). The flag is only valid
+alongside `password`; sending it alone returns `422 validation_failed` at
+`body.require_password_change`. An account without local password sign-in cannot
+hold a temporary password; updating one with the flag returns `409 conflict`. A
+password sent without the flag is not temporary and clears a pending change. Setting a password still revokes the account's login
+sessions.
+
+`POST /api/v2/admin/users/{id}/password-reset` issues a password reset link, so an
+administrator can help a locked-out account without handling its password. The body
+is `{ "delivery": "email" }` or `{ "delivery": "link" }`, and the response is 201:
+
+| Member | Meaning |
+|--------|---------|
+| `delivery` | The requested delivery. |
+| `delivery_status` | `sent` or `failed_or_unknown` for email; `not_requested` for a link. |
+| `reset_url` | For `link` only: the link itself, disclosed once. |
+| `expires_at` | When the link stops working, 24 hours after issue. |
+
+`email` sends the link to the account's address and never returns it. When the mail
+server does not confirm delivery, the link is still live: send again or create a link
+instead. `link` returns the URL for the administrator to share with the account
+holder. The URL is a bearer credential for the account's password until it expires.
+
+An account holds at most one live link: issuing a new one replaces the old. The link
+works once. Any other password change also retires it. The public side of the flow
+is described in [password reset links](auth-api.md#password-reset-links).
+
+| Condition | Result |
+|-----------|--------|
+| No such account | `404 not_found` |
+| External provider manages sign-in, account disabled, or no email address for `email` | `409 conflict` |
+| Email not configured for `email` | `409 capability_not_configured` |
+| No server public URL (`server.public_url`) | `409 capability_not_configured` |
+
+Account capabilities advertise `password_reset_link` (a public URL is configured)
+and `password_reset_email` (email is also configured). The operation is not
+retryable: each call replaces the previous link. The request log records each issue
+against the acting administrator and target account. Scoped `admin:users` keys do
+not reach this route, and the handler refuses a scoped key for an administrator
+account in any case.
+
 `POST /api/v2/admin/users/{id}/impersonate` returns the shared token-pair contract.
 It creates a login session and has no replay identity. Clients must not retry an
 uncertain response automatically. The web client checks its captured authority

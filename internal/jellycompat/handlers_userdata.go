@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -44,9 +45,9 @@ func (h *UserDataHandler) HandleGetUserData(w http.ResponseWriter, r *http.Reque
 	if !validateOptionalUser(w, r, session) {
 		return
 	}
-	contentID, err := decodeContentID(h.codec, chi.URLParam(r, "itemId"))
+	contentID, _, err := decodeContentOrMediaSourceID(r.Context(), h.codec, chi.URLParam(r, "itemId"))
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		writeItemIDError(w, r, err)
 		return
 	}
 
@@ -174,9 +175,9 @@ func (h *UserDataHandler) handleFavoriteMutation(w http.ResponseWriter, r *http.
 		return
 	}
 
-	contentID, err := decodeContentID(h.codec, chi.URLParam(r, "itemId"))
+	contentID, _, err := decodeContentOrMediaSourceID(r.Context(), h.codec, chi.URLParam(r, "itemId"))
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		writeItemIDError(w, r, err)
 		return
 	}
 
@@ -243,15 +244,18 @@ func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Re
 }
 
 func (h *UserDataHandler) resolvePlayedTargets(r *http.Request, session *Session, rawItemID string) ([]string, error) {
-	if contentID, err := decodeItemID(h.codec, rawItemID); err == nil {
-		return h.resolvePlayedTargetsForItem(r, session, contentID)
+	if seasonID, err := h.codec.DecodeStringID(EncodedIDSeason, rawItemID); err == nil {
+		return h.resolvePlayedTargetsForSeason(r, session, seasonID)
 	}
 
-	contentID, err := h.codec.DecodeStringID(EncodedIDSeason, rawItemID)
-	if err != nil {
+	contentID, _, err := decodeItemOrMediaSourceID(r.Context(), h.codec, rawItemID)
+	if errors.Is(err, errMediaSourceOwnerNotFound) {
 		return nil, &HTTPError{StatusCode: http.StatusNotFound, Message: "Item not found"}
 	}
-	return h.resolvePlayedTargetsForSeason(r, session, contentID)
+	if err != nil {
+		return nil, err
+	}
+	return h.resolvePlayedTargetsForItem(r, session, contentID)
 }
 
 func (h *UserDataHandler) resolvePlayedTargetsForItem(r *http.Request, session *Session, contentID string) ([]string, error) {
@@ -350,9 +354,9 @@ func (h *UserDataHandler) HandleUpdateUserData(w http.ResponseWriter, r *http.Re
 		writeError(w, 400, "BadRequest", "Invalid playback position")
 		return
 	}
-	contentID, err := decodeContentID(h.codec, chi.URLParam(r, "itemId"))
+	contentID, _, err := decodeContentOrMediaSourceID(r.Context(), h.codec, chi.URLParam(r, "itemId"))
 	if err != nil {
-		writeError(w, 404, "NotFound", "Item not found")
+		writeItemIDError(w, r, err)
 		return
 	}
 	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)

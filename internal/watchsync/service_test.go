@@ -50,6 +50,8 @@ type serviceFakeRepo struct {
 	historyLookupIDs       []string
 	historyLookupLimit     int
 	listItemStates         []ListItemState
+	ratingStates           []RatingSyncState
+	listMedia              map[string]LocalFavorite
 	scrobbleConnections    []Connection
 	scrobbleSessions       []ScrobbleSession
 	pendingReconciliations []ScrobbleSession
@@ -62,6 +64,12 @@ type serviceFakeRepo struct {
 	markHistoryStatusErr   error
 	syncRunMu              sync.Mutex
 	scrobbleMu             sync.Mutex
+	// ratingLockBusy simulates another node holding a connection's rating
+	// sync lock; ratingLocks records each lock taken, with whether it waited.
+	ratingLockBusy map[string]bool
+	ratingLocks    []string
+	// upsertRatingErr fails UpsertRatingSyncStates when set.
+	upsertRatingErr error
 }
 
 type scrobbleUpdate struct {
@@ -511,6 +519,123 @@ func (r *serviceFakeRepo) MarkListItemError(_ context.Context, connectionID stri
 		s.LastError = lastError
 	})
 	return nil
+}
+
+func (r *serviceFakeRepo) ListRatingEventConnections(_ context.Context, userID int, profileID string) ([]Connection, error) {
+	var conns []Connection
+	for _, conn := range r.connections {
+		if conn.UserID == userID && conn.ProfileID == profileID && conn.ExportRatingsEnabled {
+			conns = append(conns, cloneConnectionForTest(conn))
+		}
+	}
+	return conns, nil
+}
+
+func (r *serviceFakeRepo) ListRatingSyncStates(_ context.Context, connectionID, providerAccountID string, mediaItemIDs []string) ([]RatingSyncState, error) {
+	var states []RatingSyncState
+	for _, state := range r.ratingStates {
+		if state.ConnectionID != connectionID || state.ProviderAccountID != providerAccountID {
+			continue
+		}
+		if mediaItemIDs != nil && !containsString(mediaItemIDs, state.MediaItemID) {
+			continue
+		}
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+func (r *serviceFakeRepo) UpsertRatingSyncStates(_ context.Context, states []RatingSyncState) error {
+	if r.upsertRatingErr != nil && len(states) > 0 {
+		return r.upsertRatingErr
+	}
+	for _, state := range states {
+		replaced := false
+		for i := range r.ratingStates {
+			existing := &r.ratingStates[i]
+			if existing.ConnectionID == state.ConnectionID && existing.MediaItemID == state.MediaItemID {
+				if state.Kind == "" {
+					state.Kind = existing.Kind
+				}
+				if state.ProviderItemKey == "" {
+					state.ProviderItemKey = existing.ProviderItemKey
+				}
+				*existing = state
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			r.ratingStates = append(r.ratingStates, state)
+		}
+	}
+	return nil
+}
+
+func (r *serviceFakeRepo) WithRatingSyncLock(ctx context.Context, connectionID string, wait bool, fn func(context.Context) error) (bool, error) {
+	if r.ratingLockBusy[connectionID] {
+		if wait {
+			return false, context.DeadlineExceeded
+		}
+		return false, nil
+	}
+	mode := "try"
+	if wait {
+		mode = "wait"
+	}
+	r.ratingLocks = append(r.ratingLocks, mode+":"+connectionID)
+	return true, fn(ctx)
+}
+
+func (r *serviceFakeRepo) DeleteRatingSyncStates(_ context.Context, connectionID, providerAccountID string, mediaItemIDs []string) error {
+	kept := r.ratingStates[:0]
+	for _, state := range r.ratingStates {
+		if state.ConnectionID == connectionID && state.ProviderAccountID == providerAccountID && containsString(mediaItemIDs, state.MediaItemID) {
+			continue
+		}
+		kept = append(kept, state)
+	}
+	r.ratingStates = kept
+	return nil
+}
+
+func (r *serviceFakeRepo) ClearRatingSyncStates(_ context.Context, connectionID, keepAccountID string) error {
+	kept := r.ratingStates[:0]
+	for _, state := range r.ratingStates {
+		if state.ConnectionID != connectionID || state.ProviderAccountID == keepAccountID {
+			kept = append(kept, state)
+		}
+	}
+	r.ratingStates = kept
+	return nil
+}
+
+func (r *serviceFakeRepo) UpdateRatingCursors(_ context.Context, connectionID, providerAccountID string, remove []string, set map[string]string) error {
+	for key, conn := range r.connections {
+		if conn.ID != connectionID || conn.ProviderAccountID != providerAccountID {
+			continue
+		}
+		cursors := cloneStringMapForTest(conn.SyncCursors)
+		for _, k := range remove {
+			delete(cursors, k)
+		}
+		for k, v := range set {
+			cursors[k] = v
+		}
+		conn.SyncCursors = cursors
+		r.connections[key] = conn
+	}
+	return nil
+}
+
+func (r *serviceFakeRepo) GetListMediaItems(_ context.Context, mediaItemIDs []string) (map[string]LocalFavorite, error) {
+	result := make(map[string]LocalFavorite, len(mediaItemIDs))
+	for _, id := range mediaItemIDs {
+		if item, ok := r.listMedia[id]; ok {
+			result[id] = item
+		}
+	}
+	return result, nil
 }
 
 func (r *serviceFakeRepo) ListScrobbleConnections(_ context.Context, _ int, _ string) ([]Connection, error) {
@@ -3773,4 +3898,26 @@ func (r *serviceFakeRepo) UpdateConnectionSettings(ctx context.Context, provider
 		current.ScrobbleEnabled = *update.ScrobbleEnabled
 	}
 	return r.UpsertConnection(ctx, current)
+}
+
+func TestExportItemOutcomeDecidesByMediaItemIDBeforeKey(t *testing.T) {
+	// A movie and a show share the key tmdb:550; the provider reports the
+	// movie missing and the show sent.
+	result := ExportResult{
+		Sent:     []string{"show-1", "tmdb:550"},
+		NotFound: []string{"movie-1", "tmdb:550"},
+	}
+	if sent, notFound := exportItemOutcome(result, "movie-1", "tmdb:550"); sent || !notFound {
+		t.Fatalf("movie outcome = sent %v notFound %v, want not found", sent, notFound)
+	}
+	if sent, notFound := exportItemOutcome(result, "show-1", "tmdb:550"); !sent || notFound {
+		t.Fatalf("show outcome = sent %v notFound %v, want sent", sent, notFound)
+	}
+	// A result that names items only by key still works.
+	if sent, _ := exportItemOutcome(ExportResult{Sent: []string{"imdb:tt1"}}, "movie-2", "imdb:tt1"); !sent {
+		t.Fatal("a key-only result must still confirm the item")
+	}
+	if sent, _ := exportItemOutcome(ExportResult{Failed: map[string]string{"movie-3": "x"}, Sent: []string{"imdb:tt3"}}, "movie-3", "imdb:tt3"); sent {
+		t.Fatal("a failed media item must not be confirmed through its key")
+	}
 }

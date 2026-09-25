@@ -115,7 +115,7 @@ func TestPollDeviceLogin(t *testing.T) {
 	if rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	want := `{"status":"approved","poll_after":5,"tokens":{"access_token":"acc","refresh_token":"ref","expires_in":3600,"user":{"id":"1","username":"laura","email":"laura@example.test","role":"user","permissions":[],"download_allowed":true}},"profile_id":"","profile_token":"","temporary":false}` + "\n"
+	want := `{"status":"approved","poll_after":5,"tokens":{"access_token":"acc","refresh_token":"ref","expires_in":3600,"user":{"id":"1","username":"laura","email":"laura@example.test","role":"user","permissions":[],"download_allowed":true,"password_change_required":false}},"profile_id":"","profile_token":"","temporary":false}` + "\n"
 	if rec.Body.String() != want {
 		t.Fatalf("body = %s", rec.Body.String())
 	}

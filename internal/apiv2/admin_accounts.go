@@ -56,6 +56,8 @@ type AdminAccountCapabilitiesOutputBody struct {
 	DefaultProfile       bool `json:"default_profile"`
 	ExactIdentityFilter  bool `json:"exact_identity_filter"`
 	AccessGroups         bool `json:"access_groups"`
+	PasswordResetLink    bool `json:"password_reset_link" doc:"Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL"`
+	PasswordResetEmail   bool `json:"password_reset_email" doc:"Whether createAdminUserPasswordReset can email the link; needs the public URL and a configured mail server"`
 }
 
 type AdminAccountPolicyInput struct {
@@ -74,24 +76,26 @@ type AdminAccountPolicyInput struct {
 }
 type AdminAccountCreateBody struct {
 	AdminAccountPolicyInput
-	Username             string       `json:"username" minLength:"1" maxLength:"255"`
-	Email                string       `json:"email" minLength:"1" maxLength:"320"`
-	Password             string       `json:"password" minLength:"8" maxLength:"72"`
-	Role                 string       `json:"role" enum:"admin,user"`
-	Permissions          []Permission `json:"permissions,omitempty"`
-	MaxProfiles          *int         `json:"max_profiles,omitempty" minimum:"1"`
-	CreateDefaultProfile bool         `json:"create_default_profile"`
-	DefaultProfileName   string       `json:"default_profile_name,omitempty" maxLength:"100"`
+	Username              string       `json:"username" minLength:"1" maxLength:"255"`
+	Email                 string       `json:"email" minLength:"1" maxLength:"320"`
+	Password              string       `json:"password" minLength:"8" maxLength:"72"`
+	RequirePasswordChange bool         `json:"require_password_change,omitempty" doc:"Make password temporary: the account must choose a new one at its first sign-in before it can do anything else"`
+	Role                  string       `json:"role" enum:"admin,user"`
+	Permissions           []Permission `json:"permissions,omitempty"`
+	MaxProfiles           *int         `json:"max_profiles,omitempty" minimum:"1"`
+	CreateDefaultProfile  bool         `json:"create_default_profile"`
+	DefaultProfileName    string       `json:"default_profile_name,omitempty" maxLength:"100"`
 }
 type AdminAccountUpdateBody struct {
 	AdminAccountPolicyInput
-	Username    *string      `json:"username,omitempty" minLength:"1" maxLength:"255"`
-	Email       *string      `json:"email,omitempty" minLength:"1" maxLength:"320"`
-	Password    *string      `json:"password,omitempty" minLength:"8" maxLength:"72"`
-	Role        *string      `json:"role,omitempty" enum:"admin,user"`
-	Permissions []Permission `json:"permissions,omitempty"`
-	MaxProfiles *int         `json:"max_profiles,omitempty" minimum:"1"`
-	Enabled     *bool        `json:"enabled,omitempty"`
+	Username              *string      `json:"username,omitempty" minLength:"1" maxLength:"255"`
+	Email                 *string      `json:"email,omitempty" minLength:"1" maxLength:"320"`
+	Password              *string      `json:"password,omitempty" minLength:"8" maxLength:"72"`
+	RequirePasswordChange *bool        `json:"require_password_change,omitempty" doc:"Only with password: make it temporary, so the account must choose a new one at its next sign-in before it can do anything else. A password sent without it is not temporary"`
+	Role                  *string      `json:"role,omitempty" enum:"admin,user"`
+	Permissions           []Permission `json:"permissions,omitempty"`
+	MaxProfiles           *int         `json:"max_profiles,omitempty" minimum:"1"`
+	Enabled               *bool        `json:"enabled,omitempty"`
 }
 type AdminAccountCreateInput struct {
 	Body    AdminAccountCreateBody
@@ -220,7 +224,7 @@ func (b AdminAccountPolicyInput) model(raw []byte) (models.UpdateUserInput, *Pro
 	}, nil
 }
 func registerAdminAccounts(reg *Registry) {
-	Register(reg, adminAccountOperation(http.MethodGet, "/capabilities", "getAdminAccountCapabilities", false), func(_ context.Context, _ *CapabilityInput) (*AdminAccountCapabilitiesOutput, error) {
+	Register(reg, adminAccountOperation(http.MethodGet, "/capabilities", "getAdminAccountCapabilities", false), func(ctx context.Context, _ *CapabilityInput) (*AdminAccountCapabilitiesOutput, error) {
 		out := new(AdminAccountCapabilitiesOutput)
 		if svc := reg.deps.AdminAccounts; svc != nil {
 			out.Body.Available, out.Body.DefaultProfile = svc.AdminAccountCapabilities()
@@ -228,6 +232,10 @@ func registerAdminAccounts(reg *Registry) {
 		}
 		out.Body.AccessGroups = reg.deps.AdminAccessGroups != nil
 		out.Body.ExactIdentityFilter = reg.deps.AdminUsers != nil
+		if resets := reg.deps.PasswordResets; resets != nil {
+			caps := resets.PasswordResetCapabilities(ctx)
+			out.Body.PasswordResetLink, out.Body.PasswordResetEmail = caps.Link, caps.Email
+		}
 		return out, nil
 	})
 	get := adminAccountOperation(http.MethodGet, "/{id}", "getAdminUser", false)
@@ -259,6 +267,9 @@ func registerAdminAccounts(reg *Registry) {
 	Register(reg, create, reg.createAdminAccount)
 	update := adminAccountOperation(http.MethodPut, "/{id}", "updateAdminUser", true)
 	update.DefaultStatus = 204
+	// A taken username or email, or a temporary password for an account
+	// without local password sign-in, is 409 conflict.
+	update.Errors = append(update.Errors, http.StatusConflict)
 	Register(reg, update, reg.updateAdminAccount)
 	del := adminAccountOperation(http.MethodDelete, "/{id}", "deleteAdminUser", true)
 	del.DefaultStatus = 204
@@ -337,7 +348,7 @@ func (reg *Registry) createAdminAccount(ctx context.Context, in *AdminAccountCre
 	if b.Permissions == nil {
 		permissions = nil
 	}
-	id, err := svc.CreateAdminAccount(ctx, auth.CreateAccountInput{User: models.CreateUserInput{Username: b.Username, Email: b.Email, Password: b.Password, Role: b.Role, Permissions: permissions, MaxProfiles: b.MaxProfiles, LibraryIDs: libraries, AccessGroupID: policy.AccessGroupID.Value, MaxPlaybackQuality: b.MaxPlaybackQuality, MaxStreams: b.MaxStreams, MaxTranscodes: b.MaxTranscodes, MaxRemoteStreamBitrateKbps: b.MaxRemoteStreamBitrateKbps, MaxLocalStreamBitrateKbps: b.MaxLocalStreamBitrateKbps, TranscodeAllowed: b.TranscodeAllowed, AudioTranscodeAllowed: b.AudioTranscodeAllowed, DownloadAllowed: b.DownloadAllowed, DownloadTranscodeAllowed: b.DownloadTranscodeAllowed, RequestsAllowed: b.RequestsAllowed}, DefaultProfile: auth.DefaultProfileOptions{Enabled: b.CreateDefaultProfile, Name: b.DefaultProfileName}})
+	id, err := svc.CreateAdminAccount(ctx, auth.CreateAccountInput{User: models.CreateUserInput{Username: b.Username, Email: b.Email, Password: b.Password, PasswordChangeRequired: b.RequirePasswordChange, Role: b.Role, Permissions: permissions, MaxProfiles: b.MaxProfiles, LibraryIDs: libraries, AccessGroupID: policy.AccessGroupID.Value, MaxPlaybackQuality: b.MaxPlaybackQuality, MaxStreams: b.MaxStreams, MaxTranscodes: b.MaxTranscodes, MaxRemoteStreamBitrateKbps: b.MaxRemoteStreamBitrateKbps, MaxLocalStreamBitrateKbps: b.MaxLocalStreamBitrateKbps, TranscodeAllowed: b.TranscodeAllowed, AudioTranscodeAllowed: b.AudioTranscodeAllowed, DownloadAllowed: b.DownloadAllowed, DownloadTranscodeAllowed: b.DownloadTranscodeAllowed, RequestsAllowed: b.RequestsAllowed}, DefaultProfile: auth.DefaultProfileOptions{Enabled: b.CreateDefaultProfile, Name: b.DefaultProfileName}})
 	if err != nil {
 		return nil, adminAccountError(err)
 	}
@@ -366,9 +377,14 @@ func (reg *Registry) updateAdminAccount(ctx context.Context, in *AdminAccountUpd
 			return nil, p
 		}
 	}
+	if b.RequirePasswordChange != nil && b.Password == nil {
+		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+			WithErrors(ProblemError{Location: locationBody + ".require_password_change", Code: codeInvalid, Detail: "Only a new password can be made temporary; send password with it."})
+	}
 	input.Username = b.Username
 	input.Email = b.Email
 	input.Password = b.Password
+	input.PasswordChangeRequired = b.RequirePasswordChange != nil && *b.RequirePasswordChange
 	input.Role = b.Role
 	input.Enabled = b.Enabled
 	input.MaxProfiles = b.MaxProfiles

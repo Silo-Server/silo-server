@@ -348,6 +348,13 @@ type PolicyConfig struct {
 	DecisionLogRetentionDays   int    `yaml:"-"` // policy decision log retention window
 }
 
+// MarkersConfig holds local marker detection settings.
+type MarkersConfig struct {
+	// DetectionWorkers is how many seasons intro detection analyzes at once,
+	// which also bounds its ffmpeg processes.
+	DetectionWorkers int `yaml:"-"`
+}
+
 // MetadataConfig holds metadata pipeline settings.
 type MetadataConfig struct {
 	CacheImages bool `yaml:"-"`
@@ -378,6 +385,7 @@ type Config struct {
 	Matcher              MatcherConfig              `yaml:"matcher"`
 	Artwork              ArtworkConfig              `yaml:"artwork"`
 	Metadata             MetadataConfig             `yaml:"-"`
+	Markers              MarkersConfig              `yaml:"-"`
 	Playback             PlaybackConfig             `yaml:"playback"`
 	Redis                RedisConfig                `yaml:"redis"`
 	RateLimit            RateLimitConfig            `yaml:"rate_limiting"`

@@ -103,6 +103,8 @@ func (s *DetailService) GetItemCardsByIDs(ctx context.Context, contentIDs []stri
 			Tagline:           localized.Tagline,
 			Runtime:           localized.Runtime,
 			ContentRating:     localized.ContentRating,
+			AdvisoryAge:       localized.AdvisoryAge,
+			AdvisorySource:    localized.AdvisorySource,
 			Genres:            localized.Genres,
 			RatingIMDB:        localized.RatingIMDB,
 			RatingTMDB:        localized.RatingTMDB,

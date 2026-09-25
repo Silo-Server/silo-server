@@ -22,6 +22,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
 	"github.com/Silo-Server/silo-server/internal/rootcheck"
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
 // videoExtensions is the set of file extensions recognized as media files.
@@ -164,6 +165,7 @@ type Scanner struct {
 	// file that reappears (flapping mount, reverted upgrade) restores cheaply.
 	fileRemovalGrace     time.Duration
 	markerFetcher        func(context.Context, string) *IntroCreditsMarkers
+	markerPrefix         markerPrefixCache
 	metadataQueue        MetadataQueueProducer
 	ebookEnrichmentQueue EbookEnrichmentQueue
 	movieQueueSyncer     MovieQueueSyncer
@@ -350,7 +352,11 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 		return &ScanResult{}, nil
 	}
 
-	return s.scanPaths(watchCtx, folder, folder.Paths, folder.Paths, true)
+	result, err := s.scanPaths(watchCtx, folder, folder.Paths, folder.Paths, true)
+	if err == nil && result != nil && !result.EmptyRootGuarded {
+		err = s.scanOptionalThemeSongs(watchCtx, folder, "", false)
+	}
+	return result, err
 }
 
 // ScanSubtree walks a single subtree within a media folder and reconciles only
@@ -395,7 +401,11 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 		}
 		return &ScanResult{}, nil
 	}
-	return s.scanPaths(watchCtx, folder, []string{cleanSubtree}, []string{cleanSubtree}, false)
+	result, err := s.scanPaths(watchCtx, folder, []string{cleanSubtree}, []string{cleanSubtree}, false)
+	if err == nil && result != nil && !result.EmptyRootGuarded {
+		err = s.scanOptionalThemeSongs(watchCtx, folder, cleanSubtree, false)
+	}
+	return result, err
 }
 
 func cleanScopedAudiobookScanRoot(path string) (string, error) {
@@ -2607,8 +2617,13 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		}
 		return s.scanEbookPaths(ctx, folder, []string{cleanFile}, false)
 	}
-
 	// Verify the file extension is recognized.
+	if dir, ok := themesongs.OwnerDirectory(cleanFile); ok && supportsThemeSongs(folder.Type) {
+		if !pathWithinAnyRoot(dir, folder.Paths) {
+			return fmt.Errorf("theme owner is outside the library")
+		}
+		return s.scanThemeSongs(ctx, folder, dir, true)
+	}
 	ext := strings.ToLower(filepath.Ext(cleanFile))
 	if !videoExtensions[ext] {
 		return fmt.Errorf("unrecognized video extension: %s", ext)
@@ -2725,7 +2740,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 			"scope", filepath.Clean(filePath),
 		)
 	}
-	return nil
+	return s.scanOptionalThemeSongs(ctx, folder, filepath.Dir(filePath), true)
 }
 
 func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *models.MediaFolder, filePath string) (bool, error) {
@@ -4090,6 +4105,9 @@ func (s *Scanner) fetchMarkers(ctx context.Context, fileHash string) *IntroCredi
 	if fileHash == "" || s.artworkStore == nil {
 		return nil
 	}
+	if s.markerPrefixEmpty(ctx) {
+		return nil
+	}
 
 	key := fmt.Sprintf("markers/%s.json", fileHash)
 	reader, _, err := s.artworkStore.Get(ctx, key)
@@ -4113,4 +4131,98 @@ func (s *Scanner) fetchMarkers(ctx context.Context, fileHash string) *IntroCredi
 	}
 
 	return &markers
+}
+
+// markerPrefixCheckTTL is how long one LIST of markers/ answers for every
+// file this scanner reads markers for.
+const markerPrefixCheckTTL = time.Minute
+
+// markerPrefixListTimeout bounds the LIST. A LIST that runs longer counts as
+// failed, so a slow or unresponsive store costs each worker at most this long
+// once per markerPrefixCheckTTL before reads fall back to the per-file GET.
+const markerPrefixListTimeout = 5 * time.Second
+
+// markerPrefixCache remembers whether markers/ held any object at the last
+// check.
+type markerPrefixCache struct {
+	mu         sync.Mutex
+	checkedAt  time.Time
+	empty      bool
+	listFailed bool
+	// checking is closed when the LIST in flight finishes; nil when none runs.
+	checking chan struct{}
+	// listTimeout overrides markerPrefixListTimeout when set (tests).
+	listTimeout time.Duration
+}
+
+func (c *markerPrefixCache) freshLocked(now time.Time) bool {
+	return !c.checkedAt.IsZero() && now.Sub(c.checkedAt) < markerPrefixCheckTTL
+}
+
+// markerPrefixEmpty reports whether markers/ holds no objects, so the caller
+// can skip a GET that would miss. Only an optional external process writes
+// markers, so most deployments have none, and on S3 the skipped GET is a
+// round trip per new or changed file.
+//
+// One LIST answers for markerPrefixCheckTTL across concurrent scans and
+// single-file ingests, and every node checks on its own. A producer's first
+// marker is therefore missed only by files scanned within that window after a
+// check, the same outcome as a marker written just after its file was
+// scanned. A failed or timed-out LIST counts as non-empty, so reads fall back
+// to the per-file GET. The LIST runs outside the lock: callers that arrive
+// while it runs wait for its answer, bounded by markerPrefixListTimeout and
+// their own context.
+func (s *Scanner) markerPrefixEmpty(ctx context.Context) bool {
+	c := &s.markerPrefix
+	c.mu.Lock()
+	if c.freshLocked(time.Now()) {
+		empty := c.empty
+		c.mu.Unlock()
+		return empty
+	}
+	if done := c.checking; done != nil {
+		c.mu.Unlock()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return false
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		// A check abandoned by its caller's cancellation records nothing, so
+		// this caller reads the file directly.
+		return c.freshLocked(time.Now()) && c.empty
+	}
+	done := make(chan struct{})
+	c.checking = done
+	timeout := c.listTimeout
+	c.mu.Unlock()
+	if timeout <= 0 {
+		timeout = markerPrefixListTimeout
+	}
+
+	startedAt := time.Now()
+	listCtx, cancel := context.WithTimeout(ctx, timeout)
+	objects, _, err := s.artworkStore.List(listCtx, "markers", "", 1)
+	cancel()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.checking = nil
+	close(done)
+	if err != nil && ctx.Err() != nil {
+		return false
+	}
+	if err != nil {
+		if c.listFailed {
+			slog.DebugContext(ctx, "scanner: markers prefix check failed", "component", "scanner", "error", err)
+		} else {
+			slog.WarnContext(ctx, "scanner: markers prefix check failed; reading markers for every new or changed file",
+				"component", "scanner", "error", err)
+		}
+	}
+	c.listFailed = err != nil
+	c.checkedAt = startedAt
+	c.empty = err == nil && len(objects) == 0
+	return c.empty
 }

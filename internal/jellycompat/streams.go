@@ -31,8 +31,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
@@ -616,9 +618,9 @@ func (h *PlaybackHandler) HandleDownload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	contentID, err := decodeContentID(h.codec, chiURLParam(r, "id"))
+	contentID, routeFileID, err := decodeContentOrMediaSourceID(r.Context(), h.codec, chiURLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		writeItemIDError(w, r, err)
 		return
 	}
 	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)
@@ -628,14 +630,27 @@ func (h *PlaybackHandler) HandleDownload(w http.ResponseWriter, r *http.Request)
 	}
 
 	version := detail.Versions[0]
-	if mediaSourceID := firstNonEmpty(r.URL.Query().Get("mediaSourceId"), r.URL.Query().Get("MediaSourceId")); mediaSourceID != "" {
+	mediaSourceID := firstNonEmpty(r.URL.Query().Get("mediaSourceId"), r.URL.Query().Get("MediaSourceId"))
+	sourceFromRoute := mediaSourceID == "" && routeFileID > 0
+	if sourceFromRoute {
+		mediaSourceID = h.codec.EncodeIntID(EncodedIDMediaSource, routeFileID)
+	}
+	if mediaSourceID != "" {
+		matched := false
 		if fileID, decodeErr := h.codec.DecodeIntID(EncodedIDMediaSource, mediaSourceID); decodeErr == nil {
 			for _, v := range detail.Versions {
 				if int64(v.FileID) == fileID {
 					version = v
+					matched = true
 					break
 				}
 			}
+		}
+		if !matched && sourceFromRoute {
+			// The route named a version the item no longer has; do not serve
+			// a different file.
+			writeError(w, http.StatusNotFound, "NotFound", "Media source not found")
+			return
 		}
 	}
 
@@ -1265,7 +1280,7 @@ func (h *PlaybackHandler) fetchRemoteCompatManifest(ctx context.Context, nodeURL
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+h.JWTSecret)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), req, "stream")
 	if err != nil {
 		return nil, err
 	}
@@ -1287,7 +1302,7 @@ func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *htt
 	}
 	req.Header.Set("Authorization", "Bearer "+h.JWTSecret)
 	transcodeproxy.PrepareRequest(req, r)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), req, "stream")
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "TranscodeUnavailable", "Remote transcode segment is unavailable")
 		return
@@ -1301,7 +1316,7 @@ func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *htt
 		return
 	}
 	if generation != "" && r.Method == http.MethodGet && sw.CompletedFullResponse(transcodeproxy.FullRepresentationSize(resp)) {
-		if err := transcodeproxy.Acknowledge(r.Context(), http.DefaultClient, nodepool.NodeEndpoint(nodeURL, path), h.JWTSecret, generation); err != nil {
+		if err := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), nodepool.NodeEndpoint(nodeURL, path), h.JWTSecret, generation); err != nil {
 			slog.WarnContext(r.Context(), "acknowledge Jellyfin-compatible transcode segment", "component", "jellycompat", "error", err, "playback_session_id", upstreamSessionID)
 		}
 	}
@@ -2124,14 +2139,18 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, "BadRequest", "Invalid session report")
 		return
 	}
-	if req.PlaySessionID == "" {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
 	var playSession *PlaybackSession
 	var ok bool
-	if stop {
+	unidentified := req.PlaySessionID == ""
+	if unidentified {
+		var lookupErr error
+		playSession, lookupErr = h.playbackStore.FindUnidentifiedPlayback(session.Token, req.ItemID, req.MediaSourceID)
+		ok = lookupErr == nil && playSession != nil
+		if !ok {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	} else if stop {
 		playSession, ok = h.playbackStore.GetFinalizable(req.PlaySessionID, session.Token)
 	} else {
 		playSession, ok = h.playbackStore.Get(req.PlaySessionID)
@@ -2189,7 +2208,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	// report, not just on track changes. Restarting ffmpeg on each report
 	// (every ~10s) tears down segments the player is still appending and
 	// causes an hls.js retry loop. Only act when the index actually changes.
-	if req.AudioStreamIndex != nil && audioSelectionChanged(playSession, req.MediaSourceID, int(*req.AudioStreamIndex)) {
+	if (!stop || !unidentified) && req.AudioStreamIndex != nil && audioSelectionChanged(playSession, req.MediaSourceID, int(*req.AudioStreamIndex)) {
 		selectedAudioStreamIndex := int(*req.AudioStreamIndex)
 		updatedPlaySession, updatedSource, restarted, selectionErr := h.applyCompatAudioSelection(
 			r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds,
@@ -2251,7 +2270,14 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			findMediaSource(playSession, req.MediaSourceID), &positionSeconds,
 		)
 	}
-	// Persist progress to user store
+	// Only the Stopped report and the report that marks the item watched change
+	// the taste profile; a position-only report does not. A Stopped report
+	// refreshes even when it carries no position: the play's earlier reports
+	// already wrote its progress, and StopSession does not run the native stop
+	// finalizer that would otherwise refresh the profile.
+	refreshTasteProfile := stop
+	// Ignore early zero reports while a client is still seeking to its resume
+	// point, matching the native playback persistence rule.
 	if positionSeconds > 0 && h.storeProvider != nil && playSession.ItemID != "" {
 		if store, storeErr := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID); storeErr == nil {
 			// Find the duration from the media source
@@ -2262,12 +2288,21 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 					break
 				}
 			}
-			if err := store.UpdateProgress(r.Context(), session.ProfileID, playSession.ItemID, positionSeconds, duration, h.playbackThresholds(r.Context())); err == nil {
-				triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, duration, h.playbackThresholds(r.Context()))
+			if err == nil && completed {
+				refreshTasteProfile = true
 			}
 		}
 	}
-	if stop {
+	if refreshTasteProfile && playSession.ItemID != "" {
+		triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	}
+	// ID-less players still supply a final resume sample on Stopped. Persist
+	// it above, but do not use an item/source match to tear down a play: a
+	// delayed report has no generation identifier. Normal idle cleanup owns
+	// resource expiry for these clients. Their samples are last-write-wins,
+	// just like progress reports (including intentional backward seeks).
+	if stop && !unidentified {
 		// Direct ids and recorded aliases are per-play, caller-owned identifiers.
 		// Route-only matching is intentionally excluded for Stopped reports: a
 		// delayed stop for an earlier play of the same item must never tear down
@@ -2738,6 +2773,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		}
 	}
 	opts.SegmentDuration = h.compatSegmentDuration()
+	autoPipeline := h.newCompatAutoTranscodePipeline(ctx, opts)
 
 	// Hold the per-session lifecycle lock across "check existing → spawn →
 	// register" so a concurrent reconstruct cannot run a second ffmpeg writer
@@ -2760,7 +2796,9 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		h.tm.CloseTranscodeSessionIf(upstreamSessionID, existing, "")
 	}
 	manifestDeadline := time.Now().Add(compatManifestStartupTimeout)
-	transcodeSession, err := playback.StartTranscode(ctx, opts)
+	// A disabled pipeline returns opts unchanged. An enabled one never carries
+	// a tone-map recipe, so the tone-map downgrade below cannot apply to it.
+	transcodeSession, err := playback.StartTranscode(ctx, autoPipeline.Current())
 	if err != nil && downgradeCompatLocalToneMap(&opts, toneMapCapabilities, autoVideoToolboxBitrate) {
 		transcodeSession, err = playback.StartTranscode(ctx, opts)
 		if err == nil {
@@ -2817,6 +2855,15 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				return nil, fallbackErr
 			}
 		}
+	} else if autoPipeline.Enabled() {
+		var successor *playback.TranscodeSession
+		transcodeSession, successor, err = h.awaitCompatAutoTranscode(ctx, upstreamSessionID, source, requiredToneMapMode, autoPipeline, transcodeSession)
+		if err != nil {
+			return nil, err
+		}
+		if successor != nil {
+			return successor, nil
+		}
 	}
 	if h.compatLocalTranscodeReady != nil {
 		h.compatLocalTranscodeReady(transcodeSession)
@@ -2869,6 +2916,82 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	publishUnlock()
 
 	return transcodeSession, nil
+}
+
+func (h *PlaybackHandler) newCompatAutoTranscodePipeline(ctx context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {
+	if h.compatAutoTranscodePipeline != nil {
+		return h.compatAutoTranscodePipeline(ctx, opts)
+	}
+	return playback.NewAutoTranscodePipeline(ctx, opts)
+}
+
+// awaitCompatAutoTranscode waits for a registered hw_accel=auto transcode and,
+// when FFmpeg exits before its first manifest, replaces it under the lifecycle
+// lock with the pipeline's next safer path. A process still running at the
+// deadline is kept: it is already registered for concurrent manifest requests,
+// and a second encoder would duplicate it. It returns the ready (or slow)
+// session, or the live successor another caller installed instead.
+func (h *PlaybackHandler) awaitCompatAutoTranscode(
+	ctx context.Context,
+	upstreamSessionID string,
+	source PlaybackMediaSource,
+	requiredToneMapMode tonemap.Mode,
+	pipeline *playback.AutoTranscodePipeline,
+	transcodeSession *playback.TranscodeSession,
+) (*playback.TranscodeSession, *playback.TranscodeSession, error) {
+	for {
+		_, readyErr := transcodeSession.WaitForGenerationManifest(compatManifestStartupTimeout)
+		if readyErr == nil {
+			pipeline.RememberSuccess()
+			return transcodeSession, nil, nil
+		}
+		if transcodeSession.IsRunning() {
+			slog.WarnContext(ctx, "compat transcode slow to produce a manifest",
+				"component", "jellycompat", "playback_session_id", upstreamSessionID, "error", readyErr)
+			return transcodeSession, nil, nil
+		}
+		failedDevice := transcodeSession.Opts().HWDevice
+		advanced := pipeline.AdvanceAfterFailure(failedDevice)
+		replaceUnlock := h.tm.LockSessionLifecycle(upstreamSessionID)
+		if live := h.tm.GetTranscodeSession(upstreamSessionID); live != transcodeSession {
+			replaceUnlock()
+			if live != nil && compatTranscodeSessionUsesToneMapMode(live, requiredToneMapMode) {
+				if compatLiveTranscodeMatchesAudioSource(live, source) {
+					return nil, live, nil
+				}
+				return nil, nil, errCompatRecipeSourceMismatch
+			}
+			if live != nil {
+				return nil, nil, errHDRTranscodeUnsupported
+			}
+			return nil, nil, readyErr
+		}
+		h.tm.CloseTranscodeSessionIf(upstreamSessionID, transcodeSession, "")
+		if !advanced {
+			replaceUnlock()
+			return nil, nil, readyErr
+		}
+		next := pipeline.Current()
+		slog.WarnContext(ctx, "compat transcode exited during startup; trying a safer path",
+			"component", "jellycompat",
+			"playback_session_id", upstreamSessionID,
+			"failed_device", failedDevice,
+			"next_hw_accel", next.HWAccel,
+			"next_software_decode", next.SoftwareVideoDecode,
+			"error", readyErr,
+		)
+		replacement, err := playback.StartTranscode(ctx, next)
+		if err != nil {
+			replaceUnlock()
+			return nil, nil, err
+		}
+		if !h.tm.RegisterTranscodeSession(upstreamSessionID, replacement) {
+			replaceUnlock()
+			return nil, nil, context.Canceled
+		}
+		replaceUnlock()
+		transcodeSession = replacement
+	}
 }
 
 // downgradeCompatLocalToneMap removes the bitrate synthesized solely for a
@@ -3244,9 +3367,13 @@ func (h *PlaybackHandler) compatSegmentDuration() int {
 // is the client's own PlaySessionId (if it sent one) so later playback reports
 // carrying it can resolve this session directly.
 func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *Session, routeID, mediaSourceID, clientPlaySessionID string) (*PlaybackSession, *PlaybackMediaSource, error) {
-	contentID, err := decodeContentID(h.codec, routeID)
+	contentID, routeFileID, err := decodeContentOrMediaSourceID(ctx, h.codec, routeID)
 	if err != nil {
 		return nil, nil, ErrSessionNotFound
+	}
+	sourceFromRoute := mediaSourceID == "" && routeFileID > 0
+	if sourceFromRoute {
+		mediaSourceID = h.codec.EncodeIntID(EncodedIDMediaSource, routeFileID)
 	}
 	detail, err := h.content.GetItemDetail(ctx, session, contentID, nil)
 	if err != nil || detail == nil || len(detail.Versions) == 0 {
@@ -3261,6 +3388,11 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 	}
 	allow4KTranscode := h.allow4KVideoTranscode(ctx)
 	for _, version := range detail.Versions {
+		// Reused requests and reports may omit MediaSourceId. Keep their
+		// default source bound to the file selected by the route.
+		if sourceFromRoute && int64(version.FileID) != routeFileID {
+			continue
+		}
 		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps, streamLocation: string(streamlocation.FromContext(ctx))}, allow4KTranscode)
 		sources = append(sources, source)
 	}
@@ -3273,6 +3405,11 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 		ClientPlaySessionID: clientPlaySessionID,
 		UserID:              session.PseudoUserID.String(),
 		MediaSources:        sources,
+	}
+	if sourceFromRoute && findMediaSource(ps, mediaSourceID) == nil {
+		// The route named a version the item no longer has. Without this, the
+		// item alias below would match RouteItemID and play the first version.
+		return nil, nil, ErrSessionNotFound
 	}
 	matched := playbackRouteSource(ps, mediaSourceID, true, true)
 	if matched != nil {
@@ -3303,6 +3440,18 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 		// requests. Reuse remains scoped to this token and the requested item.
 	}
 
+	// An ID-less direct player's repeated range requests and resumes belong
+	// to the already-started stream, not an unstarted PlaybackInfo negotiation.
+	if clientPlaySessionID == "" && staticRequest {
+		active, err := h.playbackStore.FindUnidentifiedPlayback(compatSession.Token, routeID, mediaSourceID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if active != nil {
+			return active, playbackRouteSource(active, mediaSourceID, allowItemAlias, staticRequest), nil
+		}
+	}
+
 	playSession, _, ok := h.playbackStore.FindByRoute(compatSession.Token, routeID)
 	if !ok {
 		return nil, nil, ErrSessionNotFound
@@ -3327,6 +3476,11 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 }
 
 func playbackRouteSource(session *PlaybackSession, mediaSourceID string, allowItemAlias, staticRequest bool) *PlaybackMediaSource {
+	// A session keyed on a media-source id has a RouteItemID that is also a
+	// source id, so an exact source match wins over the item alias.
+	if source := findMediaSource(session, mediaSourceID); source != nil {
+		return source
+	}
 	if mediaSourceID == "" || (allowItemAlias && mediaSourceIDsEqual(mediaSourceID, session.RouteItemID)) {
 		if staticRequest {
 			for _, source := range session.MediaSources {
@@ -3338,7 +3492,7 @@ func playbackRouteSource(session *PlaybackSession, mediaSourceID string, allowIt
 		}
 		return firstMediaSource(session)
 	}
-	return findMediaSource(session, mediaSourceID)
+	return nil
 }
 
 func firstMediaSource(session *PlaybackSession) *PlaybackMediaSource {

@@ -274,6 +274,58 @@ describe("LibraryRecommended", () => {
     });
   });
 
+  it("keeps rows out of the error state when a refresh bump lands mid-load", async () => {
+    const requests: Array<{
+      sectionId: string;
+      signal: AbortSignal;
+      resolve: (isFavorite: boolean) => void;
+    }> = [];
+    mockFetchLibrarySectionItems.mockImplementation(
+      (_libraryId: number, sectionId: string, options: { signal: AbortSignal }) =>
+        new Promise((resolve) => {
+          requests.push({
+            sectionId,
+            signal: options.signal,
+            resolve: (isFavorite) =>
+              resolve({
+                section: makeSection({
+                  id: sectionId,
+                  title: sectionId === "cw" ? "Continue Watching" : "Recently Added",
+                  section_type: sectionId === "cw" ? "continue_watching" : "recently_added",
+                  isFavorite,
+                }),
+              }),
+          });
+        }),
+    );
+    const queryClient = await render(<LibraryRecommended libraryId={42} />);
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests.map((request) => request.sectionId)).toEqual(["cw", "recent"]);
+
+    // The bump reaches the page through a query observer that TanStack
+    // notifies on its own schedule; the next generation's requests show the
+    // page has reset and re-requested its rows.
+    bumpHomeRefreshSignal(queryClient);
+    await waitFor(() => expect(requests).toHaveLength(4));
+
+    expect(container.textContent).not.toContain("could not be loaded");
+    const [firstGeneration, secondGeneration] = [requests.slice(0, 2), requests.slice(2)];
+    expect(firstGeneration.every((request) => request.signal.aborted)).toBe(true);
+    expect(secondGeneration.map((request) => request.sectionId)).toEqual(["cw", "recent"]);
+
+    // The cancelled generation answers after the new one, so a stale result
+    // that got through would overwrite the new data.
+    secondGeneration.forEach((request) => request.resolve(true));
+    firstGeneration.forEach((request) => request.resolve(false));
+    await waitFor(() => {
+      const rows = Array.from(container.querySelectorAll('[data-kind="section-row"]'));
+      expect(rows.map((row) => row.getAttribute("data-favorite"))).toEqual(["true", "true"]);
+    });
+
+    expect(container.textContent).not.toContain("could not be loaded");
+    expect(requests).toHaveLength(4);
+  });
+
   it("renders hero banner for featured sections", async () => {
     mockUseLibraryLayout.mockReturnValue({
       data: {

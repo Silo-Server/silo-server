@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -87,7 +88,7 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 		if i == 4 {
 			year = 2023
 		}
-		exec(`UPDATE media_items SET genres=ARRAY[$2]::text[],year=$3,content_rating='PG',status='matched' WHERE content_id=$1`, id, genre, year)
+		exec(`UPDATE media_items SET genres=ARRAY[$2]::text[],year=$3,content_rating='PG',content_rating_age=8,status='matched' WHERE content_id=$1`, id, genre, year)
 		link(id, libraryID)
 		if i != 5 && i != 6 {
 			favorite(id, profiles[0])
@@ -102,7 +103,7 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 			link(id, disabledID)
 		}
 	}
-	base := BrowseFilters{Type: "movie", ContentIDs: movieIDs, Genres: []string{"Drama"}, Years: []int{2024}, IsFavorite: true, IsPlayed: new(false), UserID: userID, ProfileID: profiles[0], LibraryIDs: []int{libraryID}, DisabledLibraryIDs: []int{disabledID}, MaxContentRating: "PG", Sort: "sort_title", Order: "asc", Limit: 1, Offset: 1}
+	base := BrowseFilters{Type: "movie", ContentIDs: movieIDs, Genres: []string{"Drama"}, Years: []int{2024}, IsFavorite: true, IsPlayed: new(false), UserID: userID, ProfileID: profiles[0], LibraryIDs: []int{libraryID}, DisabledLibraryIDs: []int{disabledID}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}, Sort: "sort_title", Order: "asc", Limit: 1, Offset: 1}
 	browse := NewBrowseRepository(pool)
 	t.Run("played only binds every parameter", func(t *testing.T) {
 		for _, completed := range []bool{true, false} {
@@ -170,7 +171,7 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 	})
 	seriesID, otherSeries := prefix+"-series", prefix+"-other-series"
 	for _, id := range []string{seriesID, otherSeries} {
-		exec(`INSERT INTO media_items(content_id,type,title,genres,content_rating) VALUES($1,'series','Synthetic Series',ARRAY['Drama'],'PG')`, id)
+		exec(`INSERT INTO media_items(content_id,type,title,genres,content_rating,content_rating_age) VALUES($1,'series','Synthetic Series',ARRAY['Drama'],'PG',8)`, id)
 		link(id, libraryID)
 	}
 	seasonIDs := []string{prefix + "-season1", prefix + "-season2"}
@@ -226,7 +227,7 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 			t.Fatalf("unavailable or foreign episode included: %v", ids)
 		}
 	})
-	access := AccessFilter{AllowedLibraryIDs: []int{libraryID}, DisabledLibraryIDs: []int{disabledID}, MaxContentRating: "PG"}
+	access := AccessFilter{AllowedLibraryIDs: []int{libraryID}, DisabledLibraryIDs: []int{disabledID}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
 	q := base
 	q.ContentIDs = nil
 	q.Sort = ""

@@ -35,7 +35,7 @@ func TestAdminSectionPreviewPreservesViewerAndBoundedSample(t *testing.T) {
 	h := &SectionHandler{previewFetcher: spy}
 	ctx := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 21})
 	ctx = apimw.SetProfileID(ctx, "selected")
-	ctx = access.SetScope(ctx, access.Scope{AllowedLibraryIDs: []int{4}, DisabledLibraryIDs: []int{5}, MaxContentRating: "PG"})
+	ctx = access.SetScope(ctx, access.Scope{AllowedLibraryIDs: []int{4}, DisabledLibraryIDs: []int{5}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}})
 	result, err := h.PreviewAdminSection(ctx, AdminSectionPreviewRequest{SectionType: string(sections.SectionRecentlyAdded), Config: json.RawMessage(`{}`), ItemLimit: 999})
 	if err != nil {
 		t.Fatal(err)

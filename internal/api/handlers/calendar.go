@@ -229,7 +229,7 @@ func (h *CalendarHandler) calendarEvents(ctx context.Context, q CalendarQuery, a
 		End:                q.End.AddDate(0, 0, 2),
 		AllowedLibraryIDs:  af.AllowedLibraryIDs,
 		DisabledLibraryIDs: af.DisabledLibraryIDs,
-		MaxContentRating:   af.MaxContentRating,
+		MaturityLimits:     af.MaturityLimits,
 		RestrictByIDs:      scope.restrict,
 		RestrictToIDs:      scope.ids,
 		LibraryID:          q.LibraryID,

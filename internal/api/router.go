@@ -59,6 +59,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/opslog"
+	"github.com/Silo-Server/silo-server/internal/passwordreset"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/planstore"
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -83,6 +84,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/subtitles/subsource"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	"github.com/Silo-Server/silo-server/internal/taskmanager/repository"
+	"github.com/Silo-Server/silo-server/internal/themedelivery"
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
@@ -281,6 +284,26 @@ func (d *Dependencies) CurrentConfig() *config.Config {
 	return d.Config
 }
 
+// themeRouter routes theme audio with the same planner, token secret, recipe
+// store and routing policy as video playback. The local AAC recipe is read
+// from the playback handler's cached FFmpeg registry.
+func (deps Dependencies) themeRouter(playbackHandler *handlers.PlaybackHandler) *themedelivery.Router {
+	router := &themedelivery.Router{
+		Secret:  func() string { return deps.CurrentConfig().Auth.JWTSecret },
+		Recipes: noderecipe.NewStore(deps.RedisClient, 0),
+		Policy:  func() config.PlaybackRoutingPolicy { return deps.CurrentConfig().Playback.Routing },
+		LocalConversion: func(ctx context.Context) bool {
+			return playbackHandler.LocalTransformationAvailableV3(ctx, playback.TransformationAudioToAACV3)
+		},
+	}
+	// Assigned only when present: a nil *Planner in the interface would read
+	// as a worker pool.
+	if deps.NodePlanner != nil {
+		router.Planner = deps.NodePlanner
+	}
+	return router
+}
+
 // invalidateNodeCapabilities drops every cached view of one node's hardware.
 //
 // There is more than one: protocol-v3 planning holds an inventory, and prepared
@@ -421,6 +444,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.DB != nil {
 		settingsRepo = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(deps.DB), deps.SecretCipher)
 	}
+	// One reader for access.unrated_content shared by every resolver built here.
+	unratedContent := config.NewUnratedContentPolicy(settingsRepo)
 	var accessGroupStore *access.GroupStore
 	if deps.DB != nil {
 		accessGroupStore = access.NewGroupStore(deps.DB)
@@ -467,6 +492,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var userRepo *auth.UserRepository
 	var inviteCodeRepo *auth.InviteCodeRepository
 	var invitationService *invitations.Service
+	var passwordResetService *passwordreset.Service
 	var apiKeyRepo *auth.APIKeyRepository
 	var authService *auth.Service
 	var authHandler *handlers.AuthHandler
@@ -518,6 +544,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 				settingsRepo,
 				"",
 			)
+			passwordResetService = passwordreset.NewService(
+				passwordreset.NewRepository(deps.DB),
+				userRepo,
+				authService,
+				mail.NewSMTPSender(settingsRepo),
+				settingsRepo,
+				"",
+			)
+			passwordResetService.OnSessionsRevoked(deps.OnUserSessionsRevoked)
 		}
 		profileTokenService = access.NewProfileTokenService(deps.Config.Auth.JWTSecret, 0)
 		deviceLoginService = auth.NewDeviceLoginService(
@@ -536,10 +571,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		authMiddleware = apimw.NewAuthMiddleware(jwtService, sessionRepo, apiKeyRepo, userRepo)
 		if deps.UserStoreProvider != nil {
 			if deps.PolicySystem != nil {
-				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP(), accessGroupStore)
+				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
 			} else {
 				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService, accessGroupStore)
+				viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService, accessGroupStore).WithUnratedContentPolicy(unratedContent)
 			}
 			viewerAccessMiddleware = apimw.NewViewerAccessMiddleware(viewerResolver)
 		}
@@ -1062,6 +1097,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var recsRepoForStale *recommendations.Repo
 	if ratingsRepo != nil && itemRepo != nil {
 		ratingsHandler = handlers.NewRatingsHandler(ratingsRepo, itemRepo)
+		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalRatingEventDispatcher); ok {
+			ratingsHandler.SetLocalRatingEventDispatcher(dispatcher)
+		}
 		if deps.DB != nil {
 			recsRepoForStale = recommendations.NewRepo(deps.DB)
 			ratingsHandler.SetProfileStaler(recsRepoForStale)
@@ -1287,7 +1325,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 			if subtitleRepo != nil {
 				subtitleReader = subtitleRepo
 			}
-			if resolver := handlers.NewSubtitleInventoryResolver(deps.FileRepo, subtitleReader); resolver != nil {
+			// The attempt store is an interface field: pass it only when set so
+			// the resolver never holds a typed nil either.
+			var attempts playback.PlanStoreV3
+			if playbackHandler.PlanStoreV3 != nil {
+				attempts = playbackHandler.PlanStoreV3
+			}
+			if resolver := handlers.NewSubtitleInventoryResolver(deps.FileRepo, subtitleReader, attempts); resolver != nil {
 				subtitleInventoryResolver = resolver
 			}
 		}
@@ -1943,6 +1987,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// devices sync on app open / background refresh; there is no server
 		// background worker.
 		downloadSvc.SetSubscriptions(downloads.NewSubscriptionRepository(deps.DB))
+		if deps.UserStoreProvider != nil {
+			// delete_watched monitors skip episodes the profile has finished.
+			downloadSvc.SetProgressStores(deps.UserStoreProvider)
+		}
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
 		if deps.NodePlanner != nil {
 			downloadHandler.SetProxyDelivery(deps.NodePlanner, func() string {
@@ -2146,6 +2194,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.DiagnosticsIngress = diagnosticsHandler
 		v2deps.DiagnosticsChunks = diagnosticsHandler
 	}
+	if passwordResetService != nil {
+		passwordResetHandler := handlers.NewPasswordResetHandler(passwordResetService, userRepo)
+		if accessGroupStore != nil {
+			passwordResetHandler.SetAccessGroupProvider(accessGroupStore)
+		}
+		v2deps.PasswordResets = passwordResetHandler
+	}
 	var invitationHandler *handlers.InvitationHandler
 	if invitationService != nil {
 		invitationHandler = handlers.NewInvitationHandler(invitationService)
@@ -2154,6 +2209,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		v2deps.Invitations = invitationHandler
 	}
+	if deps.DB != nil && deps.Config != nil && viewerResolver != nil {
+		v2deps.ThemeSongs = &handlers.ThemeSongsHandler{
+			Service: themesongs.NewService(themesongs.NewRepository(deps.DB), deps.Config.Auth.JWTSecret), Sessions: sessionRepo, Users: userRepo, Resolver: viewerResolver,
+			Router:     deps.themeRouter(playbackHandler),
+			FFmpegPath: func() string { return deps.CurrentConfig().Playback.FFmpegPath },
+		}
+	}
+	v2deps.ObserveThemeAudio = func(method string, handler http.Handler) http.Handler {
+		return observeNative(deps.StreamTelemetry, method, "/api/v2/catalog/items/{id}/themes/{theme_id}/audio", handler.ServeHTTP)
+	}
+
 	var themeHandler *handlers.ThemeHandler
 	if settingsRepo != nil {
 		themeHandler = handlers.NewThemeHandler(settingsRepo)
@@ -2224,7 +2290,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}", streamHandler.HandleStream)(w, r)
 			})
 			v2deps.PlaybackMedia.Subtitle = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)(w, r)
+				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)(w, r.WithContext(handlers.WithNativeAPIV2(r.Context())))
 			})
 			v2deps.PlaybackMedia.SubtitleFonts = streamHandler
 		}
@@ -4295,6 +4361,8 @@ func skipNativeMediaCompression(r *http.Request) bool {
 		return false
 	}
 	switch {
+	case len(p) == 8 && p[1] == "v2" && p[2] == "catalog" && p[3] == "items" && p[4] != "" && p[5] == "themes" && p[6] != "" && p[7] == "audio":
+		return true
 	case len(p) == 4 && p[2] == "stream" && p[3] != "":
 		return true
 	case len(p) == 7 && p[2] == "playback" && p[3] == "transcode" && p[4] != "" && p[5] == "segment" && p[6] != "":
@@ -4442,6 +4510,10 @@ func resolveOptionalPluginAccessUser(
 
 	claims, err := jwtService.ValidateToken(token)
 	if err != nil || (claims.TokenType != auth.TokenTypeAccess && claims.TokenType != auth.TokenTypePluginAccess) {
+		return false, false, 0, ""
+	}
+	// A session holding a temporary password may only change it.
+	if claims.PasswordChangeRequired {
 		return false, false, 0, ""
 	}
 	valid, err := sessionRepo.IsValid(r.Context(), claims.SessionID)

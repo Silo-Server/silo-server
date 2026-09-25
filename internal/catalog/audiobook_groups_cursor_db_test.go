@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -49,7 +50,7 @@ func TestAudiobookGroupsCursorDB(t *testing.T) {
 	for i, name := range names {
 		id := fmt.Sprintf("%s-%d", prefix, i)
 		pid := time.Now().UnixNano()
-		exec(`INSERT INTO media_items(content_id,type,title,status,genres,content_rating,poster_path) VALUES($1,'audiobook',$1,'released','{}',$2,$3)`, id, map[bool]string{true: "R", false: "PG"}[i == 6], map[bool]string{true: "", false: id + ".jpg"}[i == 5])
+		exec(`INSERT INTO media_items(content_id,type,title,status,genres,content_rating,content_rating_age,poster_path) VALUES($1,'audiobook',$1,'released','{}',$2,$4,$3)`, id, map[bool]string{true: "R", false: "PG"}[i == 6], map[bool]string{true: "", false: id + ".jpg"}[i == 5], map[bool]int{true: 17, false: 8}[i == 6])
 		exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, id, lib)
 		exec(`INSERT INTO audiobook_series(content_id,series_name) VALUES($1,$2)`, id, name)
 		exec(`INSERT INTO people(id,name) VALUES($1,$2)`, pid, prefix+name)
@@ -61,7 +62,7 @@ func TestAudiobookGroupsCursorDB(t *testing.T) {
 			exec(`INSERT INTO user_watch_progress(user_id,profile_id,media_item_id,position_seconds,completed) VALUES($1,$2,$3,50,false),($1,$4,$3,100,true)`, uid, profile, id, other)
 		}
 	}
-	filter := AccessFilter{UserID: uid, ProfileID: profile, AllowedLibraryIDs: []int{lib}, MaxContentRating: "PG"}
+	filter := AccessFilter{UserID: uid, ProfileID: profile, AllowedLibraryIDs: []int{lib}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
 	for _, axis := range []AudiobookGroupBy{AudiobookGroupBySeries, AudiobookGroupByAuthor, AudiobookGroupByNarrator} {
 		for _, sort := range []string{"name", "count", "duration"} {
 			t.Run(string(axis)+"/"+sort, func(t *testing.T) {

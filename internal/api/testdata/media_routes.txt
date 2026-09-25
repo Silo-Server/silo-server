@@ -336,6 +336,7 @@ PUT /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}/api-keys	non-media
 POST /api/v2/admin/users/{id}/impersonate	non-media
 GET /api/v2/admin/users/{id}/ips	non-media
+POST /api/v2/admin/users/{id}/password-reset	non-media
 GET /api/v2/admin/users/{id}/profiles	non-media
 GET /api/v2/admin/users/{id}/settings/values	non-media
 DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
@@ -379,6 +380,7 @@ GET /api/v2/calendar	non-media
 GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
+GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
@@ -387,6 +389,9 @@ GET /api/v2/catalog/filters/search	non-media
 GET /api/v2/catalog/items/{id}	non-media
 GET /api/v2/catalog/items/{id}/episodes	non-media
 GET /api/v2/catalog/items/{id}/manga-files	non-media
+GET /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
+HEAD /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
+POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback	non-media
 POST /api/v2/catalog/items/{id}/trailers/refresh	non-media
 POST /api/v2/catalog/items/{id}/translate-description	non-media
 GET /api/v2/catalog/items/{id}/versions	non-media
@@ -398,6 +403,7 @@ GET /api/v2/catalog/search/capabilities	non-media
 GET /api/v2/catalog/series/{id}/seasons	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}/episodes	non-media
+GET /api/v2/catalog/themes/capabilities	non-media
 GET /api/v2/catalog/works/{work_id}	non-media
 GET /api/v2/collections	non-media
 POST /api/v2/collections	non-media
@@ -592,6 +598,9 @@ GET /api/v2/onboarding/flow	non-media
 PUT /api/v2/onboarding/progress	non-media
 GET /api/v2/onboarding/state	non-media
 GET /api/v2/openapi.json	non-media
+POST /api/v2/password-resets	non-media
+GET /api/v2/password-resets/{token}	non-media
+POST /api/v2/password-resets/{token}/complete	non-media
 GET /api/v2/playback/capabilities	non-media
 POST /api/v2/playback/route-events	non-media
 GET /api/v2/playback/sessions/control/capabilities	non-media
@@ -1490,6 +1499,7 @@ PUT /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}/api-keys	non-media
 POST /api/v2/admin/users/{id}/impersonate	non-media
 GET /api/v2/admin/users/{id}/ips	non-media
+POST /api/v2/admin/users/{id}/password-reset	non-media
 GET /api/v2/admin/users/{id}/profiles	non-media
 GET /api/v2/admin/users/{id}/settings/values	non-media
 DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
@@ -1533,6 +1543,7 @@ GET /api/v2/calendar	non-media
 GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
+GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
@@ -1541,6 +1552,9 @@ GET /api/v2/catalog/filters/search	non-media
 GET /api/v2/catalog/items/{id}	non-media
 GET /api/v2/catalog/items/{id}/episodes	non-media
 GET /api/v2/catalog/items/{id}/manga-files	non-media
+GET /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
+HEAD /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
+POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback	non-media
 POST /api/v2/catalog/items/{id}/trailers/refresh	non-media
 POST /api/v2/catalog/items/{id}/translate-description	non-media
 GET /api/v2/catalog/items/{id}/versions	non-media
@@ -1552,6 +1566,7 @@ GET /api/v2/catalog/search/capabilities	non-media
 GET /api/v2/catalog/series/{id}/seasons	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}	non-media
 GET /api/v2/catalog/series/{id}/seasons/{num}/episodes	non-media
+GET /api/v2/catalog/themes/capabilities	non-media
 GET /api/v2/catalog/works/{work_id}	non-media
 GET /api/v2/collections	non-media
 POST /api/v2/collections	non-media
@@ -1746,6 +1761,9 @@ GET /api/v2/onboarding/flow	non-media
 PUT /api/v2/onboarding/progress	non-media
 GET /api/v2/onboarding/state	non-media
 GET /api/v2/openapi.json	non-media
+POST /api/v2/password-resets	non-media
+GET /api/v2/password-resets/{token}	non-media
+POST /api/v2/password-resets/{token}/complete	non-media
 GET /api/v2/playback/capabilities	non-media
 POST /api/v2/playback/route-events	non-media
 GET /api/v2/playback/sessions/control/capabilities	non-media

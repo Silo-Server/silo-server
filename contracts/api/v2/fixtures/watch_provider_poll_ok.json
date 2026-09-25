@@ -13,7 +13,9 @@
     "export_watchlist": false,
     "remove_watchlist": false,
     "provides_watchlist_order": false,
-    "scrobble_playback": false
+    "scrobble_playback": false,
+    "import_ratings": false,
+    "export_ratings": false
   },
   "auth_method": "",
   "connected": true,
@@ -29,5 +31,7 @@
   "sync_watchlist_removals_enabled": false,
   "sync_watchlist_order_enabled": false,
   "scrobble_enabled": false,
+  "import_ratings_enabled": false,
+  "export_ratings_enabled": false,
   "credentials_configured": false
 }

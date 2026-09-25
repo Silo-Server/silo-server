@@ -996,3 +996,66 @@ requires a public S3 bucket because local artwork storage is available.
 catalog read return only the versions stored in the `library_id` it was given.
 It is server-wide, applies without a restart, and never affects playback; see
 "Library-scoped version lists" in [catalog-api.md](catalog-api.md).
+
+`access.unrated_content` (`hide` or `allow`, default `hide`) decides whether a
+profile with a content-rating ceiling sees titles that have no rating: an empty
+rating or an explicit marker such as `NR` or `Not Rated`. A rating the server
+cannot read is hidden from every ceilinged profile regardless. The setting covers
+titles in the library; request discovery keeps hiding TMDB titles that have no US
+certification from ceilinged profiles. The setting is
+server-wide and applies within seconds, without a restart. Ceilings compare
+minimum viewer ages, so a ceiling from any national system limits titles rated
+in any other; a US ceiling admits its whole tier (`PG-13` admits `TV-14`, `R`
+admits `NC-17`). The setting does not apply to a profile's advisory-age limit
+(`max_advisory_age`). Whether that limit hides a title with no advisory age is
+a per-profile choice, `require_advisory_age`, not this server-wide setting; see
+"Advisory age" in [catalog-api.md](catalog-api.md).
+
+## Forward and rewind intervals
+
+Revision 9 adds four profile-wide preferences. The backend stores and validates
+these values; each client applies them to its own relative-seek actions.
+
+| Key                                     | Default |
+| --------------------------------------- | ------- |
+| `player.video_skip_back_seconds`        | 10      |
+| `player.video_skip_forward_seconds`     | 30      |
+| `player.audiobook_skip_back_seconds`    | 10      |
+| `player.audiobook_skip_forward_seconds` | 30      |
+
+Each value is a numeric enum in seconds: `5`, `10`, `15`, `30`, `45`, `60`, or
+`90`. Only `profile` scope is allowed; an unset preference resolves to its
+contract default. The preference follows the active household profile across
+client families and devices. It does not belong to the whole login account.
+
+Discover support through the settings capability and manifest endpoints before
+reading or writing these keys. Use the existing effective read, profile-scoped
+PUT/DELETE, and `user_settings.changed` invalidation flow. No playback protocol
+or database schema change is required. On an older server, or one whose
+capabilities could not be read, a client uses the contract defaults for video
+and any interval this browser or device stored locally for audiobooks; neither
+state authorizes a write to the server.
+
+Clients should use one resolved interval per media type and direction for
+buttons, keyboard shortcuts, gestures, minimized players, and supported media
+controls. Labels must show the interval the action will use. Settings changes
+apply to subsequent actions without restarting playback. Explicit timestamp
+seeks, chapter navigation, automatic marker skipping, and resume rewind are
+separate operations and do not use these intervals.
+
+Legacy browser-local audiobook intervals have no profile identity. Importing
+must be an explicit user action that identifies the values and explains their
+profile-wide effect. The two writes are independent: report each failure and
+retain legacy values for retry instead of claiming an atomic import.
+
+The standalone web player receives resolved intervals from its host rather
+than calling the settings API itself. Media Session relative-seek handlers use
+the configured interval even if an operating system supplies its own default
+`seekOffset`. Browser-native fullscreen controls may perform seeks internally
+without dispatching those handlers; there is no portable API to configure that
+UI, and such controls are not guaranteed to honor these preferences.
+
+Native adoption is tracked in [Apple #267](https://github.com/Silo-Server/silo-apple/issues/267)
+and [Android #300](https://github.com/Silo-Server/silo-android/issues/300).
+Jellyfin clients keep their own seek controls; this does not extend the
+Jellyfin protocol.

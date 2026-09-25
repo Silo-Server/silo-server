@@ -4409,6 +4409,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/users/{id}/password-reset": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Email an account a password reset link, or create one to share. */
+    post: operations["createAdminUserPasswordReset"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/users/{id}/profiles": {
     parameters: {
       query?: never;
@@ -5045,6 +5062,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/capabilities/password-reset": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover whether the sign-in page may offer self-service password reset. */
+    get: operations["getPasswordResetCapability"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/capabilities/trailers": {
     parameters: {
       query?: never;
@@ -5175,6 +5209,39 @@ export interface paths {
     get: operations["listCatalogItemMangaFiles"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/catalog/items/{id}/themes/{theme_id}/audio": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["getThemeSongAudio"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head: operations["headThemeSongAudio"];
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/catalog/items/{id}/themes/{theme_id}/playback": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Authorize theme audio for this account and profile, routed like video playback and converted to AAC when the client cannot decode the original. */
+    post: operations["createThemeSongPlayback"];
     delete?: never;
     options?: never;
     head?: never;
@@ -5360,6 +5427,23 @@ export interface paths {
     };
     /** The episodes of one season of a series by number. */
     get: operations["listSeasonEpisodes"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/catalog/themes/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Local theme audio support and delivery limitations. */
+    get: operations["getThemeSongsCapability"];
     put?: never;
     post?: never;
     delete?: never;
@@ -6245,7 +6329,10 @@ export interface paths {
     /** Page the calling device's series monitors, including paused monitors. */
     get: operations["listDownloadSubscriptions"];
     put?: never;
-    /** Create a monitor or return the existing monitor without changing it. Sync explicitly after receipt; do not automatically resend an uncertain create. */
+    /**
+     * Create a monitor or return the device's existing monitor for the series.
+     * @description An existing monitor keeps its options and forgets the episodes deleted under it, so the next sync can register them again. Sync explicitly after receipt; do not automatically resend an uncertain create.
+     */
     post: operations["createDownloadSubscription"];
     delete?: never;
     options?: never;
@@ -7872,6 +7959,57 @@ export interface paths {
     get: operations["getOpenAPIDocument"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/password-resets": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Email a reset link to the account a sign-in name or email address names, if one matches. */
+    post: operations["requestPasswordReset"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/password-resets/{token}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Describe a usable password reset link for the reset screen. */
+    get: operations["lookupPasswordReset"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/password-resets/{token}/complete": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Set a new password through a reset link, sign out everywhere, and sign in. */
+    post: operations["completePasswordReset"];
     delete?: never;
     options?: never;
     head?: never;
@@ -10354,6 +10492,11 @@ export interface components {
       /** @description Present only while an administrator impersonates this account */
       impersonation?: components["schemas"]["Impersonation"];
       /**
+       * @description Whether the account holds a temporary password. Until changePassword replaces it, the session may only read the account, change the password, and log out; other operations return 403 password_change_required. Refresh the tokens after the change to lift the restriction
+       * @example false
+       */
+      password_change_required: boolean;
+      /**
        * @description Effective assignable permissions; empty for a disabled account
        * @example [
        *       "marker_edit"
@@ -10515,6 +10658,10 @@ export interface components {
       default_profile: boolean;
       exact_identity_filter: boolean;
       guarded_configuration: boolean;
+      /** @description Whether createAdminUserPasswordReset can email the link; needs the public URL and a configured mail server */
+      password_reset_email: boolean;
+      /** @description Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL */
+      password_reset_link: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -10550,6 +10697,8 @@ export interface components {
       password: string;
       permissions?: string[];
       requests_allowed?: boolean | null;
+      /** @description Make password temporary: the account must choose a new one at its first sign-in before it can do anything else */
+      require_password_change?: boolean;
       /** @enum {string} */
       role: "admin" | "user";
       transcode_allowed?: boolean | null;
@@ -10604,6 +10753,8 @@ export interface components {
       password?: string;
       permissions?: string[];
       requests_allowed?: boolean | null;
+      /** @description Only with password: make it temporary, so the account must choose a new one at its next sign-in before it can do anything else. A password sent without it is not temporary */
+      require_password_change?: boolean;
       /** @enum {string} */
       role?: "admin" | "user";
       transcode_allowed?: boolean | null;
@@ -11632,6 +11783,11 @@ export interface components {
     AdminDashboardStats: {
       /** Format: int64 */
       active_streams: number;
+      /**
+       * Format: int64
+       * @description Movies and series that carry an advisory age, the coverage a profile's max_advisory_age limit acts on; compare with total_movies + total_shows
+       */
+      advisory_titles: number;
       /** Format: int64 */
       total_files: number;
       /** Format: int64 */
@@ -13156,6 +13312,37 @@ export interface components {
        */
       timestamp: string;
       user_id?: string;
+    };
+    AdminPasswordReset: {
+      /**
+       * @example link
+       * @enum {string}
+       */
+      delivery: "email" | "link";
+      /**
+       * @description For email: sent, or failed_or_unknown when the mail server did not confirm delivery (the link is still live; send again or share a link). For link: not_requested
+       * @example not_requested
+       * @enum {string}
+       */
+      delivery_status: "sent" | "failed_or_unknown" | "not_requested";
+      /**
+       * Format: date-time
+       * @description When the link stops working
+       */
+      expires_at: string;
+      /**
+       * @description Present for delivery=link only. One-time disclosure of a bearer credential for the account's password; share it only with the account holder
+       * @example https://silo.example.test/reset-password/3f2b47eb7b36dd2d
+       */
+      reset_url?: string;
+    };
+    AdminPasswordResetInputBody: {
+      /**
+       * @description email sends the link to the account's address; link returns it to you to share. Either way you never see the new password
+       * @example email
+       * @enum {string}
+       */
+      delivery: "email" | "link";
     };
     AdminPersonUpdate: {
       bio?: string | null;
@@ -15544,6 +15731,16 @@ export interface components {
        */
       max_transcodes: number | null;
       /**
+       * @description Whether the account holds a temporary password it must replace at its next sign-in
+       * @example false
+       */
+      password_change_required: boolean;
+      /**
+       * @description Whether the account signs in with a local password. False when an external authentication provider manages its sign-in; password actions do not apply then
+       * @example true
+       */
+      password_login: boolean;
+      /**
        * @description Permissions assigned directly to the account
        * @example [
        *       "marker_edit"
@@ -16135,6 +16332,18 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       added_at?: string;
+      /**
+       * Format: int64
+       * @description Recommended minimum viewer age from an advisory service. A profile with max_advisory_age hides titles whose advisory age is above it; the age never changes the content-rating ceiling
+       * @example 13
+       */
+      advisory_age?: number;
+      /**
+       * @description Who recommended advisory_age
+       * @example commonsense
+       * @enum {string}
+       */
+      advisory_source?: "commonsense" | "mdblist";
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;
@@ -16253,6 +16462,18 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       added_at?: string;
+      /**
+       * Format: int64
+       * @description Recommended minimum viewer age from an advisory service. A profile with max_advisory_age hides titles whose advisory age is above it; the age never changes the content-rating ceiling
+       * @example 13
+       */
+      advisory_age?: number;
+      /**
+       * @description Who recommended advisory_age
+       * @example commonsense
+       * @enum {string}
+       */
+      advisory_source?: "commonsense" | "mdblist";
       /** @description Calendar date, YYYY-MM-DD */
       air_date?: string;
       air_time?: string;
@@ -16386,6 +16607,7 @@ export interface components {
       /** @description Empty, never null */
       subtitles: components["schemas"]["SubtitleInfo"][];
       tagline?: string;
+      themes?: components["schemas"]["ThemeSongSet"];
       /** @example Heat */
       title: string;
       tmdb_id?: string;
@@ -17239,11 +17461,13 @@ export interface components {
     };
     ConnectionUpdate: {
       export_favorites_enabled?: boolean;
+      export_ratings_enabled?: boolean;
       export_unwatched_enabled?: boolean;
       export_watched_enabled?: boolean;
       export_watchlist_enabled?: boolean;
       import_favorites_enabled?: boolean;
       import_progress_enabled?: boolean;
+      import_ratings_enabled?: boolean;
       import_watched_enabled?: boolean;
       import_watchlist_enabled?: boolean;
       scrobble_enabled?: boolean;
@@ -18773,6 +18997,18 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       added_at?: string;
+      /**
+       * Format: int64
+       * @description Recommended minimum viewer age from an advisory service. A profile with max_advisory_age hides titles whose advisory age is above it; the age never changes the content-rating ceiling
+       * @example 13
+       */
+      advisory_age?: number;
+      /**
+       * @description Who recommended advisory_age
+       * @example commonsense
+       * @enum {string}
+       */
+      advisory_source?: "commonsense" | "mdblist";
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;
@@ -21251,6 +21487,53 @@ export interface components {
       /** Format: int64 */
       telemetry_only_truncated: number;
     };
+    PasswordResetCapability: {
+      /** @description Whether the current principal may use the capability */
+      allowed?: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
+    PasswordResetCompleteInputBody: {
+      /**
+       * @description The new password
+       * @example margin fossil quench hollow
+       */
+      password: string;
+    };
+    PasswordResetCompletion: {
+      /** @enum {string} */
+      login_status: "signed_in" | "sign_in_required";
+      /** @enum {string} */
+      status: "completed";
+      tokens?: components["schemas"]["TokenPair"];
+      username: string;
+    };
+    PasswordResetLookup: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      expires_at: string;
+      /** @example Silo */
+      server_name: string;
+      /**
+       * @description The account whose password the link replaces
+       * @example alice
+       */
+      username: string;
+    };
+    PasswordResetRequestInputBody: {
+      /**
+       * @description The account's sign-in name or email address
+       * @example alice
+       */
+      login: string;
+    };
     Person: {
       bio?: string;
       /**
@@ -22560,6 +22843,12 @@ export interface components {
       /** @example false */
       library_restrictions_enabled: boolean;
       /**
+       * Format: int64
+       * @description Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null means no limit
+       * @example 12
+       */
+      max_advisory_age: number | null;
+      /**
        * @description Content-rating ceiling; empty means none
        * @example PG-13
        */
@@ -22581,6 +22870,11 @@ export interface components {
        * @example auto
        */
       quality_preference: string;
+      /**
+       * @description Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age
+       * @example false
+       */
+      require_advisory_age: boolean;
       /** @example false */
       show_forced_subtitles: boolean;
       /**
@@ -22615,8 +22909,18 @@ export interface components {
       avatar_upload_enabled: boolean;
       /** @description The page's items; empty, never null */
       items: components["schemas"]["Profile"][];
+      /**
+       * @description Whether profiles accept max_advisory_age and the server enforces it
+       * @example true
+       */
+      max_advisory_age_supported: boolean;
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
+      /**
+       * @description Whether profiles accept require_advisory_age and the server enforces it
+       * @example true
+       */
+      require_advisory_age_supported: boolean;
     };
     ProfileCreate: {
       /**
@@ -22650,6 +22954,12 @@ export interface components {
       /** @example false */
       library_restrictions_enabled?: boolean;
       /**
+       * Format: int64
+       * @description Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set
+       * @example 12
+       */
+      max_advisory_age?: number;
+      /**
        * @description Content-rating ceiling
        * @example PG-13
        */
@@ -22680,6 +22990,11 @@ export interface components {
        * @example auto
        */
       quality_preference?: string;
+      /**
+       * @description Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age
+       * @example true
+       */
+      require_advisory_age?: boolean;
       /**
        * @description Defaults to true when omitted
        * @example true
@@ -22790,6 +23105,12 @@ export interface components {
       /** @example false */
       library_restrictions_enabled?: boolean;
       /**
+       * Format: int64
+       * @description Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null removes it
+       * @example 12
+       */
+      max_advisory_age?: number | null;
+      /**
        * @description Content-rating ceiling; null removes it
        * @example PG-13
        */
@@ -22820,6 +23141,11 @@ export interface components {
        * @example auto
        */
       quality_preference?: string;
+      /**
+       * @description Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age
+       * @example true
+       */
+      require_advisory_age?: boolean;
       /** @example false */
       show_forced_subtitles?: boolean;
       /**
@@ -24831,6 +25157,18 @@ export interface components {
       reason: string;
       retryable: boolean;
     };
+    ThemeAudioFormat: {
+      /**
+       * @description Codec, lower case, e.g. mp3, aac, alac, flac, vorbis, opus, pcm. Empty accepts any codec in the container
+       * @example vorbis
+       */
+      audio_codec?: string;
+      /**
+       * @description File container, lower case, e.g. mp3, mp4, m4a, flac, ogg, opus, wav, aac
+       * @example ogg
+       */
+      container: string;
+    };
     ThemeCatalogCapabilitiesOutputBody: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
@@ -24887,6 +25225,59 @@ export interface components {
     ThemeOverrides: {
       raw_css: string;
       vars: string;
+    };
+    ThemePlayback: {
+      /**
+       * @description Media type of the audio at url
+       * @example audio/mpeg
+       */
+      content_type: string;
+      /**
+       * @description converted is progressive AAC in audio-only MP4 with no length and no byte ranges; fetch a new grant to replay it
+       * @enum {string}
+       */
+      delivery: "original" | "converted";
+      /** Format: date-time */
+      expires_at: string;
+      /** @description Short-lived credential; do not log, persist, or share. Relative to this server, or an absolute URL on a proxy node's origin */
+      url: string;
+    };
+    ThemePlaybackRequest: {
+      /** @description Container and codec pairs the client decodes. The original is chosen when it matches; otherwise AAC in audio-only MP4 when an mp4 (or m4a) entry accepts aac or any codec. Unknown values are ignored */
+      accepted_formats?: components["schemas"]["ThemeAudioFormat"][];
+    };
+    ThemeSong: {
+      container: string;
+      /** Format: int64 */
+      duration_seconds: number;
+      id: string;
+      title: string;
+    };
+    ThemeSongsCapability: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      /** @description Theme audio can be served by worker nodes */
+      cluster_routing: boolean;
+      /**
+       * @description routed: themes follow the playback routing policy, so audio may come from a proxy node on another origin; local_direct_play: audio comes from this API origin only
+       * @enum {string}
+       */
+      delivery: "local_direct_play" | "routed";
+      /** Format: int64 */
+      grant_lifetime_seconds: number;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @description A theme the client cannot decode can be converted to AAC in audio-only MP4 when the client accepts it */
+      transcode: boolean;
+    };
+    ThemeSongSet: {
+      items: components["schemas"]["ThemeSong"][];
+      owner_id: string;
     };
     TimelineV3: {
       can_seek_anywhere: boolean;
@@ -25527,11 +25918,13 @@ export interface components {
     };
     WatchProviderCapabilities: {
       export_favorites: boolean;
+      export_ratings: boolean;
       export_unwatched: boolean;
       export_watched: boolean;
       export_watchlist: boolean;
       import_favorites: boolean;
       import_progress: boolean;
+      import_ratings: boolean;
       import_watched: boolean;
       import_watchlist: boolean;
       provides_watchlist_order: boolean;
@@ -25547,11 +25940,13 @@ export interface components {
       credentials_configured: boolean;
       display_name: string;
       export_favorites_enabled: boolean;
+      export_ratings_enabled: boolean;
       export_unwatched_enabled: boolean;
       export_watched_enabled: boolean;
       export_watchlist_enabled: boolean;
       import_favorites_enabled: boolean;
       import_progress_enabled: boolean;
+      import_ratings_enabled: boolean;
       import_watched_enabled: boolean;
       import_watchlist_enabled: boolean;
       last_error?: string;
@@ -25615,11 +26010,15 @@ export interface components {
     };
     WatchProviderSettings: {
       export_favorites_enabled: boolean;
+      /** @description Send the profile's star ratings to the provider (stars times two) and clear removed ones. */
+      export_ratings_enabled: boolean;
       export_unwatched_enabled: boolean;
       export_watched_enabled: boolean;
       export_watchlist_enabled: boolean;
       import_favorites_enabled: boolean;
       import_progress_enabled: boolean;
+      /** @description Import the provider's movie and series ratings as stars (1-2 is 1 star, 9-10 is 5 stars). */
+      import_ratings_enabled: boolean;
       import_watched_enabled: boolean;
       import_watchlist_enabled: boolean;
       scrobble_enabled: boolean;
@@ -25671,6 +26070,10 @@ export interface components {
       /** Format: int64 */
       inbound_progress_imported: number;
       /** Format: int64 */
+      inbound_ratings_found: number;
+      /** Format: int64 */
+      inbound_ratings_imported: number;
+      /** Format: int64 */
       inbound_watched_found: number;
       /** Format: int64 */
       inbound_watched_imported: number;
@@ -25684,6 +26087,16 @@ export interface components {
       outbound_favorites_sent: number;
       /** Format: int64 */
       outbound_found: number;
+      /**
+       * Format: int64
+       * @description Movie and series ratings the profile holds.
+       */
+      outbound_ratings_found: number;
+      /**
+       * Format: int64
+       * @description Ratings set or cleared on the provider.
+       */
+      outbound_ratings_sent: number;
       /** Format: int64 */
       outbound_sent: number;
       /** Format: int64 */
@@ -26087,6 +26500,18 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       added_at?: string;
+      /**
+       * Format: int64
+       * @description Recommended minimum viewer age from an advisory service. A profile with max_advisory_age hides titles whose advisory age is above it; the age never changes the content-rating ceiling
+       * @example 13
+       */
+      advisory_age?: number;
+      /**
+       * @description Who recommended advisory_age
+       * @example commonsense
+       * @enum {string}
+       */
+      advisory_source?: "commonsense" | "mdblist";
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;
@@ -26234,6 +26659,18 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       added_at?: string;
+      /**
+       * Format: int64
+       * @description Recommended minimum viewer age from an advisory service. A profile with max_advisory_age hides titles whose advisory age is above it; the age never changes the content-rating ceiling
+       * @example 13
+       */
+      advisory_age?: number;
+      /**
+       * @description Who recommended advisory_age
+       * @example commonsense
+       * @enum {string}
+       */
+      advisory_source?: "commonsense" | "mdblist";
       backdrop_thumbhash?: string;
       /** @description Presigned, short-lived */
       backdrop_url?: string;
@@ -46469,7 +46906,7 @@ export interface operations {
         user_id?: number;
       };
       header: {
-        /** @description Browser origin must match the configured public origin. */
+        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
         Origin?: string;
         /** @description Offer silo.admin-logs.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -67150,6 +67587,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Precondition Failed */
       412: {
         headers: {
@@ -67649,6 +68095,155 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  createAdminUserPasswordReset: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminPasswordResetInputBody"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminPasswordReset"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };
@@ -72220,6 +72815,98 @@ export interface operations {
       };
     };
   };
+  getPasswordResetCapability: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PasswordResetCapability"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getTrailersCapability: {
     parameters: {
       query?: never;
@@ -73202,6 +73889,407 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getThemeSongAudio: {
+    parameters: {
+      query: {
+        /** @description Short-lived theme playback grant */
+        token: string;
+      };
+      header?: {
+        "If-Match"?: string;
+        "If-Modified-Since"?: string;
+        "If-None-Match"?: string;
+        "If-Range"?: string;
+        "If-Unmodified-Since"?: string;
+        Range?: string;
+      };
+      path: {
+        id: string;
+        theme_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Original audio, or for a converted grant progressive AAC in audio-only MP4 with no length or ranges */
+      200: {
+        headers: {
+          "Accept-Ranges"?: string;
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Range"?: string;
+          "Content-Type"?: string;
+          ETag?: string;
+          "Last-Modified"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "audio/aac": string;
+          "audio/flac": string;
+          "audio/mp4": string;
+          "audio/mpeg": string;
+          "audio/ogg": string;
+          "audio/wav": string;
+          "multipart/byteranges": string;
+        };
+      };
+      /** @description Requested byte range */
+      206: {
+        headers: {
+          "Accept-Ranges"?: string;
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Range"?: string;
+          "Content-Type"?: string;
+          ETag?: string;
+          "Last-Modified"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "audio/aac": string;
+          "audio/flac": string;
+          "audio/mp4": string;
+          "audio/mpeg": string;
+          "audio/ogg": string;
+          "audio/wav": string;
+          "multipart/byteranges": string;
+        };
+      };
+      /** @description Audio unchanged */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Requested Range Not Satisfiable */
+      416: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  headThemeSongAudio: {
+    parameters: {
+      query: {
+        /** @description Short-lived theme playback grant */
+        token: string;
+      };
+      header?: {
+        "If-Match"?: string;
+        "If-Modified-Since"?: string;
+        "If-None-Match"?: string;
+        "If-Range"?: string;
+        "If-Unmodified-Since"?: string;
+        Range?: string;
+      };
+      path: {
+        id: string;
+        theme_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Original audio, or for a converted grant progressive AAC in audio-only MP4 with no length or ranges */
+      200: {
+        headers: {
+          "Accept-Ranges"?: string;
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Range"?: string;
+          "Content-Type"?: string;
+          ETag?: string;
+          "Last-Modified"?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Requested byte range */
+      206: {
+        headers: {
+          "Accept-Ranges"?: string;
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Range"?: string;
+          "Content-Type"?: string;
+          ETag?: string;
+          "Last-Modified"?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Audio unchanged */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Requested Range Not Satisfiable */
+      416: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  createThemeSongPlayback: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+        theme_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ThemePlaybackRequest"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ThemePlayback"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };
@@ -74544,6 +75632,138 @@ export interface operations {
       /** @description Not Acceptable */
       406: {
         headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getThemeSongsCapability: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ThemeSongsCapability"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -85326,7 +86546,7 @@ export interface operations {
         channels?: string;
       };
       header: {
-        /** @description Browser origin must match the configured public origin. */
+        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
         Origin?: string;
         /** @description Offer silo.events.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -97701,6 +98921,321 @@ export interface operations {
       };
     };
   };
+  requestPasswordReset: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PasswordResetRequestInputBody"];
+      };
+    };
+    responses: {
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  lookupPasswordReset: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        token: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PasswordResetLookup"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  completePasswordReset: {
+    parameters: {
+      query?: never;
+      header?: {
+        "User-Agent"?: string;
+      };
+      path: {
+        token: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PasswordResetCompleteInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PasswordResetCompletion"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   stopPlayback: {
     parameters: {
       query?: never;
@@ -98457,7 +99992,7 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        /** @description Browser origin must match the configured public origin. */
+        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
         Origin?: string;
         /** @description Offer silo.playback-control.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;
@@ -108169,6 +109704,8 @@ export interface operations {
         duration?: number;
         /** @description Source media file the inventory URL names; must be the plan's effective or requested file. */
         file_id?: string;
+        /** @description 1 on a .srt URL published under subrip_sidecar_v1: serve the stored SRT bytes instead of the WebVTT conversion. */
+        original?: string;
         /** @description Seek position in seconds for windowed text extraction. */
         position?: number;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
@@ -108186,7 +109723,7 @@ export interface operations {
       };
       path: {
         session_id: string;
-        /** @description Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup) the inventory URL carries. */
+        /** @description Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup, .srt) the inventory URL carries. */
         track: string;
       };
       cookie?: never;
@@ -108317,6 +109854,8 @@ export interface operations {
         duration?: number;
         /** @description Source media file the inventory URL names; must be the plan's effective or requested file. */
         file_id?: string;
+        /** @description 1 on a .srt URL published under subrip_sidecar_v1: serve the stored SRT bytes instead of the WebVTT conversion. */
+        original?: string;
         /** @description Seek position in seconds for windowed text extraction. */
         position?: number;
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
@@ -108334,7 +109873,7 @@ export interface operations {
       };
       path: {
         session_id: string;
-        /** @description Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup) the inventory URL carries. */
+        /** @description Combined subtitle ordinal from the plan inventory, optionally suffixed with the sidecar extension (.vtt, .ass, .sup, .srt) the inventory URL carries. */
         track: string;
       };
       cookie?: never;
@@ -116306,7 +117845,7 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        /** @description Browser origin must match configured public origin. */
+        /** @description Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin. */
         Origin?: string;
         /** @description Offer silo.room.v2 followed by silo.ticket.<single-use-ticket>. */
         "Sec-WebSocket-Protocol": string;

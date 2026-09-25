@@ -35,6 +35,8 @@ const GROUP_ORDER: DeviceSettingGroupId[] = ["picture", "sound", "subtitles", "e
 
 /** Keys whose group is not implied by their manifest category. */
 const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
+  "ui.theme_music_enabled": "sound",
+  "ui.theme_music_loop": "sound",
   "playback.audio_language": "sound",
   "playback.subtitle_language": "subtitles",
   "playback.subtitle_mode": "subtitles",

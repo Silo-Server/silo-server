@@ -11,7 +11,8 @@
       "email": "laura@example.test",
       "role": "user",
       "permissions": [],
-      "download_allowed": true
+      "download_allowed": true,
+      "password_change_required": false
     }
   },
   "profile_id": "",

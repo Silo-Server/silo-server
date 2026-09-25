@@ -1,10 +1,12 @@
 {
-  "revision": "fc20b1000288c8729013eeca7ccd093584c4788c66f53c244c77543ada324491",
+  "revision": "f27a2d332204054da8ad9b7907ba2bbc861a1aa8f8d7ba4e5e9ca40f2d153f7f",
   "state": "available",
   "allowed": true,
   "available": true,
   "guarded_configuration": true,
   "default_profile": true,
   "exact_identity_filter": true,
-  "access_groups": true
+  "access_groups": true,
+  "password_reset_link": true,
+  "password_reset_email": true
 }

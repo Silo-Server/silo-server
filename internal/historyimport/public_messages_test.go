@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -97,5 +98,83 @@ func TestTagUnreachableMarksOnlyNetworkFailures(t *testing.T) {
 	rejected := UpstreamHTTPError(http.StatusUnauthorized)
 	if err := tagUnreachable(rejected); errors.Is(err, ErrSourceUnreachable) {
 		t.Fatalf("HTTP 401 was tagged unreachable: %v", err)
+	}
+}
+
+// The stored diagnostic has to reach a real summary: an unmapped warning falls
+// through to GenericRunWarning, which would leave the skip as opaque to the
+// person reading the run as counting it silently was.
+func TestPublicWarningExplainsHiddenHistorySkips(t *testing.T) {
+	t.Parallel()
+
+	got := PublicWarning(hiddenHistoryWarning(3))
+	if got == GenericRunWarning {
+		t.Fatalf("PublicWarning(%q) fell through to the generic text", hiddenHistoryWarning(3))
+	}
+	if !strings.Contains(got, "(3)") {
+		t.Errorf("PublicWarning = %q, want the count of skipped items", got)
+	}
+	if !strings.Contains(got, "removed") {
+		t.Errorf("PublicWarning = %q, want it to name the history removal", got)
+	}
+}
+
+// A run updates the hidden-skip warning as it goes, so a run that is canceled or
+// fails partway still carries the explanation for what it skipped. Other warnings
+// appended around it must not produce a second copy or strand the index.
+func TestHiddenHistoryWarningStaysCurrentDuringARun(t *testing.T) {
+	t.Parallel()
+
+	warnings := []string{"an earlier warning"}
+	index := -1
+	warnings, index = upsertHiddenHistoryWarning(warnings, index, 1)
+	if got := PublicWarning(warnings[index]); !strings.Contains(got, "(1)") {
+		t.Fatalf("after one skip PublicWarning = %q", got)
+	}
+	warnings = append(warnings, "a warning from a later record")
+	warnings, index = upsertHiddenHistoryWarning(warnings, index, 2)
+	warnings, index = upsertHiddenHistoryWarning(warnings, index, 3)
+
+	hidden := 0
+	for _, warning := range warnings {
+		if strings.HasPrefix(warning, "skipped hidden history items") {
+			hidden++
+		}
+	}
+	if hidden != 1 {
+		t.Errorf("hidden warnings = %d, want exactly 1: %q", hidden, warnings)
+	}
+	if warnings[index] != hiddenHistoryWarning(3) {
+		t.Errorf("warnings[%d] = %q, want the latest count", index, warnings[index])
+	}
+	if len(warnings) != 3 {
+		t.Errorf("warnings = %q, want the two unrelated entries kept", warnings)
+	}
+}
+
+// Only the first maxStoredWarnings entries are persisted. A run noisy enough to
+// fill that cap is exactly the one whose skipped tally needs explaining, so the
+// aggregate has to survive the trim.
+func TestHiddenHistoryWarningSurvivesTheStoredWarningCap(t *testing.T) {
+	t.Parallel()
+
+	summary := ExecutionSummary{}
+	for i := range maxStoredWarnings {
+		summary.Warnings = append(summary.Warnings, fmt.Sprintf("an earlier diagnostic %d", i))
+	}
+	index := -1
+	summary.Warnings, index = upsertHiddenHistoryWarning(summary.Warnings, index, 1)
+	summary.Warnings, _ = upsertHiddenHistoryWarning(summary.Warnings, index, 2)
+
+	stored := trimWarnings(persistedWarnings(summary))
+	found := false
+	for _, warning := range stored {
+		if warning == hiddenHistoryWarning(2) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the hidden-history warning was trimmed away; stored %d of %d warnings",
+			len(stored), len(summary.Warnings))
 	}
 }

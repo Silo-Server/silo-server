@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { EpisodeRef, PlayerTimeRange, SeriesContext } from "../types";
+import type { EpisodeRef, PlaybackStartTrigger, PlayerTimeRange, SeriesContext } from "../types";
 
 interface NextEpisodeState {
   showCountdown: boolean;
@@ -11,13 +11,14 @@ interface NextEpisodeState {
 
 /**
  * Detects when the current playback position enters the configured trigger region,
- * starts a 10-second countdown, and provides the next episode reference.
+ * starts a 10-second countdown, and provides the next episode reference. The
+ * countdown running out is an automatic start; skipping it is the viewer's.
  */
 export function useNextEpisode(
   triggerRegion: PlayerTimeRange | null,
   seriesContext: SeriesContext | undefined,
   currentTime: number,
-  onNavigate: (contentId: string) => void,
+  onNavigate: (contentId: string, trigger: PlaybackStartTrigger) => void,
 ): NextEpisodeState {
   const [showCountdown, setShowCountdown] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(10);
@@ -68,7 +69,7 @@ export function useNextEpisode(
         setSecondsRemaining((prev) => {
           if (prev <= 1) {
             if (countdownRef.current) clearInterval(countdownRef.current);
-            onNavigate(nextEpisode.contentId);
+            onNavigate(nextEpisode.contentId, "automatic");
             return 0;
           }
           return prev - 1;
@@ -86,7 +87,7 @@ export function useNextEpisode(
 
   const skipToNext = useCallback(() => {
     if (countdownRef.current) clearInterval(countdownRef.current);
-    if (nextEpisode) onNavigate(nextEpisode.contentId);
+    if (nextEpisode) onNavigate(nextEpisode.contentId, "viewer");
   }, [nextEpisode, onNavigate]);
 
   const cancelAutoPlay = useCallback(() => {

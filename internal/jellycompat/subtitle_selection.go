@@ -1,12 +1,15 @@
 package jellycompat
 
 import (
+	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // Jellyfin SubtitlePlaybackMode values.
@@ -236,4 +239,41 @@ func compatLanguageUndefined(language string) bool {
 	default:
 		return false
 	}
+}
+
+// compatDetailSubtitleStreamIndex applies the same viewer preferences before
+// playback and after the playback audio choice has been negotiated.
+func compatDetailSubtitleStreamIndex(detail *upstreamItemDetail, version catalog.FileVersion, downloaded []subtitles.DownloadedSubtitle, savedMode string, audioIndex *int) *int {
+	mode := compatJellyfinSubtitleMode(detail.SubtitleMode, detail.SubtitleModeSet, detail.ShowForcedSubtitles, savedMode)
+	var preferred []string
+	if language := strings.TrimSpace(detail.SubtitleLanguage); language != "" {
+		preferred = []string{language}
+	}
+	candidates := compatSubtitleCandidates(version, downloaded)
+	if !detail.ShowForcedSubtitles {
+		candidates = compatWithoutForcedSubtitles(candidates)
+	}
+	return compatDefaultSubtitleStreamIndex(candidates, preferred, mode, compatAudioTrack(version, audioIndex).Language)
+}
+
+// savedCompatSubtitleMode returns the SubtitleMode the viewer's Jellyfin
+// client last saved, or "" when none is stored or it cannot be read. It only
+// tells Jellyfin's Default apart from Smart, which share Silo's "auto".
+func savedCompatSubtitleMode(ctx context.Context, provider userstore.UserStoreProvider, session *Session) string {
+	if provider == nil || session == nil || session.ProfileID == "" {
+		return ""
+	}
+	store, err := provider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil || store == nil {
+		return ""
+	}
+	raw, err := store.GetSetting(ctx, configurationKey(session.ProfileID))
+	if err != nil || raw == "" {
+		return ""
+	}
+	var saved struct{ SubtitleMode string }
+	if json.Unmarshal([]byte(raw), &saved) != nil {
+		return ""
+	}
+	return saved.SubtitleMode
 }

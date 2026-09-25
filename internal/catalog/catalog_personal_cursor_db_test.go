@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -52,7 +53,7 @@ func TestCatalogPersonalCursorDB(t *testing.T) {
 	for i := range 5 {
 		id := fmt.Sprintf("%s-%d", prefix, i)
 		ids = append(ids, id)
-		exec(`INSERT INTO media_items(content_id,type,title,status,genres,content_rating) VALUES($1,'movie',$2,'released','{}',$3)`, id, fmt.Sprintf("Title %d", 4-i), map[bool]string{true: "R", false: "PG"}[i == 4])
+		exec(`INSERT INTO media_items(content_id,type,title,status,genres,content_rating,content_rating_age) VALUES($1,'movie',$2,'released','{}',$3,$4)`, id, fmt.Sprintf("Title %d", 4-i), map[bool]string{true: "R", false: "PG"}[i == 4], map[bool]int{true: 17, false: 8}[i == 4])
 		exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, id, lib)
 		exec(`INSERT INTO user_favorites(user_id,profile_id,media_item_id,added_at) VALUES($1,$2,$3,'2025-01-01'::timestamptz)`, uid, p1, id)
 		exec(`INSERT INTO user_watchlist(user_id,profile_id,media_item_id,added_at) VALUES($1,$2,$3,'2025-01-01'::timestamptz)`, uid, p1, id)
@@ -61,7 +62,7 @@ func TestCatalogPersonalCursorDB(t *testing.T) {
 	exec(`INSERT INTO user_favorites(user_id,profile_id,media_item_id) VALUES($1,$2,$3)`, uid, p2, ids[3])
 	provider := pgstore.NewPostgresProvider(pool)
 	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool)).WithUserStoreProvider(provider)
-	access := AccessFilter{UserID: uid, ProfileID: p1, AllowedLibraryIDs: []int{lib}, MaxContentRating: "PG"}
+	access := AccessFilter{UserID: uid, ProfileID: p1, AllowedLibraryIDs: []int{lib}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
 	walk := func(req CatalogRequest, viewer AccessFilter) []string {
 		t.Helper()
 		var result []string
@@ -128,7 +129,7 @@ func TestCatalogPersonalCursorDB(t *testing.T) {
 		}
 	})
 	series := prefix + "-series"
-	exec(`INSERT INTO media_items(content_id,type,title,status,genres,content_rating) VALUES($1,'series','Series','released','{}','PG')`, series)
+	exec(`INSERT INTO media_items(content_id,type,title,status,genres,content_rating,content_rating_age) VALUES($1,'series','Series','released','{}','PG',8)`, series)
 	exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, series, lib)
 	for i := range 2 {
 		ep := fmt.Sprintf("%s-ep%d", prefix, i)
@@ -242,7 +243,7 @@ func TestCatalogPersonalCursorDB(t *testing.T) {
 	})
 	t.Run("list exceeds legacy candidate ceiling", func(t *testing.T) {
 		bulk := prefix + "-bulk-"
-		exec(`INSERT INTO media_items(content_id,type,title,status,genres,content_rating) SELECT $1 || lpad(n::text,5,'0'),'movie','Bulk','released','{}','PG' FROM generate_series(1,10005) n`, bulk)
+		exec(`INSERT INTO media_items(content_id,type,title,status,genres,content_rating,content_rating_age) SELECT $1 || lpad(n::text,5,'0'),'movie','Bulk','released','{}','PG',8 FROM generate_series(1,10005) n`, bulk)
 		exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) SELECT content_id,$2 FROM media_items WHERE content_id LIKE $1`, bulk+"%", lib)
 		exec(`INSERT INTO user_favorites(user_id,profile_id,media_item_id,added_at) SELECT $1,$2,content_id,'2024-01-01'::timestamptz FROM media_items WHERE content_id LIKE $3`, uid, p1, bulk+"%")
 		exec(`ANALYZE media_items`)

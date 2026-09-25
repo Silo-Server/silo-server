@@ -61,6 +61,7 @@ const version: PlayerFileVersion = {
 };
 
 const watchPageProps: WatchPageProps = {
+  seekIntervals: { back: 10, forward: 30 },
   contentId: "content-1",
   title: "Test movie",
   versions: [version],
@@ -103,6 +104,7 @@ function playbackSession(
     refreshSubtitles: vi.fn(),
     applySubtitleTrack: vi.fn(),
     updatePlaybackState: vi.fn(),
+    reportFirstFrame: vi.fn(),
     reportEvent: vi.fn(),
     ...overrides,
   };
@@ -314,6 +316,58 @@ describe("WatchPage playback state", () => {
   });
 });
 
+describe("Watch Party selection changes", () => {
+  it("follows another member's selection as an automatic start", async () => {
+    // Nobody here pressed Play, so the controller must not time this start.
+    const room = {
+      room_id: "room-1",
+      phase: "playing",
+      selected_content_id: "content-1",
+      selected_file_id: 7,
+      selection_revision: 1,
+      self_role: "guest",
+      members: [{ is_self: true, connected: true }],
+      generation: 1,
+    };
+    const props = {
+      ...watchPageProps,
+      fileId: 7,
+      watchTogetherRoomId: "room-1",
+      watchTogetherRoomToken: "proof",
+    };
+    playbackSessionMock.mockReturnValue(playbackSession());
+    roomConnectionMock.mockReturnValue({ room, connectionState: "connected" });
+    const view = render(createElement(WatchPage, props));
+    await waitFor(() => expect(videoPlayerMock).toHaveBeenCalled());
+    expect(startPlaybackMock).not.toHaveBeenCalled();
+
+    roomConnectionMock.mockReturnValue({
+      room: {
+        ...room,
+        selected_content_id: "content-2",
+        selected_file_id: 9,
+        selection_revision: 2,
+      },
+      connectionState: "connected",
+    });
+    view.rerender(createElement(WatchPage, props));
+
+    await waitFor(() => expect(startPlaybackMock).toHaveBeenCalledOnce());
+    expect(startPlaybackMock).toHaveBeenCalledWith(
+      {
+        contentId: "content-2",
+        fileId: 9,
+        libraryId: undefined,
+        roomId: "room-1",
+        roomToken: "proof",
+        restart: true,
+      },
+      "automatic",
+    );
+    view.unmount();
+  });
+});
+
 describe("Watch Party source fallback", () => {
   function refusedRoom(selfRole = "host") {
     const room = {
@@ -401,6 +455,7 @@ describe("Watch Party source fallback", () => {
       await waitFor(() =>
         expect(startPlaybackMock).toHaveBeenCalledWith(
           expect.objectContaining({ fileId: 8, roomId: "room-1", restart: true }),
+          "automatic",
         ),
       );
       finish();

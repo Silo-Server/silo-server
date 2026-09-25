@@ -277,8 +277,9 @@ func (s *Service) BrowseGenre(ctx context.Context, viewer Viewer, slug string, r
 }
 
 // certificationCeilingFor maps a Silo rating ceiling (which spans both the
-// movie and TV ladders — see access.RatingRank) onto the US certification
-// string TMDB's certification.lte understands for the given media type.
+// movie and TV ladders, and every national one — see access.RatingRank) onto
+// the US certification string TMDB's certification.lte understands for the
+// given media type.
 // Returns "" for an empty or unrecognized ceiling, in which case the caller
 // omits the parameter.
 //
@@ -289,11 +290,15 @@ func (s *Service) BrowseGenre(ctx context.Context, viewer Viewer, slug string, r
 //
 // Because that post-filter cannot resurrect titles TMDB already omitted, the
 // mapping must be a SUPERSET of what access.RatingAllowed permits at the
-// ceiling, never a subset. Two spots encode that: rank 3 maps to TMDB's
-// maximum on each ladder ("NC-17"/"TV-MA" — an R ceiling locally allows
-// NC-17, since both are rank 3), and TV rank 0 maps to "TV-G" (TMDB order 3)
-// rather than "TV-Y" so TV-Y/TV-Y7 titles are not excluded upstream of our
-// own ladder, which ranks them together.
+// ceiling, never a subset. The 0-3 rank the mapping reads is a bucketed view
+// of the ceiling's minimum age and is monotone in it, so every rating the
+// ceiling admits falls at or below the ceiling's own rank — the superset holds
+// by construction. Two spots widen it further: rank 3 maps to TMDB's maximum
+// on each ladder ("NC-17"/"TV-MA"), and TV rank 0 maps to "TV-G" (TMDB order
+// 3) rather than "TV-Y" so TV-Y/TV-Y7 titles are not excluded upstream.
+//
+// The mapping errs loose, not tight: over-fetching costs a request, while
+// under-fetching would hide a title the viewer is allowed to request.
 func certificationCeilingFor(ceiling, tmdbMediaType string) string {
 	rank, ok := access.RatingRank(ceiling)
 	if !ok {

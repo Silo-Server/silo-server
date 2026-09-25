@@ -2,6 +2,12 @@
 GET /	non-media
 HEAD /	non-media
 GET /Artists	non-media
+GET /Audio/{itemId}/stream	media	transfer	viewer_egress	false	true
+HEAD /Audio/{itemId}/stream	media	transfer	viewer_egress	false	true
+GET /Audio/{itemId}/stream.{container}	media	transfer	viewer_egress	false	true
+HEAD /Audio/{itemId}/stream.{container}	media	transfer	viewer_egress	false	true
+GET /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
+HEAD /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 GET /Branding/Configuration	non-media
 POST /ClientLog/Document	non-media
 GET /DisplayPreferences/{displayPreferencesId}	non-media
@@ -54,6 +60,7 @@ GET /Shows/{id}/Episodes	non-media
 GET /Shows/{id}/Seasons	non-media
 GET /Shows/{id}/Similar	non-media
 GET /Studios	non-media
+GET /SyncPlay/List	non-media
 GET /System/Endpoint	non-media
 GET /System/Info	non-media
 GET /System/Info/Public	non-media
@@ -84,6 +91,7 @@ GET /Users/{id}/Items/Latest	non-media
 POST /Users/{userId}/Configuration	non-media
 DELETE /Users/{userId}/FavoriteItems/{itemId}	non-media
 POST /Users/{userId}/FavoriteItems/{itemId}	non-media
+GET /Users/{userId}/GroupingOptions	non-media
 GET /Users/{userId}/Items/Resume	non-media
 GET /Users/{userId}/Items/{id}	non-media
 GET /Users/{userId}/Items/{id}/Intros	non-media
@@ -140,6 +148,12 @@ TRACE /web/*	non-media
 GET /	non-media
 HEAD /	non-media
 GET /Artists	non-media
+GET /Audio/{itemId}/stream	media	transfer	viewer_egress	false	true
+HEAD /Audio/{itemId}/stream	media	transfer	viewer_egress	false	true
+GET /Audio/{itemId}/stream.{container}	media	transfer	viewer_egress	false	true
+HEAD /Audio/{itemId}/stream.{container}	media	transfer	viewer_egress	false	true
+GET /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
+HEAD /Audio/{itemId}/universal	media	transfer	viewer_egress	false	true
 GET /Branding/Configuration	non-media
 POST /ClientLog/Document	non-media
 GET /DisplayPreferences/{displayPreferencesId}	non-media
@@ -192,6 +206,7 @@ GET /Shows/{id}/Episodes	non-media
 GET /Shows/{id}/Seasons	non-media
 GET /Shows/{id}/Similar	non-media
 GET /Studios	non-media
+GET /SyncPlay/List	non-media
 GET /System/Endpoint	non-media
 GET /System/Info	non-media
 GET /System/Info/Public	non-media
@@ -222,6 +237,7 @@ GET /Users/{id}/Items/Latest	non-media
 POST /Users/{userId}/Configuration	non-media
 DELETE /Users/{userId}/FavoriteItems/{itemId}	non-media
 POST /Users/{userId}/FavoriteItems/{itemId}	non-media
+GET /Users/{userId}/GroupingOptions	non-media
 GET /Users/{userId}/Items/Resume	non-media
 GET /Users/{userId}/Items/{id}	non-media
 GET /Users/{userId}/Items/{id}/Intros	non-media

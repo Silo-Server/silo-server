@@ -150,9 +150,9 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 
 	insertItem := func(contentID, mediaType, title, overview, rating, originalLanguage string) {
 		batchEquivExec(t, pool, `
-			INSERT INTO media_items (content_id, type, title, genres, overview, content_rating, default_metadata_language, original_language)
-			VALUES ($1, $2, $3, '{}'::text[], $4, $5, 'en', $6)
-		`, contentID, mediaType, title, overview, rating, originalLanguage)
+			INSERT INTO media_items (content_id, type, title, genres, overview, content_rating, content_rating_age, default_metadata_language, original_language)
+			VALUES ($1, $2, $3, '{}'::text[], $4, $5, $7, 'en', $6)
+		`, contentID, mediaType, title, overview, rating, originalLanguage, access.StoredRating(rating))
 	}
 	// movieA: localized into fr, credited, has files. content_rating PG -> visible.
 	insertItem(movieA, "movie", "Movie A", "Movie A overview (en)", "PG", "en")
@@ -261,9 +261,9 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 		MetadataLanguageOverrides: map[string]string{
 			"no": access.OriginalMetadataLanguage,
 		},
-		MaxContentRating: "PG-13",
-		UserID:           1,
-		ProfileID:        "profile-1",
+		MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"},
+		UserID:         1,
+		ProfileID:      "profile-1",
 	}
 
 	visibleIDs := []string{movieA, movieB, series}

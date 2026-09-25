@@ -128,7 +128,7 @@ func (h *AuthHandler) ChangePassword(ctx context.Context, claims *auth.Claims, c
 	if currentPassword == "" || newPassword == "" {
 		return apiError(http.StatusBadRequest, "bad_request", "Current password and new password are required")
 	}
-	err := h.passwords.ChangePassword(ctx, claims.UserID, currentPassword, newPassword)
+	err := h.passwords.ChangePassword(ctx, claims.UserID, claims.SessionID, currentPassword, newPassword)
 	switch {
 	case err == nil:
 		return nil
@@ -138,6 +138,8 @@ func (h *AuthHandler) ChangePassword(ctx context.Context, claims *auth.Claims, c
 		return &APIError{Status: http.StatusBadRequest, Code: codeWeakPassword, Message: "Password must be at least 8 characters", Field: "new_password"}
 	case errors.Is(err, auth.ErrPasswordTooLong):
 		return &APIError{Status: http.StatusBadRequest, Code: codePasswordTooLong, Message: "Password must be at most 72 bytes", Field: "new_password"}
+	case errors.Is(err, auth.ErrPasswordUnchanged):
+		return &APIError{Status: http.StatusBadRequest, Code: codeWeakPassword, Message: "Choose a password different from the temporary one", Field: "new_password"}
 	case errors.Is(err, auth.ErrPasswordLoginDisabled):
 		return apiError(http.StatusConflict, "password_login_disabled", "This account does not use local password sign-in")
 	}
@@ -147,6 +149,11 @@ func (h *AuthHandler) ChangePassword(ctx context.Context, claims *auth.Claims, c
 func (h *AuthHandler) passwordChangeAllowed(ctx context.Context, claims *auth.Claims, profileID string) (bool, error) {
 	if claims == nil || claims.TokenType != auth.TokenTypeAccess || claims.SessionID == "" || claims.ImpersonatorUserID != nil {
 		return false, nil
+	}
+	// A session holding a temporary password can do nothing else, including
+	// pick a profile, and was opened by whoever knew the account password.
+	if claims.PasswordChangeRequired {
+		return true, nil
 	}
 	profileID = strings.TrimSpace(profileID)
 	if profileID == "" {

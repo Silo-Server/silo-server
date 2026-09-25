@@ -34,6 +34,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
@@ -80,7 +81,13 @@ type TranscodeStartRequest struct {
 	SubtitleCodec              string                 `json:"subtitle_codec,omitempty"`
 	TotalDuration              float64                `json:"total_duration"`
 	RequireReady               bool                   `json:"require_ready,omitempty"`
-	ThrottleSeconds            int                    `json:"throttle_seconds,omitempty"`
+	// AutoFallbackReady asks the node to wait for the first manifest only when
+	// its own hw_accel=auto fallback is enabled for this start, so an early
+	// hardware failure can move to a safer path. The node decides from its
+	// live hardware; any other start is not waited on. RequireReady still
+	// forces a wait.
+	AutoFallbackReady bool `json:"auto_fallback_ready,omitempty"`
+	ThrottleSeconds   int  `json:"throttle_seconds,omitempty"`
 }
 
 // TranscodeStartResponse is the JSON response for POST /transcode/start.
@@ -99,6 +106,11 @@ type TranscodeStartResponse struct {
 	// ThrottleSeconds attests that the executor understood and armed the
 	// control plane's resolved forward-buffer policy.
 	ThrottleSeconds int `json:"throttle_seconds,omitempty"`
+	// SoftwareVideoDecode reports that the executed recipe decodes video on
+	// the CPU, as the hw_accel=auto fallback may choose after a hardware
+	// decoder failed to start. Older nodes omit it, so callers OR it with the
+	// requested value.
+	SoftwareVideoDecode bool `json:"software_video_decode,omitempty"`
 }
 
 var ErrAudioRecipeAttestationMismatch = errors.New("transcode node audio recipe attestation mismatch")
@@ -211,8 +223,15 @@ const sessionReapInterval = time.Minute
 // control-plane response depend on Redis latency.
 const sessionTrackingOperationTimeout = 2 * time.Second
 
-// TranscodeStartReadinessTimeout is the node-side RequireReady manifest budget.
+// TranscodeStartReadinessTimeout is the node-side RequireReady manifest budget
+// for one FFmpeg attempt.
 const TranscodeStartReadinessTimeout = playback.ManifestStartupTimeout
+
+// TranscodeStartReadyMaxDuration bounds how long a RequireReady start can wait
+// on manifests across attempts: under hw_accel=auto each early exit moves to a
+// safer path with its own TranscodeStartReadinessTimeout. Callers size their
+// start deadline to it so a fallback that succeeds on the node is not canceled.
+const TranscodeStartReadyMaxDuration = time.Duration(playback.MaxAutoTranscodeStartupAttempts) * TranscodeStartReadinessTimeout
 
 // progressiveRemuxShutdownTimeout bounds a destructive reload when a canceled
 // FFmpeg process does not exit. A timed-out reload must fail rather than report
@@ -243,6 +262,7 @@ type Server struct {
 	tracker                   sessionTracker
 	ffmpegSink                playback.FFmpegLogSink
 	inputPaths                InputPathAuthorizer
+	themeInputs               ThemeInputApprover
 	transcodeDir              string
 	artifactRoot              string
 	telemetry                 *streamtelemetry.Registry
@@ -284,6 +304,9 @@ type Server struct {
 	// resolveToneMapRecipeFn is a package-private execution seam for error and
 	// lifecycle tests. Production uses resolveToneMapRecipe.
 	resolveToneMapRecipeFn func(context.Context, *playback.TranscodeOpts) error
+	// autoTranscodePipelineFn is a package-private seam for the hw_accel=auto
+	// fallback pipeline. Production uses playback.NewAutoTranscodePipeline.
+	autoTranscodePipelineFn func(context.Context, playback.TranscodeOpts) *playback.AutoTranscodePipeline
 
 	// lifecycleMu guards lifecycleLocks, the per-session locks that serialize
 	// every path which spawns ffmpeg into a session's output dir (fresh start and
@@ -347,6 +370,13 @@ func (s *Server) resolveToneMapRecipe(ctx context.Context, opts *playback.Transc
 		return s.resolveToneMapRecipeFn(ctx, opts)
 	}
 	return resolveToneMapRecipe(ctx, opts)
+}
+
+func (s *Server) autoTranscodePipeline(ctx context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {
+	if s.autoTranscodePipelineFn != nil {
+		return s.autoTranscodePipelineFn(ctx, opts)
+	}
+	return playback.NewAutoTranscodePipeline(ctx, opts)
 }
 
 // sessionLifecycleLock is a refcounted per-session lock; the refcount lets the
@@ -759,6 +789,13 @@ func (s *Server) SetRecipeStore(store recipeStore) {
 // endpoint that accepts an FFmpeg input path.
 func (s *Server) SetInputPathAuthorizer(authorizer InputPathAuthorizer) {
 	s.inputPaths = authorizer
+}
+
+// SetThemeInputAuthorizer wires the theme-file authority for theme AAC
+// conversions. A node without one does not advertise theme execution, so the
+// API never routes a theme conversion to it.
+func (s *Server) SetThemeInputAuthorizer(authorizer ThemeInputApprover) {
+	s.themeInputs = authorizer
 }
 
 // SetStreamTelemetry wires local stream observation. A nil registry is a
@@ -1309,6 +1346,9 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 	if s.nodeRowID != nil {
 		if nodeID, ok := s.nodeRowID(); ok && nodeID > 0 {
 			info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxExecutionV1}
+			if s.themeInputs != nil {
+				info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeatureThemeAudioExecutionV1)
+			}
 		}
 	}
 	info.CapabilityHash = playback.ComputeCapabilityHash(info)
@@ -1600,7 +1640,33 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// spawn or validation failure must leave a healthy live session intact.
-	session, err := playback.StartTranscode(r.Context(), opts)
+	var session *playback.TranscodeSession
+	var err error
+	pipeline := s.autoTranscodePipeline(r.Context(), opts)
+	if req.RequireReady || req.AutoFallbackReady && pipeline.Enabled() {
+		// Every attempt writes into opts.OutputDir, the replacement directory
+		// when a live session exists, and a failed attempt is closed before
+		// the next, so the live session is untouched until publication. Under
+		// hw_accel=auto an early exit moves to the next safer path; otherwise
+		// the legacy retry mirrors the API server's local transport: an early
+		// death under VideoToolbox retries once in software (there is no
+		// alternate render device to move to), so a hardware encoder session
+		// this Mac cannot create does not fail clustered playback while CPU
+		// encoding was available.
+		session, err = playback.StartReadyTranscode(r.Context(), pipeline, playback.TranscodeStartup{
+			Timeout:     TranscodeStartReadinessTimeout,
+			LegacyRetry: playback.TranscodeStartupRetryAccelChange,
+		})
+	} else {
+		session, err = playback.StartTranscode(r.Context(), opts)
+	}
+	var startupErr *playback.TranscodeStartupError
+	if errors.As(err, &startupErr) {
+		unlock()
+		slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+		http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
+		return
+	}
 	if err != nil {
 		unlock()
 		slog.ErrorContext(r.Context(), "start transcode", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
@@ -1610,43 +1676,6 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to start transcode", http.StatusInternalServerError)
 		}
 		return
-	}
-
-	if req.RequireReady {
-		if _, err := session.WaitForManifest(TranscodeStartReadinessTimeout); err != nil {
-			wasRunning := session.IsRunning()
-			_ = session.Close()
-			// Mirror the API server's local-transport retry: an early death
-			// under VideoToolbox retries once in software (there is no
-			// alternate render device to move to), so a hardware encoder
-			// session this Mac cannot create does not fail clustered
-			// playback while CPU encoding was available.
-			retryAccel := playback.StartupRetryHWAccel(opts)
-			if wasRunning || retryAccel == opts.HWAccel {
-				unlock()
-				slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
-				http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
-				return
-			}
-			slog.WarnContext(r.Context(), "transcode crashed during startup; retrying with software encoding",
-				"component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
-			retryOpts := opts
-			retryOpts.HWAccel = retryAccel
-			session, err = playback.StartTranscode(context.WithoutCancel(r.Context()), retryOpts)
-			if err != nil {
-				unlock()
-				slog.ErrorContext(r.Context(), "start transcode retry", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
-				http.Error(w, "failed to start transcode", http.StatusInternalServerError)
-				return
-			}
-			if _, retryErr := session.WaitForManifest(TranscodeStartReadinessTimeout); retryErr != nil {
-				_ = session.Close()
-				unlock()
-				slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", retryErr, "session", req.SessionID, "playback_session_id", req.SessionID)
-				http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
-				return
-			}
-		}
 	}
 
 	// The replacement has successfully spawned, so retire the old session and
@@ -1703,6 +1732,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		AudioRecipeVersion:    req.AudioRecipeVersion,
 		CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion,
 		ThrottleSeconds:       req.ThrottleSeconds,
+		SoftwareVideoDecode:   session.Opts().SoftwareVideoDecode,
 	})
 }
 
@@ -1936,7 +1966,17 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		opts.SeekSeconds = float64(requestedSegment * card.SegmentDuration)
 	}
 
-	session, err := playback.StartTranscode(r.Context(), opts)
+	// Under hw_accel=auto the reconstruct walks the same safer paths as a
+	// fresh start in this output directory, keeping a slow process rather than
+	// duplicating it.
+	pipeline := s.autoTranscodePipeline(r.Context(), opts)
+	adaptive := pipeline.Enabled()
+	var session *playback.TranscodeSession
+	if adaptive {
+		session, err = playback.StartReconstructTranscode(r.Context(), pipeline, playback.TranscodeStartup{Timeout: playback.ManifestStartupTimeout})
+	} else {
+		session, err = playback.StartTranscode(r.Context(), opts)
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "transcode node reconstruct start failed", "component", "transcodenode", "error", err,
 			"session", sessionID, "playback_session_id", sessionID)
@@ -1946,10 +1986,14 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	// Readiness is normally the caller's concern, but a VideoToolbox session
 	// can die at encoder init (e.g. a session the hardware cannot create at
 	// these dimensions), and registering the dead session would serve this
-	// media as permanently missing. Mirror handleStart's software retry for
-	// the accel StartupRetryHWAccel would change; other accels keep the
-	// existing register-immediately behavior.
-	if retryAccel := playback.StartupRetryHWAccel(opts); retryAccel != opts.HWAccel {
+	// media as permanently missing. Outside the automatic pipeline, mirror
+	// handleStart's software retry for the accel StartupRetryHWAccel would
+	// change; other accels keep the existing register-immediately behavior.
+	retryAccel := opts.HWAccel
+	if !adaptive {
+		retryAccel = playback.StartupRetryHWAccel(opts)
+	}
+	if retryAccel != opts.HWAccel {
 		if _, waitErr := session.WaitForManifest(playback.ManifestStartupTimeout); waitErr != nil {
 			if session.IsRunning() {
 				slog.WarnContext(r.Context(), "reconstructed transcode slow to produce a manifest", "component", "transcodenode",
@@ -2125,7 +2169,16 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if !s.requireApprovedInputPath(w, r, claims.MediaPath) {
+	theme := claims.PlayMethod == streamtoken.PlayMethodThemeAAC
+	if theme {
+		if !claims.TranscodeAudio || !claims.AudioOnly || claims.TargetCodecAudio != themesongs.CodecAAC || claims.ThemeID <= 0 {
+			http.NotFound(w, r)
+			return
+		}
+		if !s.requireApprovedThemeInput(w, r, claims) {
+			return
+		}
+	} else if !s.requireApprovedInputPath(w, r, claims.MediaPath) {
 		return
 	}
 	seekSeconds := 0.0
@@ -2225,8 +2278,12 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		if source == streamtoken.StartedAtSourceNone {
 			startedAt = time.Now().UTC()
 		}
+		trackerType := "remux"
+		if theme {
+			trackerType = "theme_audio"
+		}
 		s.tracker.Track(ctx, nodesessions.SessionInfo{
-			SessionID: playbackSessionID, NodeURL: s.tracker.NodeURL(), NodeName: s.tracker.NodeName(), Type: "remux",
+			SessionID: playbackSessionID, NodeURL: s.tracker.NodeURL(), NodeName: s.tracker.NodeName(), Type: trackerType,
 			CodecAudio: claims.TargetCodecAudio, StartedAt: startedAt.Format(time.RFC3339), StartedAtUnixNano: startedAt.UnixNano(),
 			StartedAtSource: string(source), AuthUserID: claims.UserID, ProfileID: claims.ProfileID, MediaFileID: claims.MediaFileID,
 		})
@@ -2234,7 +2291,13 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	}
 
 	request := r.WithContext(ctx)
-	s.attachTelemetrySession(request, transportID)
+	if theme {
+		// A theme conversion is a transfer attributed to its viewer, not a
+		// playback session.
+		streamtelemetry.Attach(ctx, streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(claims.UserID), ProfileID: claims.ProfileID})
+	} else {
+		s.attachTelemetrySession(request, transportID)
+	}
 	if err := playback.ServeRemuxWithOptions(w, request, claims.MediaPath, "mp4", seekSeconds, claims.TranscodeAudio, claims.AudioTrackIndex, claims.DVProfile, playback.RemuxServeOptions{
 		DVMode: playback.RemuxDVMode(claims.RemuxDVMode), FFmpegPath: cfg.Playback.FFmpegPath,
 		ContentType: playback.RemuxContentType(claims.AudioOnly), AudioOnly: claims.AudioOnly,
@@ -2261,7 +2324,28 @@ func (s *Server) progressiveRemuxRunsOnThisNode(claims *streamtoken.Claims) bool
 }
 
 func transcodeNodeRemuxPlayMethod(method string) bool {
-	return method == string(playback.PlayRemux) || method == streamtoken.PlayMethodAudioDownmixRemux
+	return method == string(playback.PlayRemux) || method == streamtoken.PlayMethodAudioDownmixRemux ||
+		method == streamtoken.PlayMethodThemeAAC
+}
+
+// requireApprovedThemeInput is requireApprovedInputPath for theme conversions:
+// the theme authority, not the media_files catalog, approves the input.
+func (s *Server) requireApprovedThemeInput(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims) bool {
+	if s.themeInputs == nil {
+		http.Error(w, "theme input authority unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	allowed, err := s.themeInputs.AllowedTheme(r.Context(), claims.ThemeID, claims.MediaPath, claims.ThemeSize, time.Unix(0, claims.ThemeModifiedUnixNano))
+	if err != nil {
+		slog.ErrorContext(r.Context(), "authorize theme conversion input", "component", "transcodenode", "error", err)
+		http.Error(w, "theme input authority unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	if !allowed {
+		http.Error(w, "theme input is not an approved theme file", http.StatusBadRequest)
+		return false
+	}
+	return true
 }
 
 // progressiveRemuxAuthorityActive checks the durable transport record written

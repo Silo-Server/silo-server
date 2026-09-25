@@ -3,8 +3,10 @@ package scanner
 import (
 	"path/filepath"
 
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
 const (
@@ -32,6 +34,12 @@ type rootInferenceResult struct {
 
 // ObserveRoot derives the logical content root for a media file path.
 func ObserveRoot(filePath string, libraryType string, libraryRoots ...string) (RootObservation, bool) {
+	kind := librarykind.Of(libraryType)
+	if kind.Movie || kind.TV || kind.Mixed {
+		if _, theme := themesongs.OwnerDirectory(filePath); theme {
+			return RootObservation{}, false
+		}
+	}
 	result := inferRootAssignments([]string{filePath}, libraryType, 0, nil, libraryRoots...)
 	assignment, ok := result.Assignments[filepath.Clean(filePath)]
 	if !ok {

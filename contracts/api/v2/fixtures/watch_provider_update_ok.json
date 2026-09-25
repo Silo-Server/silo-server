@@ -10,5 +10,7 @@
   "export_watchlist_enabled": false,
   "sync_watchlist_removals_enabled": false,
   "sync_watchlist_order_enabled": false,
-  "scrobble_enabled": false
+  "scrobble_enabled": false,
+  "import_ratings_enabled": false,
+  "export_ratings_enabled": false
 }
