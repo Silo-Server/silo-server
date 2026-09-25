@@ -203,4 +203,32 @@ func TestRemapSubtitleSelectionAcrossFormatsNeedsOneDeliverableMatch(t *testing.
 	if got, err := remap(commentary, ambiguous, 1); err != nil || got != 1 {
 		t.Fatalf("title disambiguation: got %d, %v; want the Commentary track at 1", got, err)
 	}
+
+	// External bitmaps can be neither burned in nor served as a sidecar, so an
+	// external PGS neither wins the fallback nor makes it ambiguous.
+	externalBitmap := &models.MediaFile{ID: 2,
+		ExternalSubtitles: []models.ExternalSubtitle{{Language: "fre", Format: "hdmv_pgs_subtitle"}},
+		SubtitleTracks:    []models.SubtitleTrack{{Language: "fre", Codec: "subrip"}},
+	}
+	if got, err := remap(pgs, externalBitmap, 0); err != nil || got != 1 {
+		t.Fatalf("external bitmap: got %d, %v; want embedded SRT at 1", got, err)
+	}
+	onlyExternalBitmap := &models.MediaFile{ID: 2, ExternalSubtitles: []models.ExternalSubtitle{{Language: "fre", Format: "hdmv_pgs_subtitle"}}}
+	if _, err := remap(pgs, onlyExternalBitmap, 0); err == nil {
+		t.Fatal("an external bitmap was chosen as the only fallback")
+	}
+
+	// The container's embedded title is what the viewer sees when no stored
+	// title exists, so it disambiguates too.
+	embeddedTitled := &models.MediaFile{ID: 1, SubtitleTracks: []models.SubtitleTrack{
+		{Language: "fre", Codec: "hdmv_pgs_subtitle"},
+		{Language: "fre", Codec: "hdmv_pgs_subtitle", EmbeddedTitle: "Commentary"},
+	}}
+	embeddedTargets := &models.MediaFile{ID: 2, SubtitleTracks: []models.SubtitleTrack{
+		{Language: "fre", Codec: "subrip", EmbeddedTitle: "Main"},
+		{Language: "fre", Codec: "subrip", EmbeddedTitle: "Commentary"},
+	}}
+	if got, err := remap(embeddedTitled, embeddedTargets, 1); err != nil || got != 1 {
+		t.Fatalf("embedded title disambiguation: got %d, %v; want the Commentary track at 1", got, err)
+	}
 }

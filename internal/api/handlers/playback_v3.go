@@ -6197,7 +6197,7 @@ func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, 
 	switch {
 	case index < len(source.ExternalSubtitles):
 		wanted := source.ExternalSubtitles[index]
-		wantLanguage, wantTitle, wantForced, wantHearingImpaired = wanted.Language, wanted.Title, wanted.Forced, wanted.HearingImpaired
+		wantLanguage, wantTitle, wantForced, wantHearingImpaired = wanted.Language, displayedSubtitleTitleV3(wanted.Title, wanted.EmbeddedTitle), wanted.Forced, wanted.HearingImpaired
 		for candidateIndex, candidate := range target.ExternalSubtitles {
 			if strings.EqualFold(candidate.Language, wanted.Language) && strings.EqualFold(candidate.Format, wanted.Format) && candidate.Forced == wanted.Forced && candidate.HearingImpaired == wanted.HearingImpaired {
 				targetIndex = candidateIndex
@@ -6206,7 +6206,7 @@ func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, 
 		}
 	case index < len(source.ExternalSubtitles)+len(source.SubtitleTracks):
 		wanted := source.SubtitleTracks[index-len(source.ExternalSubtitles)]
-		wantLanguage, wantTitle, wantForced, wantHearingImpaired = wanted.Language, wanted.Title, wanted.Forced, wanted.HearingImpaired
+		wantLanguage, wantTitle, wantForced, wantHearingImpaired = wanted.Language, displayedSubtitleTitleV3(wanted.Title, wanted.EmbeddedTitle), wanted.Forced, wanted.HearingImpaired
 		for candidateIndex, candidate := range target.SubtitleTracks {
 			if strings.EqualFold(candidate.Language, wanted.Language) && strings.EqualFold(candidate.Codec, wanted.Codec) && candidate.Forced == wanted.Forced && candidate.HearingImpaired == wanted.HearingImpaired {
 				targetIndex = len(target.ExternalSubtitles) + candidateIndex
@@ -6248,6 +6248,15 @@ func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, 
 // flags, whatever its format, or -1. Several such tracks (main dialog and
 // commentary, say) are narrowed by title; a match that stays ambiguous is not
 // treated as the same selection.
+// displayedSubtitleTitleV3 is the title the subtitle inventory shows a
+// viewer: the stored title, else the container's embedded one.
+func displayedSubtitleTitleV3(title, embeddedTitle string) string {
+	if strings.TrimSpace(title) != "" {
+		return title
+	}
+	return embeddedTitle
+}
+
 func subtitleVariantIndexV3(file *models.MediaFile, language, title string, forced, hearingImpaired bool) int {
 	type candidate struct {
 		index int
@@ -6255,13 +6264,15 @@ func subtitleVariantIndexV3(file *models.MediaFile, language, title string, forc
 	}
 	var candidates []candidate
 	for i, track := range file.ExternalSubtitles {
-		if strings.EqualFold(track.Language, language) && track.Forced == forced && track.HearingImpaired == hearingImpaired && playback.SubtitleFormatDeliverableV3(track.Format) {
-			candidates = append(candidates, candidate{index: i, title: track.Title})
+		// The policy burns in embedded bitmaps only and serves no external
+		// bitmap sidecar, so an external candidate must be text.
+		if strings.EqualFold(track.Language, language) && track.Forced == forced && track.HearingImpaired == hearingImpaired && playback.SubtitleFormatDeliverableV3(track.Format) && !playback.NeedsBurnIn(track.Format) {
+			candidates = append(candidates, candidate{index: i, title: displayedSubtitleTitleV3(track.Title, track.EmbeddedTitle)})
 		}
 	}
 	for i, track := range file.SubtitleTracks {
 		if strings.EqualFold(track.Language, language) && track.Forced == forced && track.HearingImpaired == hearingImpaired && playback.SubtitleFormatDeliverableV3(track.Codec) {
-			candidates = append(candidates, candidate{index: len(file.ExternalSubtitles) + i, title: track.Title})
+			candidates = append(candidates, candidate{index: len(file.ExternalSubtitles) + i, title: displayedSubtitleTitleV3(track.Title, track.EmbeddedTitle)})
 		}
 	}
 	if len(candidates) == 1 {
