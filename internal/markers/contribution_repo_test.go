@@ -328,33 +328,42 @@ func TestContributionStoreCandidatesOrderByConfidenceAndSkipClaimed(t *testing.T
 		t.Fatalf("age invalid claim: %v", err)
 	}
 
-	providers := []string{fixture.provider}
-	var got []int
-	var after *ContributionCandidate
-	for {
-		page, err := fixture.store.CandidateLocalIntroFiles(ctx, 0.9, providers, after, 1)
-		if err != nil {
-			t.Fatalf("CandidateLocalIntroFiles: %v", err)
-		}
-		if len(page) == 0 {
-			break
-		}
-		for _, c := range page {
-			got = append(got, c.FileID)
-		}
-		after = &page[len(page)-1]
+	seeded := make(map[int]bool, len(fileIDs))
+	for _, id := range fileIDs {
+		seeded[id] = true
 	}
+	// candidates pages through every candidate and keeps the seeded files, so
+	// other eligible rows in the test database cannot change the result.
+	candidates := func(providers []string, pageSize int) []int {
+		t.Helper()
+		var got []int
+		var after *ContributionCandidate
+		for {
+			page, err := fixture.store.CandidateLocalIntroFiles(ctx, 0.9, providers, after, pageSize)
+			if err != nil {
+				t.Fatalf("CandidateLocalIntroFiles: %v", err)
+			}
+			if len(page) == 0 {
+				return got
+			}
+			for _, c := range page {
+				if seeded[c.FileID] {
+					got = append(got, c.FileID)
+				}
+			}
+			after = &page[len(page)-1]
+		}
+	}
+
+	got := candidates([]string{fixture.provider}, 1)
 	want := []int{fileIDs[1], fileIDs[7], fileIDs[6], fileIDs[2], fileIDs[0]}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("candidates = %v, want %v (confidence order; current-target claim, season 0, and low confidence excluded)", got, want)
 	}
 
 	// Another provider without a claim still sees the claimed file.
-	other, err := fixture.store.CandidateLocalIntroFiles(ctx, 0.9, []string{fixture.provider, fixture.provider + "-other"}, nil, 10)
-	if err != nil {
-		t.Fatalf("CandidateLocalIntroFiles: %v", err)
-	}
-	if len(other) != 7 || other[0].FileID != fileIDs[3] {
-		t.Fatalf("candidates for two providers = %+v, want the claimed file first", other)
+	other := candidates([]string{fixture.provider, fixture.provider + "-other"}, 10)
+	if len(other) != 7 || other[0] != fileIDs[3] {
+		t.Fatalf("candidates for two providers = %v, want the claimed file first", other)
 	}
 }
