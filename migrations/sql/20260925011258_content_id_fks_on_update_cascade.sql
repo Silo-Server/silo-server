@@ -10,6 +10,13 @@
 --
 -- This repeats that migration's rebuild for any FK still lacking an ON UPDATE
 -- clause. pg_get_constraintdef carries the existing ON DELETE clause through.
+--
+-- Each DROP/ADD CONSTRAINT locks the child table and its parent (media_items,
+-- seasons or episodes), and re-adding the key scans the child table to
+-- validate it. The loop runs in one transaction, so those locks block writes
+-- to every table it touches until the migration commits. Schedule a
+-- maintenance window and budget the migration timeout for the size of the
+-- affected child tables.
 
 -- +goose Up
 -- +goose StatementBegin
