@@ -289,6 +289,12 @@ func TestCanWriteMarkerUpdateLetsChromaprintRescoreDownward(t *testing.T) {
 	if CanWriteMarkerUpdate(payload("chromaprint:v3", 0.9, 10, 70), payload("chromaprint:v3", 0.9, 10.2, 70.2)) {
 		t.Error("an identical Chromaprint result should stay a no-op")
 	}
+	if !CanWriteMarkerUpdate(payload("chromaprint:dialogue:v3", 0.9, 14, 70), payload("chromaprint:v3", 0.65, 10, 70)) { //nolint:misspell // Persisted algorithm identifier.
+		t.Error("a same-version plain rescore must replace a refined marker whose subtitle is gone")
+	}
+	if CanWriteMarkerUpdate(payload("chromaprint:dialogue:v3", 0.9, 14, 70), payload("chromaprint:v2", 0.9, 10, 70)) { //nolint:misspell // Persisted algorithm identifier.
+		t.Error("an older Chromaprint version must not replace a newer refined marker")
+	}
 	if CanWriteMarkerUpdate(payload("chapter:v1", 0.95, 60, 120), payload("chapter:v1", 0.85, 60, 125)) {
 		t.Error("a lower-confidence chapter result must not replace a higher one")
 	}

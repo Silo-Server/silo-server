@@ -45,18 +45,21 @@ func CanWriteMarkerUpdate(existing, incoming SegmentPayload) bool {
 		if existing.Confidence == nil || existing.Algorithm == "" {
 			return true
 		}
+		// Chromaprint results are scored against the whole season on every
+		// analysis, so the latest result of the same detector version
+		// replaces the stored one even at lower confidence: a season that no
+		// longer agrees must not keep an older, higher score. A plain and a
+		// subtitle-refined result of one version count as the same detector,
+		// so a file that loses its subtitle also loses the refined score.
+		if sameChromaprintVersion(existing.Algorithm, incoming.Algorithm) {
+			return incoming.Algorithm != existing.Algorithm ||
+				confidenceGreater(incoming.Confidence, existing.Confidence) ||
+				confidenceGreater(existing.Confidence, incoming.Confidence) ||
+				!sameMarkerRanges(existing, incoming)
+		}
 		currentRank, nextRank := scannerAlgorithmPriority(existing.Algorithm), scannerAlgorithmPriority(incoming.Algorithm)
 		if currentRank != nextRank {
 			return nextRank > currentRank
-		}
-		// Chromaprint results are scored against the whole season on every
-		// analysis, so the latest result of the same detector replaces the
-		// stored one even at lower confidence: a season that no longer agrees
-		// must not keep an older, higher score.
-		if incoming.Algorithm == existing.Algorithm && seasonScoredAlgorithm(incoming.Algorithm) {
-			return confidenceGreater(incoming.Confidence, existing.Confidence) ||
-				confidenceGreater(existing.Confidence, incoming.Confidence) ||
-				!sameMarkerRanges(existing, incoming)
 		}
 		if confidenceGreater(incoming.Confidence, existing.Confidence) {
 			return true
@@ -137,10 +140,21 @@ func markerRanges(payload SegmentPayload) []models.MarkerSegment {
 	return ranges
 }
 
-// seasonScoredAlgorithm reports scanner algorithms whose confidence is
+// sameChromaprintVersion reports whether two scanner algorithms are the plain
+// or subtitle-refined result of one Chromaprint version, whose confidence is
 // recomputed from the whole season each time it is analyzed.
-func seasonScoredAlgorithm(algorithm string) bool {
-	return strings.HasPrefix(algorithm, "chromaprint:")
+func sameChromaprintVersion(a, b string) bool {
+	const family, refined = "chromaprint:", "dialogue:" //nolint:misspell // Persisted algorithm identifier.
+	version := func(algorithm string) (string, bool) {
+		rest, ok := strings.CutPrefix(algorithm, family)
+		if !ok {
+			return "", false
+		}
+		return strings.TrimPrefix(rest, refined), true
+	}
+	va, okA := version(a)
+	vb, okB := version(b)
+	return okA && okB && va == vb
 }
 
 // scannerAlgorithmPriority ranks local detector outputs. A superseded version
