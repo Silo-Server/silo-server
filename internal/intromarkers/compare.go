@@ -120,21 +120,37 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 	for fileID := range results {
 		neighborMatched[fileID] = true
 	}
+	// The search walks episodes, not files, outward from the file's own: a
+	// file among many versions of its episode would otherwise reach every
+	// episode on one side before the nearer ones on the other.
+	groups := episodeGroups(ordered)
+	groupOf := make([]int, len(ordered))
+	for g, group := range groups {
+		for i := group[0]; i < group[1]; i++ {
+			groupOf[i] = g
+		}
+	}
 	for i := range ordered {
 		if neighborMatched[ordered[i].Candidate.FileID] {
 			continue
 		}
 		extra := map[string]struct{}{}
-		for distance := 1; distance < len(ordered); distance++ {
-			for _, j := range [2]int{i - distance, i + distance} {
-				if j < 0 || j >= len(ordered) || !comparable(i, j) {
+		g := groupOf[i]
+		for distance := 1; distance < len(groups) && len(extra) < compareFallbackEpisodes; distance++ {
+			for _, h := range [2]int{g - distance, g + distance} {
+				if h < 0 || h >= len(groups) {
 					continue
 				}
-				if _, done := compared[[2]int{min(i, j), max(i, j)}]; done {
-					continue
-				}
-				if within(extra, compareFallbackEpisodes, ordered[j].Candidate.EpisodeID) {
-					compare(i, j)
+				for j := groups[h][0]; j < groups[h][1]; j++ {
+					if !comparable(i, j) {
+						continue
+					}
+					if _, done := compared[[2]int{min(i, j), max(i, j)}]; done {
+						continue
+					}
+					if within(extra, compareFallbackEpisodes, ordered[j].Candidate.EpisodeID) {
+						compare(i, j)
+					}
 				}
 			}
 		}
@@ -161,6 +177,21 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 		best[fileID] = segment
 	}
 	return best
+}
+
+// episodeGroups splits files sorted in episode order into [start, end) index
+// ranges, one per episode. A file with no episode ID is a group of its own.
+func episodeGroups(ordered []fingerprintInput) [][2]int {
+	var groups [][2]int
+	for i := range ordered {
+		episode := ordered[i].Candidate.EpisodeID
+		if i > 0 && episode != "" && episode == ordered[i-1].Candidate.EpisodeID {
+			groups[len(groups)-1][1] = i + 1
+			continue
+		}
+		groups = append(groups, [2]int{i, i + 1})
+	}
+	return groups
 }
 
 // consensusSegment picks the pair result that the most partner episodes agree

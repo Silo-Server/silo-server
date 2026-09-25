@@ -401,3 +401,59 @@ func TestCompareFingerprintsWidensSearchForFilesOnlyAnotherSearchReached(t *test
 		t.Fatalf("episode 12 = %+v, want its 37s intro to win over the 17s cue", got)
 	}
 }
+
+func TestCompareFingerprintsFallbackSearchesNearestEpisodesFirst(t *testing.T) {
+	// Episode 10's only partner is episode 1, nine episodes to its left.
+	// Episode 9 has 60 versions, so the 59 right-hand episodes the neighbor
+	// pass skipped are fewer files away than episode 1. Walking files would
+	// spend the fallback budget there first; walking episodes reaches episode
+	// 1 at distance nine. Episode 1 matches episode 2 on a separate cue, so it
+	// never runs a fallback of its own that could find episode 10.
+	rng := rand.New(rand.NewPCG(0, 19))
+	shared := func(n int) []uint32 {
+		out := make([]uint32, n)
+		for i := range out {
+			out[i] = rng.Uint32()
+		}
+		return out
+	}
+	cue, intro := shared(140), shared(300)
+	var inputs []fingerprintInput
+	add := func(fileID, number int) {
+		points := make([]uint32, 900)
+		prng := rand.New(rand.NewPCG(uint64(fileID), 23))
+		for i := range points {
+			points[i] = prng.Uint32()
+		}
+		switch fileID {
+		case 1:
+			copy(points[100:], intro)
+			copy(points[600:], cue)
+		case 2:
+			copy(points[600:], cue)
+		case 10:
+			copy(points[100:], intro)
+		}
+		inputs = append(inputs, fingerprintInput{
+			Candidate: Candidate{FileID: fileID, EpisodeID: fmt.Sprintf("e%d", number), EpisodeNumber: number, DurationSeconds: 3600},
+			Points:    points,
+		})
+	}
+	for e := 1; e <= 8; e++ {
+		add(e, e)
+	}
+	for v := 0; v < 60; v++ {
+		add(1000+v, 9)
+	}
+	for e := 10; e <= 80; e++ {
+		add(e, e)
+	}
+	segments := CompareFingerprints(inputs, DefaultConfig("ffmpeg"))
+	got, ok := segments[10]
+	if !ok {
+		t.Fatal("episode 10 should reach episode 1 through the fallback")
+	}
+	if want := 100*DefaultPointHopSeconds + chromaprintStartLeadSeconds; math.Abs(got.Start-want) > 0.2 {
+		t.Fatalf("episode 10 start = %.2f, want the shared intro at %.2f", got.Start, want)
+	}
+}
