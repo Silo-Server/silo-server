@@ -39,6 +39,12 @@ func newMapper(codec *ResourceIDCodec, cfg *config.Config) *mapper {
 	return &mapper{codec: codec, serverID: serverID, imageTagSigner: newImageTagSigner(imageTagSecret)}
 }
 
+// displayPreferencesID is Jellyfin's DisplayPreferencesId for a view: the
+// view's GUID in "N" format (no hyphens).
+func displayPreferencesID(viewID string) string {
+	return strings.ReplaceAll(viewID, "-", "")
+}
+
 func (m *mapper) viewFromLibrary(library upstreamUserLibrary) baseItemDTO {
 	imgTags := map[string]string{}
 	routeID := m.codec.EncodeIntID(EncodedIDLibrary, int64(library.ID))
@@ -58,7 +64,10 @@ func (m *mapper) viewFromLibrary(library upstreamUserLibrary) baseItemDTO {
 		ServerID:       m.serverID,
 		CollectionType: libraryCollectionType(library.Type),
 		SortName:       strings.ToLower(library.Name),
-		ImageTags:      imgTags,
+		// Jellyfin clients key per-library view settings on this; Jellyfin
+		// for Android TV crashes reopening a library without it.
+		DisplayPreferencesID: displayPreferencesID(routeID),
+		ImageTags:            imgTags,
 		UserData: &itemUserDataDTO{
 			Key:    routeID,
 			ItemID: routeID,

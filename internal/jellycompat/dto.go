@@ -1,6 +1,9 @@
 package jellycompat
 
-import "encoding/json"
+import (
+	"cmp"
+	"encoding/json"
+)
 
 // queryResultDTO mirrors Jellyfin's common paged result envelope.
 type queryResultDTO struct {
@@ -256,19 +259,44 @@ type mediaSourceDTO struct {
 	MediaStreams                        []mediaStreamDTO  `json:"MediaStreams,omitempty"`
 }
 
+// MarshalJSON adds the flag labels Jellyfin sets on audio and subtitle streams
+// (MediaStreamRepository): Default and External on both, the rest on subtitles. Clients build track names from them; Wholphin shows
+// "English SRT (null)" for an external track without LocalizedExternal.
+func (s mediaStreamDTO) MarshalJSON() ([]byte, error) {
+	type plain mediaStreamDTO
+	if s.Type == compatStreamTypeAudio || s.Type == compatStreamTypeSubtitle {
+		s.LocalizedDefault = cmp.Or(s.LocalizedDefault, "Default")
+		s.LocalizedExternal = cmp.Or(s.LocalizedExternal, "External")
+	}
+	if s.Type == compatStreamTypeSubtitle {
+		s.LocalizedUndefined = cmp.Or(s.LocalizedUndefined, "Undefined")
+		s.LocalizedForced = cmp.Or(s.LocalizedForced, "Forced")
+		s.LocalizedHearingImpaired = cmp.Or(s.LocalizedHearingImpaired, "Hearing Impaired")
+	}
+	return json.Marshal(plain(s))
+}
+
 type mediaStreamDTO struct {
-	Index                  int     `json:"Index"`
-	Type                   string  `json:"Type"`
-	Codec                  string  `json:"Codec,omitempty"`
-	Language               string  `json:"Language,omitempty"`
-	LocalizedLanguage      string  `json:"LocalizedLanguage,omitempty"`
-	LocalizedOriginal      string  `json:"LocalizedOriginal,omitempty"`
-	TimeBase               string  `json:"TimeBase,omitempty"`
-	DisplayTitle           string  `json:"DisplayTitle,omitempty"`
-	Title                  string  `json:"Title,omitempty"`
-	IsDefault              bool    `json:"IsDefault"`
-	IsExternal             bool    `json:"IsExternal"`
-	IsForced               bool    `json:"IsForced"`
+	Index                    int    `json:"Index"`
+	Type                     string `json:"Type"`
+	Codec                    string `json:"Codec,omitempty"`
+	Language                 string `json:"Language,omitempty"`
+	LocalizedLanguage        string `json:"LocalizedLanguage,omitempty"`
+	LocalizedOriginal        string `json:"LocalizedOriginal,omitempty"`
+	LocalizedUndefined       string `json:"LocalizedUndefined,omitempty"`
+	LocalizedDefault         string `json:"LocalizedDefault,omitempty"`
+	LocalizedForced          string `json:"LocalizedForced,omitempty"`
+	LocalizedExternal        string `json:"LocalizedExternal,omitempty"`
+	LocalizedHearingImpaired string `json:"LocalizedHearingImpaired,omitempty"`
+	TimeBase                 string `json:"TimeBase,omitempty"`
+	DisplayTitle             string `json:"DisplayTitle,omitempty"`
+	Title                    string `json:"Title,omitempty"`
+	IsDefault                bool   `json:"IsDefault"`
+	IsExternal               bool   `json:"IsExternal"`
+	IsForced                 bool   `json:"IsForced"`
+	// IsOriginal is required by the Jellyfin 12 SDK models; Silo does not track
+	// which audio track is the original language.
+	IsOriginal             bool    `json:"IsOriginal"`
 	IsHearingImpaired      bool    `json:"IsHearingImpaired"`
 	IsTextSubtitleStream   bool    `json:"IsTextSubtitleStream"`
 	SupportsExternalStream bool    `json:"SupportsExternalStream"`

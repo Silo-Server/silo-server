@@ -1645,6 +1645,7 @@ func (h *PlaybackHandler) warmCompatTextSubtitles(fileID int) {
 }
 
 const (
+	compatStreamTypeAudio          = "Audio"
 	compatStreamTypeSubtitle       = "Subtitle"
 	compatSubtitleDeliveryExternal = "External"
 )

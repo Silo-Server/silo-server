@@ -20,8 +20,11 @@ type systemInfoResponse struct {
 	CastReceiverApplications []struct{} `json:"CastReceiverApplications"`
 }
 
+// brandingConfigurationResponse is Jellyfin's BrandingOptionsDto;
+// jellyfin-sdk-kotlin requires SplashscreenEnabled.
 type brandingConfigurationResponse struct {
-	LoginDisclaimer string `json:"LoginDisclaimer"`
+	LoginDisclaimer     string `json:"LoginDisclaimer"`
+	SplashscreenEnabled bool   `json:"SplashscreenEnabled"`
 }
 
 type endpointInfoResponse struct {

@@ -86,6 +86,7 @@ func (h *ItemsHandler) collectionsView() baseItemDTO {
 		Name:                    "Collections",
 		ServerID:                h.mapper.serverID,
 		SortName:                "collections",
+		DisplayPreferencesID:    displayPreferencesID(collectionsViewID),
 		PrimaryImageAspectRatio: &posterAspect,
 		ImageTags:               map[string]string{"Primary": primaryTag},
 		UserData: &itemUserDataDTO{

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -441,6 +442,12 @@ func TestUserViews_PrependsCollectionsViewWhenVisible(t *testing.T) {
 	}
 	if result.Items[1].Name != "Movies" {
 		t.Fatalf("expected real library after the Collections view, got %+v", result.Items[1])
+	}
+	// Jellyfin for Android TV crashes reopening a view without DisplayPreferencesId.
+	for _, item := range result.Items {
+		if item.DisplayPreferencesID == "" || strings.Contains(item.DisplayPreferencesID, "-") {
+			t.Fatalf("view %q DisplayPreferencesId = %q, want hyphenless view id", item.Name, item.DisplayPreferencesID)
+		}
 	}
 }
 
