@@ -687,7 +687,7 @@ function UserForm({
   }
 
   const { data: libraries = [] } = useAdminLibraries();
-  const { data: accessGroups = [] } = useAccessGroups();
+  const { data: accessGroups = [], isSuccess: accessGroupsLoaded } = useAccessGroups();
   const [username, setUsername] = useState(user?.username ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
   const [password, setPassword] = useState("");
@@ -710,15 +710,19 @@ function UserForm({
   const createMutation = useCreateUser();
   const updateMutation = useUpdateUser();
   const isPending = createMutation.isPending || updateMutation.isPending;
-  // This form has no group picker: editing keeps the account's group, while a
-  // new account lands on the default group — except an admin, which the server
-  // deliberately leaves ungrouped (auth.Repository.CreateUser).
+  // This form has no group picker and sends no group for a regular account, so
+  // editing keeps the account's group, while a new account or an admin demoted
+  // here lands on the default group. An admin stays ungrouped
+  // (auth.Repository create and update).
+  const joinsDefaultGroup = !user || user.role === "admin";
   const defaultGroupID = accessGroups.find((group) => group.is_default)?.id ?? null;
-  const inheritGroupID = effectiveAccessGroupID(role, user ? user.access_group_id : defaultGroupID);
-  // A new regular account is grouped even before the list naming its default
-  // group has loaded; until then what it inherits is unknown, not the no-group
-  // defaults.
-  const awaitingDefaultGroup = !user && role !== "admin" && defaultGroupID === null;
+  const inheritGroupID = effectiveAccessGroupID(
+    role,
+    joinsDefaultGroup ? defaultGroupID : user.access_group_id,
+  );
+  // Until the group list loads, the default group such an account joins is
+  // unknown, and so is what it inherits; it is not the no-group defaults.
+  const awaitingDefaultGroup = joinsDefaultGroup && role !== "admin" && !accessGroupsLoaded;
   const hintSource = awaitingDefaultGroup ? "group" : policyDefaultSource(role, inheritGroupID);
   const inheritHints = awaitingDefaultGroup
     ? undefined
