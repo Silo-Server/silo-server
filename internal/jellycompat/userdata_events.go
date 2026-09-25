@@ -21,6 +21,13 @@ type UserStateEvents interface {
 // events whichever surface made the change.
 const userStateChangedEvent = "user_state.changed"
 
+// userStateChangeWatched is the first-party change kind for a watched-state
+// update.
+const userStateChangeWatched = "watched"
+
+// wsUserDataChanged is Jellyfin's socket message type for user-data updates.
+const wsUserDataChanged = "UserDataChanged"
+
 // maxWatchedEventsPerBatch caps the events one batch mutation publishes. A
 // Jellyfin client refreshes a whole list from any single UserDataChanged
 // entry, and marking a long series must not flood the hub's subscriber
@@ -55,7 +62,7 @@ func publishWatchedChange(ctx context.Context, events UserStateEvents, session *
 		_ = events.PublishJSON(ctx, evt.ChannelUserState, userStateChangedEvent, userStateChangedPayload{
 			ProfileID: session.ProfileID,
 			ContentID: contentID,
-			Change:    "watched",
+			Change:    userStateChangeWatched,
 			Played:    &played,
 		}, evt.PublishOptions{
 			UserID:    session.StreamAppUserID,
@@ -112,5 +119,5 @@ func userDataChangedFor(env evt.Envelope, session *Session, codec *ResourceIDCod
 	if err != nil {
 		return wsMessage{}, false
 	}
-	return wsMessage{MessageType: "UserDataChanged", Data: data}, true
+	return wsMessage{MessageType: wsUserDataChanged, Data: data}, true
 }

@@ -82,7 +82,7 @@ func TestPublishWatchedChangeAnnouncesEachItemUpToTheCap(t *testing.T) {
 	if first.channel != evt.ChannelUserState || first.event != userStateChangedEvent {
 		t.Fatalf("event %s/%s", first.channel, first.event)
 	}
-	if first.payload.ContentID != "episode-0" || first.payload.Change != "watched" ||
+	if first.payload.ContentID != "episode-0" || first.payload.Change != userStateChangeWatched ||
 		first.payload.Played == nil || !*first.payload.Played || first.payload.ProfileID != "profile-1" {
 		t.Fatalf("payload %+v", first.payload)
 	}
@@ -107,9 +107,9 @@ func TestUserDataChangedForTranslatesOnlyTheSessionsOwnChanges(t *testing.T) {
 	played := true
 
 	msg, ok := userDataChangedFor(userStateEnvelope(t, 3, "profile-1", userStateChangedPayload{
-		ProfileID: "profile-1", ContentID: "movie-1", Change: "watched", Played: &played,
+		ProfileID: "profile-1", ContentID: "movie-1", Change: userStateChangeWatched, Played: &played,
 	}), session, codec)
-	if !ok || msg.MessageType != "UserDataChanged" {
+	if !ok || msg.MessageType != wsUserDataChanged {
 		t.Fatalf("message %+v ok=%v", msg, ok)
 	}
 	var data userDataChangedMessage
@@ -123,10 +123,10 @@ func TestUserDataChangedForTranslatesOnlyTheSessionsOwnChanges(t *testing.T) {
 	}
 
 	for name, env := range map[string]evt.Envelope{
-		"other account":   userStateEnvelope(t, 4, "profile-1", userStateChangedPayload{ProfileID: "profile-1", ContentID: "movie-1", Change: "watched"}),
-		"other profile":   userStateEnvelope(t, 3, "profile-2", userStateChangedPayload{ProfileID: "profile-2", ContentID: "movie-1", Change: "watched"}),
+		"other account":   userStateEnvelope(t, 4, "profile-1", userStateChangedPayload{ProfileID: "profile-1", ContentID: "movie-1", Change: userStateChangeWatched}),
+		"other profile":   userStateEnvelope(t, 3, "profile-2", userStateChangedPayload{ProfileID: "profile-2", ContentID: "movie-1", Change: userStateChangeWatched}),
 		"no content":      userStateEnvelope(t, 3, "profile-1", userStateChangedPayload{ProfileID: "profile-1", Change: "progress"}),
-		"no account":      userStateEnvelope(t, 0, "profile-1", userStateChangedPayload{ProfileID: "profile-1", ContentID: "movie-1", Change: "watched"}),
+		"no account":      userStateEnvelope(t, 0, "profile-1", userStateChangedPayload{ProfileID: "profile-1", ContentID: "movie-1", Change: userStateChangeWatched}),
 		"another channel": {Channel: evt.ChannelCatalog, UserID: 3, ProfileID: "profile-1"},
 	} {
 		if msg, ok := userDataChangedFor(env, session, codec); ok {
@@ -163,13 +163,13 @@ func TestSocketForwardsUserDataChangedForTheSession(t *testing.T) {
 
 	played := true
 	// Another profile's change must not reach this socket; the session's own does.
-	events.envelopes <- userStateEnvelope(t, 3, "profile-2", userStateChangedPayload{ProfileID: "profile-2", ContentID: "movie-2", Change: "watched", Played: &played})
-	events.envelopes <- userStateEnvelope(t, 3, "profile-1", userStateChangedPayload{ProfileID: "profile-1", ContentID: "movie-1", Change: "watched", Played: &played})
+	events.envelopes <- userStateEnvelope(t, 3, "profile-2", userStateChangedPayload{ProfileID: "profile-2", ContentID: "movie-2", Change: userStateChangeWatched, Played: &played})
+	events.envelopes <- userStateEnvelope(t, 3, "profile-1", userStateChangedPayload{ProfileID: "profile-1", ContentID: "movie-1", Change: userStateChangeWatched, Played: &played})
 
 	if err := conn.ReadJSON(&msg); err != nil {
 		t.Fatal(err)
 	}
-	if msg.MessageType != "UserDataChanged" {
+	if msg.MessageType != wsUserDataChanged {
 		t.Fatalf("message %+v", msg)
 	}
 	var data userDataChangedMessage
