@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
@@ -308,9 +311,56 @@ func TestCreateStaticPlaySessionSelectsRouteMediaSource(t *testing.T) {
 		t.Fatalf("session item = %q route = %q; want movie-1 and %s", playSession.ItemID, playSession.RouteItemID, routeID)
 	}
 	r := httptest.NewRequest(http.MethodGet, "/Videos/"+routeID+"/stream?Static=true", nil)
-	_, reused, err := h.resolvePlaybackRoute(r, session, routeID, routeID)
+	_, reused, err := h.resolvePlaybackRoute(r, session, routeID, "")
 	if err != nil || reused == nil || reused.FileID != 43 {
 		t.Fatalf("reused source = %+v, err = %v; want file 43", reused, err)
+	}
+}
+
+type mediaSourceFiles map[int]*models.MediaFile
+
+func (files mediaSourceFiles) GetByID(_ context.Context, id int) (*models.MediaFile, error) {
+	if file := files[id]; file != nil {
+		return file, nil
+	}
+	return nil, scanner.ErrFileNotFound
+}
+
+func TestStaticMediaSourceRouteKeepsVersionAcrossRangeRequests(t *testing.T) {
+	for _, clientSessionID := range []string{"", "client-session"} {
+		t.Run("clientSessionID="+clientSessionID, func(t *testing.T) {
+			h, _, _ := newStaticDirectPlayHandler(t)
+			detail := h.content.(*stubContentService).detail
+			second := detail.Versions[0]
+			second.FileID = 43
+			second.FilePath = filepath.Join(t.TempDir(), "second.mkv")
+			if err := os.WriteFile(second.FilePath, []byte("second version bytes"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			detail.Versions = append(detail.Versions, second)
+			h.fileResolver = mediaSourceFiles{
+				42: {ID: 42, FilePath: detail.Versions[0].FilePath},
+				43: {ID: 43, FilePath: second.FilePath},
+			}
+			h.codec.SetMediaSourceOwnerLookup(mediaSourceOwners{42: "movie-1", 43: "movie-1"})
+			routeID := h.codec.EncodeIntID(EncodedIDMediaSource, 43)
+			for _, span := range []struct{ byteRange, want string }{
+				{"bytes=0-5", "second"},
+				{"bytes=7-13", "version"},
+			} {
+				req := httptest.NewRequest(http.MethodGet, "/Videos/"+routeID+"/stream?Static=true&PlaySessionId="+clientSessionID, nil)
+				req.Header.Set("Range", span.byteRange)
+				routeCtx := chi.NewRouteContext()
+				routeCtx.URLParams.Add("id", routeID)
+				ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+				ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"})
+				rec := httptest.NewRecorder()
+				h.HandleVideoStream(rec, req.WithContext(ctx))
+				if rec.Code != http.StatusPartialContent || rec.Body.String() != span.want {
+					t.Fatalf("range %s: status = %d, body = %q; want 206 and %q", span.byteRange, rec.Code, rec.Body.String(), span.want)
+				}
+			}
+		})
 	}
 }
 

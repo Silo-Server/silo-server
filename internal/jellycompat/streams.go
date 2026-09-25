@@ -3388,6 +3388,11 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 	}
 	allow4KTranscode := h.allow4KVideoTranscode(ctx)
 	for _, version := range detail.Versions {
+		// Reused requests and reports may omit MediaSourceId. Keep their
+		// default source bound to the file selected by the route.
+		if sourceFromRoute && int64(version.FileID) != routeFileID {
+			continue
+		}
 		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps, streamLocation: string(streamlocation.FromContext(ctx))}, allow4KTranscode)
 		sources = append(sources, source)
 	}
