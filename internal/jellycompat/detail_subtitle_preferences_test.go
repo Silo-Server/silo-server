@@ -63,13 +63,15 @@ func TestItemDetailSubtitlePreferenceCarriesIntoPlayback(t *testing.T) {
 				}
 				playback := &PlaybackHandler{content: content, codec: codec, deviceProfiles: NewDeviceProfileStore(time.Hour, nil), playbackStore: NewPlaybackSessionStore(time.Hour, nil), SubtitleRepo: repo}
 				body, _ := json.Marshal(map[string]int{"SubtitleStreamIndex": selected})
-				response := postPlaybackInfo(t, playback, routeID, string(body))
-				got := -1
-				if index := response.MediaSources[0].DefaultSubtitleStreamIndex; index != nil {
-					got = *index
-				}
-				if got != tc.want {
-					t.Fatalf("playback subtitle = %d, want %d", got, tc.want)
+				for _, request := range []string{`{}`, string(body)} {
+					response := postPlaybackInfo(t, playback, routeID, request)
+					got := -1
+					if index := response.MediaSources[0].DefaultSubtitleStreamIndex; index != nil {
+						got = *index
+					}
+					if got != tc.want {
+						t.Fatalf("request %s: playback subtitle = %d, want %d", request, got, tc.want)
+					}
 				}
 				off := postPlaybackInfo(t, playback, routeID, `{"SubtitleStreamIndex":-1}`)
 				if off.MediaSources[0].DefaultSubtitleStreamIndex != nil {
@@ -112,5 +114,42 @@ func TestItemDetailUsesSavedJellyfinModeForCurrentProfile(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("profile %s selected %d, want %d", tc.profile, got, tc.want)
 		}
+	}
+}
+
+// Smart follows the negotiated audio only while subtitles remain automatic.
+// A client-provided Off cannot be distinguished from an intentional user choice.
+func TestSmartSubtitlesFollowPlaybackAudioUnlessExplicitlyOff(t *testing.T) {
+	for _, tc := range []struct {
+		name, codec, body       string
+		wantAudio, wantSubtitle int
+	}{
+		{"English audio", "aac", `{}`, 1, -1},
+		{"requested French audio", "aac", `{"AudioStreamIndex":2}`, 2, 3},
+		{"requested French audio with Off", "aac", `{"AudioStreamIndex":2,"SubtitleStreamIndex":-1}`, 2, -1},
+		{"device falls back to French", "truehd", `{}`, 2, 3},
+		{"device fallback with Off", "truehd", `{"SubtitleStreamIndex":-1}`, 2, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			version := catalog.FileVersion{FileID: 42, Container: "mkv", VideoTracks: []models.VideoTrack{{Codec: "h264"}},
+				AudioTracks:    []models.AudioTrack{{Codec: tc.codec, Language: "en", Default: true}, {Codec: "aac", Language: "fr"}},
+				SubtitleTracks: []catalog.VersionSubtitleTrack{{Index: 3, Codec: "subrip", Language: "en", Default: true}},
+			}
+			detail := &upstreamItemDetail{ContentID: "item-1", Type: "movie", Versions: []catalog.FileVersion{version}, SubtitleMode: "auto", SubtitleModeSet: true, SubtitleLanguage: "en", ShowForcedSubtitles: true}
+			codec := NewResourceIDCodec()
+			h := &PlaybackHandler{content: &stubContentService{detail: detail}, codec: codec, deviceProfiles: NewDeviceProfileStore(time.Hour, nil), playbackStore: NewPlaybackSessionStore(time.Hour, nil)}
+			response := postPlaybackInfo(t, h, codec.EncodeStringID(EncodedIDItem, detail.ContentID), tc.body)
+			source := response.MediaSources[0]
+			if source.DefaultAudioStreamIndex == nil || *source.DefaultAudioStreamIndex != tc.wantAudio {
+				t.Fatalf("audio = %v, want %d", source.DefaultAudioStreamIndex, tc.wantAudio)
+			}
+			got := -1
+			if source.DefaultSubtitleStreamIndex != nil {
+				got = *source.DefaultSubtitleStreamIndex
+			}
+			if got != tc.wantSubtitle {
+				t.Fatalf("subtitle = %d, want %d", got, tc.wantSubtitle)
+			}
+		})
 	}
 }
