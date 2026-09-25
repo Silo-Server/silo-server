@@ -100,3 +100,33 @@ func TestEventsSocketV2TrustedProxyDenialPreservesTicket(t *testing.T) {
 		t.Fatalf("hello=%s error=%v", body, err)
 	}
 }
+
+// TestEventsSocketV2TraefikWebSocketForwardedProto covers #1089: Traefik
+// forwards a TLS WebSocket upgrade with X-Forwarded-Proto: wss, and the
+// browser's https origin must still pass the origin check and open the socket.
+func TestEventsSocketV2TraefikWebSocketForwardedProto(t *testing.T) {
+	h, _ := socketTestHandler()
+	cidrs, _ := clientip.ParseCIDRs("127.0.0.0/8,::1/128")
+	server := httptest.NewServer(clientip.Middleware(clientip.NewResolver(cidrs))(h))
+	defer server.Close()
+	ticket := socketTestTicket(t, h, time.Now().Add(time.Minute))
+	dialer := websocket.Dialer{Subprotocols: []string{EventsSocketProtocol, eventsTicketProtocolPrefix + ticket}}
+	endpoint := "ws" + strings.TrimPrefix(server.URL, "http") + "?channels=user_state"
+	origin := "https" + strings.TrimPrefix(server.URL, "http")
+	headers := http.Header{"Origin": []string{origin}, "X-Forwarded-Proto": []string{"wss"}, "X-Forwarded-For": []string{"198.51.100.1"}}
+	conn, resp, err := dialer.DialContext(t.Context(), endpoint, headers)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("wss-forwarded handshake: %v, %v", resp, err)
+	}
+	defer conn.Close()
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	_, body, err := conn.ReadMessage()
+	if err != nil || !strings.Contains(string(body), `"type":"hello"`) {
+		t.Fatalf("hello=%s error=%v", body, err)
+	}
+}
