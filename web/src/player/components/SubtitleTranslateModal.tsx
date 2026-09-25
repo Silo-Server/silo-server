@@ -6,6 +6,7 @@ import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
 import { playerV2 } from "../player-v2";
 import { PlayerFetchError } from "../player-fetch";
 import { LANGUAGES, getLanguageName, normalizeLanguageCode } from "../utils/languageNames";
+import { isSubtitleFormatLabel } from "../utils/subtitleCodecs";
 import {
   buildSubtitleTranslateRequest,
   isTranslatableSource,
@@ -28,10 +29,38 @@ interface SubtitleTranslateModalProps {
   onClose: () => void;
 }
 
-function sourceLabel(track: PlayerSubtitleInfo): string {
+// sourceLabel names a translation source so full, SDH and forced tracks in one
+// language can be told apart: the track title when it says more than the
+// language or format (as the subtitle menu shows it), then Forced and SDH when
+// the title does not already say so, then where the track comes from.
+export function sourceLabel(track: PlayerSubtitleInfo): string {
   const lang = getLanguageName(track.language) || track.language || "Unknown";
-  const origin = track.source ? ` · ${track.source}` : "";
-  return `${lang}${origin}`;
+  const title = track.label?.trim() ?? "";
+  const hasDetail =
+    title !== "" &&
+    title !== track.language &&
+    title !== lang &&
+    !isSubtitleFormatLabel(title, track.codec);
+  const parts = [lang];
+  if (hasDetail) parts.push(title);
+  if (track.forced && !/\bforced\b/i.test(title)) parts.push("Forced");
+  if (track.hearing_impaired && !/\b(sdh|cc|hearing)\b/i.test(title)) parts.push("SDH");
+  if (track.source) parts.push(track.source);
+  return parts.join(" · ");
+}
+
+// sourceLabels labels every source track, numbering any that would still read
+// the same so each option in the picker is distinct.
+export function sourceLabels(tracks: PlayerSubtitleInfo[]): Map<number, string> {
+  const labels = tracks.map((track) => sourceLabel(track));
+  const counts = new Map<string, number>();
+  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1);
+  return new Map(
+    tracks.map((track, i) => [
+      track.index,
+      (counts.get(labels[i]) ?? 0) > 1 ? `${labels[i]} · track ${track.index + 1}` : labels[i],
+    ]),
+  );
 }
 
 function audioLabel(track: PlayerAudioTrack, i: number): string {
@@ -67,6 +96,7 @@ export function SubtitleTranslateModal({
   // Only offer sources the server can actually translate (excludes live tracks,
   // bitmap embedded tracks, and ASS/non-text external/downloaded tracks).
   const sourceTracks = useMemo(() => tracks.filter(isTranslatableSource), [tracks]);
+  const sourceOptionLabels = useMemo(() => sourceLabels(sourceTracks), [sourceTracks]);
   const canTranslate = translateEnabled && sourceTracks.length > 0;
   const canTranscribe = transcribeEnabled && (audioTracks?.length ?? 0) > 0;
   // Subtitle translation is the default; generating from audio takes over when
@@ -299,7 +329,7 @@ export function SubtitleTranslateModal({
                   >
                     {sourceTracks.map((track) => (
                       <option key={track.index} value={track.index}>
-                        {sourceLabel(track)}
+                        {sourceOptionLabels.get(track.index)}
                       </option>
                     ))}
                   </select>
