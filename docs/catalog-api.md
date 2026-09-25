@@ -277,8 +277,8 @@ are unchanged. Frozen v1 membership responses do not expose this field.
 
 ## Advisory age
 
-Catalog items may carry `advisory_age`, a recommended minimum viewer age from an
-advisory service such as Common Sense Media, and `advisory_source`, which names
+Movies and series may carry `advisory_age`, a recommended minimum viewer age from
+an advisory service such as Common Sense Media, and `advisory_source`, which names
 who recommended it (`commonsense` or `mdblist`). Both are optional and appear
 only together; an item with no advisory omits both.
 
@@ -305,7 +305,8 @@ A household manager can also limit a profile by advisory age with the profile's
 profile operations. The server hides every title whose `advisory_age` is above
 the limit, everywhere the content-rating ceiling applies: browse, search, detail,
 episodes, sections, progress, recommendations and the Jellyfin-compatible API.
-Episodes use their series' advisory age.
+Episodes use their series' advisory age. Other item types, including the beta
+book libraries, never carry an advisory age, so the limit never hides them.
 
 - The limit only ever tightens. It is ANDed with `max_content_rating`, and a
   title must pass both.

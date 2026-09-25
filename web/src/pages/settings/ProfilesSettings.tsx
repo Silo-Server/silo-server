@@ -38,7 +38,12 @@ function getDeleteGuardReason(
 }
 
 export default function ProfilesSettings() {
-  const { data: profiles = [], isLoading: profilesLoading, avatarUploadEnabled } = useProfiles();
+  const {
+    data: profiles = [],
+    isLoading: profilesLoading,
+    avatarUploadEnabled,
+    maxAdvisoryAgeSupported,
+  } = useProfiles();
   const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries();
   const { profile: activeProfile, selectProfile, verifyProfilePin } = useAuth();
   const deleteMutation = useDeleteProfile();
@@ -196,6 +201,7 @@ export default function ProfilesSettings() {
         profile={editingProfile}
         libraries={libraries}
         avatarUploadEnabled={avatarUploadEnabled}
+        advisoryAgeSupported={maxAdvisoryAgeSupported}
         onOpenChange={(open) => {
           setEditorOpen(open);
           if (!open) {

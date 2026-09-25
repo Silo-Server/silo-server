@@ -205,3 +205,40 @@ func TestMergeAdvisoryKeepsThePairTogether(t *testing.T) {
 		}
 	})
 }
+
+// TestPluginProviderGetMetadata_AdvisoryAgeOnlyForMoviesAndSeries pins that an
+// advisory age reported for any other item type is dropped, so the profile
+// advisory-age limit can never reach the beta book libraries.
+func TestPluginProviderGetMetadata_AdvisoryAgeOnlyForMoviesAndSeries(t *testing.T) {
+	metadata, err := structpb.NewStruct(map[string]any{
+		"advisory_age":    13,
+		"advisory_source": AdvisorySourceCommonSense,
+	})
+	if err != nil {
+		t.Fatalf("structpb.NewStruct() error = %v", err)
+	}
+	provider, err := NewPluginProviderWithClientFactory(map[string]string{
+		pluginInstallationIDSetting: "1",
+		capabilityIDSetting:         "books",
+	}, func(context.Context, int, string) (pluginMetadataClient, error) {
+		return &fakePluginMetadataClient{
+			response: &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{Title: "A Book", Metadata: metadata}},
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
+	}
+
+	for contentType, want := range map[string]int{"movie": 13, "series": 13, "audiobook": 0, "ebook": 0, "podcast": 0, "": 0} {
+		result, err := provider.GetMetadata(context.Background(), MetadataRequest{
+			ProviderIDs: map[string]string{"books": "b-1"},
+			ContentType: contentType,
+		})
+		if err != nil || result == nil {
+			t.Fatalf("%q: GetMetadata() = %v, %v", contentType, result, err)
+		}
+		if result.AdvisoryAge != want || (want == 0) != (result.AdvisorySource == "") {
+			t.Errorf("%q: advisory = (%d, %q), want age %d", contentType, result.AdvisoryAge, result.AdvisorySource, want)
+		}
+	}
+}

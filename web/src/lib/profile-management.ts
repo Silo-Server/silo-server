@@ -106,7 +106,19 @@ export function createProfileDraft(profile?: Profile | null): ProfileDraft {
  * there is nothing to clear on a profile that does not exist yet, and the
  * contract rejects empty strings where v1 read them as "unset".
  */
-export function buildProfileRequestFromDraft(draft: ProfileDraft): ProfileCreate {
+export interface ProfileRequestOptions {
+  /**
+   * The server accepts `max_advisory_age` (`max_advisory_age_supported` on
+   * listProfiles). Without it the member is never sent: an older server
+   * rejects unknown members, which would fail every profile save.
+   */
+  advisoryAgeSupported?: boolean;
+}
+
+export function buildProfileRequestFromDraft(
+  draft: ProfileDraft,
+  options: ProfileRequestOptions = {},
+): ProfileCreate {
   const maxPlaybackQuality = playbackQualityValueFromPreset(draft.maxPlaybackQuality);
   const body: ProfileCreate = {
     name: draft.name.trim(),
@@ -123,7 +135,7 @@ export function buildProfileRequestFromDraft(draft: ProfileDraft): ProfileCreate
   if (draft.maxContentRating !== "") {
     body.max_content_rating = draft.maxContentRating;
   }
-  if (draft.maxAdvisoryAge !== null) {
+  if (options.advisoryAgeSupported && draft.maxAdvisoryAge !== null) {
     body.max_advisory_age = draft.maxAdvisoryAge;
   }
   if (maxPlaybackQuality === "1080p" || maxPlaybackQuality === "2160p") {
@@ -141,14 +153,16 @@ export function buildProfileRequestFromDraft(draft: ProfileDraft): ProfileCreate
  * so the profile matches the draft; a cleared value goes on the wire as null
  * (the contract's clearing form), and the PIN is omitted unless it changes.
  */
-export function buildProfileUpdateFromDraft(draft: ProfileDraft): ProfileUpdate {
+export function buildProfileUpdateFromDraft(
+  draft: ProfileDraft,
+  options: ProfileRequestOptions = {},
+): ProfileUpdate {
   const maxPlaybackQuality = playbackQualityValueFromPreset(draft.maxPlaybackQuality);
   const body: ProfileUpdate = {
     name: draft.name.trim(),
     avatar: draft.avatarPreset ? avatarPresetRef(draft.avatarPreset) : null,
     is_child: draft.isChild,
     max_content_rating: draft.maxContentRating === "" ? null : draft.maxContentRating,
-    max_advisory_age: draft.maxAdvisoryAge,
     max_playback_quality:
       maxPlaybackQuality === "1080p" || maxPlaybackQuality === "2160p" ? maxPlaybackQuality : null,
     library_restrictions_enabled: draft.libraryRestrictionsEnabled,
@@ -156,6 +170,10 @@ export function buildProfileUpdateFromDraft(draft: ProfileDraft): ProfileUpdate 
       ? sortUniqueLibraryIDs(draft.allowedLibraryIDs).map(String)
       : [],
   };
+
+  if (options.advisoryAgeSupported) {
+    body.max_advisory_age = draft.maxAdvisoryAge;
+  }
 
   if (draft.clearPin) {
     body.pin = null;

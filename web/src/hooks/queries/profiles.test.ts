@@ -49,6 +49,7 @@ describe("profile queries on the v2 contract", () => {
 
     expect(requestOf(fetchMock, 0).url).toBe("/api/v2/profiles");
     expect(list.avatar_upload_enabled).toBe(listProfilesOk.avatar_upload_enabled);
+    expect(list.max_advisory_age_supported).toBe(true);
     expect(list.profiles).toHaveLength(listProfilesOk.items.length);
     expect(list.profiles[0]).toMatchObject({
       id: "p-owner",
@@ -56,6 +57,16 @@ describe("profile queries on the v2 contract", () => {
       is_primary: true,
       allowed_library_ids: [3],
     });
+  });
+
+  it("reports no advisory-age support for a server that predates the flag", async () => {
+    const { max_advisory_age_supported: _dropped, ...olderServer } = listProfilesOk;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => json(olderServer)),
+    );
+
+    expect((await listProfiles()).max_advisory_age_supported).toBe(false);
   });
 
   it("creates a profile with the v2 body and projects the created profile", async () => {

@@ -140,7 +140,6 @@ describe("profile-management", () => {
       avatar: null,
       is_child: false,
       max_content_rating: null,
-      max_advisory_age: null,
       max_playback_quality: null,
       library_restrictions_enabled: true,
       allowed_library_ids: ["1", "3"],
@@ -159,19 +158,28 @@ describe("profile-management", () => {
   });
 
   it("carries the advisory-age limit through drafts, requests and the summary", () => {
+    const supported = { advisoryAgeSupported: true };
     const draft = createProfileDraft(makeProfile({ max_advisory_age: 10 }));
     expect(draft.maxAdvisoryAge).toBe(10);
-    expect(buildProfileUpdateFromDraft(draft).max_advisory_age).toBe(10);
-    // The editor always sends the member, so clearing it reaches the server.
-    expect(buildProfileUpdateFromDraft({ ...draft, maxAdvisoryAge: null }).max_advisory_age).toBe(
-      null,
-    );
+    expect(buildProfileUpdateFromDraft(draft, supported).max_advisory_age).toBe(10);
+    // The editor sends the member on a supporting server, so clearing it reaches it.
+    expect(
+      buildProfileUpdateFromDraft({ ...draft, maxAdvisoryAge: null }, supported).max_advisory_age,
+    ).toBe(null);
 
     // A create body omits "no limit": the contract admits no null there.
-    expect(buildProfileRequestFromDraft({ ...draft, name: "Kid" }).max_advisory_age).toBe(10);
     expect(
-      "max_advisory_age" in buildProfileRequestFromDraft({ ...draft, maxAdvisoryAge: null }),
+      buildProfileRequestFromDraft({ ...draft, name: "Kid" }, supported).max_advisory_age,
+    ).toBe(10);
+    expect(
+      "max_advisory_age" in
+        buildProfileRequestFromDraft({ ...draft, maxAdvisoryAge: null }, supported),
     ).toBe(false);
+
+    // An older server rejects the unknown member, so it is never sent without
+    // the capability, whatever the draft holds.
+    expect("max_advisory_age" in buildProfileUpdateFromDraft(draft)).toBe(false);
+    expect("max_advisory_age" in buildProfileRequestFromDraft(draft)).toBe(false);
 
     expect(
       buildProfileAccessSummary(makeProfile({ max_content_rating: "PG", max_advisory_age: 10 }))

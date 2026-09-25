@@ -32,10 +32,16 @@ export type ProfileCreate = V2Body<"POST /api/v2/profiles">;
 /** The answer of the v2 verifyProfilePIN operation. */
 export type ProfileVerification = V2Result<"POST /api/v2/profiles/{id}/verify-pin">;
 
-/** The profile list as the app models it: the profiles plus the avatar-upload capability. */
+/** The profile list as the app models it: the profiles plus the server's profile capabilities. */
 export interface ProfileList {
   profiles: Profile[];
   avatar_upload_enabled: boolean;
+  /**
+   * Whether the server accepts and enforces `max_advisory_age`. The profile
+   * operations reject unknown members, so the editor neither shows the control
+   * nor sends the member unless this is true.
+   */
+  max_advisory_age_supported: boolean;
 }
 
 /**
@@ -102,6 +108,8 @@ export async function listProfiles(): Promise<ProfileList> {
   return {
     profiles: list.items.map(profileFromV2),
     avatar_upload_enabled: list.avatar_upload_enabled,
+    // Absent on a server that predates the advisory-age limit.
+    max_advisory_age_supported: list.max_advisory_age_supported === true,
   };
 }
 
@@ -147,6 +155,7 @@ export function useProfiles(options?: { enabled?: boolean }) {
     ...query,
     data: query.data?.profiles ?? [],
     avatarUploadEnabled: query.data?.avatar_upload_enabled ?? false,
+    maxAdvisoryAgeSupported: query.data?.max_advisory_age_supported ?? false,
   };
 }
 
@@ -175,6 +184,7 @@ export function useUpdateProfile() {
         return {
           profiles,
           avatar_upload_enabled: current?.avatar_upload_enabled ?? false,
+          max_advisory_age_supported: current?.max_advisory_age_supported ?? false,
         };
       });
       toast.success("Profile updated");
@@ -194,6 +204,7 @@ export function useUploadProfileAvatar() {
       queryClient.setQueryData<ProfileList | undefined>(profileKeys.list(), (current) => ({
         profiles: replaceProfileInList(current?.profiles, updatedProfile),
         avatar_upload_enabled: current?.avatar_upload_enabled ?? false,
+        max_advisory_age_supported: current?.max_advisory_age_supported ?? false,
       }));
       toast.success("Avatar updated");
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
