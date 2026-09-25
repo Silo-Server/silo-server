@@ -126,6 +126,7 @@ func (e *Engine) profileAccessFilter(ctx context.Context, userID int, profileID 
 
 	filter.MaxContentRating = profile.MaxContentRating
 	filter.MaxAdvisoryAge = profile.MaxAdvisoryAge
+	filter.RequireAdvisoryAge = profile.RequireAdvisoryAge && profile.MaxAdvisoryAge > 0
 	if e.unrated != nil {
 		// The ceiling is the pair: without this, every recommendations query
 		// emits the hide-unrated predicate while the catalog rails beside it

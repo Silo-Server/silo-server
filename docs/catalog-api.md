@@ -310,9 +310,16 @@ book libraries, never carry an advisory age, so the limit never hides them.
 
 - The limit only ever tightens. It is ANDed with `max_content_rating`, and a
   title must pass both.
-- A title with no advisory age is **not** hidden by the limit; the content-rating
-  ceiling alone decides it. `access.unrated_content` does not apply to the
-  advisory limit.
+- By default a title with no advisory age is **not** hidden by the limit; the
+  content-rating ceiling alone decides it. `access.unrated_content` does not
+  apply to the advisory limit.
+- A profile can instead require an advisory age with `require_advisory_age`
+  (boolean, default `false`). With it set, a title with no advisory age is
+  hidden too, so the profile sees only titles an advisory service rated at or
+  under the limit. It has no effect without `max_advisory_age`. On a large
+  library that has not been looked up yet, such a profile starts nearly empty
+  and fills in as ages arrive: the opposite of the default, where titles
+  disappear as ages arrive.
 - Because coverage grows as the provider enriches the library, the set of titles
   a limited profile sees can shrink over time, for example when a title a child
   could see gains an advisory age above the limit. `advisory_titles` on
@@ -321,12 +328,14 @@ book libraries, never carry an advisory age, so the limit never hides them.
 - Media-request discovery cannot apply the limit, because titles outside the
   library carry no advisory age.
 - Only a household manager (a server admin, or the primary profile) can set or
-  clear it; a restricted profile cannot change its own limit. Changing it bumps
-  the account's access policy revision, the same as changing
-  `max_content_rating`.
-- Detect support with `max_advisory_age_supported` on the `listProfiles`
-  response. The profile operations reject unknown members, so do not send
-  `max_advisory_age` to a server that does not report it.
+  clear either field; a restricted profile cannot change its own limit.
+  Changing either bumps the account's access policy revision, the same as
+  changing `max_content_rating`.
+- Detect support with `max_advisory_age_supported` and
+  `require_advisory_age_supported` on the `listProfiles` response. They are
+  separate because `require_advisory_age` arrived later, so a server can report
+  the first without the second. The profile operations reject unknown members,
+  so do not send either field to a server that does not report it.
 
 Frozen v1 responses do not expose these fields.
 

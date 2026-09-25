@@ -32958,7 +32958,7 @@
             "type": "boolean"
           },
           "max_advisory_age": {
-            "description": "Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone; null means no limit",
+            "description": "Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null means no limit",
             "examples": [
               12
             ],
@@ -33004,6 +33004,13 @@
             ],
             "type": "string"
           },
+          "require_advisory_age": {
+            "description": "Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "show_forced_subtitles": {
             "examples": [
               false
@@ -33045,6 +33052,7 @@
           "is_primary",
           "max_content_rating",
           "max_advisory_age",
+          "require_advisory_age",
           "quality_preference",
           "language",
           "preferred_metadata_language",
@@ -33106,11 +33114,19 @@
           "page": {
             "$ref": "#/components/schemas/PageInfo",
             "description": "Cursor state; absent for bounded unpaginated collections"
+          },
+          "require_advisory_age_supported": {
+            "description": "Whether profiles accept require_advisory_age and the server enforces it",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
           "avatar_upload_enabled",
           "max_advisory_age_supported",
+          "require_advisory_age_supported",
           "items"
         ],
         "type": "object"
@@ -33187,7 +33203,7 @@
             "type": "boolean"
           },
           "max_advisory_age": {
-            "description": "Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone",
+            "description": "Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set",
             "examples": [
               12
             ],
@@ -33246,6 +33262,13 @@
             ],
             "maxLength": 32,
             "type": "string"
+          },
+          "require_advisory_age": {
+            "description": "Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           },
           "show_forced_subtitles": {
             "description": "Defaults to true when omitted",
@@ -33490,7 +33513,7 @@
             "type": "boolean"
           },
           "max_advisory_age": {
-            "description": "Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone; null removes it",
+            "description": "Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null removes it",
             "examples": [
               12
             ],
@@ -33564,6 +33587,13 @@
             ],
             "maxLength": 32,
             "type": "string"
+          },
+          "require_advisory_age": {
+            "description": "Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           },
           "show_forced_subtitles": {
             "examples": [

@@ -17,6 +17,8 @@ export interface ProfileDraft {
   maxContentRating: string;
   /** Advisory-age limit; null means no limit. */
   maxAdvisoryAge: number | null;
+  /** Hide titles with no advisory age; only meaningful with a limit. */
+  requireAdvisoryAge: boolean;
   maxPlaybackQuality: PlaybackQualityPreset;
   libraryRestrictionsEnabled: boolean;
   allowedLibraryIDs: number[];
@@ -72,8 +74,8 @@ export const MAX_ADVISORY_AGE_LIMIT = 21;
  * Advisory-age limits a profile can be given: every limit the server accepts,
  * so a profile set to any valid limit by another client opens on a matching
  * option. A limit of N hides titles recommended for viewers older than N.
- * Titles with no advisory age are not hidden by the limit, so the content
- * rating still has to do its job.
+ * Titles with no advisory age are not hidden by the limit unless the profile
+ * also requires an advisory age, so the content rating still has to do its job.
  */
 export const ADVISORY_AGE_OPTIONS: AdvisoryAgeOption[] = [
   { value: null, label: "No limit" },
@@ -100,6 +102,7 @@ export function createProfileDraft(profile?: Profile | null): ProfileDraft {
     isChild: profile?.is_child ?? false,
     maxContentRating: profile?.max_content_rating ?? "",
     maxAdvisoryAge: profile?.max_advisory_age ?? null,
+    requireAdvisoryAge: profile?.require_advisory_age ?? false,
     maxPlaybackQuality: playbackQualityPresetFromValue(profile?.max_playback_quality),
     libraryRestrictionsEnabled: profile?.library_restrictions_enabled ?? false,
     allowedLibraryIDs: sortUniqueLibraryIDs(profile?.allowed_library_ids),
@@ -118,6 +121,11 @@ export interface ProfileRequestOptions {
    * rejects unknown members, which would fail every profile save.
    */
   advisoryAgeSupported?: boolean;
+  /**
+   * The server accepts `require_advisory_age`
+   * (`require_advisory_age_supported`). Same reason: never send it otherwise.
+   */
+  requireAdvisoryAgeSupported?: boolean;
 }
 
 export function buildProfileRequestFromDraft(
@@ -142,6 +150,9 @@ export function buildProfileRequestFromDraft(
   }
   if (options.advisoryAgeSupported && draft.maxAdvisoryAge !== null) {
     body.max_advisory_age = draft.maxAdvisoryAge;
+    if (options.requireAdvisoryAgeSupported && draft.requireAdvisoryAge) {
+      body.require_advisory_age = true;
+    }
   }
   if (maxPlaybackQuality === "1080p" || maxPlaybackQuality === "2160p") {
     body.max_playback_quality = maxPlaybackQuality;
@@ -178,6 +189,11 @@ export function buildProfileUpdateFromDraft(
 
   if (options.advisoryAgeSupported) {
     body.max_advisory_age = draft.maxAdvisoryAge;
+    if (options.requireAdvisoryAgeSupported) {
+      // Cleared together with the limit, so removing the limit does not leave
+      // a stored flag that silently comes back with the next limit.
+      body.require_advisory_age = draft.maxAdvisoryAge !== null && draft.requireAdvisoryAge;
+    }
   }
 
   if (draft.clearPin) {
@@ -194,6 +210,7 @@ export function buildProfileAccessSummary(
     Profile,
     | "max_content_rating"
     | "max_advisory_age"
+    | "require_advisory_age"
     | "library_restrictions_enabled"
     | "allowed_library_ids"
     | "max_playback_quality"
@@ -203,7 +220,7 @@ export function buildProfileAccessSummary(
     CONTENT_RATING_OPTIONS.find((option) => option.value === profile.max_content_rating)?.summary ??
     "Any content";
   const advisoryAge = profile.max_advisory_age
-    ? `Advisory age ${profile.max_advisory_age} max`
+    ? `Advisory age ${profile.max_advisory_age} max${profile.require_advisory_age ? ", rated titles only" : ""}`
     : "";
   const libraryCount = sortUniqueLibraryIDs(profile.allowed_library_ids).length;
   const libraries = profile.library_restrictions_enabled
@@ -251,6 +268,7 @@ export function clearKidsPreset(draft: ProfileDraft): ProfileDraft {
     isChild: false,
     maxContentRating: "",
     maxAdvisoryAge: null,
+    requireAdvisoryAge: false,
     maxPlaybackQuality: "any",
     libraryRestrictionsEnabled: false,
     allowedLibraryIDs: [],

@@ -44,3 +44,26 @@ func mustMarshal(t *testing.T, v any) []byte {
 	}
 	return b
 }
+
+// TestHidesUnadvised pins the one place the strict flag is read: it needs a
+// limit to mean anything, so a stored flag on a profile with no limit hides
+// nothing.
+func TestHidesUnadvised(t *testing.T) {
+	for _, tt := range []struct {
+		limits MaturityLimits
+		want   bool
+	}{
+		{MaturityLimits{}, false},
+		{MaturityLimits{MaxAdvisoryAge: 10}, false},
+		{MaturityLimits{RequireAdvisoryAge: true}, false},
+		{MaturityLimits{MaxAdvisoryAge: 10, RequireAdvisoryAge: true}, true},
+	} {
+		if got := tt.limits.HidesUnadvised(); got != tt.want {
+			t.Errorf("%+v.HidesUnadvised() = %v, want %v", tt.limits, got, tt.want)
+		}
+	}
+	// Active is unchanged by the flag alone: it tightens a limit, it is not one.
+	if (MaturityLimits{RequireAdvisoryAge: true}).Active() {
+		t.Error("a require flag with no limit must not make the limits active")
+	}
+}

@@ -1,4 +1,4 @@
-import type { AdminUser } from "@/api/types";
+import type { AccessGroup, AdminUser } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
@@ -30,6 +30,8 @@ const mocks = vi.hoisted(() => ({
   available: true,
   impersonate: vi.fn(),
   beginImpersonation: vi.fn(),
+  accessGroups: [] as AccessGroup[],
+  accessGroupsLoaded: false,
 }));
 
 vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
@@ -50,7 +52,7 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
 }));
 
 vi.mock("@/hooks/queries/admin/accessGroups", () => ({
-  useAccessGroups: () => ({ data: [] }),
+  useAccessGroups: () => ({ data: mocks.accessGroups, isSuccess: mocks.accessGroupsLoaded }),
 }));
 
 vi.mock("./admin-settings/InvitationsTab", () => ({
@@ -379,5 +381,128 @@ describe("AdminUsers row actions", () => {
     expect(await screen.findByText("This user is disabled.")).toBeInTheDocument();
     expect(mocks.beginImpersonation).not.toHaveBeenCalled();
     expect(screen.getByTestId("location")).toHaveTextContent("/admin/users");
+  });
+});
+
+const defaultGroup: AccessGroup = {
+  id: 2,
+  name: "Everyone",
+  description: "",
+  library_ids: null,
+  max_playback_quality: "",
+  download_allowed: true,
+  download_transcode_allowed: true,
+  transcode_allowed: true,
+  audio_transcode_allowed: true,
+  max_streams: 5,
+  max_transcodes: 3,
+  max_remote_stream_bitrate_kbps: 0,
+  max_local_stream_bitrate_kbps: 0,
+  allowed_permissions: null,
+  requests_allowed: true,
+  is_default: true,
+  member_count: 1,
+  created_at: "2026-07-01T12:00:00Z",
+  updated_at: "2026-07-01T12:00:00Z",
+};
+
+describe("AdminUsers user dialog policy hints", () => {
+  beforeEach(() => {
+    setAccessToken("account");
+    setProfileId("owner");
+    setProfileToken(null);
+    mocks.users = [];
+    mocks.available = true;
+    mocks.accessGroups = [];
+    mocks.accessGroupsLoaded = false;
+    mocks.useAdminServerSettings.mockReturnValue({ data: {}, isLoading: false });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    // Radix Select reads pointer capture and scrolls options into view, which
+    // jsdom does not implement.
+    Object.defineProperties(Element.prototype, {
+      hasPointerCapture: { configurable: true, value: () => false },
+      setPointerCapture: { configurable: true, value: () => {} },
+      releasePointerCapture: { configurable: true, value: () => {} },
+      scrollIntoView: { configurable: true, value: () => {} },
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  async function openLimits(user: ReturnType<typeof userEvent.setup>, button: string | RegExp) {
+    await user.click(screen.getByRole("button", { name: button }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    return dialog;
+  }
+
+  async function chooseRole(
+    user: ReturnType<typeof userEvent.setup>,
+    dialog: HTMLElement,
+    role: string,
+  ) {
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.click(within(dialog).getByRole("combobox", { name: "Role" }));
+    await user.click(await screen.findByRole("option", { name: role }));
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+  }
+
+  it("keeps a new user's hints on its group while the group list loads", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, /Add User/);
+
+    // A new regular account always joins the default group, so until the
+    // list loads its values are unknown, not the server's no-group ones.
+    expect(within(dialog).getAllByText("Inherited from group").length).toBeGreaterThan(0);
+    expect(within(dialog).queryByText(/Server default|Unlimited/)).not.toBeInTheDocument();
+
+    await chooseRole(user, dialog, "Admin");
+    expect(within(dialog).getAllByText("Admin default: Unlimited")).toHaveLength(4);
+    expect(within(dialog).queryByText(/Inherit/)).not.toBeInTheDocument();
+  });
+
+  it("previews the default group a new user joins", async () => {
+    mocks.accessGroups = [defaultGroup];
+    mocks.accessGroupsLoaded = true;
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, /Add User/);
+
+    expect(within(dialog).getByText("Inherited: 5")).toBeInTheDocument();
+    expect(within(dialog).getByText("Inherited: 3")).toBeInTheDocument();
+  });
+
+  it("uses the server defaults once a loaded list has no default group", async () => {
+    mocks.accessGroupsLoaded = true;
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, /Add User/);
+
+    // The server then creates the account without a group.
+    expect(within(dialog).getAllByText("Server default: Unlimited")).toHaveLength(4);
+    expect(within(dialog).queryByText(/Inherit/)).not.toBeInTheDocument();
+  });
+
+  it("previews the default group for an admin demoted from the list", async () => {
+    mocks.users = [{ ...adminUser, username: "root", role: "admin" }];
+    mocks.accessGroups = [defaultGroup];
+    mocks.accessGroupsLoaded = true;
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, "Edit root");
+    expect(within(dialog).getAllByText("Admin default: Unlimited")).toHaveLength(4);
+
+    // This form sends no group for a regular account, and the server moves a
+    // demoted admin into the default group.
+    await chooseRole(user, dialog, "User");
+    expect(within(dialog).getByText("Inherited: 5")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Server default/)).not.toBeInTheDocument();
   });
 });

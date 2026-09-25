@@ -188,6 +188,42 @@ describe("profile-management", () => {
     expect(createProfileDraft(makeProfile()).maxAdvisoryAge).toBeNull();
   });
 
+  it("carries the require-advisory-age option only alongside a limit", () => {
+    const supported = { advisoryAgeSupported: true, requireAdvisoryAgeSupported: true };
+    const draft = createProfileDraft(
+      makeProfile({ max_advisory_age: 10, require_advisory_age: true }),
+    );
+    expect(draft.requireAdvisoryAge).toBe(true);
+    expect(buildProfileUpdateFromDraft(draft, supported).require_advisory_age).toBe(true);
+    expect(
+      buildProfileRequestFromDraft({ ...draft, name: "Kid" }, supported).require_advisory_age,
+    ).toBe(true);
+
+    // Clearing the limit clears the option with it, so a later limit does not
+    // silently come back strict.
+    expect(
+      buildProfileUpdateFromDraft({ ...draft, maxAdvisoryAge: null }, supported)
+        .require_advisory_age,
+    ).toBe(false);
+    expect(
+      "require_advisory_age" in
+        buildProfileRequestFromDraft({ ...draft, maxAdvisoryAge: null }, supported),
+    ).toBe(false);
+
+    // Never sent to a server that does not report it, even one that has the
+    // limit: it rejects unknown members.
+    const limitOnly = { advisoryAgeSupported: true };
+    expect("require_advisory_age" in buildProfileUpdateFromDraft(draft, limitOnly)).toBe(false);
+    expect("require_advisory_age" in buildProfileRequestFromDraft(draft, limitOnly)).toBe(false);
+
+    expect(
+      buildProfileAccessSummary(
+        makeProfile({ max_content_rating: "PG", max_advisory_age: 10, require_advisory_age: true }),
+      ).text,
+    ).toBe("PG max · Advisory age 10 max, rated titles only · All libraries · Any quality");
+    expect(clearKidsPreset(draft).requireAdvisoryAge).toBe(false);
+  });
+
   it("clears the advisory-age limit with the other kids restrictions", () => {
     const draft = createProfileDraft(makeProfile({ is_child: true, max_advisory_age: 8 }));
     expect(clearKidsPreset(draft).maxAdvisoryAge).toBeNull();

@@ -28,4 +28,12 @@ func TestViewerScopeDigestCoversMaturityLimits(t *testing.T) {
 	if digest(access.MaturityLimits{MaxAdvisoryAge: 10}) == digest(access.MaturityLimits{MaxAdvisoryAge: 13}) {
 		t.Error("advisory limits 10 and 13 must digest differently")
 	}
+	// Requiring an advisory age walks a different, smaller set of rows.
+	if digest(access.MaturityLimits{MaxAdvisoryAge: 10}) == digest(access.MaturityLimits{MaxAdvisoryAge: 10, RequireAdvisoryAge: true}) {
+		t.Error("requiring an advisory age must change the cursor scope digest")
+	}
+	// Without a limit the flag renders no SQL, so it must not strand cursors.
+	if digest(access.MaturityLimits{RequireAdvisoryAge: true}) != base {
+		t.Error("a require flag with no limit changed the cursor scope digest")
+	}
 }

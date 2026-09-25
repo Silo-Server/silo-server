@@ -22,8 +22,9 @@ import {
 } from "@/lib/playback-quality";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 
-// Per-user policy overrides. null = inherit the access group's value; a
-// concrete value is an explicit override in either direction.
+// Per-user policy overrides. null = no override, so the field takes its
+// default (see PolicyDefaultSource); a concrete value is an explicit override
+// in either direction.
 export interface UserPolicyState {
   libraryIDs: number[] | null;
   maxPlaybackQuality: string | null;
@@ -139,16 +140,59 @@ export function effectiveAccessGroupID(role: string, accessGroupID: number | nul
   return role === "admin" ? null : accessGroupID;
 }
 
+// Where a field that is not overridden gets its value. Only a grouped account
+// inherits; an admin or an account outside every group gets the server's fixed
+// no-group defaults, so its fields name that source instead of a group.
+export type PolicyDefaultSource = "group" | "admin" | "server";
+
+export function policyDefaultSource(
+  role: string,
+  accessGroupID: number | null,
+): PolicyDefaultSource {
+  if (role === "admin") return "admin";
+  return accessGroupID === null ? "server" : "group";
+}
+
+const DEFAULT_SOURCE_TEXT: Record<
+  PolicyDefaultSource,
+  { prefix: string; unknown: string; allLibraries: string; revert: string; quality: string }
+> = {
+  group: {
+    prefix: "Inherited",
+    unknown: "Inherited from group",
+    allLibraries: "Inherit from group",
+    revert: "inherit",
+    quality: "Uses the access group's quality ceiling.",
+  },
+  admin: {
+    prefix: "Admin default",
+    unknown: "Admin default",
+    allLibraries: "Admin default",
+    revert: "use the admin default",
+    quality: "Uses the admin default quality ceiling.",
+  },
+  server: {
+    prefix: "Server default",
+    unknown: "Server default",
+    allLibraries: "Server default",
+    revert: "use the server default",
+    quality: "Uses the server default quality ceiling.",
+  },
+};
+
 interface PolicyContext {
   state: UserPolicyState;
   onChange: (state: UserPolicyState) => void;
-  // What the fields inherit when they are not overridden, used to show what an
-  // inheriting field currently evaluates to. Absent when unknown.
+  // Where the fields take their value from when they are not overridden.
+  source: PolicyDefaultSource;
+  // What those fields currently evaluate to, shown next to the source. Absent
+  // when unknown.
   effective?: PolicyInheritHints;
 }
 
-function inheritHint(effectiveText: string | undefined): string {
-  return effectiveText === undefined ? "Inherited from group" : `Inherited: ${effectiveText}`;
+function defaultHint(source: PolicyDefaultSource, effectiveText: string | undefined): string {
+  const text = DEFAULT_SOURCE_TEXT[source];
+  return effectiveText === undefined ? text.unknown : `${text.prefix}: ${effectiveText}`;
 }
 
 const INHERIT = "inherit" as const;
@@ -158,12 +202,14 @@ function BooleanPolicyRow({
   description,
   value,
   onValueChange,
+  source,
   effectiveValue,
 }: {
   label: string;
   description?: string;
   value: boolean | null;
   onValueChange: (value: boolean | null) => void;
+  source: PolicyDefaultSource;
   effectiveValue?: boolean;
 }) {
   const id = useId();
@@ -183,7 +229,8 @@ function BooleanPolicyRow({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={INHERIT}>
-            {inheritHint(
+            {defaultHint(
+              source,
               effectiveValue === undefined ? undefined : effectiveValue ? "Allowed" : "Not allowed",
             )}
           </SelectItem>
@@ -203,20 +250,22 @@ function limitDraftValue(draft: string): number | null {
 }
 
 // Label row with the Override switch; while not overridden the field shows
-// what it inherits instead of its control.
+// its default and where it comes from instead of its control.
 function PolicyOverrideField({
   id,
   label,
   overridden,
   onOverriddenChange,
-  inheritedText,
+  source,
+  defaultText,
   children,
 }: {
   id: string;
   label: string;
   overridden: boolean;
   onOverriddenChange: (checked: boolean) => void;
-  inheritedText: string | undefined;
+  source: PolicyDefaultSource;
+  defaultText: string | undefined;
   children: ReactNode;
 }) {
   const overrideId = `${id}-override`;
@@ -235,7 +284,7 @@ function PolicyOverrideField({
         children
       ) : (
         <p className="text-muted-foreground border-border rounded-md border border-dashed px-3 py-2 text-sm">
-          {inheritHint(inheritedText)}
+          {defaultHint(source, defaultText)}
         </p>
       )}
     </div>
@@ -246,11 +295,13 @@ function LimitPolicyField({
   label,
   value,
   onValueChange,
+  source,
   effectiveValue,
 }: {
   label: string;
   value: number | null;
   onValueChange: (value: number | null) => void;
+  source: PolicyDefaultSource;
   effectiveValue?: number;
 }) {
   const id = useId();
@@ -290,7 +341,8 @@ function LimitPolicyField({
       label={label}
       overridden={overridden}
       onOverriddenChange={handleOverrideChange}
-      inheritedText={
+      source={source}
+      defaultText={
         effectiveValue === undefined
           ? undefined
           : effectiveValue === 0
@@ -309,7 +361,7 @@ function LimitPolicyField({
       />
       <p className="text-muted-foreground text-xs">
         {draftValue === null
-          ? "Enter a whole number, or turn Override off to inherit."
+          ? `Enter a whole number, or turn Override off to ${DEFAULT_SOURCE_TEXT[source].revert}.`
           : "0 = unlimited"}
       </p>
     </PolicyOverrideField>
@@ -320,17 +372,19 @@ function StreamBitratePolicyField({
   label,
   value,
   onValueChange,
+  source,
   effectiveValue,
 }: {
   label: string;
   value: number | null;
   onValueChange: (value: number | null) => void;
+  source: PolicyDefaultSource;
   effectiveValue?: number;
 }) {
   const id = useId();
   // Same override model as LimitPolicyField: turning Override on seeds the
-  // value the field already resolves to, and with no hint the field keeps
-  // inheriting until the admin picks a limit.
+  // value the field already resolves to, and with no hint the field keeps its
+  // default until the admin picks a limit.
   const [overridden, setOverridden] = useState(value !== null);
 
   function handleOverrideChange(checked: boolean) {
@@ -344,7 +398,8 @@ function StreamBitratePolicyField({
       label={label}
       overridden={overridden}
       onOverriddenChange={handleOverrideChange}
-      inheritedText={
+      source={source}
+      defaultText={
         effectiveValue === undefined ? undefined : formatStreamBitrateLimit(effectiveValue)
       }
     >
@@ -366,6 +421,7 @@ function StreamBitratePolicyField({
 export function PolicyAccessFields({
   state,
   onChange,
+  source,
   effective,
   libraries,
 }: PolicyContext & { libraries: Library[] }) {
@@ -375,8 +431,9 @@ export function PolicyAccessFields({
         libraries={libraries}
         value={state.libraryIDs}
         onChange={(libraryIDs) => onChange({ ...state, libraryIDs })}
-        allLabel="Inherit from group"
-        emptyHint={inheritHint(
+        allLabel={DEFAULT_SOURCE_TEXT[source].allLibraries}
+        emptyHint={defaultHint(
+          source,
           effective === undefined
             ? undefined
             : effective.library_ids === null
@@ -389,6 +446,7 @@ export function PolicyAccessFields({
           label="Downloads"
           value={state.downloadAllowed}
           onValueChange={(downloadAllowed) => onChange({ ...state, downloadAllowed })}
+          source={source}
           effectiveValue={effective?.download_allowed}
         />
         <BooleanPolicyRow
@@ -397,6 +455,7 @@ export function PolicyAccessFields({
           onValueChange={(downloadTranscodeAllowed) =>
             onChange({ ...state, downloadTranscodeAllowed })
           }
+          source={source}
           effectiveValue={effective?.download_transcode_allowed}
         />
       </div>
@@ -405,6 +464,7 @@ export function PolicyAccessFields({
         description="Request new movies and series when requests are enabled."
         value={state.requestsAllowed}
         onValueChange={(requestsAllowed) => onChange({ ...state, requestsAllowed })}
+        source={source}
         effectiveValue={effective?.requests_allowed}
       />
     </>
@@ -412,7 +472,7 @@ export function PolicyAccessFields({
 }
 
 // Limits-tab policy fields: stream/transcode ceilings and the quality gate.
-export function PolicyLimitFields({ state, onChange, effective }: PolicyContext) {
+export function PolicyLimitFields({ state, onChange, source, effective }: PolicyContext) {
   const qualityId = useId();
   const qualityValue: PlaybackQualityPreset | typeof INHERIT =
     state.maxPlaybackQuality === null
@@ -425,12 +485,14 @@ export function PolicyLimitFields({ state, onChange, effective }: PolicyContext)
           label="Max Streams"
           value={state.maxStreams}
           onValueChange={(maxStreams) => onChange({ ...state, maxStreams })}
+          source={source}
           effectiveValue={effective?.max_streams}
         />
         <LimitPolicyField
           label="Max Transcodes"
           value={state.maxTranscodes}
           onValueChange={(maxTranscodes) => onChange({ ...state, maxTranscodes })}
+          source={source}
           effectiveValue={effective?.max_transcodes}
         />
         <StreamBitratePolicyField
@@ -439,6 +501,7 @@ export function PolicyLimitFields({ state, onChange, effective }: PolicyContext)
           onValueChange={(maxRemoteStreamBitrateKbps) =>
             onChange({ ...state, maxRemoteStreamBitrateKbps })
           }
+          source={source}
           effectiveValue={effective?.max_remote_stream_bitrate_kbps}
         />
         <StreamBitratePolicyField
@@ -447,6 +510,7 @@ export function PolicyLimitFields({ state, onChange, effective }: PolicyContext)
           onValueChange={(maxLocalStreamBitrateKbps) =>
             onChange({ ...state, maxLocalStreamBitrateKbps })
           }
+          source={source}
           effectiveValue={effective?.max_local_stream_bitrate_kbps}
         />
       </div>
@@ -455,6 +519,7 @@ export function PolicyLimitFields({ state, onChange, effective }: PolicyContext)
           label="Video Transcoding"
           value={state.transcodeAllowed}
           onValueChange={(transcodeAllowed) => onChange({ ...state, transcodeAllowed })}
+          source={source}
           effectiveValue={effective?.transcode_allowed}
         />
         <BooleanPolicyRow
@@ -462,6 +527,7 @@ export function PolicyLimitFields({ state, onChange, effective }: PolicyContext)
           description="Audio conversion without video encoding."
           value={state.audioTranscodeAllowed}
           onValueChange={(audioTranscodeAllowed) => onChange({ ...state, audioTranscodeAllowed })}
+          source={source}
           effectiveValue={effective?.audio_transcode_allowed}
         />
       </div>
@@ -484,7 +550,8 @@ export function PolicyLimitFields({ state, onChange, effective }: PolicyContext)
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={INHERIT}>
-              {inheritHint(
+              {defaultHint(
+                source,
                 effective === undefined
                   ? undefined
                   : formatPlaybackQualityPreset(effective.max_playback_quality),
@@ -499,7 +566,7 @@ export function PolicyLimitFields({ state, onChange, effective }: PolicyContext)
         </Select>
         <p className="text-muted-foreground text-xs">
           {qualityValue === INHERIT
-            ? "Uses the access group's quality ceiling."
+            ? DEFAULT_SOURCE_TEXT[source].quality
             : PLAYBACK_QUALITY_OPTIONS.find((option) => option.value === qualityValue)?.description}
         </p>
       </div>
