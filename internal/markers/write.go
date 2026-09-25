@@ -49,6 +49,15 @@ func CanWriteMarkerUpdate(existing, incoming SegmentPayload) bool {
 		if currentRank != nextRank {
 			return nextRank > currentRank
 		}
+		// Chromaprint results are scored against the whole season on every
+		// analysis, so the latest result of the same detector replaces the
+		// stored one even at lower confidence: a season that no longer agrees
+		// must not keep an older, higher score.
+		if incoming.Algorithm == existing.Algorithm && seasonScoredAlgorithm(incoming.Algorithm) {
+			return confidenceGreater(incoming.Confidence, existing.Confidence) ||
+				confidenceGreater(existing.Confidence, incoming.Confidence) ||
+				!sameMarkerRanges(existing, incoming)
+		}
 		if confidenceGreater(incoming.Confidence, existing.Confidence) {
 			return true
 		}
@@ -126,6 +135,12 @@ func markerRanges(payload SegmentPayload) []models.MarkerSegment {
 		ranges = []models.MarkerSegment{{StartSeconds: *payload.Start, EndSeconds: *payload.End}}
 	}
 	return ranges
+}
+
+// seasonScoredAlgorithm reports scanner algorithms whose confidence is
+// recomputed from the whole season each time it is analyzed.
+func seasonScoredAlgorithm(algorithm string) bool {
+	return strings.HasPrefix(algorithm, "chromaprint:")
 }
 
 // scannerAlgorithmPriority ranks local detector outputs. A superseded version

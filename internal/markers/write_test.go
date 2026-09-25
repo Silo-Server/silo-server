@@ -275,3 +275,21 @@ func TestCanWriteMarkerUpdateLetsReplacementVersionsOverwrite(t *testing.T) {
 		}
 	}
 }
+
+// A re-analysis that rescores a Chromaprint intro lower must replace the stored
+// score, while other detectors keep the higher-confidence result.
+func TestCanWriteMarkerUpdateLetsChromaprintRescoreDownward(t *testing.T) {
+	payload := func(algorithm string, confidence, start, end float64) SegmentPayload {
+		return SegmentPayload{Start: new(start), End: new(end), Source: models.MarkerSourceScanner,
+			Confidence: new(confidence), Algorithm: algorithm}
+	}
+	if !CanWriteMarkerUpdate(payload("chromaprint:v3", 0.9, 10, 70), payload("chromaprint:v3", 0.65, 10, 70)) {
+		t.Error("a lower Chromaprint rescore of the same range was rejected")
+	}
+	if CanWriteMarkerUpdate(payload("chromaprint:v3", 0.9, 10, 70), payload("chromaprint:v3", 0.9, 10.2, 70.2)) {
+		t.Error("an identical Chromaprint result should stay a no-op")
+	}
+	if CanWriteMarkerUpdate(payload("chapter:v1", 0.95, 60, 120), payload("chapter:v1", 0.85, 60, 125)) {
+		t.Error("a lower-confidence chapter result must not replace a higher one")
+	}
+}
