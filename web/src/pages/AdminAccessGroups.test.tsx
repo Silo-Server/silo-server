@@ -29,6 +29,8 @@ vi.mock("@/hooks/queries/admin/users", () => ({
     refetch: vi.fn(),
   }),
 }));
+const toastSuccess = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: vi.fn() } }));
 
 // Radix Select needs these to open under jsdom.
 class ResizeObserverStub {
@@ -199,6 +201,46 @@ describe("AdminAccessGroups", () => {
     expect(within(members).queryByRole("link", { name: "robin" })).toBeNull();
     expect(within(members).queryByRole("link", { name: "root" })).toBeNull();
     adminUsers.data = [];
+  });
+
+  it("returns to the group list with a confirmation after saving", async () => {
+    toastSuccess.mockClear();
+    const router = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    fireEvent.click(await screen.findByRole("switch", { name: "Allow downloads" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
+    expect(putBody).toMatchObject({ download_allowed: true });
+    expect(toastSuccess).toHaveBeenCalledWith("Group saved");
+    expect(router.state.location.pathname).toBe("/admin/access-groups");
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+
+    // The save replaced the group's entry, so Back doesn't reopen the editor.
+    await router.navigate(-1);
+    expect(router.state.location.pathname).toBe("/admin/access-groups");
+  });
+
+  it("stays in the editor with the error when a save fails", async () => {
+    toastSuccess.mockClear();
+    const serve = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) =>
+        String(input) === "/api/v2/admin/access-groups/1" && init?.method === "PUT"
+          ? jsonResponse({ error: "internal_error", message: "Could not save the group." }, 500)
+          : serve(input, init),
+      ),
+    );
+    const router = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    fireEvent.click(await screen.findByRole("switch", { name: "Allow downloads" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/admin/access-groups/1");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
+    expect(toastSuccess).not.toHaveBeenCalled();
   });
 
   it("opens a group at its own URL so Back returns to the group list", async () => {

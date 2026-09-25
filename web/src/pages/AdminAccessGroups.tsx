@@ -1,6 +1,7 @@
 import { ArrowLeft, Plus, Trash2, UsersRound } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
+import { toast } from "sonner";
 
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -185,6 +186,11 @@ function AccessGroupsPage() {
         <AccessGroupEditor
           key={selected.group.id}
           initialEditor={selected}
+          onSaved={() => {
+            toast.success("Group saved");
+            // Replace the group's entry so Back and "All groups" reach the same list.
+            if (stillOn(location.key)) navigate("/admin/access-groups", { replace: true });
+          }}
           onDeleted={() => {
             if (stillOn(location.key)) navigate("/admin/access-groups", { replace: true });
           }}
@@ -326,10 +332,11 @@ function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () =
 
 interface AccessGroupEditorProps {
   initialEditor: GroupEditor;
+  onSaved: () => void;
   onDeleted: () => void;
 }
 
-function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps) {
+function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEditorProps) {
   const [editor, setEditor] = useState(initialEditor);
   const group = editor.group;
   const busy = useRef(false);
@@ -424,6 +431,7 @@ function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps)
     };
     try {
       setEditor(await updateGroup.mutateAsync({ editor, body }));
+      onSaved();
     } catch (err) {
       failed(err);
     } finally {
