@@ -38,6 +38,7 @@ require (
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
+	github.com/sony/sonyflake/v2 v2.2.0
 	github.com/tetratelabs/wazero v1.12.0
 	github.com/wneessen/go-mail v0.7.3
 	github.com/zishang520/socket.io/v2 v2.5.0
@@ -149,7 +150,6 @@ require (
 	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.20.1
 	github.com/robfig/cron/v3 v3.0.1
-	github.com/sony/sonyflake v1.3.0
 	go.opentelemetry.io/contrib/bridges/otelslog v0.19.0
 	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.20.0
