@@ -49,13 +49,14 @@ const (
 	// which almost nothing is referenced. Deleting on that signal would erase
 	// the library, so a page this lopsided stops the sweep instead.
 	//
-	// The ratio counts only unreferenced objects nothing else explains.
-	// Genuine orphans are not spread evenly: artwork replaced in bulk (a
-	// provider taking over covers for a whole import, say) leaves its old
+	// Genuine orphans are not spread evenly, though: artwork replaced in bulk
+	// (a provider taking over covers for a whole import, say) leaves its old
 	// revisions next to each other in key order, so whole pages can be
-	// legitimately unreferenced. Objects whose original the artwork revision
-	// GC has on record as displaced are explained by that record and do not
-	// count toward the ratio; see displacedOriginals.
+	// legitimately unreferenced. A lopsided page whose unreferenced objects
+	// the artwork revision GC is already scheduled to collect is skipped
+	// rather than refused; see scheduledOriginals. Only what that schedule
+	// does not account for counts toward the ratio, and a skipped page deletes
+	// nothing.
 	artworkSweepAnomalyRatio = 0.8
 
 	// artworkSweepAnomalyFloor exempts small pages from the ratio check. The
@@ -84,7 +85,7 @@ type ArtworkStorageSweepStats struct {
 	Scanned          int    `json:"scanned"`
 	Referenced       int    `json:"referenced"`
 	TooNew           int    `json:"too_new"`
-	Corroborated     int    `json:"corroborated"`
+	LeftToGC         int    `json:"left_to_gc"`
 	Unparsable       int    `json:"unparsable"`
 	Deleted          int    `json:"deleted"`
 	Pages            int    `json:"pages"`
@@ -104,10 +105,10 @@ type ArtworkStorageSweeper struct {
 	// Defaults to the database query; tests substitute it so the deletion
 	// guards can be exercised without a live catalog.
 	lookup func(ctx context.Context, paths []string) (map[string]struct{}, error)
-	// displaced resolves which candidate paths the artwork revision GC has on
-	// record as displaced revisions. Nil means no such record is available,
-	// and the anomaly guard then counts every unreferenced object.
-	displaced func(ctx context.Context, paths []string) (map[string]struct{}, error)
+	// scheduled resolves which candidate paths the artwork revision GC is
+	// scheduled to collect. Nil means no schedule is available, and the
+	// anomaly guard then counts every unreferenced object.
+	scheduled func(ctx context.Context, paths []string) (map[string]struct{}, error)
 }
 
 // NewArtworkStorageSweeper returns nil when the sweep cannot run, matching the
@@ -118,7 +119,7 @@ func NewArtworkStorageSweeper(pool *pgxpool.Pool, store ArtworkStorageLister) *A
 	}
 	sweeper := &ArtworkStorageSweeper{pool: pool, store: store, now: time.Now}
 	sweeper.lookup = sweeper.referencedOriginals
-	sweeper.displaced = sweeper.displacedOriginals
+	sweeper.scheduled = sweeper.scheduledOriginals
 	return sweeper
 }
 
@@ -189,38 +190,44 @@ func (s *ArtworkStorageSweeper) referencedOriginals(ctx context.Context, paths [
 	return referenced, nil
 }
 
-// displacedOriginals returns the subset of candidate original-variant paths
-// that the artwork revision GC holds a candidate row for.
+// scheduledOriginals returns the subset of candidate original-variant paths
+// that the artwork revision GC has armed for collection: a candidate row with
+// next_attempt_at set.
 //
-// A candidate row is written when a catalog write replaces an artwork path, so
-// it is a record, made at the time, that the revision was superseded. That is
-// independent of the reference union: a broken reference check cannot create
-// such rows for artwork that is still live. And the GC deletes its candidates
-// after checking the same union the sweep uses, so removing an object the GC
-// already holds is no riskier than the GC's own pass over that row. It only
-// happens sooner.
-func (s *ArtworkStorageSweeper) displacedOriginals(ctx context.Context, paths []string) (map[string]struct{}, error) {
-	displaced := make(map[string]struct{}, len(paths))
+// This is not proof that a revision is garbage. The tracker registers every
+// upload, and a displacement trigger re-arms a row whenever a path leaves one
+// column, even if another still holds it. What it does establish is that the
+// GC will reach the object and re-check its references before deleting
+// anything. The sweep therefore never deletes on this signal. It only uses it
+// to tell a page of queued garbage apart from a broken reference check, and
+// leaves such a page to the GC.
+//
+// Live artwork the GC has confirmed is parked with next_attempt_at NULL and
+// does not match here, so a reference check that stops seeing live artwork
+// still produces an unexplained, lopsided page and still stops the sweep.
+func (s *ArtworkStorageSweeper) scheduledOriginals(ctx context.Context, paths []string) (map[string]struct{}, error) {
+	scheduled := make(map[string]struct{}, len(paths))
 	if len(paths) == 0 {
-		return displaced, nil
+		return scheduled, nil
 	}
-	rows, err := s.pool.Query(ctx,
-		"SELECT original_path FROM artwork_revision_gc_candidates WHERE original_path = ANY($1)", paths)
+	rows, err := s.pool.Query(ctx, `
+		SELECT original_path FROM artwork_revision_gc_candidates
+		WHERE original_path = ANY($1) AND next_attempt_at IS NOT NULL`, paths)
 	if err != nil {
-		return nil, fmt.Errorf("artwork storage sweep: displaced revision check: %w", err)
+		return nil, fmt.Errorf("artwork storage sweep: GC schedule check: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var p string
 		if err := rows.Scan(&p); err != nil {
-			return nil, fmt.Errorf("artwork storage sweep: scan displaced revision: %w", err)
+			return nil, fmt.Errorf("artwork storage sweep: scan GC schedule: %w", err)
 		}
-		displaced[p] = struct{}{}
+		scheduled[p] = struct{}{}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("artwork storage sweep: displaced revisions: %w", err)
+		return nil, fmt.Errorf("artwork storage sweep: GC schedule: %w", err)
 	}
-	return displaced, nil
+	return scheduled, nil
 }
 
 // artworkSweepPageIsAnomalous reports whether unexplained unreferenced objects
@@ -320,17 +327,18 @@ func (s *ArtworkStorageSweeper) SweepPrefix(ctx context.Context, prefix, token s
 
 		// Fail closed on an implausible page rather than deleting on what is
 		// more likely a broken reference check than a genuinely empty catalog.
-		// A lopsided page is first checked against the GC's record of displaced
-		// revisions; only what that record does not explain counts.
+		// A lopsided page is first checked against the GC's schedule. If that
+		// accounts for it, the page is queued garbage: leave all of it to the
+		// GC, which re-checks references before it deletes, and move on.
 		if artworkSweepPageIsAnomalous(len(doomed), len(parsed)) {
 			unexplained := len(doomed)
-			if s.displaced != nil {
-				displaced, err := s.displaced(ctx, doomedOriginals)
+			if s.scheduled != nil {
+				scheduled, err := s.scheduled(ctx, doomedOriginals)
 				if err != nil {
 					return stats, err
 				}
 				for _, original := range doomedOriginals {
-					if _, ok := displaced[original]; ok {
+					if _, ok := scheduled[original]; ok {
 						unexplained--
 					}
 				}
@@ -338,11 +346,12 @@ func (s *ArtworkStorageSweeper) SweepPrefix(ctx context.Context, prefix, token s
 			if artworkSweepPageIsAnomalous(unexplained, len(parsed)) {
 				stats.StoppedOnAnomaly = true
 				return stats, fmt.Errorf(
-					"artwork storage sweep: %d of %d objects on one page of %s looked unreferenced and %d of those are not displaced revisions the GC knows about; refusing to delete and stopping (check the catalog and the storage key prefix)",
+					"artwork storage sweep: %d of %d objects on one page of %s looked unreferenced and %d of those are not scheduled for artwork GC; refusing to delete and stopping (check the catalog and the storage key prefix)",
 					len(doomed), len(parsed), prefix, unexplained,
 				)
 			}
-			stats.Corroborated += len(doomed) - unexplained
+			stats.LeftToGC += len(doomed)
+			doomed = nil
 		}
 
 		if len(doomed) > 0 {
