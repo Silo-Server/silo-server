@@ -128,14 +128,22 @@ func markerRanges(payload SegmentPayload) []models.MarkerSegment {
 	return ranges
 }
 
+// scannerAlgorithmPriority ranks local detector outputs. A superseded version
+// ranks below its replacement so re-analysis can overwrite what it wrote.
 func scannerAlgorithmPriority(algorithm string) int {
 	switch algorithm {
-	case "chapter:silence:v1":
+	case "chapter:silence:v2":
 		return 40
 	case "chapter:v1":
 		return 30
+	case "chapter:silence:v1": // Extended chapter ends too far; below chapter:v1.
+		return 25
 	case "episode-version-copy:v1":
 		return 20
+	case "chromaprint:dialogue:v2": //nolint:misspell // Persisted algorithm identifier.
+		return 18
+	case "chromaprint:v2":
+		return 17
 	case "chromaprint:dialogue:v1": //nolint:misspell // Persisted algorithm identifier.
 		return 15
 	case "chromaprint:v1":

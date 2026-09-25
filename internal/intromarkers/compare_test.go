@@ -1,6 +1,10 @@
 package intromarkers
 
-import "testing"
+import (
+	"math"
+	"math/rand/v2"
+	"testing"
+)
 
 func TestCompareFingerprintsFindsSharedRange(t *testing.T) {
 	left := make([]uint32, 400)
@@ -65,10 +69,11 @@ func TestCompareFingerprintsFindsSharedRangeWithOffset(t *testing.T) {
 	if len(segments) != 2 {
 		t.Fatalf("expected two file segments, got %d", len(segments))
 	}
-	if segments[1].Start != 0 {
-		t.Fatalf("unexpected left start %.3f", segments[1].Start)
+	// 40 points in, shifted back by the Chromaprint start lead.
+	if want := 40*DefaultPointHopSeconds + chromaprintStartLeadSeconds; math.Abs(segments[1].Start-want) > 0.01 {
+		t.Fatalf("left start = %.3f, want %.3f", segments[1].Start, want)
 	}
-	if segments[2].Start < 23 || segments[2].Start > 26 {
+	if segments[2].Start < 24 || segments[2].Start > 27 {
 		t.Fatalf("unexpected right start %.3f", segments[2].Start)
 	}
 	if got := segments[1].End - segments[1].Start; got < 30 {
@@ -125,5 +130,69 @@ func TestComparePairAtShiftAllowsSmallBackwardJitter(t *testing.T) {
 	}
 	if got := leftSegment.End - leftSegment.Start; got < 15 {
 		t.Fatalf("expected jitter-tolerant run, got duration %.3f", got)
+	}
+}
+
+func TestConsensusSegmentUsesMedianOfAgreeingPairs(t *testing.T) {
+	segment, confirmations := consensusSegment([]Segment{
+		{Start: 60, End: 150}, // One pair ran long into shared music after the intro.
+		{Start: 60, End: 120},
+		{Start: 61, End: 121},
+		{Start: 59, End: 119},
+		{Start: 600, End: 640}, // An unrelated shared cue elsewhere in the episode.
+	})
+	if confirmations != 4 {
+		t.Fatalf("confirmations = %d, want the four overlapping results", confirmations)
+	}
+	if segment.Start != 60 || segment.End != 120.5 {
+		t.Fatalf("consensus = %+v, want median 60-120.5 rather than the longest result", segment)
+	}
+}
+
+func TestAdjustSegmentSnapsOnlyNearZeroStarts(t *testing.T) {
+	candidate := Candidate{DurationSeconds: 1800}
+	nearZero := adjustSegment(Segment{Start: 0.4, End: 60}, candidate)
+	if nearZero.Start != 0 {
+		t.Fatalf("start %.2f within the snap window should become 0", nearZero.Start)
+	}
+	afterLogo := adjustSegment(Segment{Start: 4, End: 60}, candidate)
+	if want := 4 + chromaprintStartLeadSeconds; afterLogo.Start != want {
+		t.Fatalf("start after a short logo = %.2f, want %.2f", afterLogo.Start, want)
+	}
+	if want := 60 + chromaprintEndLeadSeconds; afterLogo.End != want {
+		t.Fatalf("end = %.2f, want %.2f", afterLogo.End, want)
+	}
+}
+
+func TestCompareFingerprintsLimitsComparisonsToNeighbors(t *testing.T) {
+	// Episodes 1-10 share one intro; only neighbors within
+	// compareNeighborEpisodes are compared, and every file still matches.
+	const episodes = 10
+	intro := make([]uint32, 300)
+	introRNG := rand.New(rand.NewPCG(0, 1))
+	for i := range intro {
+		intro[i] = introRNG.Uint32()
+	}
+	inputs := make([]fingerprintInput, 0, episodes)
+	for e := 1; e <= episodes; e++ {
+		points := make([]uint32, 500)
+		rng := rand.New(rand.NewPCG(uint64(e), 1))
+		for i := range points {
+			points[i] = rng.Uint32()
+		}
+		copy(points[100:], intro)
+		inputs = append(inputs, fingerprintInput{
+			Candidate: Candidate{FileID: 100 + e, EpisodeID: string(rune('a' + e)), EpisodeNumber: episodes + 1 - e, DurationSeconds: 1800},
+			Points:    points,
+		})
+	}
+	segments := CompareFingerprints(inputs, DefaultConfig("ffmpeg"))
+	if len(segments) != episodes {
+		t.Fatalf("matched %d files, want %d", len(segments), episodes)
+	}
+	for fileID, segment := range segments {
+		if want := 100*DefaultPointHopSeconds + chromaprintStartLeadSeconds; math.Abs(segment.Start-want) > 0.2 {
+			t.Fatalf("file %d start = %.2f, want %.2f", fileID, segment.Start, want)
+		}
 	}
 }

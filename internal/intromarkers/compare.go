@@ -11,17 +11,61 @@ type fingerprintInput struct {
 	Points    []uint32
 }
 
+// Chromaprint points each summarize a window of roughly 2.4 seconds that
+// starts at the point's timestamp, so a segment two files share starts matching
+// before it begins and stops matching before it ends. These leads were measured
+// against authored intro chapters and shift both boundaries back into place.
+const (
+	chromaprintStartLeadSeconds = 1.35
+	chromaprintEndLeadSeconds   = 1.05
+)
+
+// zeroStartSnapSeconds treats a detected start this close to the beginning of
+// the file as the beginning. Intros that start after a short logo or cold open
+// keep their real start.
+const zeroStartSnapSeconds = 2.0
+
+// compareNeighborEpisodes bounds how many following episodes, in episode
+// order, each file is compared with. Neighbors share the season's current
+// intro even when it changes mid-season, and the bound keeps long seasons
+// linear rather than quadratic.
+const compareNeighborEpisodes = 8
+
+// minimumConsensusOverlap is the overlap, as intersection over union, a pair
+// result needs with a file's anchor segment to count toward its consensus.
+const minimumConsensusOverlap = 0.3
+
+// CompareFingerprints matches each file against its neighboring episodes and
+// reduces the pair results for a file to a consensus: the median boundaries of
+// the results that agree with the most-confirmed one. Taking the longest pair
+// result instead let a single over-extended match set the boundaries.
 func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment {
 	cfg = cfg.normalized()
-	best := map[int]Segment{}
-	confirmations := map[int]int{}
+	ordered := append([]fingerprintInput(nil), inputs...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		a, b := ordered[i].Candidate, ordered[j].Candidate
+		if a.SeasonNumber != b.SeasonNumber {
+			return a.SeasonNumber < b.SeasonNumber
+		}
+		if a.EpisodeNumber != b.EpisodeNumber {
+			return a.EpisodeNumber < b.EpisodeNumber
+		}
+		return a.FileID < b.FileID
+	})
 
-	for i := 0; i < len(inputs); i++ {
-		for j := i + 1; j < len(inputs); j++ {
-			left, right := inputs[i], inputs[j]
-			if left.Candidate.EpisodeID == "" || left.Candidate.EpisodeID == right.Candidate.EpisodeID {
+	matches := map[int][]Segment{}
+	for i := range ordered {
+		left := ordered[i]
+		if left.Candidate.EpisodeID == "" {
+			continue
+		}
+		compared := 0
+		for j := i + 1; j < len(ordered) && compared < compareNeighborEpisodes; j++ {
+			right := ordered[j]
+			if right.Candidate.EpisodeID == "" || right.Candidate.EpisodeID == left.Candidate.EpisodeID {
 				continue
 			}
+			compared++
 			leftSeg, rightSeg, ok := comparePair(left.Points, right.Points, cfg)
 			if !ok {
 				continue
@@ -29,20 +73,22 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 			leftSeg = adjustSegment(leftSeg, left.Candidate)
 			rightSeg = adjustSegment(rightSeg, right.Candidate)
 			if validAdjustedSegment(leftSeg) {
-				recordBest(best, confirmations, left.Candidate.FileID, leftSeg)
+				matches[left.Candidate.FileID] = append(matches[left.Candidate.FileID], leftSeg)
 			}
 			if validAdjustedSegment(rightSeg) {
-				recordBest(best, confirmations, right.Candidate.FileID, rightSeg)
+				matches[right.Candidate.FileID] = append(matches[right.Candidate.FileID], rightSeg)
 			}
 		}
 	}
 
-	for fileID, segment := range best {
+	best := make(map[int]Segment, len(matches))
+	for fileID, segments := range matches {
+		segment, confirmations := consensusSegment(segments)
 		confidence := 0.65
 		if segment.End-segment.Start >= 30 {
 			confidence += 0.10
 		}
-		if confirmations[fileID] >= 2 {
+		if confirmations >= 2 {
 			confidence += 0.10
 		}
 		if segment.Start == 0 {
@@ -55,8 +101,53 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 		segment.Algorithm = ChromaprintAlgorithm
 		best[fileID] = segment
 	}
-
 	return best
+}
+
+// consensusSegment picks the pair result that the most other results overlap,
+// preferring the longer one on a tie, and returns the median boundaries of the
+// results that overlap it together with how many there were.
+func consensusSegment(segments []Segment) (Segment, int) {
+	anchor, anchorVotes := 0, -1
+	for i, candidate := range segments {
+		votes := 0
+		for _, other := range segments {
+			if segmentOverlap(candidate, other) >= minimumConsensusOverlap {
+				votes++
+			}
+		}
+		if votes > anchorVotes || (votes == anchorVotes &&
+			candidate.End-candidate.Start > segments[anchor].End-segments[anchor].Start) {
+			anchor, anchorVotes = i, votes
+		}
+	}
+	starts := make([]float64, 0, anchorVotes)
+	ends := make([]float64, 0, anchorVotes)
+	for _, other := range segments {
+		if segmentOverlap(segments[anchor], other) >= minimumConsensusOverlap {
+			starts = append(starts, other.Start)
+			ends = append(ends, other.End)
+		}
+	}
+	return Segment{Start: medianSeconds(starts), End: medianSeconds(ends)}, len(starts)
+}
+
+func segmentOverlap(a, b Segment) float64 {
+	intersection := math.Min(a.End, b.End) - math.Max(a.Start, b.Start)
+	if intersection <= 0 {
+		return 0
+	}
+	return intersection / (math.Max(a.End, b.End) - math.Min(a.Start, b.Start))
+}
+
+func medianSeconds(values []float64) float64 {
+	sorted := append([]float64(nil), values...)
+	sort.Float64s(sorted)
+	mid := len(sorted) / 2
+	if len(sorted)%2 == 0 {
+		return (sorted[mid-1] + sorted[mid]) / 2
+	}
+	return sorted[mid]
 }
 
 func comparePair(left, right []uint32, cfg Config) (Segment, Segment, bool) {
@@ -206,7 +297,9 @@ func absInt(v int) int {
 }
 
 func adjustSegment(segment Segment, candidate Candidate) Segment {
-	if segment.Start <= 5 {
+	segment.Start += chromaprintStartLeadSeconds
+	segment.End += chromaprintEndLeadSeconds
+	if segment.Start <= zeroStartSnapSeconds {
 		segment.Start = 0
 	}
 	for _, chapter := range candidate.Chapters {
@@ -234,11 +327,4 @@ func snapBoundary(value, boundary float64) float64 {
 func validAdjustedSegment(segment Segment) bool {
 	duration := segment.End - segment.Start
 	return segment.Start >= 0 && segment.End > segment.Start && duration >= 10 && duration <= 180
-}
-
-func recordBest(best map[int]Segment, confirmations map[int]int, fileID int, segment Segment) {
-	confirmations[fileID]++
-	if current, ok := best[fileID]; !ok || segment.End-segment.Start > current.End-current.Start {
-		best[fileID] = segment
-	}
 }

@@ -21,6 +21,44 @@ import (
 // against Postgres: a file whose refinement found nothing better, and one whose
 // refinement failed, must both drop out of the next run until their inputs
 // change or the failure backoff elapses.
+func TestSilenceBackfillRevisitsLegacySilenceMarkersPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := database.RunMigrations(ctx, pool, migrations.FS, "sql"); err != nil {
+		t.Fatalf("migrate test database: %v", err)
+	}
+	fileIDs := seedSilenceBackfillFixture(t, pool)
+	legacy, current := fileIDs[0], fileIDs[1]
+	if _, err := pool.Exec(ctx, `UPDATE media_files SET intro_markers_algorithm = $2 WHERE id = $1`, legacy, legacyChapterSilenceAlgorithm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_files SET intro_markers_algorithm = $2 WHERE id = $1`, current, ChapterSilenceAlgorithm); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := NewRepository(pool).ListChapterSilenceBackfillCandidates(ctx, 1_000_000, DefaultConfig("ffmpeg"), "node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []int
+	for _, candidate := range all {
+		if slices.Contains(fileIDs, candidate.FileID) {
+			got = append(got, candidate.FileID)
+		}
+	}
+	if want := []int{legacy, fileIDs[2]}; !slices.Equal(got, want) {
+		t.Fatalf("backfill = %v, want the legacy silence marker and the chapter marker %v", got, want)
+	}
+}
+
 func TestSilenceBackfillSkipsUnchangedAttemptsPostgres(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {

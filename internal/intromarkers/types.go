@@ -10,16 +10,27 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// AlgorithmVersion keys the fingerprint cache; changing it discards every
+// stored fingerprint. Bump AnalysisBehaviorVersion instead to re-run season
+// comparisons over cached fingerprints.
+//
+// The algorithm identifiers are persisted with each marker. A new version
+// needs a rank in markers.scannerAlgorithmPriority above the one it replaces,
+// or re-analysis cannot overwrite markers the old version wrote.
 const (
 	AlgorithmVersion             = 1
-	AnalysisBehaviorVersion      = 2
+	AnalysisBehaviorVersion      = 3
 	ChapterAlgorithm             = "chapter:v1"
-	ChapterSilenceAlgorithm      = "chapter:silence:v1"
+	ChapterSilenceAlgorithm      = "chapter:silence:v2"
 	EpisodeVersionCopyAlgorithm  = "episode-version-copy:v1"
-	ChromaprintAlgorithm         = "chromaprint:v1"
-	ChromaprintDialogueAlgorithm = "chromaprint:dialogue:v1"
+	ChromaprintAlgorithm         = "chromaprint:v2"
+	ChromaprintDialogueAlgorithm = "chromaprint:dialogue:v2" //nolint:misspell // Persisted algorithm identifier.
 	ChromaprintFormat            = "chromaprint:raw:uint32le"
 	DefaultPointHopSeconds       = 0.123
+
+	// legacyChapterSilenceAlgorithm extended chapter ends by up to 30 seconds.
+	// The silence backfill revisits its markers under the current limit.
+	legacyChapterSilenceAlgorithm = "chapter:silence:v1"
 )
 
 type Config struct {
@@ -44,6 +55,12 @@ type Config struct {
 	DialogueRefinementMinimumRemainingSeconds float64
 }
 
+// defaultSilenceMaximumExtensionSeconds bounds how far a silence may move an
+// authored intro chapter's end. Short extensions catch music that rings past
+// the chapter mark; against Chromaprint's audio match, extensions of five
+// seconds or more mostly overshot the chapter end into the episode.
+const defaultSilenceMaximumExtensionSeconds = 5
+
 func DefaultConfig(ffmpegPath string) Config {
 	if strings.TrimSpace(ffmpegPath) == "" {
 		ffmpegPath = "ffmpeg"
@@ -61,7 +78,7 @@ func DefaultConfig(ffmpegPath string) Config {
 		SilenceMinimumDurationSeconds:             0.33,
 		SilenceNoiseThresholdDB:                   intPtr(-50),
 		SilenceMinimumExtensionSeconds:            0.5,
-		SilenceMaximumExtensionSeconds:            30,
+		SilenceMaximumExtensionSeconds:            defaultSilenceMaximumExtensionSeconds,
 		SilenceBackfillLimit:                      2000,
 		SilenceBackfillMaxDuration:                45 * time.Minute,
 		DialogueRefinementEnabled:                 true,
@@ -106,7 +123,7 @@ func (c Config) normalized() Config {
 		c.SilenceMinimumExtensionSeconds = 0.5
 	}
 	if c.SilenceMaximumExtensionSeconds <= 0 {
-		c.SilenceMaximumExtensionSeconds = 30
+		c.SilenceMaximumExtensionSeconds = defaultSilenceMaximumExtensionSeconds
 	}
 	if c.SilenceBackfillLimit <= 0 {
 		c.SilenceBackfillLimit = 2000

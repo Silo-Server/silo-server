@@ -140,7 +140,7 @@ func (r *Repository) ListChapterSilenceBackfillCandidates(ctx context.Context, l
 		  AND mf.intro_start IS NOT NULL
 		  AND mf.intro_end IS NOT NULL
 		  AND mf.intro_markers_source = $1
-		  AND mf.intro_markers_algorithm = $2
+		  AND mf.intro_markers_algorithm = ANY($2::text[])
 		  AND NOT COALESCE(
 		      attempts.config_hash = $3
 		      AND attempts.file_hash = COALESCE(mf.file_hash, '')
@@ -156,7 +156,7 @@ func (r *Repository) ListChapterSilenceBackfillCandidates(ctx context.Context, l
 		  mf.id
 		LIMIT $5`,
 		models.MarkerSourceScanner,
-		ChapterAlgorithm,
+		[]string{ChapterAlgorithm, legacyChapterSilenceAlgorithm},
 		cfg.SilenceConfigHash(),
 		silenceAttemptNoImprovement,
 		limit,
