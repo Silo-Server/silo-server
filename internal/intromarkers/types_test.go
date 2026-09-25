@@ -58,7 +58,7 @@ func TestAnalysisConfigHashTracksDurationBounds(t *testing.T) {
 func TestDialogueRefinementKeepsTheMinimumIntroDuration(t *testing.T) {
 	cfg := DefaultConfig("ffmpeg")
 	if cfg.DialogueRefinementMinimumRemainingSeconds != float64(cfg.MinimumIntroDurationSeconds) {
-		t.Fatalf("dialogue refinement minimum = %.0fs, want the %ds intro minimum so every detectable intro can be refined",
+		t.Fatalf("subtitle refinement minimum = %.0fs, want the %ds intro minimum so every detectable intro can be refined",
 			cfg.DialogueRefinementMinimumRemainingSeconds, cfg.MinimumIntroDurationSeconds)
 	}
 }
