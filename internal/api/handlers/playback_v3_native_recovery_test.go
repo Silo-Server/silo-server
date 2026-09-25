@@ -131,6 +131,9 @@ func TestRemapSubtitleSelectionAcrossSubtitleFormats(t *testing.T) {
 			{Language: "fre", Codec: "subrip", Forced: true},
 			{Language: "fre", Codec: "subrip"},
 		}}, 1, 1},
+		{"embedded teletext", &models.MediaFile{ID: 2, SubtitleTracks: []models.SubtitleTrack{
+			{Language: "fre", Codec: "dvb_teletext"},
+		}}, 1, 0},
 		{"keeps forced variant", &models.MediaFile{ID: 2, SubtitleTracks: []models.SubtitleTrack{
 			{Language: "fre", Codec: "subrip"},
 			{Language: "fre", Codec: "subrip", Forced: true},
