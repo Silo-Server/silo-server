@@ -184,6 +184,52 @@ describe("AdminAccessGroups", () => {
     );
   });
 
+  function holdCreate() {
+    const serve = globalThis.fetch;
+    let finish: () => void = () => {};
+    const created = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        if (String(input) === "/api/v2/admin/access-groups" && init?.method === "POST") {
+          await created;
+          return jsonResponse({ ...GROUP, id: "7", name: "Guests", is_default: false }, 201);
+        }
+        return serve(input, init);
+      }),
+    );
+    return finish;
+  }
+
+  async function startCreate(name: string) {
+    fireEvent.click(await screen.findByRole("button", { name: /New group/ }));
+    fireEvent.change(screen.getByLabelText("New group name"), { target: { value: name } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  }
+
+  it("opens a newly created group", async () => {
+    const finish = holdCreate();
+    const router = renderPage();
+    await startCreate("Guests");
+    finish();
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin/access-groups/7"));
+  });
+
+  it("keeps the admin on a group they opened while another was being created", async () => {
+    const finish = holdCreate();
+    const router = renderPage();
+    await startCreate("Guests");
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    expect(await screen.findByLabelText("Name")).toHaveValue("Kids");
+
+    finish();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Create" })).toBeNull());
+    expect(router.state.location.pathname).toBe("/admin/access-groups/1");
+    expect(screen.getByLabelText("Name")).toHaveValue("Kids");
+  });
+
   it("opens the group editor when loaded from a group URL", async () => {
     const router = renderPage("/admin/access-groups/1");
     expect(await screen.findByLabelText("Name")).toHaveValue("Kids");

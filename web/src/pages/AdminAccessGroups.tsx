@@ -1,6 +1,6 @@
 import { ArrowLeft, Plus, Trash2, UsersRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -92,6 +92,10 @@ function AccessGroupsPage() {
   // Bumped to retry a failed load of the group already in the URL.
   const [loadAttempt, setLoadAttempt] = useState(0);
   const mounted = useRef(true);
+  // One page instance serves the list and every group URL, so a finished create
+  // compares history entries to tell whether the admin moved on meanwhile.
+  const location = useLocation();
+  const locationKey = useRef(location.key);
   const createGroup = useCreateAccessGroup();
 
   useEffect(() => {
@@ -100,6 +104,10 @@ function AccessGroupsPage() {
       mounted.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    locationKey.current = location.key;
+  }, [location.key]);
 
   useEffect(() => {
     setSelected(null);
@@ -139,13 +147,15 @@ function AccessGroupsPage() {
     const name = newName.trim();
     if (!name || busy.current || !available) return;
     busy.current = true;
+    const startedAt = locationKey.current;
     setError("");
     try {
       const group = await createGroup.mutateAsync({ body: { name }, profileContext: authority });
       setNewName("");
       setCreating(false);
-      // Don't pull the admin back if they left while the group was created.
-      if (mounted.current) select(group.id);
+      // Don't pull the admin away if they opened another group or left the page
+      // while the group was created.
+      if (mounted.current && locationKey.current === startedAt) select(group.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create group.");
     } finally {
