@@ -64,16 +64,21 @@ export interface AdvisoryAgeOption {
   label: string;
 }
 
+/** The advisory-age limits the server accepts (access.Min/MaxAdvisoryAgeLimit). */
+export const MIN_ADVISORY_AGE_LIMIT = 1;
+export const MAX_ADVISORY_AGE_LIMIT = 21;
+
 /**
- * Advisory-age limits a profile can be given. Advisory services such as Common
- * Sense Media recommend a minimum age from 2 up; a limit of N hides titles
- * recommended for viewers older than N. Titles with no advisory age are not
- * hidden by the limit, so the content rating still has to do its job.
+ * Advisory-age limits a profile can be given: every limit the server accepts,
+ * so a profile set to any valid limit by another client opens on a matching
+ * option. A limit of N hides titles recommended for viewers older than N.
+ * Titles with no advisory age are not hidden by the limit, so the content
+ * rating still has to do its job.
  */
 export const ADVISORY_AGE_OPTIONS: AdvisoryAgeOption[] = [
   { value: null, label: "No limit" },
-  ...Array.from({ length: 16 }, (_, index) => {
-    const age = index + 2;
+  ...Array.from({ length: MAX_ADVISORY_AGE_LIMIT - MIN_ADVISORY_AGE_LIMIT + 1 }, (_, index) => {
+    const age = index + MIN_ADVISORY_AGE_LIMIT;
     return { value: age, label: `Ages ${age} and under` };
   }),
 ];

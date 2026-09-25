@@ -25,6 +25,19 @@
 ALTER TABLE public.episode_catalog_entries
     ADD COLUMN IF NOT EXISTS advisory_age smallint;
 
+-- Only movies and series carry an advisory age: the host now drops one a
+-- plugin reports for any other type, so the profile advisory-age limit can
+-- never hide a title in the beta book libraries. A refresh never clears a
+-- stored age, so clear any a book, podcast or other row picked up before that
+-- rule existed. The provider that supplies advisory ages only answers for
+-- movies and series, so this normally matches nothing. Down does not restore
+-- them.
+UPDATE public.media_items
+SET advisory_age = NULL,
+    advisory_source = NULL
+WHERE type NOT IN ('movie', 'series')
+  AND (advisory_age IS NOT NULL OR advisory_source IS NOT NULL);
+
 -- Verbatim from 20260923234321_content_rating_age.sql, plus advisory_age.
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION public.refresh_episode_catalog_entry(p_episode_id text, p_media_folder_id integer)

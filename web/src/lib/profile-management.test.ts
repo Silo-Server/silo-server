@@ -200,11 +200,12 @@ describe("profile-management", () => {
     ).toBeNull();
   });
 
-  it("offers only limits the server accepts", () => {
+  it("offers every limit the server accepts", () => {
     const ages = ADVISORY_AGE_OPTIONS.flatMap((option) =>
       option.value === null ? [] : [option.value],
     );
     expect(ADVISORY_AGE_OPTIONS[0]).toEqual({ value: null, label: "No limit" });
-    expect(ages.every((age) => Number.isInteger(age) && age >= 1 && age <= 21)).toBe(true);
+    // Exactly the server's range, so any stored limit has a matching option.
+    expect(ages).toEqual(Array.from({ length: 21 }, (_, index) => index + 1));
   });
 });
