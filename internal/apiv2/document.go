@@ -705,6 +705,7 @@ func registerAll(reg *Registry) {
 	registerThemeCatalog(reg)
 	registerAdminInviteCodes(reg)
 	registerInvitations(reg)
+	registerPasswordResets(reg)
 	registerWebhookSync(reg)
 	registerWebhookReceiver(reg)
 	registerOnboarding(reg)

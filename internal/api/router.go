@@ -59,6 +59,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/opslog"
+	"github.com/Silo-Server/silo-server/internal/passwordreset"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/planstore"
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -491,6 +492,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var userRepo *auth.UserRepository
 	var inviteCodeRepo *auth.InviteCodeRepository
 	var invitationService *invitations.Service
+	var passwordResetService *passwordreset.Service
 	var apiKeyRepo *auth.APIKeyRepository
 	var authService *auth.Service
 	var authHandler *handlers.AuthHandler
@@ -542,6 +544,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 				settingsRepo,
 				"",
 			)
+			passwordResetService = passwordreset.NewService(
+				passwordreset.NewRepository(deps.DB),
+				userRepo,
+				authService,
+				mail.NewSMTPSender(settingsRepo),
+				settingsRepo,
+				"",
+			)
+			passwordResetService.OnSessionsRevoked(deps.OnUserSessionsRevoked)
 		}
 		profileTokenService = access.NewProfileTokenService(deps.Config.Auth.JWTSecret, 0)
 		deviceLoginService = auth.NewDeviceLoginService(
@@ -2182,6 +2193,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if diagnosticsHandler != nil {
 		v2deps.DiagnosticsIngress = diagnosticsHandler
 		v2deps.DiagnosticsChunks = diagnosticsHandler
+	}
+	if passwordResetService != nil {
+		passwordResetHandler := handlers.NewPasswordResetHandler(passwordResetService, userRepo)
+		if accessGroupStore != nil {
+			passwordResetHandler.SetAccessGroupProvider(accessGroupStore)
+		}
+		v2deps.PasswordResets = passwordResetHandler
 	}
 	var invitationHandler *handlers.InvitationHandler
 	if invitationService != nil {
@@ -4492,6 +4510,10 @@ func resolveOptionalPluginAccessUser(
 
 	claims, err := jwtService.ValidateToken(token)
 	if err != nil || (claims.TokenType != auth.TokenTypeAccess && claims.TokenType != auth.TokenTypePluginAccess) {
+		return false, false, 0, ""
+	}
+	// A session holding a temporary password may only change it.
+	if claims.PasswordChangeRequired {
 		return false, false, 0, ""
 	}
 	valid, err := sessionRepo.IsValid(r.Context(), claims.SessionID)

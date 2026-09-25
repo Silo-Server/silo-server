@@ -46,6 +46,13 @@
             "$ref": "#/components/schemas/Impersonation",
             "description": "Present only while an administrator impersonates this account"
           },
+          "password_change_required": {
+            "description": "Whether the account holds a temporary password. Until changePassword replaces it, the session may only read the account, change the password, and log out; other operations return 403 password_change_required. Refresh the tokens after the change to lift the restriction",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "permissions": {
             "description": "Effective assignable permissions; empty for a disabled account",
             "examples": [
@@ -87,7 +94,8 @@
           "email",
           "role",
           "permissions",
-          "download_allowed"
+          "download_allowed",
+          "password_change_required"
         ],
         "type": "object"
       },
@@ -760,6 +768,14 @@
           "guarded_configuration": {
             "type": "boolean"
           },
+          "password_reset_email": {
+            "description": "Whether createAdminUserPasswordReset can email the link; needs the public URL and a configured mail server",
+            "type": "boolean"
+          },
+          "password_reset_link": {
+            "description": "Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL",
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -781,6 +797,8 @@
           "default_profile",
           "exact_identity_filter",
           "access_groups",
+          "password_reset_link",
+          "password_reset_email",
           "revision",
           "state",
           "allowed"
@@ -908,6 +926,10 @@
               "boolean",
               "null"
             ]
+          },
+          "require_password_change": {
+            "description": "Make password temporary: the account must choose a new one at its first sign-in before it can do anything else",
+            "type": "boolean"
           },
           "role": {
             "enum": [
@@ -1117,6 +1139,10 @@
               "boolean",
               "null"
             ]
+          },
+          "require_password_change": {
+            "description": "Only with password: make it temporary, so the account must choose a new one at its next sign-in before it can do anything else. A password sent without it is not temporary",
+            "type": "boolean"
           },
           "role": {
             "enum": [
@@ -8161,6 +8187,73 @@
         ],
         "type": "object"
       },
+      "AdminPasswordReset": {
+        "additionalProperties": false,
+        "properties": {
+          "delivery": {
+            "enum": [
+              "email",
+              "link"
+            ],
+            "examples": [
+              "link"
+            ],
+            "type": "string"
+          },
+          "delivery_status": {
+            "description": "For email: sent, or failed_or_unknown when the mail server did not confirm delivery (the link is still live; send again or share a link). For link: not_requested",
+            "enum": [
+              "sent",
+              "failed_or_unknown",
+              "not_requested"
+            ],
+            "examples": [
+              "not_requested"
+            ],
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "When the link stops working",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "reset_url": {
+            "description": "Present for delivery=link only. One-time disclosure of a bearer credential for the account's password; share it only with the account holder",
+            "examples": [
+              "https://silo.example.test/reset-password/3f2b47eb7b36dd2d"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "delivery",
+          "delivery_status",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "AdminPasswordResetInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "delivery": {
+            "description": "email sends the link to the account's address; link returns it to you to share. Either way you never see the new password",
+            "enum": [
+              "email",
+              "link"
+            ],
+            "examples": [
+              "email"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "delivery"
+        ],
+        "type": "object"
+      },
       "AdminPersonUpdate": {
         "additionalProperties": false,
         "properties": {
@@ -15111,6 +15204,20 @@
               "null"
             ]
           },
+          "password_change_required": {
+            "description": "Whether the account holds a temporary password it must replace at its next sign-in",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "password_login": {
+            "description": "Whether the account signs in with a local password. False when an external authentication provider manages its sign-in; password actions do not apply then",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "permissions": {
             "description": "Permissions assigned directly to the account",
             "examples": [
@@ -15194,6 +15301,8 @@
           "download_transcode_allowed",
           "requests_allowed",
           "access_group_id",
+          "password_login",
+          "password_change_required",
           "effective_policy",
           "created_at",
           "updated_at",
@@ -29914,6 +30023,85 @@
           "legacy_only_truncated",
           "mismatches",
           "mismatches_truncated"
+        ],
+        "type": "object"
+      },
+      "PasswordResetCompleteInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "description": "The new password",
+            "examples": [
+              "margin fossil quench hollow"
+            ],
+            "maxLength": 72,
+            "minLength": 8,
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "type": "object"
+      },
+      "PasswordResetCompletion": {
+        "additionalProperties": false,
+        "properties": {
+          "login_status": {
+            "enum": [
+              "signed_in",
+              "sign_in_required"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "completed"
+            ],
+            "type": "string"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/TokenPair"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "login_status",
+          "username"
+        ],
+        "type": "object"
+      },
+      "PasswordResetLookup": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "server_name": {
+            "examples": [
+              "Silo"
+            ],
+            "type": "string"
+          },
+          "username": {
+            "description": "The account whose password the link replaces",
+            "examples": [
+              "alice"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "server_name",
+          "expires_at"
         ],
         "type": "object"
       },
@@ -103672,6 +103860,214 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/admin/users/{id}/password-reset": {
+      "post": {
+        "operationId": "createAdminUserPasswordReset",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminPasswordResetInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPasswordReset"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Email an account a password reset link, or create one to share.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/admin/users/{id}/profiles": {
       "get": {
         "operationId": "listAdminUserProfiles",
@@ -150567,6 +150963,264 @@
           "system"
         ],
         "x-silo-class": "public"
+      }
+    },
+    "/api/v2/password-resets/{token}": {
+      "get": {
+        "operationId": "lookupPasswordReset",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResetLookup"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Describe a usable password reset link for the reset screen.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/password-resets/{token}/complete": {
+      "post": {
+        "operationId": "completePasswordReset",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetCompleteInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResetCompletion"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Set a new password through a reset link, sign out everywhere, and sign in.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
       }
     },
     "/api/v2/playback/capabilities": {

@@ -10,6 +10,7 @@
     "permissions": [
       "marker_edit"
     ],
-    "download_allowed": true
+    "download_allowed": true,
+    "password_change_required": false
   }
 }

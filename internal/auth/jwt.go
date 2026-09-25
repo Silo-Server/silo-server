@@ -23,8 +23,12 @@ type Claims struct {
 	ProfileID          string `json:"profile_id,omitempty"`
 	TokenType          string `json:"token_type"`
 	ImpersonatorUserID *int   `json:"impersonator_user_id,omitempty"`
-	APIKeyID           int64  `json:"api_key_id,omitempty"`
-	RateTier           string `json:"rate_tier,omitempty"`
+	// PasswordChangeRequired restricts the session to changing its temporary
+	// password. Login and refresh copy it from the account, so the tokens a
+	// refresh issues after the change no longer carry it.
+	PasswordChangeRequired bool   `json:"password_change_required,omitempty"`
+	APIKeyID               int64  `json:"api_key_id,omitempty"`
+	RateTier               string `json:"rate_tier,omitempty"`
 	// APIKeyScopes carries the authenticating API key's scopes; empty for
 	// JWT sessions and unscoped keys. Never serialized into issued JWTs —
 	// it only exists on claims built for API-key requests.

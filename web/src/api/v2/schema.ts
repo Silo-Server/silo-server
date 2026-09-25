@@ -4409,6 +4409,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/users/{id}/password-reset": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Email an account a password reset link, or create one to share. */
+    post: operations["createAdminUserPasswordReset"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/users/{id}/profiles": {
     parameters: {
       query?: never;
@@ -7931,6 +7948,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/password-resets/{token}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Describe a usable password reset link for the reset screen. */
+    get: operations["lookupPasswordReset"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/password-resets/{token}/complete": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Set a new password through a reset link, sign out everywhere, and sign in. */
+    post: operations["completePasswordReset"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/playback/{session_id}": {
     parameters: {
       query?: never;
@@ -10407,6 +10458,11 @@ export interface components {
       /** @description Present only while an administrator impersonates this account */
       impersonation?: components["schemas"]["Impersonation"];
       /**
+       * @description Whether the account holds a temporary password. Until changePassword replaces it, the session may only read the account, change the password, and log out; other operations return 403 password_change_required. Refresh the tokens after the change to lift the restriction
+       * @example false
+       */
+      password_change_required: boolean;
+      /**
        * @description Effective assignable permissions; empty for a disabled account
        * @example [
        *       "marker_edit"
@@ -10568,6 +10624,10 @@ export interface components {
       default_profile: boolean;
       exact_identity_filter: boolean;
       guarded_configuration: boolean;
+      /** @description Whether createAdminUserPasswordReset can email the link; needs the public URL and a configured mail server */
+      password_reset_email: boolean;
+      /** @description Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL */
+      password_reset_link: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -10603,6 +10663,8 @@ export interface components {
       password: string;
       permissions?: string[];
       requests_allowed?: boolean | null;
+      /** @description Make password temporary: the account must choose a new one at its first sign-in before it can do anything else */
+      require_password_change?: boolean;
       /** @enum {string} */
       role: "admin" | "user";
       transcode_allowed?: boolean | null;
@@ -10657,6 +10719,8 @@ export interface components {
       password?: string;
       permissions?: string[];
       requests_allowed?: boolean | null;
+      /** @description Only with password: make it temporary, so the account must choose a new one at its next sign-in before it can do anything else. A password sent without it is not temporary */
+      require_password_change?: boolean;
       /** @enum {string} */
       role?: "admin" | "user";
       transcode_allowed?: boolean | null;
@@ -13215,6 +13279,37 @@ export interface components {
       timestamp: string;
       user_id?: string;
     };
+    AdminPasswordReset: {
+      /**
+       * @example link
+       * @enum {string}
+       */
+      delivery: "email" | "link";
+      /**
+       * @description For email: sent, or failed_or_unknown when the mail server did not confirm delivery (the link is still live; send again or share a link). For link: not_requested
+       * @example not_requested
+       * @enum {string}
+       */
+      delivery_status: "sent" | "failed_or_unknown" | "not_requested";
+      /**
+       * Format: date-time
+       * @description When the link stops working
+       */
+      expires_at: string;
+      /**
+       * @description Present for delivery=link only. One-time disclosure of a bearer credential for the account's password; share it only with the account holder
+       * @example https://silo.example.test/reset-password/3f2b47eb7b36dd2d
+       */
+      reset_url?: string;
+    };
+    AdminPasswordResetInputBody: {
+      /**
+       * @description email sends the link to the account's address; link returns it to you to share. Either way you never see the new password
+       * @example email
+       * @enum {string}
+       */
+      delivery: "email" | "link";
+    };
     AdminPersonUpdate: {
       bio?: string | null;
       /** @description YYYY-MM-DD; empty clears; null or omission preserves. */
@@ -15601,6 +15696,16 @@ export interface components {
        * @example 0
        */
       max_transcodes: number | null;
+      /**
+       * @description Whether the account holds a temporary password it must replace at its next sign-in
+       * @example false
+       */
+      password_change_required: boolean;
+      /**
+       * @description Whether the account signs in with a local password. False when an external authentication provider manages its sign-in; password actions do not apply then
+       * @example true
+       */
+      password_login: boolean;
       /**
        * @description Permissions assigned directly to the account
        * @example [
@@ -21347,6 +21452,35 @@ export interface components {
       telemetry_only: string[];
       /** Format: int64 */
       telemetry_only_truncated: number;
+    };
+    PasswordResetCompleteInputBody: {
+      /**
+       * @description The new password
+       * @example margin fossil quench hollow
+       */
+      password: string;
+    };
+    PasswordResetCompletion: {
+      /** @enum {string} */
+      login_status: "signed_in" | "sign_in_required";
+      /** @enum {string} */
+      status: "completed";
+      tokens?: components["schemas"]["TokenPair"];
+      username: string;
+    };
+    PasswordResetLookup: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      expires_at: string;
+      /** @example Silo */
+      server_name: string;
+      /**
+       * @description The account whose password the link replaces
+       * @example alice
+       */
+      username: string;
     };
     Person: {
       bio?: string;
@@ -67945,6 +68079,155 @@ export interface operations {
       };
     };
   };
+  createAdminUserPasswordReset: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminPasswordResetInputBody"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminPasswordReset"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   listAdminUserProfiles: {
     parameters: {
       query?: never;
@@ -98476,6 +98759,209 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  lookupPasswordReset: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        token: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PasswordResetLookup"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  completePasswordReset: {
+    parameters: {
+      query?: never;
+      header?: {
+        "User-Agent"?: string;
+      };
+      path: {
+        token: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PasswordResetCompleteInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PasswordResetCompletion"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };

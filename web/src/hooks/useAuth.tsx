@@ -8,6 +8,7 @@ import {
   isSessionIdentityCurrent,
   onProfileUnverified,
   onSessionRejected,
+  refreshAuthentication,
   setAccessToken,
   setProfileId,
   setProfileToken,
@@ -32,6 +33,8 @@ export type AuthProviderOption = V2Result<"GET /api/v2/auth/providers">["items"]
 
 interface AuthState {
   user: User | null;
+  /** The signed-in account while it holds a temporary password; `user` is null until it is changed. */
+  pendingPasswordChange: User | null;
   profile: Profile | null;
   loading: boolean;
   setupLoading: boolean;
@@ -42,7 +45,10 @@ interface AuthState {
   refreshSetupStatus: () => Promise<void>;
   providers: AuthProviderOption[];
   isImpersonating: boolean;
-  login: (username: string, password: string, provider?: string) => Promise<void>;
+  /** Resolves with the signed-in account; a temporary password confines it to changing the password. */
+  login: (username: string, password: string, provider?: string) => Promise<User>;
+  /** Swaps a temporary-password session for an unrestricted one after the password was changed. */
+  settleTemporaryPassword: () => Promise<void>;
   completeLogin: (data: LoginResponse) => void;
   setupInitialUser: (username: string, email: string, password: string) => Promise<void>;
   signup: (username: string, email: string, password: string, inviteCode: string) => Promise<void>;
@@ -204,7 +210,12 @@ export async function endImpersonationWithRecovery({
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  // The account the session authenticates. A temporary password confines the
+  // session to choosing a new one, so until then the app treats it as signed
+  // out: nothing keyed on `user` runs, and only the password change sees it.
+  const [account, setUser] = useState<User | null>(null);
+  const user = account?.password_change_required ? null : account;
+  const pendingPasswordChange = account?.password_change_required ? account : null;
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [setupLoading, setSetupLoading] = useState(true);
@@ -216,8 +227,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // The committed account, for the auth callbacks, which run after commit.
   const signedInUserIdRef = useRef<number | null>(null);
   useEffect(() => {
-    signedInUserIdRef.current = user?.id ?? null;
-  }, [user]);
+    signedInUserIdRef.current = account?.id ?? null;
+  }, [account]);
 
   const restoreProfile = useCallback(() => {
     const savedProfile = storage.get(storage.KEYS.CURRENT_PROFILE);
@@ -570,10 +581,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const tokens = await v2("POST /api/v2/auth/login", {
         body: { username, password, provider },
       });
-      applyAuthenticatedUser(sessionFromTokenPair(tokens));
+      const session = sessionFromTokenPair(tokens);
+      applyAuthenticatedUser(session);
+      return session.user;
     },
     [applyAuthenticatedUser],
   );
+
+  // Tokens carry the temporary-password restriction from when they were
+  // issued; the server drops it from the ones a refresh issues once the
+  // account has a new password. Rotation keeps the session identity, so a
+  // sign-out meanwhile still discards the result.
+  const settleTemporaryPassword = useCallback(async () => {
+    const session = captureSessionIdentity();
+    if (!(await refreshAuthentication())) {
+      throw new Error("Your password was changed, but the session ended. Sign in again.");
+    }
+    const account = userFromAccount(await v2("GET /api/v2/account/me"));
+    if (!isSessionIdentityCurrent(session)) return;
+    setUser(account);
+  }, []);
 
   const setupInitialUser = useCallback(
     async (username: string, email: string, password: string) => {
@@ -608,6 +635,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
+        pendingPasswordChange,
         profile,
         loading,
         setupLoading,
@@ -617,6 +645,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         providers,
         isImpersonating,
         login,
+        settleTemporaryPassword,
         completeLogin: applyAuthenticatedUser,
         setupInitialUser,
         signup,

@@ -268,6 +268,11 @@ same way. Turning off hardware video decoding in Chrome avoids it.
 
 ## Sessions and socket
 
+Sign-in refuses an account holding a temporary password with `401` and a message to
+sign in to Silo first: Jellyfin clients cannot run the password change it requires
+(see [temporary passwords](auth-api.md#temporary-passwords)). The account's other
+state is unaffected, and signing in works again once the password is changed.
+
 `GET /Sessions` lists started playback mappings owned by the caller's token,
 including mappings persisted by another API process. Device and activity filters
 apply to the returned list. Current native play state is included when locally

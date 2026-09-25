@@ -1,4 +1,5 @@
 import { AdminUserDeleteDialog } from "@/components/AdminUserDeleteDialog";
+import { AdminUserPasswordResetDialog } from "@/components/AdminUserPasswordResetDialog";
 import {
   adminUserScope,
   captureAdminUserAuthority,
@@ -61,7 +62,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowUpRight, ChevronRight, Pencil, RotateCcw, Settings2, UserCircle } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronRight,
+  KeyRound,
+  Pencil,
+  RotateCcw,
+  Settings2,
+  UserCircle,
+} from "lucide-react";
 import { useNavigate } from "react-router";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -117,6 +126,7 @@ function AdminUserDetailPage() {
   const capabilities = useAdminUserCapabilities();
   const available = capabilities.data?.available === true;
   const [confirmImpersonateOpen, setConfirmImpersonateOpen] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
 
   if (isLoading) return <div className="page-shell py-8">Loading user...</div>;
   if (error || !user)
@@ -172,6 +182,7 @@ function AdminUserDetailPage() {
             <Badge variant={user.enabled ? "outline" : "destructive"}>
               {user.enabled ? "Active" : "Disabled"}
             </Badge>
+            {user.password_change_required && <Badge variant="outline">Temporary password</Badge>}
           </div>
           <p className="page-subtitle text-sm sm:text-base">{user.email}</p>
         </div>
@@ -215,6 +226,18 @@ function AdminUserDetailPage() {
               )}
             </DialogContent>
           </Dialog>
+          {/* An external provider manages this account's sign-in: it has no password to reset. */}
+          {user.password_login && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 sm:flex-none"
+              onClick={() => setResetOpen(true)}
+              disabled={!available || !user.enabled}
+            >
+              <KeyRound className="mr-1 h-3.5 w-3.5" /> Reset password
+            </Button>
+          )}
           <Button
             variant="destructive"
             size="sm"
@@ -265,6 +288,14 @@ function AdminUserDetailPage() {
           returnPath={`/admin/users/${user.id}`}
           onClose={() => setConfirmImpersonateOpen(false)}
           onError={setActionError}
+        />
+      )}
+      {resetOpen && (
+        <AdminUserPasswordResetDialog
+          user={user}
+          emailAvailable={capabilities.data?.password_reset_email === true}
+          linkAvailable={capabilities.data?.password_reset_link === true}
+          onClose={() => setResetOpen(false)}
         />
       )}
       {deleteEditor && (
@@ -1151,6 +1182,7 @@ function EditUserForm({
   const [username, setUsername] = useState(user.username);
   const [email, setEmail] = useState(user.email);
   const [password, setPassword] = useState("");
+  const [requirePasswordChange, setRequirePasswordChange] = useState(false);
   const [role, setRole] = useState(user.role);
   const [enabled, setEnabled] = useState(user.enabled);
   const [permissions, setPermissions] = useState<string[]>(user.permissions ?? []);
@@ -1159,6 +1191,8 @@ function EditUserForm({
   const [maxProfiles, setMaxProfiles] = useState(user.max_profiles);
   const accessGroupSelectId = useId();
   const roleSelectId = useId();
+  const passwordInputId = useId();
+  const requireChangeId = useId();
   const markerEditId = useId();
   const metadataCurationId = useId();
   const updateMutation = useUpdateUser();
@@ -1199,7 +1233,10 @@ function EditUserForm({
       max_profiles: maxProfiles,
       ...policyUpdateFields(policy),
     };
-    if (password) body.password = password;
+    if (password) {
+      body.password = password;
+      if (requirePasswordChange) body.require_password_change = true;
+    }
     try {
       await updateMutation.mutateAsync({ editor, body });
       setSaved(true);
@@ -1256,14 +1293,36 @@ function EditUserForm({
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Password (leave blank to keep current)</Label>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
+              {user.password_login ? (
+                <div className="space-y-2">
+                  <Label htmlFor={passwordInputId}>Password (leave blank to keep current)</Label>
+                  <Input
+                    id={passwordInputId}
+                    type="password"
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id={requireChangeId}
+                      checked={requirePasswordChange && password !== ""}
+                      disabled={password === ""}
+                      onCheckedChange={setRequirePasswordChange}
+                    />
+                    <Label htmlFor={requireChangeId} className="text-xs font-normal">
+                      Require change at next sign-in
+                    </Label>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label>Password</Label>
+                  <p className="text-muted-foreground text-xs">
+                    An external sign-in provider manages this account's password.
+                  </p>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor={roleSelectId}>Role</Label>
                 <Select value={role} onValueChange={setRole}>

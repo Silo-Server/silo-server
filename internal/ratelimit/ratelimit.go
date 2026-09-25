@@ -89,6 +89,9 @@ func DefaultConfig() Config {
 			// Invitation claim lookups and accepts: single-use tokens with
 			// 256-bit entropy, so this is anti-probe hygiene, not the guard.
 			"invitation": {RequestsPerMinute: 20, Burst: 10},
+			// Password reset link lookups and completions: same token entropy
+			// and the same anti-probe role.
+			"password_reset": {RequestsPerMinute: 20, Burst: 10},
 			// Public autoscan webhook intake. Generous: arr fires one delivery
 			// per imported file, so season packs are legitimate bursts.
 			"autoscan_webhook": {RequestsPerMinute: 60, Burst: 30},

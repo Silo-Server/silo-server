@@ -691,6 +691,7 @@ function UserForm({
   const [username, setUsername] = useState(user?.username ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
   const [password, setPassword] = useState("");
+  const [requirePasswordChange, setRequirePasswordChange] = useState(false);
   const [role, setRole] = useState(user?.role ?? "user");
   const [enabled, setEnabled] = useState(user?.enabled ?? true);
   const [permissions, setPermissions] = useState<string[]>(
@@ -702,6 +703,7 @@ function UserForm({
   const usernameId = useId();
   const emailId = useId();
   const passwordId = useId();
+  const requireChangeId = useId();
   const roleId = useId();
   const enabledId = useId();
   const markerEditId = useId();
@@ -760,7 +762,10 @@ function UserForm({
         if (role === "admin") {
           body.access_group_id = effectiveAccessGroupID(role, user.access_group_id);
         }
-        if (password) body.password = password;
+        if (password) {
+          body.password = password;
+          if (requirePasswordChange) body.require_password_change = true;
+        }
         await updateMutation.mutateAsync({ editor, body });
         setSaved(true);
         await getAdminUser(user.id, editor.profileContext);
@@ -770,6 +775,7 @@ function UserForm({
           username,
           email,
           password,
+          ...(requirePasswordChange ? { require_password_change: true } : {}),
           role,
           permissions,
           create_default_profile: createDefaultProfile,
@@ -850,18 +856,39 @@ function UserForm({
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor={passwordId}>
-                  Password {user && "(leave blank to keep current)"}
-                </Label>
-                <Input
-                  id={passwordId}
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required={!user}
-                />
-              </div>
+              {user && !user.password_login ? (
+                <div className="space-y-2">
+                  <Label>Password</Label>
+                  <p className="text-muted-foreground text-xs">
+                    An external sign-in provider manages this account's password.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor={passwordId}>
+                    Password {user && "(leave blank to keep current)"}
+                  </Label>
+                  <Input
+                    id={passwordId}
+                    type="password"
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required={!user}
+                  />
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id={requireChangeId}
+                      checked={requirePasswordChange && password !== ""}
+                      disabled={password === ""}
+                      onCheckedChange={setRequirePasswordChange}
+                    />
+                    <Label htmlFor={requireChangeId} className="text-xs font-normal">
+                      Require change at {user ? "next" : "first"} sign-in
+                    </Label>
+                  </div>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor={roleId}>Role</Label>
                 <Select value={role} onValueChange={setRole}>

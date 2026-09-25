@@ -130,6 +130,7 @@ describe("credential responses", () => {
         role: "user",
         permissions: ["marker_edit"],
         download_allowed: true,
+        password_change_required: false,
         impersonation: null,
       },
     });

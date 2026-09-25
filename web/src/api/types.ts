@@ -108,6 +108,8 @@ export interface User {
   role: string;
   permissions: string[];
   download_allowed: boolean;
+  /** The account holds a temporary password: until it is changed, the session may only change it. */
+  password_change_required?: boolean;
   impersonation?: ImpersonationInfo | null;
 }
 
@@ -2404,6 +2406,10 @@ export interface AdminUser {
   download_allowed: boolean | null;
   download_transcode_allowed: boolean | null;
   requests_allowed: boolean | null;
+  /** Signs in with a local password; false when an external provider manages sign-in. */
+  password_login: boolean;
+  /** Holds a temporary password it must replace at its next sign-in. */
+  password_change_required: boolean;
   effective_policy: AdminUserEffectivePolicy;
   created_at: string;
   updated_at: string;
@@ -2415,6 +2421,8 @@ export interface CreateUserRequest {
   username: string;
   email: string;
   password: string;
+  /** The password is temporary: the account must replace it at its first sign-in. */
+  require_password_change?: boolean;
   role: string;
   permissions?: string[];
   create_default_profile?: boolean;
@@ -2440,6 +2448,8 @@ export interface UpdateUserRequest {
   username?: string;
   email?: string;
   password?: string;
+  /** Only with password: make it temporary, replaced at the next sign-in. */
+  require_password_change?: boolean;
   role?: string;
   permissions?: string[];
   enabled?: boolean;

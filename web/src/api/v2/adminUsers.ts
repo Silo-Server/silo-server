@@ -51,6 +51,8 @@ export function adminUserFromV2(user: AdminUserV2): AdminUser {
     download_allowed: user.download_allowed,
     download_transcode_allowed: user.download_transcode_allowed,
     requests_allowed: user.requests_allowed,
+    password_login: user.password_login,
+    password_change_required: user.password_change_required,
     effective_policy: {
       library_ids:
         user.effective_policy.library_ids === null
@@ -188,6 +190,25 @@ export async function impersonateAdminUser(
   });
   requireAdminUserAuthority(profileContext);
   return { session: sessionFromTokenPair(pair), profileContext };
+}
+export type AdminPasswordReset = V2Result<"POST /api/v2/admin/users/{id}/password-reset">;
+
+/** Issues a password reset link for an account, replacing any earlier link.
+ * `email` sends it to the account's address; `link` returns it to share. */
+export async function issueAdminPasswordReset(
+  id: number,
+  delivery: "email" | "link",
+  profileContext = captureAdminUserAuthority(),
+): Promise<AdminPasswordReset> {
+  requireAdminUserAuthority(profileContext);
+  const result = await v2("POST /api/v2/admin/users/{id}/password-reset", {
+    path: { id: String(id) },
+    body: { delivery },
+    profileContext,
+    retryAuthentication: false,
+  });
+  requireAdminUserAuthority(profileContext);
+  return result;
 }
 export async function getAdminUserCapabilities(profileContext = captureAdminUserAuthority()) {
   requireAdminUserAuthority(profileContext);

@@ -353,6 +353,7 @@ export const v2Operations = {
   "GET /api/v2/onboarding/flow": "getOnboardingFlow",
   "GET /api/v2/onboarding/state": "getOnboardingState",
   "GET /api/v2/openapi.json": "getOpenAPIDocument",
+  "GET /api/v2/password-resets/{token}": "lookupPasswordReset",
   "GET /api/v2/playback/capabilities": "getPlaybackCapabilities",
   "GET /api/v2/playback/sessions/control/capabilities": "getPlaybackControlSocketCapabilities",
   "GET /api/v2/playback/sessions/{session_id}/control/ws": "connectPlaybackControlSocket",
@@ -596,6 +597,7 @@ export const v2Operations = {
   "POST /api/v2/admin/tasks/{key}/run": "runAdminTask",
   "POST /api/v2/admin/users": "createAdminUser",
   "POST /api/v2/admin/users/{id}/impersonate": "impersonateAdminUser",
+  "POST /api/v2/admin/users/{id}/password-reset": "createAdminUserPasswordReset",
   "POST /api/v2/api-keys": "createPersonalAPIKey",
   "POST /api/v2/auth/device/approve": "approveDeviceLogin",
   "POST /api/v2/auth/device/approve-handoff": "approveDeviceHandoff",
@@ -658,6 +660,7 @@ export const v2Operations = {
   "POST /api/v2/notifications/webhooks/{id}/rotate-secret": "rotateNotificationWebhookSecret",
   "POST /api/v2/notifications/webhooks/{id}/test": "testNotificationWebhook",
   "POST /api/v2/notifications/{id}/read": "markNotificationRead",
+  "POST /api/v2/password-resets/{token}/complete": "completePasswordReset",
   "POST /api/v2/playback/route-events": "reportPlaybackRouteEvent",
   "POST /api/v2/playback/sessions/{session_id}/control/ws-ticket":
     "createPlaybackControlSocketTicket",

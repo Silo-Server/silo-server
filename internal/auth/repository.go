@@ -50,7 +50,7 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 
 // allColumns is the list of columns returned by all SELECT queries.
 // Kept in one place so scanUser stays in sync.
-const allColumns = `id, email, username, password_hash, local_password_login_enabled, role, permissions, enabled,
+const allColumns = `id, email, username, password_hash, local_password_login_enabled, password_change_required, role, permissions, enabled,
 	library_ids, max_playback_quality, access_policy_revision,
 	max_streams, max_transcodes, max_remote_stream_bitrate_kbps, max_local_stream_bitrate_kbps, transcode_allowed, audio_transcode_allowed, max_profiles, download_allowed,
 	download_transcode_allowed, requests_allowed, access_group_id, created_at, updated_at`
@@ -64,6 +64,7 @@ func scanUser(row pgx.Row) (*models.User, error) {
 		&u.Username,
 		&u.PasswordHash,
 		&u.LocalPasswordLoginEnabled,
+		&u.PasswordChangeRequired,
 		&u.Role,
 		&u.Permissions,
 		&u.Enabled,
@@ -104,6 +105,7 @@ func scanUsers(rows pgx.Rows) ([]*models.User, error) {
 			&u.Username,
 			&u.PasswordHash,
 			&u.LocalPasswordLoginEnabled,
+			&u.PasswordChangeRequired,
 			&u.Role,
 			&u.Permissions,
 			&u.Enabled,
@@ -166,7 +168,7 @@ func createUser(ctx context.Context, db interface {
 	// Policy columns are written explicitly: a nil pointer stores NULL, which
 	// means "inherit from the access group" (the columns carry no defaults).
 	cols := []string{
-		"email", "username", "password_hash", "local_password_login_enabled", "role", "permissions",
+		"email", "username", "password_hash", "local_password_login_enabled", "password_change_required", "role", "permissions",
 		"library_ids", "max_playback_quality", "max_streams", "max_transcodes", "max_remote_stream_bitrate_kbps", "max_local_stream_bitrate_kbps",
 		"transcode_allowed", "audio_transcode_allowed", "download_allowed", "download_transcode_allowed",
 		"requests_allowed",
@@ -176,6 +178,7 @@ func createUser(ctx context.Context, db interface {
 		NormalizeUsername(input.Username),
 		string(hash),
 		localPasswordLoginEnabled,
+		input.PasswordChangeRequired,
 		input.Role,
 		permissions,
 		input.LibraryIDs,
@@ -377,6 +380,7 @@ func updateUser(ctx context.Context, db interface {
 		{column: "email", set: email != nil, value: email},
 		{column: "username", set: username != nil, value: username},
 		{column: "password_hash", set: passwordHash != nil, value: passwordHash},
+		{column: "password_change_required", set: passwordHash != nil, value: input.PasswordChangeRequired},
 		{column: "local_password_login_enabled", set: input.LocalPasswordLoginEnabled != nil, value: input.LocalPasswordLoginEnabled},
 		{column: "role", set: input.Role != nil, value: input.Role, bumpsAccessPolicy: true},
 		{column: "permissions", set: input.Permissions != nil, value: permissions, bumpsAccessPolicy: true},
@@ -475,7 +479,8 @@ func updateUser(ctx context.Context, db interface {
 
 // CompareAndSwapPassword replaces the bcrypt hash only if it is still the one
 // the caller verified. Concurrent password changes using the same old password
-// therefore cannot both succeed with different replacements.
+// therefore cannot both succeed with different replacements. The account
+// chose this password itself, so it settles any temporary one.
 func (r *UserRepository) CompareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string) error {
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
@@ -484,7 +489,7 @@ func (r *UserRepository) CompareAndSwapPassword(ctx context.Context, id int, exp
 
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE users
-		SET password_hash = $1, updated_at = NOW()
+		SET password_hash = $1, password_change_required = false, updated_at = NOW()
 		WHERE id = $2 AND password_hash = $3`, string(hash), id, expectedHash)
 	if err != nil {
 		return fmt.Errorf("updating password: %w", err)

@@ -15,7 +15,7 @@ func TestGetCurrentUser(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"id":"1","username":"laura","email":"laura@example.test","role":"user","permissions":["marker_edit"],"download_allowed":true}` + "\n"
+	want := `{"id":"1","username":"laura","email":"laura@example.test","role":"user","permissions":["marker_edit"],"download_allowed":true,"password_change_required":false}` + "\n"
 	if rec.Body.String() != want {
 		t.Fatalf("body = %s", rec.Body.String())
 	}

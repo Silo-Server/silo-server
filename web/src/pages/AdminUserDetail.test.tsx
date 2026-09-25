@@ -51,6 +51,8 @@ const adminUser: AdminUser = {
   download_allowed: null,
   download_transcode_allowed: null,
   requests_allowed: null,
+  password_login: true,
+  password_change_required: false,
   effective_policy: {
     library_ids: null,
     max_playback_quality: "",
@@ -110,6 +112,7 @@ vi.mock("@/hooks/queries/admin/users", () => ({
   useUpdateUser: () => ({ mutateAsync: mocks.updateUserMutate, isPending: false }),
   useDeleteUser: () => ({ mutate: vi.fn(), isPending: false }),
   useImpersonateUser: () => ({ mutateAsync: mocks.impersonate, reset: vi.fn(), isPending: false }),
+  useIssuePasswordReset: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAdminUserDeviceSettings: () => ({ data: [], isLoading: false }),
   useAdminUserSettings: () => ({ data: mocks.userSettings, isLoading: false }),
   useDeleteAdminUserDeviceSetting: () => ({ mutate: vi.fn(), isPending: false }),
@@ -590,6 +593,45 @@ describe("AdminUserDetail effective values", () => {
 function rowValue(label: string): string | undefined {
   return screen.getByText(label).nextElementSibling?.textContent ?? undefined;
 }
+
+it("sends a temporary password when the admin requires a change", async () => {
+  const user = userEvent.setup();
+  mocks.updateUserMutate.mockResolvedValue(undefined);
+  renderUserDetail();
+  await user.click(screen.getByRole("button", { name: /edit/i }));
+  const dialog = await screen.findByRole("dialog");
+  const toggle = within(dialog).getByRole("switch", { name: "Require change at next sign-in" });
+  expect(toggle).toBeDisabled();
+  await user.type(
+    within(dialog).getByLabelText("Password (leave blank to keep current)"),
+    "temporary-pass",
+  );
+  await user.click(toggle);
+  await user.click(within(dialog).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(mocks.updateUserMutate).toHaveBeenCalledTimes(1));
+  expect(mocks.updateUserMutate.mock.calls[0]![0].body).toMatchObject({
+    password: "temporary-pass",
+    require_password_change: true,
+  });
+});
+
+it("hides password actions for an account an external provider manages", async () => {
+  const user = userEvent.setup();
+  mocks.user = { ...adminUser, password_login: false };
+  renderUserDetail();
+  expect(screen.queryByRole("button", { name: /reset password/i })).toBeNull();
+  await user.click(screen.getByRole("button", { name: /edit/i }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).queryByLabelText(/Password \(leave blank/)).toBeNull();
+  expect(within(dialog).getByText(/external sign-in provider/)).toBeInTheDocument();
+});
+
+it("offers a password reset for an account that signs in with a password", async () => {
+  const user = userEvent.setup();
+  renderUserDetail();
+  await user.click(screen.getByRole("button", { name: /reset password/i }));
+  expect(await screen.findByRole("dialog", { name: "Reset password" })).toBeInTheDocument();
+});
 
 it("preserves user draft and frozen guard after conflict until explicit reload", async () => {
   const user = userEvent.setup();

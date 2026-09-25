@@ -220,6 +220,8 @@ const adminUser: AdminUser = {
   download_allowed: null,
   download_transcode_allowed: null,
   requests_allowed: null,
+  password_login: true,
+  password_change_required: false,
   effective_policy: {
     library_ids: null,
     max_playback_quality: "",

@@ -327,6 +327,10 @@ type AdminUserView struct {
 	CreatedAt                  time.Time           `json:"created_at"`
 	UpdatedAt                  time.Time           `json:"updated_at"`
 	LastActiveAt               *time.Time          `json:"last_active_at,omitempty"`
+	// PasswordLogin and PasswordChangeRequired are v2-only: the frozen v1
+	// body does not carry them.
+	PasswordLogin          bool `json:"-"`
+	PasswordChangeRequired bool `json:"-"`
 }
 
 // EffectivePolicyView is the resolved policy block on admin user responses.
@@ -412,6 +416,8 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 		DownloadTranscodeAllowed:   clonePtr(u.DownloadTranscodeAllowed),
 		RequestsAllowed:            clonePtr(u.RequestsAllowed),
 		AccessGroupID:              clonePtr(u.AccessGroupID),
+		PasswordLogin:              u.LocalPasswordLoginEnabled && u.PasswordHash != "",
+		PasswordChangeRequired:     u.PasswordChangeRequired,
 		EffectivePolicy: EffectivePolicyView{
 			LibraryIDs:                 effective.LibraryIDs,
 			MaxPlaybackQuality:         effective.MaxPlaybackQuality,

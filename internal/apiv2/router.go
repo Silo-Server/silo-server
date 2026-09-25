@@ -378,6 +378,7 @@ type Dependencies struct {
 	ThemeOverrides                     ThemeOverrideService
 	AdminInviteCodes                   AdminInviteCodeService
 	Invitations                        InvitationService
+	PasswordResets                     PasswordResetService
 	ThemeCatalog                       ThemeCatalogService
 	AdminSubtitleProviderConfiguration AdminSubtitleProviderConfigurationService
 	// PersonalCollections manages a profile's own collections and groups
