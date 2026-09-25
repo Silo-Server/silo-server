@@ -61,3 +61,51 @@ func TestLoadSourceReusesCachedEmbeddedSubtitle(t *testing.T) {
 		t.Fatalf("unexpected unsupported-source error: %v", err)
 	}
 }
+
+// TestLoadSourceFillsCacheOnMiss: the first translation of an uncached track
+// extracts it once and publishes the extract, so a later translation, even
+// from another service sharing the cache, reads it without extracting.
+func TestLoadSourceFillsCacheOnMiss(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "movie.mkv")
+	if err := os.WriteFile(source, []byte("not a real container"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := playback.NewSubtitleCache(func() string { return filepath.Join(dir, "transcode") })
+	file := &models.MediaFile{ID: 7, FilePath: source, SubtitleTracks: []models.SubtitleTrack{
+		{Language: "eng", Codec: "subrip"},
+		{Language: "fre", Codec: "subrip"},
+	}}
+	newService := func(extract func(context.Context, string, int) ([]byte, error)) *Service {
+		svc := NewService(context.Background(), Config{}, nil, nil, nil, nil, nil,
+			runTranscribeFileResolver{file: file}, nil, "", nil, nil)
+		svc.SetSubtitleCache(cache)
+		svc.extractEmbedded = extract
+		return svc
+	}
+
+	calls := 0
+	first := newService(func(_ context.Context, path string, ordinal int) ([]byte, error) {
+		calls++
+		if path != source || ordinal != 1 {
+			t.Fatalf("extracted %s track %d, want %s track 1", path, ordinal, source)
+		}
+		return []byte(cachedSourceSRT), nil
+	})
+	for range 2 {
+		cues, language, err := first.loadSource(context.Background(), &Job{MediaFileID: file.ID, SourceIndex: 1})
+		if err != nil || language != "fre" || len(cues) != 2 {
+			t.Fatalf("language=%q cues=%d err=%v", language, len(cues), err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("extracted %d times, want 1", calls)
+	}
+
+	second := newService(func(context.Context, string, int) ([]byte, error) {
+		return nil, errors.New("extracted again despite a cached source")
+	})
+	if _, _, err := second.loadSource(context.Background(), &Job{MediaFileID: file.ID, SourceIndex: 1}); err != nil {
+		t.Fatal(err)
+	}
+}

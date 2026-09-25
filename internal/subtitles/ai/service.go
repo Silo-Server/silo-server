@@ -80,6 +80,9 @@ type Service struct {
 	// with subtitle delivery, so a source track is demuxed once rather than
 	// on every translation of it. Optional; nil extracts every time.
 	subtitleCache *playback.SubtitleCache
+	// extractEmbedded demuxes one embedded subtitle stream (ffmpeg's 0:s:N)
+	// as SRT. Nil uses playback.ExtractSubtitle; tests replace it.
+	extractEmbedded func(ctx context.Context, filePath string, ordinal int) ([]byte, error)
 }
 
 // SetSubtitleCache shares the node's subtitle extract cache with translation
@@ -704,6 +707,9 @@ func (s *Service) loadSource(ctx context.Context, job *Job) ([]SubtitleCue, stri
 			return nil, "", fmt.Errorf("%w: bitmap track", ErrSourceUnsupported)
 		}
 		extract := func(ctx context.Context) ([]byte, error) {
+			if s.extractEmbedded != nil {
+				return s.extractEmbedded(ctx, file.FilePath, embeddedIndex)
+			}
 			data, _, err := playback.ExtractSubtitle(ctx, file.FilePath, embeddedIndex, s.ffmpegPath)
 			return data, err
 		}

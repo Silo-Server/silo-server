@@ -387,6 +387,15 @@ func (c *SubtitleCache) ExtractText(ctx context.Context, inputPath string, track
 		return data, nil
 	}
 	fill := c.beginFill(inputPath, trackIndex, format)
+	if fill == nil && c.waitForTextFill(ctx, inputPath, TextSubtitleTrack{Ordinal: trackIndex, Format: format}) {
+		// Another request is extracting this track: share its result rather
+		// than demuxing the source a second time. If that fill failed, try
+		// again as the filler.
+		if data, ok := c.LookupText(inputPath, trackIndex, format); ok {
+			return data, nil
+		}
+		fill = c.beginFill(inputPath, trackIndex, format)
+	}
 	data, err := extract(ctx)
 	if err != nil {
 		if fill != nil {
