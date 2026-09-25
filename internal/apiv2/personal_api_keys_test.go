@@ -48,8 +48,8 @@ func TestPersonalAPIKeysAccountAndSecrets(t *testing.T) {
 	if created.Code != 201 || f.createUser != 2 || !strings.Contains(created.Body.String(), `"key":"creation-secret"`) {
 		t.Fatal(created.Code, created.Body.String(), f.createUser)
 	}
-	listed := do(t, h, "GET", Prefix+"/api-keys", "", bearer(memberToken))
-	if listed.Code != 200 || f.account != 1 {
+	listed := do(t, h, "GET", Prefix+"/api-keys", "", bearer(adminToken))
+	if listed.Code != 200 || f.account != 2 {
 		t.Fatal(listed.Code, listed.Body.String(), f.account)
 	}
 	for _, secret := range []string{`"key":`, `"revision":`, `"username":`} {

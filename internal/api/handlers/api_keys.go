@@ -144,12 +144,6 @@ func (h *APIKeyHandler) HandleCreateAPIKey(w http.ResponseWriter, r *http.Reques
 	if claims == nil {
 		return
 	}
-	// Only server admins create API keys (#1189 AC2); listing and deletion stay
-	// open so any account can still revoke keys it already owns.
-	if claims.Role != models.RoleAdmin {
-		writeError(w, http.StatusForbidden, "forbidden", "Only server admins can create API keys")
-		return
-	}
 
 	var req createAPIKeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
