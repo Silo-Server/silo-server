@@ -176,8 +176,8 @@ func (t *SweepArtworkStorageTask) Execute(ctx context.Context, progress taskmana
 	}
 
 	progress.Report(100, fmt.Sprintf(
-		"Swept %d objects in %s: %d referenced, %d deleted, %d too new, %d unrecognized",
-		stats.Scanned, cp.Prefix, stats.Referenced, stats.Deleted, stats.TooNew, stats.Unparsable,
+		"Swept %d objects in %s: %d referenced, %d deleted, %d left to artwork GC, %d too new, %d unrecognized",
+		stats.Scanned, cp.Prefix, stats.Referenced, stats.Deleted, stats.LeftToGC, stats.TooNew, stats.Unparsable,
 	))
 	return nil
 }
