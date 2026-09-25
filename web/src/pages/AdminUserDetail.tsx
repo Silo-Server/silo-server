@@ -66,6 +66,7 @@ import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonatio
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { formatPlaybackQualityPreset } from "@/lib/playback-quality";
+import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import {
   PERMISSION_MARKER_EDIT,
@@ -370,18 +371,14 @@ function OverviewTab({ user }: { user: AdminUser }) {
           <DetailRow
             label="Max remote stream bitrate"
             value={
-              (effective.max_remote_stream_bitrate_kbps === 0
-                ? "Unlimited"
-                : `${effective.max_remote_stream_bitrate_kbps} kbps`) +
+              formatStreamBitrateLimit(effective.max_remote_stream_bitrate_kbps) +
               overridden(user.max_remote_stream_bitrate_kbps !== null)
             }
           />
           <DetailRow
             label="Max local stream bitrate"
             value={
-              (effective.max_local_stream_bitrate_kbps === 0
-                ? "Unlimited"
-                : `${effective.max_local_stream_bitrate_kbps} kbps`) +
+              formatStreamBitrateLimit(effective.max_local_stream_bitrate_kbps) +
               overridden(user.max_local_stream_bitrate_kbps !== null)
             }
           />

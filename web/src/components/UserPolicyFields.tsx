@@ -1,7 +1,8 @@
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 
 import type { AccessGroup, AdminUser, AdminUserEffectivePolicy, Library } from "@/api/types";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
+import { StreamBitrateLimitInput } from "@/components/StreamBitrateLimitInput";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -19,6 +20,7 @@ import {
   playbackQualityValueFromPreset,
   type PlaybackQualityPreset,
 } from "@/lib/playback-quality";
+import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 
 // Per-user policy overrides. null = inherit the access group's value; a
 // concrete value is an explicit override in either direction.
@@ -200,6 +202,46 @@ function limitDraftValue(draft: string): number | null {
   return parsed;
 }
 
+// Label row with the Override switch; while not overridden the field shows
+// what it inherits instead of its control.
+function PolicyOverrideField({
+  id,
+  label,
+  overridden,
+  onOverriddenChange,
+  inheritedText,
+  children,
+}: {
+  id: string;
+  label: string;
+  overridden: boolean;
+  onOverriddenChange: (checked: boolean) => void;
+  inheritedText: string | undefined;
+  children: ReactNode;
+}) {
+  const overrideId = `${id}-override`;
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <Label htmlFor={id}>{label}</Label>
+        <div className="flex items-center gap-2">
+          <Label htmlFor={overrideId} className="text-muted-foreground text-xs">
+            Override
+          </Label>
+          <Switch id={overrideId} checked={overridden} onCheckedChange={onOverriddenChange} />
+        </div>
+      </div>
+      {overridden ? (
+        children
+      ) : (
+        <p className="text-muted-foreground border-border rounded-md border border-dashed px-3 py-2 text-sm">
+          {inheritHint(inheritedText)}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function LimitPolicyField({
   label,
   value,
@@ -212,7 +254,6 @@ function LimitPolicyField({
   effectiveValue?: number;
 }) {
   const id = useId();
-  const overrideId = `${id}-override`;
   // Override is tracked locally because "overriding, but nothing typed yet" has
   // no representation in UserPolicyState: while the box is empty the field
   // keeps inheriting rather than pinning 0, which would mean unlimited.
@@ -244,45 +285,80 @@ function LimitPolicyField({
   }
 
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between">
-        <Label htmlFor={id}>{label}</Label>
-        <div className="flex items-center gap-2">
-          <Label htmlFor={overrideId} className="text-muted-foreground text-xs">
-            Override
-          </Label>
-          <Switch id={overrideId} checked={overridden} onCheckedChange={handleOverrideChange} />
-        </div>
-      </div>
-      {overridden ? (
-        <>
-          <Input
-            id={id}
-            type="number"
-            min={0}
-            step={1}
-            required
-            value={draft}
-            onChange={(event) => handleDraftChange(event.target.value)}
-          />
-          <p className="text-muted-foreground text-xs">
-            {draftValue === null
-              ? "Enter a whole number, or turn Override off to inherit."
-              : "0 = unlimited"}
-          </p>
-        </>
-      ) : (
-        <p className="text-muted-foreground border-border rounded-md border border-dashed px-3 py-2 text-sm">
-          {inheritHint(
-            effectiveValue === undefined
-              ? undefined
-              : effectiveValue === 0
-                ? "Unlimited"
-                : String(effectiveValue),
-          )}
-        </p>
-      )}
-    </div>
+    <PolicyOverrideField
+      id={id}
+      label={label}
+      overridden={overridden}
+      onOverriddenChange={handleOverrideChange}
+      inheritedText={
+        effectiveValue === undefined
+          ? undefined
+          : effectiveValue === 0
+            ? "Unlimited"
+            : String(effectiveValue)
+      }
+    >
+      <Input
+        id={id}
+        type="number"
+        min={0}
+        step={1}
+        required
+        value={draft}
+        onChange={(event) => handleDraftChange(event.target.value)}
+      />
+      <p className="text-muted-foreground text-xs">
+        {draftValue === null
+          ? "Enter a whole number, or turn Override off to inherit."
+          : "0 = unlimited"}
+      </p>
+    </PolicyOverrideField>
+  );
+}
+
+function StreamBitratePolicyField({
+  label,
+  value,
+  onValueChange,
+  effectiveValue,
+}: {
+  label: string;
+  value: number | null;
+  onValueChange: (value: number | null) => void;
+  effectiveValue?: number;
+}) {
+  const id = useId();
+  // Same override model as LimitPolicyField: turning Override on seeds the
+  // value the field already resolves to, and with no hint the field keeps
+  // inheriting until the admin picks a limit.
+  const [overridden, setOverridden] = useState(value !== null);
+
+  function handleOverrideChange(checked: boolean) {
+    setOverridden(checked);
+    onValueChange(checked ? (effectiveValue ?? null) : null);
+  }
+
+  return (
+    <PolicyOverrideField
+      id={id}
+      label={label}
+      overridden={overridden}
+      onOverriddenChange={handleOverrideChange}
+      inheritedText={
+        effectiveValue === undefined ? undefined : formatStreamBitrateLimit(effectiveValue)
+      }
+    >
+      <StreamBitrateLimitInput
+        id={id}
+        label={label}
+        value={value}
+        // A custom box without a valid value keeps the last one; the form's
+        // required/pattern validation blocks saving until it is fixed.
+        onValueChange={(kbps) => {
+          if (kbps !== null) onValueChange(kbps);
+        }}
+      />
+    </PolicyOverrideField>
   );
 }
 
@@ -357,16 +433,16 @@ export function PolicyLimitFields({ state, onChange, effective }: PolicyContext)
           onValueChange={(maxTranscodes) => onChange({ ...state, maxTranscodes })}
           effectiveValue={effective?.max_transcodes}
         />
-        <LimitPolicyField
-          label="Max remote stream bitrate (kbps)"
+        <StreamBitratePolicyField
+          label="Max remote stream bitrate"
           value={state.maxRemoteStreamBitrateKbps}
           onValueChange={(maxRemoteStreamBitrateKbps) =>
             onChange({ ...state, maxRemoteStreamBitrateKbps })
           }
           effectiveValue={effective?.max_remote_stream_bitrate_kbps}
         />
-        <LimitPolicyField
-          label="Max local stream bitrate (kbps)"
+        <StreamBitratePolicyField
+          label="Max local stream bitrate"
           value={state.maxLocalStreamBitrateKbps}
           onValueChange={(maxLocalStreamBitrateKbps) =>
             onChange({ ...state, maxLocalStreamBitrateKbps })

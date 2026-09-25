@@ -3,6 +3,7 @@ import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,6 +11,32 @@ import { installPolicyStorageMocks, jsonResponse } from "./admin-policy/policyTe
 import AdminAccessGroups from "./AdminAccessGroups";
 
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({}) }));
+
+// Radix Select needs these to open under jsdom.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+if (typeof globalThis.ResizeObserver === "undefined") {
+  (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
+    ResizeObserverStub;
+}
+if (!window.HTMLElement.prototype.hasPointerCapture) {
+  window.HTMLElement.prototype.hasPointerCapture = () => false;
+  window.HTMLElement.prototype.releasePointerCapture = () => {};
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+}
+
+async function pickOption(
+  user: ReturnType<typeof userEvent.setup>,
+  combobox: string,
+  option: string,
+) {
+  await user.click(screen.getByRole("combobox", { name: combobox }));
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 const GROUP = {
   id: "1",
   name: "Kids",
@@ -52,6 +79,7 @@ function renderPage(initialPath = "/admin/access-groups") {
 
 describe("AdminAccessGroups", () => {
   let putBody: unknown;
+  let group: typeof GROUP;
 
   beforeEach(() => {
     installPolicyStorageMocks();
@@ -59,6 +87,7 @@ describe("AdminAccessGroups", () => {
     setProfileId("owner");
     setProfileToken(null);
     putBody = undefined;
+    group = GROUP;
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input, init) => {
@@ -67,10 +96,10 @@ describe("AdminAccessGroups", () => {
         if (url === "/api/v2/admin/users/capabilities")
           return jsonResponse({ access_groups: true });
         if (url === "/api/v2/admin/access-groups?limit=200" && method === "GET") {
-          return jsonResponse({ items: [GROUP], page: { has_more: false } });
+          return jsonResponse({ items: [group], page: { has_more: false } });
         }
         if (url === "/api/v2/admin/access-groups/1" && method === "GET") {
-          return new Response(JSON.stringify(GROUP), {
+          return new Response(JSON.stringify(group), {
             headers: { "Content-Type": "application/json", ETag: '"initial"' },
           });
         }
@@ -97,6 +126,7 @@ describe("AdminAccessGroups", () => {
   });
 
   it("summarizes a group and saves edited restrictions", async () => {
+    const user = userEvent.setup();
     renderPage();
 
     expect(await screen.findByText("Kids")).toBeInTheDocument();
@@ -109,9 +139,7 @@ describe("AdminAccessGroups", () => {
 
     // Drill-in editor seeds from the group; toggle downloads on and save.
     fireEvent.click(await screen.findByRole("switch", { name: "Allow downloads" }));
-    fireEvent.change(screen.getByLabelText("Max remote stream bitrate (kbps)"), {
-      target: { value: "4000" },
-    });
+    await pickOption(user, "Max remote stream bitrate", "8 Mbps");
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
     await waitFor(() => {
@@ -120,7 +148,8 @@ describe("AdminAccessGroups", () => {
         library_ids: ["2"],
         download_allowed: true,
         max_streams: 1,
-        max_remote_stream_bitrate_kbps: 4000,
+        max_remote_stream_bitrate_kbps: 8000,
+        max_local_stream_bitrate_kbps: 0,
         requests_allowed: false,
         allowed_permissions: [],
         is_default: true,
@@ -287,27 +316,64 @@ describe("AdminAccessGroups", () => {
     expect(screen.getByText(/make another group the default first/i)).toBeInTheDocument();
   });
 
-  it("does not truncate a fractional remote bitrate limit", async () => {
+  it("saves a custom Mbps bitrate limit as whole kbps", async () => {
+    const user = userEvent.setup();
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
-    const limit = await screen.findByLabelText("Max remote stream bitrate (kbps)");
-    fireEvent.change(limit, { target: { value: "1.5" } });
+    await screen.findByRole("combobox", { name: "Max remote stream bitrate" });
+    await pickOption(user, "Max remote stream bitrate", "Custom");
+    await user.type(screen.getByLabelText("Max remote stream bitrate in Mbps"), "1.5");
+    await pickOption(user, "Max local stream bitrate", "40 Mbps");
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => {
-      expect(putBody).toMatchObject({ max_remote_stream_bitrate_kbps: 0 });
+      expect(putBody).toMatchObject({
+        max_remote_stream_bitrate_kbps: 1500,
+        max_local_stream_bitrate_kbps: 40000,
+      });
     });
   });
 
-  it("keeps an existing limit when the number input has invalid intermediate text", async () => {
+  it("opens a non-preset limit as a custom Mbps value", async () => {
+    group = { ...GROUP, max_remote_stream_bitrate_kbps: 4500 };
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
-    const limit = await screen.findByLabelText("Max remote stream bitrate (kbps)");
-    fireEvent.change(limit, { target: { value: "4000" } });
-    Object.defineProperty(limit, "validity", { value: { badInput: true }, configurable: true });
-    fireEvent.change(limit, { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByLabelText("Max remote stream bitrate in Mbps")).toHaveValue("4.5");
+    expect(screen.getByRole("combobox", { name: "Max remote stream bitrate" })).toHaveTextContent(
+      "Custom",
+    );
+    expect(screen.getByRole("combobox", { name: "Max local stream bitrate" })).toHaveTextContent(
+      "Unlimited",
+    );
+  });
+
+  it("blocks saving until a custom limit is a valid Mbps value and warns below 1 Mbps", async () => {
+    const user = userEvent.setup();
+    group = { ...GROUP, max_remote_stream_bitrate_kbps: 4000 };
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    const limit = await screen.findByLabelText("Max remote stream bitrate in Mbps");
+    const save = screen.getByRole("button", { name: "Save changes" });
+
+    // A cleared box is an unsaved edit, never a silent 0 (unlimited).
+    await user.clear(limit);
+    expect(save).toBeDisabled();
+    expect(screen.getByText(/Enter a value above 0 Mbps/)).toBeInTheDocument();
+
+    // 0 means unlimited and has its own choice, so a half-typed "0." is not a cap.
+    await user.type(limit, "0.");
+    expect(save).toBeDisabled();
+    // kbps resolution is the floor; finer values are rejected, not rounded.
+    await user.type(limit, "0005");
+    expect(limit).toHaveValue("0.0005");
+    expect(save).toBeDisabled();
+
+    await user.clear(limit);
+    await user.type(limit, "0.5");
+    expect(save).toBeEnabled();
+    expect(screen.getByText(/Below 1 Mbps/)).toBeInTheDocument();
+    fireEvent.click(save);
     await waitFor(() => {
-      expect(putBody).toMatchObject({ max_remote_stream_bitrate_kbps: 4000 });
+      expect(putBody).toMatchObject({ max_remote_stream_bitrate_kbps: 500 });
     });
   });
 });

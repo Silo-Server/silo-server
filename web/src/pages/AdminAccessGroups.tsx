@@ -12,6 +12,7 @@ import {
 import { V2ProblemError } from "@/api/v2/request";
 import type { AccessGroup, AccessGroupInput } from "@/api/types";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
+import { StreamBitrateLimitInput } from "@/components/StreamBitrateLimitInput";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -373,12 +374,15 @@ function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps)
   const [audioTranscodeAllowed, setAudioTranscodeAllowed] = useState(group.audio_transcode_allowed);
   const [maxStreams, setMaxStreams] = useState(group.max_streams);
   const [maxTranscodes, setMaxTranscodes] = useState(group.max_transcodes);
-  const [maxRemoteStreamBitrateKbps, setMaxRemoteStreamBitrateKbps] = useState(
+  // null while a custom bitrate box holds no valid value; Save stays disabled.
+  const [maxRemoteStreamBitrateKbps, setMaxRemoteStreamBitrateKbps] = useState<number | null>(
     group.max_remote_stream_bitrate_kbps,
   );
-  const [maxLocalStreamBitrateKbps, setMaxLocalStreamBitrateKbps] = useState(
+  const [maxLocalStreamBitrateKbps, setMaxLocalStreamBitrateKbps] = useState<number | null>(
     group.max_local_stream_bitrate_kbps,
   );
+  const bitrateLimitsValid =
+    maxRemoteStreamBitrateKbps !== null && maxLocalStreamBitrateKbps !== null;
   const [permissions, setPermissions] = useState<string[] | null>(group.allowed_permissions);
   const [requestsAllowed, setRequestsAllowed] = useState(group.requests_allowed);
   const [isDefault, setIsDefault] = useState(group.is_default);
@@ -395,6 +399,7 @@ function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps)
 
   async function save() {
     if (busy.current || conflict) return;
+    if (maxRemoteStreamBitrateKbps === null || maxLocalStreamBitrateKbps === null) return;
     busy.current = true;
     setError("");
     const body: AccessGroupInput = {
@@ -505,20 +510,22 @@ function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps)
             </SelectContent>
           </Select>
         </div>
-        <LimitField
-          id="group-stream-bitrate"
-          label="Max remote stream bitrate (kbps)"
-          hint="0 = unlimited. Applies to new remote streams."
-          value={maxRemoteStreamBitrateKbps}
-          onChange={setMaxRemoteStreamBitrateKbps}
-        />
-        <LimitField
-          id="group-local-stream-bitrate"
-          label="Max local stream bitrate (kbps)"
-          hint="0 = unlimited. Applies to new local streams."
-          value={maxLocalStreamBitrateKbps}
-          onChange={setMaxLocalStreamBitrateKbps}
-        />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <StreamBitrateLimitField
+            id="group-stream-bitrate"
+            label="Max remote stream bitrate"
+            hint="Applies to new remote streams."
+            value={maxRemoteStreamBitrateKbps}
+            onChange={setMaxRemoteStreamBitrateKbps}
+          />
+          <StreamBitrateLimitField
+            id="group-local-stream-bitrate"
+            label="Max local stream bitrate"
+            hint="Applies to new local streams."
+            value={maxLocalStreamBitrateKbps}
+            onChange={setMaxLocalStreamBitrateKbps}
+          />
+        </div>
       </section>
 
       <section className="surface-panel space-y-3 rounded-2xl border-0 p-5">
@@ -631,7 +638,13 @@ function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps)
         <Button
           type="button"
           onClick={save}
-          disabled={updateGroup.isPending || deleteGroup.isPending || conflict || reloading}
+          disabled={
+            updateGroup.isPending ||
+            deleteGroup.isPending ||
+            conflict ||
+            reloading ||
+            !bitrateLimitsValid
+          }
         >
           {updateGroup.isPending ? "Saving..." : "Save changes"}
         </Button>
@@ -712,6 +725,28 @@ interface LimitFieldProps {
   hint: string;
   value: number;
   onChange: (value: number) => void;
+}
+
+function StreamBitrateLimitField({
+  id,
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  value: number | null;
+  onChange: (kbps: number | null) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <StreamBitrateLimitInput id={id} label={label} value={value} onValueChange={onChange} />
+      <p className="text-muted-foreground text-xs">{hint}</p>
+    </div>
+  );
 }
 
 function LimitField({ id, label, hint, value, onChange }: LimitFieldProps) {

@@ -154,7 +154,7 @@ vi.mock("@/hooks/queries/admin/accessGroups", () => ({
         audio_transcode_allowed: true,
         max_streams: 1,
         max_transcodes: 0,
-        max_remote_stream_bitrate_kbps: 0,
+        max_remote_stream_bitrate_kbps: 8000,
         max_local_stream_bitrate_kbps: 0,
         allowed_permissions: [],
         requests_allowed: false,
@@ -469,7 +469,8 @@ describe("AdminUserDetail inherit hints", () => {
     // effective_policy resolved against the account's saved group.
     await user.click(screen.getByRole("tab", { name: "Limits" }));
     expect(screen.getByText("Inherited: 1")).toBeInTheDocument();
-    expect(screen.getAllByText("Inherited: Unlimited")).toHaveLength(3);
+    expect(screen.getByText("Inherited: 8 Mbps")).toBeInTheDocument();
+    expect(screen.getAllByText("Inherited: Unlimited")).toHaveLength(2);
   });
 
   it("seeds a limit override from the inherited value, not from unlimited", async () => {
@@ -510,6 +511,78 @@ describe("AdminUserDetail inherit hints", () => {
     await waitFor(() => expect(mocks.updateUserMutate).toHaveBeenCalled());
     const call = mocks.updateUserMutate.mock.calls[0]?.[0] as UpdateUserMutationArg | undefined;
     expect(call?.body.max_streams).toBe(3);
+  });
+});
+
+describe("AdminUserDetail stream bitrate limits", () => {
+  it("overrides a bitrate limit in Mbps, seeded from the inherited cap", async () => {
+    const user = userEvent.setup();
+    renderUserDetail();
+
+    await openLimitsTab(user);
+    await selectGuestsGroup(user);
+    await user.click(screen.getByRole("tab", { name: "Limits" }));
+
+    await user.click(overrideSwitch(2));
+    const remote = screen.getByRole("combobox", { name: "Max remote stream bitrate" });
+    expect(remote).toHaveTextContent("8 Mbps");
+
+    await user.click(remote);
+    await user.click(await screen.findByRole("option", { name: "Custom" }));
+    const custom = screen.getByLabelText("Max remote stream bitrate in Mbps");
+    expect(custom).toHaveValue("8");
+    await user.clear(custom);
+    await user.type(custom, "2.5");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.updateUserMutate).toHaveBeenCalled());
+    const call = mocks.updateUserMutate.mock.calls[0]?.[0] as UpdateUserMutationArg | undefined;
+    expect(call?.body.max_remote_stream_bitrate_kbps).toBe(2500);
+    expect(call?.body.max_local_stream_bitrate_kbps).toBeNull();
+  });
+
+  it("does not save a custom bitrate box until it holds a cap above 0", async () => {
+    const user = userEvent.setup();
+    renderUserDetail();
+
+    await openLimitsTab(user);
+    await user.click(overrideSwitch(3));
+    await user.click(screen.getByRole("combobox", { name: "Max local stream bitrate" }));
+    await user.click(await screen.findByRole("option", { name: "Custom" }));
+    const custom = screen.getByLabelText("Max local stream bitrate in Mbps");
+    expect(custom).toHaveValue("");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(mocks.updateUserMutate).not.toHaveBeenCalled();
+
+    // "0" would be unlimited; the custom box only takes a real cap.
+    await user.type(custom, "0");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(mocks.updateUserMutate).not.toHaveBeenCalled();
+
+    await user.clear(custom);
+    await user.type(custom, "0.75");
+    expect(screen.getByText(/Below 1 Mbps/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.updateUserMutate).toHaveBeenCalled());
+    const call = mocks.updateUserMutate.mock.calls[0]?.[0] as UpdateUserMutationArg | undefined;
+    expect(call?.body.max_local_stream_bitrate_kbps).toBe(750);
+  });
+
+  it("shows the effective caps in Mbps", () => {
+    mocks.user = {
+      ...adminUser,
+      max_local_stream_bitrate_kbps: 1500,
+      effective_policy: {
+        ...adminUser.effective_policy,
+        max_remote_stream_bitrate_kbps: 8000,
+        max_local_stream_bitrate_kbps: 1500,
+      },
+    };
+    renderUserDetail();
+
+    expect(rowValue("Max remote stream bitrate")).toBe("8 Mbps");
+    expect(rowValue("Max local stream bitrate")).toBe("1.5 Mbps (override)");
   });
 });
 
