@@ -1,5 +1,7 @@
 package jellycompat
 
+import "encoding/json"
+
 // queryResultDTO mirrors Jellyfin's common paged result envelope.
 type queryResultDTO struct {
 	Items            []baseItemDTO `json:"Items"`
@@ -84,7 +86,7 @@ type baseItemDTO struct {
 	ProductionLocations      []string                     `json:"ProductionLocations,omitempty"`
 	ImageTags                map[string]string            `json:"ImageTags"`
 	PrimaryImageItemID       string                       `json:"PrimaryImageItemId,omitempty"`
-	BackdropImageTags        []string                     `json:"BackdropImageTags,omitempty"`
+	BackdropImageTags        []string                     `json:"BackdropImageTags"`
 	PrimaryImageAspectRatio  *float64                     `json:"PrimaryImageAspectRatio,omitempty"`
 	ImageBlurHashes          map[string]map[string]string `json:"ImageBlurHashes,omitempty"`
 	UserData                 *itemUserDataDTO             `json:"UserData,omitempty"`
@@ -122,6 +124,19 @@ type baseItemDTO struct {
 	MediaStreams             []mediaStreamDTO             `json:"MediaStreams,omitempty"`
 	Width                    int                          `json:"Width,omitempty"`
 	Height                   int                          `json:"Height,omitempty"`
+}
+
+// MarshalJSON always emits BackdropImageTags as an array. Real Jellyfin sends
+// `[]` for an item without backdrops, and Roku (BrightScript) clients index the
+// field without checking for it, crashing right after login when it is absent
+// or null. Image filters and ImageTypeLimit=0 still clear it, so a nil slice is
+// normalized here rather than at every assignment.
+func (d baseItemDTO) MarshalJSON() ([]byte, error) {
+	type plain baseItemDTO
+	if d.BackdropImageTags == nil {
+		d.BackdropImageTags = []string{}
+	}
+	return json.Marshal(plain(d))
 }
 
 type itemUserDataDTO struct {
