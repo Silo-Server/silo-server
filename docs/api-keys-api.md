@@ -93,7 +93,9 @@ profile.
 | DELETE | `/api/v2/api-keys/{id}` | Owner-only revocation returning `204` |
 
 Listing, creation, and revocation require JWT authentication; API-key credentials
-receive `403`. Scope discovery retains its availability to unscoped API keys.
+receive `403`. Creation also requires a server admin account: a regular account's
+login session receives `403` and no key is created. Any account can still list and
+revoke keys it already owns. Scope discovery retains its availability to unscoped API keys.
 Creation and revocation retain the demo restriction; listing and scope discovery
 do not. An unavailable store reports
 `available: false` in scope discovery and `503` for management operations.

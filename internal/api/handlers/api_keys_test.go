@@ -48,18 +48,34 @@ func (s *fakeAPIKeyStore) UpdateTier(context.Context, int64, string) error {
 
 func createAPIKey(t *testing.T, body string) (*httptest.ResponseRecorder, *fakeAPIKeyStore) {
 	t.Helper()
+	return createAPIKeyAs(t, "admin", body)
+}
+
+func createAPIKeyAs(t *testing.T, role, body string) (*httptest.ResponseRecorder, *fakeAPIKeyStore) {
+	t.Helper()
 	store := &fakeAPIKeyStore{}
 	h := NewAPIKeyHandler(store)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", strings.NewReader(body))
 	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{
 		UserID:    7,
-		Role:      "user",
+		Role:      role,
 		TokenType: auth.TokenTypeAccess,
 		SessionID: "s1",
 	}))
 	rec := httptest.NewRecorder()
 	h.HandleCreateAPIKey(rec, req)
 	return rec, store
+}
+
+// TestHandleCreateAPIKeyRequiresAdmin covers #1361 on the frozen v1 route.
+func TestHandleCreateAPIKeyRequiresAdmin(t *testing.T) {
+	rec, store := createAPIKeyAs(t, "user", `{"label":"ci"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (body %s)", rec.Code, rec.Body.String())
+	}
+	if store.created {
+		t.Fatal("a non-admin request must not create a key")
+	}
 }
 
 func TestHandleCreateAPIKeyHonorsRequestedScopes(t *testing.T) {
