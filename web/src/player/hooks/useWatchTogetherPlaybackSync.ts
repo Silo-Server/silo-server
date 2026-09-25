@@ -280,9 +280,10 @@ export function useWatchTogetherPlaybackSync({
   useEffect(() => {
     const video = videoRef.current;
     const preroll = prerollRef.current;
-    // A new command, or the room leaving the barrier, takes over playback.
+    // Stop before restoring audio. A new command takes over playback at its
+    // scheduled execution time, which may still be in the future.
     if (preroll && preroll.commandId !== waitingSeekCommandId) {
-      endPreroll(waitingSeekCommandId !== null);
+      endPreroll(true);
     }
     if (!video || !waitingSeekCommandId) return;
     const targetSeconds = transportCommand?.position_seconds ?? 0;

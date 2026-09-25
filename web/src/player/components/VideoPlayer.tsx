@@ -2985,13 +2985,6 @@ export function VideoPlayer({
     resetRoomCatchupRate,
   ]);
 
-  const handleVolumeChange = useCallback((v: number) => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.volume = v;
-    if (v > 0 && video.muted) video.muted = false;
-  }, []);
-
   const handleMutedChange = useCallback(
     (m: boolean) => {
       const video = videoRef.current;
@@ -3005,6 +2998,16 @@ export function VideoPlayer({
       video.muted = m;
     },
     [watchTogetherSync],
+  );
+
+  const handleVolumeChange = useCallback(
+    (v: number) => {
+      const video = videoRef.current;
+      if (!video) return;
+      video.volume = v;
+      if (v > 0 && video.muted) handleMutedChange(false);
+    },
+    [handleMutedChange],
   );
 
   const handleToggleMuted = useCallback(() => {
