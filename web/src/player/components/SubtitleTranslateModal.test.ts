@@ -93,6 +93,16 @@ describe("sourceLabel", () => {
     );
   });
 
+  it("still marks a flag the title negates", () => {
+    const base = { language: "en", source: "embedded" as const, codec: "subrip" };
+    expect(sourceLabel(track({ ...base, label: "Non-forced", forced: true }))).toBe(
+      "English · Non-forced · Forced · embedded",
+    );
+    expect(sourceLabel(track({ ...base, label: "Not SDH", hearing_impaired: true }))).toBe(
+      "English · Not SDH · SDH · embedded",
+    );
+  });
+
   it("drops a title that only repeats the format", () => {
     expect(sourceLabel(track({ language: "en", label: "SRT", codec: "subrip" }))).toBe("English");
   });
@@ -106,5 +116,17 @@ describe("sourceLabel", () => {
     expect(labels.get(2)).toBe("English · embedded · track 3");
     expect(labels.get(5)).toBe("English · embedded · track 6");
     expect(labels.get(6)).toBe("English · Forced · embedded");
+  });
+
+  it("keeps a numbered label distinct from another option's label", () => {
+    const labels = sourceLabels([
+      track({ index: 2, label: "English", source: "embedded", codec: "subrip" }),
+      track({ index: 5, label: "English", source: "embedded", codec: "subrip" }),
+      track({ index: 9, label: "embedded · track 3", codec: "subrip" }),
+    ]);
+    expect(labels.get(9)).toBe("English · embedded · track 3");
+    expect(labels.get(2)).toBe("English · embedded · track 3 (2)");
+    expect(labels.get(5)).toBe("English · embedded · track 6");
+    expect(new Set(labels.values()).size).toBe(3);
   });
 });

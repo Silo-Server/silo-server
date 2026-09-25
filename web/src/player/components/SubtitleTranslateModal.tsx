@@ -29,6 +29,15 @@ interface SubtitleTranslateModalProps {
   onClose: () => void;
 }
 
+// titleNames reports whether a track title already states a flag, so the flag
+// is not repeated. A negated mention ("Non-forced", "Not SDH") does not count.
+function titleNames(title: string, words: string): boolean {
+  return (
+    new RegExp(`\\b(?:${words})\\b`, "i").test(title) &&
+    !new RegExp(`\\b(?:non|not)[\\s-]*(?:${words})\\b`, "i").test(title)
+  );
+}
+
 // sourceLabel names a translation source so full, SDH and forced tracks in one
 // language can be told apart: the track title when it says more than the
 // language or format (as the subtitle menu shows it), then Forced and SDH when
@@ -43,24 +52,35 @@ export function sourceLabel(track: PlayerSubtitleInfo): string {
     !isSubtitleFormatLabel(title, track.codec);
   const parts = [lang];
   if (hasDetail) parts.push(title);
-  if (track.forced && !/\bforced\b/i.test(title)) parts.push("Forced");
-  if (track.hearing_impaired && !/\b(sdh|cc|hearing)\b/i.test(title)) parts.push("SDH");
+  if (track.forced && !titleNames(title, "forced")) parts.push("Forced");
+  if (track.hearing_impaired && !titleNames(title, "sdh|cc|hearing")) parts.push("SDH");
   if (track.source) parts.push(track.source);
   return parts.join(" · ");
 }
 
-// sourceLabels labels every source track, numbering any that would still read
-// the same so each option in the picker is distinct.
+// sourceLabels labels every source track so each option in the picker is
+// distinct. Tracks whose labels would read the same get their track number,
+// and a numbered label that still matches another option gets a counter.
 export function sourceLabels(tracks: PlayerSubtitleInfo[]): Map<number, string> {
-  const labels = tracks.map((track) => sourceLabel(track));
+  const base = tracks.map((track) => ({ index: track.index, label: sourceLabel(track) }));
   const counts = new Map<string, number>();
-  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1);
-  return new Map(
-    tracks.map((track, i) => [
-      track.index,
-      (counts.get(labels[i]) ?? 0) > 1 ? `${labels[i]} · track ${track.index + 1}` : labels[i],
-    ]),
+  for (const { label } of base) counts.set(label, (counts.get(label) ?? 0) + 1);
+  const used = new Set(
+    base.filter(({ label }) => counts.get(label) === 1).map(({ label }) => label),
   );
+  const labels = new Map<number, string>();
+  for (const { index, label } of base) {
+    if (counts.get(label) === 1) {
+      labels.set(index, label);
+      continue;
+    }
+    const numbered = `${label} · track ${index + 1}`;
+    let candidate = numbered;
+    for (let n = 2; used.has(candidate); n++) candidate = `${numbered} (${n})`;
+    used.add(candidate);
+    labels.set(index, candidate);
+  }
+  return labels;
 }
 
 function audioLabel(track: PlayerAudioTrack, i: number): string {
