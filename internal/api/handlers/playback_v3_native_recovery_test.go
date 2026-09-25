@@ -111,3 +111,54 @@ func TestRemapSubtitleSelectionRetainsHearingImpairedVariant(t *testing.T) {
 		}
 	}
 }
+
+// TestRemapSubtitleSelectionAcrossSubtitleFormats covers #1034: auto quality
+// swaps from an HDR edition with PGS subtitles to an SDR edition with SRT ones.
+// The selection keeps its language and forced/SDH variant in the effective
+// file's format instead of failing playback.
+func TestRemapSubtitleSelectionAcrossSubtitleFormats(t *testing.T) {
+	source := &models.MediaFile{ID: 1, SubtitleTracks: []models.SubtitleTrack{
+		{Language: "fre", Codec: "hdmv_pgs_subtitle", Forced: true},
+		{Language: "fre", Codec: "hdmv_pgs_subtitle"},
+	}}
+	cases := []struct {
+		name   string
+		target *models.MediaFile
+		from   int
+		want   int
+	}{
+		{"embedded srt", &models.MediaFile{ID: 2, SubtitleTracks: []models.SubtitleTrack{
+			{Language: "fre", Codec: "subrip", Forced: true},
+			{Language: "fre", Codec: "subrip"},
+		}}, 1, 1},
+		{"keeps forced variant", &models.MediaFile{ID: 2, SubtitleTracks: []models.SubtitleTrack{
+			{Language: "fre", Codec: "subrip"},
+			{Language: "fre", Codec: "subrip", Forced: true},
+		}}, 0, 1},
+		{"external srt", &models.MediaFile{ID: 2,
+			ExternalSubtitles: []models.ExternalSubtitle{{Language: "fre", Format: "srt"}},
+			SubtitleTracks:    []models.SubtitleTrack{{Language: "eng", Codec: "subrip"}},
+		}, 1, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := playback.StartRequestV3{SubtitleTrackIndex: new(tc.from)}
+			handler := &PlaybackHandler{}
+			if err := handler.remapSubtitleSelectionV3(t.Context(), source, tc.target, &request); err != nil {
+				t.Fatal(err)
+			}
+			if *request.SubtitleTrackIndex != tc.want {
+				t.Fatalf("remapped to %d, want %d", *request.SubtitleTrackIndex, tc.want)
+			}
+			if request.SubtitleTrackID != playback.TrackIDV3(tc.target.ID, "subtitle", tc.want) {
+				t.Fatalf("track id = %q", request.SubtitleTrackID)
+			}
+		})
+	}
+
+	request := playback.StartRequestV3{SubtitleTrackIndex: new(1)}
+	other := &models.MediaFile{ID: 3, SubtitleTracks: []models.SubtitleTrack{{Language: "eng", Codec: "subrip"}}}
+	if err := (&PlaybackHandler{}).remapSubtitleSelectionV3(t.Context(), source, other, &request); err == nil {
+		t.Fatal("a language the effective file lacks was remapped")
+	}
+}
