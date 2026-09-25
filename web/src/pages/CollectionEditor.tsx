@@ -3,8 +3,11 @@ import type { CollectionEditSnapshot } from "@/api/personalCollections";
 import { useNavigate, useParams } from "react-router";
 
 import type { Collection, UserCollectionType } from "@/api/types";
+import { isNotFoundProblem } from "@/api/v2/request";
 import PageBack from "@/components/PageBack";
-import { Card, CardHeader, CardDescription, CardTitle } from "@/components/ui/card";
+import PageUnavailable from "@/components/PageUnavailable";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { Button } from "@/components/ui/button";
 import {
   useCollections,
   useCollectionCapabilities,
@@ -32,7 +35,7 @@ export default function CollectionEditor() {
   const { data: capabilities } = useCollectionCapabilities();
   const { id } = useParams<{ id: string }>();
   const { data: collections = [] } = useCollections();
-  const { data: fetched, isLoading } = useCollectionEditSnapshot(id);
+  const { data: fetched, isLoading, isFetching, error, refetch } = useCollectionEditSnapshot(id);
   const [snapshot, setSnapshot] = useState<CollectionEditSnapshot>();
   if (fetched && fetched.collection.id === id && snapshot?.collection.id !== id) {
     const artwork = collections.find((entry) => entry.id === id)?.poster_url;
@@ -48,16 +51,27 @@ export default function CollectionEditor() {
   }
 
   if (id && !collection && !isLoading) {
+    if (error && !isNotFoundProblem(error)) {
+      return (
+        <PageUnavailable
+          title="Couldn't load this collection"
+          description="Something went wrong while loading it. Try again in a moment."
+          onRetry={() => void refetch()}
+          retrying={isFetching}
+        />
+      );
+    }
     return (
-      <div className="page-shell relative space-y-4 py-4 sm:py-6">
-        <PageBack to="/collections" up />
-        <Card className="surface-panel mt-10 rounded-[1.7rem] border-0 shadow-none sm:mt-12">
-          <CardHeader>
-            <CardTitle>Collection not found</CardTitle>
-            <CardDescription>The selected collection could not be loaded.</CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
+      <PageUnavailable
+        title="This collection isn't available"
+        description="It may have been deleted, or you may not have access to it."
+      >
+        <Button asChild variant="outline">
+          <ViewTransitionLink to="/collections" up>
+            All collections
+          </ViewTransitionLink>
+        </Button>
+      </PageUnavailable>
     );
   }
 

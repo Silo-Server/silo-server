@@ -248,6 +248,15 @@ export class V2ProblemError extends Error {
   }
 }
 
+/**
+ * Whether the server answered that there is nothing to show. A proxy's 404 page
+ * is a `V2TransportError`, not this: only the contract can say a resource is
+ * missing, and it says so the same way for hidden resources.
+ */
+export function isNotFoundProblem(error: unknown): boolean {
+  return error instanceof V2ProblemError && error.status === 404;
+}
+
 /** Parses a delta-seconds `Retry-After` header; an HTTP-date form is not a contract shape. */
 function retryAfterSecondsOf(res: Response): number | null {
   const raw = res.headers.get("Retry-After");

@@ -1,20 +1,34 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { V2ProblemError } from "@/api/v2/request";
 
 const mocks = vi.hoisted(() => ({
   useCatalogItemDetail: vi.fn(),
+  useUserLibraries: vi.fn(),
+  refetchLibraries: vi.fn(),
   toastError: vi.fn(),
   search: "",
 }));
 
-vi.mock("react-router", () => ({
-  useParams: () => ({ id: "movie-123" }),
-  useSearchParams: () => [new URLSearchParams(mocks.search)],
-}));
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual<typeof import("react-router")>("react-router");
+  return {
+    ...actual,
+    useParams: () => ({ id: "movie-123" }),
+    useSearchParams: () => [new URLSearchParams(mocks.search)],
+  };
+});
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
   useCatalogItemDetail: (...args: unknown[]) => mocks.useCatalogItemDetail(...args),
+}));
+
+vi.mock("@/hooks/queries/libraries", () => ({
+  useUserLibraries: () => mocks.useUserLibraries(),
 }));
 
 // Mocked like every other data hook in this file: the page renders here
@@ -60,9 +74,36 @@ import {
   SidebarItemEnteredFromHomeContext,
 } from "@/components/sidebarItemNavigationContext";
 
+function itemProblem(status: number) {
+  return new V2ProblemError("getCatalogItem", {
+    type: `https://silo.example/problems/${status === 404 ? "not_found" : "internal_error"}`,
+    title: status === 404 ? "Not Found" : "Internal Server Error",
+    status,
+    detail: status === 404 ? "Item not found." : "The catalog is unavailable.",
+    instance: "/api/v2/catalog/items/movie-123",
+  });
+}
+
+function libraryList(overrides: Record<string, unknown> = {}) {
+  return {
+    data: [{ id: 4, name: "Movies", type: "movies" }],
+    dataUpdatedAt: 0,
+    isFetching: false,
+    isError: false,
+    refetch: mocks.refetchLibraries,
+    ...overrides,
+  };
+}
+
+function renderInRouter(ui: React.ReactElement) {
+  return render(<MemoryRouter initialEntries={["/item/movie-123"]}>{ui}</MemoryRouter>);
+}
+
 describe("ItemDetail", () => {
   beforeEach(() => {
     mocks.useCatalogItemDetail.mockReset();
+    mocks.useUserLibraries.mockReset();
+    mocks.refetchLibraries.mockReset();
     mocks.toastError.mockReset();
     mocks.search = "";
     mocks.useCatalogItemDetail.mockReturnValue({
@@ -70,6 +111,10 @@ describe("ItemDetail", () => {
       isLoading: false,
       error: null,
     });
+    // A read that finished after the page appeared: the only kind that can
+    // vouch for the link's library.
+    mocks.useUserLibraries.mockReturnValue(libraryList({ dataUpdatedAt: Date.now() + 60_000 }));
+    document.title = "Silo";
   });
 
   it("ignores a malformed library id so the detail query matches the prefetch key", () => {
@@ -245,5 +290,107 @@ describe("ItemDetail", () => {
     const markup = renderToStaticMarkup(<ItemDetail />);
 
     expect(markup).toContain("Ebook: A Psalm for the Wild-Built");
+  });
+
+  describe("when the item cannot be shown", () => {
+    it("explains a 404 on the page without a toast or a claim about why", () => {
+      mocks.useCatalogItemDetail.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: itemProblem(404),
+      });
+
+      renderInRouter(<ItemDetail />);
+
+      expect(
+        screen.getByRole("heading", { level: 1, name: "This item isn't available" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("It may have been removed, or you may not have access to it."),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Go home" })).toHaveAttribute("href", "/");
+      expect(mocks.toastError).not.toHaveBeenCalled();
+      expect(document.title).toContain("Not found");
+    });
+
+    it("offers the link's library while the viewer can still open it", () => {
+      mocks.search = "libraryId=4";
+      mocks.useCatalogItemDetail.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: itemProblem(404),
+      });
+
+      renderInRouter(<ItemDetail />);
+
+      expect(screen.getByRole("link", { name: "Browse library" })).toHaveAttribute(
+        "href",
+        "/library/4",
+      );
+      expect(mocks.refetchLibraries).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      [
+        "while the fresh read is in flight",
+        { isFetching: true, dataUpdatedAt: Date.now() + 60_000 },
+      ],
+      ["on a list cached before the page appeared", { dataUpdatedAt: 0 }],
+      ["when the fresh read failed and left the old list", { isError: true, dataUpdatedAt: 0 }],
+    ])("does not vouch for the library %s", (_case, overrides) => {
+      mocks.search = "libraryId=4";
+      mocks.useCatalogItemDetail.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: itemProblem(404),
+      });
+      mocks.useUserLibraries.mockReturnValue(libraryList(overrides));
+
+      renderInRouter(<ItemDetail />);
+
+      expect(
+        screen.getByRole("heading", { name: "This item isn't available" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Browse library" })).not.toBeInTheDocument();
+    });
+
+    it("drops Browse library for a library the viewer can no longer open", () => {
+      mocks.search = "libraryId=9";
+      mocks.useCatalogItemDetail.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: itemProblem(404),
+      });
+
+      renderInRouter(<ItemDetail />);
+
+      expect(
+        screen.getByRole("heading", { name: "This item isn't available" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Browse library" })).not.toBeInTheDocument();
+    });
+
+    it("keeps the toast for other failures and offers a retry instead of a 404 message", async () => {
+      const refetch = vi.fn().mockResolvedValue(undefined);
+      mocks.useCatalogItemDetail.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        isFetching: false,
+        error: itemProblem(500),
+        refetch,
+      });
+
+      renderInRouter(<ItemDetail />);
+
+      expect(mocks.toastError).toHaveBeenCalledWith("The catalog is unavailable.");
+      expect(
+        screen.getByRole("heading", { level: 1, name: "Couldn't load this item" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("This item isn't available")).not.toBeInTheDocument();
+      expect(document.title).not.toContain("Not found");
+
+      await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+      expect(refetch).toHaveBeenCalledTimes(1);
+    });
   });
 });
