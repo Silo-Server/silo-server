@@ -15337,6 +15337,8 @@ export interface components {
       /** Format: int64 */
       failed: number;
       /** Format: int64 */
+      invalid: number;
+      /** Format: int64 */
       retry_after_seconds: number;
       /** Format: int64 */
       skipped: number;

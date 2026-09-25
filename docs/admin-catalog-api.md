@@ -278,8 +278,15 @@ No native client or Jellyfin administration caller requires migration.
 file access. Its optional body selects a provider and marker segments; an absent
 body uses the existing contributor defaults. The request waits for contribution
 processing and returns `200` with per-provider outcomes, including skipped or
-failed outcomes. Provider-specific content claims do not make the whole request
+failed outcomes. Provider-specific claims do not make the whole request
 replay-safe across providers; the operation is non-retryable.
+
+A claim covers the provider item (show, season and episode, or movie), not the
+submitted times: providers accept one submission per account for each item and
+segment and cannot amend it, so a later payload for a claimed item is skipped.
+A provider refusal of the item itself, such as a season the provider's catalog
+does not list, is recorded with status `invalid` and holds the claim for 30 days
+before one more attempt. Retryable errors release the claim.
 
 `GET /api/v2/admin/files/{fileId}/contributions` applies the same access checks
 and returns `items` plus `page`, with default limit 50 and maximum 200. Database

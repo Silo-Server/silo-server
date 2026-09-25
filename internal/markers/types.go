@@ -184,6 +184,28 @@ func (e *SubmissionConflictError) Error() string {
 	return "submission conflict"
 }
 
+// SubmissionInvalidError marks a provider refusal of the submitted item itself,
+// such as an unknown season. Retrying the same target fails the same way until
+// the provider's catalog or our metadata changes.
+type SubmissionInvalidError struct {
+	Provider   string
+	HTTPStatus int
+	Message    string
+}
+
+func (e *SubmissionInvalidError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Message != "" {
+		return e.Message
+	}
+	if e.Provider != "" {
+		return fmt.Sprintf("%s: submission rejected as invalid", e.Provider)
+	}
+	return "submission rejected as invalid"
+}
+
 // UserStats is a contribution-account summary used to validate a key and show
 // contribution totals in the admin UI.
 type UserStats struct {

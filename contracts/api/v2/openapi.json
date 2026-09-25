@@ -14231,6 +14231,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "invalid": {
+            "format": "int64",
+            "type": "integer"
+          },
           "retry_after_seconds": {
             "format": "int64",
             "type": "integer"
@@ -14247,6 +14251,7 @@
         "required": [
           "submitted",
           "skipped",
+          "invalid",
           "failed",
           "retry_after_seconds"
         ],

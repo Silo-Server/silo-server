@@ -215,9 +215,62 @@ func TestPluginProviderSubmitMapsConflicts(t *testing.T) {
 	}
 }
 
+func TestPluginProviderSubmitMapsPermanentRefusals(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{
+			name:       "legacy HTTP 400",
+			err:        status.Error(codes.Unknown, `introdb: submit HTTP 400: {"error":"Season 2 does not exist for this show on TMDB"}`),
+			wantStatus: 400,
+		},
+		{
+			name:       "legacy HTTP 422",
+			err:        status.Error(codes.Unknown, `introdb: submit HTTP 422: unprocessable`),
+			wantStatus: 422,
+		},
+		{
+			name: "structured invalid argument",
+			err:  status.Error(codes.InvalidArgument, "season does not exist"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := submitWithPluginError(t, tt.err)
+			var invalid *SubmissionInvalidError
+			if !errors.As(err, &invalid) {
+				t.Fatalf("error = %T %v, want SubmissionInvalidError", err, err)
+			}
+			if invalid.Provider != "plugin:12:markers" || invalid.HTTPStatus != tt.wantStatus {
+				t.Fatalf("invalid = %+v, want HTTP status %d", invalid, tt.wantStatus)
+			}
+		})
+	}
+}
+
 func TestPluginProviderSubmitKeepsOtherErrorsRetryable(t *testing.T) {
-	wantErr := status.Error(codes.Unknown, "introdb: submit HTTP 500: unavailable")
-	client := &fakePluginMarkerClient{submitErr: wantErr}
+	for _, pluginErr := range []error{
+		status.Error(codes.Unknown, "introdb: submit HTTP 500: unavailable"),
+		status.Error(codes.Unknown, "introdb: submit HTTP 401: invalid api key"),
+		status.Error(codes.Unknown, "introdb: submit HTTP 408: timeout"),
+		status.Error(codes.Unavailable, "plugin unavailable"),
+		status.Error(codes.FailedPrecondition, "api key not configured"),
+	} {
+		_, err := submitWithPluginError(t, pluginErr)
+		var conflict *SubmissionConflictError
+		var invalid *SubmissionInvalidError
+		if errors.As(err, &conflict) || errors.As(err, &invalid) {
+			t.Fatalf("error for %v = %T, want retryable provider error", pluginErr, err)
+		}
+	}
+}
+
+func submitWithPluginError(t *testing.T, pluginErr error) (SubmissionResult, error) {
+	t.Helper()
+	client := &fakePluginMarkerClient{submitErr: pluginErr}
 	provider, err := NewPluginProviderWithClientFactory(PluginProviderOptions{
 		InstallationID: 12,
 		CapabilityID:   "markers",
@@ -227,14 +280,9 @@ func TestPluginProviderSubmitKeepsOtherErrorsRetryable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPluginProviderWithClientFactory: %v", err)
 	}
-
-	_, err = provider.SubmitMarker(context.Background(), SubmissionRequest{
+	return provider.SubmitMarker(context.Background(), SubmissionRequest{
 		Kind:        ItemKindMovie,
 		ExternalIDs: map[string]string{ExternalIDKeyTMDB: "123"},
 		Segment:     MarkerKindIntro,
 	})
-	var conflict *SubmissionConflictError
-	if errors.As(err, &conflict) {
-		t.Fatalf("error = %+v, want retryable provider error", conflict)
-	}
 }
