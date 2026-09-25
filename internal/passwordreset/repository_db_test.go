@@ -40,7 +40,7 @@ func newResetDB(t *testing.T) resetDB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = admin.Exec(context.WithoutCancel(ctx), "DROP SCHEMA "+q+" CASCADE"); admin.Close() })
-	for _, table := range []string{"users", "auth_sessions", "password_reset_tokens"} {
+	for _, table := range []string{"users", "auth_sessions", "password_reset_tokens", "abs_sessions", "device_login_requests"} {
 		if _, err = admin.Exec(ctx, "CREATE TABLE "+q+"."+table+" (LIKE public."+table+" INCLUDING ALL)"); err != nil {
 			t.Fatal(err)
 		}
@@ -99,6 +99,15 @@ func TestResetLinkCompletesOnceAndSignsOutEverywhere(t *testing.T) {
 	if err != nil || link.UserID != id || link.Username != "reset" {
 		t.Fatalf("lookup = %+v, %v", link, err)
 	}
+	// Credentials a login minted without the password: an Audiobookshelf
+	// session and a device sign-in approved but not yet collected.
+	if _, err := d.pool.Exec(ctx, `INSERT INTO abs_sessions(user_id, token_hash, device_id) VALUES ($1, 'abs-token', 'abs-device')`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.pool.Exec(ctx, `INSERT INTO device_login_requests(id, device_code_hash, browser_code_hash, user_code_hash, match_code, device_name, status, approved_by_user_id, expires_at)
+		VALUES (gen_random_uuid(), 'dev', 'browser', 'user', 'MATCH', 'tv', 'approved', $1, now() + interval '10 minutes')`, id); err != nil {
+		t.Fatal(err)
+	}
 	user, err := d.repo.Complete(ctx, auth.HashLinkToken("tok"), "new-password")
 	if err != nil {
 		t.Fatal(err)
@@ -106,9 +115,13 @@ func TestResetLinkCompletesOnceAndSignsOutEverywhere(t *testing.T) {
 	if !auth.CheckPassword(user, "new-password") || user.PasswordChangeRequired {
 		t.Fatalf("password not reset or still temporary: %+v", user)
 	}
-	var live int
-	if err := d.pool.QueryRow(ctx, `SELECT count(*) FROM auth_sessions WHERE user_id = $1 AND revoked_at IS NULL`, id).Scan(&live); err != nil || live != 0 {
-		t.Fatalf("%d sessions survived the reset (%v)", live, err)
+	var live, liveABS, approved int
+	err = d.pool.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM auth_sessions WHERE user_id = $1 AND revoked_at IS NULL),
+		(SELECT count(*) FROM abs_sessions WHERE user_id = $1 AND revoked_at IS NULL),
+		(SELECT count(*) FROM device_login_requests WHERE approved_by_user_id = $1 AND status = 'approved')`, id).Scan(&live, &liveABS, &approved)
+	if err != nil || live != 0 || liveABS != 0 || approved != 0 {
+		t.Fatalf("survived the reset: %d sessions, %d Audiobookshelf sessions, %d approved device sign-ins (%v)", live, liveABS, approved, err)
 	}
 	if _, err := d.repo.Complete(ctx, auth.HashLinkToken("tok"), "another-password"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second use: %v", err)

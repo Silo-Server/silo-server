@@ -643,8 +643,10 @@ func (s *Service) PasswordChangeAvailable(ctx context.Context, userID int) (bool
 
 // ChangePassword verifies the existing local credential before replacing it.
 // Profile authorization and impersonation checks belong to the HTTP boundary;
-// this method owns only the account credential transition.
-func (s *Service) ChangePassword(ctx context.Context, userID int, currentPassword, newPassword string) error {
+// this method owns only the account credential transition. sessionID is the
+// login session making the change: when it replaces a temporary password,
+// every other session of the account is revoked.
+func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string) error {
 	user, err := s.users.GetByID(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("getting user: %w", err)
@@ -653,7 +655,13 @@ func (s *Service) ChangePassword(ctx context.Context, userID int, currentPasswor
 		return err
 	}
 
-	if err := s.users.CompareAndSwapPassword(ctx, userID, user.PasswordHash, newPassword); err != nil {
+	swap := s.users.CompareAndSwapPassword
+	if user.PasswordChangeRequired {
+		swap = func(ctx context.Context, id int, expectedHash, newPassword string) error {
+			return s.users.ReplaceTemporaryPassword(ctx, id, expectedHash, newPassword, sessionID)
+		}
+	}
+	if err := swap(ctx, userID, user.PasswordHash, newPassword); err != nil {
 		return fmt.Errorf("updating password: %w", err)
 	}
 	return nil

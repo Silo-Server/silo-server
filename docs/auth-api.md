@@ -113,6 +113,8 @@ session may change the password without selecting a profile. The current
 
 After `POST /account/password` succeeds, refresh the tokens: the access token keeps
 the restriction until it is replaced, and the refreshed pair no longer carries it.
+The change revokes every other session of the account, since each was opened with
+the temporary password.
 An administrator impersonating the account is not restricted. Jellyfin and
 Audiobookshelf compatible sign-ins refuse an account holding a temporary password,
 because those clients cannot run the change; the account signs in to Silo first.

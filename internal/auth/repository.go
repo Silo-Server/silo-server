@@ -482,12 +482,30 @@ func updateUser(ctx context.Context, db interface {
 // therefore cannot both succeed with different replacements. The account
 // chose this password itself, so it settles any temporary one.
 func (r *UserRepository) CompareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string) error {
+	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, nil)
+}
+
+// ReplaceTemporaryPassword is CompareAndSwapPassword for an account holding a
+// temporary password. Every other login session was opened with that
+// temporary password, possibly by someone else, and its next refresh would
+// lift the restriction; they are revoked in the same transaction, keeping
+// only keepSessionID, the session that chose the new password.
+func (r *UserRepository) ReplaceTemporaryPassword(ctx context.Context, id int, expectedHash, newPassword, keepSessionID string) error {
+	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, &keepSessionID)
+}
+
+func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string, keepSessionID *string) error {
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("hashing password: %w", err)
 	}
 
-	tag, err := r.pool.Exec(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin password update: %w", err)
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // rollback after commit is a no-op
+	tag, err := tx.Exec(ctx, `
 		UPDATE users
 		SET password_hash = $1, password_change_required = false, updated_at = NOW()
 		WHERE id = $2 AND password_hash = $3`, string(hash), id, expectedHash)
@@ -495,6 +513,16 @@ func (r *UserRepository) CompareAndSwapPassword(ctx context.Context, id int, exp
 		return fmt.Errorf("updating password: %w", err)
 	}
 	if tag.RowsAffected() == 1 {
+		if keepSessionID != nil {
+			if _, err := tx.Exec(ctx, `
+				UPDATE auth_sessions SET revoked_at = NOW()
+				WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`, id, *keepSessionID); err != nil {
+				return fmt.Errorf("revoking temporary-password sessions: %w", err)
+			}
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("commit password update: %w", err)
+		}
 		return nil
 	}
 

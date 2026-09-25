@@ -103216,6 +103216,16 @@
             },
             "description": "Request Timeout"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "412": {
             "content": {
               "application/problem+json": {

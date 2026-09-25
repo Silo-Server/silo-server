@@ -267,6 +267,9 @@ func registerAdminAccounts(reg *Registry) {
 	Register(reg, create, reg.createAdminAccount)
 	update := adminAccountOperation(http.MethodPut, "/{id}", "updateAdminUser", true)
 	update.DefaultStatus = 204
+	// A taken username or email, or a temporary password for an account
+	// without local password sign-in, is 409 conflict.
+	update.Errors = append(update.Errors, http.StatusConflict)
 	Register(reg, update, reg.updateAdminAccount)
 	del := adminAccountOperation(http.MethodDelete, "/{id}", "deleteAdminUser", true)
 	del.DefaultStatus = 204

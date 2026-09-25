@@ -64,8 +64,9 @@ request temporary. At its next sign-in the account must choose a new password be
 its session can do anything else (see
 [temporary passwords](auth-api.md#temporary-passwords)). The flag is only valid
 alongside `password`; sending it alone returns `422 validation_failed` at
-`body.require_password_change`. A password sent without the flag is not temporary
-and clears a pending change. Setting a password still revokes the account's login
+`body.require_password_change`. An account without local password sign-in cannot
+hold a temporary password; updating one with the flag returns `409 conflict`. A
+password sent without the flag is not temporary and clears a pending change. Setting a password still revokes the account's login
 sessions.
 
 `POST /api/v2/admin/users/{id}/password-reset` issues a password reset link, so an

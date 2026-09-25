@@ -40,7 +40,12 @@ The public operations spend the `password_reset` per-IP rate-limit budget; with
 **One transaction.** Completion locks the link and account rows, re-checks
 expiry against `clock_timestamp()`, deletes the link, replaces the password,
 clears `password_change_required`, and revokes every login session the account
-owns or impersonates from, then commits. Concurrent completions of one link have
+owns or impersonates from, then commits. The same transaction revokes the
+account's Audiobookshelf-compatible sessions and denies any device sign-in it
+approved that the device has not collected yet, which would otherwise mint a
+fresh session afterwards. Personal API keys survive: the account created them on
+purpose, and revoking them would break its integrations, so the account or an
+administrator revokes them separately. Concurrent completions of one link have
 exactly one winner. Sign-in afterwards is a separate effect: when it fails, the
 response still reports the committed reset (`sign_in_required`) and the caller must
 not replay it. The `OnUserSessionsRevoked` hook then drops Jellyfin-compatible
@@ -56,7 +61,8 @@ receives would still replace the one the account may already hold.
 
 **Every password write decides the flag.** `users.password_change_required` is
 written only together with a password. An administrator's create or update sets it
-from `require_password_change`, false when omitted. A self-service change or a
+from `require_password_change`, false when omitted, and refuses it for an account
+without local password sign-in, which could never run the change. A self-service change or a
 completed reset clears it. A write without a password never touches it, so no path
 leaves a stale flag behind.
 
@@ -65,8 +71,11 @@ completion, and refresh copy the flag from the account into the access-token cla
 `password_change_required`. The auth middleware already validates the token and its
 session on every request, so the restriction costs no extra read. An administrator
 setting a temporary password revokes the account's sessions in the same
-transaction, so every session opened afterwards carries the claim. Once the account
-chooses a new password, the next refresh issues tokens without it. An impersonating
+transaction, so every session opened afterwards carries the claim. Choosing the new
+password revokes every other session of the account in the same transaction: each
+was opened with the temporary password, possibly by someone else, and its next
+refresh would otherwise lift the restriction. The session that chose the password
+gets tokens without the claim on its next refresh. An impersonating
 administrator's tokens never carry it.
 
 **Allowlist, fail closed.** `RequireAuth` admits a restricted session only to the

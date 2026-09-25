@@ -128,7 +128,7 @@ func (h *AuthHandler) ChangePassword(ctx context.Context, claims *auth.Claims, c
 	if currentPassword == "" || newPassword == "" {
 		return apiError(http.StatusBadRequest, "bad_request", "Current password and new password are required")
 	}
-	err := h.passwords.ChangePassword(ctx, claims.UserID, currentPassword, newPassword)
+	err := h.passwords.ChangePassword(ctx, claims.UserID, claims.SessionID, currentPassword, newPassword)
 	switch {
 	case err == nil:
 		return nil

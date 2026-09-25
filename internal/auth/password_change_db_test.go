@@ -67,10 +67,19 @@ func TestTemporaryPasswordLifecycleDB(t *testing.T) {
 	if _, _, err := svc.CompatLogin(ctx, name, "temporary-pass", "test", ""); !errors.Is(err, ErrPasswordChangeRequired) {
 		t.Fatalf("compat login with a temporary password: %v", err)
 	}
-	if err := svc.ChangePassword(ctx, user.ID, "temporary-pass", "temporary-pass"); !errors.Is(err, ErrPasswordUnchanged) {
+	// Someone else who knew the temporary password signed in too.
+	other, _, err := svc.Login(ctx, name, "temporary-pass", "other", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := jwt.ValidateToken(pair.AccessToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ChangePassword(ctx, user.ID, claims.SessionID, "temporary-pass", "temporary-pass"); !errors.Is(err, ErrPasswordUnchanged) {
 		t.Fatalf("reusing the temporary password: %v", err)
 	}
-	if err := svc.ChangePassword(ctx, user.ID, "temporary-pass", "chosen-pass"); err != nil {
+	if err := svc.ChangePassword(ctx, user.ID, claims.SessionID, "temporary-pass", "chosen-pass"); err != nil {
 		t.Fatal(err)
 	}
 	if flag() {
@@ -79,6 +88,10 @@ func TestTemporaryPasswordLifecycleDB(t *testing.T) {
 	refreshed, err := svc.Refresh(ctx, pair.RefreshToken)
 	if err != nil || restricted(refreshed.AccessToken) {
 		t.Fatalf("refresh after the change still restricted: %v", err)
+	}
+	// The other temporary-password session is revoked, not promoted.
+	if _, err := svc.Refresh(ctx, other.RefreshToken); err == nil {
+		t.Fatal("another temporary-password session survived the change")
 	}
 
 	// An administrator's password write decides the flag either way; other

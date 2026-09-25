@@ -221,6 +221,11 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 		if actorIsScopedAPIKey(ctx) && ((input.Role != nil && role == roleAdmin) || (current.Role == roleAdmin && (input.Password != nil || input.Role != nil))) {
 			return false, apiError(403, "insufficient_scope", "A scoped API key may not change admin credentials or grant admin")
 		}
+		// Only local password sign-in can run the change a temporary password
+		// demands; an externally managed account would be locked out.
+		if input.PasswordChangeRequired && !current.LocalPasswordLoginEnabled {
+			return false, apiError(409, "password_login_disabled", "This account does not use local password sign-in, so its password cannot be made temporary")
+		}
 		if input.AccessGroupID.Set {
 			if err := h.validateAdminGroup(ctx, tx, input.AccessGroupID.Value, role); err != nil {
 				return false, err

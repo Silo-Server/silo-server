@@ -17,6 +17,7 @@ type stubAccountPasswordService struct {
 	available bool
 	err       error
 	userID    int
+	sessionID string
 	current   string
 	new       string
 }
@@ -25,8 +26,9 @@ func (s *stubAccountPasswordService) PasswordChangeAvailable(context.Context, in
 	return s.available, s.err
 }
 
-func (s *stubAccountPasswordService) ChangePassword(_ context.Context, userID int, currentPassword, newPassword string) error {
+func (s *stubAccountPasswordService) ChangePassword(_ context.Context, userID int, sessionID, currentPassword, newPassword string) error {
 	s.userID = userID
+	s.sessionID = sessionID
 	s.current = currentPassword
 	s.new = newPassword
 	return s.err
