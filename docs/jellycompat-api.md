@@ -68,8 +68,10 @@ A profile with no stored subtitle mode reads as `Default`, Jellyfin's default.
 Modes set outside a Jellyfin client read as the matching row (`off` with forced
 subtitles shown reads as `OnlyForced`).
 
-Audio and subtitle language preferences read as three-letter ISO codes matching
-`/Localization/Cultures` (for example, `eng`). Native settings retain canonical
+Audio and subtitle language preferences use three-letter ISO codes for recognized
+languages (for example, `eng`). They match Jellyfin Web's selector only when
+`/Localization/Cultures` offers that language; `fil`, for example, has no option.
+Unrecognized and undefined tags are preserved. Native settings retain canonical
 BCP 47 tags. Returning an unchanged language choice preserves a native region or
 script preference, such as `pt-BR`; selecting a different language replaces it,
 and an empty or null preference clears it.

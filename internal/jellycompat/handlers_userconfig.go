@@ -85,7 +85,7 @@ func (h *AuthHandler) resolvedUserDTO(ctx context.Context, session *Session) (us
 	return dto, nil
 }
 
-// compatLanguagePreference matches the ISO codes used by the Cultures options.
+// compatLanguagePreference converts recognized languages to ISO three-letter codes.
 // Keep unrecognized tags intact and never infer a language for an undefined tag.
 func compatLanguagePreference(value string) string {
 	tag, err := language.Parse(value)
@@ -93,7 +93,8 @@ func compatLanguagePreference(value string) string {
 		return value
 	}
 	base, _, _ := tag.Raw()
-	if base.String() == "und" {
+	undefined, _, _ := language.Und.Raw()
+	if base == undefined {
 		return value
 	}
 	return base.ISO3()
