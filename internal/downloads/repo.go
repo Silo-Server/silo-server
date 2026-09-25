@@ -769,7 +769,9 @@ func (r *Repository) MarkLinkedDownloadsFailed(ctx context.Context, artifactID, 
 // returned to 'preparing' here, and a row that existed earlier was already
 // reset by the requeue, so the caller's copy is stale either way. FOR SHARE
 // waits for an in-flight requeue to commit, so either this read sees the
-// queued artifact or the requeue's linked-download reset sees this row.
+// queued artifact or the requeue's linked-download reset sees this row. The
+// reset is fenced on the artifact so a concurrent create that relinked the
+// row elsewhere is left alone.
 func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Download, error) {
 	if d == nil || d.ArtifactID == "" {
 		return d, nil
@@ -789,8 +791,8 @@ func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Dow
 		if _, err := tx.Exec(ctx,
 			`UPDATE downloads SET status = 'preparing', bytes_sent = 0, completed_at = NULL,
 			     error_message = '', updated_at = now()
-			 WHERE id = $1 AND status = 'ready'`,
-			d.ID,
+			 WHERE id = $1 AND artifact_id = $2 AND status = 'ready'`,
+			d.ID, d.ArtifactID,
 		); err != nil {
 			return nil, fmt.Errorf("resetting download of requeued artifact: %w", err)
 		}

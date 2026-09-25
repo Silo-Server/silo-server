@@ -1223,6 +1223,30 @@ func TestConfirmArtifactLinkReturnsRowResetByRecovery(t *testing.T) {
 	}
 }
 
+// A concurrent create can relink the same managed row, for example to an
+// original-quality download with no artifact, after this create read it. The
+// reset must not strand that newer row in preparing.
+func TestConfirmArtifactLinkIgnoresRowRelinkedConcurrently(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	ready := readyArtifactForRecovery(t, repo, pool, fileID, "")
+	linkRecoveryDownload(t, pool, fileID, ready.ID, StatusReady)
+	var stale Download
+	if err := scanInto(pool.QueryRow(ctx, `SELECT `+downloadColumns+` FROM downloads WHERE artifact_id = $1`, ready.ID), &stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Requeue(ctx, ready.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE downloads SET artifact_id = NULL, format = 'original' WHERE id = $1`, stale.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := NewRepository(pool).ConfirmArtifactLink(ctx, &stale)
+	if err != nil || got.Status != StatusReady || got.ArtifactID != "" {
+		t.Fatalf("relinked row = %+v (%v), want the stored ready original row", got, err)
+	}
+}
+
 // A stat failure other than "not found" is not proof the output is gone, so
 // recovery must leave the row alone rather than retire it and orphan the file.
 func TestRecoverReadyArtifactsSkipsIndeterminateStatErrors(t *testing.T) {
