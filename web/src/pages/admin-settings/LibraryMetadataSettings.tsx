@@ -33,7 +33,12 @@ const SCANNER_KEYS = [
   "metadata.image_workers",
 ];
 
-const MARKER_KEYS = ["markers.mode", "markers.lazy_playback", "markers.online_storage"];
+const MARKER_KEYS = [
+  "markers.mode",
+  "markers.lazy_playback",
+  "markers.online_storage",
+  "markers.detection_workers",
+];
 
 const MEILI_URL_KEY = "catalog.search.meilisearch.url";
 const MEILI_API_KEY = "catalog.search.meilisearch.api_key";
@@ -294,6 +299,17 @@ export default function LibraryMetadataSettings() {
               value={form.getValue("markers.lazy_playback") || "true"}
               onChange={(value) => form.setValue("markers.lazy_playback", value)}
               restartRequired={restartKeys.has("markers.lazy_playback")}
+            />
+          )}
+
+          {(markerMode === "local" || markerMode === "both") && (
+            <SettingField
+              label="Detection workers"
+              type="number"
+              description="How many seasons Silo analyzes for intros at once, each reading audio with its own ffmpeg process. Defaults to 1. Raise it to finish a large library sooner if your storage and CPU have room."
+              value={form.getValue("markers.detection_workers")}
+              onChange={(value) => form.setValue("markers.detection_workers", value)}
+              restartRequired={restartKeys.has("markers.detection_workers")}
             />
           )}
 

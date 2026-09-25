@@ -261,6 +261,7 @@ export const ADMIN_SETTINGS_GROUPS: AdminSettingsSearchGroup[] = [
           "Marker source",
           "Online preferred + server detection",
           "Find markers on playback",
+          "Detection workers",
           "Save online markers",
           "Save to library",
           "Fetch when needed",

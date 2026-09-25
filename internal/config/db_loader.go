@@ -325,6 +325,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Metadata.ImageWorkers = imageWorkers
+	detectionWorkers, err := intOr(m, MarkersDetectionWorkersSettingKey, 1)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Markers.DetectionWorkers = detectionWorkers
 
 	// Playback
 	cfg.Playback.FFmpegPath = stringOr(m, "playback.ffmpeg_path", "")

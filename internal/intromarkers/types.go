@@ -65,13 +65,19 @@ type Config struct {
 // seconds or more mostly overshot the chapter end into the episode.
 const defaultSilenceMaximumExtensionSeconds = 5
 
+// DefaultDetectionWorkers is how many seasons intro detection analyzes at
+// once, and so how many ffmpeg processes it runs, unless an administrator
+// raises markers.detection_workers. One keeps a shared server's storage and
+// CPU free for playback.
+const DefaultDetectionWorkers = 1
+
 func DefaultConfig(ffmpegPath string) Config {
 	if strings.TrimSpace(ffmpegPath) == "" {
 		ffmpegPath = "ffmpeg"
 	}
 	return Config{
 		FFmpegPath:                                ffmpegPath,
-		MaxParallelFFmpeg:                         1,
+		MaxParallelFFmpeg:                         DefaultDetectionWorkers,
 		AnalysisPercent:                           25,
 		AnalysisLengthLimitMinutes:                10,
 		MinimumIntroDurationSeconds:               15,
@@ -314,6 +320,32 @@ type SeasonState struct {
 	Status           string
 	MarkersWritten   int
 	LastError        string
+	AnalyzedAt       time.Time
+}
+
+const (
+	seasonStatusComplete = "complete"
+	seasonStatusNotFound = "not_found"
+	seasonStatusFailed   = "failed"
+	// seasonStatusPartial marks a group analyzed while some fingerprint
+	// extractions failed. It is retried after partialSeasonRetryInterval
+	// even when its inputs have not changed.
+	seasonStatusPartial = "partial"
+
+	partialSeasonRetryInterval = 7 * 24 * time.Hour
+)
+
+// settled reports whether a stored analysis still stands for unchanged
+// inputs at now.
+func (s SeasonState) settled(now time.Time) bool {
+	switch s.Status {
+	case seasonStatusComplete, seasonStatusNotFound:
+		return true
+	case seasonStatusPartial:
+		return now.Sub(s.AnalyzedAt) < partialSeasonRetryInterval
+	default:
+		return false
+	}
 }
 
 const (
@@ -357,6 +389,7 @@ type RunSummary struct {
 	SeasonGroupsConsidered       int      `json:"season_groups_considered"`
 	FingerprintsComputed         int      `json:"fingerprints_computed"`
 	FingerprintCacheHits         int      `json:"fingerprint_cache_hits"`
+	FingerprintExtractionErrors  int      `json:"fingerprint_extraction_errors"`
 	ChapterMarkersWritten        int      `json:"chapter_markers_written"`
 	ChromaprintMarkersWritten    int      `json:"chromaprint_markers_written"`
 	GroupsNotFound               int      `json:"groups_not_found"`

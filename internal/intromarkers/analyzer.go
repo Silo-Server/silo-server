@@ -23,6 +23,39 @@ type Analyzer struct {
 	// node names this server in recorded silence refinement failures, which
 	// only defer retries on the server that recorded them.
 	node string
+	// slotsMu guards workers and the ffmpegSlots pointer, which SetWorkers
+	// sets when the markers.detection_workers setting changes.
+	slotsMu sync.Mutex
+	// workers is how many season groups, and silence backfill shares, run at
+	// once. Zero falls back to config.MaxParallelFFmpeg.
+	workers int
+	// ffmpegSlots bounds the ffmpeg processes this analyzer runs at once across
+	// the nightly run and its season workers. Nil means no shared bound.
+	ffmpegSlots *slotLimiter
+	// interactiveSlots is reserved for analysis started from playback (see
+	// WithPlaybackPriority), which would otherwise queue behind every nightly
+	// extraction waiting for a slot.
+	interactiveSlots chan struct{}
+	// lookupSlots bounds concurrent fingerprint cache reads across every group
+	// being analyzed; see fingerprintLookupSlots.
+	lookupOnce  sync.Once
+	lookupSlots chan struct{}
+}
+
+// maxConcurrentFingerprintLookups caps the database connections fingerprint
+// cache reads hold at once. Each candidate in a season looks up its cache
+// entry concurrently, and several seasons run at once, so without a cap the
+// nightly run could take the whole pool and starve API requests.
+const maxConcurrentFingerprintLookups = 4
+
+// interactiveAnalysisKey marks a context whose analysis a viewer is waiting on.
+type interactiveAnalysisKey struct{}
+
+// WithPlaybackPriority marks analysis a viewer is waiting on, letting it use
+// the ffmpeg slot reserved for playback. Background callers, such as admin
+// refreshes, must not use it or they would queue ahead of playback.
+func WithPlaybackPriority(ctx context.Context) context.Context {
+	return context.WithValue(ctx, interactiveAnalysisKey{}, true)
 }
 
 type introRepository interface {
@@ -62,7 +95,110 @@ func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer
 		config:             config,
 		logger:             logger,
 		node:               node,
+		workers:            config.MaxParallelFFmpeg,
+		ffmpegSlots:        newSlotLimiter(config.MaxParallelFFmpeg),
+		interactiveSlots:   make(chan struct{}, 1),
 	}
+}
+
+// SetWorkers applies the markers.detection_workers setting: how many season
+// groups are analyzed at once and how many ffmpeg processes they may run. Less
+// than one means DefaultDetectionWorkers. The change applies to new work
+// without waiting for a run to finish; after a decrease, extractions already
+// running finish before new ones start.
+func (a *Analyzer) SetWorkers(n int) {
+	if n <= 0 {
+		n = DefaultDetectionWorkers
+	}
+	a.slotsMu.Lock()
+	defer a.slotsMu.Unlock()
+	if a.workers == n && a.ffmpegSlots != nil {
+		return
+	}
+	a.workers = n
+	if a.ffmpegSlots == nil {
+		a.ffmpegSlots = newSlotLimiter(n)
+		return
+	}
+	a.ffmpegSlots.resize(n)
+}
+
+// workerCount is the current number of season workers.
+func (a *Analyzer) workerCount() int {
+	a.slotsMu.Lock()
+	defer a.slotsMu.Unlock()
+	if a.workers > 0 {
+		return a.workers
+	}
+	return max(1, a.config.normalized().MaxParallelFFmpeg)
+}
+
+func (a *Analyzer) sharedSlots() *slotLimiter {
+	a.slotsMu.Lock()
+	defer a.slotsMu.Unlock()
+	return a.ffmpegSlots
+}
+
+// acquireFFmpeg waits for an ffmpeg slot and returns its release. Interactive
+// analysis may also take the reserved slot, so it never waits behind the
+// nightly queue for more than one extraction.
+func (a *Analyzer) acquireFFmpeg(ctx context.Context) (func(), error) {
+	slots := a.sharedSlots()
+	if slots == nil {
+		return func() {}, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// A nil channel never receives, so non-interactive callers only wait on
+	// the shared limit.
+	var reserved chan struct{}
+	if interactive, _ := ctx.Value(interactiveAnalysisKey{}).(bool); interactive {
+		reserved = a.interactiveSlots
+	}
+	for {
+		if reserved != nil {
+			select {
+			case reserved <- struct{}{}:
+				return func() { <-reserved }, nil
+			default:
+			}
+		}
+		ok, changed := slots.tryAcquire()
+		if ok {
+			return slots.release, nil
+		}
+		select {
+		case reserved <- struct{}{}:
+			return func() { <-reserved }, nil
+		case <-changed:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+// fingerprintLookupSlots returns the analyzer-wide bound on concurrent
+// fingerprint cache reads, created on first use so analyzers built without
+// NewAnalyzer share one too.
+func (a *Analyzer) fingerprintLookupSlots() chan struct{} {
+	a.lookupOnce.Do(func() {
+		a.lookupSlots = make(chan struct{}, maxConcurrentFingerprintLookups)
+	})
+	return a.lookupSlots
+}
+
+// loadFingerprint reads a cached fingerprint within the lookup bound. The
+// slot covers only the read, not the wait for ffmpeg that may follow a miss.
+func (a *Analyzer) loadFingerprint(ctx context.Context, candidate Candidate) (*Fingerprint, error) {
+	slots := a.fingerprintLookupSlots()
+	select {
+	case slots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-slots }()
+	return a.repo.LoadFingerprint(ctx, candidate, a.config)
 }
 
 type ProgressFunc func(percent float64, message string)
@@ -146,31 +282,12 @@ func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, 
 	}
 	summary.ChromaprintSupported = true
 
-	for idx, group := range groups {
-		if err := ctx.Err(); err != nil {
-			return summary, err
-		}
-		percent := 40 + float64(idx)/float64(len(groups))*55
-		report(percent, fmt.Sprintf("Analyzing intro group %d/%d", idx+1, len(groups)))
-		groupSummary, err := a.analyzeGroup(ctx, group, analyzeGroupOptions{
-			persistState: true,
-		})
-		summary.FingerprintsComputed += groupSummary.FingerprintsComputed
-		summary.FingerprintCacheHits += groupSummary.FingerprintCacheHits
-		summary.ChromaprintMarkersWritten += groupSummary.ChromaprintMarkersWritten
-		summary.DialogueRefinementsAttempted += groupSummary.DialogueRefinementsAttempted
-		summary.DialogueRefinementsApplied += groupSummary.DialogueRefinementsApplied
-		summary.DialogueRefinementErrors += groupSummary.DialogueRefinementErrors
-		summary.GroupsNotFound += groupSummary.GroupsNotFound
-		summary.GroupsSkipped += groupSummary.GroupsSkipped
-		summary.Errors = append(summary.Errors, groupSummary.Errors...)
-		if err != nil {
-			a.logger.WarnContext(ctx, "intro marker group analysis failed",
-				"season_id", group.SeasonID,
-				"media_folder_id", group.MediaFolderID,
-				"group_key", group.AnalysisGroupKey,
-				"error", err)
-		}
+	groupSummary := a.analyzeGroups(ctx, groups, func(done int) {
+		report(40+float64(done)/float64(len(groups))*55, fmt.Sprintf("Analyzed intro group %d/%d", done, len(groups)))
+	})
+	mergeRunSummary(&summary, groupSummary)
+	if err := ctx.Err(); err != nil {
+		return summary, err
 	}
 
 	backfillSummary, err := a.runSilenceBackfill(ctx)
@@ -265,6 +382,7 @@ func (a *Analyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (RunSum
 		})
 		summary.FingerprintsComputed += groupSummary.FingerprintsComputed
 		summary.FingerprintCacheHits += groupSummary.FingerprintCacheHits
+		summary.FingerprintExtractionErrors += groupSummary.FingerprintExtractionErrors
 		summary.ChromaprintMarkersWritten += groupSummary.ChromaprintMarkersWritten
 		summary.DialogueRefinementsAttempted += groupSummary.DialogueRefinementsAttempted
 		summary.DialogueRefinementsApplied += groupSummary.DialogueRefinementsApplied
@@ -335,7 +453,12 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 			continue
 		}
 
-		segment = a.refineChapterSegment(ctx, candidate, segment, &summary)
+		segment, refined := a.refineChapterSegment(ctx, candidate, segment, opts.deadline, &summary)
+		if !refined {
+			// The run's time budget ran out while waiting for an ffmpeg slot.
+			remaining = append(remaining, candidate)
+			continue
+		}
 		applied, patchErr := a.repo.PatchIntroMarker(ctx, IntroMarkerPatch{
 			ExpectedFile: candidate.expectedFile(),
 			FileID:       candidate.FileID,
@@ -419,26 +542,40 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 	return unresolved, summary
 }
 
-func (a *Analyzer) refineChapterSegment(ctx context.Context, candidate Candidate, segment Segment, summary *RunSummary) Segment {
+// refineChapterSegment runs silence refinement on a chapter intro. It returns
+// false, leaving the file untouched, when deadline passed while it waited for
+// an ffmpeg slot.
+func (a *Analyzer) refineChapterSegment(ctx context.Context, candidate Candidate, segment Segment, deadline time.Time, summary *RunSummary) (Segment, bool) {
 	if a.refiner == nil || !a.config.normalized().SilenceRefinementEnabled {
-		return segment
+		return segment, true
+	}
+	release, err := a.acquireFFmpeg(ctx)
+	if err != nil {
+		summary.SilenceRefinementsAttempted++
+		summary.SilenceRefinementErrors++
+		return segment, true
+	}
+	if !deadline.IsZero() && time.Now().After(deadline) {
+		release()
+		return segment, false
 	}
 	summary.SilenceRefinementsAttempted++
 	refined, ok, err := a.refiner.RefineChapterEnd(ctx, candidate, segment)
+	release()
 	if err != nil {
 		summary.SilenceRefinementErrors++
 		a.logger.WarnContext(ctx, "intro marker silence refinement failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
 		if ctx.Err() == nil {
 			a.recordSilenceAttempt(ctx, candidate, segment, err, summary)
 		}
-		return segment
+		return segment, true
 	}
 	if ok {
 		summary.SilenceRefinementsApplied++
-		return refined
+		return refined, true
 	}
 	a.recordSilenceAttempt(ctx, candidate, segment, nil, summary)
-	return segment
+	return segment, true
 }
 
 const (
@@ -564,12 +701,81 @@ func (a *Analyzer) runSilenceBackfill(ctx context.Context) (RunSummary, error) {
 	if len(candidates) == 0 {
 		return summary, nil
 	}
-	_, backfillSummary := a.processChapterCandidates(ctx, candidates, chapterProcessingOptions{
+	// Backfill files are independent: no episode-version copies are made, so
+	// the candidates split across workers.
+	opts := chapterProcessingOptions{
 		forceExistingScanner: true,
 		deadline:             time.Now().Add(cfg.SilenceBackfillMaxDuration),
-	})
-	mergeRunSummary(&summary, backfillSummary)
+	}
+	workers := min(len(candidates), a.workerCount())
+	var (
+		mu sync.Mutex
+		wg sync.WaitGroup
+	)
+	for w := range workers {
+		share := make([]Candidate, 0, len(candidates)/workers+1)
+		for i := w; i < len(candidates); i += workers {
+			share = append(share, candidates[i])
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, shareSummary := a.processChapterCandidates(ctx, share, opts)
+			mu.Lock()
+			mergeRunSummary(&summary, shareSummary)
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
 	return summary, nil
+}
+
+// analyzeGroups runs season groups on workerCount workers. Most groups
+// are skipped or served from cached fingerprints, so workers keep the ffmpeg
+// slots busy while other groups compare or wait on the database. progress is
+// called with the number of groups finished.
+func (a *Analyzer) analyzeGroups(ctx context.Context, groups []candidateGroup, progress func(done int)) RunSummary {
+	var (
+		mu      sync.Mutex
+		summary RunSummary
+		done    int
+		wg      sync.WaitGroup
+	)
+	work := make(chan candidateGroup)
+	for range min(len(groups), a.workerCount()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for group := range work {
+				groupSummary, err := a.analyzeGroup(ctx, group, analyzeGroupOptions{persistState: true})
+				if err != nil {
+					a.logger.WarnContext(ctx, "intro marker group analysis failed",
+						"season_id", group.SeasonID,
+						"media_folder_id", group.MediaFolderID,
+						"group_key", group.AnalysisGroupKey,
+						"error", err)
+				}
+				mu.Lock()
+				mergeRunSummary(&summary, groupSummary)
+				done++
+				if progress != nil {
+					progress(done)
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+feed:
+	for _, group := range groups {
+		select {
+		case work <- group:
+		case <-ctx.Done():
+			break feed
+		}
+	}
+	close(work)
+	wg.Wait()
+	return summary
 }
 
 type candidateGroup struct {
@@ -638,17 +844,27 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 	if err != nil {
 		return summary, err
 	}
-	if !opts.force && existing != nil && existing.InputSignature == state.InputSignature &&
-		(existing.Status == "complete" || existing.Status == "not_found") {
+	if !opts.force && existing != nil && existing.InputSignature == state.InputSignature && existing.settled(time.Now()) {
 		summary.GroupsSkipped++
 		return summary, nil
 	}
 
-	inputs, hits, computed, err := a.ensureFingerprints(ctx, group.Candidates)
+	inputs, hits, computed, failed, err := a.ensureFingerprints(ctx, group.Candidates)
 	summary.FingerprintCacheHits += hits
 	summary.FingerprintsComputed += computed
+	summary.FingerprintExtractionErrors += failed
+	// A failed extraction (unlike a file with no audio to fingerprint) may
+	// succeed later, so the group stays partial and is retried even though its
+	// inputs have not changed.
+	settle := func(status string) {
+		state.Status = status
+		if failed > 0 {
+			state.Status = seasonStatusPartial
+			state.LastError = fmt.Sprintf("%d fingerprint extraction(s) failed", failed)
+		}
+	}
 	if err != nil {
-		state.Status = "failed"
+		state.Status = seasonStatusFailed
 		state.LastError = err.Error()
 		if opts.persistState {
 			_ = a.repo.UpsertSeasonState(ctx, state, a.config)
@@ -657,8 +873,8 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		return summary, err
 	}
 	if distinctFingerprintEpisodeCount(inputs) < 2 {
-		state.Status = "not_found"
 		state.LastError = "too few fingerprints"
+		settle(seasonStatusNotFound)
 		if opts.persistState {
 			if err := a.repo.UpsertSeasonState(ctx, state, a.config); err != nil {
 				return summary, err
@@ -670,7 +886,7 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 
 	segments := CompareFingerprints(inputs, a.config)
 	if len(segments) == 0 {
-		state.Status = "not_found"
+		settle(seasonStatusNotFound)
 		if opts.persistState {
 			if err := a.repo.UpsertSeasonState(ctx, state, a.config); err != nil {
 				return summary, err
@@ -727,9 +943,9 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 	}
 
 	if opts.persistState {
-		state.Status = "complete"
+		settle(seasonStatusComplete)
 		if refinementFailures > 0 {
-			state.Status = "failed"
+			state.Status = seasonStatusFailed
 			state.LastError = fmt.Sprintf("subtitle refinement failed for %d file(s)", refinementFailures)
 		}
 		state.MarkersWritten = summary.ChromaprintMarkersWritten
@@ -783,36 +999,43 @@ func shouldPatchGroupFile(fileID int, allowed map[int]struct{}) bool {
 	return ok
 }
 
-func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidate) ([]fingerprintInput, int, int, error) {
+// ensureFingerprints loads cached fingerprints and extracts missing ones. It
+// returns the inputs with their cache hits, extractions, and failed
+// extractions; a database error or cancellation is returned as err.
+func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidate) ([]fingerprintInput, int, int, int, error) {
 	var (
 		mu       sync.Mutex
 		inputs   []fingerprintInput
 		hits     int
 		computed int
+		failed   int
 		firstErr error
 	)
-	sem := make(chan struct{}, max(1, a.config.MaxParallelFFmpeg))
+	setErr := func(err error) {
+		mu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		mu.Unlock()
+	}
+	acquire := a.acquireFFmpeg
+	if a.sharedSlots() == nil {
+		// Analyzers built without NewAnalyzer still bound this call.
+		local := &Analyzer{ffmpegSlots: newSlotLimiter(a.workerCount())}
+		acquire = local.acquireFFmpeg
+	}
 	var wg sync.WaitGroup
 	for _, candidate := range candidates {
-		candidate := candidate
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if err := ctx.Err(); err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				mu.Unlock()
+				setErr(err)
 				return
 			}
-			cached, err := a.repo.LoadFingerprint(ctx, candidate, a.config)
+			cached, err := a.loadFingerprint(ctx, candidate)
 			if err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				mu.Unlock()
+				setErr(err)
 				return
 			}
 			if cached != nil {
@@ -823,31 +1046,29 @@ func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidat
 				return
 			}
 
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = ctx.Err()
-				}
-				mu.Unlock()
+			release, err := acquire(ctx)
+			if err != nil {
+				setErr(err)
 				return
 			}
 			fp, ok, err := a.extractor.Extract(ctx, candidate)
-			<-sem
+			release()
 			if err != nil {
+				if ctx.Err() != nil {
+					setErr(ctx.Err())
+					return
+				}
 				a.logger.WarnContext(ctx, "intro marker fingerprint extraction failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
+				mu.Lock()
+				failed++
+				mu.Unlock()
 				return
 			}
 			if !ok {
 				return
 			}
 			if err := a.repo.UpsertFingerprint(ctx, fp); err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				mu.Unlock()
+				setErr(err)
 				return
 			}
 			mu.Lock()
@@ -860,7 +1081,7 @@ func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidat
 	sort.Slice(inputs, func(i, j int) bool {
 		return inputs[i].Candidate.FileID < inputs[j].Candidate.FileID
 	})
-	return inputs, hits, computed, firstErr
+	return inputs, hits, computed, failed, firstErr
 }
 
 func distinctEpisodeCount(candidates []Candidate) int {
@@ -889,6 +1110,7 @@ func mergeRunSummary(dst *RunSummary, src RunSummary) {
 	dst.ChromaprintMarkersWritten += src.ChromaprintMarkersWritten
 	dst.GroupsNotFound += src.GroupsNotFound
 	dst.GroupsSkipped += src.GroupsSkipped
+	dst.FingerprintExtractionErrors += src.FingerprintExtractionErrors
 	dst.Errors = append(dst.Errors, src.Errors...)
 	if src.ChromaprintSupported {
 		dst.ChromaprintSupported = true

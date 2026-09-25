@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 )
 
 type fakeIntroRepository struct {
+	mu                 sync.Mutex
 	enabledLibraries   int
 	eligibleCandidates []Candidate
 	episodeCandidates  map[string][]Candidate
@@ -26,27 +28,39 @@ type fakeIntroRepository struct {
 }
 
 func (f *fakeIntroRepository) CountEnabledLibraries(context.Context) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.enabledLibraries, nil
 }
 
 func (f *fakeIntroRepository) ListEligibleCandidates(context.Context) ([]Candidate, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return append([]Candidate(nil), f.eligibleCandidates...), nil
 }
 
 func (f *fakeIntroRepository) ListCandidatesForEpisode(_ context.Context, episodeID string) ([]Candidate, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return append([]Candidate(nil), f.episodeCandidates[episodeID]...), nil
 }
 
 func (f *fakeIntroRepository) ListCandidatesForGroup(_ context.Context, mediaFolderID int, seasonID, analysisGroupKey string) ([]Candidate, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	key := groupKey(mediaFolderID, seasonID, analysisGroupKey)
 	return append([]Candidate(nil), f.groupCandidates[key]...), nil
 }
 
 func (f *fakeIntroRepository) ListChapterSilenceBackfillCandidates(context.Context, int, Config, string) ([]Candidate, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return append([]Candidate(nil), f.backfillCandidates...), nil
 }
 
 func (f *fakeIntroRepository) LoadSilenceRefinementAttempt(_ context.Context, fileID int) (*SilenceRefinementAttempt, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	attempt, ok := f.silenceAttempts[fileID]
 	if !ok {
 		return nil, nil
@@ -55,6 +69,8 @@ func (f *fakeIntroRepository) LoadSilenceRefinementAttempt(_ context.Context, fi
 }
 
 func (f *fakeIntroRepository) UpsertSilenceRefinementAttempt(_ context.Context, attempt SilenceRefinementAttempt) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.silenceAttempts == nil {
 		f.silenceAttempts = map[int]SilenceRefinementAttempt{}
 	}
@@ -64,11 +80,15 @@ func (f *fakeIntroRepository) UpsertSilenceRefinementAttempt(_ context.Context, 
 }
 
 func (f *fakeIntroRepository) PatchIntroMarker(_ context.Context, patch IntroMarkerPatch) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.patches = append(f.patches, patch)
 	return true, nil
 }
 
 func (f *fakeIntroRepository) LoadSeasonState(context.Context, SeasonState, Config) (*SeasonState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.seasonState == nil {
 		return nil, nil
 	}
@@ -77,11 +97,15 @@ func (f *fakeIntroRepository) LoadSeasonState(context.Context, SeasonState, Conf
 }
 
 func (f *fakeIntroRepository) UpsertSeasonState(_ context.Context, state SeasonState, _ Config) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.upsertedStates = append(f.upsertedStates, state)
 	return nil
 }
 
 func (f *fakeIntroRepository) LoadFingerprint(_ context.Context, candidate Candidate, _ Config) (*Fingerprint, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	fp := f.fingerprints[candidate.FileID]
 	if fp == nil {
 		return nil, nil
@@ -92,31 +116,41 @@ func (f *fakeIntroRepository) LoadFingerprint(_ context.Context, candidate Candi
 }
 
 func (f *fakeIntroRepository) UpsertFingerprint(context.Context, Fingerprint) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return nil
 }
 
 type fakeFingerprintExtractor struct {
+	mu             sync.Mutex
 	preflightCalls int
 	extractCalls   int
 }
 
 func (f *fakeFingerprintExtractor) Preflight(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.preflightCalls++
 	return nil
 }
 
 func (f *fakeFingerprintExtractor) Extract(context.Context, Candidate) (Fingerprint, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.extractCalls++
 	return Fingerprint{}, false, nil
 }
 
 type fakeBoundaryRefiner struct {
+	mu       sync.Mutex
 	calls    int
 	segments map[int]Segment
 	errors   map[int]error
 }
 
 func (f *fakeBoundaryRefiner) RefineChapterEnd(_ context.Context, candidate Candidate, segment Segment) (Segment, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls++
 	if err := f.errors[candidate.FileID]; err != nil {
 		return segment, false, err
@@ -129,12 +163,15 @@ func (f *fakeBoundaryRefiner) RefineChapterEnd(_ context.Context, candidate Cand
 }
 
 type fakeChromaprintStartRefiner struct {
+	mu       sync.Mutex
 	calls    int
 	segments map[int]Segment
 	errors   map[int]error
 }
 
 func (f *fakeChromaprintStartRefiner) RefineChromaprintStart(_ context.Context, candidate Candidate, segment Segment) (Segment, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls++
 	if err := f.errors[candidate.FileID]; err != nil {
 		return segment, false, err

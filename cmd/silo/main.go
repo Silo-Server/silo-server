@@ -1286,6 +1286,12 @@ func main() {
 			intromarkers.DefaultConfig(cfg.Playback.FFmpegPath),
 			slog.Default(),
 		)
+		// markers.detection_workers applies without a restart.
+		introAnalyzer := deps.IntroAnalyzer
+		introAnalyzer.SetWorkers(cfg.Markers.DetectionWorkers)
+		configWatcher.OnChange(func(_, updated *config.Config) {
+			introAnalyzer.SetWorkers(updated.Markers.DetectionWorkers)
+		})
 	}
 	if deps.DB != nil {
 		markerRegistry := markers.NewRegistry(slog.Default())

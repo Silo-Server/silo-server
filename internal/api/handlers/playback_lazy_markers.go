@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -195,7 +196,8 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 			"file_id", file.ID,
 			"episode_id", file.EpisodeID,
 			"mode", mode)
-		summary, err := h.IntroAnalyzer.AnalyzeEpisode(ctx, file.EpisodeID)
+		// A viewer is waiting: take the ffmpeg slot reserved for playback.
+		summary, err := h.IntroAnalyzer.AnalyzeEpisode(intromarkers.WithPlaybackPriority(ctx), file.EpisodeID)
 		if err != nil {
 			slog.Warn("playback lazy markers: local analyzer failed",
 				"session_id", sessionID,
