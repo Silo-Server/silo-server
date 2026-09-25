@@ -12,6 +12,10 @@
 # Add a pin in the same change that sets its budget. It must pass on a freshly
 # migrated database without skipping.
 
+# Schema: every content_id-family foreign key cascades on update, so the online
+# re-id can rename an item whatever child rows it has (#933).
+./migrations TestContentIDFamilyFKsCascadeOnUpdatePostgres
+
 # Detail and versions: localization and folder reads per detail build, and the
 # versions endpoint issuing fewer queries than full detail with no image work.
 ./internal/catalog TestBuildMediaItemDetailSharesLocalization
