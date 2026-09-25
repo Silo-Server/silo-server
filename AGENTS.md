@@ -184,8 +184,9 @@ checks it end to end.
 
 A pull request body is written in two passes. First decide what goes in, using
 [Write the description](CONTRIBUTING.md#write-the-description): plain summary
-first, no restated diff, no working history, about 300 words. Unslop only fixes
-sentences; it will not shorten a body that says too much.
+first, no restated diff, no working history. There is no word limit; do not
+count words. Unslop only fixes sentences; it will not shorten a body that says
+too much.
 
 Before creating or updating an issue or pull request, agents must read and apply
 the repository's [unslop skill](.agents/skills/unslop/SKILL.md) to the title and body.

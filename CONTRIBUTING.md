@@ -169,9 +169,9 @@ Write for a maintainer who knows Silo but has not seen your working session or
 the diff. The first paragraph should tell them what is broken and what this
 change does; the rest should help them decide how closely to review.
 
-- Open the Problem section with two to four plain sentences: what goes wrong,
-  who it affects, and what this change does about it. Identifiers, numbers, and
-  mechanism come after that.
+- Open the Problem section with a short plain-language summary: what goes
+  wrong, who it affects, and what this change does about it. Identifiers,
+  numbers, and mechanism come after that.
 - Use the names the codebase already uses, or plain words. Do not carry over
   terms you coined while working. If a new name is unavoidable, define it once
   and keep using it.
@@ -181,8 +181,10 @@ change does; the rest should help them decide how closely to review.
 - Leave out how you got here: earlier designs, dead ends, and how an
   investigation or replay was run. Mention a rejected alternative only when a
   reviewer would otherwise ask about it, in one sentence.
-- Aim for 300 words above the AI disclosure. Go past that only for evidence a
-  reviewer needs, and put it in a `<details>` block after the summary.
+- Let the change set the length. A small fix needs a few lines; a risky or
+  subtle change can take more. There is no word limit, so do not count words
+  or trim to a target. Long supporting evidence, such as tables or
+  measurements, can go in a `<details>` block after the summary.
 
 ## Review expectations
 

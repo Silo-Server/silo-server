@@ -1,6 +1,6 @@
 <!-- Follow "Write the description" in CONTRIBUTING.md: plain summary first, no restated
-diff, no working history, about 300 words above the AI disclosure. Agents: then apply
-.agents/skills/unslop/SKILL.md to the title and body before posting. -->
+diff, no working history. Agents: then apply .agents/skills/unslop/SKILL.md to the
+title and body before posting. -->
 
 ## Problem
 
@@ -12,8 +12,8 @@ Validation tasks: #NNN C1
 (see "1.0 validation" in AGENTS.md), e.g. "unblocks #1144 C3; changes #1200 C1".
 Write "none" when no validation task is affected. -->
 
-Two to four plain sentences: what goes wrong, who it affects, and what this change
-does about it. Details come after.
+A short plain-language summary: what goes wrong, who it affects, and what this
+change does about it. Details come after.
 
 ## Approach
 
