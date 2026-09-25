@@ -609,6 +609,13 @@ func (m *ArtifactManager) recoverReadyArtifacts(ctx context.Context) {
 		}
 		if a.OutputPath != "" {
 			if _, statErr := os.Stat(a.OutputPath); statErr != nil {
+				// Only a definite miss is recoverable. A transient error (EACCES,
+				// EIO, a stale mount) must not retire a row whose file still
+				// exists: cleanup walks rows, so that file would never be removed.
+				if !errors.Is(statErr, os.ErrNotExist) {
+					slog.WarnContext(ctx, "checking download artifact output failed", "component", "downloads", "artifact_id", a.ID, "path", a.OutputPath, "error", statErr)
+					continue
+				}
 				switch linked, result, err := m.repo.RecoverMissing(ctx, a.ID, missingArtifactRetireGrace); {
 				case err != nil:
 					slog.WarnContext(ctx, "recovering missing download artifact failed", "component", "downloads", "artifact_id", a.ID, "error", err)

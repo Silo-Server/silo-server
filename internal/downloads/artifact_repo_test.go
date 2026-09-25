@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -1197,5 +1199,29 @@ func TestConfirmReadyArtifactLinkResetsDownloadOfRequeuedArtifact(t *testing.T) 
 	got, err := downloads.ConfirmReadyArtifactLink(ctx, &d)
 	if err != nil || got.Status != StatusPreparing || got.ID != d.ID {
 		t.Fatalf("link to a requeued artifact = %+v (%v), want preparing", got, err)
+	}
+}
+
+// A stat failure other than "not found" is not proof the output is gone, so
+// recovery must leave the row alone rather than retire it and orphan the file.
+func TestRecoverReadyArtifactsSkipsIndeterminateStatErrors(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	ready := readyArtifactForRecovery(t, repo, pool, fileID, "")
+	notDir := filepath.Join(t.TempDir(), "regular-file")
+	if err := os.WriteFile(notDir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Stat of a path beneath a regular file fails with ENOTDIR.
+	if _, err := pool.Exec(ctx, `UPDATE download_artifacts SET output_path = $2 WHERE id = $1`, ready.ID, filepath.Join(notDir, "out.mp4")); err != nil {
+		t.Fatal(err)
+	}
+	manager := &ArtifactManager{repo: repo, preparer: &lifecycleTestPreparer{}}
+
+	manager.recoverReadyArtifacts(ctx)
+
+	row, err := repo.GetByID(ctx, ready.ID)
+	if err != nil || row.Status != ArtifactReady {
+		t.Fatalf("artifact after indeterminate stat error = %+v (%v), want unchanged", row, err)
 	}
 }
