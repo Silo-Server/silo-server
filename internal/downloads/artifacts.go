@@ -569,6 +569,14 @@ func (m *ArtifactManager) recoverQueueState(ctx context.Context) {
 		workmetrics.Recovered("downloads", int64(len(count)))
 	}
 
+	if reset, err := m.downloads.ResetReadyDownloadsOfRequeuedArtifacts(ctx); err != nil {
+		slog.WarnContext(ctx, "resetting ready downloads of requeued artifacts failed", "component", "downloads", "error", err)
+	} else {
+		for _, d := range reset {
+			m.publish(ctx, d)
+		}
+	}
+
 	// Reconcile downloads stranded in 'preparing' against their artifact's
 	// terminal state: this closes the non-transactional window between an
 	// artifact's MarkReady and its MarkLinkedDownloadsReady, and fails the links

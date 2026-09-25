@@ -1165,3 +1165,42 @@ func TestRemoteMissingRequeuesArtifactWithActiveDownload(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orphans[0].ID) })
 }
+
+// A create that read the artifact as ready can link a 'ready' download after
+// recovery requeued the artifact. The next recovery tick must return that
+// download to preparing so it is flipped ready again by the new output.
+func TestRecoveryResetsReadyDownloadLinkedToRequeuedArtifact(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	ready := readyArtifactForRecovery(t, repo, pool, fileID, "")
+	linkRecoveryDownload(t, pool, fileID, ready.ID, StatusCompleted)
+	if got, err := repo.RecoverMissing(ctx, ready.ID, missingArtifactRetireGrace); err != nil || got != artifactRequeued {
+		t.Fatalf("RecoverMissing = (%v, %v), want requeued", got, err)
+	}
+	linkRecoveryDownload(t, pool, fileID, ready.ID, StatusReady)
+	var published []*Download
+	manager := NewArtifactManager(repo, NewRepository(pool), nil, nil, "recovery-test", nil,
+		func(_ context.Context, d *Download) { published = append(published, d) })
+
+	manager.recoverQueueState(ctx)
+
+	var statuses []string
+	rows, err := pool.Query(ctx, `SELECT status FROM downloads WHERE artifact_id = $1 ORDER BY created_at, id`, ready.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var status string
+		if err := rows.Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		statuses = append(statuses, status)
+	}
+	rows.Close()
+	if len(statuses) != 2 || statuses[0] != StatusCompleted || statuses[1] != StatusPreparing {
+		t.Fatalf("download statuses = %v, want [completed preparing]", statuses)
+	}
+	if len(published) != 1 || published[0].Status != StatusPreparing {
+		t.Fatalf("published = %+v, want the reset download", published)
+	}
+}
