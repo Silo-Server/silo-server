@@ -161,7 +161,7 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 		for _, item := range bundle.Items {
 			studios, networks, countries, keywords := itemRecordStringArrays(item)
 			contentRatingAge := access.StoredRating(item.ContentRating)
-			advisoryAge, advisorySource := models.AdvisoryColumns(item.AdvisoryAge, item.AdvisorySource)
+			advisoryAge, advisorySource := models.AdvisoryColumns(item.Type, item.AdvisoryAge, item.AdvisorySource)
 			itemRows = append(itemRows, []any{
 				item.ContentID, item.Type, item.Title, item.SortTitle, item.OriginalTitle, item.Year, item.Genres,
 				item.ContentRating, item.Runtime, item.Overview, item.Tagline,
@@ -1053,7 +1053,7 @@ func bulkInsertItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, onBatch
 	rows := make([][]any, 0, len(items))
 	for _, item := range items {
 		contentRatingAge := access.StoredRating(item.ContentRating)
-		advisoryAge, advisorySource := models.AdvisoryColumns(item.AdvisoryAge, item.AdvisorySource)
+		advisoryAge, advisorySource := models.AdvisoryColumns(item.Type, item.AdvisoryAge, item.AdvisorySource)
 		rows = append(rows, []any{
 			item.ContentID, item.Type, item.Title, item.SortTitle, item.OriginalTitle, item.Year, item.Genres,
 			item.ContentRating, item.Runtime, item.Overview, item.Tagline,
@@ -1921,7 +1921,7 @@ func batchImportItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, mode C
 	for _, item := range items {
 		studios, networks, countries, keywords := itemRecordStringArrays(item)
 		contentRatingAge := access.StoredRating(item.ContentRating)
-		advisoryAge, advisorySource := models.AdvisoryColumns(item.AdvisoryAge, item.AdvisorySource)
+		advisoryAge, advisorySource := models.AdvisoryColumns(item.Type, item.AdvisoryAge, item.AdvisorySource)
 		contentIDs = append(contentIDs, item.ContentID)
 		rows = append(rows, []any{
 			item.ContentID, item.Type, item.Title, item.SortTitle, item.OriginalTitle, item.Year, item.Genres,
@@ -2086,7 +2086,7 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 	// the only ladder; content_rating keeps the verbatim string, which is what
 	// re-derives the matched system if anything ever needs it.
 	contentRatingAge := access.StoredRating(item.ContentRating)
-	advisoryAge, advisorySource := models.AdvisoryColumns(item.AdvisoryAge, item.AdvisorySource)
+	advisoryAge, advisorySource := models.AdvisoryColumns(item.Type, item.AdvisoryAge, item.AdvisorySource)
 	if mode == ConflictModeSkipExisting {
 		tag, execErr := tx.Exec(ctx, `
 			INSERT INTO media_items (

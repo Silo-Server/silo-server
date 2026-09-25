@@ -633,7 +633,7 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 	// The stored age is derived here, never in SQL: access.Normalize is the one
 	// ladder, and content_rating stays the verbatim provider string.
 	contentRatingAge := access.StoredRating(item.ContentRating)
-	advisoryAge, advisorySource := models.AdvisoryColumns(item.AdvisoryAge, item.AdvisorySource)
+	advisoryAge, advisorySource := models.AdvisoryColumns(item.Type, item.AdvisoryAge, item.AdvisorySource)
 
 	tag, err := execer.Exec(ctx, query+conflict,
 		item.ContentID,

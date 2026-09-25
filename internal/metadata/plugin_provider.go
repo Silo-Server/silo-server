@@ -249,7 +249,7 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 	}
 
 	advisoryAge, advisorySource := advisoryFromPluginMetadata(response.GetItem().GetMetadata())
-	if !advisoryAgeApplies(req.ContentType) {
+	if !models.AdvisoryAgeApplies(req.ContentType) {
 		advisoryAge, advisorySource = 0, ""
 	}
 
@@ -592,15 +592,6 @@ const (
 var advisoryAgeSources = map[string]string{
 	AdvisorySourceCommonSense: AdvisorySourceCommonSense,
 	AdvisorySourceMDBList:     AdvisorySourceMDBList,
-}
-
-// advisoryAgeApplies reports whether an advisory age is stored for an item of
-// contentType. Only movies and series carry one: those are the types advisory
-// services rate and the only ones the profile advisory-age limit is meant for.
-// Dropping it for every other type keeps that limit from ever touching the
-// beta book libraries, whatever a plugin reports.
-func advisoryAgeApplies(contentType string) bool {
-	return contentType == "movie" || contentType == "series"
 }
 
 // maxAdvisoryAge bounds a reported advisory age. Advisory services top out at

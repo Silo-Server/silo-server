@@ -579,13 +579,25 @@ type AudiobookSeriesMembership struct {
 // either half is missing, both columns store NULL, so "no advisory" has one
 // spelling in the database rather than a NULL, an empty string, and a zero.
 //
+// Only movies and series store an advisory (see AdvisoryAgeApplies), so a
+// profile's advisory-age limit can never hide an item of any other type, such
+// as a title in the beta book libraries.
+//
 // Every write path funnels through here, including the COPY-based bulk import,
-// which cannot lean on a NULLIF in SQL.
-func AdvisoryColumns(age *int, source string) (*int, *string) {
-	if age == nil || *age <= 0 || source == "" {
+// which cannot lean on a NULLIF in SQL, and the catalog-bundle imports, which
+// may carry an advisory from any source.
+func AdvisoryColumns(itemType string, age *int, source string) (*int, *string) {
+	if !AdvisoryAgeApplies(itemType) || age == nil || *age <= 0 || source == "" {
 		return nil, nil
 	}
 	return age, &source
+}
+
+// AdvisoryAgeApplies reports whether an item of itemType may carry an advisory
+// age. Only movies and series do: those are the types advisory services rate
+// and the only ones the profile advisory-age limit is meant for.
+func AdvisoryAgeApplies(itemType string) bool {
+	return itemType == "movie" || itemType == "series"
 }
 
 type MediaItem struct {
