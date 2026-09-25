@@ -249,7 +249,8 @@ func TestIssueUnlessRecentHoldsTheCooldownDB(t *testing.T) {
 	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "third", expires, time.Minute); err != nil || !stored || hashOf() != "third" {
 		t.Fatalf("request after cooldown: %v, %v, link %q", stored, err, hashOf())
 	}
-	if err := d.pool.QueryRow(ctx, `SELECT issued_by FROM password_reset_tokens WHERE user_id = $1`, alice).Scan(&issuedBy); err != nil || issuedBy != nil {
+	// A requested link records the account as its own issuer.
+	if err := d.pool.QueryRow(ctx, `SELECT issued_by FROM password_reset_tokens WHERE user_id = $1`, alice).Scan(&issuedBy); err != nil || issuedBy == nil || *issuedBy != alice {
 		t.Fatalf("requested link has issuer %v, %v", issuedBy, err)
 	}
 	// An administrator's link is not subject to the cooldown.
@@ -263,6 +264,13 @@ func TestIssueUnlessRecentHoldsTheCooldownDB(t *testing.T) {
 	}
 	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "over-admin", expires, time.Minute); err != nil || stored || hashOf() != "admin-sent" {
 		t.Fatalf("request replaced a live admin link: %v, %v, link %q", stored, err, hashOf())
+	}
+	// Nor one whose issuing administrator was deleted (issued_by set NULL).
+	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET issued_by = NULL WHERE user_id = $1`, alice); err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := d.repo.IssueUnlessRecent(ctx, alice, "over-orphan", expires, time.Minute); err != nil || stored || hashOf() != "admin-sent" {
+		t.Fatalf("request replaced an admin link whose issuer was deleted: %v, %v, link %q", stored, err, hashOf())
 	}
 	// Once that link is dead, expired or outdated by a password change, it can.
 	if _, err := d.pool.Exec(ctx, `UPDATE password_reset_tokens SET password_fingerprint = 'outdated' WHERE user_id = $1`, alice); err != nil {

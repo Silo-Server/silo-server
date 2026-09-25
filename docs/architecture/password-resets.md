@@ -81,11 +81,12 @@ mid-send also leaves the link holding the cooldown, so the requester can ask aga
 after five minutes.
 
 **Same link, shorter life, bounded rate.** A requested link is an ordinary row in
-`password_reset_tokens` with no issuer, completed through the same screen and
+`password_reset_tokens` that names the account as its own issuer, completed through the same screen and
 transaction as an administrator's. It lives `SelfServiceTTL` (an hour), not
 `DefaultTTL`, because nobody vouched for the request. `IssueUnlessRecent` replaces
 the account's link only when that link is older than the cooldown and is not a
-live link an administrator issued, as one upsert. That caps mail to one address
+live link an administrator issued, as one upsert. Any other issuer, or none once
+that administrator is deleted, marks the link as an administrator's. That caps mail to one address
 across every node and client IP, stops repeated requests from continually
 replacing a link just sent, and keeps anyone who knows an account name from
 retiring the link an administrator shared. An administrator's `Issue` ignores

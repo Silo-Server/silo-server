@@ -88,7 +88,9 @@ func (r *Repository) Issue(ctx context.Context, userID int, tokenHash string, is
 }
 
 // IssueUnlessRecent is Issue for a link the account holder asked for
-// themselves, with no issuer of record. It reports whether it stored a new
+// themselves, recorded with the account as its own issuer. An administrator's
+// link keeps another issuer, or none once that administrator is deleted, so
+// it stays protected either way. It reports whether it stored a new
 // link, and leaves the account's link alone when that link is younger than
 // minAge, so repeated requests can neither flood the mailbox nor keep
 // replacing a link that was just sent. Nor does it replace a live link an
@@ -99,15 +101,15 @@ func (r *Repository) Issue(ctx context.Context, userID int, tokenHash string, is
 func (r *Repository) IssueUnlessRecent(ctx context.Context, userID int, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		INSERT INTO password_reset_tokens (user_id, token_hash, password_fingerprint, issued_by, expires_at)
-		SELECT u.id, $2, `+passwordFingerprint+`, NULL, $3 FROM users u WHERE u.id = $1 AND `+eligibleAccount+`
+		SELECT u.id, $2, `+passwordFingerprint+`, u.id, $3 FROM users u WHERE u.id = $1 AND `+eligibleAccount+`
 		ON CONFLICT (user_id) DO UPDATE SET
 			token_hash = EXCLUDED.token_hash,
 			password_fingerprint = EXCLUDED.password_fingerprint,
-			issued_by = NULL,
+			issued_by = EXCLUDED.issued_by,
 			expires_at = EXCLUDED.expires_at,
 			created_at = now()
 		WHERE password_reset_tokens.created_at <= now() - make_interval(secs => $4)
-			AND (password_reset_tokens.issued_by IS NULL
+			AND (password_reset_tokens.issued_by = password_reset_tokens.user_id
 				OR password_reset_tokens.expires_at <= now()
 				OR password_reset_tokens.password_fingerprint <> EXCLUDED.password_fingerprint)`,
 		userID, tokenHash, expiresAt, minAge.Seconds())
