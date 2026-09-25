@@ -162,3 +162,37 @@ it("names failed maintenance steps in execution history", async () => {
   );
   expect(await screen.findByText("Failed steps: Cleanup Policy Decision Log")).toBeInTheDocument();
 });
+
+it("shows a way out for a task key the server does not know", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async () =>
+      jsonResponse(
+        {
+          type: "https://siloserver.org/docs/api/v2/problems/not_found",
+          title: "Not Found",
+          status: 404,
+          detail: "Task not found",
+        },
+        404,
+      ),
+    ),
+  );
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <MemoryRouter initialEntries={["/admin/tasks/missing"]}>
+        <Routes>
+          <Route path="/admin/tasks/:key" element={<AdminTaskDetail />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Task not found" }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "All tasks" })).toHaveAttribute("href", "/admin/tasks");
+  expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+});

@@ -5,7 +5,9 @@ import {
   getAdminUser,
   type AdminUserEditor,
 } from "@/api/v2/adminUsers";
-import { V2ProblemError } from "@/api/v2/request";
+import { isNotFoundProblem, V2ProblemError } from "@/api/v2/request";
+import PageUnavailable from "@/components/PageUnavailable";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useId, useMemo, useState, useRef } from "react";
 import type { FormEvent } from "react";
 import { useParams, Link } from "react-router";
@@ -107,7 +109,7 @@ function AdminUserDetailPage() {
   const { id } = useParams<{ id: string }>();
   const userId = Number(id);
   const navigate = useNavigate();
-  const { data: user, isLoading, error } = useAdminUser(userId);
+  const { data: user, isLoading, isFetching, error, refetch } = useAdminUser(userId);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteEditor, setDeleteEditor] = useState<AdminUserEditor | null>(null);
   const [editEditor, setEditEditor] = useState<AdminUserEditor | null>(null);
@@ -120,8 +122,44 @@ function AdminUserDetailPage() {
   const [confirmImpersonateOpen, setConfirmImpersonateOpen] = useState(false);
 
   if (isLoading) return <div className="page-shell py-8">Loading user...</div>;
-  if (error || !user)
-    return <div className="page-shell text-destructive py-8">User not found.</div>;
+  if (!user) {
+    if (error && !isNotFoundProblem(error)) {
+      return (
+        <PageUnavailable
+          title="Couldn't load this user"
+          description="Something went wrong while loading the account. Try again in a moment."
+          onRetry={() => void refetch()}
+          retrying={isFetching}
+        />
+      );
+    }
+    // With a valid id and no error, the read never ran: account reads act as a
+    // profile, and none is selected. Nothing says the account is gone.
+    if (!error && Number.isSafeInteger(userId) && userId > 0) {
+      return (
+        <PageUnavailable
+          title="Choose a profile first"
+          description="Managing accounts acts as one of your profiles. Choose a profile, then open this account again."
+        >
+          <Button asChild variant="outline">
+            <ViewTransitionLink to="/profiles">Choose profile</ViewTransitionLink>
+          </Button>
+        </PageUnavailable>
+      );
+    }
+    return (
+      <PageUnavailable
+        title="User not found"
+        description="The account may have been deleted, or the link may be wrong."
+      >
+        <Button asChild variant="outline">
+          <ViewTransitionLink to="/admin/users" up>
+            All users
+          </ViewTransitionLink>
+        </Button>
+      </PageUnavailable>
+    );
+  }
 
   const impersonationDisabled = user.role === "admin" || !user.enabled;
 

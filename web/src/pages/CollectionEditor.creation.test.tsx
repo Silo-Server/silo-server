@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   adminCreate: vi.fn(),
   collection: null as LibraryCollection | null,
   editSnapshotError: null as Error | null,
+  adminSnapshotError: null as Error | null,
 }));
 vi.mock("@/hooks/queries/collections", () => ({
   useCollections: () => ({ data: [] }),
@@ -36,6 +37,9 @@ vi.mock("@/hooks/queries/admin/collections", () => ({
   useAdminCollectionSnapshot: () => ({
     data: mocks.collection ? { collection: mocks.collection, etag: '"revision"' } : undefined,
     isLoading: false,
+    isFetching: false,
+    error: mocks.adminSnapshotError,
+    refetch: vi.fn(),
   }),
   useAdminCollectionCapabilities: () => ({ data: {} }),
   useCreateAdminCollection: () => ({ mutate: mocks.adminCreate }),
@@ -96,6 +100,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.collection = null;
   mocks.editSnapshotError = null;
+  mocks.adminSnapshotError = null;
 });
 function show(admin = false, edit = false) {
   render(
@@ -194,6 +199,27 @@ it("points a missing personal collection back to the collection list", () => {
 it("offers a retry when a personal collection fails to load", () => {
   mocks.editSnapshotError = collectionProblem(500);
   showPersonalEdit();
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Couldn't load this collection" }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+});
+
+it("points a missing admin collection back to the collection board", () => {
+  mocks.adminSnapshotError = collectionProblem(404);
+  show(true, true);
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Collection not found" }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "All collections" })).toHaveAttribute(
+    "href",
+    "/admin/collections",
+  );
+});
+
+it("offers a retry when an admin collection fails to load", () => {
+  mocks.adminSnapshotError = collectionProblem(500);
+  show(true, true);
   expect(
     screen.getByRole("heading", { level: 1, name: "Couldn't load this collection" }),
   ).toBeInTheDocument();

@@ -29,6 +29,8 @@ const mocks = vi.hoisted(() => ({
   userSettings: [] as unknown[],
   /** The account the detail page renders, reset to `adminUser` per test. */
   user: null as AdminUser | null,
+  userError: null as Error | null,
+  refetchUser: vi.fn(),
 }));
 
 const adminUser: AdminUser = {
@@ -106,7 +108,13 @@ vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
   useAdminUserCapabilities: () => ({ data: { available: true, default_profile: true } }),
-  useAdminUser: () => ({ data: mocks.user, isLoading: false, error: null }),
+  useAdminUser: () => ({
+    data: mocks.user ?? undefined,
+    isLoading: false,
+    isFetching: false,
+    error: mocks.userError,
+    refetch: mocks.refetchUser,
+  }),
   useUpdateUser: () => ({ mutateAsync: mocks.updateUserMutate, isPending: false }),
   useDeleteUser: () => ({ mutate: vi.fn(), isPending: false }),
   useImpersonateUser: () => ({ mutateAsync: mocks.impersonate, reset: vi.fn(), isPending: false }),
@@ -207,6 +215,8 @@ beforeEach(() => {
   mocks.deleteSettingMutate.mockReset();
   mocks.userSettings = [];
   mocks.user = adminUser;
+  mocks.userError = null;
+  mocks.refetchUser.mockReset();
 });
 
 afterEach(() => {
@@ -735,4 +745,53 @@ it.each([
   mocks.user = { ...adminUser, ...eligibility };
   renderUserDetail();
   expect(screen.getByRole("button", { name: "View as user" })).toBeDisabled();
+});
+
+function userProblem(status: number) {
+  return new V2ProblemError("getAdminUser", {
+    type: `https://silo.example/problems/${status === 404 ? "not_found" : "internal_error"}`,
+    title: status === 404 ? "Not Found" : "Internal Server Error",
+    status,
+    detail: status === 404 ? "User not found" : "Users are unavailable",
+    instance: "/api/v2/admin/users/7",
+  });
+}
+
+it("points a missing account back to the user list", () => {
+  mocks.user = null;
+  mocks.userError = userProblem(404);
+  renderUserDetail();
+  expect(screen.getByRole("heading", { level: 1, name: "User not found" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "All users" })).toHaveAttribute("href", "/admin/users");
+});
+
+it("offers a retry instead of calling a failed account read missing", async () => {
+  mocks.user = null;
+  mocks.userError = userProblem(500);
+  renderUserDetail();
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Couldn't load this user" }),
+  ).toBeInTheDocument();
+  expect(screen.queryByText("User not found")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(mocks.refetchUser).toHaveBeenCalledTimes(1);
+});
+
+it("keeps showing a loaded account when a background read fails", () => {
+  mocks.userError = userProblem(500);
+  renderUserDetail();
+  expect(
+    screen.queryByRole("heading", { name: "Couldn't load this user" }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText("User not found")).not.toBeInTheDocument();
+});
+
+it("asks for a profile instead of calling an unread account missing", () => {
+  mocks.user = null;
+  renderUserDetail();
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Choose a profile first" }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Choose profile" })).toHaveAttribute("href", "/profiles");
+  expect(screen.queryByText("User not found")).not.toBeInTheDocument();
 });
