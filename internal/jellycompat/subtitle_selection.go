@@ -314,11 +314,11 @@ func compatSignatureSubtitleIndex(candidates []compatSubtitleCandidate, sig *use
 
 // compatSubtitleTrackLabel is the label the playback v3 inventory gives a
 // track, which Silo clients record in its signature: title, then embedded
-// title, the sidecar file name, and language. Catalog fills an untitled
-// sidecar's Title with its file name, so that case falls through here.
+// title, the sidecar file name, and language. Catalog marks an untitled
+// sidecar whose Title was filled from its file name.
 func compatSubtitleTrackLabel(track catalog.VersionSubtitleTrack) string {
 	title := track.Title
-	if track.External && title == track.FileName {
+	if track.External && track.TitleIsFallback {
 		title = ""
 	}
 	for _, label := range []string{title, track.EmbeddedTitle, track.FileName, track.Language} {

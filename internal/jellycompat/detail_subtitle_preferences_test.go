@@ -10,6 +10,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -168,7 +169,7 @@ func TestDetailSubtitleFollowsRememberedSeriesTrack(t *testing.T) {
 	// Sidecars sort ahead of embedded tracks, so they get their own version.
 	withSidecars := version
 	withSidecars.SubtitleTracks = append(slices.Clone(version.SubtitleTracks),
-		catalog.VersionSubtitleTrack{Index: 5, Codec: "ass", Language: "en", Title: "movie.en.ass", EmbeddedTitle: "Signs", FileName: "movie.en.ass", External: true})
+		catalog.VersionSubtitleTrack{Index: 5, Codec: "ass", Language: "en", Title: "movie.en.ass", TitleIsFallback: true, EmbeddedTitle: "Signs", FileName: "movie.en.ass", External: true})
 	downloaded := []subtitles.DownloadedSubtitle{{MediaFileID: 7, Language: "en", Format: subtitles.FormatSRT, ReleaseName: "Release", Provider: "provider"}}
 	forcedEnglish := &userstore.SubtitleTrackSignature{Source: "embedded", Language: "en", Codec: "subrip", Label: "Forced", Forced: true}
 	for _, tc := range []struct {
@@ -202,5 +203,24 @@ func TestDetailSubtitleFollowsRememberedSeriesTrack(t *testing.T) {
 				t.Fatalf("subtitle = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRememberedExplicitSidecarTitleMatchingFileName(t *testing.T) {
+	const fileName = "episode.en.ass"
+	file := &models.MediaFile{ID: 7, ExternalSubtitles: []models.ExternalSubtitle{{
+		Path: fileName, Language: "en", Format: "ass", Title: fileName, EmbeddedTitle: "Signs",
+	}}}
+	inventory := playback.BuildSubtitleInventoryV3(file, nil)
+	if len(inventory) != 1 || inventory[0].Label != fileName {
+		t.Fatalf("playback inventory = %+v", inventory)
+	}
+	version := catalog.FileVersion{FileID: file.ID, SubtitleTracks: []catalog.VersionSubtitleTrack{{
+		Index: 2, Codec: "ass", Language: "en", External: true,
+		Title: fileName, EmbeddedTitle: "Signs", FileName: fileName,
+	}}}
+	signature := &userstore.SubtitleTrackSignature{Source: inventory[0].Source, Language: inventory[0].Language, Codec: inventory[0].Codec, Label: inventory[0].Label}
+	if got := compatSignatureSubtitleIndex(compatSubtitleCandidates(version, nil), signature); got == nil || *got != 2 {
+		t.Fatalf("remembered sidecar matched index %v, want 2", got)
 	}
 }

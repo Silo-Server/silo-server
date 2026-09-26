@@ -559,6 +559,7 @@ type VersionSubtitleTrack struct {
 	Language        string `json:"language,omitempty"`
 	Codec           string `json:"codec,omitempty"`
 	Title           string `json:"title,omitempty"`
+	TitleIsFallback bool   `json:"-"` // An external title filled from its file name.
 	EmbeddedTitle   string `json:"embedded_title,omitempty"`
 	Resolution      string `json:"resolution,omitempty"`
 	Forced          bool   `json:"forced"`
@@ -4124,6 +4125,7 @@ func buildVersionSubtitleTracks(file *models.MediaFile) []VersionSubtitleTrack {
 			Language:        sub.Language,
 			Codec:           sub.Format,
 			Title:           firstNonEmpty(sub.Title, filepath.Base(sub.Path)),
+			TitleIsFallback: strings.TrimSpace(sub.Title) == "",
 			EmbeddedTitle:   sub.EmbeddedTitle,
 			Resolution:      sub.Resolution,
 			Forced:          sub.Forced,
