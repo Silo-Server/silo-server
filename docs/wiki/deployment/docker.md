@@ -370,22 +370,35 @@ you already have it.
 
 ### Valkey in place of Redis
 
-[Valkey](https://valkey.io/) works as a drop-in replacement for Redis here. It
-forked from Redis 7.2.4 and keeps the same wire protocol and command set, Silo
-uses only core commands that both implement, and the Go client talks to either
-without configuration. `REDIS_URL` keeps the `redis://` scheme.
+[Valkey](https://valkey.io/) supports the Redis protocol and the core commands
+Silo uses. The Go client connects to either server with a `redis://` URL; no
+Valkey-specific setting is needed. To connect to an existing Valkey server,
+follow the external-service Compose instructions above and set the Silo
+service's `REDIS_URL` to that server's address.
 
-Pointing Silo at a Valkey server you already run needs nothing beyond that URL.
-To swap the bundled service, override the image and the healthcheck together —
-the Valkey image ships `valkey-cli` rather than `redis-cli`:
+For a new installation, save this bundled-service override as
+`valkey-override.yml`:
 
 ```yaml
 services:
   redis:
     image: valkey/valkey:alpine
-    healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
 ```
+
+The base Compose file's `redis-cli ping` healthcheck works with the official
+Valkey image, which provides `redis-cli` as a compatibility link. Check the
+merged configuration and start the stack with the override:
+
+```sh
+docker compose -f docker-compose.yml -f valkey-override.yml config --quiet
+docker compose -f docker-compose.yml -f valkey-override.yml up -d
+```
+
+For an existing installation, check the Redis version and follow
+[Valkey's migration guide](https://valkey.io/topics/migration/) for its
+persisted data before switching images. The bundled Compose file reuses the
+same `/data` mount, but Redis 7.4 and later write data files that Valkey
+cannot read.
 
 ## Server roles and distributed deployments
 
