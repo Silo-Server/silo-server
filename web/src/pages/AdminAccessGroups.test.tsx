@@ -12,6 +12,8 @@ import AdminAccessGroups from "./AdminAccessGroups";
 
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({}) }));
 const adminUsers = vi.hoisted(() => ({
+  update: vi.fn(),
+  currentGroups: new Map<number, number | null>(),
   data: [] as Array<{
     id: number;
     username: string;
@@ -20,13 +22,28 @@ const adminUsers = vi.hoisted(() => ({
     access_group_id: number | null;
   }>,
 }));
-vi.mock("@/hooks/queries/admin/users", () => ({
+vi.mock("@/hooks/queries/admin/users", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/admin/users")>()),
   useAdminUsers: () => ({
     data: adminUsers.data,
     isPending: false,
     isError: false,
     isSuccess: true,
     refetch: vi.fn(),
+  }),
+}));
+vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/api/v2/adminUsers")>()),
+  updateAdminUser: (...args: unknown[]) => adminUsers.update(...args),
+  getAdminUser: async (id: number) => ({
+    user: {
+      id,
+      access_group_id: adminUsers.currentGroups.has(id)
+        ? adminUsers.currentGroups.get(id)
+        : adminUsers.data.find((candidate) => candidate.id === id)?.access_group_id,
+    },
+    etag: `"user-${id}"`,
+    profileContext: null,
   }),
 }));
 const toastSuccess = vi.hoisted(() => vi.fn());
@@ -129,6 +146,14 @@ describe("AdminAccessGroups", () => {
             { id: 3, name: "Anime", type: "series", enabled: true },
           ]);
         }
+        if (url === "/api/v2/libraries") {
+          return jsonResponse({
+            items: [
+              { id: "2", name: "Movies", type: "movie", enabled: true },
+              { id: "3", name: "Anime", type: "series", enabled: true },
+            ],
+          });
+        }
         if (url === "/api/v2/admin/access-groups/1" && method === "PUT") {
           putBody = JSON.parse(String(init?.body));
           return new Response(JSON.stringify({ ...GROUP, download_allowed: true }), {
@@ -143,6 +168,8 @@ describe("AdminAccessGroups", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    adminUsers.currentGroups.clear();
   });
 
   it("summarizes a group and saves edited restrictions", async () => {
@@ -200,6 +227,183 @@ describe("AdminAccessGroups", () => {
     expect(within(members).queryByRole("link", { name: "sam" })).toBeNull();
     expect(within(members).queryByRole("link", { name: "robin" })).toBeNull();
     expect(within(members).queryByRole("link", { name: "root" })).toBeNull();
+    adminUsers.data = [];
+  });
+
+  function withGuestsGroup() {
+    const serve = globalThis.fetch;
+    const guests = {
+      ...GROUP,
+      id: "2",
+      name: "Guests",
+      library_ids: ["3"],
+      is_default: false,
+      download_allowed: true,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) =>
+        String(input) === "/api/v2/admin/access-groups?limit=200" &&
+        (init?.method ?? "GET") === "GET"
+          ? jsonResponse({ items: [GROUP, guests], page: { has_more: false } })
+          : serve(input, init),
+      ),
+    );
+  }
+
+  const member = (id: number, username: string, role: string, group: number | null) => ({
+    id,
+    username,
+    email: `${username}@example.test`,
+    role,
+    access_group_id: group,
+  });
+
+  it("moves selected members to another group after confirming the policy changes", async () => {
+    withGuestsGroup();
+    adminUsers.data = [member(7, "taylor", "user", 1), member(8, "sam", "user", 1)];
+    adminUsers.update.mockReset().mockResolvedValue(undefined);
+    toastSuccess.mockClear();
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+
+    await user.click(within(members).getByRole("checkbox", { name: "Select taylor" }));
+    await pickOption(user, "Move selected members to", "Guests");
+    await user.click(within(members).getByRole("button", { name: /Move 1 selected/ }));
+
+    const confirm = await screen.findByRole("alertdialog");
+    expect(within(confirm).getByText("Move 1 user to Guests?")).toBeInTheDocument();
+    expect(within(confirm).getByText("1 from Kids")).toBeInTheDocument();
+    expect(within(confirm).getByText("Libraries: Movies → Anime")).toBeInTheDocument();
+    expect(within(confirm).getByText("Downloads: Not allowed → Allowed")).toBeInTheDocument();
+    await user.click(within(confirm).getByRole("button", { name: "Move" }));
+
+    await waitFor(() => expect(adminUsers.update).toHaveBeenCalledTimes(1));
+    const call = adminUsers.update.mock.calls[0]!;
+    expect(call[0].user.id).toBe(7);
+    expect(String(call[1].access_group_id)).toBe("2");
+    expect(toastSuccess).toHaveBeenCalledWith("Moved 1 user to Guests");
+    adminUsers.data = [];
+  });
+
+  it("adds eligible users to the group, showing where they come from", async () => {
+    withGuestsGroup();
+    adminUsers.data = [
+      member(7, "taylor", "user", 1),
+      member(8, "sam", "user", 2),
+      member(9, "robin", "user", null),
+      member(10, "root", "admin", null),
+    ];
+    adminUsers.update.mockReset().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+
+    await user.click(within(members).getByRole("button", { name: "Add users" }));
+    const dialog = await screen.findByRole("dialog");
+    // Members and admin accounts aren't offered.
+    expect(within(dialog).queryByText("taylor")).toBeNull();
+    expect(within(dialog).queryByText("root")).toBeNull();
+    expect(within(dialog).getByText("sam").closest("label")).toHaveTextContent("Guests");
+    expect(within(dialog).getByText("robin").closest("label")).toHaveTextContent("No group");
+
+    await user.type(within(dialog).getByLabelText("Search users"), "rob");
+    expect(within(dialog).queryByText("sam")).toBeNull();
+    await user.click(within(dialog).getByRole("checkbox"));
+    await user.click(within(dialog).getByRole("button", { name: /Add 1 selected/ }));
+
+    const confirm = await screen.findByRole("alertdialog");
+    expect(within(confirm).getByText("Move 1 user to Kids?")).toBeInTheDocument();
+    expect(within(confirm).getByText("1 from no group")).toBeInTheDocument();
+    await user.click(within(confirm).getByRole("button", { name: "Move" }));
+
+    await waitFor(() => expect(adminUsers.update).toHaveBeenCalledTimes(1));
+    expect(adminUsers.update.mock.calls[0]![0].user.id).toBe(9);
+    expect(String(adminUsers.update.mock.calls[0]![1].access_group_id)).toBe("1");
+    adminUsers.data = [];
+  });
+
+  it("names members that could not be moved", async () => {
+    withGuestsGroup();
+    adminUsers.data = [member(7, "taylor", "user", 1), member(8, "sam", "user", 1)];
+    adminUsers.update
+      .mockReset()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("This user changed."));
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+
+    await user.click(within(members).getByRole("checkbox", { name: "Select sam" }));
+    await user.click(within(members).getByRole("checkbox", { name: "Select taylor" }));
+    await pickOption(user, "Move selected members to", "Guests");
+    await user.click(within(members).getByRole("button", { name: /Move 2 selected/ }));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Move" }),
+    );
+
+    const alert = await within(members).findByRole("alert");
+    expect(alert).toHaveTextContent("Some users could not be moved");
+    expect(alert).toHaveTextContent("taylor: This user changed.");
+    // The failed member stays selected with the same target, ready to retry.
+    expect(within(members).getByRole("checkbox", { name: "Select taylor" })).toBeChecked();
+    expect(within(members).getByRole("checkbox", { name: "Select sam" })).not.toBeChecked();
+    expect(
+      within(members).getByRole("combobox", { name: "Move selected members to" }),
+    ).toHaveTextContent("Guests");
+    adminUsers.update.mockResolvedValue(undefined);
+    await user.click(within(members).getByRole("button", { name: /Move 1 selected/ }));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Move" }),
+    );
+    await waitFor(() => expect(adminUsers.update).toHaveBeenCalledTimes(3));
+    expect(adminUsers.update.mock.calls[2]![0].user.id).toBe(7);
+    adminUsers.data = [];
+  });
+
+  it("does not move a member whose group changed after confirmation", async () => {
+    withGuestsGroup();
+    adminUsers.data = [member(7, "taylor", "user", 1)];
+    adminUsers.update.mockReset().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+
+    await user.click(within(members).getByRole("checkbox", { name: "Select taylor" }));
+    await pickOption(user, "Move selected members to", "Guests");
+    await user.click(within(members).getByRole("button", { name: /Move 1 selected/ }));
+    adminUsers.currentGroups.set(7, 2);
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Move" }),
+    );
+
+    expect(await within(members).findByRole("alert")).toHaveTextContent(
+      "taylor: This user's group changed. Reload and try again.",
+    );
+    expect(adminUsers.update).not.toHaveBeenCalled();
+    adminUsers.data = [];
+  });
+
+  it("refreshes user and group lists once after moving several members", async () => {
+    withGuestsGroup();
+    adminUsers.data = [member(7, "taylor", "user", 1), member(8, "sam", "user", 1)];
+    adminUsers.update.mockReset().mockResolvedValue(undefined);
+    const invalidations = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+
+    await user.click(within(members).getByRole("checkbox", { name: "Select taylor" }));
+    await user.click(within(members).getByRole("checkbox", { name: "Select sam" }));
+    await pickOption(user, "Move selected members to", "Guests");
+    await user.click(within(members).getByRole("button", { name: /Move 2 selected/ }));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Move" }),
+    );
+
+    await waitFor(() => expect(adminUsers.update).toHaveBeenCalledTimes(2));
+    expect(invalidations).toHaveBeenCalledTimes(2);
     adminUsers.data = [];
   });
 
