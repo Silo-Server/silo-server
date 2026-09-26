@@ -11,7 +11,7 @@ it("delegates arrows to directional actions and updates callbacks", () => {
     ({ next }) =>
       useKeyboardShortcuts(
         { current: video },
-        { current: document.body },
+        vi.fn(),
         vi.fn(),
         { back, forward: next },
         vi.fn(),
@@ -28,4 +28,23 @@ it("delegates arrows to directional actions and updates callbacks", () => {
   rerender({ next: changed });
   fireEvent.keyDown(document.body, { key: "ArrowRight" });
   expect(changed).toHaveBeenCalledOnce();
+});
+
+it("toggles fullscreen with F", () => {
+  const toggleFullscreen = vi.fn();
+  renderHook(() =>
+    useKeyboardShortcuts(
+      { current: document.createElement("video") },
+      toggleFullscreen,
+      vi.fn(),
+      { back: vi.fn(), forward: vi.fn() },
+      vi.fn(),
+      vi.fn(),
+      undefined,
+      true,
+    ),
+  );
+  fireEvent.keyDown(document.body, { key: "f" });
+  fireEvent.keyDown(document.body, { key: "F" });
+  expect(toggleFullscreen).toHaveBeenCalledTimes(2);
 });

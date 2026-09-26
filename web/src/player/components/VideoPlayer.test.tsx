@@ -3,6 +3,7 @@ import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
+import { PlayerFullscreenRootContext } from "../context/PlayerFullscreenContext";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
 import { fixturePlanV3 } from "../protocol-v3.fixtures";
 import type {
@@ -3438,6 +3439,50 @@ describe("VideoPlayer translation handoff", () => {
       expect(webkitExitFullscreen).toHaveBeenCalledOnce();
     },
   );
+
+  it("makes the host's fullscreen root fullscreen instead of its own container", () => {
+    const root = document.createElement("div");
+    const requestRootFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(root, "requestFullscreen", {
+      value: requestRootFullscreen,
+      configurable: true,
+    });
+    const { container } = render(createElement(VideoPlayer, playerProps()), {
+      wrapper: ({ children }) =>
+        wrapper({
+          children: createElement(PlayerFullscreenRootContext.Provider, {
+            value: { current: root },
+            children,
+          }),
+        }),
+    });
+    const playerContainer = container.querySelector(".player-container") as HTMLElement;
+    const requestContainerFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(playerContainer, "requestFullscreen", {
+      value: requestContainerFullscreen,
+      configurable: true,
+    });
+
+    act(() => {
+      controls.current?.onFullscreenToggle?.();
+    });
+
+    expect(requestRootFullscreen).toHaveBeenCalledOnce();
+    expect(requestContainerFullscreen).not.toHaveBeenCalled();
+  });
+
+  it("starts in fullscreen when mounted inside a fullscreen host", () => {
+    Object.defineProperty(document, "fullscreenElement", {
+      value: document.body,
+      configurable: true,
+    });
+    try {
+      renderPlayer();
+      expect(controls.current?.isFullscreen).toBe(true);
+    } finally {
+      delete (document as { fullscreenElement?: Element | null }).fullscreenElement;
+    }
+  });
 
   it("tracks WebKit fullscreen events on the video element", async () => {
     const { container } = renderPlayer();
