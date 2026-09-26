@@ -61,7 +61,7 @@ func TestJellyfinProviderFetch_ImportsFavorites(t *testing.T) {
 		"bb": {ID: "bb", Type: "Series", Name: "Breaking Bad", ProductionYear: 2008, ProviderIDs: map[string]string{"Tvdb": "81189"}},
 	})
 
-	records, warnings, err := NewJellyfinProvider(NewJellyfinClient(), jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}).Fetch(context.Background())
+	records, warnings, err := NewJellyfinProvider(NewJellyfinClient(), jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestJellyfinProviderFetch_FavoritesFailureIsAWarning(t *testing.T) {
 		"IsPlayed": {{ID: "matrix", Type: "Movie", Name: "The Matrix", ProviderIDs: map[string]string{"Tmdb": "603"}, UserData: jellyfinUserData{Played: true}}},
 	}, nil)
 
-	records, warnings, err := NewJellyfinProvider(NewJellyfinClient(), jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}).Fetch(context.Background())
+	records, warnings, err := NewJellyfinProvider(NewJellyfinClient(), jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestJellyfinProviderFetch_FavoriteSeriesLookupFailureIsAWarning(t *testing.
 		"IsFavorite": {{ID: "bb-s2e2", Type: "Episode", Name: "Grilled", SeriesID: "bb", ParentIndexNumber: 2, IndexNumber: 2, ProviderIDs: map[string]string{"Tvdb": "349234"}, UserData: jellyfinUserData{IsFavorite: true}}},
 	}, nil)
 
-	records, warnings, err := NewJellyfinProvider(NewJellyfinClient(), jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}).Fetch(context.Background())
+	records, warnings, err := NewJellyfinProvider(NewJellyfinClient(), jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}

@@ -52,6 +52,9 @@ func TestPersonalRunnerRestartsEveryAuthenticationPath(t *testing.T) {
 	for _, path := range []string{"emby-predefined", "emby-connect", "jellyfin-password", "plex-browser", "plex-session", "plex-predefined"} {
 		t.Run(path, func(t *testing.T) {
 			repo := personalEffectRepository(t)
+			// The upstream listens on loopback, which only an account trusted
+			// with the local network may reach: user 1 is an admin.
+			makeUserOneAdmin(t, repo)
 			var authCalls, fetchCalls, accountCalls atomic.Int32
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -160,6 +163,7 @@ func TestPersonalRunnerRestartsEveryAuthenticationPath(t *testing.T) {
 			}
 			firstCtx, stopFirst := context.WithCancel(t.Context())
 			first := NewService(firstCtx, repo, pgstore.NewPostgresProvider(repo.pool))
+			first.SetLocalNetworkAccess(NewLocalNetworkAccess(nil, repo))
 			run, err := first.CreateRun(t.Context(), 1, input)
 			stopFirst()
 			if err != nil {
@@ -179,6 +183,7 @@ func TestPersonalRunnerRestartsEveryAuthenticationPath(t *testing.T) {
 			// Two newly configured nodes compete for the same persisted intent.
 			for range 2 {
 				restarted := NewService(ctx, restartedRepo, pgstore.NewPostgresProvider(repo.pool))
+				restarted.SetLocalNetworkAccess(NewLocalNetworkAccess(nil, restartedRepo))
 				restarted.plex.discoverBaseURL = discover.URL
 				restarted.SetStableIdentityResolver(watchstate.NewStableIdentityResolver(startupIdentityItems{}, nil, startupIdentityProviders{}))
 				restarted.AddObserver(queueObserverFunc(func(run Run) { observed <- run }))

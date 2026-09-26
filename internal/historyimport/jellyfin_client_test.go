@@ -38,7 +38,7 @@ func TestJellyfinAuthenticateServerUser_UsesStandardAuthorizationHeader(t *testi
 	defer server.Close()
 
 	client := NewJellyfinClient()
-	auth, err := client.AuthenticateServerUser(context.Background(), server.URL, "alice", "password")
+	auth, err := client.AuthenticateServerUser(trustLoopback(context.Background()), server.URL, "alice", "password")
 	if err != nil {
 		t.Fatalf("AuthenticateServerUser returned error: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestJellyfinAuthenticateServerUser_RejectedPasswordIsNotRetried(t *testing.
 	}))
 	defer server.Close()
 
-	_, err := NewJellyfinClient().AuthenticateServerUser(context.Background(), server.URL+"/", "alice", "wrong")
+	_, err := NewJellyfinClient().AuthenticateServerUser(trustLoopback(context.Background()), server.URL+"/", "alice", "wrong")
 	if got := UpstreamHTTPStatus(err); got != http.StatusUnauthorized {
 		t.Fatalf("UpstreamHTTPStatus = %d (err %v), want 401", got, err)
 	}
@@ -87,7 +87,7 @@ func TestJellyfinListUsers_UsesStandardAuthorizationHeader(t *testing.T) {
 	defer server.Close()
 
 	client := NewJellyfinClient()
-	users, err := client.ListUsers(context.Background(), server.URL, "admin-token")
+	users, err := client.ListUsers(trustLoopback(context.Background()), server.URL, "admin-token")
 	if err != nil {
 		t.Fatalf("ListUsers returned error: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestJellyfinFetchResumableItems_IncludesExpectedQueryAndPaginates(t *testin
 	client := NewJellyfinClient()
 	auth := jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}
 
-	items, err := client.FetchResumableItems(context.Background(), auth)
+	items, err := client.FetchResumableItems(trustLoopback(context.Background()), auth)
 	if err != nil {
 		t.Fatalf("FetchResumableItems returned error: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestJellyfinFetchItems_PaginatesPlayedItems(t *testing.T) {
 	// A saved source address may end in "/"; Jellyfin 404s on "//Items".
 	auth := jellyfinLocalAuth{BaseURL: server.URL + "/", UserID: "user-1", AccessToken: "token-1"}
 
-	items, err := client.FetchItems(context.Background(), auth, "IsPlayed", jellyfinPlayableItemTypes)
+	items, err := client.FetchItems(trustLoopback(context.Background()), auth, "IsPlayed", jellyfinPlayableItemTypes)
 	if err != nil {
 		t.Fatalf("FetchItems returned error: %v", err)
 	}

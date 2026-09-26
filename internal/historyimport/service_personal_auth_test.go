@@ -27,7 +27,8 @@ func TestPersonalPreparationExchangesPasswordForToken(t *testing.T) {
 		_, _ = w.Write([]byte(`{"AccessToken":"returned-token","User":{"Id":"external-user"}}`))
 	}))
 	defer upstream.Close()
-	svc := &Service{jellyfin: NewJellyfinClient()}
+	// The upstream listens on loopback, so the admin must allow local servers.
+	svc := &Service{jellyfin: NewJellyfinClient(), localNetwork: allowLocalNetworkForEveryone()}
 	prepared, err := svc.preparePersonalRun(t.Context(), 7, CreateRunInput{Source: SourceTypeJellyfin, ProfileID: "target", JellyfinBaseURL: upstream.URL, JellyfinUsername: "username", JellyfinPassword: "input-password"})
 	if err != nil {
 		t.Fatal(err)

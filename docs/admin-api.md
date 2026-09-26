@@ -1528,6 +1528,18 @@ summaries. Known diagnostics map to a fixed summary of their cause, such as an i
 no provider ID or a show missing from the library; anything else reads as a generic
 summary. Run credentials and private dispatch metadata never appear in these responses.
 
+A server address the user supplied must be on the public internet unless the
+account is an admin or an admin turned on `media_servers.allow_private_destinations`.
+That covers a typed Jellyfin or Plex URL and the server addresses Emby Connect or
+plex.tv list for the account; servers an admin configured as import sources are
+exempt. A refused address returns `422 validation_failed` whose detail says the
+address is on the server's local network (v1 answers 400 `bad_request` with the
+same message). Cloud metadata, link-local, and other blocked addresses are refused
+for every account. The policy is read again when a queued run starts, so a run
+admitted before the setting was turned off fails with the same message. v1 run
+responses and realtime history-import events carry the same safe summaries as
+the v2 monitors. See [Outbound address guard](architecture/outbound-address-guard.md).
+
 New queued personal imports survive server restart. Source changes invalidate captured
 configuration without retargeting the import; stale running executions fail without replay.
 Already committed history effects are retained. Historical personal jobs without durable

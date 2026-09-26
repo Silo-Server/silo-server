@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 // fakeHistoryImports answers the history-imports seams from memory.
@@ -235,6 +238,16 @@ func TestCreateHistoryImportRun(t *testing.T) {
 	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"emby","source_id":"1"}`, bearer(memberToken)), TypeValidationFailed)
 	if p.Detail != "Choose a server and enter the Emby username." || len(p.Errors) != 1 || p.Errors[0].Detail != p.Detail {
 		t.Fatalf("invalid input problem = %+v", p)
+	}
+	// A server address the outbound guard refused names the fix, whether it
+	// arrives raw or through the v1 seam's mapping.
+	refusedDial := &url.Error{Op: "Post", URL: "http://192.168.1.10:8096/Users/AuthenticateByName", Err: &net.OpError{Op: "dial", Net: "tcp", Err: netguard.ErrPrivateDestination}}
+	for _, refused := range []error{refusedDial, &handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: historyimport.PrivateAddressMessage}} {
+		fake.createErr = refused
+		p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"jellyfin"}`, bearer(memberToken)), TypeValidationFailed)
+		if p.Detail != historyimport.PrivateAddressMessage || len(p.Errors) != 1 || p.Errors[0].Detail != p.Detail {
+			t.Fatalf("refused address problem = %+v", p)
+		}
 	}
 	fake.createErr = &handlers.APIError{Status: http.StatusConflict, Code: "conflict", Message: historyimport.ErrActiveRunExists.Error()}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"plex"}`, bearer(memberToken)), TypeConflict)

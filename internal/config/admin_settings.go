@@ -250,6 +250,10 @@ var adminSettingDefaults = map[string]string{
 	"taskmanager.history_retention_days": "30",
 	"taskmanager.history_keep_per_task":  "1000",
 
+	// Off: server addresses non-admin users supply for history import and
+	// webhook sync must be on the public internet (historyimport).
+	"media_servers.allow_private_destinations": "false",
+
 	"opslog.capture_level":            "info",
 	"opslog.retention_days":           "7",
 	"opslog.cleanup_interval_minutes": "15",
@@ -390,7 +394,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"matcher.enable_tv_series_group_queue", "policy.editor_enabled",
 		"overlays.enabled", "notifications.release_events_enabled", "notifications.fanout_enabled",
 		"notifications.ui_enabled", "notifications.webhooks_enabled",
-		"notifications.webhooks.allow_private_destinations", "notifications.email_enabled",
+		"notifications.webhooks.allow_private_destinations", "media_servers.allow_private_destinations",
+		"notifications.email_enabled",
 		"notifications.email.allow_per_episode", "notifications.discord_enabled",
 		"notifications.discord.allow_per_episode", "notifications.server_channels_enabled",
 		"notifications.server_channels.mention_requesters", "notifications.web_push_enabled",

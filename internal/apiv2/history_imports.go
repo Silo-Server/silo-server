@@ -515,6 +515,11 @@ func (b HistoryImportRunCreate) toInput() (historyimport.CreateRunInput, *Proble
 // since the Silo session is fine; a source server that could not answer is
 // the fail-closed problem with a retry hint; the rest follow the status.
 func historyImportProblem(err error) *Problem {
+	// A server address the outbound guard refused is the member's input to fix.
+	if message, refused := historyimport.ServerAddressMessage(err); refused {
+		return NewProblem(TypeValidationFailed, message).
+			WithErrors(ProblemError{Location: locationBody, Code: codeInvalid, Detail: message})
+	}
 	switch {
 	case errors.Is(err, historyimport.ErrPersonalAdmissionUncertain):
 		return NewProblem(TypeDependencyUnavailable, historyimport.ErrPersonalAdmissionUncertain.Error())
@@ -584,7 +589,10 @@ func historyImportSourceOf(s historyimport.Source) HistoryImportSource {
 	}
 }
 
-func historyImportRunOf(run *historyimport.Run) HistoryImportRun {
+func historyImportRunOf(stored *historyimport.Run) HistoryImportRun {
+	// Stored failures, warnings, and reasons are diagnostics; only their fixed
+	// summaries leave the server.
+	run := historyimport.PublicRun(*stored)
 	samples := make([]HistoryImportUnmatchedSample, 0, len(run.UnmatchedSamples))
 	for _, s := range run.UnmatchedSamples {
 		samples = append(samples, HistoryImportUnmatchedSample{Kind: s.Kind, Title: s.Title, Year: s.Year, Reason: s.Reason})
@@ -622,20 +630,6 @@ func historyImportRunOf(run *historyimport.Run) HistoryImportRun {
 	if run.Status == historyimport.RunStatusCancelled {
 		out.ErrorMessage = ""
 	}
-	switch out.ErrorMessage {
-	case "", historyimport.ErrRunConfigurationChanged.Error(), historyimport.LegacyDispatchUnavailableMessage, historyimport.StaleRunInterruptedMessage, historyimport.ErrPersonalCredentialsUnavailable.Error(),
-		historyimport.RunErrorSourceRejected, historyimport.RunErrorStoppedEarly, historyimport.RunErrorNotCompleted:
-	default:
-		out.ErrorMessage = "The import failed. Review the source configuration before starting a new run."
-	}
-	// Stored warnings and reasons are diagnostics; only their fixed summaries
-	// leave the server.
-	out.Warnings = make([]string, 0, len(run.Warnings))
-	for _, warning := range run.Warnings {
-		out.Warnings = append(out.Warnings, historyimport.PublicWarning(warning))
-	}
-	for i := range out.UnmatchedSamples {
-		out.UnmatchedSamples[i].Reason = historyimport.PublicUnmatchedReason(out.UnmatchedSamples[i].Reason)
-	}
+	out.Warnings = append(make([]string, 0, len(run.Warnings)), run.Warnings...)
 	return out
 }

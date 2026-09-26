@@ -34,6 +34,10 @@ type Service struct {
 	stores     userstore.UserStoreProvider
 	bgContext  context.Context
 
+	// localNetwork decides whether a server address a user supplied may be on
+	// this server's own network. Nil limits those addresses to the internet.
+	localNetwork *LocalNetworkAccess
+
 	// runSemaphore limits concurrent run goroutines to maxConcurrentRuns.
 	runSemaphore   chan struct{}
 	queueWake      chan struct{}
@@ -69,6 +73,14 @@ func NewService(bgContext context.Context, repo *Repository, storeProvider users
 // observers have been configured. Construction must not consume persisted jobs.
 func (s *Service) StartBackgroundWork() {
 	s.backgroundOnce.Do(func() { s.startStaleRunMonitor(); s.startImportQueue() })
+}
+
+// SetLocalNetworkAccess installs the policy for server addresses users supply.
+// Without it, those addresses are limited to the public internet.
+func (s *Service) SetLocalNetworkAccess(access *LocalNetworkAccess) {
+	if s != nil {
+		s.localNetwork = access
+	}
 }
 
 func (s *Service) SetStableIdentityResolver(identity *watchstate.StableIdentityResolver) {
@@ -565,6 +577,9 @@ const (
 )
 
 func userFacingRunError(summary ExecutionSummary, err error) string {
+	if message, refused := ServerAddressMessage(err); refused {
+		return message
+	}
 	if UpstreamHTTPStatus(err) == http.StatusUnauthorized {
 		return RunErrorSourceRejected
 	}

@@ -621,6 +621,14 @@ rejections retain delivery logs. This synchronous operation is non-retryable;
 existing provider ordering and duplicate-handling behavior is unchanged and does
 not provide an exactly-once guarantee.
 
+A Plex connection's `base_url` follows the history import rule for server
+addresses: it must be on the public internet unless the account is an admin or
+an admin turned on `media_servers.allow_private_destinations`. Creating a
+connection with a refused address returns `422 validation_failed` (v1: 400
+`bad_request`), and a delivery whose metadata lookup is refused records that
+message as the connection's last error. See
+[Outbound address guard](architecture/outbound-address-guard.md).
+
 Responses set `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 `GET /api/v2/webhook-sync/capabilities` exposes `available` and `max_body_bytes`.
 V2 connection list/create/update and secret rotation emit v2 receiver URLs.
