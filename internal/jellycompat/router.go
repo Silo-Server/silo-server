@@ -23,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
+	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
 
 const sqliteUserStoreBackend = "sqlite"
@@ -99,6 +100,15 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.DB != nil {
 		itemsHandler.themeSongs = themesongs.NewRepository(deps.DB)
 		itemsHandler.collections = catalog.NewLibraryCollectionRepository(deps.DB)
+		// Personal collections the owner opted into their server collections are
+		// exposed alongside the library ones, scoped to that owner's session.
+		itemsHandler.userCollections = usercollections.NewStore(deps.DB)
+		if deps.BrowseRepo != nil && deps.ItemRepo != nil && deps.UserStoreProvider != nil {
+			itemsHandler.collectionResolver = catalog.NewCatalogResolver(deps.BrowseRepo, deps.ItemRepo).
+				WithUserStoreProvider(deps.UserStoreProvider).
+				WithEpisodeRepository(deps.EpisodeRepo).
+				WithSearchProvider(deps.CatalogSearchProvider)
+		}
 		// Smart (live-query) collections derive membership at read time, so the
 		// BoxSet children path needs a query executor to resolve them.
 		itemsHandler.queryExecutor = &catalog.QueryExecutor{Pool: deps.DB}
@@ -180,6 +190,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
 	imagesHandler.collections = itemsHandler.collections
+	imagesHandler.userCollections = itemsHandler.userCollections
 	imagesHandler.keyAuth = adminAPIKeyAuth
 	imagesHandler.frontendFS = deps.FrontendFS
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)

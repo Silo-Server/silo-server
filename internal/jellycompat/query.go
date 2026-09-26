@@ -13,53 +13,55 @@ import (
 )
 
 type itemsQuery struct {
-	limit                  int
-	startIndex             int
-	enableTotalRecordCount bool
-	searchTerm             string
-	namePrefix             string
-	maxOfficialRating      string
-	parentLibraryID        int
-	parentItemID           string
-	parentSeasonID         string
-	parentCollectionID     string
-	specificIDs            []string
-	specificCollectionIDs  []string
-	itemTypes              []string
-	genreName              string
-	genres                 []string
-	years                  []int
-	recursive              bool
-	disableImages          bool
-	disableUserData        bool
-	enableImageTypes       map[string]bool
-	seasonNumber           *int
-	totalOverride          *int
-	isFavorite             bool
-	isResumable            bool
-	hasItemTypeFilter      bool // true when IncludeItemTypes or ExcludeItemTypes was present in the request
-	wantsBoxSets           bool // true when IncludeItemTypes contains BoxSet
-	wantsViews             bool // true when IncludeItemTypes contains CollectionFolder
-	sortExplicit           bool // true when SortBy was present in the request
-	needsDetailFields      bool // true when requested Fields include detail-level data (e.g. MediaSources)
-	itemType               string
-	sort                   string
-	order                  string
-	personID               int64
-	isPlayed               *bool // nil = not specified
-	imageTypeLimit         *int  // nil = not specified
-	requireBackdrop        bool  // true when ImageTypes includes Backdrop (filter, not just a hint)
-	audioLanguages         []string
-	subtitleLanguages      []string
-	hasRootFilter          bool // a Jellyfin 12 HasFilters parameter was sent; see jellyfinRootFilterParams
-	unmatchedIDFilter      bool // GenreIds or PersonIds was sent but no value names a genre or person
-	mediaTypes             []string
-	mediaTypesSet          map[string]bool
-	mediaTypesExplicit     bool
-	requestedFields        map[string]bool // parsed from Fields param
-	fieldsExplicit         bool            // true when Fields was in the request
-	startItemID            string          // raw encoded ID from StartItemId param
-	adjacentTo             string          // raw encoded ID from AdjacentTo param
+	limit                         int
+	startIndex                    int
+	enableTotalRecordCount        bool
+	searchTerm                    string
+	namePrefix                    string
+	maxOfficialRating             string
+	parentLibraryID               int
+	parentItemID                  string
+	parentSeasonID                string
+	parentCollectionID            string
+	parentPersonalCollectionID    string
+	specificIDs                   []string
+	specificCollectionIDs         []string
+	specificPersonalCollectionIDs []string
+	itemTypes                     []string
+	genreName                     string
+	genres                        []string
+	years                         []int
+	recursive                     bool
+	disableImages                 bool
+	disableUserData               bool
+	enableImageTypes              map[string]bool
+	seasonNumber                  *int
+	totalOverride                 *int
+	isFavorite                    bool
+	isResumable                   bool
+	hasItemTypeFilter             bool // true when IncludeItemTypes or ExcludeItemTypes was present in the request
+	wantsBoxSets                  bool // true when IncludeItemTypes contains BoxSet
+	wantsViews                    bool // true when IncludeItemTypes contains CollectionFolder
+	sortExplicit                  bool // true when SortBy was present in the request
+	needsDetailFields             bool // true when requested Fields include detail-level data (e.g. MediaSources)
+	itemType                      string
+	sort                          string
+	order                         string
+	personID                      int64
+	isPlayed                      *bool // nil = not specified
+	imageTypeLimit                *int  // nil = not specified
+	requireBackdrop               bool  // true when ImageTypes includes Backdrop (filter, not just a hint)
+	audioLanguages                []string
+	subtitleLanguages             []string
+	hasRootFilter                 bool // a Jellyfin 12 HasFilters parameter was sent; see jellyfinRootFilterParams
+	unmatchedIDFilter             bool // GenreIds or PersonIds was sent but no value names a genre or person
+	mediaTypes                    []string
+	mediaTypesSet                 map[string]bool
+	mediaTypesExplicit            bool
+	requestedFields               map[string]bool // parsed from Fields param
+	fieldsExplicit                bool            // true when Fields was in the request
+	startItemID                   string          // raw encoded ID from StartItemId param
+	adjacentTo                    string          // raw encoded ID from AdjacentTo param
 	// Jellyfin browse filters served by catalog compat predicates.
 	nameLessThan            string
 	nameStartsWithOrGreater string
@@ -117,6 +119,8 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 			result.parentSeasonID = seasonID
 		} else if contentID, itemErr := decodeItemID(codec, parentID); itemErr == nil && contentID != "" {
 			result.parentItemID = contentID
+		} else if collectionID, collErr := codec.DecodeStringID(EncodedIDUserCollection, parentID); collErr == nil && collectionID != "" {
+			result.parentPersonalCollectionID = collectionID
 		}
 	}
 
@@ -128,6 +132,8 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 				result.specificIDs = append(result.specificIDs, decoded)
 			} else if collectionID, collErr := codec.DecodeStringID(EncodedIDCollection, raw); collErr == nil && collectionID != "" {
 				result.specificCollectionIDs = append(result.specificCollectionIDs, collectionID)
+			} else if collectionID, collErr := codec.DecodeStringID(EncodedIDUserCollection, raw); collErr == nil && collectionID != "" {
+				result.specificPersonalCollectionIDs = append(result.specificPersonalCollectionIDs, collectionID)
 			}
 		}
 	}

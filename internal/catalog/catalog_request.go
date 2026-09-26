@@ -18,23 +18,26 @@ const (
 
 // CatalogRequest is the normalized request shape shared by catalog parsing and resolution.
 type CatalogRequest struct {
-	Source         CatalogSource
-	Scope          string
-	SectionID      string
-	LibraryID      int
-	CollectionID   string
-	PersonID       int64
-	NamePrefix     string
-	SearchQuery    string
-	Query          QueryDefinition
-	Limit          int
-	Offset         int
-	CursorPaging   bool
-	GroupByWork    bool
-	After          *QueryCursor
-	Seek           *int
-	UseSourceOrder bool
-	SkipTotal      bool
+	Source          CatalogSource
+	Scope           string
+	SectionID       string
+	LibraryID       int
+	CollectionID    string
+	PersonID        int64
+	RequireBackdrop bool
+	Randomize       bool
+	BrowseOverlay   *BrowseFilters
+	NamePrefix      string
+	SearchQuery     string
+	Query           QueryDefinition
+	Limit           int
+	Offset          int
+	CursorPaging    bool
+	GroupByWork     bool
+	After           *QueryCursor
+	Seek            *int
+	UseSourceOrder  bool
+	SkipTotal       bool
 	// SnapshotAt freezes the result set to items created at or before this
 	// timestamp, preventing offset-based pagination drift when new items are
 	// added during a scan.  Nil means the server will generate a snapshot.

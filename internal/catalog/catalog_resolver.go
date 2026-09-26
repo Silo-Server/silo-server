@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"slices"
 	"strconv"
 	"strings"
@@ -756,6 +757,9 @@ func (r *CatalogResolver) resolveCollectionWithEffectiveSort(
 	// default come into play. A frozen sort from an earlier page of this request
 	// wins over both — see CatalogRequest.ResolvedSort.
 	switch {
+	case req.Randomize:
+		req.Query.Sort = QuerySort{}
+		req.UseSourceOrder = true
 	case req.ResolvedSort != nil:
 		req.Query.Sort = *req.ResolvedSort
 		req.UseSourceOrder = req.Query.Sort.Field == ""
@@ -796,6 +800,17 @@ func (r *CatalogResolver) resolveUserCollectionItems(
 			items, err = FilterCollectionItemsByDisplayQuery(ctx, r.itemRepo.pool, items, collection.DisplayQueryDefinition, access)
 			if err != nil {
 				return nil, err
+			}
+			// Keep the source relation (notably episodes) when compat browse
+			// filters re-hydrate the smart collection's membership.
+			if req.Query.MediaScope == "" {
+				req.Query.MediaScope = def.MediaScope
+			}
+			if req.PersonID > 0 || req.BrowseOverlay != nil {
+				items, err = r.fetchAccessibleItemsByID(ctx, contentIDsFromMediaItems(items), catalogBaseCollectionRequest(req), access)
+				if err != nil {
+					return nil, err
+				}
 			}
 			return r.resolveExactOrderedMediaItems(ctx, items, req, access)
 		}
@@ -925,11 +940,20 @@ func (r *CatalogResolver) resolveExactOrderedMediaItems(ctx context.Context, ite
 	req = normalizeExactCollectionOverlayRequest(req, items)
 	items = filterCatalogSearchItems(items, req.SearchQuery)
 	items = filterCatalogNamePrefix(items, req.NamePrefix)
+	if req.RequireBackdrop {
+		// Match browse's BTRIM predicate using hydrated images, including episode inheritance.
+		items = slices.DeleteFunc(items, func(item *models.MediaItem) bool {
+			return item == nil || strings.Trim(item.BackdropPath, " ") == ""
+		})
+	}
 	if req.UseSourceOrder {
 		var err error
 		items, err = r.filterExactSourceItemsByQuery(ctx, items, req.Query, access)
 		if err != nil {
 			return nil, err
+		}
+		if req.Randomize {
+			rand.Shuffle(len(items), func(i, j int) { items[i], items[j] = items[j], items[i] })
 		}
 		total := len(items)
 		paged := paginateCatalogItems(items, req.Offset, req.Limit)
@@ -1607,6 +1631,10 @@ func validateCatalogCollectionRequest(req CatalogRequest, allowPersonalizedSorts
 func catalogRequestHasOverlay(req CatalogRequest) bool {
 	return strings.TrimSpace(req.SearchQuery) != "" ||
 		strings.TrimSpace(req.NamePrefix) != "" ||
+		req.PersonID > 0 ||
+		req.RequireBackdrop ||
+		req.Randomize ||
+		req.BrowseOverlay != nil ||
 		catalogQueryHasFilter(req.Query) ||
 		strings.TrimSpace(req.Query.Sort.Field) != ""
 }
@@ -2175,13 +2203,20 @@ func (r *CatalogResolver) loadCollectionSourceBaseItems(ctx context.Context, req
 
 func catalogBaseCollectionRequest(req CatalogRequest) CatalogRequest {
 	return CatalogRequest{
-		Source:       req.Source,
-		CollectionID: req.CollectionID,
-		Limit:        req.Limit,
-		Offset:       req.Offset,
-		CursorPaging: req.CursorPaging, GroupByWork: req.GroupByWork, After: req.After, Seek: req.Seek,
-		SkipTotal:      req.SkipTotal,
-		UseSourceOrder: true,
+		Source:          req.Source,
+		CollectionID:    req.CollectionID,
+		PersonID:        req.PersonID,
+		RequireBackdrop: req.RequireBackdrop,
+		BrowseOverlay:   req.BrowseOverlay,
+		Query:           QueryDefinition{MediaScope: req.Query.MediaScope},
+		Limit:           req.Limit,
+		Offset:          req.Offset,
+		CursorPaging:    req.CursorPaging,
+		GroupByWork:     req.GroupByWork,
+		After:           req.After,
+		Seek:            req.Seek,
+		SkipTotal:       req.SkipTotal,
+		UseSourceOrder:  true,
 	}
 }
 
@@ -2368,17 +2403,32 @@ func catalogBrowseFilters(req CatalogRequest, access AccessFilter) (BrowseFilter
 		return BrowseFilters{}, true, nil
 	}
 
-	filters := BrowseFilters{
-		// BrowseFilters.Type accepts a comma-separated type list, so group
-		// scopes like "video" expand here rather than leaking downstream.
-		Type:               strings.Join(MediaScopeItemTypes(req.Query.MediaScope), ","),
-		NamePrefix:         req.NamePrefix,
-		DisabledLibraryIDs: slices.Clone(access.DisabledLibraryIDs),
-		// The ceiling string and the unrated-content policy are one boundary:
-		// carrying the string without the flag silently ignores
-		// access.unrated_content on every browse, facet and filter read.
-		MaturityLimits: access.MaturityLimits,
+	filters := BrowseFilters{}
+	if req.BrowseOverlay != nil {
+		filters.Genres = req.BrowseOverlay.Genres
+		filters.Years = req.BrowseOverlay.Years
+		filters.NameLessThan = req.BrowseOverlay.NameLessThan
+		filters.NameStartsWithOrGreater = req.BrowseOverlay.NameStartsWithOrGreater
+		filters.ExcludeContentIDs = req.BrowseOverlay.ExcludeContentIDs
+		filters.Studios = req.BrowseOverlay.Studios
+		filters.OfficialRatings = req.BrowseOverlay.OfficialRatings
+		filters.MinCommunityRating = req.BrowseOverlay.MinCommunityRating
+		filters.MinPremiereDate = req.BrowseOverlay.MinPremiereDate
+		filters.MaxPremiereDate = req.BrowseOverlay.MaxPremiereDate
+		filters.AudioLanguages = req.BrowseOverlay.AudioLanguages
+		filters.SubtitleLanguages = req.BrowseOverlay.SubtitleLanguages
 	}
+	// BrowseFilters.Type accepts a comma-separated type list, so group scopes
+	// like "video" expand here rather than leaking downstream.
+	filters.Type = strings.Join(MediaScopeItemTypes(req.Query.MediaScope), ",")
+	filters.NamePrefix = req.NamePrefix
+	filters.DisabledLibraryIDs = slices.Clone(access.DisabledLibraryIDs)
+	filters.MaturityLimits = access.MaturityLimits
+	filters.MaxPlaybackQuality = access.MaxPlaybackQuality
+	filters.UserID = access.UserID
+	filters.ProfileID = access.ProfileID
+	filters.PersonID = req.PersonID
+	filters.RequireBackdrop = req.RequireBackdrop
 	applyCatalogBrowseOverlayRules(&filters, req.Query)
 
 	if len(allowedLibraryIDs) == 1 {

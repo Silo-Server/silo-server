@@ -61,6 +61,12 @@ type ItemsHandler struct {
 	// collections is optional; when set, library collections are exposed as
 	// Jellyfin BoxSets. posterPresigner/presignTTL resolve their artwork keys.
 	collections collectionSource
+	// userCollections is optional; when set, the session owner's own personal
+	// collections that opted into server collections are exposed as BoxSets too.
+	userCollections userCollectionSource
+	// collectionResolver keeps personal BoxSet membership, display filtering and
+	// saved/default sorting identical to the native catalog surface.
+	collectionResolver personalCollectionCatalogResolver
 	// queryExecutor is optional; when set, smart (live-query) collections
 	// resolve their BoxSet children at read time instead of from stored items.
 	queryExecutor   smartCollectionQueryExecutor
@@ -146,7 +152,7 @@ func (h *ItemsHandler) userViews(ctx context.Context, session *Session) ([]baseI
 	}
 
 	items := make([]baseItemDTO, 0, len(libraries)+1)
-	if h.collectionsViewVisible(ctx, libraries) {
+	if h.collectionsViewVisible(ctx, session, libraries) {
 		items = append(items, h.collectionsView())
 	}
 	for _, library := range libraries {
@@ -195,9 +201,9 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 		// A genre or person filter whose IDs name nothing matches nothing,
 		// rather than falling back to an unfiltered browse.
 		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
-	case len(query.specificIDs) > 0 || len(query.specificCollectionIDs) > 0 || idsRequestCollectionsView(r):
+	case len(query.specificIDs) > 0 || len(query.specificCollectionIDs) > 0 || len(query.specificPersonalCollectionIDs) > 0 || idsRequestCollectionsView(r):
 		h.handleSpecificItems(w, r, session, query)
-	case query.parentCollectionID != "":
+	case query.parentCollectionID != "" || query.parentPersonalCollectionID != "":
 		h.handleBoxSetChildren(w, r, session, query)
 	case query.hasItemTypeFilter && len(query.itemTypes) == 0:
 		// Every requested type is one catalog browse cannot serve. BoxSet has
@@ -345,10 +351,9 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if collectionID, err := h.codec.DecodeStringID(EncodedIDCollection, rawID); err == nil {
-		h.handleBoxSetItem(w, r, session, collectionID)
+		h.handleBoxSetItem(w, r, session, collectionID, false)
 		return
 	}
-
 	if fileID, err := h.codec.DecodeIntID(EncodedIDMediaSource, rawID); err == nil {
 		contentID, err := h.codec.ResolveMediaSourceOwner(r.Context(), fileID)
 		if err != nil {
@@ -365,6 +370,10 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 
 	contentID, err := decodeContentID(h.codec, rawID)
 	if err != nil {
+		if collectionID, collectionErr := h.codec.DecodeStringID(EncodedIDUserCollection, rawID); collectionErr == nil {
+			h.handleBoxSetItem(w, r, session, collectionID, true)
+			return
+		}
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
 		return
 	}
@@ -2829,7 +2838,7 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 
 	// Ids= may also reference collections (BoxSet route IDs handed out by the
 	// collections listing); append their DTOs so clients can re-hydrate them.
-	boxSets, err := h.boxSetsByIDs(r.Context(), session, query.specificCollectionIDs)
+	boxSets, err := h.boxSetsByIDs(r.Context(), session, query.specificCollectionIDs, query.specificPersonalCollectionIDs)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -2848,7 +2857,7 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 			writeCompatUpstreamError(w, err)
 			return
 		}
-		if h.collectionsViewVisible(r.Context(), libraries) {
+		if h.collectionsViewVisible(r.Context(), session, libraries) {
 			items = append([]baseItemDTO{h.collectionsView()}, items...)
 		}
 	}
