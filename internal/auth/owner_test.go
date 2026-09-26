@@ -314,6 +314,59 @@ func TestImpersonationNeedsTheCheckedStandingPostgres(t *testing.T) {
 	}
 }
 
+// TestMutateAdminAccountLocksActorFirstPostgres pins the lock order an
+// ownership transfer uses: with the actor's id below the target's, the write
+// waits on the actor before it locks the target, so a transfer holding the
+// actor can still take the target instead of deadlocking.
+func TestMutateAdminAccountLocksActorFirstPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	owner := testRoleAccount(t, r, models.RoleAdmin)
+	admin := testRoleAccount(t, r, models.RoleAdmin)
+	if owner.ID >= admin.ID {
+		t.Fatalf("expected ascending ids, got %d and %d", owner.ID, admin.ID)
+	}
+	transfer, err := r.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = transfer.Rollback(t.Context()) }()
+	if _, err := transfer.Exec(t.Context(), `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.MutateAdminAccount(t.Context(), owner.ID, admin.ID, -1, &models.UpdateUserInput{Username: new(uuid.NewString())}, func(*models.User, pgx.Tx) (bool, error) { return false, nil })
+		done <- err
+	}()
+	// Wait until the write is blocked on the actor's row.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var waiting int
+		if err := r.pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the write never waited on the actor's row")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := transfer.Exec(t.Context(), `SET LOCAL lock_timeout = '2s'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := transfer.Exec(t.Context(), `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, admin.ID); err != nil {
+		t.Fatalf("the write locked the target before the actor: %v", err)
+	}
+	if err := transfer.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func lockedOwnerActor(t *testing.T, r *UserRepository, id int) (OwnerActor, error) {
 	t.Helper()
 	tx, err := r.pool.Begin(t.Context())

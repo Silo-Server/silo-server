@@ -19,7 +19,7 @@ import (
 
 type adminAccountRepository interface {
 	GetAdminSnapshot(context.Context, int) (auth.AdminUserSnapshot, error)
-	MutateAdminAccount(context.Context, int, int64, *models.UpdateUserInput, func(*models.User, pgx.Tx) (bool, error)) (auth.AdminUserSnapshot, error)
+	MutateAdminAccount(context.Context, int, int, int64, *models.UpdateUserInput, func(*models.User, pgx.Tx) (bool, error)) (auth.AdminUserSnapshot, error)
 }
 type AdminAccountView struct {
 	User          AdminUserView
@@ -213,7 +213,7 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 		input.MaxPlaybackQuality.Value = new(value)
 	}
 	revoked := false
-	snapshot, err := repo.MutateAdminAccount(ctx, id, revision, &input, func(current *models.User, tx pgx.Tx) (bool, error) {
+	snapshot, err := repo.MutateAdminAccount(ctx, actorUserID(ctx), id, revision, &input, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if revision != -1 {
 			_, actual, err := adminAccountTransactionGroup(ctx, tx, current)
 			if err != nil {
@@ -263,7 +263,7 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 	if !ok {
 		return apiError(501, "capability_unsupported", "Guarded account management is unavailable")
 	}
-	_, err := repo.MutateAdminAccount(ctx, id, revision, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
+	_, err := repo.MutateAdminAccount(ctx, actorUserID(ctx), id, revision, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if revision != -1 {
 			_, actual, err := adminAccountTransactionGroup(ctx, tx, current)
 			if err != nil {

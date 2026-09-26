@@ -25,6 +25,9 @@ type scopedKeyUserRepo struct {
 	created *models.CreateUserInput
 	updated *models.UpdateUserInput
 	deleted bool
+	// promoteBeforeMutate makes the account an admin between the handler's
+	// pre-checks and the locked write, as a concurrent promotion would.
+	promoteBeforeMutate bool
 	// updateErr, when set, is what Update returns.
 	updateErr        error
 	createByOwnerErr error
@@ -76,10 +79,13 @@ func (r *scopedKeyUserRepo) Delete(context.Context, int) error { return nil }
 
 // MutateAdminAccount runs the handler's checks against the stored account the
 // way the transactional repository does, without a transaction.
-func (r *scopedKeyUserRepo) MutateAdminAccount(ctx context.Context, id int, _ int64, input *models.UpdateUserInput, validate func(*models.User, pgx.Tx) (bool, error)) (auth.AdminUserSnapshot, error) {
+func (r *scopedKeyUserRepo) MutateAdminAccount(ctx context.Context, _, id int, _ int64, input *models.UpdateUserInput, validate func(*models.User, pgx.Tx) (bool, error)) (auth.AdminUserSnapshot, error) {
 	current, err := r.GetByID(ctx, id)
 	if err != nil {
 		return auth.AdminUserSnapshot{}, err
+	}
+	if r.promoteBeforeMutate {
+		current.Role = models.RoleAdmin
 	}
 	if _, err := validate(current, nil); err != nil {
 		return auth.AdminUserSnapshot{User: current}, err
@@ -440,4 +446,18 @@ func updateUserRequestFor(t *testing.T, h *AdminHandler, claims *auth.Claims, bo
 	rec := httptest.NewRecorder()
 	h.HandleUpdateUser(rec, req)
 	return rec
+}
+
+func TestHandleUpdateUserRechecksScopedKeyAgainstLockedAccount(t *testing.T) {
+	h, repo := newScopedKeyAdminHandler(models.RoleUser)
+	repo.promoteBeforeMutate = true
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/users/42", strings.NewReader(`{"password":"new-password"}`))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "42")
+	req = req.WithContext(apimw.SetClaims(context.WithValue(req.Context(), chi.RouteCtxKey, rctx), scopedKeyClaims()))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateUser(rec, req)
+	if rec.Code != http.StatusForbidden || decodeErrorCode(t, rec) != "insufficient_scope" || repo.updated != nil {
+		t.Fatalf("status %d body %s, updated %v", rec.Code, rec.Body.String(), repo.updated != nil)
+	}
 }

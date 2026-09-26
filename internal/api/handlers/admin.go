@@ -999,13 +999,18 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	revoked := false
-	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, tx pgx.Tx) (bool, error) {
+	_, err = repo.MutateAdminAccount(r.Context(), actorUserID(r.Context()), id, -1, &updateInput, func(current *models.User, tx pgx.Tx) (bool, error) {
 		actor, err := h.transactionOwnerActor(r.Context(), tx)
 		if err != nil {
 			return false, err
 		}
 		if err := auth.CheckOwnerUpdate(actor, current, updateInput); err != nil {
 			return false, ownerError(err)
+		}
+		// Recheck the scoped-key limits against the locked account: the
+		// target may have been promoted since rejectScopedAPIKeyUpdate read it.
+		if actorIsScopedAPIKey(r.Context()) && current.Role == roleAdmin && (updateInput.Password != nil || updateInput.Role != nil) {
+			return false, apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not change the password or role of an admin account")
 		}
 		revoked = updateRequiresSessionRevocation(current, updateInput)
 		return revoked, nil
@@ -1057,7 +1062,7 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 	}
 	// As for updates, the Owner rules run against the locked account in the
 	// transaction that deletes it and revokes its sign-ins.
-	_, err = repo.MutateAdminAccount(r.Context(), id, -1, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
+	_, err = repo.MutateAdminAccount(r.Context(), actorUserID(r.Context()), id, -1, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
 		actor, err := h.transactionOwnerActor(r.Context(), tx)
 		if err != nil {
 			return false, err

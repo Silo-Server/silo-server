@@ -114,7 +114,7 @@ func TestAdminAccountMutationAtomicGuardAndSessionRevocation(t *testing.T) {
 	results := make(chan error, 4)
 	for n := range 4 {
 		wg.Go(func() {
-			_, err := r.MutateAdminAccount(t.Context(), u.ID, before.Revision, &models.UpdateUserInput{Password: new(fmt.Sprintf("new-password-%d", n))}, func(*models.User, pgx.Tx) (bool, error) { return true, nil })
+			_, err := r.MutateAdminAccount(t.Context(), 0, u.ID, before.Revision, &models.UpdateUserInput{Password: new(fmt.Sprintf("new-password-%d", n))}, func(*models.User, pgx.Tx) (bool, error) { return true, nil })
 			results <- err
 		})
 	}
@@ -147,7 +147,7 @@ func TestAdminAccountMutationAtomicGuardAndSessionRevocation(t *testing.T) {
 	if err := NewSessionRepository(r.pool).Create(t.Context(), models.AuthSession{ID: fresh, UserID: u.ID, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = r.MutateAdminAccount(t.Context(), u.ID, before.Revision, &models.UpdateUserInput{Password: new("replayed-password")}, func(*models.User, pgx.Tx) (bool, error) { t.Fatal("stale request reached effects"); return true, nil })
+	_, err = r.MutateAdminAccount(t.Context(), 0, u.ID, before.Revision, &models.UpdateUserInput{Password: new("replayed-password")}, func(*models.User, pgx.Tx) (bool, error) { t.Fatal("stale request reached effects"); return true, nil })
 	if !errors.Is(err, ErrAdminUserRevision) {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestAdminAccountMutationRollbackAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Revocation precedes the duplicate constraint failure and must roll back.
-	_, err = r.MutateAdminAccount(t.Context(), u.ID, before.Revision, &models.UpdateUserInput{Username: new(other.Username)}, func(*models.User, pgx.Tx) (bool, error) { return true, nil })
+	_, err = r.MutateAdminAccount(t.Context(), 0, u.ID, before.Revision, &models.UpdateUserInput{Username: new(other.Username)}, func(*models.User, pgx.Tx) (bool, error) { return true, nil })
 	if !IsDuplicate(err) {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestAdminAccountMutationRollbackAndDelete(t *testing.T) {
 	if valid, err := NewSessionRepository(r.pool).IsValid(t.Context(), session); err != nil || !valid {
 		t.Fatalf("session changed after rollback: %v %v", valid, err)
 	}
-	_, err = r.MutateAdminAccount(t.Context(), u.ID, before.Revision, nil, func(*models.User, pgx.Tx) (bool, error) { return true, nil })
+	_, err = r.MutateAdminAccount(t.Context(), 0, u.ID, before.Revision, nil, func(*models.User, pgx.Tx) (bool, error) { return true, nil })
 	if err != nil {
 		t.Fatal(err)
 	}

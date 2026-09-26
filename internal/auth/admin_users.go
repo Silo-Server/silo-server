@@ -33,7 +33,10 @@ func (r *UserRepository) GetAdminSnapshot(ctx context.Context, id int) (AdminUse
 // MutateAdminAccount holds the configuration precondition, target-dependent
 // validation and session revocation in the same transaction. A nil input deletes.
 // Group locking precedes account locking, matching group policy propagation.
-func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revision int64, input *models.UpdateUserInput, validate func(*models.User, pgx.Tx) (bool, error)) (AdminUserSnapshot, error) {
+// The acting account's row (actorID, when positive and not the target) is
+// share-locked with the target's, in id order like an ownership transfer, so
+// validate can read the actor's Owner standing without a lock-order cycle.
+func (r *UserRepository) MutateAdminAccount(ctx context.Context, actorID, id int, revision int64, input *models.UpdateUserInput, validate func(*models.User, pgx.Tx) (bool, error)) (AdminUserSnapshot, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return AdminUserSnapshot{}, err
@@ -42,9 +45,24 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	if _, err = tx.Exec(ctx, `LOCK TABLE access_groups IN SHARE MODE`); err != nil {
 		return AdminUserSnapshot{}, err
 	}
+	lockActor := func() error {
+		_, err := tx.Exec(ctx, `SELECT 1 FROM users WHERE id=$1 FOR SHARE`, actorID)
+		return err
+	}
+	actorFirst := actorID > 0 && actorID < id
+	if actorFirst {
+		if err = lockActor(); err != nil {
+			return AdminUserSnapshot{}, err
+		}
+	}
 	current, err := adminUserSnapshot(tx.QueryRow(ctx, `SELECT `+allColumns+`, admin_revision FROM users WHERE id=$1 FOR UPDATE`, id))
 	if err != nil {
 		return AdminUserSnapshot{}, err
+	}
+	if actorID > id {
+		if err = lockActor(); err != nil {
+			return AdminUserSnapshot{}, err
+		}
 	}
 	if revision != -1 && current.Revision != revision {
 		return current, ErrAdminUserRevision

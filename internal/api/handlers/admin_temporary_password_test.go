@@ -36,7 +36,7 @@ func (r *mutatingUserRepo) GetAdminSnapshot(context.Context, int) (auth.AdminUse
 	return auth.AdminUserSnapshot{User: &r.current}, nil
 }
 
-func (r *mutatingUserRepo) MutateAdminAccount(_ context.Context, _ int, _ int64, _ *models.UpdateUserInput, validate func(*models.User, pgx.Tx) (bool, error)) (auth.AdminUserSnapshot, error) {
+func (r *mutatingUserRepo) MutateAdminAccount(_ context.Context, _, _ int, _ int64, _ *models.UpdateUserInput, validate func(*models.User, pgx.Tx) (bool, error)) (auth.AdminUserSnapshot, error) {
 	if _, err := validate(&r.current, nil); err != nil {
 		return auth.AdminUserSnapshot{User: &r.current}, err
 	}
