@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -40,11 +41,58 @@ func (h *ItemsHandler) WatchDetail(ctx context.Context, userID int, profileID, c
 		}
 	}
 
+	if detail.Type == itemTypeMovie || detail.Type == itemTypeEpisode {
+		h.populateWatchMarkers(ctx, detail, filter.SelectedFileID)
+	}
 	if detail.Type == itemTypeMovie || detail.Type == itemTypeEpisode || detail.Type == itemTypeEbook || detail.Type == itemTypeAudiobook {
 		detail.UserData = h.leafUserData(ctx, userID, profileID, detail.ContentID, detail.Type)
 		applyEffectiveEditionPreference(detail.UserData, &detail.EffectiveVersionEditionKey)
 	}
 	return detail, nil
+}
+
+func (h *ItemsHandler) populateWatchMarkers(ctx context.Context, detail *catalog.WatchDetail, selectedFileID int) {
+	if h.MarkerPopulation == nil || h.MarkerFileResolver == nil || len(detail.Versions) == 0 {
+		return
+	}
+	if selectedFileID == 0 && len(detail.PlaybackVariants) > 0 {
+		selectedFileID = detail.PlaybackVariants[0].DefaultFileID
+	}
+	if selectedFileID == 0 {
+		selectedFileID = detail.Versions[0].FileID
+	}
+	// Only a version returned by the access-filtered detail may cause a lookup.
+	var selected *catalog.FileVersion
+	for i := range detail.Versions {
+		if detail.Versions[i].FileID == selectedFileID {
+			selected = &detail.Versions[i]
+			break
+		}
+	}
+	if selected == nil {
+		return
+	}
+	file, err := h.MarkerFileResolver.GetByID(ctx, selectedFileID)
+	if err != nil {
+		slog.WarnContext(ctx, "watch marker file lookup failed", "file_id", selectedFileID, "error", err)
+		return
+	}
+	file = populateFileMarkers(ctx, h.MarkerPopulation, file)
+	if file == nil {
+		return
+	}
+	selected.SetMarkers(file)
+	detail.Intro, detail.Credits, detail.Recap, detail.Preview = selected.Intro, selected.Credits, selected.Recap, selected.Preview
+	for i := range detail.PlaybackVariants {
+		for j := range detail.PlaybackVariants[i].Parts {
+			for k := range detail.PlaybackVariants[i].Parts[j].Versions {
+				version := &detail.PlaybackVariants[i].Parts[j].Versions[k]
+				if version.FileID == selectedFileID {
+					version.SetMarkers(file)
+				}
+			}
+		}
+	}
 }
 
 // SetWatchedState marks a movie, ebook, episode, season or series watched

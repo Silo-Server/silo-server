@@ -56,6 +56,48 @@ type TrendingSnapshotRepository struct {
 	pool *pgxpool.Pool
 }
 
+// ErrTrendingRefreshLeaseLost means a newer worker replaced this refresh
+// before it attempted to persist its result.
+var ErrTrendingRefreshLeaseLost = errors.New("trending refresh lease lost")
+
+// TryClaimRefresh atomically claims one canonical feed for a bounded period.
+// Unlike a session advisory lock, the claim does not retain a pool connection
+// while the caller performs external HTTP requests or catalog lookups. A
+// crashed worker can be replaced after lease expires.
+func (r *TrendingSnapshotRepository) TryClaimRefresh(ctx context.Context, source, window string, lease time.Duration) (time.Time, bool, error) {
+	source, window = canonicalTrendingKey(source, window)
+	leaseMilliseconds := lease.Milliseconds()
+	if leaseMilliseconds < 1 {
+		leaseMilliseconds = 1
+	}
+	var claimedAt time.Time
+	err := r.pool.QueryRow(ctx, `
+		WITH lease_clock AS (
+			SELECT clock_timestamp() AS claimed_at
+		)
+		INSERT INTO trending_discover_snapshots
+			(source, time_window, last_attempt_at, last_status, last_error)
+		SELECT $1, $2, claimed_at, 'refreshing', ''
+		FROM lease_clock
+		ON CONFLICT (source, time_window) DO UPDATE SET
+			last_attempt_at = EXCLUDED.last_attempt_at,
+			last_status     = 'refreshing',
+			last_error      = ''
+		WHERE (trending_discover_snapshots.last_attempt_at IS NULL
+		       OR trending_discover_snapshots.last_attempt_at <= EXCLUDED.last_attempt_at)
+		  AND (trending_discover_snapshots.last_status <> 'refreshing'
+		       OR trending_discover_snapshots.last_attempt_at <=
+		          EXCLUDED.last_attempt_at - ($3::bigint * INTERVAL '1 millisecond'))
+		RETURNING last_attempt_at`, source, window, leaseMilliseconds).Scan(&claimedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("claiming trending refresh: %w", err)
+	}
+	return claimedAt, true, nil
+}
+
 // NewTrendingSnapshotRepository creates a new TrendingSnapshotRepository.
 func NewTrendingSnapshotRepository(pool *pgxpool.Pool) *TrendingSnapshotRepository {
 	return &TrendingSnapshotRepository{pool: pool}
@@ -87,46 +129,48 @@ func (r *TrendingSnapshotRepository) Get(ctx context.Context, source, window str
 // "ok" when at least one entry matched the catalog and "empty" when the provider
 // returned entries but none matched. Used only when the provider actually
 // returned data; see RecordAttempt for the no-data / failure paths.
-func (r *TrendingSnapshotRepository) SaveSuccess(ctx context.Context, source, window string, contentIDs []string, entryCount int, status string, at time.Time) error {
+func (r *TrendingSnapshotRepository) SaveSuccess(ctx context.Context, source, window string, contentIDs []string, entryCount int, status string, claimAt, refreshedAt time.Time) error {
 	source, window = canonicalTrendingKey(source, window)
 	if contentIDs == nil {
 		contentIDs = []string{}
 	}
-	_, err := r.pool.Exec(ctx, `
-		INSERT INTO trending_discover_snapshots
-			(source, time_window, content_ids, entry_count, refreshed_at, last_attempt_at, last_status, last_error)
-		VALUES ($1, $2, $3, $4, $5, $5, $6, '')
-		ON CONFLICT (source, time_window) DO UPDATE SET
-			content_ids     = EXCLUDED.content_ids,
-			entry_count     = EXCLUDED.entry_count,
-			refreshed_at    = EXCLUDED.refreshed_at,
-			last_attempt_at = EXCLUDED.last_attempt_at,
-			last_status     = EXCLUDED.last_status,
-			last_error      = ''`,
-		source, window, contentIDs, entryCount, at, status)
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE trending_discover_snapshots SET
+			content_ids  = $3,
+			entry_count  = $4,
+			refreshed_at = $5,
+			last_status  = $6,
+			last_error   = ''
+		WHERE source = $1 AND time_window = $2
+		  AND last_status = 'refreshing' AND last_attempt_at = $7`,
+		source, window, contentIDs, entryCount, refreshedAt, status, claimAt)
 	if err != nil {
 		return fmt.Errorf("saving trending snapshot: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrTrendingRefreshLeaseLost
 	}
 	return nil
 }
 
 // RecordAttempt records an attempt that produced no new content (an upstream
 // failure or an unconfigured/empty provider) WITHOUT clearing the last-good
-// content_ids. status is "error" or "empty". If no row exists yet it inserts a
-// placeholder so the attempt is still observable.
-func (r *TrendingSnapshotRepository) RecordAttempt(ctx context.Context, source, window, status, message string, at time.Time) error {
+// content_ids. status is "error" or "empty". TryClaimRefresh creates the row
+// before work begins, so even the first failed attempt remains observable.
+func (r *TrendingSnapshotRepository) RecordAttempt(ctx context.Context, source, window, status, message string, claimAt time.Time) error {
 	source, window = canonicalTrendingKey(source, window)
-	_, err := r.pool.Exec(ctx, `
-		INSERT INTO trending_discover_snapshots
-			(source, time_window, last_attempt_at, last_status, last_error)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (source, time_window) DO UPDATE SET
-			last_attempt_at = EXCLUDED.last_attempt_at,
-			last_status     = EXCLUDED.last_status,
-			last_error      = EXCLUDED.last_error`,
-		source, window, at, status, message)
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE trending_discover_snapshots SET
+			last_status = $3,
+			last_error  = $4
+		WHERE source = $1 AND time_window = $2
+		  AND last_status = 'refreshing' AND last_attempt_at = $5`,
+		source, window, status, message, claimAt)
 	if err != nil {
 		return fmt.Errorf("recording trending snapshot attempt: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrTrendingRefreshLeaseLost
 	}
 	return nil
 }

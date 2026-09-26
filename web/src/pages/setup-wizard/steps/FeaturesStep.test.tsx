@@ -30,6 +30,9 @@ vi.mock("@/hooks/queries/admin/system", () => ({}));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const defaultValues: Record<string, string> = {
+  "markers.mode": "both",
+  "markers.lazy_playback": "true",
+  "markers.online_storage": "stored",
   "notifications.apple_push_delivery_enabled": "true",
   "notifications.android_push_delivery_enabled": "true",
   "download.enabled": "false",
@@ -73,6 +76,72 @@ describe("FeaturesStep", () => {
     vi.clearAllMocks();
   });
 
+  it("shows online markers and local fallback enabled for the server defaults", () => {
+    mockStep();
+    render(<FeaturesStep />);
+
+    expect(screen.getByRole("switch", { name: "Skip markers from TheIntroDB" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Detect markers on this server" })).toBeChecked();
+    expect(
+      screen.getByText(/Online markers are preferred over local detection/),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    ["both", "online", undefined],
+    ["online", "both", "true"],
+    ["local", "off", "false"],
+    ["off", "local", "true"],
+  ])(
+    "changes local detection from %s to %s without changing online lookup",
+    async (mode, nextMode, lazy) => {
+      const { setValue } = mockStep({ "markers.mode": mode, "markers.lazy_playback": "false" });
+      render(<FeaturesStep />);
+
+      await userEvent.click(screen.getByRole("switch", { name: "Detect markers on this server" }));
+
+      expect(setValue).toHaveBeenCalledWith("markers.mode", nextMode);
+      if (lazy === undefined) {
+        expect(setValue).not.toHaveBeenCalledWith("markers.lazy_playback", expect.anything());
+      } else {
+        expect(setValue).toHaveBeenCalledWith("markers.lazy_playback", lazy);
+      }
+    },
+  );
+
+  it.each([
+    ["both", "local", undefined],
+    ["local", "both", "true"],
+    ["online", "off", "false"],
+    ["off", "online", "true"],
+  ])(
+    "changes online lookup from %s to %s without changing local detection",
+    async (mode, nextMode, lazy) => {
+      const { setValue } = mockStep({ "markers.mode": mode, "markers.lazy_playback": "false" });
+      render(<FeaturesStep />);
+
+      await userEvent.click(screen.getByRole("switch", { name: "Skip markers from TheIntroDB" }));
+
+      expect(setValue).toHaveBeenCalledWith("markers.mode", nextMode);
+      if (lazy === undefined) {
+        expect(setValue).not.toHaveBeenCalledWith("markers.lazy_playback", expect.anything());
+      } else {
+        expect(setValue).toHaveBeenCalledWith("markers.lazy_playback", lazy);
+      }
+    },
+  );
+
+  it("includes markers in the step summary when only local detection is enabled", () => {
+    const { setSummary } = mockStep({
+      "markers.mode": "local",
+      "notifications.apple_push_delivery_enabled": "false",
+      "notifications.android_push_delivery_enabled": "false",
+    });
+    render(<FeaturesStep />);
+
+    expect(setSummary).toHaveBeenCalledWith("features", "Skip markers");
+  });
+
   it("shows push on by default and reveals the relay disclosure on request", async () => {
     mockStep();
     render(<FeaturesStep />);
@@ -104,6 +173,19 @@ describe("FeaturesStep", () => {
     render(<FeaturesStep />);
 
     expect(screen.getByLabelText("Total download bandwidth")).toBeInTheDocument();
+  });
+
+  it.each(["stored", "on_demand"])("explains scheduled sync for %s storage", (storage) => {
+    mockStep({ "markers.mode": "online", "markers.online_storage": storage });
+    render(<FeaturesStep />);
+
+    if (storage === "stored") {
+      expect(screen.getByText(/daily at 03:00 \(server time\) by default/)).toBeInTheDocument();
+      expect(screen.queryByText(/Scheduled online sync is disabled/)).not.toBeInTheDocument();
+    } else {
+      expect(screen.getByText(/Scheduled online sync is disabled/)).toBeInTheDocument();
+      expect(screen.queryByText(/daily at 03:00/)).not.toBeInTheDocument();
+    }
   });
 
   it("offers provider presets and a connection check once recommendations are on", () => {

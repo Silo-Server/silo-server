@@ -37,7 +37,7 @@ func TestAdminSubtitleMetadataRevisionDB(t *testing.T) {
 	}
 	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM downloaded_subtitles WHERE id=$1`, id) }()
 	repo := subtitles.NewPgRepository(pool, nil)
-	handler := &AdminSubtitleHandler{repo: repo, manager: subtitles.NewManager(repo, nil, "")}
+	handler := &AdminSubtitleHandler{repo: repo, manager: subtitles.NewManager(repo, nil)}
 	initial, err := handler.GetAdminSubtitleMetadata(ctx, id)
 	if err != nil {
 		t.Fatal(err)

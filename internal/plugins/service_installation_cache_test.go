@@ -69,6 +69,54 @@ func TestLoadInstallationCachesAndInvalidatesOnLifecycleChange(t *testing.T) {
 	}
 }
 
+func TestRefreshMarkerRuntimeInvalidatesReplicaState(t *testing.T) {
+	svc, store := newCachedInstallationService(&Installation{ID: 7, PluginID: "silo.theintrodb", Version: "1.0.0", Enabled: true})
+	host := &fakeServiceHost{}
+	svc.host = host
+	if _, err := svc.loadInstallation(t.Context(), 7, true); err != nil {
+		t.Fatal(err)
+	}
+	version := "1.1.0"
+	if err := store.Update(t.Context(), 7, UpdateInstallationInput{Version: &version}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RefreshMarkerRuntime(7); err != nil {
+		t.Fatal(err)
+	}
+	current, err := svc.loadInstallation(t.Context(), 7, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Version != version || store.getByIDCalls != 2 {
+		t.Fatalf("replica retained cached installation: version=%s reads=%d", current.Version, store.getByIDCalls)
+	}
+	if len(host.stopped) != 1 || host.stopped[0] != 7 {
+		t.Fatalf("runtime was not discarded: stops=%v", host.stopped)
+	}
+}
+
+func TestRefreshMarkerRuntimeKeepsResidentSupervised(t *testing.T) {
+	f := newResidentFixture(t, ResidentOptions{})
+	f.service.StartResidents(t.Context())
+	waitState(t, f.service, 5, "initial resident launch", running)
+	before, err := f.host.Client(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.service.RefreshMarkerRuntime(5); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, f.service, 5, "resident launch after marker refresh", running)
+	after, err := f.host.Client(5)
+	if err != nil {
+		t.Fatalf("supervisor reports running without a resident process: %v", err)
+	}
+	if after == before {
+		t.Fatal("marker refresh retained the previous resident process")
+	}
+}
+
 func TestIsInstallationEnabledReflectsCacheAndInvalidation(t *testing.T) {
 	ctx := context.Background()
 	svc, store := newCachedInstallationService(&Installation{ID: 7, PluginID: "silo.metadb", Enabled: true})

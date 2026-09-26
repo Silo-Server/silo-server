@@ -17,6 +17,8 @@
       "position_seconds": 0,
       "is_paused": false,
       "has_playback_control": false,
+      "client_ip": "127.0.0.1",
+      "stream_location": "local",
       "audio_track_index": 0,
       "transcode_audio": false,
       "stream_bitrate_kbps": null,
@@ -41,6 +43,7 @@
       "position_seconds": 0,
       "is_paused": false,
       "has_playback_control": true,
+      "stream_location": "remote",
       "audio_track_index": 0,
       "transcode_audio": false,
       "stream_bitrate_kbps": null,
@@ -50,6 +53,7 @@
       "source_audio_channels": 8,
       "effective_play_method": "transcode",
       "is_jellyfin_client": true,
+      "routing_network_provider": "tailscale",
       "routing_execution_node_id": "9"
     }
   ],

@@ -160,6 +160,19 @@ func (r *Repository) ListTrendingDiscoverConfigs(ctx context.Context) ([]json.Ra
 	return out, rows.Err()
 }
 
+// ListTrendingDiscoverSections returns enabled trending sections with their
+// identities so profile overrides can contribute their effective configs.
+func (r *Repository) ListTrendingDiscoverSections(ctx context.Context) ([]*PageSection, error) {
+	rows, err := r.query(ctx).Query(ctx, fmt.Sprintf(`
+		SELECT %s FROM page_sections
+		WHERE section_type = 'trending_discover' AND enabled = true`, sectionColumns))
+	if err != nil {
+		return nil, fmt.Errorf("listing trending_discover sections: %w", err)
+	}
+	defer rows.Close()
+	return scanSections(rows)
+}
+
 // Update modifies an existing section.
 func (r *Repository) update(ctx context.Context, s *PageSection) error {
 	query := `UPDATE page_sections SET

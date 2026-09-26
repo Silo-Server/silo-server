@@ -28,6 +28,33 @@ func (s *PostgresUserStore) ListSectionOverrides(ctx context.Context, profileID,
 	return result, nil
 }
 
+// ListAllSectionOverrides returns every section override stored for this
+// account, across profiles and page scopes.
+func (s *PostgresUserStore) ListAllSectionOverrides(ctx context.Context) ([]userstore.SectionOverride, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT value
+		FROM user_settings
+		WHERE user_id = $1 AND starts_with(key, 'section_overrides:')`, s.userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []userstore.SectionOverride
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return nil, err
+		}
+		var overrides []userstore.SectionOverride
+		if err := json.Unmarshal([]byte(value), &overrides); err != nil {
+			return nil, fmt.Errorf("unmarshaling section overrides: %w", err)
+		}
+		result = append(result, overrides...)
+	}
+	return result, rows.Err()
+}
+
 func (s *PostgresUserStore) SaveSectionOverrides(ctx context.Context, profileID, scope, libraryID string, overrides []userstore.SectionOverride) error {
 	existing, err := s.listAllSectionOverrides(ctx, scope, libraryID)
 	if err != nil {

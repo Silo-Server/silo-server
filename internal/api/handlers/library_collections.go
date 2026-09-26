@@ -25,8 +25,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
@@ -44,7 +44,7 @@ type LibraryCollectionHandler struct {
 	Executor              *catalog.QueryExecutor
 	detailSvc             *catalog.DetailService
 	httpClient            *http.Client
-	ArtworkStore          artworkstore.Store
+	ArtworkStore          blobstore.Store
 	ArtworkResolver       artworkurl.Resolver
 	FrontendFS            fs.FS
 	SectionRepo           *sections.Repository
@@ -2641,6 +2641,8 @@ func (h *LibraryCollectionHandler) itemListResponseOf(ctx context.Context, item 
 		Year:              item.Year,
 		Genres:            item.Genres,
 		ContentRating:     item.ContentRating,
+		AdvisoryAge:       item.AdvisoryAge,
+		AdvisorySource:    item.AdvisorySource,
 		Status:            item.Status,
 		RatingIMDB:        item.RatingIMDB,
 		Overview:          item.Overview,

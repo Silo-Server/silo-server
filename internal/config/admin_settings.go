@@ -42,6 +42,20 @@ const SetupCompletedSettingKey = "setup.completed"
 // version of an item visible no matter which library it was opened from.
 const CatalogScopeVersionsToLibrarySettingKey = "catalog.scope_versions_to_library"
 
+// AccessUnratedContentSettingKey decides what a profile with a content-rating
+// ceiling sees for a title with no rating: an empty rating, or an explicit
+// "not rated" marker. "hide", the default, keeps such a title out of every
+// ceilinged viewer's catalog; "allow" shows it. A rating the server cannot
+// read is hidden from ceilinged profiles either way (see
+// access.UnrecognizedRatingAge). Profiles without a ceiling are unaffected.
+const AccessUnratedContentSettingKey = "access.unrated_content"
+
+// Values for AccessUnratedContentSettingKey.
+const (
+	AccessUnratedContentHide  = "hide"
+	AccessUnratedContentAllow = "allow"
+)
+
 // Shared server-setting keys used by playback and prepared-download policy
 // readers. Keep them here with the effective admin-setting defaults.
 const (
@@ -54,6 +68,10 @@ const (
 // edited through the administrator settings API.
 const ArtworkStorageReconcileCheckpointKey = "s3.public_storage_reconcile_checkpoint"
 
+// StorageTransitionTargetKey holds the machine-managed staged transition and
+// its post-restart recovery status.
+const StorageTransitionTargetKey = "storage.transition.target"
+
 // ArtworkStorageSweepCheckpointKey is the machine-managed cursor for the
 // artwork storage sweep, kept out of the administrator settings API for the
 // same reason as the reconcile checkpoint.
@@ -62,6 +80,10 @@ const ArtworkStorageSweepCheckpointKey = "artwork.storage_sweep_checkpoint"
 // MetadataImageWorkersSettingKey sizes the artwork encode pool. 0 means one
 // worker per CPU core, resolved when the task runs.
 const MetadataImageWorkersSettingKey = "metadata.image_workers"
+
+// MarkersDetectionWorkersSettingKey sizes local intro detection: how many
+// seasons are analyzed at once and how many ffmpeg processes read audio.
+const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
 
 // adminSettingDefaults is the effective value shown by the Admin UI when no
 // row exists in server_settings. Keep these values aligned with the runtime
@@ -108,8 +130,10 @@ var adminSettingDefaults = map[string]string{
 	"metadata.cache_images":                "true",
 	"artwork.storage_backend":              "auto",
 	"artwork.local_path":                   "/var/lib/silo/artwork",
-	"markers.mode":                         "local",
-	"markers.lazy_playback":                "false",
+	"markers.mode":                         "both",
+	"markers.lazy_playback":                "true",
+	MarkersDetectionWorkersSettingKey:      "1",
+	"markers.online_storage":               "stored",
 
 	"playback.ffmpeg_path":                           "",
 	playbackTranscodeDirSettingKey:                   DefaultTranscodeDir,
@@ -129,6 +153,7 @@ var adminSettingDefaults = map[string]string{
 	PlaybackTranscodeHardwareToneMapSettingKey:       "false",
 	PlaybackTranscodeSoftwareToneMapSettingKey:       "false",
 	CatalogScopeVersionsToLibrarySettingKey:          "false",
+	AccessUnratedContentSettingKey:                   AccessUnratedContentHide,
 	"playback.watched_threshold":                     "90",
 	"playback.min_resume_threshold":                  "5",
 	Allow4KTranscodeSettingKey:                       "false",
@@ -185,7 +210,7 @@ var adminSettingDefaults = map[string]string{
 	"download.artifact_max_bytes":            "0",
 
 	"policy.editor_enabled":                 "false",
-	"policy.eval_timeout_ms":                "25",
+	"policy.eval_timeout_ms":                "100",
 	"policy.decision_log_verbosity":         "digest",
 	"policy.decision_log_scope_sample_rate": "50",
 	"policy.decision_log_retention_days":    "14",
@@ -225,6 +250,10 @@ var adminSettingDefaults = map[string]string{
 	"taskmanager.history_retention_days": "30",
 	"taskmanager.history_keep_per_task":  "1000",
 
+	// Off: server addresses non-admin users supply for history import and
+	// webhook sync must be on the public internet (historyimport).
+	"media_servers.allow_private_destinations": "false",
+
 	"opslog.capture_level":            "info",
 	"opslog.retention_days":           "7",
 	"opslog.cleanup_interval_minutes": "15",
@@ -233,6 +262,10 @@ var adminSettingDefaults = map[string]string{
 	"overlays.enabled":                "true",
 	"signup.enabled":                  "false",
 	SetupCompletedSettingKey:          "false",
+
+	// Self-service password reset from the sign-in page; an administrator
+	// opts in.
+	"password_reset.self_service_enabled": "false",
 
 	"catalog.search.provider":                             "postgres",
 	"catalog.search.meilisearch.index":                    "silo_media_items",
@@ -356,12 +389,13 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", "recommendations.enabled",
 		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled",
 		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
-		"email.enabled", "signup.enabled", SetupCompletedSettingKey,
+		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,
 		"scanner.empty_trash_after_scan", "matcher.enable_tv_series_root_queue",
 		"matcher.enable_tv_series_group_queue", "policy.editor_enabled",
 		"overlays.enabled", "notifications.release_events_enabled", "notifications.fanout_enabled",
 		"notifications.ui_enabled", "notifications.webhooks_enabled",
-		"notifications.webhooks.allow_private_destinations", "notifications.email_enabled",
+		"notifications.webhooks.allow_private_destinations", "media_servers.allow_private_destinations",
+		"notifications.email_enabled",
 		"notifications.email.allow_per_episode", "notifications.discord_enabled",
 		"notifications.discord.allow_per_episode", "notifications.server_channels_enabled",
 		"notifications.server_channels.mention_requesters", "notifications.web_push_enabled",
@@ -369,6 +403,9 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
 		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style":
 		return normalizeAdminBool(key, value)
+
+	case AccessUnratedContentSettingKey:
+		return normalizeAdminEnum(key, value, AccessUnratedContentHide, AccessUnratedContentAllow)
 
 	case "artwork.storage_backend":
 		return normalizeAdminEnum(key, value, "auto", "local", "s3")
@@ -389,6 +426,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 100000)
 	case MetadataImageWorkersSettingKey:
 		return normalizeAdminInt(key, value, 0, 256)
+	case MarkersDetectionWorkersSettingKey:
+		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.chapter_thumbnail_workers", "playback.chapter_thumbnail_node_capacity":
 		return normalizeAdminInt(key, value, 1, 1024)
 	case "playback.watched_threshold":
@@ -730,7 +769,7 @@ func normalizeAdminDuration(key, value string) (string, error) {
 }
 
 // ValidateArtworkStorageSettings rejects an explicit S3 artwork backend with
-// no public bucket to back it. artworkstore.Open fails on that combination, so
+// no public bucket to back it. blobstore.Open fails on that combination, so
 // accepting it here would only surface as a fatal restart.
 func ValidateArtworkStorageSettings(effective map[string]string) error {
 	if strings.ToLower(strings.TrimSpace(effective["artwork.storage_backend"])) != "s3" {

@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -16,6 +17,9 @@ import (
 type compatEpisodeTarget struct {
 	Item         upstreamListItem
 	SeriesImages seriesImageSet
+	// SeasonImages carries only the season poster (ContentID, Poster*,
+	// UpdatedAt); it is empty when the loader has no season row.
+	SeasonImages seriesImageSet
 	SeasonID     string
 	SeasonName   string
 }
@@ -208,6 +212,9 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			e.tvdb_id,
 			COALESCE(e.season_id, ''),
 			COALESCE(se.title, ''),
+			COALESCE(se.poster_path, ''),
+			COALESCE(se.poster_thumbhash, ''),
+			COALESCE(se.updated_at, e.updated_at),
 			si.content_id,
 			si.title,
 			si.genres,
@@ -253,6 +260,9 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			episodeTvdbID    string
 			seasonID         string
 			seasonName       string
+			seasonPoster     string
+			seasonPosterTH   string
+			seasonUpdatedAt  time.Time
 			seriesID         string
 			seriesTitle      string
 			genres           []string
@@ -284,6 +294,9 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			&episodeTvdbID,
 			&seasonID,
 			&seasonName,
+			&seasonPoster,
+			&seasonPosterTH,
+			&seasonUpdatedAt,
 			&seriesID,
 			&seriesTitle,
 			&genres,
@@ -349,6 +362,17 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			},
 			SeasonID:   seasonID,
 			SeasonName: seasonName,
+		}
+		if seasonID != "" && seasonPoster != "" {
+			target := result[contentID]
+			target.SeasonImages = seriesImageSet{
+				ContentID:       seasonID,
+				PosterURL:       compatPresignImage(h.detailSvc, ctx, seasonPoster, "poster", compatCardImageSize),
+				PosterPath:      seasonPoster,
+				PosterThumbhash: seasonPosterTH,
+				UpdatedAt:       seasonUpdatedAt,
+			}
+			result[contentID] = target
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -499,6 +523,7 @@ func compatItemColumns(alias string) string {
 		"metadata_s3_path", "metadata_etag", "season_count",
 		"studios", "networks", "countries", "first_air_date", "last_air_date",
 		"matched_at", "status", "created_at", "updated_at",
+		"original_language",
 	}
 	prefixed := make([]string, len(cols))
 	for i, col := range cols {
@@ -520,6 +545,7 @@ func scanCompatMediaItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.MetadataS3Path, &item.MetadataEtag, &item.SeasonCount,
 			&item.Studios, &item.Networks, &item.Countries, &item.FirstAirDate, &item.LastAirDate,
 			&item.MatchedAt, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+			&item.OriginalLanguage,
 		); err != nil {
 			return nil, fmt.Errorf("scanning compat media item: %w", err)
 		}
@@ -549,4 +575,76 @@ func filterContentIDsForLibrary(ctx context.Context, checker libraryMembershipCh
 		}
 	}
 	return filtered, nil
+}
+
+// Jellyfin BaseItemDto.Type values whose versions are counted.
+const (
+	compatDTOTypeMovie   = "Movie"
+	compatDTOTypeEpisode = "Episode"
+)
+
+// applyListMediaSourceCounts replaces the list path's assumed single source
+// with the real number of accessible, present versions when the client asked
+// for MediaSourceCount (Jellyfin Web's multi-version badge on library grids).
+// It counts the same files the detail path lists as versions: a movie's files
+// by content_id, an episode's by episode_id. One grouped query per kind covers
+// the whole page; any failure keeps the list default.
+func (h *ItemsHandler) applyListMediaSourceCounts(ctx context.Context, session *Session, items []baseItemDTO, query itemsQuery) {
+	if len(items) == 0 || !query.requestedFields["mediasourcecount"] || h.codec == nil {
+		return
+	}
+	pool := h.compatPool()
+	if pool == nil {
+		return
+	}
+	byKind := map[string][]string{}
+	indexes := map[string][]int{}
+	for i, dto := range items {
+		var column string
+		switch dto.Type {
+		case compatDTOTypeMovie:
+			column = "content_id"
+		case compatDTOTypeEpisode:
+			column = "episode_id"
+		default:
+			continue
+		}
+		contentID, err := decodeItemID(h.codec, dto.ID)
+		if err != nil || contentID == "" {
+			continue
+		}
+		byKind[column] = append(byKind[column], contentID)
+		indexes[column+"\x00"+contentID] = append(indexes[column+"\x00"+contentID], i)
+	}
+	access := h.resolveAccessFilter(ctx, session)
+	for column, ids := range byKind {
+		args := []any{ids}
+		conditions, args := catalog.MediaFileAccessSQL("mf", access, args)
+		conditions = append([]string{"mf." + column + " = ANY($1)", "mf.missing_since IS NULL"}, conditions...)
+		rows, err := pool.Query(ctx, "SELECT mf."+column+", COUNT(*) FROM media_files mf WHERE "+strings.Join(conditions, " AND ")+" GROUP BY mf."+column, args...)
+		if err != nil {
+			slog.DebugContext(ctx, "jellycompat media source count failed", "component", "jellycompat", "error", err)
+			continue
+		}
+		counts := make(map[string]int, len(ids))
+		for rows.Next() {
+			var contentID string
+			var count int
+			if err := rows.Scan(&contentID, &count); err != nil {
+				break
+			}
+			counts[contentID] = count
+		}
+		rows.Close()
+		if rows.Err() != nil {
+			continue
+		}
+		// An item with no file the viewer may play leaves the count unset
+		// rather than keeping the mapper's single-source assumption.
+		for _, contentID := range ids {
+			for _, i := range indexes[column+"\x00"+contentID] {
+				items[i].MediaSourceCount = counts[contentID]
+			}
+		}
+	}
 }

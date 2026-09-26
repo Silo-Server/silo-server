@@ -2,14 +2,15 @@ package historyimport
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
-	"net/http"
 )
 
 // PlexAdminProvider fetches watch history for a specific Plex account using an admin token.
 // It uses the PMS session history API (GET /status/sessions/history/all?accountID=X)
 // rather than the per-user library endpoints used by PlexServerProvider.
+//
+// Session history only records playback that reached the watched threshold. Titles
+// marked watched without playing and resume positions are per-user library state
+// the admin token cannot read, so this provider never sees them.
 type PlexAdminProvider struct {
 	client    *PlexClient
 	baseURL   string
@@ -38,7 +39,16 @@ func (p *PlexAdminProvider) Fetch(ctx context.Context) ([]Record, []string, erro
 
 	var warnings []string
 	// Enrich episodes with series-level metadata (for external IDs on the series).
-	seriesMeta := p.fetchSeriesMetadata(ctx, items, &warnings)
+	var seriesKeys []string
+	for _, item := range items {
+		if item.Type == KindEpisode {
+			seriesKeys = append(seriesKeys, item.GrandparentRatingKey)
+		}
+	}
+	seriesMeta, err := fetchPlexSeriesMetadata(ctx, p.client, p.baseURL, p.token, seriesKeys, &warnings)
+	if err != nil {
+		return nil, warnings, err
+	}
 	itemMeta, err := p.fetchItemMetadata(ctx, items, seriesMeta, &warnings)
 	if err != nil {
 		return nil, warnings, err
@@ -70,9 +80,9 @@ func (p *PlexAdminProvider) Fetch(ctx context.Context) ([]Record, []string, erro
 // fetchItemMetadata resolves external provider IDs omitted by Plex's session-history
 // endpoint. Only movies and episodes are looked up: the matcher rejects every other
 // kind, so fetching metadata for music tracks or clips would be wasted requests.
-// Rating keys are fetched once each, in batches, because one item can appear many
-// times in the raw history. Individual failures stay best-effort so other records
-// can still import; only context cancellation aborts the sweep.
+// Episodes whose series already carries ids match on series ids plus season/episode
+// numbers and are skipped. Rating keys are fetched once each, in batches, because
+// one item can appear many times in the raw history.
 func (p *PlexAdminProvider) fetchItemMetadata(
 	ctx context.Context,
 	items []PlexHistoryItem,
@@ -92,7 +102,6 @@ func (p *PlexAdminProvider) fetchItemMetadata(
 			resolved[item.RatingKey] = struct{}{}
 		}
 	}
-	seen := make(map[string]struct{}, len(eligible))
 	var pending []string
 	for _, item := range items {
 		if _, ok := eligible[item.RatingKey]; !ok {
@@ -101,77 +110,35 @@ func (p *PlexAdminProvider) fetchItemMetadata(
 		if _, ok := resolved[item.RatingKey]; ok {
 			continue
 		}
-		if _, ok := seen[item.RatingKey]; ok {
-			continue
-		}
-		seen[item.RatingKey] = struct{}{}
 		pending = append(pending, item.RatingKey)
 	}
+	pending = uniqueNonEmpty(pending)
 
-	result := make(map[string]*PlexItem, len(pending))
-	var firstErr error
-	noteErr := func(err error, keys []string) {
-		slog.WarnContext(ctx, "plex admin history import: failed to fetch item metadata",
-			"component", "historyimport", "rating_keys", keys, "error", err)
-		if firstErr == nil {
-			firstErr = err
-		}
+	sweep, err := p.client.fetchMetadataByKey(ctx, p.baseURL, p.token, pending)
+	if err != nil {
+		return nil, err
 	}
-
-	for start := 0; start < len(pending); start += plexMetadataBatchSize {
-		batch := pending[start:min(start+plexMetadataBatchSize, len(pending))]
-		metas, err := p.client.FetchMetadataBatch(ctx, p.baseURL, p.token, batch)
-		if err == nil {
-			for i := range metas {
-				result[metas[i].RatingKey] = &metas[i]
-			}
-			continue
-		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if len(batch) == 1 {
-			noteErr(err, batch)
-			continue
-		}
-		// Plex can return 404 for a whole batch when only one key was deleted.
-		// Retry that case per key, but do not multiply systematic failures such as
-		// authentication errors, outages, or timeouts into one request per item.
-		noteErr(err, batch)
-		if !isPlexHTTPStatus(err, http.StatusNotFound) {
-			continue
-		}
-		for _, key := range batch {
-			meta, err := p.client.FetchMetadata(ctx, p.baseURL, p.token, key)
-			if err != nil {
-				if ctx.Err() != nil {
-					return nil, ctx.Err()
-				}
-				noteErr(err, []string{key})
-				continue
-			}
-			if meta != nil {
-				result[key] = meta
-			}
-		}
-	}
-
 	unresolved := 0
 	for _, key := range pending {
-		meta, ok := result[key]
+		meta, ok := sweep.items[key]
 		if !ok || !hasMatchablePlexGuid(meta.Guid) {
 			unresolved++
 		}
 	}
 	if unresolved > 0 {
 		*warnings = append(*warnings, plexUnresolvedIDsWarning(
-			"plex admin history", "unique items", unresolved, len(pending), firstErr))
+			"plex admin history", "unique items", unresolved, len(pending), sweep.firstErr, sweep.aborted))
 	}
-	return result, nil
+	return sweep.items, nil
 }
 
+// enrichPlexHistoryItem fills what a sparse history row omits from the item's full
+// metadata, when that was fetched.
 func enrichPlexHistoryItem(item PlexHistoryItem, meta *PlexItem) PlexHistoryItem {
 	item.Guid, item.Year = applyPlexMetadataFallback(item.Guid, item.Year, meta)
+	if meta != nil && item.Duration == 0 {
+		item.Duration = meta.Duration
+	}
 	return item
 }
 
@@ -181,34 +148,4 @@ func hasMatchableSeriesFallback(item PlexHistoryItem, seriesMeta map[string]*Ple
 	}
 	series := seriesMeta[item.GrandparentRatingKey]
 	return series != nil && hasMatchablePlexGuid(series.Guid)
-}
-
-// fetchSeriesMetadata fetches metadata for all unique series referenced by episode items.
-func (p *PlexAdminProvider) fetchSeriesMetadata(ctx context.Context, items []PlexHistoryItem, warnings *[]string) map[string]*PlexItem {
-	seen := make(map[string]struct{})
-	var seriesKeys []string
-	for _, item := range items {
-		if item.Type != "episode" || item.GrandparentRatingKey == "" {
-			continue
-		}
-		if _, ok := seen[item.GrandparentRatingKey]; ok {
-			continue
-		}
-		seen[item.GrandparentRatingKey] = struct{}{}
-		seriesKeys = append(seriesKeys, item.GrandparentRatingKey)
-	}
-
-	result := make(map[string]*PlexItem, len(seriesKeys))
-	for _, key := range seriesKeys {
-		meta, err := p.client.FetchMetadata(ctx, p.baseURL, p.token, key)
-		if err != nil {
-			slog.WarnContext(ctx, "plex admin history import: failed to fetch series metadata", "component", "historyimport", "rating_key", key, "error", err)
-			*warnings = append(*warnings, fmt.Sprintf("failed to fetch series metadata for %s: %v", key, err))
-			continue
-		}
-		if meta != nil {
-			result[key] = meta
-		}
-	}
-	return result
 }

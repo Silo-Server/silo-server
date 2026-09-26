@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -92,6 +93,37 @@ type Server struct {
 	// countProbesInFlight overrides the detached-probe count the re-probe route
 	// refuses on. Tests set it; production leaves it nil.
 	countProbesInFlight func() int
+
+	// networkAccess reports the network access provider plugins running beside
+	// this proxy, for the API's health pull. Nil until a plugin host is wired
+	// (SetNetworkAccessStatus), which leaves the health field absent — the same
+	// as a build that predates it.
+	networkAccess NetworkAccessStatusSource
+	// networkAccessHost drives the provider instances for the bearer
+	// network-access routes; nil answers 503 there. See network_access.go.
+	networkAccessHost NetworkAccessProviderHost
+	// ingressTokens validates the X-Silo-Ingress-Token a provider plugin
+	// stamps on requests it proxies to this listener, so the access path is
+	// known here too. Nil accepts no tokens (the header is still stripped).
+	ingressTokens *netaccess.Registry
+}
+
+// SetIngressTokens wires the ingress-token registry the listener validates
+// provider-stamped requests against. Call it during construction.
+func (s *Server) SetIngressTokens(registry *netaccess.Registry) {
+	s.ingressTokens = registry
+}
+
+// NetworkAccessStatusSource answers what a proxy reports about its network
+// access providers. *netaccess.StatusCache satisfies it.
+type NetworkAccessStatusSource interface {
+	NodeNetworkAccess() netaccess.NodeNetworkAccess
+}
+
+// SetNetworkAccessStatus wires the provider status source /health reports
+// from. Call it during construction; nil leaves the field absent.
+func (s *Server) SetNetworkAccessStatus(source NetworkAccessStatusSource) {
+	s.networkAccess = source
 }
 
 type remoteArtifactMissReporter interface {
@@ -102,17 +134,10 @@ type remoteArtifactMissReporter interface {
 // tracker.
 func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Server {
 	server := &Server{
-		watcher: watcher,
-		tracker: tracker,
-		// No overall timeout — stream bodies are long-lived. Hung nodes are
-		// bounded by the transport's response-header timeout instead.
-		httpClient: &http.Client{
-			Transport: newStreamTransport(),
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
-		egress: newEgressMeter(),
+		watcher:    watcher,
+		tracker:    tracker,
+		httpClient: transcodeproxy.NodeClient(),
+		egress:     newEgressMeter(),
 		subCache: playback.NewSubtitleCache(func() string {
 			return watcher.Config().Playback.TranscodeDir
 		}),
@@ -184,20 +209,6 @@ func writeStreamDenied(w http.ResponseWriter) {
 	http.Error(w, "playback session ended", http.StatusGone)
 }
 
-// newStreamTransport tunes the proxy→transcode-node connection pool. Many
-// concurrent viewers fan their segment fetches through one proxy→node pair,
-// and Go's default of 2 idle connections per host causes constant connection
-// churn (and TLS re-handshakes) under load. The response-header timeout
-// bounds requests to a hung node; the longest legitimate server-side wait is
-// the 30s manifest-readiness poll on the transcode node.
-func newStreamTransport() *http.Transport {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.MaxIdleConns = 128
-	t.MaxIdleConnsPerHost = 32
-	t.ResponseHeaderTimeout = 60 * time.Second
-	return t
-}
-
 // sealedHandler is what Handler hands out: the finished router behind an
 // unexported field and a ServeHTTP method, nothing else, so no assertion or
 // type switch recovers a registration surface from it, and the route
@@ -227,6 +238,9 @@ func (s *Server) router() chi.Router {
 	r := chi.NewRouter()
 	if s.clientIP != nil {
 		r.Use(clientip.Middleware(s.clientIP))
+	}
+	if s.ingressTokens != nil {
+		r.Use(netaccess.Middleware(s.ingressTokens))
 	}
 	// hls.js uses XHR for manifest/segment fetches which are subject to
 	// CORS when the proxy runs on a different origin than the web app.
@@ -277,6 +291,8 @@ func (s *Server) router() chi.Router {
 		r.Get("/stream/v3/{session_id}/segment/{name}", observeProxy(s.telemetry, http.MethodGet, "/stream/v3/{session_id}/segment/{name}", s.handleGrantTranscodeSegment))
 		r.Get("/stream/subtitles/{token}/{track}/fonts", observeProxy(s.telemetry, http.MethodGet, "/stream/subtitles/{token}/{track}/fonts", s.handleSubtitleFonts))
 		r.Get("/stream/subtitles/{token}/{track}", observeProxy(s.telemetry, http.MethodGet, "/stream/subtitles/{token}/{track}", s.handleSubtitle))
+		r.Head("/stream/theme/{token}", observeProxy(s.telemetry, http.MethodHead, "/stream/theme/{token}", s.handleThemeAudio))
+		r.Get("/stream/theme/{token}", observeProxy(s.telemetry, http.MethodGet, "/stream/theme/{token}", s.handleThemeAudio))
 		r.Head("/downloads/file/{token}", observeProxy(s.telemetry, http.MethodHead, "/downloads/file/{token}", s.handleDownloadFile))
 		r.Get("/downloads/file/{token}", observeProxy(s.telemetry, http.MethodGet, "/downloads/file/{token}", s.handleDownloadFile))
 	})
@@ -289,6 +305,12 @@ func (s *Server) router() chi.Router {
 		r.Post("/admin/reload-config", s.handleReloadConfig)
 		r.Post("/admin/reprobe-capabilities", s.handleReprobeCapabilities)
 		r.Get("/status", s.handleStatus)
+		// Network access providers running beside this proxy; the API fans its
+		// admin status/connect/disconnect out to these with the node bearer.
+		r.Get("/network-access/status", s.handleNetworkAccessStatus)
+		r.Get("/network-access/{provider}/status", s.handleNetworkAccessProviderStatus)
+		r.Post("/network-access/{provider}/connect", s.handleNetworkAccessConnect)
+		r.Post("/network-access/{provider}/disconnect", s.handleNetworkAccessDisconnect)
 	})
 	return r
 }
@@ -385,7 +407,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 		return playback.HWAccelInfo{}, err
 	}
 	info.Transformations = registry.Advertised()
-	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1}
+	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureThemeAudioEgressV1}
 	// Advertised before the hash is taken, because it is part of what the hash
 	// covers: a build that needs longer reaches the sweep rather than sitting
 	// behind an unchanged identity.
@@ -474,6 +496,12 @@ type healthResponse struct {
 	SampledAt   time.Time                        `json:"sampled_at,omitzero"`
 	// Build identifies the binary this proxy runs; see transcodenode.HealthResponse.
 	Build buildinfo.Info `json:"build"`
+	// NetworkAccess is the last status of each network access provider plugin
+	// running beside this proxy, keyed by provider slug. The API stores it on
+	// the node row and hands overlay clients the matching origin. Absent when no
+	// provider runs here; carries no auth URL or error text, since this route
+	// takes no credential.
+	NetworkAccess netaccess.NodeNetworkAccess `json:"network_access,omitempty"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -482,6 +510,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		activeJobs = s.tracker.ActiveCount()
 	}
 	snapshot := s.metrics.Snapshot().RedactPaths()
+	var networkAccess netaccess.NodeNetworkAccess
+	if s.networkAccess != nil {
+		networkAccess = s.networkAccess.NodeNetworkAccess()
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(healthResponse{
 		Status:           "ok",
@@ -493,6 +525,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		Attribution:      snapshot.Attribution,
 		SampledAt:        snapshot.SampledAt,
 		Build:            buildinfo.Current(),
+		NetworkAccess:    networkAccess,
 	})
 }
 
@@ -797,7 +830,10 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 		http.Error(w, "download unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	client := downloadprepare.HTTPPreparer{Client: s.httpClient}
+	// The zero preparer uses the artifact client with a bounded response-header
+	// wait, as the API relay does. s.httpClient waits on headers without a
+	// deadline for transcode rebuilds, which an artifact read never needs.
+	client := downloadprepare.HTTPPreparer{}
 	resp, err := client.Open(r.Context(), claims.TranscodeNode, cfg.Auth.JWTSecret, claims.DownloadArtifactID, r.Method, r.Header)
 	if err != nil {
 		slog.WarnContext(r.Context(), "download artifact relay failed", "component", "proxy", "artifact_id", claims.DownloadArtifactID, "node", claims.TranscodeNode, "error", err)

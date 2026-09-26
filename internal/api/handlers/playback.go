@@ -26,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -205,6 +206,9 @@ type PlaybackHandler struct {
 	// InstallationID is diagnostics.ServerInstanceID; v2 playback mutations
 	// carry it and are refused when it differs. Empty leaves v2 unconfigured.
 	InstallationID string
+	// WatchTogetherAvailable is set when the room service and authenticated
+	// socket are wired, so capability discovery reflects their dependencies.
+	WatchTogetherAvailable bool
 	// progressSideEffectLocks serializes v2 progress side effects per session
 	// (see persistProgressV2).
 	progressSideEffectLocks sync.Map
@@ -234,8 +238,7 @@ type PlaybackHandler struct {
 	IntroAnalyzer          IntroEpisodeAnalyzer
 	IntroRepository        PlaybackIntroEligibilityChecker
 	MarkerRegistry         *markers.Registry
-	MarkerResolver         markers.ExternalIDResolver
-	MarkerUpserter         PlaybackMarkerUpserter
+	MarkerPopulation       MarkerPopulationService
 	MarkerUpdateNotifier   PlaybackMarkerUpdateNotifier
 	MarkerLazyContext      context.Context
 	MarkerLazyInFlight     sync.Map
@@ -250,6 +253,9 @@ type PlaybackHandler struct {
 	PlaybackConfig func() config.PlaybackConfig
 	FFmpegLogSink  playback.FFmpegLogSink
 	copySeekAnchor copySeekAnchorResolver
+	// autoTranscodePipelineV3 is a test seam for the hw_accel=auto fallback
+	// pipeline; nil uses playback.NewAutoTranscodePipeline.
+	autoTranscodePipelineV3 func(context.Context, playback.TranscodeOpts) *playback.AutoTranscodePipeline
 	// beforeIdentityLifecycleLockV3 is a test seam for proving that identity
 	// route authority remains unpublished until the shared lifecycle boundary.
 	beforeIdentityLifecycleLockV3 func()
@@ -797,6 +803,8 @@ func identityRecipeCard(s *playback.Session) playback.RecipeCard {
 		card = playback.NewDirectRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID)
 	}
 	card.OriginalStartedAt = s.StartedAt
+	card.RoutingNetworkProvider = s.RoutingNetworkProvider
+	card.StreamLocation = s.StreamLocation
 	card.RoutingWorkload = s.RoutingWorkload
 	card.RoutingExecution = s.RoutingExecution
 	card.RoutingExecutionNodeID = s.RoutingExecutionNodeID
@@ -924,9 +932,9 @@ func (h *PlaybackHandler) resolveOriginalLanguage(ctx context.Context, file *mod
 }
 
 // resolvedPlaybackAudioLanguage returns the effective playback.audio_language
-// for one canonical settings context. It may return
-// playback.OriginalLanguageSentinel, which the caller resolves to a concrete
-// language. Returns "" when nothing is stored: the contract default is null,
+// for one canonical settings context. It may return an original-language
+// preference (playback.IsOriginalLanguagePreference), which the caller
+// resolves to a concrete language. Returns "" when nothing is stored: the contract default is null,
 // "no preference". Resolution and decoding failures are returned so playback
 // does not silently substitute a different track.
 func resolvedPlaybackAudioLanguage(ctx context.Context, store userstore.UserStore, rc settingsresolve.Context) (string, error) {
@@ -985,9 +993,13 @@ func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback
 	}
 
 	duration := float64(file.Duration)
-	if err := store.UpdateProgress(ctx, session.ProfileID, targetID, session.Position, duration, h.playbackThresholds(ctx)); err != nil {
+	completed, err := userstore.UpdateProgressReportingCompletion(ctx, store, session.ProfileID, targetID, session.Position, duration, h.playbackThresholds(ctx))
+	if err != nil {
 		slog.ErrorContext(ctx, "failed to persist progress", "component", "api", "session", session.ID, "error", err)
-	} else {
+	} else if completed {
+		// A heartbeat that only moves the position leaves the taste profile
+		// alone; the stop (persistStopAndHistory) refreshes it for the play,
+		// and marking the item watched refreshes it here.
 		triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, session.UserID, session.ProfileID)
 	}
 
@@ -1150,6 +1162,16 @@ func (h *PlaybackHandler) syncSessionsNow(ctx context.Context, reason string) {
 	}
 	if err := h.SessionSyncer.SyncNow(ctx); err != nil {
 		slog.ErrorContext(ctx, "failed to sync sessions", "component", "api", "reason", reason, "error", err)
+	}
+}
+
+// syncSessionsOnPauseChange syncs after a progress sample only when it flips
+// the pause state. A sync upserts every session on this node and invalidates
+// the admin session caches on every replica, which is too much for each
+// heartbeat; position alone waits for the periodic reconcile tick.
+func (h *PlaybackHandler) syncSessionsOnPauseChange(ctx context.Context, wasPaused, isPaused bool) {
+	if wasPaused != isPaused {
+		h.syncSessionsNow(ctx, "progress_pause")
 	}
 }
 
@@ -1387,8 +1409,9 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var envelope struct {
-		ProtocolVersion *int `json:"protocol_version"`
-		Capabilities    *struct {
+		ProtocolVersion        *int            `json:"protocol_version"`
+		AllowAlternateVersions json.RawMessage `json:"allow_alternate_versions"`
+		Capabilities           *struct {
 			VideoEvidence *string `json:"video_evidence"`
 			AudioEvidence *string `json:"audio_evidence"`
 		} `json:"client_capabilities"`
@@ -1402,6 +1425,14 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 		upgrade := playback.LegacyUpgradeErrorV3()
 		writeError(w, http.StatusUpgradeRequired, upgrade.Error, upgrade.Message)
 		return
+	}
+	// V1 remains frozen: ignore the v2-only fixed-source control just as the
+	// legacy decoder ignored this unknown field before it was introduced.
+	if len(envelope.AllowAlternateVersions) > 0 {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(body, &fields) // The envelope was validated above.
+		delete(fields, "allow_alternate_versions")
+		body, _ = json.Marshal(fields)
 	}
 	h.handleStartPlaybackV3(w, r, body)
 }
@@ -1450,7 +1481,7 @@ func (h *PlaybackHandler) HandleUpdateProgress(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update progress")
 		return
 	}
-	h.syncSessionsNow(r.Context(), "progress")
+	h.syncSessionsOnPauseChange(r.Context(), wasPaused, req.IsPaused)
 
 	// Persist progress to UserStore (best-effort).
 	if sess, getErr := h.sessionMgr.GetSession(sessionID); getErr == nil {
@@ -1963,9 +1994,13 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 // never receives a token, and therefore never a proxy origin either, since a
 // proxy authenticates from the token in the URL path alone. It gets the
 // API-local manifest path, which the client fetches with its own credential.
-func (h *PlaybackHandler) buildProxyManifestURL(card playback.RecipeCard, proxyNode *nodepool.Node, requireMediaAuth bool) string {
+//
+// path is the client's access path. A proxy with no origin on it is the same
+// as no proxy: the manifest stays API-local and this server relays the node.
+func (h *PlaybackHandler) buildProxyManifestURL(card playback.RecipeCard, proxyNode *nodepool.Node, requireMediaAuth bool, path netaccess.Path) string {
 	localURL := fmt.Sprintf("/playback/transcode/%s/master.m3u8", card.SessionID)
-	if proxyNode == nil {
+	base := proxyNode.ClientURLFor(path)
+	if base == "" {
 		return appendStreamToken(localURL, h.signSessionToken(card, requireMediaAuth))
 	}
 	card.RoutingEgressNodeID = proxyNode.ID
@@ -1973,7 +2008,7 @@ func (h *PlaybackHandler) buildProxyManifestURL(card playback.RecipeCard, proxyN
 	if token == "" {
 		return appendStreamToken(localURL, token)
 	}
-	return nodepool.NodeEndpoint(proxyNode.ClientURL(), "/stream/transcode/"+token+"/master.m3u8")
+	return nodepool.NodeEndpoint(base, "/stream/transcode/"+token+"/master.m3u8")
 }
 
 // proxyToTranscodeNode forwards a request to the remote transcode node.
@@ -2027,7 +2062,7 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	resp, err := telemetry.DoTrustedNode(http.DefaultClient, req, "stream")
+	resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), req, "stream")
 	if err != nil {
 		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "api", "error", err, "url", targetURL, "playback_session_id", sessionID)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
@@ -2075,7 +2110,7 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 	fullSize := transcodeproxy.FullRepresentationSize(resp)
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
 		sw.CompletedFullResponse(fullSize) {
-		if ackErr := transcodeproxy.Acknowledge(r.Context(), http.DefaultClient, transcodeNodeURL+path, h.JWTSecret, generation); ackErr != nil {
+		if ackErr := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), transcodeNodeURL+path, h.JWTSecret, generation); ackErr != nil {
 			slog.WarnContext(r.Context(), "acknowledge transcode segment completion", "component", "api", "error", ackErr, "playback_session_id", sessionID)
 		}
 	}

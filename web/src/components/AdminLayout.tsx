@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Outlet, useLocation } from "react-router";
 import AdminSidebar from "@/components/AdminSidebar";
 import { AdminSectionCommandDialog } from "@/components/AdminSectionCommandDialog";
@@ -55,6 +55,20 @@ export default function AdminLayout() {
     documentTitle === "Admin" ? "Dashboard" : documentTitle.replace(/^Admin /, "");
 
   useDocumentTitle(documentTitle);
+
+  // Publish this shell on the document root, as Layout does with
+  // `data-app-shell`. Out-of-tree chrome (the audiobook MiniBar, which stays
+  // mounted across admin navigation) sets its left edge from
+  // `--app-sidebar-offset`, and app.css resolves that to this shell's fixed
+  // 240px sidebar only while the attribute is present; otherwise the bar
+  // would start at 0px and paint over the bottom of the admin navigation.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.dataset.adminShell = "true";
+    return () => {
+      delete root.dataset.adminShell;
+    };
+  }, []);
 
   useEffect(() => {
     const desktopMedia = window.matchMedia(ADMIN_DESKTOP_MEDIA_QUERY);

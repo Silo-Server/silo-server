@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -218,17 +219,18 @@ type episodeListSource interface {
 
 // directContentService implements ContentService by calling catalog repos directly.
 type directContentService struct {
-	browseRepo      browseSource
-	itemRepo        itemAccessSource
-	searchProvider  catalog.CatalogSearchProvider
-	seasonRepo      seasonListSource
-	episodeRepo     episodeListSource
-	detailSvc       *catalog.DetailService
-	folderRepo      folderListSource
-	storeProvider   userstore.UserStoreProvider
-	accessFilter    AccessFilterResolver
-	posterPresigner LibraryPosterPresigner
-	presignTTL      time.Duration
+	catalogUserState bool
+	browseRepo       browseSource
+	itemRepo         itemAccessSource
+	searchProvider   catalog.CatalogSearchProvider
+	seasonRepo       seasonListSource
+	episodeRepo      episodeListSource
+	detailSvc        *catalog.DetailService
+	folderRepo       folderListSource
+	storeProvider    userstore.UserStoreProvider
+	accessFilter     AccessFilterResolver
+	posterPresigner  LibraryPosterPresigner
+	presignTTL       time.Duration
 }
 
 func newDirectContentService(
@@ -269,21 +271,31 @@ func applyCompatPresentationLibrary(filter catalog.AccessFilter, libraryID *int)
 	return filter
 }
 
+// clampMaxContentRating combines the profile's ceiling with the MaxOfficialRating
+// a Jellyfin client asked for, keeping whichever admits less. A client value
+// that sets no usable age is ignored rather than allowed to hide the whole
+// library.
 func clampMaxContentRating(existing, requested string) string {
-	existing = strings.TrimSpace(existing)
-	requested = strings.TrimSpace(requested)
-	switch {
-	case existing == "":
-		return requested
-	case requested == "":
-		return existing
-	case access.RatingAllowed(existing, requested):
-		return existing
-	case access.RatingAllowed(requested, existing):
-		return requested
-	default:
+	// The client's value is vetted FIRST, before the profile's ceiling is even
+	// looked at: an absent, blank or unrecognized MaxOfficialRating is dropped
+	// here, so it can never reach StricterCeiling and become a
+	// deny-everything ceiling the profile never had.
+	if _, ok := access.AgeForCeiling(requested); !ok {
 		return existing
 	}
+	if !access.HasCeiling(existing) {
+		return requested
+	}
+	return access.StricterCeiling(existing, requested)
+}
+
+// clampMaturityLimits returns the viewer's maturity limits with the content
+// rating ceiling clamped to a Jellyfin client's MaxOfficialRating (see
+// clampMaxContentRating). Every other limit passes through unchanged, so a
+// client can tighten the ceiling but never drop the advisory-age limit.
+func clampMaturityLimits(limits access.MaturityLimits, requested string) access.MaturityLimits {
+	limits.MaxContentRating = clampMaxContentRating(limits.MaxContentRating, requested)
+	return limits
 }
 
 func (s *directContentService) ListUserLibraries(ctx context.Context, session *Session) ([]upstreamUserLibrary, error) {
@@ -377,6 +389,11 @@ func (s *directContentService) accessibleLibraryIDs(ctx context.Context, filter 
 func (s *directContentService) BrowseItems(ctx context.Context, session *Session, params url.Values) (*upstreamBrowseResponse, error) {
 	filter := s.resolveFilter(ctx, session)
 	isPlayedFilter := params.Get("is_played") // "", "true", or "false"
+	var played *bool
+	if isPlayedFilter != "" && parseBool(params.Get("compose_state"), false) {
+		played = new(parseBool(isPlayedFilter, false))
+		isPlayedFilter = ""
+	}
 	contentIDs := parseContentIDParam(params.Get("content_ids"))
 	includeTotal := parseBool(params.Get("include_total"), true)
 
@@ -398,21 +415,84 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 	}
 
 	filters := catalog.BrowseFilters{
-		Type:               compatScopedTypes(params.Get("type")),
-		Genre:              params.Get("genre"),
-		NamePrefix:         params.Get("name_prefix"),
-		ContentIDs:         contentIDs,
-		LibraryID:          catalog.ParseIntParam(params.Get("library_id")),
-		LibraryIDs:         filter.AllowedLibraryIDs,
-		DisabledLibraryIDs: filter.DisabledLibraryIDs,
-		MaxContentRating:   clampMaxContentRating(filter.MaxContentRating, params.Get("max_content_rating")),
-		PersonID:           catalog.ParseInt64Param(params.Get("person_id")),
-		Sort:               params.Get("sort"),
-		Order:              params.Get("order"),
-		Limit:              fetchLimit,
-		MaxLimit:           compatBrowseMaxLimit,
-		Offset:             requestedOffset,
-		RequireBackdrop:    parseBool(params.Get("require_backdrop"), false),
+		Type:                    compatScopedTypes(params.Get("type")),
+		UserID:                  session.StreamAppUserID,
+		ProfileID:               session.ProfileID,
+		IsPlayed:                played,
+		IsFavorite:              parseBool(params.Get("is_favorite"), false),
+		IsResumable:             parseBool(params.Get("is_resumable"), false),
+		Genre:                   params.Get("genre"),
+		Genres:                  splitNonemptyGenres(params.Get("genres")),
+		Years:                   parseBrowseYears(params.Get("years")),
+		SearchTerm:              params.Get("search_term"),
+		NamePrefix:              params.Get("name_prefix"),
+		ContentIDs:              contentIDs,
+		NameLessThan:            params.Get("name_less_than"),
+		NameStartsWithOrGreater: params.Get("name_at_least"),
+		ExcludeContentIDs:       parseContentIDParam(params.Get("exclude_content_ids")),
+		Studios:                 splitNonemptyGenres(params.Get("studios")),
+		OfficialRatings:         splitNonemptyGenres(params.Get("official_ratings")),
+		MinCommunityRating:      parseFloatParam(params.Get("min_community_rating")),
+		MinPremiereDate:         params.Get("min_premiere_date"),
+		MaxPremiereDate:         params.Get("max_premiere_date"),
+		LibraryID:               catalog.ParseIntParam(params.Get("library_id")),
+		LibraryIDs:              filter.AllowedLibraryIDs,
+		DisabledLibraryIDs:      filter.DisabledLibraryIDs,
+		MaturityLimits:          clampMaturityLimits(filter.MaturityLimits, params.Get("max_content_rating")),
+		PersonID:                catalog.ParseInt64Param(params.Get("person_id")),
+		Sort:                    params.Get("sort"),
+		Order:                   params.Get("order"),
+		Limit:                   fetchLimit,
+		MaxLimit:                compatBrowseMaxLimit,
+		Offset:                  requestedOffset,
+		RequireBackdrop:         parseBool(params.Get("require_backdrop"), false),
+		AudioLanguages:          splitCommaValues([]string{params.Get("audio_languages")}),
+		SubtitleLanguages:       splitCommaValues([]string{params.Get("subtitle_languages")}),
+		MaxPlaybackQuality:      filter.MaxPlaybackQuality,
+	}
+	// Limit=0 wants only the total. Count directly unless played state is a
+	// profile overlay applied after the catalog query.
+	if parseBool(params.Get("count_only"), false) && isPlayedFilter == "" &&
+		(s.catalogUserState || (!filters.IsFavorite && filters.IsPlayed == nil && !filters.IsResumable)) {
+		if counter, ok := s.browseRepo.(interface {
+			BrowseCount(context.Context, catalog.BrowseFilters) (int, error)
+		}); ok {
+			total, err := counter.BrowseCount(ctx, filters)
+			if err != nil {
+				return nil, fmt.Errorf("browse items: %w", err)
+			}
+			return &upstreamBrowseResponse{Total: total, Items: []upstreamListItem{}}, nil
+		}
+	}
+	if !s.catalogUserState && (filters.IsFavorite || filters.IsPlayed != nil || filters.IsResumable || isPlayedFilter != "") {
+		if isPlayedFilter != "" {
+			filters.IsPlayed = new(parseBool(isPlayedFilter, false))
+		}
+		filters.Limit = requestedLimit
+		result, err := s.browseConfiguredUserState(ctx, session, filters, includeTotal, func(page catalog.BrowseFilters) ([]upstreamListItem, bool, error) {
+			result, err := s.browseRepo.BrowsePage(ctx, page, false)
+			if err != nil {
+				return nil, false, err
+			}
+			localized := result.Items
+			if s.detailSvc != nil {
+				if models, err := s.detailSvc.LocalizeItemModels(ctx, result.Items, filter); err == nil && models != nil {
+					localized = models
+				}
+			}
+			items := make([]upstreamListItem, 0, len(localized))
+			for _, item := range localized {
+				items = append(items, mediaItemToListItem(item))
+			}
+			return items, result.HasMore, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		presignCompatListItems(ctx, s.detailSvc, result.Items)
+		fillListItemDurations(ctx, s.detailSvc, result.Items)
+		s.EnrichSeriesUserData(ctx, session, result.Items)
+		return result, nil
 	}
 
 	// A no-parentId recently_added browse (the /Items/Latest hot path) would
@@ -975,14 +1055,47 @@ func (s *directContentService) ListItemFilters(ctx context.Context, session *Ses
 		LibraryID:          catalog.ParseIntParam(params.Get("library_id")),
 		LibraryIDs:         filter.AllowedLibraryIDs,
 		DisabledLibraryIDs: filter.DisabledLibraryIDs,
-		MaxContentRating:   clampMaxContentRating(filter.MaxContentRating, params.Get("max_content_rating")),
+		MaturityLimits:     clampMaturityLimits(filter.MaturityLimits, params.Get("max_content_rating")),
 	}
 
 	genres, err := s.browseRepo.ListGenres(ctx, filters)
 	if err != nil {
 		return nil, fmt.Errorf("list genres: %w", err)
 	}
-	return &upstreamItemFiltersResponse{Genres: genres}, nil
+	result := &upstreamItemFiltersResponse{Genres: genres, Studios: []string{}, OfficialRatings: []string{}, Years: []int{}}
+	if facets, ok := s.browseRepo.(interface {
+		ListStudios(context.Context, catalog.BrowseFilters) ([]string, error)
+		ListContentRatings(context.Context, catalog.BrowseFilters) ([]string, error)
+		ListYears(context.Context, catalog.BrowseFilters) ([]int, error)
+	}); ok {
+		if result.Studios, err = facets.ListStudios(ctx, filters); err != nil {
+			return nil, err
+		}
+		if result.OfficialRatings, err = facets.ListContentRatings(ctx, filters); err != nil {
+			return nil, err
+		}
+		if result.Years, err = facets.ListYears(ctx, filters); err != nil {
+			return nil, err
+		}
+	}
+	if languageTypes := params.Get("language_facet_types"); languageTypes != "" {
+		if facets, ok := s.browseRepo.(interface {
+			ListAudioLanguages(context.Context, catalog.BrowseFilters) ([]string, error)
+			ListSubtitleLanguages(context.Context, catalog.BrowseFilters) ([]string, error)
+		}); ok {
+			languageFilters := filters
+			languageFilters.Type = languageTypes
+			languageFilters.MaxPlaybackQuality = filter.MaxPlaybackQuality
+			languageFilters.ScopeFacetFilesToAccess = true
+			if result.AudioLanguages, err = facets.ListAudioLanguages(ctx, languageFilters); err != nil {
+				return nil, err
+			}
+			if result.SubtitleLanguages, err = facets.ListSubtitleLanguages(ctx, languageFilters); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return result, nil
 }
 
 // enrichListItemsUserData adds user data to a batch of list items.
@@ -1281,6 +1394,7 @@ func mediaItemToListItem(mi *models.MediaItem) upstreamListItem {
 		Type:              mi.Type,
 		Title:             mi.Title,
 		SortTitle:         mi.SortTitle,
+		OriginalLanguage:  mi.OriginalLanguage,
 		Year:              mi.Year,
 		Genres:            mi.Genres,
 		ContentRating:     mi.ContentRating,
@@ -1318,41 +1432,42 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 		return compatPrimaryVideoTrack(versions[i]).Width > compatPrimaryVideoTrack(versions[j]).Width
 	})
 	detail := upstreamItemDetail{
-		ContentID:     d.ContentID,
-		Type:          d.Type,
-		Title:         d.Title,
-		SortTitle:     d.SortTitle,
-		OriginalTitle: d.OriginalTitle,
-		Year:          d.Year,
-		Overview:      d.Overview,
-		Tagline:       d.Tagline,
-		Runtime:       d.Runtime,
-		ContentRating: d.ContentRating,
-		Genres:        d.Genres,
-		RatingIMDB:    d.RatingIMDB,
-		RatingTMDB:    d.RatingTMDB,
-		ImdbID:        d.ImdbID,
-		TmdbID:        d.TmdbID,
-		TvdbID:        d.TvdbID,
-		PosterURL:     d.PosterURL,
-		BackdropURL:   d.BackdropURL,
-		LogoURL:       d.LogoURL,
-		Studios:       d.Studios,
-		Countries:     d.Countries,
-		SeasonCount:   d.SeasonCount,
-		SeriesID:      d.SeriesID,
-		SeriesTitle:   d.SeriesTitle,
-		SeasonNumber:  d.SeasonNumber,
-		EpisodeNumber: d.EpisodeNumber,
-		EpisodeCount:  d.EpisodeCount,
-		AirDate:       compatPremiereDatePtr(d.ReleaseDate, d.FirstAirDate, d.AirDate),
-		IsSpecials:    d.IsSpecials,
-		UserData:      d.SeasonUserData,
-		Versions:      versions,
-		Cast:          d.Cast,
-		Crew:          d.Crew,
-		Videos:        d.Videos,
-		Extras:        d.Extras,
+		ContentID:        d.ContentID,
+		Type:             d.Type,
+		Title:            d.Title,
+		SortTitle:        d.SortTitle,
+		OriginalTitle:    d.OriginalTitle,
+		OriginalLanguage: d.OriginalLanguage,
+		Year:             d.Year,
+		Overview:         d.Overview,
+		Tagline:          d.Tagline,
+		Runtime:          d.Runtime,
+		ContentRating:    d.ContentRating,
+		Genres:           d.Genres,
+		RatingIMDB:       d.RatingIMDB,
+		RatingTMDB:       d.RatingTMDB,
+		ImdbID:           d.ImdbID,
+		TmdbID:           d.TmdbID,
+		TvdbID:           d.TvdbID,
+		PosterURL:        d.PosterURL,
+		BackdropURL:      d.BackdropURL,
+		LogoURL:          d.LogoURL,
+		Studios:          d.Studios,
+		Countries:        d.Countries,
+		SeasonCount:      d.SeasonCount,
+		SeriesID:         d.SeriesID,
+		SeriesTitle:      d.SeriesTitle,
+		SeasonNumber:     d.SeasonNumber,
+		EpisodeNumber:    d.EpisodeNumber,
+		EpisodeCount:     d.EpisodeCount,
+		AirDate:          compatPremiereDatePtr(d.ReleaseDate, d.FirstAirDate, d.AirDate),
+		IsSpecials:       d.IsSpecials,
+		UserData:         d.SeasonUserData,
+		Versions:         versions,
+		Cast:             d.Cast,
+		Crew:             d.Crew,
+		Videos:           d.Videos,
+		Extras:           d.Extras,
 	}
 	if detail.Genres == nil {
 		detail.Genres = []string{}
@@ -1372,6 +1487,11 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 	if detail.Crew == nil {
 		detail.Crew = []catalog.CrewCredit{}
 	}
+	detail.SubtitleLanguage = d.EffectiveSubtitleLanguage
+	detail.SubtitleMode = d.EffectiveSubtitleMode
+	detail.SubtitleModeSet = d.HasEffectiveSubtitleMode
+	// playback.show_forced_subtitles defaults to true.
+	detail.ShowForcedSubtitles = !d.HasEffectiveShowForcedSubtitles || d.EffectiveShowForcedSubtitles
 	return detail
 }
 
@@ -1463,4 +1583,31 @@ func wrapCatalogError(err error) error {
 		return &HTTPError{StatusCode: 404, Message: errMsg}
 	}
 	return err
+}
+
+func parseFloatParam(raw string) float64 {
+	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || value < 0 {
+		return 0
+	}
+	return value
+}
+
+func splitNonemptyGenres(raw string) []string {
+	var out []string
+	for value := range strings.SplitSeq(raw, "|") {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+func parseBrowseYears(raw string) []int {
+	var out []int
+	for value := range strings.SplitSeq(raw, ",") {
+		if n, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && n > 0 {
+			out = append(out, n)
+		}
+	}
+	return out
 }

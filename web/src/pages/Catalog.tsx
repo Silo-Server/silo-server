@@ -4,12 +4,17 @@ import { CheckSquare, RefreshCw, Search, Trash2, X } from "lucide-react";
 
 import { captureProfileRequestContext } from "@/api/client";
 import type { BrowseItem } from "@/api/types";
+import { isNotFoundProblem } from "@/api/v2/request";
 import ItemGrid from "@/components/ItemGrid";
+import PageUnavailable from "@/components/PageUnavailable";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
+import CastCarousel from "@/components/CastCarousel";
 import { RequestToAddSection } from "@/components/RequestToAddSection";
 import { Button } from "@/components/ui/button";
 import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
 import SearchScopeChips from "@/components/catalog/SearchScopeChips";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
+import { usePersonSearch } from "@/hooks/queries/people";
 import { useSetCollectionSortPreference } from "@/hooks/queries/collections";
 import { querySortToSelectValue } from "@/lib/collectionSortConfig";
 import { useSearchMediaScope, type SearchMediaScope } from "@/hooks/useSearchMediaScope";
@@ -56,27 +61,32 @@ export default function Catalog() {
   const [searchParams, setSearchParams] = useSearchParams();
   const state = useMemo(() => parseCatalogSearchParams(searchParams), [searchParams]);
   const isEmptySearch = state.source === "query" && !state.q && !state.library_id;
-  const emptySearchTitle = isEmptySearch ? "Search" : defaultCatalogTitle(state.source, state.q);
 
-  useDocumentTitle(emptySearchTitle);
-
+  // Each view owns its tab title. A title set here too would run after the
+  // results' own on mount and replace it whenever the results were cached.
   if (isEmptySearch) {
-    return (
-      <section className="page-shell flex min-h-[calc(100dvh-10rem)] flex-col items-center justify-center py-16 text-center">
-        <div className="text-muted-foreground mb-6">
-          <Search className="h-10 w-10" strokeWidth={1.5} />
-        </div>
-        <h1 className="page-title mb-4">Search</h1>
-        <p className="page-subtitle mb-8 max-w-xl text-sm sm:text-base">
-          Find films, series, performances, and rediscover things you forgot you saved.
-        </p>
-        <SearchBar autoFocus prominent />
-      </section>
-    );
+    return <EmptySearch />;
   }
 
   return (
     <CatalogResults searchParams={searchParams} setSearchParams={setSearchParams} state={state} />
+  );
+}
+
+function EmptySearch() {
+  useDocumentTitle("Search");
+
+  return (
+    <section className="page-shell flex min-h-[calc(100dvh-10rem)] flex-col items-center justify-center py-16 text-center">
+      <div className="text-muted-foreground mb-6">
+        <Search className="h-10 w-10" strokeWidth={1.5} />
+      </div>
+      <h1 className="page-title mb-4">Search</h1>
+      <p className="page-subtitle mb-8 max-w-xl text-sm sm:text-base">
+        Find films, series, performances, and rediscover things you forgot you saved.
+      </p>
+      <SearchBar autoFocus prominent />
+    </section>
   );
 }
 
@@ -146,6 +156,8 @@ function CatalogResults({
   );
 
   const mediaScope = effectiveState.query_definition.media_scope;
+  const peopleQuery = usePersonSearch(state.q ?? "", 20, isQuerySource, mediaScope);
+  const people = peopleQuery.data ?? [];
   const activeChipScope: SearchMediaScope =
     mediaScope === "audiobook" ? "audiobook" : mediaScope ? "video" : "all";
   const handleChipScopeChange = useCallback(
@@ -242,6 +254,8 @@ function CatalogResults({
     !catalogQuery.isLoading && !catalogQuery.isPlaceholderData && !catalogQuery.isError;
   const libraryHasResults = libraryResultsKnown && (catalogQuery.data?.totalItems ?? 0) > 0;
   const libraryEmpty = libraryResultsKnown && !libraryHasResults;
+  const showPeopleSection =
+    isQuerySource && (peopleQuery.isLoading || peopleQuery.isError || people.length > 0);
   // When the library is empty and the request section will (or might) render,
   // hide ItemGrid entirely. The previous approach pinned ItemGrid's `loading`
   // prop to true, which renders 24 skeleton tiles forever above the section.
@@ -275,8 +289,12 @@ function CatalogResults({
     () => selectedHistoryItems.map((item) => buildHistoryRemovalTarget(item.content_id, item.type)),
     [selectedHistoryItems],
   );
-  const title =
-    catalogQuery.data?.title ?? state.title ?? defaultCatalogTitle(state.source, state.q);
+  // A collection the viewer cannot reach answers 404, the same for a deleted
+  // collection and one they were never shown, so the page says neither.
+  const collectionUnavailable = isCollectionSource && isNotFoundProblem(catalogQuery.sourceError);
+  const title = collectionUnavailable
+    ? "Not found"
+    : (catalogQuery.data?.title ?? state.title ?? defaultCatalogTitle(state.source, state.q));
 
   useDocumentTitle(title);
 
@@ -304,6 +322,21 @@ function CatalogResults({
   // reading while an outside-library result is visible.
   const resultNoun =
     state.source === "query" ? "in library" : `result${totalItems === 1 ? "" : "s"}`;
+
+  if (collectionUnavailable) {
+    return (
+      <PageUnavailable
+        title="This collection isn't available"
+        description="It may have been deleted, or you may not have access to it."
+      >
+        <Button asChild variant="outline">
+          <ViewTransitionLink to="/collections" up>
+            All collections
+          </ViewTransitionLink>
+        </Button>
+      </PageUnavailable>
+    );
+  }
 
   return (
     <div className="page-shell space-y-6 py-4 sm:py-6">
@@ -427,6 +460,35 @@ function CatalogResults({
         </section>
       )}
 
+      {showPeopleSection ? (
+        <section aria-label="People" className="space-y-3">
+          <h2 className="text-lg font-semibold">People</h2>
+          {peopleQuery.isError ? (
+            <div role="alert" className="space-y-2">
+              <p className="text-muted-foreground text-sm">Could not load people results.</p>
+              <Button variant="outline" size="sm" onClick={() => void peopleQuery.refetch()}>
+                <RefreshCw className="size-4" />
+                Retry people search
+              </Button>
+            </div>
+          ) : peopleQuery.isLoading ? (
+            <p role="status" className="text-muted-foreground text-sm">
+              Searching people...
+            </p>
+          ) : (
+            <CastCarousel
+              cast={people.map((person, index) => ({
+                person_id: person.id,
+                name: person.name,
+                photo_url: person.photo_url,
+                character: "",
+                order: index,
+              }))}
+            />
+          )}
+        </section>
+      ) : null}
+
       {catalogQuery.isError ? (
         <div
           className="search-paint-surface flex flex-col items-center justify-center gap-3 rounded-2xl border px-4 py-16 text-center"
@@ -445,7 +507,7 @@ function CatalogResults({
             {isQuerySource ? "Retry search" : "Retry catalog"}
           </Button>
         </div>
-      ) : tmdbMayRescueLibrary ? null : (
+      ) : tmdbMayRescueLibrary || (libraryEmpty && showPeopleSection) ? null : (
         <ItemGrid
           totalItems={catalogQuery.data?.totalItems ?? 0}
           pages={catalogQuery.data?.pages ?? new Map()}

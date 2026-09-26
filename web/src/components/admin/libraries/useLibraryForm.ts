@@ -142,7 +142,7 @@ export function useLibraryForm({
     library?.chapter_thumbnails_enabled ?? false,
   );
   const [introDetectionEnabled, setIntroDetectionEnabled] = useState(
-    library?.intro_detection_enabled ?? false,
+    library?.intro_detection_enabled ?? true,
   );
   const [trailerKinds, setTrailerKinds] = useState<string[]>(
     library?.trailer_kinds ?? [...PROVIDER_TRAILER_KINDS],

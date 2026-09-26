@@ -55,6 +55,24 @@ export async function setWatchTogetherGuestControl(
   }
 }
 
+/** Stops playback for everyone, keeping the room open, with toast feedback. */
+export async function stopWatchTogetherPlayback(
+  stopPlayback: () => Promise<WatchTogetherRoomSnapshot | null>,
+): Promise<WatchTogetherRoomSnapshot | null> {
+  const authority = captureProfileRequestContext();
+  try {
+    const room = await stopPlayback();
+    if (room && authority && isCapturedProfileAuthorityActive(authority))
+      toast.success("Stopped for everyone. The room is still open.");
+    return room;
+  } catch (error) {
+    if (error instanceof StaleApiRequestContextError) return null;
+    if (authority && isCapturedProfileAuthorityActive(authority))
+      toast.error(error instanceof Error ? error.message : "Could not stop playback");
+    return null;
+  }
+}
+
 /** Ends the watch party with toast feedback. */
 export async function endWatchTogetherRoom(closeRoom: () => Promise<void>): Promise<void> {
   const authority = captureProfileRequestContext();

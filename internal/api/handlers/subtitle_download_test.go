@@ -28,7 +28,7 @@ func (p *downloadRecordingProvider) Download(context.Context, string) ([]byte, s
 }
 func TestSubtitleDownloadServiceAuthorizationAttributionAndBridge(t *testing.T) {
 	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockS3ClientForHandler(), "synthetic")
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
 	provider := new(downloadRecordingProvider)
 	manager.RegisterProvider(provider)
 	h := NewSubtitleSearchHandler(manager, repo, nil)
@@ -55,7 +55,7 @@ func TestSubtitleDownloadServiceAuthorizationAttributionAndBridge(t *testing.T) 
 // service entry point and the v1 bridge answer 404 rather than 500.
 func TestSubtitleDownloadUnknownProviderIsNotFound(t *testing.T) {
 	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockS3ClientForHandler(), "synthetic")
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
 	manager.RegisterProvider(new(downloadRecordingProvider))
 	h := NewSubtitleSearchHandler(manager, repo, nil)
 	h.FileAuthorizer = &MediaFileAuthorizer{FileResolver: stubMediaFileResolver{file: &models.MediaFile{ID: 42, ContentID: "movie"}}, ItemAccess: stubItemAccessChecker{}}
@@ -78,7 +78,7 @@ func TestSubtitleDownloadUnknownProviderIsNotFound(t *testing.T) {
 
 func TestSubtitleUploadServiceAuthorizationAndAttribution(t *testing.T) {
 	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockS3ClientForHandler(), "synthetic")
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
 	h := NewSubtitleSearchHandler(manager, repo, nil)
 	h.FileAuthorizer = &MediaFileAuthorizer{FileResolver: stubMediaFileResolver{file: &models.MediaFile{ID: 42, ContentID: "movie"}}, ItemAccess: stubItemAccessChecker{err: catalog.ErrItemNotFound}}
 	request := subtitles.UploadRequest{MediaFileID: 42, UserID: new(999), Filename: "synthetic.en.srt", Language: "fr", PreferUserLanguage: true, Data: []byte("synthetic")}

@@ -92,6 +92,7 @@ type WatchFileVersion struct {
 	Credits                  *WatchMarker         `json:"credits,omitempty"`
 	Recap                    *WatchMarker         `json:"recap,omitempty"`
 	Preview                  *WatchMarker         `json:"preview,omitempty"`
+	MarkerSegments           []MarkerOccurrence   `json:"marker_segments" doc:"All effective marker occurrences for this file in source-time order; empty, never null"`
 }
 
 // WatchVideoTrack is one video stream of a file as the scanner probed it.
@@ -419,6 +420,7 @@ func watchVersionOf(v catalogpkg.FileVersion) WatchFileVersion {
 		Credits:                  watchMarkerOf(v.Credits),
 		Recap:                    watchMarkerOf(v.Recap),
 		Preview:                  watchMarkerOf(v.Preview),
+		MarkerSegments:           markerOccurrences(v.EffectiveMarkerSegments()),
 	}
 	for _, t := range v.VideoTracks {
 		out.VideoTracks = append(out.VideoTracks, watchVideoTrackOf(t))

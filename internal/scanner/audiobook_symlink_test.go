@@ -81,7 +81,7 @@ func TestCollectAudiobookRootScansSymlinks(t *testing.T) {
 
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			scans, err := collectAudiobookRootScans(ctx, 11, []string{root})
+			scans, err := collectAudiobookRootScans(ctx, 11, []string{root}, nil, true)
 			if err != nil {
 				t.Fatalf("collectAudiobookRootScans: %v", err)
 			}
@@ -112,7 +112,7 @@ func TestCollectAudiobookRootScansBrokenSymlinkProtectsReconciliation(t *testing
 			if err := os.Symlink(filepath.Join(root, "missing-target"), filepath.Join(root, name)); err != nil {
 				t.Fatal(err)
 			}
-			scans, err := collectAudiobookRootScans(context.Background(), 11, []string{root})
+			scans, err := collectAudiobookRootScans(t.Context(), 11, []string{root}, nil, true)
 			if err != nil {
 				t.Fatal(err)
 			}

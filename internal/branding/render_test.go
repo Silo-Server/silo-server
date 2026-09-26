@@ -64,6 +64,47 @@ func TestRenderIndexHTMLInjectsThemeColorOnlyWhenAccentSet(t *testing.T) {
 	}
 }
 
+func TestRenderIndexHTMLStampsDefaultThemeOnlyWhenSet(t *testing.T) {
+	in := []byte(`<!doctype html><html lang="en" data-theme="midnight-cinema"><head></head></html>`)
+	if out := string(RenderIndexHTML(in, newSnapshot("X"))); strings.Contains(out, "data-default-theme") {
+		t.Fatalf("default theme should not be stamped when unset: %q", out)
+	}
+	snap := newSnapshot("X")
+	snap.DefaultTheme = "cinema-light"
+	out := string(RenderIndexHTML(in, snap))
+	want := `<!doctype html><html data-default-theme="cinema-light" lang="en" data-theme="midnight-cinema">`
+	if !strings.HasPrefix(out, want) {
+		t.Fatalf("default theme not stamped on <html>: %q", out)
+	}
+	// The static data-theme stays: the boot script decides what paints, and a
+	// stale id stored here must never leave the page without a theme.
+	if strings.Count(out, "data-theme=") != 1 {
+		t.Fatalf("static data-theme should be left alone: %q", out)
+	}
+}
+
+func TestRenderIndexHTMLEscapesDefaultTheme(t *testing.T) {
+	in := []byte(`<html lang="en"><head></head></html>`)
+	snap := newSnapshot("X")
+	snap.DefaultTheme = `x" onload="alert(1)`
+	out := string(RenderIndexHTML(in, snap))
+	if strings.Contains(out, `onload="alert`) {
+		t.Fatalf("default theme not escaped: %q", out)
+	}
+	if !strings.Contains(out, `data-default-theme="x&#34; onload=&#34;alert(1)"`) {
+		t.Fatalf("expected escaped default theme, got: %q", out)
+	}
+}
+
+func TestRenderKeyIncludesDefaultTheme(t *testing.T) {
+	snap := newSnapshot("Acme")
+	baseline := snap.RenderKey()
+	snap.DefaultTheme = "cinema-light"
+	if got := snap.RenderKey(); got == baseline {
+		t.Fatal("RenderKey did not change when the default theme changed")
+	}
+}
+
 func TestRenderKeyIncludesWordmarkLight(t *testing.T) {
 	snap := newSnapshot("Acme")
 	baseline := snap.RenderKey()
@@ -96,8 +137,14 @@ func TestRenderIndexHTMLAgainstRealShell(t *testing.T) {
 	if !strings.Contains(string(data), indexFaviconLink) {
 		t.Fatalf("web/index.html no longer contains the expected favicon link %q; update indexFaviconLink", indexFaviconLink)
 	}
-	snap := Snapshot{ServerName: "Acme", assets: map[AssetKind]string{KindFavicon: "f00.png"}}
+	if !strings.Contains(string(data), indexHTMLOpen) {
+		t.Fatalf("web/index.html no longer contains the expected %q; update indexHTMLOpen", indexHTMLOpen)
+	}
+	snap := Snapshot{ServerName: "Acme", DefaultTheme: "cinema-light", assets: map[AssetKind]string{KindFavicon: "f00.png"}}
 	out := string(RenderIndexHTML(data, snap))
+	if !strings.Contains(out, `<html data-default-theme="cinema-light" `) {
+		t.Fatalf("default theme not stamped on <html> in real shell")
+	}
 	if !strings.Contains(out, "<title>Acme</title>") {
 		t.Fatalf("title not replaced in real shell")
 	}

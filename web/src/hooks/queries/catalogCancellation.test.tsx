@@ -9,6 +9,7 @@ import { installPolicyStorageMocks } from "@/pages/admin-policy/policyTestUtils"
 import { useAudiobookGroups } from "./audiobookGroups";
 import { useMetadataAIStatus } from "./metadataAI";
 import { usePersonSearch } from "./people";
+import { personKeys } from "./keys";
 
 describe("catalog query cancellation", () => {
   beforeEach(() => {
@@ -32,6 +33,7 @@ describe("catalog query cancellation", () => {
     ["metadata AI capability", () => useMetadataAIStatus(), "/api/v2/capabilities/metadata-ai"],
   ] as const)("aborts %s when the observer unmounts", async (_name, useRead, path) => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(personKeys.searchCapabilities(), { people_media_scope: true });
     let requestSignal: AbortSignal | null | undefined;
     const fetchMock = vi.fn<typeof fetch>(async (_url, options) => {
       requestSignal = options?.signal;
@@ -60,6 +62,7 @@ describe("catalog query cancellation", () => {
 
   it("aborts the old search when the normalized search changes", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(personKeys.searchCapabilities(), { people_media_scope: true });
     const signals: (AbortSignal | null | undefined)[] = [];
     vi.stubGlobal(
       "fetch",

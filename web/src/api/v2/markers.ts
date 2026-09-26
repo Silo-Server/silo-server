@@ -28,6 +28,7 @@ function fileMarkersFromV2(markers: FileMarkers): FileMarkersResponse {
     credits: markerSegmentFromV2(markers.credits),
     recap: markerSegmentFromV2(markers.recap),
     preview: markerSegmentFromV2(markers.preview),
+    marker_segments: markers.marker_segments,
   };
 }
 

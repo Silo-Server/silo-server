@@ -1,4 +1,15 @@
 {
+  "themes": {
+    "owner_id": "movie:heat-1995",
+    "items": [
+      {
+        "id": "7",
+        "title": "Opening",
+        "duration_seconds": 60,
+        "container": "mp3"
+      }
+    ]
+  },
   "content_id": "movie:heat-1995",
   "type": "movie",
   "title": "Heat",
@@ -53,6 +64,17 @@
       "duration": 0,
       "bitrate": 0,
       "added_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "rating_sources": [
+    {
+      "source": "imdb",
+      "score": 83,
+      "votes": 673852
+    },
+    {
+      "source": "mdblist",
+      "score": 86
     }
   ],
   "subtitles": []

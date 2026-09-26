@@ -33,20 +33,20 @@ func TestFetchWatchedImportsEveryPageAndEpisodeProgress(t *testing.T) {
 		case "1", "2":
 			switch kind {
 			case "movies":
-				writeWatchedFixture(t, w, `[{"plays":2,"last_watched_at":"2026-09-01T12:00:00Z","movie":{"title":"Movie %s","year":2020,"ids":{"tmdb":10%s}}}]`, page, page)
+				writeTraktFixture(t, w, `[{"plays":2,"last_watched_at":"2026-09-01T12:00:00Z","movie":{"title":"Movie %s","year":2020,"ids":{"tmdb":10%s}}}]`, page, page)
 			case "shows":
 				if r.URL.Query().Get("extended") != "progress" {
 					// Current Trakt default: no seasons or episodes without progress.
-					writeWatchedFixture(t, w, `[{"show":{"title":"Show","ids":{"tmdb":200}}}]`)
+					writeTraktFixture(t, w, `[{"show":{"title":"Show","ids":{"tmdb":200}}}]`)
 					return
 				}
-				writeWatchedFixture(t, w, `[{"show":{"title":"Show %s","year":2021,"ids":{"tmdb":20%s,"tvdb":30%s,"imdb":"tt40%s"}},"seasons":[{"number":0,"episodes":[{"number":1,"plays":3,"last_watched_at":"2026-09-02T12:00:00Z"}]},{"number":2,"episodes":[{"number":5,"plays":1,"last_watched_at":"2026-09-03T12:00:00Z"}]}]}]`, page, page, page, page)
+				writeTraktFixture(t, w, `[{"show":{"title":"Show %s","year":2021,"ids":{"tmdb":20%s,"tvdb":30%s,"imdb":"tt40%s"}},"seasons":[{"number":0,"episodes":[{"number":1,"plays":3,"last_watched_at":"2026-09-02T12:00:00Z"}]},{"number":2,"episodes":[{"number":5,"plays":1,"last_watched_at":"2026-09-03T12:00:00Z"}]}]}]`, page, page, page, page)
 			default:
 				t.Errorf("unexpected path %s", r.URL.Path)
 				http.NotFound(w, r)
 			}
 		case "3":
-			writeWatchedFixture(t, w, `[]`)
+			writeTraktFixture(t, w, `[]`)
 		default:
 			t.Errorf("unexpected page %q", page)
 			http.Error(w, "unexpected page", 500)
@@ -57,7 +57,7 @@ func TestFetchWatchedImportsEveryPageAndEpisodeProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantRequests := []string{"movies:1", "movies:2", "movies:3", "shows:1", "shows:2", "shows:3"}
+	wantRequests := []string{"movies:1", "movies:2", "movies:3", "movies:1", "movies:2", "movies:3", "shows:1", "shows:2", "shows:3", "shows:1", "shows:2", "shows:3"}
 	if !reflect.DeepEqual(requests, wantRequests) {
 		t.Fatalf("requests = %v, want %v", requests, wantRequests)
 	}
@@ -89,18 +89,18 @@ func TestFetchWatchedDoesNotReturnPartialHistoryOnLaterPageFailure(t *testing.T)
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					if r.URL.Query().Get("page") == "1" {
-						writeWatchedFixture(t, w, `[{"plays":1,"last_watched_at":"2026-09-01T12:00:00Z","movie":{"ids":{"tmdb":123}},"show":{"ids":{"tmdb":456}},"seasons":[{"number":1,"episodes":[{"number":1,"plays":1,"last_watched_at":"2026-09-01T12:00:00Z"}]}]}]`)
+						writeTraktFixture(t, w, `[{"plays":1,"last_watched_at":"2026-09-01T12:00:00Z","movie":{"ids":{"tmdb":123}},"show":{"ids":{"tmdb":456}},"seasons":[{"number":1,"episodes":[{"number":1,"plays":1,"last_watched_at":"2026-09-01T12:00:00Z"}]}]}]`)
 						return
 					}
 					if r.URL.Path == "/sync/watched/"+kind {
 						if failure == "http" {
 							http.Error(w, "unavailable", http.StatusServiceUnavailable)
 						} else {
-							writeWatchedFixture(t, w, `[{`)
+							writeTraktFixture(t, w, `[{`)
 						}
 						return
 					}
-					writeWatchedFixture(t, w, `[]`)
+					writeTraktFixture(t, w, `[]`)
 				}))
 				defer server.Close()
 				rows, err := NewProvider(server.Client(), server.URL).FetchWatched(context.Background(), watchsync.ServerConfig{}, watchsync.Connection{})
@@ -112,9 +112,9 @@ func TestFetchWatchedDoesNotReturnPartialHistoryOnLaterPageFailure(t *testing.T)
 	}
 }
 
-func writeWatchedFixture(t *testing.T, w http.ResponseWriter, format string, args ...any) {
+func writeTraktFixture(t *testing.T, w http.ResponseWriter, format string, args ...any) {
 	t.Helper()
 	if _, err := fmt.Fprintf(w, format, args...); err != nil {
-		t.Errorf("write watched fixture: %v", err)
+		t.Errorf("write trakt fixture: %v", err)
 	}
 }

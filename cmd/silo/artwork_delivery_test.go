@@ -9,14 +9,14 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/apiv2"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
 )
 
 func TestCompatibilityListenerServesSignedArtwork(t *testing.T) {
-	store, err := artworkstore.NewFilesystem(t.TempDir())
+	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func (noopABSMounter) Mount(chi.Router) {}
 // The ABS cover handlers redirect to root-relative signed artwork URLs, so the
 // ABS listener must answer them itself.
 func TestAudiobookshelfListenerServesSignedArtwork(t *testing.T) {
-	store, err := artworkstore.NewFilesystem(t.TempDir())
+	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestAudiobookshelfListenerServesSignedArtwork(t *testing.T) {
 		t.Fatal(err)
 	}
 	signer := artworkurl.NewSigner("test-secret", time.Hour)
-	srv := newAudiobookshelfListener(":0", noopABSMounter{}, apiv2.NewArtworkHandler(store, signer, nil), nil)
+	srv := newAudiobookshelfListener(":0", noopABSMounter{}, apiv2.NewArtworkHandler(store, signer, nil), nil, nil)
 	u, _ := signer.Sign(key, time.Now())
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		rec := httptest.NewRecorder()
@@ -73,7 +73,7 @@ func TestAudiobookshelfListenerServesSignedArtwork(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unsigned artwork on the ABS listener: %d", rec.Code)
 	}
-	unmounted := newAudiobookshelfListener(":0", noopABSMounter{}, nil, nil)
+	unmounted := newAudiobookshelfListener(":0", noopABSMounter{}, nil, nil, nil)
 	rec = httptest.NewRecorder()
 	unmounted.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, u, nil))
 	if rec.Code != http.StatusNotFound {

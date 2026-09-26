@@ -67,13 +67,13 @@ export function useValidateMarkerProvider() {
       const provider = variables.provider;
       queryClient.setQueryData(adminKeys.markerProviderValidation(provider), data);
       if (data.valid) {
-        toast.success(`${label} validated`);
+        toast.success(`${label} connection successful`);
       } else {
-        toast.error(data.error || `${label} validation failed`);
+        toast.error(data.error || `${label} connection test failed`);
       }
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Marker provider validation failed");
+      toast.error(err instanceof Error ? err.message : "Marker provider connection test failed");
     },
   });
 }

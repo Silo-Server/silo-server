@@ -169,6 +169,21 @@ type AdminPluginCatalogEntry struct {
 	Metadata           PluginJSONValue           `json:"metadata"`
 }
 
+// AdminPluginRuntime is one installation's process state. A resident plugin
+// (one declaring a capability the server keeps running, such as a network
+// access provider) is supervised: started at boot, restarted after a crash
+// with exponential backoff, and parked as failed after repeated failures
+// until an administrator restarts or reconfigures it. Other plugins start on
+// first use and report only running or stopped.
+type AdminPluginRuntime struct {
+	Resident      bool     `json:"resident" doc:"True when the server supervises this plugin's process"`
+	State         string   `json:"state" enum:"stopped,starting,running,backoff,failed" doc:"Process state; backoff and failed occur only for resident plugins"`
+	RestartCount  int      `json:"restart_count" doc:"Automatic restarts since the plugin last ran stably or was restarted by an administrator"`
+	LastError     string   `json:"last_error,omitempty" doc:"Why the process last stopped or failed to start"`
+	LastStartedAt *Instant `json:"last_started_at,omitempty"`
+	NextRestartAt *Instant `json:"next_restart_at,omitempty" doc:"Scheduled automatic restart while in backoff"`
+}
+
 // AdminPluginInstallation is one manageable installation with its redacted
 // configuration and bindings.
 type AdminPluginInstallation struct {
@@ -195,6 +210,7 @@ type AdminPluginInstallation struct {
 	GlobalConfigs      []AdminPluginConfigValue  `json:"global_configs"`
 	AuthBindings       []AdminPluginAuthBinding  `json:"auth_bindings"`
 	TaskBindings       []AdminPluginTaskBinding  `json:"task_bindings"`
+	Runtime            AdminPluginRuntime        `json:"runtime"`
 	CreatedAt          Instant                   `json:"created_at"`
 	UpdatedAt          Instant                   `json:"updated_at"`
 }
@@ -307,6 +323,23 @@ func adminPluginCatalogEntryOf(v handlers.PluginCatalogEntryView) (AdminPluginCa
 	return AdminPluginCatalogEntry{RepositoryID: IDFromInt(int64(v.RepositoryID)), PluginID: v.PluginID, Version: v.Version, ArchiveURL: v.ArchiveURL, SourceKind: v.SourceKind, RepositoryName: v.RepositoryName, RepoURL: v.RepoURL, Presentation: adminPluginPresentationOf(v.Presentation), Capabilities: caps, GlobalConfigSchema: global, UserConfigSchema: user, Routes: pluginRoutesOf(v.Routes), Assets: pluginAssetsOf(v.Assets), Metadata: NonNilMap(PluginJSONValue(v.Metadata))}, nil
 }
 
+func adminPluginRuntimeOf(v *handlers.PluginRuntimeView) AdminPluginRuntime {
+	if v == nil {
+		return AdminPluginRuntime{State: string(plugins.ResidentStopped)}
+	}
+	out := AdminPluginRuntime{Resident: v.Resident, State: v.State, RestartCount: v.RestartCount, LastError: v.LastError}
+	if out.State == "" {
+		out.State = string(plugins.ResidentStopped)
+	}
+	if v.LastStartedAt != nil {
+		out.LastStartedAt = new(NewInstant(*v.LastStartedAt))
+	}
+	if v.NextRestartAt != nil {
+		out.NextRestartAt = new(NewInstant(*v.NextRestartAt))
+	}
+	return out
+}
+
 func adminPluginInstallationOf(v handlers.PluginInstallationView) (AdminPluginInstallation, error) {
 	caps, err := adminPluginCapabilitiesOf(v.Capabilities)
 	if err != nil {
@@ -320,7 +353,7 @@ func adminPluginInstallationOf(v handlers.PluginInstallationView) (AdminPluginIn
 	if err != nil {
 		return AdminPluginInstallation{}, err
 	}
-	out := AdminPluginInstallation{ID: IDFromInt(int64(v.ID)), PluginID: v.PluginID, Version: v.Version, InstallPath: v.InstallPath, Enabled: v.Enabled, Kind: v.Kind, UpdatePolicy: v.UpdatePolicy, SourceKind: v.SourceKind, RepositoryName: v.RepositoryName, RepoURL: v.RepoURL, Presentation: adminPluginPresentationOf(v.Presentation), UpdatesPaused: v.UpdatesPaused, Capabilities: caps, GlobalConfigSchema: global, UserConfigSchema: user, Routes: pluginRoutesOf(v.Routes), Assets: pluginAssetsOf(v.Assets), Metadata: NonNilMap(PluginJSONValue(v.Metadata)), GlobalConfigs: make([]AdminPluginConfigValue, 0, len(v.GlobalConfigs)), AuthBindings: make([]AdminPluginAuthBinding, 0, len(v.AuthBindings)), TaskBindings: make([]AdminPluginTaskBinding, 0, len(v.TaskBindings)), CreatedAt: NewInstant(v.CreatedAt), UpdatedAt: NewInstant(v.UpdatedAt)}
+	out := AdminPluginInstallation{ID: IDFromInt(int64(v.ID)), PluginID: v.PluginID, Version: v.Version, InstallPath: v.InstallPath, Enabled: v.Enabled, Kind: v.Kind, UpdatePolicy: v.UpdatePolicy, SourceKind: v.SourceKind, RepositoryName: v.RepositoryName, RepoURL: v.RepoURL, Presentation: adminPluginPresentationOf(v.Presentation), UpdatesPaused: v.UpdatesPaused, Capabilities: caps, GlobalConfigSchema: global, UserConfigSchema: user, Routes: pluginRoutesOf(v.Routes), Assets: pluginAssetsOf(v.Assets), Metadata: NonNilMap(PluginJSONValue(v.Metadata)), GlobalConfigs: make([]AdminPluginConfigValue, 0, len(v.GlobalConfigs)), AuthBindings: make([]AdminPluginAuthBinding, 0, len(v.AuthBindings)), TaskBindings: make([]AdminPluginTaskBinding, 0, len(v.TaskBindings)), Runtime: adminPluginRuntimeOf(v.Runtime), CreatedAt: NewInstant(v.CreatedAt), UpdatedAt: NewInstant(v.UpdatedAt)}
 	if v.RepositoryID != nil {
 		out.RepositoryID = new(IDFromInt(int64(*v.RepositoryID)))
 	}

@@ -51,6 +51,12 @@ type adminServerStatusResponse struct {
 type adminArtworkStorageStatus struct {
 	Backend string `json:"backend,omitempty"`
 	Locked  bool   `json:"locked"`
+	// StatusKnown is false when the settings lookup failed, so a false Locked
+	// value cannot be mistaken for a confirmed editable location.
+	StatusKnown bool `json:"-"`
+	// PrivateLocked is true once a configured private bucket is recorded at
+	// startup, or once artwork is recorded. Only /api/v2 reports it.
+	PrivateLocked bool `json:"-"`
 }
 
 // adminServerHealth backs the dashboard health strip. Version, uptime and node
@@ -203,7 +209,9 @@ func (h *AdminHandler) ReadAdminServerStatus(ctx context.Context) AdminServerSta
 		settings, err := h.SettingsRepo.GetAll(settingsCtx)
 		cancel()
 		if err == nil {
-			resp.ArtworkStorage.Locked = artworkStorageLocked(settings)
+			resp.ArtworkStorage.Locked = assetsStorageLocked(settings)
+			resp.ArtworkStorage.PrivateLocked = artworkStorageLocked(settings)
+			resp.ArtworkStorage.StatusKnown = true
 		}
 		if err == nil && jellycompat.WebComponentStatusForConfig(h.Config, settings).RestartRequired {
 			resp.RestartRequired = true

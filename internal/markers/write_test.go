@@ -89,49 +89,214 @@ func TestBuildUpdatePayloadFallsBackAlgorithmAndProvider(t *testing.T) {
 	}
 }
 
-func TestCanWriteMarkerEqualPriorityRequiresHigherConfidence(t *testing.T) {
-	existing := models.MarkerSourceOnline
-	low, high := 0.5, 0.9
-
-	if CanWriteMarker(&existing, &high, models.MarkerSourceOnline, &low) {
-		t.Error("equal priority with lower new confidence should not write")
+func TestApplyResultKeepsOccurrencesAndManualEdits(t *testing.T) {
+	file := &models.MediaFile{Duration: 1000, IntroStart: new(10.0), IntroEnd: new(50.0),
+		IntroMarkersSource: new(models.MarkerSourceManual)}
+	result := Result{ProviderID: "provider", SourceClass: models.MarkerSourceOnline, RefreshedProviders: []string{"provider"},
+		Markers: []Marker{
+			{Kind: MarkerKindCredits, Start: 900 * time.Second, End: 950 * time.Second, Confidence: 0.9},
+			{Kind: MarkerKindIntro, Start: 20 * time.Second, End: 60 * time.Second, Confidence: 0.9},
+			{Kind: MarkerKindCredits, Start: 800 * time.Second, End: 850 * time.Second, Confidence: 0.9},
+		}}
+	payload := BuildUpdatePayload(result)
+	if len(payload.Credits.Ranges) != 2 || *payload.Credits.Start != 800 || *payload.Credits.End != 850 {
+		t.Fatalf("lost credit occurrences or wrong legacy range: %+v", payload.Credits)
 	}
-	if !CanWriteMarker(&existing, &low, models.MarkerSourceOnline, &high) {
-		t.Error("equal priority with strictly higher new confidence should write")
+	next := ApplyResult(file, result)
+	if *next.IntroStart != 10 || len(next.MarkerSegments) != 3 || *next.CreditsStart != 800 {
+		t.Fatalf("incorrect marker projection: %+v", next.MarkerSegments)
 	}
-	if CanWriteMarker(&existing, &high, models.MarkerSourceOnline, &high) {
-		t.Error("equal priority with equal confidence should not write")
+	if file.CreditsStart != nil || len(file.MarkerSegments) != 0 {
+		t.Fatal("on-demand projection changed the stored file snapshot")
+	}
+	cleared := ApplyResult(next, Result{RefreshedProviders: []string{"provider"}})
+	if cleared.CreditsStart != nil || len(cleared.MarkerSegments) != 1 || *cleared.IntroStart != 10 {
+		t.Fatal("provider miss did not clear only that provider's ranges")
 	}
 }
 
-func TestCanWriteMarkerHigherPriorityWinsRegardless(t *testing.T) {
-	existing := models.MarkerSourceScanner
-	if !CanWriteMarker(&existing, nil, models.MarkerSourceOnline, nil) {
-		t.Error("higher priority should win even without confidence")
+func TestCanWriteMarkerUpdateAcceptsSelectedProviderRefresh(t *testing.T) {
+	existing := SegmentPayload{Start: new(10.0), End: new(20.0), Source: models.MarkerSourceOnline,
+		Provider: new("old"), Confidence: new(0.9)}
+	incoming := existing
+	incoming.Start = new(12.0)
+	if !CanWriteMarkerUpdate(existing, incoming) {
+		t.Fatal("same provider correction at unchanged confidence was rejected")
 	}
-	online := models.MarkerSourceOnline
-	if CanWriteMarker(&online, nil, models.MarkerSourceScanner, nil) {
-		t.Error("lower priority should not overwrite higher")
+	incoming.Provider, incoming.Confidence = new("preferred"), new(0.8)
+	if !CanWriteMarkerUpdate(existing, incoming) {
+		t.Fatal("registry's selected provider was overridden by incomparable confidence")
+	}
+	existing.Source = models.MarkerSourceManual
+	if CanWriteMarkerUpdate(existing, incoming) {
+		t.Fatal("online result replaced a manual edit")
 	}
 }
 
-func TestCanWriteMarkerManualAlwaysWinsLastWriter(t *testing.T) {
-	manual := models.MarkerSourceManual
-	conf := 1.0
+func TestCanWriteMarkerUpdatePreservesSourcePriority(t *testing.T) {
+	scanner := SegmentPayload{Start: new(10.0), End: new(20.0), Source: models.MarkerSourceScanner}
+	online := scanner
+	online.Source = models.MarkerSourceOnline
+	manual := scanner
+	manual.Source = models.MarkerSourceManual
+	manual.Confidence = new(1.0)
+	if !CanWriteMarkerUpdate(scanner, online) || CanWriteMarkerUpdate(online, scanner) {
+		t.Fatal("online/scanner priority is incorrect")
+	}
+	if !CanWriteMarkerUpdate(online, manual) || CanWriteMarkerUpdate(manual, online) {
+		t.Fatal("manual priority is incorrect")
+	}
+	if !CanWriteMarkerUpdate(manual, manual) {
+		t.Fatal("manual edits must allow corrections at unchanged confidence")
+	}
+}
 
-	// A manual edit must overwrite an existing manual marker even though both
-	// share priority 4 and confidence 1.0 — otherwise corrections silently fail.
-	if !CanWriteMarker(&manual, &conf, models.MarkerSourceManual, &conf) {
-		t.Error("manual edit should overwrite an existing manual marker (last-writer-wins)")
+// A kind can occur more than once. An update that keeps the first occurrence but
+// changes a later one is a real correction, not a no-op, so the equal-confidence
+// path has to compare the whole range set.
+func TestCanWriteMarkerUpdateComparesEveryOccurrence(t *testing.T) {
+	confidence := new(0.9)
+	ranges := func(bounds ...[2]float64) []models.MarkerSegment {
+		out := make([]models.MarkerSegment, 0, len(bounds))
+		for _, bound := range bounds {
+			out = append(out, models.MarkerSegment{Kind: models.MarkerSegmentIntro, StartSeconds: bound[0], EndSeconds: bound[1]})
+		}
+		return out
 	}
-	// Manual still wins over lower-priority sources.
-	online := models.MarkerSourceOnline
-	highConf := 0.99
-	if !CanWriteMarker(&online, &highConf, models.MarkerSourceManual, &conf) {
-		t.Error("manual edit should overwrite a high-confidence online marker")
+	payload := func(source string, bounds ...[2]float64) SegmentPayload {
+		segments := ranges(bounds...)
+		return SegmentPayload{Start: new(bounds[0][0]), End: new(bounds[0][1]), Ranges: segments,
+			Source: source, Confidence: confidence, Algorithm: "chapter:v1"}
 	}
-	// A non-manual source still cannot displace a manual marker.
-	if CanWriteMarker(&manual, &conf, models.MarkerSourceOnline, &highConf) {
-		t.Error("online source should never overwrite a manual marker")
+
+	existing := payload(models.MarkerSourceScanner, [2]float64{10, 40}, [2]float64{100, 130})
+
+	movedLaterRange := payload(models.MarkerSourceScanner, [2]float64{10, 40}, [2]float64{500, 540})
+	if !CanWriteMarkerUpdate(existing, movedLaterRange) {
+		t.Error("a corrected second occurrence at unchanged confidence was rejected")
+	}
+
+	withdrawnLaterRange := payload(models.MarkerSourceScanner, [2]float64{10, 40})
+	if !CanWriteMarkerUpdate(existing, withdrawnLaterRange) {
+		t.Error("a withdrawn second occurrence at unchanged confidence was rejected")
+	}
+
+	addedLaterRange := payload(models.MarkerSourceScanner, [2]float64{10, 40}, [2]float64{100, 130}, [2]float64{700, 730})
+	if !CanWriteMarkerUpdate(existing, addedLaterRange) {
+		t.Error("an added third occurrence at unchanged confidence was rejected")
+	}
+
+	identical := payload(models.MarkerSourceScanner, [2]float64{10, 40}, [2]float64{100, 130})
+	if CanWriteMarkerUpdate(existing, identical) {
+		t.Error("an identical equal-confidence update should stay a no-op")
+	}
+
+	withinTolerance := payload(models.MarkerSourceScanner, [2]float64{10.4, 40.4}, [2]float64{100.4, 130.4})
+	if CanWriteMarkerUpdate(existing, withinTolerance) {
+		t.Error("sub-half-second drift should count as the same occurrence")
+	}
+}
+
+// Ranges are compared as a set, so a payload whose ranges arrive unsorted must
+// not read as a change, and two occurrences close enough to be within tolerance
+// must pair up whichever way round they arrive.
+func TestCanWriteMarkerUpdateMatchesRangesWithTolerance(t *testing.T) {
+	confidence := new(0.7)
+	payload := func(bounds ...[2]float64) SegmentPayload {
+		ranges := make([]models.MarkerSegment, 0, len(bounds))
+		for _, bound := range bounds {
+			ranges = append(ranges, models.MarkerSegment{Kind: models.MarkerSegmentCredits, StartSeconds: bound[0], EndSeconds: bound[1]})
+		}
+		first := ranges[0]
+		return SegmentPayload{Start: new(first.StartSeconds), End: new(first.EndSeconds), Ranges: ranges,
+			Source: models.MarkerSourceS3, Confidence: confidence}
+	}
+
+	existing := payload([2]float64{10, 40}, [2]float64{900, 950})
+	unsorted := payload([2]float64{900, 950}, [2]float64{10, 40})
+	if CanWriteMarkerUpdate(existing, unsorted) {
+		t.Error("the same occurrence set in a different order should stay a no-op")
+	}
+
+	// Range validation permits two occurrences with the same start and different
+	// ends, so ordering them by start alone leaves them in arrival order and the
+	// same set reads as a change.
+	tied := payload([2]float64{10, 20}, [2]float64{10, 40})
+	tiedReordered := payload([2]float64{10, 40}, [2]float64{10, 20})
+	if CanWriteMarkerUpdate(tied, tiedReordered) {
+		t.Error("two occurrences sharing a start compared as a change when only their order differed")
+	}
+
+	// Two starts within tolerance of each other: sorting by exact value pairs the
+	// short occurrence with the long one and reports a change for the same set.
+	closeStarts := payload([2]float64{10.0, 20.0}, [2]float64{10.4, 40.0})
+	closeStartsNoisy := payload([2]float64{10.4, 20.4}, [2]float64{10.0, 40.4})
+	if CanWriteMarkerUpdate(closeStarts, closeStartsNoisy) {
+		t.Error("occurrences within tolerance compared as a change when noise reordered their starts")
+	}
+
+	// A genuine change still writes: the second occurrence ends elsewhere.
+	movedEnd := payload([2]float64{10, 40}, [2]float64{900, 1200})
+	if !CanWriteMarkerUpdate(existing, movedEnd) {
+		t.Error("a moved end should still count as a change")
+	}
+
+	// Equal confidence on an unranked source: only a real range change applies.
+	withdrawn := payload([2]float64{900, 950})
+	if !CanWriteMarkerUpdate(existing, withdrawn) {
+		t.Error("an equal-confidence ranged source could not withdraw an occurrence")
+	}
+}
+
+// A new detector version must be able to overwrite what the version it
+// replaces wrote, even at lower confidence.
+func TestCanWriteMarkerUpdateLetsReplacementVersionsOverwrite(t *testing.T) {
+	payload := func(algorithm string, confidence float64, start, end float64) SegmentPayload {
+		return SegmentPayload{Start: new(start), End: new(end), Source: models.MarkerSourceScanner,
+			Confidence: new(confidence), Algorithm: algorithm}
+	}
+	cases := []struct {
+		name               string
+		existing, incoming SegmentPayload
+		want               bool
+	}{
+		{"chromaprint v2 over dialogue v1", payload("chromaprint:dialogue:v1", 0.9, 10, 70), payload("chromaprint:v2", 0.75, 12, 70), true}, //nolint:misspell // Persisted algorithm identifier.
+		{"dialogue v2 over chromaprint v2", payload("chromaprint:v2", 0.9, 10, 70), payload("chromaprint:dialogue:v2", 0.75, 12, 70), true}, //nolint:misspell // Persisted algorithm identifier.
+		{"chapter over over-extended legacy silence", payload("chapter:silence:v1", 0.98, 60, 140), payload("chapter:v1", 0.95, 60, 120), true},
+		{"silence v2 over chapter", payload("chapter:v1", 0.95, 60, 120), payload("chapter:silence:v2", 0.98, 60, 122), true},
+		{"chromaprint v3 over dialogue v2", payload("chromaprint:dialogue:v2", 0.9, 10, 70), payload("chromaprint:v3", 0.3, 12, 70), true},            //nolint:misspell // Persisted algorithm identifier.
+		{"dialogue v3 over chromaprint v3", payload("chromaprint:v3", 0.9, 10, 70), payload("chromaprint:dialogue:v3", 0.65, 12, 70), true},           //nolint:misspell // Persisted algorithm identifier.
+		{"episode copy over chromaprint v3", payload("chromaprint:dialogue:v3", 0.9, 10, 70), payload("episode-version-copy:v1", 0.85, 12, 70), true}, //nolint:misspell // Persisted algorithm identifier.
+		{"chromaprint v4 over dialogue v3", payload("chromaprint:dialogue:v3", 0.9, 10, 70), payload("chromaprint:v4", 0.65, 12, 70), true},           //nolint:misspell // Persisted algorithm identifier.
+		{"legacy chromaprint cannot replace v2", payload("chromaprint:v2", 0.75, 12, 70), payload("chromaprint:dialogue:v1", 0.9, 10, 70), false},     //nolint:misspell // Persisted algorithm identifier.
+	}
+	for _, tc := range cases {
+		if got := CanWriteMarkerUpdate(tc.existing, tc.incoming); got != tc.want {
+			t.Errorf("%s: CanWriteMarkerUpdate = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A re-analysis that rescores a Chromaprint intro lower must replace the stored
+// score, while other detectors keep the higher-confidence result.
+func TestCanWriteMarkerUpdateLetsChromaprintRescoreDownward(t *testing.T) {
+	payload := func(algorithm string, confidence, start, end float64) SegmentPayload {
+		return SegmentPayload{Start: new(start), End: new(end), Source: models.MarkerSourceScanner,
+			Confidence: new(confidence), Algorithm: algorithm}
+	}
+	if !CanWriteMarkerUpdate(payload("chromaprint:v3", 0.9, 10, 70), payload("chromaprint:v3", 0.65, 10, 70)) {
+		t.Error("a lower Chromaprint rescore of the same range was rejected")
+	}
+	if CanWriteMarkerUpdate(payload("chromaprint:v3", 0.9, 10, 70), payload("chromaprint:v3", 0.9, 10.2, 70.2)) {
+		t.Error("an identical Chromaprint result should stay a no-op")
+	}
+	if !CanWriteMarkerUpdate(payload("chromaprint:dialogue:v3", 0.9, 14, 70), payload("chromaprint:v3", 0.65, 10, 70)) { //nolint:misspell // Persisted algorithm identifier.
+		t.Error("a same-version plain rescore must replace a refined marker whose subtitle is gone")
+	}
+	if CanWriteMarkerUpdate(payload("chromaprint:dialogue:v3", 0.9, 14, 70), payload("chromaprint:v2", 0.9, 10, 70)) { //nolint:misspell // Persisted algorithm identifier.
+		t.Error("an older Chromaprint version must not replace a newer refined marker")
+	}
+	if CanWriteMarkerUpdate(payload("chapter:v1", 0.95, 60, 120), payload("chapter:v1", 0.85, 60, 125)) {
+		t.Error("a lower-confidence chapter result must not replace a higher one")
 	}
 }

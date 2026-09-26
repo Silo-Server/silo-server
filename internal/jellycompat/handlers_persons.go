@@ -2,36 +2,43 @@ package jellycompat
 
 import (
 	"context"
-	"errors"
 	"net/http"
-	"regexp"
 	"strings"
-	"unicode"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+type personSearchSource interface {
+	SearchVisible(context.Context, string, bool, int, int, catalog.AccessFilter, bool) ([]models.Person, int, error)
+	SearchVisibleWithOptions(context.Context, catalog.PersonSearchOptions) ([]models.Person, int, error)
+}
+
+// personBrowseMaxResults caps a /Persons page without a SearchTerm. Substring
+// searches keep the tighter auxSearchMaxResults guard.
+const personBrowseMaxResults = 100
+
 // PersonsHandler serves the Jellyfin /Persons endpoints.
 type PersonsHandler struct {
-	personRepo *catalog.PersonRepository
+	personRepo personSearchSource
 	content    ContentService
 	codec      *ResourceIDCodec
 	images     *ImageCache
 	serverID   string
+	imageTags  *imageTagSigner
 }
 
 // NewPersonsHandler creates a new persons handler.
-func NewPersonsHandler(personRepo *catalog.PersonRepository, content ContentService, codec *ResourceIDCodec, images *ImageCache, serverID string) *PersonsHandler {
+func NewPersonsHandler(personRepo *catalog.PersonRepository, content ContentService, codec *ResourceIDCodec, images *ImageCache, serverID, imageTagSecret string) *PersonsHandler {
 	return &PersonsHandler{
 		personRepo: personRepo,
 		content:    content,
 		codec:      codec,
 		images:     images,
 		serverID:   serverID,
+		imageTags:  newImageTagSigner(imageTagSecret),
 	}
 }
 
@@ -45,32 +52,60 @@ func (h *PersonsHandler) HandleGetPersons(w http.ResponseWriter, r *http.Request
 
 	q := newCaseInsensitiveQuery(r.URL.Query())
 	searchTerm := strings.TrimSpace(q.Get("SearchTerm"))
-	// Person search hits PostgreSQL directly (it is not in the Meilisearch
-	// index), so it is gated: short terms never run and results are capped.
+	// Person queries use PostgreSQL directly and cap the returned page. The
+	// optional SearchTerm accepts short names; an empty term lists visible
+	// people and may page in larger windows.
 	limit := clampAuxSearchLimit(parsePositiveInt(q.Get("Limit"), auxSearchMaxResults))
-
-	var people []models.Person
-	var err error
-
-	if searchTerm != "" {
-		if auxSearchTermTooShort(searchTerm) {
-			writeJSON(w, http.StatusOK, queryResultDTO{
-				Items:            []baseItemDTO{},
-				TotalRecordCount: 0,
-			})
-			return
+	if searchTerm == "" {
+		limit = parsePositiveInt(q.Get("Limit"), personBrowseMaxResults)
+		if limit <= 0 || limit > personBrowseMaxResults {
+			// As for searches, a non-positive limit means the default page.
+			limit = personBrowseMaxResults
 		}
-		if h.shouldSuppressSearchPeople(r.Context(), session, searchTerm) {
-			writeJSON(w, http.StatusOK, queryResultDTO{
-				Items:            []baseItemDTO{},
-				TotalRecordCount: 0,
-			})
-			return
-		}
-		people, err = h.personRepo.Search(r.Context(), searchTerm, limit)
-	} else {
-		people, err = h.personRepo.Search(r.Context(), "", limit)
 	}
+
+	// Silo favorites are content items only (see handleFavoriteMutation), so
+	// no person is a favorite. Listing everyone would fill a client's
+	// Favorites > People tab with the whole catalog.
+	if isFavorite := q.Get("IsFavorite"); isFavorite != "" && parseBool(isFavorite, false) || hasFilter(q.Get("Filters"), "IsFavorite") {
+		writeJSON(w, http.StatusOK, emptyQueryResult(parsePositiveInt(q.Get("StartIndex"), 0)))
+		return
+	}
+
+	filter := catalog.AccessFilter{AllowedLibraryIDs: []int{}}
+	if service, ok := h.content.(*directContentService); ok {
+		filter = service.resolveFilter(r.Context(), session)
+	}
+	opts := catalog.PersonSearchOptions{
+		Term:                    searchTerm,
+		NameStartsWith:          strings.TrimSpace(q.Get("NameStartsWith")),
+		NameLessThan:            strings.TrimSpace(q.Get("NameLessThan")),
+		NameStartsWithOrGreater: strings.TrimSpace(q.Get("NameStartsWithOrGreater")),
+		Limit:                   limit,
+		Offset:                  parsePositiveInt(q.Get("StartIndex"), 0),
+		Filter:                  filter,
+		IncludeTotal:            parseBool(q.Get("EnableTotalRecordCount"), true),
+	}
+	// Jellyfin 12 scopes people to the items under ParentId. Silo credits live
+	// on movies and series, so a library or movie/series parent is honored and
+	// any other parent (season, collection) matches nobody.
+	if parentID := strings.TrimSpace(q.Get("ParentId")); parentID != "" {
+		if libraryID, err := h.codec.DecodeIntID(EncodedIDLibrary, parentID); err == nil && libraryID > 0 {
+			// A library the viewer cannot browse lists nobody, even when its
+			// items are shared with a library the viewer can see.
+			if !narrowAccessToLibrary(&opts.Filter, int(libraryID)) {
+				writeJSON(w, http.StatusOK, emptyQueryResult(opts.Offset))
+				return
+			}
+			opts.LibraryID = int(libraryID)
+		} else if contentID, err := decodeItemID(h.codec, parentID); err == nil && contentID != "" {
+			opts.ContentID = contentID
+		} else {
+			writeJSON(w, http.StatusOK, emptyQueryResult(opts.Offset))
+			return
+		}
+	}
+	people, total, err := h.personRepo.SearchVisibleWithOptions(r.Context(), opts)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -83,7 +118,8 @@ func (h *PersonsHandler) HandleGetPersons(w http.ResponseWriter, r *http.Request
 
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
-		TotalRecordCount: len(items),
+		TotalRecordCount: total,
+		StartIndex:       opts.Offset,
 	})
 }
 
@@ -96,110 +132,36 @@ func (h *PersonsHandler) HandleGetPerson(w http.ResponseWriter, r *http.Request)
 	}
 
 	name := chi.URLParam(r, "name")
-	person, err := h.personRepo.GetByName(r.Context(), name)
+	filter := catalog.AccessFilter{AllowedLibraryIDs: []int{}}
+	if service, ok := h.content.(*directContentService); ok {
+		filter = service.resolveFilter(r.Context(), session)
+	}
+	people, _, err := h.personRepo.SearchVisible(r.Context(), name, true, 1, 0, filter, false)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "NotFound", "Person not found")
-		} else {
-			writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
-		}
+		writeCompatUpstreamError(w, err)
 		return
 	}
-
+	if len(people) == 0 {
+		writeError(w, http.StatusNotFound, "NotFound", "Person not found")
+		return
+	}
+	person := &people[0]
 	writeJSON(w, http.StatusOK, h.personToDTO(*person))
 }
 
+// personToDTO maps a person returned by a visibility-filtered search, so it may
+// carry a signed photo tag.
 func (h *PersonsHandler) personToDTO(p models.Person) baseItemDTO {
+	routeID := h.codec.EncodeIntID(EncodedIDPerson, p.ID)
 	dto := baseItemDTO{
-		ID:       h.codec.EncodeIntID(EncodedIDPerson, p.ID),
+		ID:       routeID,
 		Name:     p.Name,
 		Type:     "Person",
 		ServerID: h.serverID,
+		Overview: p.Bio,
 	}
 	if p.PhotoPath != "" && p.PhotoPath != "-" {
-		dto.ImageTags = map[string]string{"Primary": tagValue(p.PhotoPath)}
+		dto.ImageTags = map[string]string{compatImagePrimary: personPrimaryImageTag(h.imageTags, routeID, p.PhotoPath, p.PhotoThumbhash)}
 	}
 	return dto
-}
-
-// personNamePattern matches strings that "look like" a person name: a leading
-// Unicode letter followed by additional letters or common name punctuation
-// (whitespace, dot, hyphen, apostrophe). Digits and colons disqualify the
-// candidate, sending it through the slower media-probe path used to detect
-// when a query is actually a media title.
-var personNamePattern = regexp.MustCompile(`^[\p{L}][\p{L}\s.\-']{1,}$`)
-
-// looksLikePersonName returns true when the search term has a "name shape":
-// word boundaries with letters / common name punctuation only, no digits,
-// no colons. Avoids the round-trip media search for the common case.
-func looksLikePersonName(term string) bool {
-	term = strings.TrimSpace(term)
-	if len(term) < 2 {
-		return false
-	}
-	return personNamePattern.MatchString(term)
-}
-
-func (h *PersonsHandler) shouldSuppressSearchPeople(ctx context.Context, session *Session, raw string) bool {
-	if h == nil || h.content == nil || session == nil {
-		return false
-	}
-
-	// If the term clearly looks like a person name, skip the media probe
-	// entirely and let the persons search proceed.
-	if looksLikePersonName(raw) {
-		return false
-	}
-
-	query := normalizeCompatSearchValue(raw)
-	if query == "" {
-		return false
-	}
-
-	media, err := h.content.SearchItems(ctx, session, SearchItemsOptions{
-		Query:     raw,
-		ItemTypes: []string{"movie", "series"},
-		Limit:     5,
-		SkipTotal: true,
-	})
-	if err != nil || media == nil || len(media.Items) == 0 {
-		return false
-	}
-
-	exactMatch := false
-	prefixMatches := 0
-	for _, item := range media.Items {
-		title := normalizeCompatSearchValue(item.Title)
-		if title == "" {
-			continue
-		}
-		if title == query {
-			exactMatch = true
-			break
-		}
-		if strings.HasPrefix(title, query) {
-			prefixMatches++
-		}
-	}
-
-	return exactMatch || prefixMatches >= 2
-}
-
-func normalizeCompatSearchValue(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-
-	var b strings.Builder
-	b.Grow(len(raw))
-	for _, r := range raw {
-		switch {
-		case unicode.IsLetter(r), unicode.IsDigit(r):
-			b.WriteRune(unicode.ToLower(r))
-		default:
-			b.WriteByte(' ')
-		}
-	}
-	return strings.Join(strings.Fields(b.String()), " ")
 }

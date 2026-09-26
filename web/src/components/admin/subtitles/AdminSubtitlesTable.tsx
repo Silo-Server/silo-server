@@ -82,7 +82,7 @@ export default function AdminSubtitlesTable({
         <p className="text-muted-foreground mx-auto mt-2 max-w-lg text-sm leading-relaxed">
           {hasActiveFilters
             ? "Try widening the provider, language, or uploader filters to see more results."
-            : "User uploads and provider downloads will appear here once subtitles are stored in S3."}
+            : "User uploads and provider downloads will appear here."}
         </p>
         {hasActiveFilters && (
           <Button type="button" variant="outline" className="mt-5" onClick={onResetFilters}>

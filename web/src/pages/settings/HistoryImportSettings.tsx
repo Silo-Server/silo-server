@@ -254,12 +254,17 @@ export default function HistoryImportSettings() {
           server_id: connectServerId,
         });
         setActiveRunId(run.id);
+        // Starting a run consumes the Connect session; another import needs a
+        // fresh sign-in.
+        setConnectSession(null);
+        setConnectServerId("");
+        setConnectPassword("");
       } else if (embyMode === "saved" && selectedSavedSource) {
         const run = await createRunMutation.mutateAsync({
           profile_id: effectiveProfileId,
           source: "emby",
           source_id: selectedSavedSource.id,
-          username: savedUsername,
+          username: savedUsername.trim(),
           password: savedPassword,
         });
         setActiveRunId(run.id);
@@ -310,6 +315,7 @@ export default function HistoryImportSettings() {
           connectSession,
           connectServerId,
           selectedSavedSource,
+          savedUsername,
         )
       : sourceType === "plex"
         ? plexMode === "oauth"
@@ -449,6 +455,7 @@ export default function HistoryImportSettings() {
                         <Label>Emby Password</Label>
                         <Input
                           type="password"
+                          placeholder="Leave blank if the account has none"
                           value={savedPassword}
                           onChange={(e) => setSavedPassword(e.target.value)}
                         />
@@ -695,7 +702,7 @@ function SourceCard({
   const isJellyfin = type === "jellyfin";
   const label = isEmby ? "Emby" : isJellyfin ? "Jellyfin" : "Plex";
   const description = isEmby
-    ? "Emby Connect or direct server"
+    ? "Emby Connect or saved server"
     : isJellyfin
       ? "Direct server URL + credentials"
       : "Plex account or direct server";
@@ -819,7 +826,8 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
     );
   }
 
-  const processed = run.matched + run.unmatched + run.skipped;
+  // Skipped items were matched first, so they are already in run.matched.
+  const processed = run.matched + run.unmatched;
   const progressPct = run.fetched > 0 ? Math.min(100, (processed / run.fetched) * 100) : 0;
   const isActive = run.status === "running" || run.status === "queued";
 
@@ -888,8 +896,8 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
         <div className="space-y-2">
           <Label className="text-sm font-medium">Warnings</Label>
           <div className="space-y-1.5">
-            {run.warnings.map((warning) => (
-              <div key={warning} className="flex items-start gap-2 text-sm">
+            {run.warnings.map((warning, index) => (
+              <div key={`${index}-${warning}`} className="flex items-start gap-2 text-sm">
                 <AlertTriangle className="text-muted-foreground mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span className="text-muted-foreground">{warning}</span>
               </div>

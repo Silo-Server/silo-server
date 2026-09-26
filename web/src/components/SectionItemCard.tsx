@@ -32,7 +32,7 @@ export default function SectionItemCard({
   overlayPrefs = null,
   quickActionMode = "none",
 }: SectionItemCardProps) {
-  const { loaded, onLoad } = useImageLoaded(item.poster_url);
+  const { loaded, onLoad, onError } = useImageLoaded(item.poster_url);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
   const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const upcomingEvent = item.upcoming_event;
@@ -75,6 +75,7 @@ export default function SectionItemCard({
                 className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
                 loading="lazy"
                 onLoad={onLoad}
+                onError={onError}
               />
             ) : (
               <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm">

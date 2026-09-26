@@ -118,6 +118,8 @@ export async function startPlaybackV2(
     throw new Error("Playback is not available for this account");
   if (!cap.protocol_versions.includes(3))
     throw new Error("This server does not offer playback protocol v3");
+  if (body.allow_alternate_versions === false && !cap.features.includes("fixed_media_file_v1"))
+    throw new Error("This server needs an update to keep Watch Party viewers on the same version.");
   const installationId = cap.installation_id;
   const payload = JSON.stringify({
     ...body,

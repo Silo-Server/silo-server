@@ -20,9 +20,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -61,7 +61,7 @@ type LibraryHandler struct {
 	ObservedLocationRepo  *scanner.ObservedLocationRepository
 	SectionRepo           *sections.Repository
 	StoreProvider         userstore.UserStoreProvider
-	ArtworkStore          artworkstore.Store
+	ArtworkStore          blobstore.Store
 	ArtworkResolver       artworkurl.Resolver
 	appCtx                context.Context
 	EventBus              cache.EventBus
@@ -442,7 +442,7 @@ func (h *LibraryHandler) HandleReorderLibraries(w http.ResponseWriter, r *http.R
 
 // HandleListSkippedRoots handles GET /libraries/skipped-roots.
 func (h *LibraryHandler) HandleListSkippedRoots(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.ListSkippedRoots(r.Context(), "", 0, 0)
+	resp, _, err := h.ListSkippedRoots(r.Context(), "", 0, 0)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -1647,7 +1647,7 @@ func metadataContentLevelsForLibraryType(libraryType string) []string {
 
 // HandleListStaleIDs handles GET /libraries/stale-ids.
 func (h *LibraryHandler) HandleListStaleIDs(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.ListStaleIDs(r.Context(), "", 0, 0)
+	resp, _, err := h.ListStaleIDs(r.Context(), "", 0, 0)
 	if err != nil {
 		writeAPIError(w, err)
 		return

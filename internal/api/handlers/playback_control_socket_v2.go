@@ -184,9 +184,10 @@ type PlaybackControlSocketV2 struct {
 	Tickets  *PlaybackControlTicketStore
 	Validate EventsSocketValidator
 	// PublicOrigin is the configured external origin, never a forwarded header.
-	PublicOrigin  string
-	publicOrigin  atomic.Pointer[string]
-	checkInterval time.Duration
+	PublicOrigin   string
+	publicOrigin   atomic.Pointer[string]
+	overlayOrigins atomic.Pointer[OverlayOriginSource]
+	checkInterval  time.Duration
 
 	laneMu sync.Mutex
 	lanes  map[string]*playbackControlLane
@@ -277,7 +278,7 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "invalid handshake", http.StatusBadRequest)
 		return
 	}
-	if !socketOriginAllowed(r, h.currentPublicOrigin()) {
+	if !socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load())) {
 		http.Error(w, "origin refused", http.StatusForbidden)
 		return
 	}
@@ -334,7 +335,9 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	ctx, cancel := context.WithDeadline(validated, deadline)
 	defer cancel()
 
-	upgrader := websocket.Upgrader{Subprotocols: []string{PlaybackControlSocketProtocol}, CheckOrigin: func(r *http.Request) bool { return socketOriginAllowed(r, h.currentPublicOrigin()) }}
+	upgrader := websocket.Upgrader{Subprotocols: []string{PlaybackControlSocketProtocol}, CheckOrigin: func(r *http.Request) bool {
+		return socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load()))
+	}}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "playback control websocket upgrade failed", "component", "api", "error", err, "session", sessionID, "playback_session_id", sessionID)
@@ -424,6 +427,12 @@ func (h *PlaybackControlSocketV2) currentPublicOrigin() string {
 func (h *PlaybackControlSocketV2) SetPublicOrigin(origin string) {
 	normalized := strings.TrimRight(origin, "/")
 	h.publicOrigin.Store(&normalized)
+}
+
+// SetOverlayOrigins installs the source of overlay origins accepted next to
+// the public origin.
+func (h *PlaybackControlSocketV2) SetOverlayOrigins(source OverlayOriginSource) {
+	h.overlayOrigins.Store(&source)
 }
 
 func (h *PlaybackControlSocketV2) owns(sessionID string, lane *playbackControlLane) bool {

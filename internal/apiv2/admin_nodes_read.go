@@ -41,6 +41,19 @@ type AdminNode struct {
 	CapabilityDriftBaseline    json.RawMessage `json:"capability_drift_baseline,omitempty"`
 	AdvertisedCapabilitiesHash *string         `json:"advertised_capabilities_hash,omitempty" doc:"Absent when not checked in this process; empty when checked but no hash was advertised."`
 	PhysicalGPUKeys            []string        `json:"physical_gpu_keys,omitempty"`
+	// NetworkAccess is keyed by provider slug ("tailscale"). Only proxy nodes
+	// report it; a transcode node never does because clients never reach one.
+	NetworkAccess map[string]AdminNodeNetworkAccess `json:"network_access,omitempty" doc:"Last network access provider status the node reported on its health check, keyed by provider slug. Omitted when the node reports no providers."`
+}
+
+// AdminNodeNetworkAccess is one provider's status as the node last reported
+// it. Stream URLs for clients arriving through that provider are built on
+// origin while state is connected.
+type AdminNodeNetworkAccess struct {
+	State     string   `json:"state" doc:"disconnected | awaiting_authorization | connecting | connected | error"`
+	Origin    string   `json:"origin,omitempty" doc:"scheme://host[:port] clients on the provider's overlay use to reach this node. Only used while state is connected."`
+	Hostname  string   `json:"hostname,omitempty" doc:"Overlay DNS name of the node."`
+	UpdatedAt *Instant `json:"updated_at,omitempty" doc:"When the node last heard from the provider, on the node's clock."`
 }
 type AdminNodesListInput struct {
 	LimitParam
@@ -66,6 +79,16 @@ func adminNodeOf(n *nodepool.Node) AdminNode {
 	}
 	if n.CapabilitiesRefreshedAt != nil {
 		out.CapabilitiesRefreshedAt = new(NewInstant(*n.CapabilitiesRefreshedAt))
+	}
+	if len(n.NetworkAccess) > 0 {
+		out.NetworkAccess = make(map[string]AdminNodeNetworkAccess, len(n.NetworkAccess))
+		for provider, status := range n.NetworkAccess {
+			entry := AdminNodeNetworkAccess{State: status.State, Origin: status.Origin, Hostname: status.Hostname}
+			if !status.UpdatedAt.IsZero() {
+				entry.UpdatedAt = new(NewInstant(status.UpdatedAt))
+			}
+			out.NetworkAccess[provider] = entry
+		}
 	}
 	return out
 }

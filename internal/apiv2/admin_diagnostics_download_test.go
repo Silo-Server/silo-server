@@ -5,8 +5,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -66,5 +68,36 @@ func TestAdminDiagnosticDownloadProblems(t *testing.T) {
 				t.Fatal(r.Code, r.Body.String())
 			}
 		})
+	}
+}
+
+// Without presigning this route is the only way a bundle leaves the server,
+// and Accept-Ranges: none means a download cut off by the API server's
+// absolute WriteTimeout cannot resume.
+func TestAdminDiagnosticDownloadOutlastsServerWriteTimeout(t *testing.T) {
+	body := &slowArtifactReader{chunks: []string{"bu", "nd", "le"}, delay: 150 * time.Millisecond}
+	s := &diagnosticDownloadStub{body: &diagnosticTestBody{Reader: body}}
+	deps := requestDeps(fixtureRequests())
+	deps.AdminDiagnosticDownloads = s
+	srv := httptest.NewUnstartedServer(NewHandler(deps))
+	srv.Config.WriteTimeout = 100 * time.Millisecond
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+Prefix+"/admin/diagnostics/reports/report-1/download", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range actingRequestAdmin {
+		req.Header.Set(k, v)
+	}
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	got, err := io.ReadAll(resp.Body)
+	if err != nil || string(got) != "bundle" {
+		t.Fatalf("status = %d, body = %q, err = %v", resp.StatusCode, got, err)
 	}
 }

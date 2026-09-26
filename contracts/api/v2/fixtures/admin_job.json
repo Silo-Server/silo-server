@@ -14,5 +14,6 @@
     "detail_content_id": "detail",
     "matched_files": 0
   },
-  "artifact_size_bytes": 0
+  "artifact_size_bytes": 0,
+  "public_link_supported": false
 }

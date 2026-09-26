@@ -78,23 +78,33 @@ func (s *Service) handleClusterEvent(event cache.Event) {
 		}
 		s.mu.Lock()
 		live := s.rooms[incoming.RoomID]
-		members := make([]*memberState, 0)
+		hasViewers := false
 		if live != nil && live.room.Phase != RoomPhaseEnded {
 			for _, member := range live.members {
 				if member != nil && member.connection != nil {
-					members = append(members, member)
+					hasViewers = true
+					break
 				}
 			}
 		}
 		s.mu.Unlock()
-		for _, member := range members {
-			memberCtx, memberCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			rows, err := s.suggestions.ListSuggestions(memberCtx, incoming.RoomID, member.userID, member.profileID)
-			memberCancel()
-			if err == nil {
-				s.runDispatches([]snapshotDispatch{{conn: member.connection, payload: map[string]any{clusterMessageTypeKey: suggestionsUpdateType, "suggestions": rows}}})
-			}
+		if !hasViewers {
+			return
 		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		rows, err := s.suggestions.ListSuggestions(ctx, incoming.RoomID, 0, "")
+		cancel()
+		if err != nil {
+			return
+		}
+		s.mu.Lock()
+		if s.rooms[incoming.RoomID] != live {
+			s.mu.Unlock()
+			return
+		}
+		dispatches := s.prepareSuggestionDispatchesLocked(live, rows)
+		s.mu.Unlock()
+		s.runDispatches(dispatches)
 		return
 	}
 	if event.Type != "watch_together_room_state" {
@@ -104,49 +114,49 @@ func (s *Service) handleClusterEvent(event cache.Event) {
 	if json.Unmarshal([]byte(event.Payload), &incoming) != nil || incoming.Source == s.instanceID || incoming.RoomID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	room, err := s.repo.GetRoomByID(ctx, incoming.RoomID)
-	if err != nil || room == nil {
-		return
-	}
+	s.queueRoomReconciliation(incoming.RoomID)
+}
+
+// queueRoomReconciliation keeps SQL and row-lock waits off the PubSub reader.
+// Each locally active room has at most one worker and one pending refresh.
+func (s *Service) queueRoomReconciliation(roomID string) {
 	s.mu.Lock()
-	live := s.rooms[incoming.RoomID]
-	if live == nil {
+	select {
+	case <-s.janitorStop:
+		s.mu.Unlock()
+		return
+	default:
+	}
+	live := s.rooms[roomID]
+	if live == nil || !hasLocalRoomWork(live) {
 		s.mu.Unlock()
 		return
 	}
-	if room.Phase == RoomPhaseEnded {
-		dispatches := s.prepareRoomClosedDispatchesLocked(live)
-		if live.hostCloseTimer != nil {
-			live.hostCloseTimer.Stop()
-		}
-		if live.waitingTimer != nil {
-			live.waitingTimer.Stop()
-		}
-		delete(s.rooms, incoming.RoomID)
-		s.mu.Unlock()
-		s.runDispatches(dispatches)
-		return
-	}
-	if room.Generation <= live.room.Generation {
+	if live.reconciling {
+		live.reconcilePending = true
 		s.mu.Unlock()
 		return
 	}
-	if room.SelectionRevision != live.room.SelectionRevision {
-		s.disarmWaitingDeadlineLocked(live)
-		for _, member := range live.members {
-			if member == nil {
-				continue
-			}
-			member.sessionID = ""
-			member.isReady = false
-			member.isBuffering = false
-			member.ignoreWait = false
-		}
-	}
-	live.room = *room
-	dispatches := s.prepareSnapshotDispatchesLocked(live)
+	live.reconciling = true
 	s.mu.Unlock()
-	s.runDispatches(dispatches)
+	go func() {
+		for {
+			_ = s.reconcileRoom(context.Background(), roomID)
+			s.mu.Lock()
+			stopped := false
+			select {
+			case <-s.janitorStop:
+				stopped = true
+			default:
+			}
+			if stopped || s.rooms[roomID] != live || !live.reconcilePending {
+				live.reconciling = false
+				live.reconcilePending = false
+				s.mu.Unlock()
+				return
+			}
+			live.reconcilePending = false
+			s.mu.Unlock()
+		}
+	}()
 }

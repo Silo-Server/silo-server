@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 // WriteAccessScopeCacheKey appends every AccessFilter field that bounds WHICH
@@ -16,8 +18,10 @@ import (
 // through this method, so a new boundary field added to AccessFilter only has
 // to be captured here — never in per-cache copies that can silently drift.
 //
-// Included: AllowedLibraryIDs, DisabledLibraryIDs, MaxContentRating,
-// ExcludedMediaTypes, NamePrefix, AllowedContentIDs. AllowedLibraryIDs and
+// Included: AllowedLibraryIDs, DisabledLibraryIDs, every MaturityLimits field
+// (MaxContentRating, AllowUnratedContent, MaxAdvisoryAge, RequireAdvisoryAge),
+// ExcludedMediaTypes,
+// NamePrefix, AllowedContentIDs. AllowedLibraryIDs and
 // AllowedContentIDs preserve the nil (unrestricted) vs empty (restrict to
 // nothing) distinction the access layer branches on; AllowedContentIDs is
 // hashed because the allow-list can be large.
@@ -36,7 +40,25 @@ func (f AccessFilter) WriteAccessScopeCacheKey(b *strings.Builder) {
 	writeSortedIntsKey(b, f.DisabledLibraryIDs)
 
 	b.WriteString("|rating=")
-	b.WriteString(f.MaxContentRating)
+	b.WriteString(contentRatingCeilingCacheKey(f.MaxContentRating))
+
+	// Part of the ceiling, not a separate preference: flipping
+	// access.unrated_content changes which rows the same ceiling admits, so a
+	// cached list warmed under one value must not be served under the other.
+	b.WriteString("|unrated=")
+	b.WriteString(strconv.FormatBool(f.AllowUnratedContent))
+
+	// 0 is "no limit", the only value ApplyMaturityLimits skips.
+	b.WriteString("|advisory=")
+	b.WriteString(strconv.Itoa(f.MaxAdvisoryAge))
+
+	// Keyed raw, like the unrated setting, not as HidesUnadvised: that can
+	// only split an entry, never merge two scopes that render different SQL,
+	// and it keeps every field independently visible to the drift guard in
+	// access_cache_key_test.go. The resolvers already fold the flag to false
+	// without a limit, so the extra split does not arise in practice.
+	b.WriteString("|requireadvisory=")
+	b.WriteString(strconv.FormatBool(f.RequireAdvisoryAge))
 
 	b.WriteString("|excludedtypes=")
 	writeSortedStringsKey(b, f.ExcludedMediaTypes)
@@ -46,6 +68,28 @@ func (f AccessFilter) WriteAccessScopeCacheKey(b *strings.Builder) {
 
 	b.WriteString("|allowedcontent=")
 	b.WriteString(hashOptionalStringsKey(f.AllowedContentIDs))
+}
+
+// contentRatingCeilingCacheKey reduces a maturity ceiling to the three states
+// ApplyMaturityLimits actually branches on: no ceiling, a ceiling that
+// resolves to no age (deny everything), or a resolved age. Two filters that
+// agree here always produce the same ceiling predicate.
+//
+// Keying the resolved state rather than the raw string is what BOUNDS the
+// caches this feeds. MaxContentRating is not always a value Silo wrote: the
+// jellycompat browse paths fold a client's MaxOfficialRating into it, and that
+// is free text. "PG-13", "pg13", "PG 13", "US:PG-13" and "+13" all render the
+// same SQL, so keying the string would let one client mint an unbounded number
+// of process-global entries that each hold the same list.
+func contentRatingCeilingCacheKey(ceiling string) string {
+	if !access.HasCeiling(ceiling) {
+		return "none"
+	}
+	age, ok := access.AgeForCeiling(ceiling)
+	if !ok {
+		return "blocked"
+	}
+	return "age" + strconv.Itoa(*age)
 }
 
 // writeOptionalSortedIntsKey encodes an int set preserving the nil vs empty

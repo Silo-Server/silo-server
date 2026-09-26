@@ -1,19 +1,13 @@
 package handlers
 
-import (
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
-	"github.com/Silo-Server/silo-server/internal/s3client"
-)
+import "github.com/Silo-Server/silo-server/internal/blobstore"
 
-// NewProfileAvatarStore keeps existing and new avatar keys in private S3 when
-// configured. Standalone installations store avatars locally and sign delivery
-// URLs through the artwork resolver. Public artwork S3 is never eligible.
-func NewProfileAvatarStore(artwork artworkstore.Store, private *s3client.Client, backend string) artworkstore.Store {
-	if private != nil {
-		return artworkstore.NewS3(private)
-	}
-	if backend == artworkstore.BackendLocal {
-		return artwork
-	}
-	return nil
+// NewProfileAvatarStore returns the store avatars live in, which is the
+// operational store: private S3 when configured, preserving existing keys and
+// presigned delivery, and otherwise the local root with signed delivery through
+// the artwork resolver. Public artwork S3 is never eligible, and an S3
+// deployment without a private bucket has nowhere to put avatars, so this
+// returns nil and uploads stay unavailable.
+func NewProfileAvatarStore(stores blobstore.Stores) blobstore.Store {
+	return stores.Operational
 }

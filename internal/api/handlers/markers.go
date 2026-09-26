@@ -59,12 +59,13 @@ type MarkerAuditLister interface {
 // admin-only. A successful manual write fires a background contribution run
 // (see maybeContribute) so corrected markers reach enabled providers.
 type MarkersHandler struct {
-	Files         MarkerFileResolver
-	Writer        ManualMarkerWriter
-	Contributor   MarkerContributor
-	Contributions MarkerContributionLister
-	AuditHistory  MarkerAuditLister
-	Notifier      PlaybackMarkerUpdateNotifier
+	Files            MarkerFileResolver
+	Writer           ManualMarkerWriter
+	Contributor      MarkerContributor
+	Contributions    MarkerContributionLister
+	AuditHistory     MarkerAuditLister
+	Notifier         PlaybackMarkerUpdateNotifier
+	MarkerPopulation MarkerPopulationService
 	// Authorizer enforces per-item access on file lookups so a viewer can only
 	// edit markers for content they can actually watch. When nil (tests) the
 	// handler falls back to an unchecked lookup.
@@ -109,11 +110,12 @@ type segmentMarker struct {
 }
 
 type fileMarkersResponse struct {
-	FileID  int           `json:"file_id"`
-	Intro   segmentMarker `json:"intro"`
-	Credits segmentMarker `json:"credits"`
-	Recap   segmentMarker `json:"recap"`
-	Preview segmentMarker `json:"preview"`
+	FileID         int                    `json:"file_id"`
+	Intro          segmentMarker          `json:"intro"`
+	Credits        segmentMarker          `json:"credits"`
+	Recap          segmentMarker          `json:"recap"`
+	Preview        segmentMarker          `json:"preview"`
+	MarkerSegments []models.MarkerSegment `json:"-"`
 }
 
 type contributionOutcomeResponse struct {
@@ -167,7 +169,8 @@ type markerEditAuditResponse struct {
 
 func fileMarkers(file *models.MediaFile) fileMarkersResponse {
 	return fileMarkersResponse{
-		FileID: file.ID,
+		FileID:         file.ID,
+		MarkerSegments: models.EffectiveMarkerSegments(file),
 		Intro: segmentMarker{file.IntroStart, file.IntroEnd, file.IntroMarkersSource, file.IntroMarkersProvider,
 			file.IntroMarkersConfidence, file.IntroMarkersAlgorithm, file.IntroMarkersDetectedAt},
 		Credits: segmentMarker{file.CreditsStart, file.CreditsEnd, file.CreditsMarkersSource, file.CreditsMarkersProvider,

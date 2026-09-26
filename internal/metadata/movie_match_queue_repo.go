@@ -97,7 +97,7 @@ func (r *MovieMatchQueueRepository) EnqueueMovieFile(ctx context.Context, fileID
 		SELECT
 			mf.id,
 			mf.media_folder_id,
-			`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+`,
+			`+matchQueueInputFingerprintSQL(movieMatchQueueFileIdentitySQL, "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+`,
 			`+fmt.Sprintf("%d", movieMatcherRevision)+`,
 			NOW(),
 			NOW()
@@ -174,7 +174,7 @@ func (r *MovieMatchQueueRepository) SyncForFolder(ctx context.Context, folderID 
 		SELECT
 			mf.id,
 			mf.media_folder_id,
-			`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+`,
+			`+matchQueueInputFingerprintSQL(movieMatchQueueFileIdentitySQL, "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+`,
 			`+fmt.Sprintf("%d", movieMatcherRevision)+`,
 			NOW(),
 			NOW()
@@ -256,7 +256,7 @@ func (r *MovieMatchQueueRepository) SyncInScope(ctx context.Context, folderID in
 		SELECT
 			mf.id,
 			mf.media_folder_id,
-			`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+`,
+			`+matchQueueInputFingerprintSQL(movieMatchQueueFileIdentitySQL, "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+`,
 			`+fmt.Sprintf("%d", movieMatcherRevision)+`,
 			NOW(),
 			NOW()
@@ -588,7 +588,7 @@ func (r *MovieMatchQueueRepository) RetryNowByFolder(ctx context.Context, folder
 	tag, err := r.pool.Exec(ctx, `
 		WITH current_inputs AS (
 			SELECT q.media_file_id, mf.media_folder_id,
-				`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+` AS input_fingerprint
+				`+matchQueueInputFingerprintSQL(movieMatchQueueFileIdentitySQL, "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+` AS input_fingerprint
 			FROM movie_match_queue q
 			JOIN media_files mf ON mf.id = q.media_file_id
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
@@ -618,7 +618,7 @@ func (r *MovieMatchQueueRepository) WakeForChangedInputs(ctx context.Context) (i
 	tag, err := r.pool.Exec(ctx, `
 		WITH changed AS (
 			SELECT q.media_file_id, mf.media_folder_id,
-				`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+` AS input_fingerprint
+				`+matchQueueInputFingerprintSQL(movieMatchQueueFileIdentitySQL, "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+` AS input_fingerprint
 			FROM movie_match_queue q
 			JOIN media_files mf ON mf.id = q.media_file_id
 			JOIN media_folders folders ON folders.id = mf.media_folder_id

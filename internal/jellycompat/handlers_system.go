@@ -15,8 +15,16 @@ type publicSystemInfoResponse struct {
 	StartupWizardCompleted bool   `json:"StartupWizardCompleted"`
 }
 
+type systemInfoResponse struct {
+	publicSystemInfoResponse
+	CastReceiverApplications []struct{} `json:"CastReceiverApplications"`
+}
+
+// brandingConfigurationResponse is Jellyfin's BrandingOptionsDto;
+// jellyfin-sdk-kotlin requires SplashscreenEnabled.
 type brandingConfigurationResponse struct {
-	LoginDisclaimer string `json:"LoginDisclaimer"`
+	LoginDisclaimer     string `json:"LoginDisclaimer"`
+	SplashscreenEnabled bool   `json:"SplashscreenEnabled"`
 }
 
 type endpointInfoResponse struct {
@@ -44,7 +52,11 @@ func (h *SystemHandler) HandlePublicInfo(w http.ResponseWriter, r *http.Request)
 
 // HandleInfo serves GET /System/Info.
 func (h *SystemHandler) HandleInfo(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.systemInfo())
+	writeJSON(w, http.StatusOK, systemInfoResponse{
+		publicSystemInfoResponse: h.systemInfo(),
+		// Jellyfin Web iterates this array even when Chromecast is unavailable.
+		CastReceiverApplications: []struct{}{},
+	})
 }
 
 // HandleBrandingConfiguration serves GET /Branding/Configuration.

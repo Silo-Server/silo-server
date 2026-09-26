@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
 )
 
@@ -28,19 +28,19 @@ func (m *memBrandingStore) Put(_ context.Context, key string, data []byte) error
 	m.objects[key] = data
 	return nil
 }
-func (m *memBrandingStore) Get(_ context.Context, key string) (io.ReadCloser, artworkstore.ObjectInfo, error) {
+func (m *memBrandingStore) Get(_ context.Context, key string) (io.ReadCloser, blobstore.ObjectInfo, error) {
 	data, ok := m.objects[key]
 	if !ok {
-		return nil, artworkstore.ObjectInfo{}, artworkstore.ErrNotFound
+		return nil, blobstore.ObjectInfo{}, blobstore.ErrNotFound
 	}
-	return io.NopCloser(bytes.NewReader(data)), artworkstore.ObjectInfo{Key: key, Size: int64(len(data))}, nil
+	return io.NopCloser(bytes.NewReader(data)), blobstore.ObjectInfo{Key: key, Size: int64(len(data))}, nil
 }
-func (m *memBrandingStore) Stat(_ context.Context, key string) (artworkstore.ObjectInfo, error) {
+func (m *memBrandingStore) Stat(_ context.Context, key string) (blobstore.ObjectInfo, error) {
 	data, ok := m.objects[key]
 	if !ok {
-		return artworkstore.ObjectInfo{}, artworkstore.ErrNotFound
+		return blobstore.ObjectInfo{}, blobstore.ErrNotFound
 	}
-	return artworkstore.ObjectInfo{Key: key, Size: int64(len(data))}, nil
+	return blobstore.ObjectInfo{Key: key, Size: int64(len(data))}, nil
 }
 
 // The v2 seam keeps the v1 decisions: kind and image-type failures are field

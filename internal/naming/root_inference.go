@@ -14,18 +14,16 @@ var (
 	inferTitleYearRe       = regexp.MustCompile(`^(.+?)\s*\((\d{4})\)`)
 	inferWhitespaceTokenRe = regexp.MustCompile(`\s+`)
 	inferReleaseTokenRe    = regexp.MustCompile(`(?i)\b(?:remux|bluray|bdrip|brrip|web[ ._-]?dl|webrip|hdr|dv|2160p|1080p|720p|x264|x265|h\.?264|h\.?265|hevc|av1|aac|dts|truehd|atmos)\b`)
-	inferSeasonDirRe       = regexp.MustCompile(`(?i)^Season\s+(\d{1,4})(?:\s.*)?$`)
-	inferNumericSeasonRe   = regexp.MustCompile(`^\d{1,4}$`)
-	inferSpecialsDirRe     = regexp.MustCompile(`(?i)^(?:specials?|extras?)$`)
 	// Matches a well-formed tag ([tvdb-81189]), an unsubstituted Sonarr token
 	// ([tvdb-{TvdbId}]), or an empty token ({imdb-}). The id part is either a
 	// {...} placeholder or zero-or-more word chars.
-	inferProviderTagRe = regexp.MustCompile(`\s*[{\[](?:tmdb|tmdbid|imdb|imdbid|tvdb|tvdbid)-(?:\{[^}]*\}|[\w]*)[}\]]`)
+	inferProviderTagRe = regexp.MustCompile(`(?i)\s*[{\[](?:tmdb|tmdbid|imdb|imdbid|tvdb|tvdbid)[-=](?:\{[^}]*\}|[\w]*)[}\]]`)
 )
 
 type RootAssignment struct {
 	FilePath               string
 	RootPath               string
+	LibraryRootPath        string
 	InferredType           string
 	Title                  string
 	Year                   int
@@ -45,6 +43,7 @@ func InferRootAssignments(
 	libraryType string,
 	folderID int,
 	overrides map[string]models.MediaRootOverride,
+	libraryRoots ...string,
 ) ([]models.ScannedMediaRoot, map[string]RootAssignment) {
 	assignments := make(map[string]RootAssignment, len(filePaths))
 	if len(filePaths) == 0 {
@@ -69,7 +68,7 @@ func InferRootAssignments(
 	byRoot := make(map[string]*aggregate, len(filePaths))
 	for _, rawPath := range filePaths {
 		cleanFilePath := filepath.Clean(rawPath)
-		assignment := inferFileRootAssignment(cleanFilePath, libraryType, overrides)
+		assignment := inferFileRootAssignment(cleanFilePath, libraryType, overrides, libraryRoots...)
 		assignments[cleanFilePath] = assignment
 
 		agg, found := byRoot[assignment.RootPath]
@@ -88,7 +87,7 @@ func InferRootAssignments(
 					Year:              assignment.Year,
 				},
 			}
-			if ids := ParseFolderIDs(filepath.Base(assignment.RootPath)); ids != nil {
+			if ids := ParseFolderIDs(filepath.Base(assignment.RootPath)); ids != nil && assignment.RootPath != assignment.LibraryRootPath {
 				agg.hasFolderIDs = true
 				agg.root.TmdbID = ids.TmdbID
 				agg.root.ImdbID = ids.ImdbID
@@ -172,6 +171,7 @@ func InferRootAssignments(
 			agg.movieEvidenceCount > 0
 		if conflictingTypeVotes ||
 			(!agg.hasFolderIDs && agg.root.TypeConfidence == "low" && agg.root.Title == "") ||
+			(!agg.hasFolderIDs && agg.root.InferredType == seriesContentType && agg.root.Title == "") ||
 			(agg.contradictionCount > 0 && agg.root.ObservedFileCount == 1) {
 			agg.root.State = "ambiguous"
 		}
@@ -225,8 +225,9 @@ func inferFileRootAssignment(
 	filePath string,
 	libraryType string,
 	overrides map[string]models.MediaRootOverride,
+	libraryRoots ...string,
 ) RootAssignment {
-	assignment := extractPathEvidence(filePath, libraryType)
+	assignment := extractPathEvidence(filePath, libraryType, libraryRoots...)
 
 	if overrideRoot, ok := deepestOverrideAncestor(filePath, overrides); ok {
 		assignment.RootPath = overrideRoot
@@ -238,13 +239,20 @@ func inferFileRootAssignment(
 		assignment.RootPath,
 		assignment.Title,
 		assignment.Year,
+		assignment.LibraryRootPath,
 	)
 	assignment.RootPath = promotedRoot
 	assignment.WrapperCollapsed = wrapperCollapsed
 	assignment.PromotedAncestor = assignment.PromotedAncestor || promotedAncestor
 
-	if assignment.Title == "" || assignment.Year == 0 {
-		rootTitle, rootYear := parseInferTitleYear(filepath.Base(assignment.RootPath))
+	if (assignment.Title == "" || assignment.Year == 0) && assignment.RootPath != filepath.Clean(filePath) && assignment.RootPath != assignment.LibraryRootPath {
+		rootName := filepath.Base(assignment.RootPath)
+		rootTitle, rootYear := parseTitleYearCandidate(rootName)
+		if assignment.InferredType == "movie" {
+			if stem := parseInferMovieStem(rootName, assignment.Title, assignment.Year); stem.Title != "" {
+				rootTitle, rootYear = stem.Title, stem.Year
+			}
+		}
 		if assignment.Title == "" {
 			assignment.Title = rootTitle
 		}
@@ -253,29 +261,36 @@ func inferFileRootAssignment(
 		}
 	}
 
-	if ids := ParseFolderIDs(filepath.Base(assignment.RootPath)); ids != nil {
+	if ids := ParseFolderIDs(filepath.Base(assignment.RootPath)); ids != nil && assignment.RootPath != assignment.LibraryRootPath {
 		assignment.HasFolderIDs = true
 	}
 
 	return assignment
 }
 
-func extractPathEvidence(filePath string, libraryType string) RootAssignment {
+func extractPathEvidence(filePath string, libraryType string, libraryRoots ...string) RootAssignment {
 	cleanFilePath := filepath.Clean(filePath)
 	baseName := filepath.Base(cleanFilePath)
 	nameNoExt := strings.TrimSuffix(baseName, filepath.Ext(baseName))
 	parentDir := filepath.Dir(cleanFilePath)
 	parentBase := filepath.Base(parentDir)
-	pathParts := strings.Split(filepath.ToSlash(cleanFilePath), "/")
-	dirParts := pathParts[:max(len(pathParts)-1, 0)]
+	libraryRoot := deepestContainingLibraryRoot(cleanFilePath, libraryRoots)
+	dirParts := directorySegmentsWithinRoot(cleanFilePath, libraryRoot)
 
-	hasEpisodePattern := seasonEpisodeRe.MatchString(nameNoExt)
-	hasSeasonStructure := detectInferSeasonStructure(dirParts, hasEpisodePattern || normalizeInferLibraryType(libraryType) == "series")
+	seriesLibrary := normalizeInferLibraryType(libraryType) == seriesContentType
+	allowNumericSeason := seriesLibrary && (libraryRoot == "" || len(dirParts) > 1)
+	_, hasEpisodePattern := parseEpisodeToken(nameNoExt, dirParts, allowNumericSeason, seriesLibrary)
+	hasSeasonStructure, _ := detectSeasonStructure(dirParts, hasEpisodePattern || seriesLibrary, libraryRoot != "")
 	parentTitle, parentYear, parentTrusted := parseInferFolderTitleYear(parentBase)
+	if parentDir == libraryRoot {
+		parentTitle, parentYear, parentTrusted = "", 0, false
+	}
 	fileStem := parseInferMovieStem(nameNoExt, parentTitle, parentYear)
-	hasMovieEvidence := detectInferMovieFolderEvidence(parentBase, nameNoExt, hasSeasonStructure)
+	hasMovieEvidence := parentDir != libraryRoot && detectInferMovieFolderEvidence(parentBase, nameNoExt, hasSeasonStructure)
 	strongMovieContradiction := false
-	if !hasSeasonStructure && parentTrusted && fileStem.Title != "" && !inferTitlesCoherent(parentTitle, fileStem.Title) {
+	// A title inferred from an undated release is weaker evidence than a
+	// trusted movie folder. Only a dated filename can contradict its title.
+	if !hasSeasonStructure && parentTrusted && fileStem.Year != 0 && fileStem.Title != "" && !inferTitlesCoherent(parentTitle, fileStem.Title) {
 		strongMovieContradiction = true
 	}
 	if !hasSeasonStructure && parentTrusted && hasEpisodePattern {
@@ -302,19 +317,32 @@ func extractPathEvidence(filePath string, libraryType string) RootAssignment {
 	}
 
 	rootPath := parentDir
+	var seriesContext *PathContext
 	if inferredType == "series" {
-		rootPath = deriveInferSeriesRootPath(cleanFilePath, dirParts)
+		seriesContext = ResolvePathContext(cleanFilePath, libraryType, libraryRoot)
+		rootPath = seriesContext.RootPath
 	} else {
 		rootPath = deriveInferMovieRootPath(cleanFilePath, hasMovieEvidence || parentTrusted)
 	}
 
 	title, year := parseInferTitleYear(filepath.Base(rootPath))
+	if inferredType == seriesContentType {
+		title, year = parseTitleYearCandidate(filepath.Base(rootPath))
+	}
 	if inferredType == "movie" && parentTrusted {
 		title = parentTitle
 		year = parentYear
+	} else if inferredType == "movie" && fileStem.Title != "" {
+		title = fileStem.Title
+		year = fileStem.Year
 	}
 	if title == "" || year == 0 {
 		fileTitle, fileYear := parseInferTitleYear(nameNoExt)
+		if inferredType == seriesContentType {
+			fileTitle, fileYear = parseTitleYearCandidate(nameNoExt)
+		} else if fileStem.Title != "" {
+			fileTitle, fileYear = fileStem.Title, fileStem.Year
+		}
 		if title == "" {
 			title = fileTitle
 		}
@@ -322,9 +350,13 @@ func extractPathEvidence(filePath string, libraryType string) RootAssignment {
 			year = fileYear
 		}
 	}
+	if seriesContext != nil {
+		title, year = seriesContext.Title, seriesContext.Year
+	}
 
 	return RootAssignment{
 		FilePath:               cleanFilePath,
+		LibraryRootPath:        libraryRoot,
 		RootPath:               filepath.Clean(rootPath),
 		InferredType:           inferredType,
 		Title:                  title,
@@ -350,18 +382,8 @@ func normalizeInferLibraryType(value string) string {
 }
 
 func detectInferSeasonStructure(parts []string, allowNumeric bool) bool {
-	for _, part := range parts {
-		segment := filepath.Base(part)
-		switch {
-		case inferSeasonDirRe.MatchString(segment):
-			return true
-		case allowNumeric && inferNumericSeasonRe.MatchString(segment):
-			return true
-		case inferSpecialsDirRe.MatchString(segment):
-			return true
-		}
-	}
-	return false
+	found, _ := detectSeasonStructure(parts, allowNumeric)
+	return found
 }
 
 // IsMisplacedSeriesFile reports whether filePath is a TV episode that lives
@@ -370,20 +392,26 @@ func detectInferSeasonStructure(parts []string, allowNumeric bool) bool {
 // "supercuts" pack): a movie library would otherwise turn every episode into a
 // bogus per-episode "Season NN" movie that never matches a movie provider.
 //
-// The check is intentionally strict — it requires BOTH an SxxExx pattern in the
+// The check requires both a recognized episode token in the
 // file name AND an explicit season/specials ancestor directory — so legitimate
 // movies that merely carry an episode-like substring in their release name
 // (e.g. "...S01E43..." inside a "Title (Year)/" folder) are never flagged.
-func IsMisplacedSeriesFile(filePath string) bool {
+// Directories at or above a configured library root (such as an /mnt/s3 mount)
+// are not season directories.
+func IsMisplacedSeriesFile(filePath string, libraryRoots ...string) bool {
 	clean := filepath.Clean(filePath)
 	baseName := filepath.Base(clean)
 	nameNoExt := strings.TrimSuffix(baseName, filepath.Ext(baseName))
-	if !seasonEpisodeRe.MatchString(nameNoExt) {
+	parts := directorySegmentsWithinRoot(clean, deepestContainingLibraryRoot(clean, libraryRoots))
+	if _, ok := parseEpisodeToken(nameNoExt, parts, false); !ok {
 		return false
 	}
-	parts := strings.Split(filepath.ToSlash(clean), "/")
-	for _, part := range parts[:max(len(parts)-1, 0)] {
-		if inferSeasonDirRe.MatchString(part) || inferSpecialsDirRe.MatchString(part) {
+	for i, part := range parts {
+		parent := ""
+		if i > 0 {
+			parent = parts[i-1]
+		}
+		if _, ok := seasonDirectoryNumber(part, parent, false); ok {
 			return true
 		}
 	}
@@ -412,22 +440,6 @@ func detectInferMovieFolderEvidence(parentBase string, nameNoExt string, hasSeas
 		return true
 	}
 	return true
-}
-
-func deriveInferSeriesRootPath(filePath string, dirParts []string) string {
-	if len(dirParts) == 0 {
-		return filepath.Dir(filePath)
-	}
-	for i := len(dirParts) - 1; i >= 0; i-- {
-		segment := filepath.Base(dirParts[i])
-		if inferSeasonDirRe.MatchString(segment) || inferNumericSeasonRe.MatchString(segment) || inferSpecialsDirRe.MatchString(segment) {
-			if i > 0 {
-				return filepath.Clean(strings.Join(dirParts[:i], string(filepath.Separator)))
-			}
-			return filepath.Dir(filePath)
-		}
-	}
-	return filepath.Dir(filePath)
 }
 
 func deriveInferMovieRootPath(filePath string, hasMovieEvidence bool) string {
@@ -469,14 +481,14 @@ func deepestOverrideAncestor(
 	return longest, true
 }
 
-func promoteCandidateRoot(filePath, currentRoot, title string, year int) (string, bool, bool) {
+func promoteCandidateRoot(filePath, currentRoot, title string, year int, libraryRoot string) (string, bool, bool) {
 	cleanRoot := filepath.Clean(currentRoot)
 	wrapperCollapsed := false
 	promotedAncestor := false
 
 	for {
 		parent := filepath.Dir(cleanRoot)
-		if parent == "." || parent == "/" || parent == cleanRoot || parent == "" {
+		if parent == "." || parent == "/" || parent == cleanRoot || parent == "" || parent == libraryRoot {
 			break
 		}
 
@@ -538,10 +550,10 @@ func parseInferTitleYear(name string) (string, int) {
 		}
 		return strings.TrimSpace(match[1]), year
 	}
-	if stem := parseInferMovieStem(surface, "", 0); stem.Title != "" && stem.Year != 0 {
+	if stem := parseInferMovieStem(surface, "", 0); stem.Title != "" {
 		return stem.Title, stem.Year
 	}
-	return surface, 0
+	return normalizeNameSeparators(surface), 0
 }
 
 func stripInferProviderTags(name string) string {

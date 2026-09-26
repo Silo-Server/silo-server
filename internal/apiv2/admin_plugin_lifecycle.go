@@ -7,17 +7,19 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
 // AdminPluginLifecycleService is the slice of *handlers.PluginHandler the
 // installation lifecycle uses: install from catalog or archive URL, partial
-// assignment, apply the recorded update, and uninstall. Every method refuses
-// the reserved builtin row and reports an unknown installation as
-// plugins.ErrInstallationNotFound.
+// assignment, apply the recorded update, restart the process, and uninstall.
+// Every method refuses the reserved builtin row and reports an unknown
+// installation as plugins.ErrInstallationNotFound.
 type AdminPluginLifecycleService interface {
 	CreateAdminPluginInstallation(context.Context, handlers.PluginInstallationCreateInput) (handlers.PluginInstallationView, error)
 	UpdateAdminPluginInstallation(context.Context, int, handlers.PluginInstallationUpdateInput) (handlers.PluginInstallationView, error)
 	ApplyAdminPluginUpdate(context.Context, int) (handlers.PluginInstallationView, error)
+	RestartAdminPluginInstallation(context.Context, int) (handlers.PluginInstallationView, error)
 	DeleteAdminPluginInstallation(context.Context, int) error
 }
 
@@ -54,6 +56,8 @@ func adminPluginLifecycleProblem(err error) error {
 	switch {
 	case errors.Is(err, handlers.ErrPluginUpdateUnavailable):
 		return NewProblem(TypeConflict, "This installation has no applicable update.")
+	case errors.Is(err, plugins.ErrInstallationDisabled):
+		return NewProblem(TypeConflict, "This installation is disabled; enable it before restarting.")
 	case errors.As(err, &apiErr) && apiErr.Status == http.StatusBadRequest && apiErr.Field != "":
 		return validationProblem(locationBody+"."+apiErr.Field, codeInvalid, apiErr.Message)
 	}
@@ -129,6 +133,18 @@ func registerAdminPluginLifecycle(reg *Registry) {
 			return nil, p
 		}
 		return adminPluginInstallationOutput(reg.deps.AdminPluginLifecycle.ApplyAdminPluginUpdate(ctx, id))
+	})
+	restart := op(http.MethodPost, "/{id}/restart", "restartAdminPluginInstallation", "Stop the installation's process and, for a resident plugin (one the server supervises, such as a network access provider), start it again with a fresh failure budget; the response's runtime reports the outcome, including a launch that failed. A non-resident plugin is only stopped and launches on its next use. A disabled installation is 409. Repeating the request converges on one running process.", RetrySafetyNaturalIdempotent)
+	restart.Errors = append(restart.Errors, http.StatusNotFound, http.StatusConflict)
+	Register(reg, restart, func(ctx context.Context, in *AdminPluginInstallationIDInput) (*AdminPluginInstallationOutput, error) {
+		if reg.deps.AdminPluginLifecycle == nil {
+			return nil, unavailable("plugin lifecycle")
+		}
+		id, p := adminPluginInstallationID(in.ID)
+		if p != nil {
+			return nil, p
+		}
+		return adminPluginInstallationOutput(reg.deps.AdminPluginLifecycle.RestartAdminPluginInstallation(ctx, id))
 	})
 	remove := op(http.MethodDelete, "/{id}", "deleteAdminPluginInstallation", "Stop the plugin, delete the installation row (configuration, bindings and archives cascade) and remove its files. Row delete and file removal are not one transaction and a repeat finds no row: a later 404 is not this caller's receipt; never automatically retry.", RetrySafetyNonRetryable)
 	remove.DefaultStatus = http.StatusNoContent

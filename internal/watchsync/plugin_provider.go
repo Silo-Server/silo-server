@@ -63,11 +63,13 @@ type PluginProvider struct {
 	resolveClient          WatchSyncPluginClientResolver
 	resolveConfig          WatchSyncPluginConfigResolver
 	repository             PluginCredentialRepository
+	now                    func() time.Time
 }
 
 const (
 	watchSyncUnsupportedMovieMediaMessage   = "watch sync plugin does not support movie media"
 	watchSyncUnsupportedEpisodeMediaMessage = "watch sync plugin does not support episode media"
+	watchSyncUnsupportedSeriesMediaMessage  = "watch sync plugin does not support series media"
 	watchSyncUnsupportedMediaMessage        = "watch sync plugin does not support this media type"
 	watchSyncJSONSchemaNumberType           = "number"
 	watchSyncJSONSchemaBooleanType          = "boolean"
@@ -112,6 +114,7 @@ func NewPluginProvider(options PluginProviderOptions) (*PluginProvider, error) {
 		resolveClient:          options.ResolveClient,
 		resolveConfig:          options.ResolveConfig,
 		repository:             options.Repository,
+		now:                    time.Now,
 	}, nil
 }
 
@@ -173,6 +176,8 @@ func (p *PluginProvider) Capabilities() Capabilities {
 		RemoveWatchlist:        p.descriptor.GetRemoveWatchlist(),
 		ProvidesWatchlistOrder: p.descriptor.GetProvidesWatchlistOrder(),
 		ScrobblePlayback:       p.descriptor.GetScrobblePlayback(),
+		ImportRatings:          p.descriptor.GetImportRatings(),
+		ExportRatings:          p.descriptor.GetExportRatings(),
 	}
 }
 
@@ -1152,12 +1157,29 @@ func mediaFromIdentity(mediaItemID, kind, title string, year int, imdbID, tmdbID
 	}
 }
 
+// SyncsRatingKind reports whether the plugin rates items of kind, from the
+// media types it supports. Without it, the host would send a movie-only plugin
+// every series rating on each sync and log the rejection.
+func (p *PluginProvider) SyncsRatingKind(kind string) bool {
+	return p.supportsMedia(watchSyncMediaType(kind))
+}
+
+// mediaFromLocalFavorite builds list and rating media. A series item carries
+// its own ids, so its SERIES media has them in external_ids and no series_*.
+func mediaFromLocalFavorite(item LocalFavorite) *pluginv1.WatchSyncMedia {
+	return mediaFromIdentity(item.MediaItemID, item.Kind, item.Title, item.Year,
+		item.IMDbID, item.TMDBID, item.TVDBID, "", 0,
+		item.SeriesIMDbID, item.SeriesTMDBID, item.SeriesTVDBID, 0, 0)
+}
+
 func watchSyncMediaType(kind string) pluginv1.WatchSyncMediaType {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case historyimport.KindMovie:
 		return pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE
 	case historyimport.KindEpisode:
 		return pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE
+	case historyimport.KindSeries:
+		return pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES
 	default:
 		return pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_UNSPECIFIED
 	}
@@ -1263,11 +1285,19 @@ func supportedWatchSyncMediaTypes(descriptor *pluginv1.WatchSyncProviderDescript
 	for _, mediaType := range media {
 		switch mediaType {
 		case pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE,
-			pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE:
+			pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE,
+			pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES:
 			supported[mediaType] = struct{}{}
-		default:
+		case pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_UNSPECIFIED:
 			return nil, fmt.Errorf("advertises unsupported media type %q", mediaType.String())
+		default:
+			// A media type added by a newer SDK is ignored rather than
+			// rejecting the plugin, so a plugin release that opts into a new
+			// type keeps its existing sync on servers that predate the type.
 		}
+	}
+	if len(supported) == 0 {
+		return nil, errors.New("advertises no media type this server supports")
 	}
 	return supported, nil
 }
@@ -1286,6 +1316,8 @@ func unsupportedWatchSyncMediaMessage(mediaType pluginv1.WatchSyncMediaType) str
 		return watchSyncUnsupportedMovieMediaMessage
 	case pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE:
 		return watchSyncUnsupportedEpisodeMediaMessage
+	case pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES:
+		return watchSyncUnsupportedSeriesMediaMessage
 	default:
 		return watchSyncUnsupportedMediaMessage
 	}

@@ -2,12 +2,11 @@ package watchtogether
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/jackc/pgx/v5"
 )
 
 // selectionOnceStore serializes identity comparison and selection replacement.
@@ -30,11 +29,19 @@ func (r *Repository) selectOnce(ctx context.Context, roomID string, user int, pr
 	if r == nil || r.pool == nil {
 		return nil, false, fmt.Errorf("watch together repository unavailable")
 	}
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return nil, false, err
+	var tx pgx.Tx
+	var err error
+	commit := func(context.Context) error { return nil }
+	if op := operationFrom(ctx); op != nil {
+		tx = op.tx
+	} else {
+		tx, err = r.pool.Begin(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		commit = tx.Commit
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
 	room, err := scanRoom(tx.QueryRow(ctx, `SELECT `+roomColumns+` FROM watch_together_rooms WHERE id=$1 FOR UPDATE`, roomID))
 	if err != nil {
 		return nil, false, err
@@ -48,9 +55,11 @@ func (r *Repository) selectOnce(ctx context.Context, roomID string, user int, pr
 	if room.SelectionMode == RoomSelectionModeVote && !viaVote {
 		return nil, false, ErrVoteRoomSelection
 	}
-	identical := room.SelectedContentID != nil && *room.SelectedContentID == selection.ContentID && (contentOnly || (equalSelectionID(room.SelectedFileID, selection.FileID) && equalSelectionID(room.SelectedLibraryID, selection.LibraryID)))
+	// A staged lobby item is not "already playing": selecting or promoting
+	// the very thing that is staged must still start it.
+	identical := room.Phase == RoomPhasePlaying && room.SelectedContentID != nil && *room.SelectedContentID == selection.ContentID && (contentOnly || (equalSelectionID(room.SelectedFileID, selection.FileID) && equalSelectionID(room.SelectedLibraryID, selection.LibraryID)))
 	if identical || room.Generation != expected {
-		if err := tx.Commit(ctx); err != nil {
+		if err := commit(ctx); err != nil {
 			return nil, false, err
 		}
 		return room, false, nil
@@ -64,7 +73,7 @@ func (r *Repository) selectOnce(ctx context.Context, roomID string, user int, pr
 	if err != nil {
 		return nil, false, err
 	}
-	if err := tx.Commit(ctx); err != nil {
+	if err := commit(ctx); err != nil {
 		return nil, false, err
 	}
 	return room, true, nil
@@ -83,7 +92,7 @@ func (s *Service) SelectItemOnce(ctx context.Context, roomID string, user int, p
 	return s.selectItemOnce(ctx, roomID, user, profile, input, false, false)
 }
 
-func (s *Service) selectItemOnce(ctx context.Context, roomID string, user int, profile string, input SelectItemInput, viaVote, promotion bool) (Snapshot, error) {
+func (s *Service) selectItemOnceInRoom(ctx context.Context, roomID string, user int, profile string, resolved *ResolvedSelection, viaVote, promotion bool) (Snapshot, error) {
 	if s == nil {
 		return Snapshot{}, fmt.Errorf("watch together unavailable")
 	}
@@ -100,19 +109,6 @@ func (s *Service) selectItemOnce(ctx context.Context, roomID string, user int, p
 			return Snapshot{}, ErrSuggestionPromotionUnavailable
 		}
 		write = promoting.PromoteOnce
-	}
-	if strings.TrimSpace(input.ContentID) == "" {
-		return Snapshot{}, ErrInvalidSelection
-	}
-	resolved, err := s.selectionResolver.ResolveSelection(ctx, user, profile, input)
-	if err != nil {
-		if errors.Is(err, catalog.ErrWatchTargetNotPlayable) {
-			return Snapshot{}, ErrInvalidSelection
-		}
-		return Snapshot{}, err
-	}
-	if resolved == nil || strings.TrimSpace(resolved.ContentID) == "" {
-		return Snapshot{}, ErrInvalidSelection
 	}
 	_, live, err := s.getOrLoadLiveRoom(ctx, roomID)
 	if err != nil {
@@ -131,21 +127,7 @@ func (s *Service) selectItemOnce(ctx context.Context, roomID string, user int, p
 		s.mu.Unlock()
 		return Snapshot{}, ErrRoomClosed
 	}
-	if room.Generation >= live.room.Generation {
-		if room.SelectionRevision > live.room.SelectionRevision {
-			for _, member := range live.members {
-				if member == nil {
-					continue
-				}
-				member.sessionID = ""
-				member.isReady = false
-				member.isBuffering = false
-				member.ignoreWait = false
-			}
-			s.disarmWaitingDeadlineLocked(live)
-		}
-		live.room = *room
-	}
+	s.adoptSelectionWriteLocked(live, room)
 	snapshot := s.buildSnapshotLocked(live, user, profile)
 	if !applied {
 		s.mu.Unlock()
@@ -153,6 +135,222 @@ func (s *Service) selectItemOnce(ctx context.Context, roomID string, user int, p
 	}
 	dispatches := s.prepareSnapshotDispatchesLocked(live)
 	s.mu.Unlock()
-	s.runDispatches(dispatches)
+	s.sendDispatches(ctx, dispatches)
+	s.publishRoomStateAfterCommit(ctx, *room)
+	return snapshot, nil
+}
+
+// adoptSelectionWriteLocked reconciles the live room with a row a serialized
+// selection write returned. A newer selection revision means playback
+// restarted: every member's attached session, pending command, buffering
+// readiness and lobby "ready" belong to the previous epoch and are dropped.
+// Must be called with s.mu held.
+func (s *Service) adoptSelectionWriteLocked(live *liveRoom, room *Room) {
+	if room == nil || room.Generation < live.room.Generation {
+		return
+	}
+	if room.SelectionRevision > live.room.SelectionRevision {
+		live.command = nil
+		for _, member := range live.members {
+			if member != nil {
+				member.resetForSelection()
+			}
+		}
+		live.bufferingWaitAt = time.Time{}
+		s.disarmWaitingDeadlineLocked(live)
+	}
+	live.room = *room
+}
+
+// startOnceStore serializes the lobby-to-playing transition of a staged item.
+type startOnceStore interface {
+	StartStagedOnce(context.Context, string, int, string, int64, time.Time) (*Room, bool, error)
+}
+
+// StartStagedOnce moves a lobby with a staged item to playing/waiting exactly
+// the way a selection does, without changing what is staged. An already
+// playing room is a no-op receipt (a double press), so the host never restarts
+// playback by accident.
+func (r *Repository) StartStagedOnce(ctx context.Context, roomID string, user int, profile string, expected int64, now time.Time) (*Room, bool, error) {
+	if r == nil || r.pool == nil {
+		return nil, false, fmt.Errorf("watch together repository unavailable")
+	}
+	var tx pgx.Tx
+	var err error
+	commit := func(context.Context) error { return nil }
+	if op := operationFrom(ctx); op != nil {
+		tx = op.tx
+	} else {
+		tx, err = r.pool.Begin(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		commit = tx.Commit
+	}
+	room, err := scanRoom(tx.QueryRow(ctx, `SELECT `+roomColumns+` FROM watch_together_rooms WHERE id=$1 FOR UPDATE`, roomID))
+	if err != nil {
+		return nil, false, err
+	}
+	if room.HostUserID != user || room.HostProfileID != profile {
+		return nil, false, ErrRoomForbidden
+	}
+	if room.Phase == RoomPhaseEnded {
+		return nil, false, ErrRoomClosed
+	}
+	if room.Phase == RoomPhasePlaying || room.Generation != expected {
+		if err := commit(ctx); err != nil {
+			return nil, false, err
+		}
+		return room, false, nil
+	}
+	if room.SelectedContentID == nil || strings.TrimSpace(*room.SelectedContentID) == "" {
+		return nil, false, ErrNoStagedSelection
+	}
+	room, err = scanRoom(tx.QueryRow(ctx, `UPDATE watch_together_rooms SET
+ phase='playing', playback_state='waiting', resume_on_ready=true,
+ anchor_position_seconds=0, is_paused=true, anchor_updated_at=$2,
+ selection_revision=selection_revision+1, generation=generation+1
+ WHERE id=$1 RETURNING `+roomColumns, roomID, now.UTC()))
+	if err != nil {
+		return nil, false, err
+	}
+	if err := commit(ctx); err != nil {
+		return nil, false, err
+	}
+	return room, true, nil
+}
+
+// StartStagedOnce is the host's explicit "play" for a staged lobby item.
+func (s *Service) startStagedOnce(ctx context.Context, roomID string, user int, profile string) (Snapshot, error) {
+	if s == nil {
+		return Snapshot{}, fmt.Errorf("watch together unavailable")
+	}
+	store, ok := s.repo.(startOnceStore)
+	if !ok {
+		return Snapshot{}, fmt.Errorf("watch together start unavailable")
+	}
+	_, live, err := s.getOrLoadLiveRoom(ctx, roomID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	s.mu.Lock()
+	expected := live.room.Generation
+	s.mu.Unlock()
+	room, applied, err := store.StartStagedOnce(ctx, roomID, user, profile, expected, s.now())
+	if err != nil {
+		return Snapshot{}, err
+	}
+	s.mu.Lock()
+	if s.rooms[roomID] != live || live.room.Phase == RoomPhaseEnded {
+		s.mu.Unlock()
+		return Snapshot{}, ErrRoomClosed
+	}
+	s.adoptSelectionWriteLocked(live, room)
+	snapshot := s.buildSnapshotLocked(live, user, profile)
+	if !applied {
+		s.mu.Unlock()
+		return snapshot, nil
+	}
+	dispatches := s.prepareSnapshotDispatchesLocked(live)
+	s.mu.Unlock()
+	s.sendDispatches(ctx, dispatches)
+	s.publishRoomStateAfterCommit(ctx, *room)
+	return snapshot, nil
+}
+
+// stopOnceStore serializes the playing-to-lobby transition.
+type stopOnceStore interface {
+	StopPlaybackOnce(context.Context, string, int, string, int64, time.Time) (*Room, bool, error)
+}
+
+// StopPlaybackOnce returns a playing room to the lobby without ending it. The
+// selection stays staged so the host can start it again or pick something
+// else; the revision advances because the playback epoch is over and every
+// attached session belongs to it. A room that is not playing is a no-op
+// receipt, so a double press cannot disturb a lobby.
+func (r *Repository) StopPlaybackOnce(ctx context.Context, roomID string, user int, profile string, expected int64, now time.Time) (*Room, bool, error) {
+	if r == nil || r.pool == nil {
+		return nil, false, fmt.Errorf("watch together repository unavailable")
+	}
+	var tx pgx.Tx
+	var err error
+	commit := func(context.Context) error { return nil }
+	if op := operationFrom(ctx); op != nil {
+		tx = op.tx
+	} else {
+		tx, err = r.pool.Begin(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		commit = tx.Commit
+	}
+	room, err := scanRoom(tx.QueryRow(ctx, `SELECT `+roomColumns+` FROM watch_together_rooms WHERE id=$1 FOR UPDATE`, roomID))
+	if err != nil {
+		return nil, false, err
+	}
+	if room.HostUserID != user || room.HostProfileID != profile {
+		return nil, false, ErrRoomForbidden
+	}
+	if room.Phase == RoomPhaseEnded {
+		return nil, false, ErrRoomClosed
+	}
+	if room.Phase != RoomPhasePlaying || room.Generation != expected {
+		if err := commit(ctx); err != nil {
+			return nil, false, err
+		}
+		return room, false, nil
+	}
+	room, err = scanRoom(tx.QueryRow(ctx, `UPDATE watch_together_rooms SET
+ phase='lobby', playback_state='idle', resume_on_ready=false,
+ anchor_position_seconds=0, is_paused=true, anchor_updated_at=$2,
+ selection_revision=selection_revision+1, generation=generation+1
+ WHERE id=$1 RETURNING `+roomColumns, roomID, now.UTC()))
+	if err != nil {
+		return nil, false, err
+	}
+	if err := commit(ctx); err != nil {
+		return nil, false, err
+	}
+	return room, true, nil
+}
+
+// StopPlaybackOnce is the host's "stop for everyone": the party stays open in
+// the lobby with the item still staged.
+func (s *Service) stopPlaybackOnce(ctx context.Context, roomID string, user int, profile string) (Snapshot, error) {
+	if s == nil {
+		return Snapshot{}, fmt.Errorf("watch together unavailable")
+	}
+	store, ok := s.repo.(stopOnceStore)
+	if !ok {
+		return Snapshot{}, fmt.Errorf("watch together stop unavailable")
+	}
+	_, live, err := s.getOrLoadLiveRoom(ctx, roomID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	s.mu.Lock()
+	expected := live.room.Generation
+	s.mu.Unlock()
+	room, applied, err := store.StopPlaybackOnce(ctx, roomID, user, profile, expected, s.now())
+	if err != nil {
+		return Snapshot{}, err
+	}
+	s.mu.Lock()
+	if s.rooms[roomID] != live || live.room.Phase == RoomPhaseEnded {
+		s.mu.Unlock()
+		return Snapshot{}, ErrRoomClosed
+	}
+	s.adoptSelectionWriteLocked(live, room)
+	snapshot := s.buildSnapshotLocked(live, user, profile)
+	if !applied {
+		s.mu.Unlock()
+		return snapshot, nil
+	}
+	dispatches := s.prepareSnapshotDispatchesLocked(live)
+	s.mu.Unlock()
+	s.sendDispatches(ctx, dispatches)
+	s.publishRoomStateAfterCommit(ctx, *room)
 	return snapshot, nil
 }

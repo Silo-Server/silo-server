@@ -20,7 +20,7 @@ import (
 
 	"github.com/h2non/bimg"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
@@ -941,7 +941,7 @@ func (s stubResolver) ResolveImageURL(_ context.Context, _ string, _ string) str
 var _ = containsKey
 
 func TestCacheBytesRepeatedLocalArtworkDoesNotWrite(t *testing.T) {
-	store, err := artworkstore.NewFilesystem(t.TempDir())
+	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -964,7 +964,7 @@ func TestCacheBytesRepeatedLocalArtworkDoesNotWrite(t *testing.T) {
 }
 
 type countingArtworkStore struct {
-	*artworkstore.Filesystem
+	*blobstore.Filesystem
 	mu     sync.Mutex
 	writes int
 }
@@ -1010,7 +1010,7 @@ func TestCacheBytesRepeatedS3ArtworkDoesNotWrite(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	store := artworkstore.NewS3(s3client.NewClient(s3client.BucketConfig{Endpoint: server.URL, Bucket: "artwork", PathStyle: true, AccessKey: "test", SecretKey: "test"}))
+	store := blobstore.NewS3(s3client.NewClient(s3client.BucketConfig{Endpoint: server.URL, Bucket: "artwork", PathStyle: true, AccessKey: "test", SecretKey: "test"}))
 	cacher := New(store)
 	data := makeTestJPEG(t)
 	req := CacheRequest{ProviderID: "tmdb", ContentType: "movies", ContentID: "550", ImageType: metadata.ImagePoster}

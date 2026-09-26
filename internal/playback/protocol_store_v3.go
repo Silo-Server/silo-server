@@ -125,6 +125,9 @@ type AttemptRecordV3 struct {
 	CurrentPlan            PlanV3
 	FrozenRecipe           ExecutableRecipeV3
 	NormalizedRequest      StartRequestV3
+	// ServerBitrateCapKbps is fixed when the attempt starts; replans must not
+	// pick up later administrator edits to the account or access group.
+	ServerBitrateCapKbps int
 	// StartResponse is the latest durable decision for this attempt. It begins
 	// as the exact start response and advances atomically with each completed
 	// replan so an idempotent start retry never resurrects a superseded plan.
@@ -206,7 +209,10 @@ type PlanStoreV3 interface {
 	// current_replan_request_id equals the caller's base revision, otherwise
 	// ErrReplanSupersededV3 is returned.
 	CompleteReplan(ctx context.Context, sessionID, requestID, leaseToken, baseReplanRequestID string, response json.RawMessage, record AttemptRecordV3) error
-	RecordRouteEvent(context.Context, RouteEventRecordV3) error
+	// RecordRouteEvent reports whether it stored a new row. A v2 report that
+	// repeats an event_id already stored for its attempt is a no-op and
+	// returns false, so derived metrics count a retried report once.
+	RecordRouteEvent(context.Context, RouteEventRecordV3) (inserted bool, err error)
 	CleanupExpired(context.Context, time.Time) (int64, error)
 }
 
@@ -413,18 +419,18 @@ func (s *MemoryPlanStoreV3) GetAttemptIdentityByPlaybackAttemptID(ctx context.Co
 	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID}, nil
 }
 
-func (s *MemoryPlanStoreV3) RecordRouteEvent(_ context.Context, record RouteEventRecordV3) error {
+func (s *MemoryPlanStoreV3) RecordRouteEvent(_ context.Context, record RouteEventRecordV3) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if record.EventID != "" {
 		for _, existing := range s.events {
 			if existing.EventID == record.EventID && existing.PlaybackAttemptID == record.PlaybackAttemptID {
-				return nil
+				return false, nil
 			}
 		}
 	}
 	s.events = append(s.events, record)
-	return nil
+	return true, nil
 }
 
 func (s *MemoryPlanStoreV3) CleanupExpired(_ context.Context, now time.Time) (int64, error) {

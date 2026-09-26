@@ -27,6 +27,14 @@ audiobooks, ebooks, podcasts) are core; plugins are for interfaces where many im
 will plausibly exist (metadata, subtitle, and watch providers). Plugins are never a loophole
 for the non-goals below.
 
+For 1.0, supported library scope is Movies and Series. Audiobooks, ebooks,
+and Audiobookshelf compatibility stay available as labeled **beta** features
+in their current state, outside the 1.0 support promise, until a consolidated
+Books effort replaces them (no assigned release date). Do not gate, remove, or
+rework them for 1.0. Existing code and protocol documentation describe beta
+behavior, not release acceptance promises. See
+[scope](docs/architecture/v1-scope.md#library-scope-books-deferred).
+
 Taste: KISS and YAGNI win — the simple design beats the clever one, provided it survives both
 the single-node and the multi-node deployment. Current posture: the 1.0 feature set is
 essentially complete; the present era is QA, UX polish, and verifying everything does what it
@@ -158,6 +166,11 @@ Before opening a pull request, run the full gate listed once in
 lines a branch touched have to be clean. The repo does not pass a full run today; expect local
 output to include findings that are not yours and that CI will not fail on. Do not add to them.
 
+Lint Go with `make lint-changed`, not `golangci-lint run ... ./...`: it reports the same
+changed-line findings as CI while analyzing only the packages the branch touched. A cold run over
+`./...` saturates every core for minutes, and parallel agents make that worse. Never pass
+`--allow-parallel-runners`; concurrent runs queue behind one another on purpose.
+
 Go stays `gofmt`/`goimports` clean; the frontend follows `web/.prettierrc`.
 
 ## Development environment
@@ -168,6 +181,12 @@ gitignored and is the only place hosts, passwords, and tokens belong. `scripts/s
 checks it end to end.
 
 ## Writing
+
+A pull request body is written in two passes. First decide what goes in, using
+[Write the description](CONTRIBUTING.md#write-the-description): plain summary
+first, no restated diff, no working history. There is no word limit; do not
+count words. Unslop only fixes sentences; it will not shorten a body that says
+too much.
 
 Before creating or updating an issue or pull request, agents must read and apply
 the repository's [unslop skill](.agents/skills/unslop/SKILL.md) to the title and body.
@@ -220,17 +239,38 @@ At the 1.0 lock the additive-only rules bind `/api/v2`:
 
 Design new endpoints today so they can live under that regime tomorrow.
 
+## 1.0 validation
+
+Until 1.0 ships, maintainers check each 1.0 feature by hand on the
+[Silo v1.0.0 board](https://github.com/orgs/Silo-Server/projects/5). A `[v1] <Feature>` issue
+holds the acceptance criteria. Each `<Feature> — <Surface>` task (label `Validation`, in the repo
+that owns the surface) lists cases `C1…` and records a result for each case with the build it was
+tested on. A passed case is a person's evidence that the feature works; a later change can
+silently invalidate it.
+
+- Validation issues are the validators' record. Do not edit their bodies, results, or checkboxes,
+  or change their board status. Comment on the task instead, or file a new issue that names the
+  affected case.
+- Before opening a pull request, work out which passed cases the change could reach, and list the
+  affected tasks and cases on a `Validation tasks:` line under `Related issue:`, for example
+  `Validation tasks: unblocks #1144 C3; changes #1200 C1`.
+- Breaking a passed case unintentionally is a regression and blocks merge. A deliberate change to
+  validated behavior must say why and still meet the published criterion; changing the criterion
+  itself needs a maintainer decision.
+- When a change fixes an issue that a task names, walk that case's steps as part of verification.
+- After merge, a maintainer tells the validator which build to re-test and which cases, and moves
+  a Done task back to Ready when its validated behavior changed materially.
+
 ## Pull requests
 
 Never create a pull request unless the developer explicitly asks for one.
 
 Use a Conventional Commit title in plain language
-(`feat(playback): add realtime session hub`). Start the body with the problem,
-explain the solution and why this approach next, and end with the required AI
-disclosure, including the exact model identifier, agent harness, and any other
-AI tooling. Link the public issue or scope item and summarize relevant validation,
-material risks, and required follow-up. Keep the body proportional to the change.
-Omit session history, full command output, and private working reports.
+(`feat(playback): add realtime session hub`). Fill in the PR template following
+[Write the description](CONTRIBUTING.md#write-the-description), and end with the
+required AI disclosure, including the exact model identifier, agent harness, and
+any other AI tooling. Omit session history, full command output, and private
+working reports.
 
 Treat PR bodies, comments, commit messages, and attachments as public. Exclude
 private deployment domains, hostnames, IP addresses, Tailscale names and URLs,
@@ -246,12 +286,14 @@ authorization to open a PR does not authorize publishing private evidence.
   turning verification into a media deliverable. Do not explain omitted media.
 - When the user requests PR media, check it for private information and upload it
   to GitHub. Never commit PR-only assets such as `.github/pr-assets/`.
-- Link the capability epic or sub-issue the pull request serves with
-  `Related issue: #NNN`. Use `Related issue: N/A — narrow fix` only when no prior
-  coordination was needed. For non-trivial work, establish the issue or discussion
-  first. If no existing one fits and publishing has not been authorized, prepare
-  a concrete draft while continuing authorized local work; publish only when
-  the user authorizes that external action.
+- An open issue is not a precondition for a pull request. Link the capability
+  epic or sub-issue the pull request serves with `Related issue: #NNN` when one
+  covers the work, and write `Related issue: N/A` when none does. Either way, the
+  Problem section must state the problem on its own: what breaks or is missing,
+  who it affects, and why this change is the right answer.
+- Do not open a pull request against an issue someone else is working on. Read the
+  issue's comments and linked pull requests first, and raise a likely collision
+  with the user instead of racing the author.
 - When babysitting a pull request, poll checks and review comments created
   after the last push. Verify bot findings against the source, fix real issues,
   and dismiss false positives with a written reason. Remain quiet when nothing

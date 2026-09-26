@@ -100,7 +100,9 @@ func (s *RuntimeConfigStore) PutGlobalConfig(
 
 // CompareAndSwapGlobalConfig persists value only when the row still matches
 // the version the caller merged. A nil expectedUpdatedAt creates the row only
-// when it does not already exist.
+// when it does not already exist. An admin save also advances the durable
+// runtime generation in the same transaction, so proxy polls recover a
+// missed lifecycle event. Plugin-originated writes use PutGlobalConfig.
 func (s *RuntimeConfigStore) CompareAndSwapGlobalConfig(
 	ctx context.Context,
 	installationID int,
@@ -116,15 +118,31 @@ func (s *RuntimeConfigStore) CompareAndSwapGlobalConfig(
 		return false, fmt.Errorf("marshaling plugin runtime config: %w", err)
 	}
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin plugin config update: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// Lock the parent installation before touching plugin_runtime_configs.
+	// InstallationStore.Update takes this lock first; acquiring it here keeps
+	// the FK key-share lock and generation update in one order and prevents a
+	// concurrent lifecycle update from deadlocking with a config save.
+	var parentID int
+	if err := tx.QueryRow(ctx, `SELECT id FROM plugin_installations WHERE id = $1 FOR NO KEY UPDATE`, installationID).Scan(&parentID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("lock plugin installation for config update: %w", err)
+	}
 	var tag pgconn.CommandTag
 	if expectedUpdatedAt == nil {
-		tag, err = s.pool.Exec(ctx, `
+		tag, err = tx.Exec(ctx, `
 			INSERT INTO plugin_runtime_configs (plugin_installation_id, config_key, config_value)
 			VALUES ($1, $2, $3)
 			ON CONFLICT (plugin_installation_id, config_key) DO NOTHING
 		`, installationID, key, valueJSON)
 	} else {
-		tag, err = s.pool.Exec(ctx, `
+		tag, err = tx.Exec(ctx, `
 			UPDATE plugin_runtime_configs
 			SET config_value = $3, updated_at = NOW()
 			WHERE plugin_installation_id = $1
@@ -135,7 +153,18 @@ func (s *RuntimeConfigStore) CompareAndSwapGlobalConfig(
 	if err != nil {
 		return false, fmt.Errorf("compare-and-swap plugin runtime config: %w", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+	if _, err := tx.Exec(ctx, `UPDATE plugin_installations
+		SET runtime_generation = runtime_generation + 1, updated_at = NOW()
+		WHERE id = $1`, installationID); err != nil {
+		return false, fmt.Errorf("advance plugin runtime generation: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit plugin config update: %w", err)
+	}
+	return true, nil
 }
 
 func (s *RuntimeConfigStore) ListGlobalConfigs(ctx context.Context, installationID int) ([]*RuntimeConfig, error) {

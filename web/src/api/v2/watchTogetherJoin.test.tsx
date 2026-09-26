@@ -2,13 +2,14 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { joinWatchTogetherRoom } from "@/lib/watchTogether";
-import WatchTogetherJoin from "@/pages/WatchTogetherJoin";
+import WatchPartyHub from "@/pages/watchtogether/WatchPartyHub";
 const state = vi.hoisted(() => ({ token: "invite-A", navigate: vi.fn() }));
 vi.mock("react-router", () => ({
   useSearchParams: () => [new URLSearchParams({ token: state.token })],
 }));
 vi.mock("@/hooks/useViewTransition", () => ({ useViewTransitionNavigate: () => state.navigate }));
 vi.mock("@/hooks/useDocumentTitle", () => ({ useDocumentTitle: () => {} }));
+vi.mock("@/hooks/useAuth", () => ({ useOptionalAuth: () => null }));
 const snapshot = {
   room_id: "room",
   phase: "playing",
@@ -83,11 +84,11 @@ it.each(["invite", "authority", "unmount"])(
       .fn()
       .mockImplementation(() => new Promise<Response>((resolve) => pending.push(resolve)));
     vi.stubGlobal("fetch", fetch);
-    const view = render(<WatchTogetherJoin />);
+    const view = render(<WatchPartyHub />);
     await waitFor(() => expect(pending.length).toBe(1));
     if (kind === "invite") {
       state.token = "invite-B";
-      view.rerender(<WatchTogetherJoin />);
+      view.rerender(<WatchPartyHub />);
       await waitFor(() => expect(pending.length).toBe(2));
     }
     if (kind === "authority") setProfileToken("replacement");
@@ -124,11 +125,11 @@ it.each([
       "fetch",
       vi.fn().mockImplementation(() => new Promise<Response>((resolve) => pending.push(resolve))),
     );
-    const view = render(<WatchTogetherJoin />);
+    const view = render(<WatchPartyHub />);
     await waitFor(() => expect(pending.length).toBe(1));
     if (kind === "invite removal") state.token = "";
     else setProfileToken("replacement");
-    view.rerender(<WatchTogetherJoin />);
+    view.rerender(<WatchPartyHub />);
     const code = view.getByLabelText("Room code");
     expect(code).toBeEnabled();
     fireEvent.change(code, { target: { value: "ROOM" } });

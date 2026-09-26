@@ -8,6 +8,13 @@ import { decisionFromWireV2 } from "./start-v2";
 
 type ReplanBody = components["schemas"]["PlaybackReplanBody"];
 
+// A replan that starts a new transport returns only after FFmpeg has produced
+// its first safe manifest, which the server allows up to 30 s for (software
+// tone-mapped 4K HDR routinely needs 10-15 s). Aborting earlier cancels the
+// request context and kills the transport mid-startup, so the client budget
+// must exceed the server's, matching the 45 s given to HLS loads.
+const REPLAN_TIMEOUT_MS = 45_000;
+
 /**
  * Replans a v2 session: the ordinary v3 replan body plus the installation the
  * session was started with. Failure recovery, seek re-anchor and track,
@@ -29,7 +36,7 @@ export async function replanV2(
       method: "POST",
       headers: { Accept: "application/json" },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(REPLAN_TIMEOUT_MS),
     },
   );
   const text = await response.text().catch(() => "");

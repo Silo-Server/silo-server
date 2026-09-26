@@ -52,6 +52,9 @@ func TestPersonalRunnerRestartsEveryAuthenticationPath(t *testing.T) {
 	for _, path := range []string{"emby-predefined", "emby-connect", "jellyfin-password", "plex-browser", "plex-session", "plex-predefined"} {
 		t.Run(path, func(t *testing.T) {
 			repo := personalEffectRepository(t)
+			// The upstream listens on loopback, which only an account trusted
+			// with the local network may reach: user 1 is an admin.
+			makeUserOneAdmin(t, repo)
 			var authCalls, fetchCalls, accountCalls atomic.Int32
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -84,9 +87,11 @@ func TestPersonalRunnerRestartsEveryAuthenticationPath(t *testing.T) {
 					case "/library/sections":
 						_, _ = w.Write([]byte(`{"MediaContainer":{"Directory":[{"key":"1","type":"movie"}]}}`))
 					case "/library/sections/1/all":
+						if r.URL.Query().Get("inProgress") == "1" {
+							_, _ = w.Write([]byte(`{"MediaContainer":{"totalSize":0,"Metadata":[]}}`))
+							return
+						}
 						_, _ = w.Write([]byte(`{"MediaContainer":{"totalSize":1,"Metadata":[{"ratingKey":"external","type":"movie","title":"Movie","year":2026,"Guid":[{"id":"imdb://tt1234567"}],"duration":100000,"viewCount":1,"lastViewedAt":1788220800}]}}`))
-					case "/library/onDeck":
-						_, _ = w.Write([]byte(`{"MediaContainer":{"Metadata":[]}}`))
 					default:
 						t.Errorf("unexpected PMS path %s", r.URL.Path)
 						http.NotFound(w, r)
@@ -158,6 +163,7 @@ func TestPersonalRunnerRestartsEveryAuthenticationPath(t *testing.T) {
 			}
 			firstCtx, stopFirst := context.WithCancel(t.Context())
 			first := NewService(firstCtx, repo, pgstore.NewPostgresProvider(repo.pool))
+			first.SetLocalNetworkAccess(NewLocalNetworkAccess(nil, repo))
 			run, err := first.CreateRun(t.Context(), 1, input)
 			stopFirst()
 			if err != nil {
@@ -177,6 +183,7 @@ func TestPersonalRunnerRestartsEveryAuthenticationPath(t *testing.T) {
 			// Two newly configured nodes compete for the same persisted intent.
 			for range 2 {
 				restarted := NewService(ctx, restartedRepo, pgstore.NewPostgresProvider(repo.pool))
+				restarted.SetLocalNetworkAccess(NewLocalNetworkAccess(nil, restartedRepo))
 				restarted.plex.discoverBaseURL = discover.URL
 				restarted.SetStableIdentityResolver(watchstate.NewStableIdentityResolver(startupIdentityItems{}, nil, startupIdentityProviders{}))
 				restarted.AddObserver(queueObserverFunc(func(run Run) { observed <- run }))

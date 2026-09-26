@@ -150,7 +150,7 @@ export default function AdminCatalogMaintenance() {
             progress in one place.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="ml-auto flex shrink-0 flex-wrap justify-end gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -636,7 +636,9 @@ export default function AdminCatalogMaintenance() {
                         Download
                       </Button>
                     ) : null}
-                    {job.status === "completed" && !job.public_url ? (
+                    {job.status === "completed" &&
+                    !job.public_url &&
+                    job.public_link_supported !== false ? (
                       <Button
                         variant="outline"
                         size="sm"

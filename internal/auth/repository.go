@@ -50,10 +50,10 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 
 // allColumns is the list of columns returned by all SELECT queries.
 // Kept in one place so scanUser stays in sync.
-const allColumns = `id, email, username, password_hash, local_password_login_enabled, role, permissions, enabled,
+const allColumns = `id, email, username, password_hash, local_password_login_enabled, password_change_required, role, permissions, enabled,
 	library_ids, max_playback_quality, access_policy_revision,
-	max_streams, max_transcodes, transcode_allowed, audio_transcode_allowed, max_profiles, download_allowed,
-	download_transcode_allowed, requests_allowed, access_group_id, created_at, updated_at`
+	max_streams, max_transcodes, max_remote_stream_bitrate_kbps, max_local_stream_bitrate_kbps, transcode_allowed, audio_transcode_allowed, max_profiles, download_allowed,
+	download_transcode_allowed, requests_allowed, access_group_id, is_owner, created_at, updated_at`
 
 // scanUser scans a single row into a *models.User.
 func scanUser(row pgx.Row) (*models.User, error) {
@@ -64,6 +64,7 @@ func scanUser(row pgx.Row) (*models.User, error) {
 		&u.Username,
 		&u.PasswordHash,
 		&u.LocalPasswordLoginEnabled,
+		&u.PasswordChangeRequired,
 		&u.Role,
 		&u.Permissions,
 		&u.Enabled,
@@ -72,6 +73,8 @@ func scanUser(row pgx.Row) (*models.User, error) {
 		&u.AccessPolicyRevision,
 		&u.MaxStreams,
 		&u.MaxTranscodes,
+		&u.MaxRemoteStreamBitrateKbps,
+		&u.MaxLocalStreamBitrateKbps,
 		&u.TranscodeAllowed,
 		&u.AudioTranscodeAllowed,
 		&u.MaxProfiles,
@@ -79,6 +82,7 @@ func scanUser(row pgx.Row) (*models.User, error) {
 		&u.DownloadTranscodeAllowed,
 		&u.RequestsAllowed,
 		&u.AccessGroupID,
+		&u.IsOwner,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 	)
@@ -102,6 +106,7 @@ func scanUsers(rows pgx.Rows) ([]*models.User, error) {
 			&u.Username,
 			&u.PasswordHash,
 			&u.LocalPasswordLoginEnabled,
+			&u.PasswordChangeRequired,
 			&u.Role,
 			&u.Permissions,
 			&u.Enabled,
@@ -110,6 +115,8 @@ func scanUsers(rows pgx.Rows) ([]*models.User, error) {
 			&u.AccessPolicyRevision,
 			&u.MaxStreams,
 			&u.MaxTranscodes,
+			&u.MaxRemoteStreamBitrateKbps,
+			&u.MaxLocalStreamBitrateKbps,
 			&u.TranscodeAllowed,
 			&u.AudioTranscodeAllowed,
 			&u.MaxProfiles,
@@ -117,6 +124,7 @@ func scanUsers(rows pgx.Rows) ([]*models.User, error) {
 			&u.DownloadTranscodeAllowed,
 			&u.RequestsAllowed,
 			&u.AccessGroupID,
+			&u.IsOwner,
 			&u.CreatedAt,
 			&u.UpdatedAt,
 		)
@@ -162,8 +170,8 @@ func createUser(ctx context.Context, db interface {
 	// Policy columns are written explicitly: a nil pointer stores NULL, which
 	// means "inherit from the access group" (the columns carry no defaults).
 	cols := []string{
-		"email", "username", "password_hash", "local_password_login_enabled", "role", "permissions",
-		"library_ids", "max_playback_quality", "max_streams", "max_transcodes",
+		"email", "username", "password_hash", "local_password_login_enabled", "password_change_required", "role", "permissions",
+		"library_ids", "max_playback_quality", "max_streams", "max_transcodes", "max_remote_stream_bitrate_kbps", "max_local_stream_bitrate_kbps",
 		"transcode_allowed", "audio_transcode_allowed", "download_allowed", "download_transcode_allowed",
 		"requests_allowed",
 	}
@@ -172,12 +180,15 @@ func createUser(ctx context.Context, db interface {
 		NormalizeUsername(input.Username),
 		string(hash),
 		localPasswordLoginEnabled,
+		input.PasswordChangeRequired,
 		input.Role,
 		permissions,
 		input.LibraryIDs,
 		normalizeQualityOverride(input.MaxPlaybackQuality),
 		input.MaxStreams,
 		input.MaxTranscodes,
+		input.MaxRemoteStreamBitrateKbps,
+		input.MaxLocalStreamBitrateKbps,
 		input.TranscodeAllowed,
 		input.AudioTranscodeAllowed,
 		input.DownloadAllowed,
@@ -371,6 +382,7 @@ func updateUser(ctx context.Context, db interface {
 		{column: "email", set: email != nil, value: email},
 		{column: "username", set: username != nil, value: username},
 		{column: "password_hash", set: passwordHash != nil, value: passwordHash},
+		{column: "password_change_required", set: passwordHash != nil, value: input.PasswordChangeRequired},
 		{column: "local_password_login_enabled", set: input.LocalPasswordLoginEnabled != nil, value: input.LocalPasswordLoginEnabled},
 		{column: "role", set: input.Role != nil, value: input.Role, bumpsAccessPolicy: true},
 		{column: "permissions", set: input.Permissions != nil, value: permissions, bumpsAccessPolicy: true},
@@ -384,6 +396,8 @@ func updateUser(ctx context.Context, db interface {
 		},
 		{column: "max_streams", set: input.MaxStreams.Set, value: input.MaxStreams.Value},
 		{column: "max_transcodes", set: input.MaxTranscodes.Set, value: input.MaxTranscodes.Value},
+		{column: "max_remote_stream_bitrate_kbps", set: input.MaxRemoteStreamBitrateKbps.Set, value: input.MaxRemoteStreamBitrateKbps.Value},
+		{column: "max_local_stream_bitrate_kbps", set: input.MaxLocalStreamBitrateKbps.Set, value: input.MaxLocalStreamBitrateKbps.Value},
 		{column: "transcode_allowed", set: input.TranscodeAllowed.Set, value: input.TranscodeAllowed.Value},
 		{column: "audio_transcode_allowed", set: input.AudioTranscodeAllowed.Set, value: input.AudioTranscodeAllowed.Value},
 		{column: "max_profiles", set: input.MaxProfiles != nil, value: input.MaxProfiles},
@@ -467,21 +481,50 @@ func updateUser(ctx context.Context, db interface {
 
 // CompareAndSwapPassword replaces the bcrypt hash only if it is still the one
 // the caller verified. Concurrent password changes using the same old password
-// therefore cannot both succeed with different replacements.
+// therefore cannot both succeed with different replacements. The account
+// chose this password itself, so it settles any temporary one.
 func (r *UserRepository) CompareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string) error {
+	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, nil)
+}
+
+// ReplaceTemporaryPassword is CompareAndSwapPassword for an account holding a
+// temporary password. Every other login session was opened with that
+// temporary password, possibly by someone else, and its next refresh would
+// lift the restriction; they are revoked in the same transaction, keeping
+// only keepSessionID, the session that chose the new password.
+func (r *UserRepository) ReplaceTemporaryPassword(ctx context.Context, id int, expectedHash, newPassword, keepSessionID string) error {
+	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, &keepSessionID)
+}
+
+func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string, keepSessionID *string) error {
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("hashing password: %w", err)
 	}
 
-	tag, err := r.pool.Exec(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin password update: %w", err)
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // rollback after commit is a no-op
+	tag, err := tx.Exec(ctx, `
 		UPDATE users
-		SET password_hash = $1, updated_at = NOW()
+		SET password_hash = $1, password_change_required = false, updated_at = NOW()
 		WHERE id = $2 AND password_hash = $3`, string(hash), id, expectedHash)
 	if err != nil {
 		return fmt.Errorf("updating password: %w", err)
 	}
 	if tag.RowsAffected() == 1 {
+		if keepSessionID != nil {
+			if _, err := tx.Exec(ctx, `
+				UPDATE auth_sessions SET revoked_at = NOW()
+				WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`, id, *keepSessionID); err != nil {
+				return fmt.Errorf("revoking temporary-password sessions: %w", err)
+			}
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("commit password update: %w", err)
+		}
 		return nil
 	}
 

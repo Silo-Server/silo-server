@@ -24,9 +24,9 @@ func NewDetectIntroMarkersTask(analyzer *intromarkers.Analyzer, settings MarkerS
 }
 
 func (t *DetectIntroMarkersTask) Key() string  { return "detect_intro_markers" }
-func (t *DetectIntroMarkersTask) Name() string { return "Populate Markers" }
+func (t *DetectIntroMarkersTask) Name() string { return "Detect markers on this server" }
 func (t *DetectIntroMarkersTask) Description() string {
-	return "Populates intro and credits markers for opted-in libraries"
+	return "Analyzes files for intros in libraries with marker detection enabled."
 }
 func (t *DetectIntroMarkersTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary

@@ -22,7 +22,8 @@ func (reg *Registry) adminSettingsSnapshotTag(ctx context.Context, s handlers.Ad
 	if len(reg.deps.CursorSecret) == 0 {
 		return EntityTag{}, unavailable("settings validator")
 	}
-	raw, err := json.Marshal(struct{ Stored, Effective map[string]string }{s.Stored, s.Effective})
+	stored, effective := s.ValidatorValues()
+	raw, err := json.Marshal(struct{ Stored, Effective map[string]string }{stored, effective})
 	if err != nil {
 		return EntityTag{}, err
 	}

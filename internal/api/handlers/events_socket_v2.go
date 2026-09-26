@@ -35,9 +35,10 @@ type EventsSocketV2 struct {
 	Tickets  *evt.SocketTicketStore
 	Validate EventsSocketValidator
 	// PublicOrigin is the configured external origin, never a forwarded header.
-	PublicOrigin  string
-	publicOrigin  atomic.Pointer[string]
-	checkInterval time.Duration
+	PublicOrigin   string
+	publicOrigin   atomic.Pointer[string]
+	overlayOrigins atomic.Pointer[OverlayOriginSource]
+	checkInterval  time.Duration
 }
 
 func (h *EventsSocketV2) Mint(ctx context.Context, identity evt.SocketIdentity) (string, error) {
@@ -132,7 +133,7 @@ func (h *EventsSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *EventsSocketV2) validOrigin(r *http.Request) bool {
-	return socketOriginAllowed(r, h.currentPublicOrigin())
+	return socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load()))
 }
 
 func (h *EventsSocketV2) currentPublicOrigin() string {
@@ -148,7 +149,32 @@ func (h *EventsSocketV2) SetPublicOrigin(origin string) {
 	h.publicOrigin.Store(&normalized)
 }
 
-func socketOriginAllowed(r *http.Request, publicOrigin string) bool {
+// SetOverlayOrigins installs the source of overlay origins (connected
+// network access providers on this host) accepted next to the public origin.
+func (h *EventsSocketV2) SetOverlayOrigins(source OverlayOriginSource) {
+	h.overlayOrigins.Store(&source)
+}
+
+// OverlayOriginSource lists the scheme://host[:port] origins of the network
+// access providers currently connected on this host. netaccess.StatusCache's
+// ConnectedOrigins is the production source; it is read per handshake so a
+// provider that connects or drops is reflected without a config reload.
+type OverlayOriginSource func() []string
+
+func overlayOriginsFrom(source *OverlayOriginSource) []string {
+	if source == nil || *source == nil {
+		return nil
+	}
+	return (*source)()
+}
+
+// socketOriginAllowed accepts a browser Origin that matches the configured
+// public origin, the request's own scheme and host, or one of the overlay
+// origins connected providers report. The request's own origin stays accepted
+// with a public origin configured so a browser on a LAN address or IP:port can
+// open the sockets of the page it loaded. All are exact scheme and host
+// matches; forwarded host headers are never consulted here.
+func socketOriginAllowed(r *http.Request, publicOrigin string, overlayOrigins []string) bool {
 	origins := r.Header.Values("Origin")
 	if len(origins) == 0 {
 		return true
@@ -160,16 +186,25 @@ func socketOriginAllowed(r *http.Request, publicOrigin string) bool {
 	if err != nil || origin.User != nil || origin.Host == "" || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || (origin.Scheme != eventsSchemeHTTPS && origin.Scheme != eventsSchemeHTTP) {
 		return false
 	}
-	expected := publicOrigin
-	if expected == "" {
-		scheme := clientip.RequestScheme(r)
-		if scheme == "" {
-			return false
-		}
-		expected = scheme + "://" + r.Host
+	if publicOrigin != "" && originMatches(origin, publicOrigin) {
+		return true
 	}
+	// An empty scheme means ambiguous proxy metadata; refuse the request's own
+	// origin rather than guess it.
+	if scheme := clientip.RequestScheme(r); scheme != "" && originMatches(origin, scheme+"://"+r.Host) {
+		return true
+	}
+	for _, overlay := range overlayOrigins {
+		if originMatches(origin, overlay) {
+			return true
+		}
+	}
+	return false
+}
+
+func originMatches(origin *url.URL, expected string) bool {
 	target, err := url.Parse(expected)
-	return err == nil && strings.EqualFold(origin.Host, target.Host) && origin.Scheme == target.Scheme
+	return err == nil && strings.EqualFold(origin.Host, target.Host) && strings.EqualFold(origin.Scheme, target.Scheme)
 }
 
 type eventsSessionValidator interface {

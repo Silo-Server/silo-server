@@ -43,6 +43,10 @@ type fakeItemRepo struct {
 	trailersReleased       chan struct{}
 	trailersReleaseGate    chan struct{}
 	now                    func() time.Time
+
+	// referenced reports whether something links to an item, for
+	// DeleteIfUnreferenced. Nil treats every item as unreferenced.
+	referenced func(contentID string) bool
 }
 
 // trailersClaimResult forces a fixed answer out of the cooldown gate, for the
@@ -65,7 +69,7 @@ func (r *fakeItemRepo) GetByID(_ context.Context, contentID string) (*models.Med
 		cp := *item
 		return &cp, nil
 	}
-	return nil, fmt.Errorf("item not found: %s", contentID)
+	return nil, fmt.Errorf("%w: %s", catalog.ErrItemNotFound, contentID)
 }
 
 func (r *fakeItemRepo) GetByExternalID(_ context.Context, tmdbID, imdbID, tvdbID, itemType string) (*models.MediaItem, error) {
@@ -109,6 +113,27 @@ func (r *fakeItemRepo) Upsert(_ context.Context, item *models.MediaItem) error {
 	cp := *item
 	r.items[item.ContentID] = &cp
 	return nil
+}
+
+func (r *fakeItemRepo) InsertIfAbsent(_ context.Context, item *models.MediaItem) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[item.ContentID]; ok {
+		return false, nil
+	}
+	cp := *item
+	r.items[item.ContentID] = &cp
+	return true, nil
+}
+
+func (r *fakeItemRepo) DeleteIfUnreferenced(_ context.Context, contentID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[contentID]; !ok || (r.referenced != nil && r.referenced(contentID)) {
+		return false, nil
+	}
+	delete(r.items, contentID)
+	return true, nil
 }
 
 func (r *fakeItemRepo) Delete(_ context.Context, contentID string) ([]string, error) {
@@ -580,6 +605,9 @@ func (r *fakeFileRepo) ListByGroupKey(_ context.Context, folderID int, groupKeyV
 			continue
 		}
 		cp := *file
+		if contentID, ok := r.contentIDs[file.ID]; ok {
+			cp.ContentID = contentID
+		}
 		out = append(out, &cp)
 	}
 	return out, nil

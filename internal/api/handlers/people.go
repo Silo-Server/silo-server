@@ -19,6 +19,7 @@ import (
 type peopleRepository interface {
 	Get(ctx context.Context, id int64) (*models.Person, error)
 	Search(ctx context.Context, query string, limit int) ([]models.Person, error)
+	SearchScoped(ctx context.Context, query string, limit int, mediaScope string, filter catalog.AccessFilter) ([]models.Person, error)
 	Update(ctx context.Context, p models.Person) error
 }
 
@@ -108,7 +109,7 @@ func (h *PeopleHandler) HandleGetPerson(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	resp, err := h.Person(r.Context(), id)
+	resp, err := h.Person(r.Context(), id, true)
 	if err != nil {
 		writeAPIError(w, err)
 		return

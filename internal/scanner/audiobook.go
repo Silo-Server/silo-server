@@ -120,7 +120,9 @@ type parsedAudiobookFile struct {
 // audio files, so the caller can skip it. Every other error (including an
 // ffprobe binary that cannot be executed) is a real failure and must be
 // reported by the caller.
-func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath string) (*parsedAudiobook, error) {
+// allowedPaths is the inventory accepted by discovery, including ignore rules.
+// A nil inventory allows every audio file in the folder.
+func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath string, allowedPaths map[string]bool) (*parsedAudiobook, error) {
 	entries, err := os.ReadDir(folderPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -138,7 +140,10 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 			continue
 		}
 		if SupportsAudioFile(entry.Name()) {
-			audioFiles = append(audioFiles, filepath.Join(folderPath, entry.Name()))
+			path := filepath.Join(folderPath, entry.Name())
+			if allowedPaths == nil || allowedPaths[path] {
+				audioFiles = append(audioFiles, path)
+			}
 		}
 	}
 	if len(audioFiles) == 0 {

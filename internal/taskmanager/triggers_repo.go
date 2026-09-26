@@ -4,7 +4,12 @@ import "context"
 
 // TriggerRepository persists task trigger configuration.
 type TriggerRepository interface {
+	// GetTriggers returns nil only when no schedule has been saved. A saved
+	// empty schedule returns a non-nil empty slice.
 	GetTriggers(ctx context.Context, taskKey string) ([]TriggerConfig, error)
+	// GetOrCreateTriggers persists defaults only if no schedule exists. A
+	// concurrent edit takes precedence, including an explicitly empty schedule.
+	GetOrCreateTriggers(ctx context.Context, taskKey string, defaults []TriggerConfig) ([]TriggerConfig, error)
 	SetTriggers(ctx context.Context, taskKey string, triggers []TriggerConfig) error
 }
 

@@ -1,3 +1,4 @@
+import { TriangleAlert } from "lucide-react";
 import { useId, useMemo, useState } from "react";
 
 import type {
@@ -33,12 +34,14 @@ import {
   SettingFieldStatus,
 } from "./SettingField";
 
-// Sign-in lifetimes and proxy trust go through the batched settings endpoint.
-// Rate limits do not: they live behind /admin/rate-limits/config and the batch
-// endpoint rejects those keys, so this page drives two writers behind one save
-// bar rather than showing the admin two different Save buttons.
+// Sign-in lifetimes, proxy trust, and local media server access go through the
+// batched settings endpoint. Rate limits do not: they live behind
+// /admin/rate-limits/config and the batch endpoint rejects those keys, so this
+// page drives two writers behind one save bar rather than showing the admin two
+// different Save buttons.
 const SESSION_KEYS = ["auth.access_token_expiry", "auth.refresh_token_expiry"];
-const NETWORK_KEYS = ["clientip.trusted_proxies"];
+const LOCAL_MEDIA_SERVERS_KEY = "media_servers.allow_private_destinations";
+const NETWORK_KEYS = ["clientip.trusted_proxies", LOCAL_MEDIA_SERVERS_KEY];
 const KEYS = [...SESSION_KEYS, ...NETWORK_KEYS];
 
 const DEFAULT_TIER: RateLimitTierConfig = {
@@ -174,6 +177,7 @@ export default function SecurityAccessSettings() {
   const updateConfig = useUpdateRateLimitConfig();
 
   const trustedProxiesManaged = form.sensitiveManagedByEnv.includes("clientip.trusted_proxies");
+  const localMediaServersAllowed = form.getValue(LOCAL_MEDIA_SERVERS_KEY) === "true";
 
   // The save endpoint rejects the Redis backend unless Redis is configured, so
   // mirror that rule on the option itself. The server stays the source of
@@ -374,6 +378,23 @@ export default function SecurityAccessSettings() {
             disabled={trustedProxiesManaged}
             restartRequired={restartKeys.has("clientip.trusted_proxies")}
           />
+          <SettingField
+            label="Local servers for every account"
+            description="Lets every account import history from, and sync with, Plex, Emby, and Jellyfin servers at local network addresses such as 192.168.x.x or localhost. Admins always can."
+            type="toggle"
+            value={form.getValue(LOCAL_MEDIA_SERVERS_KEY)}
+            onChange={(v) => form.setValue(LOCAL_MEDIA_SERVERS_KEY, v)}
+            restartRequired={restartKeys.has(LOCAL_MEDIA_SERVERS_KEY)}
+          />
+          {localMediaServersAllowed && (
+            <div className="flex items-start gap-2 py-3 text-xs text-amber-500">
+              <TriangleAlert className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              <p>
+                Anyone who can sign in can make this server send requests to devices on its local
+                network. Turn this on only if you trust every account on this server.
+              </p>
+            </div>
+          )}
         </FieldGroup>
 
         <FieldGroup label="Rate limiting">

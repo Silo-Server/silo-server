@@ -60,7 +60,7 @@ function joinPath(dir: string, name: string): string {
  * `filepath.Clean` for slash-separated paths: collapses repeated separators and
  * resolves `.` and `..` lexically, leaving `.` for an empty result.
  */
-function cleanPath(path: string): string {
+export function cleanPath(path: string): string {
   const rooted = path.startsWith("/");
   const resolved: string[] = [];
   for (const segment of path.split("/")) {

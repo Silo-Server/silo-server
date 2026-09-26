@@ -27,6 +27,11 @@ var (
 	ErrCurrentPasswordInvalid  = errors.New("current password is invalid")
 	ErrPasswordTooShort        = errors.New("password is too short")
 	ErrPasswordTooLong         = errors.New("password is too long")
+	// ErrPasswordUnchanged refuses replacing a temporary password with itself.
+	ErrPasswordUnchanged = errors.New("new password matches the temporary password")
+	// ErrPasswordChangeRequired refuses a sign-in surface that cannot offer
+	// the password change a temporary password requires.
+	ErrPasswordChangeRequired = errors.New("password change required")
 )
 
 const (
@@ -128,7 +133,15 @@ func NewService(
 // Login authenticates the user with the given credentials and creates a new
 // session. Returns a TokenPair containing the access and refresh tokens.
 func (s *Service) Login(ctx context.Context, username, password, deviceName, ip string) (*TokenPair, *models.User, error) {
-	return s.loginWithProvider(ctx, "local", username, password, deviceName, ip)
+	return s.loginWithProvider(ctx, "local", username, password, deviceName, ip, false)
+}
+
+// CompatLogin is Login for sign-in surfaces that cannot run the forced
+// password change (Jellyfin and Audiobookshelf compatibility). An account
+// holding a temporary password gets ErrPasswordChangeRequired and no session:
+// its holder must sign in to Silo and choose a new password first.
+func (s *Service) CompatLogin(ctx context.Context, username, password, deviceName, ip string) (*TokenPair, *models.User, error) {
+	return s.loginWithProvider(ctx, "local", username, password, deviceName, ip, true)
 }
 
 func (s *Service) LoginWithProvider(
@@ -142,7 +155,7 @@ func (s *Service) LoginWithProvider(
 	if providerID == "" {
 		providerID = s.defaultID
 	}
-	return s.loginWithProvider(ctx, providerID, username, password, deviceName, ip)
+	return s.loginWithProvider(ctx, providerID, username, password, deviceName, ip, false)
 }
 
 func (s *Service) RegisterProvider(info LoginProviderInfo, provider AuthProvider) {
@@ -220,9 +233,10 @@ func (s *Service) CompleteOAuthLogin(ctx context.Context, in OAuthLoginInput) (*
 		return nil, nil, fmt.Errorf("creating session: %w", err)
 	}
 	pair, err := s.generateTokenPair(Claims{
-		UserID:    user.ID,
-		Role:      user.Role,
-		SessionID: sessionID,
+		UserID:                 user.ID,
+		Role:                   user.Role,
+		SessionID:              sessionID,
+		PasswordChangeRequired: user.PasswordChangeRequired,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -252,6 +266,7 @@ func (s *Service) loginWithProvider(
 	password string,
 	deviceName string,
 	ip string,
+	refusePasswordChange bool,
 ) (*TokenPair, *models.User, error) {
 	provider := s.providers[providerID]
 	if provider == nil {
@@ -264,6 +279,9 @@ func (s *Service) loginWithProvider(
 	})
 	if err != nil {
 		return nil, nil, err
+	}
+	if refusePasswordChange && user.PasswordChangeRequired {
+		return nil, nil, ErrPasswordChangeRequired
 	}
 
 	// Create a new session with a pre-generated ID to avoid the race condition
@@ -282,9 +300,10 @@ func (s *Service) loginWithProvider(
 	}
 
 	pair, err := s.generateTokenPair(Claims{
-		UserID:    user.ID,
-		Role:      user.Role,
-		SessionID: sessionID,
+		UserID:                 user.ID,
+		Role:                   user.Role,
+		SessionID:              sessionID,
+		PasswordChangeRequired: user.PasswordChangeRequired,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -479,7 +498,9 @@ func (s *Service) StartImpersonation(ctx context.Context, adminUserID, targetUse
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("getting target user: %w", err)
 	}
-	if !target.Enabled || target.Role == "admin" {
+	// Admins may not act as another admin; only the server Owner may, and
+	// nobody may act as the Owner.
+	if !target.Enabled || target.IsOwner || (target.Role == "admin" && !admin.IsOwner) {
 		return nil, nil, nil, ErrImpersonationNotAllowed
 	}
 
@@ -573,11 +594,14 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 		return nil, fmt.Errorf("extending session: %w", err)
 	}
 
+	// An impersonating administrator is not the one who must change the
+	// password, so only the account's own sessions are restricted.
 	return s.generateTokenPair(Claims{
-		UserID:             user.ID,
-		Role:               user.Role,
-		SessionID:          session.ID,
-		ImpersonatorUserID: session.ImpersonatorUserID,
+		UserID:                 user.ID,
+		Role:                   user.Role,
+		SessionID:              session.ID,
+		ImpersonatorUserID:     session.ImpersonatorUserID,
+		PasswordChangeRequired: user.PasswordChangeRequired && session.ImpersonatorUserID == nil,
 	})
 }
 
@@ -621,8 +645,10 @@ func (s *Service) PasswordChangeAvailable(ctx context.Context, userID int) (bool
 
 // ChangePassword verifies the existing local credential before replacing it.
 // Profile authorization and impersonation checks belong to the HTTP boundary;
-// this method owns only the account credential transition.
-func (s *Service) ChangePassword(ctx context.Context, userID int, currentPassword, newPassword string) error {
+// this method owns only the account credential transition. sessionID is the
+// login session making the change: when it replaces a temporary password,
+// every other session of the account is revoked.
+func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string) error {
 	user, err := s.users.GetByID(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("getting user: %w", err)
@@ -631,7 +657,13 @@ func (s *Service) ChangePassword(ctx context.Context, userID int, currentPasswor
 		return err
 	}
 
-	if err := s.users.CompareAndSwapPassword(ctx, userID, user.PasswordHash, newPassword); err != nil {
+	swap := s.users.CompareAndSwapPassword
+	if user.PasswordChangeRequired {
+		swap = func(ctx context.Context, id int, expectedHash, newPassword string) error {
+			return s.users.ReplaceTemporaryPassword(ctx, id, expectedHash, newPassword, sessionID)
+		}
+	}
+	if err := swap(ctx, userID, user.PasswordHash, newPassword); err != nil {
 		return fmt.Errorf("updating password: %w", err)
 	}
 	return nil
@@ -644,7 +676,13 @@ func validatePasswordChange(user *models.User, currentPassword, newPassword stri
 	if !CheckPassword(user, currentPassword) {
 		return ErrCurrentPasswordInvalid
 	}
-	return ValidateNewPassword(newPassword)
+	if err := ValidateNewPassword(newPassword); err != nil {
+		return err
+	}
+	if user.PasswordChangeRequired && newPassword == currentPassword {
+		return ErrPasswordUnchanged
+	}
+	return nil
 }
 
 // ValidateNewPassword applies the shared local credential policy before a new

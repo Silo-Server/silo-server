@@ -41,8 +41,8 @@ func registerWatchTogetherSuggestionPromote(reg *Registry) {
 			switch {
 			case errors.Is(err, watchtogether.ErrRoomForbidden):
 				return nil, NewProblem(TypePermissionDenied, "Only the host account and profile may promote suggestions.")
-			case errors.Is(err, watchtogether.ErrNotVoteWinner), errors.Is(err, watchtogether.ErrNoVotesCast), errors.Is(err, watchtogether.ErrVoteRoomSelection):
-				return nil, NewProblem(TypeConflict, "The suggestion is not the room's current eligible vote winner.")
+			case errors.Is(err, watchtogether.ErrVoteRoomSelection):
+				return nil, NewProblem(TypeConflict, "The room's selection mode refused this promotion.")
 			case errors.Is(err, watchtogether.ErrInvalidSelection):
 				return nil, NewProblem(TypeValidationFailed, "The suggestion is not playable.")
 			case errors.Is(err, watchtogether.ErrSuggestionPromotionUnavailable):

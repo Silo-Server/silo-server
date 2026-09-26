@@ -22,7 +22,13 @@ import { isHouseholdSetupDone, setHouseholdSetupDone } from "@/lib/onboarding";
  */
 export default function HouseholdSetup() {
   const { user, loading, selectProfile } = useAuth();
-  const { data: profiles = [], isLoading: profilesLoading, avatarUploadEnabled } = useProfiles();
+  const {
+    data: profiles = [],
+    isLoading: profilesLoading,
+    avatarUploadEnabled,
+    maxAdvisoryAgeSupported,
+    requireAdvisoryAgeSupported,
+  } = useProfiles();
   const { data: libraries = [] } = useAvailableUserLibraries();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<Profile | null>(null);
@@ -140,6 +146,8 @@ export default function HouseholdSetup() {
         profile={editing}
         libraries={libraries}
         avatarUploadEnabled={avatarUploadEnabled}
+        advisoryAgeSupported={maxAdvisoryAgeSupported}
+        requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
         onOpenChange={(open) => {
           setEditorOpen(open);
           if (!open) setEditing(null);

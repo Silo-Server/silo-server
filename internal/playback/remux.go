@@ -242,7 +242,7 @@ func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float6
 	}
 
 	if transcodeAudio {
-		channels, bitrateKbps := resolvedAACOutputV3(targetAudioChannels, targetAudioBitrateKbps)
+		channels, bitrateKbps := ResolveAACOutputV3(targetAudioChannels, targetAudioBitrateKbps)
 		// Video copy + AAC encode is effectively single-threaded work.
 		// ffmpeg's default auto-threading spawns one filter thread per CPU
 		// core for the implicit downmix/resampler, all idle. Pin to one.

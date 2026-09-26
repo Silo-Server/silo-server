@@ -22,6 +22,7 @@ export function userFromAccount(account: Account): User {
     role: account.role,
     permissions: account.permissions,
     download_allowed: account.download_allowed,
+    password_change_required: account.password_change_required,
     impersonation: account.impersonation
       ? {
           active: account.impersonation.active,

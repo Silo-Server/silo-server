@@ -33,16 +33,18 @@ const (
 type ScopeInput struct {
 	SchemaVersion int `json:"schema_version"`
 
-	UserID                int    `json:"user_id"`
-	SessionID             string `json:"session_id"`
-	ProfileID             string `json:"profile_id"`
-	AccountLibraryIDs     []int  `json:"account_library_ids"`
-	AccountRestricted     bool   `json:"account_restricted"`
-	AccountMaxQuality     string `json:"account_max_playback_quality"`
-	AccessPolicyRevision  int64  `json:"access_policy_revision"`
-	DisabledLibraryIDs    []int  `json:"disabled_library_ids"`
-	ProfilePresent        bool   `json:"profile_present"`
-	ProfileMaxRating      string `json:"profile_max_content_rating"`
+	UserID               int    `json:"user_id"`
+	SessionID            string `json:"session_id"`
+	ProfileID            string `json:"profile_id"`
+	AccountLibraryIDs    []int  `json:"account_library_ids"`
+	AccountRestricted    bool   `json:"account_restricted"`
+	AccountMaxQuality    string `json:"account_max_playback_quality"`
+	AccessPolicyRevision int64  `json:"access_policy_revision"`
+	DisabledLibraryIDs   []int  `json:"disabled_library_ids"`
+	ProfilePresent       bool   `json:"profile_present"`
+	ProfileMaxRating     string `json:"profile_max_content_rating"`
+	// ProfileMaxAdvisoryAge is the profile's advisory-age limit; 0 means none.
+	ProfileMaxAdvisoryAge int    `json:"profile_max_advisory_age"`
 	ProfileMaxQuality     string `json:"profile_max_playback_quality"`
 	ProfileLibraryLimited bool   `json:"profile_library_restricted"`
 	ProfileLibraryIDs     []int  `json:"profile_allowed_library_ids"`
@@ -62,12 +64,21 @@ type ScopeInput struct {
 // unrestricted explicitly records whether allowed_library_ids is meaningful.
 // Adapters map unrestricted=true to a nil access.Scope.AllowedLibraryIDs.
 type ScopeDecision struct {
-	SchemaVersion             int    `json:"schema_version"`
-	Unrestricted              bool   `json:"unrestricted"`
-	AllowedLibraryIDs         []int  `json:"allowed_library_ids"`
-	DisabledLibraryIDs        []int  `json:"disabled_library_ids"`
-	LibrariesRestricted       bool   `json:"libraries_restricted"`
-	MaxContentRating          string `json:"max_content_rating"`
+	SchemaVersion       int    `json:"schema_version"`
+	Unrestricted        bool   `json:"unrestricted"`
+	AllowedLibraryIDs   []int  `json:"allowed_library_ids"`
+	DisabledLibraryIDs  []int  `json:"disabled_library_ids"`
+	LibrariesRestricted bool   `json:"libraries_restricted"`
+	MaxContentRating    string `json:"max_content_rating"`
+	// MaxContentRatingOverride is the ceiling a custom scope override asked for,
+	// reported unreduced. Rego cannot rank one rating against another — the
+	// maturity ladder lives in internal/access — so the effective ceiling is
+	// access.StricterCeiling(MaxContentRating, MaxContentRatingOverride), which
+	// can only tighten. Empty means no override asked for one.
+	MaxContentRatingOverride string `json:"max_content_rating_override"`
+	// MaxAdvisoryAge is the effective advisory-age limit, already reduced
+	// against any override (the lower limit wins); 0 means none.
+	MaxAdvisoryAge            int    `json:"max_advisory_age"`
 	MaxPlaybackQuality        string `json:"max_playback_quality"`
 	PreferredMetadataLanguage string `json:"preferred_metadata_language"`
 	PolicyRevision            int64  `json:"policy_revision"`
@@ -176,6 +187,12 @@ type ActionInput struct {
 	MaxPlaybackQuality string `json:"max_playback_quality"`
 	ContentRating      string `json:"content_rating"`
 	MaxContentRating   string `json:"max_content_rating"`
+	// ContentRatingWithinCeiling is derived, not supplied: CheckAction resolves
+	// ContentRating against MaxContentRating with access.RatingAllowed before
+	// evaluation, because comparing ratings from different national systems
+	// needs the ladder in internal/access. Whatever a caller sets here is
+	// overwritten.
+	ContentRatingWithinCeiling bool `json:"content_rating_within_ceiling"`
 
 	RequestTime string `json:"request_time"`
 	DeviceID    string `json:"device_id"`

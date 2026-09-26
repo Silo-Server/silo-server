@@ -4,6 +4,49 @@
 > 1.0. The frozen alpha `/api/v1` surface answers the same features through the pre-1.0 bridge
 > window and is then retired. See [the native API contract](architecture/api-contract.md).
 
+## People search
+
+`GET /api/v2/catalog/people` (`listPeople`) accepts a name fragment in `q` and
+`limit` from 1 to 100 (default 20). Case-insensitive exact name matches come first;
+other matches sort by name, with person ID breaking ties. Ranking happens before
+applying the limit.
+
+The optional `media_scope` parameter limits results to people credited on items
+in that scope. It accepts `video` (movies and series), `movie`, `series`, `episode`,
+`audiobook`, `ebook`, or `manga`. Omit it to search credits across all media scopes.
+Results require at least one credit visible to the viewer. Library restrictions, disabled libraries, rating
+limits, and excluded media types apply before the limit, including when the media
+scope is omitted. Every credit role participates, so directors match video searches
+and authors and narrators match audiobook searches. A person with several matching
+credits appears once.
+
+Episode credits inherit library visibility and rating limits from their parent
+series. Media scope and excluded media types still apply to the credited episode.
+
+`GET /api/v2/catalog/search/capabilities` advertises `people_media_scope: true`
+when people search supports media scopes and viewer access filtering. Clients
+must check this signal before offering people results, including unscoped
+searches. Web omits the People row on older servers that do not advertise support.
+
+Web search applies its selected media scope to both titles and people. People
+responses remain an `{items}` collection with string IDs. The v1 bridge retains
+its existing alphabetical, unscoped search.
+
+## Person detail
+
+`GET /api/v2/catalog/people/{id}` (`getPerson`) returns one person. A read counts
+as a view: when the person's metadata is incomplete or stale and no provider lookup
+ran recently, the server queues a background refresh.
+
+Clients that warm a cache speculatively, such as web prefetching the cast of an
+open item, pass `prefetch=true`. A prefetch returns the same person but does not
+queue a refresh; missing metadata is left to the server's background sweep. Read
+the person without `prefetch` when the user actually opens them.
+
+`GET /api/v2/catalog/search/capabilities` advertises `person_prefetch: true` when
+the server accepts the parameter. Check it first: `/api/v2` rejects unknown query
+parameters, so an older server answers a prefetch read with `422`.
+
 ## Saved browse sort
 
 `PUT /api/v2/collections/sort-preference` (`setCollectionSortPreference`) saves the
@@ -231,3 +274,199 @@ fall back to the ID when the title is absent. Personal membership pages hydrate
 titles through the existing viewer access filter; admin pages require acting
 administrator access. Membership identity, ordering and cursor revision checks
 are unchanged. Frozen v1 membership responses do not expose this field.
+
+## Advisory age
+
+Movies and series may carry `advisory_age`, a recommended minimum viewer age from
+an advisory service such as Common Sense Media, and `advisory_source`, which names
+who recommended it (`commonsense` or `mdblist`). Both are optional and appear
+only together; an item with no advisory omits both.
+
+The advisory is not a certification. `content_rating` remains the certification a
+rating body issued, and it alone drives the content-rating ceiling
+(`max_content_rating`). Do not present the advisory as a rating a viewer has to
+satisfy.
+
+Coverage is partial by design. The providers that supply advisory ages are rate
+limited per day, so on a large library some titles carry one and others do not,
+and the set grows over time. Absence means "not fetched yet", never "suitable
+for everyone".
+
+Whether to show the badge is a per-profile choice, `catalog.show_advisory_age`
+in the settings contract, default off. The field is served regardless; the
+setting decides whether a client renders it and never changes what a profile may
+watch. Detect support by reading the setting from the settings contract
+capabilities rather than sniffing versions.
+
+### Advisory-age limit
+
+A household manager can also limit a profile by advisory age with the profile's
+`max_advisory_age` (an integer from 1 to 21, or `null` for no limit) on the v2
+profile operations. The server hides every title whose `advisory_age` is above
+the limit, everywhere the content-rating ceiling applies: browse, search, detail,
+episodes, sections, progress, recommendations and the Jellyfin-compatible API.
+Episodes use their series' advisory age. Other item types, including the beta
+book libraries, never carry an advisory age, so the limit never hides them.
+
+- The limit only ever tightens. It is ANDed with `max_content_rating`, and a
+  title must pass both.
+- By default a title with no advisory age is **not** hidden by the limit; the
+  content-rating ceiling alone decides it. `access.unrated_content` does not
+  apply to the advisory limit.
+- A profile can instead require an advisory age with `require_advisory_age`
+  (boolean, default `false`). With it set, a title with no advisory age is
+  hidden too, so the profile sees only titles an advisory service rated at or
+  under the limit. It has no effect without `max_advisory_age`. On a large
+  library that has not been looked up yet, such a profile starts nearly empty
+  and fills in as ages arrive: the opposite of the default, where titles
+  disappear as ages arrive.
+- Because coverage grows as the provider enriches the library, the set of titles
+  a limited profile sees can shrink over time, for example when a title a child
+  could see gains an advisory age above the limit. `advisory_titles` on
+  `getAdminDashboardStats` reports how many movies and series carry an advisory
+  age, next to `total_movies` and `total_shows`.
+- Media-request discovery cannot apply the limit, because titles outside the
+  library carry no advisory age.
+- Only a household manager (a server admin, or the primary profile) can set or
+  clear either field; a restricted profile cannot change its own limit.
+  Changing either bumps the account's access policy revision, the same as
+  changing `max_content_rating`.
+- Detect support with `max_advisory_age_supported` and
+  `require_advisory_age_supported` on the `listProfiles` response. They are
+  separate because `require_advisory_age` arrived later, so a server can report
+  the first without the second. The profile operations reject unknown members,
+  so do not send either field to a server that does not report it.
+
+Frozen v1 responses do not expose these fields.
+
+## Rating sources
+
+The v2 item detail of a movie or series may carry `rating_sources`, a list of
+per-source ratings a metadata provider reported, such as the MDBList plugin's
+IMDb, Metacritic, Letterboxd and Roger Ebert scores. Each entry has:
+
+- `source`: one of `imdb`, `tmdb`, `rt_critic`, `rt_audience`, `metacritic`,
+  `metacritic_user`, `letterboxd`, `trakt`, `rogerebert`, `myanimelist` or
+  `mdblist` (MDBList's own aggregate). The list of sources can grow; ignore a
+  name you do not recognize.
+- `score`: the rating on a 0-100 scale, whatever scale the source uses itself.
+- `votes`: how many votes produced the score, omitted when the source does not
+  report it.
+
+Entries come in that fixed source order, at most one per source. The member is
+absent when no provider reported a source. It is detail-only: list and section
+cards do not carry it.
+
+The four `rating_imdb`, `rating_tmdb`, `rating_rt_critic` and
+`rating_rt_audience` members are unchanged, keep their own scales, and remain
+the only ratings browse can sort or filter by.
+
+Rating sources follow the same refresh and lock rules as those four members. A
+scheduled refresh only adds sources the item lacks, a manual refresh overwrites
+the sources the providers report, and locking the rating field freezes all of
+them. A refresh never removes a source a provider stopped reporting. Identify
+is the exception: it matches the item to a different title, so the sources the
+new match reports replace the stored set, and a source it does not report is
+removed.
+
+Plugins send them under `ratings.sources` in a metadata item, as
+`{"<source>": {"score": 0-100, "votes": n}}`. The server drops an unknown
+source name or a score outside 0-100, and drops a vote count that is not a
+whole, non-negative number while keeping its score.
+
+Frozen v1 responses do not expose this member.
+
+## Local theme songs, V2
+
+Movies, series, and seasons can own local theme audio. Place `theme.mp3`
+(or `.m4a`, `.m4b`, `.flac`, `.ogg`, `.opus`, `.wav`, `.aac`) in the item's directory,
+or put audio files in its `theme-music/` directory. Scans honor the library's
+ignore rules. Theme audio is separate from media files, extras, metadata
+matching, and watch progress. Files must contain audio without video tracks.
+Symlinked audio files and symlinked `theme-music` directories are excluded.
+
+Ownership follows current video-file associations. A movie can use its
+canonical directory or the directory containing its video. A series uses its
+canonical root; flat episode files can use their containing directory when every
+video there belongs to that series. A season uses directories below that root whose
+videos belong to that season alone, including season directories above disc subdirectories.
+Ambiguous directories do not grant a theme to multiple movies, series, or seasons.
+Metadata rematching changes ownership without copying theme rows.
+Theme-file update events reconcile the owner's audio without importing the library
+again. Failed audio probes preserve only that file's cached record, and deleted
+videos retain their themes until the scanner removes the missing video rows.
+
+The V2 item detail document includes `themes` with `owner_id` and an ordered
+`items` array. Each theme has `id`, `title`, `duration_seconds`, and `container`.
+Paths are never exposed. A season without themes inherits its series' set;
+an episode uses its season's set, then its series' set. Resolution selects one
+owner's set and applies the viewer's library, rating, and quality restrictions.
+An empty set retains the requested item's ID and an empty array.
+Seasons derived from episode groups use the same ownership and inheritance rules.
+If the optional theme lookup fails, item detail still succeeds and omits `themes`.
+
+| Method and path | Result |
+| --- | --- |
+| `GET /api/v2/catalog/themes/capabilities` | Shared capability document with `delivery: routed`, `transcode`, `cluster_routing`, and `grant_lifetime_seconds` |
+| `POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback` | `url`, `expires_at`, `delivery`, and `content_type` for an authenticated login session and verified profile |
+| `GET\|HEAD /api/v2/catalog/items/{id}/themes/{theme_id}/audio?token=...` | Theme audio this API node serves, authorized by the playback grant |
+
+The optional playback request body lists what the client decodes as
+`accepted_formats`, pairs of `container` and `audio_codec` (for example
+`{"container": "ogg", "audio_codec": "vorbis"}`; an empty codec accepts any
+codec in the container). The server sends the original when it matches.
+Otherwise it sends a conversion to AAC in progressive audio-only MP4
+(`delivery: converted`, `content_type: audio/mp4`) when an `mp4` or `m4a`
+entry accepts `aac`. A client that decodes neither gets `406 not_acceptable`.
+A request without a body receives the original, as before conversion existed.
+`transcode` reports whether any conversion route exists on this deployment.
+
+Themes follow the playback routing policy, like video. Original audio follows
+`playback.routing.direct_play_egress`: with the default `prefer_proxy`, a proxy
+node serves it and the API serves it only when no proxy can. A conversion
+follows `playback.routing.remux_execution` and `playback.routing.remux_egress`:
+by default a transcode node converts it and a proxy relays it, falling back to
+a proxy, then to the API, as far as the policy allows. `proxy_only` and
+`worker_only` are never crossed; when no route satisfies the policy, the
+playback request answers `503 dependency_unavailable`. Only workers that
+advertise `theme_audio_egress_v1` (proxies) or `theme_audio_execution_v1`
+(transcode nodes) are chosen, so a mixed-version cluster never hands a theme to
+a worker that cannot serve it.
+
+`url` is either this server's audio route or an absolute URL on a proxy's
+origin. Both expire after at most five minutes, bounded by the login token's
+remaining lifetime. The API grant binds the account, profile, login session,
+policy revision, owner, theme file ID, size, and modification time, and each
+audio request rechecks the current account, login session, profile,
+permissions, ownership, and file. A proxy URL is checked against the same
+authority when it is issued and is then authorized by its signed token alone
+for its lifetime, as video stream tokens are; it names the theme file, its
+size and modification time, the serving proxy, and, for a conversion, the
+transcode node. Grants use a separate signing key derived from the server
+secret and cannot be used as an account or ordinary playback token. Clients
+must not log or persist signed URLs. Grant responses and audio use
+`Cache-Control: no-store`.
+
+Original audio supports byte ranges, HEAD, ETags, and HTTP read preconditions.
+Authorization happens before a conditional response. A converted stream has no
+length and no byte ranges; replay it with a new grant. The node serving a
+theme must read the theme directory at the path the scanner recorded, as it
+must for library media. Missing local files or changed bytes require a rescan.
+
+The web preferences `ui.theme_music_enabled` and `ui.theme_music_loop` default
+to `false` and support profile and profile-device scope on the web platform.
+The web player fades theme audio, preserves its position across details with
+the same owner, suspends while a navigation destination is unresolved, and
+stops on normal playback, logout, or profile change. It handles browser autoplay
+rejection and retries a failed audio URL once with a fresh grant. Playback
+progress resets that retry budget for a later expiry.
+
+The web player reports its formats with `canPlayType`. It loops original audio
+with the element's `loop`, and replays a converted theme with a fresh grant when
+it ends.
+
+Apple and Android do not advertise this feature initially, as specified in
+issue #937. They need V2 discovery and fixtures, settings, playback, and lifecycle
+support before enabling it. Provider downloads, theme videos, uploads, remote
+URLs, and HLS theme transcoding are outside this local-file capability. No V1
+route or V1 item-detail shape changes.

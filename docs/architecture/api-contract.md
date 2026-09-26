@@ -335,7 +335,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   then the profile, acting-admin, or permission gate. A gate's denial is re-rendered as the
   matching Problem Details document by switching on the v1 body's machine-readable `error` and
   `reason`; the decision itself is the v1 gate's, and a locked profile keeps its own
-  `profile_verification_required` type so clients still know to ask for the PIN. A gate the
+  `profile_verification_required` type so clients still know to ask for the PIN, and a session
+  holding a temporary password keeps `password_change_required` so clients route to the
+  password change. A gate the
   wiring lacks makes its operations fail closed with `503 dependency_unavailable`; it never
   removes them from the route table. Handlers read claims, profile, and viewer scope from the
   request context and never from headers. Every authenticated class guarantees non-nil
@@ -818,6 +820,12 @@ Clients use capability documents to decide whether a feature exists. The server 
 contract digest are for diagnostics, support, cache identity, and last-resort compatibility
 messages; they are not substitutes for feature detection.
 
+`links.identity` points at `GET /api/v2/system/identity`, the one public per-deployment value:
+a stable `server_id` every API process answers at every address. It is self-asserted and
+authorizes nothing; the signed-in `GET /api/v2/system/connections` capability document lists the
+addresses the deployment offers. Both are specified in
+[server-identity.md](server-identity.md).
+
 Every stable operation remains registered regardless of runtime provider wiring. Route presence
 means that the operation belongs to the stable contract, not that the current server is configured,
 authorized, and healthy enough to perform it. Each optional domain exposes a typed capability
@@ -1142,6 +1150,11 @@ cutover, explain how to regenerate it, and provide a post-upgrade verification c
 server must not redirect old URLs containing tokens or secrets.
 
 Jellyfin compatibility and Audiobookshelf compatibility remain entirely outside this contract.
+For release scope, Jellyfin compatibility remains in 1.0; Audiobookshelf
+compatibility stays available as a beta feature, outside 1.0 certification,
+until the consolidated Books effort replaces it.
+See [the scope decision](v1-scope.md#library-scope-books-deferred). This does
+not remove the existing implementation or change its wire protocol.
 They implement other projects' wire protocols. Playback v3's normative JSON Schemas and domain
 semantics remain authoritative for v2 playback payloads. The existing HTTP conformance matrix,
 including its legacy/draft-body `426` case, remains a bridge/v1-adapter test; v2 gets a separate
@@ -1226,8 +1239,8 @@ Two findings from the pilot are now settled for every later section:
 
 - **PATCH semantics.** A v1 full-replacement `PUT` becomes a `PATCH` whose members are all
   optional: an omitted member is unchanged, and explicit `null` clears a member only where the
-  schema admits clearing (for `updateProfile`: avatar, PIN, content-rating ceiling, languages,
-  playback ceiling). `null` on any other member is a `422` `validation_failed` naming the member.
+  schema admits clearing (for `updateProfile`: avatar, PIN, content-rating ceiling, advisory-age
+  limit, languages, playback ceiling). `null` on any other member is a `422` `validation_failed` naming the member.
   Because Huma treats `null` on an optional member as absent, the distinction is enforced from the
   raw body. The pilot mutation is naturally idempotent and is not `If-Match` protected;
   optimistic concurrency stays opt-in per operation.
@@ -1259,8 +1272,8 @@ paged with `limit` plus an opaque cursor whose cards are the shared `CatalogItem
 (`{item_id, added_at}`, or `{item_id, rating, rated_at}`) or `404`, a bodiless `PUT` add
 (ratings take `{rating}`) answering `204`, and a `DELETE` answering `204` whether or not
 the entry existed. All six mutations are `non_retryable`: the shared seams dispatch provider
-list events and recommendation refresh without change gating, and rating updates replace
-`rated_at` even when unchanged. Their ledger `DEFECT` notes retain the durable-dispatch work
+list and rating events and recommendation refresh without change gating, and rating updates
+replace `rated_at` even when unchanged. Their ledger `DEFECT` notes retain the durable-dispatch work
 required before clients can retry automatically. The mutations are not demo-restricted: v1's demo
 guard only blocks its listed routes, so these writes pass in demo mode and v2 matches. The three
 lists page by keyset, not offset: the cursor is the (`added_at`, `item_id`) — for ratings
@@ -1846,6 +1859,13 @@ separate calls. A process dispatches the run after creation; this is not a durab
 job-dispatch mechanism. Cooldown problems retain their Retry-After header and the
 web settings page displays the delay. No watch-provider consumers were found in
 the Apple and Android source inventory.
+
+Rating sync settings (`import_ratings_enabled`, `export_ratings_enabled`) and the
+rating run counters exist only on v2, as do the `import_ratings` and `export_ratings`
+capability flags, which v2 projects through its own `WatchProviderCapabilities` type. The
+frozen v1 provider, connection, and run responses omit all of them, and a v1 settings
+update ignores the toggles. See
+[watch-provider-rating-sync.md](watch-provider-rating-sync.md) for the sync rules.
 
 ### Webhook connection management
 

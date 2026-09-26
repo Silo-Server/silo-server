@@ -14,8 +14,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
@@ -33,7 +33,7 @@ type UserCollectionImportHandler struct {
 	scheduler       *usercollections.Scheduler
 	registry        *templates.Registry
 	mdblist         *mdblist.Client
-	ArtworkStore    artworkstore.Store
+	ArtworkStore    blobstore.Store
 	ArtworkResolver artworkurl.Resolver
 	frontendFS      fs.FS
 }
@@ -193,6 +193,9 @@ func (h *UserCollectionImportHandler) ImportTMDB(ctx context.Context, userID int
 // first sync.
 func (h *UserCollectionImportHandler) ImportTrakt(ctx context.Context, userID int, profileID string, req UserImportTraktRequest) (UserImportView, error) {
 	var none UserImportView
+	return none, apiError(http.StatusGone, "unsupported_source", "new Trakt collections are not supported")
+	/* Legacy implementation retained below so existing Trakt collections can
+	continue to sync while creation is disabled.
 	if strings.TrimSpace(req.Title) == "" {
 		return none, fieldError("title", "title is required")
 	}
@@ -213,6 +216,7 @@ func (h *UserCollectionImportHandler) ImportTrakt(ctx context.Context, userID in
 		LibraryIDs: req.LibraryIDs,
 	}
 	return h.createImportedCollection(ctx, userID, profileID, "trakt", cfg, req.UserImportSharedFields)
+	*/
 }
 
 func (h *UserCollectionImportHandler) createImportedCollection(
@@ -345,7 +349,7 @@ func (h *UserCollectionImportHandler) storeBundledTemplatePoster(
 	return nil
 }
 
-func (h *UserCollectionImportHandler) artworkBackend() artworkstore.Store {
+func (h *UserCollectionImportHandler) artworkBackend() blobstore.Store {
 	return h.ArtworkStore
 }
 

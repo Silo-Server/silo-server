@@ -52,6 +52,9 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+vi.mock("@/pages/watchtogether/DetailWatchTogether", () => ({
+  useDetailWatchTogether: () => ({ menu: undefined, sheet: null }),
+}));
 vi.mock("@/hooks/useOnViewTranslation", () => ({
   useOnViewTranslation: () => ({ translating: false, onTranslate: undefined }),
 }));

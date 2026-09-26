@@ -45,13 +45,6 @@ const (
 	calendarFilterTrending   = "trending"
 )
 
-// The Trending preset reads this canonical external-trending snapshot
-// (see internal/sections trending snapshots).
-const (
-	calendarTrendingSnapshotSource = "tmdb"
-	calendarTrendingSnapshotWindow = "week"
-)
-
 // CalendarHandler handles the calendar endpoint.
 type CalendarHandler struct {
 	repo      calendarRepository
@@ -229,7 +222,7 @@ func (h *CalendarHandler) calendarEvents(ctx context.Context, q CalendarQuery, a
 		End:                q.End.AddDate(0, 0, 2),
 		AllowedLibraryIDs:  af.AllowedLibraryIDs,
 		DisabledLibraryIDs: af.DisabledLibraryIDs,
-		MaxContentRating:   af.MaxContentRating,
+		MaturityLimits:     af.MaturityLimits,
 		RestrictByIDs:      scope.restrict,
 		RestrictToIDs:      scope.ids,
 		LibraryID:          q.LibraryID,
@@ -288,7 +281,7 @@ func (h *CalendarHandler) resolveCalendarRestriction(ctx context.Context, filter
 		if h.trending == nil {
 			return true, nil, nil
 		}
-		snap, ok, err := h.trending.Get(ctx, calendarTrendingSnapshotSource, calendarTrendingSnapshotWindow)
+		snap, ok, err := h.trending.Get(ctx, sections.CalendarTrendingSource, sections.CalendarTrendingWindow)
 		if err != nil {
 			return true, nil, err
 		}

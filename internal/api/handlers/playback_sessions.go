@@ -13,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -46,6 +47,7 @@ type playbackSessionRow struct {
 	IsPaused             bool      `json:"is_paused"`
 	HasPlaybackControl   bool      `json:"has_playback_control"`
 	ClientIP             string    `json:"client_ip,omitempty"`
+	StreamLocation       string    `json:"-"`
 	ClientName           string    `json:"client_name,omitempty"`
 	ClientVersion        string    `json:"client_version,omitempty"`
 	ClientBuild          string    `json:"client_build,omitempty"`
@@ -59,39 +61,44 @@ type playbackSessionRow struct {
 	TranscodeNodeURL     string    `json:"-"`
 	TargetResolution     string    `json:"target_resolution,omitempty"`
 	TargetVideoCodec     string    `json:"target_video_codec,omitempty"`
-	TargetAudioCodec     string    `json:"target_audio_codec,omitempty"`
+	// OutputContainer and OutputProtocol are the serving transport's reported
+	// format. They are native-only: the frozen bridge payload omits them.
+	OutputContainer  string `json:"-"`
+	OutputProtocol   string `json:"-"`
+	TargetAudioCodec string `json:"target_audio_codec,omitempty"`
 	// TargetAudioChannels is the channel count the transcode actually encodes.
 	// Absent when the reporting node did not know it — clients must then show
 	// the target codec with no channel layout rather than reusing
 	// SourceAudioChannels, which is what made a 7.1 source downmixed to AAC 5.1
 	// read as "AAC 7.1".
-	TargetAudioChannels      *int   `json:"target_audio_channels,omitempty"`
-	TargetBitrateKbps        *int   `json:"target_bitrate_kbps"`
-	TranscodeHWAccel         string `json:"transcode_hw_accel,omitempty"`
-	ToneMapMode              string `json:"tone_map_mode,omitempty"`
-	SourceContainer          string `json:"source_container,omitempty"`
-	SourceBitrateKbps        *int   `json:"source_bitrate_kbps"`
-	SourceVideoCodec         string `json:"source_video_codec,omitempty"`
-	SourceVideoResolution    string `json:"source_video_resolution,omitempty"`
-	SourceAudioCodec         string `json:"source_audio_codec,omitempty"`
-	SourceAudioChannels      *int   `json:"source_audio_channels"`
-	SourceAudioLanguage      string `json:"source_audio_language,omitempty"`
-	SourceAudioTitle         string `json:"source_audio_title,omitempty"`
-	SourceAudioLayout        string `json:"source_audio_layout,omitempty"`
-	RequestedVideoCodec      string `json:"requested_video_codec,omitempty"`
-	RequestedVideoResolution string `json:"requested_video_resolution,omitempty"`
-	VideoDecision            string `json:"video_decision,omitempty"`
-	AudioDecision            string `json:"audio_decision,omitempty"`
-	EffectivePlayMethod      string `json:"effective_play_method,omitempty"`
-	IsJellyfinClient         bool   `json:"is_jellyfin_client,omitempty"`
-	RoutingWorkload          string `json:"routing_workload,omitempty"`
-	RoutingExecution         string `json:"routing_execution,omitempty"`
-	RoutingExecutionNodeID   *int   `json:"routing_execution_node_id,omitempty"`
-	RoutingExecutionNodeName string `json:"routing_execution_node_name,omitempty"`
-	RoutingEgress            string `json:"routing_egress,omitempty"`
-	RoutingEgressNodeID      *int   `json:"routing_egress_node_id,omitempty"`
-	RoutingEgressNodeName    string `json:"routing_egress_node_name,omitempty"`
-	CompatOrigin             bool   `json:"-"`
+	TargetAudioChannels      *int    `json:"target_audio_channels,omitempty"`
+	TargetBitrateKbps        *int    `json:"target_bitrate_kbps"`
+	TranscodeHWAccel         string  `json:"transcode_hw_accel,omitempty"`
+	ToneMapMode              string  `json:"tone_map_mode,omitempty"`
+	SourceContainer          string  `json:"source_container,omitempty"`
+	SourceBitrateKbps        *int    `json:"source_bitrate_kbps"`
+	SourceVideoCodec         string  `json:"source_video_codec,omitempty"`
+	SourceVideoResolution    string  `json:"source_video_resolution,omitempty"`
+	SourceAudioCodec         string  `json:"source_audio_codec,omitempty"`
+	SourceAudioChannels      *int    `json:"source_audio_channels"`
+	SourceAudioLanguage      string  `json:"source_audio_language,omitempty"`
+	SourceAudioTitle         string  `json:"source_audio_title,omitempty"`
+	SourceAudioLayout        string  `json:"source_audio_layout,omitempty"`
+	RequestedVideoCodec      string  `json:"requested_video_codec,omitempty"`
+	RequestedVideoResolution string  `json:"requested_video_resolution,omitempty"`
+	VideoDecision            string  `json:"video_decision,omitempty"`
+	AudioDecision            string  `json:"audio_decision,omitempty"`
+	EffectivePlayMethod      string  `json:"effective_play_method,omitempty"`
+	IsJellyfinClient         bool    `json:"is_jellyfin_client,omitempty"`
+	RoutingNetworkProvider   *string `json:"-"`
+	RoutingWorkload          string  `json:"routing_workload,omitempty"`
+	RoutingExecution         string  `json:"routing_execution,omitempty"`
+	RoutingExecutionNodeID   *int    `json:"routing_execution_node_id,omitempty"`
+	RoutingExecutionNodeName string  `json:"routing_execution_node_name,omitempty"`
+	RoutingEgress            string  `json:"routing_egress,omitempty"`
+	RoutingEgressNodeID      *int    `json:"routing_egress_node_id,omitempty"`
+	RoutingEgressNodeName    string  `json:"routing_egress_node_name,omitempty"`
+	CompatOrigin             bool    `json:"-"`
 }
 
 // playbackSessionsCapabilitiesResponse advertises the additive fields of the
@@ -315,7 +322,11 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			COALESCE(execution_node.name, ''),
 			COALESCE(s.routing_egress, ''),
 			s.routing_egress_node_id,
-			COALESCE(egress_node.name, '')
+			COALESCE(egress_node.name, ''),
+			s.routing_network_provider,
+			COALESCE(s.output_container, ''),
+			COALESCE(s.output_protocol, ''),
+			COALESCE(s.stream_location, '')
 		 FROM playback_sessions_sync s
 		 LEFT JOIN users u ON u.id = s.user_id
 		 LEFT JOIN media_files mf ON mf.id = s.media_file_id
@@ -385,7 +396,8 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			&s.TranscodeHWAccel, &s.ToneMapMode, &s.SourceContainer, &sourceBitrateKbps, &s.SourceVideoCodec, &s.SourceVideoResolution,
 			&s.SourceAudioCodec, &sourceAudioChannels, &audioTracksJSON, &s.RequestedVideoCodec, &s.RequestedVideoResolution,
 			&s.CompatOrigin, &s.RoutingWorkload, &s.RoutingExecution, &s.RoutingExecutionNodeID,
-			&s.RoutingExecutionNodeName, &s.RoutingEgress, &s.RoutingEgressNodeID, &s.RoutingEgressNodeName,
+			&s.RoutingExecutionNodeName, &s.RoutingEgress, &s.RoutingEgressNodeID, &s.RoutingEgressNodeName, &s.RoutingNetworkProvider,
+			&s.OutputContainer, &s.OutputProtocol, &s.StreamLocation,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scanning playback session: %w", err)
 		}
@@ -432,6 +444,10 @@ func enrichPlaybackSessionRow(row *playbackSessionRow, audioTracksJSON []byte) {
 
 	row.VideoDecision, row.AudioDecision = sessionComponentDecision(row.PlayMethod, row.TranscodeAudio, row.TargetVideoCodec)
 	row.EffectivePlayMethod = effectivePlayMethod(row.VideoDecision, row.AudioDecision)
+	if row.PlayMethod == string(playback.PlayDirect) {
+		row.OutputContainer = row.SourceContainer
+		row.OutputProtocol = playback.OutputProtocolHTTP
+	}
 	row.IsJellyfinClient = row.CompatOrigin || isJellyfinEcosystemClient(row.ClientName, row.ClientUserAgent)
 
 	var audioTracks []models.AudioTrack
@@ -526,7 +542,7 @@ func sessionComponentDecision(playMethod string, transcodeAudio bool, targetVide
 // and an audio-only re-encode reports "remux" — the decisions carry what
 // actually costs CPU.
 //   - video re-encoded        -> "transcode"
-//   - only audio re-encoded   -> "audio"
+//   - only audio re-encoded   -> "audio" (the native API reports "direct_stream")
 //   - streams only repackaged -> "remux"
 //   - nothing touched         -> "direct"
 //

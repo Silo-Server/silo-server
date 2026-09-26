@@ -256,6 +256,7 @@ function crewMemberFromV2(credit: CrewCreditV2): CrewMember {
 
 export function catalogItemDetailFromV2(item: CatalogItemDetailV2): ItemDetail {
   return {
+    themes: item.themes,
     content_id: item.content_id,
     play_content_id: item.play_content_id,
     type: item.type as ItemDetail["type"],
@@ -269,6 +270,8 @@ export function catalogItemDetailFromV2(item: CatalogItemDetailV2): ItemDetail {
     pending_translation_language: item.pending_translation_language,
     runtime: item.runtime ?? 0,
     content_rating: item.content_rating ?? "",
+    advisory_age: item.advisory_age ?? null,
+    advisory_source: item.advisory_source ?? "",
     genres: item.genres,
     rating_imdb: item.rating_imdb ?? null,
     rating_tmdb: item.rating_tmdb ?? null,
@@ -382,7 +385,7 @@ export function mangaFilesFromV2(files: MangaFilesV2): MangaSeriesFiles {
 }
 
 export function personFromV2(person: PersonV2): Person {
-  return { ...person, id: Number(person.id) };
+  return { ...person };
 }
 
 export function catalogFiltersFromV2(filters: CatalogFiltersV2): CatalogFiltersResponse {

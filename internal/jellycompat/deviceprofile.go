@@ -3,12 +3,16 @@ package jellycompat
 import (
 	"encoding/json"
 	"io"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
@@ -27,8 +31,15 @@ type DeviceProfile struct {
 	MaxStreamingBitrate int64                `json:"MaxStreamingBitrate,omitempty"`
 	DirectPlayProfiles  []DirectPlayProfile  `json:"DirectPlayProfiles,omitempty"`
 	TranscodingProfiles []TranscodingProfile `json:"TranscodingProfiles,omitempty"`
+	ContainerProfiles   []ContainerProfile   `json:"ContainerProfiles,omitempty"`
 	CodecProfiles       []CodecProfile       `json:"CodecProfiles,omitempty"`
 	SubtitleProfiles    []SubtitleProfile    `json:"SubtitleProfiles,omitempty"`
+}
+
+type ContainerProfile struct {
+	Type       string             `json:"Type,omitempty"`
+	Container  string             `json:"Container,omitempty"`
+	Conditions []ProfileCondition `json:"Conditions,omitempty"`
 }
 
 type DirectPlayProfile struct {
@@ -39,12 +50,14 @@ type DirectPlayProfile struct {
 }
 
 type TranscodingProfile struct {
-	Type       string `json:"Type,omitempty"`
-	Container  string `json:"Container,omitempty"`
-	Protocol   string `json:"Protocol,omitempty"`
-	Context    string `json:"Context,omitempty"`
-	VideoCodec string `json:"VideoCodec,omitempty"`
-	AudioCodec string `json:"AudioCodec,omitempty"`
+	MaxAudioChannels string             `json:"MaxAudioChannels,omitempty"`
+	Conditions       []ProfileCondition `json:"Conditions,omitempty"`
+	Type             string             `json:"Type,omitempty"`
+	Container        string             `json:"Container,omitempty"`
+	Protocol         string             `json:"Protocol,omitempty"`
+	Context          string             `json:"Context,omitempty"`
+	VideoCodec       string             `json:"VideoCodec,omitempty"`
+	AudioCodec       string             `json:"AudioCodec,omitempty"`
 }
 
 type CodecProfile struct {
@@ -71,6 +84,7 @@ type ProfileCondition struct {
 
 // DeviceProfileStore keeps the last reported device profile per compat token.
 type DeviceProfileStore struct {
+	pool     *pgxpool.Pool
 	mu       sync.RWMutex
 	profiles map[string]storedDeviceProfile
 	ttl      time.Duration
@@ -140,7 +154,7 @@ func (p DeviceProfile) HasData() bool {
 		len(p.DirectPlayProfiles) > 0 ||
 		len(p.TranscodingProfiles) > 0 ||
 		len(p.CodecProfiles) > 0 ||
-		len(p.SubtitleProfiles) > 0
+		len(p.SubtitleProfiles) > 0 || len(p.ContainerProfiles) > 0
 }
 
 // ExternalSubtitleFormat returns the client-requested format for delivering an
@@ -209,8 +223,9 @@ func (p DeviceProfile) SupportsDirectPlayForAudioStream(version catalog.FileVers
 // SupportsDirectStream reports whether a version can be remuxed without a full
 // video transcode.
 func (p DeviceProfile) SupportsDirectStream(version catalog.FileVersion) bool {
+	version.Container = compatContainerMP4
 	if len(p.DirectPlayProfiles) == 0 {
-		return true
+		return p.codecProfileCompatibility(version, nil).supportsDirectPlay()
 	}
 	for _, profile := range p.DirectPlayProfiles {
 		if !matchesVideoType(profile.Type) {
@@ -218,7 +233,7 @@ func (p DeviceProfile) SupportsDirectStream(version catalog.FileVersion) bool {
 		}
 		if matchesCSV(profile.VideoCodec, version.CodecVideo) &&
 			matchesCSV(profile.AudioCodec, version.CodecAudio) {
-			return true
+			return p.codecProfileCompatibility(version, nil).supportsDirectPlay()
 		}
 	}
 	return false
@@ -226,6 +241,47 @@ func (p DeviceProfile) SupportsDirectStream(version catalog.FileVersion) bool {
 
 // SupportsTranscoding reports whether the client advertises HLS transcoding.
 func (p DeviceProfile) SupportsTranscoding(version catalog.FileVersion) bool {
+	return p.supportsTranscodingOutput(version, 2, 0, "")
+}
+
+func (p DeviceProfile) supportsTranscodingOutput(version catalog.FileVersion, channels, videoBitrateKbps int, resolution string) bool {
+	channels, audioBitrateKbps := playback.ResolveAACOutputV3(channels, 0)
+	output := version
+	output.Container = "ts"
+	output.CodecVideo = compatTargetVideoCodec
+	output.CodecAudio = compatTargetAudioCodec
+	output.Bitrate = 0
+	output.HDR = false
+	sourceVideo := compatPrimaryVideoTrack(version)
+	// Source codec levels, reference frames and HDR metadata do not describe
+	// the encoded H264 stream. Profile and level depend on the chosen worker's
+	// encoder; leave them unknown so required conditions remain fail-closed.
+	// Full HDR encodes are separately gated on tone-map availability.
+	video := models.VideoTrack{
+		Codec: compatTargetVideoCodec, BitDepth: 8, VideoRangeType: compatRangeSDR,
+		Width: sourceVideo.Width, Height: sourceVideo.Height,
+		AspectRatio: sourceVideo.AspectRatio, FrameRate: sourceVideo.FrameRate,
+		Interlaced: sourceVideo.Interlaced,
+	}
+	if height, err := strconv.Atoi(strings.TrimSuffix(resolution, "p")); err == nil && height > 0 {
+		video.Height = height
+		video.Width = 0
+		if sourceVideo.Width > 0 && sourceVideo.Height > 0 {
+			// All encoder paths use scale width=-2 with the requested height.
+			video.Width = int(math.Round(float64(sourceVideo.Width)*float64(height)/float64(sourceVideo.Height)/2)) * 2
+		}
+	}
+	if videoBitrateKbps > 0 {
+		video.Bitrate = videoBitrateKbps * 1000
+		output.Bitrate = videoBitrateKbps + audioBitrateKbps
+	}
+	output.VideoTracks = []models.VideoTrack{video}
+	output.AudioTracks = []models.AudioTrack{{Codec: compatTargetAudioCodec, Channels: channels, Bitrate: audioBitrateKbps * 1000}}
+	audioIndex := len(output.VideoTracks)
+	if !p.codecProfileCompatibility(output, &audioIndex).supportsDirectPlay() {
+		return false
+	}
+
 	if len(p.TranscodingProfiles) == 0 {
 		return true
 	}
@@ -236,10 +292,16 @@ func (p DeviceProfile) SupportsTranscoding(version catalog.FileVersion) bool {
 		if protocol := strings.ToLower(strings.TrimSpace(profile.Protocol)); protocol != "" && protocol != "hls" {
 			continue
 		}
-		if !matchesCSV(profile.VideoCodec, "h264") {
+		if maxChannels, _ := strconv.Atoi(profile.MaxAudioChannels); maxChannels > 0 && channels > maxChannels {
 			continue
 		}
-		if !matchesCSV(profile.AudioCodec, "aac") {
+		if !conditionsMatch(profile.Conditions, buildConditionValues(output, &audioIndex)) {
+			continue
+		}
+		if !matchesCSV(profile.VideoCodec, compatTargetVideoCodec) {
+			continue
+		}
+		if !matchesCSV(profile.AudioCodec, compatTargetAudioCodec) {
 			continue
 		}
 		if profile.Container != "" && !matchesCSV(profile.Container, "ts") && !matchesCSV(profile.Container, "mpegts") {
@@ -260,6 +322,12 @@ func (p DeviceProfile) SupportsHLSRemuxForAudioStream(version catalog.FileVersio
 	}
 	audioCodec := compatAudioCodec(version, audioStreamIndex)
 	for _, profile := range p.TranscodingProfiles {
+		if maxChannels, _ := strconv.Atoi(profile.MaxAudioChannels); maxChannels > 0 && (compatAudioTrack(version, audioStreamIndex).Channels <= 0 || compatAudioTrack(version, audioStreamIndex).Channels > maxChannels) {
+			continue
+		}
+		if !conditionsMatch(profile.Conditions, buildConditionValues(version, audioStreamIndex)) {
+			continue
+		}
 		if !matchesVideoType(profile.Type) {
 			continue
 		}
@@ -276,11 +344,37 @@ func (p DeviceProfile) SupportsHLSRemuxForAudioStream(version catalog.FileVersio
 	return false
 }
 
-func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeForAudioStream(version catalog.FileVersion, audioStreamIndex *int) bool {
+func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeForAudioStream(version catalog.FileVersion, audioStreamIndex *int, targetAudioChannels int) bool {
+	targetAudioChannels, audioBitrateKbps := playback.ResolveAACOutputV3(targetAudioChannels, 0)
+	outputVersion := version
+	outputAudio := compatAudioTrack(version, audioStreamIndex)
+	outputAudio.Codec = compatTargetAudioCodec
+	outputAudio.Profile = ""
+	outputAudio.Bitrate = audioBitrateKbps * 1000
+	outputAudio.Channels = targetAudioChannels
+	outputAudio.Default = true
+	outputVersion.CodecAudio = compatTargetAudioCodec
+	outputVersion.AudioTracks = []models.AudioTrack{outputAudio}
+	outputAudioStreamIndex := len(outputVersion.VideoTracks)
 	if len(p.TranscodingProfiles) == 0 {
-		return false
+		// Omitted profiles retain the permissive legacy audio-remux fallback,
+		// while explicit profiles below must authorize the actual container.
+		videoSupported := len(p.DirectPlayProfiles) == 0
+		for _, profile := range p.DirectPlayProfiles {
+			if matchesVideoType(profile.Type) && matchesCSV(profile.VideoCodec, version.CodecVideo) {
+				videoSupported = true
+				break
+			}
+		}
+		if !videoSupported {
+			return false
+		}
+		return p.hlsRemuxCodecProfileCompatibility(outputVersion, &outputAudioStreamIndex).supportsDirectPlay()
 	}
 	for _, profile := range p.TranscodingProfiles {
+		if maxChannels, _ := strconv.Atoi(profile.MaxAudioChannels); maxChannels > 0 && maxChannels < targetAudioChannels {
+			continue
+		}
 		if !matchesVideoType(profile.Type) {
 			continue
 		}
@@ -293,19 +387,9 @@ func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeForAudioStream(version 
 			continue
 		}
 
-		outputVersion := version
-		outputAudio := compatAudioTrack(version, audioStreamIndex)
-		outputAudio.Codec = compatTargetAudioCodec
-		outputAudio.Profile = ""
-		outputAudio.Bitrate = 192_000
-		if outputAudio.Channels > 0 {
-			outputAudio.Channels = 2
+		if conditionsMatch(profile.Conditions, buildConditionValues(outputVersion, &outputAudioStreamIndex)) && p.hlsRemuxCodecProfileCompatibility(outputVersion, &outputAudioStreamIndex).supportsDirectPlay() {
+			return true
 		}
-		outputAudio.Default = true
-		outputVersion.CodecAudio = compatTargetAudioCodec
-		outputVersion.AudioTracks = []models.AudioTrack{outputAudio}
-		outputAudioStreamIndex := len(outputVersion.VideoTracks)
-		return p.hlsRemuxCodecProfileCompatibility(outputVersion, &outputAudioStreamIndex).supportsDirectPlay()
 	}
 	return false
 }
@@ -332,6 +416,8 @@ func (p DeviceProfile) SupportsVideoCodecForDirectStream(version catalog.FileVer
 }
 
 func (p DeviceProfile) SupportsVideoCodecForDirectStreamForAudioStream(version catalog.FileVersion, audioStreamIndex *int) bool {
+	// Progressive remux writes MP4 even when the original is Matroska.
+	version.Container = compatContainerMP4
 	if len(p.DirectPlayProfiles) == 0 {
 		return p.codecProfileCompatibility(version, audioStreamIndex).VideoSupported
 	}
@@ -347,12 +433,13 @@ func (p DeviceProfile) SupportsVideoCodecForDirectStreamForAudioStream(version c
 }
 
 // SupportsAudioCodecForDirectStream reports whether the client can accept the
-// source audio codec in a remux-style stream, regardless of container.
+// source audio codec in a progressive MP4 remux stream.
 func (p DeviceProfile) SupportsAudioCodecForDirectStream(version catalog.FileVersion) bool {
 	return p.SupportsAudioCodecForDirectStreamForAudioStream(version, nil)
 }
 
 func (p DeviceProfile) SupportsAudioCodecForDirectStreamForAudioStream(version catalog.FileVersion, audioStreamIndex *int) bool {
+	version.Container = compatContainerMP4
 	if len(p.DirectPlayProfiles) == 0 {
 		return p.codecProfileCompatibility(version, audioStreamIndex).AudioSupported
 	}
@@ -371,7 +458,7 @@ func (p DeviceProfile) SupportsAudioCodecForDirectStreamForAudioStream(version c
 // decodeDeviceProfile extracts a device profile from either a wrapped
 // Jellyfin request body or a direct DeviceProfile payload.
 func decodeDeviceProfile(r io.Reader) (DeviceProfile, error) {
-	body, err := io.ReadAll(r)
+	body, err := readDeviceProfileRequest(r)
 	if err != nil {
 		return DeviceProfile{}, err
 	}

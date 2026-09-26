@@ -1,15 +1,18 @@
 import { AdminUserDeleteDialog } from "@/components/AdminUserDeleteDialog";
+import { AdminUserPasswordResetDialog } from "@/components/AdminUserPasswordResetDialog";
 import {
   adminUserScope,
   captureAdminUserAuthority,
-  requireAdminUserAuthority,
   getAdminUser,
   type AdminUserEditor,
 } from "@/api/v2/adminUsers";
-import { V2ProblemError } from "@/api/v2/request";
+import { isNotFoundProblem, V2ProblemError } from "@/api/v2/request";
+import PageUnavailable from "@/components/PageUnavailable";
+import { guardRedirectTarget } from "@/lib/authRedirect";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useId, useMemo, useState, useRef } from "react";
 import type { FormEvent } from "react";
-import { useParams, Link } from "react-router";
+import { useLocation, useParams, Link } from "react-router";
 import {
   type AdminDeviceSetting,
   type AdminSettingIdentity,
@@ -17,7 +20,7 @@ import {
   useAdminUser,
   useUpdateUser,
   useAdminUserCapabilities,
-  useImpersonateUser,
+  useViewerIsOwner,
   useAdminUserDeviceSettings,
   useAdminUserSettings,
   useDeleteAdminUserDeviceSetting,
@@ -38,6 +41,7 @@ import {
   PolicyAccessFields,
   PolicyLimitFields,
   effectiveAccessGroupID,
+  policyDefaultSource,
   policyInheritHints,
   policyStateFromUser,
   policyUpdateFields,
@@ -62,11 +66,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowUpRight, ChevronRight, Pencil, RotateCcw, Settings2, UserCircle } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronRight,
+  KeyRound,
+  Pencil,
+  RotateCcw,
+  Settings2,
+  UserCircle,
+} from "lucide-react";
 import { useNavigate } from "react-router";
+import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
+import { canManageAccount, canViewAsAccount } from "@/lib/accountOwner";
 import { formatPlaybackQualityPreset } from "@/lib/playback-quality";
+import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import {
   PERMISSION_MARKER_EDIT,
@@ -95,6 +110,8 @@ import {
   formatDateTime as formatDateTimePreferred,
 } from "@/lib/datetime";
 
+import { formatDecisionLabel } from "./adminActivityPresentation";
+
 export default function AdminUserDetail() {
   useAuth();
   const { id } = useParams<{ id: string }>();
@@ -104,8 +121,13 @@ function AdminUserDetailPage() {
   const { id } = useParams<{ id: string }>();
   const userId = Number(id);
   const navigate = useNavigate();
-  const { beginImpersonation } = useAuth();
-  const { data: user, isLoading, error } = useAdminUser(userId);
+  const location = useLocation();
+  const { data: cachedUser, isLoading, isFetching, error, refetch } = useAdminUser(userId);
+  const viewerId = useAuth().user?.id;
+  const viewerIsOwner = useViewerIsOwner(viewerId);
+  // A background read that fails leaves the loaded account up, but a 404 means
+  // it is gone (another admin deleted it) and outranks the cached copy.
+  const user = isNotFoundProblem(error) ? undefined : cachedUser;
   const [editOpen, setEditOpen] = useState(false);
   const [deleteEditor, setDeleteEditor] = useState<AdminUserEditor | null>(null);
   const [editEditor, setEditEditor] = useState<AdminUserEditor | null>(null);
@@ -116,13 +138,52 @@ function AdminUserDetailPage() {
   const capabilities = useAdminUserCapabilities();
   const available = capabilities.data?.available === true;
   const [confirmImpersonateOpen, setConfirmImpersonateOpen] = useState(false);
-  const impersonateMutation = useImpersonateUser();
+  const [resetOpen, setResetOpen] = useState(false);
 
   if (isLoading) return <div className="page-shell py-8">Loading user...</div>;
-  if (error || !user)
-    return <div className="page-shell text-destructive py-8">User not found.</div>;
+  if (!user) {
+    if (error && !isNotFoundProblem(error)) {
+      return (
+        <PageUnavailable
+          title="Couldn't load this user"
+          description="Something went wrong while loading the account. Try again in a moment."
+          onRetry={() => void refetch()}
+          retrying={isFetching}
+        />
+      );
+    }
+    // With a valid id and no error, the read never ran: account reads act as a
+    // profile, and none is selected. Nothing says the account is gone.
+    if (!error && Number.isSafeInteger(userId) && userId > 0) {
+      return (
+        <PageUnavailable
+          title="Choose a profile first"
+          description="Managing accounts acts as one of your profiles. Choose a profile, then open this account again."
+        >
+          <Button asChild variant="outline">
+            <ViewTransitionLink to={guardRedirectTarget("/profiles", location)}>
+              Choose profile
+            </ViewTransitionLink>
+          </Button>
+        </PageUnavailable>
+      );
+    }
+    return (
+      <PageUnavailable
+        title="User not found"
+        description="The account may have been deleted, or the link may be wrong."
+      >
+        <Button asChild variant="outline">
+          <ViewTransitionLink to="/admin/users" up>
+            All users
+          </ViewTransitionLink>
+        </Button>
+      </PageUnavailable>
+    );
+  }
 
-  const impersonationDisabled = user.role === "admin" || !user.enabled;
+  const impersonationDisabled = !canViewAsAccount(user, viewerId, viewerIsOwner);
+  const manageable = canManageAccount(user, viewerId);
 
   async function loadEditor(deleting = false) {
     if (busy.current || !available) return;
@@ -169,11 +230,18 @@ function AdminUserDetailPage() {
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">{user.username}</h1>
             <Badge variant={user.role === "admin" ? "default" : "secondary"}>{user.role}</Badge>
+            {user.is_owner && <Badge variant="outline">Owner</Badge>}
             <Badge variant={user.enabled ? "outline" : "destructive"}>
               {user.enabled ? "Active" : "Disabled"}
             </Badge>
+            {user.password_change_required && <Badge variant="outline">Temporary password</Badge>}
           </div>
           <p className="page-subtitle text-sm sm:text-base">{user.email}</p>
+          {!manageable && (
+            <p className="text-muted-foreground text-sm">
+              This is the server owner. Only the owner can change this account.
+            </p>
+          )}
         </div>
         <div className="flex w-full flex-wrap gap-2 sm:w-auto">
           <Button
@@ -181,9 +249,9 @@ function AdminUserDetailPage() {
             size="sm"
             className="flex-1 sm:flex-none"
             onClick={() => setConfirmImpersonateOpen(true)}
-            disabled={!available || impersonationDisabled || impersonateMutation.isPending}
+            disabled={!available || impersonationDisabled}
           >
-            Impersonate
+            View as user
           </Button>
           <Dialog
             open={editOpen}
@@ -192,7 +260,7 @@ function AdminUserDetailPage() {
             }}
           >
             <Button
-              disabled={!available}
+              disabled={!available || !manageable}
               onClick={() => void loadEditor()}
               variant="outline"
               size="sm"
@@ -215,15 +283,29 @@ function AdminUserDetailPage() {
               )}
             </DialogContent>
           </Dialog>
-          <Button
-            variant="destructive"
-            size="sm"
-            className="flex-1 sm:flex-none"
-            onClick={handleDelete}
-            disabled={!available}
-          >
-            Delete
-          </Button>
+          {/* An external provider manages this account's sign-in: it has no password to reset. */}
+          {user.password_login && manageable && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 sm:flex-none"
+              onClick={() => setResetOpen(true)}
+              disabled={!available || !user.enabled}
+            >
+              <KeyRound className="mr-1 h-3.5 w-3.5" /> Reset password
+            </Button>
+          )}
+          {!user.is_owner && (
+            <Button
+              variant="destructive"
+              size="sm"
+              className="flex-1 sm:flex-none"
+              onClick={handleDelete}
+              disabled={!available}
+            >
+              Delete
+            </Button>
+          )}
         </div>
       </div>
 
@@ -259,36 +341,22 @@ function AdminUserDetailPage() {
           <IPHistoryTab userId={userId} />
         </TabsContent>
       </Tabs>
-      <ConfirmDialog
-        open={confirmImpersonateOpen}
-        onOpenChange={(open) => {
-          if (!open && !busy.current) setConfirmImpersonateOpen(false);
-        }}
-        title="Impersonate user"
-        description={`Continue as "${user.username}"? Admin access will be removed until you end impersonation.`}
-        confirmLabel="Impersonate"
-        isPending={impersonateMutation.isPending}
-        onConfirm={() => {
-          if (busy.current || !available) return;
-          busy.current = true;
-          setActionError("");
-          void impersonateMutation
-            .mutateAsync({ id: user.id, profileContext: authority })
-            .then((result) => {
-              requireAdminUserAuthority(result.profileContext);
-              beginImpersonation(result.session, `/admin/users/${user.id}`);
-              impersonateMutation.reset();
-              setConfirmImpersonateOpen(false);
-              navigate("/profiles");
-            })
-            .catch((err: unknown) => {
-              setActionError(err instanceof Error ? err.message : "Failed to start impersonation");
-            })
-            .finally(() => {
-              busy.current = false;
-            });
-        }}
-      />
+      {confirmImpersonateOpen && (
+        <AdminUserImpersonationDialog
+          user={user}
+          returnPath={`/admin/users/${user.id}`}
+          onClose={() => setConfirmImpersonateOpen(false)}
+          onError={setActionError}
+        />
+      )}
+      {resetOpen && (
+        <AdminUserPasswordResetDialog
+          user={user}
+          emailAvailable={capabilities.data?.password_reset_email === true}
+          linkAvailable={capabilities.data?.password_reset_link === true}
+          onClose={() => setResetOpen(false)}
+        />
+      )}
       {deleteEditor && (
         <AdminUserDeleteDialog
           initialEditor={deleteEditor}
@@ -388,6 +456,20 @@ function OverviewTab({ user }: { user: AdminUser }) {
                 : effective.max_transcodes === 0
                   ? "Unlimited"
                   : String(effective.max_transcodes)) + overridden(user.max_transcodes !== null)
+            }
+          />
+          <DetailRow
+            label="Max remote stream bitrate"
+            value={
+              formatStreamBitrateLimit(effective.max_remote_stream_bitrate_kbps) +
+              overridden(user.max_remote_stream_bitrate_kbps !== null)
+            }
+          />
+          <DetailRow
+            label="Max local stream bitrate"
+            value={
+              formatStreamBitrateLimit(effective.max_local_stream_bitrate_kbps) +
+              overridden(user.max_local_stream_bitrate_kbps !== null)
             }
           />
           <DetailRow
@@ -540,7 +622,7 @@ function WatchHistoryTab({ userId }: { userId: number }) {
                   </Link>
                 </TableCell>
                 <TableCell>
-                  <Badge variant="secondary">{row.play_method}</Badge>
+                  <Badge variant="secondary">{formatDecisionLabel(row.play_method)}</Badge>
                 </TableCell>
                 <TableCell>
                   <div>{formatDuration(row.watched_seconds)}</div>
@@ -1155,6 +1237,7 @@ function EditUserForm({
   const [username, setUsername] = useState(user.username);
   const [email, setEmail] = useState(user.email);
   const [password, setPassword] = useState("");
+  const [requirePasswordChange, setRequirePasswordChange] = useState(false);
   const [role, setRole] = useState(user.role);
   const [enabled, setEnabled] = useState(user.enabled);
   const [permissions, setPermissions] = useState<string[]>(user.permissions ?? []);
@@ -1163,6 +1246,8 @@ function EditUserForm({
   const [maxProfiles, setMaxProfiles] = useState(user.max_profiles);
   const accessGroupSelectId = useId();
   const roleSelectId = useId();
+  const passwordInputId = useId();
+  const requireChangeId = useId();
   const markerEditId = useId();
   const metadataCurationId = useId();
   const updateMutation = useUpdateUser();
@@ -1174,6 +1259,7 @@ function EditUserForm({
   // An admin inherits from no group, so preview the no-group policy while the
   // picked group is kept for toggling the role back.
   const hintGroupID = effectiveAccessGroupID(role, accessGroupID);
+  const hintSource = policyDefaultSource(role, hintGroupID);
   const inheritHints =
     policyInheritHints(hintGroupID, accessGroups) ??
     (hintGroupID === user.access_group_id ? user.effective_policy : undefined);
@@ -1202,7 +1288,10 @@ function EditUserForm({
       max_profiles: maxProfiles,
       ...policyUpdateFields(policy),
     };
-    if (password) body.password = password;
+    if (password) {
+      body.password = password;
+      if (requirePasswordChange) body.require_password_change = true;
+    }
     try {
       await updateMutation.mutateAsync({ editor, body });
       setSaved(true);
@@ -1259,17 +1348,39 @@ function EditUserForm({
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Password (leave blank to keep current)</Label>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
+              {user.password_login ? (
+                <div className="space-y-2">
+                  <Label htmlFor={passwordInputId}>Password (leave blank to keep current)</Label>
+                  <Input
+                    id={passwordInputId}
+                    type="password"
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id={requireChangeId}
+                      checked={requirePasswordChange && password !== ""}
+                      disabled={password === ""}
+                      onCheckedChange={setRequirePasswordChange}
+                    />
+                    <Label htmlFor={requireChangeId} className="text-xs font-normal">
+                      Require change at next sign-in
+                    </Label>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label>Password</Label>
+                  <p className="text-muted-foreground text-xs">
+                    An external sign-in provider manages this account's password.
+                  </p>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor={roleSelectId}>Role</Label>
-                <Select value={role} onValueChange={setRole}>
+                <Select value={role} onValueChange={setRole} disabled={user.is_owner}>
                   <SelectTrigger id={roleSelectId}>
                     <SelectValue />
                   </SelectTrigger>
@@ -1284,12 +1395,14 @@ function EditUserForm({
               <div>
                 <div className="text-sm font-medium">Account status</div>
                 <div className="text-muted-foreground text-xs">
-                  Disable access without deleting the user.
+                  {user.is_owner
+                    ? "The server owner stays an enabled admin."
+                    : "Disable access without deleting the user."}
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <Label className="text-xs">Enabled</Label>
-                <Switch checked={enabled} onCheckedChange={setEnabled} />
+                <Switch checked={enabled} onCheckedChange={setEnabled} disabled={user.is_owner} />
               </div>
             </div>
           </TabsContent>
@@ -1357,13 +1470,19 @@ function EditUserForm({
             <PolicyAccessFields
               state={policy}
               onChange={setPolicy}
+              source={hintSource}
               effective={inheritHints}
               libraries={libraries}
             />
           </TabsContent>
 
           <TabsContent value="limits" className="mt-0 space-y-4">
-            <PolicyLimitFields state={policy} onChange={setPolicy} effective={inheritHints} />
+            <PolicyLimitFields
+              state={policy}
+              onChange={setPolicy}
+              source={hintSource}
+              effective={inheritHints}
+            />
             <div className="space-y-1">
               <Label>Max Profiles</Label>
               <Input

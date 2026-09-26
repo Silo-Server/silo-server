@@ -997,3 +997,71 @@ func TestStartRemoteTranscodeRejectsOldNodeAfterStaleAudioCapabilityProbe(t *tes
 		t.Fatal("unattested remote job was not stopped")
 	}
 }
+
+func TestMonoAACStartupDoesNotRequireStereoBoost(t *testing.T) {
+	for _, remote := range []bool{false, true} {
+		name := "local"
+		if remote {
+			name = "remote"
+		}
+		t.Run(name, func(t *testing.T) {
+			version := testCompatVersion()
+			version.AudioTracks[1].Channels = 6
+			source := testCompatSource(NewResourceIDCodec(), version)
+			source.TargetAudioChannels = 1
+			file := &models.MediaFile{ID: version.FileID, FilePath: filepath.Join(t.TempDir(), "movie.mkv")}
+			if err := os.WriteFile(file.FilePath, []byte("video"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			store.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", MediaSources: []PlaybackMediaSource{source}})
+			ffmpeg, _, _ := writeCompatAudioRecipeFFmpeg(t, false, "")
+			handler := &PlaybackHandler{
+				JWTSecret: "secret", playbackStore: store,
+				sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
+					"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID, PlayMethod: playback.PlayTranscode},
+				}},
+				fileResolver: testCompatFileResolver{file: file},
+				TranscodeDir: t.TempDir(), FFmpegPath: ffmpeg, tm: playback.NewTranscodeManager(),
+			}
+			if remote {
+				var request transcodenode.TranscodeStartRequest
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodGet {
+						// An older node can encode ordinary mono AAC without the optional
+						// surround-to-stereo boost transformation.
+						writeJSON(w, http.StatusOK, playback.HWAccelInfo{})
+						return
+					}
+					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+						t.Errorf("decode start request: %v", err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{})
+				}))
+				defer server.Close()
+				if err := handler.startRemoteTranscode(t.Context(), "play-1", "upstream-1", source, file, 0, server.URL); err != nil {
+					t.Fatal(err)
+				}
+				if request.SourceAudioChannels != 0 || request.TargetAudioChannels != 1 || request.AudioRecipeVersion != "" || request.RequireReady {
+					t.Fatalf("mono incorrectly requires stereo recipe: %+v", request)
+				}
+			} else {
+				live, err := handler.ensureTranscodeSession(t.Context(), "play-1", "upstream-1", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = live.Close() })
+				opts := live.Opts()
+				if opts.SourceAudioChannels != 0 || opts.TargetAudioChannels != 1 {
+					t.Fatalf("mono startup channel recipe: source=%d target=%d", opts.SourceAudioChannels, opts.TargetAudioChannels)
+				}
+			}
+			persisted, ok := store.Get("play-1")
+			if !ok || persisted.Recipe == nil || persisted.Recipe.SourceAudioChannels != 0 || persisted.Recipe.TargetAudioChannels != 1 {
+				t.Fatalf("mono recipe not persisted: %+v", persisted.Recipe)
+			}
+		})
+	}
+}

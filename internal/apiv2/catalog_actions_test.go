@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,14 +18,16 @@ import (
 // fakeCatalogActions backs the stage B operations: trailer refresh, on-view
 // translation, people, and works.
 type fakeCatalogActions struct {
-	enabled     bool
-	err         error
-	trailerView handlers.TrailerRefreshView
-	lastUser    int
-	lastContent string
-	lastLang    string
-	lastFilter  catalogpkg.AccessFilter
-	refreshed   []int64
+	enabled        bool
+	err            error
+	trailerView    handlers.TrailerRefreshView
+	lastUser       int
+	lastContent    string
+	lastLang       string
+	lastFilter     catalogpkg.AccessFilter
+	lastMediaScope string
+	refreshed      []int64
+	personReads    []bool
 }
 
 func (f *fakeCatalogActions) TrailerRefreshCapability() handlers.TrailerRefreshCapabilityView {
@@ -80,19 +83,22 @@ func fakePerson(id int64) handlers.PersonView {
 	return handlers.PersonView{ID: id, Name: "Al Pacino", Bio: "Actor", BirthDate: &birth, Birthplace: "New York", PhotoURL: "https://cdn.example/people/7.jpg", TmdbID: "1158"}
 }
 
-func (f *fakeCatalogActions) SearchPeople(_ context.Context, query string, limit int) ([]handlers.PersonView, error) {
+func (f *fakeCatalogActions) SearchPeopleScoped(_ context.Context, query string, limit int, mediaScope string, filter catalogpkg.AccessFilter) ([]handlers.PersonView, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
 	f.lastLang = query
 	f.lastUser = limit
+	f.lastMediaScope = mediaScope
+	f.lastFilter = filter
 	if strings.HasPrefix("al pacino", strings.ToLower(query)) {
 		return []handlers.PersonView{fakePerson(7)}, nil
 	}
 	return nil, nil
 }
 
-func (f *fakeCatalogActions) Person(_ context.Context, id int64) (handlers.PersonView, error) {
+func (f *fakeCatalogActions) Person(_ context.Context, id int64, queueRefresh bool) (handlers.PersonView, error) {
+	f.personReads = append(f.personReads, queueRefresh)
 	if f.err != nil {
 		return handlers.PersonView{}, f.err
 	}
@@ -242,14 +248,28 @@ func TestPeople(t *testing.T) {
 	if rec.Code != 200 || len(list.Items) != 1 || list.Items[0].ID != "7" || *list.Items[0].BirthDate != "1940-04-25" || list.Page != nil || fake.lastUser != 20 {
 		t.Fatalf("%d %s limit=%d", rec.Code, rec.Body.String(), fake.lastUser)
 	}
+	if !slices.Equal(fake.lastFilter.AllowedLibraryIDs, []int{1, 2}) {
+		t.Fatalf("viewer access was not forwarded: %+v", fake.lastFilter)
+	}
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/people?q=zzz&limit=5", "", viewerHeaders())
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"items":[]`) || fake.lastUser != 5 {
 		t.Fatalf("empty: %d %s", rec.Code, rec.Body.String())
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/people?limit=0", "", viewerHeaders()), TypeValidationFailed)
+	for _, scope := range []string{"video", "movie", "series", "episode", "audiobook", "ebook", "manga"} {
+		rec = do(t, h, http.MethodGet, "/api/v2/catalog/people?q=al&media_scope="+scope, "", viewerHeaders())
+		if rec.Code != 200 || fake.lastMediaScope != scope {
+			t.Fatalf("scope %q: %d %s, forwarded %q", scope, rec.Code, rec.Body.String(), fake.lastMediaScope)
+		}
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/people?media_scope=invalid", "", viewerHeaders()), TypeValidationFailed)
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/people/7", "", viewerHeaders())
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"photo_url":"https://cdn.example/people/7.jpg"`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/catalog/people/7?prefetch=true", "", viewerHeaders())
+	if rec.Code != 200 || !slices.Equal(fake.personReads, []bool{true, false}) {
+		t.Fatalf("prefetch read: %d %s, queueRefresh per read %v", rec.Code, rec.Body.String(), fake.personReads)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/people/8", "", viewerHeaders()), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/people/abc", "", viewerHeaders()), TypeValidationFailed)

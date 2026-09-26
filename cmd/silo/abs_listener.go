@@ -10,6 +10,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
 // absMounter is the narrow interface the listener needs from the
@@ -36,10 +37,13 @@ type absMounter interface {
 // artwork storage the client follows them on this port; without the route
 // here every locally stored cover would 404. Mirrors the Jellyfin listener.
 // A nil handler mounts nothing.
-func newAudiobookshelfListener(listen string, handler absMounter, artwork http.Handler, ipResolver *clientip.Resolver) *http.Server {
+func newAudiobookshelfListener(listen string, handler absMounter, artwork http.Handler, ipResolver *clientip.Resolver, ingressTokens *netaccess.Registry) *http.Server {
 	absRouter := chi.NewRouter()
 	if ipResolver != nil {
 		absRouter.Use(clientip.Middleware(ipResolver))
+	}
+	if ingressTokens != nil {
+		absRouter.Use(netaccess.Middleware(ingressTokens))
 	}
 	absRouter.Use(chimiddleware.Recoverer)
 	absRouter.Use(httpstream.CompressExcept(5, abs.SkipMediaCompression))

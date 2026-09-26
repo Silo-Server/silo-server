@@ -146,7 +146,7 @@ func (h *HistoryImportHandler) HandleCreateRun(w http.ResponseWriter, r *http.Re
 		writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, run)
+	writeJSON(w, http.StatusCreated, historyimport.PublicRun(*run))
 }
 
 func (h *HistoryImportHandler) HandleListRuns(w http.ResponseWriter, r *http.Request) {
@@ -160,6 +160,9 @@ func (h *HistoryImportHandler) HandleListRuns(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list history import runs")
 		return
+	}
+	for i := range runs {
+		runs[i] = historyimport.PublicRun(runs[i])
 	}
 	writeJSON(w, http.StatusOK, runs)
 }
@@ -180,7 +183,7 @@ func (h *HistoryImportHandler) HandleGetRun(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, run)
+	writeJSON(w, http.StatusOK, historyimport.PublicRun(*run))
 }
 
 func (h *HistoryImportHandler) HandleCreatePlexPin(w http.ResponseWriter, r *http.Request) {
@@ -284,6 +287,9 @@ func (h *HistoryImportHandler) writeHistoryImportError(w http.ResponseWriter, er
 // upstream-error code so the v2 listener can tell a rejected source
 // credential from a Silo authentication failure.
 func historyImportAPIError(err error) *APIError {
+	if message, refused := historyimport.ServerAddressMessage(err); refused {
+		return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: message, cause: err}
+	}
 	switch {
 	case errors.Is(err, historyimport.ErrPersonalAdmissionUncertain):
 		return &APIError{Status: http.StatusServiceUnavailable, Code: "dependency_unavailable", Message: historyimport.ErrPersonalAdmissionUncertain.Error(), cause: err}

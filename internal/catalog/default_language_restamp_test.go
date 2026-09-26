@@ -84,6 +84,105 @@ func TestItemUpsertRestampsDefaultMetadataLanguage(t *testing.T) {
 	}
 }
 
+// TestItemInsertIfAbsentKeepsExistingRow verifies that a second creator of the
+// same content_id neither overwrites the stored row nor reports an insert.
+func TestItemInsertIfAbsentKeepsExistingRow(t *testing.T) {
+	ctx := context.Background()
+	pool := newRestampTestPool(t)
+	repo := NewItemRepository(pool)
+
+	contentID := fmt.Sprintf("insert-if-absent-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, contentID)
+	})
+
+	skeleton := &models.MediaItem{
+		ContentID: contentID,
+		Type:      "series",
+		Title:     "Example Show",
+		Status:    "pending",
+		Studios:   []string{},
+		Networks:  []string{},
+		Countries: []string{},
+		Genres:    []string{},
+	}
+	inserted, err := repo.InsertIfAbsent(ctx, skeleton)
+	if err != nil || !inserted {
+		t.Fatalf("first insert = %v, %v; want inserted", inserted, err)
+	}
+	matched := *skeleton
+	matched.Title = "Matched Show"
+	matched.Status = "matched"
+	if err := repo.Upsert(ctx, &matched); err != nil {
+		t.Fatalf("match upsert: %v", err)
+	}
+
+	inserted, err = repo.InsertIfAbsent(ctx, skeleton)
+	if err != nil || inserted {
+		t.Fatalf("second insert = %v, %v; want not inserted", inserted, err)
+	}
+	got, err := repo.GetByID(ctx, contentID)
+	if err != nil {
+		t.Fatalf("get item: %v", err)
+	}
+	if got.Title != "Matched Show" || got.Status != "matched" {
+		t.Fatalf("second insert overwrote the row: title=%q status=%q", got.Title, got.Status)
+	}
+}
+
+// TestItemDeleteIfUnreferencedKeepsLinkedItem verifies that the guarded delete
+// leaves an item a media file still links to and removes it once unlinked.
+func TestItemDeleteIfUnreferencedKeepsLinkedItem(t *testing.T) {
+	ctx := context.Background()
+	pool := newRestampTestPool(t)
+	repo := NewItemRepository(pool)
+
+	suffix := time.Now().UnixNano()
+	contentID := fmt.Sprintf("guarded-delete-%d", suffix)
+	var folderID int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,enabled) VALUES('series',$1,true) RETURNING id`, contentID).Scan(&folderID); err != nil {
+		t.Fatalf("insert folder: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = $1`, folderID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, contentID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
+	})
+	item := &models.MediaItem{
+		ContentID: contentID,
+		Type:      "series",
+		Title:     "Example Show",
+		Status:    "pending",
+		Studios:   []string{},
+		Networks:  []string{},
+		Countries: []string{},
+		Genres:    []string{},
+	}
+	if err := repo.Upsert(ctx, item); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_files (content_id, media_folder_id, file_path) VALUES ($1, $2, $3)`,
+		contentID, folderID, fmt.Sprintf("/tv/example-%d.mkv", suffix)); err != nil {
+		t.Fatalf("insert file: %v", err)
+	}
+
+	deleted, err := repo.DeleteIfUnreferenced(ctx, contentID)
+	if err != nil || deleted {
+		t.Fatalf("linked item delete = %v, %v; want kept", deleted, err)
+	}
+	if _, err := repo.GetByID(ctx, contentID); err != nil {
+		t.Fatalf("linked item is gone: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = $1`, folderID); err != nil {
+		t.Fatalf("unlink file: %v", err)
+	}
+	deleted, err = repo.DeleteIfUnreferenced(ctx, contentID)
+	if err != nil || !deleted {
+		t.Fatalf("unlinked item delete = %v, %v; want deleted", deleted, err)
+	}
+}
+
 // TestSeasonAndEpisodeUpsertRestampDefaultMetadataLanguage verifies the same
 // restamp-on-upsert semantics for the season and episode tables, which carry
 // their own default_metadata_language pins.

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -88,7 +88,7 @@ type SettingsReader interface {
 	Get(ctx context.Context, key string) (string, error)
 }
 
-type ObjectStore = artworkstore.Store
+type ObjectStore = blobstore.Store
 
 type ThumbnailNotifier interface {
 	ChapterThumbnailReady(ctx context.Context, fileID int, chapterIndex int, thumbnailPath string, thumbnailThumbhash string)

@@ -1,5 +1,24 @@
 @import "tailwindcss";
 
+/* Tailwind v4 wraps every `hover:` and `group-hover:` utility in
+   `@media (hover: hover)`. That feature is false on Windows machines whose
+   Chromium under-reports pointer capability — the same devices the card
+   controls gate works around — so every hover style in the app is silently
+   inert there, not just the card controls.
+
+   Gate on the observed-pointer attribute instead (see lib/pointerCapability.ts,
+   which seeds it from the equivalent media query at boot). Behaviour is
+   unchanged wherever the media query was already right; touch devices still
+   get no hover styling, because a touch press clears the attribute.
+
+   The gate MUST stay inside :where(). Tailwind orders its state variants by
+   specificity, so an unwrapped `:root[data-fine-pointer="true"]` prefix would
+   make every hover: utility 0-4-0 against 0-2-0 for disabled:, active: and
+   focus-visible: — hover would then beat them on every device, not just the
+   ones this works around. :where() contributes nothing, leaving the compiled
+   selectors at exactly the specificity Tailwind intends. */
+@custom-variant hover (:where(:root[data-fine-pointer="true"]) &:hover);
+
 /* ================================================================
    § 1  THEME BRIDGE — Tailwind ↔ CSS Custom Properties
    ================================================================
@@ -447,6 +466,31 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --info-foreground: oklch(0.98 0.01 250);
   }
 
+  /* ── Contrast-adjustable tokens ─────────────────────────────
+     These seven tokens are the ones high contrast mode lightens.
+     Themes define the literal under `--<token>-base`; the semantic
+     token is an alias. The indirection is required, not stylistic:
+     a custom property whose value references itself is a dependency
+     cycle and is invalid at computed-value time, so the high-contrast
+     block cannot write `--border: color-mix(..., var(--border))`.
+     It reads `--border-base` instead.
+     ───────────────────────────────────────────────────────── */
+  :root {
+    /* The direction high contrast pushes toward: away from the page. White on
+       the dark themes, black on a light one. Defaulting here means a theme
+       that forgets to set it degrades to the dark-theme behaviour rather than
+       to an invalid value. */
+    --contrast-boost: #ffffff;
+
+    --muted-foreground: var(--muted-foreground-base);
+    --border: var(--border-base);
+    --input: var(--input-base);
+    --surface: var(--surface-base);
+    --surface-hover: var(--surface-hover-base);
+    --surface-raised: var(--surface-raised-base);
+    --accent: var(--accent-base);
+  }
+
   /* ── Midnight Cinema ────────────────────────────────────── */
   /* Inspired by premium streaming UIs: monochromatic, cinematic,
      content-focused. White primary creates an elegant, theater-like
@@ -457,6 +501,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --font-display: "Outfit", sans-serif;
 
     /* Surfaces: near-black with subtle cool undertone */
+    --contrast-boost: #ffffff;
     --background: #141417;
     --foreground: #e8e8ec;
     --card: #1c1c20;
@@ -474,8 +519,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --muted: #1c1c20;
     /* Lightened from #6e6e78 (~3.4:1) to meet WCAG AA: ~6.3:1 on --background,
        ~5.3:1 even on the lightest chip surface (#232328). */
-    --muted-foreground: #9696a0;
-    --accent: #232328;
+    --muted-foreground-base: #9696a0;
+    --accent-base: #232328;
     --accent-foreground: #e8e8ec;
 
     /* Destructive: warm red for danger actions */
@@ -483,8 +528,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --destructive-foreground: #ffffff;
 
     /* Borders: barely visible, just enough structure */
-    --border: #28282e;
-    --input: #1c1c20;
+    --border-base: #28282e;
+    --input-base: #1c1c20;
     --ring: #e8e8ec;
 
     /* Charts: categorical set validated on this theme's card surface —
@@ -508,9 +553,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --sidebar-ring: #e8e8ec;
 
     /* Surfaces: layered depth */
-    --surface: #1c1c20;
-    --surface-hover: #232328;
-    --surface-raised: #28282e;
+    --surface-base: #1c1c20;
+    --surface-hover-base: #232328;
+    --surface-raised-base: #28282e;
     --ambient: #e8e8ec;
     --ambient-glow-opacity: 0.08;
   }
@@ -521,6 +566,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --font-display: "Outfit", sans-serif;
 
     /* Surfaces: warm off-white with cool undertone */
+    --contrast-boost: #000000;
     --background: #f4f4f6;
     --foreground: #1a1a1e;
     --card: #ffffff;
@@ -538,8 +584,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --muted: #ebebef;
     /* Darkened from #78787f (~4.0:1) to meet WCAG AA on light surfaces
        (~4.9:1 on the #e8e8ec chip, ~5.4:1 on --background). */
-    --muted-foreground: #63636b;
-    --accent: #e8e8ec;
+    --muted-foreground-base: #63636b;
+    --accent-base: #e8e8ec;
     --accent-foreground: #1a1a1e;
 
     /* Destructive: warm red for danger actions */
@@ -547,8 +593,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --destructive-foreground: #ffffff;
 
     /* Borders: soft gray, enough structure without weight */
-    --border: #d8d8de;
-    --input: #e8e8ec;
+    --border-base: #d8d8de;
+    --input-base: #e8e8ec;
     --ring: #1a1a1e;
 
     /* Charts: light-mode steps of the same categorical set, validated against
@@ -571,9 +617,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --sidebar-ring: #1a1a1e;
 
     /* Surfaces: layered depth */
-    --surface: #ebebef;
-    --surface-hover: #e0e0e6;
-    --surface-raised: #ffffff;
+    --surface-base: #ebebef;
+    --surface-hover-base: #e0e0e6;
+    --surface-raised-base: #ffffff;
     --ambient: #1a1a1e;
     --ambient-glow-opacity: 0.05;
 
@@ -590,6 +636,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --radius: 0.75rem;
     --font-body: "Outfit", sans-serif;
     --font-display: "Outfit", sans-serif;
+    --contrast-boost: #ffffff;
     --background: #101722;
     --foreground: #f4f8ff;
     --card: #151e2b;
@@ -601,13 +648,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --secondary: #1b2634;
     --secondary-foreground: #d7e2f1;
     --muted: #151e2b;
-    --muted-foreground: #90a0b5;
-    --accent: #203043;
+    --muted-foreground-base: #90a0b5;
+    --accent-base: #203043;
     --accent-foreground: #f4f8ff;
     --destructive: #ef6b73;
     --destructive-foreground: #ffffff;
-    --border: #28384d;
-    --input: #182231;
+    --border-base: #28384d;
+    --input-base: #182231;
     --ring: #78aefc;
     /* Shared dark categorical set (see midnight-cinema). */
     --chart-1: #5f74ee;
@@ -624,9 +671,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --sidebar-border: #1f2a39;
     --sidebar-section-divider: #283a4e;
     --sidebar-ring: #78aefc;
-    --surface: #151e2b;
-    --surface-hover: #1d2a3b;
-    --surface-raised: #223245;
+    --surface-base: #151e2b;
+    --surface-hover-base: #1d2a3b;
+    --surface-raised-base: #223245;
     --ambient: #78aefc;
     --ambient-glow-opacity: 0.11;
   }
@@ -635,6 +682,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --radius: 0.75rem;
     --font-body: "Outfit", sans-serif;
     --font-display: "Outfit", sans-serif;
+    --contrast-boost: #ffffff;
     --background: #171113;
     --foreground: #f8f2f3;
     --card: #20181b;
@@ -646,13 +694,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --secondary: #281d21;
     --secondary-foreground: #decfd2;
     --muted: #20181b;
-    --muted-foreground: #a28e95;
-    --accent: #322228;
+    --muted-foreground-base: #a28e95;
+    --accent-base: #322228;
     --accent-foreground: #f8f2f3;
     --destructive: #f08080;
     --destructive-foreground: #ffffff;
-    --border: #3b2830;
-    --input: #251a1f;
+    --border-base: #3b2830;
+    --input-base: #251a1f;
     --ring: #d16a78;
     /* Shared dark categorical set (see midnight-cinema). */
     --chart-1: #5f74ee;
@@ -669,9 +717,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --sidebar-border: #2c1d23;
     --sidebar-section-divider: #3a252e;
     --sidebar-ring: #d16a78;
-    --surface: #20181b;
-    --surface-hover: #2a2025;
-    --surface-raised: #34262c;
+    --surface-base: #20181b;
+    --surface-hover-base: #2a2025;
+    --surface-raised-base: #34262c;
     --ambient: #d16a78;
     --ambient-glow-opacity: 0.11;
   }
@@ -680,6 +728,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --radius: 0.75rem;
     --font-body: "Outfit", sans-serif;
     --font-display: "Outfit", sans-serif;
+    --contrast-boost: #ffffff;
     --background: #101715;
     --foreground: #f2f8f5;
     --card: #16201d;
@@ -691,13 +740,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --secondary: #1b2824;
     --secondary-foreground: #d1e0d9;
     --muted: #16201d;
-    --muted-foreground: #91a39c;
-    --accent: #20322d;
+    --muted-foreground-base: #91a39c;
+    --accent-base: #20322d;
     --accent-foreground: #f2f8f5;
     --destructive: #f07a7a;
     --destructive-foreground: #ffffff;
-    --border: #284038;
-    --input: #182420;
+    --border-base: #284038;
+    --input-base: #182420;
     --ring: #5bc39d;
     /* Shared dark categorical set (see midnight-cinema). */
     --chart-1: #5f74ee;
@@ -714,9 +763,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --sidebar-border: #1d2f2a;
     --sidebar-section-divider: #253d35;
     --sidebar-ring: #5bc39d;
-    --surface: #16201d;
-    --surface-hover: #1e2b27;
-    --surface-raised: #263732;
+    --surface-base: #16201d;
+    --surface-hover-base: #1e2b27;
+    --surface-raised-base: #263732;
     --ambient: #5bc39d;
     --ambient-glow-opacity: 0.1;
   }
@@ -755,16 +804,22 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --font-weight-semibold-ui: 600;
     --font-weight-bold-ui: 700;
   }
+  /* Every token here pushes toward --contrast-boost, never toward white
+     directly. Hard-coded white raises contrast on a dark theme and destroys it
+     on a light one: on cinema-light it drove --muted-foreground to 1.36:1 and
+     --foreground to 1.10:1 against the page, i.e. high contrast mode made the
+     theme unreadable. Mixing toward the boost gives 15.49:1 and 19.12:1 there
+     while leaving the dark themes as they were. */
   html[data-high-contrast="true"] {
-    --foreground: #ffffff;
-    --ring: oklch(0.95 0 0);
-    --muted-foreground: color-mix(in srgb, white 72%, var(--muted-foreground));
-    --border: color-mix(in srgb, white 34%, var(--border));
-    --input: color-mix(in srgb, white 16%, var(--input));
-    --surface: color-mix(in srgb, white 10%, var(--surface));
-    --surface-hover: color-mix(in srgb, white 16%, var(--surface-hover));
-    --surface-raised: color-mix(in srgb, white 20%, var(--surface-raised));
-    --accent: color-mix(in srgb, white 14%, var(--accent));
+    --foreground: var(--contrast-boost);
+    --ring: var(--contrast-boost);
+    --muted-foreground: color-mix(in srgb, var(--contrast-boost) 72%, var(--muted-foreground-base));
+    --border: color-mix(in srgb, var(--contrast-boost) 34%, var(--border-base));
+    --input: color-mix(in srgb, var(--contrast-boost) 16%, var(--input-base));
+    --surface: color-mix(in srgb, var(--contrast-boost) 10%, var(--surface-base));
+    --surface-hover: color-mix(in srgb, var(--contrast-boost) 16%, var(--surface-hover-base));
+    --surface-raised: color-mix(in srgb, var(--contrast-boost) 20%, var(--surface-raised-base));
+    --accent: color-mix(in srgb, var(--contrast-boost) 14%, var(--accent-base));
     --ambient-glow-opacity: 0.04;
   }
   html[data-high-contrast="true"] .surface-panel-subtle,
@@ -1418,6 +1473,18 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     contain: layout;
   }
 
+  /* JASSUB writes contain-mode geometry directly onto its canvas. Override
+     that geometry when the video uses Fill so styled subtitles follow the
+     same crop instead of remaining letterboxed over the zoomed picture.
+     useASSSubtitles keeps regular dialogue inside the visible area. */
+  .player-ass-fill {
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover;
+  }
+
   /* Bottom HUD rail — title/time on the left, utilities on the right. */
   .player-hud {
     background: linear-gradient(
@@ -1592,10 +1659,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     pointer-events: auto;
   }
   /* Hover reveal is for precise pointers only, so a tap-emulated :hover on a
-     phone cannot uncover the controls. This deliberately uses a direct :hover
-     selector: Tailwind's group-hover variant is limited to the primary
-     pointer's (hover: hover) result, which can exclude Windows hybrid devices
-     even while an attached mouse is actively hovering the card.
+     phone cannot uncover the controls. These are bespoke rules rather than
+     group-hover utilities because they span two named groups (card and media)
+     and share one reveal across every card surface.
 
      Card actions sit at z-20 in the card wrapper's stacking context while the
      overlay-badge layer sits at z-10 inside the artwork box, so a visible
@@ -1611,15 +1677,40 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .group\/media:focus-within .media-card-hover-dim {
     opacity: 1;
   }
-  @media (any-hover: hover) and (any-pointer: fine) {
-    .group\/media:hover .media-card-hover-dim {
-      opacity: 1;
-    }
-    .group\/card:hover .media-card-action-trigger,
-    .group\/media:hover .media-card-play-trigger {
-      opacity: 1;
-      pointer-events: auto;
-    }
+  /* Gated on an attribute set from observed pointer events
+     (lib/pointerCapability.ts), not on a media query. Chromium on some Windows
+     hybrid machines reports `any-hover: none` and `any-pointer: coarse` even
+     while a mouse is actively hovering the card, so this block never matched
+     and the controls stayed at `opacity: 0` permanently. The attribute is
+     seeded from that same media query at boot, so behaviour is unchanged
+     wherever it was already right.
+
+     Deliberately no `[data-fine-pointer="false"]` counterpart forcing opacity
+     back to 0: at this specificity it would out-weigh the `[data-state="open"]`
+     and `:focus-visible` rules above and hide the trigger while its own menu is
+     open on a touch device. Rest state is the base rule's job. */
+  :where(:root[data-fine-pointer="true"]) .group\/media:hover .media-card-hover-dim {
+    opacity: 1;
+  }
+  :where(:root[data-fine-pointer="true"]) .group\/card:hover .media-card-action-trigger,
+  :where(:root[data-fine-pointer="true"]) .group\/media:hover .media-card-play-trigger {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Row actions that appear on hover. On a touch screen there is no hover, so
+     the action stays visible; a fine pointer hides it until the row is hovered
+     or the control is focused. Gated on the observed pointer like the card
+     reveals above. Usage: a `group/row` wrapper and `.pointer-reveal` on the
+     control. */
+  :where(:root[data-fine-pointer="true"]) .pointer-reveal {
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-default);
+  }
+  :where(:root[data-fine-pointer="true"]) .group\/row:hover .pointer-reveal,
+  :where(:root[data-fine-pointer="true"]) .group\/row:focus-within .pointer-reveal,
+  :where(:root[data-fine-pointer="true"]) .pointer-reveal:focus-visible {
+    opacity: 1;
   }
 
   /* A long press on a card opens the action sheet, so the browser's own image
@@ -2433,18 +2524,30 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      top via Tailwind's `sticky top-0 z-50` utilities on the
      outer element.                                              */
   /* Global sidebar offset used by out-of-tree chrome that needs to
-     align with the current sidebar width. Layout sets
-     `data-sidebar-collapsed` on the root element; this media-query
-     block resolves the correct px value per breakpoint/state.     */
+     align with the current sidebar width. Layout sets `data-app-shell`
+     on the root element for exactly as long as the sidebar exists, and
+     `data-sidebar-collapsed` while it is the 64px rail; this media-query
+     block resolves the correct px value per breakpoint/state.
+
+     Gated on a shell attribute because this chrome also renders above the
+     routes that live outside Layout — /profiles, /login, /watch — where
+     there is no sidebar to align with. Without the gate those pages got
+     a 260px blank strip on the banner's left (issue #1290). The admin
+     area is its own shell: AdminLayout publishes `data-admin-shell` and
+     draws a fixed 240px sidebar (`w-[240px]` / `lg:ml-[240px]`), and the
+     audiobook MiniBar can be open there.                              */
   :root {
     --app-sidebar-offset: 0px;
   }
   @media (min-width: 1024px) {
-    :root {
+    :root[data-app-shell] {
       --app-sidebar-offset: 260px;
     }
-    :root[data-sidebar-collapsed="true"] {
+    :root[data-app-shell][data-sidebar-collapsed="true"] {
       --app-sidebar-offset: 64px;
+    }
+    :root[data-admin-shell] {
+      --app-sidebar-offset: 240px;
     }
   }
 

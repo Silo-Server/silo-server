@@ -22,7 +22,8 @@ type LogEntry struct {
 
 // Writer buffers log entries for asynchronous persistence.
 type Writer interface {
-	// Write enqueues a log entry. Must not block.
+	// Write enqueues a log entry on the request goroutine. It must not
+	// block or log.
 	Write(entry LogEntry)
 
 	// Close flushes remaining entries and releases resources.

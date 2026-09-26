@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/go-chi/chi/v5"
@@ -33,7 +34,7 @@ type NodeRepository interface {
 	Create(ctx context.Context, input nodepool.CreateNodeInput) (*nodepool.Node, error)
 	Update(ctx context.Context, id int, input nodepool.UpdateNodeInput) (*nodepool.Node, error)
 	Delete(ctx context.Context, id int) error
-	UpdateHealth(ctx context.Context, id int, checkedURL string, healthy bool, activeJobs, egressKbps int, lastStats []byte) error
+	UpdateHealth(ctx context.Context, id int, checkedURL string, healthy bool, activeJobs, egressKbps int, lastStats []byte, networkAccess netaccess.NodeNetworkAccess) error
 }
 
 // NodeListEnabled queries enabled nodes by type for pool reload.
@@ -473,17 +474,17 @@ func (h *NodeHandler) HandleCheckNode(w http.ResponseWriter, r *http.Request) {
 // Fenced on the node's URL by the pools themselves, like every other health
 // write: the row can be repointed while a check is in flight.
 func (h *NodeHandler) applyHealthToPools(
-	node *nodepool.Node, healthy bool, activeJobs, egressKbps int, capabilitiesHash string, lastStats []byte,
+	node *nodepool.Node, healthy bool, activeJobs, egressKbps int, capabilitiesHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess,
 ) {
 	checkedAt := time.Now()
 	switch node.Type {
 	case nodepool.NodeTypeProxy:
 		if h.proxyPool != nil {
-			h.proxyPool.ApplyHealth(node.ID, node.URL, healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, checkedAt)
+			h.proxyPool.ApplyHealth(node.ID, node.URL, healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess, checkedAt)
 		}
 	case nodepool.NodeTypeTranscode:
 		if h.transcodePool != nil {
-			h.transcodePool.ApplyHealth(node.ID, node.URL, healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, checkedAt)
+			h.transcodePool.ApplyHealth(node.ID, node.URL, healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess, checkedAt)
 		}
 	}
 }

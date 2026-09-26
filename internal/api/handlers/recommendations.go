@@ -594,7 +594,7 @@ func (h *RecommendationsHandler) blendUpcomingIntoDiscoverRows(
 		End:                end,
 		AllowedLibraryIDs:  filter.AllowedLibraryIDs,
 		DisabledLibraryIDs: filter.DisabledLibraryIDs,
-		MaxContentRating:   filter.MaxContentRating,
+		MaturityLimits:     filter.MaturityLimits,
 	})
 	if err != nil {
 		return discoverRows, err

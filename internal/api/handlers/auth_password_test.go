@@ -17,6 +17,7 @@ type stubAccountPasswordService struct {
 	available bool
 	err       error
 	userID    int
+	sessionID string
 	current   string
 	new       string
 }
@@ -25,8 +26,9 @@ func (s *stubAccountPasswordService) PasswordChangeAvailable(context.Context, in
 	return s.available, s.err
 }
 
-func (s *stubAccountPasswordService) ChangePassword(_ context.Context, userID int, currentPassword, newPassword string) error {
+func (s *stubAccountPasswordService) ChangePassword(_ context.Context, userID int, sessionID, currentPassword, newPassword string) error {
 	s.userID = userID
+	s.sessionID = sessionID
 	s.current = currentPassword
 	s.new = newPassword
 	return s.err
@@ -194,5 +196,40 @@ func TestAccountPasswordCapability(t *testing.T) {
 	}
 	if response.MinimumPasswordLength != auth.MinimumPasswordLength || response.MaximumPasswordBytes != auth.MaximumPasswordBytes {
 		t.Fatalf("password limits = (%d, %d)", response.MinimumPasswordLength, response.MaximumPasswordBytes)
+	}
+}
+
+// A session holding a temporary password can do nothing else, including pick
+// a profile, so it may replace the password with no profile declared.
+func TestTemporaryPasswordSessionMayChangeWithoutProfile(t *testing.T) {
+	t.Parallel()
+
+	service := &stubAccountPasswordService{available: true}
+	handler := newPasswordHandler(service)
+	claims := passwordClaims()
+	claims.PasswordChangeRequired = true
+	if err := handler.AuthorizePasswordChange(context.Background(), &claims, ""); err != nil {
+		t.Fatalf("restricted session refused: %v", err)
+	}
+	claims.ImpersonatorUserID = new(int)
+	if err := handler.AuthorizePasswordChange(context.Background(), &claims, ""); err == nil {
+		t.Fatal("impersonated session allowed to change the password")
+	}
+
+	settled := passwordClaims()
+	if err := handler.AuthorizePasswordChange(context.Background(), &settled, ""); err == nil {
+		t.Fatal("ordinary session without a profile allowed to change the password")
+	}
+}
+
+func TestChangePasswordRejectsReusedTemporaryPassword(t *testing.T) {
+	t.Parallel()
+
+	handler := newPasswordHandler(&stubAccountPasswordService{available: true, err: auth.ErrPasswordUnchanged})
+	claims := passwordClaims()
+	err := handler.ChangePassword(context.Background(), &claims, "temporary-pass", "temporary-pass")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Field != "new_password" || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("err = %#v", err)
 	}
 }

@@ -44,9 +44,9 @@ func TestAIPublicationPostgresCancelDuringUpload(t *testing.T) {
 		for _, complete := range []bool{true, false} {
 			t.Run(terminal+map[bool]string{true: " final", false: " intermediate"}[complete], func(t *testing.T) {
 				pool := aiPublicationDatabase(t)
-				objects := newMockS3Client()
-				gate := &gatedSubtitleObjectStore{S3Client: objects, putReady: make(chan struct{}, 1), putRelease: make(chan struct{})}
-				manager := NewManager(NewPgRepository(pool, nil), gate, "synthetic")
+				objects := newMockBlobStore()
+				gate := &gatedSubtitleObjectStore{BlobStore: objects, putReady: make(chan struct{}, 1), putRelease: make(chan struct{})}
+				manager := NewManager(NewPgRepository(pool, nil), gate)
 				req := aiPublicationRequest()
 				req.Publication.Complete = complete
 				result := make(chan error, 1)
@@ -76,9 +76,9 @@ func TestAIPublicationPostgresCancelDuringUpload(t *testing.T) {
 
 func TestAIPublicationPostgresDuplicateAndTerminalReuse(t *testing.T) {
 	pool := aiPublicationDatabase(t)
-	objects := newMockS3Client()
-	gate := &gatedSubtitleObjectStore{S3Client: objects, putReady: make(chan struct{}, 2), putRelease: make(chan struct{})}
-	manager := NewManager(NewPgRepository(pool, nil), gate, "synthetic")
+	objects := newMockBlobStore()
+	gate := &gatedSubtitleObjectStore{BlobStore: objects, putReady: make(chan struct{}, 2), putRelease: make(chan struct{})}
+	manager := NewManager(NewPgRepository(pool, nil), gate)
 	type result struct {
 		sub *DownloadedSubtitle
 		err error
@@ -108,7 +108,7 @@ func TestAIPublicationPostgresDuplicateAndTerminalReuse(t *testing.T) {
 		t.Fatalf("completed=%d err=%v", completed, err)
 	}
 	assertAIPublicationState(t, pool, "completed", 1)
-	manager = NewManager(NewPgRepository(pool, nil), objects, "synthetic")
+	manager = NewManager(NewPgRepository(pool, nil), objects)
 	if _, err := manager.StoreSubtitle(ctx, aiPublicationRequest()); !errors.Is(err, ErrAIJobInactive) {
 		t.Fatalf("terminal duplicate reuse=%v", err)
 	}
@@ -119,7 +119,7 @@ func TestAIPublicationPostgresDuplicateAndTerminalReuse(t *testing.T) {
 
 func TestAIPublicationPostgresIntermediateThenCancel(t *testing.T) {
 	pool := aiPublicationDatabase(t)
-	manager := NewManager(NewPgRepository(pool, nil), newMockS3Client(), "synthetic")
+	manager := NewManager(NewPgRepository(pool, nil), newMockBlobStore())
 	req := aiPublicationRequest()
 	req.Publication.Complete = false
 	if _, err := manager.StoreSubtitle(t.Context(), req); err != nil {
@@ -145,8 +145,8 @@ func TestAIPublicationPostgresCompletionFailureRollsBackMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	objects := newMockS3Client()
-	manager := NewManager(NewPgRepository(pool, nil), objects, "synthetic")
+	objects := newMockBlobStore()
+	manager := NewManager(NewPgRepository(pool, nil), objects)
 	if _, err := manager.StoreSubtitle(t.Context(), aiPublicationRequest()); err == nil {
 		t.Fatal("completion unexpectedly succeeded")
 	}
@@ -166,8 +166,8 @@ func (r lostAIPublicationReply) PublishAISubtitle(ctx context.Context, sub *Down
 }
 func TestAIPublicationPostgresLostReplyRetainsBytes(t *testing.T) {
 	pool := aiPublicationDatabase(t)
-	objects := newMockS3Client()
-	manager := NewManager(lostAIPublicationReply{NewPgRepository(pool, nil)}, objects, "synthetic")
+	objects := newMockBlobStore()
+	manager := NewManager(lostAIPublicationReply{NewPgRepository(pool, nil)}, objects)
 	if _, err := manager.StoreSubtitle(t.Context(), aiPublicationRequest()); !errors.Is(err, ErrAIPublicationUncertain) {
 		t.Fatalf("lost reply did not preserve uncertainty: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestAIPublicationPostgresCancellationWinsRowLock(t *testing.T) {
 	if _, err := tx.Exec(ctx, `SELECT id FROM subtitle_ai_jobs WHERE id=1 FOR UPDATE`); err != nil {
 		t.Fatal(err)
 	}
-	manager := NewManager(NewPgRepository(pool, nil), newMockS3Client(), "synthetic")
+	manager := NewManager(NewPgRepository(pool, nil), newMockBlobStore())
 	result := make(chan error, 1)
 	go func() { _, err := manager.StoreSubtitle(ctx, aiPublicationRequest()); result <- err }()
 	waitForAIBlocker(t, ctx, pool, conn.Conn().PgConn().PID())
@@ -255,7 +255,7 @@ func TestAIPublicationPostgresPublicationWinsCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock_all()`) //nolint:errcheck // Release test barrier on every exit.
-	manager := NewManager(NewPgRepository(pool, nil), newMockS3Client(), "synthetic")
+	manager := NewManager(NewPgRepository(pool, nil), newMockBlobStore())
 	result := make(chan error, 1)
 	go func() { _, err := manager.StoreSubtitle(ctx, aiPublicationRequest()); result <- err }()
 	publisherPID := waitForAIBlocker(t, ctx, pool, conn.Conn().PgConn().PID())
@@ -295,7 +295,7 @@ func TestAIPublicationPostgresIdentityFence(t *testing.T) {
 			case "missing":
 				req.Publication.JobID = 99
 			}
-			manager := NewManager(NewPgRepository(pool, nil), newMockS3Client(), "synthetic")
+			manager := NewManager(NewPgRepository(pool, nil), newMockBlobStore())
 			if _, err := manager.StoreSubtitle(t.Context(), req); !errors.Is(err, ErrAIJobInactive) {
 				t.Fatalf("identity fence=%v", err)
 			}
@@ -308,15 +308,15 @@ func TestAIPublicationPostgresLegacyReuse(t *testing.T) {
 	pool := aiPublicationDatabase(t)
 	req := aiPublicationRequest()
 	repo := NewPgRepository(pool, nil)
-	objects := newMockS3Client()
+	objects := newMockBlobStore()
 	legacy := &DownloadedSubtitle{MediaFileID: req.MediaFileID, Provider: req.Provider, Language: req.Language, Format: req.Format, S3Key: buildSubtitleS3Key(req.MediaFileID, req.Language, req.Provider, req.Format, req.Data)}
 	if err := repo.InsertDownloadedSubtitle(t.Context(), legacy); err != nil {
 		t.Fatal(err)
 	}
-	if err := objects.PutObject(t.Context(), "synthetic", legacy.S3Key, req.Data); err != nil {
+	if err := objects.Put(t.Context(), legacy.S3Key, req.Data); err != nil {
 		t.Fatal(err)
 	}
-	manager := NewManager(repo, objects, "synthetic")
+	manager := NewManager(repo, objects)
 	sub, err := manager.StoreSubtitle(t.Context(), req)
 	if err != nil || sub.ID != legacy.ID {
 		t.Fatalf("legacy reuse=%+v %v", sub, err)
@@ -329,8 +329,8 @@ func TestAIPublicationPostgresLegacyReuse(t *testing.T) {
 
 func TestAIPublicationRequiresAtomicRepository(t *testing.T) {
 	repo := newMockSubtitleRepo()
-	objects := newMockS3Client()
-	manager := NewManager(repo, objects, "synthetic")
+	objects := newMockBlobStore()
+	manager := NewManager(repo, objects)
 	if _, err := manager.StoreSubtitle(t.Context(), aiPublicationRequest()); err == nil {
 		t.Fatal("missing atomic repository silently accepted publication")
 	}

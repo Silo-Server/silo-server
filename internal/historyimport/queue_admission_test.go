@@ -65,7 +65,8 @@ func queueTestPoolBeforePersonalMigration(t *testing.T, seedDuplicates bool) *pg
  CREATE TABLE history_import_runs (
  id text PRIMARY KEY,user_id integer NOT NULL DEFAULT 1,profile_id text NOT NULL DEFAULT 'p',
  source_type text NOT NULL DEFAULT 'plex',connection_mode text NOT NULL DEFAULT 'admin_token',
- status text NOT NULL, mapping_id integer REFERENCES history_import_user_mappings(id) ON DELETE SET NULL,
+ status text NOT NULL CONSTRAINT history_import_runs_status_check CHECK (status IN ('queued','running','completed','failed','cancelled')),
+ mapping_id integer REFERENCES history_import_user_mappings(id) ON DELETE SET NULL,
  fetched integer NOT NULL DEFAULT 0,matched integer NOT NULL DEFAULT 0,unmatched integer NOT NULL DEFAULT 0,
  progress_updated integer NOT NULL DEFAULT 0,history_created integer NOT NULL DEFAULT 0,
  watchlist_added integer NOT NULL DEFAULT 0,favorites_imported integer NOT NULL DEFAULT 0,skipped integer NOT NULL DEFAULT 0,

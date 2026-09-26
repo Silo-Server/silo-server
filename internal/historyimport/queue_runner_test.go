@@ -17,7 +17,15 @@ import (
 
 func queueRunnerRepository(t *testing.T) *Repository {
 	t.Helper()
-	return queueRunnerRepositoryFromPool(t, queueTestPool(t, false))
+	repo := queueRunnerRepositoryFromPool(t, queueTestPool(t, false))
+	// Claim validation also references personal-import targets. Keep the admin
+	// fixture independent of application tables in the public schema.
+	if _, err := repo.pool.Exec(t.Context(), `CREATE TABLE users(id integer PRIMARY KEY);
+ CREATE TABLE user_profiles(user_id integer REFERENCES users(id),id text,PRIMARY KEY(user_id,id));
+ INSERT INTO users VALUES(1); INSERT INTO user_profiles VALUES(1,'p')`); err != nil {
+		t.Fatal(err)
+	}
+	return repo
 }
 
 func queueRunnerRepositoryFromPool(t *testing.T, pool *pgxpool.Pool) *Repository {
@@ -135,6 +143,51 @@ func TestQueueTwoNodesAdmissionAndClaim(t *testing.T) {
 	wg.Wait()
 	if claimed.Load() != 1 {
 		t.Fatalf("claims=%d", claimed.Load())
+	}
+}
+
+func TestQueueRecoversExpiredCancellation(t *testing.T) {
+	repo := queueRunnerRepository(t)
+	ctx := t.Context()
+	run, err := repo.EnqueueAdminRun(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, claim, err := repo.claimAdminRun(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.updateRunProgress(ctx, claim, ExecutionSummary{Fetched: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CancelRunIfActive(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// A restarted service must allow a worker with a live lease to acknowledge.
+	service := &Service{repo: repo}
+	if err := service.reconcileStaleRuns(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetRunByID(ctx, run.ID)
+	if err != nil || got.Status != RunStatusRunning || !got.CancelRequested {
+		t.Fatalf("live cancellation=%+v err=%v", got, err)
+	}
+	if _, err := repo.pool.Exec(ctx, `UPDATE history_import_runs SET last_heartbeat_at=now()-interval '2 minutes' WHERE id=$1`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.reconcileStaleRuns(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got, err = repo.GetRunByID(ctx, run.ID)
+	if err != nil || got.Status != RunStatusCancelled || got.CompletedAt == nil || got.Fetched != 7 {
+		t.Fatalf("expired cancellation=%+v err=%v", got, err)
+	}
+	if err := repo.completeRun(ctx, claim, ExecutionSummary{}); err == nil {
+		t.Fatal("late worker completed a canceled run")
+	}
+	if _, err := repo.EnqueueAdminRun(ctx, 1); err != nil {
+		t.Fatalf("canceled run still blocks its mapping: %v", err)
 	}
 }
 

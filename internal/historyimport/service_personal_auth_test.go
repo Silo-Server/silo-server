@@ -2,6 +2,7 @@ package historyimport
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,7 +27,8 @@ func TestPersonalPreparationExchangesPasswordForToken(t *testing.T) {
 		_, _ = w.Write([]byte(`{"AccessToken":"returned-token","User":{"Id":"external-user"}}`))
 	}))
 	defer upstream.Close()
-	svc := &Service{jellyfin: NewJellyfinClient()}
+	// The upstream listens on loopback, so the admin must allow local servers.
+	svc := &Service{jellyfin: NewJellyfinClient(), localNetwork: allowLocalNetworkForEveryone()}
 	prepared, err := svc.preparePersonalRun(t.Context(), 7, CreateRunInput{Source: SourceTypeJellyfin, ProfileID: "target", JellyfinBaseURL: upstream.URL, JellyfinUsername: "username", JellyfinPassword: "input-password"})
 	if err != nil {
 		t.Fatal(err)
@@ -116,5 +118,36 @@ func TestPersonalPreparationDoesNotConsumePlexSession(t *testing.T) {
 	stillAvailable, err := repo.GetPlexSession(t.Context(), 1, session.ID)
 	if err != nil || stillAvailable.ConsumedAt != nil {
 		t.Fatal("preparation consumed a session before durable admission", err)
+	}
+}
+
+func TestPersonalPreparationAllowsEmbyAccountWithoutPassword(t *testing.T) {
+	repo := editorRepository(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body["Username"] != "kid" || body["Pw"] != "" {
+			t.Errorf("login body = %v, want kid with an empty password", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"AccessToken":"server-token","User":{"Id":"external-kid"}}`))
+	}))
+	defer upstream.Close()
+	source, err := repo.CreateSource(t.Context(), CreateSourceInput{Name: "Emby", SourceType: SourceTypeEmby, BaseURL: upstream.URL, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{repo: repo, emby: NewEmbyClient()}
+	prepared, err := svc.preparePersonalRun(t.Context(), 1, CreateRunInput{Source: SourceTypeEmby, ProfileID: "p1", SourceID: source.ID, Username: "kid"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Credentials.ExternalUserID != "external-kid" || prepared.Credentials.ServerToken != "server-token" {
+		t.Fatalf("credentials = %+v", prepared.Credentials)
+	}
+	if _, err := svc.preparePersonalRun(t.Context(), 1, CreateRunInput{Source: SourceTypeEmby, ProfileID: "p1", SourceID: source.ID, Username: " "}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("blank username err = %v, want ErrInvalidInput", err)
 	}
 }

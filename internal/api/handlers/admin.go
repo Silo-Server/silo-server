@@ -25,8 +25,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -37,6 +37,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/policy"
+	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
@@ -303,41 +304,50 @@ func (r *updateUserRequest) libraryIDsOptional() models.Optional[[]int] {
 // value the server enforces (override when set, otherwise the group's value,
 // otherwise the permissive no-group default).
 type AdminUserView struct {
-	ID                       int                 `json:"id"`
-	Username                 string              `json:"username"`
-	Email                    string              `json:"email"`
-	Role                     string              `json:"role"`
-	Permissions              []string            `json:"permissions"`
-	Enabled                  bool                `json:"enabled"`
-	LibraryIDs               []int               `json:"library_ids"`
-	MaxPlaybackQuality       *string             `json:"max_playback_quality"`
-	MaxStreams               *int                `json:"max_streams"`
-	MaxTranscodes            *int                `json:"max_transcodes"`
-	TranscodeAllowed         *bool               `json:"transcode_allowed"`
-	AudioTranscodeAllowed    *bool               `json:"audio_transcode_allowed"`
-	MaxProfiles              int                 `json:"max_profiles"`
-	DownloadAllowed          *bool               `json:"download_allowed"`
-	DownloadTranscodeAllowed *bool               `json:"download_transcode_allowed"`
-	RequestsAllowed          *bool               `json:"requests_allowed"`
-	AccessGroupID            *int64              `json:"access_group_id"`
-	EffectivePolicy          EffectivePolicyView `json:"effective_policy"`
-	CreatedAt                time.Time           `json:"created_at"`
-	UpdatedAt                time.Time           `json:"updated_at"`
-	LastActiveAt             *time.Time          `json:"last_active_at,omitempty"`
+	ID                         int                 `json:"id"`
+	Username                   string              `json:"username"`
+	Email                      string              `json:"email"`
+	Role                       string              `json:"role"`
+	Permissions                []string            `json:"permissions"`
+	Enabled                    bool                `json:"enabled"`
+	LibraryIDs                 []int               `json:"library_ids"`
+	MaxPlaybackQuality         *string             `json:"max_playback_quality"`
+	MaxStreams                 *int                `json:"max_streams"`
+	MaxTranscodes              *int                `json:"max_transcodes"`
+	MaxRemoteStreamBitrateKbps *int                `json:"-"`
+	MaxLocalStreamBitrateKbps  *int                `json:"-"`
+	TranscodeAllowed           *bool               `json:"transcode_allowed"`
+	AudioTranscodeAllowed      *bool               `json:"audio_transcode_allowed"`
+	MaxProfiles                int                 `json:"max_profiles"`
+	DownloadAllowed            *bool               `json:"download_allowed"`
+	DownloadTranscodeAllowed   *bool               `json:"download_transcode_allowed"`
+	RequestsAllowed            *bool               `json:"requests_allowed"`
+	AccessGroupID              *int64              `json:"access_group_id"`
+	EffectivePolicy            EffectivePolicyView `json:"effective_policy"`
+	CreatedAt                  time.Time           `json:"created_at"`
+	UpdatedAt                  time.Time           `json:"updated_at"`
+	LastActiveAt               *time.Time          `json:"last_active_at,omitempty"`
+	// PasswordLogin, PasswordChangeRequired and IsOwner are v2-only: the
+	// frozen v1 body does not carry them.
+	PasswordLogin          bool `json:"-"`
+	PasswordChangeRequired bool `json:"-"`
+	IsOwner                bool `json:"-"`
 }
 
 // EffectivePolicyView is the resolved policy block on admin user responses.
 type EffectivePolicyView struct {
-	LibraryIDs               []int    `json:"library_ids"`
-	MaxPlaybackQuality       string   `json:"max_playback_quality"`
-	MaxStreams               int      `json:"max_streams"`
-	MaxTranscodes            int      `json:"max_transcodes"`
-	TranscodeAllowed         bool     `json:"transcode_allowed"`
-	AudioTranscodeAllowed    bool     `json:"audio_transcode_allowed"`
-	DownloadAllowed          bool     `json:"download_allowed"`
-	DownloadTranscodeAllowed bool     `json:"download_transcode_allowed"`
-	RequestsAllowed          bool     `json:"requests_allowed"`
-	Permissions              []string `json:"permissions"`
+	LibraryIDs                 []int    `json:"library_ids"`
+	MaxPlaybackQuality         string   `json:"max_playback_quality"`
+	MaxStreams                 int      `json:"max_streams"`
+	MaxTranscodes              int      `json:"max_transcodes"`
+	MaxRemoteStreamBitrateKbps int      `json:"-"`
+	MaxLocalStreamBitrateKbps  int      `json:"-"`
+	TranscodeAllowed           bool     `json:"transcode_allowed"`
+	AudioTranscodeAllowed      bool     `json:"audio_transcode_allowed"`
+	DownloadAllowed            bool     `json:"download_allowed"`
+	DownloadTranscodeAllowed   bool     `json:"download_transcode_allowed"`
+	RequestsAllowed            bool     `json:"requests_allowed"`
+	Permissions                []string `json:"permissions"`
 }
 
 type adminPlaybackHistoryRow struct {
@@ -388,34 +398,41 @@ func (h *AdminHandler) presignPosterURL(r *http.Request, path string) string {
 func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserView {
 	effective := access.ApplyGroupPolicy(u, group)
 	resp := AdminUserView{
-		ID:                       u.ID,
-		Username:                 u.Username,
-		Email:                    u.Email,
-		Role:                     u.Role,
-		Permissions:              append([]string{}, u.Permissions...),
-		Enabled:                  u.Enabled,
-		LibraryIDs:               cloneIntSlice(u.LibraryIDs),
-		MaxPlaybackQuality:       normalizedQualityPtr(u.MaxPlaybackQuality),
-		MaxStreams:               clonePtr(u.MaxStreams),
-		MaxTranscodes:            clonePtr(u.MaxTranscodes),
-		TranscodeAllowed:         clonePtr(u.TranscodeAllowed),
-		AudioTranscodeAllowed:    clonePtr(u.AudioTranscodeAllowed),
-		MaxProfiles:              u.MaxProfiles,
-		DownloadAllowed:          clonePtr(u.DownloadAllowed),
-		DownloadTranscodeAllowed: clonePtr(u.DownloadTranscodeAllowed),
-		RequestsAllowed:          clonePtr(u.RequestsAllowed),
-		AccessGroupID:            clonePtr(u.AccessGroupID),
+		ID:                         u.ID,
+		Username:                   u.Username,
+		Email:                      u.Email,
+		Role:                       u.Role,
+		Permissions:                append([]string{}, u.Permissions...),
+		Enabled:                    u.Enabled,
+		LibraryIDs:                 cloneIntSlice(u.LibraryIDs),
+		MaxPlaybackQuality:         normalizedQualityPtr(u.MaxPlaybackQuality),
+		MaxStreams:                 clonePtr(u.MaxStreams),
+		MaxTranscodes:              clonePtr(u.MaxTranscodes),
+		MaxRemoteStreamBitrateKbps: clonePtr(u.MaxRemoteStreamBitrateKbps),
+		MaxLocalStreamBitrateKbps:  clonePtr(u.MaxLocalStreamBitrateKbps),
+		TranscodeAllowed:           clonePtr(u.TranscodeAllowed),
+		AudioTranscodeAllowed:      clonePtr(u.AudioTranscodeAllowed),
+		MaxProfiles:                u.MaxProfiles,
+		DownloadAllowed:            clonePtr(u.DownloadAllowed),
+		DownloadTranscodeAllowed:   clonePtr(u.DownloadTranscodeAllowed),
+		RequestsAllowed:            clonePtr(u.RequestsAllowed),
+		AccessGroupID:              clonePtr(u.AccessGroupID),
+		PasswordLogin:              u.LocalPasswordLoginEnabled && u.PasswordHash != "",
+		PasswordChangeRequired:     u.PasswordChangeRequired,
+		IsOwner:                    u.IsOwner,
 		EffectivePolicy: EffectivePolicyView{
-			LibraryIDs:               effective.LibraryIDs,
-			MaxPlaybackQuality:       effective.MaxPlaybackQuality,
-			MaxStreams:               effective.MaxStreams,
-			MaxTranscodes:            effective.MaxTranscodes,
-			TranscodeAllowed:         effective.TranscodeAllowed,
-			AudioTranscodeAllowed:    effective.AudioTranscodeAllowed,
-			DownloadAllowed:          effective.DownloadAllowed,
-			DownloadTranscodeAllowed: effective.DownloadTranscodeAllowed,
-			RequestsAllowed:          effective.RequestsAllowed,
-			Permissions:              append([]string{}, effective.Permissions...),
+			LibraryIDs:                 effective.LibraryIDs,
+			MaxPlaybackQuality:         effective.MaxPlaybackQuality,
+			MaxStreams:                 effective.MaxStreams,
+			MaxTranscodes:              effective.MaxTranscodes,
+			MaxRemoteStreamBitrateKbps: effective.MaxRemoteStreamBitrateKbps,
+			MaxLocalStreamBitrateKbps:  effective.MaxLocalStreamBitrateKbps,
+			TranscodeAllowed:           effective.TranscodeAllowed,
+			AudioTranscodeAllowed:      effective.AudioTranscodeAllowed,
+			DownloadAllowed:            effective.DownloadAllowed,
+			DownloadTranscodeAllowed:   effective.DownloadTranscodeAllowed,
+			RequestsAllowed:            effective.RequestsAllowed,
+			Permissions:                append([]string{}, effective.Permissions...),
 		},
 		CreatedAt: u.CreatedAt,
 		UpdatedAt: u.UpdatedAt,
@@ -969,16 +986,24 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		AccessGroupID:            req.AccessGroupID.Optional(),
 	}
 
-	if currentUser == nil && updateMayRequireSessionRevocation(updateInput) {
+	if currentUser == nil {
 		if currentUser, blocked = h.loadTargetUser(w, r, id); blocked {
 			return
 		}
+	}
+	if err := auth.CheckOwnerUpdate(actorUserID(r.Context()), currentUser, updateInput); err != nil {
+		writeAPIError(w, ownerError(err))
+		return
 	}
 
 	err = h.userRepo.Update(r.Context(), id, updateInput)
 	if err != nil {
 		if auth.IsNotFound(err) {
 			writeError(w, http.StatusNotFound, "not_found", "User not found")
+			return
+		}
+		if auth.IsDuplicate(err) {
+			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
@@ -1011,6 +1036,14 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid user ID")
+		return
+	}
+	target, blocked := h.loadTargetUser(w, r, id)
+	if blocked {
+		return
+	}
+	if err := auth.CheckOwnerDelete(actorUserID(r.Context()), target); err != nil {
+		writeAPIError(w, ownerError(err))
 		return
 	}
 
@@ -1591,7 +1624,9 @@ var sensitiveSettingKeys = catalog.SensitiveSettingKeys
 var machineManagedSettingKeys = map[string]bool{
 	config.ArtworkStorageReconcileCheckpointKey: true,
 	config.ArtworkStorageSweepCheckpointKey:     true,
-	artworkstore.IdentitySettingKey:             true,
+	blobstore.IdentitySettingKey:                true,
+	blobstore.OperationalIdentitySettingKey:     true,
+	config.StorageTransitionTargetKey:           true,
 }
 
 // Setting keys that decide where artwork lives. The s3 keys are the canonical
@@ -1603,42 +1638,63 @@ const (
 	s3PublicBucketKey        = "s3.public_bucket"
 	s3PublicKeyPrefixKey     = "s3.public_key_prefix"
 	s3OperationalBucketKey   = "s3.operational_bucket"
+	s3PrivateEndpointKey     = "s3.private_endpoint"
+	s3PrivateBucketKey       = "s3.private_bucket"
+	s3PrivateKeyPrefixKey    = "s3.private_key_prefix"
 )
 
-// artworkStorageLocked reports whether the artwork storage location can still
-// change. The first artwork write records the store identity; after that the
-// catalog's keys live in exactly one place and there is no migrator, so every
-// setting that selects that place is read-only.
+// artworkStorageLocked reports whether a stored location can no longer be
+// written directly. The first artwork write records the assets identity, and
+// startup records any configured private bucket. After either, the settings
+// that select that place change only through a managed transition.
 func artworkStorageLocked(stored map[string]string) bool {
-	return strings.TrimSpace(stored[artworkstore.IdentitySettingKey]) != ""
+	return assetsStorageLocked(stored) || strings.TrimSpace(stored[blobstore.OperationalIdentitySettingKey]) != ""
+}
+
+// assetsStorageLocked reports whether the artwork location itself is recorded.
+func assetsStorageLocked(stored map[string]string) bool {
+	return strings.TrimSpace(stored[blobstore.IdentitySettingKey]) != ""
 }
 
 var errArtworkStorageLocked = &APIError{
 	Status:  http.StatusConflict,
 	Code:    "artwork_storage_locked",
-	Message: "artwork storage cannot change once artwork has been stored; the catalog's artwork keys belong to the recorded storage",
+	Message: "recorded storage locations cannot be changed directly; use a managed storage transition",
 }
 
-// artworkIdentityInputs names the effective settings that decide where
-// artwork lives: the resolved backend and, for that backend, the fields the
-// store folds into its identity. The s3 keys are the canonical names; the
-// effective map already applies the legacy operational aliases.
+// artworkIdentityInputs names the effective settings that decide where public
+// artwork and private operational objects live. The S3 keys are canonical; the
+// effective map already applies the legacy operational aliases. A private
+// bucket owns diagnostics, job artifacts, and avatars on either backend, so its
+// location is locked on a local backend too: adding one would otherwise strand
+// what the local root already holds.
 func artworkIdentityInputs(effective map[string]string) (backend string, inputs map[string]string) {
 	backend = strings.ToLower(strings.TrimSpace(effective[artworkStorageBackendKey]))
 	if backend == "" || backend == config.ArtworkBackendAuto {
-		backend = artworkstore.BackendLocal
+		backend = blobstore.BackendLocal
 		if strings.TrimSpace(effective[s3PublicBucketKey]) != "" {
-			backend = artworkstore.BackendS3
+			backend = blobstore.BackendS3
 		}
 	}
+	// Compare locations the way the stores name them: endpoint scheme and host
+	// and the bucket are case-insensitive, and a key prefix ignores its
+	// slashes. An edit that only restyles a value is then a plain save.
 	inputs = map[string]string{}
 	switch backend {
-	case artworkstore.BackendS3:
-		for _, key := range []string{s3PublicEndpointKey, s3PublicBucketKey, s3PublicKeyPrefixKey} {
-			inputs[key] = strings.TrimSpace(effective[key])
-		}
+	case blobstore.BackendS3:
+		inputs[s3PublicEndpointKey] = blobstore.NormalizeEndpoint(effective[s3PublicEndpointKey])
+		inputs[s3PublicBucketKey] = strings.ToLower(strings.TrimSpace(effective[s3PublicBucketKey]))
+		inputs[s3PublicKeyPrefixKey] = s3client.NormalizeKeyPrefix(effective[s3PublicKeyPrefixKey])
 	default:
 		inputs[artworkLocalPathKey] = strings.TrimSpace(effective[artworkLocalPathKey])
+	}
+	// Without a bucket there is no private location, so a leftover endpoint or
+	// prefix can change freely.
+	privateBucket := strings.ToLower(strings.TrimSpace(effective[s3PrivateBucketKey]))
+	inputs[s3PrivateBucketKey] = privateBucket
+	if privateBucket != "" {
+		inputs[s3PrivateEndpointKey] = blobstore.NormalizeEndpoint(effective[s3PrivateEndpointKey])
+		inputs[s3PrivateKeyPrefixKey] = s3client.NormalizeKeyPrefix(effective[s3PrivateKeyPrefixKey])
 	}
 	return backend, inputs
 }
@@ -1653,6 +1709,16 @@ func rejectArtworkIdentityChange(recorded string, before, after map[string]strin
 	recordedBackend, _, _ := strings.Cut(strings.TrimSpace(recorded), "|")
 	_, beforeInputs := artworkIdentityInputs(before)
 	afterBackend, afterInputs := artworkIdentityInputs(after)
+	if recordedBackend == "" {
+		// Only the private bucket is recorded. The assets location can still
+		// be chosen until the first artwork write.
+		for key, value := range beforeInputs {
+			if strings.HasPrefix(key, "s3.private_") && afterInputs[key] != value {
+				return errArtworkStorageLocked
+			}
+		}
+		return nil
+	}
 	if afterBackend != recordedBackend {
 		return errArtworkStorageLocked
 	}
@@ -2142,7 +2208,7 @@ func (h *AdminHandler) normalizeBatchSetting(
 	}
 
 	switch key {
-	case markers.SettingMode, markers.SettingLazyPlayback:
+	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage:
 		normalized, err = markers.NormalizeSetting(key, normalized)
 	case clientip.SettingTrustedProxies:
 		normalized, err = clientip.NormalizeCIDRList(normalized)
@@ -2447,7 +2513,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 				prospective[key] = value
 			}
 			if artworkStorageLocked(stored) {
-				if err := rejectArtworkIdentityChange(stored[artworkstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
+				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
 					preconditionErr = err
 					return nil, err
 				}
@@ -2601,7 +2667,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 	}
 
 	switch key {
-	case markers.SettingMode, markers.SettingLazyPlayback:
+	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage:
 		if normalized, err := markers.NormalizeSetting(key, req.Value); err != nil {
 			return AdminSettingUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: err.Error()}
 		} else {
@@ -2805,7 +2871,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 			prospective := maps.Clone(stored)
 			prospective[key] = req.Value
 			if artworkStorageLocked(stored) {
-				if err := rejectArtworkIdentityChange(stored[artworkstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
+				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
 					preconditionErr = err
 					return nil, err
 				}

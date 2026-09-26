@@ -51,7 +51,7 @@ func TestSuggestionPromotionV2(t *testing.T) {
 	for _, tc := range []struct {
 		err    error
 		status int
-	}{{watchtogether.ErrRoomForbidden, 403}, {watchtogether.ErrSuggestionNotFound, 404}, {watchtogether.ErrRoomClosed, 409}, {watchtogether.ErrNotVoteWinner, 409}, {watchtogether.ErrNoVotesCast, 409}, {watchtogether.ErrInvalidSelection, 422}, {watchtogether.ErrSuggestionPromotionUnavailable, 503}} {
+	}{{watchtogether.ErrRoomForbidden, 403}, {watchtogether.ErrSuggestionNotFound, 404}, {watchtogether.ErrRoomClosed, 409}, {watchtogether.ErrVoteRoomSelection, 409}, {watchtogether.ErrInvalidSelection, 422}, {watchtogether.ErrSuggestionPromotionUnavailable, 503}} {
 		f.err = tc.err
 		r = do(t, h, http.MethodPost, path, body, headers)
 		if r.Code != tc.status {

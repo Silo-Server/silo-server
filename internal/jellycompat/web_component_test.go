@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,260 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 )
+
+func seedWebSeekSources(t *testing.T, root string) {
+	t.Helper()
+	for fixture, path := range map[string]string{"playbackmanager.js": webPlaybackManagerSource, "htmlvideo.js": webHTMLVideoPlayerSource} {
+		data, err := os.ReadFile(filepath.Join("testdata", "web-seek-reanchor", fixture))
+		if err != nil {
+			t.Fatal(err)
+		}
+		target := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestManagedWebSeekPatchBehavior(t *testing.T) {
+	root := t.TempDir()
+	seedWebSeekSources(t, root)
+	if err := patchManagedWebSources(root); err != nil {
+		t.Fatal(err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js required to execute upstream Jellyfin Web seek logic")
+	}
+	cmd := exec.CommandContext(t.Context(), node, "testdata/web-seek-reanchor/behavior.cjs", filepath.Join(root, webPlaybackManagerSource), filepath.Join(root, webHTMLVideoPlayerSource))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("patched upstream behavior: %v\n%s", err, out)
+	}
+}
+
+func TestManagedWebSeekPatchRejectsIncompatibleSources(t *testing.T) {
+	for _, mode := range []string{"missing", "ambiguous", "already patched"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			seedWebSeekSources(t, root)
+			manager := filepath.Join(root, webPlaybackManagerSource)
+			player := filepath.Join(root, webHTMLVideoPlayerSource)
+			original, err := os.ReadFile(manager)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "missing":
+				if err := os.WriteFile(player, []byte("upstream changed"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			case "ambiguous":
+				data, err := os.ReadFile(player)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(player, append(data, data...), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			case "already patched":
+				if err := patchManagedWebSources(root); err != nil {
+					t.Fatal(err)
+				}
+				original, err = os.ReadFile(manager)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := patchManagedWebSources(root); err == nil || !strings.Contains(err.Error(), "incompatible upstream source") {
+				t.Fatalf("got %v", err)
+			}
+			after, err := os.ReadFile(manager)
+			if err != nil || string(after) != string(original) {
+				t.Fatal("failed validation partially modified source")
+			}
+		})
+	}
+}
+
+func TestInstallWebComponentPatchesBeforeBuildAndRecordsProvenance(t *testing.T) {
+	gitDir, err := commandOutput(t.Context(), "", "git", "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		t.Skip("installer fixture requires a Git checkout")
+	}
+	var npmCalls int
+	status, err := InstallWebComponent(t.Context(), WebComponentInstallOptions{
+		InstallRoot: t.TempDir(), Version: "10.11.8",
+		RunCommand: func(_ context.Context, dir string, args []string, _ string) error {
+			if args[0] == "git" {
+				dir = args[len(args)-1]
+				seedWebSeekSources(t, dir)
+				if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: "+strings.TrimSpace(gitDir)+"\n"), 0o644); err != nil {
+					return err
+				}
+				return os.WriteFile(filepath.Join(dir, "LICENSE"), []byte("GPL-2.0 fixture"), 0o644)
+			}
+			npmCalls++
+			for path, marker := range map[string]string{webPlaybackManagerSource: "SiloSeekReanchor: true", webHTMLVideoPlayerSource: "canSeekTo(milliseconds)"} {
+				data, err := os.ReadFile(filepath.Join(dir, path))
+				if err != nil || !strings.Contains(string(data), marker) {
+					t.Fatalf("npm ran before patch %s: %v", path, err)
+				}
+			}
+			if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(dir, "dist", "index.html"), []byte("fixture"), 0o644)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if npmCalls != 2 {
+		t.Fatalf("npm calls=%d", npmCalls)
+	}
+	metadata, err := readWebMetadata(status.InstallPath)
+	if err != nil || !metadata.Modified || len(metadata.Patches) != 1 || metadata.Patches[0] != webSeekReanchorPatch {
+		t.Fatalf("metadata=%+v err=%v", metadata, err)
+	}
+	provenance, err := os.ReadFile(filepath.Join(status.InstallPath, webSourceFile))
+	if err != nil || !strings.Contains(string(provenance), "Modified: true") || !strings.Contains(string(provenance), webSeekReanchorPatch) {
+		t.Fatalf("provenance=%s err=%v", provenance, err)
+	}
+}
+
+func TestInstallWebComponentUsesTwoPartUpstreamTag(t *testing.T) {
+	gitDir, err := commandOutput(t.Context(), "", "git", "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		t.Skip("installer fixture requires a Git checkout")
+	}
+	root := t.TempDir()
+	var cloneArgs []string
+	var npmCalls [][]string
+	status, err := InstallWebComponent(t.Context(), WebComponentInstallOptions{
+		InstallRoot: root, Version: "v12.1",
+		RunCommand: func(_ context.Context, dir string, args []string, _ string) error {
+			if args[0] == "git" {
+				cloneArgs = args
+				dir = args[len(args)-1]
+				seedWebSeekSources(t, dir)
+				if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: "+strings.TrimSpace(gitDir)+"\n"), 0o644); err != nil {
+					return err
+				}
+				if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"engines":{"node":">=24.0.0","npm":">=11.0.0"}}`), 0o644); err != nil {
+					return err
+				}
+				return os.WriteFile(filepath.Join(dir, "LICENSE"), []byte("GPL-2.0 fixture"), 0o644)
+			}
+			npmCalls = append(npmCalls, args)
+			if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(dir, "dist", "index.html"), []byte("fixture"), 0o644)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(cloneArgs, " "); !strings.Contains(got, "--branch v12.1 ") {
+		t.Fatalf("clone args = %q, want upstream tag v12.1", got)
+	}
+	wantNPM := []string{
+		"npm exec --yes --package=npm@>=11.0.0 -- npm ci",
+		"npm exec --yes --package=npm@>=11.0.0 -- npm run build:production",
+	}
+	if len(npmCalls) != len(wantNPM) {
+		t.Fatalf("npm calls = %q, want %q", npmCalls, wantNPM)
+	}
+	for i, want := range wantNPM {
+		if got := strings.Join(npmCalls[i], " "); got != want {
+			t.Fatalf("npm call %d = %q, want %q", i, got, want)
+		}
+	}
+	metadata, err := readWebMetadata(filepath.Join(root, "12.1"))
+	if err != nil || metadata.Version != "12.1" || metadata.Tag != "v12.1" {
+		t.Fatalf("metadata=%+v err=%v", metadata, err)
+	}
+	if want := "npm exec --yes '--package=npm@>=11.0.0' -- npm ci && npm exec --yes '--package=npm@>=11.0.0' -- npm run build:production"; metadata.BuildCommand != want {
+		t.Fatalf("BuildCommand = %q, want %q", metadata.BuildCommand, want)
+	}
+	if status.PinnedVersion != "12.1" || status.InstalledVersion != "12.1" {
+		t.Fatalf("status=%+v", status)
+	}
+	// Once the operation settles, the pinned two-part version must match the
+	// installed release rather than report an update.
+	settled := webComponentStatus(root, ManagedWebInstallPath(root), "12.1", "")
+	if settled.WebState != WebComponentInstalled {
+		t.Fatalf("settled WebState = %q, want %q (%s)", settled.WebState, WebComponentInstalled, settled.LastError)
+	}
+}
+
+func TestWebInstallNPMCommandUsesUpstreamEngineRange(t *testing.T) {
+	tests := []struct {
+		name        string
+		packageJSON string
+		want        string
+		wantErr     bool
+	}{
+		{name: "missing package.json", want: "npm ci"},
+		{name: "no npm engine", packageJSON: `{"engines":{"node":">=20.0.0"}}`, want: "npm ci"},
+		{name: "10.11 range below npm 11", packageJSON: `{"engines":{"npm":">=9.6.4 <11.0.0"}}`, want: "npm exec --yes --package=npm@>=9.6.4 <11.0.0 -- npm ci"},
+		{name: "12.x range", packageJSON: `{"engines":{"npm":">=11.0.0"}}`, want: "npm exec --yes --package=npm@>=11.0.0 -- npm ci"},
+		{name: "alternatives and wildcards", packageJSON: `{"engines":{"npm":"^10.x || >= 11"}}`, want: "npm exec --yes --package=npm@^10.x || >= 11 -- npm ci"},
+		{name: "hyphen range", packageJSON: `{"engines":{"npm":"9.6.4 - 10"}}`, want: "npm exec --yes --package=npm@9.6.4 - 10 -- npm ci"},
+		{name: "rejects latest dist-tag", packageJSON: `{"engines":{"npm":"latest"}}`, wantErr: true},
+		{name: "rejects arbitrary tag", packageJSON: `{"engines":{"npm":"foo"}}`, wantErr: true},
+		{name: "rejects tag among comparators", packageJSON: `{"engines":{"npm":">=11 next"}}`, wantErr: true},
+		{name: "empty alternative", packageJSON: `{"engines":{"npm":">=10 ||"}}`, want: "npm exec --yes --package=npm@>=10 || -- npm ci"},
+		{name: "rejects dangling hyphen", packageJSON: `{"engines":{"npm":"9.6.4 -"}}`, wantErr: true},
+		{name: "rejects file spec", packageJSON: `{"engines":{"npm":"file:../npm"}}`, wantErr: true},
+		{name: "rejects URL spec", packageJSON: `{"engines":{"npm":"https://example.invalid/npm.tgz"}}`, wantErr: true},
+		{name: "rejects malformed package.json", packageJSON: `{`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tt.packageJSON != "" {
+				if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(tt.packageJSON), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			npm, err := webInstallNPMCommand(dir)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("webInstallNPMCommand() = %q, want error", npm.args("ci"))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(npm.args("ci"), " "); got != tt.want {
+				t.Fatalf("npm args = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// Set this to an unmodified upstream checkout to verify the guarded patch
+// against complete source files as well as the small executable excerpts.
+func TestManagedWebSeekPatchUpstreamCheckout(t *testing.T) {
+	upstream := os.Getenv("SILO_TEST_JELLYFIN_WEB_SOURCE")
+	if upstream == "" {
+		t.Skip("SILO_TEST_JELLYFIN_WEB_SOURCE is not set")
+	}
+	root := t.TempDir()
+	for _, path := range []string{webPlaybackManagerSource, webHTMLVideoPlayerSource} {
+		if err := copyFile(filepath.Join(upstream, path), filepath.Join(root, path)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := patchManagedWebSources(root); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestWebComponentStatusMissing(t *testing.T) {
 	root := t.TempDir()
@@ -270,6 +525,30 @@ func TestSelectCompatibleWebVersion(t *testing.T) {
 			want:      "10.11.6",
 		},
 		{
+			name:      "keeps two-part upstream tag form",
+			api:       "12.1.0",
+			available: []string{"12.0", "12.1", "10.11.8"},
+			want:      "12.1",
+		},
+		{
+			name:      "orders two-part and three-part versions numerically",
+			api:       "12.2.0",
+			available: []string{"10.11.8", "12.1", "12.0.1", "12.0"},
+			want:      "12.1",
+		},
+		{
+			name:      "keeps three-part selection with two-part releases present",
+			api:       "10.11.0",
+			available: []string{"12.1", "12.0", "10.11.8", "10.11.6"},
+			want:      "10.11.8",
+		},
+		{
+			name:      "ignores two-part prerelease tags",
+			api:       "12.0.0",
+			available: []string{"12.0-rc7", "10.11.8"},
+			want:      "10.11.8",
+		},
+		{
 			name:      "uses oldest available when all versions are newer",
 			api:       "9.9.0",
 			available: []string{"10.10.1", "10.9.9", "10.11.0"},
@@ -301,6 +580,8 @@ func TestSelectCompatibleWebVersionRejectsInvalidInputs(t *testing.T) {
 
 func TestParseRemoteWebReleaseVersions(t *testing.T) {
 	versions, err := parseRemoteWebReleaseVersions(strings.NewReader(`[
+		{"tag_name":"v12.1","draft":false,"prerelease":false},
+		{"tag_name":"v12.0-rc7","draft":false,"prerelease":true},
 		{"tag_name":"v10.11.6","draft":false,"prerelease":false},
 		{"tag_name":"10.12.0","draft":true,"prerelease":false},
 		{"tag_name":"10.12.1","draft":false,"prerelease":true},
@@ -309,7 +590,7 @@ func TestParseRemoteWebReleaseVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseRemoteWebReleaseVersions: %v", err)
 	}
-	want := []string{"10.11.6"}
+	want := []string{"12.1", "10.11.6"}
 	if len(versions) != len(want) {
 		t.Fatalf("versions = %#v, want %#v", versions, want)
 	}

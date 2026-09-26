@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 func withURLParam(req *http.Request, key, value string) *http.Request {
@@ -39,10 +39,10 @@ func TestArtworkBackendLocksOnceStorageIsRecorded(t *testing.T) {
 	}
 
 	locked := &fakeServerSettingsStore{values: map[string]string{
-		"artwork.storage_backend":       "local",
-		"s3.public_endpoint":            "https://s3.example",
-		"s3.public_bucket":              "artwork",
-		artworkstore.IdentitySettingKey: "local|/var/lib/silo/artwork",
+		"artwork.storage_backend":    "local",
+		"s3.public_endpoint":         "https://s3.example",
+		"s3.public_bucket":           "artwork",
+		blobstore.IdentitySettingKey: "local|/var/lib/silo/artwork",
 	}}
 	h := &AdminHandler{SettingsRepo: locked}
 	for name, rec := range map[string]*httptest.ResponseRecorder{
@@ -63,9 +63,9 @@ func TestArtworkBackendLocksOnceStorageIsRecorded(t *testing.T) {
 	}
 	// The recorded default is auto when the row was never written.
 	defaulted := &fakeServerSettingsStore{values: map[string]string{
-		"s3.public_endpoint":            "https://s3.example",
-		"s3.public_bucket":              "artwork",
-		artworkstore.IdentitySettingKey: "s3|https://s3.example|artwork|",
+		"s3.public_endpoint":         "https://s3.example",
+		"s3.public_bucket":           "artwork",
+		blobstore.IdentitySettingKey: "s3|https://s3.example|artwork|",
 	}}
 	if rec := putOne(&AdminHandler{SettingsRepo: defaulted}, "artwork.storage_backend", "auto"); rec.Code != http.StatusOK {
 		t.Fatalf("auto on an unset locked row: %d %s", rec.Code, rec.Body.String())
@@ -106,8 +106,8 @@ func TestArtworkIdentityFieldsLockOnceStorageIsRecorded(t *testing.T) {
 
 	local := func() *fakeServerSettingsStore {
 		return &fakeServerSettingsStore{values: map[string]string{
-			"artwork.storage_backend":       "local",
-			artworkstore.IdentitySettingKey: "local|/var/lib/silo/artwork",
+			"artwork.storage_backend":    "local",
+			blobstore.IdentitySettingKey: "local|/var/lib/silo/artwork",
 		}}
 	}
 	conflict(t, "local path", putOne(&AdminHandler{SettingsRepo: local()}, "artwork.local_path", "/srv/artwork"))
@@ -117,8 +117,46 @@ func TestArtworkIdentityFieldsLockOnceStorageIsRecorded(t *testing.T) {
 	ok(t, "bucket under explicit local", put(&AdminHandler{SettingsRepo: local()},
 		`{"values":{"s3.public_endpoint":"https://s3.example","s3.public_bucket":"media"}}`))
 
+	// A private bucket owns avatars, diagnostics, and job artifacts on a local
+	// backend too. Adding, changing, or removing one strands what the current
+	// location holds, so it goes through a managed transition.
+	conflict(t, "private bucket under local", put(&AdminHandler{SettingsRepo: local()},
+		`{"values":{"s3.private_endpoint":"https://private-s3.example","s3.private_bucket":"private"}}`))
+	localPrivate := func() *fakeServerSettingsStore {
+		store := local()
+		store.values["s3.private_endpoint"] = "https://private-s3.example"
+		store.values["s3.private_bucket"] = "private"
+		return store
+	}
+	conflict(t, "changed private bucket under local", putOne(&AdminHandler{SettingsRepo: localPrivate()}, "s3.private_bucket", "other-private"))
+	conflict(t, "legacy operational bucket under local", putOne(&AdminHandler{SettingsRepo: local()}, "s3.operational_bucket", "legacy"))
+	ok(t, "private credentials under local", putOne(&AdminHandler{SettingsRepo: localPrivate()}, "s3.private_region", "eu-central-1"))
+	// A leftover endpoint or prefix with no bucket names no location, and a
+	// prefix that normalizes to the same value names the same one.
+	ok(t, "prefix without a bucket", putOne(&AdminHandler{SettingsRepo: local()}, "s3.private_key_prefix", "ops"))
+	withPrefix := localPrivate()
+	withPrefix.values["s3.private_key_prefix"] = "ops"
+	ok(t, "equivalent prefix", putOne(&AdminHandler{SettingsRepo: withPrefix}, "s3.private_key_prefix", "ops/"))
+	conflict(t, "changed prefix", putOne(&AdminHandler{SettingsRepo: localPrivate()}, "s3.private_key_prefix", "other"))
+	// Restyling a value names the same store: host and bucket case do not
+	// matter to S3, here or for the public keys below.
+	ok(t, "private endpoint host case", putOne(&AdminHandler{SettingsRepo: localPrivate()}, "s3.private_endpoint", "https://PRIVATE-S3.example"))
+
+	// A private bucket that holds data locks before any artwork is stored,
+	// while the assets location stays free to choose.
+	privateOnly := func() *fakeServerSettingsStore {
+		return &fakeServerSettingsStore{values: map[string]string{
+			"artwork.storage_backend":               "local",
+			"s3.private_endpoint":                   "https://private-s3.example",
+			"s3.private_bucket":                     "private",
+			blobstore.OperationalIdentitySettingKey: "s3|https://private-s3.example|private|",
+		}}
+	}
+	conflict(t, "recorded private bucket", putOne(&AdminHandler{SettingsRepo: privateOnly()}, "s3.private_bucket", "other-private"))
+	ok(t, "unrecorded assets location", putOne(&AdminHandler{SettingsRepo: privateOnly()}, "artwork.local_path", "/srv/artwork"))
+
 	autoLocal := &fakeServerSettingsStore{values: map[string]string{
-		artworkstore.IdentitySettingKey: "local|/var/lib/silo/artwork",
+		blobstore.IdentitySettingKey: "local|/var/lib/silo/artwork",
 	}}
 	conflict(t, "bucket under auto-local", put(&AdminHandler{SettingsRepo: autoLocal},
 		`{"values":{"s3.public_endpoint":"https://s3.example","s3.public_bucket":"media"}}`))
@@ -128,23 +166,31 @@ func TestArtworkIdentityFieldsLockOnceStorageIsRecorded(t *testing.T) {
 
 	s3 := func() *fakeServerSettingsStore {
 		return &fakeServerSettingsStore{values: map[string]string{
-			"artwork.storage_backend":       "s3",
-			"s3.public_endpoint":            "https://s3.example",
-			"s3.public_bucket":              "artwork",
-			"s3.public_key_prefix":          "cache",
-			artworkstore.IdentitySettingKey: "s3|https://s3.example|artwork|cache",
+			"artwork.storage_backend":    "s3",
+			"s3.public_endpoint":         "https://s3.example",
+			"s3.public_bucket":           "artwork",
+			"s3.public_key_prefix":       "cache",
+			"s3.private_endpoint":        "https://private-s3.example",
+			"s3.private_bucket":          "private",
+			"s3.private_key_prefix":      "operations",
+			blobstore.IdentitySettingKey: "s3|https://s3.example|artwork|cache",
 		}}
 	}
 	for key, value := range map[string]string{
-		"s3.public_endpoint":   "https://other.example",
-		"s3.public_bucket":     "other",
-		"s3.public_key_prefix": "elsewhere",
+		"s3.public_endpoint":    "https://other.example",
+		"s3.public_bucket":      "other",
+		"s3.public_key_prefix":  "elsewhere",
+		"s3.private_endpoint":   "https://other-private.example",
+		"s3.private_bucket":     "other-private",
+		"s3.private_key_prefix": "other-operations",
 	} {
 		conflict(t, key, putOne(&AdminHandler{SettingsRepo: s3()}, key, value))
 	}
 	// The identity does not include credentials or the read endpoint, so
 	// rotating those stays allowed.
 	ok(t, "read endpoint", putOne(&AdminHandler{SettingsRepo: s3()}, "s3.public_read_endpoint", "https://cdn.example"))
+	ok(t, "public endpoint host case", putOne(&AdminHandler{SettingsRepo: s3()}, "s3.public_endpoint", "https://S3.example"))
+	ok(t, "public bucket case", putOne(&AdminHandler{SettingsRepo: s3()}, "s3.public_bucket", "Artwork"))
 	ok(t, "same bucket", put(&AdminHandler{SettingsRepo: s3()},
 		`{"values":{"s3.public_endpoint":"https://s3.example","s3.public_bucket":"artwork","s3.public_key_prefix":"cache"}}`))
 	// Clearing the bucket would resolve the s3 backend to nothing; that is an
@@ -196,8 +242,17 @@ func TestAdminServerStatusReportsArtworkStorageLock(t *testing.T) {
 		var body struct {
 			ArtworkStorage adminArtworkStorageStatus `json:"artwork_storage"`
 		}
-		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
+		}
+		var wire struct {
+			ArtworkStorage map[string]json.RawMessage `json:"artwork_storage"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := wire.ArtworkStorage["status_known"]; ok {
+			t.Fatal("v1 status exposed the v2 storage lock validity field")
 		}
 		return body.ArtworkStorage
 	}
@@ -205,8 +260,23 @@ func TestAdminServerStatusReportsArtworkStorageLock(t *testing.T) {
 	if got := read(fresh); got.Locked || got.Backend != "local" {
 		t.Fatalf("fresh install: %+v", got)
 	}
-	recorded := &AdminHandler{RestartStatus: NewServerRestartStatusTracker(), ArtworkBackend: "s3", SettingsRepo: &fakeServerSettingsStore{values: map[string]string{artworkstore.IdentitySettingKey: "s3|https://s3.example|artwork|"}}}
+	if got := fresh.ReadAdminServerStatus(t.Context()).ArtworkStorage; !got.StatusKnown {
+		t.Fatalf("fresh install lock state unknown: %+v", got)
+	}
+	recorded := &AdminHandler{RestartStatus: NewServerRestartStatusTracker(), ArtworkBackend: "s3", SettingsRepo: &fakeServerSettingsStore{values: map[string]string{blobstore.IdentitySettingKey: "s3|https://s3.example|artwork|"}}}
 	if got := read(recorded); !got.Locked || got.Backend != "s3" {
 		t.Fatalf("recorded storage: %+v", got)
+	}
+	if got := recorded.ReadAdminServerStatus(t.Context()).ArtworkStorage; !got.PrivateLocked || !got.StatusKnown {
+		t.Fatalf("recorded artwork did not lock the private bucket: %+v", got)
+	}
+	// A private bucket that holds data locks only the private location; the
+	// artwork location is still free until the first artwork write.
+	privateOnly := &AdminHandler{RestartStatus: NewServerRestartStatusTracker(), ArtworkBackend: "local", SettingsRepo: &fakeServerSettingsStore{values: map[string]string{blobstore.OperationalIdentitySettingKey: "s3|https://private.example|private|"}}}
+	if got := privateOnly.ReadAdminServerStatus(t.Context()).ArtworkStorage; got.Locked || !got.PrivateLocked {
+		t.Fatalf("private-only recording: %+v", got)
+	}
+	if got := read(privateOnly); got.Locked {
+		t.Fatalf("v1 status reported the artwork location locked: %+v", got)
 	}
 }

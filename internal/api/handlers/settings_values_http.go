@@ -423,7 +423,7 @@ func (h *SettingValuesHandler) observedLanguageSuggestions(
 	if scope, ok := access.GetScope(ctx); ok {
 		filters.LibraryIDs = scope.AllowedLibraryIDs
 		filters.DisabledLibraryIDs = scope.DisabledLibraryIDs
-		filters.MaxContentRating = scope.MaxContentRating
+		filters.MaturityLimits = scope.MaturityLimits
 	}
 	values, err := h.languageSource.ListOriginalLanguages(ctx, filters)
 	if err != nil {

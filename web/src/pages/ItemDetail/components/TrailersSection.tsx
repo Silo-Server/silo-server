@@ -4,6 +4,7 @@ import type { ItemVideo } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { extraKindLabel } from "@/lib/extraKinds";
+import { THEME_MUSIC_INTERRUPT_EVENT } from "@/lib/themeMusic";
 import TrailerModal from "./TrailerModal";
 
 interface TrailersSectionProps {
@@ -42,7 +43,13 @@ export default function TrailersSection({ videos }: TrailersSectionProps) {
           <ul role="list" className="embla__container flex cursor-grab list-none gap-3">
             {playable.map((video) => (
               <li key={`${video.site}-${video.site_key}`} className="embla__slide shrink-0">
-                <TrailerCard video={video} onPlay={() => setActiveVideo(video)} />
+                <TrailerCard
+                  video={video}
+                  onPlay={() => {
+                    document.dispatchEvent(new Event(THEME_MUSIC_INTERRUPT_EVENT));
+                    setActiveVideo(video);
+                  }}
+                />
               </li>
             ))}
           </ul>

@@ -5,11 +5,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PluginCatalogEntry, PluginInstallation } from "@/api/types";
 
+import { pluginStatusIndicator } from "@/lib/pluginStatusIndicator";
+
 import AdminPlugins from "./AdminPlugins";
 
 const useAdminPluginsMock = vi.fn();
 const checkPluginUpdatesMutateMock = vi.fn();
 const updatePluginCatalogSettingsMutateMock = vi.fn();
+const restartPluginInstallationMutateMock = vi.fn();
+let restartPluginInstallationPending = false;
 const capturedButtonProps: Array<Record<string, unknown>> = [];
 const capturedSwitchProps: Array<Record<string, unknown>> = [];
 
@@ -57,6 +61,7 @@ function makeInstallation(index: number, displayName: string): PluginInstallatio
     version: "1.0.0",
     install_path: `/plugins/installed-${suffix}`,
     enabled: true,
+    runtime: { resident: false, state: "stopped", restart_count: 0 },
     source_kind: "silo",
     repository_name: "Silo plugins",
     updates_paused: false,
@@ -131,6 +136,10 @@ vi.mock("@/hooks/queries/admin/plugins", () => ({
   usePluginUpload: () => ({ upload: vi.fn(), progress: null, isPending: false }),
   useUpdatePluginInstallation: () => ({ mutate: vi.fn(), isPending: false }),
   useApplyPluginUpdate: () => ({ mutate: vi.fn(), isPending: false }),
+  useRestartPluginInstallation: () => ({
+    mutate: restartPluginInstallationMutateMock,
+    isPending: restartPluginInstallationPending,
+  }),
   useDeletePluginInstallation: () => ({ mutate: vi.fn(), isPending: false }),
   useSavePluginConfig: () => ({ mutate: vi.fn(), isPending: false }),
   useTestPluginConfig: () => ({ mutate: vi.fn(), isPending: false }),
@@ -148,6 +157,8 @@ describe("AdminPlugins", () => {
     capturedSwitchProps.length = 0;
     checkPluginUpdatesMutateMock.mockReset();
     updatePluginCatalogSettingsMutateMock.mockReset();
+    restartPluginInstallationMutateMock.mockReset();
+    restartPluginInstallationPending = false;
     useAdminPluginsMock.mockReturnValue({
       repositories: [],
       catalog: [],
@@ -155,6 +166,98 @@ describe("AdminPlugins", () => {
       catalogSettings: undefined,
       isLoading: false,
     });
+  });
+
+  it("reads runtime.state for the status dot only when the plugin is resident", () => {
+    const base = makeInstallation(1, "Resident");
+    expect(pluginStatusIndicator(base)).toMatchObject({ dotClass: "bg-success", label: "Active" });
+    expect(
+      pluginStatusIndicator({
+        ...base,
+        runtime: { resident: false, state: "stopped", restart_count: 0 },
+      }),
+    ).toMatchObject({ dotClass: "bg-success", label: "Active" });
+    expect(
+      pluginStatusIndicator({
+        ...base,
+        runtime: { resident: true, state: "running", restart_count: 0 },
+      }),
+    ).toMatchObject({ dotClass: "bg-success", label: "Running" });
+    expect(
+      pluginStatusIndicator({
+        ...base,
+        runtime: { resident: true, state: "backoff", restart_count: 3, last_error: "exited" },
+      }),
+    ).toMatchObject({ dotClass: "bg-warning", label: "Restarting (3)", title: "exited" });
+    expect(
+      pluginStatusIndicator({
+        ...base,
+        runtime: { resident: true, state: "failed", restart_count: 9, last_error: "boom" },
+      }),
+    ).toMatchObject({ dotClass: "bg-destructive", label: "Failed", title: "boom" });
+    expect(
+      pluginStatusIndicator({
+        ...base,
+        enabled: false,
+        runtime: { resident: true, state: "failed", restart_count: 9 },
+      }),
+    ).toMatchObject({ dotClass: "bg-muted-foreground", label: "Inactive" });
+  });
+
+  it("renders the resident runtime state on the installed card", () => {
+    useAdminPluginsMock.mockReturnValue({
+      repositories: [],
+      catalog: [],
+      installations: [
+        {
+          ...makeInstallation(1, "Overlay"),
+          runtime: { resident: true, state: "failed", restart_count: 10, last_error: "exited" },
+        },
+      ],
+      catalogSettings: undefined,
+      isLoading: false,
+    });
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <AdminPlugins />
+      </MemoryRouter>,
+    );
+    expect(markup).toContain("bg-destructive");
+    expect(markup).toContain("Failed");
+    expect(markup).not.toContain(">Active<");
+    const restart = capturedButtonProps.find((props) => props["aria-label"] === "Restart Overlay");
+    expect(restart).toBeDefined();
+    expect(restart?.disabled).toBe(false);
+    (restart?.onClick as () => void)();
+    expect(restartPluginInstallationMutateMock).toHaveBeenCalledWith(1);
+  });
+
+  it.each([
+    { enabled: false, resident: true, pending: false, visible: false },
+    { enabled: true, resident: false, pending: false, visible: false },
+    { enabled: true, resident: true, pending: true, visible: true },
+  ])("only offers restart to enabled residents and waits for the response: %j", (testCase) => {
+    restartPluginInstallationPending = testCase.pending;
+    useAdminPluginsMock.mockReturnValue({
+      repositories: [],
+      catalog: [],
+      installations: [
+        {
+          ...makeInstallation(1, "Overlay"),
+          enabled: testCase.enabled,
+          runtime: { resident: testCase.resident, state: "failed", restart_count: 10 },
+        },
+      ],
+      isLoading: false,
+    });
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <AdminPlugins />
+      </MemoryRouter>,
+    );
+    const restart = capturedButtonProps.find((props) => props["aria-label"] === "Restart Overlay");
+    expect(Boolean(restart)).toBe(testCase.visible);
+    if (restart) expect(restart.disabled).toBe(testCase.pending);
   });
 
   it("starts the shared plugin update check task from the plugins page", () => {
@@ -340,6 +443,7 @@ describe("AdminPlugins", () => {
           version: "0.9.0",
           install_path: "/plugins/example",
           enabled: true,
+          runtime: { resident: false, state: "stopped", restart_count: 0 },
           source_kind: "silo",
           repository_name: "Silo plugins",
           updates_paused: false,

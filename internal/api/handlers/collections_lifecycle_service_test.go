@@ -124,3 +124,23 @@ func TestPersonalCollectionUpdatePreservesNullableGroupAndImportConfig(t *testin
 		t.Fatalf("patch must only clear limit: %#v", cfg)
 	}
 }
+
+func TestPersonalLegacyTraktSourceCannotBeEdited(t *testing.T) {
+	store := &lifecycleStore{collection: userstore.Collection{
+		ID: "c", CreatorProfileID: "owner", AllowedProfileIDs: []string{"owner"},
+		CollectionType: "trakt", SourceConfig: `{"url":"https://trakt.tv/users/example/lists/list"}`,
+	}}
+	h := NewCollectionHandler(lifecycleProvider{store: store})
+	maxItems := 25
+	_, err := h.UpdatePersonalCollection(t.Context(), PersonalCollectionUpdateCommand{
+		UserID: 1, ProfileID: "owner", CollectionID: "c",
+		Request: PersonalCollectionUpdateRequest{MaxItems: &maxItems},
+	})
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Code != "legacy_source_immutable" {
+		t.Fatalf("error = %#v, want legacy_source_immutable", err)
+	}
+	if store.mutations != 0 {
+		t.Fatalf("source edit caused %d mutations", store.mutations)
+	}
+}

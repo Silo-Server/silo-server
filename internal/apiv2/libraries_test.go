@@ -208,9 +208,9 @@ func (f *fakeLibraryAdmin) DeleteRootOverride(_ context.Context, req handlers.Ro
 	return nil
 }
 
-func (f *fakeLibraryAdmin) ListSkippedRoots(_ context.Context, search string, limit, offset int) ([]handlers.SkippedRootView, error) {
+func (f *fakeLibraryAdmin) ListSkippedRoots(_ context.Context, search string, limit, offset int) ([]handlers.SkippedRootView, int, error) {
 	if f.err != nil {
-		return nil, f.err
+		return nil, 0, f.err
 	}
 	all := []handlers.SkippedRootView{{LibraryID: 1, LibraryName: "Movies", RootPath: "/media/movies/Extras", Reason: "no_media_files", SampleFilePath: "/media/movies/Extras/a.txt", FileCount: 3, FirstSeenAt: fixedTime(), LastSeenAt: fixedTime()}}
 	f.lastSearch, f.lastLimit, f.lastOffset = search, limit, offset
@@ -219,12 +219,12 @@ func (f *fakeLibraryAdmin) ListSkippedRoots(_ context.Context, search string, li
 		root.RootPath += strconv.Itoa(i)
 		all = append(all, root)
 	}
-	return all[min(offset, len(all)):min(offset+limit, len(all))], nil
+	return all[min(offset, len(all)):min(offset+limit, len(all))], len(all), nil
 }
 
-func (f *fakeLibraryAdmin) ListStaleIDs(_ context.Context, search string, limit, offset int) ([]handlers.StaleMediaIDView, error) {
+func (f *fakeLibraryAdmin) ListStaleIDs(_ context.Context, search string, limit, offset int) ([]handlers.StaleMediaIDView, int, error) {
 	if f.err != nil {
-		return nil, f.err
+		return nil, 0, f.err
 	}
 	f.lastLimit, f.lastOffset, f.lastSearch = limit, offset, search
 	all := []handlers.StaleMediaIDView{
@@ -245,9 +245,9 @@ func (f *fakeLibraryAdmin) ListStaleIDs(_ context.Context, search string, limit,
 		all = matches
 	}
 	if offset > len(all) {
-		return []handlers.StaleMediaIDView{}, nil
+		return []handlers.StaleMediaIDView{}, len(all), nil
 	}
-	return all[offset:min(offset+limit, len(all))], nil
+	return all[offset:min(offset+limit, len(all))], len(all), nil
 }
 
 func (f *fakeLibraryAdmin) RematchStaleID(_ context.Context, contentID string) error {
@@ -632,11 +632,10 @@ func TestListSkippedRootsAndStaleIDs(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	var body struct {
-		Items []map[string]json.RawMessage `json:"items"`
-	}
+	var body rootPage
 	decodeJSON(t, rec.Body, &body)
-	if len(body.Items) != 1 || string(body.Items[0]["library_id"]) != `"1"` || string(body.Items[0]["first_seen_at"]) != `"2026-01-02T03:04:05.678Z"` || string(body.Items[0]["file_count"]) != `3` {
+	// The total counts every matching root, not only the page.
+	if len(body.Items) != 1 || body.Total != 3 || string(body.Items[0]["library_id"]) != `"1"` || string(body.Items[0]["first_seen_at"]) != `"2026-01-02T03:04:05.678Z"` || string(body.Items[0]["file_count"]) != `3` {
 		t.Fatalf("skipped = %s", rec.Body.String())
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids?limit=2", "", bearer(adminToken))
@@ -646,7 +645,7 @@ func TestListSkippedRootsAndStaleIDs(t *testing.T) {
 	var stale rootPage
 	decodeJSON(t, rec.Body, &stale)
 	// v1 rendered second-precision strings; v2 carries the instants and pages.
-	if len(stale.Items) != 2 || !stale.Page.HasMore || stale.Page.NextCursor == "" || string(stale.Items[0]["provider_id"]) != `"949"` || string(stale.Items[0]["last_seen_at"]) != `"2026-01-02T03:04:05.678Z"` {
+	if len(stale.Items) != 2 || !stale.Page.HasMore || stale.Page.NextCursor == "" || stale.Total != 3 || string(stale.Items[0]["provider_id"]) != `"949"` || string(stale.Items[0]["last_seen_at"]) != `"2026-01-02T03:04:05.678Z"` {
 		t.Fatalf("stale = %s", rec.Body.String())
 	}
 	if fake.lastLimit != 3 || fake.lastOffset != 0 {
@@ -654,7 +653,7 @@ func TestListSkippedRootsAndStaleIDs(t *testing.T) {
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids?limit=2&cursor="+stale.Page.NextCursor, "", bearer(adminToken))
 	decodeJSON(t, rec.Body, &stale)
-	if len(stale.Items) != 1 || stale.Page.HasMore || string(stale.Items[0]["content_id"]) != `"series:lost-2004"` || string(stale.Items[0]["library_id"]) != `"0"` || fake.lastOffset != 2 {
+	if len(stale.Items) != 1 || stale.Page.HasMore || stale.Total != 3 || string(stale.Items[0]["content_id"]) != `"series:lost-2004"` || string(stale.Items[0]["library_id"]) != `"0"` || fake.lastOffset != 2 {
 		t.Fatalf("second stale page = %s (offset %d)", rec.Body.String(), fake.lastOffset)
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids", "", bearer(adminToken))
@@ -735,7 +734,7 @@ func TestDiagnosticsSearchAndSkippedPagination(t *testing.T) {
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids?limit=1&q=%20Lost%20", "", bearer(adminToken))
 	decodeJSON(t, rec.Body, &page)
-	if len(page.Items) != 1 || page.Page.HasMore || fake.lastSearch != "Lost" || string(page.Items[0]["title"]) != `"Lost"` {
+	if len(page.Items) != 1 || page.Page.HasMore || page.Total != 1 || fake.lastSearch != "Lost" || string(page.Items[0]["title"]) != `"Lost"` {
 		t.Fatalf("search beyond first page: %s", rec.Body.String())
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/libraries/stale-ids?limit=1", "", bearer(adminToken))

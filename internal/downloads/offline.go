@@ -90,7 +90,7 @@ func (s *Service) buildBatchManifestRows(ctx context.Context, rows []*Download, 
 			skipped = append(skipped, SkippedManifest{DownloadID: dl.ID, Reason: "revoked"})
 			continue
 		}
-		m, err := s.manifest.build(ctx, dl, filter, seriesCache)
+		m, err := s.manifest.build(ctx, dl, filter, seriesCache, false)
 		if err != nil {
 			reason := "error"
 			if errors.Is(err, catalog.ErrItemNotFound) {

@@ -7,7 +7,9 @@ import {
   useCreateUser,
   useUpdateUser,
   useAdminUserCapabilities,
+  useViewerIsOwner,
 } from "@/hooks/queries/admin/users";
+import { canManageAccount, canViewAsAccount } from "@/lib/accountOwner";
 import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
@@ -16,10 +18,13 @@ import {
   PolicyLimitFields,
   effectiveAccessGroupID,
   policyCreateFields,
+  policyDefaultSource,
   policyInheritHints,
   policyStateFromUser,
   policyUpdateFields,
 } from "@/components/UserPolicyFields";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,6 +58,7 @@ import {
   ChevronDown,
   ChevronUp,
   History,
+  UserRound,
   Plus,
   Pencil,
   Trash2,
@@ -101,6 +107,8 @@ export default function AdminUsers() {
 function AdminUsersPage() {
   const usersQuery = useAdminUsers();
   const { data: users = [], isLoading } = usersQuery;
+  const viewerId = useAuth().user?.id;
+  const viewerIsOwner = useViewerIsOwner(viewerId);
   const capabilities = useAdminUserCapabilities();
   const available = capabilities.data?.available === true;
   const [authority] = useState(captureAdminUserAuthority);
@@ -114,19 +122,34 @@ function AdminUsersPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUserEditor | null>(null);
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<AdminUserEditor | null>(null);
+  const [impersonatingUser, setImpersonatingUser] = useState<AdminUser | null>(null);
   const [search, setSearch] = useState("");
+  // "all", "none" (regular accounts outside every group), or a group id.
+  const [groupFilter, setGroupFilter] = useState("all");
+  const accessGroupsQuery = useAccessGroups();
+  const accessGroups = useMemo(() => accessGroupsQuery.data ?? [], [accessGroupsQuery.data]);
+  const groupNames = useMemo(
+    () => new Map(accessGroups.map((group) => [String(group.id), group.name])),
+    [accessGroups],
+  );
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
   const [sortField, setSortField] = useState<UserSortField>("username");
   const [sortDir, setSortDir] = useState<SortDirection>("asc");
 
   const filteredUsers = useMemo(() => {
-    if (!search) return users;
     const q = search.toLowerCase();
-    return users.filter(
-      (u) => u.username?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q),
-    );
-  }, [users, search]);
+    return users.filter((u) => {
+      if (q && !(u.username?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q))) {
+        return false;
+      }
+      if (groupFilter === "all") return true;
+      // Admin accounts can't join groups, so they only appear under "All groups".
+      if (u.role === "admin") return false;
+      if (groupFilter === "none") return u.access_group_id == null;
+      return String(u.access_group_id) === groupFilter;
+    });
+  }, [users, search, groupFilter]);
 
   const sortedUsers = useMemo(
     () => sortAdminUsers(filteredUsers, sortField, sortDir),
@@ -198,6 +221,14 @@ function AdminUsersPage() {
           initialEditor={confirmDeleteUser}
           onClose={() => setConfirmDeleteUser(null)}
           onDeleted={() => setConfirmDeleteUser(null)}
+        />
+      )}
+      {impersonatingUser && (
+        <AdminUserImpersonationDialog
+          user={impersonatingUser}
+          returnPath="/admin/users"
+          onClose={() => setImpersonatingUser(null)}
+          onError={setActionError}
         />
       )}
       {actionError && <p role="alert">{actionError}</p>}
@@ -278,31 +309,61 @@ function AdminUsersPage() {
           <TabsTrigger value="invite-codes">Invite Codes</TabsTrigger>
         </TabsList>
         <TabsContent value="users" className="pt-4">
-          <div className="relative mb-4">
-            <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
-            <Input
-              placeholder="Search by username or email..."
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(0);
-              }}
-              className="pr-9 pl-9"
-            />
-            {search && (
-              <button
-                type="button"
-                aria-label="Clear search"
-                onClick={() => {
-                  setSearch("");
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row">
+            <div className="relative flex-1">
+              <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+              <Input
+                placeholder="Search by username or email..."
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
                   setPage(0);
                 }}
-                className="text-muted-foreground hover:text-foreground absolute top-1/2 right-3 -translate-y-1/2"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
+                className="pr-9 pl-9"
+              />
+              {search && (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() => {
+                    setSearch("");
+                    setPage(0);
+                  }}
+                  className="text-muted-foreground hover:text-foreground absolute top-1/2 right-3 -translate-y-1/2"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <Select
+              value={groupFilter}
+              onValueChange={(value) => {
+                setGroupFilter(value);
+                setPage(0);
+              }}
+            >
+              <SelectTrigger className="sm:w-56" aria-label="Filter by access group">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All groups</SelectItem>
+                {accessGroups.map((group) => (
+                  <SelectItem key={group.id} value={String(group.id)}>
+                    {group.name}
+                  </SelectItem>
+                ))}
+                <SelectItem value="none">No group</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+          {accessGroupsQuery.isError && (
+            <div role="alert" className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+              Could not load access groups, so group names and group filters are unavailable.
+              <Button variant="outline" size="sm" onClick={() => void accessGroupsQuery.refetch()}>
+                Retry
+              </Button>
+            </div>
+          )}
           <div className="surface-panel overflow-x-auto rounded-2xl border-0">
             <Table>
               <TableHeader>
@@ -331,6 +392,7 @@ function AdminUsersPage() {
                   >
                     Role
                   </SortableUserHead>
+                  <TableHead>Group</TableHead>
                   <SortableUserHead
                     field="enabled"
                     activeField={sortField}
@@ -355,7 +417,7 @@ function AdminUsersPage() {
                   >
                     Last Active
                   </SortableUserHead>
-                  <TableHead className="w-24">Actions</TableHead>
+                  <TableHead className="w-32">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -368,7 +430,26 @@ function AdminUsersPage() {
                     </TableCell>
                     <TableCell>{u.email}</TableCell>
                     <TableCell>
-                      <Badge variant={u.role === "admin" ? "default" : "secondary"}>{u.role}</Badge>
+                      <div className="flex flex-wrap gap-1">
+                        <Badge variant={u.role === "admin" ? "default" : "secondary"}>
+                          {u.role}
+                        </Badge>
+                        {u.is_owner && <Badge variant="outline">Owner</Badge>}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {u.role === "admin" ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : u.access_group_id == null ? (
+                        <span className="text-muted-foreground">No group</span>
+                      ) : (
+                        <Link
+                          to={`/admin/access-groups/${u.access_group_id}`}
+                          className="hover:underline"
+                        >
+                          {groupNames.get(String(u.access_group_id)) ?? "Unknown group"}
+                        </Link>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge variant={u.enabled ? "outline" : "destructive"}>
@@ -382,36 +463,73 @@ function AdminUsersPage() {
                       {formatRelativeTime(u.last_active_at, "Never")}
                     </TableCell>
                     <TableCell>
-                      <div className="flex gap-1">
-                        <Button asChild variant="ghost" size="icon" className="h-7 w-7">
-                          <Link
-                            to={`/admin/history?user_id=${u.id}`}
-                            aria-label={`View ${u.username} playback history`}
-                          >
-                            <History className="h-3 w-3" aria-hidden="true" />
-                          </Link>
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          aria-label={`Edit ${u.username}`}
-                          onClick={() => {
-                            void loadEditor(u);
-                          }}
-                        >
-                          <Pencil className="h-3 w-3" aria-hidden="true" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          aria-label={`Delete ${u.username}`}
-                          onClick={() => handleDelete(u)}
-                        >
-                          <Trash2 className="h-3 w-3" aria-hidden="true" />
-                        </Button>
-                      </div>
+                      <TooltipProvider delayDuration={0}>
+                        <div className="flex gap-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button asChild variant="ghost" size="icon" className="h-7 w-7">
+                                <Link
+                                  to={`/admin/history?user_id=${u.id}`}
+                                  aria-label={`View ${u.username} playback history`}
+                                >
+                                  <History className="h-3 w-3" aria-hidden="true" />
+                                </Link>
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>View playback history</TooltipContent>
+                          </Tooltip>
+                          {available && canViewAsAccount(u, viewerId, viewerIsOwner) && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  aria-label={`View as user: ${u.username}`}
+                                  onClick={() => setImpersonatingUser(u)}
+                                >
+                                  <UserRound className="h-3 w-3" aria-hidden="true" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>View as user</TooltipContent>
+                            </Tooltip>
+                          )}
+                          {canManageAccount(u, viewerId) && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  aria-label={`Edit ${u.username}`}
+                                  onClick={() => {
+                                    void loadEditor(u);
+                                  }}
+                                >
+                                  <Pencil className="h-3 w-3" aria-hidden="true" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Edit user</TooltipContent>
+                            </Tooltip>
+                          )}
+                          {!u.is_owner && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  aria-label={`Delete ${u.username}`}
+                                  onClick={() => handleDelete(u)}
+                                >
+                                  <Trash2 className="h-3 w-3" aria-hidden="true" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Delete user</TooltipContent>
+                            </Tooltip>
+                          )}
+                        </div>
+                      </TooltipProvider>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -641,10 +759,11 @@ function UserForm({
   }
 
   const { data: libraries = [] } = useAdminLibraries();
-  const { data: accessGroups = [] } = useAccessGroups();
+  const { data: accessGroups = [], isSuccess: accessGroupsLoaded } = useAccessGroups();
   const [username, setUsername] = useState(user?.username ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
   const [password, setPassword] = useState("");
+  const [requirePasswordChange, setRequirePasswordChange] = useState(false);
   const [role, setRole] = useState(user?.role ?? "user");
   const [enabled, setEnabled] = useState(user?.enabled ?? true);
   const [permissions, setPermissions] = useState<string[]>(
@@ -656,22 +775,54 @@ function UserForm({
   const usernameId = useId();
   const emailId = useId();
   const passwordId = useId();
+  const requireChangeId = useId();
   const roleId = useId();
   const enabledId = useId();
   const markerEditId = useId();
   const metadataCurationId = useId();
   const maxProfilesId = useId();
+  const accessGroupSelectId = useId();
   const createMutation = useCreateUser();
   const updateMutation = useUpdateUser();
   const isPending = createMutation.isPending || updateMutation.isPending;
-  // This form has no group picker: editing keeps the account's group, while a
-  // new account lands on the default group — except an admin, which the server
-  // deliberately leaves ungrouped (auth.Repository.CreateUser).
+  // The group picker starts on the account's group. A new account, or an admin
+  // being demoted here, starts on the default group (undefined until picked),
+  // which is where the server would place it anyway. An admin stays ungrouped
+  // (auth.Repository create and update), so the picker is disabled for admins.
+  const [pickedGroupID, setPickedGroupID] = useState<number | null | undefined>(
+    user && user.role !== "admin" ? user.access_group_id : undefined,
+  );
   const defaultGroupID = accessGroups.find((group) => group.is_default)?.id ?? null;
-  const inheritGroupID = effectiveAccessGroupID(role, user ? user.access_group_id : defaultGroupID);
-  const inheritHints =
-    policyInheritHints(inheritGroupID, accessGroups) ??
-    (role === "admin" ? undefined : user?.effective_policy);
+  const selectedGroupID = pickedGroupID === undefined ? defaultGroupID : pickedGroupID;
+  const inheritGroupID = effectiveAccessGroupID(role, selectedGroupID);
+  // Until the group list loads, the default group such an account joins is
+  // unknown, and so is what it inherits; it is not the no-group defaults.
+  const awaitingDefaultGroup =
+    pickedGroupID === undefined && role !== "admin" && !accessGroupsLoaded;
+  const hintSource = awaitingDefaultGroup ? "group" : policyDefaultSource(role, inheritGroupID);
+  const inheritHints = awaitingDefaultGroup
+    ? undefined
+    : (policyInheritHints(inheritGroupID, accessGroups) ??
+      (role !== "admin" && user && selectedGroupID === user.access_group_id
+        ? user.effective_policy
+        : undefined));
+  // The group to send: none while the default group is still unknown, so the
+  // server applies its own default instead of an accidental "no group".
+  const groupToSend = awaitingDefaultGroup
+    ? undefined
+    : effectiveAccessGroupID(role, selectedGroupID);
+  const accessGroupValue =
+    awaitingDefaultGroup || role === "admin" || selectedGroupID === null
+      ? "none"
+      : String(selectedGroupID);
+  // Creating an account can't choose "no group": the server treats a missing or
+  // null group alike and places the account in the default group. Offer it only
+  // when editing, or when there is no default group to show instead.
+  const offerNoGroup = Boolean(user) || awaitingDefaultGroup || defaultGroupID === null;
+  const selectedGroupMissing =
+    selectedGroupID !== null &&
+    accessGroupsLoaded &&
+    !accessGroups.some((group) => group.id === selectedGroupID);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -701,10 +852,13 @@ function UserForm({
           max_profiles: maxProfiles,
           ...policyUpdateFields(policy),
         };
-        if (role === "admin") {
-          body.access_group_id = effectiveAccessGroupID(role, user.access_group_id);
+        if (groupToSend !== undefined) {
+          body.access_group_id = groupToSend;
         }
-        if (password) body.password = password;
+        if (password) {
+          body.password = password;
+          if (requirePasswordChange) body.require_password_change = true;
+        }
         await updateMutation.mutateAsync({ editor, body });
         setSaved(true);
         await getAdminUser(user.id, editor.profileContext);
@@ -714,11 +868,13 @@ function UserForm({
           username,
           email,
           password,
+          ...(requirePasswordChange ? { require_password_change: true } : {}),
           role,
           permissions,
           create_default_profile: createDefaultProfile,
           max_profiles: maxProfiles,
           ...policyCreateFields(policy),
+          ...(typeof groupToSend === "number" ? { access_group_id: groupToSend } : {}),
         };
         await createMutation.mutateAsync({ body, profileContext: authority });
         createMutation.reset();
@@ -794,21 +950,42 @@ function UserForm({
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor={passwordId}>
-                  Password {user && "(leave blank to keep current)"}
-                </Label>
-                <Input
-                  id={passwordId}
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required={!user}
-                />
-              </div>
+              {user && !user.password_login ? (
+                <div className="space-y-2">
+                  <Label>Password</Label>
+                  <p className="text-muted-foreground text-xs">
+                    An external sign-in provider manages this account's password.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor={passwordId}>
+                    Password {user && "(leave blank to keep current)"}
+                  </Label>
+                  <Input
+                    id={passwordId}
+                    type="password"
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required={!user}
+                  />
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id={requireChangeId}
+                      checked={requirePasswordChange && password !== ""}
+                      disabled={password === ""}
+                      onCheckedChange={setRequirePasswordChange}
+                    />
+                    <Label htmlFor={requireChangeId} className="text-xs font-normal">
+                      Require change at {user ? "next" : "first"} sign-in
+                    </Label>
+                  </div>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor={roleId}>Role</Label>
-                <Select value={role} onValueChange={setRole}>
+                <Select value={role} onValueChange={setRole} disabled={user?.is_owner}>
                   <SelectTrigger id={roleId}>
                     <SelectValue />
                   </SelectTrigger>
@@ -824,20 +1001,61 @@ function UserForm({
                 <div>
                   <div className="text-sm font-medium">Account status</div>
                   <div className="text-muted-foreground text-xs">
-                    Disable access without deleting the user.
+                    {user.is_owner
+                      ? "The server owner stays an enabled admin."
+                      : "Disable access without deleting the user."}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Label htmlFor={enabledId} className="text-xs">
                     Enabled
                   </Label>
-                  <Switch id={enabledId} checked={enabled} onCheckedChange={setEnabled} />
+                  <Switch
+                    id={enabledId}
+                    checked={enabled}
+                    onCheckedChange={setEnabled}
+                    disabled={user.is_owner}
+                  />
                 </div>
               </div>
             )}
           </TabsContent>
 
           <TabsContent value="access" className="mt-0 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor={accessGroupSelectId}>Group</Label>
+              <Select
+                value={accessGroupValue}
+                onValueChange={(value) => {
+                  setPickedGroupID(value === "none" ? null : Number(value));
+                }}
+                disabled={role === "admin" || awaitingDefaultGroup}
+              >
+                <SelectTrigger id={accessGroupSelectId} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {offerNoGroup && (
+                    <SelectItem value="none">
+                      {awaitingDefaultGroup ? "Default group" : "No group"}
+                    </SelectItem>
+                  )}
+                  {selectedGroupMissing && (
+                    <SelectItem value={String(selectedGroupID)}>#{selectedGroupID}</SelectItem>
+                  )}
+                  {accessGroups.map((group) => (
+                    <SelectItem key={group.id} value={String(group.id)}>
+                      {group.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {role === "admin" && (
+                <p className="text-muted-foreground text-xs">
+                  Admin accounts can&apos;t join groups.
+                </p>
+              )}
+            </div>
             <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
               <div>
                 <Label htmlFor={markerEditId}>Marker Editing</Label>
@@ -875,13 +1093,19 @@ function UserForm({
             <PolicyAccessFields
               state={policy}
               onChange={setPolicy}
+              source={hintSource}
               effective={inheritHints}
               libraries={libraries}
             />
           </TabsContent>
 
           <TabsContent value="limits" className="mt-0 space-y-4">
-            <PolicyLimitFields state={policy} onChange={setPolicy} effective={inheritHints} />
+            <PolicyLimitFields
+              state={policy}
+              onChange={setPolicy}
+              source={hintSource}
+              effective={inheritHints}
+            />
             <div className="space-y-1">
               <Label htmlFor={maxProfilesId}>Max Profiles</Label>
               <Input

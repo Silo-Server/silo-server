@@ -348,6 +348,13 @@ type PolicyConfig struct {
 	DecisionLogRetentionDays   int    `yaml:"-"` // policy decision log retention window
 }
 
+// MarkersConfig holds local marker detection settings.
+type MarkersConfig struct {
+	// DetectionWorkers is how many seasons intro detection analyzes at once,
+	// which also bounds its ffmpeg processes.
+	DetectionWorkers int `yaml:"-"`
+}
+
 // MetadataConfig holds metadata pipeline settings.
 type MetadataConfig struct {
 	CacheImages bool `yaml:"-"`
@@ -378,6 +385,7 @@ type Config struct {
 	Matcher              MatcherConfig              `yaml:"matcher"`
 	Artwork              ArtworkConfig              `yaml:"artwork"`
 	Metadata             MetadataConfig             `yaml:"-"`
+	Markers              MarkersConfig              `yaml:"-"`
 	Playback             PlaybackConfig             `yaml:"playback"`
 	Redis                RedisConfig                `yaml:"redis"`
 	RateLimit            RateLimitConfig            `yaml:"rate_limiting"`
@@ -451,8 +459,8 @@ func EffectiveDownloadArtifactDir(artifactDir, transcodeDir string) string {
 	return filepath.Join(filepath.Dir(filepath.Clean(transcodeDir)), "silo-download-artifacts")
 }
 
-const DefaultJellyfinCompatEmulatedServerVersion = "10.12.0"
-const DefaultJellyfinWebVersion = "10.11.6"
+const DefaultJellyfinCompatEmulatedServerVersion = "12.1.0"
+const DefaultJellyfinWebVersion = "12.1"
 const DefaultJellyfinWebInstallDir = "/var/lib/silo/compat/jellyfin-web"
 const DefaultJellyfinWebDir = DefaultJellyfinWebInstallDir + "/current"
 

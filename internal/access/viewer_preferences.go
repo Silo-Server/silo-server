@@ -16,76 +16,48 @@ import (
 
 // ViewerPreferences are the canonical preferences needed while constructing
 // an access scope. They are resolved together because this path runs on nearly
-// every authenticated request and one candidate read can answer both keys.
+// every authenticated request and one candidate read can answer every key.
 type ViewerPreferences struct {
 	DisabledLibraryIDs        []int
 	PreferredMetadataLanguage string
 	MetadataLanguageOverrides map[string]string
+	// NextUpMode is ui.next_up_mode. It rides along so home-section requests
+	// can read it from the resolved scope instead of resolving it again.
+	NextUpMode string
 }
 
 // ResolveViewerPreferences resolves the profile's viewer-scope preferences in
-// one canonical store read. The legacy disabled_library_ids account setting is
-// consulted only when no canonical row decided that value.
+// one canonical store read. Every key it reads is profile-scoped, so a request
+// without a profile has none and costs no read. A failed read degrades to the
+// contract defaults: hidden libraries are a browsing preference, not an access
+// control.
 func ResolveViewerPreferences(
 	ctx context.Context, store userstore.UserStore, profileID string,
 ) ViewerPreferences {
 	profileID = strings.TrimSpace(profileID)
-	if store == nil {
+	if store == nil || profileID == "" {
 		return ViewerPreferences{}
 	}
-	if profileID == "" {
-		return ViewerPreferences{DisabledLibraryIDs: legacyDisabledLibraryIDs(ctx, store)}
-	}
 
-	resolved, ok := resolveCanonicalViewerPreferences(ctx, store, profileID)
-	if !ok || !resolved.disabledLibraryIDsSet {
-		resolved.preferences.DisabledLibraryIDs = legacyDisabledLibraryIDs(ctx, store)
+	preferences, err := ResolveViewerPreferencesStrict(ctx, store, profileID)
+	if err != nil {
+		slog.WarnContext(ctx, "viewer preference resolution degraded", "component", "access", "profile_id", profileID, "error", err)
+		return ViewerPreferences{}
 	}
-	return resolved.preferences
+	return preferences
 }
 
 // ViewerPreferenceReader is the bounded settings read needed by viewer policy.
 type ViewerPreferenceReader interface {
 	settingsresolve.Store
-	GetSetting(context.Context, string) (string, error)
 }
 
 // ResolveViewerPreferencesStrict retains canonical precedence but propagates
 // dependency failures instead of weakening authority through a fallback.
 func ResolveViewerPreferencesStrict(ctx context.Context, store ViewerPreferenceReader, profileID string) (ViewerPreferences, error) {
-	resolved, err := canonicalViewerPreferencesStrict(ctx, store, profileID)
-	if err != nil {
-		return ViewerPreferences{}, err
-	}
-	if !resolved.disabledLibraryIDsSet {
-		raw, err := store.GetSetting(ctx, settingKeyDisabledLibraryIDs)
-		if err != nil {
-			return ViewerPreferences{}, err
-		}
-		resolved.preferences.DisabledLibraryIDs = parseLibraryIDList(json.RawMessage(raw))
-	}
-	return resolved.preferences, nil
-}
-
-type canonicalViewerPreferences struct {
-	preferences           ViewerPreferences
-	disabledLibraryIDsSet bool
-}
-
-func resolveCanonicalViewerPreferences(
-	ctx context.Context, store userstore.UserStore, profileID string,
-) (canonicalViewerPreferences, bool) {
-	out, err := canonicalViewerPreferencesStrict(ctx, store, profileID)
-	if err != nil {
-		slog.WarnContext(ctx, "viewer preference resolution degraded", "component", "access", "profile_id", profileID, "error", err)
-		return canonicalViewerPreferences{}, false
-	}
-	return out, true
-}
-func canonicalViewerPreferencesStrict(ctx context.Context, store ViewerPreferenceReader, profileID string) (canonicalViewerPreferences, error) {
 	contract, err := settingscontract.Load()
 	if err != nil {
-		return canonicalViewerPreferences{}, err
+		return ViewerPreferences{}, err
 	}
 	values, err := settingsresolve.New(contract).Resolve(ctx, store,
 		settingsresolve.Context{ProfileID: profileID},
@@ -93,26 +65,29 @@ func canonicalViewerPreferencesStrict(ctx context.Context, store ViewerPreferenc
 			settingskeys.UiDisabledLibraryIds,
 			settingskeys.CatalogMetadataLanguage,
 			settingskeys.CatalogMetadataLanguageOverrides,
+			settingskeys.UiNextUpMode,
 		}, nil)
 	if err != nil {
-		return canonicalViewerPreferences{}, err
+		return ViewerPreferences{}, err
 	}
 
-	var out canonicalViewerPreferences
+	var out ViewerPreferences
 	for _, value := range values {
 		switch value.Key {
 		case settingskeys.UiDisabledLibraryIds:
-			out.disabledLibraryIDsSet = value.Source != settingscontract.ScopeDefault
-			if out.disabledLibraryIDsSet {
-				out.preferences.DisabledLibraryIDs = parseLibraryIDList(value.Value)
-			}
+			out.DisabledLibraryIDs = parseLibraryIDList(value.Value)
 		case settingskeys.CatalogMetadataLanguage:
 			var language string
 			if json.Unmarshal(value.Value, &language) == nil {
-				out.preferences.PreferredMetadataLanguage = strings.TrimSpace(language)
+				out.PreferredMetadataLanguage = strings.TrimSpace(language)
 			}
 		case settingskeys.CatalogMetadataLanguageOverrides:
-			out.preferences.MetadataLanguageOverrides = parseMetadataLanguageOverrides(value.Value)
+			out.MetadataLanguageOverrides = parseMetadataLanguageOverrides(value.Value)
+		case settingskeys.UiNextUpMode:
+			var mode string
+			if json.Unmarshal(value.Value, &mode) == nil {
+				out.NextUpMode = strings.TrimSpace(mode)
+			}
 		}
 	}
 	return out, nil
@@ -161,12 +136,4 @@ func parseMetadataLanguageOverrides(raw json.RawMessage) map[string]string {
 		return nil
 	}
 	return out
-}
-
-func legacyDisabledLibraryIDs(ctx context.Context, store userstore.UserStore) []int {
-	raw, err := store.GetSetting(ctx, settingKeyDisabledLibraryIDs)
-	if err != nil || raw == "" {
-		return nil
-	}
-	return parseLibraryIDList(json.RawMessage(raw))
 }

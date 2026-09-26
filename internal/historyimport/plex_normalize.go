@@ -15,9 +15,10 @@ func NormalizePlexItem(item PlexItem, series *PlexItem) Record {
 		PlayCount:       item.ViewCount,
 		PositionSeconds: float64(item.ViewOffset) / 1000,
 		DurationSeconds: float64(item.Duration) / 1000,
-		UpdatedAt:       time.Now().UTC(),
 	}
 
+	// Without a source timestamp UpdatedAt stays zero, which the import treats
+	// as older than any local activity instead of overwriting newer progress.
 	if item.LastViewedAt > 0 {
 		t := time.Unix(item.LastViewedAt, 0).UTC()
 		record.LastPlayedAt = &t
@@ -79,7 +80,6 @@ func NormalizePlexHistoryItem(item PlexHistoryItem, series *PlexItem) Record {
 		Played:          true,
 		PlayCount:       1,
 		DurationSeconds: float64(item.Duration) / 1000,
-		UpdatedAt:       time.Now().UTC(),
 	}
 
 	if item.ViewedAt > 0 {
@@ -112,23 +112,49 @@ func NormalizePlexHistoryItem(item PlexHistoryItem, series *PlexItem) Record {
 	return record
 }
 
+// plexLegacyAgentProviders maps the pre-2020 Plex metadata agents, which
+// long-lived libraries still use, to their id providers. Their items carry no
+// Guid array, only one guid such as "com.plexapp.agents.imdb://tt0133093?lang=en".
+var plexLegacyAgentProviders = map[string]string{
+	"com.plexapp.agents.imdb":       plexGuidIMDb,
+	"com.plexapp.agents.themoviedb": plexGuidTMDB,
+	"com.plexapp.agents.thetvdb":    plexGuidTVDB,
+}
+
+// Plex Guid provider prefixes, as in "tmdb://603".
+const (
+	plexGuidIMDb = "imdb"
+	plexGuidTMDB = "tmdb"
+	plexGuidTVDB = "tvdb"
+)
+
 func ParsePlexGuids(guids PlexGuids, imdbID, tmdbID, tvdbID *string) {
 	for _, g := range guids {
 		provider, value, ok := strings.Cut(g.ID, "://")
 		if !ok {
 			continue
 		}
+		provider = strings.ToLower(provider)
+		if legacy, ok := plexLegacyAgentProviders[provider]; ok {
+			provider = legacy
+			value, _, _ = strings.Cut(value, "?")
+			// Legacy episode guids read "{series}/{season}/{episode}": the id names
+			// the series, so it cannot identify the episode itself.
+			if strings.Contains(value, "/") {
+				continue
+			}
+		}
 		value = strings.TrimSpace(value)
-		switch strings.ToLower(provider) {
-		case "imdb":
+		switch provider {
+		case plexGuidIMDb:
 			if *imdbID == "" {
 				*imdbID = value
 			}
-		case "tmdb":
+		case plexGuidTMDB:
 			if *tmdbID == "" {
 				*tmdbID = value
 			}
-		case "tvdb":
+		case plexGuidTVDB:
 			if *tvdbID == "" {
 				*tvdbID = value
 			}
@@ -180,12 +206,22 @@ func overlayMissingPlexGuids(existing, metadata PlexGuids) PlexGuids {
 
 // plexUnresolvedIDsWarning is the shared wording for a best-effort id sweep that left
 // some items without a matchable identity. firstErr, when set, names the first upstream
-// failure so a systematic cause (auth, wrong URL) is visible in the run summary.
-func plexUnresolvedIDsWarning(scope, noun string, unresolved, attempted int, firstErr error) string {
-	msg := fmt.Sprintf("%s: could not resolve external ids for %d of %d %s; those items will remain unmatched",
-		scope, unresolved, attempted, noun)
+// failure so a systematic cause (auth, wrong URL) is visible in the run summary, and
+// aborted says the sweep stopped early rather than asking about every item.
+func plexUnresolvedIDsWarning(scope, noun string, unresolved, attempted int, firstErr error, aborted bool) string {
+	msg := fmt.Sprintf("%s: could not resolve external ids for %d of %d %s; those items will remain unmatched%s",
+		scope, unresolved, attempted, noun, plexSweepAbortedSuffix(aborted))
 	if firstErr != nil {
 		msg += fmt.Sprintf(" (first error: %v)", firstErr)
 	}
 	return msg
+}
+
+// plexSweepAbortedSuffix names the early stop in a run warning so the reader knows
+// the unresolved count came from giving up, not from Plex answering about every item.
+func plexSweepAbortedSuffix(aborted bool) string {
+	if !aborted {
+		return ""
+	}
+	return ", and the lookup stopped early after repeated server errors"
 }

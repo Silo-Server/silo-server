@@ -55,6 +55,15 @@ type ManualOnlyTask interface {
 	ManualOnly() bool
 }
 
+// LibraryScopedTask marks a task whose work exists only for one kind of
+// library. ListRelevantTasks omits it while no library of that kind exists; it
+// still runs on schedule and stays in ListTasks and reachable by key.
+type LibraryScopedTask interface {
+	// ServesLibrary reports whether a library with this media_folders.type
+	// gives the task work.
+	ServesLibrary(libraryType string) bool
+}
+
 // ProgressReporter allows tasks to report progress and result data during execution.
 type ProgressReporter interface {
 	Report(percent float64, message string)

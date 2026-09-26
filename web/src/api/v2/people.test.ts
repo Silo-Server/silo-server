@@ -27,13 +27,13 @@ describe("people on the v2 contract", () => {
     vi.unstubAllGlobals();
   });
 
-  it("searches people and returns the page's numeric ids", async () => {
+  it("searches people and preserves string ids", async () => {
     const fetchMock = stubFetch(listPeopleOk);
 
     const people = await searchPeople("al", 5);
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/api/v2/catalog/people?q=al&limit=5");
-    expect(people).toEqual([{ ...listPeopleOk.items[0], id: 7 }]);
+    expect(people).toEqual([{ ...listPeopleOk.items[0], id: "7" }]);
   });
 
   it("reads one person", async () => {
@@ -42,8 +42,28 @@ describe("people on the v2 contract", () => {
     const person = await getPerson("7");
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/api/v2/catalog/people/7");
-    expect(person.id).toBe(7);
+    expect(person.id).toBe("7");
     expect(person.name).toBe("Al Pacino");
+  });
+
+  it("sends the selected media scope with the people query", async () => {
+    const fetchMock = stubFetch(listPeopleOk);
+    await searchPeople("al", 5, { mediaScope: "video" });
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]), "http://localhost");
+    expect(url.searchParams.get("media_scope")).toBe("video");
+    expect(url.searchParams.get("q")).toBe("al");
+  });
+
+  it("preserves IDs larger than JavaScript's safe integer range across search and detail", async () => {
+    const person = { ...getPersonOk, id: "137101642343383042" };
+    const fetchMock = stubFetch({ ...listPeopleOk, items: [person] });
+    const [match] = await searchPeople("Al Pacino");
+    expect(match?.id).toBe(person.id);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(person));
+    const detail = await getPerson(String(match!.id));
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(`/api/v2/catalog/people/${person.id}`);
+    expect(detail.id).toBe(person.id);
   });
 
   it("queues a refresh and surfaces the accepted body", async () => {

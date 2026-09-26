@@ -3,13 +3,18 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 // fakeHistoryImports answers the history-imports seams from memory.
@@ -215,6 +220,35 @@ func TestCreateHistoryImportRun(t *testing.T) {
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body" || p.Errors[0].Detail != "plex_session_id or source_id is required for Plex imports" {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
+	// Clients that show only the problem detail still say what to fix.
+	if p.Detail != "plex_session_id or source_id is required for Plex imports" {
+		t.Fatalf("detail = %q", p.Detail)
+	}
+	fake.createErr = upstreamAPIError(t, http.StatusUnauthorized)
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"emby","source_id":"1","username":"alice"}`, bearer(memberToken)), TypeValidationFailed)
+	if p.Detail != historyimport.RunErrorSourceRejected {
+		t.Fatalf("rejected credential detail = %q", p.Detail)
+	}
+	fake.createErr = fmt.Errorf("%w: dial tcp: connection refused", historyimport.ErrSourceUnreachable)
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"emby","source_id":"1","username":"alice"}`, bearer(memberToken)), TypeDependencyUnavailable)
+	if p.Detail != historyImportUnreachableMessage {
+		t.Fatalf("unreachable detail = %q", p.Detail)
+	}
+	fake.createErr = fmt.Errorf("%w: choose a server and enter the Emby username", historyimport.ErrInvalidInput)
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"emby","source_id":"1"}`, bearer(memberToken)), TypeValidationFailed)
+	if p.Detail != "Choose a server and enter the Emby username." || len(p.Errors) != 1 || p.Errors[0].Detail != p.Detail {
+		t.Fatalf("invalid input problem = %+v", p)
+	}
+	// A server address the outbound guard refused names the fix, whether it
+	// arrives raw or through the v1 seam's mapping.
+	refusedDial := &url.Error{Op: "Post", URL: "http://192.168.1.10:8096/Users/AuthenticateByName", Err: &net.OpError{Op: "dial", Net: "tcp", Err: netguard.ErrPrivateDestination}}
+	for _, refused := range []error{refusedDial, &handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: historyimport.PrivateAddressMessage}} {
+		fake.createErr = refused
+		p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"jellyfin"}`, bearer(memberToken)), TypeValidationFailed)
+		if p.Detail != historyimport.PrivateAddressMessage || len(p.Errors) != 1 || p.Errors[0].Detail != p.Detail {
+			t.Fatalf("refused address problem = %+v", p)
+		}
+	}
 	fake.createErr = &handlers.APIError{Status: http.StatusConflict, Code: "conflict", Message: historyimport.ErrActiveRunExists.Error()}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"plex"}`, bearer(memberToken)), TypeConflict)
 	fake.createErr = &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: historyimport.ErrProfileNotFound.Error()}
@@ -320,5 +354,50 @@ func TestHistoryImportDemoGuard(t *testing.T) {
 	}
 	if r := do(t, h, http.MethodPost, Prefix+"/history-imports/plex/auth/pin", "", bearer(adminToken)); r.Code != 200 || fake.pinCalls != 1 {
 		t.Fatalf("admin demo write: %d %s", r.Code, r.Body)
+	}
+}
+
+func TestHistoryImportRunShowsSafeSummaries(t *testing.T) {
+	run := historyImportRunOf(&historyimport.Run{
+		ID:           "run-3",
+		Status:       historyimport.RunStatusFailed,
+		ErrorMessage: historyimport.RunErrorStoppedEarly,
+		Warnings: []string{
+			"unmatched items (2): missing tmdb_id, imdb_id, or tvdb_id",
+			"fetching Emby favorites: emby http 500: <html>internal stack</html>",
+			"pq: relation user_favorites does not exist",
+		},
+		UnmatchedSamples: []historyimport.UnmatchedSample{{Kind: "movie", Title: "Blade Runner 2049", Reason: `no tmdb_id match for "335984"`}},
+	})
+	if run.ErrorMessage != historyimport.RunErrorStoppedEarly {
+		t.Fatalf("error message = %q, want the user-facing run error", run.ErrorMessage)
+	}
+	want := []string{
+		"Not matched (2): The source item has no TMDB, IMDb, or TVDB ID.",
+		"Emby favorites couldn't be read, so none were imported.",
+		historyimport.GenericRunWarning,
+	}
+	if !slices.Equal(run.Warnings, want) {
+		t.Fatalf("warnings = %q, want %q", run.Warnings, want)
+	}
+	if got := run.UnmatchedSamples[0].Reason; got != "Nothing in the library has the same TMDB, IMDb, or TVDB ID." {
+		t.Fatalf("unmatched reason = %q", got)
+	}
+}
+
+// seamError mirrors the v1 seam's *handlers.APIError: its text is the v1
+// decision and the service error is only reachable by unwrapping.
+type seamError struct{ cause error }
+
+func (e seamError) Error() string { return "internal_error: History import request failed" }
+func (e seamError) Unwrap() error { return e.cause }
+
+func TestHistoryImportInputMessage(t *testing.T) {
+	invalid := fmt.Errorf("%w: choose a server and enter the Emby username", historyimport.ErrInvalidInput)
+	if got := historyImportInputMessage(seamError{invalid}); got != "Choose a server and enter the Emby username." {
+		t.Fatalf("message through the seam = %q", got)
+	}
+	if got := historyImportInputMessage(fmt.Errorf("%w: base_url must be an http or https URL", historyimport.ErrInvalidInput)); got != "base_url must be an http or https URL." {
+		t.Fatalf("field-name message = %q", got)
 	}
 }

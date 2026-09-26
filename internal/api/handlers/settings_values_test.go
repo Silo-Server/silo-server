@@ -2096,7 +2096,7 @@ func TestObservedLanguageSuggestionsIncludesAccessibleOriginalLanguages(t *testi
 	req = req.WithContext(access.SetScope(req.Context(), access.Scope{
 		AllowedLibraryIDs:  []int{4, 9},
 		DisabledLibraryIDs: []int{12},
-		MaxContentRating:   "PG-13",
+		MaturityLimits:     access.MaturityLimits{MaxContentRating: "PG-13"},
 	}))
 	observed := handler.observedLanguageSuggestions(req.Context(), []settingsresolve.Effective{{
 		Key: settingskeys.CatalogMetadataLanguage,

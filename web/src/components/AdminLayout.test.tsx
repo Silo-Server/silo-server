@@ -105,6 +105,18 @@ describe("AdminLayout search shortcut hint", () => {
   });
 });
 
+describe("AdminLayout shell attribute", () => {
+  it("publishes data-admin-shell for exactly its own lifetime", () => {
+    // app.css resolves `--app-sidebar-offset` to this shell's 240px sidebar
+    // only while the attribute is present, so the audiobook MiniBar clears the
+    // admin navigation instead of painting over its bottom edge.
+    const { unmount } = renderAdmin();
+    expect(document.documentElement).toHaveAttribute("data-admin-shell", "true");
+    unmount();
+    expect(document.documentElement).not.toHaveAttribute("data-admin-shell");
+  });
+});
+
 describe("AdminLayout restart banner", () => {
   it("stays quiet while no restart is owed", () => {
     mocks.useAdminServerStatus.mockReturnValue({ data: { restart_required: false } });

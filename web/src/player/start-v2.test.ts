@@ -70,6 +70,30 @@ afterEach(() => {
 });
 
 describe("startPlaybackV2", () => {
+  it("requires advertised support before starting playback with a fixed version", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(json(capabilities));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(
+      startPlaybackV2(config, {
+        ...fixtureStartRequestV3(),
+        allow_alternate_versions: false,
+      }),
+    ).rejects.toThrow("same version");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the fixed version constraint when the server supports it", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        json({ ...capabilities, features: [...capabilities.features, "fixed_media_file_v1"] }),
+      )
+      .mockResolvedValueOnce(json(wireDecision(), 201));
+    vi.stubGlobal("fetch", fetcher);
+    await startPlaybackV2(config, { ...fixtureStartRequestV3(), allow_alternate_versions: false });
+    expect(JSON.parse(fetcher.mock.calls[1]![1].body).allow_alternate_versions).toBe(false);
+  });
+
   it("reads capabilities once, sends installation_id and string file_id, and registers the session", async () => {
     const fetcher = vi
       .fn()

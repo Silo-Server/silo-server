@@ -41,11 +41,11 @@ func (r *viewerDeleteRepo) DeleteDownloadedSubtitleWithRevision(_ context.Contex
 }
 
 type viewerDeleteObjects struct {
-	handlerMockS3Client
+	handlerMockBlobStore
 	deleted int
 }
 
-func (s *viewerDeleteObjects) DeleteObject(context.Context, string, string) error {
+func (s *viewerDeleteObjects) Delete(context.Context, string) error {
 	s.deleted++
 	return nil
 }
@@ -56,7 +56,7 @@ func TestViewerSubtitleDeletionAuthorityAndCAS(t *testing.T) {
 			repo := &viewerDeleteRepo{handlerMockSubtitleRepo: newMockSubtitleRepoForHandler()}
 			repo.subtitles[9] = &subtitles.DownloadedSubtitle{ID: 9, MediaFileID: 42, DownloadedBy: new(1), Revision: 3, S3Key: "owned"}
 			objects := new(viewerDeleteObjects)
-			h := NewSubtitleSearchHandler(subtitles.NewManager(repo, objects, "fixture"), repo, nil)
+			h := NewSubtitleSearchHandler(subtitles.NewManager(repo, objects), repo, nil)
 			checker := stubItemAccessChecker{}
 			if kind == "denied_file" || kind == "admin_denied_file" {
 				checker.err = catalog.ErrItemNotFound

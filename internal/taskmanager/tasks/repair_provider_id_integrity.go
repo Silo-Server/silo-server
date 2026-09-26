@@ -52,7 +52,7 @@ func (t *RepairProviderIDIntegrityTask) Description() string {
 func (t *RepairProviderIDIntegrityTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategorySystem
 }
-func (t *RepairProviderIDIntegrityTask) IsHidden() bool { return false }
+func (t *RepairProviderIDIntegrityTask) IsHidden() bool { return true }
 
 func (t *RepairProviderIDIntegrityTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeStartup}}

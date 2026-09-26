@@ -13,6 +13,8 @@ interface SubtitleSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubtitleDownloaded: () => void;
+  /** False hides the online-search section; manual upload stays available. */
+  onlineSearchEnabled?: boolean;
 }
 
 interface ProviderInfo {
@@ -39,6 +41,7 @@ export function SubtitleSearchModal({
   isOpen,
   onClose,
   onSubtitleDownloaded,
+  onlineSearchEnabled = true,
 }: SubtitleSearchModalProps) {
   const [selectedLang, setSelectedLang] = useState("en");
   const [results, setResults] = useState<SubtitleResult[]>([]);
@@ -69,10 +72,21 @@ export function SubtitleSearchModal({
     previousActiveElementRef.current = document.activeElement as HTMLElement;
     // Delay to allow the modal to render before focusing.
     const timer = setTimeout(() => {
-      searchInputRef.current?.focus();
+      // Without online search there is no search input; keep focus in the modal.
+      (searchInputRef.current ?? modalRef.current?.querySelector<HTMLElement>("button"))?.focus();
     }, 0);
     return () => clearTimeout(timer);
   }, [isOpen]);
+
+  // The provider probe can resolve after the modal opened. If it hides online
+  // search, the focused language select unmounts; keep focus inside the modal.
+  useEffect(() => {
+    if (!isOpen || onlineSearchEnabled) return;
+    const modal = modalRef.current;
+    if (modal && !modal.contains(document.activeElement)) {
+      modal.querySelector<HTMLElement>("button")?.focus();
+    }
+  }, [isOpen, onlineSearchEnabled]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -274,34 +288,38 @@ export function SubtitleSearchModal({
           defaultLanguage={selectedLang}
         />
 
-        <div className="border-b border-white/10 px-4 py-2">
-          <p className="text-xs font-medium text-white/60">Search online</p>
-        </div>
+        {onlineSearchEnabled && (
+          <div className="border-b border-white/10 px-4 py-2">
+            <p className="text-xs font-medium text-white/60">Search online</p>
+          </div>
+        )}
 
         {/* Search controls */}
-        <div className="flex gap-2 px-4 py-3">
-          <select
-            ref={searchInputRef}
-            aria-label="Language"
-            className="flex-1 rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
-            value={selectedLang}
-            onChange={(e) => setSelectedLang(e.target.value)}
-          >
-            {LANGUAGES.map((lang) => (
-              <option key={lang.code} value={lang.code}>
-                {lang.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="rounded bg-white/10 px-3 py-1.5 text-sm font-medium hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
-            onClick={handleSearch}
-            disabled={searching}
-          >
-            {searching ? "Searching\u2026" : "Search"}
-          </button>
-        </div>
+        {onlineSearchEnabled && (
+          <div className="flex gap-2 px-4 py-3">
+            <select
+              ref={searchInputRef}
+              aria-label="Language"
+              className="flex-1 rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+              value={selectedLang}
+              onChange={(e) => setSelectedLang(e.target.value)}
+            >
+              {LANGUAGES.map((lang) => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="rounded bg-white/10 px-3 py-1.5 text-sm font-medium hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
+              onClick={handleSearch}
+              disabled={searching}
+            >
+              {searching ? "Searching\u2026" : "Search"}
+            </button>
+          </div>
+        )}
 
         {/* Error */}
         {error && (
@@ -325,75 +343,77 @@ export function SubtitleSearchModal({
         )}
 
         {/* Results */}
-        <div className="max-h-[60vh] overflow-y-auto px-4 pb-4">
-          {results.length === 0 && !searching && !error && (
-            <p className="py-6 text-center text-xs text-white/40">
-              Select a language and press Search.
-            </p>
-          )}
+        {onlineSearchEnabled && (
+          <div className="max-h-[60vh] overflow-y-auto px-4 pb-4">
+            {results.length === 0 && !searching && !error && (
+              <p className="py-6 text-center text-xs text-white/40">
+                Select a language and press Search.
+              </p>
+            )}
 
-          {results.map((result) => {
-            const key = `${result.provider}:${result.id}`;
-            const isDownloading = downloading === key;
-            const info = providerInfo[result.provider];
+            {results.map((result) => {
+              const key = `${result.provider}:${result.id}`;
+              const isDownloading = downloading === key;
+              const info = providerInfo[result.provider];
 
-            return (
-              <button
-                key={key}
-                type="button"
-                className="mb-1.5 flex w-full items-center gap-2 rounded bg-white/5 px-3 py-2 text-left hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
-                onClick={() => handleDownload(result)}
-                disabled={downloading !== null}
-              >
-                {/* Score badge */}
-                <span
-                  className="shrink-0 rounded px-1.5 py-0.5 text-xs font-bold tabular-nums"
-                  style={{
-                    backgroundColor: `${scoreColor(result.score)}22`,
-                    color: scoreColor(result.score),
-                    border: `1px solid ${scoreColor(result.score)}55`,
-                  }}
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className="mb-1.5 flex w-full items-center gap-2 rounded bg-white/5 px-3 py-2 text-left hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
+                  onClick={() => handleDownload(result)}
+                  disabled={downloading !== null}
                 >
-                  {result.score}
-                </span>
-
-                {/* Release name */}
-                <span className="min-w-0 flex-1 truncate text-xs">{result.release_name}</span>
-
-                {/* HI badge */}
-                {result.hearing_impaired && (
-                  <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-[10px] text-white/60">
-                    HI
+                  {/* Score badge */}
+                  <span
+                    className="shrink-0 rounded px-1.5 py-0.5 text-xs font-bold tabular-nums"
+                    style={{
+                      backgroundColor: `${scoreColor(result.score)}22`,
+                      color: scoreColor(result.score),
+                      border: `1px solid ${scoreColor(result.score)}55`,
+                    }}
+                  >
+                    {result.score}
                   </span>
-                )}
 
-                {/* Download count */}
-                <span className="shrink-0 text-[10px] text-white/40">
-                  ↓{result.downloads.toLocaleString()}
-                </span>
+                  {/* Release name */}
+                  <span className="min-w-0 flex-1 truncate text-xs">{result.release_name}</span>
 
-                {/* Provider badge */}
-                <span
-                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
-                  style={{
-                    backgroundColor: `${info?.color ?? "#6b7280"}22`,
-                    color: info?.color ?? "#9ca3af",
-                    border: `1px solid ${info?.color ?? "#6b7280"}55`,
-                  }}
-                >
-                  {info?.abbr ?? result.provider}
-                </span>
+                  {/* HI badge */}
+                  {result.hearing_impaired && (
+                    <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-[10px] text-white/60">
+                      HI
+                    </span>
+                  )}
 
-                {/* Download spinner */}
-                {isDownloading && (
-                  <span className="shrink-0 text-xs text-white/60" aria-label="Downloading">
-                    ⟳
+                  {/* Download count */}
+                  <span className="shrink-0 text-[10px] text-white/40">
+                    ↓{result.downloads.toLocaleString()}
                   </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+
+                  {/* Provider badge */}
+                  <span
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                    style={{
+                      backgroundColor: `${info?.color ?? "#6b7280"}22`,
+                      color: info?.color ?? "#9ca3af",
+                      border: `1px solid ${info?.color ?? "#6b7280"}55`,
+                    }}
+                  >
+                    {info?.abbr ?? result.provider}
+                  </span>
+
+                  {/* Download spinner */}
+                  {isDownloading && (
+                    <span className="shrink-0 text-xs text-white/60" aria-label="Downloading">
+                      ⟳
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

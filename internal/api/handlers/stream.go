@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -26,9 +27,11 @@ import (
 )
 
 const (
-	subtitleFormatASS = "ass"
-	subtitleFormatSSA = "ssa"
-	subtitleFormatSUP = "sup"
+	subtitleFormatASS  = "ass"
+	subtitleFormatSSA  = "ssa"
+	subtitleFormatSUP  = "sup"
+	subtitleFormatSRT  = "srt"
+	subtitleMIMESubRip = "application/x-subrip"
 )
 
 // FilePathResolver looks up a media file by its ID.
@@ -75,8 +78,7 @@ type StreamHandler struct {
 	// (tests / minimal setups) — extraction then always streams uncached.
 	SubtitleCache *playback.SubtitleCache
 	SubtitleRepo  subtitles.Repository // optional; enables S3-sourced subtitles
-	S3Client      subtitles.S3Client   // optional; needed for fetching S3 subtitles
-	S3Bucket      string               // bucket for subtitle storage
+	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
 }
 
 // ffmpegPath returns the currently configured ffmpeg binary path.
@@ -219,6 +221,11 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case playback.PlayRemux:
+		if setter, ok := h.sessionMgr.(interface {
+			SetOutputFormat(string, string, string) error
+		}); ok {
+			_ = setter.SetOutputFormat(sessionID, playback.OutputContainerFMP4, playback.OutputProtocolHTTP)
+		}
 		if err := h.sessionMgr.BeginTransport(sessionID); err == nil {
 			defer func() {
 				_ = h.sessionMgr.EndTransport(sessionID)
@@ -366,7 +373,7 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "bad_request", "Invalid downloaded subtitle identity")
 			return
 		}
-		if h.SubtitleRepo == nil || h.S3Client == nil {
+		if h.SubtitleRepo == nil || h.SubtitleBlobs == nil {
 			writeError(w, http.StatusNotFound, "not_found", "Subtitle track not found")
 			return
 		}
@@ -385,7 +392,7 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.Method == http.MethodHead {
-			writeSubtitleRepresentationHead(w, requestedFormat)
+			writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, servesOriginalSubRip(r, string(downloaded.Format), requestedFormat)))
 			return
 		}
 		h.serveDownloadedSubtitle(w, r, *downloaded, requestedFormat)
@@ -400,11 +407,22 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.Method == http.MethodHead {
-			writeSubtitleRepresentationHead(w, requestedFormat)
+			writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, servesOriginalSubRip(r, sub.Format, requestedFormat)))
 			return
 		}
 
-		// Serve ASS/SSA external subtitles as raw data for client-side rendering.
+		// Serve ASS/SSA external subtitles as raw data for client-side
+		// rendering, and SRT the same way when the URL asks for .srt.
+		if servesOriginalSubRip(r, sub.Format, requestedFormat) {
+			data, err := playback.LoadExternalSubtitleRaw(sub.Path)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error",
+					"Failed to load external subtitle")
+				return
+			}
+			serveOriginalSubRip(w, data)
+			return
+		}
 		if playback.IsASS(sub.Format) && requestedFormat != "vtt" {
 			data, err := playback.LoadExternalSubtitleRaw(sub.Path)
 			if err != nil {
@@ -445,7 +463,8 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.Method == http.MethodHead && requestedFormat != subtitleFormatSUP {
-			writeSubtitleRepresentationHead(w, requestedFormat)
+			// Embedded text streams as WebVTT whatever the extension.
+			writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, false))
 			return
 		}
 
@@ -458,8 +477,8 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check downloaded subtitles (from S3).
-	if h.SubtitleRepo != nil && h.S3Client != nil {
+	// Check downloaded subtitles (from blob storage).
+	if h.SubtitleRepo != nil && h.SubtitleBlobs != nil {
 		downloaded, err := h.SubtitleRepo.ListDownloadedSubtitles(r.Context(), file.ID)
 		if err != nil {
 			// A DB failure here must not masquerade as "track not found":
@@ -478,7 +497,7 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		downloadedIndex := embeddedIndex - len(file.SubtitleTracks)
 		if downloadedIndex >= 0 && downloadedIndex < len(downloaded) {
 			if r.Method == http.MethodHead {
-				writeSubtitleRepresentationHead(w, requestedFormat)
+				writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, servesOriginalSubRip(r, string(downloaded[downloadedIndex].Format), requestedFormat)))
 				return
 			}
 			h.serveDownloadedSubtitle(w, r, downloaded[downloadedIndex], requestedFormat)
@@ -495,13 +514,18 @@ func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.R
 			"Requested subtitle extension does not match the selected track")
 		return
 	}
-	data, err := h.S3Client.GetObject(r.Context(), h.S3Bucket, subtitle.S3Key)
+	data, err := h.SubtitleBlobs.Get(r.Context(), subtitle.S3Key)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "s3_error", "Failed to load subtitle from storage")
 		return
 	}
 
-	// Serve ASS/SSA downloaded subtitles as raw data.
+	// Serve ASS/SSA downloaded subtitles as raw data, and SRT the same way
+	// when the URL asks for .srt.
+	if servesOriginalSubRip(r, string(subtitle.Format), requestedFormat) {
+		serveOriginalSubRip(w, data)
+		return
+	}
 	if playback.IsASS(string(subtitle.Format)) && requestedFormat != "vtt" {
 		playback.ServeSubtitle(w, data, subtitleFormatASS)
 		return
@@ -544,10 +568,49 @@ func subtitleSidecarFormatSupported(codec, requestedFormat string, embeddedPGS b
 	return true
 }
 
+// servesOriginalSubRip reports whether a sidecar request is answered with the
+// original SRT bytes: only a SubRip track requested through /api/v2 as .srt
+// with original=1, which is the URL subrip_sidecar_v1 publishes. Every other
+// request for a SubRip track, including any on the frozen /api/v1 route, keeps
+// the historical WebVTT response.
+func servesOriginalSubRip(r *http.Request, codec, requestedFormat string) bool {
+	return playback.IsSubRip(codec) &&
+		strings.EqualFold(strings.TrimSpace(requestedFormat), subtitleFormatSRT) &&
+		r.URL.Query().Get(playback.SubtitleOriginalParamV3) == "1" &&
+		isNativeAPIV2(r.Context())
+}
+
+// serveOriginalSubRip writes stored SRT bytes as they are. SRT declares no
+// encoding, so the response claims UTF-8 only when the bytes are valid UTF-8;
+// a legacy-encoded file is labeled without a charset rather than mislabeled.
+func serveOriginalSubRip(w http.ResponseWriter, data []byte) {
+	contentType := subtitleMIMESubRip
+	if utf8.Valid(data) {
+		contentType += "; charset=utf-8"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.WriteHeader(http.StatusOK)
+	w.Write(data) //nolint:errcheck
+}
+
+// subtitleRepresentationFormat names the representation a GET would serve, so
+// a HEAD reports the same content type: a .srt request that is not answered
+// with the original SRT is answered with WebVTT.
+func subtitleRepresentationFormat(requestedFormat string, servesOriginalSRT bool) string {
+	if strings.EqualFold(strings.TrimSpace(requestedFormat), subtitleFormatSRT) && !servesOriginalSRT {
+		return "vtt"
+	}
+	return requestedFormat
+}
+
 func writeSubtitleRepresentationHead(w http.ResponseWriter, requestedFormat string) {
 	switch strings.ToLower(strings.TrimSpace(requestedFormat)) {
 	case subtitleFormatASS, subtitleFormatSSA:
 		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
+	case subtitleFormatSRT:
+		// HEAD does not read the stored bytes, so it cannot vouch for UTF-8.
+		w.Header().Set("Content-Type", subtitleMIMESubRip)
 	case subtitleFormatSUP:
 		w.Header().Set("Content-Type", "application/octet-stream")
 	default:

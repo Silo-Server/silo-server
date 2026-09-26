@@ -19,7 +19,7 @@ func TestUpdateProfile(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"id":"p-owner","name":"Laura","avatar":"preset:fox","avatar_url":"/avatars/presets/fox.png","avatar_source":"preset","has_pin":false,"is_child":false,"is_primary":true,"max_content_rating":"","quality_preference":"auto","language":"en","preferred_metadata_language":"","subtitle_language":"","subtitle_mode":"auto","auto_skip_intro":true,"auto_skip_credits":false,"auto_skip_recap":false,"auto_play_next_preview":false,"show_forced_subtitles":false,"library_restrictions_enabled":false,"allowed_library_ids":["3"],"max_playback_quality":"1080p","created_at":"2026-01-02T03:04:05.000Z","updated_at":"2026-01-02T03:04:05.000Z"}` + "\n"
+	want := `{"id":"p-owner","name":"Laura","avatar":"preset:fox","avatar_url":"/avatars/presets/fox.png","avatar_source":"preset","has_pin":false,"is_child":false,"is_primary":true,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"quality_preference":"auto","language":"en","preferred_metadata_language":"","subtitle_language":"","subtitle_mode":"auto","auto_skip_intro":true,"auto_skip_credits":false,"auto_skip_recap":false,"auto_play_next_preview":false,"show_forced_subtitles":false,"library_restrictions_enabled":false,"allowed_library_ids":["3"],"max_playback_quality":"1080p","created_at":"2026-01-02T03:04:05.000Z","updated_at":"2026-01-02T03:04:05.000Z"}` + "\n"
 	if rec.Body.String() != want {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
@@ -248,7 +248,7 @@ func TestListProfiles(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"items":[{"id":"p-owner","name":"Laura","avatar":"preset:fox","avatar_url":"/avatars/presets/fox.png","avatar_source":"preset","has_pin":false,"is_child":false,"is_primary":true,"max_content_rating":"","quality_preference":"auto","language":"en","preferred_metadata_language":"","subtitle_language":"","subtitle_mode":"auto","auto_skip_intro":true,"auto_skip_credits":false,"auto_skip_recap":false,"auto_play_next_preview":false,"show_forced_subtitles":false,"library_restrictions_enabled":false,"allowed_library_ids":["3"],"max_playback_quality":"1080p","created_at":"2026-01-02T03:04:05.000Z","updated_at":"2026-01-02T03:04:05.000Z"}],"avatar_upload_enabled":true}` + "\n"
+	want := `{"items":[{"id":"p-owner","name":"Laura","avatar":"preset:fox","avatar_url":"/avatars/presets/fox.png","avatar_source":"preset","has_pin":false,"is_child":false,"is_primary":true,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"quality_preference":"auto","language":"en","preferred_metadata_language":"","subtitle_language":"","subtitle_mode":"auto","auto_skip_intro":true,"auto_skip_credits":false,"auto_skip_recap":false,"auto_play_next_preview":false,"show_forced_subtitles":false,"library_restrictions_enabled":false,"allowed_library_ids":["3"],"max_playback_quality":"1080p","created_at":"2026-01-02T03:04:05.000Z","updated_at":"2026-01-02T03:04:05.000Z"}],"avatar_upload_enabled":true,"max_advisory_age_supported":true,"require_advisory_age_supported":true}` + "\n"
 	if rec.Body.String() != want {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
@@ -625,4 +625,100 @@ func TestDeleteProfileAvatar(t *testing.T) {
 	unwired := pilotDeps(nil, nil)
 	unwired.Profiles = nil
 	requireProblem(t, do(t, newTestHandler(t, unwired), http.MethodDelete, "/api/v2/profiles/p-owner/avatar", "", bearer(memberToken)), TypeDependencyUnavailable)
+}
+
+// max_advisory_age follows the Patch contract: omitted leaves the limit alone,
+// null clears it (0 in the v1 request), and a value sets it. The response
+// renders a stored limit as a number and "no limit" as null.
+func TestProfileAdvisoryAgeLimit(t *testing.T) {
+	view := fixtureProfileView()
+	view.MaxAdvisoryAge = 12
+	profiles := &fakeProfiles{view: view}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
+	auth := bearer(memberToken)
+
+	rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"is_child":true}`, auth)
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	if got := profiles.last.Request.MaxAdvisoryAge; got != nil {
+		t.Fatalf("omitted max_advisory_age reached the store as %d", *got)
+	}
+	if !strings.Contains(rec.Body.String(), `"max_advisory_age":12,`) {
+		t.Fatalf("stored limit not rendered: %s", rec.Body.String())
+	}
+
+	rec = do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"max_advisory_age":null}`, auth)
+	if got := profiles.last.Request.MaxAdvisoryAge; rec.Code != 200 || got == nil || *got != 0 {
+		t.Fatalf("null: %d, request %v", rec.Code, got)
+	}
+
+	rec = do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"max_advisory_age":10}`, auth)
+	if got := profiles.last.Request.MaxAdvisoryAge; rec.Code != 200 || got == nil || *got != 10 {
+		t.Fatalf("value: %d, request %v", rec.Code, got)
+	}
+
+	for _, body := range []string{`{"max_advisory_age":0}`, `{"max_advisory_age":22}`, `{"max_advisory_age":"12"}`, `{"max_advisory_age":12.5}`} {
+		p := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", body, auth), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "body.max_advisory_age" {
+			t.Errorf("%s: errors = %+v", body, p.Errors)
+		}
+	}
+
+	rec = do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid","max_advisory_age":9}`, with(auth, "X-Profile-Id", "p-owner"))
+	if rec.Code != 201 || profiles.lastCreate.Request.MaxAdvisoryAge != 9 {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, body := range []string{`{"name":"Kid","max_advisory_age":null}`, `{"name":"Kid","max_advisory_age":0}`} {
+		p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/profiles", body, auth), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "body.max_advisory_age" {
+			t.Errorf("%s: errors = %+v", body, p.Errors)
+		}
+	}
+}
+
+// require_advisory_age is a plain optional boolean: omitted leaves it alone, a
+// value sets it, and null is rejected rather than read as false, because it is
+// not a clearing member. The response always carries it.
+func TestProfileRequireAdvisoryAge(t *testing.T) {
+	view := fixtureProfileView()
+	view.MaxAdvisoryAge = 10
+	view.RequireAdvisoryAge = true
+	profiles := &fakeProfiles{view: view}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
+	auth := bearer(memberToken)
+
+	rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"is_child":true}`, auth)
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	if got := profiles.last.Request.RequireAdvisoryAge; got != nil {
+		t.Fatalf("omitted require_advisory_age reached the store as %v", *got)
+	}
+	if !strings.Contains(rec.Body.String(), `"require_advisory_age":true,`) {
+		t.Fatalf("stored flag not rendered: %s", rec.Body.String())
+	}
+
+	for _, want := range []bool{false, true} {
+		body := `{"require_advisory_age":false}`
+		if want {
+			body = `{"require_advisory_age":true}`
+		}
+		rec = do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", body, auth)
+		if got := profiles.last.Request.RequireAdvisoryAge; rec.Code != 200 || got == nil || *got != want {
+			t.Fatalf("%s: %d, request %v", body, rec.Code, got)
+		}
+	}
+
+	for _, body := range []string{`{"require_advisory_age":null}`, `{"require_advisory_age":"true"}`} {
+		p := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", body, auth), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "body.require_advisory_age" {
+			t.Errorf("%s: errors = %+v", body, p.Errors)
+		}
+	}
+
+	rec = do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid","max_advisory_age":8,"require_advisory_age":true}`, with(auth, "X-Profile-Id", "p-owner"))
+	if rec.Code != 201 || !profiles.lastCreate.Request.RequireAdvisoryAge || profiles.lastCreate.Request.MaxAdvisoryAge != 8 {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
 }

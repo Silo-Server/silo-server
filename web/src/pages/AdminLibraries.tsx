@@ -37,6 +37,7 @@ import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { buildLibraryReorderEntries } from "./adminLibraryOrder";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import { LibraryEditorDialog } from "@/components/admin/libraries/LibraryEditorDialog";
+import { LibraryRefreshDialog } from "@/components/admin/libraries/LibraryRefreshDialog";
 import { MetadataMatcherQueuesSection } from "@/components/admin/libraries/MetadataMatcherQueuesSection";
 import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDiagnosticsSection";
 import { Button } from "@/components/ui/button";
@@ -171,6 +172,7 @@ export default function AdminLibraries() {
   const [editingLib, setEditingLib] = useState<Library | null>(null);
   const [confirmDeleteLib, setConfirmDeleteLib] = useState<Library | null>(null);
   const [confirmEmptyRootLib, setConfirmEmptyRootLib] = useState<Library | null>(null);
+  const [refreshLib, setRefreshLib] = useState<Library | null>(null);
   const [lastMountCheckByLibraryId, setLastMountCheckByLibraryId] = useState<
     Record<number, LibraryMountCheckResponse>
   >({});
@@ -406,6 +408,22 @@ export default function AdminLibraries() {
               true
             }
           />
+          <LibraryRefreshDialog
+            libraryName={refreshLib?.name ?? null}
+            onOpenChange={(open) => {
+              // Keep the dialog up until the queued request settles.
+              if (!open && !refreshMutation.isPending) setRefreshLib(null);
+            }}
+            isPending={refreshMutation.isPending}
+            onConfirm={(mode) => {
+              if (!refreshLib) return;
+              const id = refreshLib.id;
+              refreshMutation.mutate(
+                { id, mode },
+                { onSettled: () => setRefreshLib((open) => (open?.id === id ? null : open)) },
+              );
+            }}
+          />
         </div>
       </div>
 
@@ -451,7 +469,7 @@ export default function AdminLibraries() {
                       ).length;
                       const queuedLibraryScans = activeLibraryScans.length - runningLibraryScans;
                       const isRefreshStarting =
-                        refreshMutation.isPending && refreshMutation.variables === lib.id;
+                        refreshMutation.isPending && refreshMutation.variables?.id === lib.id;
                       const isCheckingMount =
                         mountCheckMutation.isPending && mountCheckMutation.variables === lib.id;
                       const mountCheck = lastMountCheckByLibraryId[lib.id];
@@ -502,6 +520,9 @@ export default function AdminLibraries() {
                                 ) : null}
                                 {lib.scan_warning_code === "dead_root" ? (
                                   <Badge variant="destructive">Root unreachable</Badge>
+                                ) : null}
+                                {lib.scan_warning_code === "partial_walk" ? (
+                                  <Badge variant="destructive">Partial scan</Badge>
                                 ) : null}
                               </div>
                             </TableCell>
@@ -577,7 +598,7 @@ export default function AdminLibraries() {
                                       cancelAdminJobMutation.mutate(activeRefreshJob.id);
                                       return;
                                     }
-                                    refreshMutation.mutate(lib.id);
+                                    setRefreshLib(lib);
                                   }}
                                 >
                                   {activeRefreshJob ? (
@@ -674,9 +695,25 @@ export default function AdminLibraries() {
                       .filter(
                         (lib) =>
                           lib.scan_warning_code === "empty_root" ||
-                          lib.scan_warning_code === "dead_root",
+                          lib.scan_warning_code === "dead_root" ||
+                          lib.scan_warning_code === "partial_walk",
                       )
                       .map((lib) => {
+                        if (lib.scan_warning_code === "partial_walk") {
+                          return (
+                            <TableRow key={`${lib.id}-warning`}>
+                              <TableCell colSpan={7} className="bg-destructive/5 text-sm">
+                                <div className="flex flex-col gap-2 py-1">
+                                  <div className="text-destructive font-medium">Partial scan</div>
+                                  <div className="text-muted-foreground">
+                                    {lib.scan_warning_message ??
+                                      "Some paths could not be read. Run another scan after storage is available."}
+                                  </div>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        }
                         const mountCheck = lastMountCheckByLibraryId[lib.id];
                         const isCheckingMount =
                           mountCheckMutation.isPending && mountCheckMutation.variables === lib.id;
@@ -1408,6 +1445,10 @@ function useSort<K extends string>(defaultField: K, defaultDir: SortDir = "desc"
 
 /* ─── Skipped Roots (Troubleshooting) ───────────────────────────── */
 
+/**
+ * AmbiguousRootsSection displays scanner roots that require manual resolution,
+ * handling loading, confirmed empty, populated warning, and error states.
+ */
 function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
   const [open, setOpen] = useState(false);
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | undefined>(libraries[0]?.id);
@@ -1422,6 +1463,7 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
   // search term restarts paging from the first page.
   const {
     data: rootPages,
+    isError,
     hasNextPage,
     fetchNextPage,
     isFetchingNextPage,
@@ -1431,6 +1473,13 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
   });
   const roots = useMemo(() => flattenLibraryRoots(rootPages), [rootPages]);
   const totalRoots = rootPages?.pages[0]?.total ?? 0;
+  // Until the first page arrives for the selected library and search, the
+  // count is unknown: the query is disabled while collapsed, so a missing
+  // page must not read as a confirmed zero. A failure after a page loaded
+  // (a later page or a refetch) keeps showing what already loaded.
+  const loadFailed = rootPages === undefined && isError;
+  const countUnknown = rootPages === undefined && !isError;
+  const isWarning = totalRoots > 0;
 
   const pag = usePagination(roots);
 
@@ -1442,8 +1491,20 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
     <CollapsibleDiagnosticsSection
       title="Ambiguous Roots"
       description="Scanner roots that stay visible but do not enter unattended metadata matching."
-      count={totalRoots}
-      icon={<FolderOpen className="h-4 w-4 text-amber-500" />}
+      count={countUnknown ? undefined : totalRoots}
+      isError={loadFailed}
+      icon={
+        loadFailed ? (
+          <AlertTriangle className="text-destructive h-4 w-4" />
+        ) : (
+          <FolderOpen
+            className={cn("h-4 w-4", isWarning ? "text-amber-500" : "text-muted-foreground")}
+          />
+        )
+      }
+      iconClassName={
+        loadFailed ? "bg-destructive/10" : isWarning ? "bg-amber-500/10" : "bg-muted/50"
+      }
       open={open}
       onOpenChange={setOpen}
     >
@@ -1494,10 +1555,24 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {roots.length === 0 ? (
+            {loadFailed ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-destructive text-center text-sm">
+                  Failed to load ambiguous roots for this library.
+                </TableCell>
+              </TableRow>
+            ) : countUnknown ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
-                  No ambiguous roots for this library.
+                  Loading ambiguous roots for this library.
+                </TableCell>
+              </TableRow>
+            ) : roots.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
+                  {debouncedSearch.trim()
+                    ? "No ambiguous roots match your filter."
+                    : "No ambiguous roots for this library."}
                 </TableCell>
               </TableRow>
             ) : (
@@ -1800,7 +1875,7 @@ function SkippedRootsSection() {
     <CollapsibleDiagnosticsSection
       title="Troubleshooting"
       description="Roots where the inferred canonical folder lacks embedded provider IDs."
-      count={skippedRoots.length}
+      count={data?.pages[0]?.total}
       icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
       open={open}
       onOpenChange={setOpen}
@@ -2140,7 +2215,7 @@ function StaleIDsSection() {
     <CollapsibleDiagnosticsSection
       title="Stale External IDs"
       description="Provider IDs no longer resolve; metadata refresh will fail until re-matched. Most recently seen first."
-      count={staleIDs.length}
+      count={stalePages?.pages[0]?.total}
       icon={<Unlink className="h-4 w-4 text-red-400" />}
       iconClassName="bg-red-500/10"
       open={open}

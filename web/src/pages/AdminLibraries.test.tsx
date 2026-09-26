@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -125,6 +126,51 @@ const renderPage = () => {
   );
 };
 
+const renderInteractivePage = () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <AdminLibraries />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+};
+
+// Radix Select opens through pointer capture, which jsdom lacks.
+if (typeof window !== "undefined" && !window.HTMLElement.prototype.hasPointerCapture) {
+  window.HTMLElement.prototype.hasPointerCapture = () => false;
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+}
+
+const ambiguousRoot = (libraryId: number) => ({
+  library_id: libraryId,
+  library_name: "Movies",
+  root_path: "/media/movies/Inception (2010)",
+  state: "ambiguous",
+  inferred_type: "movie",
+  type_confidence: "low",
+  title: "Inception",
+  year: 2010,
+  observed_file_count: 1,
+  sample_file_path: "/media/movies/Inception (2010)/Inception (2010).mkv",
+  first_seen_at: "2026-03-23T20:00:00Z",
+  last_seen_at: "2026-03-23T21:00:00Z",
+});
+
+const libraryRootsResult = (roots: unknown[]) => ({
+  data: { pageParams: [undefined], pages: [{ total: roots.length, nextCursor: undefined, roots }] },
+  isError: false,
+  hasNextPage: false,
+  isFetchingNextPage: false,
+  fetchNextPage: vi.fn(),
+});
+
+// The Ambiguous Roots header: its first child holds the severity icon, and
+// the rest of its text is the title, description, and count indicator.
+const ambiguousRootsHeader = () => screen.getByRole("button", { name: /Ambiguous Roots/ });
+const ambiguousRootsIconBox = () => ambiguousRootsHeader().firstElementChild as HTMLElement;
+
 describe("AdminLibraries", () => {
   afterEach(cleanup);
   beforeEach(() => {
@@ -228,6 +274,33 @@ describe("AdminLibraries", () => {
     );
   });
 
+  it("shows the partial-walk failure count without offering cleanup", () => {
+    mocks.useAdminLibraries.mockReturnValue({
+      data: [
+        {
+          id: 2,
+          name: "Ebooks",
+          paths: ["/media/ebooks"],
+          type: "ebooks",
+          enabled: true,
+          last_scanned_at: null,
+          scan_warning_code: "partial_walk",
+          scan_warning_at: null,
+          scan_warning_message:
+            "Scan could not read or resolve 3 paths; some files were not scanned.",
+        },
+      ],
+      isLoading: false,
+    });
+
+    const markup = renderPage();
+
+    expect(markup).toContain("Partial scan");
+    expect(markup).toContain("Scan could not read or resolve 3 paths");
+    expect(markup).not.toContain("Confirm Cleanup");
+    expect(markup).not.toContain("Confirm Empty-Root Cleanup");
+  });
+
   it("offers confirmed cleanup for a suspect-empty dead-root warning", () => {
     mocks.useAdminLibraries.mockReturnValue({
       data: [
@@ -284,10 +357,11 @@ describe("AdminLibraries", () => {
       fetchNextPage: vi.fn(),
     });
 
-    const markup = renderPage();
+    renderInteractivePage();
 
-    expect(markup).toContain("Ambiguous Roots");
-    expect(markup).toContain("Scanner roots that stay visible");
+    expect(ambiguousRootsHeader()).toHaveTextContent("1");
+    expect(ambiguousRootsIconBox()).toHaveClass("bg-amber-500/10");
+    expect(ambiguousRootsIconBox().querySelector("svg")).toHaveClass("text-amber-500");
   });
 
   it("shows metadata matcher pending and parked counts", () => {
@@ -355,14 +429,130 @@ describe("AdminLibraries", () => {
     expect(markup).toContain("Entire library");
   });
 
-  it("renders the collapsed Ambiguous Roots section when no roots exist", () => {
+  it("shows an unknown count, not a zero, before Ambiguous Roots has loaded", () => {
     // The roots query is disabled while the section is collapsed, so the
     // default mock has no data. The section itself still renders because it
-    // is gated on libraries.length.
-    const markup = renderPage();
+    // is gated on libraries.length, and the missing page is not a confirmed zero.
+    renderInteractivePage();
 
-    expect(markup).toContain("Ambiguous Roots");
-    expect(markup).toContain("Scanner roots that stay visible");
+    expect(mocks.useLibraryRoots).toHaveBeenLastCalledWith(1, "ambiguous", {
+      enabled: false,
+      search: "",
+    });
+    expect(ambiguousRootsHeader()).toHaveTextContent("Count not loaded");
+    expect(ambiguousRootsHeader()).not.toHaveTextContent(/\b0\b/);
+    expect(ambiguousRootsIconBox()).toHaveClass("bg-muted/50");
+  });
+
+  it("renders a loading row, not an empty result, while Ambiguous Roots loads", () => {
+    renderInteractivePage();
+
+    fireEvent.click(ambiguousRootsHeader());
+
+    expect(mocks.useLibraryRoots).toHaveBeenLastCalledWith(1, "ambiguous", {
+      enabled: true,
+      search: "",
+    });
+    expect(screen.getByText("Loading ambiguous roots for this library.")).toBeInTheDocument();
+    expect(screen.queryByText("No ambiguous roots for this library.")).toBeNull();
+  });
+
+  it("renders a confirmed empty Ambiguous Roots result with neutral styling", () => {
+    mocks.useLibraryRoots.mockReturnValue(libraryRootsResult([]));
+
+    renderInteractivePage();
+
+    expect(ambiguousRootsHeader()).toHaveTextContent("0");
+    expect(ambiguousRootsHeader()).not.toHaveTextContent("Count not loaded");
+    expect(ambiguousRootsIconBox()).toHaveClass("bg-muted/50");
+    expect(ambiguousRootsIconBox().querySelector("svg")).not.toHaveClass("text-amber-500");
+
+    fireEvent.click(ambiguousRootsHeader());
+
+    expect(screen.getByText("No ambiguous roots for this library.")).toBeInTheDocument();
+  });
+
+  it("renders an error state when Ambiguous Roots fails to load", () => {
+    mocks.useLibraryRoots.mockReturnValue({
+      ...libraryRootsResult([]),
+      data: undefined,
+      isError: true,
+    });
+
+    renderInteractivePage();
+
+    expect(ambiguousRootsHeader()).toHaveTextContent("Error loading count");
+    expect(ambiguousRootsIconBox()).toHaveClass("bg-destructive/10");
+
+    fireEvent.click(ambiguousRootsHeader());
+
+    expect(
+      screen.getByText("Failed to load ambiguous roots for this library."),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps loaded Ambiguous Roots visible when a later page fails", () => {
+    mocks.useLibraryRoots.mockReturnValue({
+      ...libraryRootsResult([ambiguousRoot(1)]),
+      isError: true,
+    });
+
+    renderInteractivePage();
+    fireEvent.click(ambiguousRootsHeader());
+
+    expect(ambiguousRootsHeader()).toHaveTextContent("1");
+    expect(screen.getByText("/media/movies/Inception (2010)")).toBeInTheDocument();
+    expect(screen.queryByText("Failed to load ambiguous roots for this library.")).toBeNull();
+  });
+
+  it("queries and styles Ambiguous Roots per selected library", async () => {
+    mocks.useAdminLibraries.mockReturnValue({
+      data: [
+        {
+          id: 1,
+          name: "Movies",
+          paths: ["/media/movies"],
+          type: "movies",
+          enabled: true,
+          last_scanned_at: null,
+          scan_warning_code: null,
+          scan_warning_at: null,
+          scan_warning_message: null,
+        },
+        {
+          id: 42,
+          name: "Television",
+          paths: ["/media/tv"],
+          type: "tv",
+          enabled: true,
+          last_scanned_at: null,
+          scan_warning_code: null,
+          scan_warning_at: null,
+          scan_warning_message: null,
+        },
+      ],
+      isLoading: false,
+    });
+    mocks.useLibraryRoots.mockImplementation((libraryId: number) =>
+      libraryId === 42 ? libraryRootsResult([ambiguousRoot(42)]) : libraryRootsResult([]),
+    );
+
+    renderInteractivePage();
+    fireEvent.click(ambiguousRootsHeader());
+
+    expect(ambiguousRootsIconBox()).toHaveClass("bg-muted/50");
+    expect(screen.getByText("No ambiguous roots for this library.")).toBeInTheDocument();
+
+    const section = ambiguousRootsHeader().closest("section") as HTMLElement;
+    await userEvent.click(within(section).getByRole("combobox"));
+    await userEvent.click(await screen.findByRole("option", { name: "Television" }));
+
+    expect(mocks.useLibraryRoots).toHaveBeenLastCalledWith(42, "ambiguous", {
+      enabled: true,
+      search: "",
+    });
+    expect(ambiguousRootsIconBox()).toHaveClass("bg-amber-500/10");
+    expect(screen.getByText("/media/movies/Inception (2010)")).toBeInTheDocument();
   });
 
   it("renders Stale External IDs collapsed by default and loads the first page on demand", () => {
@@ -400,6 +590,121 @@ describe("AdminLibraries", () => {
     expect(markup).not.toContain("Re-match");
     // The section is collapsed on mount, so the first page is not requested yet.
     expect(mocks.useStaleMediaIDs).toHaveBeenCalledWith({ enabled: false, search: "" });
+  });
+
+  describe("diagnostic section header counts", () => {
+    const infinite = (data: unknown, extra: Record<string, unknown> = {}) => ({
+      data,
+      isLoading: false,
+      isError: false,
+      isFetched: data !== undefined,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+      ...extra,
+    });
+    const skippedRoot = {
+      library_id: 1,
+      library_name: "Movies",
+      root_path: "/media/movies/Unknown Movie",
+      reason: "missing_provider_ids",
+      file_count: 2,
+      sample_file_path: "/media/movies/Unknown Movie/movie.mkv",
+      first_seen_at: "2026-03-23T20:00:00Z",
+      last_seen_at: "2026-03-23T21:00:00Z",
+    };
+    const header = (name: RegExp) => screen.getByRole("button", { name });
+    const renderInteractive = () => {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      return render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <AdminLibraries />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    };
+
+    it("shows an unknown count instead of 0 while the sections are collapsed and unloaded", () => {
+      mocks.useSkippedLibraryRoots.mockReturnValue(infinite(undefined));
+      mocks.useStaleMediaIDs.mockReturnValue(infinite(undefined));
+      renderInteractive();
+
+      for (const name of [/Troubleshooting/, /Stale External IDs/]) {
+        expect(within(header(name)).getByText("Count not loaded")).toBeDefined();
+        expect(within(header(name)).queryByText("0")).toBeNull();
+      }
+    });
+
+    it("keeps the count unknown while the first page loads after opening", () => {
+      mocks.useSkippedLibraryRoots.mockReturnValue(infinite(undefined, { isLoading: true }));
+      mocks.useStaleMediaIDs.mockReturnValue(infinite(undefined, { isLoading: true }));
+      renderInteractive();
+
+      fireEvent.click(header(/Troubleshooting/));
+      fireEvent.click(header(/Stale External IDs/));
+      expect(mocks.useSkippedLibraryRoots).toHaveBeenLastCalledWith({ enabled: true, search: "" });
+      expect(mocks.useStaleMediaIDs).toHaveBeenLastCalledWith({ enabled: true, search: "" });
+      for (const name of [/Troubleshooting/, /Stale External IDs/]) {
+        expect(within(header(name)).getByText("Count not loaded")).toBeDefined();
+      }
+    });
+
+    it("shows 0 once the server confirms an empty result", () => {
+      mocks.useSkippedLibraryRoots.mockReturnValue(
+        infinite({ pages: [{ roots: [], nextCursor: undefined, total: 0 }] }),
+      );
+      mocks.useStaleMediaIDs.mockReturnValue(
+        infinite({ pages: [{ staleIDs: [], nextCursor: undefined, total: 0 }] }),
+      );
+      renderInteractive();
+
+      for (const name of [/Troubleshooting/, /Stale External IDs/]) {
+        expect(within(header(name)).getByText("0")).toBeDefined();
+        expect(within(header(name)).queryByText("Count not loaded")).toBeNull();
+      }
+    });
+
+    it("shows the server total rather than the rows loaded so far", () => {
+      mocks.useSkippedLibraryRoots.mockReturnValue(
+        infinite({ pages: [{ roots: [skippedRoot], nextCursor: "next", total: 1 }] }),
+      );
+      mocks.useStaleMediaIDs.mockReturnValue(
+        infinite(
+          {
+            pages: [
+              {
+                staleIDs: [staleID("a", "Alpha"), staleID("b", "Bravo")],
+                nextCursor: "next",
+                total: 120,
+              },
+              { staleIDs: [staleID("c", "Charlie")], nextCursor: "later", total: 120 },
+            ],
+          },
+          { hasNextPage: true },
+        ),
+      );
+      renderInteractive();
+
+      expect(within(header(/Troubleshooting/)).getByText("1")).toBeDefined();
+      expect(within(header(/Stale External IDs/)).getByText("120")).toBeDefined();
+      fireEvent.click(header(/Stale External IDs/));
+      expect(within(header(/Stale External IDs/)).getByText("120")).toBeDefined();
+      expect(within(header(/Stale External IDs/)).queryByText("3")).toBeNull();
+    });
+
+    it("keeps the count unknown when the listing fails to load", () => {
+      mocks.useSkippedLibraryRoots.mockReturnValue(infinite(undefined, { isError: true }));
+      mocks.useStaleMediaIDs.mockReturnValue(infinite(undefined, { isError: true }));
+      renderInteractive();
+
+      fireEvent.click(header(/Troubleshooting/));
+      fireEvent.click(header(/Stale External IDs/));
+      for (const name of [/Troubleshooting/, /Stale External IDs/]) {
+        expect(within(header(name)).getByText("Count not loaded")).toBeDefined();
+        expect(within(header(name)).queryByText("0")).toBeNull();
+      }
+    });
   });
 
   it("reopens Stale External IDs after an empty result to show newly discovered IDs", () => {

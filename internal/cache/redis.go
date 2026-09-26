@@ -44,6 +44,7 @@ const (
 	EventMetadataUpdated             = "metadata_updated"
 	EventAdminStatsInvalidated       = "admin_stats_invalidated"
 	EventPlaybackSessionsChanged     = "playback_sessions_changed"
+	EventMarkersUpdated              = "markers_updated"
 	EventUserDisabled                = "user_disabled"
 	EventUserDeleted                 = "user_deleted"
 	EventSettingsChanged             = "settings_changed"
@@ -53,7 +54,18 @@ const (
 	EventOperationalLogAppended      = "operational_log_appended"
 	EventAuditLogAppended            = "audit_log_appended"
 	EventEventsNotification          = "events_notification"
+	// EventPluginsChanged is published on ChannelAdmin by the API server after
+	// every plugin lifecycle change (install, enable, disable, config save,
+	// auto-update, uninstall) so proxy nodes running resident plugins from the
+	// same installations reconcile at once instead of on their next poll, and
+	// every API replica's plugin event dispatcher rebuilds its subscriber index.
+	EventPluginsChanged = "plugins_changed"
 )
+
+// EventUserSessionsRevoked is published on ChannelAdmin with a user ID whose
+// login sessions were revoked, so every API replica drops that account's
+// in-memory Jellyfin-compatible sessions.
+const EventUserSessionsRevoked = "user_sessions_revoked"
 
 // ---------------------------------------------------------------------------
 // Event

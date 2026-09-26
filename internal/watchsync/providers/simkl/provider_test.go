@@ -34,9 +34,14 @@ func TestProviderIdentityAndCapabilities(t *testing.T) {
 		ExportWatchlist:  true,
 		RemoveWatchlist:  true,
 		ScrobblePlayback: true,
+		ImportRatings:    true,
+		ExportRatings:    true,
 	}) {
 		t.Fatalf("capabilities = %#v", provider.Capabilities())
 	}
+	var _ watchsync.RatingImporter = provider
+	var _ watchsync.RatingExporter = provider
+	var _ watchsync.RatingExportWatchGate = provider
 }
 
 func TestStartDeviceAuthSendsSimklHeadersAndDecodesResponse(t *testing.T) {

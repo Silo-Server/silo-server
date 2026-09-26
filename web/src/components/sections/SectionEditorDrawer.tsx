@@ -31,7 +31,12 @@ import {
   filterRecipeCatalog,
   sectionTypeLabel,
 } from "@/lib/sectionTypes";
-import type { Category, RecipeCatalogResponse, RecipeDefinition } from "@/lib/recipes";
+import {
+  matchRecipePreset,
+  type Category,
+  type RecipeCatalogResponse,
+  type RecipeDefinition,
+} from "@/lib/recipes";
 import {
   queryDefinitionFromSectionConfig,
   queryDefinitionToSectionConfig,
@@ -78,6 +83,16 @@ function lookupRecipe(
     if (found) return found;
   }
   return undefined;
+}
+
+/** The preset labelling a type the pickable list no longer offers, e.g. an admin-only section a profile already owns. */
+function matchRecipePresetFor(
+  catalog: RecipeCatalogResponse | undefined,
+  type: string,
+  params: Record<string, unknown>,
+) {
+  const definition = lookupRecipe(catalog, type);
+  return definition ? matchRecipePreset(definition, params) : undefined;
 }
 
 function parseRecipeParams(config: unknown): Record<string, unknown> {
@@ -427,8 +442,8 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
                   (catalogCategories.length > 0 ||
                     !pickableFallbackTypes.some((type) => type.value === sectionType)) ? (
                     <SelectItem value={sectionType}>
-                      {lookupRecipe(props.recipeCatalog, sectionType)?.presets[0]?.display_name ??
-                        sectionTypeLabel(sectionType)}
+                      {matchRecipePresetFor(props.recipeCatalog, sectionType, recipeParams)
+                        ?.display_name ?? sectionTypeLabel(sectionType)}
                     </SelectItem>
                   ) : null}
                   {catalogCategories.length > 0
@@ -436,8 +451,15 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
                         <SelectGroup key={category}>
                           <SelectLabel>{CATEGORY_LABELS[category] ?? category}</SelectLabel>
                           {(pickableCatalog?.categories[category] ?? []).map((definition) => {
-                            const label = definition.presets[0]?.display_name ?? definition.type;
-                            const icon = definition.presets[0]?.icon;
+                            // The selected type is labelled by the preset its
+                            // params match, so a weekly trending section reads
+                            // "TMDB Trending This Week" rather than the first preset.
+                            const preset =
+                              definition.type === sectionType
+                                ? matchRecipePreset(definition, recipeParams)
+                                : definition.presets[0];
+                            const label = preset?.display_name ?? definition.type;
+                            const icon = preset?.icon;
                             return (
                               <SelectItem key={definition.type} value={definition.type}>
                                 {icon ? `${icon} ${label}` : label}

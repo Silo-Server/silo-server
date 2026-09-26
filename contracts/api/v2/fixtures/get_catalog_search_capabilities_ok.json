@@ -1,7 +1,9 @@
 {
-  "revision": "3a1b9d67c82b4f1bc37ee9228b76920ecd740a8616034ee743b1b45400d209fc",
+  "revision": "f0b5e50b48a77fed38fed6c59e913aac676878e0a5f8ae09e0ff67faaadcf1f8",
   "state": "available",
   "allowed": true,
+  "people_media_scope": true,
+  "person_prefetch": true,
   "provider": "meilisearch",
   "result_window_limit": 1000,
   "session_ttl_seconds": 900,

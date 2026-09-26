@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/go-chi/chi/v5"
@@ -22,6 +23,9 @@ type adminPeopleRepo struct {
 
 func (r *adminPeopleRepo) Get(context.Context, int64) (*models.Person, error) { return &r.person, nil }
 func (r *adminPeopleRepo) Search(context.Context, string, int) ([]models.Person, error) {
+	return nil, nil
+}
+func (r *adminPeopleRepo) SearchScoped(context.Context, string, int, string, catalog.AccessFilter) ([]models.Person, error) {
 	return nil, nil
 }
 func (r *adminPeopleRepo) Update(_ context.Context, p models.Person) error {

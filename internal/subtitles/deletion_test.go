@@ -13,12 +13,12 @@ import (
 )
 
 type deletionObjectSpy struct {
-	S3Client
+	BlobStore
 	keys []string
 	err  error
 }
 
-func (s *deletionObjectSpy) DeleteObject(_ context.Context, _, key string) error {
+func (s *deletionObjectSpy) Delete(_ context.Context, key string) error {
 	s.keys = append(s.keys, key)
 	return s.err
 }
@@ -34,7 +34,7 @@ func (r uncertainSubtitleDelete) DeleteDownloadedSubtitleWithRevision(ctx contex
 }
 func TestSubtitleGuardedDeleteRequiresRepositorySupport(t *testing.T) {
 	objects := &deletionObjectSpy{}
-	err := NewManager(newMockSubtitleRepo(), objects, "fixture").DeleteSubtitleWithRevision(t.Context(), 1, new(int64(1)))
+	err := NewManager(newMockSubtitleRepo(), objects).DeleteSubtitleWithRevision(t.Context(), 1, new(int64(1)))
 	if !errors.Is(err, ErrSubtitleGuardedDeletionUnavailable) || len(objects.keys) != 0 {
 		t.Fatalf("unsupported: %v %v", err, objects.keys)
 	}
@@ -53,7 +53,7 @@ func TestSubtitleGuardedDeletionDB(t *testing.T) {
 	}
 	row := seed("a")
 	objects := &deletionObjectSpy{}
-	manager := NewManager(repo, objects, "fixture")
+	manager := NewManager(repo, objects)
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestSubtitleGuardedDeletionDB(t *testing.T) {
 		t.Fatalf("missing replay: %v", err)
 	}
 	replacement := seed("b")
-	uncertain := NewManager(uncertainSubtitleDelete{repo}, objects, "fixture")
+	uncertain := NewManager(uncertainSubtitleDelete{repo}, objects)
 	if err = uncertain.DeleteSubtitleWithRevision(ctx, replacement.ID, new(replacement.Revision)); err == nil || len(objects.keys) != 1 {
 		t.Fatalf("uncertain reply cleaned object: %v", err)
 	}

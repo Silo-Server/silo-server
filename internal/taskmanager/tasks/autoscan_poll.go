@@ -40,7 +40,7 @@ func (t *AutoscanPollTask) Description() string {
 func (t *AutoscanPollTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary
 }
-func (t *AutoscanPollTask) IsHidden() bool { return false }
+func (t *AutoscanPollTask) IsHidden() bool { return true }
 
 func (t *AutoscanPollTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{

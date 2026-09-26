@@ -44,6 +44,19 @@ func (r *PgTriggerRepository) GetSchedule(ctx context.Context, taskKey string) (
 	return snapshot, tx.Commit(ctx)
 }
 
+func (r *PgTriggerRepository) GetOrCreateTriggers(ctx context.Context, taskKey string, defaults []taskmanager.TriggerConfig) ([]taskmanager.TriggerConfig, error) {
+	// Revision zero requires an absent schedule. Use the same lock and revision
+	// guard as administrator edits so startup cannot overwrite a saved schedule.
+	saved, err := r.ReplaceSchedule(ctx, taskKey, 0, defaults)
+	if _, conflict := errors.AsType[*taskmanager.ScheduleConflict](err); conflict {
+		return r.GetTriggers(ctx, taskKey)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return saved.Triggers, nil
+}
+
 func readSchedule(ctx context.Context, tx pgx.Tx, taskKey string) (taskmanager.Schedule, error) {
 	var snapshot taskmanager.Schedule
 	snapshot.Triggers = []taskmanager.TriggerConfig{}

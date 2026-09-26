@@ -37,7 +37,7 @@ func TestSyncProgressNativeVisibilityAndSelectedStore(t *testing.T) {
 	lookup := &fakeProgressLookup{accessible: map[string]bool{"visible": true}}
 	h := NewProgressHandler(provider)
 	h.LibraryLookup = lookup
-	ctx := access.SetScope(t.Context(), access.Scope{AllowedLibraryIDs: []int{4}, MaxContentRating: "PG"})
+	ctx := access.SetScope(t.Context(), access.Scope{AllowedLibraryIDs: []int{4}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}})
 	out, err := h.SyncProgress(ctx, 17, "child", []ProgressSyncUpdate{{MediaItemID: "hidden", CheckAccess: true}, {MediaItemID: "visible", CheckAccess: true}})
 	if err != nil {
 		t.Fatal(err)

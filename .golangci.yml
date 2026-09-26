@@ -3,6 +3,11 @@ version: "2"
 run:
   # Diff-scoped CI runs over large PRs exceed 5m on the shared runner (exit 4).
   timeout: 15m
+  # Wait for another run on this machine to finish instead of failing after
+  # 5s with "parallel golangci-lint is running". A cold run saturates every
+  # core, so queueing concurrent runs (several agents, several worktrees)
+  # beats running them side by side. Never pass --allow-parallel-runners.
+  allow-serial-runners: true
 
 formatters:
   enable:
@@ -19,7 +24,6 @@ linters:
     - bodyclose
     - errcheck
     - errorlint
-    - gocritic
     - goconst
     - govet
     - ineffassign
@@ -40,12 +44,18 @@ linters:
     # and these rules report the attempt early: a type assertion, type switch
     # or generic instantiation whose type registers routes by its method set
     # (alias, defined type, embedding or structural interface included), and
-    # reflect.Value.MethodByName, outside tests. CI runs the check full-tree
-    # (make lint-router-recovery) as well as on changed lines. ruleguard was
-    # chosen over forbidigo because forbidigo visits only identifier and
-    # selector nodes and cannot tell an assertion from a parameter type. Keep
-    # the check list to ruleguard: widening it enrolls the whole tree in
-    # gocritic's style set.
+    # reflect.Value.MethodByName, outside tests. ruleguard was chosen over
+    # forbidigo because forbidigo visits only identifier and selector nodes
+    # and cannot tell an assertion from a parameter type. Keep the check list
+    # to ruleguard: widening it enrolls the whole tree in gocritic's style set.
+    #
+    # gocritic is deliberately absent from linters.enable above and runs only
+    # through make lint-router-recovery (--enable-only gocritic), full-tree,
+    # which CI gates on. A changed-lines pass would find nothing that step
+    # does not, and it is the costliest linter here: gocritic rebuilds the
+    # ruleguard engine for every package, and each rebuild type-checks chi
+    # and net/http from source — about two seconds of fixed cost per package,
+    # nearly half the analysis time of a cold run over ./... .
     gocritic:
       disable-all: true
       enabled-checks:

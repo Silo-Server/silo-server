@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes apiv2-openapi verify-apiv2-openapi verify-apiv2-contract apiv2-fixtures verify-apiv2-fixtures apiv2-fixtures-sync verify-apiv2-fixtures-siblings apiv2-web-types verify-apiv2-web-types
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint lint-changed test test-go test-db-pins test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes apiv2-openapi verify-apiv2-openapi verify-apiv2-contract apiv2-fixtures verify-apiv2-fixtures apiv2-fixtures-sync verify-apiv2-fixtures-siblings apiv2-web-types verify-apiv2-web-types
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -16,7 +16,7 @@ DEV_PLUGIN_SDK_DIR ?= $(SHARED_PLUGIN_SDK_DIR)
 endif
 
 JELLYFIN_WEB_INSTALL_DIR ?= .local/compat/jellyfin-web
-JELLYFIN_WEB_VERSION ?= 10.11.6
+JELLYFIN_WEB_VERSION ?= 12.1
 
 # Build version stamping: inject the git revision so the admin Build panel shows a
 # version even when Go's VCS metadata isn't embedded (mirrors the Dockerfile ldflags).
@@ -56,14 +56,18 @@ lint:
 	golangci-lint run
 	cd web && pnpm run lint
 
+# Lint the Go packages this branch touched, on the lines it changed. Same
+# findings as CI's changed-lines step at a fraction of the cost of ./... .
+# BASE_REF=origin/<pr-base> when not main.
+lint-changed:
+	BASE_REF=$(BASE_REF) scripts/lint-changed.sh
+
 # Frontend test files that fail on main today. This list is shrink-only: delete
 # an entry along with its fix, and never extend it to land a change. The Go
 # suite has no equivalent — a Go test that cannot pass yet carries a t.Skip and
 # its reason in the source, where whoever reads the test finds it.
 WEBTEST_KNOWN_FAILURES := \
-	--exclude src/pages/Catalog.test.tsx \
-	--exclude src/pages/ItemDetail/SeasonContent.test.tsx \
-	--exclude src/pages/LibraryRecommended.test.tsx
+	--exclude src/pages/Catalog.test.tsx
 
 # The Go binary embeds the built frontend, so every Go build and test needs
 # web/dist to exist. Tests never serve it, so a placeholder is enough; `make
@@ -78,8 +82,20 @@ test: test-go test-web
 test-go: embed-stub
 	go test ./...
 
+# Run the DB-backed query-budget pins listed in $(DB_PINS) against the
+# migrated, disposable database named by SILO_TEST_DATABASE_URL. Unlike
+# test-go, a listed test that skips (no URL, unmigrated schema) or is missing
+# fails the run. Migrate a fresh database first with
+# DATABASE_URL=<url> SECRET_KEY=<32+ chars> go run ./cmd/silo/ --migrate-only.
+DB_PINS := scripts/ci/db-pins.txt
+test-db-pins: embed-stub
+	go run ./scripts/ci/dbpins -list $(DB_PINS)
+
+# WEBTEST_ARGS passes extra vitest flags through; CI uses it to shard the
+# suite across runners (--shard=N/M).
+WEBTEST_ARGS ?=
 test-web:
-	cd web && pnpm exec vitest run $(WEBTEST_KNOWN_FAILURES)
+	cd web && pnpm exec vitest run $(WEBTEST_KNOWN_FAILURES) $(WEBTEST_ARGS)
 
 # Regenerate the settings-contract bindings for every language.
 #

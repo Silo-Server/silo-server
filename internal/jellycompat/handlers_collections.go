@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -22,6 +23,7 @@ type collectionSource interface {
 	ListAll(ctx context.Context, libraryID *int, opts catalog.ListLibraryCollectionsOptions) ([]*models.LibraryCollection, error)
 	GetByID(ctx context.Context, id string) (*models.LibraryCollection, error)
 	ListItems(ctx context.Context, collectionID string) ([]*models.LibraryCollectionItem, error)
+	ListContainingItem(ctx context.Context, mediaItemID string) ([]*models.LibraryCollection, error)
 	AnyVisibleInLibraries(ctx context.Context, libraryIDs []int) (bool, error)
 }
 
@@ -84,6 +86,7 @@ func (h *ItemsHandler) collectionsView() baseItemDTO {
 		Name:                    "Collections",
 		ServerID:                h.mapper.serverID,
 		SortName:                "collections",
+		DisplayPreferencesID:    displayPreferencesID(collectionsViewID),
 		PrimaryImageAspectRatio: &posterAspect,
 		ImageTags:               map[string]string{"Primary": primaryTag},
 		UserData: &itemUserDataDTO{
@@ -339,6 +342,12 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 		if namePrefix != "" && !strings.HasPrefix(title, namePrefix) {
 			continue
 		}
+		if query.nameLessThan != "" && title >= strings.ToLower(query.nameLessThan) {
+			continue
+		}
+		if query.nameStartsWithOrGreater != "" && title < strings.ToLower(query.nameStartsWithOrGreater) {
+			continue
+		}
 		matched = append(matched, c)
 	}
 
@@ -361,6 +370,9 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 		pageLimit = clampAuxSearchLimit(query.limit)
 	}
 	page := slicePage(matched, query.startIndex, pageLimit)
+	if query.countOnly {
+		page = nil
+	}
 	items := make([]baseItemDTO, 0, len(page))
 	for _, c := range page {
 		items = append(items, h.boxSetFromCollection(r.Context(), c))
@@ -379,7 +391,7 @@ func slicePage[T any](items []T, startIndex, limit int) []T {
 		startIndex = 0
 	}
 	if startIndex >= len(items) {
-		return nil
+		return []T{}
 	}
 	if limit <= 0 {
 		limit = len(items)
@@ -400,6 +412,95 @@ func (h *ItemsHandler) handleBoxSetItem(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	writeJSON(w, http.StatusOK, h.boxSetFromCollection(r.Context(), collection))
+}
+
+// HandleItemCollections serves GET /Items/{id}/Collections (Jellyfin 12.0+,
+// the "Included In" row on item details): the visible BoxSets that contain the
+// item, ordered by name and paged by StartIndex/Limit. Visibility is checked
+// before membership, so an item the viewer cannot see answers 404 whether or
+// not it belongs to a collection. Only movies and series can be members; a
+// visible episode, or a season, returns an empty result.
+func (h *ItemsHandler) HandleItemCollections(w http.ResponseWriter, r *http.Request) {
+	session := SessionFromContext(r.Context())
+	if session == nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
+		return
+	}
+	q := newCaseInsensitiveQuery(r.URL.Query())
+	if userID := q.Get("UserId"); userID != "" && !validatePseudoUser(w, userID, session) {
+		return
+	}
+	startIndex := parsePositiveInt(q.Get("StartIndex"), 0)
+	limit := parsePositiveInt(q.Get("Limit"), 0)
+
+	rawID := chi.URLParam(r, "id")
+	contentID, err := decodeItemID(h.codec, rawID)
+	if err != nil {
+		if _, seasonErr := h.codec.DecodeStringID(EncodedIDSeason, rawID); seasonErr == nil {
+			writeJSON(w, http.StatusOK, emptyQueryResult(startIndex))
+			return
+		}
+		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+	items, err := h.fetchCompatItemsByContentIDs(r.Context(), session, []string{contentID}, nil)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	if _, ok := items[contentID]; !ok {
+		episodes, episodeErr := h.fetchCompatEpisodeTargetsByContentIDs(r.Context(), session, []string{contentID}, nil)
+		if episodeErr != nil {
+			writeCompatUpstreamError(w, episodeErr)
+			return
+		}
+		if _, ok := episodes[contentID]; ok {
+			writeJSON(w, http.StatusOK, emptyQueryResult(startIndex))
+			return
+		}
+		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+	if h.collections == nil {
+		writeJSON(w, http.StatusOK, emptyQueryResult(startIndex))
+		return
+	}
+
+	containing, err := h.collections.ListContainingItem(r.Context(), contentID)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	visible, err := h.visibleLibraryIDs(r.Context(), session)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+
+	matched := make([]*models.LibraryCollection, 0, len(containing))
+	for _, c := range containing {
+		if collectionVisible(c, visible) {
+			matched = append(matched, c)
+		}
+	}
+	sort.SliceStable(matched, func(i, j int) bool {
+		a, b := strings.ToLower(matched[i].Title), strings.ToLower(matched[j].Title)
+		if a != b {
+			return a < b
+		}
+		return matched[i].Title < matched[j].Title
+	})
+	page := slicePage(matched, startIndex, limit)
+	dtos := make([]baseItemDTO, 0, len(page))
+	for _, c := range page {
+		dtos = append(dtos, h.boxSetFromCollection(r.Context(), c))
+	}
+	applyItemsResponseOptions(dtos, parseItemsQuery(r, h.codec))
+	writeJSON(w, http.StatusOK, queryResultDTO{
+		Items:            dtos,
+		TotalRecordCount: len(matched),
+		StartIndex:       startIndex,
+	})
 }
 
 // handleBoxSetChildren serves GET /Items?ParentId={boxsetId} by hydrating the
@@ -425,7 +526,7 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 	// proportional to the page size instead of the collection size. The
 	// explicit-sort case falls through to the browse allowlist path below, which
 	// re-sorts the whole membership.
-	if catalog.IsLiveQueryType(collection.CollectionType) && !query.sortExplicit {
+	if catalog.IsLiveQueryType(collection.CollectionType) && !query.sortExplicit && !query.hasIntersectingFilters() && !query.hasItemTypeFilter && query.searchTerm == "" && !query.isFavorite && query.isPlayed == nil && !query.isResumable {
 		routeID := h.codec.EncodeStringID(EncodedIDCollection, collection.ID)
 		pageIDs, total, ok, pageErr := h.smartCollectionContentIDPage(
 			r.Context(), session, collection, query.startIndex, query.limit)
@@ -490,7 +591,7 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 
 	routeID := h.codec.EncodeStringID(EncodedIDCollection, collection.ID)
 
-	if query.sortExplicit {
+	if query.sortExplicit || query.hasIntersectingFilters() || query.hasItemTypeFilter || query.searchTerm != "" || query.isFavorite || query.isPlayed != nil || query.isResumable {
 		// Catalog handles ordering and paging; the member list acts as an
 		// access-filtered allowlist.
 		params := buildBrowseParams(query)
@@ -537,7 +638,8 @@ func (h *ItemsHandler) writeCollectionItemsPage(w http.ResponseWriter, r *http.R
 		dto.ParentID = routeID
 		items = append(items, dto)
 	}
-	applyImageTypeLimit(items, query.imageTypeLimit)
+	h.applyListMediaSourceCounts(r.Context(), session, items, query)
+	applyItemsResponseOptions(items, query)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
 		TotalRecordCount: total,

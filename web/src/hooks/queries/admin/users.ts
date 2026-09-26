@@ -19,6 +19,7 @@ import {
   updateAdminUser,
   deleteAdminUser,
   impersonateAdminUser,
+  issueAdminPasswordReset,
   getAdminUserCapabilities,
   type AdminUserEditor,
 } from "@/api/v2/adminUsers";
@@ -176,6 +177,11 @@ export function useAdminUsers() {
     retry: false,
     staleTime: ADMIN_STALE_TIME,
   });
+}
+/** Whether the signed-in account is the server Owner, read from the account list. */
+export function useViewerIsOwner(viewerId: number | undefined): boolean {
+  const { data } = useAdminUsers();
+  return data?.some((u) => u.id === viewerId && u.is_owner) ?? false;
 }
 export function useAdminUser(id: number) {
   const context = captureProfileRequestContext();
@@ -542,6 +548,18 @@ export function useAdminDeviceDetail(userId: number, deviceId: string, enabled =
     queryFn: () => getAdminDevice(userId, deviceId, context ?? captureAdminUserAuthority()),
     enabled: enabled && context !== null && userId > 0 && deviceId.length > 0,
     staleTime: ADMIN_STALE_TIME,
+  });
+}
+
+/** Issues a password reset link. Not retried: each call replaces the
+ * account's link, and a delivery the server could not confirm is reported,
+ * not repeated. */
+export function useIssuePasswordReset() {
+  return useMutation({
+    retry: false,
+    mutationFn: ({ id, delivery }: { id: number; delivery: "email" | "link" }) =>
+      issueAdminPasswordReset(id, delivery),
+    gcTime: 0,
   });
 }
 

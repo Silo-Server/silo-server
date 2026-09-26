@@ -32,17 +32,15 @@ type Manager struct {
 	mu        sync.RWMutex
 	providers map[string]Provider
 	repo      Repository
-	s3        S3Client
-	s3Bucket  string
+	blobs     BlobStore
 }
 
 // NewManager creates a new subtitle manager.
-func NewManager(repo Repository, s3 S3Client, s3Bucket string) *Manager {
+func NewManager(repo Repository, blobs BlobStore) *Manager {
 	return &Manager{
 		providers: make(map[string]Provider),
 		repo:      repo,
-		s3:        s3,
-		s3Bucket:  s3Bucket,
+		blobs:     blobs,
 	}
 }
 
@@ -204,7 +202,7 @@ type UploadRequest struct {
 	Data               []byte
 }
 
-// Download fetches a subtitle from a provider and stores it in S3.
+// Download fetches a subtitle from a provider and stores its bytes.
 func (m *Manager) Download(ctx context.Context, req DownloadRequest) (*DownloadedSubtitle, error) {
 	m.mu.RLock()
 	prov, ok := m.providers[req.ProviderName]
@@ -231,7 +229,7 @@ func (m *Manager) Download(ctx context.Context, req DownloadRequest) (*Downloade
 	})
 }
 
-// Upload stores a user-provided subtitle file in S3.
+// Upload stores a user-provided subtitle file.
 func (m *Manager) Upload(ctx context.Context, req UploadRequest) (*DownloadedSubtitle, error) {
 	if len(req.Data) == 0 {
 		return nil, fmt.Errorf("empty subtitle file")
@@ -311,7 +309,7 @@ func (m *Manager) StoreSubtitle(ctx context.Context, req StoreSubtitleRequest) (
 		return nil, fmt.Errorf("check legacy duplicate: %w", err)
 	}
 	if legacy != nil && legacy.Language == req.Language {
-		data, err := m.s3.GetObject(ctx, m.s3Bucket, legacy.S3Key)
+		data, err := m.blobs.Get(ctx, legacy.S3Key)
 		if err != nil {
 			return nil, fmt.Errorf("verify legacy subtitle: %w", err)
 		}
@@ -320,8 +318,8 @@ func (m *Manager) StoreSubtitle(ctx context.Context, req StoreSubtitleRequest) (
 		}
 	}
 	sub.S3Key = fmt.Sprintf("subtitles/%d/%s.%s", req.MediaFileID, uuid.NewString(), req.Format)
-	if err := m.s3.PutObject(ctx, m.s3Bucket, sub.S3Key, req.Data); err != nil {
-		return nil, fmt.Errorf("upload to s3: %w", err)
+	if err := m.blobs.Put(ctx, sub.S3Key, req.Data); err != nil {
+		return nil, fmt.Errorf("store subtitle object: %w", err)
 	}
 	if err := m.repo.InsertDownloadedSubtitle(ctx, sub); err != nil {
 		if errors.Is(err, ErrSubtitleDuplicate) {
@@ -368,7 +366,7 @@ func (m *Manager) UpdateDownloadedSubtitleWithRevision(ctx context.Context, id i
 		update.Language = new(language)
 		// Backfill legacy content identity from bytes, never from the short key.
 		if sub.ContentSHA256 == "" {
-			data, err := m.s3.GetObject(ctx, m.s3Bucket, sub.S3Key)
+			data, err := m.blobs.Get(ctx, sub.S3Key)
 			if err != nil {
 				return nil, fmt.Errorf("fetch subtitle content: %w", err)
 			}
@@ -389,12 +387,12 @@ func (m *Manager) UpdateDownloadedSubtitleWithRevision(ctx context.Context, id i
 }
 
 func (m *Manager) cleanupSubtitleObject(ctx context.Context, key string) {
-	if err := m.s3.DeleteObject(ctx, m.s3Bucket, key); err != nil {
+	if err := m.blobs.Delete(ctx, key); err != nil {
 		slog.ErrorContext(ctx, "subtitle metadata removed; object cleanup needs reconciliation", "component", "subtitles", "object_key", key, "error", err)
 	}
 }
 
-// GetSubtitleContent loads a downloaded subtitle record and its S3 bytes.
+// GetSubtitleContent loads a downloaded subtitle record and its bytes.
 func (m *Manager) GetSubtitleContent(ctx context.Context, id int) (*DownloadedSubtitle, []byte, error) {
 	sub, err := m.repo.GetDownloadedSubtitle(ctx, id)
 	if err != nil {
@@ -404,7 +402,7 @@ func (m *Manager) GetSubtitleContent(ctx context.Context, id int) (*DownloadedSu
 		return nil, nil, ErrSubtitleNotFound
 	}
 
-	data, err := m.s3.GetObject(ctx, m.s3Bucket, sub.S3Key)
+	data, err := m.blobs.Get(ctx, sub.S3Key)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetch subtitle content: %w", err)
 	}

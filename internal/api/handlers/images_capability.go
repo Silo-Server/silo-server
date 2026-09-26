@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 )
@@ -70,9 +70,9 @@ func HandleImagesCapability(w http.ResponseWriter, r *http.Request) {
 
 // GetImagesCapability derives the shared size discovery view from the actual ladder.
 func GetImagesCapability(backend ...string) ImagesCapabilityResponse {
-	storageBackend, delivery := artworkstore.BackendLocal, artworkDeliveryServer
+	storageBackend, delivery := blobstore.BackendLocal, artworkDeliveryServer
 	if len(backend) > 0 && backend[0] == "s3" {
-		storageBackend, delivery = artworkstore.BackendS3, artworkDeliveryDirect
+		storageBackend, delivery = blobstore.BackendS3, artworkDeliveryDirect
 	}
 	widths := make(map[string]ImageSizeWidths, len(imageTypesWithWidths))
 	for _, imageType := range imageTypesWithWidths {

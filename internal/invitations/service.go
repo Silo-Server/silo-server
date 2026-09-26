@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -340,27 +339,13 @@ func (s *Service) claimable(ctx context.Context, token string) (*models.Invitati
 
 // linkBase resolves the canonical externally reachable base URL for claim links.
 func (s *Service) linkBase(ctx context.Context) string {
-	if s.settings != nil {
-		if base, err := s.settings.Get(ctx, "server.public_url"); err == nil {
-			if base = strings.TrimRight(strings.TrimSpace(base), "/"); base != "" {
-				return base
-			}
-		}
-	}
-	return s.publicURL
+	return mail.AccountLinkBase(ctx, s.settings, s.publicURL)
 }
 
 // serverName reads the branded server name for email copy and the claim
 // screen, defaulting to "Silo".
 func (s *Service) serverName(ctx context.Context) string {
-	if s.settings != nil {
-		if name, err := s.settings.Get(ctx, branding.KeyServerName); err == nil {
-			if name = strings.TrimSpace(name); name != "" {
-				return name
-			}
-		}
-	}
-	return branding.DefaultServerName
+	return mail.ServerName(ctx, s.settings)
 }
 
 // profileNameFromEmail derives the default profile name from the address's

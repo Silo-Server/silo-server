@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
-	"github.com/Silo-Server/silo-server/internal/artworkstore/artworkstoretest"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type failedPosterStore struct{ artworkstore.Store }
+type failedPosterStore struct{ blobstore.Store }
 
 func (failedPosterStore) Put(context.Context, string, []byte) error {
 	return errors.New("no space left on device")
@@ -43,7 +43,7 @@ INSERT INTO media_folders (id,type,name,enabled,poster_path) VALUES (7,'movies',
 		t.Fatal(err)
 	}
 	h := NewLibraryHandler(catalog.NewFolderRepository(pool), nil, nil, nil, nil)
-	store := artworkstoretest.New()
+	store := blobstoretest.New()
 	if err := store.Put(t.Context(), "library-posters/7.jpg", []byte("old")); err != nil {
 		t.Fatal(err)
 	}

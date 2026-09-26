@@ -54,7 +54,7 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 		return current, err
 	}
 	if input == nil || revoke {
-		if _, err = tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at=NOW() WHERE (user_id=$1 OR impersonator_user_id=$1) AND revoked_at IS NULL`, id); err != nil {
+		if err = RevokeSignInsInTransaction(ctx, tx, id); err != nil {
 			return current, err
 		}
 	}

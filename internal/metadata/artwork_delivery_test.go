@@ -13,7 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
@@ -26,7 +26,7 @@ type deliveryTestChecker struct {
 	hookErr     error
 }
 
-func (c *deliveryTestChecker) Stat(_ context.Context, key string) (artworkstore.ObjectInfo, error) {
+func (c *deliveryTestChecker) Stat(_ context.Context, key string) (blobstore.ObjectInfo, error) {
 	c.mu.Lock()
 	hook := c.beforeCheck
 	c.beforeCheck = nil
@@ -36,16 +36,16 @@ func (c *deliveryTestChecker) Stat(_ context.Context, key string) (artworkstore.
 			c.mu.Lock()
 			c.hookErr = err
 			c.mu.Unlock()
-			return artworkstore.ObjectInfo{}, err
+			return blobstore.ObjectInfo{}, err
 		}
 	}
 	if c.err != nil {
-		return artworkstore.ObjectInfo{}, c.err
+		return blobstore.ObjectInfo{}, c.err
 	}
 	if c.existing != nil && !c.existing[key] {
-		return artworkstore.ObjectInfo{}, artworkstore.ErrNotFound
+		return blobstore.ObjectInfo{}, blobstore.ErrNotFound
 	}
-	return artworkstore.ObjectInfo{Key: key}, nil
+	return blobstore.ObjectInfo{Key: key}, nil
 }
 func (c *deliveryTestChecker) ObjectAvailable(_ context.Context, key string) (bool, error) {
 	return c.available[key], c.err

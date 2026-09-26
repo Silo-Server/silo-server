@@ -27,8 +27,15 @@ type PlaybackSession struct {
 	// request for the same play before it starts either response; the newer
 	// negotiation replaces an older, still-unstarted one from the same device.
 	ClientDeviceID string
-	ItemID         string
-	RouteItemID    string
+	// ClientIP is the resolved address that negotiated this play. Static
+	// streams from clients that send no credentials (Jellyfin for Android TV,
+	// Findroid) are granted only to the same address; see FindStreamGrant.
+	ClientIP string
+	// ClientPeer is the transport peer host of that request, before forwarding
+	// headers were applied.
+	ClientPeer  string
+	ItemID      string
+	RouteItemID string
 	// NegotiationVariant identifies the playback-affecting source and track
 	// selections. Duplicate PlaybackInfo calls replace only an equivalent
 	// unstarted variant, so a subtitle switch cannot invalidate the URL the
@@ -80,18 +87,37 @@ type PlaybackSession struct {
 
 // PlaybackMediaSource stores one negotiated stream source within a compat play session.
 type PlaybackMediaSource struct {
-	ID                   string
-	FileID               int
-	Version              catalog.FileVersion
-	SupportsDirectPlay   bool
-	SupportsDirectStream bool
-	SupportsTranscoding  bool
+	ServerBitrateCapKbps int
+	StreamLocation       string // bitrate-policy classification fixed by PlaybackInfo
+	// SiloSeekReanchor opts into source-time copy-HLS startup for clients that
+	// renegotiate seeks outside the produced playlist window.
+	SiloSeekReanchor         bool
+	SubtitleBurnIn           bool
+	SubtitleExternalDelivery bool
+	SubtitleDeliveryFormat   string
+	SubtitleTrackIndex       int
+	SubtitleCodec            string
+	CanBurnSubtitle          bool
+	TargetBitrateKbps        int
+	TargetResolution         string
+	TargetAudioChannels      int
+	ID                       string
+	FileID                   int
+	Version                  catalog.FileVersion
+	SupportsDirectPlay       bool
+	SupportsDirectStream     bool
+	SupportsTranscoding      bool
 	// HLSRemux selects HLS with video copy. TranscodeAudio remains the
 	// independent audio-encode decision, so a compatible audio codec can stay
 	// bit-for-bit copied. HLSRemuxMPEGTS overrides the normal fMP4 packaging for
 	// clients whose Dolby Vision decoder requires MPEG-TS.
-	HLSRemux                    bool
-	HLSRemuxMPEGTS              bool
+	HLSRemux       bool
+	HLSRemuxMPEGTS bool
+	// DOVIVariant marks a copy remux of Dolby Vision without a compatible base
+	// layer (HEVC profile 5, AV1 profile 10) for a client whose device profile
+	// explicitly lists DOVI. As in Jellyfin 12, the fMP4 master playlist then
+	// offers a dvh1/dav1 variant ahead of the hvc1 fallback.
+	DOVIVariant                 bool
 	HLSRemuxAudioStreamIndexes  []int
 	TranscodeAudio              bool
 	DefaultAudioStreamIndex     *int
@@ -99,10 +125,21 @@ type PlaybackMediaSource struct {
 	DefaultSubtitleStreamIndex  *int
 	SelectedSubtitleStreamIndex *int
 	ETag                        string
+	// SubtitleDeliveries preserves client delivery capabilities for tracks that
+	// may be enabled later. The scalar fields above retain the selected track's
+	// delivery for sessions read by older binaries during a rolling update.
+	SubtitleDeliveries map[int]PlaybackSubtitleDelivery
 
 	// preservedJSON carries fields written by a newer binary through this
 	// binary's durable read-modify-write cycle. See playback_sessions_json.go.
 	preservedJSON map[string]json.RawMessage
+}
+
+// PlaybackSubtitleDelivery stores a text track's negotiated external format and
+// whether delivery must be external even when playing the original media file.
+type PlaybackSubtitleDelivery struct {
+	Format   string
+	External bool
 }
 
 // CompatPlaybackStore persists compat playback negotiation sessions (the
@@ -146,6 +183,9 @@ type CompatPlaybackStore interface {
 	Update(id string, fn func(*PlaybackSession) error) error
 	// FindByRoute resolves a route item / media-source id to a session.
 	FindByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool)
+	// FindUnidentifiedPlayback resolves an item/source pair to exactly one started,
+	// active session owned by the caller. Pending negotiations are not playback.
+	FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, error)
 	// FindByClientPlaySessionID resolves the client-generated PlaySessionId
 	// alias recorded for plays that skipped PlaybackInfo. The alias must
 	// identify exactly one live session; ambiguity returns not-found.
@@ -162,6 +202,11 @@ type CompatPlaybackStore interface {
 	// FindByUpstreamSessionID resolves the local upstream session that owns a
 	// compat play. It is used for process-local failure lifecycle handling.
 	FindByUpstreamSessionID(upstreamSessionID string) (*PlaybackSession, bool)
+	// FindStreamGrant returns the most recently active live negotiation, from
+	// any caller, for the route item and media source that clientIP negotiated
+	// through the transport peer clientPeer, and that was active within maxIdle.
+	// It authorizes credential-less static streams; see PlaybackSessionAuth.
+	FindStreamGrant(routeItemID, mediaSourceID, clientIP, clientPeer string, maxIdle time.Duration) (*PlaybackSession, bool)
 }
 
 // PlaybackSessionStore keeps compat playback sessions in memory. It is the
@@ -626,6 +671,58 @@ func (s *PlaybackSessionStore) FindByUpstreamSessionID(upstreamSessionID string)
 	return nil, false
 }
 
+// FindStreamGrant implements CompatPlaybackStore.
+func (s *PlaybackSessionStore) FindStreamGrant(routeItemID, mediaSourceID, clientIP, clientPeer string, maxIdle time.Duration) (*PlaybackSession, bool) {
+	if routeItemID == "" || mediaSourceID == "" || clientIP == "" || clientPeer == "" {
+		return nil, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	now := s.now()
+	activeSince := now.Add(-maxIdle)
+	var match *PlaybackSession
+	for _, session := range s.sessions {
+		if streamGrantMatches(&session, routeItemID, mediaSourceID, clientIP, clientPeer, activeSince, now) && (match == nil || session.UpdatedAt.After(match.UpdatedAt)) {
+			copy := session
+			match = &copy
+		}
+	}
+	return match, match != nil
+}
+
+// sameStreamPath reports whether a stream reached the server the way its
+// negotiation did: from the same transport peer, or through a forwarding proxy
+// both times. Load-balanced deployments spread one client's requests across
+// several proxies, so the proxy itself cannot be pinned; a client that
+// connected directly must stream from that same address. Operators who trust
+// all private ranges (the default) let a LAN host forward a spoofed address,
+// so narrowing trusted proxies to the real proxy hosts is what binds a grant.
+func sameStreamPath(session *PlaybackSession, clientIP, clientPeer string) bool {
+	if session.ClientPeer == clientPeer {
+		return true
+	}
+	negotiatedViaProxy := session.ClientPeer != "" && session.ClientPeer != session.ClientIP
+	return negotiatedViaProxy && clientPeer != "" && clientPeer != clientIP
+}
+
+// streamGrantMatches reports whether a session grants a credential-less static
+// stream: live, owned by a caller, negotiated from clientIP through clientPeer
+// for this item and source, and active recently.
+func streamGrantMatches(session *PlaybackSession, routeItemID, mediaSourceID, clientIP, clientPeer string, activeSince, now time.Time) bool {
+	if session == nil || session.Terminal || session.CompatToken == "" || session.ClientIP != clientIP || !sameStreamPath(session, clientIP, clientPeer) ||
+		!session.ExpiresAt.After(now) || session.UpdatedAt.Before(activeSince) ||
+		!mediaSourceIDsEqual(session.RouteItemID, routeItemID) {
+		return false
+	}
+	for _, source := range session.MediaSources {
+		if mediaSourceIDsEqual(source.ID, mediaSourceID) {
+			return true
+		}
+	}
+	return false
+}
+
 // FindByRoute resolves a route item/media-source identifier to a compat playback session.
 func (s *PlaybackSessionStore) FindByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool) {
 	return s.findByRoute(compatToken, routeID, false, false)
@@ -689,4 +786,32 @@ func (s *PlaybackSessionStore) findByRoute(
 	}
 
 	return matchedSession, matchedSource, matchedSession != nil
+}
+
+var errUnidentifiedPlaybackAmbiguous = errors.New("ambiguous unidentified playback")
+
+// FindUnidentifiedPlayback supports direct players that omit PlaySessionId.
+// Require a unique started session and validate both identifiers before binding
+// a report; map iteration must never select another simultaneous play.
+// A nil session with no error means no started match; ambiguity is an error.
+func (s *PlaybackSessionStore) FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, error) {
+	if compatToken == "" || (routeItemID == "" && mediaSourceID == "") {
+		return nil, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var match *PlaybackSession
+	report := sessionReportRequest{ItemID: routeItemID, MediaSourceID: mediaSourceID}
+	now := s.now()
+	for _, candidate := range s.sessions {
+		if candidate.CompatToken != compatToken || candidate.Terminal || candidate.UpstreamSessionID == "" || !candidate.ExpiresAt.After(now) || !reportMatchesPlaySession(&candidate, report) {
+			continue
+		}
+		if match != nil {
+			return nil, errUnidentifiedPlaybackAmbiguous
+		}
+		copy := candidate
+		match = &copy
+	}
+	return match, nil
 }

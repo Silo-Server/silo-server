@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +61,22 @@ func (f *fakeCollectionSource) GetByID(_ context.Context, id string) (*models.Li
 
 func (f *fakeCollectionSource) ListItems(_ context.Context, collectionID string) ([]*models.LibraryCollectionItem, error) {
 	return f.items[collectionID], nil
+}
+
+func (f *fakeCollectionSource) ListContainingItem(_ context.Context, mediaItemID string) ([]*models.LibraryCollection, error) {
+	out := []*models.LibraryCollection{}
+	for _, c := range f.collections {
+		if c.Visibility != "visible" {
+			continue
+		}
+		for _, item := range f.items[c.ID] {
+			if item.MediaItemID == mediaItemID {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeCollectionSource) AnyVisibleInLibraries(_ context.Context, libraryIDs []int) (bool, error) {
@@ -426,6 +443,12 @@ func TestUserViews_PrependsCollectionsViewWhenVisible(t *testing.T) {
 	if result.Items[1].Name != "Movies" {
 		t.Fatalf("expected real library after the Collections view, got %+v", result.Items[1])
 	}
+	// Jellyfin for Android TV crashes reopening a view without DisplayPreferencesId.
+	for _, item := range result.Items {
+		if item.DisplayPreferencesID == "" || strings.Contains(item.DisplayPreferencesID, "-") {
+			t.Fatalf("view %q DisplayPreferencesId = %q, want hyphenless view id", item.Name, item.DisplayPreferencesID)
+		}
+	}
 }
 
 func TestUserViews_OmitsCollectionsViewWhenNoVisibleCollections(t *testing.T) {
@@ -547,5 +570,129 @@ func TestHandleItem_CollectionsViewReturnsCollectionFolder(t *testing.T) {
 	}
 	if view.ID != collectionsViewID || view.Type != "CollectionFolder" || view.CollectionType != "boxsets" {
 		t.Fatalf("unexpected Collections view: %+v", view)
+	}
+}
+
+func performItemCollectionsRequest(t *testing.T, h *ItemsHandler, target string) *httptest.ResponseRecorder {
+	t.Helper()
+	router := chi.NewRouter()
+	router.Get("/Items/{id}/Collections", h.HandleItemCollections)
+	req := httptest.NewRequest("GET", target, nil)
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestHandleItemCollections_ListsVisibleContainingCollectionsByName(t *testing.T) {
+	member := func(collectionID string) []*models.LibraryCollectionItem {
+		return []*models.LibraryCollectionItem{{CollectionID: collectionID, MediaItemID: "m-1"}}
+	}
+	collections := &fakeCollectionSource{
+		collections: []*models.LibraryCollection{
+			{ID: "201", LibraryID: 1, Title: "zombie classics", Visibility: "visible", ItemCount: 4},
+			{ID: "202", LibraryID: 1, Title: "Action Picks", Visibility: "visible", ItemCount: 2},
+			{ID: "203", LibraryID: 2, Title: "Hidden Library Set", Visibility: "visible"},
+			{ID: "204", LibraryID: 1, Title: "Hidden Set", Visibility: "hidden"},
+			{ID: "205", LibraryID: 1, Title: "Unrelated", Visibility: "visible"},
+		},
+		items: map[string][]*models.LibraryCollectionItem{
+			"201": member("201"),
+			"202": member("202"),
+			"203": member("203"),
+			"204": member("204"),
+			"205": {{CollectionID: "205", MediaItemID: "m-2"}},
+		},
+	}
+	itemRepo := &fakeBatchItemRepo{items: map[string]*models.MediaItem{"m-1": {ContentID: "m-1", Type: "movie", Title: "Night"}}}
+	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, itemRepo)
+
+	itemID := h.codec.EncodeStringID(EncodedIDItem, "m-1")
+	rec := performItemCollectionsRequest(t, h, "/Items/"+itemID+"/Collections?Fields=PrimaryImageAspectRatio")
+	if rec.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var result queryResultDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result.TotalRecordCount != 2 || len(result.Items) != 2 {
+		t.Fatalf("expected the two visible containing collections, got %+v", result)
+	}
+	if result.Items[0].Name != "Action Picks" || result.Items[1].Name != "zombie classics" {
+		t.Fatalf("expected case-insensitive name order, got %q, %q", result.Items[0].Name, result.Items[1].Name)
+	}
+	if result.Items[0].Type != "BoxSet" || result.Items[0].PrimaryImageAspectRatio == nil {
+		t.Fatalf("expected BoxSet DTO with aspect ratio, got %+v", result.Items[0])
+	}
+
+	rec = performItemCollectionsRequest(t, h, "/Items/"+itemID+"/Collections?StartIndex=1&Limit=1")
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal page: %v", err)
+	}
+	if result.TotalRecordCount != 2 || result.StartIndex != 1 || len(result.Items) != 1 || result.Items[0].Name != "zombie classics" {
+		t.Fatalf("expected second page [zombie classics] of 2, got %+v", result)
+	}
+
+	// Standard item response controls apply as on every other item list.
+	if result.Items[0].UserData == nil {
+		t.Fatal("fixture should carry user data before it is disabled")
+	}
+	rec = performItemCollectionsRequest(t, h, "/Items/"+itemID+"/Collections?EnableUserData=false&EnableImages=false")
+	result = queryResultDTO{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal controls: %v", err)
+	}
+	for _, item := range result.Items {
+		if item.UserData != nil || len(item.ImageTags) != 0 {
+			t.Fatalf("response controls ignored for %q: user data %v, image tags %v", item.Name, item.UserData, item.ImageTags)
+		}
+	}
+}
+
+func TestHandleItemCollections_EmptyAndNotFound(t *testing.T) {
+	collections := &fakeCollectionSource{
+		collections: []*models.LibraryCollection{{ID: "201", LibraryID: 1, Title: "Set", Visibility: "visible"}},
+		items:       map[string][]*models.LibraryCollectionItem{"201": {{CollectionID: "201", MediaItemID: "m-hidden"}}},
+	}
+	// m-hidden is a member but the viewer's access filter does not return it;
+	// m-ghost is equally invisible and belongs to no collection.
+	itemRepo := &fakeBatchItemRepo{items: map[string]*models.MediaItem{
+		"m-none": {ContentID: "m-none", Type: "movie", Title: "Loner"},
+		"s-show": {ContentID: "s-show", Type: "series", Title: "Show"},
+	}}
+	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, itemRepo)
+	h.episodeRepo = &countingEpisodeRepo{episodesByID: map[string]*models.Episode{"e-1": {ContentID: "e-1", SeriesID: "s-show", SeasonNumber: 1, EpisodeNumber: 1}}}
+
+	cases := []struct {
+		name   string
+		target string
+		code   int
+	}{
+		{"visible item in no collection", "/Items/" + h.codec.EncodeStringID(EncodedIDItem, "m-none") + "/Collections", 200},
+		{"visible episode", "/Items/" + h.codec.EncodeStringID(EncodedIDItem, "e-1") + "/Collections", 200},
+		{"season", "/Items/" + h.codec.EncodeStringID(EncodedIDSeason, "s-1") + "/Collections", 200},
+		{"inaccessible member", "/Items/" + h.codec.EncodeStringID(EncodedIDItem, "m-hidden") + "/Collections", 404},
+		{"inaccessible non-member", "/Items/" + h.codec.EncodeStringID(EncodedIDItem, "m-ghost") + "/Collections", 404},
+		{"undecodable id", "/Items/not-an-id/Collections", 404},
+		{"other user", "/Items/" + h.codec.EncodeStringID(EncodedIDItem, "m-none") + "/Collections?userId=someone-else", 404},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := performItemCollectionsRequest(t, h, tc.target)
+			if rec.Code != tc.code {
+				t.Fatalf("expected %d, got %d: %s", tc.code, rec.Code, rec.Body.String())
+			}
+			if tc.code != 200 {
+				return
+			}
+			var result queryResultDTO
+			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if result.TotalRecordCount != 0 || len(result.Items) != 0 {
+				t.Fatalf("expected empty result, got %+v", result)
+			}
+		})
 	}
 }

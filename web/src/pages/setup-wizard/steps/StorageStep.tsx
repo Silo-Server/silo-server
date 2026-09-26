@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import type { FormEvent, ReactNode } from "react";
 
 import {
   ConnectionCheckAction,
@@ -50,6 +50,17 @@ const ALL_KEYS = [
   ...PUBLIC_S3_KEYS,
   ...PRIVATE_S3_KEYS,
   ...META_KEYS,
+];
+
+const STORAGE_LOCATION_KEYS = [
+  "artwork.storage_backend",
+  "artwork.local_path",
+  "s3.public_endpoint",
+  "s3.public_bucket",
+  "s3.public_key_prefix",
+  "s3.private_endpoint",
+  "s3.private_bucket",
+  "s3.private_key_prefix",
 ];
 
 const S3_URL_AUTH_OPTIONS = [
@@ -147,11 +158,19 @@ function S3Fields({
   prefix,
   check,
   disabled,
+  locationLocked = false,
+  locationStatusUnavailable = false,
+  lockedDescription,
 }: {
   form: Form;
   prefix: "public" | "private";
   check: ReturnType<typeof useConnectionCheck>;
   disabled: boolean;
+  // The server refuses direct location changes after an identity is recorded.
+  // A configured private bucket is recorded at startup, even when empty.
+  locationLocked?: boolean;
+  locationStatusUnavailable?: boolean;
+  lockedDescription?: string;
 }) {
   const key = (name: string) => `s3.${prefix}_${name}`;
   const urlAuth = form.getValue(key("url_auth")) || "presigned";
@@ -162,11 +181,20 @@ function S3Fields({
         hint="https://s3.amazonaws.com"
         value={form.getValue(key("endpoint"))}
         onChange={(v) => form.setValue(key("endpoint"), v)}
+        disabled={locationLocked}
+        description={
+          locationLocked
+            ? locationStatusUnavailable
+              ? "Storage lock status is unavailable. Reload before changing this location."
+              : lockedDescription
+            : undefined
+        }
       />
       <SettingField
         label="Bucket"
         value={form.getValue(key("bucket"))}
         onChange={(v) => form.setValue(key("bucket"), v)}
+        disabled={locationLocked}
       />
       <SettingField
         label="Access key"
@@ -188,6 +216,7 @@ function S3Fields({
         hint="silo"
         value={form.getValue(key("key_prefix"))}
         onChange={(v) => form.setValue(key("key_prefix"), v)}
+        disabled={locationLocked}
       />
       {prefix === "public" ? (
         <>
@@ -265,7 +294,18 @@ export function StorageStep() {
   // The health probe pings Redis and Postgres; only worth it once there is a
   // Redis to report on.
   const serverStatus = useAdminServerStatus();
-  const artworkLocked = serverStatus.data?.artwork_storage?.locked === true;
+  const artworkStorage = serverStatus.data?.artwork_storage;
+  const storageLockStatusKnown =
+    !serverStatus.isError &&
+    artworkStorage != null &&
+    "status_known" in artworkStorage &&
+    artworkStorage.status_known === true;
+  const locationStatusUnavailable = !storageLockStatusKnown;
+  const artworkLocked = storageLockStatusKnown && artworkStorage.locked === true;
+  const privateLocked =
+    storageLockStatusKnown && (artworkLocked || artworkStorage.private_locked === true);
+  const pendingLocationEdit = STORAGE_LOCATION_KEYS.some(form.isDirty);
+  const holdSubmit = locationStatusUnavailable && pendingLocationEdit;
   const redisConfigured = form.getValue("redis.url").trim() !== "" || redisSaved;
   const redisStatus = redisStatusFor(redisSaved, redisManaged, serverStatus.data?.health?.redis);
   const publicConfigured = form.getValue("s3.public_bucket").trim() !== "";
@@ -277,24 +317,53 @@ export function StorageStep() {
   const usesS3 = artworkBackend === "s3" || (artworkBackend === "auto" && publicConfigured);
   const storageParts = [
     redisConfigured ? "Redis" : null,
-    usesS3 ? "S3 artwork" : "Local artwork",
+    usesS3 ? "S3 storage" : "Local storage",
   ].filter(Boolean);
   useStepSummary("storage", storageParts.join(" + "));
 
-  if (form.isPending) return <StepSkeleton rows={3} />;
+  if (!artworkStorage && (serverStatus.isError || serverStatus.data)) {
+    return (
+      <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4" role="alert">
+        <p className="text-sm font-medium">Storage lock status is unavailable</p>
+        <p className="text-muted-foreground mt-1 text-xs">
+          Reload this page before editing storage settings.
+        </p>
+      </div>
+    );
+  }
+
+  if (form.isPending || !artworkStorage) return <StepSkeleton rows={3} />;
 
   return (
     <StepFrame
       title="Storage and cache"
-      lede="A single server works without any of this. Add Redis to run more than one node, and an S3 bucket if you want artwork and thumbnails kept somewhere other than this server."
-      onSubmit={handleSubmit}
+      lede="A single server works without any of this. Add Redis to run more than one node, and an S3 bucket if you want stored files kept somewhere other than this server."
+      onSubmit={(event: FormEvent<HTMLFormElement>) => {
+        if (holdSubmit) {
+          event.preventDefault();
+          return;
+        }
+        void handleSubmit(event);
+      }}
       busy={busy}
+      disabled={holdSubmit}
       onSkip={skip}
-      footnote="All of this is in Admin › Settings › Infrastructure."
+      footnote="Storage, Redis, and database settings are in Admin › Settings › Storage & Database."
     >
+      {locationStatusUnavailable ? (
+        <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4" role="alert">
+          <p className="text-sm font-medium">Storage lock status is unavailable</p>
+          <p className="text-muted-foreground mt-1 text-xs">
+            Reload before changing storage locations.{" "}
+            {pendingLocationEdit
+              ? "Continue is unavailable until lock status returns."
+              : "Other settings can still be saved."}
+          </p>
+        </div>
+      ) : null}
       <StepSection>
         <SettingField
-          label="Artwork storage"
+          label="Storage"
           type="select"
           value={artworkBackend}
           options={[
@@ -302,11 +371,13 @@ export function StorageStep() {
             { value: "local", label: "Local disk" },
             { value: "s3", label: "S3" },
           ]}
-          disabled={artworkLocked}
+          disabled={locationStatusUnavailable || artworkLocked}
           description={
-            artworkLocked
-              ? "Locked: artwork has already been stored on this backend and cannot be moved."
-              : undefined
+            locationStatusUnavailable
+              ? "Storage lock status is unavailable. Reload before changing the backend."
+              : artworkLocked
+                ? "Locked: files have already been stored on this backend. Change it from Admin › Settings › Storage & Database, which moves them."
+                : "Where Silo keeps artwork, subtitles, and other library assets."
           }
           onChange={(value) => {
             form.setValue("artwork.storage_backend", value);
@@ -314,12 +385,16 @@ export function StorageStep() {
           }}
         />
         <SettingField
-          label="Local artwork path"
+          label="Local storage path"
           hint="/var/lib/silo/artwork"
           value={form.getValue("artwork.local_path")}
           onChange={(value) => form.setValue("artwork.local_path", value)}
-          disabled={artworkLocked}
-          description="Absolute path on the server. Mount a volume here in Docker."
+          disabled={locationStatusUnavailable || artworkLocked}
+          description={
+            locationStatusUnavailable
+              ? "Storage lock status is unavailable. Reload before changing this path."
+              : "Absolute path on the server. Mount a volume here in Docker."
+          }
         />
         <SettingFieldRow
           label="Keep provider artwork"
@@ -371,7 +446,21 @@ export function StorageStep() {
           open={open.public}
           onToggle={() => setOpen((o) => ({ ...o, public: !o.public }))}
         >
-          <S3Fields form={form} prefix="public" check={publicCheck} disabled={busy} />
+          <S3Fields
+            form={form}
+            prefix="public"
+            check={publicCheck}
+            disabled={busy}
+            locationLocked={
+              locationStatusUnavailable || (artworkLocked && artworkBackend !== "local")
+            }
+            locationStatusUnavailable={locationStatusUnavailable}
+            lockedDescription={
+              usesS3
+                ? "Locked: files are stored here. Change it from Admin › Settings › Storage & Database, which moves them."
+                : "Locked: files are stored on local disk, and adding a public bucket would switch Automatic storage to S3. Change it from Admin › Settings › Storage & Database, which moves them."
+            }
+          />
         </Backend>
         <Backend
           title="Private bucket"
@@ -380,7 +469,15 @@ export function StorageStep() {
           open={open.private}
           onToggle={() => setOpen((o) => ({ ...o, private: !o.private }))}
         >
-          <S3Fields form={form} prefix="private" check={privateCheck} disabled={busy} />
+          <S3Fields
+            form={form}
+            prefix="private"
+            check={privateCheck}
+            disabled={busy}
+            locationLocked={locationStatusUnavailable || privateLocked}
+            locationStatusUnavailable={locationStatusUnavailable}
+            lockedDescription="Locked: Silo records a configured private bucket at startup, even when empty. Stored library assets also lock this location. Change it from Admin › Settings › Storage & Database."
+          />
         </Backend>
       </StepSection>
     </StepFrame>

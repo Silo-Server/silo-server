@@ -886,12 +886,12 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
               </li>
               <li>
                 <ViewTransitionLink
-                  to="/rooms/join"
+                  to="/rooms"
                   onClick={onNavigate}
-                  className={navLinkClass("/rooms/join")}
-                  aria-current={isActive("/rooms/join") ? "page" : undefined}
+                  className={navLinkClass("/rooms")}
+                  aria-current={isActive("/rooms") ? "page" : undefined}
                 >
-                  {isActive("/rooms/join") && (
+                  {isActive("/rooms") && (
                     <span
                       className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
                       style={{ background: "var(--primary)" }}

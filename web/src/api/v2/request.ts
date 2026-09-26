@@ -21,6 +21,7 @@ import {
   type ProfileRequestContextSnapshot,
 } from "../client";
 import { v2Operations } from "./operations";
+import { problemId } from "./problemId";
 import type { components, paths } from "./schema";
 
 // ---------------------------------------------------------------------------
@@ -90,6 +91,17 @@ type BodyOf<Op> = Op extends { requestBody: { content: { "application/json": inf
   ? B
   : never;
 
+// An operation whose JSON body the server marks optional (`requestBody?`).
+// `requestBody?: never` (no body at all) must not match, and `[never]` is
+// assignable to any tuple, so it is excluded first.
+type OptionalBodyOf<Op> = Op extends { requestBody?: infer R }
+  ? [NonNullable<R>] extends [never]
+    ? never
+    : [NonNullable<R>] extends [{ content: { "application/json": infer B } }]
+      ? B
+      : never
+  : never;
+
 type FormBodyOf<Op> = Op extends { requestBody: { content: { "multipart/form-data": infer F } } }
   ? F
   : never;
@@ -126,6 +138,11 @@ export type V2Result<K extends V2OperationKey> = V2<SuccessOf<OperationOf<K>>>;
 
 /** The JSON request body type of a v2 operation (`never` when it has none). */
 export type V2Body<K extends V2OperationKey> = BodyOf<OperationOf<K>>;
+
+/** The JSON body of a v2 operation that may be sent without one (`never` otherwise). */
+export type V2OptionalBody<K extends V2OperationKey> = [V2Body<K>] extends [never]
+  ? OptionalBodyOf<OperationOf<K>>
+  : never;
 
 /**
  * The multipart form of a v2 operation (`never` when it has none): each
@@ -173,6 +190,7 @@ export type V2RequestOptions<K extends V2OperationKey> = CommonOptions &
   ([V2PathParams<K>] extends [never] ? unknown : { path: V2PathParams<K> }) &
   ([V2Query<K>] extends [never] ? unknown : { query?: V2Query<K> }) &
   ([V2Body<K>] extends [never] ? unknown : { body: V2Body<K> }) &
+  ([V2OptionalBody<K>] extends [never] ? unknown : { body?: V2OptionalBody<K> }) &
   ([V2Form<K>] extends [never] ? unknown : { form: V2Form<K> }) &
   ([V2Headers<K>] extends [never]
     ? unknown
@@ -195,12 +213,7 @@ export type Problem = components["schemas"]["Problem"];
 /** One field-level validation detail inside a `validation_failed` problem. */
 export type ProblemError = components["schemas"]["ProblemError"];
 
-/** The machine-readable identifier: the final path segment of `Problem.type`. */
-export function problemId(problem: Pick<Problem, "type">): string {
-  const path = problem.type.split("?")[0] ?? "";
-  const segment = path.slice(path.lastIndexOf("/") + 1);
-  return segment.replace(/#.*$/, "");
-}
+export { problemId };
 
 /** A documented v2 error: the server answered with a Problem Details body. */
 export class V2ProblemError extends Error {
@@ -233,6 +246,15 @@ export class V2ProblemError extends Error {
     this.currentETag = currentETag;
     this.headers = headers;
   }
+}
+
+/**
+ * Whether the server answered that there is nothing to show. A proxy's 404 page
+ * is a `V2TransportError`, not this: only the contract can say a resource is
+ * missing, and it says so the same way for hidden resources.
+ */
+export function isNotFoundProblem(error: unknown): boolean {
+  return error instanceof V2ProblemError && error.status === 404;
 }
 
 /** Parses a delta-seconds `Retry-After` header; an HTTP-date form is not a contract shape. */

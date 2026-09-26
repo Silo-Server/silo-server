@@ -2,13 +2,14 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { captureRoomCreationDraft, createRoom } from "./watchTogetherCreate";
-import WatchTogetherJoin from "@/pages/WatchTogetherJoin";
+import WatchPartyHub from "@/pages/watchtogether/WatchPartyHub";
 const state = vi.hoisted(() => ({ token: "", navigate: vi.fn() }));
 vi.mock("react-router", () => ({
   useSearchParams: () => [new URLSearchParams({ token: state.token })],
 }));
 vi.mock("@/hooks/useViewTransition", () => ({ useViewTransitionNavigate: () => state.navigate }));
 vi.mock("@/hooks/useDocumentTitle", () => ({ useDocumentTitle: () => {} }));
+vi.mock("@/hooks/useAuth", () => ({ useOptionalAuth: () => null }));
 function response(id: string) {
   return new Response(
     JSON.stringify({
@@ -89,13 +90,13 @@ it("refuses old authority before dispatch and mismatched creation receipts", asy
 it("mounted create reuses uncertain draft and changes identity only for new mode", async () => {
   const fetch = vi.fn().mockRejectedValue(new Error("uncertain"));
   vi.stubGlobal("fetch", fetch);
-  const view = render(<WatchTogetherJoin />);
+  const view = render(<WatchPartyHub />);
   fireEvent.click(view.getByRole("button", { name: "Create Watch Party" }));
   await view.findByText("uncertain");
   fireEvent.click(view.getByRole("button", { name: "Create Watch Party" }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
   expect(fetch.mock.calls[0]![1].body).toBe(fetch.mock.calls[1]![1].body);
-  fireEvent.click(view.getByRole("radio", { name: /Vote Together/ }));
+  fireEvent.click(view.getByRole("radio", { name: /Everyone votes/ }));
   await waitFor(() =>
     expect(view.getByRole("button", { name: "Create Watch Party" })).not.toBeDisabled(),
   );
@@ -121,13 +122,13 @@ it.each([
       .fn()
       .mockImplementation(() => new Promise<Response>((resolve) => pending.push(resolve)));
     vi.stubGlobal("fetch", fetch);
-    const view = render(<WatchTogetherJoin />);
+    const view = render(<WatchPartyHub />);
     fireEvent.click(view.getByRole("button", { name: "Create Watch Party" }));
     await waitFor(() => expect(pending.length).toBe(1));
-    if (kind === "mode") fireEvent.click(view.getByRole("radio", { name: /Vote Together/ }));
+    if (kind === "mode") fireEvent.click(view.getByRole("radio", { name: /Everyone votes/ }));
     if (kind === "authority") {
       setProfileToken("new");
-      view.rerender(<WatchTogetherJoin />);
+      view.rerender(<WatchPartyHub />);
     }
     if (kind === "unmount") view.unmount();
     if (kind !== "unmount") {

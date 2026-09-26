@@ -64,13 +64,13 @@ func Category(key string) string {
 		return "watch_sync"
 	case workloadNotifications, "notification_delivery", "history_import", "recommendations", "ai", "subtitles", workloadPlugin, "admin", "transcode", "remux", "probe":
 		return key
-	case "refresh_metadata", "sync_manga_metadata", "sync_audiobook_metadata", "sync_ebook_metadata", "backfill_ebook_metadata", "sync_podcast_feeds", "metadata":
+	case "refresh_metadata", "refresh_all_library_metadata", "bulk_metadata_enrichment", "sync_manga_metadata", "sync_audiobook_metadata", "sync_ebook_metadata", "backfill_ebook_metadata", "sync_podcast_feeds", "metadata":
 		return "metadata"
 	case "refresh_trending_discover":
 		return "recommendations"
 	case "seed_content_availability", "rebuild_release_interest":
 		return workloadNotifications
-	case "reconcile_requests", "reconcile_watch_history", "cleanup_activity_log", "cleanup_policy_decision_log", "cleanup_client_diagnostics", "cleanup_auth_sessions", "cleanup_operational_log", "cleanup_task_history", "cleanup_catalog_search_index_events", "cleanup_orphaned_media_items", "setting_mutations_retention", "notifications_retention", "backfill_media_item_aliases", "repair_provider_id_integrity", "sync_collections", "sync_user_collections", "check_plugin_updates":
+	case "reconcile_requests", "reconcile_watch_history", "database_maintenance", "cleanup_client_diagnostics", "cleanup_operational_log", "cleanup_orphaned_media_items", "setting_mutations_retention", "backfill_media_item_aliases", "repair_provider_id_integrity", "sync_collections", "sync_user_collections", "check_plugin_updates":
 		return "maintenance"
 	default:
 		if strings.HasPrefix(key, "plugin:") || strings.HasPrefix(key, "plugin_") {

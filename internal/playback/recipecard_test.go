@@ -117,6 +117,7 @@ func TestRecipeCardOriginalStartedAtRoundTripAndReconstruct(t *testing.T) {
 	started := time.Date(2026, 8, 16, 12, 34, 56, 987654321, time.UTC)
 	card := NewRecipeCard(42, "profile-1", 77, "", TranscodeOpts{SessionID: "started", InputPath: "/media/movie.mkv"})
 	card.OriginalStartedAt = started
+	card.StreamLocation = "local"
 	encoded, err := json.Marshal(card)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +126,7 @@ func TestRecipeCardOriginalStartedAtRoundTripAndReconstruct(t *testing.T) {
 	if err := json.Unmarshal(encoded, &stored); err != nil {
 		t.Fatal(err)
 	}
-	if !stored.OriginalStartedAt.Equal(started) {
+	if !stored.OriginalStartedAt.Equal(started) || stored.StreamLocation != "local" {
 		t.Fatalf("stored-card round trip = %s, want %s", stored.OriginalStartedAt, started)
 	}
 
@@ -134,14 +135,14 @@ func TestRecipeCardOriginalStartedAtRoundTripAndReconstruct(t *testing.T) {
 		t.Fatalf("ostn = %d, want %d", claims.OriginalStartedAtUnixNano, started.UnixNano())
 	}
 	back := RecipeCardFromClaims(&claims)
-	if !back.OriginalStartedAt.Equal(started) {
+	if !back.OriginalStartedAt.Equal(started) || back.StreamLocation != "local" {
 		t.Fatalf("claim round trip = %s, want %s", back.OriginalStartedAt, started)
 	}
 
 	tm := NewTranscodeManager()
 	tm.Sessions = NewSessionManager(0, 0)
 	session := tm.ReconstructSession(t.Context(), "started", 42, back)
-	if session == nil || !session.StartedAt.Equal(started) {
+	if session == nil || !session.StartedAt.Equal(started) || session.StreamLocation != "local" {
 		t.Fatalf("reconstructed StartedAt = %v, want %s", session, started)
 	}
 }
@@ -176,6 +177,50 @@ func TestRecipeCardPreservesRoutingNodeIDs(t *testing.T) {
 	back := RecipeCardFromClaims(&claims)
 	if back.RoutingExecutionNodeID != 7 || back.RoutingEgressNodeID != 11 {
 		t.Fatalf("round-trip node IDs = execution %d, egress %d; want 7 and 11", back.RoutingExecutionNodeID, back.RoutingEgressNodeID)
+	}
+}
+
+func TestRecipeCardNetworkRouteSurvivesRecovery(t *testing.T) {
+	for _, provider := range []*string{nil, new(""), new("tailscale")} {
+		card := NewDirectRecipeCard("network-route", 42, "profile-1", 77)
+		card.RoutingNetworkProvider = provider
+		card.RoutingWorkload = "remux"
+		card.RoutingExecution = "transcode"
+		card.RoutingExecutionNodeID = 7
+		card.RoutingEgress = "proxy"
+		card.RoutingEgressNodeID = 11
+		for _, token := range []bool{false, true} {
+			var recovered RecipeCard
+			if token {
+				wire, err := json.Marshal(card.ToClaims())
+				if err != nil {
+					t.Fatal(err)
+				}
+				var claims streamtoken.Claims
+				if err := json.Unmarshal(wire, &claims); err != nil {
+					t.Fatal(err)
+				}
+				recovered = RecipeCardFromClaims(&claims)
+			} else {
+				wire, err := json.Marshal(card)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(wire, &recovered); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tm := NewTranscodeManager()
+			tm.Sessions = NewSessionManager(0, 0)
+			session := tm.ReconstructSession(t.Context(), card.SessionID, card.UserID, recovered)
+			if session == nil || session.RoutingExecutionNodeID != 7 || session.RoutingEgressNodeID != 11 {
+				t.Fatalf("recovered route: %#v", session)
+			}
+			got := session.RoutingNetworkProvider
+			if (got == nil) != (provider == nil) || (got != nil && *got != *provider) {
+				t.Fatalf("network provider changed through recovery: got %v want %v", got, provider)
+			}
+		}
 	}
 }
 

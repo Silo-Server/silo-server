@@ -1,6 +1,6 @@
 # S3 Storage Setup
 
-S3 is optional for artwork. A single-node install uses local artwork storage by default; S3 is recommended for multi-node deployments and remains available for catalog exports and other operational data. Any S3-compatible backend works (AWS S3, Ceph RGW, MinIO, Cloudflare R2, etc.).
+S3 is optional for artwork. A single-node install uses local artwork storage by default; S3 is recommended for multi-node deployments and remains available for catalog exports and other operational data. Any S3-compatible backend works (AWS S3, Ceph RGW, MinIO, Garage, Cloudflare R2, etc.).
 
 ## Core Settings
 
@@ -41,6 +41,8 @@ Generates HMAC-signed URLs validated by a Cloudflare WAF rule. Best for Cloudfla
 - **Token Secret** — HMAC-SHA256 shared secret (must match the WAF rule)
 - **Token Param** — Query parameter name (default: `verify`)
 - **Token TTL** — Token lifetime in seconds (default: `10800` = 3 hours)
+
+Silo reuses the token for revisioned artwork, such as `w500.<revision>.webp`, for a quarter of the Token TTL, capped at a day, so clients and the CDN keep their cached images. Each URL stays valid for at least three quarters of the TTL. A longer TTL means fewer URL changes and a longer life for a leaked URL.
 
 ---
 
@@ -131,3 +133,108 @@ https://your-cdn-domain.com/tmdb/movies/550/poster/original.jpg?verify=171215040
 3. Leave URL Auth Method as **S3 Presigned URLs** (default)
 
 No additional setup needed — presigned URLs work out of the box.
+
+---
+
+## Garage Setup Guide
+
+[Garage](https://garagehq.deuxfleurs.fr/) is a lightweight, actively maintained
+S3-compatible object store aimed at self-hosters. It implements the core S3 API
+(`PutObject`, `GetObject`, `DeleteObject`, multipart upload, bucket CORS) that
+Silo needs, so it works as a drop-in backend the same way MinIO or Ceph RGW do
+— with one difference worth knowing up front: **Garage has no S3 bucket-policy
+or object-ACL support** (`PutBucketPolicy`, `PutObjectAcl`, and friends are all
+unimplemented — see [Garage's S3 compatibility
+matrix](https://garagehq.deuxfleurs.fr/documentation/reference-manual/s3-compatibility/)).
+Public, unsigned reads are handled entirely differently: through Garage's own
+[website-access
+feature](https://garagehq.deuxfleurs.fr/documentation/cookbook/exposing-websites/),
+which binds a bucket to a domain either by exact bucket-name match or as a
+subdomain of a configured `root_domain` — not by a bucket policy on the normal
+S3 API endpoint.
+
+### Option A: Presigned URLs (simplest, no extra setup)
+
+Garage's S3 API supports standard SigV4 signing, so the default **S3 Presigned
+URLs** mode works with no additional Garage-specific Silo configuration:
+
+1. Create a bucket and an access key scoped to it:
+   ```
+   garage bucket create <bucket-name>
+   garage key create <key-name>
+   garage bucket allow --key <key-name-or-ID> --read --write <bucket-name>
+   ```
+2. Configure Silo with the endpoint, bucket, and credentials, **Path Style**
+   enabled
+3. Set Silo's **Region** to match Garage's configured `[s3_api].s3_region` in
+   `garage.toml` — Garage validates the SigV4 signing scope against this
+   value, so a mismatch breaks presigned URLs even with a correct endpoint
+   and credentials. `s3_region` has no built-in default (Garage requires it
+   set explicitly); Garage's own quick-start guide uses `garage`, not AWS's
+   `us-east-1`, so this almost always needs to be changed from Silo's own
+   default.
+4. Leave URL Auth Method as **S3 Presigned URLs** (default)
+
+This is the recommended starting point and is sufficient for most
+self-hosted deployments.
+
+### Option B: Public (no auth), for a public asset domain
+
+Public mode is usable with Garage, but — because Garage has no bucket-policy
+concept — it requires the bucket itself to be named after the domain you want
+to serve it from, and Garage's separate website listener (not the main S3 API
+port) to be what Silo's Read Endpoint actually reaches:
+
+1. **Name the bucket as the exact public domain**, e.g. `garage bucket create
+   assets.example.com` (Garage matches the website Host header against the
+   bucket name itself, or against `<bucket>.<root_domain>` if you'd rather use
+   a shared suffix — see the website-access cookbook linked above)
+2. **Enable website access on that bucket**: `garage bucket website --allow
+   assets.example.com`
+3. **Configure and start Garage's website listener** — it does not listen by
+   default, this section has to be added to `garage.toml`. `root_domain` is a
+   required field of Garage's `[s3_web]` config in v2.4.1 (the config fails
+   to load without it, even though it only affects `<bucket>.<root_domain>`
+   -style routing) — any placeholder value works if you only need exact
+   bucket-name matching:
+   ```toml
+   [s3_web]
+   bind_addr = "[::]:3902"
+   root_domain = ".web.example.com"
+   ```
+4. **Route the domain to that port** — e.g. a Caddy/nginx vhost for
+   `assets.example.com` proxying to `garage:3902` with the Host header
+   preserved
+5. **Configure Silo:**
+
+| Setting | Value |
+|---------|-------|
+| Endpoint | Garage's S3 API endpoint, e.g. `https://garage.internal:3900` |
+| Bucket | `assets.example.com` |
+| Region | must match `garage.toml`'s `[s3_api].s3_region` — see Option A |
+| Path Style | Enabled |
+| URL Auth Method | Public (no auth) |
+| Read Endpoint | `https://assets.example.com` |
+
+Garage's `[s3_api].api_bind_addr` listener has no built-in TLS support either
+(same as the website listener) — an `https://` endpoint only works if a
+reverse proxy in front of Garage terminates TLS and forwards to that port.
+Point Silo's Endpoint at that proxy, not directly at `api_bind_addr`, if you
+want HTTPS to the S3 API.
+
+To verify the route, request a known object path rather than the domain root.
+Website mode serves objects, not a bucket index, so a bare `GET
+https://assets.example.com/` answers `404` on a correctly configured bucket
+unless you have set an index document. That `404` is expected and is not a
+sign of a broken setup.
+
+Private/operational buckets (metadata, user DB) are unaffected by this — keep
+those on the default presigned mode against the normal S3 API port; only the
+bucket you want served as public, unsigned reads needs the website-domain
+treatment above.
+
+**Not supported today:** the `MakeObjectPublic` per-object ACL path in
+`internal/s3client` (`PutObjectAcl` with a `public-read` canned ACL) will fail
+against Garage, since object ACLs are unimplemented. It is not currently
+called anywhere in this codebase, but a future caller should not assume it
+works on every configured backend.

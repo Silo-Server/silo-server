@@ -10,6 +10,8 @@ import (
 
 type CatalogSearchCapabilities struct {
 	Capability
+	PeopleMediaScope      bool   `json:"people_media_scope,omitzero" doc:"People search accepts media_scope and filters credits by viewer access"`
+	PersonPrefetch        bool   `json:"person_prefetch,omitzero" doc:"Person reads accept prefetch=true for speculative reads that do not queue a provider refresh"`
 	Provider              string `json:"provider,omitempty" enum:"postgres,meilisearch"`
 	ResultWindowLimit     int    `json:"result_window_limit,omitzero" doc:"Maximum candidates in a Meilisearch ranked window; absent for PostgreSQL live queries"`
 	SessionTTLSeconds     int    `json:"session_ttl_seconds,omitzero" doc:"Fixed Meilisearch ranking-session lifetime; requests do not extend it"`
@@ -40,6 +42,8 @@ func registerCatalogSearchCapabilities(reg *Registry) {
 			}
 			return &CatalogSearchCapabilitiesOutput{Body: CatalogSearchCapabilities{
 				Capability: Capability{State: StateAvailable}, Provider: result.Provider,
+				PeopleMediaScope:  reg.deps.People != nil && reg.deps.CatalogAccess != nil,
+				PersonPrefetch:    reg.deps.People != nil,
 				ResultWindowLimit: result.ResultWindowLimit, SessionTTLSeconds: result.SessionTTLSeconds, MaxSessionsPerAccount: result.MaxSessionsPerAccount,
 			}}, nil
 		})

@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Profile } from "@/api/types";
+import type { LoginResponse, Profile } from "@/api/types";
 import { v2Fixture } from "@/api/v2/testing";
 import listAuthProvidersOk from "../../../contracts/api/v2/fixtures/list_auth_providers_ok.json";
 import { storage } from "@/utils/storage";
@@ -18,6 +18,7 @@ const setProfileIdMock = vi.hoisted(() => vi.fn());
 const setProfileTokenMock = vi.hoisted(() => vi.fn());
 const setRefreshTokenMock = vi.hoisted(() => vi.fn());
 const queryClientClearMock = vi.hoisted(() => vi.fn());
+const refreshAuthenticationMock = vi.hoisted(() => vi.fn());
 const v2Mock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/api/client", async () => {
@@ -29,6 +30,7 @@ vi.mock("@/api/client", async () => {
     bootstrapAccessToken: bootstrapAccessTokenMock,
     getAccessToken: getAccessTokenMock,
     onProfileUnverified: onProfileUnverifiedMock,
+    refreshAuthentication: refreshAuthenticationMock,
     setAccessToken: setAccessTokenMock,
     setProfileId: setProfileIdMock,
     setProfileToken: setProfileTokenMock,
@@ -102,6 +104,50 @@ function ProfileSelectionProbe() {
       <button onClick={() => selectProfile(profileOne)}>Select profile one</button>
       <button onClick={() => selectProfile(renamedProfileOne)}>Update profile one</button>
       <button onClick={() => selectProfile(profileTwo)}>Select profile two</button>
+    </div>
+  );
+}
+
+function makeSession(id: number, username: string): LoginResponse {
+  return {
+    access_token: `access-${id}`,
+    refresh_token: `refresh-${id}`,
+    expires_in: 3600,
+    user: {
+      id,
+      username,
+      email: "",
+      role: "user",
+      permissions: [],
+      download_allowed: false,
+      impersonation: null,
+    },
+  };
+}
+
+function AccountProbe() {
+  const { user, loading, completeLogin } = useAuth();
+
+  return (
+    <div>
+      <div data-testid="signed-in-user">{loading ? "loading" : (user?.username ?? "none")}</div>
+      <button onClick={() => completeLogin(makeSession(1, "laura"))}>Sign in as laura</button>
+      <button onClick={() => completeLogin(makeSession(2, "sam"))}>Sign in as sam</button>
+    </div>
+  );
+}
+
+function TemporaryPasswordProbe() {
+  const { user, pendingPasswordChange, loading, completeLogin, settleTemporaryPassword } =
+    useAuth();
+  const temporary = makeSession(1, "laura");
+  temporary.user.password_change_required = true;
+  return (
+    <div>
+      <div data-testid="signed-in-user">{loading ? "loading" : (user?.username ?? "none")}</div>
+      <div data-testid="pending-user">{pendingPasswordChange?.username ?? "none"}</div>
+      <button onClick={() => completeLogin(temporary)}>Sign in with a temporary password</button>
+      <button onClick={() => void settleTemporaryPassword()}>Settle</button>
     </div>
   );
 }
@@ -190,5 +236,70 @@ describe("AuthProvider", () => {
 
     expect(queryClientClearMock).not.toHaveBeenCalled();
     expect(screen.getByTestId("active-profile")).toHaveTextContent("Alex Updated");
+  });
+
+  it("keeps a temporary-password session signed out until the password is changed", async () => {
+    renderWithAuthProvider(<TemporaryPasswordProbe />);
+    await waitFor(() => expect(screen.getByTestId("signed-in-user")).toHaveTextContent("none"));
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Sign in with a temporary password" }).click();
+    });
+    // Nothing keyed on `user` runs for the restricted session, including the
+    // sole-profile bootstrap.
+    expect(screen.getByTestId("signed-in-user")).toHaveTextContent("none");
+    expect(screen.getByTestId("pending-user")).toHaveTextContent("laura");
+    expect(v2Mock.mock.calls.some(([key]) => String(key).includes("/profiles"))).toBe(false);
+
+    refreshAuthenticationMock.mockResolvedValue(true);
+    v2Mock.mockImplementation((key: string) =>
+      key === "GET /api/v2/account/me"
+        ? Promise.resolve(
+            v2Fixture<"GET /api/v2/account/me">({
+              id: "1",
+              username: "laura",
+              email: "",
+              role: "user",
+              permissions: [],
+              download_allowed: false,
+              password_change_required: false,
+            }),
+          )
+        : Promise.reject(new Error(`unexpected v2 call: ${key}`)),
+    );
+    await act(async () => {
+      screen.getByRole("button", { name: "Settle" }).click();
+    });
+    await waitFor(() => expect(screen.getByTestId("signed-in-user")).toHaveTextContent("laura"));
+    expect(screen.getByTestId("pending-user")).toHaveTextContent("none");
+    expect(refreshAuthenticationMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the cache before a different account replaces the signed-in one", async () => {
+    renderWithAuthProvider(<AccountProbe />);
+    await waitFor(() => expect(screen.getByTestId("signed-in-user")).toHaveTextContent("none"));
+
+    // Which account was on screen each time the cache was cleared.
+    const shownAtClear: Array<string | null> = [];
+    queryClientClearMock.mockImplementation(() => {
+      shownAtClear.push(screen.getByTestId("signed-in-user").textContent);
+    });
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Sign in as laura" }).click();
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Sign in as laura" }).click();
+    });
+    expect(screen.getByTestId("signed-in-user")).toHaveTextContent("laura");
+    // Signing in from signed out, or again as the same account, keeps the cache.
+    expect(shownAtClear).toEqual([]);
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Sign in as sam" }).click();
+    });
+    expect(screen.getByTestId("signed-in-user")).toHaveTextContent("sam");
+    // Cleared while laura was still rendered: none of sam's reads had started.
+    expect(shownAtClear).toEqual(["laura"]);
   });
 });

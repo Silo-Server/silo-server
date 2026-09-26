@@ -93,13 +93,7 @@ describe("LibraryMetadataSettings", () => {
   it("renders every field group heading", () => {
     const rendered = text(render({ "catalog.search.provider": "meilisearch" }));
 
-    for (const heading of [
-      "Artwork",
-      "Browsing",
-      "Scanning",
-      "Intro and credits markers",
-      "Search",
-    ]) {
+    for (const heading of ["Artwork", "Browsing", "Scanning", "Skip markers", "Search"]) {
       expect(rendered).toContain(heading);
     }
   });
@@ -109,14 +103,15 @@ describe("LibraryMetadataSettings", () => {
 
     expect(rendered).toContain("Library & Metadata");
     expect(rendered).toContain("Keep provider artwork");
-    expect(rendered).toContain("Find intros and credits");
+    expect(rendered).toContain("Marker source");
     expect(rendered).toContain("Search engine");
   });
 
   it("states the CPU cost of local detection and the search fallback guarantee", () => {
     const rendered = text(render({ "catalog.search.provider": "meilisearch" }));
 
-    expect(rendered).toContain("Detecting on this server utilizes CPU.");
+    expect(rendered).toContain("Online markers take priority.");
+    expect(rendered).toContain("Local detection uses CPU.");
     expect(rendered).toContain(
       "Meilisearch tolerates typos but runs as its own service. If it goes down, search falls back to the built-in engine automatically.",
     );
@@ -136,6 +131,18 @@ describe("LibraryMetadataSettings", () => {
     expect(button?.getAttribute("data-variant")).toBe("secondary");
   });
 
+  it.each(["stored", "on_demand"])("explains scheduled sync for %s storage", (storage) => {
+    const rendered = text(render({ "markers.mode": "online", "markers.online_storage": storage }));
+
+    if (storage === "stored") {
+      expect(rendered).toContain("daily at 03:00 (server time) by default");
+      expect(rendered).not.toContain("Scheduled online sync is disabled.");
+    } else {
+      expect(rendered).toContain("Scheduled online sync is disabled.");
+      expect(rendered).not.toContain("daily at 03:00");
+    }
+  });
+
   it("manages the merged key set of the three tabs it replaces", () => {
     render({});
 
@@ -151,6 +158,8 @@ describe("LibraryMetadataSettings", () => {
         "metadata.image_workers",
         "markers.mode",
         "markers.lazy_playback",
+        "markers.online_storage",
+        "markers.detection_workers",
         "catalog.search.provider",
         "catalog.search.meilisearch.url",
         "catalog.search.meilisearch.api_key",
@@ -166,10 +175,10 @@ describe("LibraryMetadataSettings", () => {
   it("keeps marker behavior and points provider setup at the providers page", () => {
     const rendered = render({ "catalog.search.provider": "postgres" });
 
-    expect(text(rendered)).toContain("Find intros and credits");
+    expect(text(rendered)).toContain("Marker source");
     // Per-provider configuration moved to Subtitles & Metadata; only the link
     // to it is left here.
-    expect(text(rendered)).not.toContain("Use for online marker lookup");
+    expect(text(rendered)).not.toContain("Get markers from this provider");
     expect(text(rendered)).not.toContain("Minimum confidence");
     expect(text(rendered)).toContain("Marker providers");
     expect(rendered).toContain("/admin/settings/providers");
@@ -226,8 +235,22 @@ describe("LibraryMetadataSettings", () => {
     expect(toggleDisabled(rendered, "Keep provider artwork")).toBe(false);
   });
 
+  it("shows detection workers only while this server detects markers", () => {
+    expect(text(render({ "markers.mode": "local" }))).toContain("Detection workers");
+    expect(text(render({ "markers.mode": "both" }))).toContain("Detection workers");
+    expect(text(render({ "markers.mode": "online" }))).not.toContain("Detection workers");
+    expect(text(render({ "markers.mode": "off" }))).not.toContain("Detection workers");
+  });
+
   it("says it once for a group where every field needs a restart", () => {
-    useRestartKeysMock.mockReturnValue(new Set(["markers.mode", "markers.lazy_playback"]));
+    useRestartKeysMock.mockReturnValue(
+      new Set([
+        "markers.mode",
+        "markers.lazy_playback",
+        "markers.online_storage",
+        "markers.detection_workers",
+      ]),
+    );
 
     const rendered = render({ "catalog.search.provider": "postgres" });
 

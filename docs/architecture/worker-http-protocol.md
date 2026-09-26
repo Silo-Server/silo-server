@@ -37,6 +37,18 @@ worker. They consume no request DTO and retain the existing paths:
 | `/admin/force-reload` | Empty 204 | 401, 500 | Proxy reloads configuration; transcode node also tears down sessions and delivery authority. |
 | `/admin/reprobe-capabilities` | JSON 200: `resolved`, `capability_hash` | 401, 409, 503 | Rebuild the capability snapshot; an incomplete rebuild retains the prior published hash. |
 
+The proxy listener additionally carries the network access provider routes the
+API server fans its `/api/v2/admin/network-access/{provider}/...` operations
+out to, under the same node bearer: `GET /network-access/{provider}/status`
+(JSON, only the named provider, independent of other providers' response times), and
+`POST /network-access/{provider}/connect` / `.../disconnect` (JSON, the state
+the instance reached; 404 for a provider no enabled installation declares).
+The status responses carry `auth_url` and error text. The original
+`GET /network-access/status` also remains available to read every provider
+instance on that proxy. Connect and disconnect are `natural_idempotent`: repeating converges on connected or
+disconnected. A proxy that hosts no plugins answers plain-text 503. See
+[network-access.md](network-access.md).
+
 An unconfigured transcode listener also returns plain-text 503 from its bearer
 middleware, including for both reload commands. All six require the existing node bearer token. Reprobe refuses active probes;
 the transcode node also refuses active jobs while holding its GPU admission gate.
@@ -143,6 +155,27 @@ limits and tracking. A read failure after headers can truncate bytes without a
 new error status. Neither method prepares an artifact or promises a durable
 transfer, retry receipt or cross-node reconstruction.
 
+Proxy theme GET and HEAD use `/stream/theme/{token}`. The token must pass the
+playback selected-egress check for this proxy and carry a theme method whose
+routing tuple matches it: `theme_direct_v1` with `direct_play`/`none`, or
+`theme_aac_v1` with `remux` and proxy or transcode execution. Theme tokens are
+refused on every video route, and video tokens on this one. Original themes are
+served with ServeContent ranges and conditions after the file's size and
+modification time are checked against the token. Conversions stream progressive
+AAC in audio-only MP4, run on the proxy or relayed from the reserved transcode
+node with the `seek` query forwarded. HEAD never starts FFmpeg and, like
+downloads, is not tracked as an active transfer. Theme transfers are classed as
+transfers, not playback sessions, and node session reports label them
+`theme_audio`.
+
+A transcode node accepts `theme_aac_v1` on `/remux/{session_id}` under the same
+bearer, token, routing tuple, node identity and stored-recipe checks as a video
+progressive remux. Theme files are not `media_files` rows, so the input is
+approved by the theme authority instead: the token's theme ID must still name
+that exact path in an enabled library, and the file must have the size and
+modification time the token recorded. Video tokens remain limited to the
+media-file catalog.
+
 The transcode listener's legacy `DELETE /transcode/{session_id}` holds the same
 lifecycle lock as start and reconstruction. For legacy progressive remux,
 cancellation installs a process-local fence lasting the maximum token lifetime.
@@ -167,9 +200,24 @@ Success is 202 with JSON-encoded `TranscodeStartResponse`, including available
 recipe attestations. The current handler does not set Content-Type: the HTTP
 server emits text/plain. The description uses JSON Schema content annotations
 for that textual payload rather than claiming application/json on the wire.
-`RequireReady` waits for a manifest, with the existing limited software retry for
-early hardware failure. Without it, 202 establishes registration, not playable
-bytes or successful encoder completion. Tracking is asynchronous monitoring.
+`RequireReady` waits for a manifest. When FFmpeg exits before that manifest under
+`hw_accel=auto` (a video transcode without tone mapping that resolves to a
+hardware backend), the node tries CPU decode with GPU encode, then software;
+otherwise it keeps the limited software retry for an early VideoToolbox failure.
+`auto_fallback_ready` asks for that wait only when the node's own `hw_accel=auto`
+pipeline is enabled for the start, judged from its live hardware; otherwise the
+start is not waited on. The Jellyfin-compatible surface sends it for `auto` video
+transcodes instead of `RequireReady`, and older nodes ignore it. Each attempt
+gets its own manifest wait, so callers size the start deadline of an `auto`
+video transcode that sets either field to `TranscodeStartReadyMaxDuration` (one
+wait per path); every other start keeps the single-wait deadline. Readiness is
+judged only on a manifest the current FFmpeg process wrote; an earlier
+generation's `stream.m3u8` in a reused directory does not count. A process still
+running at the deadline is closed, never duplicated. The response reports `software_video_decode`
+when the executed recipe decodes on the CPU; older nodes omit it, so callers OR
+it with the requested value. Without
+`RequireReady`, 202 establishes registration, not playable bytes or successful
+encoder completion. Tracking is asynchronous monitoring.
 The command is non-retryable and has no durable admission or replay identity;
 it does not alter native startPlayback ownership or release gates.
 

@@ -3,19 +3,20 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
-	"github.com/Silo-Server/silo-server/internal/artworkstore/artworkstoretest"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 )
 
 func TestArtworkNestedKeyBytesAndRanges(t *testing.T) {
-	store, err := artworkstore.NewFilesystem(t.TempDir())
+	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,13 +47,13 @@ func TestArtworkNestedKeyBytesAndRanges(t *testing.T) {
 
 // Embedding the store keeps the fake focused on the read boundary exercised here.
 type artworkReadFailure struct {
-	artworkstore.Store
+	blobstore.Store
 	calls int
 }
 
-func (s *artworkReadFailure) Get(context.Context, string) (io.ReadCloser, artworkstore.ObjectInfo, error) {
+func (s *artworkReadFailure) Get(context.Context, string) (io.ReadCloser, blobstore.ObjectInfo, error) {
 	s.calls++
-	return nil, artworkstore.ObjectInfo{}, errors.New("storage offline")
+	return nil, blobstore.ObjectInfo{}, errors.New("storage offline")
 }
 
 type artworkRepairRecorder struct {
@@ -70,7 +71,8 @@ func TestArtworkRejectsInvalidSignaturesBeforeStorage(t *testing.T) {
 	store := &artworkReadFailure{}
 	h := NewHandler(Dependencies{ArtworkStore: store, ArtworkSigner: signer})
 	valid, _ := signer.Sign("nested/original.rev.webp", time.Now())
-	expired, _ := signer.Sign("nested/original.rev.webp", time.Now().Add(-2*time.Hour))
+	// A revisioned URL holds for a UTC day plus the TTL.
+	expired, _ := signer.Sign("nested/original.rev.webp", time.Now().Add(-26*time.Hour))
 	traversal, _ := signer.Sign("nested/../original.rev.webp", time.Now())
 	for name, u := range map[string]string{
 		"missing query":     Prefix + "/artwork/nested/original.rev.webp",
@@ -91,7 +93,7 @@ func TestArtworkRejectsInvalidSignaturesBeforeStorage(t *testing.T) {
 	}
 }
 func TestArtworkMissingRevisionEnqueuesOriginalRepair(t *testing.T) {
-	store, err := artworkstore.NewFilesystem(t.TempDir())
+	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +134,7 @@ func TestArtworkStorageFailure(t *testing.T) {
 	}
 }
 func TestArtworkMutableCachePolicy(t *testing.T) {
-	store, err := artworkstore.NewFilesystem(t.TempDir())
+	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,10 +152,37 @@ func TestArtworkMutableCachePolicy(t *testing.T) {
 	}
 }
 
+// A revisioned URL holds for its UTC day, so its bytes may stay cached until
+// the URL expires.
+func TestArtworkRevisionedCachePolicy(t *testing.T) {
+	store, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "nested/w500.rev.webp"
+	if err := store.Put(t.Context(), key, []byte("image")); err != nil {
+		t.Fatal(err)
+	}
+	signer := artworkurl.NewSigner("test-secret", time.Hour)
+	h := NewHandler(Dependencies{ArtworkStore: store, ArtworkSigner: signer})
+	u, expires := signer.Sign(key, time.Now())
+	got := do(t, h, http.MethodGet, u, "", nil)
+	var maxAge int64
+	cache := got.Header().Get("Cache-Control")
+	if _, err := fmt.Sscanf(cache, "private, max-age=%d, immutable", &maxAge); err != nil || got.Code != http.StatusOK {
+		t.Fatalf("status = %d, cache = %q", got.Code, cache)
+	}
+	// A few seconds of slack covers a run that crosses midnight UTC between
+	// signing and serving, when the URL has only the TTL left.
+	if remaining := int64(time.Until(expires).Seconds()); maxAge < 3600-5 || maxAge > remaining+1 {
+		t.Fatalf("max-age = %d, URL remaining lifetime = %ds", maxAge, remaining)
+	}
+}
+
 func TestArtworkRangesOnForwardOnlyStreams(t *testing.T) {
 	// S3 bodies are not seekable. Ranges, HEAD, and full reads must still work
 	// without buffering the object.
-	store := artworkstoretest.New()
+	store := blobstoretest.New()
 	key := "tmdb/movies/123/poster/w500.rev.webp"
 	if err := store.Put(t.Context(), key, []byte("0123456789")); err != nil {
 		t.Fatal(err)

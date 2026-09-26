@@ -68,11 +68,12 @@ type DownloadManifest struct {
 	SelectedAudioTrackIndex *int                          `json:"selected_audio_track_index,omitempty"`
 	AudioTracks             []downloads.OfflineAudioTrack `json:"audio_tracks,omitempty"`
 
-	Chapters []downloads.OfflineChapter `json:"chapters,omitempty"`
-	Intro    *DownloadMarker            `json:"intro,omitempty"`
-	Credits  *DownloadMarker            `json:"credits,omitempty"`
-	Recap    *DownloadMarker            `json:"recap,omitempty"`
-	Preview  *DownloadMarker            `json:"preview,omitempty"`
+	Chapters       []downloads.OfflineChapter `json:"chapters,omitempty"`
+	Intro          *DownloadMarker            `json:"intro,omitempty"`
+	Credits        *DownloadMarker            `json:"credits,omitempty"`
+	Recap          *DownloadMarker            `json:"recap,omitempty"`
+	Preview        *DownloadMarker            `json:"preview,omitempty"`
+	MarkerSegments []MarkerOccurrence         `json:"marker_segments" doc:"All effective marker occurrences in source-time order; empty, never null"`
 
 	Subtitles []downloads.OfflineSubtitle `json:"subtitles"`
 
@@ -153,6 +154,7 @@ func downloadManifestOf(row *downloads.OfflineManifest) (DownloadManifest, error
 		Credits:                 (*DownloadMarker)(row.Credits),
 		Recap:                   (*DownloadMarker)(row.Recap),
 		Preview:                 (*DownloadMarker)(row.Preview),
+		MarkerSegments:          markerOccurrences(row.MarkerSegments),
 		Subtitles:               row.Subtitles,
 		StableIdentity:          row.StableIdentity,
 		Integrity:               row.Integrity,

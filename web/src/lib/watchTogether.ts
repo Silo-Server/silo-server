@@ -12,6 +12,13 @@ import { deleteRoomSuggestion } from "@/api/v2/watchTogetherSuggestionDelete";
 import { listRoomSuggestions, setRoomSuggestionVote } from "@/api/v2/watchTogetherSuggestions";
 import { captureProfileRequestContext, type ProfileRequestContextSnapshot } from "@/api/client";
 import { closeRoom } from "@/api/v2/watchTogetherClose";
+import { stageRoomItem } from "@/api/v2/watchTogetherStage";
+import { startRoomPlayback } from "@/api/v2/watchTogetherStart";
+import { stopRoomPlayback } from "@/api/v2/watchTogetherStop";
+import { updateRoomSelectionMode } from "@/api/v2/watchTogetherSelectionMode";
+import { queryRoomMemberState } from "@/api/v2/watchTogetherMemberState";
+import { readRoomPicker } from "@/api/v2/watchTogetherPicker";
+import { readWatchTogetherCapabilities } from "@/api/v2/watchTogetherCapabilities";
 
 export type GuestControlPolicy = "host_only" | "guest_play_pause";
 export type WatchTogetherRole = "host" | "guest";
@@ -27,6 +34,11 @@ export interface WatchTogetherRoomMember {
   is_host: boolean;
   is_self: boolean;
   connected: boolean;
+  is_ready?: boolean;
+  is_buffering?: boolean;
+  is_syncing?: boolean;
+  /** Lobby "I'm ready". Absent on older servers; always false once playing. */
+  lobby_ready?: boolean;
 }
 
 export interface WatchTogetherRoomSnapshot {
@@ -137,6 +149,62 @@ export async function updateWatchTogetherRoomPolicy(
   authority = captureProfileRequestContext(),
 ) {
   return updateRoomPolicy(roomId, guestControlPolicy, authority);
+}
+
+/** A lobby with a selection is staged: chosen, not yet started. */
+export function isRoomStaged(room: WatchTogetherRoomSnapshot | null | undefined): boolean {
+  return !!room && room.phase === "lobby" && !!room.selected_content_id;
+}
+
+export async function stageWatchTogetherRoomItem(
+  roomId: string,
+  input: SelectWatchTogetherRoomItemInput,
+  authority = captureProfileRequestContext(),
+) {
+  return stageRoomItem(roomId, { ...input }, authority);
+}
+
+export async function startWatchTogetherRoomPlayback(
+  roomId: string,
+  authority = captureProfileRequestContext(),
+) {
+  return startRoomPlayback(roomId, authority);
+}
+
+export async function stopWatchTogetherRoomPlayback(
+  roomId: string,
+  authority = captureProfileRequestContext(),
+) {
+  return stopRoomPlayback(roomId, authority);
+}
+
+export async function updateWatchTogetherRoomSelectionMode(
+  roomId: string,
+  mode: WatchTogetherSelectionMode,
+  authority = captureProfileRequestContext(),
+) {
+  return updateRoomSelectionMode(roomId, mode, authority);
+}
+
+export async function queryWatchTogetherMemberState(
+  roomId: string,
+  roomToken: string,
+  contentIds: string[],
+  authority = captureProfileRequestContext(),
+) {
+  return queryRoomMemberState(roomId, roomToken, contentIds, authority);
+}
+
+export async function getWatchTogetherRoomPicker(
+  roomId: string,
+  roomToken: string,
+  authority = captureProfileRequestContext(),
+) {
+  return readRoomPicker(roomId, roomToken, authority);
+}
+
+export async function getWatchTogetherCapabilities() {
+  return readWatchTogetherCapabilities();
 }
 
 export async function selectWatchTogetherRoomItem(

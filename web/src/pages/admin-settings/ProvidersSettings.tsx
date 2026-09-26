@@ -595,9 +595,8 @@ export default function ProvidersSettings() {
   // Marker tiles can be perfectly set up and still never run: the detection
   // mode on Library & Metadata decides whether Silo looks online at all. The
   // key is read, not staged — this page never saves it.
-  const markerMode = form.getValue("markers.mode");
-  const offlineMarkerMode =
-    markerMode === "off" ? "Off" : markerMode === "local" ? "Detect on this server" : null;
+  const markerMode = form.getValue("markers.mode") || "both";
+  const onlineMarkerLookupEnabled = markerMode === "online" || markerMode === "both";
 
   const providers = sortSubtitleProviders(data?.providers ?? []);
 
@@ -664,7 +663,7 @@ export default function ProvidersSettings() {
       </FieldGroup>
 
       {/*
-        Marker providers are the online half of "Find intros and credits". The
+        Marker providers are the online half of "Marker source". The
         detection mode itself stays on Library & Metadata; what each provider
         does — lookup order, whether this server contributes back — is provider
         configuration and belongs beside the other providers.
@@ -677,29 +676,15 @@ export default function ProvidersSettings() {
             onCollapse={() => setExpandedTile(null)}
           />
           <p className="text-muted-foreground text-xs">
-            {offlineMarkerMode ? (
-              <>
-                Nothing here is searched right now:{" "}
-                <Link
-                  to="/admin/settings/library"
-                  className="hover:text-foreground font-medium underline underline-offset-2 transition-colors"
-                >
-                  Find intros and credits
-                </Link>{" "}
-                is set to {offlineMarkerMode}.
-              </>
-            ) : (
-              <>
-                Providers are searched when{" "}
-                <Link
-                  to="/admin/settings/library"
-                  className="hover:text-foreground font-medium underline underline-offset-2 transition-colors"
-                >
-                  Find intros and credits
-                </Link>{" "}
-                looks online.
-              </>
-            )}
+            Online marker lookup is {onlineMarkerLookupEnabled ? "enabled" : "disabled"}. Change
+            this under{" "}
+            <Link
+              to="/admin/settings/library"
+              className="hover:text-foreground font-medium underline underline-offset-2 transition-colors"
+            >
+              Marker source
+            </Link>
+            .
           </p>
         </div>
       </FieldGroup>

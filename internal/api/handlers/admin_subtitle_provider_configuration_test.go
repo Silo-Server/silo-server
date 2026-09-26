@@ -101,7 +101,7 @@ func (r *revisionProviderConfigRepo) SaveProviderConfigWithRevision(_ context.Co
 	return saved, nil
 }
 func revisionProviderHandler(repo *revisionProviderConfigRepo) (*AdminSubtitleHandler, *subtitles.Manager) {
-	manager := subtitles.NewManager(repo, newMockS3ClientForHandler(), "fixture")
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
 	handler := NewAdminSubtitleHandler(repo)
 	handler.SetDownloadedSubtitleDeps(nil, manager)
 	handler.providerFactory = func(cfg *subtitles.ProviderConfig) (subtitles.Provider, error) {

@@ -5,7 +5,7 @@ import { markNavigationDirection, resolveCommittedDirection } from "@/lib/naviga
 
 /**
  * Keeps `html[data-navigation-direction]` in step with the browser. Mount once,
- * above every route — `WatchPlaybackChrome` and `WatchTogetherJoin` start view
+ * above every route — `WatchPlaybackChrome` and `WatchPartyHub` start view
  * transitions outside `Layout`, and the tracked index has to survive the
  * auth-gated routes that unmount it.
  *

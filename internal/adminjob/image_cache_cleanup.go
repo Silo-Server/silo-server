@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 const JobTypeImageCacheCleanup = "image_cache_cleanup"
@@ -29,10 +29,10 @@ type imageCacheCleanupExecutor interface {
 }
 
 type ImageCacheCleanupExecutor struct {
-	store artworkstore.Store
+	store blobstore.Store
 }
 
-func NewImageCacheCleanupExecutor(store artworkstore.Store) *ImageCacheCleanupExecutor {
+func NewImageCacheCleanupExecutor(store blobstore.Store) *ImageCacheCleanupExecutor {
 	if store == nil {
 		return nil
 	}

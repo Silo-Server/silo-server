@@ -29,7 +29,7 @@ func (h *MarkersHandler) GetMarkers(ctx context.Context, access catalog.AccessFi
 	if err != nil {
 		return FileMarkersView{}, err
 	}
-	return fileMarkers(file), nil
+	return fileMarkers(populateFileMarkers(ctx, h.MarkerPopulation, file)), nil
 }
 
 func (h *MarkersHandler) SetMarkers(ctx context.Context, access catalog.AccessFilter, target MarkerTarget, changes MarkerChanges) (FileMarkersView, error) {

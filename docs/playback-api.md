@@ -25,7 +25,12 @@ features, deliveries}` with `Cache-Control: private, no-cache` and an `ETag`; cl
 and `allowed` is `true`; a server without playback wired answers
 `not_configured` with `allowed: false`. `installation_id` is the persisted
 server instance UUID that diagnostics also report. `protocol_versions` is
-`[3]`. `features` is the v3 server feature set plus `sequenced_progress_v1`.
+`[3]`. `features` is the v3 server feature set plus `sequenced_progress_v1`,
+`fixed_media_file_v1`, and `marker_segments_v1`. When the room service and
+authenticated room socket are configured, it also includes
+`watch_party_source_fallback_v1` and `watch_party_coordinator_v1`.
+The coordinator capability covers shared room
+membership, command-aware readiness, and ready/buffering/syncing member status.
 `deliveries` lists `original_http`, `server_remux_progressive`,
 `server_remux_hls` and, when transcoding is enabled, `server_transcode_hls`.
 `revision` is a digest of the rest.
@@ -34,6 +39,20 @@ Every mutation body carries the `installation_id` the client read from
 capabilities. A different value is `409 installation_changed`: refresh
 capabilities and start a new attempt. There is no admission step and no
 per-account enrollment.
+
+## Marker ranges
+
+V2 watch detail includes `marker_segments` on each file version, including
+versions nested in playback variants. Each entry is
+`{kind, start_seconds, end_seconds}`, with kind `intro`, `credits`, `recap`, or
+`preview`. The collection is ordered by source time and is empty when the file
+has no markers. A kind may occur more than once: skip only the active range,
+without spanning intervening content. Existing singular `intro`, `credits`,
+`recap`, and `preview` fields remain for older clients.
+
+Marker reads and watch detail can populate the selected file's markers after
+authorization. A provider error leaves the available markers readable.
+See [Marker API](markers-api.md) for reads, manual edits, and provenance.
 
 ## Start
 
@@ -55,6 +74,37 @@ budget includes backoff and response-body reads; each request gets at most
 the request or backoff. A 4xx refusal ends that start, and a later user Play
 uses the newly selected file and a new attempt ID. The web client does not
 restore pending START requests across page reloads.
+
+The frozen v1 start route ignores `allow_alternate_versions`.
+Servers advertising `fixed_media_file_v1` accept the optional start field
+`allow_alternate_versions`. Setting it to `false` keeps this attempt on the
+requested file through quality, track, output, seek, and recovery replans.
+Transcoding and delivery changes remain available for that file. If it cannot
+play, the server returns an adaptation refusal instead of substituting another
+version with a potentially different timeline. Omitted or `true` retains the
+existing alternate-version behavior. The choice is persisted with the attempt
+and cannot be relaxed by a replan.
+
+When an administrator sets a positive bitrate limit for the stream's location
+(local or remote), a new start allows the original file only when its probed
+bitrate fits. Otherwise the server plans
+a lower-bitrate transcode, including an audio and mux-overhead budget. A
+client's lower bandwidth preference still wins. If no compliant encode route
+exists, the server tries the item's other versions as it does for 4K and HDR
+refusals. When none fits, the decision is terminal with
+`bitrate_policy_unavailable`; it never falls back to the oversized original.
+The selected limit is frozen on a new playback attempt and reused through
+replans, so later policy edits do not interrupt it.
+`server_remote_stream_bitrate_policy_v1` and
+`server_local_stream_bitrate_policy_v1` in `features` advertise this behavior.
+
+The web Watch Party player requires this capability and sends `false`. When a
+source cannot be adapted, `watch_party_source_fallback_v1` allows connected
+viewers to request a shared replacement through the room's `source-fallback`
+operation (see [Realtime API](realtime-api.md#room-membership-and-buffering)).
+Every viewer then starts a new fixed-file attempt for that room selection. Ordinary
+web, Apple, Android, and Jellyfin playback keep their existing behavior; Apple
+has no active room caller and Android's room UI remains disabled.
 
 ## Progress and stop
 

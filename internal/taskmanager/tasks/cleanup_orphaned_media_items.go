@@ -44,6 +44,11 @@ func (t *CleanupOrphanedMediaItemsTask) DefaultTriggers() []taskmanager.TriggerC
 	return nil
 }
 
+// ManualOnly keeps the deletion an explicit administrator action: its safety
+// check lists the tables that can reference an item, so a table added later
+// without updating that list must never be swept on a schedule.
+func (t *CleanupOrphanedMediaItemsTask) ManualOnly() bool { return true }
+
 func (t *CleanupOrphanedMediaItemsTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
 	if t == nil || t.cleaner == nil {
 		progress.Report(100, "Orphaned media cleanup is not configured")

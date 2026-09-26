@@ -172,6 +172,12 @@ func isTextSubtitleV3(codec string) bool {
 	}
 }
 
+// SubtitleFormatDeliverableV3 reports whether the v3 subtitle policy can
+// deliver a track in this format at all: as text, or by burning in a bitmap.
+func SubtitleFormatDeliverableV3(codec string) bool {
+	return isTextSubtitleV3(codec) || NeedsBurnIn(codec) || normalizeCodecV3(codec) == "dvb_teletext"
+}
+
 func isClientRenderableBitmapSubtitleV3(codec string) bool {
 	// normalizeCodecV3 centralizes the short spellings carried by older rows;
 	// the bitmap policy can then use the same canonical set as burn-in.

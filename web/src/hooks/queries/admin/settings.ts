@@ -86,6 +86,61 @@ export function useAdminServerSettings() {
   });
 }
 
+export type StorageTransitionPolicy = "start_fresh" | "preserve_uploads" | "migrate_all";
+export type StorageTransitionCapabilities =
+  V2Result<"GET /api/v2/admin/storage-transitions/capabilities">;
+export type StorageTransitionSourceHealth =
+  V2Result<"GET /api/v2/admin/storage-transitions/source-health">;
+
+export function useStorageTransitionCapabilities() {
+  return useQuery({
+    queryKey: [...adminKeys.serverStatus(), "storage-transition-capabilities"] as const,
+    queryFn: () => v2("GET /api/v2/admin/storage-transitions/capabilities"),
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+export function useStorageTransitionSourceHealth(probe: boolean, enabled: boolean) {
+  return useQuery({
+    queryKey: [...adminKeys.serverStatus(), "storage-transition-source-health", probe] as const,
+    enabled,
+    queryFn: () => v2("GET /api/v2/admin/storage-transitions/source-health", { query: { probe } }),
+    retry: false,
+    staleTime: 0,
+    refetchInterval: (query) =>
+      !probe && query.state.data?.recovery_pending === true ? 5_000 : false,
+  });
+}
+
+export function useCreateStorageTransition() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: (request: { policy: StorageTransitionPolicy; values: Record<string, string> }) =>
+      v2("POST /api/v2/admin/storage-transitions", { body: request }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.jobs("storage_transition") }),
+      ]);
+    },
+  });
+}
+
+export function useCancelStorageTransition() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: (id: string) => v2("POST /api/v2/admin/jobs/{id}/cancel", { path: { id } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: adminKeys.jobs("storage_transition") });
+    },
+  });
+}
+
 /** Shape of `GET /admin/settings/restart-keys`. */
 export interface RestartKeysResponse {
   keys: string[];

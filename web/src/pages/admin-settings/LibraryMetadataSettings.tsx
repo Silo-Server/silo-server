@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { ArrowRight, RotateCcw } from "lucide-react";
 import { Link } from "react-router";
 
@@ -24,7 +24,7 @@ import { WORKER_SETTING_DEFAULTS, hasWorkerOverrides } from "./settingsWorkerDef
 
 const ARTWORK_KEYS = ["metadata.cache_images"];
 
-const BROWSING_KEYS = ["catalog.scope_versions_to_library"];
+const BROWSING_KEYS = ["catalog.scope_versions_to_library", "access.unrated_content"];
 
 const SCANNER_KEYS = [
   "scanner.workers",
@@ -33,7 +33,12 @@ const SCANNER_KEYS = [
   "metadata.image_workers",
 ];
 
-const MARKER_KEYS = ["markers.mode", "markers.lazy_playback"];
+const MARKER_KEYS = [
+  "markers.mode",
+  "markers.lazy_playback",
+  "markers.online_storage",
+  "markers.detection_workers",
+];
 
 const MEILI_URL_KEY = "catalog.search.meilisearch.url";
 const MEILI_API_KEY = "catalog.search.meilisearch.api_key";
@@ -58,7 +63,7 @@ const SEARCH_KEYS = ["catalog.search.provider", ...MEILI_KEYS];
 const KEYS = [...ARTWORK_KEYS, ...BROWSING_KEYS, ...SCANNER_KEYS, ...MARKER_KEYS, ...SEARCH_KEYS];
 
 export default function LibraryMetadataSettings() {
-  const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
+  const form = useSettingsForm({ keys: KEYS });
   const restartKeys = useRestartKeys();
   const checkConnection = useCheckAdminSettingsConnection();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
@@ -101,7 +106,9 @@ export default function LibraryMetadataSettings() {
     }
   }
 
-  const markerMode = form.getValue("markers.mode") || "local";
+  const markerMode = form.getValue("markers.mode") || "both";
+  const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
+  const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
 
   if (form.isLoading) {
     return (
@@ -147,6 +154,18 @@ export default function LibraryMetadataSettings() {
             value={form.getValue("catalog.scope_versions_to_library") || "false"}
             onChange={(value) => form.setValue("catalog.scope_versions_to_library", value)}
             restartRequired={restartKeys.has("catalog.scope_versions_to_library")}
+          />
+          <SettingField
+            label="Titles with no age rating"
+            type="select"
+            description="Applies to profiles with a maturity ceiling: whether they see titles with no rating, or marked Not Rated. A rating the server cannot read stays hidden from them either way. Profiles without a ceiling always see these titles."
+            value={form.getValue("access.unrated_content") || "hide"}
+            onChange={(value) => form.setValue("access.unrated_content", value)}
+            options={[
+              { value: "hide", label: "Hide from profiles with a ceiling" },
+              { value: "allow", label: "Show to every profile" },
+            ]}
+            restartRequired={restartKeys.has("access.unrated_content")}
           />
         </FieldGroup>
 
@@ -215,7 +234,8 @@ export default function LibraryMetadataSettings() {
           providers.
         */}
         <FieldGroup
-          label="Intro and credits markers"
+          label="Skip markers"
+          description="Markers identify intros, credits, recaps, and previews so players can offer skip controls."
           restartAll={allRestart(MARKER_KEYS)}
           actions={
             <Link
@@ -228,28 +248,70 @@ export default function LibraryMetadataSettings() {
           }
         >
           <SettingField
-            label="Find intros and credits"
+            label="Marker source"
             type="select"
-            description="Detecting on this server utilizes CPU. Looking online uses the marker providers set up on the Subtitles & Metadata page."
+            description="Online markers take priority. Silo skips local intro detection when an online intro is saved in your library. Local detection uses CPU."
+            className="[&_[data-slot=select-trigger]]:h-auto [&_[data-slot=select-trigger]]:min-h-9 [&_[data-slot=select-value]]:line-clamp-none [&_[data-slot=select-value]]:text-left [&_[data-slot=select-value]]:whitespace-normal"
             options={[
               { value: "off", label: "Off" },
               { value: "local", label: "Detect on this server" },
-              { value: "both", label: "Detect on this server, then look online" },
-              { value: "online", label: "Look online only" },
+              { value: "both", label: "Online preferred + server detection" },
+              { value: "online", label: "Online providers only" },
             ]}
             value={markerMode}
             onChange={(value) => form.setValue("markers.mode", value)}
             restartRequired={restartKeys.has("markers.mode")}
           />
 
-          <SettingField
-            label="Fetch markers on playback"
-            type="toggle"
-            description="Uses the enabled marker providers to look up missing markers when playback starts. Can delay the first few seconds."
-            value={form.getValue("markers.lazy_playback") || "false"}
-            onChange={(value) => form.setValue("markers.lazy_playback", value)}
-            restartRequired={restartKeys.has("markers.lazy_playback")}
-          />
+          {onlineMarkersEnabled && (
+            <SettingField
+              label="Save online markers"
+              type="select"
+              description={
+                onlineMarkerStorage === "stored"
+                  ? "Silo saves markers from enabled providers such as TheIntroDB. The Sync online markers task fetches missing markers and refreshes saved markers daily at 03:00 (server time) by default."
+                  : "Fetch markers when needed without saving them to your library. Scheduled online sync is disabled."
+              }
+              options={[
+                { value: "stored", label: "Save to library" },
+                { value: "on_demand", label: "Fetch when needed" },
+              ]}
+              value={onlineMarkerStorage}
+              onChange={(value) => {
+                form.setValue("markers.online_storage", value);
+                if (value === "on_demand") form.setValue("markers.lazy_playback", "true");
+              }}
+              restartRequired={restartKeys.has("markers.online_storage")}
+            />
+          )}
+
+          {markerMode !== "off" && (!onlineMarkersEnabled || onlineMarkerStorage === "stored") && (
+            <SettingField
+              label="Find markers on playback"
+              type="toggle"
+              description={
+                onlineMarkersEnabled
+                  ? markerMode === "both"
+                    ? "Check online first when playback starts. If intro or credits markers are available, skip local detection. Otherwise, detect locally using this server's CPU."
+                    : "Check online for missing or outdated markers when playback starts."
+                  : "Detect missing markers when playback starts. Local analysis uses CPU."
+              }
+              value={form.getValue("markers.lazy_playback") || "true"}
+              onChange={(value) => form.setValue("markers.lazy_playback", value)}
+              restartRequired={restartKeys.has("markers.lazy_playback")}
+            />
+          )}
+
+          {(markerMode === "local" || markerMode === "both") && (
+            <SettingField
+              label="Detection workers"
+              type="number"
+              description="How many seasons Silo analyzes for intros at once, each reading audio with its own ffmpeg process. Defaults to 1. Raise it to finish a large library sooner if your storage and CPU have room."
+              value={form.getValue("markers.detection_workers")}
+              onChange={(value) => form.setValue("markers.detection_workers", value)}
+              restartRequired={restartKeys.has("markers.detection_workers")}
+            />
+          )}
 
           <div className="py-3.5">
             <MarkerTasksCard />

@@ -211,14 +211,30 @@ func (h *PeopleHandler) SearchPeople(ctx context.Context, query string, limit in
 	return resp, nil
 }
 
-// Person answers one person and queues a provider refresh when one is due.
-func (h *PeopleHandler) Person(ctx context.Context, id int64) (PersonView, error) {
+// SearchPeopleScoped serves v2 people search with media scope and exact-name ranking.
+func (h *PeopleHandler) SearchPeopleScoped(ctx context.Context, query string, limit int, mediaScope string, filter catalog.AccessFilter) ([]PersonView, error) {
+	people, err := h.personRepo.SearchScoped(ctx, query, limit, mediaScope, filter)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "search_failed", err.Error())
+	}
+	resp := make([]PersonView, len(people))
+	for i, p := range people {
+		resp[i] = h.toResponse(ctx, p)
+	}
+	return resp, nil
+}
+
+// Person answers one person. A view (queueRefresh) also queues a provider
+// refresh when one is due; a speculative prefetch leaves that to the sweep.
+func (h *PeopleHandler) Person(ctx context.Context, id int64, queueRefresh bool) (PersonView, error) {
 	person, err := h.personRepo.Get(ctx, id)
 	if err != nil {
 		slog.WarnContext(ctx, "people: get person failed", "component", "api", "id", id, "id_str", strconv.FormatInt(id, 10), "error", err)
 		return PersonView{}, apiError(http.StatusNotFound, policyErrorNotFound, "person not found")
 	}
-	h.enqueuePersonRefreshIfDue(*person)
+	if queueRefresh {
+		h.enqueuePersonRefreshIfDue(*person)
+	}
 	return h.toResponse(ctx, *person), nil
 }
 

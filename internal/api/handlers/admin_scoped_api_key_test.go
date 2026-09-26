@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,6 +23,8 @@ type scopedKeyUserRepo struct {
 	getErr  error
 	created *models.CreateUserInput
 	updated *models.UpdateUserInput
+	// updateErr, when set, is what Update returns.
+	updateErr error
 }
 
 func (r *scopedKeyUserRepo) List(context.Context) ([]*models.User, error) {
@@ -38,6 +41,9 @@ func (r *scopedKeyUserRepo) Create(_ context.Context, input models.CreateUserInp
 }
 
 func (r *scopedKeyUserRepo) Update(_ context.Context, _ int, input models.UpdateUserInput) error {
+	if r.updateErr != nil {
+		return r.updateErr
+	}
 	r.updated = &input
 	return nil
 }
@@ -349,6 +355,22 @@ func TestHandleUpdateUserScopedAPIKeyMissingTarget(t *testing.T) {
 	}
 	if repo.updated != nil {
 		t.Fatal("a missing target must not be updated")
+	}
+}
+
+// A username or email another account already uses is a conflict, the same
+// answer v1 account creation gives, not a server error.
+func TestHandleUpdateUserDuplicateIdentifierIsConflict(t *testing.T) {
+	h, repo := newScopedKeyAdminHandler("user")
+	repo.updateErr = fmt.Errorf("%w: user_login_identifiers_holder_key", auth.ErrDuplicate)
+
+	rec := updateUserRequestFor(t, h, jwtAdminClaims(), `{"username":"grace@example.com"}`)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (body %s)", rec.Code, rec.Body.String())
+	}
+	if code := decodeErrorCode(t, rec); code != "duplicate" {
+		t.Fatalf("error code = %q, want duplicate", code)
 	}
 }
 

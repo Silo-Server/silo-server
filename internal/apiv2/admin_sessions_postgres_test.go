@@ -49,6 +49,10 @@ func TestAdminSessionPagesBeyondBridgeLimitPostgres(t *testing.T) {
  SELECT 'session-'||lpad(i::text,3,'0'),1,'primary',0,'direct_play','api',now()+i*interval '1 second',now() FROM generate_series(1,205) i`); err != nil {
 		t.Fatal(err)
 	}
+
+	if _, err := pool.Exec(t.Context(), `UPDATE playback_sessions_sync SET routing_network_provider = CASE WHEN session_id = 'session-001' THEN 'tailscale' ELSE '' END, stream_location = CASE WHEN session_id = 'session-001' THEN 'local' ELSE 'remote' END WHERE session_id IN ('session-001', 'session-002')`); err != nil {
+		t.Fatal(err)
+	}
 	loader := handlers.NewPlaybackSessionsLoader(pool, nil, nil)
 	legacy, err := loader.Load(t.Context(), handlers.PlaybackSessionsQuery{})
 	if err != nil || len(legacy) != 200 || legacy[0].SessionID != "session-205" || legacy[199].SessionID != "session-006" {
@@ -76,6 +80,21 @@ func TestAdminSessionPagesBeyondBridgeLimitPostgres(t *testing.T) {
 			t.Fatalf("page%d: %s", pageNumber, rec.Body.String())
 		}
 		for _, row := range page.Items {
+
+			switch row.SessionID {
+			case "session-001":
+				if row.RoutingNetworkProvider == nil || *row.RoutingNetworkProvider != "tailscale" || row.StreamLocation != "local" {
+					t.Fatalf("overlay provider: %#v", row)
+				}
+			case "session-002":
+				if row.RoutingNetworkProvider == nil || *row.RoutingNetworkProvider != "" {
+					t.Fatalf("default provider: %#v", row)
+				}
+			default:
+				if row.RoutingNetworkProvider != nil {
+					t.Fatalf("unknown provider: %#v", row)
+				}
+			}
 			ids = append(ids, row.SessionID)
 		}
 		cursor = page.Page.NextCursor

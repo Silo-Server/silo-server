@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 8;
+export const SETTINGS_REVISION = 11;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -184,6 +184,8 @@ export const SETTING_KEYS = {
   CATALOG_METADATA_LANGUAGE: "catalog.metadata_language",
   /** Metadata language exceptions */
   CATALOG_METADATA_LANGUAGE_OVERRIDES: "catalog.metadata_language_overrides",
+  /** Show advisory age */
+  CATALOG_SHOW_ADVISORY_AGE: "catalog.show_advisory_age",
   /** Download quality */
   DOWNLOADS_DEFAULT_QUALITY: "downloads.default_quality",
   /** Keep watched downloads */
@@ -226,6 +228,10 @@ export const SETTING_KEYS = {
   PLAYBACK_SUBTITLE_MODE: "playback.subtitle_mode",
   /** Audio sync offset */
   PLAYER_AUDIO_SYNC_MS: "player.audio_sync_ms",
+  /** Audiobook rewind interval */
+  PLAYER_AUDIOBOOK_SKIP_BACK_SECONDS: "player.audiobook_skip_back_seconds",
+  /** Audiobook fast-forward interval */
+  PLAYER_AUDIOBOOK_SKIP_FORWARD_SECONDS: "player.audiobook_skip_forward_seconds",
   /** Dolby Vision */
   PLAYER_DOLBY_VISION_ENABLED: "player.dolby_vision_enabled",
   /** Dolby Vision Profile 7 fallback */
@@ -252,6 +258,10 @@ export const SETTING_KEYS = {
   PLAYER_SUBTITLE_SYNC_MS: "player.subtitle_sync_ms",
   /** Video sizing */
   PLAYER_VIDEO_GRAVITY: "player.video_gravity",
+  /** Video rewind interval */
+  PLAYER_VIDEO_SKIP_BACK_SECONDS: "player.video_skip_back_seconds",
+  /** Video fast-forward interval */
+  PLAYER_VIDEO_SKIP_FORWARD_SECONDS: "player.video_skip_forward_seconds",
   /** Search scope */
   SEARCH_MEDIA_SCOPE: "search.media_scope",
   /** Match device caption settings */
@@ -292,6 +302,10 @@ export const SETTING_KEYS = {
   UI_TEXT_WEIGHT: "ui.text_weight",
   /** Theme */
   UI_THEME: "ui.theme",
+  /** Theme music */
+  UI_THEME_MUSIC_ENABLED: "ui.theme_music_enabled",
+  /** Loop theme music */
+  UI_THEME_MUSIC_LOOP: "ui.theme_music_loop",
   /** Time format */
   UI_TIME_FORMAT: "ui.time_format",
 } as const;
@@ -379,6 +393,22 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Preferred metadata language for items in specific original languages.",
     category: "catalog",
     control: "panel",
+  },
+  "catalog.show_advisory_age": {
+    key: "catalog.show_advisory_age",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 10,
+    scopes: ["profile"],
+    scopeIntroducedIn: [10],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: false,
+    label: "Show advisory age",
+    description:
+      "Show a recommended minimum viewer age from an advisory service, such as Common Sense Media, on item detail.",
+    category: "catalog",
+    control: "switch",
   },
   "downloads.default_quality": {
     key: "downloads.default_quality",
@@ -755,6 +785,60 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     minimum: -5000,
     maximum: 5000,
   },
+  "player.audiobook_skip_back_seconds": {
+    key: "player.audiobook_skip_back_seconds",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 9,
+    scopes: ["profile"],
+    scopeIntroducedIn: [9],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: 10,
+    label: "Audiobook rewind interval",
+    description:
+      "Seconds to skip back in audiobook playback. Applies to buttons, keyboard shortcuts, gestures, and supported media controls.",
+    category: "player",
+    control: "select",
+    unit: "seconds",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv", "web"],
+    values: [
+      { value: 5, label: "5 seconds", introducedIn: 9 },
+      { value: 10, label: "10 seconds", introducedIn: 9 },
+      { value: 15, label: "15 seconds", introducedIn: 9 },
+      { value: 30, label: "30 seconds", introducedIn: 9 },
+      { value: 45, label: "45 seconds", introducedIn: 9 },
+      { value: 60, label: "60 seconds", introducedIn: 9 },
+      { value: 90, label: "90 seconds", introducedIn: 9 },
+    ],
+  },
+  "player.audiobook_skip_forward_seconds": {
+    key: "player.audiobook_skip_forward_seconds",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 9,
+    scopes: ["profile"],
+    scopeIntroducedIn: [9],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: 30,
+    label: "Audiobook fast-forward interval",
+    description:
+      "Seconds to skip forward in audiobook playback. Applies to buttons, keyboard shortcuts, gestures, and supported media controls.",
+    category: "player",
+    control: "select",
+    unit: "seconds",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv", "web"],
+    values: [
+      { value: 5, label: "5 seconds", introducedIn: 9 },
+      { value: 10, label: "10 seconds", introducedIn: 9 },
+      { value: 15, label: "15 seconds", introducedIn: 9 },
+      { value: 30, label: "30 seconds", introducedIn: 9 },
+      { value: 45, label: "45 seconds", introducedIn: 9 },
+      { value: 60, label: "60 seconds", introducedIn: 9 },
+      { value: 90, label: "90 seconds", introducedIn: 9 },
+    ],
+  },
   "player.dolby_vision_enabled": {
     key: "player.dolby_vision_enabled",
     type: "boolean",
@@ -982,6 +1066,60 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: "fit", label: "Fit", introducedIn: 1 },
       { value: "fill", label: "Fill", introducedIn: 1 },
       { value: "stretch", label: "Stretch", introducedIn: 1 },
+    ],
+  },
+  "player.video_skip_back_seconds": {
+    key: "player.video_skip_back_seconds",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 9,
+    scopes: ["profile"],
+    scopeIntroducedIn: [9],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: 10,
+    label: "Video rewind interval",
+    description:
+      "Seconds to skip back in video playback. Applies to buttons, keyboard shortcuts, gestures, and supported media controls.",
+    category: "player",
+    control: "select",
+    unit: "seconds",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv", "web"],
+    values: [
+      { value: 5, label: "5 seconds", introducedIn: 9 },
+      { value: 10, label: "10 seconds", introducedIn: 9 },
+      { value: 15, label: "15 seconds", introducedIn: 9 },
+      { value: 30, label: "30 seconds", introducedIn: 9 },
+      { value: 45, label: "45 seconds", introducedIn: 9 },
+      { value: 60, label: "60 seconds", introducedIn: 9 },
+      { value: 90, label: "90 seconds", introducedIn: 9 },
+    ],
+  },
+  "player.video_skip_forward_seconds": {
+    key: "player.video_skip_forward_seconds",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 9,
+    scopes: ["profile"],
+    scopeIntroducedIn: [9],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: 30,
+    label: "Video fast-forward interval",
+    description:
+      "Seconds to skip forward in video playback. Applies to buttons, keyboard shortcuts, gestures, and supported media controls.",
+    category: "player",
+    control: "select",
+    unit: "seconds",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv", "web"],
+    values: [
+      { value: 5, label: "5 seconds", introducedIn: 9 },
+      { value: 10, label: "10 seconds", introducedIn: 9 },
+      { value: 15, label: "15 seconds", introducedIn: 9 },
+      { value: 30, label: "30 seconds", introducedIn: 9 },
+      { value: 45, label: "45 seconds", introducedIn: 9 },
+      { value: 60, label: "60 seconds", introducedIn: 9 },
+      { value: 90, label: "90 seconds", introducedIn: 9 },
     ],
   },
   "search.media_scope": {
@@ -1330,6 +1468,38 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: "oxblood-noir", label: "Oxblood Noir", introducedIn: 1 },
       { value: "evergreen-studio", label: "Evergreen Studio", introducedIn: 1 },
     ],
+  },
+  "ui.theme_music_enabled": {
+    key: "ui.theme_music_enabled",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 11,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [11, 11],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: false,
+    label: "Theme music",
+    description: "Play local theme music while browsing movie and show detail pages.",
+    category: "playback",
+    control: "switch",
+    platforms: ["web"],
+  },
+  "ui.theme_music_loop": {
+    key: "ui.theme_music_loop",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 11,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [11, 11],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: false,
+    label: "Loop theme music",
+    description: "Repeat theme music while the detail page stays open.",
+    category: "playback",
+    control: "switch",
+    platforms: ["web"],
   },
   "ui.time_format": {
     key: "ui.time_format",

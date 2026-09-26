@@ -17,14 +17,25 @@ import (
 
 type fakeAdminPlaybackSessions struct{ calls, lastLimit int }
 
+func TestAdminPlaybackSessionUsesNegotiatedLocation(t *testing.T) {
+	row := handlers.AdminPlaybackSessionView{ClientIP: "192.168.1.8", StreamLocation: "remote"}
+	if got := adminPlaybackSessionOf(row).StreamLocation; got != "remote" {
+		t.Fatalf("negotiated location = %q, want remote", got)
+	}
+	row.StreamLocation = ""
+	if got := adminPlaybackSessionOf(row).StreamLocation; got != "local" {
+		t.Fatalf("legacy location = %q, want local", got)
+	}
+}
+
 func (*fakeAdminPlaybackSessions) AdminPlaybackSessionsAvailable() bool { return true }
 func (f *fakeAdminPlaybackSessions) ReadAdminPlaybackSessions(_ context.Context, query handlers.PlaybackSessionsQuery, after string, limit int) ([]handlers.AdminPlaybackSessionView, error) {
 	f.calls++
 	f.lastLimit = limit
 	at := time.Date(2026, 1, 2, 3, 4, 5, 123456789, time.FixedZone("offset", 3600))
 	rows := []handlers.AdminPlaybackSessionView{
-		{SessionID: "b", UserID: 7, ProfileID: "child", MediaFileID: 42, RequestedMediaFileID: 41, StartedAt: at, UpdatedAt: at, RoutingExecutionNodeID: new(9), TargetAudioChannels: new(2), SourceAudioChannels: new(8), EffectivePlayMethod: "transcode", IsJellyfinClient: true, HasPlaybackControl: true},
-		{SessionID: "a", UserID: 7, ProfileID: "primary", MediaFileID: 44, RequestedMediaFileID: 44, StartedAt: at, UpdatedAt: at},
+		{SessionID: "b", UserID: 7, ProfileID: "child", MediaFileID: 42, RequestedMediaFileID: 41, StartedAt: at, UpdatedAt: at, RoutingExecutionNodeID: new(9), RoutingNetworkProvider: new("tailscale"), TargetAudioChannels: new(2), SourceAudioChannels: new(8), EffectivePlayMethod: "transcode", IsJellyfinClient: true, HasPlaybackControl: true},
+		{SessionID: "a", UserID: 7, ProfileID: "primary", MediaFileID: 44, RequestedMediaFileID: 44, ClientIP: "127.0.0.1", StartedAt: at, UpdatedAt: at},
 	}
 	slices.SortFunc(rows, func(a, b handlers.AdminPlaybackSessionView) int { return cmp.Compare(a.SessionID, b.SessionID) })
 	out := []handlers.AdminPlaybackSessionView{}
@@ -72,7 +83,7 @@ func TestAdminPlaybackSessionReadProjection(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Code != 200 || len(page.Items) != 1 || page.Items[0].SessionID != "a" || page.Items[0].UserID != "7" || page.Items[0].ProfileID != "primary" || page.Page == nil || !page.Page.HasMore {
+	if rec.Code != 200 || len(page.Items) != 1 || page.Items[0].SessionID != "a" || page.Items[0].UserID != "7" || page.Items[0].ProfileID != "primary" || page.Items[0].StreamLocation != "local" || page.Page == nil || !page.Page.HasMore {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	cursor := url.QueryEscape(page.Page.NextCursor)
@@ -81,7 +92,7 @@ func TestAdminPlaybackSessionReadProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := page.Items[0]
-	if rec.Code != 200 || row.SessionID != "b" || row.ProfileID != "child" || row.MediaFileID != "42" || row.RequestedMediaFileID != "41" || row.RoutingExecutionNodeID == nil || *row.RoutingExecutionNodeID != "9" || *row.TargetAudioChannels != 2 || *row.SourceAudioChannels != 8 || !row.IsJellyfinClient || !row.HasPlaybackControl || page.Page.HasMore {
+	if rec.Code != 200 || row.SessionID != "b" || row.RoutingNetworkProvider == nil || *row.RoutingNetworkProvider != "tailscale" || row.StreamLocation != "remote" || row.ProfileID != "child" || row.MediaFileID != "42" || row.RequestedMediaFileID != "41" || row.RoutingExecutionNodeID == nil || *row.RoutingExecutionNodeID != "9" || *row.TargetAudioChannels != 2 || *row.SourceAudioChannels != 8 || !row.IsJellyfinClient || !row.HasPlaybackControl || page.Page.HasMore {
 		t.Fatal(rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), `"started_at":"2026-01-02T02:04:05.123Z"`) {
@@ -161,5 +172,64 @@ func TestAdminPlaybackSessionsAcceptDeclaredMaximumLimit(t *testing.T) {
 func adminSessionFixtureCases() []fixtureCase {
 	return []fixtureCase{
 		{name: "admin_playback_sessions", operationID: "listAdminPlaybackSessions", method: "GET", path: Prefix + "/admin/sessions", headers: bearer(adminToken), status: 200, schema: "#/components/schemas/CollectionAdminPlaybackSession", assertHeaders: []string{"Content-Type"}, scenario: "Diagnostic rows retain account/profile and chosen/requested file distinctions with canonical string IDs and instants."},
+	}
+}
+
+func TestAdminSessionNetworkProviderProjection(t *testing.T) {
+	for _, provider := range []*string{nil, new(""), new("tailscale")} {
+		view := handlers.AdminPlaybackSessionView{RoutingNetworkProvider: provider, StartedAt: time.Now(), UpdatedAt: time.Now()}
+		wire, err := json.Marshal(adminPlaybackSessionOf(view))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(wire, &fields); err != nil {
+			t.Fatal(err)
+		}
+		raw, present := fields["routing_network_provider"]
+		if present != (provider != nil) {
+			t.Fatalf("wrong field presence: %s", wire)
+		}
+		if present {
+			var got string
+			if err := json.Unmarshal(raw, &got); err != nil || got != *provider {
+				t.Fatalf("provider = %s", raw)
+			}
+		}
+		legacy, err := json.Marshal(view)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(legacy), "routing_network_provider") {
+			t.Fatal("v2 field leaked into v1")
+		}
+	}
+}
+
+// The native API names copied video with converted audio Direct Stream and
+// carries the transport's output format; the frozen bridge keeps its alpha shape.
+func TestAdminSessionOutputFormatProjection(t *testing.T) {
+	view := handlers.AdminPlaybackSessionView{EffectivePlayMethod: "audio", OutputContainer: "fmp4", OutputProtocol: "hls", StartedAt: time.Now(), UpdatedAt: time.Now()}
+	if row := adminPlaybackSessionOf(view); row.EffectivePlayMethod != directStreamPlayMethod || row.OutputContainer != "fmp4" || row.OutputProtocol != "hls" {
+		t.Fatalf("admin projection = %+v", row)
+	}
+	if got := playbackSessionOf(view).EffectivePlayMethod; got != directStreamPlayMethod {
+		t.Fatalf("household effective_play_method = %q", got)
+	}
+	legacy, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(legacy), `"effective_play_method":"audio"`) || strings.Contains(string(legacy), "output_") {
+		t.Fatalf("bridge payload changed: %s", legacy)
+	}
+
+	rec := do(t, NewHandler(pilotDeps(nil, nil)), "GET", Prefix+"/admin/sessions/capabilities", "", bearer(adminToken))
+	var caps AdminPlaybackSessionCapabilitiesOutputBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &caps); err != nil || rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if !caps.OutputFormat || !caps.StreamLocation || !slices.Contains(caps.EffectivePlayMethodValues, directStreamPlayMethod) || slices.Contains(caps.EffectivePlayMethodValues, "audio") {
+		t.Fatalf("capabilities = %+v", caps)
 	}
 }

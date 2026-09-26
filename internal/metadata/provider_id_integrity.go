@@ -897,6 +897,16 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			  AND src.list_kind = dest.list_kind
 			  AND (src.provider_item_key = dest.provider_item_key OR dest.media_item_id = $2)`},
 	{"move remaining watch provider list items", `UPDATE watch_provider_list_items SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
+	// The agreed rating follows the ratings it describes. When both items carry
+	// one, the canonical row wins. A moved row is unconfirmed until the next read
+	// finds the rating again, so the move can never read as a provider removal.
+	{"merge watch provider rating items", `
+			INSERT INTO watch_provider_rating_items (connection_id, provider_account_id, media_item_id, kind, provider_item_key, synced_rating, remote_seen, updated_at)
+			SELECT connection_id, provider_account_id, $2, kind, '', synced_rating, false, NOW()
+			FROM watch_provider_rating_items
+			WHERE media_item_id = $1
+			ON CONFLICT (connection_id, media_item_id) DO NOTHING`},
+	{"delete source watch provider rating items", `DELETE FROM watch_provider_rating_items WHERE media_item_id = $1`},
 }
 
 func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID, canonicalID string) error {

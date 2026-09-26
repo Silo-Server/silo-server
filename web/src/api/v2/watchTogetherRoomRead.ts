@@ -61,7 +61,11 @@ export function normalizeRoomResponse(
         room.selected_file_id === undefined ? undefined : numericID(room.selected_file_id),
       selected_library_id:
         room.selected_library_id === undefined ? undefined : numericID(room.selected_library_id),
-      members: room.members?.map((member) => ({ ...member, user_id: numericID(member.user_id) })),
+      members: room.members?.map((member) => ({
+        ...member,
+        user_id: numericID(member.user_id),
+        lobby_ready: member.lobby_ready === true,
+      })),
     },
   };
 }

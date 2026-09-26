@@ -218,7 +218,7 @@ func TestParseAudiobookFolderSingleM4B(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	got, err := parseAudiobookFolder(ctx, ffprobePath, "testdata/audiobook_fixtures/single_book")
+	got, err := parseAudiobookFolder(ctx, ffprobePath, "testdata/audiobook_fixtures/single_book", nil)
 	if err != nil {
 		t.Fatalf("parseAudiobookFolder: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestParseAudiobookFolderSingleM4B(t *testing.T) {
 }
 
 func TestParseAudiobookFolderEmptyFolderSignalsNoMedia(t *testing.T) {
-	_, err := parseAudiobookFolder(context.Background(), "ffprobe", t.TempDir())
+	_, err := parseAudiobookFolder(t.Context(), "ffprobe", t.TempDir(), nil)
 	if !errors.Is(err, errFolderHasNoMedia) {
 		t.Fatalf("empty folder error = %v, want errFolderHasNoMedia", err)
 	}
@@ -263,7 +263,7 @@ func TestParseAudiobookFolderUnusableFFprobeIsNotSkippable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := parseAudiobookFolder(context.Background(), "/nonexistent/bin/ffprobe", dir)
+	_, err := parseAudiobookFolder(t.Context(), "/nonexistent/bin/ffprobe", dir, nil)
 	if err == nil {
 		t.Fatal("parseAudiobookFolder with an unusable ffprobe returned no error")
 	}
@@ -277,7 +277,7 @@ func TestParseAudiobookFolderUnusableFFprobeIsNotSkippable(t *testing.T) {
 func TestParseAudiobookFolderVanishedFolderSignalsNoMedia(t *testing.T) {
 	gone := filepath.Join(t.TempDir(), "renamed-away")
 
-	_, err := parseAudiobookFolder(context.Background(), "ffprobe", gone)
+	_, err := parseAudiobookFolder(t.Context(), "ffprobe", gone, nil)
 	if !errors.Is(err, errFolderHasNoMedia) {
 		t.Fatalf("vanished folder error = %v, want errFolderHasNoMedia", err)
 	}
@@ -293,7 +293,7 @@ func TestParseAudiobookFolderMultiFile(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	got, err := parseAudiobookFolder(ctx, ffprobePath, "testdata/audiobook_fixtures/multi_file")
+	got, err := parseAudiobookFolder(ctx, ffprobePath, "testdata/audiobook_fixtures/multi_file", nil)
 	if err != nil {
 		t.Fatalf("parseAudiobookFolder: %v", err)
 	}
@@ -428,7 +428,7 @@ func TestCollectAudiobookRootScansKeepsSiblingFoldersWhenRootHasLooseAudio(t *te
 		t.Fatal(err)
 	}
 
-	scans, err := collectAudiobookRootScans(context.Background(), 1, []string{root})
+	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, nil, true)
 	if err != nil {
 		t.Fatalf("collectAudiobookRootScans: %v", err)
 	}

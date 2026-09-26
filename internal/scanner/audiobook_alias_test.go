@@ -329,7 +329,7 @@ func TestAudiobookAliasMetadataFollowsPresentation(t *testing.T) {
 	// A failed replacement must roll back its metadata along with its files.
 	commit(1, true)
 	check(0)
-	_, skip, err := s.audiobookFolderShouldSkip(ctx, folder, paths[0])
+	_, skip, err := s.audiobookFolderShouldSkip(ctx, folder, paths[0], nil)
 	if err != nil || !skip {
 		t.Fatalf("unchanged alias skip=%v err=%v", skip, err)
 	}

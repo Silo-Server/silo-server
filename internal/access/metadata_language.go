@@ -26,9 +26,5 @@ import (
 // degrades every profile's metadata language would otherwise be
 // indistinguishable from "nobody set a preference".
 func PreferredMetadataLanguage(ctx context.Context, store userstore.UserStore, profileID string) string {
-	if store == nil || profileID == "" {
-		return ""
-	}
-	resolved, _ := resolveCanonicalViewerPreferences(ctx, store, profileID)
-	return resolved.preferences.PreferredMetadataLanguage
+	return ResolveViewerPreferences(ctx, store, profileID).PreferredMetadataLanguage
 }

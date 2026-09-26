@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -229,24 +229,43 @@ func (s *LibraryCollectionService) SyncCollectionWithOptions(ctx context.Context
 		return nil, fmt.Errorf("parsing collection source config: %w", err)
 	}
 
+	startedAt := syncTimestamp()
+	var run *models.LibraryCollectionSyncRun
 	switch source.Mode {
 	case "smart":
 		return nil, ErrLibraryCollectionSyncUnsupported
 	case "mdblist_json":
-		return s.syncMDBListCollection(ctx, collection, collectionutil.MDBListURLCandidates(source.URL, collection.SourceURL), source.Limit, opts)
+		run, err = s.syncMDBListCollection(ctx, collection, collectionutil.MDBListURLCandidates(source.URL, collection.SourceURL), source.Limit, opts)
 	case "tmdb_preset":
-		return s.syncTMDBPresetCollection(ctx, collection, source, opts)
+		run, err = s.syncTMDBPresetCollection(ctx, collection, source, opts)
 	case "tmdb_collection":
-		return s.syncTMDBFranchiseCollection(ctx, collection, source, opts)
+		run, err = s.syncTMDBFranchiseCollection(ctx, collection, source, opts)
 	case "tmdb_discover":
-		return s.syncTMDBDiscoverCollection(ctx, collection, source, opts)
+		run, err = s.syncTMDBDiscoverCollection(ctx, collection, source, opts)
 	case "trakt_preset":
-		return s.syncTraktPresetCollection(ctx, collection, source, opts)
+		run, err = s.syncTraktPresetCollection(ctx, collection, source, opts)
 	case "trakt_list":
-		return s.syncTraktListCollection(ctx, collection, source, opts)
+		run, err = s.syncTraktListCollection(ctx, collection, source, opts)
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrLibraryCollectionSyncModeUnsupported, source.Mode)
 	}
+	if err != nil && run == nil {
+		// A source error that returned before RecordSyncRun would otherwise
+		// leave last_sync_status on the previous success. The ctx may be the
+		// one that just expired, so the insert runs detached from it. The
+		// message is stored and shown to admins, and a transport error embeds
+		// the request URL, which for TMDB carries the API key.
+		recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		message := logredact.SanitizeURLError(err).Error()
+		if _, recordErr := s.recordFailedCollectionSync(recordCtx, collection.ID, startedAt, message); recordErr != nil {
+			slog.ErrorContext(ctx, "recording failed collection sync run", "component", "catalog",
+				"collection_id", collection.ID,
+				"error", recordErr,
+			)
+		}
+	}
+	return run, err
 }
 
 func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, collection *models.LibraryCollection, listURLs []string, limit *int, opts SyncCollectionOptions) (*models.LibraryCollectionSyncRun, error) {
@@ -255,19 +274,16 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 	if len(listURLs) == 0 {
 		return nil, fmt.Errorf("mdblist sync: url is required")
 	}
+	// Read only as far as the same fetch-multiplier bound used for TMDB and
+	// Trakt sources. MDBList lists can hold thousands of entries; without this,
+	// the two GetByExternalIDs IN arrays balloon to the full list size even
+	// when the user's limit is small.
+	fetchLimit := collectionutil.SourceFetchLimit(limit)
 	entries, err := collectionutil.FetchMDBListWithFallback(listURLs, func(listURL string) ([]mdblistEntry, error) {
-		return s.fetchMDBListEntries(ctx, listURL)
+		return s.fetchMDBListEntries(ctx, listURL, fetchLimit)
 	})
 	if err != nil {
 		return nil, err
-	}
-
-	// Trim the entry list to the same fetch-multiplier bound used for TMDB and
-	// Trakt sources before building the external-ID batches. MDBList lists can
-	// return hundreds of entries; without this, the two GetByExternalIDs IN
-	// arrays balloon to the full list size even when the user's limit is small.
-	if fetchLimit := collectionutil.SourceFetchLimit(limit); fetchLimit > 0 && len(entries) > fetchLimit {
-		entries = entries[:fetchLimit]
 	}
 
 	// Pre-fetch all external-ID lookups grouped by item type (movie vs series)
@@ -361,11 +377,10 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 
 	scannedEntries := 0
 	limitReached := false
-	for index, entry := range entries {
+	for index := range entries {
 		scannedEntries = index + 1
 		r, ok := resolvedByIndex[index]
 		if !ok {
-			warnings = append(warnings, fmt.Sprintf("No match in libraries %v for %s", collection.LibraryIDs, entry.Title))
 			continue
 		}
 		var chosen string
@@ -376,7 +391,6 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 			}
 		}
 		if chosen == "" {
-			warnings = append(warnings, fmt.Sprintf("No match in libraries %v for %s", collection.LibraryIDs, entry.Title))
 			continue
 		}
 		matchedItems = append(matchedItems, LibraryCollectionItemInput{
@@ -498,7 +512,6 @@ func (s *LibraryCollectionService) syncTMDBPresetCollection(ctx context.Context,
 				"tvdb_id", entry.TVDBID,
 			)
 			unmatchedCount++
-			warnings = append(warnings, fmt.Sprintf("No match in libraries %v for %s", collection.LibraryIDs, entry.Title))
 			continue
 		}
 		if firstRank, exists := seenContentIDs[item.ContentID]; exists {
@@ -660,7 +673,6 @@ func (s *LibraryCollectionService) syncTMDBFranchiseCollection(ctx context.Conte
 				"imdb_id", entry.IMDbID,
 			)
 			unmatchedCount++
-			warnings = append(warnings, fmt.Sprintf("No match in libraries %v for %s", collection.LibraryIDs, entry.Title))
 			continue
 		}
 		if firstRank, exists := seenContentIDs[item.ContentID]; exists {
@@ -837,7 +849,6 @@ func (s *LibraryCollectionService) syncTMDBDiscoverCollection(ctx context.Contex
 				"tvdb_id", entry.TVDBID,
 			)
 			unmatchedCount++
-			warnings = append(warnings, fmt.Sprintf("No match in libraries %v for %s", collection.LibraryIDs, entry.Title))
 			continue
 		}
 		if firstRank, exists := seenContentIDs[item.ContentID]; exists {
@@ -1080,7 +1091,6 @@ func (s *LibraryCollectionService) completeTraktEntrySync(ctx context.Context, c
 		}
 		if item == nil {
 			unmatchedCount++
-			warnings = append(warnings, fmt.Sprintf("No match in libraries %v for %s", collection.LibraryIDs, entry.Title))
 			continue
 		}
 		if firstRank, exists := seenContentIDs[item.ContentID]; exists {
@@ -1270,36 +1280,8 @@ func traktCandidatesByPriority(lookup *ExternalIDLookup, entry TraktCollectionEn
 	return candidates
 }
 
-func (s *LibraryCollectionService) fetchMDBListEntries(ctx context.Context, listURL string) ([]mdblistEntry, error) {
-	listURL, err := collectionutil.CanonicalMDBListURL(listURL)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating mdblist request: %w", err)
-	}
-
-	res, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetching mdblist list: %w", err)
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("mdblist request failed with status %d", res.StatusCode)
-	}
-
-	body, err := io.ReadAll(io.LimitReader(res.Body, 4<<20))
-	if err != nil {
-		return nil, fmt.Errorf("reading mdblist response: %w", err)
-	}
-
-	var entries []mdblistEntry
-	if err := json.Unmarshal(body, &entries); err != nil {
-		return nil, fmt.Errorf("parsing mdblist response: %w", err)
-	}
-	return entries, nil
+func (s *LibraryCollectionService) fetchMDBListEntries(ctx context.Context, listURL string, maxEntries int) ([]mdblistEntry, error) {
+	return collectionutil.FetchMDBListJSON[mdblistEntry](ctx, s.httpClient, listURL, maxEntries)
 }
 
 // mdbListEntryItemType normalizes an MDBList entry's media_type field to the

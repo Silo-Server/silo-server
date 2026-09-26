@@ -141,3 +141,39 @@ it("keeps item refresh completion warnings and new-file counts for the existing 
     artwork_cache_warning: expect.stringContaining("Artwork caching did not finish"),
   });
 });
+
+it("keeps structured storage transition progress and failure categories", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async () =>
+      jsonResponse({
+        id: "storage-job",
+        kind: "storage_transition",
+        state: "failed",
+        created_at: "2026-09-05T00:00:00.000Z",
+        library_ids: [],
+        artifact_size_bytes: 0,
+        failure: {
+          detail: "private/object-key",
+          retryable: true,
+          title: "Failed",
+          type: "failure",
+        },
+        storage_transition_result: {
+          manual_restart_required: false,
+          phase: "failed",
+          verified_objects: 4,
+          failure_category: "copy_failed",
+        },
+      }),
+    ),
+  );
+
+  const job = await fetchAdminTaskJob("storage-job");
+  expect(job.result_payload).toMatchObject({
+    phase: "failed",
+    verified_objects: 4,
+    failure_category: "copy_failed",
+  });
+  expect(job.error_message).toBeUndefined();
+});

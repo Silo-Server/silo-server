@@ -114,6 +114,23 @@ func TestPromotingBeforeAnyoneVotesIsRefused(t *testing.T) {
 
 // The host bypassing the tally with a direct selection would make the counts on
 // everyone else's screen decoration.
+
+// VoteWinner still reports the leader (and refuses to name one with no votes)
+// for v1 promotion and clients that show who is ahead.
+func TestVoteWinnerStillReportsTheLeader(t *testing.T) {
+	service, _ := newVoteRoomService(t, RoomSelectionModeVote, voteRoomSuggestions())
+	winner, err := service.VoteWinner(context.Background(), "room-1")
+	if err != nil || winner.ID != "winner" {
+		t.Fatalf("VoteWinner() = %+v, %v", winner, err)
+	}
+	service.suggestions = &stubSuggestions{ordered: []Suggestion{{ID: "a", RoomID: "room-1", VoteCount: 0}}}
+	if _, err := service.VoteWinner(context.Background(), "room-1"); !errors.Is(err, ErrNoVotesCast) {
+		t.Fatalf("VoteWinner() with no votes error = %v, want ErrNoVotesCast", err)
+	}
+}
+
+// The host bypassing the tally with a direct selection would make the counts on
+// everyone else's screen decoration.
 func TestDirectSelectionIsRefusedInAVoteRoom(t *testing.T) {
 	service, _ := newVoteRoomService(t, RoomSelectionModeVote, voteRoomSuggestions())
 

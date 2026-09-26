@@ -33,6 +33,10 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 	if err != nil {
 		return none, err
 	}
+	if strings.EqualFold(strings.TrimSpace(existing.CollectionType), "trakt") &&
+		(req.SourceURL != nil || req.MaxItems != nil || req.LibraryIDs != nil) {
+		return none, apiError(http.StatusConflict, "legacy_source_immutable", "Legacy Trakt collection sources cannot be changed")
+	}
 
 	if cmd.PosterFile != nil || req.PosterSourceURL != nil {
 		if err := collectionFeatureError(store, "artwork"); err != nil {

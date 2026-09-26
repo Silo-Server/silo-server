@@ -621,6 +621,14 @@ rejections retain delivery logs. This synchronous operation is non-retryable;
 existing provider ordering and duplicate-handling behavior is unchanged and does
 not provide an exactly-once guarantee.
 
+A Plex connection's `base_url` follows the history import rule for server
+addresses: it must be on the public internet unless the account is an admin or
+an admin turned on `media_servers.allow_private_destinations`. Creating a
+connection with a refused address returns `422 validation_failed` (v1: 400
+`bad_request`), and a delivery whose metadata lookup is refused records that
+message as the connection's last error. See
+[Outbound address guard](architecture/outbound-address-guard.md).
+
 Responses set `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 `GET /api/v2/webhook-sync/capabilities` exposes `available` and `max_body_bytes`.
 V2 connection list/create/update and secret rotation emit v2 receiver URLs.
@@ -958,18 +966,28 @@ The server admin settings include `artwork.storage_backend` (`auto`, `local`, or
 `/var/lib/silo/artwork`). Artwork storage settings take effect after a server
 restart.
 
-The artwork location can only be chosen before any artwork is stored. The
-first artwork write records the storage identity, and from then on a write that
-would move artwork is rejected with `409` and the problem code
+The first write to the assets store records its storage identity; writes to a
+shared local root count too. At startup, Silo records any configured private
+bucket, even if it is empty. A direct settings write that changes a recorded
+location is rejected with `409` and the problem code
 `artwork_storage_locked`: a change of `artwork.storage_backend`, of
-`artwork.local_path` for a local store, or of `s3.public_endpoint`,
-`s3.public_bucket`, or `s3.public_key_prefix` for an S3 store. Adding a public
-bucket while an `auto` backend is recorded as local is also rejected, since it
-would change what `auto` resolves to. Re-saving the current values is accepted.
-`GET /api/v2/admin/server/status` reports `artwork_storage.locked` so a settings
-form can disable the control. Selecting `s3` without a configured
-`s3.public_bucket`, or clearing the bucket while `s3` is selected, is rejected
-as `invalid_settings`.
+`artwork.local_path` for a local store, of `s3.public_endpoint`,
+`s3.public_bucket`, or `s3.public_key_prefix` for an S3 store, or of
+`s3.private_bucket` on either backend. While a private bucket is configured, its
+`s3.private_endpoint` and `s3.private_key_prefix` are locked too, and the legacy
+`s3.operational_*` aliases count as the keys they fill. When only the private
+bucket is recorded, only its keys are locked. Adding a public bucket
+while an `auto` backend is recorded as local is also rejected, since it would
+change what `auto` resolves to. Re-saving the current values is accepted, and a
+key prefix compares after trimming slashes. Locked locations change through a
+managed storage transition (see `docs/admin-settings-api.md`).
+`GET /api/v2/admin/server/status` reports `artwork_storage.locked` for the
+artwork location and `artwork_storage.private_locked` for the operational
+location. `artwork_storage.status_known` is true only when the server read the
+settings successfully; when false, the lock values must not be used to permit
+location edits.
+Selecting `s3` without a configured `s3.public_bucket`, or clearing the bucket
+while `s3` is selected, is rejected as `invalid_settings`.
 
 `metadata.image_workers` sizes the pool that downloads and encodes provider
 artwork, in parallel encodes. `0`, the default, runs one encode per CPU core.
@@ -986,3 +1004,66 @@ requires a public S3 bucket because local artwork storage is available.
 catalog read return only the versions stored in the `library_id` it was given.
 It is server-wide, applies without a restart, and never affects playback; see
 "Library-scoped version lists" in [catalog-api.md](catalog-api.md).
+
+`access.unrated_content` (`hide` or `allow`, default `hide`) decides whether a
+profile with a content-rating ceiling sees titles that have no rating: an empty
+rating or an explicit marker such as `NR` or `Not Rated`. A rating the server
+cannot read is hidden from every ceilinged profile regardless. The setting covers
+titles in the library; request discovery keeps hiding TMDB titles that have no US
+certification from ceilinged profiles. The setting is
+server-wide and applies within seconds, without a restart. Ceilings compare
+minimum viewer ages, so a ceiling from any national system limits titles rated
+in any other; a US ceiling admits its whole tier (`PG-13` admits `TV-14`, `R`
+admits `NC-17`). The setting does not apply to a profile's advisory-age limit
+(`max_advisory_age`). Whether that limit hides a title with no advisory age is
+a per-profile choice, `require_advisory_age`, not this server-wide setting; see
+"Advisory age" in [catalog-api.md](catalog-api.md).
+
+## Forward and rewind intervals
+
+Revision 9 adds four profile-wide preferences. The backend stores and validates
+these values; each client applies them to its own relative-seek actions.
+
+| Key                                     | Default |
+| --------------------------------------- | ------- |
+| `player.video_skip_back_seconds`        | 10      |
+| `player.video_skip_forward_seconds`     | 30      |
+| `player.audiobook_skip_back_seconds`    | 10      |
+| `player.audiobook_skip_forward_seconds` | 30      |
+
+Each value is a numeric enum in seconds: `5`, `10`, `15`, `30`, `45`, `60`, or
+`90`. Only `profile` scope is allowed; an unset preference resolves to its
+contract default. The preference follows the active household profile across
+client families and devices. It does not belong to the whole login account.
+
+Discover support through the settings capability and manifest endpoints before
+reading or writing these keys. Use the existing effective read, profile-scoped
+PUT/DELETE, and `user_settings.changed` invalidation flow. No playback protocol
+or database schema change is required. On an older server, or one whose
+capabilities could not be read, a client uses the contract defaults for video
+and any interval this browser or device stored locally for audiobooks; neither
+state authorizes a write to the server.
+
+Clients should use one resolved interval per media type and direction for
+buttons, keyboard shortcuts, gestures, minimized players, and supported media
+controls. Labels must show the interval the action will use. Settings changes
+apply to subsequent actions without restarting playback. Explicit timestamp
+seeks, chapter navigation, automatic marker skipping, and resume rewind are
+separate operations and do not use these intervals.
+
+Legacy browser-local audiobook intervals have no profile identity. Importing
+must be an explicit user action that identifies the values and explains their
+profile-wide effect. The two writes are independent: report each failure and
+retain legacy values for retry instead of claiming an atomic import.
+
+The standalone web player receives resolved intervals from its host rather
+than calling the settings API itself. Media Session relative-seek handlers use
+the configured interval even if an operating system supplies its own default
+`seekOffset`. Browser-native fullscreen controls may perform seeks internally
+without dispatching those handlers; there is no portable API to configure that
+UI, and such controls are not guaranteed to honor these preferences.
+
+Native adoption is tracked in [Apple #267](https://github.com/Silo-Server/silo-apple/issues/267)
+and [Android #300](https://github.com/Silo-Server/silo-android/issues/300).
+Jellyfin clients keep their own seek controls; this does not extend the
+Jellyfin protocol.

@@ -108,7 +108,7 @@ func (p *adminSubtitleTestProvider) Download(context.Context, string) ([]byte, s
 }
 
 func newTestableAdminSubtitleHandler(repo *adminSubtitleConfigRepo) (*AdminSubtitleHandler, *subtitles.Manager) {
-	manager := subtitles.NewManager(repo, newMockS3ClientForHandler(), "test")
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
 	handler := NewAdminSubtitleHandler(repo)
 	handler.SetDownloadedSubtitleDeps(nil, manager)
 	handler.providerFactory = func(cfg *subtitles.ProviderConfig) (subtitles.Provider, error) {
@@ -120,7 +120,7 @@ func newTestableAdminSubtitleHandler(repo *adminSubtitleConfigRepo) (*AdminSubti
 func newTestableAdminSubtitleHandlerWithRepo(
 	repo subtitles.Repository,
 ) (*AdminSubtitleHandler, *subtitles.Manager) {
-	manager := subtitles.NewManager(repo, newMockS3ClientForHandler(), "test")
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
 	handler := NewAdminSubtitleHandler(repo)
 	handler.SetDownloadedSubtitleDeps(nil, manager)
 	handler.providerFactory = func(cfg *subtitles.ProviderConfig) (subtitles.Provider, error) {

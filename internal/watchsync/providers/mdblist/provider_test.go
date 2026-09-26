@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
@@ -33,7 +37,12 @@ func TestProviderIdentityAndCapabilities(t *testing.T) {
 	if !caps.ProvidesWatchlistOrder {
 		t.Fatalf("mdblist should provide watchlist order: %#v", caps)
 	}
+	if !caps.ImportRatings || !caps.ExportRatings {
+		t.Fatalf("mdblist should sync ratings both ways: %#v", caps)
+	}
 	var _ watchsync.APIKeyAuthProvider = p
+	var _ watchsync.RatingImporter = p
+	var _ watchsync.RatingExporter = p
 }
 
 func TestConnectWithAPIKeyHitsUserEndpoint(t *testing.T) {
@@ -663,6 +672,27 @@ func TestFetchWatchlistContinuesOffsetPaginationWhenHasMore(t *testing.T) {
 	}
 }
 
+func TestFetchWatchlistIgnoresPaginationTotal(t *testing.T) {
+	// Only the ratings read checks total; the watchlist read still ends at
+	// the first page without next_cursor or has_more.
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"movies":[{"title":"The Shawshank Redemption","release_year":1994,"ids":{"imdb":"tt0111161"}}],"shows":[],"pagination":{"total":5,"limit":1000,"next_cursor":null}}`))
+	}))
+	defer server.Close()
+
+	p := NewProvider(server.Client(), server.URL)
+	rows, err := p.FetchWatchlist(context.Background(), watchsync.ServerConfig{}, watchsync.Connection{AccessToken: "k"})
+	if err != nil {
+		t.Fatalf("fetch watchlist: %v", err)
+	}
+	if requests != 1 || len(rows) != 1 {
+		t.Fatalf("requests = %d rows = %d, want one page and one row", requests, len(rows))
+	}
+}
+
 func TestDoRetriesShortRateLimitInPlace(t *testing.T) {
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -774,23 +804,22 @@ func TestDoIncludesMDBListValidationError(t *testing.T) {
 	}
 }
 
-func TestParseRetryAfter(t *testing.T) {
-	now := time.Date(2026, time.July, 5, 12, 0, 0, 0, time.UTC)
-	cases := []struct {
-		value string
-		want  time.Duration
-	}{
-		{"", 0},
-		{"garbage", 0},
-		{"-5", 0},
-		{"7", 7 * time.Second},
-		{now.Add(90 * time.Second).Format(http.TimeFormat), 90 * time.Second},
-		{now.Add(-time.Minute).Format(http.TimeFormat), 0},
+func TestDoParsesHTTPDateRetryAfter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", time.Now().Add(2*time.Hour).UTC().Format(http.TimeFormat))
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	p := NewProvider(server.Client(), server.URL)
+	_, err := p.fetchUser(context.Background(), "key")
+	rle, ok := watchsync.AsRateLimited(err)
+	if !ok {
+		t.Fatalf("expected RateLimitedError, got %v", err)
 	}
-	for _, tc := range cases {
-		if got := parseRetryAfter(tc.value, now); got != tc.want {
-			t.Fatalf("parseRetryAfter(%q) = %s, want %s", tc.value, got, tc.want)
-		}
+	// HTTP-dates have one-second resolution, so allow for truncation.
+	if rle.RetryAfter <= 2*time.Hour-5*time.Second || rle.RetryAfter > 2*time.Hour {
+		t.Fatalf("got retry-after %s, want about 2h", rle.RetryAfter)
 	}
 }
 
@@ -830,3 +859,304 @@ func TestDoFloorsRetryAfterWhenRetriesExhausted(t *testing.T) {
 		t.Fatalf("got retry-after %s, want floored %s", rle.RetryAfter, defaultRetryAfter)
 	}
 }
+
+const sentinelAPIKey = "SENTINEL-KEY-123"
+
+var errInjectedTransport = errors.New("injected transport failure")
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// assertErrorOmitsAPIKey fails when the key appears anywhere in err's chain,
+// not only in its top-level message.
+func assertErrorOmitsAPIKey(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if strings.Contains(e.Error(), sentinelAPIKey) {
+			t.Fatalf("error chain leaks the API key: %q", e.Error())
+		}
+	}
+}
+
+// keyedRequests covers each request shape the provider sends with the API key:
+// GET with and without a query string, and POST with a JSON body.
+var keyedRequests = []struct {
+	name string
+	call func(context.Context, *Provider) error
+}{
+	{"GET user", func(ctx context.Context, p *Provider) error {
+		_, _, err := p.ConnectWithAPIKey(ctx, sentinelAPIKey)
+		return err
+	}},
+	{"GET watched page", func(ctx context.Context, p *Provider) error {
+		_, err := p.FetchWatched(ctx, watchsync.ServerConfig{}, sentinelConnection())
+		return err
+	}},
+	{"GET playback", func(ctx context.Context, p *Provider) error {
+		_, err := p.FetchProgress(ctx, watchsync.ServerConfig{}, sentinelConnection())
+		return err
+	}},
+	{"POST watched", func(ctx context.Context, p *Provider) error {
+		_, err := p.ExportHistory(ctx, watchsync.ServerConfig{}, sentinelConnection(), []watchsync.LocalPlay{
+			{HistoryID: "h1", Kind: historyimport.KindMovie, IMDbID: "tt0111161"},
+		})
+		return err
+	}},
+	{"POST watchlist", func(ctx context.Context, p *Provider) error {
+		_, err := p.ExportWatchlist(ctx, watchsync.ServerConfig{}, sentinelConnection(), []watchsync.LocalFavorite{
+			{MediaItemID: "m1", Kind: historyimport.KindMovie, IMDbID: "tt0111161"},
+		})
+		return err
+	}},
+	{"POST scrobble", func(ctx context.Context, p *Provider) error {
+		return p.Start(ctx, watchsync.ServerConfig{}, sentinelConnection(), watchsync.ScrobbleEvent{
+			Kind:            historyimport.KindMovie,
+			IMDbID:          "tt0111161",
+			PositionSeconds: 60,
+			DurationSeconds: 600,
+		})
+	}},
+}
+
+func sentinelConnection() watchsync.Connection {
+	return watchsync.Connection{ID: "conn-1", AccessToken: sentinelAPIKey}
+}
+
+func TestRequestFailuresOmitAPIKey(t *testing.T) {
+	sources := []struct {
+		name        string
+		newProvider func(t *testing.T) *Provider
+		check       func(t *testing.T, err error)
+	}{
+		{
+			name: "transport error",
+			newProvider: func(*testing.T) *Provider {
+				client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					return nil, errInjectedTransport
+				})}
+				return NewProvider(client, "http://mdblist.test")
+			},
+			check: func(t *testing.T, err error) {
+				if !errors.Is(err, errInjectedTransport) {
+					t.Fatalf("lost the transport cause: %v", err)
+				}
+			},
+		},
+		{
+			name: "connection refused",
+			newProvider: func(*testing.T) *Provider {
+				server := httptest.NewServer(http.NotFoundHandler())
+				server.Close()
+				return NewProvider(&http.Client{}, server.URL)
+			},
+			check: func(t *testing.T, err error) {
+				var opErr *net.OpError
+				if !errors.As(err, &opErr) {
+					t.Fatalf("lost the dial error: %v", err)
+				}
+			},
+		},
+		{
+			name: "malformed base URL",
+			newProvider: func(*testing.T) *Provider {
+				return NewProvider(&http.Client{}, "http://mdblist.test/\x7f")
+			},
+		},
+		{
+			name: "redirect loop",
+			newProvider: func(t *testing.T) *Provider {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					http.Redirect(w, r, r.URL.RequestURI(), http.StatusFound)
+				}))
+				t.Cleanup(server.Close)
+				return NewProvider(server.Client(), server.URL)
+			},
+		},
+		{
+			name: "unparseable redirect",
+			newProvider: func(t *testing.T) *Provider {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Location", "http://%zz/?apikey="+r.URL.Query().Get("apikey"))
+					w.WriteHeader(http.StatusFound)
+				}))
+				t.Cleanup(server.Close)
+				return NewProvider(server.Client(), server.URL)
+			},
+		},
+	}
+	for _, source := range sources {
+		for _, request := range keyedRequests {
+			t.Run(source.name+"/"+request.name, func(t *testing.T) {
+				err := request.call(context.Background(), source.newProvider(t))
+				assertErrorOmitsAPIKey(t, err)
+				if source.check != nil {
+					source.check(t, err)
+				}
+			})
+		}
+	}
+}
+
+func TestRateLimitRetryFailureOmitsAPIKey(t *testing.T) {
+	attempts := 0
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		attempts++
+		if attempts == 1 {
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Retry-After": {"1"}},
+				Body:       io.NopCloser(strings.NewReader("")),
+				Request:    r,
+			}, nil
+		}
+		return nil, errInjectedTransport
+	})}
+	p := NewProvider(client, "http://mdblist.test")
+
+	err := p.do(context.Background(), http.MethodPost, "/watchlist/items/add", sentinelAPIKey, strings.NewReader(`{"movies":[]}`), nil)
+	assertErrorOmitsAPIKey(t, err)
+	if attempts != 2 {
+		t.Fatalf("got %d attempts, want the in-place retry to run", attempts)
+	}
+	if !errors.Is(err, errInjectedTransport) {
+		t.Fatalf("lost the transport cause: %v", err)
+	}
+}
+
+func TestCanceledRequestStillMatchesContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		cancel()
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+
+	p := NewProvider(server.Client(), server.URL)
+	_, _, err := p.ConnectWithAPIKey(ctx, sentinelAPIKey)
+	assertErrorOmitsAPIKey(t, err)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestTimedOutRequestStaysDetectable(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+
+	cases := []struct {
+		name   string
+		client *http.Client
+		ctx    func() (context.Context, context.CancelFunc)
+	}{
+		{
+			name:   "client timeout",
+			client: &http.Client{Timeout: 50 * time.Millisecond},
+			ctx:    func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
+		},
+		{
+			name:   "context deadline",
+			client: &http.Client{},
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), 50*time.Millisecond)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := tc.ctx()
+			defer cancel()
+			p := NewProvider(tc.client, server.URL)
+			_, _, err := p.ConnectWithAPIKey(ctx, sentinelAPIKey)
+			assertErrorOmitsAPIKey(t, err)
+			var netErr net.Error
+			if !errors.As(err, &netErr) || !netErr.Timeout() {
+				t.Fatalf("expected a net.Error timeout, got %v", err)
+			}
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+			}
+		})
+	}
+}
+
+func TestDoRedactsAPIKeyEchoedInErrorBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "unexpected failure for " + r.URL.RequestURI()})
+	}))
+	defer server.Close()
+
+	p := NewProvider(server.Client(), server.URL)
+	_, _, err := p.ConnectWithAPIKey(context.Background(), sentinelAPIKey)
+	assertErrorOmitsAPIKey(t, err)
+	if !strings.Contains(err.Error(), "unexpected failure for /user?apikey="+logredact.Placeholder) {
+		t.Fatalf("expected the redacted body excerpt, got %v", err)
+	}
+}
+
+func TestResponseErrorDetailDropsKeyFragmentCutByLimit(t *testing.T) {
+	filler := strings.Repeat("x", maxErrorBodyBytes-10)
+	detail := responseErrorDetail(strings.NewReader(filler+sentinelAPIKey+" tail"), sentinelAPIKey)
+	if strings.Contains(detail, sentinelAPIKey[:10]) {
+		t.Fatalf("excerpt keeps the key fragment cut by the limit: %q", detail[len(detail)-20:])
+	}
+	if detail != filler {
+		t.Fatalf("got %d-byte excerpt, want the %d filler bytes", len(detail), len(filler))
+	}
+}
+
+func TestRedactAPIKeyMasksRawAndEscapedForms(t *testing.T) {
+	const key = "k/y+z 1"
+	text := "raw=" + key + " escaped=" + url.QueryEscape(key)
+	got := redactAPIKey(text, key)
+	want := "raw=" + logredact.Placeholder + " escaped=" + logredact.Placeholder
+	if got != want {
+		t.Fatalf("redactAPIKey = %q, want %q", got, want)
+	}
+	if redactAPIKey("unchanged", "") != "unchanged" {
+		t.Fatal("empty key must not alter text")
+	}
+}
+
+func TestRequestErrorKeepsCauseClassificationWhenMaskingTheMessage(t *testing.T) {
+	const key = "SENTINEL-KEY-123"
+	cause := fmt.Errorf("GET https://api.mdblist.com/x?apikey=%s: %w", key, context.DeadlineExceeded)
+	err := requestError("send", key, cause)
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if strings.Contains(e.Error(), key) {
+			t.Fatalf("chain exposes the key: %q", e.Error())
+		}
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want it to still match context.DeadlineExceeded", err)
+	}
+	var netErr net.Error
+	timeout := &net.OpError{Op: "dial", Err: timeoutError{}}
+	if !errors.As(requestError("send", key, fmt.Errorf("%s: %w", key, timeout)), &netErr) || !netErr.Timeout() {
+		t.Fatal("a masked timeout must still be found as a net.Error")
+	}
+}
+
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "i/o timeout" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }

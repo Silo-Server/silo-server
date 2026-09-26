@@ -123,6 +123,12 @@ func (h *AdminHandler) CreateAdminAccount(ctx context.Context, input auth.Create
 	if err := validateStreamLimits(input.User.MaxStreams, input.User.MaxTranscodes); err != nil {
 		return 0, fieldError("max_streams", err.Error())
 	}
+	if input.User.MaxRemoteStreamBitrateKbps != nil && *input.User.MaxRemoteStreamBitrateKbps < 0 {
+		return 0, fieldError("max_remote_stream_bitrate_kbps", "Must be 0 (unlimited) or positive")
+	}
+	if input.User.MaxLocalStreamBitrateKbps != nil && *input.User.MaxLocalStreamBitrateKbps < 0 {
+		return 0, fieldError("max_local_stream_bitrate_kbps", "Must be 0 (unlimited) or positive")
+	}
 	if input.User.MaxPlaybackQuality != nil {
 		value, ok := access.ParsePlaybackQualityPreset(*input.User.MaxPlaybackQuality)
 		if !ok {
@@ -184,6 +190,12 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 	if err := validateStreamLimits(input.MaxStreams.Value, input.MaxTranscodes.Value); err != nil {
 		return 0, fieldError("max_streams", err.Error())
 	}
+	if input.MaxRemoteStreamBitrateKbps.Value != nil && *input.MaxRemoteStreamBitrateKbps.Value < 0 {
+		return 0, fieldError("max_remote_stream_bitrate_kbps", "Must be 0 (unlimited) or positive")
+	}
+	if input.MaxLocalStreamBitrateKbps.Value != nil && *input.MaxLocalStreamBitrateKbps.Value < 0 {
+		return 0, fieldError("max_local_stream_bitrate_kbps", "Must be 0 (unlimited) or positive")
+	}
 	if input.MaxPlaybackQuality.Value != nil {
 		value, ok := access.ParsePlaybackQualityPreset(*input.MaxPlaybackQuality.Value)
 		if !ok {
@@ -202,12 +214,20 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 				return false, auth.ErrAdminUserRevision
 			}
 		}
+		if err := auth.CheckOwnerUpdate(actorUserID(ctx), current, input); err != nil {
+			return false, ownerError(err)
+		}
 		role := current.Role
 		if input.Role != nil {
 			role = *input.Role
 		}
 		if actorIsScopedAPIKey(ctx) && ((input.Role != nil && role == roleAdmin) || (current.Role == roleAdmin && (input.Password != nil || input.Role != nil))) {
 			return false, apiError(403, "insufficient_scope", "A scoped API key may not change admin credentials or grant admin")
+		}
+		// Only local password sign-in can run the change a temporary password
+		// demands; an externally managed account would be locked out.
+		if input.PasswordChangeRequired && !current.LocalPasswordLoginEnabled {
+			return false, apiError(409, "password_login_disabled", "This account does not use local password sign-in, so its password cannot be made temporary")
 		}
 		if input.AccessGroupID.Set {
 			if err := h.validateAdminGroup(ctx, tx, input.AccessGroupID.Value, role); err != nil {
@@ -239,6 +259,9 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 			if actual != groupRevision {
 				return false, auth.ErrAdminUserRevision
 			}
+		}
+		if err := auth.CheckOwnerDelete(actorUserID(ctx), current); err != nil {
+			return false, ownerError(err)
 		}
 		return true, nil
 	})

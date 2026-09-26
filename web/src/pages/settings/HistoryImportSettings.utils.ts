@@ -36,10 +36,12 @@ export function canStartEmbyImport(
   connectSession: EmbyConnectLoginResponse | null,
   connectServerId: string,
   selectedSavedSource: HistoryImportSource | undefined,
+  savedUsername: string,
 ): boolean {
   if (!profileId) return false;
   if (mode === "connect") return !!connectSession?.connect_session_id && !!connectServerId;
-  return !!selectedSavedSource;
+  // Emby accounts may have no password, so only the username is required.
+  return !!selectedSavedSource && savedUsername.trim() !== "";
 }
 
 export function canStartJellyfinImport(

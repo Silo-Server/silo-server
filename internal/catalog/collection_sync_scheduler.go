@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -108,7 +109,9 @@ func (s *CollectionSyncScheduler) syncOne(ctx context.Context, collection *model
 
 	startedAt := time.Now()
 
-	_, syncErr := s.service.SyncCollection(ctx, collection.ID)
+	syncCtx, cancel := context.WithTimeout(ctx, collectionutil.SyncTimeout)
+	_, syncErr := s.service.SyncCollection(syncCtx, collection.ID)
+	cancel()
 
 	completedAt := time.Now()
 

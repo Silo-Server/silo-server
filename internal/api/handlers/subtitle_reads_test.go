@@ -31,7 +31,7 @@ func TestSubtitleReadsAuthorizeBeforeStorageOrProvider(t *testing.T) {
 		repo := newMockSubtitleRepoForHandler()
 		repo.list = []subtitles.DownloadedSubtitle{{ID: 7, MediaFileID: 42}}
 		var searched subtitles.SearchRequest
-		manager := subtitles.NewManager(repo, newMockS3ClientForHandler(), "test-bucket")
+		manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
 		manager.RegisterProvider(recordingSubtitleProvider{request: &searched})
 		h := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{meta: &MediaFileMetadata{FileID: 42, FilePath: "Example.1080p.mkv", FileHash: "fixture-hash", Title: "Example", IMDbID: "tt0000001"}})
 		access := stubItemAccessChecker{}
@@ -64,7 +64,7 @@ func TestSubtitleReadsAuthorizeBeforeStorageOrProvider(t *testing.T) {
 
 func TestSubtitleSearchBridgeMissingMetadataKeepsError(t *testing.T) {
 	repo := newMockSubtitleRepoForHandler()
-	h := NewSubtitleSearchHandler(subtitles.NewManager(repo, newMockS3ClientForHandler(), "test-bucket"), repo, stubSubtitleMediaResolver{})
+	h := NewSubtitleSearchHandler(subtitles.NewManager(repo, newMockBlobStoreForHandler()), repo, stubSubtitleMediaResolver{})
 	h.FileAuthorizer = &MediaFileAuthorizer{FileResolver: stubMediaFileResolver{file: &models.MediaFile{ID: 42, ContentID: "movie"}}, ItemAccess: stubItemAccessChecker{}}
 	r := newSubtitleAuthRequest(http.MethodPost, "/subtitles/search", strings.NewReader(`{"media_file_id":42,"languages":["en"]}`))
 	w := httptest.NewRecorder()
@@ -78,7 +78,7 @@ func TestSubtitleSearchCanonicalizesCompatibilityLanguages(t *testing.T) {
 	for _, input := range []string{"ar", "ara", "Arabic"} {
 		var searched subtitles.SearchRequest
 		repo := newMockSubtitleRepoForHandler()
-		manager := subtitles.NewManager(repo, newMockS3ClientForHandler(), "test-bucket")
+		manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
 		manager.RegisterProvider(recordingSubtitleProvider{request: &searched})
 		h := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{meta: &MediaFileMetadata{FileID: 42, FilePath: "Example.mkv", Title: "Example"}})
 		h.FileAuthorizer = &MediaFileAuthorizer{FileResolver: stubMediaFileResolver{file: &models.MediaFile{ID: 42, ContentID: "movie"}}, ItemAccess: stubItemAccessChecker{}}
@@ -91,7 +91,7 @@ func TestSubtitleSearchCanonicalizesCompatibilityLanguages(t *testing.T) {
 	}
 	var searched subtitles.SearchRequest
 	repo := newMockSubtitleRepoForHandler()
-	manager := subtitles.NewManager(repo, newMockS3ClientForHandler(), "test-bucket")
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
 	manager.RegisterProvider(recordingSubtitleProvider{request: &searched})
 	h := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{meta: &MediaFileMetadata{FileID: 42, FilePath: "Example.mkv", Title: "Example"}})
 	if _, err := h.SearchSubtitles(t.Context(), catalog.AccessFilter{UserID: 1}, 42, []string{"Klingon"}); err == nil {

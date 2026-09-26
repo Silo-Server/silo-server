@@ -117,12 +117,17 @@ func TestPlaybackV2StartUsesTypedServiceAndOpaqueIDs(t *testing.T) {
 	if err := json.Unmarshal(data, &fake.response); err != nil {
 		t.Fatal(err)
 	}
-	response := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/playback/start", playbackJSON(t, playbackStartFixture(t)), viewerHeaders())
+	input := playbackStartFixture(t)
+	input["allow_alternate_versions"] = false
+	response := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/playback/start", playbackJSON(t, input), viewerHeaders())
 	if response.Code != 201 {
 		t.Fatalf("start: %d %s", response.Code, response.Body.String())
 	}
 	if fake.calls != 1 || fake.request.FileID != 42 || fake.caller.ProfileID != "p-owner" || fake.caller.UserID <= 0 || fake.caller.InstallationID != playbackTestInstallation {
 		t.Fatalf("service caller/request: %+v %+v", fake.caller, fake.request)
+	}
+	if fake.request.AllowsAlternateVersions() {
+		t.Fatal("fixed media file constraint was lost at the API boundary")
 	}
 	var body struct {
 		Plan struct {

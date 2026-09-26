@@ -96,6 +96,13 @@ func TestStaleMediaIDRepository_ListActionable_MatchesPredicate(t *testing.T) {
 	if err != nil || len(searched) != 0 {
 		t.Fatalf("unmatched search: %+v %v", searched, err)
 	}
+	// The total uses the page's search, so it counts matches beyond the page.
+	if total, err := repo.CountActionable(ctx, id(4)); err != nil || total != 1 {
+		t.Fatalf("CountActionable(provider id) = %d, %v; want 1", total, err)
+	}
+	if total, err := repo.CountActionable(ctx, "nonexistent-"+id(8)); err != nil || total != 0 {
+		t.Fatalf("CountActionable(unmatched) = %d, %v; want 0", total, err)
+	}
 	got := map[string]bool{}
 	const page = 2
 	for offset := 0; ; offset += page {

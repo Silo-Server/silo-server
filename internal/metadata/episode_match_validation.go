@@ -3,7 +3,6 @@ package metadata
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -27,12 +26,6 @@ const (
 )
 
 var (
-	// The episode groups are unbounded so the whole code is consumed before the
-	// title starts. Capping them at three digits leaves the tail of a
-	// four-digit episode (S23E1162) in front of the title, which then fails
-	// every comparison in validateSeriesMatchByEpisodes. Keep this in step with
-	// naming.ParseFilename, whose episode numbers these titles are paired with.
-	episodeCodePattern          = regexp.MustCompile(`(?i)s\d{1,4}e\d+(?:e\d+)?`)
 	episodeReleaseSuffixPattern = regexp.MustCompile(
 		`(?i)(?:^|[ ._-])(?:2160p|1080p|720p|576p|480p|webrip|web[ ._-]?dl|bluray|blu[ ._-]?ray|bdrip|hdtv|dvdrip|remux|x26[45]|h26[45]|hevc|av1|aac|ac3|eac3|dts(?:[ ._-]?hd)?|flac|hdr10?|dolby[ ._-]?vision)(?:$|[ ._-])`,
 	)
@@ -81,7 +74,7 @@ func validateSeriesMatchByEpisodes(
 	// Coordinate selection keeps useful episode titles when present, but its
 	// primary purpose is to build a bounded series-shape fingerprint: the last
 	// locally present episode from up to three spread-out seasons.
-	localEpisodes := selectLocalEpisodeCoordinateHints(hints.AllGroupFilePaths)
+	localEpisodes := selectLocalEpisodeCoordinateHints(hints.AllGroupFilePaths, hints.LibraryRoots...)
 	if len(localEpisodes) == 0 {
 		return nil, nil
 	}
@@ -435,17 +428,17 @@ func candidateCorroboratingSourceCount(candidate MatchCandidate) int {
 	return len(seen)
 }
 
-func selectLocalEpisodeCoordinateHints(paths []string) []localEpisodeMatchHint {
+func selectLocalEpisodeCoordinateHints(paths []string, libraryRoots ...string) []localEpisodeMatchHint {
 	bySeason := make(map[int]map[int]localEpisodeMatchHint)
 	for _, path := range paths {
-		parsed := naming.ParseFilename(path, "series")
-		if parsed == nil || parsed.EpisodeNum <= 0 {
+		parsed := naming.ParseFilename(path, "series", libraryRoots...)
+		if parsed == nil || parsed.EpisodeNum <= 0 || !parsed.SeasonKnown {
 			continue
 		}
 		if bySeason[parsed.SeasonNum] == nil {
 			bySeason[parsed.SeasonNum] = make(map[int]localEpisodeMatchHint)
 		}
-		title := extractEpisodeMatchTitle(path)
+		title := extractEpisodeMatchTitle(path, libraryRoots...)
 		if isGenericEpisodeMatchTitle(title) {
 			title = ""
 		}
@@ -526,14 +519,8 @@ func sortedEpisodeNumbers(episodes map[int]localEpisodeMatchHint) []int {
 	return numbers
 }
 
-func extractEpisodeMatchTitle(path string) string {
-	base := filepath.Base(path)
-	stem := strings.TrimSuffix(base, filepath.Ext(base))
-	location := episodeCodePattern.FindStringIndex(stem)
-	if location == nil {
-		return ""
-	}
-	title := strings.TrimLeft(stem[location[1]:], " ._-")
+func extractEpisodeMatchTitle(path string, libraryRoots ...string) string {
+	title := naming.EpisodeTitleSuffix(path, libraryRoots...)
 	if cut := strings.IndexAny(title, "[{"); cut >= 0 {
 		title = title[:cut]
 	}

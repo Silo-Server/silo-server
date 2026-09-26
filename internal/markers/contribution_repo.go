@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const contributionClaimIndex = "marker_contributions_provider_hash_active_uidx"
+const contributionClaimIndex = "marker_contributions_provider_target_active_uidx"
 
 // ContributionRow is one submission audit record from marker_contributions.
 type ContributionRow struct {
@@ -29,6 +29,7 @@ type ContributionRow struct {
 	SubmittedEndMs   *int64
 	VideoDurationMs  *int64
 	ContentHash      string
+	TargetKey        string
 	SubmissionID     *string
 	Status           string
 	HTTPStatus       *int
@@ -74,17 +75,22 @@ func ptrIntStr(v *int64) string {
 	return strconv.FormatInt(*v, 10)
 }
 
-// Claim atomically reserves a provider-target payload before the network call.
-// A terminal or fresh in-flight row keeps the claim active; recording a
-// retryable error releases it, and a stale in-flight row can be reclaimed.
-// The advisory lock and partial unique index serialize identical payloads
-// across different local media files and server workers.
+// Claim atomically reserves a provider target before the network call. Any
+// active row for the same provider, segment, and target blocks the claim,
+// whatever times it carried: providers accept one submission per account for
+// each item. A stale in-flight row, or an invalid refusal older than
+// contributionInvalidRecheck, can be reclaimed; recording a retryable error
+// releases the claim. The advisory lock and partial unique index serialize
+// claims across local media files and server workers.
 func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow, staleAfter time.Duration) (ContributionClaim, bool, error) {
 	if s == nil || s.pool == nil {
 		return ContributionClaim{}, false, fmt.Errorf("contribution store unavailable")
 	}
 	if staleAfter <= 0 {
 		return ContributionClaim{}, false, fmt.Errorf("contribution claim lease must be positive")
+	}
+	if row.TargetKey == "" {
+		return ContributionClaim{}, false, fmt.Errorf("contribution claim target missing")
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -96,7 +102,7 @@ func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow, stal
 	if _, err := tx.Exec(ctx, `
 		SELECT pg_advisory_xact_lock(
 			hashtextextended($1 || chr(31) || $2 || chr(31) || $3, 0)
-		)`, row.Provider, row.SegmentKind, row.ContentHash); err != nil {
+		)`, row.Provider, row.SegmentKind, row.TargetKey); err != nil {
 		return ContributionClaim{}, false, fmt.Errorf("lock marker contribution claim: %w", err)
 	}
 
@@ -104,31 +110,32 @@ func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow, stal
 	if leaseSeconds < 1 {
 		leaseSeconds = 1
 	}
-	var activeID, activeStatus string
-	var stale bool
+	recheckSeconds := int64(contributionInvalidRecheck / time.Second)
+	var activeID string
+	var reclaimable bool
 	err = tx.QueryRow(ctx, `
-		SELECT id, status, updated_at < now() - ($4 * interval '1 second')
+		SELECT id,
+		       (status = $4 AND updated_at < now() - ($5 * interval '1 second'))
+		       OR (status = $6 AND updated_at < now() - ($7 * interval '1 second'))
 		FROM marker_contributions
-		WHERE provider = $1 AND segment_kind = $2 AND content_hash = $3
+		WHERE provider = $1 AND segment_kind = $2 AND target_key = $3
 		  AND claim_active`,
-		row.Provider, row.SegmentKind, row.ContentHash, leaseSeconds,
-	).Scan(&activeID, &activeStatus, &stale)
+		row.Provider, row.SegmentKind, row.TargetKey,
+		contributionStatusClaim, leaseSeconds,
+		OutcomeStatusInvalid, recheckSeconds,
+	).Scan(&activeID, &reclaimable)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return ContributionClaim{}, false, fmt.Errorf("find marker contribution claim: %w", err)
 	}
 	if err == nil {
-		if activeStatus != contributionStatusClaim || !stale {
+		if !reclaimable {
 			return ContributionClaim{}, false, nil
 		}
-		claim, reclaimed, err := reclaimContribution(ctx, tx, activeID, row, leaseSeconds)
-		if err != nil {
-			return ContributionClaim{}, false, err
-		}
-		if reclaimed {
-			if err := tx.Commit(ctx); err != nil {
-				return ContributionClaim{}, false, fmt.Errorf("commit marker contribution claim: %w", err)
-			}
-			return claim, true, nil
+		// Hand the target over by retiring the old row; its audit record stays.
+		if _, err := tx.Exec(ctx, `
+			UPDATE marker_contributions SET claim_active = false, updated_at = now()
+			WHERE id = $1 AND claim_active`, activeID); err != nil {
+			return ContributionClaim{}, false, fmt.Errorf("release stale marker contribution claim: %w", err)
 		}
 	}
 
@@ -137,13 +144,14 @@ func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow, stal
 		INSERT INTO marker_contributions (
 			media_file_id, provider, segment_kind, source,
 			submitted_start_ms, submitted_end_ms, video_duration_ms,
-			content_hash, status, claim_active, claim_token, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,gen_random_uuid(),now())
+			content_hash, target_key, status, claim_active, claim_token, updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,gen_random_uuid(),now())
 		ON CONFLICT (media_file_id, provider, segment_kind, content_hash) DO UPDATE SET
 			source = EXCLUDED.source,
 			submitted_start_ms = EXCLUDED.submitted_start_ms,
 			submitted_end_ms = EXCLUDED.submitted_end_ms,
 			video_duration_ms = EXCLUDED.video_duration_ms,
+			target_key = EXCLUDED.target_key,
 			submission_id = NULL,
 			status = EXCLUDED.status,
 			http_status = NULL,
@@ -155,7 +163,7 @@ func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow, stal
 		RETURNING id, claim_token`,
 		row.MediaFileID, row.Provider, row.SegmentKind, row.Source,
 		row.SubmittedStartMs, row.SubmittedEndMs, row.VideoDurationMs,
-		row.ContentHash, contributionStatusClaim,
+		row.ContentHash, row.TargetKey, contributionStatusClaim,
 	).Scan(&claim.ID, &claim.Token)
 	if errors.Is(err, pgx.ErrNoRows) || isContributionClaimConflict(err) {
 		return ContributionClaim{}, false, nil
@@ -165,35 +173,6 @@ func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow, stal
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return ContributionClaim{}, false, fmt.Errorf("commit marker contribution claim: %w", err)
-	}
-	return claim, true, nil
-}
-
-func reclaimContribution(ctx context.Context, tx pgx.Tx, id string, row ContributionRow, leaseSeconds int64) (ContributionClaim, bool, error) {
-	var claim ContributionClaim
-	err := tx.QueryRow(ctx, `
-		UPDATE marker_contributions SET
-			source = $2,
-			submitted_start_ms = $3,
-			submitted_end_ms = $4,
-			video_duration_ms = $5,
-			submission_id = NULL,
-			status = $6,
-			http_status = NULL,
-			error = NULL,
-			claim_token = gen_random_uuid(),
-			updated_at = now()
-		WHERE id = $1 AND claim_active AND status = $6
-		  AND updated_at < now() - ($7 * interval '1 second')
-		RETURNING id, claim_token`,
-		id, row.Source, row.SubmittedStartMs, row.SubmittedEndMs,
-		row.VideoDurationMs, contributionStatusClaim, leaseSeconds,
-	).Scan(&claim.ID, &claim.Token)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ContributionClaim{}, false, nil
-	}
-	if err != nil {
-		return ContributionClaim{}, false, fmt.Errorf("reclaim marker contribution: %w", err)
 	}
 	return claim, true, nil
 }
@@ -242,36 +221,80 @@ func (s *ContributionStore) Record(ctx context.Context, row ContributionRow) err
 	return nil
 }
 
-// CandidateLocalIntroFiles returns ids of episode files carrying a local
-// (scanner) intro marker at or above minConfidence — the auto-contribution
-// candidates. Iterated by keyset (id > afterID) for stable paging.
-func (s *ContributionStore) CandidateLocalIntroFiles(ctx context.Context, minConfidence float64, afterID, limit int) ([]int, error) {
-	if s == nil || s.pool == nil {
+// ContributionCandidate is one auto-contribution candidate and its keyset
+// position.
+type ContributionCandidate struct {
+	FileID     int
+	Confidence float64
+}
+
+// episodeTargetKeySQL derives contributionTargetKey in SQL for an episode row
+// e and its series row series.
+const episodeTargetKeySQL = `'episode|' ||
+	CASE
+		WHEN COALESCE(series.tmdb_id, '') <> '' THEN 'tmdb:' || series.tmdb_id
+		WHEN COALESCE(series.tvdb_id, '') <> '' THEN 'tvdb:' || series.tvdb_id
+		WHEN COALESCE(series.imdb_id, '') <> '' THEN 'imdb:' || series.imdb_id
+		ELSE ''
+	END || '|' || e.season_number || '|' || e.episode_number`
+
+// CandidateLocalIntroFiles returns episode files carrying a local (scanner)
+// intro marker at or above minConfidence, highest confidence first. A file is
+// skipped while every listed provider holds a claim on its current target,
+// from this file or another version of the episode, that Claim would not hand
+// over; a claim on an older target, a stale in-flight claim, and an invalid
+// refusal due for its recheck leave the file eligible.
+// Paging is by keyset: pass the last candidate returned (nil for the first
+// page).
+func (s *ContributionStore) CandidateLocalIntroFiles(ctx context.Context, minConfidence float64, providers []string, after *ContributionCandidate, limit int) ([]ContributionCandidate, error) {
+	if s == nil || s.pool == nil || len(providers) == 0 {
 		return nil, nil
 	}
+	afterConfidence, afterID := 2.0, 0
+	if after != nil {
+		afterConfidence, afterID = after.Confidence, after.FileID
+	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id FROM media_files
-		WHERE episode_id IS NOT NULL
-		  AND intro_markers_source = $1
-		  AND intro_start IS NOT NULL AND intro_end IS NOT NULL
-		  AND COALESCE(intro_markers_confidence, 0) >= $2
-		  AND id > $3
-		ORDER BY id
-		LIMIT $4`, models.MarkerSourceScanner, minConfidence, afterID, limit)
+		SELECT mf.id, COALESCE(mf.intro_markers_confidence, 0) AS confidence
+		FROM media_files mf
+		JOIN episodes e ON e.content_id = mf.episode_id
+		LEFT JOIN media_items series ON series.content_id = e.series_id
+		WHERE mf.episode_id IS NOT NULL
+		  AND mf.intro_markers_source = $1
+		  AND mf.intro_start IS NOT NULL AND mf.intro_end IS NOT NULL
+		  AND COALESCE(mf.intro_markers_confidence, 0) >= $2
+		  AND e.season_number > 0 AND e.episode_number > 0
+		  AND (COALESCE(mf.intro_markers_confidence, 0), -mf.id) < ($3::double precision, -$4::integer)
+		  AND (
+		      SELECT COUNT(DISTINCT mc.provider)
+		      FROM marker_contributions mc
+		      WHERE mc.segment_kind = 'intro'
+		        AND mc.claim_active
+		        AND mc.provider = ANY($5::text[])
+		        AND mc.target_key = `+episodeTargetKeySQL+`
+		        AND NOT (mc.status = $7 AND mc.updated_at < now() - ($8 * interval '1 second'))
+		        AND NOT (mc.status = $9 AND mc.updated_at < now() - ($10 * interval '1 second'))
+		  ) < cardinality($5::text[])
+		ORDER BY confidence DESC, mf.id
+		LIMIT $6`,
+		models.MarkerSourceScanner, minConfidence, afterConfidence, afterID, providers, limit,
+		contributionStatusClaim, int64(contributionClaimLease/time.Second),
+		OutcomeStatusInvalid, int64(contributionInvalidRecheck/time.Second),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("query contribution candidates: %w", err)
 	}
 	defer rows.Close()
 
-	var ids []int
+	var out []ContributionCandidate
 	for rows.Next() {
-		var id int
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan candidate id: %w", err)
+		var c ContributionCandidate
+		if err := rows.Scan(&c.FileID, &c.Confidence); err != nil {
+			return nil, fmt.Errorf("scan contribution candidate: %w", err)
 		}
-		ids = append(ids, id)
+		out = append(out, c)
 	}
-	return ids, rows.Err()
+	return out, rows.Err()
 }
 
 // ListByFile returns the contribution history for a file, newest first.

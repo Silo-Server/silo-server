@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -773,9 +775,9 @@ func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
 	// transaction deliberately matches stable node/id fields and stores the
 	// refreshed URL as the cleanup target.
 	ready.OriginNodeURL = "http://transcode-new"
-	linked, applied, err := repo.RequeueRemote(ctx, ready)
-	if err != nil || !applied {
-		t.Fatalf("RequeueRemote = (%v, %v)", applied, err)
+	linked, result, err := repo.RequeueRemote(ctx, ready)
+	if err != nil || result != artifactRequeued {
+		t.Fatalf("RequeueRemote = (%v, %v)", result, err)
 	}
 	if len(linked) != 1 || linked[0].ID != downloadID || linked[0].Status != StatusPreparing {
 		t.Fatalf("reset linked downloads = %+v", linked)
@@ -797,8 +799,8 @@ func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orphans[0].ID) })
 	// A stale caller cannot enqueue a second cleanup after the row changed.
-	if _, applied, err := repo.RequeueRemote(ctx, ready); err != nil || applied {
-		t.Fatalf("stale RequeueRemote = (%v, %v), want false, nil", applied, err)
+	if _, result, err := repo.RequeueRemote(ctx, ready); err != nil || result != artifactUnchanged {
+		t.Fatalf("stale RequeueRemote = (%v, %v), want unchanged, nil", result, err)
 	}
 }
 
@@ -822,8 +824,8 @@ func TestProxyMissingReportFencesCompleteRemoteLocator(t *testing.T) {
 	}
 	stale := *stillReady
 	stale.OriginNodeURL = "http://transcode-stale"
-	if applied, err := manager.requeueRemoteArtifactExactNow(ctx, &stale, "stale API miss"); err != nil || applied {
-		t.Fatalf("stale exact requeue = (%v, %v), want false, nil", applied, err)
+	if result, err := manager.requeueRemoteArtifactExactNow(ctx, &stale, "stale API miss"); err != nil || result != artifactUnchanged {
+		t.Fatalf("stale exact requeue = (%v, %v), want unchanged, nil", result, err)
 	}
 	if err := manager.ReportRemoteArtifactMissing(ctx, row.ID, "http://transcode-stale", "artifact-missing"); err != nil {
 		t.Fatal(err)
@@ -1004,5 +1006,283 @@ func TestHasActiveLinkCoversEphemeralRows(t *testing.T) {
 	}
 	if active {
 		t.Fatal("terminal-only links must not protect an artifact")
+	}
+}
+
+// readyArtifactForRecovery prepares a ready artifact last used an hour ago,
+// outside missingArtifactRetireGrace. An empty originArtifactID keeps it local.
+func readyArtifactForRecovery(t *testing.T, repo *ArtifactRepository, pool *pgxpool.Pool, fileID int, originArtifactID string) *Artifact {
+	t.Helper()
+	ctx := context.Background()
+	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, fmt.Sprintf("hash-missing-recovery-%d", time.Now().UnixNano())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ClaimNext(ctx, "worker", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	originNodeID, originNodeURL := 0, ""
+	if originArtifactID != "" {
+		originNodeID, originNodeURL = 31, "http://transcode-recovery"
+	}
+	if applied, err := repo.MarkReady(ctx, row.ID, "worker", row.OutputPath, originNodeID, originNodeURL, "", originArtifactID, 4242); err != nil || !applied {
+		t.Fatalf("MarkReady = (%v, %v)", applied, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE download_artifacts SET last_used_at = now() - interval '1 hour' WHERE id = $1`, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	ready, err := repo.GetByID(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ready
+}
+
+// linkRecoveryDownload links one download in the given status to artifactID.
+func linkRecoveryDownload(t *testing.T, pool *pgxpool.Pool, fileID int, artifactID, status string) {
+	t.Helper()
+	ctx := context.Background()
+	var userID int
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (username, role, download_allowed) VALUES ($1, 'user', true) RETURNING id`,
+		fmt.Sprintf("recovery-user-%d", time.Now().UnixNano()),
+	).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	downloadID := fmt.Sprintf("recovery-download-%d", time.Now().UnixNano())
+	if err := NewRepository(pool).Create(ctx, &Download{
+		ID: downloadID, UserID: userID, MediaFileID: fileID,
+		ContentID: "recovery-content", Kind: KindQueued, Status: status,
+		Format: FormatTranscode, ArtifactID: artifactID, FileSize: 4242,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM downloads WHERE id = $1`, downloadID)
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+	})
+}
+
+func TestRecoverMissingRetiresOnlyUnusedLocalArtifacts(t *testing.T) {
+	cases := []struct {
+		name           string
+		downloadStatus string // "" links no download
+		recentlyUsed   bool
+		want           artifactRecovery
+	}{
+		{name: "no downloads", want: artifactRetired},
+		{name: "only a canceled download", downloadStatus: StatusCancelled, want: artifactRetired},
+		{name: "completed download", downloadStatus: StatusCompleted, want: artifactRequeued},
+		{name: "used within the grace period", recentlyUsed: true, want: artifactRequeued},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, pool, fileID := newArtifactTestRepo(t)
+			ctx := context.Background()
+			ready := readyArtifactForRecovery(t, repo, pool, fileID, "")
+			if tc.downloadStatus != "" {
+				linkRecoveryDownload(t, pool, fileID, ready.ID, tc.downloadStatus)
+			}
+			if tc.recentlyUsed {
+				if touched, err := repo.TouchReady(ctx, ready.ID); err != nil || !touched {
+					t.Fatalf("TouchReady = (%v, %v)", touched, err)
+				}
+			}
+			linked, got, err := repo.RecoverMissing(ctx, ready.ID, missingArtifactRetireGrace)
+			if err != nil || got != tc.want {
+				t.Fatalf("RecoverMissing = (%v, %v), want %v", got, err, tc.want)
+			}
+			// A requeue returns the live download to preparing in the same
+			// transaction.
+			wantReset := tc.want == artifactRequeued && tc.downloadStatus == StatusCompleted
+			if gotReset := len(linked) == 1 && linked[0].Status == StatusPreparing; gotReset != wantReset || len(linked) > 1 {
+				t.Fatalf("reset downloads = %+v, want reset=%v", linked, wantReset)
+			}
+			row, err := repo.GetByID(ctx, ready.ID)
+			switch tc.want {
+			case artifactRetired:
+				if !errors.Is(err, ErrNotFound) {
+					t.Fatalf("retired artifact = %+v (%v), want ErrNotFound", row, err)
+				}
+				// A download create that read the row before retirement must not
+				// link to it; TouchReady tells Ensure to queue a fresh job.
+				if touched, err := repo.TouchReady(ctx, ready.ID); err != nil || touched {
+					t.Fatalf("TouchReady on retired artifact = (%v, %v), want false", touched, err)
+				}
+			case artifactRequeued:
+				if err != nil || row.Status != ArtifactQueued || row.Attempts != 0 {
+					t.Fatalf("requeued artifact = %+v (%v)", row, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRemoteMissingRetiresUnusedArtifactAndQueuesCleanup(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	ready := readyArtifactForRecovery(t, repo, pool, fileID, fmt.Sprintf("artifact-unused-%d", time.Now().UnixNano()))
+	preparer := &lifecycleTestPreparer{statError: downloadprepare.ErrArtifactNotFound}
+	kicked := make(chan struct{}, 1)
+	manager := &ArtifactManager{repo: repo, preparer: preparer, kick: func() { kicked <- struct{}{} }}
+
+	manager.recoverReadyArtifacts(ctx)
+
+	if row, err := repo.GetByID(ctx, ready.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unused remote artifact = %+v (%v), want retired", row, err)
+	}
+	orphans, err := repo.ListRemoteOrphansDue(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphans = remoteOrphansForArtifact(orphans, ready.ID)
+	if len(orphans) != 1 || orphans[0].OriginArtifactID != ready.OriginArtifactID {
+		t.Fatalf("remote cleanup queue = %+v, want the retired locator", orphans)
+	}
+	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orphans[0].ID) })
+	select {
+	case <-kicked:
+		t.Fatal("retiring an unused artifact triggered a prepare drain")
+	default:
+	}
+}
+
+func TestRemoteMissingRequeuesArtifactWithActiveDownload(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	ready := readyArtifactForRecovery(t, repo, pool, fileID, fmt.Sprintf("artifact-used-%d", time.Now().UnixNano()))
+	linkRecoveryDownload(t, pool, fileID, ready.ID, StatusCompleted)
+	manager := NewArtifactManager(repo, nil, nil, nil, "recovery-test", nil, nil)
+
+	if err := manager.ReportRemoteArtifactMissing(ctx, ready.ID, ready.OriginNodeURL, ready.OriginArtifactID); err != nil {
+		t.Fatal(err)
+	}
+
+	queued, err := repo.GetByID(ctx, ready.ID)
+	if err != nil || queued.Status != ArtifactQueued || queued.OriginArtifactID != "" {
+		t.Fatalf("artifact with an active download = %+v (%v), want requeued", queued, err)
+	}
+	orphans, err := repo.ListRemoteOrphansDue(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphans = remoteOrphansForArtifact(orphans, ready.ID)
+	if len(orphans) != 1 {
+		t.Fatalf("remote cleanup queue = %+v", orphans)
+	}
+	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orphans[0].ID) })
+}
+
+// A create that read the artifact as ready can link a 'ready' download after
+// recovery requeued the artifact. ConfirmArtifactLink must return that
+// download to preparing, and leave a link to a ready artifact alone.
+func TestConfirmArtifactLinkResetsDownloadOfRequeuedArtifact(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	downloads := NewRepository(pool)
+	ready := readyArtifactForRecovery(t, repo, pool, fileID, "")
+	linkRecoveryDownload(t, pool, fileID, ready.ID, StatusReady)
+	var d Download
+	if err := scanInto(pool.QueryRow(ctx, `SELECT `+downloadColumns+` FROM downloads WHERE artifact_id = $1`, ready.ID), &d); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := downloads.ConfirmArtifactLink(ctx, &d); err != nil || got.Status != StatusReady {
+		t.Fatalf("link to a ready artifact = %+v (%v), want unchanged", got, err)
+	}
+	// Simulate recovery requeuing the artifact after the create read it:
+	// requeue without the linked-download reset, as a racing requeue whose
+	// reset ran before this row was inserted would leave it.
+	if err := repo.Requeue(ctx, ready.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := downloads.ConfirmArtifactLink(ctx, &d)
+	if err != nil || got.Status != StatusPreparing || got.ID != d.ID {
+		t.Fatalf("link to a requeued artifact = %+v (%v), want preparing", got, err)
+	}
+}
+
+// A managed create that reuses an existing entry holds a copy read before
+// Ensure. If recovery reset the stored row since, ConfirmArtifactLink must
+// return the stored row instead of the stale copy.
+func TestConfirmArtifactLinkReturnsRowResetByRecovery(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	ready := readyArtifactForRecovery(t, repo, pool, fileID, "")
+	linkRecoveryDownload(t, pool, fileID, ready.ID, StatusCompleted)
+	var stale Download
+	if err := scanInto(pool.QueryRow(ctx, `SELECT `+downloadColumns+` FROM downloads WHERE artifact_id = $1`, ready.ID), &stale); err != nil {
+		t.Fatal(err)
+	}
+	if _, got, err := repo.RecoverMissing(ctx, ready.ID, missingArtifactRetireGrace); err != nil || got != artifactRequeued {
+		t.Fatalf("RecoverMissing = (%v, %v), want requeued", got, err)
+	}
+	got, err := NewRepository(pool).ConfirmArtifactLink(ctx, &stale)
+	if err != nil || got.Status != StatusPreparing || got.ID != stale.ID {
+		t.Fatalf("reused entry after recovery reset = %+v (%v), want the stored preparing row", got, err)
+	}
+}
+
+// A concurrent create can relink the same managed row, for example to an
+// original-quality download with no artifact, after this create read it. The
+// reset must not strand that newer row in preparing.
+func TestConfirmArtifactLinkIgnoresRowRelinkedConcurrently(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	ready := readyArtifactForRecovery(t, repo, pool, fileID, "")
+	linkRecoveryDownload(t, pool, fileID, ready.ID, StatusReady)
+	var stale Download
+	if err := scanInto(pool.QueryRow(ctx, `SELECT `+downloadColumns+` FROM downloads WHERE artifact_id = $1`, ready.ID), &stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Requeue(ctx, ready.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE downloads SET artifact_id = NULL, format = 'original' WHERE id = $1`, stale.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := NewRepository(pool).ConfirmArtifactLink(ctx, &stale)
+	if err != nil || got.Status != StatusReady || got.ArtifactID != "" {
+		t.Fatalf("relinked row = %+v (%v), want the stored ready original row", got, err)
+	}
+}
+
+// The create has already committed when the link is confirmed, so a failed
+// check must return the created row rather than fail the request.
+func TestServiceConfirmArtifactLinkReturnsCreatedRowOnError(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ready := readyArtifactForRecovery(t, repo, pool, fileID, "")
+	created := &Download{ID: "created-download", Status: StatusReady, ArtifactID: ready.ID}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	got := (&Service{repo: NewRepository(pool)}).confirmArtifactLink(canceled, created)
+
+	if got != created {
+		t.Fatalf("confirmArtifactLink after a failed check = %+v, want the created row", got)
+	}
+}
+
+// A stat failure other than "not found" is not proof the output is gone, so
+// recovery must leave the row alone rather than retire it and orphan the file.
+func TestRecoverReadyArtifactsSkipsIndeterminateStatErrors(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	ready := readyArtifactForRecovery(t, repo, pool, fileID, "")
+	notDir := filepath.Join(t.TempDir(), "regular-file")
+	if err := os.WriteFile(notDir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Stat of a path beneath a regular file fails with ENOTDIR.
+	if _, err := pool.Exec(ctx, `UPDATE download_artifacts SET output_path = $2 WHERE id = $1`, ready.ID, filepath.Join(notDir, "out.mp4")); err != nil {
+		t.Fatal(err)
+	}
+	manager := &ArtifactManager{repo: repo, preparer: &lifecycleTestPreparer{}}
+
+	manager.recoverReadyArtifacts(ctx)
+
+	row, err := repo.GetByID(ctx, ready.ID)
+	if err != nil || row.Status != ArtifactReady {
+		t.Fatalf("artifact after indeterminate stat error = %+v (%v), want unchanged", row, err)
 	}
 }

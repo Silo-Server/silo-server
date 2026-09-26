@@ -1,6 +1,9 @@
 package lang
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestCanonicalTag(t *testing.T) {
 	cases := map[string]string{
@@ -123,6 +126,23 @@ func TestCanonicalCountries(t *testing.T) {
 			if got[i] != tc.want[i] {
 				t.Errorf("CanonicalCountries(%v)[%d] = %q, want %q", tc.in, i, got[i], tc.want[i])
 			}
+		}
+	}
+}
+
+func TestCodeAliases(t *testing.T) {
+	for input, want := range map[string][]string{
+		"es":    {"es", "spa"},
+		"spa":   {"es", "spa"},
+		"de":    {"de", "deu", "ger"},
+		"zh":    {"zh", "zho", "chi"},
+		"eng":   {"en", "eng"},
+		"fil":   {"fil"},
+		"pt-BR": {"pt-BR"},
+		"":      nil,
+	} {
+		if got := CodeAliases(input); !slices.Equal(got, want) {
+			t.Errorf("CodeAliases(%q) = %v, want %v", input, got, want)
 		}
 	}
 }

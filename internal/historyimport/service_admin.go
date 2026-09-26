@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 // AuthenticatePlex exchanges Plex username/password for an auth token via plex.tv.
@@ -37,6 +39,8 @@ func (s *Service) DiscoverExternalUsers(ctx context.Context, sourceID int) ([]Ex
 	if token == "" {
 		return nil, ErrNoAdminToken
 	}
+	// An admin configured this server, so it may be on the local network.
+	ctx = netguard.WithPrivateAccess(ctx)
 
 	switch source.SourceType {
 	case SourceTypeEmby:

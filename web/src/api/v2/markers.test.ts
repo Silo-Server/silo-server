@@ -10,6 +10,10 @@ const markers = {
   credits: {},
   recap: {},
   preview: {},
+  marker_segments: [
+    { kind: "intro", start_seconds: 0, end_seconds: 60 },
+    { kind: "intro", start_seconds: 120, end_seconds: 150 },
+  ],
 };
 
 describe("v2 marker consumers", () => {
@@ -35,12 +39,14 @@ describe("v2 marker consumers", () => {
       detected_at: null,
     });
     expect(result.credits.start).toBeNull();
+    expect(result).toHaveProperty("marker_segments", markers.marker_segments);
   });
 
   it("sends only changed segments and preserves explicit clears", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse(markers));
     vi.stubGlobal("fetch", fetchMock);
-    await setItemMarkers("one", { intro: { start: 0, end: 60 }, credits: null });
+    const result = await setItemMarkers("one", { intro: { start: 0, end: 60 }, credits: null });
+    expect(result).toHaveProperty("marker_segments", markers.marker_segments);
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("PUT");
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       intro: { start_seconds: 0, end_seconds: 60 },

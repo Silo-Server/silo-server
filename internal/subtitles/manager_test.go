@@ -97,18 +97,18 @@ func (m *mockSubtitleRepo) UpsertProviderConfig(context.Context, *ProviderConfig
 	return nil
 }
 
-type mockS3Client struct {
+type mockBlobStore struct {
 	mu      sync.Mutex
 	keys    map[string][]byte
 	puts    int
 	deletes int
 }
 
-func newMockS3Client() *mockS3Client {
-	return &mockS3Client{keys: make(map[string][]byte)}
+func newMockBlobStore() *mockBlobStore {
+	return &mockBlobStore{keys: make(map[string][]byte)}
 }
 
-func (m *mockS3Client) PutObject(_ context.Context, _, key string, data []byte) error {
+func (m *mockBlobStore) Put(_ context.Context, key string, data []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.puts++
@@ -116,13 +116,13 @@ func (m *mockS3Client) PutObject(_ context.Context, _, key string, data []byte) 
 	return nil
 }
 
-func (m *mockS3Client) GetObject(_ context.Context, _, key string) ([]byte, error) {
+func (m *mockBlobStore) Get(_ context.Context, key string) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]byte(nil), m.keys[key]...), nil
 }
 
-func (m *mockS3Client) DeleteObject(_ context.Context, _, key string) error {
+func (m *mockBlobStore) Delete(_ context.Context, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deletes++
@@ -145,7 +145,7 @@ func (s stubProvider) Download(context.Context, string) ([]byte, SubtitleFormat,
 }
 
 func TestManagerProviderNames(t *testing.T) {
-	manager := NewManager(newMockSubtitleRepo(), newMockS3Client(), "test-bucket")
+	manager := NewManager(newMockSubtitleRepo(), newMockBlobStore())
 
 	names := manager.ProviderNames()
 	if names == nil {
@@ -179,8 +179,8 @@ func TestManagerProviderNames(t *testing.T) {
 
 func TestManagerUploadStoresSubtitle(t *testing.T) {
 	repo := newMockSubtitleRepo()
-	s3 := newMockS3Client()
-	manager := NewManager(repo, s3, "test-bucket")
+	s3 := newMockBlobStore()
+	manager := NewManager(repo, s3)
 
 	data := []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n")
 	sub, err := manager.Upload(context.Background(), UploadRequest{
@@ -208,8 +208,8 @@ func TestManagerUploadStoresSubtitle(t *testing.T) {
 
 func TestManagerUploadDedupesIdenticalContent(t *testing.T) {
 	repo := newMockSubtitleRepo()
-	s3 := newMockS3Client()
-	manager := NewManager(repo, s3, "test-bucket")
+	s3 := newMockBlobStore()
+	manager := NewManager(repo, s3)
 
 	data := []byte("duplicate content")
 	first, err := manager.Upload(context.Background(), UploadRequest{
@@ -243,7 +243,7 @@ func TestManagerUploadDedupesIdenticalContent(t *testing.T) {
 }
 
 func TestManagerUploadRejectsUnsupportedFormat(t *testing.T) {
-	manager := NewManager(newMockSubtitleRepo(), newMockS3Client(), "test-bucket")
+	manager := NewManager(newMockSubtitleRepo(), newMockBlobStore())
 	_, err := manager.Upload(context.Background(), UploadRequest{
 		MediaFileID: 1,
 		Language:    "en",
@@ -256,7 +256,7 @@ func TestManagerUploadRejectsUnsupportedFormat(t *testing.T) {
 }
 
 func TestManagerUploadRejectsOversizedFile(t *testing.T) {
-	manager := NewManager(newMockSubtitleRepo(), newMockS3Client(), "test-bucket")
+	manager := NewManager(newMockSubtitleRepo(), newMockBlobStore())
 	data := make([]byte, MaxUploadSize+1)
 	_, err := manager.Upload(context.Background(), UploadRequest{
 		MediaFileID: 1,

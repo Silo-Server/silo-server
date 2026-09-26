@@ -5,8 +5,8 @@ complete request and response schemas are generated in `contracts/api/v2/openapi
 The frozen v1 bridge keeps its existing responses.
 
 `GET /api/v2/libraries/roots`, `GET /api/v2/libraries/skipped-roots`, and
-`GET /api/v2/libraries/stale-ids` return `{items, page}` collections. Roots additionally
-return `total`, counting the matches across every page. `limit` defaults to 50 and is
+`GET /api/v2/libraries/stale-ids` return `{items, page, total}` collections, where `total`
+counts the matches across every page. `limit` defaults to 50 and is
 at most 200. Continue with `page.next_cursor` while `page.has_more` is true. A cursor
 is bound to the acting administrator and query filters; changing a filter starts a
 new listing without a cursor.
@@ -39,6 +39,19 @@ unimplemented v2 `/admin/jobs/{id}` monitor URL. The monitor survives deletion o
 library. Failed persistence never returns acceptance. Library deletion disables its
 folder and inserts the job in one transaction; repeated acceptance for the same active
 delete conflicts, while deletion of different libraries remains independent.
+
+`POST /api/v2/libraries/{id}/refresh-metadata` takes an optional body with `mode`.
+`quick`, the default when the body or mode is absent, refreshes only matched items that
+need it, such as ones never refreshed, lacking an overview or artwork, with a failed
+refresh, or with incomplete episodes. `full` refreshes every matched item and re-scans
+items that have no provider IDs.
+A refresh holds a per-library PostgreSQL advisory lock, shared with the
+`refresh_all_library_metadata` task; a job that starts while another refresh of the
+same library holds it fails rather than refreshing the library twice. A job recovered
+after its worker stopped heartbeating waits for the lock instead: its earlier attempt may
+still hold it until that worker notices the recovery, or until PostgreSQL closes the
+session of a server that disappeared. The wait counts toward the job's six-hour limit
+and can be cancelled.
 
 The job contains `id`, `kind`, `state`, `terminal`, `cancelable`, `created_at`, optional
 `started_at` and `finished_at`, and optional progress measured in items for metadata

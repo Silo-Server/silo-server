@@ -8,6 +8,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/policy"
 )
 
@@ -28,11 +29,27 @@ type MarkerSegment struct {
 }
 
 type FileMarkers struct {
-	FileID  ID            `json:"file_id"`
-	Intro   MarkerSegment `json:"intro"`
-	Credits MarkerSegment `json:"credits"`
-	Recap   MarkerSegment `json:"recap"`
-	Preview MarkerSegment `json:"preview"`
+	FileID         ID                 `json:"file_id"`
+	Intro          MarkerSegment      `json:"intro"`
+	Credits        MarkerSegment      `json:"credits"`
+	Recap          MarkerSegment      `json:"recap"`
+	Preview        MarkerSegment      `json:"preview"`
+	MarkerSegments []MarkerOccurrence `json:"marker_segments" doc:"All effective marker occurrences in source-time order; empty, never null"`
+}
+
+// MarkerOccurrence is one continuous range. A kind can occur more than once.
+type MarkerOccurrence struct {
+	Kind         string  `json:"kind" enum:"intro,credits,recap,preview"`
+	StartSeconds float64 `json:"start_seconds" minimum:"0"`
+	EndSeconds   float64 `json:"end_seconds" minimum:"0"`
+}
+
+func markerOccurrences(segments []models.MarkerSegment) []MarkerOccurrence {
+	out := make([]MarkerOccurrence, 0, len(segments))
+	for _, segment := range segments {
+		out = append(out, MarkerOccurrence{Kind: segment.Kind, StartSeconds: segment.StartSeconds, EndSeconds: segment.EndSeconds})
+	}
+	return out
 }
 
 type MarkerSegmentSet struct {
@@ -167,7 +184,7 @@ func markerOutput(view handlers.FileMarkersView, err error) (*FileMarkersOutput,
 	if err != nil {
 		return nil, catalogProblem(err, "body")
 	}
-	return &FileMarkersOutput{Body: FileMarkers{FileID: IDFromInt(int64(view.FileID)), Intro: markerSegment(view.Intro), Credits: markerSegment(view.Credits), Recap: markerSegment(view.Recap), Preview: markerSegment(view.Preview)}}, nil
+	return &FileMarkersOutput{Body: FileMarkers{FileID: IDFromInt(int64(view.FileID)), Intro: markerSegment(view.Intro), Credits: markerSegment(view.Credits), Recap: markerSegment(view.Recap), Preview: markerSegment(view.Preview), MarkerSegments: markerOccurrences(view.MarkerSegments)}}, nil
 }
 func markerSegment(view handlers.MarkerSegmentView) MarkerSegment {
 	result := MarkerSegment{StartSeconds: view.Start, EndSeconds: view.End, Source: view.Source, Provider: view.Provider, Confidence: view.Confidence, Algorithm: view.Algorithm}

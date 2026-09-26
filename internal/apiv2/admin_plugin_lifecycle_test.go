@@ -58,6 +58,17 @@ func (f *fakePluginLifecycle) ApplyAdminPluginUpdate(_ context.Context, id int) 
 	v.Version = "1.1.0"
 	return v, nil
 }
+func (f *fakePluginLifecycle) RestartAdminPluginInstallation(_ context.Context, id int) (handlers.PluginInstallationView, error) {
+	f.calls++
+	f.lastID = id
+	if f.err != nil {
+		return handlers.PluginInstallationView{}, f.err
+	}
+	v := f.view(id)
+	at := time.Date(2026, 9, 7, 0, 0, 1, 0, time.UTC)
+	v.Runtime = &handlers.PluginRuntimeView{Resident: true, State: "running", RestartCount: 2, LastStartedAt: &at}
+	return v, nil
+}
 func (f *fakePluginLifecycle) DeleteAdminPluginInstallation(_ context.Context, id int) error {
 	f.calls++
 	f.lastID = id
@@ -131,18 +142,29 @@ func TestAdminPluginLifecycleUpdateApplyDelete(t *testing.T) {
 	if rec.Code != http.StatusOK || f.lastID != 7 || !strings.Contains(rec.Body.String(), `"version":"1.1.0"`) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
+	requireProblem(t, do(t, h, http.MethodPost, base+"/restart", "", bearer(memberToken)), TypePermissionDenied)
+	rec = do(t, h, http.MethodPost, base+"/restart", "", bearer(adminToken))
+	if rec.Code != http.StatusOK || f.lastID != 7 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{`"runtime":{"resident":true,"state":"running","restart_count":2,"last_started_at":"2026-09-07T00:00:01.000Z"}`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("restart body missing %s: %s", want, rec.Body.String())
+		}
+	}
 	rec = do(t, h, http.MethodDelete, base, "", bearer(adminToken))
-	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 || f.calls != 3 {
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 || f.calls != 4 {
 		t.Fatal(rec.Code, rec.Body.String(), f.calls)
 	}
 	// Seam errors map to one problem each on every mutation.
 	for _, tc := range []struct {
 		err  error
 		want ProblemType
-	}{{plugins.ErrInstallationNotFound, TypeNotFound}, {handlers.ErrPluginBuiltinInstallation, TypeConflict}, {handlers.ErrPluginUpdateUnavailable, TypeConflict}, {errors.New("stop plugin: boom"), TypeInternalError}} {
+	}{{plugins.ErrInstallationNotFound, TypeNotFound}, {handlers.ErrPluginBuiltinInstallation, TypeConflict}, {handlers.ErrPluginUpdateUnavailable, TypeConflict}, {plugins.ErrInstallationDisabled, TypeConflict}, {errors.New("stop plugin: boom"), TypeInternalError}} {
 		f.err = tc.err
 		requireProblem(t, do(t, h, http.MethodPut, base, `{"enabled":true}`, bearer(adminToken)), tc.want)
 		requireProblem(t, do(t, h, http.MethodPost, base+"/update", "", bearer(adminToken)), tc.want)
+		requireProblem(t, do(t, h, http.MethodPost, base+"/restart", "", bearer(adminToken)), tc.want)
 		requireProblem(t, do(t, h, http.MethodDelete, base, "", bearer(adminToken)), tc.want)
 	}
 	deps.AdminPluginLifecycle = nil

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -138,6 +139,14 @@ func (h *CatalogSeedHandler) PublishCatalogExportJob(ctx context.Context, id str
 		return job, nil
 	}
 	url, err := h.store.PresignGetURL(ctx, job.ArtifactBucket, job.ArtifactKey, catalogSeedPublishExpiry)
+	if errors.Is(err, blobstore.ErrNoPresign) {
+		// A seven-day link is a URL handed to someone outside this server, which
+		// only storage-side presigning can provide. The short-lived signed
+		// download route is not a substitute: it is a capability for the
+		// administrator who is already here.
+		return nil, apiError(http.StatusConflict, "presign_unsupported",
+			"Public links require object storage that can presign URLs. This server stores exports locally; download the artifact instead.")
+	}
 	if err != nil {
 		return nil, err
 	}

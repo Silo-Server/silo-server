@@ -12,8 +12,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -43,7 +43,7 @@ var supportedDiceBearAvatarStyles = map[string]struct{}{
 	"pixel-art-neutral": {},
 }
 
-type profileAvatarStore interface{ artworkstore.Store }
+type profileAvatarStore interface{ blobstore.Store }
 
 func normalizePresetAvatarReference(raw string) (string, error) {
 	value := strings.TrimSpace(raw)
@@ -103,8 +103,8 @@ func resolveProfileAvatar(ctx context.Context, store profileAvatarStore, ttl tim
 		if presignTTL <= 0 {
 			presignTTL = 15 * time.Minute
 		}
-		if direct, ok := store.(artworkstore.DirectURLer); ok {
-			if resolved, err := direct.DirectURL(ctx, displayKey, presignTTL); err == nil && resolved != "" {
+		if direct, ok := store.(blobstore.DirectURLer); ok {
+			if resolved, _, err := direct.DirectURL(ctx, displayKey, presignTTL, 0); err == nil && resolved != "" {
 				return "upload", resolved
 			}
 			return "upload", ""

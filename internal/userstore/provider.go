@@ -14,6 +14,13 @@ type UserStoreProvider interface {
 	Close() error
 }
 
+// SectionOverrideEnumerator is the optional read-only capability used by
+// account-wide maintenance tasks that must discover profile-created sections.
+// Both production user-store implementations provide it.
+type SectionOverrideEnumerator interface {
+	ListAllSectionOverrides(ctx context.Context) ([]SectionOverride, error)
+}
+
 // SectionProfileResetProvider reports whether every account's section overrides
 // live in the supplied PostgreSQL transaction domain. Callers must check the
 // result; implementing this interface alone does not advertise support.

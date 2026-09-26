@@ -16,7 +16,13 @@ import { useProfiles } from "@/hooks/queries/profiles";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
 
 export default function Profiles() {
-  const { data: profiles = [], isLoading: profilesLoading, avatarUploadEnabled } = useProfiles();
+  const {
+    data: profiles = [],
+    isLoading: profilesLoading,
+    avatarUploadEnabled,
+    maxAdvisoryAgeSupported,
+    requireAdvisoryAgeSupported,
+  } = useProfiles();
   const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries();
   const [editorOpen, setEditorOpen] = useState(false);
   const [pinProfile, setPinProfile] = useState<Profile | null>(null);
@@ -110,6 +116,8 @@ export default function Profiles() {
           open={editorOpen}
           libraries={libraries}
           avatarUploadEnabled={avatarUploadEnabled}
+          advisoryAgeSupported={maxAdvisoryAgeSupported}
+          requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
           onOpenChange={setEditorOpen}
           onSaveSuccess={(profile, context) => void handleCreateSuccess(profile, context)}
         />

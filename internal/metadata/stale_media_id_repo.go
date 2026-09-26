@@ -226,15 +226,10 @@ const actionableStaleIDWhere = `
 		OR lower(btrim(COALESCE(mi.status, ''))) <> 'matched'
 	)`
 
-// ListActionable answers one page of the actionable stale IDs with their
-// items, most recent sighting first; the caller passes limit+1 to probe for
-// a following page. The predicate runs in SQL so the page is cut there
-// rather than after loading every row.
-func (r *StaleMediaIDRepository) ListActionable(ctx context.Context, limit, offset int, search string) ([]ActionableStaleMediaID, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT s.content_id, s.provider, s.provider_id, s.first_seen_at, s.last_seen_at,
-		       COALESCE(mi.title, ''), COALESCE(mi.year, 0), COALESCE(mi.type, ''),
-		       COALESCE(lib.folder_id, 0), COALESCE(lib.folder_name, '')
+// actionableStaleIDSearchFrom is the FROM and WHERE that ListActionable and
+// CountActionable share, with the search as $1, so a page and its total
+// always agree on which rows match.
+const actionableStaleIDSearchFrom = `
 		FROM stale_media_ids s
 		LEFT JOIN media_items mi ON mi.content_id = s.content_id
 		LEFT JOIN LATERAL (
@@ -244,11 +239,22 @@ func (r *StaleMediaIDRepository) ListActionable(ctx context.Context, limit, offs
 			WHERE mf.content_id = s.content_id
 			LIMIT 1
 		) lib ON true
-		WHERE `+actionableStaleIDWhere+`
-		AND ($3 = '' OR strpos(lower(COALESCE(mi.title, '')), lower($3)) > 0 OR strpos(lower(s.provider), lower($3)) > 0 OR strpos(lower(s.provider_id), lower($3)) > 0 OR strpos(lower(COALESCE(lib.folder_name, '')), lower($3)) > 0)
+		WHERE ` + actionableStaleIDWhere + `
+		AND ($1 = '' OR strpos(lower(COALESCE(mi.title, '')), lower($1)) > 0 OR strpos(lower(s.provider), lower($1)) > 0 OR strpos(lower(s.provider_id), lower($1)) > 0 OR strpos(lower(COALESCE(lib.folder_name, '')), lower($1)) > 0)`
+
+// ListActionable answers one page of the actionable stale IDs with their
+// items, most recent sighting first; the caller passes limit+1 to probe for
+// a following page. The predicate runs in SQL so the page is cut there
+// rather than after loading every row.
+func (r *StaleMediaIDRepository) ListActionable(ctx context.Context, limit, offset int, search string) ([]ActionableStaleMediaID, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT s.content_id, s.provider, s.provider_id, s.first_seen_at, s.last_seen_at,
+		       COALESCE(mi.title, ''), COALESCE(mi.year, 0), COALESCE(mi.type, ''),
+		       COALESCE(lib.folder_id, 0), COALESCE(lib.folder_name, '')
+		`+actionableStaleIDSearchFrom+`
 		ORDER BY s.last_seen_at DESC, s.content_id ASC, s.provider ASC, s.provider_id ASC
-		LIMIT $1 OFFSET $2
-	`, limit, offset, search)
+		LIMIT $2 OFFSET $3
+	`, search, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("listing actionable stale media IDs: %w", err)
 	}
@@ -268,4 +274,14 @@ func (r *StaleMediaIDRepository) ListActionable(ctx context.Context, limit, offs
 		return nil, fmt.Errorf("iterating actionable stale media ID rows: %w", err)
 	}
 	return out, nil
+}
+
+// CountActionable answers how many actionable stale IDs match the search
+// across every page.
+func (r *StaleMediaIDRepository) CountActionable(ctx context.Context, search string) (int, error) {
+	var total int
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) `+actionableStaleIDSearchFrom, search).Scan(&total); err != nil {
+		return 0, fmt.Errorf("counting actionable stale media IDs: %w", err)
+	}
+	return total, nil
 }

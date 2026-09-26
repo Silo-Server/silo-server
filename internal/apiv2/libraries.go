@@ -308,6 +308,7 @@ type SkippedRootCollectionOutput struct {
 // SkippedRootCollection is the named envelope the contract carries.
 type SkippedRootCollection struct {
 	Collection[SkippedRoot]
+	Total int `json:"total" doc:"Skipped roots matching the filter across every page" example:"1"`
 }
 
 // StaleMediaID is a provider identifier a provider no longer resolves.
@@ -339,6 +340,7 @@ type StaleMediaIDCollectionOutput struct {
 // StaleMediaIDCollection is the named envelope the contract carries.
 type StaleMediaIDCollection struct {
 	Collection[StaleMediaID]
+	Total int `json:"total" doc:"Stale identifiers matching the filter across every page" example:"1"`
 }
 
 // StaleIDRematchInput names the item to rematch.
@@ -1328,7 +1330,7 @@ func (reg *Registry) listSkippedRoots(ctx context.Context, cursors *Cursors, in 
 	if p != nil {
 		return nil, p
 	}
-	views, err := svc.ListSkippedRoots(ctx, strings.TrimSpace(in.Query), in.Limit+1, offset)
+	views, total, err := svc.ListSkippedRoots(ctx, strings.TrimSpace(in.Query), in.Limit+1, offset)
 	if err != nil {
 		return nil, libraryProblem(err)
 	}
@@ -1349,7 +1351,7 @@ func (reg *Registry) listSkippedRoots(ctx context.Context, cursors *Cursors, in 
 			LastSeenAt:     NewInstant(v.LastSeenAt),
 		})
 	}
-	return &SkippedRootCollectionOutput{Body: SkippedRootCollection{Collection: Paginated(items, next)}}, nil
+	return &SkippedRootCollectionOutput{Body: SkippedRootCollection{Collection: Paginated(items, next), Total: total}}, nil
 }
 
 func (reg *Registry) listStaleIDs(ctx context.Context, cursors *Cursors, in *StaleMediaIDListInput) (*StaleMediaIDCollectionOutput, error) {
@@ -1366,7 +1368,7 @@ func (reg *Registry) listStaleIDs(ctx context.Context, cursors *Cursors, in *Sta
 	if p != nil {
 		return nil, p
 	}
-	views, err := svc.ListStaleIDs(ctx, strings.TrimSpace(in.Query), in.Limit+1, offset)
+	views, total, err := svc.ListStaleIDs(ctx, strings.TrimSpace(in.Query), in.Limit+1, offset)
 	if err != nil {
 		return nil, libraryProblem(err)
 	}
@@ -1389,7 +1391,7 @@ func (reg *Registry) listStaleIDs(ctx context.Context, cursors *Cursors, in *Sta
 			LastSeenAt:  NewInstant(v.LastSeen),
 		})
 	}
-	return &StaleMediaIDCollectionOutput{Body: StaleMediaIDCollection{Collection: Paginated(items, next)}}, nil
+	return &StaleMediaIDCollectionOutput{Body: StaleMediaIDCollection{Collection: Paginated(items, next), Total: total}}, nil
 }
 
 func (reg *Registry) rematchStaleID(ctx context.Context, in *StaleIDRematchInput) (*struct{}, error) {

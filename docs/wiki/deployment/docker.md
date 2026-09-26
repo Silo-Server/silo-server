@@ -161,6 +161,10 @@ The Jellyfin/Emby and Audiobookshelf listeners are enabled by default, so
 **Admin > Settings** (`jellyfin_compat.enabled`, `audiobookshelf_compat.enabled`)
 if you do not use compatible clients.
 
+Audiobookshelf compatibility is a beta feature: it keeps working as-is on 1.0
+builds but is outside the 1.0 support promise and certification, until a later
+consolidated Books effort replaces it.
+
 > [!WARNING]
 > The application and compatibility port mappings listen on all host interfaces
 > by default and do not provide TLS themselves. Before allowing access beyond a
@@ -336,6 +340,12 @@ Silo continues to use PostgreSQL full-text search until Meilisearch is selected.
 Settings that change the index format, including enabling meaning-based search,
 also trigger an automatic background rebuild after restart. A compatible older
 Meilisearch index keeps serving keyword results while its replacement is built.
+
+The Compose file pins the Meilisearch version because Meilisearch will not open
+data written by a different version. To move to a new version, change
+`MEILISEARCH_IMAGE` and set `MEILI_UPGRADE_DB=true` in `.env` for one start,
+then remove it. Alternatively, empty `${SILO_DATA_ROOT}/meilisearch` and let
+Silo rebuild the index.
 
 ## External PostgreSQL and Redis
 

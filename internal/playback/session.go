@@ -13,7 +13,18 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
+)
+
+// Transport output facts are independent of the whole-session play method.
+const (
+	OutputContainerFMP4   = "fmp4"
+	OutputContainerMPEGTS = "mpegts"
+	OutputProtocolHLS     = "hls"
+	OutputProtocolHTTP    = "http"
 )
 
 // Session represents an active playback session.
@@ -28,6 +39,7 @@ type Session struct {
 	TranscodeAudio       bool // when true, remux should transcode audio to AAC
 	RemuxDVMode          RemuxDVMode
 	ClientIP             string // resolved client IP for the playback session
+	StreamLocation       string // local/remote policy classification fixed at playback negotiation
 	ClientName           string // reported playback client name, when available
 	ClientVersion        string // reported playback client version, when available
 	ClientBuild          string // opaque reported client build identifier, when available
@@ -45,10 +57,13 @@ type Session struct {
 	TranscodeTransportID string // remote node process identity; empty means session ID
 	AudioTrackIndex      int
 
+	// RoutingNetworkProvider is the validated access path selected when preparing
+	// playback: nil means unknown, an empty value means the default network.
 	// RoutingWorkload and the execution/egress fields describe the committed
 	// node-routing assignment independently from the transcode process route.
 	// Node URLs are internal identities used by the session sync layer to join
 	// stable stream-node IDs; they are never returned as client media origins.
+	RoutingNetworkProvider  *string
 	RoutingWorkload         string
 	RoutingExecution        string
 	RoutingExecutionNodeID  int
@@ -60,6 +75,8 @@ type Session struct {
 	StreamBitrateKbps      int          // currently delivered bitrate, when known
 	TargetResolution       string       // requested output resolution for transcodes
 	TargetVideoCodec       string       // requested output video codec for transcodes
+	OutputContainer        string       // selected muxer/segment container; empty when unreported
+	OutputProtocol         string       // hls or http, independent of the container
 	TargetAudioCodec       string       // requested output audio codec when audio is transcoded
 	SourceAudioChannels    int          // selected source track channels; zero means unknown/legacy
 	TargetAudioChannels    int          // requested encoded audio channel count
@@ -110,6 +127,8 @@ type SessionStreamState struct {
 	StreamBitrateKbps         int
 	TargetResolution          string
 	TargetVideoCodec          string
+	OutputContainer           string
+	OutputProtocol            string
 	TargetAudioCodec          string
 	SourceAudioChannels       int
 	TargetAudioChannels       int
@@ -120,6 +139,7 @@ type SessionStreamState struct {
 	TranscodeNodeURL          string
 	TranscodeTransportID      string
 	TranscodeRouteSet         bool
+	RoutingNetworkProvider    *string
 	RoutingWorkload           string
 	RoutingExecution          string
 	RoutingExecutionNodeID    int
@@ -153,6 +173,7 @@ type TranscodeRoute struct {
 // opaque session state to avoid coupling session lifetime management to route
 // selection.
 type NodeRoutingAssignment struct {
+	NetworkProvider  *string
 	Workload         string
 	Execution        string
 	ExecutionNodeID  int
@@ -287,15 +308,17 @@ func ClientInfoFromContext(ctx context.Context) ClientInfo {
 
 // SessionManager tracks active playback sessions and enforces stream limits.
 type SessionManager struct {
-	sessions         map[string]*Session
-	mu               sync.RWMutex
-	maxStreams       int
-	maxTranscodes    int
-	limitProvider    SessionLimitProvider
-	admissionDecider AdmissionDecider
-	activeGrace      time.Duration
-	pausedGrace      time.Duration
-	expireHooks      []func(*Session)
+	sessions             map[string]*Session
+	mu                   sync.RWMutex
+	maxStreams           int
+	maxTranscodes        int
+	limitProvider        SessionLimitProvider
+	admissionDecider     AdmissionDecider
+	activeGrace          time.Duration
+	pausedGrace          time.Duration
+	expireHooks          []func(*Session)
+	compatActivityReader SessionActivityReader
+	compatExpiryClaimer  SessionExpiryClaimer
 	// transportStops holds the stop channels of media transports this replica
 	// is currently serving, keyed by session ID. See WatchTransportStop.
 	transportStops map[string]map[chan struct{}]struct{}
@@ -608,25 +631,28 @@ func newSession(
 	// build a ClientInfo from their own header vocabularies.
 	clientInfo := ClientInfoFromContext(ctx).Normalized()
 	return &Session{
-		ID:                   uuid.New().String(),
-		UserID:               userID,
-		ProfileID:            profileID,
-		MediaFileID:          effectiveFileID,
-		RequestedMediaFileID: requestedFileID,
-		PlayMethod:           method,
-		BasePlayMethod:       method,
-		TranscodeAudio:       transcodeAudio,
-		Position:             0,
-		IsPaused:             false,
-		ClientName:           clientInfo.Name,
-		ClientVersion:        clientInfo.Version,
-		ClientBuild:          clientInfo.Build,
-		ClientChannel:        clientInfo.Channel,
-		ClientUserAgent:      clientInfo.UserAgent,
-		IsJellyfinCompat:     clientInfo.IsCompat,
-		StartedAt:            now,
-		UpdatedAt:            now,
-		LastActivityAt:       now,
+		ID:                     uuid.New().String(),
+		UserID:                 userID,
+		ProfileID:              profileID,
+		MediaFileID:            effectiveFileID,
+		RequestedMediaFileID:   requestedFileID,
+		PlayMethod:             method,
+		BasePlayMethod:         method,
+		TranscodeAudio:         transcodeAudio,
+		ClientIP:               clientip.FromContext(ctx),
+		StreamLocation:         string(streamlocation.FromContext(ctx)),
+		RoutingNetworkProvider: new(netaccess.PathFromContext(ctx).Provider),
+		Position:               0,
+		IsPaused:               false,
+		ClientName:             clientInfo.Name,
+		ClientVersion:          clientInfo.Version,
+		ClientBuild:            clientInfo.Build,
+		ClientChannel:          clientInfo.Channel,
+		ClientUserAgent:        clientInfo.UserAgent,
+		IsJellyfinCompat:       clientInfo.IsCompat,
+		StartedAt:              now,
+		UpdatedAt:              now,
+		LastActivityAt:         now,
 	}
 }
 
@@ -958,6 +984,23 @@ func (m *SessionManager) UpdateStreamState(sessionID string, state SessionStream
 	return nil
 }
 
+// SetStreamLocation preserves the negotiated bitrate-policy classification
+// when a compatible client starts its media request on another network path.
+func (m *SessionManager) SetStreamLocation(sessionID, location string) error {
+	if location != string(streamlocation.Local) && location != string(streamlocation.Remote) {
+		return fmt.Errorf("invalid stream location %q", location)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	s.StreamLocation = location
+	m.touchSessionLocked(s)
+	return nil
+}
+
 // applySessionStreamStateLocked applies a complete stream snapshot while the manager lock is held.
 func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 	if state.PlayMethod != "" {
@@ -968,6 +1011,8 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 	}
 	s.AudioTrackIndex = state.AudioTrackIndex
 	if state.TranscodeRouteSet {
+		s.OutputContainer = state.OutputContainer
+		s.OutputProtocol = state.OutputProtocol
 		// These fields are one byte-affecting audio recipe. A full route snapshot
 		// owns the whole tuple and can deliberately clear it; legacy partial
 		// updates must not leave a frozen surround source paired with zero-value
@@ -1005,6 +1050,7 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 	if state.TranscodeRouteSet {
 		s.TranscodeNodeURL = state.TranscodeNodeURL
 		s.TranscodeTransportID = state.TranscodeTransportID
+		s.RoutingNetworkProvider = state.RoutingNetworkProvider
 		s.RoutingWorkload = state.RoutingWorkload
 		s.RoutingExecution = state.RoutingExecution
 		s.RoutingExecutionNodeID = state.RoutingExecutionNodeID
@@ -1042,6 +1088,8 @@ func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 		StreamBitrateKbps:         s.StreamBitrateKbps,
 		TargetResolution:          s.TargetResolution,
 		TargetVideoCodec:          s.TargetVideoCodec,
+		OutputContainer:           s.OutputContainer,
+		OutputProtocol:            s.OutputProtocol,
 		TargetAudioCodec:          s.TargetAudioCodec,
 		SourceAudioChannels:       s.SourceAudioChannels,
 		TargetAudioChannels:       s.TargetAudioChannels,
@@ -1052,6 +1100,7 @@ func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 		TranscodeNodeURL:          s.TranscodeNodeURL,
 		TranscodeTransportID:      s.TranscodeTransportID,
 		TranscodeRouteSet:         true,
+		RoutingNetworkProvider:    s.RoutingNetworkProvider,
 		RoutingWorkload:           s.RoutingWorkload,
 		RoutingExecution:          s.RoutingExecution,
 		RoutingExecutionNodeID:    s.RoutingExecutionNodeID,
@@ -1082,6 +1131,8 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TargetResolution = state.TargetResolution
 	s.TargetVideoCodec = state.TargetVideoCodec
 	s.TargetAudioCodec = state.TargetAudioCodec
+	s.OutputContainer = state.OutputContainer
+	s.OutputProtocol = state.OutputProtocol
 	s.SourceAudioChannels = state.SourceAudioChannels
 	s.TargetAudioChannels = state.TargetAudioChannels
 	s.TargetAudioBitrateKbps = state.TargetAudioBitrateKbps
@@ -1090,6 +1141,7 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.ToneMapMode = state.ToneMapMode
 	s.TranscodeNodeURL = state.TranscodeNodeURL
 	s.TranscodeTransportID = state.TranscodeTransportID
+	s.RoutingNetworkProvider = state.RoutingNetworkProvider
 	s.RoutingWorkload = state.RoutingWorkload
 	s.RoutingExecution = state.RoutingExecution
 	s.RoutingExecutionNodeID = state.RoutingExecutionNodeID
@@ -1222,6 +1274,21 @@ func (m *SessionManager) SetTranscodeStreamDetails(sessionID, targetVideoCodec, 
 	return nil
 }
 
+// SetOutputFormat records the format selected by the serving transport, not
+// a guess based on a codec or a whole-session playback classification.
+func (m *SessionManager) SetOutputFormat(sessionID, container, protocol string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	s.OutputContainer = container
+	s.OutputProtocol = protocol
+	m.touchSessionLocked(s)
+	return nil
+}
+
 // SetTranscodeNodeURL assigns a transcode node URL to an existing session.
 func (m *SessionManager) SetTranscodeNodeURL(sessionID, url string) error {
 	m.mu.Lock()
@@ -1250,6 +1317,7 @@ func (m *SessionManager) SetNodeRoutingAssignment(sessionID string, assignment N
 		return ErrSessionNotFound
 	}
 
+	s.RoutingNetworkProvider = assignment.NetworkProvider
 	s.RoutingWorkload = assignment.Workload
 	s.RoutingExecution = assignment.Execution
 	s.RoutingExecutionNodeID = assignment.ExecutionNodeID
@@ -1660,11 +1728,16 @@ func (m *SessionManager) CleanStale() []*Session {
 // provided grace period. Sessions with an active media transport request are
 // preserved even if they have not emitted a recent heartbeat yet.
 func (m *SessionManager) CleanInactive(activeIdle, pausedIdle time.Duration) []*Session {
+	protected := m.refreshCompatActivity(activeIdle, pausedIdle)
 	m.mu.Lock()
 
 	now := time.Now()
+	claimed := m.claimCompatExpiryLocked(now, activeIdle, pausedIdle, protected)
 	var expired []*Session
 	for id, s := range m.sessions {
+		if protected[s] || s.IsJellyfinCompat && claimed != nil && !claimed[id] {
+			continue
+		}
 		if s.activeTransportCount > 0 {
 			continue
 		}
@@ -1695,6 +1768,12 @@ func (m *SessionManager) touchSessionLocked(s *Session) {
 func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time) bool {
 	if s == nil {
 		return false
+	}
+	// Shared compatibility activity may be newer than this replica's snapshot.
+	// Its retained slot is released by removal; admission must not infer that
+	// release from a stale local timestamp before cleanup or an explicit stop.
+	if s.IsJellyfinCompat && m.compatExpiryClaimer != nil {
+		return true
 	}
 	if s.activeTransportCount > 0 {
 		return true

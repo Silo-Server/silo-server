@@ -1,21 +1,24 @@
 package watchtogether
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/google/uuid"
 )
 
 var (
@@ -27,11 +30,10 @@ var (
 	ErrConnectionNotAttached = errors.New("watch together session is not attached")
 	ErrInvalidSelection      = errors.New("watch together selection is invalid")
 	ErrSuggestionNotFound    = errors.New("watch together suggestion not found")
-	// ErrNotVoteWinner is returned when a vote-mode room is asked to promote
-	// something other than the title the room actually voted for.
+	// ErrNotVoteWinner preserves the v1 winner-only promotion contract.
 	ErrNotVoteWinner = errors.New("watch together suggestion is not the vote winner")
-	// ErrNoVotesCast is returned when a vote-mode room is asked to start before
-	// anyone has voted: there is no winner to promote yet.
+	// ErrNoVotesCast is returned by VoteWinner when nobody has voted yet, so
+	// there is no leader to report.
 	ErrNoVotesCast = errors.New("watch together room has no votes yet")
 	// ErrVoteRoomSelection is returned when a vote room's selection is set
 	// directly instead of through the vote.
@@ -39,24 +41,68 @@ var (
 	ErrDuplicateVote     = errors.New("watch together already voted")
 	ErrNotVoted          = errors.New("watch together not voted")
 	ErrInvalidPosition   = errors.New("watch together position is invalid")
+	// ErrRoomNotInLobby is returned when a lobby-only action (staging,
+	// switching the selection mode, marking ready) arrives after playback
+	// has started.
+	ErrRoomNotInLobby = errors.New("watch together room is not in the lobby")
+	// ErrNoStagedSelection is returned when the host starts playback with
+	// nothing staged.
+	ErrNoStagedSelection = errors.New("watch together room has nothing staged")
 )
 
 const (
+	roomPayloadKey       = "room"
+	snapshotMessageType  = "snapshot"
+	transportMessageType = "transport_command"
+	commandPayloadKey    = "command"
 	defaultTransportLead = 500 * time.Millisecond
 	minTransportLead     = 350 * time.Millisecond
 	// maxTransportLead bounds how far in the future transport commands may be
 	// scheduled, so a single member with a huge (or bogus) measured latency
 	// cannot stall the whole room.
 	maxTransportLead = 5 * time.Second
+	// guestCorrectionRetryInterval prevents repeated state reports from
+	// rebuilding a guest's stream while the previous correction is still being
+	// applied. A later report retries the correction if the guest remains out of
+	// sync after this bounded interval.
+	guestCorrectionRetryInterval = 5 * time.Second
 	// maxBufferingAnchorDriftSeconds bounds how far a buffering member's
 	// reported position may move the shared room anchor.
 	maxBufferingAnchorDriftSeconds = 5.0
+	// readySeekToleranceSeconds allows media clock rounding after a seek,
+	// while rejecting readiness from the stream that is being replaced.
+	readySeekToleranceSeconds = 1.0
+	// hostReadySeekToleranceSeconds is the seek tolerance for the host. A
+	// rebuilt stream lands on a keyframe or segment boundary short of the
+	// requested position; the host's real position becomes the room anchor
+	// rather than holding everyone until the exact target is reached.
+	hostReadySeekToleranceSeconds = 15.0
 	// maxPositionSeconds rejects corrupt client reports before they can poison
 	// the shared anchor or produce unusable transport commands.
 	maxPositionSeconds = 7 * 24 * 60 * 60
 	// waitingResumeDeadline is how long a room stays in the waiting state
 	// before stragglers are skipped and playback resumes for everyone ready.
-	waitingResumeDeadline = 30 * time.Second
+	// It is a safety net past any legitimate seek plus stream reload, not the
+	// expected path: readiness is reported on every media event and state tick.
+	waitingResumeDeadline = 10 * time.Second
+	// memberStallCooldown is how long a member must play without stalling
+	// before a stall of theirs may pause the room again. The room waits for a
+	// viewer once; a viewer who keeps stalling catches up on their own instead
+	// of pausing everyone each time.
+	memberStallCooldown = 5 * time.Minute
+	// bufferingWaitSpacing bounds how often buffering may pause the room,
+	// whoever stalls, so several slow viewers cannot take turns pausing it.
+	bufferingWaitSpacing = time.Minute
+	// bufferingCorrectionHold is how long a buffering member is left without
+	// position corrections. Its stalled stream cannot apply a target, and on
+	// copy remux every correction would rebuild the stream. Recovery is
+	// acknowledged with ready; the hold bounds a client that never does.
+	bufferingCorrectionHold = 30 * time.Second
+	// hostAuthorityDriftSeconds is how far the host's passive position may
+	// drift before it moves the room anchor. Smaller drift, such as a short
+	// local stall, is corrected on the host like any viewer's instead of
+	// pulling every other viewer back.
+	hostAuthorityDriftSeconds = 2.0
 	// roomIdleTTL is how long a room may go without any playback-anchor
 	// activity before the janitor closes it.
 	roomIdleTTL = 24 * time.Hour
@@ -67,6 +113,16 @@ const (
 type RoomConnection interface {
 	WriteJSON(v any) error
 	Close() error
+}
+
+// A socket adapter can deliver a terminal replacement reason before closing.
+// Older adapters retain their existing close behavior.
+func closeReplacedConnection(conn RoomConnection) {
+	if replacement, ok := conn.(interface{ CloseReplaced() error }); ok {
+		_ = replacement.CloseReplaced()
+		return
+	}
+	_ = conn.Close()
 }
 
 type RoomStore interface {
@@ -102,6 +158,28 @@ type RoomStore interface {
 		generation int64,
 		expectedGeneration int64,
 	) (*Room, error)
+	// UpdateSelectionMode switches a lobby between host_pick and vote and
+	// drops whatever was staged: the staged item belonged to the old way of
+	// deciding.
+	UpdateSelectionMode(
+		ctx context.Context,
+		roomID string,
+		mode RoomSelectionMode,
+		anchorUpdatedAt time.Time,
+		generation int64,
+		expectedGeneration int64,
+	) (*Room, error)
+	// UpdateStagedSelection replaces the lobby's staged item without leaving
+	// the lobby. It never touches phase, playback state or the selection
+	// revision; only a start does.
+	UpdateStagedSelection(
+		ctx context.Context,
+		roomID string,
+		selection SelectItemInput,
+		anchorUpdatedAt time.Time,
+		generation int64,
+		expectedGeneration int64,
+	) (*Room, error)
 }
 
 type RoomSessionLookup interface {
@@ -117,35 +195,96 @@ type WatchTogetherSelectionResolver interface {
 }
 
 type Registration struct {
-	roomID     string
-	memberKey  string
-	connection RoomConnection
+	roomID       string
+	memberKey    string
+	connection   RoomConnection
+	connectionID string
+}
+
+type pendingDisconnect struct {
+	registration *Registration
+	explicit     bool
 }
 
 type memberState struct {
-	userID      int
-	profileID   string
-	displayName string
-	sessionID   string
-	connection  RoomConnection
-	isReady     bool
-	isBuffering bool
-	// ignoreWait excludes a member from room-wide readiness barriers. It is
-	// set when the member fails to become ready before waitingResumeDeadline
-	// and cleared once they attach or report ready again.
+	connectionID    string
+	remoteConnected bool
+	leaseUntil      time.Time
+	disconnectedAt  time.Time
+	lastCommandID   string
+	userID          int
+	profileID       string
+	displayName     string
+	sessionID       string
+	connection      RoomConnection
+	isReady         bool
+	isBuffering     bool
+	// correctionCommand is the most recent normal-playing correction sent to
+	// this member. It is persisted with the room runtime so another API server
+	// does not immediately resend the same correction.
+	correctionCommand *TransportCommand
+	// waitingCommand is the command this member must finish before resuming.
+	waitingCommand *TransportCommand
+	// ignoreWait marks a member who is catching up on their own: they are
+	// excluded from room-wide readiness barriers and their stalls do not pause
+	// the room. It is set when the member misses waitingResumeDeadline or
+	// stalls while the room does not wait for them. Reporting ready or
+	// attaching again clears it.
 	ignoreWait bool
+	// lastStallAt is when the member last stalled while the room played,
+	// missed a waiting deadline, or started a stream in a playing room. It
+	// survives reconnects and recovery so a viewer who keeps stalling cannot
+	// pause the room every time.
+	lastStallAt time.Time
+	// syncingToRoom marks a freshly attached session that has been told the
+	// room's position but has not confirmed it yet. Until then the member's
+	// state reports describe the stream's starting point, not where the room
+	// is, so they are treated as a guest's: corrected, never authoritative.
+	// Cleared by a matching state report or the member's transport request.
+	syncingToRoom bool
+	// lobbyReady is the member's "I'm ready" in the lobby. It is unrelated to
+	// isReady, which is the buffering barrier bound to an attached playback
+	// session, and it is cleared whenever what the room is about to play
+	// changes: staging a different item, starting, or switching modes.
+	lobbyReady bool
 	lastPingMS int64
 }
 
+// resetForSelection drops everything bound to the previous playback epoch.
+// A new selection starts every member afresh, including their stall history.
+func (m *memberState) resetForSelection() {
+	m.sessionID = ""
+	m.isReady = false
+	m.isBuffering = false
+	m.ignoreWait = false
+	m.lastStallAt = time.Time{}
+	m.waitingCommand = nil
+	m.correctionCommand = nil
+	m.lastCommandID = ""
+	m.syncingToRoom = false
+	m.lobbyReady = false
+}
+
 type liveRoom struct {
-	room           Room
-	members        map[string]*memberState
-	hostCloseTimer *time.Timer
-	waitingTimer   *time.Timer
+	operationMu        sync.Mutex
+	activeOperations   int
+	reconciling        bool
+	reconcilePending   bool
+	pendingDisconnects map[string]pendingDisconnect
+	broadcastState     string
+	command            *TransportCommand
+	room               Room
+	members            map[string]*memberState
+	hostCloseTimer     *time.Timer
+	waitingTimer       *time.Timer
 	// waitingEpoch identifies the current waiting period; deadline callbacks
 	// carry the epoch they were armed for so a stale timer cannot act on a
 	// newer waiting period.
 	waitingEpoch int64
+	// bufferingWaitAt is when buffering last paused the room.
+	bufferingWaitAt time.Time
+	// itemEnd caches the playing file's duration for the reconciler.
+	itemEnd itemEnd
 }
 
 type snapshotDispatch struct {
@@ -160,9 +299,12 @@ type commandDispatch struct {
 }
 
 type Service struct {
-	repo              RoomStore
-	suggestions       SuggestionStore
-	sessions          RoomSessionLookup
+	repo        RoomStore
+	suggestions SuggestionStore
+	sessions    RoomSessionLookup
+	attempts    interface {
+		GetAttempt(context.Context, string) (*playback.AttemptRecordV3, error)
+	}
 	files             MediaFileLookup
 	selectionResolver WatchTogetherSelectionResolver
 	profileNames      ProfileNameResolver
@@ -188,7 +330,7 @@ type Service struct {
 // transient drop as a departure: a host who backgrounded the app, walked
 // through a tunnel, or simply navigated somewhere the client did not hold the
 // socket open lost the room for everybody, mid-conversation, with a
-// "host_left" nobody could explain.
+// hostLeftReason nobody could explain.
 //
 // Two minutes is long enough to survive a reconnect, an app switch, or a
 // client that drops the socket while its user browses for something to
@@ -220,6 +362,10 @@ func NewService(
 		instanceID:  uuid.NewString(),
 	}
 	go s.runJanitor()
+	if _, shared := repo.(*Repository); shared {
+		go s.runReconciler()
+		go s.runHostExpirySweeper()
+	}
 	return s
 }
 
@@ -228,6 +374,14 @@ func (s *Service) Close() {
 	if s == nil || s.janitorStop == nil {
 		return
 	}
+	s.mu.Lock()
+	for _, live := range s.rooms {
+		s.disarmWaitingDeadlineLocked(live)
+		if live.hostCloseTimer != nil {
+			live.hostCloseTimer.Stop()
+		}
+	}
+	s.mu.Unlock()
 	s.clusterMu.Lock()
 	if s.clusterCancel != nil {
 		s.clusterCancel()
@@ -329,7 +483,7 @@ func (s *Service) GetRoom(ctx context.Context, roomID string) (*Room, error) {
 	})
 }
 
-func (s *Service) Snapshot(ctx context.Context, roomID string, userID int, profileID string) (Snapshot, error) {
+func (s *Service) snapshot(ctx context.Context, roomID string, userID int, profileID string) (Snapshot, error) {
 	_, live, err := s.getOrLoadLiveRoom(ctx, roomID)
 	if err != nil {
 		return Snapshot{}, err
@@ -340,12 +494,13 @@ func (s *Service) Snapshot(ctx context.Context, roomID string, userID int, profi
 	return s.buildSnapshotLocked(live, userID, profileID), nil
 }
 
-func (s *Service) Connect(
+func (s *Service) connect(
 	ctx context.Context,
 	roomID string,
 	userID int,
 	profileID string,
 	conn RoomConnection,
+	displayName string,
 ) (*Registration, Snapshot, error) {
 	room, live, err := s.getOrLoadLiveRoom(ctx, roomID)
 	if err != nil {
@@ -353,10 +508,6 @@ func (s *Service) Connect(
 	}
 
 	memberKey := buildMemberKey(userID, profileID)
-	displayName := fallbackMemberName
-	if s.profileNames != nil {
-		displayName = s.profileNames.ProfileDisplayName(ctx, userID, profileID)
-	}
 
 	s.mu.Lock()
 	current := live.members[memberKey]
@@ -368,6 +519,15 @@ func (s *Service) Connect(
 		previousConn = current.connection
 	}
 	current.connection = conn
+	current.connectionID = uuid.NewString()
+	current.remoteConnected = false
+	current.leaseUntil = s.now().Add(connectionLease)
+	current.disconnectedAt = time.Time{}
+	current.lastCommandID = ""
+	current.correctionCommand = nil
+	if live.room.PlaybackState == RoomPlaybackStateWaiting {
+		current.isReady = false
+	}
 	current.displayName = displayName
 
 	if room.HostUserID == userID && room.HostProfileID == profileID && live.hostCloseTimer != nil {
@@ -375,18 +535,19 @@ func (s *Service) Connect(
 		live.hostCloseTimer = nil
 	}
 
+	connectionID := current.connectionID
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
 	dispatches := s.prepareSnapshotDispatchesLocked(live)
 	s.mu.Unlock()
 
 	if previousConn != nil {
-		_ = previousConn.Close()
+		afterRoomCommit(ctx, func() { closeReplacedConnection(previousConn) })
 	}
-	s.runDispatches(dispatches)
-	return &Registration{roomID: roomID, memberKey: memberKey, connection: conn}, snapshot, nil
+	s.sendDispatches(ctx, dispatches)
+	return &Registration{roomID: roomID, memberKey: memberKey, connection: conn, connectionID: connectionID}, snapshot, nil
 }
 
-func (s *Service) Disconnect(reg *Registration, explicitLeave bool) {
+func (s *Service) disconnect(ctx context.Context, reg *Registration, explicitLeave bool) {
 	if s == nil || reg == nil {
 		return
 	}
@@ -399,66 +560,60 @@ func (s *Service) Disconnect(reg *Registration, explicitLeave bool) {
 	}
 
 	member := live.members[reg.memberKey]
-	if member == nil || member.connection != reg.connection {
+	if member == nil || (reg.connectionID != "" && member.connectionID != reg.connectionID) ||
+		(reg.connectionID == "" && member.connection != reg.connection) {
 		s.mu.Unlock()
 		return
 	}
 
 	isHost := member.userID == live.room.HostUserID && member.profileID == live.room.HostProfileID
 	member.connection = nil
-	member.sessionID = ""
-	delete(live.members, reg.memberKey)
+	member.remoteConnected = false
+	member.disconnectedAt = s.now()
+	if explicitLeave {
+		delete(live.members, reg.memberKey)
+	}
 
 	if isHost {
 		if explicitLeave {
 			s.mu.Unlock()
-			_ = s.CloseRoom(context.Background(), reg.roomID, member.userID, member.profileID)
+			_ = s.closeRoom(ctx, reg.roomID, member.userID, member.profileID)
 			return
 		}
 		if live.hostCloseTimer != nil {
 			live.hostCloseTimer.Stop()
 		}
-		roomID := reg.roomID
-		hostUserID := live.room.HostUserID
-		hostProfileID := live.room.HostProfileID
-		live.hostCloseTimer = time.AfterFunc(s.hostDisconnectTTL, func() {
-			s.closeIfHostStillDisconnected(roomID, hostUserID, hostProfileID)
-		})
+		// Shared rooms expire from persisted presence. Local timer changes
+		// cannot be rolled back with a failed reconnect or close transaction.
+		if _, shared := s.repo.(*Repository); !shared {
+			roomID := reg.roomID
+			hostUserID := live.room.HostUserID
+			hostProfileID := live.room.HostProfileID
+			live.hostCloseTimer = time.AfterFunc(s.hostDisconnectTTL, func() {
+				s.closeIfHostStillDisconnected(roomID, hostUserID, hostProfileID)
+			})
+		}
 	}
 
 	// A departing member may have been the last participant the room was
 	// waiting on; re-evaluate readiness so the others aren't stuck.
-	dispatches, commandDispatches := s.maybeResumeFromWaitingLocked(context.Background(), live, false)
+	dispatches, commandDispatches := s.maybeResumeFromWaitingLocked(ctx, live, false)
 	if dispatches == nil {
 		dispatches = s.prepareSnapshotDispatchesLocked(live)
 	}
 	s.mu.Unlock()
-	s.runDispatches(dispatches)
-	s.runCommandDispatches(commandDispatches)
+	s.sendDispatches(ctx, dispatches)
+	s.sendCommandDispatches(ctx, commandDispatches)
 }
 
-// closeIfHostStillDisconnected closes a room after the host-disconnect grace
-// period, unless the host reconnected while the timer was in flight
-// (Timer.Stop cannot recall a callback that already fired).
-func (s *Service) closeIfHostStillDisconnected(roomID string, hostUserID int, hostProfileID string) {
-	s.mu.Lock()
-	live := s.rooms[roomID]
-	// A nil live room means nobody (host included) is connected; closing is
-	// safe. Only a live room with the host re-connected aborts the close.
-	if live != nil && s.hostConnectedLocked(live) {
-		s.mu.Unlock()
-		return
-	}
-	s.mu.Unlock()
-	_ = s.CloseRoom(context.Background(), roomID, hostUserID, hostProfileID)
-}
-
-func (s *Service) AttachSessionForConnection(
+func (s *Service) attachSessionForConnection(
 	ctx context.Context,
 	reg *Registration,
 	userID int,
 	profileID string,
 	sessionID string,
+	session *playback.Session,
+	file *models.MediaFile,
 ) (Snapshot, error) {
 	if reg == nil {
 		return Snapshot{}, ErrRoomForbidden
@@ -469,14 +624,7 @@ func (s *Service) AttachSessionForConnection(
 		return Snapshot{}, err
 	}
 
-	session, err := s.sessions.GetSession(sessionID)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if session.UserID != userID || session.ProfileID != profileID {
-		return Snapshot{}, ErrSessionMismatch
-	}
-	if err := s.validateSessionContent(ctx, room, session); err != nil {
+	if err := validateSessionContent(room, session, file); err != nil {
 		return Snapshot{}, err
 	}
 
@@ -486,41 +634,47 @@ func (s *Service) AttachSessionForConnection(
 		s.mu.Unlock()
 		return Snapshot{}, ErrRoomForbidden
 	}
-	member.sessionID = sessionID
-	member.isReady = false
+	member.correctionCommand = nil
+	reattaching := member.sessionID == sessionID
 	member.ignoreWait = false
-	member.isBuffering = live.room.Phase == RoomPhasePlaying
+	if !reattaching {
+		member.sessionID = sessionID
+		member.isReady = false
+		member.isBuffering = live.room.Phase == RoomPhasePlaying && live.room.PlaybackState == RoomPlaybackStateWaiting
+		member.syncingToRoom = false
+	}
 
 	var commandDispatches []commandDispatch
 	if live.room.Phase == RoomPhasePlaying {
-		if live.room.PlaybackState == RoomPlaybackStatePlaying && s.activeParticipantCountLocked(live) > 1 {
-			position := s.expectedPositionLocked(live)
-			commandDispatches, _ = s.enterWaitingLocked(live, position, true)
-			conflict, err := s.persistAnchorLocked(ctx, live)
-			if err != nil {
-				s.mu.Unlock()
-				return Snapshot{}, err
-			}
-			if conflict {
-				snapshot := s.buildSnapshotLocked(live, userID, profileID)
-				s.mu.Unlock()
-				return snapshot, nil
-			}
-		} else {
-			commandDispatches = s.syncMemberToRoomLocked(live, sessionID)
+		// A late joiner or replacement stream starts behind a room that keeps
+		// playing. Its startup stall counts as its stall, so one viewer
+		// starting a stream never pauses the others; it still takes part in
+		// the room's explicit seeks.
+		if !reattaching && live.room.PlaybackState == RoomPlaybackStatePlaying && s.othersWatchingLocked(live, member) {
+			member.lastStallAt = s.now()
 		}
+		// The (re)joiner is told where the room is. Until they confirm, their
+		// stream position is the file's start, not the room's; the host in
+		// particular must not drag the anchor back there.
+		commandDispatches = s.syncMemberToRoomLocked(live, sessionID)
+		member.syncingToRoom = len(commandDispatches) > 0
 	}
 
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
 	dispatches := s.prepareSnapshotDispatchesLocked(live)
+	roomID := live.room.ID
 	s.mu.Unlock()
 
-	s.runDispatches(dispatches)
-	s.runCommandDispatches(commandDispatches)
+	for _, dispatch := range commandDispatches {
+		slog.DebugContext(ctx, "watch together sync queued",
+			append(memberCommandLogAttrs(roomID, userID, dispatch), "trigger", "attach", "reattaching", reattaching)...)
+	}
+	s.sendDispatches(ctx, dispatches)
+	s.sendCommandDispatches(ctx, commandDispatches)
 	return snapshot, nil
 }
 
-func (s *Service) HandleTransportRequestForConnection(
+func (s *Service) handleTransportRequestForConnection(
 	ctx context.Context,
 	reg *Registration,
 	userID int,
@@ -549,6 +703,9 @@ func (s *Service) HandleTransportRequestForConnection(
 		s.mu.Unlock()
 		return Snapshot{}, err
 	}
+	// An explicit transport request is the member's intent, which supersedes
+	// any pending sync to the room's position.
+	member.syncingToRoom = false
 
 	position := live.room.AnchorPositionSeconds
 	if request.PositionSeconds != nil {
@@ -615,12 +772,12 @@ func (s *Service) HandleTransportRequestForConnection(
 	dispatches := s.prepareSnapshotDispatchesLocked(live)
 	s.mu.Unlock()
 
-	s.runDispatches(dispatches)
-	s.runCommandDispatches(commandDispatches)
+	s.sendDispatches(ctx, dispatches)
+	s.sendCommandDispatches(ctx, commandDispatches)
 	return snapshot, nil
 }
 
-func (s *Service) HandleStateReportForConnection(
+func (s *Service) handleStateReportForConnection(
 	ctx context.Context,
 	reg *Registration,
 	userID int,
@@ -653,13 +810,60 @@ func (s *Service) HandleStateReportForConnection(
 		return Snapshot{}, ErrConnectionNotAttached
 	}
 
+	// While a seek or buffering barrier is pending, element positions may
+	// still describe the old stream. Keep the waiting anchor authoritative:
+	// host reports must not undo the seek, and guest corrections must not
+	// supersede the transport command that is still loading. A report that
+	// carries is_ready is the periodic form of the ready message, so a lost
+	// or rejected acknowledgement heals on the next tick.
+	if live.room.PlaybackState == RoomPlaybackStateWaiting {
+		if !report.IsReady || !s.acceptReadyLocked(ctx, live, member, userID, profileID, report) {
+			snapshot := s.buildSnapshotLocked(live, userID, profileID)
+			s.mu.Unlock()
+			return snapshot, nil
+		}
+		return s.finishReadyLocked(ctx, live, member, userID, profileID)
+	}
+
 	isHost := userID == live.room.HostUserID && profileID == live.room.HostProfileID
-	expected := s.expectedPositionLocked(live)
+	memberIsHost := isHost
+	now := s.now()
+	expected := expectedPosition(live.room, now)
 	pauseMismatch := report.IsPaused != live.room.IsPaused
 	drift := math.Abs(report.PositionSeconds - expected)
+	// A member whose report matches the room is ready, whether it just joined,
+	// is catching up, or is still marked buffering. Clients acknowledge
+	// recovery with ready; this keeps one that never does, and a late joiner
+	// that was never asked to, from staying unready. Stall history is kept.
+	caughtUp := (!member.isReady || member.isBuffering || member.ignoreWait) && !pauseMismatch && drift <= readySeekToleranceSeconds
+	if caughtUp {
+		member.isBuffering = false
+		member.ignoreWait = false
+		member.isReady = true
+	}
+	// A host who has just (re)attached and not yet reached the room's
+	// position is reporting the stream's start, not a decision. Anchoring
+	// there would rewind everyone; correct the host like a guest instead. The
+	// first report that matches the room ends the sync.
+	if isHost && member.syncingToRoom {
+		if !pauseMismatch && drift <= 1.5 {
+			member.syncingToRoom = false
+		} else {
+			isHost = false
+		}
+	}
+	// A host who is buffering or catching up reports a stalled stream, and a
+	// host inside the catch-up band has only drifted. Neither is a decision
+	// the room should follow.
+	if isHost && (member.ignoreWait || member.isBuffering || (!pauseMismatch && drift <= hostAuthorityDriftSeconds)) {
+		isHost = false
+	}
+	// A stalled stream cannot apply a target; recovery is acknowledged with
+	// ready, which sends a fresh one.
+	holdCorrection := member.isBuffering && now.Sub(member.lastStallAt) < bufferingCorrectionHold
 
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
-	if isHost && (pauseMismatch || drift > 1.5) {
+	if isHost {
 		live.room.AnchorPositionSeconds = math.Max(0, report.PositionSeconds)
 		live.room.IsPaused = report.IsPaused
 		live.room.AnchorUpdatedAt = s.now()
@@ -670,13 +874,18 @@ func (s *Service) HandleStateReportForConnection(
 		}
 		snapshot = s.buildSnapshotLocked(live, userID, profileID)
 		if conflict {
+			s.clearCorrectionCommandsLocked(live)
 			s.mu.Unlock()
 			return snapshot, nil
 		}
+		s.clearCorrectionCommandsLocked(live)
 		dispatches = s.prepareSnapshotDispatchesLocked(live)
-	} else if !isHost && (pauseMismatch || drift > 1.0) {
-		correctionDispatches = s.targetedCommandDispatchesLocked(live, report.SessionID, TransportCommand{
+	} else if holdCorrection {
+		member.correctionCommand = nil
+	} else if pauseMismatch || drift > 1.0 {
+		command := TransportCommand{
 			CommandID:         uuid.NewString(),
+			SessionID:         report.SessionID,
 			SelectionRevision: live.room.SelectionRevision,
 			Action: func() TransportAction {
 				if live.room.PlaybackState == RoomPlaybackStatePlaying {
@@ -684,31 +893,51 @@ func (s *Service) HandleStateReportForConnection(
 				}
 				return TransportActionPause
 			}(),
-			PositionSeconds: math.Max(0, expectedPosition(live.room, s.now())),
-			ExecuteAt:       s.now().Add(s.highestPingLocked(live)).UTC().Format(time.RFC3339Nano),
-			IssuedAt:        s.now().UTC().Format(time.RFC3339Nano),
+			PositionSeconds: math.Max(0, expected),
+			ExecuteAt:       now.Add(s.highestPingLocked(live)).UTC().Format(time.RFC3339Nano),
+			IssuedAt:        now.UTC().Format(time.RFC3339Nano),
 			PlaybackState:   live.room.PlaybackState,
-		})
+		}
+		if !correctionCommandPending(member, command, now) {
+			member.correctionCommand = &command
+			correctionDispatches = s.targetedCommandDispatchesLocked(live, report.SessionID, command)
+		}
+	} else {
+		member.correctionCommand = nil
 	}
+	if caughtUp && dispatches == nil {
+		dispatches = s.prepareSnapshotDispatchesLocked(live)
+	}
+	roomID := live.room.ID
 	s.mu.Unlock()
-	if isHost && (pauseMismatch || drift > 1.5) {
-		s.runDispatches(dispatches)
+	s.sendDispatches(ctx, dispatches)
+	if isHost {
 		return snapshot, nil
 	}
 
+	for _, dispatch := range correctionDispatches {
+		slog.DebugContext(ctx, "watch together correction queued",
+			append(memberCommandLogAttrs(roomID, userID, dispatch),
+				"host", memberIsHost, "reported_position_seconds", report.PositionSeconds,
+				"drift_seconds", drift, "pause_mismatch", pauseMismatch)...)
+	}
 	if len(correctionDispatches) > 0 {
-		s.runCommandDispatches(correctionDispatches)
+		s.sendCommandDispatches(ctx, correctionDispatches)
 	}
 
 	return snapshot, nil
 }
 
-func (s *Service) HandleReadyForConnection(
+// handleLobbyReadyForConnection records a member's lobby "I'm ready". It is
+// advisory: the host may start regardless, and the flag is dropped the moment
+// what the room is about to play changes. The flag rides in the shared room
+// runtime like the rest of member state, so every API server sees it.
+func (s *Service) handleLobbyReadyForConnection(
 	ctx context.Context,
 	reg *Registration,
 	userID int,
 	profileID string,
-	report StateReport,
+	ready bool,
 ) (Snapshot, error) {
 	if reg == nil {
 		return Snapshot{}, ErrRoomForbidden
@@ -719,8 +948,52 @@ func (s *Service) HandleReadyForConnection(
 		return Snapshot{}, err
 	}
 
-	var dispatches []snapshotDispatch
-	var commandDispatches []commandDispatch
+	s.mu.Lock()
+	member := live.members[reg.memberKey]
+	if member == nil || member.connection == nil || member.connection != reg.connection {
+		s.mu.Unlock()
+		return Snapshot{}, ErrRoomForbidden
+	}
+	if live.room.Phase == RoomPhaseEnded {
+		s.mu.Unlock()
+		return Snapshot{}, ErrRoomClosed
+	}
+	if live.room.Phase != RoomPhaseLobby {
+		s.mu.Unlock()
+		return Snapshot{}, ErrRoomNotInLobby
+	}
+	if member.lobbyReady == ready {
+		snapshot := s.buildSnapshotLocked(live, userID, profileID)
+		s.mu.Unlock()
+		return snapshot, nil
+	}
+	member.lobbyReady = ready
+	snapshot := s.buildSnapshotLocked(live, userID, profileID)
+	dispatches := s.prepareSnapshotDispatchesLocked(live)
+	s.mu.Unlock()
+
+	s.sendDispatches(ctx, dispatches)
+	return snapshot, nil
+}
+
+func (s *Service) handleReadyForConnection(
+	ctx context.Context,
+	reg *Registration,
+	userID int,
+	profileID string,
+	report StateReport,
+) (Snapshot, error) {
+	if reg == nil {
+		return Snapshot{}, ErrRoomForbidden
+	}
+	if !validPosition(report.PositionSeconds) {
+		return Snapshot{}, ErrInvalidPosition
+	}
+
+	_, live, err := s.getOrLoadLiveRoom(ctx, reg.roomID)
+	if err != nil {
+		return Snapshot{}, err
+	}
 
 	s.mu.Lock()
 	member := live.members[reg.memberKey]
@@ -733,26 +1006,114 @@ func (s *Service) HandleReadyForConnection(
 		return Snapshot{}, ErrConnectionNotAttached
 	}
 
+	if live.room.PlaybackState == RoomPlaybackStateWaiting &&
+		!s.acceptReadyLocked(ctx, live, member, userID, profileID, report) {
+		snapshot := s.buildSnapshotLocked(live, userID, profileID)
+		s.mu.Unlock()
+		return snapshot, nil
+	}
+	// With nobody else watching, the room ran on without an audience while
+	// this viewer caught up. Resume from where the viewer is rather than
+	// skipping what they have not seen.
+	if live.room.PlaybackState != RoomPlaybackStateWaiting && member.ignoreWait && !s.othersWatchingLocked(live, member) {
+		live.room.AnchorPositionSeconds = math.Max(0, report.PositionSeconds)
+		live.room.AnchorUpdatedAt = s.now()
+		if _, err := s.persistAnchorLocked(ctx, live); err != nil {
+			s.mu.Unlock()
+			return Snapshot{}, err
+		}
+	}
+	return s.finishReadyLocked(ctx, live, member, userID, profileID)
+}
+
+// acceptReadyLocked validates a readiness report against the member's waiting
+// command. Guests must reach a seek destination within readySeekToleranceSeconds
+// so the stream being replaced cannot satisfy the seek. The host is the
+// authority on position: within hostReadySeekToleranceSeconds the host's actual
+// position becomes the room anchor, so a rebuilt stream that lands short of the
+// target resumes from where the host really is instead of waiting out the
+// deadline. It returns false, with no state change, when the report is stale
+// or the destination has not arrived. Must be called with s.mu held.
+func (s *Service) acceptReadyLocked(
+	ctx context.Context,
+	live *liveRoom,
+	member *memberState,
+	userID int,
+	profileID string,
+	report StateReport,
+) bool {
+	command := member.waitingCommand
+	if report.CommandID != "" && (command == nil || report.CommandID != command.CommandID) {
+		return false
+	}
+	if command == nil || command.Action != TransportActionSeek {
+		return true
+	}
+	delta := math.Abs(report.PositionSeconds - command.PositionSeconds)
+	isHost := userID == live.room.HostUserID && profileID == live.room.HostProfileID
+	if !isHost {
+		return delta <= readySeekToleranceSeconds
+	}
+	if delta > hostReadySeekToleranceSeconds {
+		return false
+	}
+	if delta > readySeekToleranceSeconds {
+		live.room.AnchorPositionSeconds = math.Max(0, report.PositionSeconds)
+		live.room.AnchorUpdatedAt = s.now()
+		if _, err := s.persistAnchorLocked(ctx, live); err != nil {
+			return false
+		}
+		// A lost race reloaded live.room from the winning row; readiness is
+		// still recorded against whatever that row says.
+	}
+	return true
+}
+
+// finishReadyLocked records the member as ready, resumes the room when every
+// participant is, and sends the resulting snapshots and commands. A member
+// recovering while the room plays receives the room's current position; its
+// stall cooldown is kept, so recovering does not let it pause the room again
+// straight away. It must be called with s.mu held and releases it.
+func (s *Service) finishReadyLocked(
+	ctx context.Context,
+	live *liveRoom,
+	member *memberState,
+	userID int,
+	profileID string,
+) (Snapshot, error) {
 	member.isReady = true
 	member.isBuffering = false
 	member.ignoreWait = false
 
-	dispatches, commandDispatches = s.maybeResumeFromWaitingLocked(ctx, live, false)
-	if len(commandDispatches) == 0 && live.room.Phase == RoomPhasePlaying && live.room.PlaybackState == RoomPlaybackStatePlaying {
+	// Past the deadline, the first viewer to become ready resumes the room.
+	force := s.skipUnreadyMembersLocked(live, s.now())
+	dispatches, commandDispatches := s.maybeResumeFromWaitingLocked(ctx, live, force)
+	syncToRoom := len(commandDispatches) == 0 && live.room.Phase == RoomPhasePlaying && live.room.PlaybackState == RoomPlaybackStatePlaying
+	if syncToRoom {
 		commandDispatches = s.syncMemberToRoomLocked(live, member.sessionID)
+		// Until the member reaches that position its reports describe where
+		// it recovered, not a decision; a host must not rewind the room there.
+		member.syncingToRoom = len(commandDispatches) > 0
 	}
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
 	if dispatches == nil {
 		dispatches = s.prepareSnapshotDispatchesLocked(live)
 	}
+	roomID := live.room.ID
 	s.mu.Unlock()
 
-	s.runDispatches(dispatches)
-	s.runCommandDispatches(commandDispatches)
+	if syncToRoom {
+		for _, dispatch := range commandDispatches {
+			slog.DebugContext(ctx, "watch together sync queued",
+				append(memberCommandLogAttrs(roomID, userID, dispatch), "trigger", "ready")...)
+		}
+	}
+	s.sendDispatches(ctx, dispatches)
+	s.sendCommandDispatches(ctx, commandDispatches)
 	return snapshot, nil
 }
 
-func (s *Service) HandleBufferingForConnection(
+func (s *Service) handleBufferingForConnection(
 	ctx context.Context,
 	reg *Registration,
 	userID int,
@@ -785,17 +1146,43 @@ func (s *Service) HandleBufferingForConnection(
 		return Snapshot{}, ErrConnectionNotAttached
 	}
 
+	// A browser can emit waiting/stalled after applying pause. A paused room
+	// needs no buffering barrier; a delayed report must not reopen one.
+	if live.room.PlaybackState == RoomPlaybackStatePaused {
+		snapshot := s.buildSnapshotLocked(live, userID, profileID)
+		s.mu.Unlock()
+		return snapshot, nil
+	}
+
 	member.isBuffering = true
 	member.isReady = false
-	// Members already excluded from the readiness barrier must not drag the
-	// whole room back into waiting while they catch up.
-	if live.room.Phase != RoomPhasePlaying || member.ignoreWait {
+	if live.room.Phase != RoomPhasePlaying {
 		snapshot := s.buildSnapshotLocked(live, userID, profileID)
 		s.mu.Unlock()
 		return snapshot, nil
 	}
 
 	if live.room.PlaybackState != RoomPlaybackStateWaiting {
+		now := s.now()
+		alone := !s.othersWatchingLocked(live, member)
+		pauseRoom := alone || s.bufferingMayPauseRoomLocked(live, member, now)
+		member.lastStallAt = now
+		if alone {
+			// Waiting for a lone viewer costs nobody; letting the room run on
+			// would only skip what they have not seen.
+			member.ignoreWait = false
+		}
+		if !pauseRoom {
+			// The room keeps playing. This member catches up on its own and
+			// acknowledges recovery with ready.
+			member.ignoreWait = true
+			member.correctionCommand = nil
+			snapshot := s.buildSnapshotLocked(live, userID, profileID)
+			dispatches = s.prepareSnapshotDispatchesLocked(live)
+			s.mu.Unlock()
+			s.sendDispatches(ctx, dispatches)
+			return snapshot, nil
+		}
 		// Bound how far a single member's report can move the shared anchor.
 		position := math.Max(0, report.PositionSeconds)
 		expected := math.Max(0, s.expectedPositionLocked(live))
@@ -817,15 +1204,75 @@ func (s *Service) HandleBufferingForConnection(
 			s.mu.Unlock()
 			return snapshot, nil
 		}
+		if !alone {
+			live.bufferingWaitAt = now
+		}
 	}
 
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
 	dispatches = s.prepareSnapshotDispatchesLocked(live)
 	s.mu.Unlock()
 
-	s.runDispatches(dispatches)
-	s.runCommandDispatches(commandDispatches)
+	s.sendDispatches(ctx, dispatches)
+	s.sendCommandDispatches(ctx, commandDispatches)
 	return snapshot, nil
+}
+
+// bufferingMayPauseRoomLocked reports whether a member's stall while the room
+// plays should pause everyone. The room waits for a viewer once: not while
+// they are already catching up, not again until they have played
+// memberStallCooldown without stalling, and not within bufferingWaitSpacing of
+// the last buffering pause. Must be called with s.mu held.
+func (s *Service) bufferingMayPauseRoomLocked(live *liveRoom, member *memberState, now time.Time) bool {
+	if member.ignoreWait {
+		return false
+	}
+	if !member.lastStallAt.IsZero() && now.Sub(member.lastStallAt) < memberStallCooldown {
+		return false
+	}
+	return live.bufferingWaitAt.IsZero() || now.Sub(live.bufferingWaitAt) >= bufferingWaitSpacing
+}
+
+// othersWatchingLocked reports whether anyone besides member has playback
+// attached, whether or not they are catching up. Must be called with s.mu held.
+func (s *Service) othersWatchingLocked(live *liveRoom, member *memberState) bool {
+	for _, other := range live.members {
+		if other != member && memberConnected(other) && other.sessionID != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// skipUnreadyMembersLocked lets a waiting room that has passed its deadline
+// resume without the members that are still not ready, and reports whether it
+// may. They catch up on their own and, like any viewer who stalls, cannot
+// pause the room again until their stall cooldown passes. While nobody is
+// ready the room keeps waiting: running it without an audience would only
+// skip content for everyone, including a viewer watching alone. Must be called
+// with s.mu held.
+func (s *Service) skipUnreadyMembersLocked(live *liveRoom, now time.Time) bool {
+	if !waitingDeadlineReached(live, now) {
+		return false
+	}
+	anyReady := false
+	for _, member := range live.members {
+		if memberConnected(member) && member.sessionID != "" && member.isReady {
+			anyReady = true
+			break
+		}
+	}
+	if !anyReady {
+		return false
+	}
+	for _, member := range live.members {
+		if !memberConnected(member) || member.sessionID == "" || member.isReady {
+			continue
+		}
+		member.ignoreWait = true
+		member.lastStallAt = now
+	}
+	return true
 }
 
 func (s *Service) HandlePingForConnection(
@@ -858,7 +1305,7 @@ func (s *Service) HandlePingForConnection(
 	return nil
 }
 
-func (s *Service) UpdatePolicy(
+func (s *Service) updatePolicy(
 	ctx context.Context,
 	roomID string,
 	userID int,
@@ -896,8 +1343,175 @@ func (s *Service) UpdatePolicy(
 	dispatches := s.prepareSnapshotDispatchesLocked(live)
 	s.mu.Unlock()
 
-	s.runDispatches(dispatches)
+	s.sendDispatches(ctx, dispatches)
 	return snapshot, nil
+}
+
+// StageItem sets what a host-pick lobby will play without starting it. The
+// room stays in the lobby; StartStagedOnce moves it to playing. Staging bumps
+// the room generation but not the selection revision, because the revision is
+// the playback epoch and nothing has started.
+func (s *Service) stageItem(
+	ctx context.Context,
+	roomID string,
+	userID int,
+	profileID string,
+	input SelectItemInput,
+) (Snapshot, error) {
+	if s == nil || s.selectionResolver == nil {
+		return Snapshot{}, fmt.Errorf("watch together selection unavailable")
+	}
+	if strings.TrimSpace(input.ContentID) == "" {
+		return Snapshot{}, ErrInvalidSelection
+	}
+	resolved, err := s.selectionResolver.ResolveSelection(ctx, userID, profileID, input)
+	if err != nil {
+		if errors.Is(err, catalog.ErrWatchTargetNotPlayable) {
+			return Snapshot{}, ErrInvalidSelection
+		}
+		return Snapshot{}, err
+	}
+	if resolved == nil || strings.TrimSpace(resolved.ContentID) == "" {
+		return Snapshot{}, ErrInvalidSelection
+	}
+
+	_, live, err := s.getOrLoadLiveRoom(ctx, roomID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+
+	s.mu.Lock()
+	if live.room.HostUserID != userID || live.room.HostProfileID != profileID {
+		s.mu.Unlock()
+		return Snapshot{}, ErrRoomForbidden
+	}
+	if live.room.Phase == RoomPhaseEnded {
+		s.mu.Unlock()
+		return Snapshot{}, ErrRoomClosed
+	}
+	if live.room.SelectionMode == RoomSelectionModeVote {
+		s.mu.Unlock()
+		return Snapshot{}, ErrVoteRoomSelection
+	}
+	if live.room.Phase != RoomPhaseLobby {
+		s.mu.Unlock()
+		return Snapshot{}, ErrRoomNotInLobby
+	}
+
+	contentChanged := live.room.SelectedContentID == nil || *live.room.SelectedContentID != resolved.ContentID
+	if !contentChanged && equalSelectionID(live.room.SelectedFileID, resolved.FileID) && equalSelectionID(live.room.SelectedLibraryID, resolved.LibraryID) {
+		snapshot := s.buildSnapshotLocked(live, userID, profileID)
+		s.mu.Unlock()
+		return snapshot, nil
+	}
+	contentID := resolved.ContentID
+	live.room.SelectedContentID = &contentID
+	live.room.SelectedFileID = resolved.FileID
+	live.room.SelectedLibraryID = resolved.LibraryID
+	// Staging is activity: keep the idle janitor away from a lobby that is
+	// being used.
+	live.room.AnchorUpdatedAt = s.now()
+	if contentChanged {
+		s.clearLobbyReadyLocked(live)
+	}
+	conflict, updateErr := s.persistRoomChangeLocked(ctx, live, func(room Room, expectedGeneration int64) (*Room, error) {
+		return s.repo.UpdateStagedSelection(
+			ctx,
+			roomID,
+			SelectItemInput{ContentID: contentID, FileID: room.SelectedFileID, LibraryID: room.SelectedLibraryID},
+			room.AnchorUpdatedAt,
+			room.Generation,
+			expectedGeneration,
+		)
+	})
+	if updateErr != nil {
+		s.mu.Unlock()
+		return Snapshot{}, updateErr
+	}
+	snapshot := s.buildSnapshotLocked(live, userID, profileID)
+	if conflict {
+		s.mu.Unlock()
+		return snapshot, nil
+	}
+	dispatches := s.prepareSnapshotDispatchesLocked(live)
+	s.mu.Unlock()
+
+	s.sendDispatches(ctx, dispatches)
+	return snapshot, nil
+}
+
+// UpdateSelectionMode switches how the lobby decides what to play. Only the
+// host may switch, only while nothing is playing. A staged item is dropped;
+// suggestions and votes are rows that outlive the switch, so a room that goes
+// vote → host_pick can still promote any of them.
+func (s *Service) updateSelectionMode(
+	ctx context.Context,
+	roomID string,
+	userID int,
+	profileID string,
+	mode RoomSelectionMode,
+) (Snapshot, error) {
+	if mode != RoomSelectionModeHostPick && mode != RoomSelectionModeVote {
+		return Snapshot{}, ErrInvalidSelection
+	}
+
+	_, live, err := s.getOrLoadLiveRoom(ctx, roomID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+
+	s.mu.Lock()
+	if live.room.HostUserID != userID || live.room.HostProfileID != profileID {
+		s.mu.Unlock()
+		return Snapshot{}, ErrRoomForbidden
+	}
+	if live.room.Phase == RoomPhaseEnded {
+		s.mu.Unlock()
+		return Snapshot{}, ErrRoomClosed
+	}
+	if live.room.Phase != RoomPhaseLobby {
+		s.mu.Unlock()
+		return Snapshot{}, ErrRoomNotInLobby
+	}
+	if live.room.SelectionMode == mode {
+		snapshot := s.buildSnapshotLocked(live, userID, profileID)
+		s.mu.Unlock()
+		return snapshot, nil
+	}
+
+	live.room.SelectionMode = mode
+	live.room.SelectedContentID = nil
+	live.room.SelectedFileID = nil
+	live.room.SelectedLibraryID = nil
+	live.room.AnchorUpdatedAt = s.now()
+	s.clearLobbyReadyLocked(live)
+	conflict, updateErr := s.persistRoomChangeLocked(ctx, live, func(room Room, expectedGeneration int64) (*Room, error) {
+		return s.repo.UpdateSelectionMode(ctx, roomID, room.SelectionMode, room.AnchorUpdatedAt, room.Generation, expectedGeneration)
+	})
+	if updateErr != nil {
+		s.mu.Unlock()
+		return Snapshot{}, updateErr
+	}
+	snapshot := s.buildSnapshotLocked(live, userID, profileID)
+	if conflict {
+		s.mu.Unlock()
+		return snapshot, nil
+	}
+	dispatches := s.prepareSnapshotDispatchesLocked(live)
+	s.mu.Unlock()
+
+	s.sendDispatches(ctx, dispatches)
+	return snapshot, nil
+}
+
+// clearLobbyReadyLocked forgets every member's lobby "ready". Must be called
+// with s.mu held.
+func (s *Service) clearLobbyReadyLocked(live *liveRoom) {
+	for _, member := range live.members {
+		if member != nil {
+			member.lobbyReady = false
+		}
+	}
 }
 
 // SelectItem sets what the room plays at the host's direct request. In a vote
@@ -917,31 +1531,14 @@ func (s *Service) SelectItem(
 // once it has confirmed the suggestion is the room's winner — that call has
 // already satisfied the vote, so gating it here would leave a vote room with no
 // way at all to start playback.
-func (s *Service) selectItem(
+func (s *Service) selectItemInRoom(
 	ctx context.Context,
 	roomID string,
 	userID int,
 	profileID string,
-	input SelectItemInput,
+	resolved *ResolvedSelection,
 	viaVote bool,
 ) (Snapshot, error) {
-	if strings.TrimSpace(input.ContentID) == "" {
-		return Snapshot{}, ErrInvalidSelection
-	}
-	if s.selectionResolver == nil {
-		return Snapshot{}, fmt.Errorf("watch together selection resolver unavailable")
-	}
-
-	resolved, err := s.selectionResolver.ResolveSelection(ctx, userID, profileID, input)
-	if err != nil {
-		if errors.Is(err, catalog.ErrWatchTargetNotPlayable) {
-			return Snapshot{}, ErrInvalidSelection
-		}
-		return Snapshot{}, err
-	}
-	if resolved == nil || strings.TrimSpace(resolved.ContentID) == "" {
-		return Snapshot{}, ErrInvalidSelection
-	}
 
 	_, live, err := s.getOrLoadLiveRoom(ctx, roomID)
 	if err != nil {
@@ -967,34 +1564,51 @@ func (s *Service) selectItem(
 		return Snapshot{}, ErrRoomClosed
 	}
 
+	conflict, updateErr := s.applySelectionLocked(ctx, live, resolved, 0, true)
+	if updateErr != nil {
+		s.mu.Unlock()
+		return Snapshot{}, updateErr
+	}
+	snapshot := s.buildSnapshotLocked(live, userID, profileID)
+	if conflict {
+		s.mu.Unlock()
+		return snapshot, nil
+	}
+	dispatches := s.prepareSnapshotDispatchesLocked(live)
+	s.mu.Unlock()
+
+	s.sendDispatches(ctx, dispatches)
+	return snapshot, nil
+}
+
+// applySelectionLocked replaces the shared source and invalidates every old attachment.
+func (s *Service) applySelectionLocked(ctx context.Context, live *liveRoom, resolved *ResolvedSelection, position float64, resume bool) (bool, error) {
 	now := s.now()
 	live.room.Phase = RoomPhasePlaying
 	live.room.PlaybackState = RoomPlaybackStateWaiting
-	live.room.ResumeOnReady = true
+	live.room.ResumeOnReady = resume
 	live.room.SelectedContentID = &resolved.ContentID
 	live.room.SelectedFileID = resolved.FileID
 	live.room.SelectedLibraryID = resolved.LibraryID
-	live.room.AnchorPositionSeconds = 0
+	live.room.AnchorPositionSeconds = position
 	live.room.IsPaused = true
 	live.room.AnchorUpdatedAt = now
 	live.room.SelectionRevision++
+	live.command = nil
 	// Sessions attached for the previous selection are stale: readiness for
 	// the new content must come from a fresh attach, not an old session.
 	for _, member := range live.members {
-		if member == nil {
-			continue
+		if member != nil {
+			member.resetForSelection()
 		}
-		member.sessionID = ""
-		member.isReady = false
-		member.isBuffering = false
-		member.ignoreWait = false
 	}
+	live.bufferingWaitAt = time.Time{}
 	s.disarmWaitingDeadlineLocked(live)
 
-	conflict, updateErr := s.persistRoomChangeLocked(ctx, live, func(room Room, expectedGeneration int64) (*Room, error) {
+	return s.persistRoomChangeLocked(ctx, live, func(room Room, expectedGeneration int64) (*Room, error) {
 		return s.repo.UpdateSelection(
 			ctx,
-			roomID,
+			live.room.ID,
 			SelectItemInput{
 				ContentID: resolved.ContentID,
 				FileID:    resolved.FileID,
@@ -1011,23 +1625,9 @@ func (s *Service) selectItem(
 			expectedGeneration,
 		)
 	})
-	if updateErr != nil {
-		s.mu.Unlock()
-		return Snapshot{}, updateErr
-	}
-	snapshot := s.buildSnapshotLocked(live, userID, profileID)
-	if conflict {
-		s.mu.Unlock()
-		return snapshot, nil
-	}
-	dispatches := s.prepareSnapshotDispatchesLocked(live)
-	s.mu.Unlock()
-
-	s.runDispatches(dispatches)
-	return snapshot, nil
 }
 
-func (s *Service) CloseRoom(ctx context.Context, roomID string, userID int, profileID string) error {
+func (s *Service) closeRoom(ctx context.Context, roomID string, userID int, profileID string) error {
 	if s == nil || s.repo == nil {
 		return fmt.Errorf("watch together service unavailable")
 	}
@@ -1071,12 +1671,14 @@ func (s *Service) CloseRoom(ctx context.Context, roomID string, userID int, prof
 		if live.waitingTimer != nil {
 			live.waitingTimer.Stop()
 		}
-		delete(s.rooms, roomID)
+		if operationFrom(ctx) == nil {
+			delete(s.rooms, roomID)
+		}
 	}
 	s.mu.Unlock()
 
-	s.publishRoomState(*room)
-	s.runDispatches(dispatches)
+	s.publishRoomStateAfterCommit(ctx, *room)
+	s.sendDispatches(ctx, dispatches)
 	return nil
 }
 
@@ -1139,7 +1741,7 @@ func (s *Service) persistRoomChangeLocked(
 	if persisted != nil && persisted.Generation >= live.room.Generation {
 		live.room = *persisted
 	}
-	s.publishRoomState(live.room)
+	s.publishRoomStateAfterCommit(ctx, live.room)
 	return false, nil
 }
 
@@ -1162,10 +1764,12 @@ func (s *Service) persistAnchorLocked(ctx context.Context, live *liveRoom) (bool
 }
 
 func (s *Service) armWaitingDeadlineLocked(live *liveRoom) {
-	if live.waitingTimer != nil {
-		live.waitingTimer.Stop()
+	s.disarmWaitingDeadlineLocked(live)
+	if _, shared := s.repo.(*Repository); shared {
+		// The reconciler checks the persisted command's issue time. Process
+		// timers cannot track a barrier replaced by another API server.
+		return
 	}
-	live.waitingEpoch++
 	epoch := live.waitingEpoch
 	roomID := live.room.ID
 	live.waitingTimer = time.AfterFunc(waitingResumeDeadline, func() {
@@ -1184,25 +1788,23 @@ func (s *Service) disarmWaitingDeadlineLocked(live *liveRoom) {
 // handleWaitingDeadline fires when a waiting period outlives
 // waitingResumeDeadline: members that never became ready stop blocking the
 // readiness barrier (ignoreWait) and playback resumes for everyone else.
-func (s *Service) handleWaitingDeadline(roomID string, epoch int64) {
+func (s *Service) waitingDeadline(ctx context.Context, roomID string, epoch int64) {
 	s.mu.Lock()
 	live := s.rooms[roomID]
 	if live == nil || live.waitingEpoch != epoch || live.room.PlaybackState != RoomPlaybackStateWaiting {
 		s.mu.Unlock()
 		return
 	}
-	for _, member := range live.members {
-		if member == nil || member.connection == nil || member.sessionID == "" {
-			continue
-		}
-		if !member.isReady {
-			member.ignoreWait = true
-		}
+	// Nobody is ready yet: keep waiting. The first ready member resumes the
+	// room from finishReadyLocked.
+	if !s.skipUnreadyMembersLocked(live, s.now()) {
+		s.mu.Unlock()
+		return
 	}
-	dispatches, commandDispatches := s.maybeResumeFromWaitingLocked(context.Background(), live, true)
+	dispatches, commandDispatches := s.maybeResumeFromWaitingLocked(ctx, live, true)
 	s.mu.Unlock()
-	s.runDispatches(dispatches)
-	s.runCommandDispatches(commandDispatches)
+	s.sendDispatches(ctx, dispatches)
+	s.sendCommandDispatches(ctx, commandDispatches)
 }
 
 // maybeResumeFromWaitingLocked leaves the waiting state once every remaining
@@ -1281,9 +1883,9 @@ func (s *Service) runJanitor() {
 func (s *Service) sweepIdleRooms() {
 	s.mu.Lock()
 	for roomID, live := range s.rooms {
-		if live == nil || s.connectedMemberCountLocked(live) == 0 {
-			// Room state is fully persisted; it reloads on next access. Any
-			// pending host-close timer keeps working from the database.
+		if live == nil || (live.activeOperations == 0 && !hasLocalRoomWork(live)) {
+			// Room state is fully persisted; it reloads on next access. The
+			// shared host-expiry sweep does not depend on this local cache.
 			if live != nil && live.waitingTimer != nil {
 				live.waitingTimer.Stop()
 			}
@@ -1302,19 +1904,21 @@ func (s *Service) sweepIdleRooms() {
 	if err != nil {
 		return
 	}
-	closedAt := s.now()
 	for _, roomID := range roomIDs {
-		s.mu.Lock()
-		live := s.rooms[roomID]
-		hasMembers := live != nil && s.connectedMemberCountLocked(live) > 0
-		s.mu.Unlock()
-		if hasMembers {
-			continue
-		}
-		room, closeErr := s.repo.CloseRoom(ctx, roomID, closedAt)
-		if closeErr == nil && room != nil {
-			s.publishRoomState(*room)
-		}
+		_, _ = withRoomOperation(ctx, s, roomID, func(ctx context.Context) (struct{}, error) {
+			s.mu.Lock()
+			live := s.rooms[roomID]
+			hasMembers := live != nil && s.connectedMemberCountLocked(live) > 0
+			s.mu.Unlock()
+			if hasMembers {
+				return struct{}{}, nil
+			}
+			room, err := s.repo.CloseRoom(ctx, roomID, s.now())
+			if err == nil && room != nil {
+				s.publishRoomStateAfterCommit(ctx, *room)
+			}
+			return struct{}{}, err
+		})
 	}
 }
 
@@ -1370,16 +1974,12 @@ func (s *Service) ensureTransportAllowedLocked(
 	return ErrTransportNotAllowed
 }
 
-func (s *Service) validateSessionContent(ctx context.Context, room *Room, session *playback.Session) error {
-	if room == nil || session == nil || s.files == nil {
+func validateSessionContent(room *Room, session *playback.Session, file *models.MediaFile) error {
+	if room == nil || session == nil {
 		return ErrSessionMismatch
 	}
 	if room.Phase != RoomPhasePlaying || room.SelectedContentID == nil || *room.SelectedContentID == "" {
 		return ErrSessionMismatch
-	}
-	file, err := s.files.GetByID(ctx, session.MediaFileID)
-	if err != nil {
-		return err
 	}
 	if file == nil {
 		return ErrSessionMismatch
@@ -1404,7 +2004,7 @@ func (s *Service) buildSnapshotLocked(live *liveRoom, userID int, profileID stri
 
 	members := make([]MemberSummary, 0, len(live.members))
 	for _, m := range live.members {
-		if m == nil || m.connection == nil {
+		if !memberConnected(m) {
 			continue
 		}
 		members = append(members, MemberSummary{
@@ -1414,16 +2014,25 @@ func (s *Service) buildSnapshotLocked(live *liveRoom, userID int, profileID stri
 			IsHost:      m.userID == live.room.HostUserID && m.profileID == live.room.HostProfileID,
 			IsSelf:      m.userID == userID && m.profileID == profileID,
 			Connected:   true,
+			IsReady:     m.isReady, IsBuffering: m.isBuffering,
+			IsSyncing:  live.room.PlaybackState == RoomPlaybackStateWaiting && m.sessionID != "" && !m.isReady && !m.ignoreWait,
+			LobbyReady: m.lobbyReady,
 		})
 	}
-	sort.Slice(members, func(i, j int) bool {
-		if members[i].IsHost != members[j].IsHost {
-			return members[i].IsHost
+	slices.SortFunc(members, func(a, b MemberSummary) int {
+		if a.IsHost != b.IsHost {
+			if a.IsHost {
+				return -1
+			}
+			return 1
 		}
-		if members[i].DisplayName != members[j].DisplayName {
-			return members[i].DisplayName < members[j].DisplayName
+		if order := cmp.Compare(a.DisplayName, b.DisplayName); order != 0 {
+			return order
 		}
-		return members[i].ProfileID < members[j].ProfileID
+		if order := cmp.Compare(a.ProfileID, b.ProfileID); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.UserID, b.UserID)
 	})
 
 	return Snapshot{
@@ -1465,6 +2074,7 @@ func (s *Service) buildSnapshotLocked(live *liveRoom, userID int, profileID stri
 
 func (s *Service) prepareSnapshotDispatchesLocked(live *liveRoom) []snapshotDispatch {
 	dispatches := make([]snapshotDispatch, 0, len(live.members))
+	base := s.buildSnapshotLocked(live, 0, "")
 	for _, member := range live.members {
 		if member == nil || member.connection == nil {
 			continue
@@ -1472,8 +2082,8 @@ func (s *Service) prepareSnapshotDispatchesLocked(live *liveRoom) []snapshotDisp
 		dispatches = append(dispatches, snapshotDispatch{
 			conn: member.connection,
 			payload: map[string]any{
-				"type": "snapshot",
-				"room": s.buildSnapshotLocked(live, member.userID, member.profileID),
+				clusterMessageTypeKey: snapshotMessageType,
+				roomPayloadKey:        personalizeSnapshot(base, live.room, member),
 			},
 		})
 	}
@@ -1509,7 +2119,7 @@ func (s *Service) runDispatches(dispatches []snapshotDispatch) {
 func (s *Service) connectedMemberCountLocked(live *liveRoom) int {
 	count := 0
 	for _, member := range live.members {
-		if member != nil && member.connection != nil {
+		if memberConnected(member) {
 			count++
 		}
 	}
@@ -1518,7 +2128,7 @@ func (s *Service) connectedMemberCountLocked(live *liveRoom) int {
 
 func (s *Service) hostConnectedLocked(live *liveRoom) bool {
 	member := live.members[buildMemberKey(live.room.HostUserID, live.room.HostProfileID)]
-	return member != nil && member.connection != nil
+	return memberConnected(member)
 }
 
 func (s *Service) expectedPositionLocked(live *liveRoom) float64 {
@@ -1527,10 +2137,11 @@ func (s *Service) expectedPositionLocked(live *liveRoom) float64 {
 
 func (s *Service) resetMemberReadinessLocked(live *liveRoom, markBuffering bool) {
 	for _, member := range live.members {
-		if member == nil || member.connection == nil || member.sessionID == "" {
+		if !memberConnected(member) || member.sessionID == "" {
 			continue
 		}
 		member.isReady = false
+		member.correctionCommand = nil
 		if markBuffering {
 			member.isBuffering = true
 		}
@@ -1540,7 +2151,7 @@ func (s *Service) resetMemberReadinessLocked(live *liveRoom, markBuffering bool)
 func (s *Service) activeParticipantCountLocked(live *liveRoom) int {
 	count := 0
 	for _, member := range live.members {
-		if member == nil || member.connection == nil || member.sessionID == "" || member.ignoreWait {
+		if !memberConnected(member) || member.sessionID == "" || member.ignoreWait {
 			continue
 		}
 		count++
@@ -1551,7 +2162,7 @@ func (s *Service) activeParticipantCountLocked(live *liveRoom) int {
 func (s *Service) allParticipantsReadyLocked(live *liveRoom) bool {
 	participants := 0
 	for _, member := range live.members {
-		if member == nil || member.connection == nil || member.sessionID == "" || member.ignoreWait {
+		if !memberConnected(member) || member.sessionID == "" || member.ignoreWait {
 			continue
 		}
 		participants++
@@ -1569,7 +2180,7 @@ func (s *Service) allParticipantsReadyLocked(live *liveRoom) bool {
 func (s *Service) highestPingLocked(live *liveRoom) time.Duration {
 	highest := defaultTransportLead
 	for _, member := range live.members {
-		if member == nil || member.connection == nil || member.sessionID == "" {
+		if !memberConnected(member) || member.sessionID == "" {
 			continue
 		}
 		if member.lastPingMS <= 0 {
@@ -1601,12 +2212,15 @@ func (s *Service) targetedCommandDispatchesLocked(
 		}
 		payload := command
 		payload.SessionID = member.sessionID
+		if payload.PlaybackState == RoomPlaybackStateWaiting {
+			member.waitingCommand = &payload
+		}
 		dispatches = append(dispatches, commandDispatch{
 			conn:      member.connection,
 			memberKey: memberKey,
 			payload: map[string]any{
-				"type":    "transport_command",
-				"command": payload,
+				clusterMessageTypeKey: transportMessageType,
+				commandPayloadKey:     payload,
 			},
 		})
 	}
@@ -1619,31 +2233,76 @@ func (s *Service) transportCommandDispatchesLocked(
 	positionSeconds float64,
 	executeAt time.Time,
 ) []commandDispatch {
+	s.clearCorrectionCommandsLocked(live)
+	command := TransportCommand{
+		CommandID: uuid.NewString(), SelectionRevision: live.room.SelectionRevision,
+		Action: action, PositionSeconds: math.Max(0, positionSeconds),
+		ExecuteAt: executeAt.UTC().Format(time.RFC3339Nano),
+		IssuedAt:  s.now().UTC().Format(time.RFC3339Nano), PlaybackState: live.room.PlaybackState,
+	}
+	live.command = &command
 	dispatches := make([]commandDispatch, 0, len(live.members))
 	for memberKey, member := range live.members {
-		if member == nil || member.connection == nil || member.sessionID == "" {
+		if !memberConnected(member) || member.sessionID == "" {
 			continue
 		}
-		command := TransportCommand{
-			CommandID:         uuid.NewString(),
-			SessionID:         member.sessionID,
-			SelectionRevision: live.room.SelectionRevision,
-			Action:            action,
-			PositionSeconds:   math.Max(0, positionSeconds),
-			ExecuteAt:         executeAt.UTC().Format(time.RFC3339Nano),
-			IssuedAt:          s.now().UTC().Format(time.RFC3339Nano),
-			PlaybackState:     live.room.PlaybackState,
+		payload := command
+		payload.SessionID = member.sessionID
+		if payload.PlaybackState == RoomPlaybackStateWaiting {
+			member.waitingCommand = &payload
 		}
-		dispatches = append(dispatches, commandDispatch{
-			conn:      member.connection,
-			memberKey: memberKey,
-			payload: map[string]any{
-				"type":    "transport_command",
-				"command": command,
-			},
-		})
+		if member.connection != nil {
+			member.lastCommandID = command.CommandID
+			dispatches = append(dispatches, commandDispatch{conn: member.connection, memberKey: memberKey,
+				payload: map[string]any{clusterMessageTypeKey: transportMessageType, commandPayloadKey: payload}})
+		}
 	}
 	return dispatches
+}
+
+func (s *Service) clearCorrectionCommandsLocked(live *liveRoom) {
+	for _, member := range live.members {
+		if member != nil {
+			member.correctionCommand = nil
+		}
+	}
+}
+
+// memberCommandLogAttrs describes a command sent to one member to move its
+// playback to the room. Clients apply these without telling the viewer, so the
+// log is the only trace of how often the room moved a member.
+func memberCommandLogAttrs(roomID string, userID int, dispatch commandDispatch) []any {
+	command, _ := dispatch.payload[commandPayloadKey].(TransportCommand)
+	return []any{
+		"component", "watchtogether", "room_id", roomID, "user_id", userID,
+		"session_id", command.SessionID, "command_id", command.CommandID, "action", command.Action,
+		"playback_state", command.PlaybackState, "target_position_seconds", command.PositionSeconds,
+	}
+}
+
+func correctionCommandPending(member *memberState, command TransportCommand, now time.Time) bool {
+	if member == nil || member.correctionCommand == nil {
+		return false
+	}
+	pending := member.correctionCommand
+	if pending.SessionID != command.SessionID ||
+		pending.SelectionRevision != command.SelectionRevision ||
+		pending.Action != command.Action ||
+		pending.PlaybackState != command.PlaybackState {
+		return false
+	}
+	issuedAt, err := time.Parse(time.RFC3339Nano, pending.IssuedAt)
+	if err != nil {
+		return false
+	}
+	age := now.Sub(issuedAt)
+	if age < -guestCorrectionRetryInterval {
+		return false
+	}
+	if age < 0 {
+		age = 0
+	}
+	return age < guestCorrectionRetryInterval
 }
 
 func (s *Service) runCommandDispatches(dispatches []commandDispatch) {
@@ -1682,6 +2341,9 @@ func (s *Service) enterWaitingLocked(live *liveRoom, positionSeconds float64, re
 func (s *Service) syncMemberToRoomLocked(live *liveRoom, sessionID string) []commandDispatch {
 	if sessionID == "" {
 		return nil
+	}
+	if live.room.PlaybackState == RoomPlaybackStateWaiting && live.command != nil && live.command.SelectionRevision == live.room.SelectionRevision {
+		return s.targetedCommandDispatchesLocked(live, sessionID, *live.command)
 	}
 	position := expectedPosition(live.room, s.now())
 	action := TransportActionPause
@@ -1783,7 +2445,7 @@ func (s *Service) CreateSuggestion(
 	if live != nil {
 		dispatches := s.prepareSuggestionDispatchesLocked(live, suggestions)
 		s.mu.Unlock()
-		s.runDispatches(dispatches)
+		s.sendDispatches(ctx, dispatches)
 	} else {
 		s.mu.Unlock()
 	}
@@ -1855,7 +2517,7 @@ func (s *Service) DeleteSuggestion(
 	if live != nil {
 		dispatches := s.prepareSuggestionDispatchesLocked(live, suggestions)
 		s.mu.Unlock()
-		s.runDispatches(dispatches)
+		s.sendDispatches(ctx, dispatches)
 	} else {
 		s.mu.Unlock()
 	}
@@ -1903,7 +2565,7 @@ func (s *Service) Vote(
 	if live != nil {
 		dispatches := s.prepareSuggestionDispatchesLocked(live, suggestions)
 		s.mu.Unlock()
-		s.runDispatches(dispatches)
+		s.sendDispatches(ctx, dispatches)
 	} else {
 		s.mu.Unlock()
 	}
@@ -1951,7 +2613,7 @@ func (s *Service) Unvote(
 	if live != nil {
 		dispatches := s.prepareSuggestionDispatchesLocked(live, suggestions)
 		s.mu.Unlock()
-		s.runDispatches(dispatches)
+		s.sendDispatches(ctx, dispatches)
 	} else {
 		s.mu.Unlock()
 	}
@@ -1991,17 +2653,8 @@ func (s *Service) PromoteSuggestion(
 		return Snapshot{}, ErrSuggestionNotFound
 	}
 
-	// In a vote room the host starts the winner; they do not get to overrule it.
-	// Being able to promote any suggestion would make "vote" host_pick with
-	// extra steps, and the tally on everyone else's screen would be a lie.
-	//
-	// The winner is read here and the selection commits a moment later, so a
-	// vote landing in between can start a title that has just stopped being the
-	// head of the tally. That is deliberate: the host pressed start on the
-	// standings they and the room could see, and a vote arriving during the
-	// round trip should not retroactively overrule the press. Closing the window
-	// would mean holding the room lock across a suggestion-store read, which
-	// stalls every other room for a race whose worst case is off by one vote.
+	// V1 keeps its frozen winner-only behavior. V2 permits the host override
+	// through PromoteSuggestionOnce.
 	s.mu.Lock()
 	isVoteRoom := live.room.SelectionMode == RoomSelectionModeVote
 	s.mu.Unlock()
@@ -2053,6 +2706,9 @@ func winnerFrom(ordered []Suggestion) (Suggestion, error) {
 }
 
 func (s *Service) prepareSuggestionDispatchesLocked(live *liveRoom, suggestions []Suggestion) []snapshotDispatch {
+	if live == nil || live.room.Phase == RoomPhaseEnded {
+		return nil
+	}
 	// Strip voted_by_me from broadcast since it is relative to the requester.
 	// Clients merge vote state from their local knowledge on receipt.
 	broadcast := make([]Suggestion, len(suggestions))
@@ -2069,8 +2725,8 @@ func (s *Service) prepareSuggestionDispatchesLocked(live *liveRoom, suggestions 
 		dispatches = append(dispatches, snapshotDispatch{
 			conn: member.connection,
 			payload: map[string]any{
-				"type":        "suggestions_update",
-				"suggestions": broadcast,
+				clusterMessageTypeKey: suggestionsUpdateType,
+				"suggestions":         broadcast,
 			},
 		})
 	}
@@ -2091,4 +2747,63 @@ func randomToken(length int) string {
 		buf[i] = roomTokenAlphabet[int(buf[i])%len(roomTokenAlphabet)]
 	}
 	return string(buf)
+}
+
+// The sorted roster and common room fields are built once for each broadcast.
+func personalizeSnapshot(base Snapshot, room Room, member *memberState) Snapshot {
+	base.SelfRole = roleFor(room, member.userID, member.profileID)
+	base.SelfCanManageRoom = base.SelfRole == MemberRoleHost
+	base.SelfCanControlTransport = base.SelfCanManageRoom || (room.Phase == RoomPhasePlaying && room.GuestControlPolicy == GuestControlPolicyGuestPlayPause)
+	base.SelfIgnoreWait, base.AttachedSessionID = member.ignoreWait, member.sessionID
+	if base.SelfCanManageRoom {
+		base.InvitePath = fmt.Sprintf("/rooms/join?token=%s", room.JoinToken)
+	}
+	base.Members = slices.Clone(base.Members)
+	for i := range base.Members {
+		base.Members[i].IsSelf = base.Members[i].UserID == member.userID && base.Members[i].ProfileID == member.profileID
+	}
+	return base
+}
+
+// SetPlaybackAttemptStore supplies durable session ownership when a room socket
+// lands on a different API server from the playback start request.
+func (s *Service) SetPlaybackAttemptStore(store interface {
+	GetAttempt(context.Context, string) (*playback.AttemptRecordV3, error)
+}) {
+	s.attempts = store
+}
+
+func (s *Service) lookupSession(ctx context.Context, sessionID string) (*playback.Session, error) {
+	if s.attempts != nil {
+		record, err := s.attempts.GetAttempt(ctx, sessionID)
+		if err == nil && record != nil {
+			if record.StoppedAt != nil {
+				return nil, playback.ErrSessionNotFound
+			}
+			return &playback.Session{ID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID, MediaFileID: record.EffectiveMediaFileID}, nil
+		}
+		if !errors.Is(err, playback.ErrSessionNotFound) {
+			return nil, err
+		}
+	}
+	if s.sessions == nil {
+		return nil, playback.ErrSessionNotFound
+	}
+	session, err := s.sessions.GetSession(sessionID)
+	if err == nil && session != nil && s.attempts != nil && session.RequireMediaAuthorization {
+		return nil, playback.ErrSessionNotFound
+	}
+	return session, err
+}
+
+func hasLocalRoomWork(live *liveRoom) bool {
+	if len(live.pendingDisconnects) > 0 {
+		return true
+	}
+	for _, member := range live.members {
+		if member != nil && member.connection != nil {
+			return true
+		}
+	}
+	return false
 }

@@ -16,6 +16,68 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
 beforeEach(() => mutate.mockClear());
 
 describe("saving library processing settings", () => {
+  it.each([
+    ["series", true],
+    ["mixed", true],
+    ["movies", false],
+    ["audiobooks", false],
+    ["ebooks", false],
+    ["manga", false],
+    ["podcasts", false],
+  ])("new %s libraries default intro detection to %s", (type, introDetectionEnabled) => {
+    const { result } = renderHook(() => useLibraryForm({ library: null }));
+    act(() => {
+      result.current.setName("Library");
+      result.current.updatePath(0, "/media");
+      result.current.handleTypeChange(type);
+    });
+    act(() => {
+      result.current.submit();
+    });
+    expect(mutate.mock.calls[0]![0]).toMatchObject({
+      type,
+      intro_detection_enabled: introDetectionEnabled,
+    });
+  });
+
+  it.each([false, true])("preserves an existing intro detection setting of %s", (enabled) => {
+    const library = {
+      id: 1,
+      name: "Series",
+      type: "series",
+      paths: ["/media"],
+      intro_detection_enabled: enabled,
+    } as Library;
+    const { result } = renderHook(() => useLibraryForm({ library }));
+    act(() => {
+      result.current.setName("Renamed");
+    });
+    act(() => {
+      result.current.submit();
+    });
+    expect(mutate.mock.calls[0]![0]).toMatchObject({
+      id: 1,
+      body: { name: "Renamed", intro_detection_enabled: enabled },
+    });
+  });
+
+  it("preserves disabling intro detection while creating a library", () => {
+    const { result } = renderHook(() => useLibraryForm({ library: null }));
+    act(() => {
+      result.current.setName("Series");
+      result.current.updatePath(0, "/media");
+      result.current.handleTypeChange("series");
+      result.current.setIntroDetectionEnabled(false);
+    });
+    act(() => {
+      result.current.submit();
+    });
+    expect(mutate.mock.calls[0]![0]).toMatchObject({
+      type: "series",
+      intro_detection_enabled: false,
+    });
+  });
+
   it.each(["homevideos", "shows"])("preserves video settings for %s", (type) => {
     const library = {
       id: 1,

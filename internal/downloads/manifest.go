@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -137,11 +138,12 @@ type OfflineManifest struct {
 	SelectedAudioTrackIndex *int                `json:"selected_audio_track_index,omitempty"`
 	AudioTracks             []OfflineAudioTrack `json:"audio_tracks,omitempty"`
 
-	Chapters []OfflineChapter `json:"chapters,omitempty"`
-	Intro    *Marker          `json:"intro,omitempty"`
-	Credits  *Marker          `json:"credits,omitempty"`
-	Recap    *Marker          `json:"recap,omitempty"`
-	Preview  *Marker          `json:"preview,omitempty"`
+	Chapters       []OfflineChapter       `json:"chapters,omitempty"`
+	Intro          *Marker                `json:"intro,omitempty"`
+	Credits        *Marker                `json:"credits,omitempty"`
+	Recap          *Marker                `json:"recap,omitempty"`
+	Preview        *Marker                `json:"preview,omitempty"`
+	MarkerSegments []models.MarkerSegment `json:"-"`
 
 	Subtitles []OfflineSubtitle `json:"subtitles"`
 
@@ -155,12 +157,17 @@ type OfflineManifest struct {
 // ManifestBuilder assembles an OfflineManifest from the catalog detail path and
 // the download's subtitle assets, stripping every presigned URL.
 type ManifestBuilder struct {
-	detail   ManifestSource
-	subs     SubtitleSource
-	fileRepo FileResolver
+	detail           ManifestSource
+	subs             SubtitleSource
+	fileRepo         FileResolver
+	MarkerPopulation MarkerPopulationService
 	// artifact resolves a download's linked prepared artifact so artifact-backed
 	// manifests can describe the delivered file instead of the catalog source.
 	artifact func(ctx context.Context, id string) (*Artifact, error)
+}
+
+type MarkerPopulationService interface {
+	Populate(context.Context, *models.MediaFile) (*models.MediaFile, bool, error)
 }
 
 // NewManifestBuilder constructs a ManifestBuilder. artifact may be nil when no
@@ -173,13 +180,13 @@ func NewManifestBuilder(detail ManifestSource, subs SubtitleSource, fileRepo Fil
 // requesting profile's content access (GetItemDetail returns
 // catalog.ErrItemNotFound when denied).
 func (b *ManifestBuilder) Build(ctx context.Context, dl *Download, filter catalog.AccessFilter) (*OfflineManifest, error) {
-	return b.build(ctx, dl, filter, nil)
+	return b.build(ctx, dl, filter, nil, true)
 }
 
 // build is Build with an optional per-batch series-detail cache: a season
 // batch shares one series, so the batch endpoint resolves its detail once
 // instead of once per episode.
-func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalog.AccessFilter, seriesCache map[string]*catalog.ItemDetail) (*OfflineManifest, error) {
+func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalog.AccessFilter, seriesCache map[string]*catalog.ItemDetail, populateMarkers bool) (*OfflineManifest, error) {
 	detail, err := b.detail.GetItemDetail(ctx, manifestContentID(dl), filter)
 	if err != nil {
 		return nil, err
@@ -243,6 +250,25 @@ func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalo
 	}
 
 	if v := pickVersion(detail, dl.MediaFileID); v != nil {
+		if v.FileID == dl.MediaFileID {
+			selected := *v
+			if file != nil && file.ID == dl.MediaFileID {
+				if populateMarkers && b.MarkerPopulation != nil {
+					lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+					populated, _, lookupErr := b.MarkerPopulation.Populate(lookupCtx, file)
+					cancel()
+					if lookupErr != nil {
+						slog.WarnContext(ctx, "download marker lookup failed", "file_id", file.ID, "error", lookupErr)
+					}
+					if populated != nil {
+						file = populated
+					}
+				}
+				selected.SetMarkers(file)
+				m.Intro, m.Credits, m.Recap, m.Preview = toMarker(selected.Intro), toMarker(selected.Credits), toMarker(selected.Recap), toMarker(selected.Preview)
+			}
+			m.MarkerSegments = selected.EffectiveMarkerSegments()
+		}
 		m.Container = v.Container
 		m.CodecVideo = v.CodecVideo
 		m.CodecAudio = v.CodecAudio

@@ -72,7 +72,7 @@ it("uses the typed person response and preserves null date no-op", async () => {
       plex_guid: "",
     }),
   );
-  expect((await adminRefreshPerson("7")).id).toBe(7);
+  expect((await adminRefreshPerson("7")).id).toBe("7");
   expect(
     (await adminUpdatePerson("7", { name: "Updated", birth_date: null, death_date: "" })).name,
   ).toBe("Updated");

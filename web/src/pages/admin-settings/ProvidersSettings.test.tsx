@@ -552,15 +552,16 @@ describe("ProvidersSettings", () => {
 
     const tile = screen.getByRole("group", { name: "TheIntroDB" });
     expect(tile).toHaveAttribute("data-expanded", "true");
-    expect(within(tile).getByLabelText("Lookup order")).toHaveValue(10);
+    expect(within(tile).getByLabelText("Provider priority")).toHaveValue(10);
+    expect(within(tile).getByLabelText("Minimum confidence for automatic sharing")).toHaveValue(95);
     // Credentials are the plugin's, not Silo's: the panel links out for them.
     expect(within(tile).getByRole("link", { name: "plugin page" })).toHaveAttribute(
       "href",
       "/admin/plugins?installed_q=silo.theintrodb&configure=silo.theintrodb",
     );
 
-    await user.clear(within(tile).getByLabelText("Lookup order"));
-    await user.type(within(tile).getByLabelText("Lookup order"), "5");
+    await user.clear(within(tile).getByLabelText("Provider priority"));
+    await user.type(within(tile).getByLabelText("Provider priority"), "5");
     await user.click(within(tile).getByRole("button", { name: "Save" }));
 
     expect(mocks.updateMarkerProvider).toHaveBeenCalledWith({
@@ -575,24 +576,186 @@ describe("ProvidersSettings", () => {
     });
   });
 
-  it("admits when the detection mode never looks online", () => {
+  it.each(["off", "local"])("shows online lookup as disabled in %s mode", (mode) => {
     markerProviders = [markerProvider()];
-    settingsValues = { "markers.mode": "local" };
+    settingsValues = { "markers.mode": mode };
 
     render(<ProvidersSettings />);
 
-    expect(screen.getByText(/Nothing here is searched right now/)).toBeInTheDocument();
-    expect(screen.getByText(/is set to Detect on this server/)).toBeInTheDocument();
+    expect(screen.getByText(/Online marker lookup is disabled/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Marker source" })).toHaveAttribute(
+      "href",
+      "/admin/settings/library",
+    );
   });
 
-  it("says when providers are in play instead", () => {
+  it.each(["online", "both", ""])("shows online lookup as enabled in %s mode", (mode) => {
     markerProviders = [markerProvider()];
-    settingsValues = { "markers.mode": "both" };
+    settingsValues = { "markers.mode": mode };
 
     render(<ProvidersSettings />);
 
-    expect(screen.getByText(/Providers are searched when/)).toBeInTheDocument();
-    expect(screen.queryByText(/Nothing here is searched right now/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Online marker lookup is enabled/)).toBeInTheDocument();
+  });
+
+  it.each([0, 92.5, 100])(
+    "saves a confidence of %s percent in the API's 0–1 range",
+    async (percent) => {
+      const user = userEvent.setup();
+      markerProviders = [markerProvider({ contribute_enabled: true, contribute_auto_local: true })];
+      render(<ProvidersSettings />);
+      const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
+      await user.click(tile.getByRole("button", { name: "Manage" }));
+
+      const confidence = tile.getByLabelText("Minimum confidence for automatic sharing");
+      await user.clear(confidence);
+      await user.type(confidence, String(percent));
+      await user.click(tile.getByRole("button", { name: "Save" }));
+
+      expect(mocks.updateMarkerProvider).toHaveBeenCalledWith({
+        provider: "plugin:6:introdb",
+        patch: {
+          fetch_enabled: true,
+          fetch_priority: 10,
+          contribute_enabled: true,
+          contribute_auto_local: true,
+          contribute_min_confidence: percent / 100,
+        },
+      });
+    },
+  );
+
+  it.each([0.947, 0.9500000000000001, 0.9876543210987654])(
+    "keeps custom confidence %s clean and exact when another setting changes",
+    async (savedConfidence) => {
+      const user = userEvent.setup();
+      markerProviders = [markerProvider({ contribute_min_confidence: savedConfidence })];
+      reportUnsavedMock.mockClear();
+      render(<ProvidersSettings />);
+      const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
+      await user.click(tile.getByRole("button", { name: "Manage" }));
+
+      expect(tile.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(reportUnsavedMock.mock.calls.every(([dirty]) => dirty === false)).toBe(true);
+
+      await user.clear(tile.getByLabelText("Provider priority"));
+      await user.type(tile.getByLabelText("Provider priority"), "5");
+      await user.click(tile.getByRole("button", { name: "Save" }));
+
+      expect(mocks.updateMarkerProvider).toHaveBeenCalledWith(
+        expect.objectContaining({
+          patch: expect.objectContaining({ contribute_min_confidence: savedConfidence }),
+        }),
+      );
+    },
+  );
+
+  it.each(["", "-1", "101", "1e999"])("rejects invalid confidence %j", async (value) => {
+    const user = userEvent.setup();
+    markerProviders = [markerProvider({ contribute_enabled: true, contribute_auto_local: true })];
+    render(<ProvidersSettings />);
+    const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
+    await user.click(tile.getByRole("button", { name: "Manage" }));
+
+    const confidence = tile.getByLabelText("Minimum confidence for automatic sharing");
+    await user.clear(confidence);
+    if (value) await user.type(confidence, value);
+
+    expect(confidence).toHaveAttribute("aria-invalid", "true");
+    expect(tile.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(mocks.updateMarkerProvider).not.toHaveBeenCalled();
+  });
+
+  it("enables sharing controls in order and retains confidence when sharing is turned off", async () => {
+    const user = userEvent.setup();
+    markerProviders = [markerProvider({ contribute_min_confidence: 0.947 })];
+    render(<ProvidersSettings />);
+    const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
+    await user.click(tile.getByRole("button", { name: "Manage" }));
+
+    const sharing = tile.getByRole("switch", { name: "Allow sharing with this provider" });
+    const automatic = tile.getByRole("switch", { name: "Automatically share detected intros" });
+    const confidence = tile.getByLabelText("Minimum confidence for automatic sharing");
+    expect(automatic).toBeDisabled();
+    expect(confidence).toBeEnabled();
+    expect(confidence).toHaveValue(94.7);
+
+    await user.click(sharing);
+    expect(automatic).toBeEnabled();
+    expect(confidence).toBeEnabled();
+    await user.click(automatic);
+    expect(confidence).toBeEnabled();
+    await user.click(sharing);
+    expect(automatic).not.toBeChecked();
+    expect(automatic).toBeDisabled();
+    expect(confidence).toBeEnabled();
+    expect(confidence).toHaveValue(94.7);
+    expect(tile.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("keeps invalid drafts editable when lookup and sharing are turned off", async () => {
+    const user = userEvent.setup();
+    markerProviders = [markerProvider({ contribute_enabled: true, contribute_auto_local: true })];
+    render(<ProvidersSettings />);
+    const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
+    await user.click(tile.getByRole("button", { name: "Manage" }));
+    const priority = tile.getByLabelText("Provider priority");
+    const confidence = tile.getByLabelText("Minimum confidence for automatic sharing");
+    await user.clear(priority);
+    await user.clear(confidence);
+    await user.click(tile.getByRole("switch", { name: "Get markers from this provider" }));
+    await user.click(tile.getByRole("switch", { name: "Allow sharing with this provider" }));
+
+    expect(priority).toBeEnabled();
+    expect(confidence).toBeEnabled();
+    expect(tile.getByRole("button", { name: "Save" })).toBeDisabled();
+    await user.type(priority, "10");
+    await user.type(confidence, "95");
+    await user.click(tile.getByRole("button", { name: "Save" }));
+    expect(mocks.updateMarkerProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        patch: expect.objectContaining({
+          fetch_enabled: false,
+          fetch_priority: 10,
+          contribute_enabled: false,
+          contribute_auto_local: false,
+          contribute_min_confidence: 0.95,
+        }),
+      }),
+    );
+  });
+
+  it("disables sharing for providers that do not accept contributions", async () => {
+    const user = userEvent.setup();
+    markerProviders = [markerProvider({ is_submitter: false })];
+    render(<ProvidersSettings />);
+    const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
+    await user.click(tile.getByRole("button", { name: "Manage" }));
+
+    expect(tile.getByRole("switch", { name: "Allow sharing with this provider" })).toBeDisabled();
+    expect(
+      tile.getByRole("switch", { name: "Automatically share detected intros" }),
+    ).toBeDisabled();
+    expect(tile.getByLabelText("Minimum confidence for automatic sharing")).toBeDisabled();
+    expect(tile.queryByRole("button", { name: "Test connection" })).not.toBeInTheDocument();
+  });
+
+  it("tests the marker provider connection and displays the result", async () => {
+    const user = userEvent.setup();
+    markerProviders = [markerProvider()];
+    mocks.validateMarkerProvider.mockImplementation((_vars, options) => {
+      options.onSuccess({ valid: true });
+    });
+    render(<ProvidersSettings />);
+    const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
+    await user.click(tile.getByRole("button", { name: "Manage" }));
+    await user.click(tile.getByRole("button", { name: "Test connection" }));
+
+    expect(mocks.validateMarkerProvider).toHaveBeenCalledWith(
+      { provider: "plugin:6:introdb", displayName: "TheIntroDB" },
+      expect.any(Object),
+    );
+    expect(tile.getByRole("status")).toHaveTextContent("Tested");
   });
 
   it("closes a subtitle panel when a marker tile is opened", async () => {
