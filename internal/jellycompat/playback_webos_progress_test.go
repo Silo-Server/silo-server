@@ -104,6 +104,36 @@ func TestWebOSUnidentifiedStopSavesFinalPositionWithoutTearingDownPlayback(t *te
 	}
 }
 
+// Issue #1454: an ID-less stop sent while paused left the native session
+// paused, so the admin view kept the stopped play for the paused grace.
+func TestWebOSUnidentifiedStopDoesNotLeaveSessionPaused(t *testing.T) {
+	h, mgr, item, source := newReportLivenessHandler("upstream-1", true)
+	auth := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
+	postProgressReport(h, fmt.Sprintf(`{"PlaySessionId":"","ItemId":%q,"MediaSourceId":%q,"PositionTicks":15523810000,"IsPaused":true}`, item, source))
+	if !mgr.sessions["upstream-1"].IsPaused {
+		t.Fatal("paused progress report did not pause the native session")
+	}
+
+	rec := httptest.NewRecorder()
+	h.HandleSessionPlayingStopped(rec, viewerRequest("POST", "/Sessions/Playing/Stopped", fmt.Sprintf(`{"PlaySessionId":"","ItemId":%q,"MediaSourceId":%q,"PositionTicks":15523810000,"IsPaused":true}`, item, source), "", "", auth))
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status=%d: %s", rec.Code, rec.Body.String())
+	}
+	if mgr.sessions["upstream-1"].IsPaused {
+		t.Fatal("unidentified stop left the native session paused; the admin view keeps it for the paused grace")
+	}
+	if len(mgr.stopCalls) != 0 {
+		t.Fatalf("unidentified stop tore down playback: %v", mgr.stopCalls)
+	}
+
+	// A play that is still running keeps reporting its real pause state.
+	postProgressReport(h, fmt.Sprintf(`{"PlaySessionId":"","ItemId":%q,"MediaSourceId":%q,"PositionTicks":15623810000,"IsPaused":true}`, item, source))
+	if !mgr.sessions["upstream-1"].IsPaused {
+		t.Fatal("a later paused progress report must pause the session again")
+	}
+}
+
 func TestWebOSStaticResumeReusesStartedSession(t *testing.T) {
 	h, _, item, source := newReportLivenessHandler("upstream-1", true)
 	active, _ := h.playbackStore.Get("play-1")
