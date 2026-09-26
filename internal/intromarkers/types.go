@@ -249,7 +249,14 @@ type Candidate struct {
 	IntroMarkersSource     *string
 	IntroMarkersConfidence *float64
 	IntroMarkersAlgorithm  *string
-	MarkersSource          *string
+	// Credits fields let each marker kind be judged on its own; see
+	// Candidate.marker.
+	CreditsStart             *float64
+	CreditsEnd               *float64
+	CreditsMarkersSource     *string
+	CreditsMarkersConfidence *float64
+	CreditsMarkersAlgorithm  *string
+	MarkersSource            *string
 }
 
 // expectedFile preserves the identity loaded with the candidate so a completed
@@ -285,23 +292,6 @@ func (c Candidate) AnalysisGroupKey() string {
 	return strings.Join([]string{group, edition, audio}, "|")
 }
 
-func (c Candidate) EffectiveIntroSource() string {
-	if c.IntroMarkersSource != nil && strings.TrimSpace(*c.IntroMarkersSource) != "" {
-		return strings.TrimSpace(*c.IntroMarkersSource)
-	}
-	if c.IntroStart != nil && c.IntroEnd != nil && c.MarkersSource != nil {
-		return strings.TrimSpace(*c.MarkersSource)
-	}
-	return ""
-}
-
-func (c Candidate) HasHigherPriorityIntro(source string) bool {
-	if c.IntroStart == nil || c.IntroEnd == nil {
-		return false
-	}
-	return models.MarkerSourcePriority(c.EffectiveIntroSource()) > models.MarkerSourcePriority(source)
-}
-
 type Segment struct {
 	Start      float64
 	End        float64
@@ -309,7 +299,9 @@ type Segment struct {
 	Algorithm  string
 }
 
-type IntroMarkerPatch struct {
+// MarkerPatch is a detected marker of one kind to write onto a file.
+type MarkerPatch struct {
+	Kind         markerKind
 	ExpectedFile *models.MediaFile
 	FileID       int
 	Start        float64

@@ -22,7 +22,7 @@ type fakeIntroRepository struct {
 	fingerprints       map[int]*Fingerprint
 	seasonState        *SeasonState
 	upsertedStates     []SeasonState
-	patches            []IntroMarkerPatch
+	patches            []MarkerPatch
 	silenceAttempts    map[int]SilenceRefinementAttempt
 	upsertedAttempts   []SilenceRefinementAttempt
 }
@@ -79,14 +79,17 @@ func (f *fakeIntroRepository) UpsertSilenceRefinementAttempt(_ context.Context, 
 	return nil
 }
 
-func (f *fakeIntroRepository) PatchIntroMarker(_ context.Context, patch IntroMarkerPatch) (bool, error) {
+func (f *fakeIntroRepository) PatchMarker(_ context.Context, patch MarkerPatch) (bool, error) {
+	if _, err := patch.markerUpdate(); err != nil {
+		return false, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.patches = append(f.patches, patch)
 	return true, nil
 }
 
-func (f *fakeIntroRepository) LoadSeasonState(context.Context, SeasonState, Config) (*SeasonState, error) {
+func (f *fakeIntroRepository) LoadSeasonState(context.Context, SeasonState, string) (*SeasonState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.seasonState == nil {
@@ -96,7 +99,7 @@ func (f *fakeIntroRepository) LoadSeasonState(context.Context, SeasonState, Conf
 	return &state, nil
 }
 
-func (f *fakeIntroRepository) UpsertSeasonState(_ context.Context, state SeasonState, _ Config) error {
+func (f *fakeIntroRepository) UpsertSeasonState(_ context.Context, state SeasonState, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.upsertedStates = append(f.upsertedStates, state)
@@ -613,7 +616,7 @@ func TestAnalyzeGroupKeepsMarkerWhenDialogueRefinementFails(t *testing.T) {
 	if summary.DialogueRefinementErrors != 2 {
 		t.Fatalf("refinement errors = %d, want 2", summary.DialogueRefinementErrors)
 	}
-	patched := map[int]IntroMarkerPatch{}
+	patched := map[int]MarkerPatch{}
 	for _, patch := range repo.patches {
 		patched[patch.FileID] = patch
 	}

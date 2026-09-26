@@ -63,9 +63,9 @@ type introRepository interface {
 	ListChapterSilenceBackfillCandidates(ctx context.Context, limit int, cfg Config, node string) ([]Candidate, error)
 	LoadSilenceRefinementAttempt(ctx context.Context, fileID int) (*SilenceRefinementAttempt, error)
 	UpsertSilenceRefinementAttempt(ctx context.Context, attempt SilenceRefinementAttempt) error
-	PatchIntroMarker(ctx context.Context, patch IntroMarkerPatch) (bool, error)
-	LoadSeasonState(ctx context.Context, state SeasonState, cfg Config) (*SeasonState, error)
-	UpsertSeasonState(ctx context.Context, state SeasonState, cfg Config) error
+	PatchMarker(ctx context.Context, patch MarkerPatch) (bool, error)
+	LoadSeasonState(ctx context.Context, state SeasonState, analysisHash string) (*SeasonState, error)
+	UpsertSeasonState(ctx context.Context, state SeasonState, analysisHash string) error
 	LoadFingerprint(ctx context.Context, candidate Candidate, cfg Config) (*Fingerprint, error)
 	UpsertFingerprint(ctx context.Context, fp Fingerprint) error
 }
@@ -213,7 +213,7 @@ func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, 
 		return summary, err
 	}
 
-	remaining := ownDetectionCandidates(candidates)
+	remaining := ownCandidates(candidates, kindIntro)
 	if len(remaining) == 0 {
 		backfillSummary, err := a.runSilenceBackfill(ctx)
 		mergeRunSummary(&summary, backfillSummary)
@@ -287,7 +287,7 @@ func (a *Analyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (RunSum
 	if err := ctx.Err(); err != nil {
 		return summary, err
 	}
-	remaining := ownDetectionCandidates(candidates)
+	remaining := ownCandidates(candidates, kindIntro)
 	if len(remaining) == 0 {
 		return summary, nil
 	}
@@ -305,7 +305,7 @@ func (a *Analyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (RunSum
 		}
 		// Compare the same files the scheduled run would, so a file's result
 		// and confidence do not depend on how its analysis started.
-		groupCandidates = ownDetectionCandidates(groupCandidates)
+		groupCandidates = ownCandidates(groupCandidates, kindIntro)
 		if distinctEpisodeCount(groupCandidates) < 2 {
 			continue
 		}
@@ -405,12 +405,12 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 		if !opts.deadline.IsZero() && time.Now().After(opts.deadline) {
 			return remaining, summary
 		}
-		if candidate.HasHigherPriorityIntro(models.MarkerSourceScanner) {
+		if candidate.hasHigherPriority(kindIntro, models.MarkerSourceScanner) {
 			continue
 		}
 
-		hasIntro := candidate.IntroStart != nil && candidate.IntroEnd != nil
-		effectiveSource := candidate.EffectiveIntroSource()
+		hasIntro := candidate.marker(kindIntro).present()
+		effectiveSource := candidate.effectiveSource(kindIntro)
 		if hasIntro && effectiveSource != "" && effectiveSource != models.MarkerSourceScanner {
 			continue
 		}
@@ -430,7 +430,8 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 			remaining = append(remaining, candidate)
 			continue
 		}
-		applied, patchErr := a.repo.PatchIntroMarker(ctx, IntroMarkerPatch{
+		applied, patchErr := a.repo.PatchMarker(ctx, MarkerPatch{
+			Kind:         kindIntro,
 			ExpectedFile: candidate.expectedFile(),
 			FileID:       candidate.FileID,
 			Start:        segment.Start,
@@ -476,11 +477,11 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 			unresolved = append(unresolved, candidate)
 			continue
 		}
-		if candidate.HasHigherPriorityIntro(models.MarkerSourceScanner) || !compatibleEpisodeVersionDuration(source.candidate, candidate) {
+		if candidate.hasHigherPriority(kindIntro, models.MarkerSourceScanner) || !compatibleEpisodeVersionDuration(source.candidate, candidate) {
 			unresolved = append(unresolved, candidate)
 			continue
 		}
-		if candidate.IntroStart != nil && candidate.IntroEnd != nil && candidate.EffectiveIntroSource() != models.MarkerSourceScanner {
+		if candidate.marker(kindIntro).present() && candidate.effectiveSource(kindIntro) != models.MarkerSourceScanner {
 			continue
 		}
 
@@ -488,7 +489,8 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 		if source.segment.Algorithm == ChapterSilenceAlgorithm {
 			confidence = 0.90
 		}
-		applied, patchErr := a.repo.PatchIntroMarker(ctx, IntroMarkerPatch{
+		applied, patchErr := a.repo.PatchMarker(ctx, MarkerPatch{
+			Kind:         kindIntro,
 			ExpectedFile: candidate.expectedFile(),
 			FileID:       candidate.FileID,
 			Start:        source.segment.Start,
@@ -626,20 +628,6 @@ func compatibleEpisodeVersionDuration(source, target Candidate) bool {
 		diff = -diff
 	}
 	return diff <= episodeVersionCopyDurationToleranceSeconds
-}
-
-func ownDetectionCandidates(candidates []Candidate) []Candidate {
-	remaining := make([]Candidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		if candidate.HasHigherPriorityIntro(models.MarkerSourceScanner) {
-			continue
-		}
-		if candidate.IntroStart != nil && candidate.IntroEnd != nil && candidate.EffectiveIntroSource() != models.MarkerSourceScanner {
-			continue
-		}
-		remaining = append(remaining, candidate)
-	}
-	return remaining
 }
 
 func (a *Analyzer) runSilenceBackfill(ctx context.Context) (RunSummary, error) {
@@ -795,7 +783,8 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		EpisodeCount:     distinctEpisodeCount(group.Candidates),
 		FileCount:        len(group.Candidates),
 	}
-	existing, err := a.repo.LoadSeasonState(ctx, state, a.config)
+	analysisHash := a.config.AnalysisConfigHash()
+	existing, err := a.repo.LoadSeasonState(ctx, state, analysisHash)
 	if err != nil {
 		return summary, err
 	}
@@ -822,7 +811,7 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		state.Status = seasonStatusFailed
 		state.LastError = err.Error()
 		if opts.persistState {
-			_ = a.repo.UpsertSeasonState(ctx, state, a.config)
+			_ = a.repo.UpsertSeasonState(ctx, state, analysisHash)
 		}
 		summary.Errors = append(summary.Errors, err.Error())
 		return summary, err
@@ -831,7 +820,7 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		state.LastError = "too few fingerprints"
 		settle(seasonStatusNotFound)
 		if opts.persistState {
-			if err := a.repo.UpsertSeasonState(ctx, state, a.config); err != nil {
+			if err := a.repo.UpsertSeasonState(ctx, state, analysisHash); err != nil {
 				return summary, err
 			}
 		}
@@ -843,7 +832,7 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 	if len(segments) == 0 {
 		settle(seasonStatusNotFound)
 		if opts.persistState {
-			if err := a.repo.UpsertSeasonState(ctx, state, a.config); err != nil {
+			if err := a.repo.UpsertSeasonState(ctx, state, analysisHash); err != nil {
 				return summary, err
 			}
 		}
@@ -876,7 +865,8 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 				continue
 			}
 		}
-		applied, patchErr := a.repo.PatchIntroMarker(ctx, IntroMarkerPatch{
+		applied, patchErr := a.repo.PatchMarker(ctx, MarkerPatch{
+			Kind:         kindIntro,
 			ExpectedFile: candidate.expectedFile(),
 			FileID:       fileID,
 			Start:        segment.Start,
@@ -904,7 +894,7 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 			state.LastError = fmt.Sprintf("subtitle refinement failed for %d file(s)", refinementFailures)
 		}
 		state.MarkersWritten = summary.ChromaprintMarkersWritten
-		if err := a.repo.UpsertSeasonState(ctx, state, a.config); err != nil {
+		if err := a.repo.UpsertSeasonState(ctx, state, analysisHash); err != nil {
 			return summary, err
 		}
 	}
@@ -999,7 +989,7 @@ func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidat
 			}
 			if cached != nil {
 				mu.Lock()
-				inputs = append(inputs, fingerprintInput{Candidate: candidate, Points: cached.Points})
+				inputs = append(inputs, fingerprintInput{Candidate: candidate, Points: cached.Points, WindowStart: cached.WindowStartSeconds})
 				hits++
 				mu.Unlock()
 				return
@@ -1031,7 +1021,7 @@ func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidat
 				return
 			}
 			mu.Lock()
-			inputs = append(inputs, fingerprintInput{Candidate: candidate, Points: fp.Points})
+			inputs = append(inputs, fingerprintInput{Candidate: candidate, Points: fp.Points, WindowStart: fp.WindowStartSeconds})
 			computed++
 			mu.Unlock()
 		}()

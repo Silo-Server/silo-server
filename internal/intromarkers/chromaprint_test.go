@@ -92,10 +92,10 @@ func TestChromaprintExtractorArguments(t *testing.T) {
 // playback runs at normal priority.
 func TestFingerprintRequestBackground(t *testing.T) {
 	candidate := Candidate{FileID: 1, FilePath: "/media/Show/S01E01.mkv", DurationSeconds: 1500}
-	if req := fingerprintRequest(context.Background(), candidate, 375); !req.Background {
+	if req := fingerprintRequest(context.Background(), candidate, fingerprintWindow{End: 375}); !req.Background {
 		t.Fatal("scheduled analysis request is not background")
 	}
-	if req := fingerprintRequest(WithPlaybackPriority(context.Background()), candidate, 375); req.Background {
+	if req := fingerprintRequest(WithPlaybackPriority(context.Background()), candidate, fingerprintWindow{End: 375}); req.Background {
 		t.Fatal("playback analysis request is background")
 	}
 }

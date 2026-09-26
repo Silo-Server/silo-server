@@ -59,6 +59,11 @@ const baseCandidateSelectFrom = `
 	       mf.intro_markers_source,
 	       mf.intro_markers_confidence,
 	       mf.intro_markers_algorithm,
+	       mf.credits_start,
+	       mf.credits_end,
+	       mf.credits_markers_source,
+	       mf.credits_markers_confidence,
+	       mf.credits_markers_algorithm,
 	       mf.markers_source,
 	       COALESCE(mf.content_id, ''),
 	       COALESCE(mf.extra_id, ''),
@@ -368,6 +373,11 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 			&c.IntroMarkersSource,
 			&c.IntroMarkersConfidence,
 			&c.IntroMarkersAlgorithm,
+			&c.CreditsStart,
+			&c.CreditsEnd,
+			&c.CreditsMarkersSource,
+			&c.CreditsMarkersConfidence,
+			&c.CreditsMarkersAlgorithm,
 			&c.MarkersSource,
 			&c.ContentID,
 			&c.ExtraID,
@@ -430,25 +440,42 @@ func (r *Repository) CountEnabledLibraries(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-func (r *Repository) PatchIntroMarker(ctx context.Context, patch IntroMarkerPatch) (bool, error) {
+// PatchMarker writes a detected marker of patch.Kind through the scanner's
+// marker write policy, which keeps higher-priority markers in place.
+func (r *Repository) PatchMarker(ctx context.Context, patch MarkerPatch) (bool, error) {
+	update, err := patch.markerUpdate()
+	if err != nil {
+		return false, err
+	}
+	return scanner.NewFileRepository(r.pool).UpsertMarkers(ctx, patch.FileID, update)
+}
+
+func (patch MarkerPatch) markerUpdate() (scanner.MarkerUpdate, error) {
+	if patch.Kind != kindIntro && patch.Kind != kindCredits {
+		return scanner.MarkerUpdate{}, fmt.Errorf("marker patch for file %d has no marker kind", patch.FileID)
+	}
 	if patch.Source == "" {
-		return false, fmt.Errorf("intro marker source is required")
+		return scanner.MarkerUpdate{}, fmt.Errorf("%s marker source is required", patch.Kind)
 	}
 	if patch.Algorithm == "" {
-		return false, fmt.Errorf("intro marker algorithm is required")
+		return scanner.MarkerUpdate{}, fmt.Errorf("%s marker algorithm is required", patch.Kind)
 	}
 	if patch.Start < 0 || patch.End <= patch.Start {
-		return false, fmt.Errorf("invalid intro marker range %.3f-%.3f", patch.Start, patch.End)
+		return scanner.MarkerUpdate{}, fmt.Errorf("invalid %s marker range %.3f-%.3f", patch.Kind, patch.Start, patch.End)
 	}
-	return scanner.NewFileRepository(r.pool).UpsertMarkers(ctx, patch.FileID, scanner.MarkerUpdate{
-		IntroStart:        &patch.Start,
-		IntroEnd:          &patch.End,
+	update := scanner.MarkerUpdate{
 		MarkersSource:     patch.Source,
 		MarkersConfidence: &patch.Confidence,
 		MarkersAlgorithm:  patch.Algorithm,
 		DetectedAt:        patch.DetectedAt,
 		ExpectedFile:      patch.ExpectedFile,
-	})
+	}
+	if patch.Kind == kindCredits {
+		update.CreditsStart, update.CreditsEnd = &patch.Start, &patch.End
+	} else {
+		update.IntroStart, update.IntroEnd = &patch.Start, &patch.End
+	}
+	return update, nil
 }
 
 // ErrArtifactKindConflict reports an artifact whose primary key is already
@@ -728,13 +755,7 @@ func introFingerprintKey(cfg Config) ArtifactKey {
 }
 
 func introFingerprintIdentity(candidate Candidate, cfg Config) ArtifactIdentity {
-	return ArtifactIdentity{
-		FileHash:           candidate.FileHash,
-		FileSize:           candidate.FileSize,
-		DurationSeconds:    candidate.DurationSeconds,
-		WindowStartSeconds: 0,
-		WindowEndSeconds:   analysisWindowEnd(candidate.DurationSeconds, cfg),
-	}
+	return headWindow(candidate, cfg).identity(candidate)
 }
 
 // LoadFingerprint returns the candidate's cached intro fingerprint, or nil
@@ -793,8 +814,10 @@ func (r *Repository) UpsertFingerprint(ctx context.Context, fp Fingerprint) erro
 	})
 }
 
-func (r *Repository) LoadSeasonState(ctx context.Context, state SeasonState, cfg Config) (*SeasonState, error) {
-	cfg = cfg.normalized()
+// LoadSeasonState returns a season group's stored analysis under
+// analysisHash, which keys the state of one marker kind's analysis settings
+// (Config.AnalysisConfigHash for intros), or nil when there is none.
+func (r *Repository) LoadSeasonState(ctx context.Context, state SeasonState, analysisHash string) (*SeasonState, error) {
 	var existing SeasonState
 	err := r.pool.QueryRow(ctx, `
 		SELECT season_id,
@@ -817,7 +840,7 @@ func (r *Repository) LoadSeasonState(ctx context.Context, state SeasonState, cfg
 		state.MediaFolderID,
 		state.AnalysisGroupKey,
 		AlgorithmVersion,
-		cfg.AnalysisConfigHash(),
+		analysisHash,
 	).Scan(
 		&existing.SeasonID,
 		&existing.MediaFolderID,
@@ -839,8 +862,9 @@ func (r *Repository) LoadSeasonState(ctx context.Context, state SeasonState, cfg
 	return &existing, nil
 }
 
-func (r *Repository) UpsertSeasonState(ctx context.Context, state SeasonState, cfg Config) error {
-	cfg = cfg.normalized()
+// UpsertSeasonState stores a season group's analysis under analysisHash; see
+// LoadSeasonState.
+func (r *Repository) UpsertSeasonState(ctx context.Context, state SeasonState, analysisHash string) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO intro_season_analysis_state (
 		    season_id,
@@ -869,7 +893,7 @@ func (r *Repository) UpsertSeasonState(ctx context.Context, state SeasonState, c
 		state.MediaFolderID,
 		state.AnalysisGroupKey,
 		AlgorithmVersion,
-		cfg.AnalysisConfigHash(),
+		analysisHash,
 		state.InputSignature,
 		state.EpisodeCount,
 		state.FileCount,
