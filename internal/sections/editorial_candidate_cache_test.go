@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 )
@@ -23,7 +24,7 @@ func TestCachedEditorialCandidatesReusesCandidateListForSameScope(t *testing.T) 
 	}
 
 	first, err := f.cachedEditorialCandidates(context.Background(), "actor", nil, []int{2, 1}, catalog.AccessFilter{
-		MaxContentRating: "PG-13",
+		MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"},
 	}, time.Hour, loader)
 	if err != nil {
 		t.Fatalf("first cachedEditorialCandidates: %v", err)
@@ -31,7 +32,7 @@ func TestCachedEditorialCandidatesReusesCandidateListForSameScope(t *testing.T) 
 	first[0] = "mutated"
 
 	second, err := f.cachedEditorialCandidates(context.Background(), "actor", nil, []int{1, 2}, catalog.AccessFilter{
-		MaxContentRating: "PG-13",
+		MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"},
 	}, time.Hour, loader)
 	if err != nil {
 		t.Fatalf("second cachedEditorialCandidates: %v", err)
@@ -58,12 +59,12 @@ func TestCachedEditorialCandidatesSeparatesAccessScopeAndExpires(t *testing.T) {
 		return []string{time.Unix(int64(calls), 0).UTC().Format(time.RFC3339)}, nil
 	}
 
-	filter := catalog.AccessFilter{MaxContentRating: "PG-13"}
+	filter := catalog.AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
 	if _, err := f.cachedEditorialCandidates(context.Background(), "actor", nil, nil, filter, time.Hour, loader); err != nil {
 		t.Fatalf("first cachedEditorialCandidates: %v", err)
 	}
 	if _, err := f.cachedEditorialCandidates(context.Background(), "actor", nil, nil, catalog.AccessFilter{
-		MaxContentRating: "R",
+		MaturityLimits: access.MaturityLimits{MaxContentRating: "R"},
 	}, time.Hour, loader); err != nil {
 		t.Fatalf("different filter cachedEditorialCandidates: %v", err)
 	}

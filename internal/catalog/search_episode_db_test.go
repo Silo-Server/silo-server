@@ -2,8 +2,10 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,8 +100,17 @@ func TestEpisodeSearchPostgresAndDocumentSource(t *testing.T) {
 	if len(docs[0].LibraryIDs) != 1 || int(docs[0].LibraryIDs[0]) != folderID {
 		t.Fatalf("episode library ids = %v, want [%d]", docs[0].LibraryIDs, folderID)
 	}
-	if docs[0].Vectors != nil {
-		t.Fatalf("episode document unexpectedly has vectors: %#v", docs[0].Vectors)
+	// Episodes explicitly opt out of the configured userProvided embedder.
+	vector, ok := docs[0].Vectors[DefaultMeilisearchEmbedder]
+	if !ok || vector != nil || len(docs[0].Vectors) != 1 {
+		t.Fatalf("episode vectors = %#v, want only the configured embedder with a nil value", docs[0].Vectors)
+	}
+	encoded, err := json.Marshal(docs[0])
+	if err != nil {
+		t.Fatalf("marshal episode document: %v", err)
+	}
+	if expected := fmt.Sprintf(`"_vectors":{"%s":null}`, DefaultMeilisearchEmbedder); !strings.Contains(string(encoded), expected) {
+		t.Fatalf("episode document missing serialized vector opt-out %s: %s", expected, encoded)
 	}
 }
 

@@ -17,33 +17,37 @@ type GroupPolicyProvider interface {
 // field has a group counterpart here; the group value applies to each member
 // whose own field is unset (inherits).
 type GroupPolicy struct {
-	ID                       int64
-	LibraryIDs               []int // nil = unrestricted
-	MaxPlaybackQuality       string
-	DownloadAllowed          bool
-	DownloadTranscodeAllowed bool
-	TranscodeAllowed         bool
-	AudioTranscodeAllowed    bool
-	MaxStreams               int // 0 = no cap
-	MaxTranscodes            int
-	AllowedPermissions       []string // nil = all assignable
-	RequestsAllowed          bool
+	ID                         int64
+	LibraryIDs                 []int // nil = unrestricted
+	MaxPlaybackQuality         string
+	DownloadAllowed            bool
+	DownloadTranscodeAllowed   bool
+	TranscodeAllowed           bool
+	AudioTranscodeAllowed      bool
+	MaxStreams                 int // 0 = no cap
+	MaxTranscodes              int
+	MaxRemoteStreamBitrateKbps int      // 0 = unlimited
+	MaxLocalStreamBitrateKbps  int      // 0 = unlimited
+	AllowedPermissions         []string // nil = all assignable
+	RequestsAllowed            bool
 }
 
 // EffectiveUserPolicy is the fully resolved policy for an account: every field
 // carries a concrete value (user override when set, otherwise the group value,
 // otherwise the permissive no-group default).
 type EffectiveUserPolicy struct {
-	LibraryIDs               []int // nil = unrestricted
-	MaxPlaybackQuality       string
-	DownloadAllowed          bool
-	DownloadTranscodeAllowed bool
-	TranscodeAllowed         bool
-	AudioTranscodeAllowed    bool
-	MaxStreams               int
-	MaxTranscodes            int
-	Permissions              []string
-	RequestsAllowed          bool
+	LibraryIDs                 []int // nil = unrestricted
+	MaxPlaybackQuality         string
+	DownloadAllowed            bool
+	DownloadTranscodeAllowed   bool
+	TranscodeAllowed           bool
+	AudioTranscodeAllowed      bool
+	MaxStreams                 int
+	MaxTranscodes              int
+	MaxRemoteStreamBitrateKbps int
+	MaxLocalStreamBitrateKbps  int
+	Permissions                []string
+	RequestsAllowed            bool
 }
 
 // NoGroupPolicy is the policy applied to an account with no access group
@@ -54,16 +58,18 @@ type EffectiveUserPolicy struct {
 // had the gate turned on does not silently gain it.
 func NoGroupPolicy() GroupPolicy {
 	return GroupPolicy{
-		LibraryIDs:               nil,
-		MaxPlaybackQuality:       "",
-		DownloadAllowed:          true,
-		DownloadTranscodeAllowed: false,
-		TranscodeAllowed:         true,
-		AudioTranscodeAllowed:    true,
-		MaxStreams:               0,
-		MaxTranscodes:            0,
-		AllowedPermissions:       nil,
-		RequestsAllowed:          true,
+		LibraryIDs:                 nil,
+		MaxPlaybackQuality:         "",
+		DownloadAllowed:            true,
+		DownloadTranscodeAllowed:   false,
+		TranscodeAllowed:           true,
+		AudioTranscodeAllowed:      true,
+		MaxStreams:                 0,
+		MaxTranscodes:              0,
+		MaxRemoteStreamBitrateKbps: 0,
+		MaxLocalStreamBitrateKbps:  0,
+		AllowedPermissions:         nil,
+		RequestsAllowed:            true,
 	}
 }
 
@@ -105,16 +111,18 @@ func ApplyGroupPolicy(user *models.User, group *GroupPolicy) EffectiveUserPolicy
 	}
 
 	effective := EffectiveUserPolicy{
-		LibraryIDs:               inheritLibraryIDs(user.LibraryIDs, base.LibraryIDs),
-		MaxPlaybackQuality:       NormalizePlaybackQuality(inheritString(user.MaxPlaybackQuality, base.MaxPlaybackQuality)),
-		DownloadAllowed:          inheritBool(user.DownloadAllowed, base.DownloadAllowed),
-		DownloadTranscodeAllowed: inheritBool(user.DownloadTranscodeAllowed, base.DownloadTranscodeAllowed),
-		TranscodeAllowed:         inheritBool(user.TranscodeAllowed, base.TranscodeAllowed),
-		AudioTranscodeAllowed:    inheritBool(user.AudioTranscodeAllowed, base.AudioTranscodeAllowed),
-		MaxStreams:               inheritInt(user.MaxStreams, base.MaxStreams),
-		MaxTranscodes:            inheritInt(user.MaxTranscodes, base.MaxTranscodes),
-		Permissions:              cloneStrings(user.Permissions),
-		RequestsAllowed:          inheritBool(user.RequestsAllowed, base.RequestsAllowed),
+		LibraryIDs:                 inheritLibraryIDs(user.LibraryIDs, base.LibraryIDs),
+		MaxPlaybackQuality:         NormalizePlaybackQuality(inheritString(user.MaxPlaybackQuality, base.MaxPlaybackQuality)),
+		DownloadAllowed:            inheritBool(user.DownloadAllowed, base.DownloadAllowed),
+		DownloadTranscodeAllowed:   inheritBool(user.DownloadTranscodeAllowed, base.DownloadTranscodeAllowed),
+		TranscodeAllowed:           inheritBool(user.TranscodeAllowed, base.TranscodeAllowed),
+		AudioTranscodeAllowed:      inheritBool(user.AudioTranscodeAllowed, base.AudioTranscodeAllowed),
+		MaxStreams:                 inheritInt(user.MaxStreams, base.MaxStreams),
+		MaxTranscodes:              inheritInt(user.MaxTranscodes, base.MaxTranscodes),
+		MaxRemoteStreamBitrateKbps: inheritInt(user.MaxRemoteStreamBitrateKbps, base.MaxRemoteStreamBitrateKbps),
+		MaxLocalStreamBitrateKbps:  inheritInt(user.MaxLocalStreamBitrateKbps, base.MaxLocalStreamBitrateKbps),
+		Permissions:                cloneStrings(user.Permissions),
+		RequestsAllowed:            inheritBool(user.RequestsAllowed, base.RequestsAllowed),
 	}
 	if group != nil && group.AllowedPermissions != nil {
 		effective.Permissions = intersectStrings(user.Permissions, group.AllowedPermissions)

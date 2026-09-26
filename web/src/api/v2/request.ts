@@ -1,0 +1,464 @@
+/**
+ * The typed request boundary for Silo's native `/api/v2` contract.
+ *
+ * `v2("GET /api/v2/progress", { query: { limit: 20 } })` selects an operation
+ * by its `METHOD /path` literal and infers the path parameters, query, JSON
+ * body, and 2xx response type from the generated `paths` type in ./schema.ts.
+ * Documented non-2xx responses are RFC 9457 Problem Details and are thrown as
+ * `V2ProblemError`; anything the contract does not describe (an HTML error
+ * page, an unparseable body) is a `V2TransportError`; a failed fetch rejects
+ * with the network error itself.
+ *
+ * Session handling (bearer token, refresh-then-retry on 401, profile and
+ * device headers) is the same machinery the v1 client uses, shared through
+ * `fetchWithSession`. This module never touches `/api/v1`.
+ */
+import {
+  fetchWithSession,
+  isProfileRequestContextCurrent,
+  reportProfileUnverified,
+  StaleApiRequestContextError,
+  type ProfileRequestContextSnapshot,
+} from "../client";
+import { v2Operations } from "./operations";
+import { problemId } from "./problemId";
+import type { components, paths } from "./schema";
+
+// ---------------------------------------------------------------------------
+// Operation selection: `METHOD /path` literal -> generated operation type.
+// The generated `operations` interface carries no method or path, so the
+// path-keyed `paths` type is the only one that lets a single string literal
+// pin down every part of the request; the operation id is looked up at
+// runtime from the generated ./operations.ts map to label errors.
+// ---------------------------------------------------------------------------
+
+/** Every `METHOD /path` the committed v2 OpenAPI document declares. */
+export type V2OperationKey = keyof typeof v2Operations;
+
+// These operations exchange their own credentials or create a login flow.
+// A refusal cannot be repaired by refreshing a previously stored session.
+const authExchangeOperations = new Set<V2OperationKey>([
+  "POST /api/v2/auth/login",
+  "POST /api/v2/auth/oauth/complete",
+  "POST /api/v2/auth/refresh",
+  "POST /api/v2/auth/setup",
+  "POST /api/v2/auth/signup",
+  "POST /api/v2/auth/device/start",
+  "POST /api/v2/auth/device/poll",
+]);
+
+/** The operation id the spec assigns to a `METHOD /path`. */
+export type V2OperationId<K extends V2OperationKey> = (typeof v2Operations)[K];
+
+type SplitKey<K extends string> = K extends `${infer M} ${infer P}` ? [Lowercase<M>, P] : never;
+
+type OperationOf<K extends V2OperationKey> =
+  SplitKey<K> extends [infer M extends string, infer P extends keyof paths]
+    ? M extends keyof paths[P]
+      ? NonNullable<paths[P][M]>
+      : never
+    : never;
+
+type ParamsOf<Op> = Op extends { parameters: infer P } ? P : never;
+
+type PathParamsOf<Op> = ParamsOf<Op> extends { path: infer P extends object } ? P : never;
+
+type QueryOf<Op> =
+  ParamsOf<Op> extends { query?: infer Q extends object }
+    ? [Q] extends [never]
+      ? never
+      : Q
+    : never;
+
+type SessionHeader = "authorization" | "x-profile-id" | "x-profile-token" | "x-device-id";
+type CallerHeaders<H extends object> = {
+  [Key in keyof H as Key extends string
+    ? Lowercase<Key> extends SessionHeader
+      ? never
+      : Key
+    : Key]: H[Key];
+};
+type HeadersOf<Op> =
+  ParamsOf<Op> extends { header?: infer H extends object }
+    ? [H] extends [never]
+      ? never
+      : keyof CallerHeaders<H> extends never
+        ? never
+        : CallerHeaders<H>
+    : never;
+
+type BodyOf<Op> = Op extends { requestBody: { content: { "application/json": infer B } } }
+  ? B
+  : never;
+
+// An operation whose JSON body the server marks optional (`requestBody?`).
+// `requestBody?: never` (no body at all) must not match, and `[never]` is
+// assignable to any tuple, so it is excluded first.
+type OptionalBodyOf<Op> = Op extends { requestBody?: infer R }
+  ? [NonNullable<R>] extends [never]
+    ? never
+    : [NonNullable<R>] extends [{ content: { "application/json": infer B } }]
+      ? B
+      : never
+  : never;
+
+type FormBodyOf<Op> = Op extends { requestBody: { content: { "multipart/form-data": infer F } } }
+  ? F
+  : never;
+
+type SuccessStatus = 200 | 201 | 202 | 203 | 204;
+
+type SuccessOf<Op> = Op extends { responses: infer R }
+  ? {
+      [S in keyof R & SuccessStatus]: R[S] extends { content: { "application/json": infer T } }
+        ? T
+        : undefined;
+    }[keyof R & SuccessStatus]
+  : never;
+
+// ---------------------------------------------------------------------------
+// Nominal separation from the handwritten v1 mirror (src/api/types.ts).
+// A v2 success value carries a compile-time-only brand, so a v1 type that
+// happens to share a shape cannot satisfy a parameter typed against the v2
+// contract. The brand is applied once, here, after the body is decoded.
+// ---------------------------------------------------------------------------
+
+declare const v2Contract: unique symbol;
+
+/** A value decoded from a v2 response. Structural look-alikes from v1 do not carry the brand. */
+export type V2<T> = T extends object ? T & { readonly [v2Contract]: "api/v2" } : T;
+
+function brand<T>(value: T): V2<T> {
+  // The brand is a phantom type; the decoded object is returned as is.
+  return value as V2<T>;
+}
+
+/** The 2xx response type of a v2 operation. */
+export type V2Result<K extends V2OperationKey> = V2<SuccessOf<OperationOf<K>>>;
+
+/** The JSON request body type of a v2 operation (`never` when it has none). */
+export type V2Body<K extends V2OperationKey> = BodyOf<OperationOf<K>>;
+
+/** The JSON body of a v2 operation that may be sent without one (`never` otherwise). */
+export type V2OptionalBody<K extends V2OperationKey> = [V2Body<K>] extends [never]
+  ? OptionalBodyOf<OperationOf<K>>
+  : never;
+
+/**
+ * The multipart form of a v2 operation (`never` when it has none): each
+ * declared part is sent as a file or a text field.
+ */
+export type V2Form<K extends V2OperationKey> = [FormBodyOf<OperationOf<K>>] extends [never]
+  ? never
+  : { [P in keyof FormBodyOf<OperationOf<K>>]: Blob | string };
+
+/** The query parameter type of a v2 operation (`never` when it has none). */
+export type V2Query<K extends V2OperationKey> = QueryOf<OperationOf<K>>;
+
+/** The path parameter type of a v2 operation (`never` when it has none). */
+export type V2PathParams<K extends V2OperationKey> = PathParamsOf<OperationOf<K>>;
+
+/** Only headers declared by the operation; required validators remain required. */
+export type V2Headers<K extends V2OperationKey> = HeadersOf<OperationOf<K>>;
+
+// ---------------------------------------------------------------------------
+// Request options: only the parts the operation declares are accepted, and
+// the whole options object is optional when nothing is required.
+// ---------------------------------------------------------------------------
+
+type QueryScalar = string | number | boolean | null | undefined;
+type QueryValue = QueryScalar | readonly QueryScalar[];
+
+interface CommonOptions {
+  signal?: AbortSignal;
+  /**
+   * Account, profile, and PIN authority captured when a queued intent was
+   * created. The request is sent with exactly those headers rather than the
+   * current session's, and is refused (`StaleApiRequestContextError`) once
+   * the account or server has changed underneath it.
+   */
+  profileContext?: ProfileRequestContextSnapshot;
+  /** Let the browser finish the request after navigation or tab close. */
+  keepalive?: boolean;
+  /** Disable refresh-and-replay for a mutation that must be sent only once. */
+  retryAuthentication?: boolean;
+  /** Inspect metadata from a successfully decoded response, such as its ETag. */
+  onResponse?: (response: Response) => void;
+}
+
+export type V2RequestOptions<K extends V2OperationKey> = CommonOptions &
+  ([V2PathParams<K>] extends [never] ? unknown : { path: V2PathParams<K> }) &
+  ([V2Query<K>] extends [never] ? unknown : { query?: V2Query<K> }) &
+  ([V2Body<K>] extends [never] ? unknown : { body: V2Body<K> }) &
+  ([V2OptionalBody<K>] extends [never] ? unknown : { body?: V2OptionalBody<K> }) &
+  ([V2Form<K>] extends [never] ? unknown : { form: V2Form<K> }) &
+  ([V2Headers<K>] extends [never]
+    ? unknown
+    : Record<never, never> extends V2Headers<K>
+      ? { headers?: V2Headers<K> }
+      : { headers: V2Headers<K> });
+
+type RequestArgs<K extends V2OperationKey> =
+  Record<never, never> extends V2RequestOptions<K>
+    ? [options?: V2RequestOptions<K>]
+    : [options: V2RequestOptions<K>];
+
+// ---------------------------------------------------------------------------
+// Problem Details.
+// ---------------------------------------------------------------------------
+
+/** An RFC 9457 problem as the v2 contract emits it (application/problem+json). */
+export type Problem = components["schemas"]["Problem"];
+
+/** One field-level validation detail inside a `validation_failed` problem. */
+export type ProblemError = components["schemas"]["ProblemError"];
+
+export { problemId };
+
+/** A documented v2 error: the server answered with a Problem Details body. */
+export class V2ProblemError extends Error {
+  readonly operationId: string;
+  readonly problem: Problem;
+  readonly status: number;
+  /** The problem identifier, e.g. `authentication_required` or `validation_failed`. */
+  readonly problemType: string;
+  /** The `Retry-After` delay in seconds when the server sent one (rate limits, busy backends). */
+  readonly retryAfterSeconds: number | null;
+  /** Current validator supplied with a precondition failure; never applied automatically. */
+  readonly currentETag: string | null;
+  /** The response headers, for the few problems that carry an operation-specific one. */
+  readonly headers: Headers;
+
+  constructor(
+    operationId: string,
+    problem: Problem,
+    retryAfterSeconds: number | null = null,
+    currentETag: string | null = null,
+    headers: Headers = new Headers(),
+  ) {
+    super(problem.detail || problem.title);
+    this.name = "V2ProblemError";
+    this.operationId = operationId;
+    this.problem = problem;
+    this.status = problem.status;
+    this.problemType = problemId(problem);
+    this.retryAfterSeconds = retryAfterSeconds;
+    this.currentETag = currentETag;
+    this.headers = headers;
+  }
+}
+
+/**
+ * Whether the server answered that there is nothing to show. A proxy's 404 page
+ * is a `V2TransportError`, not this: only the contract can say a resource is
+ * missing, and it says so the same way for hidden resources.
+ */
+export function isNotFoundProblem(error: unknown): boolean {
+  return error instanceof V2ProblemError && error.status === 404;
+}
+
+/** Parses a delta-seconds `Retry-After` header; an HTTP-date form is not a contract shape. */
+function retryAfterSecondsOf(res: Response): number | null {
+  const raw = res.headers.get("Retry-After");
+  if (!raw) return null;
+  const seconds = Number(raw.trim());
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
+
+/**
+ * A response the contract does not describe: a non-JSON body (an HTML error
+ * page from a proxy, a truncated stream) or a status without a problem
+ * document. Distinct from `V2ProblemError` so callers never treat a gateway
+ * page as a contract answer.
+ */
+export class V2TransportError extends Error {
+  readonly operationId: string;
+  readonly status: number;
+
+  constructor(operationId: string, status: number, reason: string) {
+    super(`${operationId}: ${reason} (HTTP ${status})`);
+    this.name = "V2TransportError";
+    this.operationId = operationId;
+    this.status = status;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The request.
+// ---------------------------------------------------------------------------
+
+/** Identifies this client to the server; the same header pair the contract fixtures send. */
+export const V2_CLIENT_HEADERS: Readonly<Record<string, string>> = {
+  "X-Silo-Client": "Silo Web",
+  "X-Silo-Client-Version": typeof __SILO_WEB_VERSION__ === "string" ? __SILO_WEB_VERSION__ : "dev",
+};
+
+function isProblem(value: unknown): value is Problem {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.type === "string" &&
+    typeof candidate.title === "string" &&
+    typeof candidate.status === "number"
+  );
+}
+
+function isJsonMediaType(contentType: string | null): boolean {
+  if (!contentType) return false;
+  const mediaType = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return mediaType === "application/json" || mediaType.endsWith("+json");
+}
+
+function buildUrl(
+  route: string,
+  pathParams: Record<string, string | number> | undefined,
+  query: Record<string, QueryValue> | undefined,
+): string {
+  const url = route.replace(/\{([^}]+)\}/g, (_match, name: string) => {
+    const value = pathParams?.[name];
+    if (value === undefined) {
+      throw new Error(`v2: missing path parameter "${name}" for ${route}`);
+    }
+    return encodeURIComponent(String(value));
+  });
+  if (!query) return url;
+  const search = new URLSearchParams();
+  for (const [name, value] of Object.entries(query)) {
+    if (value === undefined || value === null) continue;
+    // Array parameters are declared `explode` in the contract: one repeated
+    // parameter per member, never a comma-joined list.
+    if (Array.isArray(value)) {
+      for (const member of value as readonly QueryScalar[]) {
+        if (member === undefined || member === null) continue;
+        search.append(name, String(member));
+      }
+      continue;
+    }
+    search.set(name, String(value));
+  }
+  const encoded = search.toString();
+  return encoded ? `${url}?${encoded}` : url;
+}
+
+async function readBody(res: Response, operationId: string): Promise<unknown> {
+  const text = await res.text();
+  if (text.trim() === "") return undefined;
+  if (!isJsonMediaType(res.headers.get("Content-Type"))) {
+    throw new V2TransportError(operationId, res.status, "the response body is not JSON");
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new V2TransportError(operationId, res.status, "the response body is not valid JSON");
+  }
+}
+
+/**
+ * Performs one v2 request. The operation is chosen by its `METHOD /path`
+ * literal; the options are inferred from the generated contract.
+ */
+export async function v2<K extends V2OperationKey>(
+  key: K,
+  ...args: RequestArgs<K>
+): Promise<V2Result<K>> {
+  const [method, route] = key.split(" ", 2) as [string, string];
+  const options = (args[0] ?? {}) as CommonOptions & {
+    headers?: Record<string, string | number | undefined>;
+    path?: Record<string, string | number>;
+    query?: Record<string, QueryValue>;
+    body?: unknown;
+    form?: Record<string, Blob | string | undefined>;
+  };
+
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    ...V2_CLIENT_HEADERS,
+  };
+  for (const [name, value] of Object.entries(options.headers ?? {})) {
+    if (
+      ["authorization", "x-profile-id", "x-profile-token", "x-device-id"].includes(
+        name.toLowerCase(),
+      )
+    ) {
+      throw new TypeError(`Session header ${name} must be supplied through the session client.`);
+    }
+    if (value !== undefined) headers[name] = String(value);
+  }
+  const init: RequestInit = { method, headers, signal: options.signal };
+  if (options.keepalive) init.keepalive = true;
+  if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(options.body);
+  } else if (options.form !== undefined) {
+    // The browser sets the multipart Content-Type and boundary itself.
+    const form = new FormData();
+    for (const [name, value] of Object.entries(options.form)) {
+      if (value !== undefined) form.set(name, value);
+    }
+    init.body = form;
+  }
+  const snapshot = options.profileContext;
+  if (snapshot) {
+    headers["Authorization"] = `Bearer ${snapshot.accessToken}`;
+    headers["X-Profile-Id"] = snapshot.profileId;
+    headers["X-Profile-Token"] = snapshot.profileToken ?? "";
+  }
+
+  const { res, requestProfileId, requestProfileToken } = await fetchWithSession(
+    buildUrl(route, options.path, options.query),
+    init,
+    snapshot,
+    options.retryAuthentication !== false && !authExchangeOperations.has(key),
+  );
+  if (snapshot && !isProfileRequestContextCurrent(snapshot)) {
+    throw new StaleApiRequestContextError();
+  }
+
+  try {
+    const decoded = await decodeV2Response(key, res);
+    options.onResponse?.(res);
+    return decoded;
+  } catch (err) {
+    if (
+      err instanceof V2ProblemError &&
+      err.status === 403 &&
+      err.problemType === "profile_verification_required"
+    ) {
+      reportProfileUnverified(requestProfileId, requestProfileToken, snapshot);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Decodes one v2 response for the operation `key`: the branded success body,
+ * or a thrown `V2ProblemError` / `V2TransportError`. Exposed for the few
+ * callers that must issue the fetch themselves (an explicit bearer token
+ * outside the shared session) and still want contract-shaped answers.
+ */
+export async function decodeV2Response<K extends V2OperationKey>(
+  key: K,
+  res: Response,
+): Promise<V2Result<K>> {
+  const operationId: string = v2Operations[key];
+  if (res.ok) {
+    const decoded = await readBody(res, operationId);
+    return brand(decoded as SuccessOf<OperationOf<K>>);
+  }
+
+  const body = await readBody(res, operationId);
+  if (!isProblem(body)) {
+    throw new V2TransportError(
+      operationId,
+      res.status,
+      "the error response is not a problem document",
+    );
+  }
+  throw new V2ProblemError(
+    operationId,
+    body,
+    retryAfterSecondsOf(res),
+    res.headers.get("ETag"),
+    res.headers,
+  );
+}

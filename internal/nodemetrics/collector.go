@@ -102,6 +102,7 @@ func (collector) Describe(chan<- *prometheus.Desc) {}
 // sampler holds while doing I/O, so it cannot block a scrape.
 func (c collector) Collect(ch chan<- prometheus.Metric) {
 	snapshot := c.sampler.Snapshot()
+	collectAttribution(ch, snapshot)
 	if !snapshot.Available {
 		return
 	}
@@ -109,12 +110,20 @@ func (c collector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, value, labels...)
 	}
 	if system := snapshot.System; system != nil {
-		gauge(descCPUPercent, float64(system.CPUPct))
-		gauge(descLoad1, system.Load1)
-		gauge(descMemoryUsed, float64(system.MemUsedMB)*float64(bytesPerMB))
-		gauge(descMemoryTotal, float64(system.MemTotalMB)*float64(bytesPerMB))
-		gauge(descNetworkRx, float64(system.NetRxBps))
-		gauge(descNetworkTx, float64(system.NetTxBps))
+		if snapshot.Attribution == nil || snapshot.Attribution.CPU.Available {
+			gauge(descCPUPercent, float64(system.CPUPct))
+		}
+		if snapshot.Attribution == nil || snapshot.Attribution.Load.Available {
+			gauge(descLoad1, system.Load1)
+		}
+		if snapshot.Attribution == nil || snapshot.Attribution.Memory.Available {
+			gauge(descMemoryUsed, float64(system.MemUsedMB)*float64(bytesPerMB))
+			gauge(descMemoryTotal, float64(system.MemTotalMB)*float64(bytesPerMB))
+		}
+		if snapshot.Attribution == nil || snapshot.Attribution.Network.Available {
+			gauge(descNetworkRx, float64(system.NetRxBps))
+			gauge(descNetworkTx, float64(system.NetTxBps))
+		}
 		const bytesPerGB = float64(1024 * 1024 * 1024)
 		for _, disk := range system.Disks {
 			if disk.Unavailable || disk.Role == "" {

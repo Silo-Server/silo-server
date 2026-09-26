@@ -1,9 +1,16 @@
 import { useCallback, useState } from "react";
+import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
+import {
+  legacyAudiobookIntervals,
+  SEEK_CHOICES,
+  seekDefault,
+  type SeekDirection,
+} from "@/lib/seekIntervals";
+import { toast } from "sonner";
 import { storage } from "@/utils/storage";
 
-export const SKIP_INTERVAL_CHOICES = [5, 10, 15, 30, 45, 60, 90] as const;
-export const DEFAULT_SKIP_BACK_SECONDS = 10;
-export const DEFAULT_SKIP_FORWARD_SECONDS = 30;
+export const DEFAULT_SKIP_BACK_SECONDS = seekDefault("audiobook", "back");
+export const DEFAULT_SKIP_FORWARD_SECONDS = seekDefault("audiobook", "forward");
 
 export const AUDIOBOOK_RATE_MIN = 0.5;
 export const AUDIOBOOK_RATE_MAX = 3;
@@ -17,21 +24,10 @@ export function clampAudiobookRate(rate: number): number {
   return Number((Math.round(clamped / AUDIOBOOK_RATE_STEP) * AUDIOBOOK_RATE_STEP).toFixed(2));
 }
 
-type SkipKey = typeof storage.KEYS.AUDIOBOOK_SKIP_BACK | typeof storage.KEYS.AUDIOBOOK_SKIP_FORWARD;
-
-function readSkipSeconds(key: SkipKey, fallback: number): number {
-  const raw = storage.get(key);
-  const value = raw == null ? NaN : Number(raw);
-  return (SKIP_INTERVAL_CHOICES as readonly number[]).includes(value) ? value : fallback;
-}
-
-export function getAudiobookSkipBack(): number {
-  return readSkipSeconds(storage.KEYS.AUDIOBOOK_SKIP_BACK, DEFAULT_SKIP_BACK_SECONDS);
-}
-
-export function getAudiobookSkipForward(): number {
-  return readSkipSeconds(storage.KEYS.AUDIOBOOK_SKIP_FORWARD, DEFAULT_SKIP_FORWARD_SECONDS);
-}
+const LEGACY_SKIP_KEYS = {
+  back: storage.KEYS.AUDIOBOOK_SKIP_BACK,
+  forward: storage.KEYS.AUDIOBOOK_SKIP_FORWARD,
+} as const;
 
 /** Smart rewind defaults to on; only an explicit "false" disables it. */
 export function getAudiobookSmartRewind(): boolean {
@@ -42,37 +38,78 @@ export interface AudiobookPrefs {
   skipBack: number;
   skipForward: number;
   smartRewind: boolean;
+  /** Selectable intervals per direction, from the settings contract. */
+  choices: Record<SeekDirection, number[]>;
+  canEditSkipIntervals: boolean;
+  hasSharedSkipIntervals: boolean;
+  /** The server supports shared intervals but the profile's values could not be read. */
+  sharedSkipIntervalsError: boolean;
+  isSavingSkipIntervals: boolean;
   setSkipBack: (seconds: number) => void;
   setSkipForward: (seconds: number) => void;
   setSmartRewind: (enabled: boolean) => void;
 }
 
 /**
- * Device-local audiobook player preferences. Instantiate once per player
+ * Profile-wide intervals with device-local speed and smart rewind preferences. Instantiate once per player
  * (in AudiobookPlayer) and pass down — multiple instances do not observe each
  * other's changes within a render lifetime.
  */
 export function useAudiobookPrefs(): AudiobookPrefs {
-  const [skipBack, setSkipBackState] = useState(getAudiobookSkipBack);
-  const [skipForward, setSkipForwardState] = useState(getAudiobookSkipForward);
+  const shared = useSeekPreferences("audiobook");
+  // Browser-local intervals: the value store on servers without shared
+  // settings, and what keeps playing while a supporting server's values load.
+  const [local, setLocal] = useState(legacyAudiobookIntervals);
   const [smartRewind, setSmartRewindState] = useState(getAudiobookSmartRewind);
 
-  const setSkipBack = useCallback((seconds: number) => {
-    setSkipBackState(seconds);
-    storage.set(storage.KEYS.AUDIOBOOK_SKIP_BACK, String(seconds));
-  }, []);
+  const useShared = shared.supported && !shared.isLoading;
+  const resolve = (direction: SeekDirection) =>
+    useShared
+      ? direction === "back"
+        ? shared.skipBack
+        : shared.skipForward
+      : (local[direction] ?? seekDefault("audiobook", direction));
 
-  const setSkipForward = useCallback((seconds: number) => {
-    setSkipForwardState(seconds);
-    storage.set(storage.KEYS.AUDIOBOOK_SKIP_FORWARD, String(seconds));
-  }, []);
+  const { supported, legacyAvailable, save } = shared;
+  const setSkip = useCallback(
+    (direction: SeekDirection, seconds: number) => {
+      if (supported) {
+        void save(direction, seconds).catch(() =>
+          toast.error(
+            direction === "back"
+              ? "Failed to save rewind interval"
+              : "Failed to save fast-forward interval",
+          ),
+        );
+        return;
+      }
+      if (!legacyAvailable) return;
+      setLocal((prev) => ({ ...prev, [direction]: seconds }));
+      storage.set(LEGACY_SKIP_KEYS[direction], String(seconds));
+    },
+    [legacyAvailable, save, supported],
+  );
+  const setSkipBack = useCallback((seconds: number) => setSkip("back", seconds), [setSkip]);
+  const setSkipForward = useCallback((seconds: number) => setSkip("forward", seconds), [setSkip]);
 
   const setSmartRewind = useCallback((enabled: boolean) => {
     setSmartRewindState(enabled);
     storage.set(storage.KEYS.AUDIOBOOK_SMART_REWIND, String(enabled));
   }, []);
 
-  return { skipBack, skipForward, smartRewind, setSkipBack, setSkipForward, setSmartRewind };
+  return {
+    skipBack: resolve("back"),
+    skipForward: resolve("forward"),
+    smartRewind,
+    choices: SEEK_CHOICES.audiobook,
+    canEditSkipIntervals: shared.supported || shared.legacyAvailable,
+    hasSharedSkipIntervals: shared.supported,
+    sharedSkipIntervalsError: shared.supported && shared.error != null,
+    isSavingSkipIntervals: shared.isSaving,
+    setSkipBack,
+    setSkipForward,
+    setSmartRewind,
+  };
 }
 
 // --- Per-book playback rate memory -----------------------------------------

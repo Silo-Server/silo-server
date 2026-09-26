@@ -1,0 +1,16 @@
+{
+  "key": "fixture",
+  "name": "Fixture task",
+  "description": "",
+  "category": "system",
+  "state": "running",
+  "progress": 0,
+  "manual_only": false,
+  "triggers": [
+    {
+      "type": "interval",
+      "interval_ms": 1000
+    }
+  ],
+  "execution_scope": "process"
+}

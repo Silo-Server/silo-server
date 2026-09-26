@@ -19,7 +19,7 @@ func TestHandleImagesCapability(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 
-	var got imagesCapabilityResponse
+	var got ImagesCapabilityResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
@@ -29,6 +29,9 @@ func TestHandleImagesCapability(t *testing.T) {
 	}
 	if got.Param != "image_size" {
 		t.Errorf("param = %q, want image_size", got.Param)
+	}
+	if got.SeasonListArtworkParam != "include_artwork" {
+		t.Errorf("season artwork parameter = %q", got.SeasonListArtworkParam)
 	}
 	wantSizes := []imagesize.Size{imagesize.Small, imagesize.Medium, imagesize.Large, imagesize.Original}
 	if len(got.Sizes) != len(wantSizes) {

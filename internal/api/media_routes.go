@@ -9,6 +9,8 @@ import (
 )
 
 var nativeMediaRoutes = []streamtelemetry.MediaRoute{
+	nativeRoute(http.MethodGet, "/api/v2/catalog/items/{id}/themes/{theme_id}/audio", streamtelemetry.ClassTransfer, false),
+	nativeRoute(http.MethodHead, "/api/v2/catalog/items/{id}/themes/{theme_id}/audio", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodGet, "/api/v1/stream/{session_id}", streamtelemetry.ClassPlayback, true),
 	nativeRoute(http.MethodHead, "/api/v1/stream/{session_id}", streamtelemetry.ClassPlayback, true),
 	nativeRoute(http.MethodGet, "/api/v1/stream/{session_id}/subtitles/{track}", streamtelemetry.ClassPlayback, true),
@@ -21,6 +23,10 @@ var nativeMediaRoutes = []streamtelemetry.MediaRoute{
 	nativeRoute(http.MethodGet, "/api/v1/downloads/{id}/file-proxy", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodHead, "/api/v1/downloads/{id}/file-proxy", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodGet, "/api/v1/downloads/{id}/subtitles/{ref}", streamtelemetry.ClassTransfer, false),
+	nativeRoute(http.MethodGet, "/api/v2/direct-download", streamtelemetry.ClassTransfer, false),
+	nativeRoute(http.MethodHead, "/api/v2/direct-download", streamtelemetry.ClassTransfer, false),
+	nativeRoute(http.MethodGet, "/api/v2/direct-download-proxy", streamtelemetry.ClassTransfer, false),
+	nativeRoute(http.MethodHead, "/api/v2/direct-download-proxy", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodGet, "/api/v1/direct-download", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodHead, "/api/v1/direct-download", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodGet, "/api/v1/direct-download-proxy", streamtelemetry.ClassTransfer, false),
@@ -48,12 +54,26 @@ func nativeCapture(pattern string) func(*http.Request) streamtelemetry.CaptureSe
 	}
 }
 
-func declareNativeMediaRoutes() { streamtelemetry.DeclareRoutes(nativeMediaRoutes...) }
+var playbackV2MediaRoutes = []streamtelemetry.MediaRoute{
+	nativeRoute(http.MethodGet, "/api/v2/stream/{session_id}", streamtelemetry.ClassPlayback, true),
+	nativeRoute(http.MethodHead, "/api/v2/stream/{session_id}", streamtelemetry.ClassPlayback, true),
+	nativeRoute(http.MethodGet, "/api/v2/playback/transcode/{session_id}/master.m3u8", streamtelemetry.ClassManifest, true),
+	nativeRoute(http.MethodGet, "/api/v2/playback/transcode/{session_id}/segment/{name}", streamtelemetry.ClassPlayback, true),
+	nativeRoute(http.MethodGet, "/api/v2/stream/{session_id}/subtitles/{track}", streamtelemetry.ClassPlayback, true),
+	nativeRoute(http.MethodHead, "/api/v2/stream/{session_id}/subtitles/{track}", streamtelemetry.ClassPlayback, true),
+}
+
+func declareNativeMediaRoutes() {
+	streamtelemetry.DeclareRoutes(nativeMediaRoutes...)
+	streamtelemetry.DeclareRoutes(playbackV2MediaRoutes...)
+}
 
 func nativeMediaRoute(method, pattern string) streamtelemetry.MediaRoute {
-	for _, route := range nativeMediaRoutes {
-		if route.Method == method && route.Pattern == pattern {
-			return route
+	for _, routes := range [][]streamtelemetry.MediaRoute{nativeMediaRoutes, playbackV2MediaRoutes} {
+		for _, route := range routes {
+			if route.Method == method && route.Pattern == pattern {
+				return route
+			}
 		}
 	}
 	panic("undeclared native media route: " + method + " " + pattern)

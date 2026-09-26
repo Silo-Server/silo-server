@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
 type playbackCommandRecord struct {
@@ -18,15 +20,48 @@ type playbackCommandRecord struct {
 // teardown such as an ffmpeg-exit cleanup, where the card is kept so the client
 // can reconstruct.
 func (h *PlaybackHandler) stopPlaybackSession(ctx context.Context, session *playback.Session, userInitiated bool) error {
+	_, err := h.stopPlaybackSessionWithResult(ctx, session, userInitiated)
+	return err
+}
+
+// stopPlaybackSessionWithResult is stopPlaybackSession reporting the history
+// writer's result, which the v2 stop receipt carries.
+func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, session *playback.Session, userInitiated bool) (watchstate.PlaybackStopResult, error) {
 	if h == nil || session == nil || session.ID == "" {
-		return playback.ErrSessionNotFound
+		return watchstate.PlaybackStopResult{}, playback.ErrSessionNotFound
+	}
+	// Replacement preparation holds this lifecycle lock until its new live
+	// session state and durable plan are committed (or rolled back). Wait for
+	// that boundary, then reload the route: callers commonly hold a copy taken
+	// before the replacement started, and deleting authority from that stale
+	// copy would leave the successor transport playable after a successful stop.
+	unlock := h.tm.LockSessionLifecycle(session.ID)
+	defer unlock()
+	current, err := h.sessionMgr.GetSession(session.ID)
+	if err != nil {
+		return watchstate.PlaybackStopResult{}, err
+	}
+	session = current
+	if userInitiated {
+		if err := h.deleteRequiredProgressiveRemuxAuthorityV3(ctx, session); err != nil {
+			return watchstate.PlaybackStopResult{}, fmt.Errorf("persist progressive remux stop: %w", err)
+		}
+		if requiresProgressiveRemuxAuthorityV3(session) {
+			if err := h.tm.CancelRemoteTranscode(ctx, remoteTransportID(session), session.TranscodeNodeURL); err != nil {
+				return watchstate.PlaybackStopResult{}, fmt.Errorf("cancel progressive remux transport: %w", err)
+			}
+		}
 	}
 
 	if err := h.sessionMgr.StopSession(session.ID); err != nil {
-		return err
+		return watchstate.PlaybackStopResult{}, err
 	}
-	h.finalizeSessionStop(ctx, session, true, "stop", userInitiated)
-	return nil
+	if userInitiated {
+		// A user or admin stop is final: revoke the session's stream tokens on
+		// every replica, not just the live entry here.
+		h.StreamDeny.Deny(ctx, session.ID)
+	}
+	return h.finalizeSessionStopWithResult(ctx, session, true, "stop", userInitiated), nil
 }
 
 func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID string, userInitiated bool) error {
@@ -49,6 +84,7 @@ func (h *PlaybackHandler) abortPlaybackSession(ctx context.Context, session *pla
 		return err
 	}
 	h.finalizeSessionAbort(ctx, session, true, "abort")
+	h.markAttemptStoppedServerSide(ctx, session.ID)
 	return nil
 }
 

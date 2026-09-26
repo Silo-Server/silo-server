@@ -35,6 +35,7 @@ const (
 
 // Source is an admin-configured external media server used as an import source.
 type Source struct {
+	Revision      int64     `json:"-"`
 	ID            int       `json:"id"`
 	Name          string    `json:"name"`
 	SourceType    string    `json:"source_type"`
@@ -134,6 +135,7 @@ type PlexServerPublic struct {
 
 // Run represents one history import execution.
 type Run struct {
+	CancelRequested   bool              `json:"-"`
 	ID                string            `json:"id"`
 	UserID            int               `json:"user_id"`
 	ProfileID         string            `json:"profile_id"`
@@ -269,15 +271,6 @@ type localProgressRow struct {
 	UpdatedAt time.Time
 }
 
-type plexAuth struct {
-	BaseURL string
-	Token   string
-	// AccountToken is the plex.tv account token (PIN/OAuth session token or
-	// the user-supplied token), used for account-level fetches such as the
-	// watchlist. May equal Token for manual-token imports.
-	AccountToken string
-}
-
 // --- Admin types ---
 
 // ExternalUser is a user account on an external media server.
@@ -291,6 +284,7 @@ type ExternalUser struct {
 
 // UserMapping persists the link from one external server user to a Silo user + profile.
 type UserMapping struct {
+	Revision         int64      `json:"-"`
 	ID               int        `json:"id"`
 	SourceID         int        `json:"source_id"`
 	ExternalUserID   string     `json:"external_user_id"`
@@ -322,10 +316,18 @@ type SetAdminTokenInput struct {
 }
 
 // BulkRunResult is the response from a bulk admin run request.
+type BulkRunOutcome struct {
+	MappingID int    `json:"mapping_id"`
+	Status    string `json:"status"`
+	Run       *Run   `json:"run,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
 type BulkRunResult struct {
-	Runs    []*Run `json:"runs"`
-	Skipped int    `json:"skipped"`
-	Errors  int    `json:"errors"`
+	Outcomes []BulkRunOutcome `json:"outcomes"`
+	Runs     []*Run           `json:"runs"`
+	Skipped  int              `json:"skipped"`
+	Errors   int              `json:"errors"`
 }
 
 type PlexLoginInput struct {

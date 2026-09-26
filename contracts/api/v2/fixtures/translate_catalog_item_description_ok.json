@@ -1,0 +1,18 @@
+{
+  "id": "42",
+  "target_kind": "item",
+  "content_id": "movie:heat-1995",
+  "include_children": false,
+  "source_language": "en",
+  "target_language": "de",
+  "engine": "openai",
+  "model": "gpt",
+  "status": "pending",
+  "progress": 0,
+  "progress_message": "queued",
+  "fields_done": 0,
+  "fields_total": 2,
+  "force": false,
+  "created_at": "2026-01-02T03:04:05.678Z",
+  "updated_at": "2026-01-02T03:04:05.678Z"
+}

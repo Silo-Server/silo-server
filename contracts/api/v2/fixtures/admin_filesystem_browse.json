@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "name": "a.json.gz",
+      "path": "/catalog-seeds/a.json.gz"
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7ImFmdGVyIjoiL2NhdGFsb2ctc2VlZHMvYS5qc29uLmd6In19.PeLdY9x7QbMvYury9riRcM8ujcoRZDhPLWprafPwLJ0",
+    "has_more": true
+  },
+  "path": "/catalog-seeds",
+  "parent": "/"
+}

@@ -8,7 +8,10 @@ const (
 	ProviderJellyfin = "jellyfin"
 )
 
-const webhookSyncPathPrefix = "/api/v1/webhook-sync/webhooks/"
+// webhookSyncPathPrefix is the delivery namespace handed to the external server
+// (Plex/Emby/Jellyfin) when a connection is created or rotated. Minted in v2 so
+// the stored URL survives the /api/v1 tombstone; the v2 projection only reads it.
+const webhookSyncPathPrefix = "/api/v2/webhook-sync/webhooks/"
 
 type Connection struct {
 	ID                        string     `json:"id"`

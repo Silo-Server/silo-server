@@ -164,6 +164,7 @@ type HWAccelInfo struct {
 	Source              string               `json:"source"`
 	NodeURL             string               `json:"node_url,omitempty"`
 	Transformations     []TransformationV3   `json:"transformations,omitempty"`
+	TransportFeatures   []string             `json:"transport_features,omitempty"`
 	ToneMapCapabilities tonemap.Capabilities `json:"tone_map_capabilities,omitempty"`
 	// BootID is this host's kernel boot identity (Linux only). Paired with a
 	// render device's PCI address it distinguishes "same GPU, same boot" from

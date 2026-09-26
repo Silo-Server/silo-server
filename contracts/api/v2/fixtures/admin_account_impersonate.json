@@ -1,0 +1,14 @@
+{
+  "access_token": "fixture-access",
+  "refresh_token": "fixture-refresh",
+  "expires_in": 3600,
+  "user": {
+    "id": "7",
+    "username": "sample",
+    "email": "",
+    "role": "user",
+    "permissions": [],
+    "download_allowed": false,
+    "password_change_required": false
+  }
+}

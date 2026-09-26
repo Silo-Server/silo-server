@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
@@ -58,6 +59,9 @@ var SensitiveSettingKeys = map[string]bool{
 	"s3.operational_access_key":   true,
 	"s3.operational_secret_key":   true,
 	"s3.operational_token_secret": true,
+	// A staged storage transition contains a complete target credential bundle.
+	// It is machine-managed and cleared when the transition commits.
+	"storage.transition.target": true,
 
 	// Redis — url may embed credentials (redis://:pass@host); sentinel_password
 	// is read at db_loader L334 and was MISSING from the old redaction map.
@@ -256,8 +260,10 @@ func (r *EncryptedSettingsRepo) Get(ctx context.Context, key string) (string, er
 	return out, nil
 }
 
-// GetAll reads every setting and decrypts any enc:v1: value in place, so
-// callers (notably config.LoadFromDB) receive a fully plaintext map.
+// GetAll reads every setting and decrypts any enc:v1: value in place. An
+// unreadable transition receipt is omitted from configuration snapshots so
+// startup can reach blocked recovery. Its owner still receives the error from
+// Get; unreadable active settings remain fatal.
 func (r *EncryptedSettingsRepo) GetAll(ctx context.Context) (map[string]string, error) {
 	all, err := r.inner.GetAll(ctx)
 	if err != nil {
@@ -266,6 +272,10 @@ func (r *EncryptedSettingsRepo) GetAll(ctx context.Context) (map[string]string, 
 	for key, value := range all {
 		out, derr := r.cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key))
 		if derr != nil {
+			if key == config.StorageTransitionTargetKey {
+				delete(all, key)
+				continue
+			}
 			return nil, fmt.Errorf("decrypt setting %q: %w", key, derr)
 		}
 		all[key] = out

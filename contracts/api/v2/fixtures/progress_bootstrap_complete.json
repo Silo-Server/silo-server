@@ -1,0 +1,25 @@
+{
+  "snapshot_id": "5e6af827-e7fc-4ebc-84f3-597c888b77ae",
+  "installation_id": "installation",
+  "account_id": "1",
+  "profile_id": "p-owner",
+  "generation": "generation",
+  "mode": "full_replace",
+  "captured_at": "2099-01-01T00:00:00.000Z",
+  "expires_at": "2099-01-01T00:15:00.000Z",
+  "item_count": 2,
+  "items": [
+    {
+      "media_item_id": "movie-b",
+      "position_seconds": 1.5,
+      "duration_seconds": 0,
+      "completed": false,
+      "updated_at": "2099-01-01T00:00:00.000Z"
+    }
+  ],
+  "page": {
+    "has_more": false
+  },
+  "complete": true,
+  "completion_token": "eyJ2IjoxLCJwIjp7InBvc2l0aW9uIjp7IlNuYXBzaG90SUQiOiI1ZTZhZjgyNy1lN2ZjLTRlYmMtODRmMy01OTdjODg4Yjc3YWUiLCJJbnN0YWxsYXRpb25JRCI6Imluc3RhbGxhdGlvbiIsIkdlbmVyYXRpb24iOiJnZW5lcmF0aW9uIiwiQWNjZXNzRGlnZXN0IjoiYWNjZXNzIiwiVXNlcklEIjoxLCJQcm9maWxlSUQiOiJwLW93bmVyIiwiUGFnZVNpemUiOjEsIkFmdGVyIjoyfSwiZXhwaXJlc19hdCI6IjIwOTktMDEtMDFUMDA6MTU6MDBaIiwibW9kZSI6ImZ1bGxfcmVwbGFjZSJ9fQ.qCBIC3KNYHyl7a8CYL46iW2l4p4L7CBquO1fzpuBZ5U"
+}

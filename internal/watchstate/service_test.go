@@ -833,3 +833,34 @@ func TestManualMarkWatchedSeriesIsAtomicOnCancel(t *testing.T) {
 		}
 	}
 }
+
+func TestManualMarkWatchedSkipsAlreadyCompletedTargets(t *testing.T) {
+	store, db := newTestUserStore(t)
+	t.Cleanup(func() { _ = db.Close() })
+	createWatchstateProfile(t, store)
+	service := NewService(testStoreProvider{store: store})
+	targets := []LeafWatchTarget{{MediaItemID: "movie-1", DurationSeconds: 7200}, {MediaItemID: "movie-2", DurationSeconds: 5400}}
+
+	first, err := service.RecordManualMarkWatchedWithResult(context.Background(), 1, "profile-1", targets[:1], time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("first mark: %v", err)
+	}
+	if len(first.Entries) != 1 {
+		t.Fatalf("first mark entries = %+v, want one", first.Entries)
+	}
+	// A series-style retry over both: only the unwatched leaf records.
+	second, err := service.RecordManualMarkWatchedWithResult(context.Background(), 1, "profile-1", targets, time.Date(2026, 4, 26, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("second mark: %v", err)
+	}
+	if len(second.Entries) != 1 || second.Entries[0].MediaItemID != "movie-2" {
+		t.Fatalf("second mark entries = %+v, want only movie-2", second.Entries)
+	}
+	history, err := store.ListHistory(context.Background(), "profile-1", 10, 0)
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("history = %+v, want one row per leaf", history)
+	}
+}

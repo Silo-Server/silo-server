@@ -21,13 +21,19 @@ func TestWatcherNodeRowID(t *testing.T) {
 	if id, ok := w.NodeRowID(); ok || id != 0 {
 		t.Fatalf("unresolved NodeRowID = (%d, %t), want (0, false)", id, ok)
 	}
-	w.rememberNodeRowID(11)
+	w.rememberNodeRegistration(11, "https://registered-node.example")
 	if id, ok := w.NodeRowID(); !ok || id != 11 {
 		t.Fatalf("resolved NodeRowID = (%d, %t), want (11, true)", id, ok)
+	}
+	if registeredURL, ok := w.NodeRegisteredURL(); !ok || registeredURL != "https://registered-node.example" {
+		t.Fatalf("resolved NodeRegisteredURL = (%q, %t)", registeredURL, ok)
 	}
 	w.forgetNodeRowID()
 	if id, ok := w.NodeRowID(); ok || id != 0 {
 		t.Fatalf("forgotten NodeRowID = (%d, %t), want (0, false)", id, ok)
+	}
+	if registeredURL, ok := w.NodeRegisteredURL(); ok || registeredURL != "" {
+		t.Fatalf("forgotten NodeRegisteredURL = (%q, %t), want empty and false", registeredURL, ok)
 	}
 }
 

@@ -8,11 +8,11 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import type { ItemDetail } from "@/api/types";
 import {
-  useMetadataAIStatus,
   useMetadataTranslationJobs,
   useTranslateItemMetadata,
   type MetadataTranslationJob,
 } from "@/hooks/queries/items";
+import { useMetadataAIStatus } from "@/hooks/queries/metadataAI";
 import { invalidateMediaSurfaceQueries } from "@/hooks/queries/mediaSurfaceRefresh";
 import { LANGUAGES } from "@/player/utils/languageNames";
 

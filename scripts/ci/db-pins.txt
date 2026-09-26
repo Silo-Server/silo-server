@@ -1,0 +1,62 @@
+# DB-backed query-budget pins. CI runs them against a freshly migrated
+# Postgres; locally, `make test-db-pins` runs them against the database named
+# by SILO_TEST_DATABASE_URL.
+#
+# One test per line: the package directory, then the top-level test name.
+# Each test asserts how many statements, rows or resolver calls an operation
+# costs, that a query plan uses its index, or the result parity that such a
+# budget relies on. The runner (scripts/ci/dbpins) fails when a listed test is
+# missing, skipped or failing, so a pin cannot switch itself off by skipping on
+# an unset database URL or an unmigrated schema.
+#
+# Add a pin in the same change that sets its budget. It must pass on a freshly
+# migrated database without skipping.
+
+# Schema: every content_id-family foreign key cascades on update, so the online
+# re-id can rename an item whatever child rows it has (#933).
+./migrations TestContentIDFamilyFKsCascadeOnUpdatePostgres
+
+# Detail and versions: localization and folder reads per detail build, and the
+# versions endpoint issuing fewer queries than full detail with no image work.
+./internal/catalog TestBuildMediaItemDetailSharesLocalization
+./internal/catalog TestGetItemVersionsSkipsPresentationAndPlaybackSafety
+./internal/catalog TestGetItemVersionsKeepsChapterImagesAndEmptyFiles
+./internal/catalog TestGetItemVersionsMatchesDetail
+./internal/catalog TestGetItemVersionsAccessAndMissing
+
+# Listings: COUNT queries only when a total is requested and cannot be derived
+# from the page.
+./internal/catalog TestQueryExecutorTerminalPageTotals
+./internal/catalog TestJellycompatPredicatesPostgres
+
+# Card play targets: leaf cards and a validated anchor hint resolve without a
+# watch-progress query.
+./internal/catalog TestPlayableTargetResolverProfileStateAvailabilityAndAccess
+
+# Keyset pages: ratings and collection continuations read an index in page
+# order, with no Sort node.
+./internal/catalog TestRatingsPageIndexDB
+./internal/catalog TestLibraryCollectionContinuationDB
+
+# Metadata refresh: season and episode writes cost the same number of
+# statements for 1 and 100 episodes; episode refresh debt the same for 1, 100
+# and 1000, with one DELETE per sync.
+./internal/metadata TestPersistSeasonsAndEpisodes_QueryCountIsBounded
+./internal/metadata TestRefreshSeriesEpisodeMetadataStateDebtQueries
+./internal/metadata TestRefreshSeriesEpisodeMetadataStateRetainsFailureDuringIncompleteSync
+
+# Home sections: one overlay summary row read per card.
+./internal/sections TestOverlaySummariesOnlyDecodeWinner
+./internal/sections TestOverlaySummariesRankingMatchesGo
+
+# Settings: one query per batched resolution, whatever its scopes and keys.
+./internal/userstore/pgstore TestPostgresResolutionIssuesOneQuery
+
+# Book scans (beta): unchanged files skip without per-file or literary-works
+# queries.
+./internal/scanner TestUnchangedBooksDoNotQueryLiteraryWorks
+./internal/scanner TestEbookScanBatchesSkipQueries
+./internal/scanner TestEbookSkipPreloadPreservesEligibility
+
+# ID-less direct ranges reuse full session payloads while checking identities.
+./internal/jellycompat TestWebOSDurableRangeDoesNotReloadSnapshots

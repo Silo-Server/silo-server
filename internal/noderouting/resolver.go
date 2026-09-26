@@ -112,12 +112,13 @@ func (a sessionPlannerAdapter) planSession(request nodepool.RouteRequest, transc
 
 type ResolveRequest struct {
 	Request
-	SessionID            string
-	CurrentTranscodeURL  string
-	EstimatedBitrateKbps int
-	TranscodeEligible    func(*nodepool.Node) bool
-	ProxyEligible        func(*nodepool.Node) bool
-	ExcludedShapeIDs     map[string]struct{}
+	SessionID              string
+	CurrentTranscodeURL    string
+	EstimatedBitrateKbps   int
+	TranscodeEligible      func(*nodepool.Node) bool
+	ProxyEligible          func(*nodepool.Node) bool
+	ProxyExecutionEligible func(*nodepool.Node) bool
+	ExcludedShapeIDs       map[string]struct{}
 }
 
 type Outcome string
@@ -169,6 +170,10 @@ func Resolve(planner nodepool.RoutePlanner, request ResolveRequest) (Decision, e
 			continue
 		}
 		plannerAttempted = true
+		proxyEligible := request.ProxyEligible
+		if shape.Execution == ExecutionProxy {
+			proxyEligible = request.ProxyExecutionEligible
+		}
 		plan := planner.PlanRoute(nodepool.RouteRequest{
 			SessionID:            request.SessionID,
 			CurrentTranscodeURL:  request.CurrentTranscodeURL,
@@ -176,7 +181,7 @@ func Resolve(planner nodepool.RoutePlanner, request ResolveRequest) (Decision, e
 			NeedsTranscode:       shape.NeedsTranscodeNode(),
 			NeedsProxy:           shape.NeedsProxyNode(),
 			TranscodeEligible:    request.TranscodeEligible,
-			ProxyEligible:        request.ProxyEligible,
+			ProxyEligible:        proxyEligible,
 		})
 		if shape.NeedsTranscodeNode() != (plan.TranscodeNode != nil) ||
 			shape.NeedsProxyNode() != (plan.ProxyNode != nil) {

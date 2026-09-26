@@ -1,3 +1,4 @@
+import { policyDomain } from "@/api/adminPolicy";
 import { Play } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -59,12 +60,21 @@ function SimulateVerdict({ decision }: { decision: unknown }) {
   }
 
   if (typeof record.unrestricted === "boolean") {
-    const rating = typeof record.max_content_rating === "string" ? record.max_content_rating : "";
+    // An override's ceiling is reported beside the base one; the server
+    // enforces whichever admits less, so show both limits.
+    const ratings = [record.max_content_rating, record.max_content_rating_override].filter(
+      (value): value is string => typeof value === "string" && value !== "",
+    );
     const quality =
       typeof record.max_playback_quality === "string" ? record.max_playback_quality : "";
+    const advisoryAge =
+      typeof record.max_advisory_age === "number" && record.max_advisory_age > 0
+        ? record.max_advisory_age
+        : 0;
     const parts = [
       record.unrestricted ? "All libraries" : "Restricted libraries",
-      rating ? `rating ≤ ${rating}` : "any rating",
+      ratings.length > 0 ? ratings.map((rating) => `rating ≤ ${rating}`).join(" · ") : "any rating",
+      ...(advisoryAge ? [`advisory age ≤ ${advisoryAge}`] : []),
       quality ? `quality ≤ ${quality}` : "any quality",
     ];
     return (
@@ -109,7 +119,7 @@ export function PolicySimulatePanel({ domains, domain, source }: PolicySimulateP
 
     try {
       await simulate.mutateAsync({
-        domain: selectedDomain,
+        domain: policyDomain(selectedDomain),
         source: source?.trim() ? source : undefined,
         input: parsedInput,
       });

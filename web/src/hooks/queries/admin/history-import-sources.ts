@@ -1,9 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import {
+  adminImportScope,
+  adminImportCapabilities,
+  listAdminImportSources,
+  createAdminImportSource,
+  updateAdminImportSource,
+  deleteAdminImportSource,
+  setAdminImportToken,
+  clearAdminImportToken,
+  discoverAdminImportUsers,
+  plexAdminImportLogin,
+} from "@/api/v2/adminHistoryImports";
 import type {
   CreateHistoryImportSourceRequest,
-  HistoryImportExternalUser,
-  HistoryImportSource,
   SetHistoryImportAdminTokenRequest,
   UpdateHistoryImportSourceRequest,
 } from "@/api/types";
@@ -12,19 +21,17 @@ import { toast } from "sonner";
 
 export function useAdminHistoryImportSources() {
   return useQuery({
-    queryKey: adminKeys.historyImportSources(),
-    queryFn: () => api<HistoryImportSource[]>("/admin/history-import-sources").then((d) => d ?? []),
+    queryKey: [...adminKeys.historyImportSources(), adminImportScope()],
+    queryFn: listAdminImportSources,
+    retry: false,
   });
 }
 
 export function useCreateAdminHistoryImportSource() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateHistoryImportSourceRequest) =>
-      api<HistoryImportSource>("/admin/history-import-sources", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    retry: false,
+    mutationFn: (body: CreateHistoryImportSourceRequest) => createAdminImportSource(body),
     onSuccess: () => {
       toast.success("Saved server created");
       queryClient.invalidateQueries({ queryKey: adminKeys.historyImportSources() });
@@ -39,11 +46,16 @@ export function useCreateAdminHistoryImportSource() {
 export function useUpdateAdminHistoryImportSource() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body }: { id: number; body: UpdateHistoryImportSourceRequest }) =>
-      api<HistoryImportSource>(`/admin/history-import-sources/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
+    retry: false,
+    mutationFn: ({
+      id,
+      body,
+      etag,
+    }: {
+      id: number;
+      body: UpdateHistoryImportSourceRequest;
+      etag?: string;
+    }) => updateAdminImportSource(id, body, etag),
     onSuccess: () => {
       toast.success("Saved server updated");
       queryClient.invalidateQueries({ queryKey: adminKeys.historyImportSources() });
@@ -58,7 +70,8 @@ export function useUpdateAdminHistoryImportSource() {
 export function useDeleteAdminHistoryImportSource() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => api(`/admin/history-import-sources/${id}`, { method: "DELETE" }),
+    retry: false,
+    mutationFn: ({ id, etag }: { id: number; etag?: string }) => deleteAdminImportSource(id, etag),
     onSuccess: () => {
       toast.success("Saved server deleted");
       queryClient.invalidateQueries({ queryKey: adminKeys.historyImportSources() });
@@ -73,11 +86,16 @@ export function useDeleteAdminHistoryImportSource() {
 export function useSetAdminSourceToken() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body }: { id: number; body: SetHistoryImportAdminTokenRequest }) =>
-      api(`/admin/history-imports/sources/${id}/token`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
+    retry: false,
+    mutationFn: ({
+      id,
+      body,
+      etag,
+    }: {
+      id: number;
+      body: SetHistoryImportAdminTokenRequest;
+      etag?: string;
+    }) => setAdminImportToken(id, body.token, etag),
     onSuccess: () => {
       toast.success("Admin token saved");
       queryClient.invalidateQueries({ queryKey: adminKeys.historyImportSources() });
@@ -91,8 +109,8 @@ export function useSetAdminSourceToken() {
 export function useClearAdminSourceToken() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) =>
-      api(`/admin/history-imports/sources/${id}/token`, { method: "DELETE" }),
+    retry: false,
+    mutationFn: ({ id, etag }: { id: number; etag?: string }) => clearAdminImportToken(id, etag),
     onSuccess: () => {
       toast.success("Admin token removed");
       queryClient.invalidateQueries({ queryKey: adminKeys.historyImportSources() });
@@ -105,11 +123,8 @@ export function useClearAdminSourceToken() {
 
 export function useDiscoverExternalUsers(sourceId: number | undefined) {
   return useQuery({
-    queryKey: adminKeys.historyImportExternalUsers(sourceId ?? 0),
-    queryFn: () =>
-      api<HistoryImportExternalUser[]>(`/admin/history-imports/sources/${sourceId}/users`).then(
-        (d) => d ?? [],
-      ),
+    queryKey: [...adminKeys.historyImportExternalUsers(sourceId ?? 0), adminImportScope()],
+    queryFn: () => discoverAdminImportUsers(sourceId!),
     enabled: false, // manually triggered
     retry: false,
   });
@@ -117,13 +132,18 @@ export function useDiscoverExternalUsers(sourceId: number | undefined) {
 
 export function usePlexLogin() {
   return useMutation({
-    mutationFn: (body: { username: string; password: string }) =>
-      api<{ token: string }>("/admin/history-imports/plex/login", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    retry: false,
+    mutationFn: plexAdminImportLogin,
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Plex login failed");
     },
+  });
+}
+
+export function useAdminHistoryImportCapabilities() {
+  return useQuery({
+    queryKey: ["admin", "historyImportCapabilities", adminImportScope()],
+    queryFn: adminImportCapabilities,
+    retry: false,
   });
 }

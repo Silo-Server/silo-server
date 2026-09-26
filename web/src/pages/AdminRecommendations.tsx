@@ -479,7 +479,7 @@ export default function AdminRecommendations() {
     );
 
   const sensitiveConfigured = sensitiveData?.configured ?? [];
-  const serverSettings = settings ?? {};
+  const serverSettings: Record<string, string> = settings ?? {};
   const embeddingLock = parseRecommendationEmbeddingLock(
     serverSettings["recommendations.embedding_lock"],
   );

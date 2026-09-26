@@ -1,3 +1,4 @@
+import { JobPageControls } from "@/components/admin/JobPageControls";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import type {
@@ -23,6 +24,7 @@ import {
   Dialog,
   DialogContent,
   DialogHeader,
+  DialogDescription,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
@@ -46,6 +48,7 @@ import { formatDateTime } from "@/lib/datetime";
 
 export default function AdminCatalogMaintenance() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [execution, setExecution] = useState<"queued" | "synchronous">("queued");
   const exportJobsQuery = useCatalogExportJobs();
   const importJobsQuery = useCatalogImportJobs();
   const importSourcesQuery = useCatalogImportSources();
@@ -84,6 +87,7 @@ export default function AdminCatalogMaintenance() {
 
   function resetImportState() {
     setImportSource("local_path");
+    setExecution("queued");
     setLocalPath("/catalog-seeds/");
     setSelectedExportJobId("");
     setSelectedArtifactKey("");
@@ -106,6 +110,7 @@ export default function AdminCatalogMaintenance() {
     importMutation.mutate(
       {
         source: importSource,
+        execution,
         ...(importSource === "local_path"
           ? { local_path: localPath.trim() }
           : importSource === "export_job"
@@ -141,11 +146,11 @@ export default function AdminCatalogMaintenance() {
         <div className="space-y-1">
           <h2 className="text-lg font-semibold">Catalog Import & Export</h2>
           <p className="text-muted-foreground text-sm">
-            Queue full catalog exports, import seeds from uploads or S3, and watch background job
+            Queue full catalog exports, import seeds from files or S3, and watch background job
             progress in one place.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="ml-auto flex shrink-0 flex-wrap justify-end gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -175,6 +180,9 @@ export default function AdminCatalogMaintenance() {
             <DialogContent className="sm:max-w-2xl">
               <DialogHeader>
                 <DialogTitle>Import Catalog Seed</DialogTitle>
+                <DialogDescription>
+                  Import a catalog seed with optional path rewrites.
+                </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleImportSubmit} className="space-y-4">
                 <div className="space-y-2">
@@ -195,6 +203,26 @@ export default function AdminCatalogMaintenance() {
                       <SelectItem value="remote_url">Remote URL</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Execution</Label>
+                  <Select
+                    value={execution}
+                    onValueChange={(value: "queued" | "synchronous") => setExecution(value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="queued">Background job</SelectItem>
+                      <SelectItem value="synchronous">Import and wait</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-muted-foreground text-xs">
+                    {execution === "queued"
+                      ? "A worker reads the source later. Local files must be available on that worker."
+                      : "Keep this request open until the import commits. If the connection is lost, check the catalog before trying again."}
+                  </p>
                 </div>
                 {importSource === "local_path" ? (
                   <div className="space-y-2">
@@ -240,6 +268,25 @@ export default function AdminCatalogMaintenance() {
                       catalog seed file on the server, or select a detected file from{" "}
                       <span className="font-mono">/catalog-seeds/</span>.
                     </p>
+                    {localImportSourcesQuery.hasNextPage && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={localImportSourcesQuery.isFetchingNextPage}
+                        onClick={() => void localImportSourcesQuery.fetchNextPage()}
+                      >
+                        Load more local files
+                      </Button>
+                    )}
+                    {localImportSourcesQuery.isError && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void localImportSourcesQuery.restart()}
+                      >
+                        Retry local files
+                      </Button>
+                    )}
                   </div>
                 ) : importSource === "export_job" ? (
                   <div className="space-y-2">
@@ -283,6 +330,25 @@ export default function AdminCatalogMaintenance() {
                         />
                         Refresh
                       </Button>
+                      {importSourcesQuery.hasNextPage && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={importSourcesQuery.isFetchingNextPage}
+                          onClick={() => void importSourcesQuery.fetchNextPage()}
+                        >
+                          Load more bucket files
+                        </Button>
+                      )}
+                      {importSourcesQuery.isError && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => void importSourcesQuery.restart()}
+                        >
+                          Retry bucket files
+                        </Button>
+                      )}
                     </div>
                     <Select value={selectedArtifactKey} onValueChange={setSelectedArtifactKey}>
                       <SelectTrigger>
@@ -404,6 +470,7 @@ export default function AdminCatalogMaintenance() {
             <Badge variant="secondary">{importJobs.length}</Badge>
           )}
         </div>
+        <JobPageControls query={importJobsQuery} label="Load older imports" />
         <div className="divide-border/60 divide-y">
           {importJobs.length === 0 ? (
             <div className="text-muted-foreground px-4 py-5 text-sm">
@@ -490,6 +557,7 @@ export default function AdminCatalogMaintenance() {
             <Badge variant="secondary">{exportJobs.length}</Badge>
           )}
         </div>
+        <JobPageControls query={exportJobsQuery} label="Load older exports" />
         <div className="divide-border/60 divide-y">
           {exportJobs.length === 0 ? (
             <div className="text-muted-foreground px-4 py-5 text-sm">
@@ -568,14 +636,16 @@ export default function AdminCatalogMaintenance() {
                         Download
                       </Button>
                     ) : null}
-                    {job.status === "completed" && !job.public_url ? (
+                    {job.status === "completed" &&
+                    !job.public_url &&
+                    job.public_link_supported !== false ? (
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => publishMutation.mutate(job.id)}
                         disabled={publishMutation.isPending}
                       >
-                        Publish
+                        Create seven-day link
                       </Button>
                     ) : null}
                     {job.public_url ? (

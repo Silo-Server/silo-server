@@ -26,7 +26,12 @@ import LibraryMultiSelect from "@/components/LibraryMultiSelect";
 import { CollectionSearchableSelect } from "@/components/CollectionSearchableSelect";
 import RecipeParamFields from "@/components/RecipeGallery/RecipeParamFields";
 import { SECTION_TYPES, FILTER_SECTION_TYPES, sectionTypeLabel } from "@/lib/sectionTypes";
-import type { Category, RecipeCatalogResponse, RecipeDefinition } from "@/lib/recipes";
+import {
+  matchRecipePreset,
+  type Category,
+  type RecipeCatalogResponse,
+  type RecipeDefinition,
+} from "@/lib/recipes";
 import {
   queryDefinitionFromSectionConfig,
   queryDefinitionToSectionConfig,
@@ -183,19 +188,21 @@ export function buildAdminSectionPayload({
   queryDefinition,
   selectedCollectionId,
   recipeParams,
-  collections,
 }: BuildAdminSectionPayloadInput): Partial<PageSectionConfig> & { id?: string } {
+  const base = section?.section_type === sectionType ? { ...section.config } : {};
   let config: Record<string, unknown>;
   if (sectionType === "collection") {
-    const selected = collections?.find((collection) => collection.id === selectedCollectionId);
-    config =
-      selected?.source === "user"
-        ? { user_collection_id: selectedCollectionId }
-        : { library_collection_id: selectedCollectionId };
+    delete base.user_collection_id;
+    config = { ...base, library_collection_id: selectedCollectionId };
   } else if (isLegacyFilterType(sectionType)) {
-    config = queryDefinitionToSectionConfig(queryDefinition);
+    // The editor replaces query fields, while keeping recipe metadata it does not edit.
+    delete base.filter_type;
+    delete base.filter_library_id;
+    delete base.filter_library_ids;
+    delete base.order;
+    config = { ...base, ...queryDefinitionToSectionConfig(queryDefinition) };
   } else {
-    config = recipeParams ?? {};
+    config = { ...base, ...recipeParams };
   }
 
   const safeTitle = title.trim() || sectionTypeLabel(sectionType);
@@ -220,7 +227,7 @@ type ProfileDrawerProps = {
   section: SettingsSectionEntry | null;
   libraries: Array<{ id: number; name: string }>;
   recipeCatalog?: RecipeCatalogResponse;
-  onSave: (section: SettingsSectionEntry) => void;
+  onSave: (section: SettingsSectionEntry) => void | Promise<void>;
 };
 
 type AdminDrawerProps = {
@@ -233,6 +240,8 @@ type AdminDrawerProps = {
   libraries: Array<{ id: number; name: string }>;
   recipeCatalog?: RecipeCatalogResponse;
   isSubmitting?: boolean;
+  conflict?: boolean;
+  onReload?: () => void;
   onSave: (section: Partial<PageSectionConfig> & { id?: string }) => void;
 };
 
@@ -242,7 +251,8 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
   const isProfile = props.mode === "profile";
   const isEdit = props.section !== null;
   const lockSectionType = isProfile && props.section !== null && !props.section.is_custom;
-  const isSubmitting = props.mode === "admin" ? props.isSubmitting : false;
+  const [profileSubmitting, setProfileSubmitting] = useState(false);
+  const isSubmitting = props.mode === "admin" ? props.isSubmitting : profileSubmitting;
   const [sectionType, setSectionType] = useState("recently_added");
   const [title, setTitle] = useState("");
   const [itemLimit, setItemLimit] = useState(20);
@@ -254,7 +264,14 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
   const [selectedCollectionId, setSelectedCollectionId] = useState("");
   const [recipeParams, setRecipeParams] = useState<Record<string, unknown>>({});
   const [filterMode, setFilterMode] = useState<"easy" | "advanced">("easy");
-  const { collections, isLoading: collectionsLoading } = useAllUserCollections();
+  const { collections: allCollections, isLoading: collectionsLoading } = useAllUserCollections();
+  const collections = useMemo(
+    () =>
+      isProfile
+        ? allCollections
+        : allCollections.filter((collection) => collection.source === "library"),
+    [allCollections, isProfile],
+  );
 
   const catalogCategories = useMemo(
     () =>
@@ -315,22 +332,30 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
     }
   }, [props.open, showCollectionPicker, showLegacyFilter, recipeDef, recipeParams]);
 
-  function handleSave() {
+  async function handleSave() {
+    if (isSubmitting) return;
     if (props.mode === "profile") {
-      props.onSave(
-        buildProfileSectionSaveEntry({
-          section: props.section,
-          sectionType,
-          title,
-          itemLimit,
-          featured,
-          queryDefinition,
-          selectedCollectionId,
-          recipeParams,
-          collections,
-        }),
-      );
-      props.onOpenChange(false);
+      setProfileSubmitting(true);
+      try {
+        await props.onSave(
+          buildProfileSectionSaveEntry({
+            section: props.section,
+            sectionType,
+            title,
+            itemLimit,
+            featured,
+            queryDefinition,
+            selectedCollectionId,
+            recipeParams,
+            collections,
+          }),
+        );
+        props.onOpenChange(false);
+      } catch {
+        // The owner reports the error; retain the draft for retry.
+      } finally {
+        setProfileSubmitting(false);
+      }
     } else {
       props.onSave(
         buildAdminSectionPayload({
@@ -356,7 +381,12 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
     (props.mode === "admin" && props.scope === "library" && props.currentLibraryId == null);
 
   return (
-    <Sheet open={props.open} onOpenChange={props.onOpenChange}>
+    <Sheet
+      open={props.open}
+      onOpenChange={(open) => {
+        if (!isSubmitting) props.onOpenChange(open);
+      }}
+    >
       <SheetContent side="right" className="overflow-y-auto sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>{isEdit ? "Edit Section" : "Add Section"}</SheetTitle>
@@ -395,8 +425,15 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
                         <SelectGroup key={category}>
                           <SelectLabel>{CATEGORY_LABELS[category] ?? category}</SelectLabel>
                           {(props.recipeCatalog?.categories[category] ?? []).map((definition) => {
-                            const label = definition.presets[0]?.display_name ?? definition.type;
-                            const icon = definition.presets[0]?.icon;
+                            // The selected type is labelled by the preset its
+                            // params match, so a weekly trending section reads
+                            // "TMDB Trending This Week" rather than the first preset.
+                            const preset =
+                              definition.type === sectionType
+                                ? matchRecipePreset(definition, recipeParams)
+                                : definition.presets[0];
+                            const label = preset?.display_name ?? definition.type;
+                            const icon = preset?.icon;
                             return (
                               <SelectItem key={definition.type} value={definition.type}>
                                 {icon ? `${icon} ${label}` : label}
@@ -560,11 +597,29 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
           ) : null}
         </div>
 
+        {props.mode === "admin" && props.conflict && (
+          <div role="alert" className="px-6">
+            <p>
+              This section changed. Your draft is preserved. Reload to discard it and edit the
+              current section.
+            </p>
+            <Button variant="outline" onClick={props.onReload}>
+              Reload section
+            </Button>
+          </div>
+        )}
         <SheetFooter>
-          <Button variant="outline" onClick={() => props.onOpenChange(false)}>
+          <Button
+            variant="outline"
+            disabled={isSubmitting}
+            onClick={() => props.onOpenChange(false)}
+          >
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={saveDisabled || isSubmitting}>
+          <Button
+            onClick={handleSave}
+            disabled={saveDisabled || isSubmitting || (props.mode === "admin" && props.conflict)}
+          >
             {isEdit ? "Save" : "Add Section"}
           </Button>
         </SheetFooter>

@@ -108,13 +108,13 @@ func (s *Postgres) SaveAttempt(ctx context.Context, record playback.AttemptRecor
 			playback_attempt_id, session_id, user_id, profile_id,
 			requested_media_file_id, effective_media_file_id,
 			current_plan_id, current_replan_request_id, current_plan, frozen_recipe,
-			normalized_request, start_response, request_digest, expires_at
-		) VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+			normalized_request, start_response, request_digest, expires_at, server_bitrate_cap_kbps
+		) VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT DO NOTHING`,
 		record.PlaybackAttemptID, record.SessionID, record.UserID, record.ProfileID,
 		record.RequestedMediaFileID, record.EffectiveMediaFileID,
 		record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON,
-		requestJSON, responseJSON, record.RequestDigest, record.ExpiresAt)
+		requestJSON, responseJSON, record.RequestDigest, record.ExpiresAt, record.ServerBitrateCapKbps)
 	if err != nil {
 		return err
 	}
@@ -170,23 +170,28 @@ func (s *Postgres) getAttemptIdentity(ctx context.Context, predicate string, val
 
 func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) (*playback.AttemptRecordV3, error) {
 	var record playback.AttemptRecordV3
-	var planJSON, recipeJSON, requestJSON, responseJSON []byte
+	var planJSON, recipeJSON, requestJSON, responseJSON, sampleJSON []byte
 	err := s.db.QueryRow(ctx, `
 		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id,
 		       requested_media_file_id, effective_media_file_id,
 		       current_plan_id, current_replan_request_id, current_plan, frozen_recipe,
-		       normalized_request, start_response, request_digest, expires_at
+		       normalized_request, start_response, request_digest, expires_at, server_bitrate_cap_kbps,
+		       last_sequence, last_sample, stopped_at, updated_at
 		FROM playback_v3_attempts
 		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
 		&record.PlaybackAttemptID, &record.SessionID, &record.UserID, &record.ProfileID,
 		&record.RequestedMediaFileID, &record.EffectiveMediaFileID,
 		&record.CurrentPlanID, &record.CurrentReplanRequestID, &planJSON, &recipeJSON,
-		&requestJSON, &responseJSON, &record.RequestDigest, &record.ExpiresAt,
+		&requestJSON, &responseJSON, &record.RequestDigest, &record.ExpiresAt, &record.ServerBitrateCapKbps,
+		&record.LastSequence, &sampleJSON, &record.StoppedAt, &record.LastSampleAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound
 	}
 	if err != nil {
+		return nil, err
+	}
+	if record.LastSample, err = decodeProgressSample(sampleJSON); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(planJSON, &record.CurrentPlan); err != nil {
@@ -319,14 +324,17 @@ func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID, lea
 			effective_media_file_id = $2, current_plan_id = $3,
 			current_replan_request_id = $4, current_plan = $5, frozen_recipe = $6,
 			normalized_request = $7, start_response = $8, expires_at = $9, updated_at = NOW()
-		WHERE session_id = $1::uuid AND current_replan_request_id = $10`,
+		WHERE session_id = $1::uuid AND current_replan_request_id = $10 AND stopped_at IS NULL`,
 		sessionID, record.EffectiveMediaFileID, record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON, requestJSON, startResponseJSON, record.ExpiresAt, baseReplanRequestID)
 	if err != nil {
 		return err
 	}
 	if attemptResult.RowsAffected() != 1 {
-		var exists bool
-		if scanErr := tx.QueryRow(ctx, `SELECT true FROM playback_v3_attempts WHERE session_id = $1::uuid`, sessionID).Scan(&exists); scanErr == nil {
+		var stopped *time.Time
+		if scanErr := tx.QueryRow(ctx, `SELECT stopped_at FROM playback_v3_attempts WHERE session_id = $1::uuid`, sessionID).Scan(&stopped); scanErr == nil {
+			if stopped != nil {
+				return playback.ErrAttemptStoppedV3
+			}
 			return playback.ErrReplanSupersededV3
 		}
 		return playback.ErrSessionNotFound
@@ -348,29 +356,194 @@ func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID, lea
 	return tx.Commit(ctx)
 }
 
-func (s *Postgres) RecordRouteEvent(ctx context.Context, record playback.RouteEventRecordV3) error {
+func (s *Postgres) RecordRouteEvent(ctx context.Context, record playback.RouteEventRecordV3) (bool, error) {
 	if record.Diagnostics == nil {
 		record.Diagnostics = map[string]string{}
 	}
 	diagnostics, err := json.Marshal(record.Diagnostics)
 	if err != nil {
-		return err
+		return false, err
 	}
-	_, err = s.db.Exec(ctx, `
+	// A v2 report carries an event id: the partial unique index makes a retry
+	// after a lost 202 a no-op instead of a second row, which RowsAffected
+	// reports as zero. Legacy v1 reports have no id and keep their
+	// unconditional insert.
+	tag, err := s.db.Exec(ctx, `
 		INSERT INTO playback_route_events (
 			playback_attempt_id, session_id, plan_id, plan_attempt_id, plan_attempt_key,
 			event, failure_classification, fallback_reason, output_context_id,
 			diagnostics, user_id, profile_id, client_name, client_version, client_build,
-			client_channel, client_model
+			client_channel, client_model, event_id
 		) VALUES ($1, NULLIF($2, '')::uuid, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''),
 		          $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), $10, $11, $12,
 		          NULLIF($13, ''), NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''),
-		          NULLIF($17, ''))`,
+		          NULLIF($17, ''), NULLIF($18, '')::uuid)
+		ON CONFLICT (playback_attempt_id, event_id) WHERE event_id IS NOT NULL DO NOTHING`,
 		record.PlaybackAttemptID, record.SessionID, record.PlanID, record.PlanAttemptID, record.PlanAttemptKey,
 		record.Event, record.FailureClassification, record.FallbackReason, record.OutputContextID,
 		diagnostics, record.UserID, record.ProfileID, record.ClientName, record.ClientVersion,
-		record.ClientBuild, record.ClientChannel, record.ClientModel)
-	return err
+		record.ClientBuild, record.ClientChannel, record.ClientModel, record.EventID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// Progress and stop sequencing. Both are single-statement compare-and-sets on
+// the attempt row, so they need neither the advisory session lock nor a
+// transaction: concurrent samples for one attempt serialize on the row lock
+// and the losers re-read the committed state to classify themselves.
+
+func decodeProgressSample(data []byte) (*playback.ProgressSampleV3, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var sample playback.ProgressSampleV3
+	if err := json.Unmarshal(data, &sample); err != nil {
+		return nil, err
+	}
+	return &sample, nil
+}
+
+func (s *Postgres) ApplyProgress(ctx context.Context, sessionID string, sample playback.ProgressSampleV3) (playback.ProgressReceiptV3, error) {
+	sampleJSON, err := json.Marshal(sample)
+	if err != nil {
+		return playback.ProgressReceiptV3{}, err
+	}
+	result, err := s.db.Exec(ctx, `
+		UPDATE playback_v3_attempts
+		SET last_sequence = $2, last_sample = $3, updated_at = NOW()
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL AND last_sequence < $2`,
+		sessionID, sample.Sequence, sampleJSON)
+	if err != nil {
+		return playback.ProgressReceiptV3{}, err
+	}
+	if result.RowsAffected() == 1 {
+		return playback.ProgressReceiptV3{Outcome: playback.ProgressAppliedV3, Accepted: &sample}, nil
+	}
+	var lastSequence int64
+	var lastJSON []byte
+	var stoppedAt *time.Time
+	err = s.db.QueryRow(ctx, `
+		SELECT last_sequence, last_sample, stopped_at FROM playback_v3_attempts
+		WHERE session_id = $1::uuid AND expires_at > NOW()`, sessionID).Scan(&lastSequence, &lastJSON, &stoppedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return playback.ProgressReceiptV3{}, playback.ErrSessionNotFound
+	}
+	if err != nil {
+		return playback.ProgressReceiptV3{}, err
+	}
+	if stoppedAt != nil {
+		return playback.ProgressReceiptV3{}, playback.ErrAttemptStoppedV3
+	}
+	last, err := decodeProgressSample(lastJSON)
+	if err != nil {
+		return playback.ProgressReceiptV3{}, err
+	}
+	return playback.ResolveUnappliedProgressV3(lastSequence, last, sample)
+}
+
+func (s *Postgres) StopAttempt(ctx context.Context, sessionID, stopID string, final *playback.ProgressSampleV3) (playback.StopReceiptV3, bool, error) {
+	if _, err := uuid.Parse(stopID); err != nil {
+		return playback.StopReceiptV3{}, false, playback.ErrInvalidStopIDV3
+	}
+	var finalSequence *int64
+	var finalJSON []byte
+	if final != nil {
+		finalSequence = &final.Sequence
+		var err error
+		if finalJSON, err = json.Marshal(final); err != nil {
+			return playback.StopReceiptV3{}, false, err
+		}
+	}
+	// SET expressions all read the pre-update row, so the "final sample is
+	// newer" test repeats verbatim for the sequence, the sample and the
+	// receipt's accepted sample.
+	var receiptJSON []byte
+	err := s.db.QueryRow(ctx, `
+		UPDATE playback_v3_attempts
+		SET stopped_at = NOW(),
+		    stop_id = $2::uuid,
+		    last_sequence = CASE WHEN $3::bigint > last_sequence THEN $3::bigint ELSE last_sequence END,
+		    last_sample = CASE WHEN $3::bigint > last_sequence THEN $4::jsonb ELSE last_sample END,
+		    stop_receipt = jsonb_strip_nulls(jsonb_build_object(
+		        'stop_id', $2::uuid::text,
+		        'accepted', CASE WHEN $3::bigint > last_sequence THEN $4::jsonb ELSE last_sample END)),
+		    updated_at = NOW()
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL
+		RETURNING stop_receipt`, sessionID, stopID, finalSequence, finalJSON).Scan(&receiptJSON)
+	if err == nil {
+		var receipt playback.StopReceiptV3
+		if err := json.Unmarshal(receiptJSON, &receipt); err != nil {
+			return playback.StopReceiptV3{}, false, err
+		}
+		return receipt, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return playback.StopReceiptV3{}, false, err
+	}
+	err = s.db.QueryRow(ctx, `
+		SELECT stop_receipt FROM playback_v3_attempts
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NOT NULL`, sessionID).Scan(&receiptJSON)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return playback.StopReceiptV3{}, false, playback.ErrSessionNotFound
+	}
+	if err != nil {
+		return playback.StopReceiptV3{}, false, err
+	}
+	var receipt playback.StopReceiptV3
+	if err := json.Unmarshal(receiptJSON, &receipt); err != nil {
+		return playback.StopReceiptV3{}, false, err
+	}
+	return receipt, false, nil
+}
+
+func (s *Postgres) RecordStopReceipt(ctx context.Context, sessionID string, receipt playback.StopReceiptV3) error {
+	if _, err := uuid.Parse(receipt.StopID); err != nil {
+		return playback.ErrInvalidStopIDV3
+	}
+	receiptJSON, err := json.Marshal(receipt)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.Exec(ctx, `
+		UPDATE playback_v3_attempts SET stop_receipt = $2, updated_at = NOW()
+		WHERE session_id = $1::uuid AND stopped_at IS NOT NULL AND stop_id = $3::uuid`,
+		sessionID, receiptJSON, receipt.StopID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return playback.ErrSessionNotFound
+	}
+	return nil
+}
+
+func (s *Postgres) ClaimStopFinalization(ctx context.Context, sessionID string, leaseUntil time.Time) (bool, error) {
+	// One UPDATE claims the lease only when nobody finalized and no live
+	// lease exists, so concurrent replays cannot both run the writers.
+	result, err := s.db.Exec(ctx, `
+		UPDATE playback_v3_attempts
+		SET stop_receipt = jsonb_set(stop_receipt, '{finalizing_until}', to_jsonb($2::timestamptz), true),
+		    updated_at = NOW()
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NOT NULL
+		  AND COALESCE((stop_receipt->>'finalized')::boolean, false) = false
+		  AND COALESCE((stop_receipt->>'finalizing_until')::timestamptz, 'epoch'::timestamptz) < NOW()`,
+		sessionID, leaseUntil)
+	if err != nil {
+		return false, err
+	}
+	if result.RowsAffected() == 1 {
+		return true, nil
+	}
+	var exists bool
+	if err := s.db.QueryRow(ctx, `SELECT true FROM playback_v3_attempts WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NOT NULL`, sessionID).Scan(&exists); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, playback.ErrSessionNotFound
+		}
+		return false, err
+	}
+	return false, nil
 }
 
 func (s *Postgres) CleanupExpired(ctx context.Context, now time.Time) (int64, error) {

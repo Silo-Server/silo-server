@@ -494,9 +494,8 @@ func (s *Service) exportList(ctx context.Context, conn Connection, cfg ServerCon
 			return result, err
 		}
 		now := s.now()
-		sent := exportResultSentSet(exportResult)
 		for _, item := range toSend {
-			if sent[item.MediaItemID] || sent[item.ProviderItemKey] {
+			if sent, _ := exportItemOutcome(exportResult, item.MediaItemID, item.ProviderItemKey); sent {
 				if err := s.repo.MarkListItemExported(ctx, conn.ID, b.kind, item.MediaItemID, now); err != nil {
 					return result, err
 				}
@@ -562,13 +561,11 @@ func (s *Service) removePendingListItems(ctx context.Context, conn Connection, c
 			return removed, err
 		}
 		now := s.now()
-		sent := exportResultSentSet(result)
 		for _, item := range items {
 			attempted[item.MediaItemID] = true
 			// Sent (removed) and NotFound (already absent remotely) both reconcile
 			// the row; true failures stay pending for the next run.
-			if sent[item.MediaItemID] || sent[item.ProviderItemKey] ||
-				containsString(result.NotFound, item.MediaItemID) || containsString(result.NotFound, item.ProviderItemKey) {
+			if sent, notFound := exportItemOutcome(result, item.MediaItemID, item.ProviderItemKey); sent || notFound {
 				if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, item.MediaItemID, now); err != nil {
 					return removed, err
 				}
@@ -587,14 +584,7 @@ func (s *Service) localItemsFromRows(ctx context.Context, conn Connection, b lis
 			addedAtByID[row.MediaItemID] = addedAt
 		}
 	}
-	type listMediaResolver interface {
-		GetListMediaItems(ctx context.Context, mediaItemIDs []string) (map[string]LocalFavorite, error)
-	}
-	resolver, ok := s.repo.(listMediaResolver)
-	if !ok {
-		return nil, nil, nil, fmt.Errorf("list media resolver is not configured")
-	}
-	resolved, err := resolver.GetListMediaItems(ctx, ids)
+	resolved, err := s.resolveListMediaItems(ctx, ids)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -635,6 +625,20 @@ func (s *Service) localItemsFromRows(ctx context.Context, conn Connection, b lis
 		})
 	}
 	return items, states, warnings, nil
+}
+
+type listMediaResolver interface {
+	GetListMediaItems(ctx context.Context, mediaItemIDs []string) (map[string]LocalFavorite, error)
+}
+
+// resolveListMediaItems loads the identity (kind, title, external ids) of
+// movies and series by media item id. Unknown ids are absent from the result.
+func (s *Service) resolveListMediaItems(ctx context.Context, ids []string) (map[string]LocalFavorite, error) {
+	resolver, ok := s.repo.(listMediaResolver)
+	if !ok {
+		return nil, fmt.Errorf("list media resolver is not configured")
+	}
+	return resolver.GetListMediaItems(ctx, ids)
 }
 
 // HandleLocalListEvent mirrors a real-time local list change (add/remove of a
@@ -709,10 +713,8 @@ func (s *Service) processLocalListEvent(ctx context.Context, event LocalListEven
 				s.recordLocalWatchEventError(ctx, conn, err)
 				continue
 			}
-			sent := exportResultSentSet(result)
 			for _, item := range event.Items {
-				if sent[item.MediaItemID] || sent[item.ProviderItemKey] ||
-					containsString(result.NotFound, item.MediaItemID) || containsString(result.NotFound, item.ProviderItemKey) {
+				if sent, notFound := exportItemOutcome(result, item.MediaItemID, item.ProviderItemKey); sent || notFound {
 					if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, item.MediaItemID, now); err != nil {
 						return err
 					}
@@ -764,9 +766,8 @@ func (s *Service) exportLocalListItems(ctx context.Context, conn Connection, cfg
 		return err
 	}
 	now := s.now()
-	sent := exportResultSentSet(result)
 	for _, item := range toSend {
-		if sent[item.MediaItemID] || sent[item.ProviderItemKey] {
+		if sent, _ := exportItemOutcome(result, item.MediaItemID, item.ProviderItemKey); sent {
 			if err := s.repo.MarkListItemExported(ctx, conn.ID, b.kind, item.MediaItemID, now); err != nil {
 				return err
 			}

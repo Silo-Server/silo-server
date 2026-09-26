@@ -1,0 +1,1978 @@
+{
+  "device_start.ok": {
+    "method": "POST",
+    "path": "/api/v1/auth/device/start",
+    "registration": 0,
+    "scenario": {
+      "id": "device_start.ok",
+      "category": "status_headers",
+      "description": "Starting a device login answers 201 with the pairing codes.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device/start",
+        "body": {
+          "device_name": "Fixture TV",
+          "device_platform": "tvos"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "device_code",
+              "user_code",
+              "match_code",
+              "verification_uri",
+              "verification_uri_complete",
+              "expires_at",
+              "expires_in",
+              "interval",
+              "device_name",
+              "device_platform",
+              "client_purpose",
+              "temporary"
+            ]
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "startDeviceLogin",
+      "method": "POST",
+      "request": {
+        "path": "/api/v2/auth/device/start",
+        "body": {
+          "device_name": "Fixture TV",
+          "device_platform": "tvos"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "device_code",
+              "user_code",
+              "match_code",
+              "verification_uri",
+              "verification_uri_complete",
+              "expires_at",
+              "expires_in",
+              "interval",
+              "device_name",
+              "device_platform",
+              "client_purpose",
+              "temporary"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "device_start.meaning": {
+    "method": "POST",
+    "path": "/api/v1/auth/device/start",
+    "registration": 0,
+    "scenario": {
+      "id": "device_start.meaning",
+      "category": "data_meaning",
+      "description": "Codes are fresh, the user code is 8 characters shown as XXXX-XXXX, the verification URI derives from the request host, and the default purpose is device_login.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device/start",
+        "body": {
+          "device_name": "Fixture TV",
+          "device_platform": "tvos"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "body": [
+          {
+            "pointer": "/user_code",
+            "op": "matches",
+            "value": "^[A-Z0-9]{4}-[A-Z0-9]{4}$"
+          },
+          {
+            "pointer": "/verification_uri",
+            "op": "matches",
+            "value": "^http://127\\.0\\.0\\.1:[0-9]+/activate$"
+          },
+          {
+            "pointer": "/verification_uri_complete",
+            "op": "matches",
+            "value": "/activate\\?token=[A-Za-z0-9_-]+$"
+          },
+          {
+            "pointer": "/expires_in",
+            "op": "equals",
+            "value": 600
+          },
+          {
+            "pointer": "/interval",
+            "op": "equals",
+            "value": 3
+          },
+          {
+            "pointer": "/client_purpose",
+            "op": "equals",
+            "value": "device_login"
+          },
+          {
+            "pointer": "/temporary",
+            "op": "equals",
+            "value": false
+          },
+          {
+            "pointer": "/expires_at",
+            "op": "rfc3339"
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "startDeviceLogin",
+      "method": "POST",
+      "request": {
+        "path": "/api/v2/auth/device/start",
+        "body": {
+          "device_name": "Fixture TV",
+          "device_platform": "tvos"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/user_code",
+            "op": "matches",
+            "value": "^[A-Z0-9]{4}-[A-Z0-9]{4}$"
+          },
+          {
+            "pointer": "/verification_uri",
+            "op": "matches",
+            "value": "^http://127\\.0\\.0\\.1:[0-9]+/activate$"
+          },
+          {
+            "pointer": "/verification_uri_complete",
+            "op": "matches",
+            "value": "/activate\\?token=[A-Za-z0-9_-]+$"
+          },
+          {
+            "pointer": "/expires_in",
+            "op": "equals",
+            "value": 600
+          },
+          {
+            "pointer": "/interval",
+            "op": "equals",
+            "value": 3
+          },
+          {
+            "pointer": "/client_purpose",
+            "op": "equals",
+            "value": "device_login"
+          },
+          {
+            "pointer": "/temporary",
+            "op": "equals",
+            "value": false
+          },
+          {
+            "pointer": "/expires_at",
+            "op": "rfc3339"
+          }
+        ]
+      }
+    }
+  },
+  "device_start.empty_body": {
+    "method": "POST",
+    "path": "/api/v1/auth/device/start",
+    "registration": 0,
+    "scenario": {
+      "id": "device_start.empty_body",
+      "category": "field_presence_nullability",
+      "description": "An empty body is accepted; device_name falls back to the User-Agent.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device/start"
+      },
+      "expect": {
+        "status": 201,
+        "body": [
+          {
+            "pointer": "/device_name",
+            "op": "equals",
+            "value": "silo-scenario-executor/1"
+          },
+          {
+            "pointer": "/device_platform",
+            "op": "equals",
+            "value": ""
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "V2 requires an application/json request body: a body-less device start is refused with a 415 unsupported_media_type Problem (no-store) and creates no device request, where v1 applied defaults.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "startDeviceLogin",
+      "method": "POST",
+      "request": {
+        "path": "/api/v2/auth/device/start"
+      },
+      "expect": {
+        "status": 415,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/problem+json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/status",
+            "op": "equals",
+            "value": 415
+          },
+          {
+            "pointer": "/type",
+            "op": "matches",
+            "value": "/docs/api/v2/problems/unsupported_media_type$"
+          },
+          {
+            "pointer": "/detail",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/instance",
+            "op": "type",
+            "value": "string"
+          }
+        ]
+      }
+    }
+  },
+  "device_start.remote": {
+    "method": "POST",
+    "path": "/api/v1/auth/device/start",
+    "registration": 0,
+    "scenario": {
+      "id": "device_start.remote",
+      "category": "filtering",
+      "description": "client_purpose remote_playback with temporary=true starts a remote handoff request.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device/start",
+        "body": {
+          "client_purpose": "remote_playback",
+          "temporary": true
+        }
+      },
+      "expect": {
+        "status": 201,
+        "body": [
+          {
+            "pointer": "/client_purpose",
+            "op": "equals",
+            "value": "remote_playback"
+          },
+          {
+            "pointer": "/temporary",
+            "op": "equals",
+            "value": true
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "startDeviceLogin",
+      "method": "POST",
+      "request": {
+        "path": "/api/v2/auth/device/start",
+        "body": {
+          "client_purpose": "remote_playback",
+          "temporary": true
+        }
+      },
+      "expect": {
+        "status": 201,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/client_purpose",
+            "op": "equals",
+            "value": "remote_playback"
+          },
+          {
+            "pointer": "/temporary",
+            "op": "equals",
+            "value": true
+          }
+        ]
+      }
+    }
+  },
+  "device_start.ok.r1": {
+    "method": "POST",
+    "path": "/api/v1/auth/device/start",
+    "registration": 1,
+    "scenario": {
+      "id": "device_start.ok.r1",
+      "category": "status_headers",
+      "description": "Starting a device login answers 201 with the pairing codes.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device/start",
+        "body": {
+          "device_name": "Fixture TV",
+          "device_platform": "tvos"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "device_code",
+              "user_code",
+              "match_code",
+              "verification_uri",
+              "verification_uri_complete",
+              "expires_at",
+              "expires_in",
+              "interval",
+              "device_name",
+              "device_platform",
+              "client_purpose",
+              "temporary"
+            ]
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "startDeviceLogin",
+      "method": "POST",
+      "request": {
+        "path": "/api/v2/auth/device/start",
+        "body": {
+          "device_name": "Fixture TV",
+          "device_platform": "tvos"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "device_code",
+              "user_code",
+              "match_code",
+              "verification_uri",
+              "verification_uri_complete",
+              "expires_at",
+              "expires_in",
+              "interval",
+              "device_name",
+              "device_platform",
+              "client_purpose",
+              "temporary"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "device_start.meaning.r1": {
+    "method": "POST",
+    "path": "/api/v1/auth/device/start",
+    "registration": 1,
+    "scenario": {
+      "id": "device_start.meaning.r1",
+      "category": "data_meaning",
+      "description": "Codes are fresh, the user code is 8 characters shown as XXXX-XXXX, the verification URI derives from the request host, and the default purpose is device_login.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device/start",
+        "body": {
+          "device_name": "Fixture TV",
+          "device_platform": "tvos"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "body": [
+          {
+            "pointer": "/user_code",
+            "op": "matches",
+            "value": "^[A-Z0-9]{4}-[A-Z0-9]{4}$"
+          },
+          {
+            "pointer": "/verification_uri",
+            "op": "matches",
+            "value": "^http://127\\.0\\.0\\.1:[0-9]+/activate$"
+          },
+          {
+            "pointer": "/verification_uri_complete",
+            "op": "matches",
+            "value": "/activate\\?token=[A-Za-z0-9_-]+$"
+          },
+          {
+            "pointer": "/expires_in",
+            "op": "equals",
+            "value": 600
+          },
+          {
+            "pointer": "/interval",
+            "op": "equals",
+            "value": 3
+          },
+          {
+            "pointer": "/client_purpose",
+            "op": "equals",
+            "value": "device_login"
+          },
+          {
+            "pointer": "/temporary",
+            "op": "equals",
+            "value": false
+          },
+          {
+            "pointer": "/expires_at",
+            "op": "rfc3339"
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "startDeviceLogin",
+      "method": "POST",
+      "request": {
+        "path": "/api/v2/auth/device/start",
+        "body": {
+          "device_name": "Fixture TV",
+          "device_platform": "tvos"
+        }
+      },
+      "expect": {
+        "status": 201,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/user_code",
+            "op": "matches",
+            "value": "^[A-Z0-9]{4}-[A-Z0-9]{4}$"
+          },
+          {
+            "pointer": "/verification_uri",
+            "op": "matches",
+            "value": "^http://127\\.0\\.0\\.1:[0-9]+/activate$"
+          },
+          {
+            "pointer": "/verification_uri_complete",
+            "op": "matches",
+            "value": "/activate\\?token=[A-Za-z0-9_-]+$"
+          },
+          {
+            "pointer": "/expires_in",
+            "op": "equals",
+            "value": 600
+          },
+          {
+            "pointer": "/interval",
+            "op": "equals",
+            "value": 3
+          },
+          {
+            "pointer": "/client_purpose",
+            "op": "equals",
+            "value": "device_login"
+          },
+          {
+            "pointer": "/temporary",
+            "op": "equals",
+            "value": false
+          },
+          {
+            "pointer": "/expires_at",
+            "op": "rfc3339"
+          }
+        ]
+      }
+    }
+  },
+  "device_start.empty_body.r1": {
+    "method": "POST",
+    "path": "/api/v1/auth/device/start",
+    "registration": 1,
+    "scenario": {
+      "id": "device_start.empty_body.r1",
+      "category": "field_presence_nullability",
+      "description": "An empty body is accepted; device_name falls back to the User-Agent.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device/start"
+      },
+      "expect": {
+        "status": 201,
+        "body": [
+          {
+            "pointer": "/device_name",
+            "op": "equals",
+            "value": "silo-scenario-executor/1"
+          },
+          {
+            "pointer": "/device_platform",
+            "op": "equals",
+            "value": ""
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "V2 requires an application/json request body: a body-less device start is refused with a 415 unsupported_media_type Problem (no-store) and creates no device request, where v1 applied defaults.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "startDeviceLogin",
+      "method": "POST",
+      "request": {
+        "path": "/api/v2/auth/device/start"
+      },
+      "expect": {
+        "status": 415,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/problem+json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/status",
+            "op": "equals",
+            "value": 415
+          },
+          {
+            "pointer": "/type",
+            "op": "matches",
+            "value": "/docs/api/v2/problems/unsupported_media_type$"
+          },
+          {
+            "pointer": "/detail",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/instance",
+            "op": "type",
+            "value": "string"
+          }
+        ]
+      }
+    }
+  },
+  "device_start.remote.r1": {
+    "method": "POST",
+    "path": "/api/v1/auth/device/start",
+    "registration": 1,
+    "scenario": {
+      "id": "device_start.remote.r1",
+      "category": "filtering",
+      "description": "client_purpose remote_playback with temporary=true starts a remote handoff request.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device/start",
+        "body": {
+          "client_purpose": "remote_playback",
+          "temporary": true
+        }
+      },
+      "expect": {
+        "status": 201,
+        "body": [
+          {
+            "pointer": "/client_purpose",
+            "op": "equals",
+            "value": "remote_playback"
+          },
+          {
+            "pointer": "/temporary",
+            "op": "equals",
+            "value": true
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "startDeviceLogin",
+      "method": "POST",
+      "request": {
+        "path": "/api/v2/auth/device/start",
+        "body": {
+          "client_purpose": "remote_playback",
+          "temporary": true
+        }
+      },
+      "expect": {
+        "status": 201,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/client_purpose",
+            "op": "equals",
+            "value": "remote_playback"
+          },
+          {
+            "pointer": "/temporary",
+            "op": "equals",
+            "value": true
+          }
+        ]
+      }
+    }
+  },
+  "device_start.bad_purpose.r1": {
+    "method": "POST",
+    "path": "/api/v1/auth/device/start",
+    "registration": 1,
+    "scenario": {
+      "id": "device_start.bad_purpose.r1",
+      "category": "error",
+      "description": "A purpose/temporary mismatch is 400 bad_request.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device/start",
+        "body": {
+          "client_purpose": "remote_playback"
+        }
+      },
+      "expect": {
+        "status": 400,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "bad_request"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "pointer": "/error",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "equals",
+            "value": "Invalid device login purpose"
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "startDeviceLogin",
+      "method": "POST",
+      "request": {
+        "path": "/api/v2/auth/device/start",
+        "body": {
+          "client_purpose": "remote_playback"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/problem+json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/status",
+            "op": "equals",
+            "value": 422
+          },
+          {
+            "pointer": "/type",
+            "op": "matches",
+            "value": "/validation_failed$"
+          }
+        ]
+      }
+    }
+  },
+  "device_start.malformed.r1": {
+    "method": "POST",
+    "path": "/api/v1/auth/device/start",
+    "registration": 1,
+    "scenario": {
+      "id": "device_start.malformed.r1",
+      "category": "error",
+      "description": "A non-JSON body is 400 bad_request.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device/start",
+        "raw_body": "{"
+      },
+      "expect": {
+        "status": 400,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "bad_request"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "pointer": "/error",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "equals",
+            "value": "Invalid request body"
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "startDeviceLogin",
+      "method": "POST",
+      "request": {
+        "path": "/api/v2/auth/device/start",
+        "raw_body": "{"
+      },
+      "expect": {
+        "status": 400,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/problem+json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/status",
+            "op": "equals",
+            "value": 400
+          },
+          {
+            "pointer": "/type",
+            "op": "matches",
+            "value": "/malformed_request$"
+          }
+        ]
+      }
+    }
+  },
+  "device_start.rate_limited.r1": {
+    "method": "POST",
+    "path": "/api/v1/auth/device/start",
+    "registration": 1,
+    "scenario": {
+      "id": "device_start.rate_limited.r1",
+      "category": "status_headers",
+      "description": "The rate-limited registration variant answers 429 with Retry-After once the per-IP device_start burst (10) is spent.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device/start",
+        "repeat": 11,
+        "body": {}
+      },
+      "expect": {
+        "status": 429,
+        "headers": [
+          {
+            "name": "Retry-After",
+            "op": "matches",
+            "value": "^[0-9]+$"
+          },
+          {
+            "name": "X-RateLimit-Remaining",
+            "op": "equals",
+            "value": "0"
+          },
+          {
+            "name": "X-RateLimit-Limit",
+            "op": "exists"
+          },
+          {
+            "name": "X-RateLimit-Reset",
+            "op": "matches",
+            "value": "^[0-9]+$"
+          },
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "rate_limit_exceeded"
+          },
+          {
+            "pointer": "/retry_after",
+            "op": "type",
+            "value": "integer"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message",
+              "retry_after"
+            ]
+          }
+        ]
+      },
+      "requires": [
+        "rate_limiter"
+      ],
+      "fresh_state": true,
+      "notes": "The 429 body has a third key (retry_after) unlike every other error envelope; flagged for the section PR.",
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Distinct rate-limited registration executed through the real limited router with fresh counter state per transport. V2 reports the burst refusal as a rate_limited Problem (no-store) carrying Retry-After only; the legacy X-RateLimit-* headers are not part of v2. Original device effects and oracles preserved.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "startDeviceLogin",
+      "method": "POST",
+      "request": {
+        "path": "/api/v2/auth/device/start",
+        "repeat": 11,
+        "body": {}
+      },
+      "expect": {
+        "status": 429,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/problem+json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          },
+          {
+            "name": "Retry-After",
+            "op": "matches",
+            "value": "^[0-9]+$"
+          },
+          {
+            "name": "X-RateLimit-Remaining",
+            "op": "absent"
+          },
+          {
+            "name": "X-RateLimit-Limit",
+            "op": "absent"
+          },
+          {
+            "name": "X-RateLimit-Reset",
+            "op": "absent"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/status",
+            "op": "equals",
+            "value": 429
+          },
+          {
+            "pointer": "/type",
+            "op": "matches",
+            "value": "/rate_limited$"
+          }
+        ]
+      }
+    }
+  },
+  "device_lookup.by_token.r1": {
+    "method": "GET",
+    "path": "/api/v1/auth/device",
+    "registration": 1,
+    "scenario": {
+      "id": "device_lookup.by_token.r1",
+      "category": "status_headers",
+      "description": "Looking up a pending request by browser token answers 200 JSON.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device",
+        "query": {
+          "token": "${browser_code}"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/status",
+            "op": "equals",
+            "value": "pending"
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "getDeviceLogin",
+      "method": "GET",
+      "request": {
+        "path": "/api/v2/auth/device",
+        "query": {
+          "token": "${browser_code}"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/status",
+            "op": "equals",
+            "value": "pending"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "status",
+              "user_code",
+              "match_code",
+              "device_name",
+              "device_platform",
+              "ip_address_hint",
+              "expires_at",
+              "client_purpose",
+              "temporary"
+            ]
+          },
+          {
+            "pointer": "/temporary",
+            "op": "equals",
+            "value": false
+          },
+          {
+            "pointer": "/user_code",
+            "op": "equals",
+            "value": ""
+          }
+        ]
+      }
+    }
+  },
+  "device_lookup.by_code.r1": {
+    "method": "GET",
+    "path": "/api/v1/auth/device",
+    "registration": 1,
+    "scenario": {
+      "id": "device_lookup.by_code.r1",
+      "category": "filtering",
+      "description": "Looking up by user code (dashes and case ignored) returns the formatted code; by token the user_code is omitted.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device",
+        "query": {
+          "code": "fixt-ure1"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "body": [
+          {
+            "pointer": "/user_code",
+            "op": "equals",
+            "value": "FIXT-URE1"
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "notes": "Token lookups omit user_code entirely (omitempty) while code lookups include it; the shape depends on the lookup key.",
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "getDeviceLogin",
+      "method": "GET",
+      "request": {
+        "path": "/api/v2/auth/device",
+        "query": {
+          "code": "fixt-ure1"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/user_code",
+            "op": "equals",
+            "value": "FIXT-URE1"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "status",
+              "user_code",
+              "match_code",
+              "device_name",
+              "device_platform",
+              "ip_address_hint",
+              "expires_at",
+              "client_purpose",
+              "temporary"
+            ]
+          },
+          {
+            "pointer": "/temporary",
+            "op": "equals",
+            "value": false
+          },
+          {
+            "pointer": "/user_code",
+            "op": "equals",
+            "value": "FIXT-URE1"
+          }
+        ]
+      }
+    }
+  },
+  "device_lookup.meaning.r1": {
+    "method": "GET",
+    "path": "/api/v1/auth/device",
+    "registration": 1,
+    "scenario": {
+      "id": "device_lookup.meaning.r1",
+      "category": "data_meaning",
+      "description": "The IP hint is masked to two octets; the device identity and expiry are echoed.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device",
+        "query": {
+          "token": "${browser_code}"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "body": [
+          {
+            "pointer": "/ip_address_hint",
+            "op": "equals",
+            "value": "127.0.*.*"
+          },
+          {
+            "pointer": "/device_name",
+            "op": "equals",
+            "value": "Fixture TV"
+          },
+          {
+            "pointer": "/match_code",
+            "op": "equals",
+            "value": "42"
+          },
+          {
+            "pointer": "/expires_at",
+            "op": "rfc3339"
+          },
+          {
+            "pointer": "/client_purpose",
+            "op": "equals",
+            "value": "device_login"
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "getDeviceLogin",
+      "method": "GET",
+      "request": {
+        "path": "/api/v2/auth/device",
+        "query": {
+          "token": "${browser_code}"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/ip_address_hint",
+            "op": "equals",
+            "value": "127.0.*.*"
+          },
+          {
+            "pointer": "/device_name",
+            "op": "equals",
+            "value": "Fixture TV"
+          },
+          {
+            "pointer": "/match_code",
+            "op": "equals",
+            "value": "42"
+          },
+          {
+            "pointer": "/expires_at",
+            "op": "rfc3339"
+          },
+          {
+            "pointer": "/client_purpose",
+            "op": "equals",
+            "value": "device_login"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "status",
+              "user_code",
+              "match_code",
+              "device_name",
+              "device_platform",
+              "ip_address_hint",
+              "expires_at",
+              "client_purpose",
+              "temporary"
+            ]
+          },
+          {
+            "pointer": "/temporary",
+            "op": "equals",
+            "value": false
+          },
+          {
+            "pointer": "/user_code",
+            "op": "equals",
+            "value": ""
+          }
+        ]
+      }
+    }
+  },
+  "device_lookup.expired.r1": {
+    "method": "GET",
+    "path": "/api/v1/auth/device",
+    "registration": 1,
+    "scenario": {
+      "id": "device_lookup.expired.r1",
+      "category": "data_meaning",
+      "description": "An expired request reports status expired rather than 404.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device",
+        "query": {
+          "token": "${browser_code_expired}"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "body": [
+          {
+            "pointer": "/status",
+            "op": "equals",
+            "value": "expired"
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "getDeviceLogin",
+      "method": "GET",
+      "request": {
+        "path": "/api/v2/auth/device",
+        "query": {
+          "token": "${browser_code_expired}"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/status",
+            "op": "equals",
+            "value": "expired"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "status",
+              "user_code",
+              "match_code",
+              "device_name",
+              "device_platform",
+              "ip_address_hint",
+              "expires_at",
+              "client_purpose",
+              "temporary"
+            ]
+          },
+          {
+            "pointer": "/temporary",
+            "op": "equals",
+            "value": false
+          },
+          {
+            "pointer": "/user_code",
+            "op": "equals",
+            "value": ""
+          }
+        ]
+      }
+    }
+  },
+  "device_lookup.shape.r1": {
+    "method": "GET",
+    "path": "/api/v1/auth/device",
+    "registration": 1,
+    "scenario": {
+      "id": "device_lookup.shape.r1",
+      "category": "field_presence_nullability",
+      "description": "temporary is omitted when false and user_code is omitted on token lookups.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device",
+        "query": {
+          "token": "${browser_code}"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "body": [
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "status",
+              "match_code",
+              "device_name",
+              "device_platform",
+              "ip_address_hint",
+              "expires_at",
+              "client_purpose"
+            ]
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "getDeviceLogin",
+      "method": "GET",
+      "request": {
+        "path": "/api/v2/auth/device",
+        "query": {
+          "token": "${browser_code}"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "status",
+              "user_code",
+              "match_code",
+              "device_name",
+              "device_platform",
+              "ip_address_hint",
+              "expires_at",
+              "client_purpose",
+              "temporary"
+            ]
+          },
+          {
+            "pointer": "/temporary",
+            "op": "equals",
+            "value": false
+          },
+          {
+            "pointer": "/user_code",
+            "op": "equals",
+            "value": ""
+          }
+        ]
+      }
+    }
+  },
+  "device_lookup.not_found.r1": {
+    "method": "GET",
+    "path": "/api/v1/auth/device",
+    "registration": 1,
+    "scenario": {
+      "id": "device_lookup.not_found.r1",
+      "category": "error",
+      "description": "An unknown token is 404 not_found.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device",
+        "query": {
+          "token": "nope"
+        }
+      },
+      "expect": {
+        "status": 404,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "not_found"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "pointer": "/error",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "equals",
+            "value": "Device login request not found"
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "getDeviceLogin",
+      "method": "GET",
+      "request": {
+        "path": "/api/v2/auth/device",
+        "query": {
+          "token": "nope"
+        }
+      },
+      "expect": {
+        "status": 404,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/problem+json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/status",
+            "op": "equals",
+            "value": 404
+          },
+          {
+            "pointer": "/type",
+            "op": "matches",
+            "value": "/not_found$"
+          }
+        ]
+      }
+    }
+  },
+  "device_lookup.no_params.r1": {
+    "method": "GET",
+    "path": "/api/v1/auth/device",
+    "registration": 1,
+    "scenario": {
+      "id": "device_lookup.no_params.r1",
+      "category": "error",
+      "description": "No token and no code is 404 not_found (not 400).",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device"
+      },
+      "expect": {
+        "status": 404,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "not_found"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "pointer": "/error",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "type",
+            "value": "string"
+          }
+        ]
+      },
+      "requires": [
+        "database"
+      ],
+      "notes": "A request with neither parameter is 404 rather than a validation 400; flagged for the section PR.",
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "getDeviceLogin",
+      "method": "GET",
+      "request": {
+        "path": "/api/v2/auth/device"
+      },
+      "expect": {
+        "status": 422,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/problem+json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/status",
+            "op": "equals",
+            "value": 422
+          },
+          {
+            "pointer": "/type",
+            "op": "matches",
+            "value": "/validation_failed$"
+          }
+        ]
+      }
+    }
+  },
+  "device_lookup.rate_limited.r1": {
+    "method": "GET",
+    "path": "/api/v1/auth/device",
+    "registration": 1,
+    "scenario": {
+      "id": "device_lookup.rate_limited.r1",
+      "category": "status_headers",
+      "description": "The rate-limited registration variant answers 429 with Retry-After once the per-IP device_lookup burst (20) is spent.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device",
+        "repeat": 21
+      },
+      "expect": {
+        "status": 429,
+        "headers": [
+          {
+            "name": "Retry-After",
+            "op": "matches",
+            "value": "^[0-9]+$"
+          },
+          {
+            "name": "X-RateLimit-Remaining",
+            "op": "equals",
+            "value": "0"
+          },
+          {
+            "name": "X-RateLimit-Limit",
+            "op": "exists"
+          },
+          {
+            "name": "X-RateLimit-Reset",
+            "op": "matches",
+            "value": "^[0-9]+$"
+          },
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "rate_limit_exceeded"
+          },
+          {
+            "pointer": "/retry_after",
+            "op": "type",
+            "value": "integer"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message",
+              "retry_after"
+            ]
+          }
+        ]
+      },
+      "requires": [
+        "rate_limiter"
+      ],
+      "fresh_state": true,
+      "notes": "The 429 body has a third key (retry_after) unlike every other error envelope; flagged for the section PR.",
+      "v2_expectation": null
+    },
+    "pair": {
+      "kind": "intentional_difference",
+      "summary": "Distinct rate-limited registration executed through the real limited router with fresh counter state per transport. V2 reports the burst refusal as a rate_limited Problem (no-store) carrying Retry-After only; the legacy X-RateLimit-* headers are not part of v2. Original device effects and oracles preserved.",
+      "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
+      "operation_id": "getDeviceLogin",
+      "method": "GET",
+      "request": {
+        "path": "/api/v2/auth/device",
+        "repeat": 21
+      },
+      "expect": {
+        "status": 429,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/problem+json"
+          },
+          {
+            "name": "Cache-Control",
+            "op": "equals",
+            "value": "no-store"
+          },
+          {
+            "name": "Retry-After",
+            "op": "matches",
+            "value": "^[0-9]+$"
+          },
+          {
+            "name": "X-RateLimit-Remaining",
+            "op": "absent"
+          },
+          {
+            "name": "X-RateLimit-Limit",
+            "op": "absent"
+          },
+          {
+            "name": "X-RateLimit-Reset",
+            "op": "absent"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/status",
+            "op": "equals",
+            "value": 429
+          },
+          {
+            "pointer": "/type",
+            "op": "matches",
+            "value": "/rate_limited$"
+          }
+        ]
+      }
+    }
+  }
+}

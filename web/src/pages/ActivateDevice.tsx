@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useSearchParams } from "react-router";
-import { api } from "@/api/client";
-import type { DeviceLoginLookupResponse } from "@/api/types";
+import { v2, type V2Result } from "@/api/v2/request";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +11,8 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useServerBranding } from "@/hooks/useServerBranding";
 import { AuthBackground } from "@/components/auth/AuthBackground";
 import { toast } from "sonner";
+
+type DeviceLoginDetails = V2Result<"GET /api/v2/auth/device">;
 
 function normalizeCode(value: string) {
   const clean = value
@@ -28,7 +29,7 @@ export default function ActivateDevice() {
   const { user, loading, setupLoading } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [codeInput, setCodeInput] = useState(searchParams.get("code") ?? "");
-  const [details, setDetails] = useState<DeviceLoginLookupResponse | null>(null);
+  const [details, setDetails] = useState<DeviceLoginDetails | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [acting, setActing] = useState(false);
   const { serverName } = useServerBranding();
@@ -51,13 +52,9 @@ export default function ActivateDevice() {
 
     setLoadingDetails(true);
     try {
-      const params = new URLSearchParams();
-      if (token) {
-        params.set("token", token);
-      } else {
-        params.set("code", code);
-      }
-      const result = await api<DeviceLoginLookupResponse>(`/auth/device?${params.toString()}`);
+      const result = await v2("GET /api/v2/auth/device", {
+        query: token ? { token } : { code },
+      });
       setDetails(result);
     } catch (error) {
       setDetails(null);
@@ -74,10 +71,12 @@ export default function ActivateDevice() {
   async function handleDecision(action: "approve" | "deny") {
     setActing(true);
     try {
-      await api(`/auth/device/${action}`, {
-        method: "POST",
-        body: JSON.stringify({ token, code }),
-      });
+      const body = token ? { token } : { code };
+      if (action === "approve") {
+        await v2("POST /api/v2/auth/device/approve", { body });
+      } else {
+        await v2("POST /api/v2/auth/device/deny", { body });
+      }
       await loadDetails();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : `Failed to ${action} request`);

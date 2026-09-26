@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiClientError } from "@/api/client";
+import { V2ProblemError } from "@/api/v2/request";
 import {
   isDefinitiveSettingMutationRejection,
+  settingMutationStatus,
   useEffectiveSettings,
   useSetSettingValue,
 } from "@/hooks/queries/settingValues";
@@ -252,10 +253,9 @@ export function shouldRetryLibraryPageStateWrite(error: unknown): boolean {
   // 408, 425, and 429 are definitive HTTP responses but transient request
   // outcomes. Keep that retry decision separate from the queue's commit
   // certainty decision so rate limiting cannot make a page state terminal.
-  if (error instanceof ApiClientError) {
-    return (
-      error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500
-    );
+  const status = settingMutationStatus(error);
+  if (status !== null) {
+    return status === 408 || status === 425 || status === 429 || status >= 500;
   }
   return !isDefinitiveSettingMutationRejection(error);
 }
@@ -270,13 +270,11 @@ export function libraryPageStateWriteRetryDelay(
   if (error instanceof LibraryPreferenceWriteCancelledError) {
     return 0;
   }
-  if (error instanceof ApiClientError && error.status === 429) {
-    const body = error.body;
-    const retryAfter =
-      body && typeof body === "object" && "retry_after" in body
-        ? (body as { retry_after?: unknown }).retry_after
-        : undefined;
-    if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > 0) {
+  if (error instanceof V2ProblemError && error.status === 429) {
+    // The contract signals the delay through the Retry-After header, which
+    // the request boundary carries on the problem error.
+    const retryAfter = error.retryAfterSeconds;
+    if (retryAfter !== null) {
       return Math.max(fallbackDelayMs, retryAfter * 1_000);
     }
   }

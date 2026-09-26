@@ -141,6 +141,23 @@ func TestMergeStepsUseCurrentWatchProviderListItemsTable(t *testing.T) {
 	}
 }
 
+func TestMergeStepsCarryWatchProviderRatingItems(t *testing.T) {
+	var hasMerge, hasDelete bool
+	for _, step := range mediaItemMergeSteps {
+		stepSQL := normalizeMergeStepSQL(step.sql)
+		if strings.Contains(stepSQL, "INSERT INTO watch_provider_rating_items") &&
+			strings.Contains(stepSQL, "ON CONFLICT (connection_id, media_item_id) DO NOTHING") {
+			hasMerge = true
+		}
+		if strings.Contains(stepSQL, "DELETE FROM watch_provider_rating_items WHERE media_item_id = $1") {
+			hasDelete = true
+		}
+	}
+	if !hasMerge || !hasDelete {
+		t.Fatalf("media item merge steps must move agreed ratings to the canonical item (merge=%v delete=%v)", hasMerge, hasDelete)
+	}
+}
+
 func TestMergeStepsPreserveEbookReaderProgress(t *testing.T) {
 	var hasMerge bool
 	var hasDelete bool

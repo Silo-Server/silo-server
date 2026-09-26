@@ -90,6 +90,30 @@ func (r *PgExecutionRepository) List(ctx context.Context, taskKey string, limit 
 	return results, rows.Err()
 }
 
+// ListPage reads bounded execution history using its complete order tuple.
+func (r *PgExecutionRepository) ListPage(ctx context.Context, key string, before time.Time, beforeID int64, limit int) ([]taskmanager.ExecutionResult, error) {
+	if limit < 1 || limit > 201 {
+		return nil, fmt.Errorf("invalid task history page limit")
+	}
+	args := []any{key, limit}
+	query := `SELECT id,task_key,started_at,completed_at,status,COALESCE(error_message,''),result_data,duration_ms FROM task_executions WHERE task_key=$1`
+	if beforeID != 0 {
+		args = append(args, before, beforeID)
+		query += ` AND (completed_at,id)<($3,$4)`
+	}
+	query += ` ORDER BY completed_at DESC,id DESC LIMIT $2`
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (taskmanager.ExecutionResult, error) {
+		var result taskmanager.ExecutionResult
+		err := row.Scan(&result.ID, &result.TaskKey, &result.StartedAt, &result.CompletedAt, &result.Status, &result.ErrorMessage, &result.ResultData, &result.DurationMs)
+		return result, err
+	})
+}
+
 // Prune deletes bounded batches of execution history outside the retention
 // policy. A database advisory lock ensures only one Silo node prunes at a time.
 // It always preserves the newest execution for every task, including tasks

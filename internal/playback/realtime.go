@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // Realtime message types exchanged over /playback/ws/{session_id}.
@@ -135,12 +137,13 @@ type TimeRangePayload struct {
 }
 
 type MarkersUpdatedPayload struct {
-	SessionID string            `json:"session_id"`
-	FileID    int               `json:"file_id"`
-	Intro     *TimeRangePayload `json:"intro"`
-	Credits   *TimeRangePayload `json:"credits"`
-	Recap     *TimeRangePayload `json:"recap"`
-	Preview   *TimeRangePayload `json:"preview"`
+	SessionID      string                 `json:"session_id"`
+	FileID         int                    `json:"file_id"`
+	Intro          *TimeRangePayload      `json:"intro"`
+	Credits        *TimeRangePayload      `json:"credits"`
+	Recap          *TimeRangePayload      `json:"recap"`
+	Preview        *TimeRangePayload      `json:"preview"`
+	MarkerSegments []models.MarkerSegment `json:"marker_segments"`
 }
 
 // SubtitleReadyPayload announces that a newly generated subtitle track (AI
@@ -266,14 +269,19 @@ func NewMarkersUpdatedEvent(
 	credits *TimeRangePayload,
 	recap *TimeRangePayload,
 	preview *TimeRangePayload,
+	segments ...models.MarkerSegment,
 ) (EventEnvelope, error) {
+	if segments == nil {
+		segments = []models.MarkerSegment{}
+	}
 	payload, err := json.Marshal(MarkersUpdatedPayload{
-		SessionID: sessionID,
-		FileID:    fileID,
-		Intro:     intro,
-		Credits:   credits,
-		Recap:     recap,
-		Preview:   preview,
+		SessionID:      sessionID,
+		FileID:         fileID,
+		Intro:          intro,
+		Credits:        credits,
+		Recap:          recap,
+		Preview:        preview,
+		MarkerSegments: segments,
 	})
 	if err != nil {
 		return EventEnvelope{}, err

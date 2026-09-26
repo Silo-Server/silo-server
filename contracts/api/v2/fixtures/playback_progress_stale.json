@@ -1,0 +1,8 @@
+{
+  "outcome": "stale_sample",
+  "accepted": {
+    "sequence": 42,
+    "position": 120,
+    "is_paused": false
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "id": "8",
+  "user_id": "2",
+  "label": "Automation",
+  "key": "creation-secret",
+  "rate_tier": "standard",
+  "scopes": [],
+  "created_at": "2026-01-02T03:04:05.678Z"
+}

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -141,6 +143,7 @@ func CleanupReports(
 		errs = append(errs, fmt.Errorf("list diagnostic objects: %w", err))
 		return result, errors.Join(errs...)
 	}
+	keys = slices.DeleteFunc(keys, func(key string) bool { return !isReportObjectKey(key) })
 	if len(keys) == 0 {
 		return result, errors.Join(errs...)
 	}
@@ -164,6 +167,20 @@ func CleanupReports(
 		result.OrphanObjectsDeleted++
 	}
 	return result, errors.Join(errs...)
+}
+
+// isReportObjectKey reports whether key has the exact shape reportObjectKey
+// writes. On a local backend with no private bucket, diagnostics shares one
+// root with artwork, whose keys begin with an unvalidated provider slug. Orphan
+// cleanup deletes whatever it lists, so it must only consider keys that could
+// be a bundle, never everything under the prefix.
+func isReportObjectKey(key string) bool {
+	parts := strings.Split(key, "/")
+	if len(parts) != 3 || parts[0] != diagnosticObjectPrefix || !strings.HasSuffix(parts[2], ".tar.gz") || parts[2] == ".tar.gz" {
+		return false
+	}
+	userID, err := strconv.Atoi(parts[1])
+	return err == nil && userID > 0 && strconv.Itoa(userID) == parts[1]
 }
 
 func deleteReportObjects(ctx context.Context, store ObjectStore, report *Report, logger *slog.Logger) error {

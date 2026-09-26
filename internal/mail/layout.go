@@ -1,8 +1,10 @@
 package mail
 
 import (
+	"fmt"
 	"html"
 	"strings"
+	"time"
 )
 
 // Shared visual tokens for Silo's branded emails, mirroring the web UI's
@@ -100,6 +102,57 @@ func EmailButton(label, href string) string {
 func EmailParagraph(text string) string {
 	return `<p style="margin:0 0 16px;font:400 14px/1.6 ` + EmailFont +
 		`;color:` + EmailColorText + `;">` + html.EscapeString(text) + `</p>`
+}
+
+// EmailFacts renders a bordered box of label/value rows, such as the address
+// to sign in with and when a link expires. Each value is HTML the caller has
+// already escaped; a mono value renders in the monospace face.
+func EmailFacts(rows ...EmailFact) string {
+	var b strings.Builder
+	b.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 0;border:1px solid ` +
+		EmailColorBorder + `;border-radius:8px;">`)
+	for _, row := range rows {
+		valueFont := EmailFont
+		if row.Mono {
+			valueFont = EmailFontMono
+		}
+		b.WriteString(`<tr><td style="padding:10px 14px;font:400 13px/1.4 ` + EmailFont +
+			`;color:` + EmailColorMuted + `;">` + row.Label + `</td>` +
+			`<td align="right" style="padding:10px 14px;font:400 13px/1.4 ` + valueFont +
+			`;color:` + EmailColorText + `;">` + row.ValueHTML + `</td></tr>`)
+	}
+	b.WriteString(`</table>`)
+	return b.String()
+}
+
+// EmailFact is one row of EmailFacts.
+type EmailFact struct {
+	Label     string
+	ValueHTML string
+	Mono      bool
+}
+
+// EmailLinkFallback renders the "paste this link" line under a button for
+// clients that block it.
+func EmailLinkFallback(href string) string {
+	return `<p style="margin:20px 0 0;font:400 12px/1.7 ` + EmailFont + `;color:` + EmailColorMuted +
+		`;">Or paste this link into your browser:<br>` +
+		`<span style="font:400 12px/1.7 ` + EmailFontMono + `;word-break:break-all;">` + html.EscapeString(href) + `</span></p>`
+}
+
+// ExpiryPhrase renders a link expiry as a human phrase ("in 7 days").
+func ExpiryPhrase(expiresAt, now time.Time) string {
+	d := expiresAt.Sub(now)
+	switch {
+	case d <= 0:
+		return "immediately"
+	case d < 2*time.Hour:
+		return "in 1 hour"
+	case d < 48*time.Hour:
+		return fmt.Sprintf("in %d hours", int(d.Round(time.Hour).Hours()))
+	default:
+		return fmt.Sprintf("in %d days", int(d.Round(24*time.Hour).Hours()/24))
+	}
 }
 
 // emailShell is the document skeleton. The color-scheme meta plus explicit

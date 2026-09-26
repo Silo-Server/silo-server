@@ -326,44 +326,44 @@ func TestPluginImageResolverCoalescesConcurrentBatchMisses(t *testing.T) {
 	}
 }
 
-type fakeS3ImagePresigner struct {
+type fakeStoredArtworkResolver struct {
 	calls int
 	ttl   time.Duration
 }
 
-func (p *fakeS3ImagePresigner) PresignGetURL(_ context.Context, _ string, key string, expiry time.Duration) (string, error) {
-	p.calls++
-	p.ttl = expiry
-	return fmt.Sprintf("s3:%s:%d", key, p.calls), nil
+func (r *fakeStoredArtworkResolver) ResolveURLs(_ context.Context, keys []string) map[string]catalog.ResolvedImageURL {
+	out := make(map[string]catalog.ResolvedImageURL, len(keys))
+	for _, key := range keys {
+		r.calls++
+		expiry := time.Now().Add(r.ttl)
+		out[key] = catalog.ResolvedImageURL{URL: fmt.Sprintf("stored:%s:%d", key, r.calls), ExpiresAt: &expiry}
+	}
+	return out
 }
 
-func (p *fakeS3ImagePresigner) Bucket() string {
-	return "metadata"
-}
-
-func TestPluginImageResolverS3URLsCarryConfiguredExpiry(t *testing.T) {
-	presigner := &fakeS3ImagePresigner{}
+func TestPluginImageResolverStoredURLsCarryResolverExpiry(t *testing.T) {
+	stored := &fakeStoredArtworkResolver{ttl: 10 * time.Minute}
 	resolver := NewPluginImageResolver()
 	defer resolver.Close()
-	resolver.SetS3Presigner(presigner, 10*time.Minute)
+	resolver.SetArtworkResolver(stored)
 
 	before := time.Now()
 	first := resolver.ResolveImageURLWithExpiry(context.Background(), "poster.jpg", "featured")
 	second := resolver.ResolveImageURLWithExpiry(context.Background(), "poster.jpg", "featured")
 
 	if first.URL == "" || second.URL != first.URL {
-		t.Fatalf("cached S3 URLs = first %q second %q", first.URL, second.URL)
+		t.Fatalf("cached stored URLs = first %q second %q", first.URL, second.URL)
 	}
-	if presigner.calls != 1 {
-		t.Fatalf("s3 presign calls = %d, want 1", presigner.calls)
-	}
-	if presigner.ttl != 10*time.Minute {
-		t.Fatalf("s3 presign ttl = %s, want 10m", presigner.ttl)
+	if stored.calls != 1 {
+		t.Fatalf("stored resolver calls = %d, want 1", stored.calls)
 	}
 	if first.ExpiresAt == nil {
-		t.Fatal("S3 resolved URL missing expiry")
+		t.Fatal("stored resolved URL missing expiry")
 	}
-	if first.ExpiresAt.Before(before.Add(9*time.Minute)) || first.ExpiresAt.After(before.Add(11*time.Minute)) {
-		t.Fatalf("S3 expiry = %s, want about 10m from now", first.ExpiresAt.Sub(before))
+	if first.ExpiresAt.Before(before.Add(4*time.Minute)) || first.ExpiresAt.After(before.Add(11*time.Minute)) {
+		t.Fatalf("stored expiry = %s, want between the cache bound and the resolver TTL", first.ExpiresAt.Sub(before))
+	}
+	if resolver.ResolveImageURL(context.Background(), "unstored.jpg", "featured") == "" {
+		t.Fatal("stored key without an availability reader must resolve to itself")
 	}
 }

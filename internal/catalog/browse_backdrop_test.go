@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -39,18 +40,30 @@ func TestCatalogCollectionFiltersReachBrowse(t *testing.T) {
 		CollectionID:    "collection-1",
 		PersonID:        42,
 		RequireBackdrop: true,
+		BrowseOverlay: &BrowseFilters{
+			Genres:            []string{"Drama", "Mystery"},
+			Years:             []int{2025, 2026},
+			ExcludeContentIDs: []string{"hidden"},
+			AudioLanguages:    []string{"sv"},
+		},
+		Query: QueryDefinition{MediaScope: "episode"},
 	}
 	if !catalogRequestHasOverlay(req) {
 		t.Fatal("person/backdrop collection filters were not recognized as an overlay")
 	}
 
 	base := catalogBaseCollectionRequest(req)
-	filters, earlyEmpty, err := catalogBrowseFilters(base, AccessFilter{})
+	filters, earlyEmpty, err := catalogBrowseFilters(base, AccessFilter{UserID: 7, ProfileID: "profile-1", MaxPlaybackQuality: "1080p"})
 	if err != nil || earlyEmpty {
 		t.Fatalf("catalogBrowseFilters err=%v earlyEmpty=%v", err, earlyEmpty)
 	}
-	if filters.PersonID != 42 || !filters.RequireBackdrop {
-		t.Fatalf("browse filters = %+v, want person 42 with backdrop", filters)
+	if filters.PersonID != 42 || !filters.RequireBackdrop || filters.Type != "episode" ||
+		!slices.Equal(filters.Genres, []string{"Drama", "Mystery"}) ||
+		!slices.Equal(filters.Years, []int{2025, 2026}) ||
+		!slices.Equal(filters.ExcludeContentIDs, []string{"hidden"}) ||
+		!slices.Equal(filters.AudioLanguages, []string{"sv"}) || filters.UserID != 7 ||
+		filters.ProfileID != "profile-1" || filters.MaxPlaybackQuality != "1080p" {
+		t.Fatalf("browse filters did not preserve the compat overlay: %+v", filters)
 	}
 }
 

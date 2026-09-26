@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,10 +64,15 @@ type System struct {
 	// delivers once an admin configures bot credentials in settings.
 	DiscordPrefs *DiscordPrefsRepository
 
-	mailSender    mail.Sender
-	emailWorker   *accountChannelWorker[string]
-	discordWorker *accountChannelWorker[int]
-	discordClient *discord.Client
+	// EmailVerification admits durable requests and reports whether the
+	// dispatcher below can hand them to the provider.
+	EmailVerification *EmailVerificationService
+
+	mailSender                mail.Sender
+	emailVerificationDispatch *emailVerificationDispatcher
+	emailWorker               *accountChannelWorker[string]
+	discordWorker             *accountChannelWorker[int]
+	discordClient             *discord.Client
 	// publicURL is the server's externally reachable base URL, used as the
 	// fallback for tokenized email links (see SetPublicURL).
 	publicURL string
@@ -247,6 +253,12 @@ func NewSystem(
 		users:               users,
 		logger:              slog.Default().With("component", "notifications.system"),
 	}
+	if emailPrefs != nil && cipher != nil {
+		// emailPrefs is only built with a mail sender, so the dispatcher
+		// always accompanies the admission service.
+		system.emailVerificationDispatch = newEmailVerificationDispatcher(emailPrefs, cipher, mailSender)
+		system.EmailVerification = &EmailVerificationService{store: emailPrefs, cipher: cipher, profile: system.lookupProfile, linkBase: system.emailLinkBase, dispatch: system.emailVerificationDispatch}
+	}
 	wsDispatcher.payload = system.PayloadForRow
 	if emailChannelInst != nil {
 		emailChannelInst.profileName = system.lookupProfileName
@@ -290,7 +302,23 @@ func (s *System) discordPosterURL(ctx context.Context, posterPath, posterSourceP
 	if mode != DiscordPostersServer || s.images == nil || posterPath == "" {
 		return ""
 	}
-	return s.images.PresignImageURL(ctx, posterPath, "poster", "")
+	return s.absoluteArtworkURL(ctx, s.images.PresignImageURL(ctx, posterPath, "poster", ""))
+}
+
+// absoluteArtworkURL makes a resolved artwork URL usable outside this server.
+// S3 delivery already presigns absolute URLs; local artwork storage signs
+// root-relative /api/v2/artwork paths that only a client of this server can
+// follow, so they are anchored to server.public_url. Without a public URL the
+// embed carries no image rather than a link Discord cannot fetch.
+func (s *System) absoluteArtworkURL(ctx context.Context, url string) string {
+	if url == "" || !strings.HasPrefix(url, "/") {
+		return url
+	}
+	base := s.emailLinkBase(ctx)
+	if base == "" {
+		return ""
+	}
+	return base + url
 }
 
 // PayloadForRow converts a row to its wire shape, attaching a presigned
@@ -353,6 +381,13 @@ func (s *System) Start(ctx context.Context) {
 		go func() {
 			defer s.wg.Done()
 			s.emailWorker.Run(ctx)
+		}()
+	}
+	if s.emailVerificationDispatch != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.emailVerificationDispatch.Run(ctx)
 		}()
 	}
 	if s.discordWorker != nil {
@@ -745,6 +780,10 @@ type RetentionStats struct {
 	WebhookAttemptsDeleted   int64
 	WebPushAttemptsDeleted   int64
 	DiscordLinkStatesDeleted int64
+	// Email verification outbox: payloads dropped from terminal rows whose
+	// link expired, and receipt rows deleted past the retention window.
+	EmailVerificationPayloadsRetired int64
+	EmailVerificationReceiptsDeleted int64
 }
 
 // RunRetention applies the retention policy: read deliveries past the read
@@ -805,6 +844,14 @@ func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 			return stats, fmt.Errorf("prune discord link states: %w", err)
 		}
 		stats.DiscordLinkStatesDeleted = states
+	}
+	if s.EmailPrefs != nil {
+		payloads, rows, err := s.EmailPrefs.RetireVerificationDispatch(ctx, now)
+		if err != nil {
+			return stats, fmt.Errorf("prune email verification outbox: %w", err)
+		}
+		stats.EmailVerificationPayloadsRetired = payloads
+		stats.EmailVerificationReceiptsDeleted = rows
 	}
 	return stats, nil
 }

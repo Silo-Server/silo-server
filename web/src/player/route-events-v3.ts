@@ -11,8 +11,6 @@
  * instead of dying in a browser console nobody reads.
  */
 
-import type { PlayerConfig } from "./context/PlayerConfigContext";
-import { playerFetch } from "./player-fetch";
 import { PROTOCOL_V3, type RouteEventNameV3, type RouteEventV3 } from "./protocol-v3";
 
 /** The server drops unknown keys and truncates values; keep the payload small anyway. */
@@ -44,19 +42,9 @@ function sanitizeDiagnostics(diagnostics: RouteEventInput["diagnostics"]): Recor
   return out;
 }
 
-/**
- * Reports one route event. Returns a promise that always resolves — callers use
- * `void reportRouteEventV3(...)` and carry on with playback regardless.
- */
-export async function reportRouteEventV3(
-  config: PlayerConfig,
-  input: RouteEventInput,
-): Promise<void> {
-  // The server bounds this at 8..128 characters; without an attempt id there is
-  // nothing to correlate the event against, so there is no event worth sending.
-  if (!input.playbackAttemptId || input.playbackAttemptId.length < 8) return;
-
-  const body: RouteEventV3 = {
+/** Builds the protocol-v3 diagnostic payload sent by the v2 transport. */
+export function buildRouteEventV3(input: RouteEventInput): RouteEventV3 {
+  return {
     protocol_version: PROTOCOL_V3,
     playback_attempt_id: input.playbackAttemptId,
     event: input.event,
@@ -70,14 +58,4 @@ export async function reportRouteEventV3(
       : {}),
     ...(input.fallbackReason ? { fallback_reason: input.fallbackReason.slice(0, 64) } : {}),
   };
-
-  try {
-    await playerFetch<void>(config, "/playback/route-events", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  } catch {
-    // Diagnostics must never affect playback. A rate-limited or rejected event
-    // is dropped, not retried.
-  }
 }

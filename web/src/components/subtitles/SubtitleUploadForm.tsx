@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Upload } from "lucide-react";
 
 import type { SubtitleLanguageDetection } from "@/api/types";
@@ -14,6 +14,15 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { LANGUAGES, getLanguageName } from "@/player/utils/languageNames";
+
+function isCanceledSubtitleRequest(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "name" in err &&
+    (err.name === "AbortError" || err.name === "StaleApiRequestContextError")
+  );
+}
 
 const ACCEPTED_SUBTITLE_EXTENSIONS = ".srt,.vtt,.ass,.ssa,.sub";
 const ACCEPTED_SUBTITLE_EXTENSION_LIST = ["srt", "vtt", "ass", "ssa", "sub"] as const;
@@ -70,6 +79,8 @@ export function SubtitleUploadForm({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
   const detectRequestRef = useRef(0);
+  const uploadRequestRef = useRef(0);
+
   const [language, setLanguage] = useState(defaultLanguage);
   const [hearingImpaired, setHearingImpaired] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -81,6 +92,18 @@ export function SubtitleUploadForm({
   >(null);
   const [languageOverride, setLanguageOverride] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    detectRequestRef.current++;
+    uploadRequestRef.current++;
+    setUploading(false);
+    setDetectingLanguage(false);
+    setSelectedFile(null);
+    return () => {
+      detectRequestRef.current++;
+      uploadRequestRef.current++;
+    };
+  }, [mediaFileId]);
 
   const isPlayer = variant === "player";
 
@@ -112,7 +135,7 @@ export function SubtitleUploadForm({
           setLanguageOverride(false);
         }
       } catch (err) {
-        if (requestId !== detectRequestRef.current) {
+        if (requestId !== detectRequestRef.current || isCanceledSubtitleRequest(err)) {
           return;
         }
         setDetectionSource(null);
@@ -194,6 +217,7 @@ export function SubtitleUploadForm({
       return;
     }
 
+    const requestId = ++uploadRequestRef.current;
     setUploading(true);
     setError(null);
 
@@ -205,6 +229,7 @@ export function SubtitleUploadForm({
         languageOverride,
         hearingImpaired,
       });
+      if (requestId !== uploadRequestRef.current) return;
       setSelectedFile(null);
       setDetectionSource(null);
       setLanguageOverride(false);
@@ -213,9 +238,10 @@ export function SubtitleUploadForm({
       }
       onSuccess();
     } catch (err) {
+      if (requestId !== uploadRequestRef.current || isCanceledSubtitleRequest(err)) return;
       reportError(err instanceof Error ? err.message : "Upload failed");
     } finally {
-      setUploading(false);
+      if (requestId === uploadRequestRef.current) setUploading(false);
     }
   };
 

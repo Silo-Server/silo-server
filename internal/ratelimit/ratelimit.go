@@ -79,15 +79,23 @@ func DefaultConfig() Config {
 		IPReqPerMinute: 6000,
 		IPBurst:        120,
 		AuthEndpoints: map[string]AuthEndpointConfig{
-			"login":         {RequestsPerMinute: 20, Burst: 10},
-			"signup":        {RequestsPerMinute: 10, Burst: 6},
-			"setup":         {RequestsPerMinute: 10, Burst: 6},
-			"device_start":  {RequestsPerMinute: 20, Burst: 10},
-			"device_lookup": {RequestsPerMinute: 60, Burst: 20},
-			"device_poll":   {RequestsPerMinute: 120, Burst: 30},
+			"login":           {RequestsPerMinute: 20, Burst: 10},
+			"signup":          {RequestsPerMinute: 10, Burst: 6},
+			"setup":           {RequestsPerMinute: 10, Burst: 6},
+			"password_change": {RequestsPerMinute: 10, Burst: 5},
+			"device_start":    {RequestsPerMinute: 20, Burst: 10},
+			"device_lookup":   {RequestsPerMinute: 60, Burst: 20},
+			"device_poll":     {RequestsPerMinute: 120, Burst: 30},
 			// Invitation claim lookups and accepts: single-use tokens with
 			// 256-bit entropy, so this is anti-probe hygiene, not the guard.
 			"invitation": {RequestsPerMinute: 20, Burst: 10},
+			// Password reset link lookups and completions: same token entropy
+			// and the same anti-probe role.
+			"password_reset": {RequestsPerMinute: 20, Burst: 10},
+			// Self-service reset requests from the sign-in page. Tighter:
+			// each one can send an email. The per-account cooldown in
+			// passwordreset bounds mail to one address across all IPs.
+			"password_reset_request": {RequestsPerMinute: 5, Burst: 3},
 			// Public autoscan webhook intake. Generous: arr fires one delivery
 			// per imported file, so season packs are legitimate bursts.
 			"autoscan_webhook": {RequestsPerMinute: 60, Burst: 30},

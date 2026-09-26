@@ -1,0 +1,39 @@
+{
+  "work_id": "work:dune-1965",
+  "work_title": "Dune",
+  "authors": [
+    {
+      "person_id": "9",
+      "name": "Frank Herbert"
+    }
+  ],
+  "formats": [
+    {
+      "type": "ebook",
+      "content_id": "ebook:dune",
+      "library_id": "2",
+      "available_files": [
+        {
+          "file_id": "300",
+          "original_filename": "Dune.epub",
+          "format": "epub",
+          "mime_type": "application/epub+zip",
+          "size": 1024
+        }
+      ],
+      "progress": {
+        "kind": "reading",
+        "progress": 0.25,
+        "updated_at": "2026-01-02T03:04:05.000Z"
+      }
+    }
+  ],
+  "metadata": {
+    "description": "Arrakis.",
+    "genres": [
+      "Science Fiction"
+    ],
+    "published_date": "1965-08-01",
+    "publisher": "Chilton"
+  }
+}

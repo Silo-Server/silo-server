@@ -15,10 +15,7 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      "react-refresh/only-export-components": [
-        "warn",
-        { allowConstantExport: true },
-      ],
+      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
       "@typescript-eslint/no-unused-vars": [
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
@@ -34,6 +31,73 @@ export default tseslint.config(
       "react-hooks/set-state-in-effect": "warn",
       "react-hooks/refs": "warn",
       "react-hooks/preserve-manual-memoization": "warn",
+    },
+  },
+  {
+    // Files on the v2 contract: every request goes through the typed boundary
+    // (src/api/v2/request.ts), so the shape is inferred from the generated
+    // spec rather than asserted at the call site. Extend the list as call
+    // sites migrate; never remove an entry.
+    files: [
+      "src/api/v2/**/*.{ts,tsx}",
+      "src/hooks/useAuth.tsx",
+      "src/hooks/queries/progress.ts",
+      "src/hooks/queries/history.ts",
+      "src/hooks/queries/profiles.ts",
+      "src/hooks/queries/admin/users.ts",
+      "src/hooks/queries/admin/libraries.ts",
+      "src/hooks/queries/libraryCollections.ts",
+      "src/hooks/queries/calendar.ts",
+      "src/hooks/queries/homeDismissals.ts",
+      "src/hooks/queries/favorites.ts",
+      "src/hooks/queries/watchlist.ts",
+      "src/hooks/queries/ratings.ts",
+      "src/components/RecipeGallery/BulkApplyDialog.tsx",
+      "src/hooks/queries/autoPlayNext.ts",
+      "src/hooks/queries/libraryPageState.ts",
+      "src/hooks/queries/pluginSettings.ts",
+      "src/hooks/queries/profileDefaults.ts",
+      "src/hooks/queries/settingValues.ts",
+      "src/hooks/queries/subtitleAppearance.ts",
+      "src/hooks/useOverlayPrefs.ts",
+      "src/lib/profile-management.ts",
+      "src/lib/seriesSubtitleSettings.ts",
+      "src/pages/OAuthComplete.tsx",
+      "src/hooks/queries/recommendations.ts",
+      "src/hooks/queries/tasteSeed.ts",
+      "src/pages/Recommendations.tsx",
+      "src/pages/RecommendationsSection.tsx",
+      "src/components/RecommendationGrid.tsx",
+      "src/pages/ProfileCustomizeHome.tsx",
+      "src/pages/setup-wizard/steps/ProfileStep.tsx",
+      "src/player/utils/subtitleChoicePersistence.ts",
+      "src/hooks/queries/catalogRead.ts",
+      "src/hooks/queries/catalog.ts",
+      "src/hooks/queries/audiobookGroups.ts",
+      "src/hooks/queries/people.ts",
+      "src/hooks/queries/metadataAI.ts",
+      "src/hooks/useOnViewTranslation.ts",
+      "src/pages/PersonDetail.tsx",
+    ],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.name='api'][typeArguments]",
+          message:
+            "api<T>(...) asserts a response shape. Migrated files call v2(...) and let the contract infer it.",
+        },
+        {
+          selector: "CallExpression[callee.name='apiWithProfileRequestContext'][typeArguments]",
+          message:
+            "apiWithProfileRequestContext<T>(...) asserts a response shape. Migrated files call v2(...) and let the contract infer it.",
+        },
+        {
+          selector: "TSAsExpression > TSTypeReference > Identifier[name=/(Response|Request)$/]",
+          message:
+            "Casting to a *Response/*Request type bypasses the contract. Use the inferred v2 types instead.",
+        },
+      ],
     },
   },
   eslintConfigPrettier,

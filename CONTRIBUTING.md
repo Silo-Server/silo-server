@@ -8,19 +8,31 @@ external contributors alike.
 ## Before you start
 
 > [!IMPORTANT]
-> Open an issue or discussion before implementing features, API or behavior
-> changes, schema migrations, large refactors, or anything else that changes
-> product scope. Documentation, typo fixes, and narrow bug fixes can go straight
-> to a pull request.
+> An open issue is not required before a pull request. State the problem in the
+> pull request itself: what breaks or is missing, who it affects, and why this
+> change is the right answer. Link an issue when one already covers the work.
 
-Silo is pre-1.0 and moves quickly. Coordinating first avoids duplicate work,
-conflicts with changes already in flight, and proposals outside scope. Read
-[Project non-goals](docs/non-goals.md) and the relevant
-`docs/architecture/` material before proposing a capability.
+Silo is pre-1.0 and moves quickly. For features, API or behavior changes, schema
+migrations, large refactors, or anything else that changes product scope, opening
+an issue or discussion first is still the cheapest way to learn that the work is
+already in flight or outside scope. That is a judgment call, not a gate; the risk
+of a rejected pull request is yours. Read [Project non-goals](docs/non-goals.md)
+and the relevant `docs/architecture/` material before proposing a capability.
+
+An open issue is not an unclaimed one. Before implementing someone else's issue,
+read its comments and linked pull requests to see whether the author is already
+working on it, and say you are picking it up.
 
 Durable architecture and contracts live under `docs/architecture/`.
 Implementation plans and working notes belong in the issue or pull request, not
 in the repository.
+
+Choose the repository that owns the behavior before implementation begins.
+This repository owns the backend, web app, native API, Jellyfin compatibility,
+and plugin host. Client-only work belongs in `silo-apple` or `silo-android`;
+plugin contracts belong in `silo-plugin-sdk`; provider behavior belongs in the
+individual plugin repository. Cross-repository changes should identify all
+affected repositories in the issue and pull request.
 
 ## Reporting a problem
 
@@ -71,7 +83,7 @@ make embed-stub
 go build ./...
 gofmt -l .                      # must print nothing
 go vet ./...
-golangci-lint run --new-from-merge-base="origin/main" ./...
+make lint-changed                   # BASE_REF=origin/<pr-base> when not main
 make test-go
 
 # Web
@@ -80,42 +92,99 @@ pnpm install --frozen-lockfile
 pnpm run lint
 pnpm run format:check
 pnpm run build
+pnpm run budget:check           # launch bundle size against perf-budget.json
 cd ..
 make test-web
 
 # Generated contracts, fixtures, and docs hygiene
 make verify-settings-bindings-all
 make verify-playback-fixtures
+make verify-route-inventory
+make verify-migration-ledger
+make verify-scenario-catalogs
+make verify-offline-routes
+make verify-apiv2-openapi
+make verify-apiv2-contract          # BASE_REF=origin/<pr-base> when not main
+make verify-apiv2-fixtures
+go test -count=1 -run '^TestCommittedArtifactMatchesRouter$' ./internal/apiv2/
 make verify-local-paths
+```
+
+Touching `internal/apiv2` registrations? Run `make apiv2-openapi` and
+`make apiv2-fixtures` and commit what they write; the gates above fail on a
+stale artifact or fixture tree.
+
+`make test-go` has no database, so every DB-backed test in it skips. The
+`Go DB pins` CI job covers the query-budget pins listed in
+[scripts/ci/db-pins.txt](scripts/ci/db-pins.txt): it migrates a fresh database
+and runs `make test-db-pins`, which fails when a listed test is missing,
+skipped or failing. A test that pins a statement count or query plan belongs in
+that list, added in the same change. Run it yourself when you change database
+or query code or add a pin. It needs a disposable, migrated database; with the
+PostgreSQL service from [DEVELOPMENT.md](DEVELOPMENT.md#local-development)
+running under the Compose defaults:
+
+```sh
+docker compose exec postgres createdb -U silo silo_pins
+export SILO_TEST_DATABASE_URL='postgres://silo:silo@localhost:5432/silo_pins?sslmode=disable'
+DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" \
+  go run ./cmd/silo/ --migrate-only
+make test-db-pins
 ```
 
 `make lint` runs `golangci-lint` over the whole tree and reports inherited
 findings the repository does not pass yet; CI only gates the lines your branch
-changed, which is what the `--new-from-merge-base` form checks. Do not add to
-the inherited findings.
+changed. `make lint-changed` checks exactly those lines, and it analyzes only
+the packages your branch touched, so it takes seconds where a cold run over
+`./...` takes minutes of every core. Do not add to the inherited findings.
+Never pass `--allow-parallel-runners`: concurrent runs queue behind one
+another on purpose.
 
-Paste the actual results into the pull request. Do not report a check as passing
-if it was skipped, failed, or ran somewhere other than where you say it did.
+Summarize the relevant commands and results in the pull request. Name required
+checks that were skipped or failed, and include short output excerpts only when
+they help explain a failure. Describe the test environment without identifying
+private infrastructure. Never claim a check passed or ran on a target it did not.
 
 ## AI-assisted contributions
 
-> [!WARNING]
-> Disclose AI use in every issue and pull request. Fabricated APIs,
-> observations, vulnerabilities, reproduction steps, logs, or test results get
-> the contributor blocked. Bug reports must come from a real reproduction with
-> raw logs.
-
-The [AI-assisted contribution policy](docs/ai-contributions.md) defines the
-disclosure block, the evidence standard, and enforcement. "No AI" is a valid
-disclosure; leaving it out is not.
+Disclose AI use in every issue and pull request, or state "No AI used" when true.
+The [AI-assisted contribution policy](docs/ai-contributions.md) covers contributor
+responsibility, evidence, and enforcement. Use the disclosure fields in the PR
+template or issue form.
 
 ## Open the pull request
 
 Use a [Conventional Commit](https://www.conventionalcommits.org/) title and fill
-in the pull request template. Link the issue or scope item for non-trivial
-work; write `Related issue: N/A — narrow fix` only when no prior coordination
-was needed. Keep the commit history intentional and the diff limited to the
-stated problem.
+in the pull request template. Link an issue or scope item when one covers the
+work; write `Related issue: N/A` when none does. Either way, the Problem section
+has to stand on its own. Keep the commit history intentional and the diff
+limited to the stated problem. Keep the description proportional to the change;
+omit session history, full logs, and private report links. Follow the
+[public-content and media rules](AGENTS.md#pull-requests). Screenshots and recordings
+are not routine PR requirements; attach them only when explicitly requested.
+
+### Write the description
+
+Write for a maintainer who knows Silo but has not seen your working session or
+the diff. The first paragraph should tell them what is broken and what this
+change does; the rest should help them decide how closely to review.
+
+- Open the Problem section with a short plain-language summary: what goes
+  wrong, who it affects, and what this change does about it. Identifiers,
+  numbers, and mechanism come after that.
+- Use the names the codebase already uses, or plain words. Do not carry over
+  terms you coined while working. If a new name is unavoidable, define it once
+  and keep using it.
+- Do not restate the diff. Skip per-test lists, walkthroughs of each function,
+  and paraphrases of code comments. Say what the tests cover and what they do
+  not.
+- Leave out how you got here: earlier designs, dead ends, and how an
+  investigation or replay was run. Mention a rejected alternative only when a
+  reviewer would otherwise ask about it, in one sentence.
+- Let the change set the length. A small fix needs a few lines; a risky or
+  subtle change can take more. There is no word limit, so do not count words
+  or trim to a target. Long supporting evidence, such as tables or
+  measurements, can go in a `<details>` block after the summary.
 
 ## Review expectations
 
@@ -129,4 +198,6 @@ building.
 Coding agents must read [AGENTS.md](AGENTS.md) before changing the repository
 (`CLAUDE.md` points to the same file). This guide and the
 [AI-assisted contribution policy](docs/ai-contributions.md) apply to agent and
-human authors equally.
+human authors equally. Before creating or updating an issue or pull request,
+agents must apply the checked-in [unslop skill](.agents/skills/unslop/SKILL.md) to
+the title and body, as required by the [Writing policy](AGENTS.md#writing).

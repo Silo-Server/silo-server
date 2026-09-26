@@ -13,6 +13,12 @@ import (
 	"github.com/google/uuid"
 )
 
+// ArtworkBackendAuto selects S3 when a public bucket is configured and local
+// storage otherwise. It is the artwork.storage_backend default.
+const ArtworkBackendAuto = "auto"
+
+const artworkBackendAuto = ArtworkBackendAuto
+
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
 	Listen    string `yaml:"listen"`
@@ -20,6 +26,7 @@ type ServerConfig struct {
 	LogLevel  string `yaml:"log_level"`
 	LogFormat string `yaml:"log_format"`
 	LogQuiet  string `yaml:"log_quiet"`
+	PublicURL string `yaml:"public_url"`
 }
 
 // DatabaseConfig holds the primary PostgreSQL connection settings.
@@ -341,9 +348,19 @@ type PolicyConfig struct {
 	DecisionLogRetentionDays   int    `yaml:"-"` // policy decision log retention window
 }
 
+// MarkersConfig holds local marker detection settings.
+type MarkersConfig struct {
+	// DetectionWorkers is how many seasons intro detection analyzes at once,
+	// which also bounds its ffmpeg processes.
+	DetectionWorkers int `yaml:"-"`
+}
+
 // MetadataConfig holds metadata pipeline settings.
 type MetadataConfig struct {
 	CacheImages bool `yaml:"-"`
+	// ImageWorkers is how many artwork encodes run at once. Zero means one
+	// per CPU core.
+	ImageWorkers int `yaml:"-"`
 }
 
 // ClientIPConfig holds client IP resolution settings.
@@ -351,6 +368,11 @@ type ClientIPConfig struct {
 	// TrustedProxies is the comma-separated CIDR list of reverse proxies
 	// whose X-Forwarded-For headers are trusted ("" = built-in defaults).
 	TrustedProxies string `yaml:"-"`
+}
+
+type ArtworkConfig struct {
+	StorageBackend string `yaml:"storage_backend"`
+	LocalPath      string `yaml:"local_path"`
 }
 
 // Config is the top-level configuration for Silo.
@@ -361,7 +383,9 @@ type Config struct {
 	UserDB               UserDBConfig               `yaml:"-"`
 	Scanner              ScannerConfig              `yaml:"-"`
 	Matcher              MatcherConfig              `yaml:"matcher"`
+	Artwork              ArtworkConfig              `yaml:"artwork"`
 	Metadata             MetadataConfig             `yaml:"-"`
+	Markers              MarkersConfig              `yaml:"-"`
 	Playback             PlaybackConfig             `yaml:"playback"`
 	Redis                RedisConfig                `yaml:"redis"`
 	RateLimit            RateLimitConfig            `yaml:"rate_limiting"`
@@ -386,6 +410,7 @@ type configRaw struct {
 	S3             s3ConfigRaw             `yaml:"s3"`
 	UserDB         userDBConfigRaw         `yaml:"user_db"`
 	Scanner        scannerConfigRaw        `yaml:"scanner"`
+	Artwork        ArtworkConfig           `yaml:"artwork"`
 	Matcher        MatcherConfig           `yaml:"matcher"`
 	Playback       PlaybackConfig          `yaml:"playback"`
 	Redis          RedisConfig             `yaml:"redis"`
@@ -434,8 +459,8 @@ func EffectiveDownloadArtifactDir(artifactDir, transcodeDir string) string {
 	return filepath.Join(filepath.Dir(filepath.Clean(transcodeDir)), "silo-download-artifacts")
 }
 
-const DefaultJellyfinCompatEmulatedServerVersion = "10.12.0"
-const DefaultJellyfinWebVersion = "10.11.6"
+const DefaultJellyfinCompatEmulatedServerVersion = "12.1.0"
+const DefaultJellyfinWebVersion = "12.1"
 const DefaultJellyfinWebInstallDir = "/var/lib/silo/compat/jellyfin-web"
 const DefaultJellyfinWebDir = DefaultJellyfinWebInstallDir + "/current"
 
@@ -494,6 +519,7 @@ func setDefaults() *configRaw {
 			MaxConcurrentLibraries: 1,
 			MaxConcurrentScoped:    2,
 		},
+		Artwork: ArtworkConfig{StorageBackend: artworkBackendAuto, LocalPath: "/var/lib/silo/artwork"},
 		Matcher: MatcherConfig{
 			Workers:                 8,
 			BatchSize:               500,

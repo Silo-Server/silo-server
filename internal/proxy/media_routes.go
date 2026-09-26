@@ -28,6 +28,10 @@ var proxyMediaRoutes = []streamtelemetry.MediaRoute{
 	grantRoute(http.MethodGet, "/stream/v3/{session_id}/segment/{name}", streamtelemetry.ClassPlayback, true),
 	proxyRoute(http.MethodGet, "/stream/subtitles/{token}/{track}", streamtelemetry.ClassPlayback, true),
 	proxyRoute(http.MethodGet, "/stream/subtitles/{token}/{track}/fonts", streamtelemetry.ClassPlayback, true),
+	// Theme audio is a short transfer, not a playback session, so it neither
+	// consumes nor is refused by a viewer's stream cap.
+	proxyRoute(http.MethodGet, "/stream/theme/{token}", streamtelemetry.ClassTransfer, false),
+	proxyRoute(http.MethodHead, "/stream/theme/{token}", streamtelemetry.ClassTransfer, false),
 	proxyRoute(http.MethodGet, "/downloads/file/{token}", streamtelemetry.ClassTransfer, false),
 	proxyRoute(http.MethodHead, "/downloads/file/{token}", streamtelemetry.ClassTransfer, false),
 }

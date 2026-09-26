@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -20,11 +21,16 @@ type MediaFileAuthorizer struct {
 
 // Authorize returns the media file when the caller may access it, or catalog.ErrItemNotFound.
 func (a *MediaFileAuthorizer) Authorize(r *http.Request, fileID int) (*models.MediaFile, error) {
+	return a.AuthorizeContext(r.Context(), fileID, requestAccessFilter(r))
+}
+
+// AuthorizeContext applies the same file and parent access policy without HTTP transport.
+func (a *MediaFileAuthorizer) AuthorizeContext(ctx context.Context, fileID int, filter catalog.AccessFilter) (*models.MediaFile, error) {
 	if a == nil || a.FileResolver == nil || a.ItemAccess == nil {
 		return nil, fmt.Errorf("media file authorization dependencies not configured")
 	}
 
-	file, err := a.FileResolver.GetByID(r.Context(), fileID)
+	file, err := a.FileResolver.GetByID(ctx, fileID)
 	if err != nil {
 		return nil, mapMediaFileLookupError(err)
 	}
@@ -32,24 +38,23 @@ func (a *MediaFileAuthorizer) Authorize(r *http.Request, fileID int) (*models.Me
 		return nil, catalog.ErrItemNotFound
 	}
 
-	filter := requestAccessFilter(r)
 	switch {
 	case file.EpisodeID != "":
 		if a.EpisodeLookup == nil {
 			return nil, fmt.Errorf("episode lookup not configured")
 		}
-		episode, err := a.EpisodeLookup.GetByID(r.Context(), file.EpisodeID)
+		episode, err := a.EpisodeLookup.GetByID(ctx, file.EpisodeID)
 		if err != nil {
 			return nil, err
 		}
 		if episode == nil {
 			return nil, catalog.ErrEpisodeNotFound
 		}
-		if err := a.ItemAccess.EnsureAccessible(r.Context(), episode.SeriesID, filter); err != nil {
+		if err := a.ItemAccess.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
 			return nil, err
 		}
 	case file.ContentID != "":
-		if err := a.ItemAccess.EnsureAccessible(r.Context(), file.ContentID, filter); err != nil {
+		if err := a.ItemAccess.EnsureAccessible(ctx, file.ContentID, filter); err != nil {
 			return nil, err
 		}
 	case file.ExtraID != "":
@@ -58,7 +63,7 @@ func (a *MediaFileAuthorizer) Authorize(r *http.Request, fileID int) (*models.Me
 		if a.ExtraLookup == nil {
 			return nil, fmt.Errorf("extra lookup not configured")
 		}
-		extra, err := a.ExtraLookup.GetByID(r.Context(), file.ExtraID)
+		extra, err := a.ExtraLookup.GetByID(ctx, file.ExtraID)
 		if err != nil {
 			if errors.Is(err, catalog.ErrExtraNotFound) {
 				return nil, catalog.ErrItemNotFound
@@ -68,7 +73,7 @@ func (a *MediaFileAuthorizer) Authorize(r *http.Request, fileID int) (*models.Me
 		if extra == nil {
 			return nil, catalog.ErrItemNotFound
 		}
-		if err := a.ItemAccess.EnsureAccessible(r.Context(), extra.ParentID, filter); err != nil {
+		if err := a.ItemAccess.EnsureAccessible(ctx, extra.ParentID, filter); err != nil {
 			return nil, err
 		}
 	default:

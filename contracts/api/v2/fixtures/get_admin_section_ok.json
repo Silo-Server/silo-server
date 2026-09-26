@@ -1,0 +1,14 @@
+{
+  "id": "s1",
+  "scope": "home",
+  "library_id": null,
+  "position": 0,
+  "section_type": "recently_added",
+  "title": "Original",
+  "featured": false,
+  "item_limit": 20,
+  "config": {},
+  "enabled": false,
+  "created_at": "2026-01-02T03:04:05.000Z",
+  "updated_at": "2026-01-02T03:04:05.000Z"
+}

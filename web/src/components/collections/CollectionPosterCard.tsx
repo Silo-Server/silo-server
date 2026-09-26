@@ -21,7 +21,7 @@ export function CollectionPosterCard({
   kind: "regular" | "user_collections";
   libraryId: number;
 }) {
-  const { loaded, onLoad } = useImageLoaded(collection.poster_url);
+  const { loaded, onLoad, onError } = useImageLoaded(collection.poster_url);
   const navigate = useViewTransitionNavigate();
   const { togglePin, isPinned, canToggle } = useToggleSidebarPin();
   const pinned = isPinned(libraryId, "collection", collection.id);
@@ -45,6 +45,7 @@ export function CollectionPosterCard({
               }`}
               loading="lazy"
               onLoad={onLoad}
+              onError={onError}
             />
           ) : (
             <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm">

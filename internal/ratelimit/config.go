@@ -7,6 +7,8 @@ import (
 	"strconv"
 )
 
+const globalRequestsPerSecondSetting = "ratelimit.global.requests_per_second"
+
 // SettingsStore is the interface for reading/writing server_settings.
 // Satisfied by *catalog.ServerSettingsRepo.
 type SettingsStore interface {
@@ -36,7 +38,7 @@ func ConfigFromSettings(all map[string]string) Config {
 	defaults := DefaultConfig()
 	cfg := Config{
 		Enabled:            parseBool(all, "ratelimit.enabled", defaults.Enabled),
-		GlobalReqPerSecond: parseRate(all, "ratelimit.global.requests_per_second", defaults.GlobalReqPerSecond, MaxGlobalRequestsPerSecond),
+		GlobalReqPerSecond: parseRate(all, globalRequestsPerSecondSetting, defaults.GlobalReqPerSecond, MaxGlobalRequestsPerSecond),
 		Tiers:              make(map[string]TierConfig),
 	}
 
@@ -73,29 +75,31 @@ func SeedDefaults(ctx context.Context, store SettingsStore) error {
 	}
 
 	defaults := map[string]string{
-		"ratelimit.enabled":                                "true",
-		"ratelimit.global.requests_per_second":             "1000",
-		"ratelimit.tier.standard.requests_per_second":      "20",
-		"ratelimit.tier.standard.requests_per_minute":      "1200",
-		"ratelimit.tier.standard.burst":                    "20",
-		"ratelimit.tier.elevated.requests_per_second":      "100",
-		"ratelimit.tier.elevated.requests_per_minute":      "6000",
-		"ratelimit.tier.elevated.burst":                    "100",
-		"ratelimit.ip.requests_per_second":                 "120",
-		"ratelimit.ip.requests_per_minute":                 "6000",
-		"ratelimit.ip.burst":                               "120",
-		"ratelimit.auth.login.requests_per_minute":         "20",
-		"ratelimit.auth.login.burst":                       "10",
-		"ratelimit.auth.signup.requests_per_minute":        "10",
-		"ratelimit.auth.signup.burst":                      "6",
-		"ratelimit.auth.setup.requests_per_minute":         "10",
-		"ratelimit.auth.setup.burst":                       "6",
-		"ratelimit.auth.device_start.requests_per_minute":  "20",
-		"ratelimit.auth.device_start.burst":                "10",
-		"ratelimit.auth.device_lookup.requests_per_minute": "60",
-		"ratelimit.auth.device_lookup.burst":               "20",
-		"ratelimit.auth.device_poll.requests_per_minute":   "120",
-		"ratelimit.auth.device_poll.burst":                 "30",
+		"ratelimit.enabled":                                  "true",
+		globalRequestsPerSecondSetting:                       "1000",
+		"ratelimit.tier.standard.requests_per_second":        "20",
+		"ratelimit.tier.standard.requests_per_minute":        "1200",
+		"ratelimit.tier.standard.burst":                      "20",
+		"ratelimit.tier.elevated.requests_per_second":        "100",
+		"ratelimit.tier.elevated.requests_per_minute":        "6000",
+		"ratelimit.tier.elevated.burst":                      "100",
+		"ratelimit.ip.requests_per_second":                   "120",
+		"ratelimit.ip.requests_per_minute":                   "6000",
+		"ratelimit.ip.burst":                                 "120",
+		"ratelimit.auth.login.requests_per_minute":           "20",
+		"ratelimit.auth.login.burst":                         "10",
+		"ratelimit.auth.signup.requests_per_minute":          "10",
+		"ratelimit.auth.signup.burst":                        "6",
+		"ratelimit.auth.setup.requests_per_minute":           "10",
+		"ratelimit.auth.setup.burst":                         "6",
+		"ratelimit.auth.password_change.requests_per_minute": "10",
+		"ratelimit.auth.password_change.burst":               "5",
+		"ratelimit.auth.device_start.requests_per_minute":    "20",
+		"ratelimit.auth.device_start.burst":                  "10",
+		"ratelimit.auth.device_lookup.requests_per_minute":   "60",
+		"ratelimit.auth.device_lookup.burst":                 "20",
+		"ratelimit.auth.device_poll.requests_per_minute":     "120",
+		"ratelimit.auth.device_poll.burst":                   "30",
 	}
 
 	// Sort keys for deterministic seeding order
@@ -121,8 +125,8 @@ func SeedDefaults(ctx context.Context, store SettingsStore) error {
 // the runtime loader.
 func ConfigSettings(cfg Config) map[string]string {
 	pairs := map[string]string{
-		"ratelimit.enabled":                    strconv.FormatBool(cfg.Enabled),
-		"ratelimit.global.requests_per_second": strconv.FormatFloat(cfg.GlobalReqPerSecond, 'f', -1, 64),
+		"ratelimit.enabled":            strconv.FormatBool(cfg.Enabled),
+		globalRequestsPerSecondSetting: strconv.FormatFloat(cfg.GlobalReqPerSecond, 'f', -1, 64),
 	}
 	for name, tier := range cfg.Tiers {
 		prefix := "ratelimit.tier." + name + "."

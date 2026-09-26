@@ -788,34 +788,10 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			  AND dest.user_id = src.user_id
 			  AND dest.profile_id = src.profile_id`},
 	{"move series playback preferences", `UPDATE user_series_playback_preferences SET series_id = $2 WHERE series_id = $1`},
-	{"merge plex sync item bindings timestamps", `
-			UPDATE plex_sync_item_bindings dest
-			SET last_seen_at = GREATEST(dest.last_seen_at, src.last_seen_at),
-			    updated_at = NOW()
-			FROM plex_sync_item_bindings src
-			WHERE src.media_item_id = $1
-			  AND dest.connection_id = src.connection_id
-			  AND (dest.media_item_id = $2 OR dest.plex_rating_key = src.plex_rating_key)
-			  AND dest.media_item_id <> src.media_item_id`},
-	{"delete duplicate plex sync item bindings", `
-			DELETE FROM plex_sync_item_bindings src
-			USING plex_sync_item_bindings dest
-			WHERE src.media_item_id = $1
-			  AND dest.connection_id = src.connection_id
-			  AND (dest.media_item_id = $2 OR dest.plex_rating_key = src.plex_rating_key)
-			  AND dest.media_item_id <> src.media_item_id`},
-	{"move remaining plex sync item bindings", `UPDATE plex_sync_item_bindings SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
-	{"delete duplicate plex sync item state", `
-			DELETE FROM plex_sync_item_state src
-			USING plex_sync_item_state dest
-			WHERE src.media_item_id = $1
-			  AND dest.media_item_id = $2
-			  AND dest.mapping_id = src.mapping_id`},
-	{"move plex sync item state", `UPDATE plex_sync_item_state SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
 	{"move webhook sync item state", `UPDATE webhook_sync_item_state SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
 	{"move watch together rooms selected", `UPDATE watch_together_rooms SET selected_content_id = $2 WHERE selected_content_id = $1`},
 	{"move watch together suggestions", `UPDATE watch_together_suggestions SET content_id = $2 WHERE content_id = $1`},
-	{"move admin playback history", `UPDATE playback_history_admin SET media_item_id = $2 WHERE media_item_id = $1`},
+	{"move admin playback history", `UPDATE admin_playback_history SET media_item_id = $2 WHERE media_item_id = $1`},
 	{"move user downloads", `UPDATE user_downloads SET media_item_id = $2 WHERE media_item_id = $1`},
 	{"move downloads", `UPDATE downloads SET content_id = $2, updated_at = NOW() WHERE content_id = $1`},
 	{"merge embeddings", `
@@ -921,6 +897,16 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			  AND src.list_kind = dest.list_kind
 			  AND (src.provider_item_key = dest.provider_item_key OR dest.media_item_id = $2)`},
 	{"move remaining watch provider list items", `UPDATE watch_provider_list_items SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
+	// The agreed rating follows the ratings it describes. When both items carry
+	// one, the canonical row wins. A moved row is unconfirmed until the next read
+	// finds the rating again, so the move can never read as a provider removal.
+	{"merge watch provider rating items", `
+			INSERT INTO watch_provider_rating_items (connection_id, provider_account_id, media_item_id, kind, provider_item_key, synced_rating, remote_seen, updated_at)
+			SELECT connection_id, provider_account_id, $2, kind, '', synced_rating, false, NOW()
+			FROM watch_provider_rating_items
+			WHERE media_item_id = $1
+			ON CONFLICT (connection_id, media_item_id) DO NOTHING`},
+	{"delete source watch provider rating items", `DELETE FROM watch_provider_rating_items WHERE media_item_id = $1`},
 }
 
 func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID, canonicalID string) error {

@@ -133,28 +133,7 @@ func (h *AdminSubtitleHandler) HandleListDownloadedSubtitles(w http.ResponseWrit
 		return
 	}
 
-	listQuery := `
-		SELECT
-			ds.id,
-			ds.media_file_id,
-			COALESCE(mf.content_id, ''),
-			ds.provider,
-			ds.language,
-			ds.format,
-			ds.release_name,
-			ds.score,
-			ds.hearing_impaired,
-			ds.created_at,
-			ds.downloaded_by,
-			COALESCE(u.username, ''),
-			COALESCE(ep.title, mi.title, ''),
-			COALESCE(CASE WHEN ep.content_id IS NOT NULL THEN 'episode' ELSE mi.type END, ''),
-			COALESCE(mf.file_path, '')
-		FROM downloaded_subtitles ds
-		LEFT JOIN users u ON u.id = ds.downloaded_by
-		LEFT JOIN media_files mf ON mf.id = ds.media_file_id
-		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
-		LEFT JOIN episodes ep ON ep.content_id = mf.content_id` + whereClause + `
+	listQuery := adminDownloadedSubtitleSelect + whereClause + `
 		ORDER BY ds.created_at DESC
 		LIMIT $` + strconv.Itoa(argIndex) + ` OFFSET $` + strconv.Itoa(argIndex+1)
 
@@ -324,3 +303,26 @@ func subtitleDownloadFilename(sub *subtitles.DownloadedSubtitle) string {
 	}
 	return fmt.Sprintf("%s.%s", base, sub.Format)
 }
+
+const adminDownloadedSubtitleSelect = `
+		SELECT
+			ds.id,
+			ds.media_file_id,
+			COALESCE(mf.content_id, ''),
+			ds.provider,
+			ds.language,
+			ds.format,
+			ds.release_name,
+			ds.score,
+			ds.hearing_impaired,
+			ds.created_at,
+			ds.downloaded_by,
+			COALESCE(u.username, ''),
+			COALESCE(ep.title, mi.title, ''),
+			COALESCE(CASE WHEN ep.content_id IS NOT NULL THEN 'episode' ELSE mi.type END, ''),
+			COALESCE(mf.file_path, '')
+		FROM downloaded_subtitles ds
+		LEFT JOIN users u ON u.id = ds.downloaded_by
+		LEFT JOIN media_files mf ON mf.id = ds.media_file_id
+		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
+		LEFT JOIN episodes ep ON ep.content_id = mf.content_id`

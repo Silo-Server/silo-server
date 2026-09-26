@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -70,17 +71,53 @@ func telemetryRegistry(t testing.TB, families ...streamtelemetry.Family) *stream
 // all — behind a real socket. Handler-level tests bypass the middleware under
 // test, which is how this project once shipped a feature that was a no-op for
 // weeks.
-func absTelemetryServer(t testing.TB, registry *streamtelemetry.Registry, deps Dependencies) *httptest.Server {
+func absTelemetryServer(t testing.TB, registry *streamtelemetry.Registry, deps Dependencies) *absServer {
 	t.Helper()
 	handler := New(deps)
 	handler.SetStreamTelemetry(registry)
+	server := &absServer{registry: registry}
 	router := chi.NewRouter()
+	// Outermost on purpose: it returns only after every inner handler,
+	// including the telemetry observer's deferred release, has run.
+	router.Use(server.trackInFlight)
 	router.Use(middleware.Recoverer)
 	router.Use(httpstream.CompressExcept(5, SkipMediaCompression))
 	handler.Mount(router)
-	server := httptest.NewServer(router)
+	server.Server = httptest.NewServer(router)
 	t.Cleanup(server.Close)
 	return server
+}
+
+// absServer is the mounted router plus a count of requests its handlers have
+// not finished. The client sees the last body byte before the handler's
+// deferred telemetry release has run, so a Sweep taken straight after client.Do
+// can fold an observation whose bytes and outcome are not recorded yet.
+type absServer struct {
+	*httptest.Server
+	registry *streamtelemetry.Registry
+	inFlight atomic.Int64
+}
+
+func (s *absServer) trackInFlight(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.inFlight.Add(1)
+		defer s.inFlight.Add(-1)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// settledSweep sweeps the registry once the server has finished every request
+// the test sent — the only point at which the totals are final.
+func (s *absServer) settledSweep(t testing.TB) streamtelemetry.Snapshot {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for s.inFlight.Load() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d request(s) still in flight after 10s", s.inFlight.Load())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return s.registry.Sweep()
 }
 
 func absPublicTrackDeps(t testing.TB, sid, contentID, userID string, body []byte) Dependencies {
@@ -145,7 +182,7 @@ func TestMountedABSRouterAttributesPublicTrack(t *testing.T) {
 
 	// Byte totals come from Sweep, not Snapshot: SessionView.BytesAccepted is
 	// lastSweptBytes and only the sweep folds live observations into it.
-	snapshot := registry.Sweep()
+	snapshot := server.settledSweep(t)
 	if len(snapshot.Sessions) != 1 {
 		t.Fatalf("sessions = %+v", snapshot.Sessions)
 	}
@@ -191,7 +228,7 @@ func TestMountedABSRouterPublicTrackEdgeCases(t *testing.T) {
 		if got.status != http.StatusOK || len(got.body) != 0 {
 			t.Fatalf("HEAD = %d, %d bytes", got.status, len(got.body))
 		}
-		snapshot := registry.Sweep()
+		snapshot := server.settledSweep(t)
 		if len(snapshot.Sessions) != 1 {
 			t.Fatalf("sessions = %+v", snapshot.Sessions)
 		}
@@ -218,7 +255,7 @@ func TestMountedABSRouterPublicTrackEdgeCases(t *testing.T) {
 		if !bytes.Equal(got.body, large[1000:3000]) {
 			t.Fatalf("range body mismatch: %d bytes", len(got.body))
 		}
-		if snapshot := registry.Sweep(); len(snapshot.Sessions) != 1 || snapshot.Sessions[0].BytesAccepted != 2000 {
+		if snapshot := server.settledSweep(t); len(snapshot.Sessions) != 1 || snapshot.Sessions[0].BytesAccepted != 2000 {
 			t.Fatalf("range accounting = %+v", snapshot.Sessions)
 		}
 	})
@@ -251,7 +288,7 @@ func TestMountedABSRouterPublicTrackEdgeCases(t *testing.T) {
 			if got.status != test.wantStatus {
 				t.Fatalf("status = %d, want %d", got.status, test.wantStatus)
 			}
-			snapshot := registry.Sweep()
+			snapshot := server.settledSweep(t)
 			if len(snapshot.Sessions) != 0 || len(snapshot.Transfers) != 0 {
 				t.Fatalf("rejected request created logical activity: %+v %+v", snapshot.Sessions, snapshot.Transfers)
 			}
@@ -314,7 +351,7 @@ func TestMountedABSRouterFeedFileResolvesOwner(t *testing.T) {
 	if got.status != http.StatusOK || !bytes.Equal(got.body, body) {
 		t.Fatalf("GET = %d, %d bytes", got.status, len(got.body))
 	}
-	snapshot := registry.Sweep()
+	snapshot := server.settledSweep(t)
 	if len(snapshot.Sessions) != 0 {
 		t.Fatalf("feed file created a logical session: %+v", snapshot.Sessions)
 	}
@@ -340,7 +377,7 @@ func TestMountedABSRouterFamilyGate(t *testing.T) {
 	if got.status != http.StatusOK || len(got.body) == 0 {
 		t.Fatalf("gated-out family broke serving: %d, %d bytes", got.status, len(got.body))
 	}
-	snapshot := registry.Sweep()
+	snapshot := server.settledSweep(t)
 	if len(snapshot.Sessions) != 0 || snapshot.UnattributedObservations != 0 {
 		t.Fatalf("gated-out family still observed: %+v", snapshot)
 	}

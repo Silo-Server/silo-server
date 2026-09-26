@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sort"
 	"testing"
 
@@ -294,34 +295,59 @@ func TestBuildSectionsResponseScopesPlayTargetsToLibraryAndProgress(t *testing.T
 	}
 }
 
-// Recently-added TV keeps one card per scan-run event, so a series hit by two
-// multi-episode runs appears twice with different anchors. Each card must
-// resolve its own target: keying the resolver's answers by content ID alone
-// silently gave both cards the first card's episode.
-func TestBuildSectionsResponseResolvesRepeatedSeriesEventsIndependently(t *testing.T) {
+// Section responses keep the first occurrence of a content ID within each row.
+// A later row may still contain the same item because cross-section overlap is
+// a separate, recipe-controlled behavior.
+func TestBuildSectionsResponseDeduplicatesItemsWithinEachSection(t *testing.T) {
 	resolver := &stubSectionPlayableTargetResolver{targets: map[string]string{
-		playTargetKey("series", "series-1", "episode-s01e01"): "episode-s01e01",
 		playTargetKey("series", "series-1", "episode-s02e05"): "episode-s02e05",
 	}}
 	h := &SectionHandler{playableTargets: resolver}
-	withItems := []sections.SectionWithItems{{
-		ResolvedSection: sections.ResolvedSection{ID: "recent", SectionType: sections.SectionRecentlyAdded, Title: "Recently Added"},
-		Items: []*models.MediaItem{
-			{ContentID: "series-1", Type: "series", Title: "Long Runner", Status: "matched", PlayContentID: "episode-s02e05"},
-			{ContentID: "series-1", Type: "series", Title: "Long Runner", Status: "matched", PlayContentID: "episode-s01e01"},
+	withItems := []sections.SectionWithItems{
+		{
+			ResolvedSection: sections.ResolvedSection{ID: "recent", SectionType: sections.SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 3},
+			Items: []*models.MediaItem{
+				nil,
+				{ContentID: "series-1", Type: "series", Title: "Long Runner", Status: "matched", PlayContentID: "episode-s02e05"},
+				{ContentID: "", Type: "movie", Title: "Invalid", Status: "matched"},
+				{ContentID: "movie-2", Type: "movie", Title: "Second", Status: "matched"},
+				{ContentID: "series-1", Type: "series", Title: "Long Runner", Status: "matched", PlayContentID: "episode-s01e01"},
+				{ContentID: "movie-3", Type: "movie", Title: "Third", Status: "matched"},
+			},
+			TotalCount: 6,
 		},
-	}}
+		{
+			ResolvedSection: sections.ResolvedSection{ID: "featured", SectionType: sections.SectionRecentlyReleased, Title: "Featured"},
+			Items: []*models.MediaItem{
+				{ContentID: "series-1", Type: "series", Title: "Long Runner", Status: "matched", PlayContentID: "episode-s02e05"},
+				{ContentID: "series-1", Type: "series", Title: "Long Runner", Status: "matched", PlayContentID: "episode-s01e01"},
+			},
+			TotalCount: 10,
+		},
+	}
 
 	resp := h.buildSectionsResponse(httptest.NewRequest(http.MethodGet, "/sections", nil), withItems, nil)
+	if len(resp.Sections) != 2 {
+		t.Fatalf("sections = %d, want 2", len(resp.Sections))
+	}
 	items := resp.Sections[0].Items
-	if len(items) != 2 {
-		t.Fatalf("items = %d, want 2", len(items))
+	if len(items) != 3 {
+		t.Fatalf("first section items = %d, want 3", len(items))
+	}
+	if got := []string{items[0].ContentID, items[1].ContentID, items[2].ContentID}; !reflect.DeepEqual(got, []string{"series-1", "movie-2", "movie-3"}) {
+		t.Fatalf("first section IDs = %v, want [series-1 movie-2 movie-3]", got)
 	}
 	if items[0].PlayContentID != "episode-s02e05" {
-		t.Fatalf("newer event play content id = %q, want episode-s02e05", items[0].PlayContentID)
+		t.Fatalf("first occurrence play content id = %q, want episode-s02e05", items[0].PlayContentID)
 	}
-	if items[1].PlayContentID != "episode-s01e01" {
-		t.Fatalf("older event play content id = %q, want episode-s01e01", items[1].PlayContentID)
+	if resp.Sections[0].TotalCount != 3 {
+		t.Fatalf("first section total count = %d, want 3", resp.Sections[0].TotalCount)
+	}
+	if got := resp.Sections[1].Items; len(got) != 1 || got[0].ContentID != "series-1" {
+		t.Fatalf("second section items = %#v, want cross-section series-1", got)
+	}
+	if resp.Sections[1].TotalCount != 10 {
+		t.Fatalf("second section full total count = %d, want 10", resp.Sections[1].TotalCount)
 	}
 }
 

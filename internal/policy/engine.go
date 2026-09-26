@@ -15,7 +15,7 @@ import (
 	"github.com/open-policy-agent/opa/v1/rego"
 )
 
-const defaultEvalTimeout = 25 * time.Millisecond
+const defaultEvalTimeout = 100 * time.Millisecond
 
 // DecisionName identifies a prepared policy decision query.
 type DecisionName string

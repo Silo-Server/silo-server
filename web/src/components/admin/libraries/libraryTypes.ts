@@ -13,3 +13,24 @@ export const LIBRARY_TYPES = [
 export function libraryTypeMeta(type: string) {
   return LIBRARY_TYPES.find((t) => t.value === type) ?? LIBRARY_TYPES[0];
 }
+
+// Keep these aligned with the video scanner and intro-marker library filters.
+export function librarySettingSupport(type: string) {
+  const kind = type.trim().toLowerCase();
+  // The scanner routes these types to dedicated pipelines; everything else
+  // follows the video pipeline, including custom library types.
+  const video = ![
+    "audiobook",
+    "audiobooks",
+    "ebook",
+    "ebooks",
+    "manga",
+    "podcast",
+    "podcasts",
+  ].includes(kind);
+  return {
+    trailers: video,
+    chapterThumbnails: video,
+    introDetection: kind === "series" || kind === "mixed",
+  };
+}

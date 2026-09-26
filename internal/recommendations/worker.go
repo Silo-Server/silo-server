@@ -7,6 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
+
 	"github.com/robfig/cron/v3"
 )
 
@@ -131,7 +134,10 @@ func (w *Worker) TriggerEmbeddings() error {
 		ctx, cancel := context.WithTimeout(context.Background(), w.embeddingsJobTimeout)
 		defer cancel()
 		slog.Info("starting embedding job (manual trigger)", "timeout", w.embeddingsJobTimeout)
+		ctx, observation := workmetrics.Start(ctx, "recommendations", time.Time{})
+		defer workmetrics.Profile(ctx)()
 		count, err := w.engine.EmbedAll(ctx)
+		observation.Finish(telemetry.Outcome(err))
 		if err != nil {
 			slog.Error("embedding job failed", "error", err, "embedded", count)
 			return
@@ -244,7 +250,10 @@ func (w *Worker) runEmbeddings() {
 	ctx, cancel := context.WithTimeout(context.Background(), w.embeddingsJobTimeout)
 	defer cancel()
 	slog.Info("starting embedding job", "timeout", w.embeddingsJobTimeout)
+	ctx, observation := workmetrics.Start(ctx, "recommendations", time.Time{})
+	defer workmetrics.Profile(ctx)()
 	count, err := w.engine.EmbedAll(ctx)
+	observation.Finish(telemetry.Outcome(err))
 	if err != nil {
 		slog.Error("embedding job failed", "error", err, "embedded", count)
 		return
@@ -532,7 +541,10 @@ func (w *Worker) profileRefreshLoop(ctx context.Context) {
 	}
 }
 
-func (w *Worker) refreshProfile(ctx context.Context, userID int, profileID string) error {
+func (w *Worker) refreshProfile(ctx context.Context, userID int, profileID string) (runErr error) {
+	ctx, observation := workmetrics.Start(ctx, "recommendations", time.Time{})
+	defer workmetrics.Profile(ctx)()
+	defer func() { observation.Finish(telemetry.Outcome(runErr)) }()
 	refreshCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 

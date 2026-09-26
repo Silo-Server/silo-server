@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -86,4 +87,67 @@ func TestFilterMediaFilesByAccess(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestFilterMediaFilesByAccessPresentationLibrary(t *testing.T) {
+	first := &models.MediaFile{ID: 1, ContentID: "shared-movie", MediaFolderID: 1, Resolution: "1080p"}
+	second := &models.MediaFile{ID: 2, ContentID: "shared-movie", MediaFolderID: 2, Resolution: "2160p"}
+	files := []*models.MediaFile{first, second}
+	libraryID := 2
+
+	for _, tt := range []struct {
+		name   string
+		filter AccessFilter
+		want   []*models.MediaFile
+	}{
+		{
+			name:   "unset returns both accessible libraries",
+			filter: AccessFilter{AllowedLibraryIDs: []int{1, 2}},
+			want:   files,
+		},
+		{
+			name:   "selected library without the scope keeps every version",
+			filter: AccessFilter{AllowedLibraryIDs: []int{1, 2}, PresentationLibraryID: &libraryID},
+			want:   files,
+		},
+		{
+			name:   "scope without a selected library keeps every version",
+			filter: AccessFilter{AllowedLibraryIDs: []int{1, 2}, ScopeFilesToLibrary: true},
+			want:   files,
+		},
+		{
+			name:   "selected library narrows accessible files",
+			filter: AccessFilter{AllowedLibraryIDs: []int{1, 2}, PresentationLibraryID: &libraryID, ScopeFilesToLibrary: true},
+			want:   []*models.MediaFile{second},
+		},
+		{
+			name:   "selected library without access restrictions",
+			filter: AccessFilter{PresentationLibraryID: &libraryID, ScopeFilesToLibrary: true},
+			want:   []*models.MediaFile{second},
+		},
+		{
+			name:   "selected library cannot bypass allowlist",
+			filter: AccessFilter{AllowedLibraryIDs: []int{1}, PresentationLibraryID: &libraryID, ScopeFilesToLibrary: true},
+		},
+		{
+			name:   "selected library cannot bypass disabled libraries",
+			filter: AccessFilter{DisabledLibraryIDs: []int{2}, PresentationLibraryID: &libraryID, ScopeFilesToLibrary: true},
+		},
+		{
+			name:   "selected library cannot bypass quality ceiling",
+			filter: AccessFilter{MaxPlaybackQuality: "1080p", PresentationLibraryID: &libraryID, ScopeFilesToLibrary: true},
+		},
+		{
+			name:   "selected file cannot bypass library scope",
+			filter: AccessFilter{AllowedLibraryIDs: []int{1, 2}, PresentationLibraryID: &libraryID, ScopeFilesToLibrary: true, SelectedFileID: first.ID},
+			want:   []*models.MediaFile{second},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FilterMediaFilesByAccess(files, tt.filter)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("files = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

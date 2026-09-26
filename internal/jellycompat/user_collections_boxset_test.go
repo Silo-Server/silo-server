@@ -288,12 +288,24 @@ func TestHandleItems_PersonalBoxSetChildrenUseCatalogResolver(t *testing.T) {
 	}
 
 	personID := h.codec.EncodeIntID(EncodedIDPerson, 42)
-	performItemsRequest(t, h, "/Items?ParentId="+parentID+"&SortBy=Random&PersonIds="+personID+"&ImageTypes=Backdrop")
+	performItemsRequest(t, h, "/Items?ParentId="+parentID+"&SortBy=Random&PersonIds="+personID+
+		"&ImageTypes=Backdrop&Genres=Drama|Mystery&Years=2025,2026&AudioLanguages=sv&SubtitleLanguages=en"+
+		"&OfficialRatings=PG-13&MinCommunityRating=7.5&MinPremiereDate=2025-01-01&MaxPremiereDate=2026-12-31")
 	if !resolver.gotReq.Randomize || !resolver.gotReq.UseSourceOrder || resolver.gotReq.Query.Sort != (catalog.QuerySort{}) {
 		t.Fatalf("random sort was not preserved: %+v", resolver.gotReq)
 	}
 	if resolver.gotReq.PersonID != 42 || !resolver.gotReq.RequireBackdrop {
 		t.Fatalf("existing Jellyfin filters were not forwarded: %+v", resolver.gotReq)
+	}
+	filters := resolver.gotReq.BrowseOverlay
+	if filters == nil || !slices.Equal(filters.Genres, []string{"Drama", "Mystery"}) ||
+		!slices.Equal(filters.Years, []int{2025, 2026}) ||
+		!slices.Equal(filters.AudioLanguages, []string{"sv"}) ||
+		!slices.Equal(filters.SubtitleLanguages, []string{"en"}) ||
+		!slices.Equal(filters.OfficialRatings, []string{"PG-13"}) ||
+		filters.MinCommunityRating != 7.5 || filters.MinPremiereDate != "2025-01-01" ||
+		filters.MaxPremiereDate != "2026-12-31" {
+		t.Fatalf("compat browse filters were not forwarded: %+v", filters)
 	}
 }
 

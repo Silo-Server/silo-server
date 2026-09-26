@@ -1568,3 +1568,74 @@ describe("filterNodesByGroup", () => {
     expect(filterNodesByGroup(nodes, "").map((n) => n.id)).toEqual([3]);
   });
 });
+
+describe("resource attribution", () => {
+  it("keeps process RSS separate from Go heap and labels the cgroup scope", () => {
+    const sample = describeResourceSample(
+      {
+        available: true,
+        sampled_at: new Date(NOW).toISOString(),
+        system: FULL_SAMPLE,
+        attribution: {
+          instance_id: "instance-a",
+          sample_interval_seconds: 5,
+          cpu: { available: true, scope: "cgroup" },
+          memory: { available: true, scope: "cgroup" },
+          process: { resident_bytes: 512 * 1024 ** 2, heap_live_bytes: 128 * 1024 ** 2 },
+        },
+      },
+      NOW,
+    );
+    expect(sample).toMatchObject({
+      kind: "sampled",
+      stale: false,
+      instanceID: "instance-a",
+      cpu: { label: "Cgroup CPU" },
+      memory: { label: "Cgroup RAM" },
+      processMemory: { value: "512.0 MiB", fill: null },
+      heapMemory: { value: "128.0 MiB", fill: null },
+    });
+  });
+
+  it("shows unavailable readings as dashes and marks stalled samples stale", () => {
+    const sample = describeResourceSample(
+      {
+        available: true,
+        sampled_at: new Date(NOW - 20_000).toISOString(),
+        system: FULL_SAMPLE,
+        attribution: {
+          sample_interval_seconds: 5,
+          cpu: { available: false },
+          memory: { available: false },
+          network: { available: false },
+          process: {},
+        },
+      },
+      NOW,
+    );
+    expect(sample).toMatchObject({
+      kind: "sampled",
+      stale: true,
+      cpu: { muted: true },
+      memory: { muted: true },
+      network: { muted: true },
+      processMemory: { muted: true },
+      heapMemory: { muted: true },
+    });
+  });
+
+  it("detects a stopped worker sampler without treating normal health polling as stale", () => {
+    const node = makeNode({
+      healthy: true,
+      last_health_check: new Date(NOW).toISOString(),
+      last_stats: {
+        system: FULL_SAMPLE,
+        sampled_at: new Date(NOW - 5000).toISOString(),
+        attribution: { sample_interval_seconds: 5 },
+      },
+    });
+    expect(describeNodeSystem(node, NOW + 30_000).kind).toBe("reported");
+    node.last_stats!.sampled_at = new Date(NOW - 20_000).toISOString();
+    expect(describeNodeSystem(node, NOW)).toMatchObject({ kind: "unreported", label: "Stale" });
+  });
+});

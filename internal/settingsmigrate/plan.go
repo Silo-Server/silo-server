@@ -23,6 +23,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/Silo-Server/silo-server/internal/jellycompat/displayprefs"
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 )
@@ -861,8 +862,8 @@ func (p *Planner) addLanguage(
 	if value == "" || (columnDefault != "" && value == columnDefault) {
 		return
 	}
-	normalized, ok := settingscontract.NormalizeLanguageTag(value)
-	if !ok {
+	normalized := lang.CompatibleTag(value)
+	if normalized == "" {
 		res.Rejects = append(res.Rejects, Reject{
 			SourceTable: sourceTable, SourceKey: key, Identity: identity,
 			Value:  value,
@@ -981,8 +982,8 @@ func (p *Planner) coerce(def *settingscontract.Definition, raw string) (json.Raw
 		}
 
 	case settingscontract.TypeLanguageTag:
-		normalized, ok := settingscontract.NormalizeLanguageTag(trimmed)
-		if !ok {
+		normalized := lang.CompatibleTag(trimmed)
+		if normalized == "" {
 			return nil, fmt.Errorf("%q is not a well-formed BCP 47 language tag", raw)
 		}
 		candidate = jsonString(normalized)

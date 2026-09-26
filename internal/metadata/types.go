@@ -72,6 +72,10 @@ type ProcessRequest struct {
 	// metadata language actually re-fetches titles/overviews.
 	AdoptLanguage            bool
 	recordedStaleProviderIDs providerIDValueSet
+	// enrichmentOnly marks a bulk enrichment write: one enrichment provider's
+	// fields merged into an item that is already matched. See
+	// persistEnrichment for how it differs from a scheduled refresh.
+	enrichmentOnly bool
 }
 
 // ProcessResult is the output of MetadataService.Process().
@@ -142,6 +146,7 @@ type MatchHints struct {
 	ObservedRootPath          string
 	AllGroupFilePaths         []string
 	PrimarySidecarSearchPaths []string
+	LibraryRoots              []string // Internal naming context; configured containers do not identify series or seasons.
 	// AlternateIdentities are independently parsed title/year hypotheses from
 	// the filename and surrounding directories. They are tried only after the
 	// primary scanner identity fails, keeping provider traffic bounded while
@@ -273,8 +278,17 @@ type MetadataResult struct {
 	// refresh and prevents them from being persisted by the same operation.
 	sameRunStaleProviderIDs providerIDValueSet
 	ContentRating           string
-	Ratings                 Ratings
-	People                  []models.ItemPerson
+	// AdvisoryAge is a recommended minimum viewer age from an advisory service,
+	// 0 when none was reported. It never feeds a content-rating ceiling.
+	AdvisoryAge int
+	// AdvisorySource attributes AdvisoryAge; empty when AdvisoryAge is 0.
+	AdvisorySource string
+	Ratings        Ratings
+	// RatingSources holds per-source ratings on a 0-100 scale, keyed by the
+	// canonical source name (models.RatingSourceIMDB, ...). They merge one
+	// source at a time under FieldRating, like Ratings.
+	RatingSources map[string]RatingSource
+	People        []models.ItemPerson
 	// Images (S3 paths or URLs).
 	PosterPath        string
 	PosterThumbhash   string
@@ -319,6 +333,16 @@ type Ratings struct {
 	TMDB       float64
 	RTCritic   float64
 	RTAudience float64
+}
+
+// RatingSource is one source's rating of an item on a common 0-100 scale. It
+// persists as a media_item_rating_sources row.
+type RatingSource struct {
+	Score float64
+	// Votes is the number of votes behind Score, 0 when unknown.
+	Votes int64
+	// Provider is the slug of the metadata provider that reported the rating.
+	Provider string
 }
 
 // ImageRequest is passed to ImageProvider.GetImages().

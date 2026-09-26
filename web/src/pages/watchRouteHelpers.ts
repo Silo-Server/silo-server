@@ -156,6 +156,7 @@ export function parseWatchHref(href: string): WatchRouteRequest | null {
 type DerivedWatchPageProps = Omit<
   WatchPageProps,
   | "playbackRequestKey"
+  | "seekIntervals"
   | "onExit"
   | "onNavigateEpisode"
   | "displayMode"

@@ -37,7 +37,14 @@ var compatImageProxyHeaders = []string{
 func shouldProxyCompatImageRequest(r *http.Request) bool {
 	return isCompatImageProxyClientRequest(r) ||
 		isCompatImageProxyRouteRequest(r) ||
-		isCompatImageProxyTag(r.URL.Query().Get("tag"))
+		isCompatImageProxyTag(compatImageRequestTag(r))
+}
+
+// compatImageRequestTag returns the image tag an image request carries.
+// Jellyfin binds query parameters case-insensitively, and clients differ:
+// Jellyfin Web sends "tag", jellyfin-kodi sends "Tag".
+func compatImageRequestTag(r *http.Request) string {
+	return strings.TrimSpace(newCaseInsensitiveQuery(r.URL.Query()).Get("tag"))
 }
 
 func isCompatImageProxyClientRequest(r *http.Request) bool {

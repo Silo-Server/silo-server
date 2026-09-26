@@ -1,0 +1,7 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/installation_changed",
+  "title": "Playback installation changed",
+  "status": 409,
+  "detail": "Playback installation changed; refresh capabilities",
+  "instance": "urn:silo:request:000000000000000000000277"
+}

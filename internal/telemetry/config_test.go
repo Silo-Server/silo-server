@@ -17,7 +17,7 @@ func TestLoadConfig(t *testing.T) {
 			wantEnabled: false,
 			wantService: "silo-server",
 			wantProto:   ProtocolGRPC,
-			wantRatio:   1.0,
+			wantRatio:   0.01,
 		},
 		{
 			name:        "enabled via endpoint",
@@ -25,7 +25,7 @@ func TestLoadConfig(t *testing.T) {
 			wantEnabled: true,
 			wantService: "silo-server",
 			wantProto:   ProtocolGRPC,
-			wantRatio:   1.0,
+			wantRatio:   0.01,
 		},
 		{
 			name:        "enabled via SILO_OTEL_ENABLED",
@@ -33,7 +33,7 @@ func TestLoadConfig(t *testing.T) {
 			wantEnabled: true,
 			wantService: "silo-server",
 			wantProto:   ProtocolGRPC,
-			wantRatio:   1.0,
+			wantRatio:   0.01,
 		},
 		{
 			name:        "service name override",
@@ -41,7 +41,7 @@ func TestLoadConfig(t *testing.T) {
 			wantEnabled: true,
 			wantService: "custom",
 			wantProto:   ProtocolGRPC,
-			wantRatio:   1.0,
+			wantRatio:   0.01,
 		},
 		{
 			name:        "http protocol",
@@ -49,7 +49,7 @@ func TestLoadConfig(t *testing.T) {
 			wantEnabled: true,
 			wantService: "silo-server",
 			wantProto:   ProtocolHTTP,
-			wantRatio:   1.0,
+			wantRatio:   0.01,
 		},
 		{
 			name:        "sampler ratio override",
@@ -65,7 +65,7 @@ func TestLoadConfig(t *testing.T) {
 			wantEnabled: true,
 			wantService: "silo-server",
 			wantProto:   ProtocolGRPC,
-			wantRatio:   1.0,
+			wantRatio:   0.01,
 		},
 		{
 			name:        "sampler arg above 1 clamps to 1.0",
@@ -81,7 +81,7 @@ func TestLoadConfig(t *testing.T) {
 			wantEnabled: true,
 			wantService: "silo-server",
 			wantProto:   ProtocolGRPC,
-			wantRatio:   1.0,
+			wantRatio:   0.01,
 		},
 		{
 			name:        "sampler arg negative falls back",
@@ -89,7 +89,7 @@ func TestLoadConfig(t *testing.T) {
 			wantEnabled: true,
 			wantService: "silo-server",
 			wantProto:   ProtocolGRPC,
-			wantRatio:   1.0,
+			wantRatio:   0.01,
 		},
 	}
 

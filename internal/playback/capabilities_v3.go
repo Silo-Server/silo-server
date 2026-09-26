@@ -59,6 +59,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 			source.DVLevel = track.DVLevel
 		}
 		source.DVBLCompatID = track.DVBLCompatID
+		source.DVBaseLayerProven = track.DVConfigPresent && track.DVBLCompatIDPresent && track.DVBLPresent
 		source.VideoCopyUnsafe = videoCopyUnsafeFile(file)
 		switch EnhancementLayerV3(strings.ToLower(track.DVEnhancementLayer)) {
 		case EnhancementNoneV3, EnhancementMELV3, EnhancementFELV3, EnhancementUnknownV3:
@@ -220,17 +221,129 @@ func routeVideoMetadataCompleteV3(source SourceDescriptorV3) bool {
 		source.BitrateKbps > 0
 }
 
-func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, VideoClaimsV3) {
-	hdr := request.ClientPlaybackContext.Output.HDRDetails
-	if hdr == nil {
-		hdr = request.Capabilities.HDRDetails
+// nativeOutputHDRV3 resolves the HDR facts a native HDR/DV presentation may be
+// planned against. output.hdr_details is the authority. The device-level
+// capability is a fallback only for clients that predate the output display
+// evidence field: a client that reports the evidence tier has separated its
+// decoder facts from its output facts, so a missing output value means "no
+// native HDR output", and an unknown evidence tier fails closed the same way.
+func nativeOutputHDRV3(request StartRequestV3) *HDRCapabilitiesV3 {
+	output := request.ClientPlaybackContext.Output
+	if output.Display != nil {
+		if output.Display.HDREvidence != OutputHDREvidenceExactV3 || output.HDRDetails == nil {
+			return nil
+		}
+		// Validation rejects a contradiction, but planning still narrows to
+		// the safe intersection so an exact SDR panel can never authorize a
+		// native range through hdr_details alone.
+		panel := output.Display.HDRTypes
+		if panel == nil {
+			panel = &HDRCapabilitiesV3{}
+		}
+		narrowed := *output.HDRDetails
+		narrowed.HDR10 = narrowed.HDR10 && panel.HDR10
+		narrowed.HDR10Plus = narrowed.HDR10Plus && panel.HDR10Plus
+		narrowed.HLG = narrowed.HLG && panel.HLG
+		profiles := make([]int, 0, len(narrowed.DolbyVisionProfiles))
+		for _, profile := range narrowed.DolbyVisionProfiles {
+			if containsIntV3(panel.DolbyVisionProfiles, profile) {
+				profiles = append(profiles, profile)
+			}
+		}
+		narrowed.DolbyVisionProfiles = profiles
+		if !narrowed.HDR10 {
+			narrowed.HDR10MaxWidth, narrowed.HDR10MaxHeight, narrowed.HDR10MaxFrameRate, narrowed.HDR10MaxBitrateKbps = 0, 0, 0, 0
+		} else {
+			// A panel ceiling caps the decoder ceiling; zero on either side
+			// means that side declared none.
+			narrowed.HDR10MaxWidth = tighterBoundV3(narrowed.HDR10MaxWidth, panel.HDR10MaxWidth)
+			narrowed.HDR10MaxHeight = tighterBoundV3(narrowed.HDR10MaxHeight, panel.HDR10MaxHeight)
+			narrowed.HDR10MaxFrameRate = tighterBoundFloatV3(narrowed.HDR10MaxFrameRate, panel.HDR10MaxFrameRate)
+			narrowed.HDR10MaxBitrateKbps = tighterBoundV3(narrowed.HDR10MaxBitrateKbps, panel.HDR10MaxBitrateKbps)
+		}
+		narrowed.DolbyVisionProfileLevels = intersectDolbyVisionProfileLevelsV3(profiles, narrowed.DolbyVisionProfileLevels, panel.DolbyVisionProfileLevels)
+		return &narrowed
 	}
+	if output.HDRDetails != nil {
+		return output.HDRDetails
+	}
+	return request.Capabilities.HDRDetails
+}
+
+// intersectDolbyVisionProfileLevelsV3 keeps one bounded record per surviving
+// profile. When both sides bound a profile the tighter level wins and the
+// compatibility-id sets intersect (an empty set on one side means "any");
+// a record present on only one side is kept as-is so a panel-only bound is
+// never dropped.
+func intersectDolbyVisionProfileLevelsV3(profiles []int, output, panel []DolbyVisionProfileCapabilityV3) []DolbyVisionProfileCapabilityV3 {
+	byProfile := make(map[int]DolbyVisionProfileCapabilityV3, len(output)+len(panel))
+	for _, capability := range output {
+		if containsIntV3(profiles, capability.Profile) {
+			byProfile[capability.Profile] = capability
+		}
+	}
+	for _, panelCapability := range panel {
+		if !containsIntV3(profiles, panelCapability.Profile) {
+			continue
+		}
+		existing, ok := byProfile[panelCapability.Profile]
+		if !ok {
+			byProfile[panelCapability.Profile] = panelCapability
+			continue
+		}
+		if panelCapability.MaxLevel > 0 && (existing.MaxLevel == 0 || panelCapability.MaxLevel < existing.MaxLevel) {
+			existing.MaxLevel = panelCapability.MaxLevel
+		}
+		switch {
+		case len(panelCapability.BLCompatibilityIDs) == 0:
+		case len(existing.BLCompatibilityIDs) == 0:
+			existing.BLCompatibilityIDs = append([]int(nil), panelCapability.BLCompatibilityIDs...)
+		default:
+			ids := make([]int, 0, len(existing.BLCompatibilityIDs))
+			for _, id := range existing.BLCompatibilityIDs {
+				if containsIntV3(panelCapability.BLCompatibilityIDs, id) {
+					ids = append(ids, id)
+				}
+			}
+			if len(ids) == 0 {
+				// Disjoint compatibility sets: nothing this profile can carry.
+				ids = []int{-1}
+			}
+			existing.BLCompatibilityIDs = ids
+		}
+		byProfile[panelCapability.Profile] = existing
+	}
+	result := make([]DolbyVisionProfileCapabilityV3, 0, len(byProfile))
+	for _, profile := range profiles {
+		if capability, ok := byProfile[profile]; ok {
+			result = append(result, capability)
+		}
+	}
+	return result
+}
+
+// hdr10OutputFitsSourceV3 applies the resolved output's HDR10 ceilings to the
+// source. The per-delivery hdr_details gate re-checks the same ceilings later,
+// but a delivery that omits hdr_details would otherwise never see the panel's
+// limits at all.
+func hdr10OutputFitsSourceV3(hdr *HDRCapabilitiesV3, source SourceDescriptorV3) bool {
+	if hdr == nil || !hdr.HDR10 {
+		return false
+	}
+	return !(hdr.HDR10MaxWidth > 0 && source.Width > hdr.HDR10MaxWidth ||
+		hdr.HDR10MaxHeight > 0 && source.Height > hdr.HDR10MaxHeight ||
+		hdr.HDR10MaxFrameRate > 0 && source.FrameRate > hdr.HDR10MaxFrameRate ||
+		hdr.HDR10MaxBitrateKbps > 0 && source.BitrateKbps > hdr.HDR10MaxBitrateKbps)
+}
+
+func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, VideoClaimsV3) {
+	hdr := nativeOutputHDRV3(request)
 	claims := VideoClaimsV3{}
 	switch source.DynamicRange {
 	case "", "sdr":
 		return true, claims
 	case "hdr10":
-		claims.HDR10 = hdr != nil && hdr.HDR10
+		claims.HDR10 = hdr10OutputFitsSourceV3(hdr, source)
 		return claims.HDR10, claims
 	case DynamicRangeHDRUnknownV3:
 		// Legacy rows only recorded a file-level HDR flag without per-track
@@ -238,7 +351,7 @@ func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (b
 		// an HDR10-capable output treats the source as HDR10 instead of
 		// refusing playback outright; the planner attaches a degradation
 		// warning for these assumed-range plans.
-		claims.HDR10 = hdr != nil && hdr.HDR10
+		claims.HDR10 = hdr10OutputFitsSourceV3(hdr, source)
 		return claims.HDR10, claims
 	case DynamicRangeHDR10PlusV3:
 		claims.HDR10Plus = hdr != nil && hdr.HDR10Plus
@@ -286,12 +399,75 @@ func clientSelectsOriginalAudioTrackV3(request StartRequestV3) bool {
 		containsFoldV3(delivery.ValidatedClaims, ClaimClientSelectedAudioTrackV3)
 }
 
-func clientSupportsHDR10V3(request StartRequestV3) bool {
-	hdr := request.ClientPlaybackContext.Output.HDRDetails
-	if hdr == nil {
-		hdr = request.Capabilities.HDRDetails
+// clientSupportsHDR10V3 reports whether the resolved output can present
+// [source] as HDR10, including any HDR10 ceilings an exact panel record
+// narrowed onto the output. Every HDR10-producing route (native, server
+// strip, client conversion, base layer) shares this so a delivery that omits
+// its own hdr_details still sees the panel's limits.
+func clientSupportsHDR10V3(request StartRequestV3, source SourceDescriptorV3) bool {
+	return hdr10OutputFitsSourceV3(nativeOutputHDRV3(request), source)
+}
+
+func clientSupportsHLGV3(request StartRequestV3) bool {
+	hdr := nativeOutputHDRV3(request)
+	return hdr != nil && hdr.HLG
+}
+
+// clientDV8BaseLayerFallbackV3 reports whether the original_http executor may
+// play a single-layer Dolby Vision Profile 8 source through its ordinary HEVC
+// decoder, and which base range that presents. It is delivery-scoped like the
+// other original_http claims and, unlike clientManagesOriginalDynamicRangeV3,
+// the server keeps every other gate: an eligible profile and enhancement
+// layer, a compatibility id whose base range is standards-defined, that range
+// supported by the active output, and an HEVC decode entry that fits the
+// source (checked by videoEligibleV3 on the caller's side).
+func clientDV8BaseLayerFallbackV3(source SourceDescriptorV3, request StartRequestV3) (bool, string) {
+	if source.DynamicRange != DynamicRangeDolbyVisionV3 || source.DVProfile != 8 ||
+		source.DVEnhancementLayer != EnhancementNoneV3 || !source.DVBaseLayerProven {
+		return false, ""
 	}
-	return hdr != nil && hdr.HDR10
+	delivery, ok := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	if !ok || !delivery.Enabled || !delivery.SupportedOnDevice ||
+		!containsFoldV3(delivery.ValidatedClaims, ClaimClientDV8BaseLayerFallbackV3) {
+		return false, ""
+	}
+	baseRange, ok := dolbyVisionBaseLayerRangeV3(source.DVBLCompatID)
+	if !ok {
+		return false, ""
+	}
+	switch baseRange {
+	case DynamicRangeHDR10V3:
+		if !clientSupportsHDR10V3(request, source) {
+			return false, ""
+		}
+	case DynamicRangeHLGV3:
+		if !clientSupportsHLGV3(request) {
+			return false, ""
+		}
+	case DynamicRangeSDRV3:
+	default:
+		return false, ""
+	}
+	return true, baseRange
+}
+
+// dolbyVisionBaseLayerRangeV3 maps a Profile 8 base-layer compatibility id to
+// the dynamic range an ordinary HEVC decoder presents, using only the
+// standard Profile 8 pairings the tone-map path accepts without a source
+// preflight: 1 is PQ (HDR10), 2 is BT.709 SDR, 4 is BT.2100 HLG. Id 6 is a
+// Profile 7 pairing that some Profile 8 files carry, 5 (BT.2020 SDR) needs
+// a gamut conversion, and 0, 3, and reserved ids fail closed.
+func dolbyVisionBaseLayerRangeV3(compatID int) (string, bool) {
+	switch compatID {
+	case 1:
+		return DynamicRangeHDR10V3, true
+	case 4:
+		return DynamicRangeHLGV3, true
+	case 2:
+		return DynamicRangeSDRV3, true
+	default:
+		return "", false
+	}
 }
 
 func audioEligibilityV3(source SourceDescriptorV3, request StartRequestV3) (copyOK, passthrough bool, claim AudioClaimsV3) {
@@ -429,4 +605,30 @@ func containsAtLeastV3(values []int, wanted int) bool {
 		}
 	}
 	return false
+}
+
+func tighterBoundV3(a, b int) int {
+	switch {
+	case a == 0:
+		return b
+	case b == 0:
+		return a
+	case b < a:
+		return b
+	default:
+		return a
+	}
+}
+
+func tighterBoundFloatV3(a, b float64) float64 {
+	switch {
+	case a == 0:
+		return b
+	case b == 0:
+		return a
+	case b < a:
+		return b
+	default:
+		return a
+	}
 }

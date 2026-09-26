@@ -4,7 +4,7 @@ import { useThemeCatalog, useRefreshThemeCatalog } from "@/hooks/queries/theme";
 import type { ThemeCatalogEntry } from "@/hooks/queries/theme";
 import { parseThemeFile } from "@/lib/themeExport";
 import { sanitizeCss } from "@/lib/cssSanitizer";
-import { api } from "@/api/client";
+import { v2 } from "@/api/v2/request";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -34,8 +34,10 @@ export function CatalogBrowser({ onInstall }: CatalogBrowserProps) {
     setInstalling(entry.id);
     try {
       // Proxy the download through the backend to prevent browser SSRF
-      const json = await api(`/theme/download?url=${encodeURIComponent(entry.downloadUrl)}`);
-      const themeFile = parseThemeFile(json);
+      const { document } = await v2("GET /api/v2/theme/download", {
+        query: { url: entry.downloadUrl },
+      });
+      const themeFile = parseThemeFile(document);
       onInstall({
         baseTheme: themeFile.baseTheme,
         vars: themeFile.vars as Record<string, string>,

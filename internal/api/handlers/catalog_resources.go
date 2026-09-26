@@ -1,11 +1,10 @@
 package handlers
 
 import (
-	"errors"
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -30,36 +29,16 @@ func (h *CatalogResourceHandler) HandleGetItemDetail(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
 		return
 	}
-
 	filter, ok := h.items.accessFilterOrError(w, r)
 	if !ok {
 		return
 	}
-
-	detail, err := h.items.detailSvc.GetItemDetail(r.Context(), id, filter)
+	view, err := h.ItemDetail(r.Context(), viewerFromRequest(r, filter), id)
 	if err != nil {
-		if isNotFound(err) {
-			syntheticDetail, syntheticErr := h.syntheticSeasonDetail(r, id)
-			if syntheticErr != nil {
-				if isNotFound(syntheticErr) {
-					writeError(w, http.StatusNotFound, "not_found", "Item not found")
-					return
-				}
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get item detail")
-				return
-			}
-			h.enrichItemDetail(r, syntheticDetail)
-			h.items.maybeRequestStaleDetailMetadataRefresh(r.Context(), syntheticDetail)
-			writeJSON(w, http.StatusOK, syntheticDetail)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get item detail")
+		writeAPIError(w, err)
 		return
 	}
-
-	h.enrichItemDetail(r, detail)
-	h.items.maybeRequestStaleDetailMetadataRefresh(r.Context(), detail)
-	writeJSON(w, http.StatusOK, detail)
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (h *CatalogResourceHandler) HandleGetItemVersions(w http.ResponseWriter, r *http.Request) {
@@ -68,69 +47,36 @@ func (h *CatalogResourceHandler) HandleGetItemVersions(w http.ResponseWriter, r 
 		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
 		return
 	}
-
 	filter, ok := h.items.accessFilterOrError(w, r)
 	if !ok {
 		return
 	}
-
-	detail, err := h.items.detailSvc.GetItemDetail(r.Context(), id, filter)
+	view, err := h.ItemVersions(r.Context(), viewerFromRequest(r, filter), id)
 	if err != nil {
-		if isNotFound(err) {
-			if _, _, ok := parseSyntheticSeasonID(id); ok {
-				writeJSON(w, http.StatusOK, []catalog.FileVersion{})
-				return
-			}
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get item versions")
+		writeAPIError(w, err)
 		return
 	}
-
-	if !h.items.requestCanViewFilePaths(r) {
-		for i := range detail.Versions {
-			detail.Versions[i].FilePath = ""
-		}
-	}
-
-	writeJSON(w, http.StatusOK, detail.Versions)
+	writeJSON(w, http.StatusOK, view)
 }
 
 // HandleGetMangaFiles returns the local file listing for a manga series (the
 // series "View Details" dialog): folder paths plus per-chapter file rows.
-// Folder and file paths are stripped for viewers without file-path visibility,
-// matching the item-versions policy; file names and sizes remain.
 func (h *CatalogResourceHandler) HandleGetMangaFiles(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
 		return
 	}
-
 	filter, ok := h.items.accessFilterOrError(w, r)
 	if !ok {
 		return
 	}
-
-	files, err := h.items.detailSvc.GetMangaChapterFiles(r.Context(), id, filter)
+	view, err := h.MangaFiles(r.Context(), viewerFromRequest(r, filter), id)
 	if err != nil {
-		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get manga files")
+		writeAPIError(w, err)
 		return
 	}
-
-	if !h.items.requestCanViewFilePaths(r) {
-		files.FolderPaths = nil
-		for i := range files.Files {
-			files.Files[i].FilePath = ""
-		}
-	}
-
-	writeJSON(w, http.StatusOK, files)
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (h *CatalogResourceHandler) HandleGetItemEpisodes(w http.ResponseWriter, r *http.Request) {
@@ -143,77 +89,20 @@ func (h *CatalogResourceHandler) HandleGetItemEpisodes(w http.ResponseWriter, r 
 		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
 		return
 	}
-	if h.items.seasonRepo == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Item not found")
-		return
-	}
-
-	season, err := h.items.seasonRepo.GetByID(r.Context(), id)
+	view, err := h.ItemEpisodes(r.Context(), viewerFromRequest(r, filter), id)
 	if err != nil {
-		if errors.Is(err, catalog.ErrSeasonNotFound) {
-			seriesID, seasonNum, ok := parseSyntheticSeasonID(id)
-			if !ok {
-				writeError(w, http.StatusNotFound, "not_found", "Item not found")
-				return
-			}
-			if err := h.items.itemRepo.EnsureAccessible(r.Context(), seriesID, filter); err != nil {
-				if isNotFound(err) {
-					writeError(w, http.StatusNotFound, "not_found", "Item not found")
-					return
-				}
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list item episodes")
-				return
-			}
-			if err := h.items.ensurePresentationLibraryAccess(r.Context(), seriesID, filter); err != nil {
-				if isNotFound(err) {
-					writeError(w, http.StatusNotFound, "not_found", "Item not found")
-					return
-				}
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list item episodes")
-				return
-			}
-			episodes, err := h.items.episodeRepo.ListBySeason(r.Context(), seriesID, seasonNum)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list item episodes")
-				return
-			}
-			if len(episodes) == 0 {
-				writeError(w, http.StatusNotFound, "not_found", "Item not found")
-				return
-			}
-			h.writeEpisodeResponses(w, r, episodes)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list item episodes")
+		writeAPIError(w, err)
 		return
 	}
-	if err := h.items.itemRepo.EnsureAccessible(r.Context(), season.SeriesID, filter); err != nil {
-		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list item episodes")
-		return
-	}
-	if err := h.items.ensurePresentationLibraryAccess(r.Context(), season.SeriesID, filter); err != nil {
-		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list item episodes")
-		return
-	}
-
-	episodes, err := h.items.episodeRepo.ListBySeasonID(r.Context(), season.ContentID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list item episodes")
-		return
-	}
-	h.items.maybeRequestStaleSeasonMetadataRefresh(r.Context(), season.ContentID, episodes)
-	h.writeEpisodeResponses(w, r, episodes)
+	writeJSON(w, http.StatusOK, episodesListResponse{Episodes: view})
 }
 
 func (h *CatalogResourceHandler) HandleGetSeasons(w http.ResponseWriter, r *http.Request) {
+	includeArtwork, valid := seasonListArtwork(r)
+	if !valid {
+		writeError(w, http.StatusBadRequest, "invalid_include_artwork", "include_artwork must be true or false")
+		return
+	}
 	filter, ok := h.items.accessFilterOrError(w, r)
 	if !ok {
 		return
@@ -223,90 +112,12 @@ func (h *CatalogResourceHandler) HandleGetSeasons(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, "bad_request", "Series ID is required")
 		return
 	}
-
-	if err := h.items.itemRepo.EnsureAccessible(r.Context(), id, filter); err != nil {
-		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list seasons")
-		return
-	}
-	if err := h.items.ensurePresentationLibraryAccess(r.Context(), id, filter); err != nil {
-		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list seasons")
-		return
-	}
-
-	if h.items.seasonRepo != nil {
-		seasons, err := h.items.seasonRepo.ListBySeries(r.Context(), id)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list seasons")
-			return
-		}
-
-		if len(seasons) > 0 {
-			if h.items.detailSvc != nil {
-				if localized, locErr := h.items.detailSvc.LocalizeSeasonModels(r.Context(), seasons, filter); locErr == nil && len(localized) == len(seasons) {
-					seasons = localized
-				}
-			}
-			episodesBySeason, err := h.items.episodeRepo.ListBySeriesGroupedBySeason(r.Context(), id)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list seasons")
-				return
-			}
-			progressMap, hasProgressMap := h.items.progressMapForEpisodes(r, flattenEpisodeGroups(episodesBySeason))
-
-			resp := make([]seasonResponse, 0, len(seasons))
-			for _, s := range seasons {
-				episodes := episodesBySeason[s.SeasonNumber]
-				if len(episodes) == 0 {
-					continue
-				}
-				var userData *catalog.SeasonUserData
-				if hasProgressMap {
-					userData = catalog.EpisodeRollupUserData(episodes, progressMap)
-				}
-				sr := h.items.seasonResponseFromEpisodes(r, s, episodes, userData, filter.ImageSize)
-				resp = append(resp, sr)
-			}
-
-			h.items.enrichSeasonPlayTargets(r, id, resp)
-			writeJSON(w, http.StatusOK, seasonsResponse{Seasons: resp})
-			return
-		}
-	}
-
-	summaries, err := h.items.episodeRepo.ListSeasons(r.Context(), id)
+	view, err := h.seriesSeasons(r.Context(), viewerFromRequest(r, filter), id, includeArtwork)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list seasons")
+		writeAPIError(w, err)
 		return
 	}
-
-	resp := make([]seasonResponse, 0, len(summaries))
-	for _, s := range summaries {
-		title := "Season " + strconv.Itoa(s.SeasonNumber)
-		if s.SeasonNumber == 0 {
-			title = "Specials"
-		}
-		episodes, _ := h.items.episodeRepo.ListBySeason(r.Context(), id, s.SeasonNumber)
-		userData := h.items.getAggregateUserData(r, episodes)
-		resp = append(resp, seasonResponse{
-			ContentID:    fmt.Sprintf("%s-S%02d", id, s.SeasonNumber),
-			SeasonNumber: s.SeasonNumber,
-			IsSpecials:   s.SeasonNumber == 0,
-			EpisodeCount: s.EpisodeCount,
-			Title:        title,
-			UserData:     userData,
-		})
-	}
-
-	h.items.enrichSeasonPlayTargets(r, id, resp)
-	writeJSON(w, http.StatusOK, seasonsResponse{Seasons: resp})
+	writeJSON(w, http.StatusOK, seasonsResponse{Seasons: view})
 }
 
 func (h *CatalogResourceHandler) HandleGetSeason(w http.ResponseWriter, r *http.Request) {
@@ -326,83 +137,12 @@ func (h *CatalogResourceHandler) HandleGetSeason(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid season number")
 		return
 	}
-
-	if err := h.items.itemRepo.EnsureAccessible(r.Context(), id, filter); err != nil {
-		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get season")
-		return
-	}
-	if err := h.items.ensurePresentationLibraryAccess(r.Context(), id, filter); err != nil {
-		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get season")
-		return
-	}
-
-	if h.items.seasonRepo != nil {
-		season, err := h.items.seasonRepo.GetBySeriesAndNumber(r.Context(), id, num)
-		switch {
-		case err == nil:
-			episodes, err := h.items.episodeRepo.ListBySeasonID(r.Context(), season.ContentID)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get season")
-				return
-			}
-			if len(episodes) == 0 {
-				episodes, err = h.items.episodeRepo.ListBySeason(r.Context(), id, season.SeasonNumber)
-				if err != nil {
-					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get season")
-					return
-				}
-			}
-			h.items.maybeRequestStaleSeasonMetadataRefresh(r.Context(), season.ContentID, episodes)
-			resp := h.items.toSeasonResponseFromEpisodes(
-				r,
-				id,
-				season,
-				episodes,
-				h.items.getAggregateUserData(r, episodes),
-				filter.ImageSize,
-			)
-			h.items.resolveSeasonPlayTarget(r, id, &resp)
-			writeJSON(w, http.StatusOK, seasonDetailResponse{Season: resp})
-			return
-		case !errors.Is(err, catalog.ErrSeasonNotFound):
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get season")
-			return
-		}
-	}
-
-	episodes, err := h.items.episodeRepo.ListBySeason(r.Context(), id, num)
+	view, err := h.SeriesSeason(r.Context(), viewerFromRequest(r, filter), id, num)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get season")
+		writeAPIError(w, err)
 		return
 	}
-	if len(episodes) == 0 {
-		writeError(w, http.StatusNotFound, "not_found", "Season not found")
-		return
-	}
-
-	title := "Season " + strconv.Itoa(num)
-	if num == 0 {
-		title = "Specials"
-	}
-	seasonID := fmt.Sprintf("%s-S%02d", id, num)
-	resp := seasonResponse{
-		ContentID:    seasonID,
-		SeasonNumber: num,
-		IsSpecials:   num == 0,
-		Title:        title,
-		EpisodeCount: len(episodes),
-		UserData:     h.items.getAggregateUserData(r, episodes),
-	}
-	h.items.resolveSeasonPlayTarget(r, id, &resp)
-	writeJSON(w, http.StatusOK, seasonDetailResponse{Season: resp})
+	writeJSON(w, http.StatusOK, seasonDetailResponse{Season: view})
 }
 
 func (h *CatalogResourceHandler) HandleGetEpisodes(w http.ResponseWriter, r *http.Request) {
@@ -422,38 +162,15 @@ func (h *CatalogResourceHandler) HandleGetEpisodes(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid season number")
 		return
 	}
-
-	if err := h.items.itemRepo.EnsureAccessible(r.Context(), id, filter); err != nil {
-		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list episodes")
-		return
-	}
-	if err := h.items.ensurePresentationLibraryAccess(r.Context(), id, filter); err != nil {
-		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list episodes")
-		return
-	}
-
-	episodes, err := h.items.episodeRepo.ListBySeason(r.Context(), id, num)
+	view, err := h.SeasonEpisodes(r.Context(), viewerFromRequest(r, filter), id, num)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list episodes")
+		writeAPIError(w, err)
 		return
 	}
-	if h.items.seasonRepo != nil {
-		if season, seasonErr := h.items.seasonRepo.GetBySeriesAndNumber(r.Context(), id, num); seasonErr == nil && season != nil {
-			h.items.maybeRequestStaleSeasonMetadataRefresh(r.Context(), season.ContentID, episodes)
-		}
-	}
-	h.writeEpisodeResponses(w, r, episodes)
+	writeJSON(w, http.StatusOK, episodesListResponse{Episodes: view})
 }
 
-func (h *CatalogResourceHandler) syntheticSeasonDetail(r *http.Request, seasonID string) (*catalog.ItemDetail, error) {
+func (h *CatalogResourceHandler) syntheticSeasonDetail(ctx context.Context, v ItemViewer, seasonID string) (*catalog.ItemDetail, error) {
 	seriesID, seasonNum, ok := parseSyntheticSeasonID(seasonID)
 	if !ok {
 		return nil, catalog.ErrItemNotFound
@@ -462,20 +179,14 @@ func (h *CatalogResourceHandler) syntheticSeasonDetail(r *http.Request, seasonID
 		return nil, catalog.ErrItemNotFound
 	}
 
-	filter, err := h.items.accessFilter(r)
-	if err != nil {
-		return nil, err
-	}
-	// The entrypoint has already rejected an unparseable size; this only carries
-	// the validated one down to the detail service and the season response.
-	filter.ImageSize = requestImageSize(r)
+	filter := v.Access
 
-	seriesDetail, err := h.items.detailSvc.GetItemDetail(r.Context(), seriesID, filter)
+	seriesDetail, err := h.items.detailSvc.GetItemDetail(ctx, seriesID, filter)
 	if err != nil {
 		return nil, err
 	}
 
-	episodes, err := h.items.episodeRepo.ListBySeason(r.Context(), seriesID, seasonNum)
+	episodes, err := h.items.episodeRepo.ListBySeason(ctx, seriesID, seasonNum)
 	if err != nil {
 		return nil, fmt.Errorf("listing season episodes: %w", err)
 	}
@@ -494,11 +205,12 @@ func (h *CatalogResourceHandler) syntheticSeasonDetail(r *http.Request, seasonID
 		season.Title = "Season " + strconv.Itoa(seasonNum)
 	}
 	seasonResp := h.items.toSeasonResponseFromEpisodes(
-		r,
+		ctx,
+		v,
 		seriesID,
 		season,
 		episodes,
-		h.items.getAggregateUserData(r, episodes),
+		h.items.getAggregateUserData(ctx, v, episodes),
 		filter.ImageSize,
 	)
 	return &catalog.ItemDetail{
@@ -522,78 +234,68 @@ func (h *CatalogResourceHandler) syntheticSeasonDetail(r *http.Request, seasonID
 	}, nil
 }
 
-func (h *CatalogResourceHandler) writeEpisodeResponses(w http.ResponseWriter, r *http.Request, episodes []*models.Episode) {
-	writeJSON(w, http.StatusOK, episodesListResponse{Episodes: h.items.buildEpisodeResponses(r, episodes)})
-}
-
 func parseSyntheticSeasonID(contentID string) (string, int, bool) {
-	seriesID, seasonPart, ok := strings.Cut(contentID, "-S")
-	if !ok || seriesID == "" || seasonPart == "" {
-		return "", 0, false
-	}
-	seasonNum, err := strconv.Atoi(seasonPart)
-	if err != nil {
-		return "", 0, false
-	}
-	return seriesID, seasonNum, true
+	return catalog.ParseSyntheticSeasonID(contentID)
 }
 
-func (h *CatalogResourceHandler) enrichItemDetail(r *http.Request, detail *catalog.ItemDetail) {
+func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemViewer, detail *catalog.ItemDetail) {
 	if detail == nil {
 		return
 	}
-	if filter, err := h.items.accessFilter(r); err == nil {
+	{
 		input := catalog.PlayableTargetInput{
 			ContentID:    detail.ContentID,
 			Type:         detail.Type,
 			SeriesID:     detail.SeriesID,
 			SeasonNumber: detail.SeasonNumber,
 		}
-		playTargets := h.items.resolvePlayableTargetInputs(r, []catalog.PlayableTargetInput{input}, nil, filter)
+		playTargets := h.items.resolvePlayableTargetInputs(ctx, v, []catalog.PlayableTargetInput{input}, nil, v.Access)
 		detail.PlayContentID = playTargets[input.Key()]
 	}
 
 	switch detail.Type {
 	case "season":
 		if h.items.episodeRepo != nil {
-			episodes, err := h.items.episodeRepo.ListBySeasonID(r.Context(), detail.ContentID)
-			if err == nil {
-				detail.SeasonUserData = h.items.getAggregateUserData(r, episodes)
+			if userData, ok := h.items.parentRollupUserData(ctx, v, detail.Type, detail.ContentID); ok {
+				detail.SeasonUserData = userData
+			} else if episodes, err := h.items.episodeRepo.ListBySeasonID(ctx, detail.ContentID); err == nil {
+				detail.SeasonUserData = h.items.getAggregateUserData(ctx, v, episodes)
 			}
 		}
 	case "series":
 		if h.items.episodeRepo != nil {
-			episodes, err := h.items.episodeRepo.ListBySeries(r.Context(), detail.ContentID)
-			if err == nil {
-				detail.SeasonUserData = h.items.getAggregateUserData(r, episodes)
+			if userData, ok := h.items.parentRollupUserData(ctx, v, detail.Type, detail.ContentID); ok {
+				detail.SeasonUserData = userData
+			} else if episodes, err := h.items.episodeRepo.ListBySeries(ctx, detail.ContentID); err == nil {
+				detail.SeasonUserData = h.items.getAggregateUserData(ctx, v, episodes)
 			}
 		}
 	case "movie", "episode", "audiobook", "ebook":
-		detail.SeasonUserData = h.items.getLeafUserData(r, detail.ContentID, detail.Type)
+		detail.SeasonUserData = h.items.getLeafUserData(ctx, v, detail.ContentID, detail.Type)
 		applyEffectiveEditionPreference(detail.SeasonUserData, &detail.EffectiveVersionEditionKey)
 	}
 
-	if !h.items.requestCanViewFilePaths(r) {
+	if !h.items.canViewFilePaths(ctx) {
 		for i := range detail.Versions {
 			detail.Versions[i].FilePath = ""
 		}
 		detail.FolderPaths = nil
 	}
 
-	h.enrichViewerState(r, detail)
+	h.enrichViewerState(ctx, v, detail)
 }
 
-func (h *CatalogResourceHandler) enrichViewerState(r *http.Request, detail *catalog.ItemDetail) {
-	store, profileID, ok := h.items.userStoreForRequest(r)
+func (h *CatalogResourceHandler) enrichViewerState(ctx context.Context, v ItemViewer, detail *catalog.ItemDetail) {
+	store, profileID, ok := h.items.viewerUserStore(ctx, v.ProfileID)
 	if !ok || detail == nil {
 		return
 	}
 
-	isFavorite, err := store.IsFavorite(r.Context(), profileID, detail.ContentID)
+	isFavorite, err := store.IsFavorite(ctx, profileID, detail.ContentID)
 	if err != nil {
 		return
 	}
-	inWatchlist, err := store.InWatchlist(r.Context(), profileID, detail.ContentID)
+	inWatchlist, err := store.InWatchlist(ctx, profileID, detail.ContentID)
 	if err != nil {
 		return
 	}
@@ -608,15 +310,29 @@ func (h *CatalogResourceHandler) enrichViewerState(r *http.Request, detail *cata
 		return
 	}
 
-	userID := apimw.GetUserID(r.Context())
+	userID := apimw.GetUserID(ctx)
 	if userID == 0 {
 		return
 	}
 
-	rating, err := h.items.ratingsRepo.Get(r.Context(), userID, profileID, detail.ContentID)
+	rating, err := h.items.ratingsRepo.Get(ctx, userID, profileID, detail.ContentID)
 	if err != nil || rating == nil {
 		return
 	}
 
 	detail.UserRating = &rating.Rating
+}
+
+// seasonListArtworkParam is the series-seasons query parameter advertised by
+// the images capability; false omits all poster preparation.
+const seasonListArtworkParam = "include_artwork"
+
+// seasonListArtwork allows text-only selectors to omit all poster preparation.
+func seasonListArtwork(r *http.Request) (bool, bool) {
+	value := r.URL.Query().Get(seasonListArtworkParam)
+	if value == "" {
+		return true, true
+	}
+	include, err := strconv.ParseBool(value)
+	return include, err == nil
 }

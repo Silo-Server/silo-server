@@ -1,0 +1,3181 @@
+{
+  "schema_version": 1,
+  "listener": "api",
+  "route_group": "/api/v1/api-keys",
+  "wave": 1,
+  "description": "Self-service API key management and the scope catalog.",
+  "rows": [
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/api-keys/",
+      "registration_index": 0,
+      "not_applicable": {
+        "filtering": "No filter parameters; scoped to the caller.",
+        "pagination": "Unpaged per-account list.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "keys_list.ok",
+          "category": "status_headers",
+          "description": "Lists the caller's keys: 200 JSON array.",
+          "principal": {
+            "class": "admin"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "type",
+                "value": "array"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 returns a collection of account-owned key metadata with string IDs and key_prefix instead of reusable secrets; empty lists stay arrays and unauthenticated refusal uses Problem Details. Full-table preservation is checked per transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_list_pairing_test.go",
+            "operation_id": "listPersonalAPIKeys",
+            "method": "GET",
+            "request": {
+              "path": "/api/v2/api-keys"
+            },
+            "expect": {
+              "status": 200,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/json"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/items",
+                  "op": "type",
+                  "value": "array"
+                },
+                {
+                  "pointer": "/items",
+                  "op": "length",
+                  "value": 2
+                },
+                {
+                  "pointer": "/items",
+                  "op": "every",
+                  "value": {
+                    "pointer": "",
+                    "op": "keys_equal",
+                    "value": [
+                      "id",
+                      "user_id",
+                      "label",
+                      "key_prefix",
+                      "rate_tier",
+                      "scopes",
+                      "created_at"
+                    ]
+                  }
+                },
+                {
+                  "pointer": "/items",
+                  "op": "every",
+                  "value": {
+                    "pointer": "/user_id",
+                    "op": "equals",
+                    "value": "${admin_user_id}"
+                  }
+                },
+                {
+                  "pointer": "/items",
+                  "op": "every",
+                  "value": {
+                    "pointer": "/id",
+                    "op": "type",
+                    "value": "string"
+                  }
+                },
+                {
+                  "pointer": "/items",
+                  "op": "every",
+                  "value": {
+                    "pointer": "/key",
+                    "op": "absent"
+                  }
+                },
+                {
+                  "pointer": "/items",
+                  "op": "every",
+                  "value": {
+                    "pointer": "/key_prefix",
+                    "op": "non_empty"
+                  }
+                },
+                {
+                  "pointer": "/items",
+                  "op": "every",
+                  "value": {
+                    "pointer": "/created_at",
+                    "op": "rfc3339"
+                  }
+                },
+                {
+                  "pointer": "/items/0/scopes",
+                  "op": "equals",
+                  "value": [
+                    "admin:users"
+                  ]
+                },
+                {
+                  "pointer": "/items/1/scopes",
+                  "op": "equals",
+                  "value": []
+                },
+                {
+                  "pointer": "/items",
+                  "op": "sorted",
+                  "value": {
+                    "by": "/created_at",
+                    "direction": "desc"
+                  }
+                },
+                {
+                  "pointer": "/items",
+                  "op": "unique_by",
+                  "value": "/id"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_list.meaning",
+          "category": "data_meaning",
+          "description": "Only the caller's keys (two for the admin), with the full key value visible and scopes as an array.",
+          "principal": {
+            "class": "admin"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "",
+                "op": "every",
+                "value": {
+                  "pointer": "/key",
+                  "op": "matches",
+                  "value": "^sa_[0-9a-f]{64}$"
+                }
+              },
+              {
+                "pointer": "",
+                "op": "every",
+                "value": {
+                  "pointer": "/user_id",
+                  "op": "equals",
+                  "value": "${admin_user_id:int}"
+                }
+              }
+            ]
+          },
+          "notes": "The full secret is returned on every list, not just at creation. Flagged for the section PR (security review).",
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_list.shape",
+          "category": "field_presence_nullability",
+          "description": "scopes is [] for an unscoped key (never null); last_used_at is omitted until first use.",
+          "principal": {
+            "class": "admin"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "",
+                "op": "every",
+                "value": {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "id",
+                    "user_id",
+                    "label",
+                    "key",
+                    "rate_tier",
+                    "scopes",
+                    "created_at"
+                  ]
+                }
+              },
+              {
+                "pointer": "/1/scopes",
+                "op": "equals",
+                "value": []
+              },
+              {
+                "pointer": "/0/scopes",
+                "op": "equals",
+                "value": [
+                  "admin:users"
+                ]
+              },
+              {
+                "pointer": "/0/rate_tier",
+                "op": "equals",
+                "value": "standard"
+              }
+            ]
+          },
+          "v2_expectation": null
+        },
+        {
+          "id": "keys_list.sorted",
+          "category": "sorting",
+          "description": "Newest first by created_at.",
+          "principal": {
+            "class": "admin"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "",
+                "op": "sorted",
+                "value": {
+                  "by": "/created_at",
+                  "direction": "desc"
+                }
+              },
+              {
+                "pointer": "",
+                "op": "unique_by",
+                "value": "/id"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 returns a collection of account-owned key metadata with string IDs and key_prefix instead of reusable secrets; empty lists stay arrays and unauthenticated refusal uses Problem Details. Full-table preservation is checked per transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_list_pairing_test.go",
+            "operation_id": "listPersonalAPIKeys",
+            "method": "GET",
+            "request": {
+              "path": "/api/v2/api-keys"
+            },
+            "expect": {
+              "status": 200,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/json"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/items",
+                  "op": "type",
+                  "value": "array"
+                },
+                {
+                  "pointer": "/items",
+                  "op": "length",
+                  "value": 2
+                },
+                {
+                  "pointer": "/items",
+                  "op": "every",
+                  "value": {
+                    "pointer": "",
+                    "op": "keys_equal",
+                    "value": [
+                      "id",
+                      "user_id",
+                      "label",
+                      "key_prefix",
+                      "rate_tier",
+                      "scopes",
+                      "created_at"
+                    ]
+                  }
+                },
+                {
+                  "pointer": "/items",
+                  "op": "every",
+                  "value": {
+                    "pointer": "/user_id",
+                    "op": "equals",
+                    "value": "${admin_user_id}"
+                  }
+                },
+                {
+                  "pointer": "/items",
+                  "op": "every",
+                  "value": {
+                    "pointer": "/id",
+                    "op": "type",
+                    "value": "string"
+                  }
+                },
+                {
+                  "pointer": "/items",
+                  "op": "every",
+                  "value": {
+                    "pointer": "/key",
+                    "op": "absent"
+                  }
+                },
+                {
+                  "pointer": "/items",
+                  "op": "every",
+                  "value": {
+                    "pointer": "/key_prefix",
+                    "op": "non_empty"
+                  }
+                },
+                {
+                  "pointer": "/items",
+                  "op": "every",
+                  "value": {
+                    "pointer": "/created_at",
+                    "op": "rfc3339"
+                  }
+                },
+                {
+                  "pointer": "/items/0/scopes",
+                  "op": "equals",
+                  "value": [
+                    "admin:users"
+                  ]
+                },
+                {
+                  "pointer": "/items/1/scopes",
+                  "op": "equals",
+                  "value": []
+                },
+                {
+                  "pointer": "/items",
+                  "op": "sorted",
+                  "value": {
+                    "by": "/created_at",
+                    "direction": "desc"
+                  }
+                },
+                {
+                  "pointer": "/items",
+                  "op": "unique_by",
+                  "value": "/id"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_list.api_key_forbidden",
+          "category": "authorization",
+          "description": "An API key may not manage API keys: 403.",
+          "principal": {
+            "class": "api_key"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "API key management is not accessible via API key authentication"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Preserve the original key authority oracle. V2 uses typed Problems and permits unscoped account reads. Observe actual asynchronous last-used commits only for middleware-admitted keys; scope/public refusals do not touch usage.",
+            "recorded_in": "internal/scenariocatalog/executor/key_authority_usage_pairing_test.go",
+            "operation_id": "listPersonalAPIKeys",
+            "method": "GET",
+            "request": {
+              "path": "/api/v2/api-keys"
+            },
+            "expect": {
+              "status": 403,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 403
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/permission_denied$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/access_token",
+                  "op": "absent"
+                },
+                {
+                  "pointer": "/refresh_token",
+                  "op": "absent"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_list.empty",
+          "category": "data_meaning",
+          "description": "An account with no keys gets [] not null.",
+          "principal": {
+            "class": "authenticated",
+            "user": "grouped"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "",
+                "op": "empty"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 returns a collection of account-owned key metadata with string IDs and key_prefix instead of reusable secrets; empty lists stay arrays and unauthenticated refusal uses Problem Details. Full-table preservation is checked per transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_list_pairing_test.go",
+            "operation_id": "listPersonalAPIKeys",
+            "method": "GET",
+            "request": {
+              "path": "/api/v2/api-keys"
+            },
+            "expect": {
+              "status": 200,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/json"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/items",
+                  "op": "type",
+                  "value": "array"
+                },
+                {
+                  "pointer": "/items",
+                  "op": "length",
+                  "value": 0
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_list.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 returns a collection of account-owned key metadata with string IDs and key_prefix instead of reusable secrets; empty lists stay arrays and unauthenticated refusal uses Problem Details. Full-table preservation is checked per transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_list_pairing_test.go",
+            "operation_id": "listPersonalAPIKeys",
+            "method": "GET",
+            "request": {
+              "path": "/api/v2/api-keys"
+            },
+            "expect": {
+              "status": 401,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 401
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/authentication_required$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_list.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/"
+          },
+          "expect": {
+            "status": 401,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Preserve the original key authority oracle. V2 uses typed Problems and permits unscoped account reads. Observe actual asynchronous last-used commits only for middleware-admitted keys; scope/public refusals do not touch usage.",
+            "recorded_in": "internal/scenariocatalog/executor/key_authority_usage_pairing_test.go",
+            "operation_id": "listPersonalAPIKeys",
+            "method": "GET",
+            "request": {
+              "path": "/api/v2/api-keys"
+            },
+            "expect": {
+              "status": 401,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 401
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/authentication_required$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/access_token",
+                  "op": "absent"
+                },
+                {
+                  "pointer": "/refresh_token",
+                  "op": "absent"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "POST",
+      "path": "/api/v1/api-keys/",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "keys_create.ok",
+          "category": "status_headers",
+          "description": "Creating a labelled key answers 201 with the key.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "fixture-created"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "id",
+                  "user_id",
+                  "label",
+                  "key",
+                  "rate_tier",
+                  "scopes",
+                  "created_at"
+                ]
+              },
+              {
+                "pointer": "/key",
+                "op": "matches",
+                "value": "^sa_[0-9a-f]{64}$"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Creation still discloses the new account-owned credential once, normalizes scopes and uses the standard tier; v2 uses string IDs and UTC-millisecond timestamps. Full-table effects link the returned credential to exactly one new row.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_create_pairing_test.go",
+            "operation_id": "createPersonalAPIKey",
+            "method": "POST",
+            "request": {
+              "path": "/api/v2/api-keys",
+              "body": {
+                "label": "fixture-created"
+              }
+            },
+            "expect": {
+              "status": 201,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/json"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "id",
+                    "user_id",
+                    "label",
+                    "key",
+                    "rate_tier",
+                    "scopes",
+                    "created_at"
+                  ]
+                },
+                {
+                  "pointer": "/id",
+                  "op": "matches",
+                  "value": "^[1-9][0-9]*$"
+                },
+                {
+                  "pointer": "/user_id",
+                  "op": "equals",
+                  "value": "${member_user_id}"
+                },
+                {
+                  "pointer": "/key",
+                  "op": "matches",
+                  "value": "^sa_[0-9a-f]{64}$"
+                },
+                {
+                  "pointer": "/label",
+                  "op": "equals",
+                  "value": "fixture-created"
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "equals",
+                  "value": []
+                },
+                {
+                  "pointer": "/rate_tier",
+                  "op": "equals",
+                  "value": "standard"
+                },
+                {
+                  "pointer": "/created_at",
+                  "op": "rfc3339"
+                },
+                {
+                  "pointer": "/last_used_at",
+                  "op": "absent"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_create.meaning",
+          "category": "data_meaning",
+          "description": "The key belongs to the caller, starts on the standard tier, unscoped.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "fixture-created"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/user_id",
+                "op": "equals",
+                "value": "${member_user_id:int}"
+              },
+              {
+                "pointer": "/rate_tier",
+                "op": "equals",
+                "value": "standard"
+              },
+              {
+                "pointer": "/scopes",
+                "op": "equals",
+                "value": []
+              },
+              {
+                "pointer": "/label",
+                "op": "equals",
+                "value": "fixture-created"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Creation still discloses the new account-owned credential once, normalizes scopes and uses the standard tier; v2 uses string IDs and UTC-millisecond timestamps. Full-table effects link the returned credential to exactly one new row.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_create_pairing_test.go",
+            "operation_id": "createPersonalAPIKey",
+            "method": "POST",
+            "request": {
+              "path": "/api/v2/api-keys",
+              "body": {
+                "label": "fixture-created"
+              }
+            },
+            "expect": {
+              "status": 201,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/json"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "id",
+                    "user_id",
+                    "label",
+                    "key",
+                    "rate_tier",
+                    "scopes",
+                    "created_at"
+                  ]
+                },
+                {
+                  "pointer": "/id",
+                  "op": "matches",
+                  "value": "^[1-9][0-9]*$"
+                },
+                {
+                  "pointer": "/user_id",
+                  "op": "equals",
+                  "value": "${member_user_id}"
+                },
+                {
+                  "pointer": "/key",
+                  "op": "matches",
+                  "value": "^sa_[0-9a-f]{64}$"
+                },
+                {
+                  "pointer": "/label",
+                  "op": "equals",
+                  "value": "fixture-created"
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "equals",
+                  "value": []
+                },
+                {
+                  "pointer": "/rate_tier",
+                  "op": "equals",
+                  "value": "standard"
+                },
+                {
+                  "pointer": "/created_at",
+                  "op": "rfc3339"
+                },
+                {
+                  "pointer": "/last_used_at",
+                  "op": "absent"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_create.scoped",
+          "category": "filtering",
+          "description": "Valid scopes are normalized and stored.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "scoped",
+              "scopes": [
+                "admin:users",
+                "admin:users"
+              ]
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/scopes",
+                "op": "equals",
+                "value": [
+                  "admin:users"
+                ]
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Creation still discloses the new account-owned credential once, normalizes scopes and uses the standard tier; v2 uses string IDs and UTC-millisecond timestamps. Full-table effects link the returned credential to exactly one new row.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_create_pairing_test.go",
+            "operation_id": "createPersonalAPIKey",
+            "method": "POST",
+            "request": {
+              "path": "/api/v2/api-keys",
+              "body": {
+                "label": "scoped",
+                "scopes": [
+                  "admin:users",
+                  "admin:users"
+                ]
+              }
+            },
+            "expect": {
+              "status": 201,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/json"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "id",
+                    "user_id",
+                    "label",
+                    "key",
+                    "rate_tier",
+                    "scopes",
+                    "created_at"
+                  ]
+                },
+                {
+                  "pointer": "/id",
+                  "op": "matches",
+                  "value": "^[1-9][0-9]*$"
+                },
+                {
+                  "pointer": "/user_id",
+                  "op": "equals",
+                  "value": "${member_user_id}"
+                },
+                {
+                  "pointer": "/key",
+                  "op": "matches",
+                  "value": "^sa_[0-9a-f]{64}$"
+                },
+                {
+                  "pointer": "/label",
+                  "op": "equals",
+                  "value": "scoped"
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "equals",
+                  "value": [
+                    "admin:users"
+                  ]
+                },
+                {
+                  "pointer": "/rate_tier",
+                  "op": "equals",
+                  "value": "standard"
+                },
+                {
+                  "pointer": "/created_at",
+                  "op": "rfc3339"
+                },
+                {
+                  "pointer": "/last_used_at",
+                  "op": "absent"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_create.bad_scope",
+          "category": "error",
+          "description": "An unknown scope is 400.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "x",
+              "scopes": [
+                "admin:everything"
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 rejects invalid scope and missing label with validation422, malformed JSON with400, and demo/unauthenticated requests with403/401 Problem Details; no credential row may change on any refusal.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_create_refusal_pairing_test.go",
+            "operation_id": "createPersonalAPIKey",
+            "method": "POST",
+            "request": {
+              "path": "/api/v2/api-keys",
+              "body": {
+                "label": "x",
+                "scopes": [
+                  "admin:everything"
+                ]
+              }
+            },
+            "expect": {
+              "status": 422,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 422
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/validation_failed$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_create.missing_label",
+          "category": "error",
+          "description": "An empty label is 400.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": ""
+            }
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Label is required"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 rejects invalid scope and missing label with validation422, malformed JSON with400, and demo/unauthenticated requests with403/401 Problem Details; no credential row may change on any refusal.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_create_refusal_pairing_test.go",
+            "operation_id": "createPersonalAPIKey",
+            "method": "POST",
+            "request": {
+              "path": "/api/v2/api-keys",
+              "body": {
+                "label": ""
+              }
+            },
+            "expect": {
+              "status": 422,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 422
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/validation_failed$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_create.malformed",
+          "category": "error",
+          "description": "A non-JSON body is 400.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "raw_body": "x"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid request body"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 rejects invalid scope and missing label with validation422, malformed JSON with400, and demo/unauthenticated requests with403/401 Problem Details; no credential row may change on any refusal.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_create_refusal_pairing_test.go",
+            "operation_id": "createPersonalAPIKey",
+            "method": "POST",
+            "request": {
+              "path": "/api/v2/api-keys",
+              "raw_body": "x"
+            },
+            "expect": {
+              "status": 400,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 400
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/malformed_request$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_create.api_key_forbidden",
+          "category": "authorization",
+          "description": "An API key cannot mint keys: 403.",
+          "principal": {
+            "class": "api_key"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "x"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Preserve the original key authority oracle. V2 uses typed Problems and permits unscoped account reads. Observe actual asynchronous last-used commits only for middleware-admitted keys; scope/public refusals do not touch usage.",
+            "recorded_in": "internal/scenariocatalog/executor/key_authority_usage_pairing_test.go",
+            "operation_id": "createPersonalAPIKey",
+            "method": "POST",
+            "request": {
+              "path": "/api/v2/api-keys",
+              "body": {
+                "label": "x"
+              }
+            },
+            "expect": {
+              "status": 403,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 403
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/permission_denied$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/access_token",
+                  "op": "absent"
+                },
+                {
+                  "pointer": "/refresh_token",
+                  "op": "absent"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_create.demo",
+          "category": "authorization",
+          "description": "In demo mode a non-admin mutation on this path is 403 demo_restricted.",
+          "principal": {
+            "class": "demo"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "x"
+            }
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "equals",
+                "value": {
+                  "error": "demo_restricted",
+                  "message": "This action is not available in demo mode."
+                }
+              }
+            ]
+          },
+          "settings": {
+            "demo.enabled": "true"
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 rejects invalid scope and missing label with validation422, malformed JSON with400, and demo/unauthenticated requests with403/401 Problem Details; no credential row may change on any refusal.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_create_refusal_pairing_test.go",
+            "operation_id": "createPersonalAPIKey",
+            "method": "POST",
+            "request": {
+              "path": "/api/v2/api-keys",
+              "body": {
+                "label": "x"
+              }
+            },
+            "expect": {
+              "status": 403,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 403
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/permission_denied$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_create.shape",
+          "category": "field_presence_nullability",
+          "description": "last_used_at is absent on a new key.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "fixture-created"
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": [
+              {
+                "pointer": "/last_used_at",
+                "op": "absent"
+              },
+              {
+                "pointer": "/created_at",
+                "op": "rfc3339"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Creation still discloses the new account-owned credential once, normalizes scopes and uses the standard tier; v2 uses string IDs and UTC-millisecond timestamps. Full-table effects link the returned credential to exactly one new row.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_create_pairing_test.go",
+            "operation_id": "createPersonalAPIKey",
+            "method": "POST",
+            "request": {
+              "path": "/api/v2/api-keys",
+              "body": {
+                "label": "fixture-created"
+              }
+            },
+            "expect": {
+              "status": 201,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/json"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "id",
+                    "user_id",
+                    "label",
+                    "key",
+                    "rate_tier",
+                    "scopes",
+                    "created_at"
+                  ]
+                },
+                {
+                  "pointer": "/id",
+                  "op": "matches",
+                  "value": "^[1-9][0-9]*$"
+                },
+                {
+                  "pointer": "/user_id",
+                  "op": "equals",
+                  "value": "${member_user_id}"
+                },
+                {
+                  "pointer": "/key",
+                  "op": "matches",
+                  "value": "^sa_[0-9a-f]{64}$"
+                },
+                {
+                  "pointer": "/label",
+                  "op": "equals",
+                  "value": "fixture-created"
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "equals",
+                  "value": []
+                },
+                {
+                  "pointer": "/rate_tier",
+                  "op": "equals",
+                  "value": "standard"
+                },
+                {
+                  "pointer": "/created_at",
+                  "op": "rfc3339"
+                },
+                {
+                  "pointer": "/last_used_at",
+                  "op": "absent"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_create.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/",
+            "body": {
+              "label": "x"
+            }
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 rejects invalid scope and missing label with validation422, malformed JSON with400, and demo/unauthenticated requests with403/401 Problem Details; no credential row may change on any refusal.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_create_refusal_pairing_test.go",
+            "operation_id": "createPersonalAPIKey",
+            "method": "POST",
+            "request": {
+              "path": "/api/v2/api-keys",
+              "body": {
+                "label": "x"
+              }
+            },
+            "expect": {
+              "status": 401,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 401
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/authentication_required$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/api-keys/scopes",
+      "registration_index": 0,
+      "not_applicable": {
+        "filtering": "Static catalog.",
+        "pagination": "Static catalog.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "scopes.ok",
+          "category": "status_headers",
+          "description": "The scope catalog for feature detection: 200 JSON.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/scopes"
+          },
+          "expect": {
+            "status": 200,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "scopes"
+                ]
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 adds an explicit available capability flag while retaining the two scope names, descriptions and fixed order; unauthenticated refusal uses Problem Details. Full API-key table remains unchanged per transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_scopes_pairing_test.go",
+            "operation_id": "getPersonalAPIKeyScopes",
+            "method": "GET",
+            "request": {
+              "path": "/api/v2/api-keys/scopes"
+            },
+            "expect": {
+              "status": 200,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/json"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "available",
+                    "scopes"
+                  ]
+                },
+                {
+                  "pointer": "/available",
+                  "op": "equals",
+                  "value": true
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "length",
+                  "value": 2
+                },
+                {
+                  "pointer": "/scopes/0/name",
+                  "op": "equals",
+                  "value": "admin:users"
+                },
+                {
+                  "pointer": "/scopes/1/name",
+                  "op": "equals",
+                  "value": "admin:access-groups:read"
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "every",
+                  "value": {
+                    "pointer": "",
+                    "op": "keys_equal",
+                    "value": [
+                      "name",
+                      "description"
+                    ]
+                  }
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "every",
+                  "value": {
+                    "pointer": "/description",
+                    "op": "non_empty"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "scopes.meaning",
+          "category": "data_meaning",
+          "description": "Both known scopes are listed with descriptions, in a stable order.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/scopes"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/scopes",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "/scopes/0/name",
+                "op": "equals",
+                "value": "admin:users"
+              },
+              {
+                "pointer": "/scopes/1/name",
+                "op": "equals",
+                "value": "admin:access-groups:read"
+              },
+              {
+                "pointer": "/scopes",
+                "op": "every",
+                "value": {
+                  "pointer": "/description",
+                  "op": "non_empty"
+                }
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 adds an explicit available capability flag while retaining the two scope names, descriptions and fixed order; unauthenticated refusal uses Problem Details. Full API-key table remains unchanged per transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_scopes_pairing_test.go",
+            "operation_id": "getPersonalAPIKeyScopes",
+            "method": "GET",
+            "request": {
+              "path": "/api/v2/api-keys/scopes"
+            },
+            "expect": {
+              "status": 200,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/json"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "available",
+                    "scopes"
+                  ]
+                },
+                {
+                  "pointer": "/available",
+                  "op": "equals",
+                  "value": true
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "length",
+                  "value": 2
+                },
+                {
+                  "pointer": "/scopes/0/name",
+                  "op": "equals",
+                  "value": "admin:users"
+                },
+                {
+                  "pointer": "/scopes/1/name",
+                  "op": "equals",
+                  "value": "admin:access-groups:read"
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "every",
+                  "value": {
+                    "pointer": "",
+                    "op": "keys_equal",
+                    "value": [
+                      "name",
+                      "description"
+                    ]
+                  }
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "every",
+                  "value": {
+                    "pointer": "/description",
+                    "op": "non_empty"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "scopes.api_key_allowed",
+          "category": "authorization",
+          "description": "Unlike the management routes, an API key may read the catalog.",
+          "principal": {
+            "class": "api_key"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/scopes"
+          },
+          "expect": {
+            "status": 200
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Preserve the original key authority oracle. V2 uses typed Problems and permits unscoped account reads. Observe actual asynchronous last-used commits only for middleware-admitted keys; scope/public refusals do not touch usage.",
+            "recorded_in": "internal/scenariocatalog/executor/key_authority_usage_pairing_test.go",
+            "operation_id": "getPersonalAPIKeyScopes",
+            "method": "GET",
+            "request": {
+              "path": "/api/v2/api-keys/scopes"
+            },
+            "expect": {
+              "status": 200,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "available",
+                    "scopes"
+                  ]
+                },
+                {
+                  "pointer": "/available",
+                  "op": "equals",
+                  "value": true
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "length",
+                  "value": 2
+                },
+                {
+                  "pointer": "/scopes/0/name",
+                  "op": "equals",
+                  "value": "admin:users"
+                },
+                {
+                  "pointer": "/scopes/1/name",
+                  "op": "equals",
+                  "value": "admin:access-groups:read"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "scopes.shape",
+          "category": "field_presence_nullability",
+          "description": "Each scope has exactly name and description.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/scopes"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/scopes",
+                "op": "length",
+                "value": 2
+              },
+              {
+                "pointer": "/scopes",
+                "op": "every",
+                "value": {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "name",
+                    "description"
+                  ]
+                }
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 adds an explicit available capability flag while retaining the two scope names, descriptions and fixed order; unauthenticated refusal uses Problem Details. Full API-key table remains unchanged per transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_scopes_pairing_test.go",
+            "operation_id": "getPersonalAPIKeyScopes",
+            "method": "GET",
+            "request": {
+              "path": "/api/v2/api-keys/scopes"
+            },
+            "expect": {
+              "status": 200,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/json"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "available",
+                    "scopes"
+                  ]
+                },
+                {
+                  "pointer": "/available",
+                  "op": "equals",
+                  "value": true
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "length",
+                  "value": 2
+                },
+                {
+                  "pointer": "/scopes/0/name",
+                  "op": "equals",
+                  "value": "admin:users"
+                },
+                {
+                  "pointer": "/scopes/1/name",
+                  "op": "equals",
+                  "value": "admin:access-groups:read"
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "every",
+                  "value": {
+                    "pointer": "",
+                    "op": "keys_equal",
+                    "value": [
+                      "name",
+                      "description"
+                    ]
+                  }
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "every",
+                  "value": {
+                    "pointer": "/description",
+                    "op": "non_empty"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "scopes.sorted",
+          "category": "sorting",
+          "description": "Catalog order is fixed (not alphabetical).",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/scopes"
+          },
+          "expect": {
+            "status": 200,
+            "body": [
+              {
+                "pointer": "/scopes",
+                "op": "length",
+                "value": 2
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 adds an explicit available capability flag while retaining the two scope names, descriptions and fixed order; unauthenticated refusal uses Problem Details. Full API-key table remains unchanged per transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_scopes_pairing_test.go",
+            "operation_id": "getPersonalAPIKeyScopes",
+            "method": "GET",
+            "request": {
+              "path": "/api/v2/api-keys/scopes"
+            },
+            "expect": {
+              "status": 200,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/json"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "",
+                  "op": "keys_equal",
+                  "value": [
+                    "available",
+                    "scopes"
+                  ]
+                },
+                {
+                  "pointer": "/available",
+                  "op": "equals",
+                  "value": true
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "length",
+                  "value": 2
+                },
+                {
+                  "pointer": "/scopes/0/name",
+                  "op": "equals",
+                  "value": "admin:users"
+                },
+                {
+                  "pointer": "/scopes/1/name",
+                  "op": "equals",
+                  "value": "admin:access-groups:read"
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "every",
+                  "value": {
+                    "pointer": "",
+                    "op": "keys_equal",
+                    "value": [
+                      "name",
+                      "description"
+                    ]
+                  }
+                },
+                {
+                  "pointer": "/scopes",
+                  "op": "every",
+                  "value": {
+                    "pointer": "/description",
+                    "op": "non_empty"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "scopes.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/scopes"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 adds an explicit available capability flag while retaining the two scope names, descriptions and fixed order; unauthenticated refusal uses Problem Details. Full API-key table remains unchanged per transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_scopes_pairing_test.go",
+            "operation_id": "getPersonalAPIKeyScopes",
+            "method": "GET",
+            "request": {
+              "path": "/api/v2/api-keys/scopes"
+            },
+            "expect": {
+              "status": 401,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 401
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/authentication_required$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "scopes.error_shape",
+          "category": "error",
+          "description": "Refusal envelope shape.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/scopes"
+          },
+          "expect": {
+            "status": 401,
+            "body": [
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "V2 adds an explicit available capability flag while retaining the two scope names, descriptions and fixed order; unauthenticated refusal uses Problem Details. Full API-key table remains unchanged per transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_scopes_pairing_test.go",
+            "operation_id": "getPersonalAPIKeyScopes",
+            "method": "GET",
+            "request": {
+              "path": "/api/v2/api-keys/scopes"
+            },
+            "expect": {
+              "status": 401,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 401
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/authentication_required$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "listener": "api",
+      "method": "DELETE",
+      "path": "/api/v1/api-keys/{id}",
+      "registration_index": 0,
+      "not_applicable": {
+        "sorting": "Single object response; nothing to order.",
+        "pagination": "Single object response; nothing to page.",
+        "filtering": "No filter parameters are read.",
+        "raw_protocol": "Plain JSON request/response; no ranges, redirects, multipart, or upgrades."
+      },
+      "scenarios": [
+        {
+          "id": "keys_delete.ok",
+          "category": "status_headers",
+          "description": "Deleting an own key answers 204.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/${member_api_key_id}"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Account-owned deletion and repeated/missing refusal retain their meaning; v2 uses Problem Details and rejects a malformed identifier with validation 422. Full-table effects are checked independently for each transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_delete_pairing_test.go",
+            "operation_id": "revokePersonalAPIKey",
+            "method": "DELETE",
+            "request": {
+              "path": "/api/v2/api-keys/${member_api_key_id}"
+            },
+            "expect": {
+              "status": 204,
+              "body_kind": "empty",
+              "headers": [],
+              "body": []
+            }
+          }
+        },
+        {
+          "id": "keys_delete.gone",
+          "category": "data_meaning",
+          "description": "A second delete is 404: the key no longer exists.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/${member_api_key_id}",
+            "repeat": 2
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "API key not found"
+              }
+            ]
+          },
+          "fresh_state": true,
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Account-owned deletion and repeated/missing refusal retain their meaning; v2 uses Problem Details and rejects a malformed identifier with validation 422. Full-table effects are checked independently for each transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_delete_pairing_test.go",
+            "operation_id": "revokePersonalAPIKey",
+            "method": "DELETE",
+            "request": {
+              "path": "/api/v2/api-keys/${member_api_key_id}",
+              "repeat": 2
+            },
+            "expect": {
+              "status": 404,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 404
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/not_found$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_delete.other_user",
+          "category": "authorization",
+          "description": "Another account's key id is 404, indistinguishable from unknown.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/${admin_api_key_id}"
+          },
+          "expect": {
+            "status": 404,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "not_found"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Account-owned deletion and repeated/missing refusal retain their meaning; v2 uses Problem Details and rejects a malformed identifier with validation 422. Full-table effects are checked independently for each transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_delete_pairing_test.go",
+            "operation_id": "revokePersonalAPIKey",
+            "method": "DELETE",
+            "request": {
+              "path": "/api/v2/api-keys/${admin_api_key_id}"
+            },
+            "expect": {
+              "status": 404,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 404
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/not_found$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_delete.bad_id",
+          "category": "error",
+          "description": "A non-integer id is 400.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/abc"
+          },
+          "expect": {
+            "status": 400,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "bad_request"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Invalid API key ID"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Account-owned deletion and repeated/missing refusal retain their meaning; v2 uses Problem Details and rejects a malformed identifier with validation 422. Full-table effects are checked independently for each transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_delete_pairing_test.go",
+            "operation_id": "revokePersonalAPIKey",
+            "method": "DELETE",
+            "request": {
+              "path": "/api/v2/api-keys/abc"
+            },
+            "expect": {
+              "status": 422,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 422
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/validation_failed$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_delete.api_key_forbidden",
+          "category": "authorization",
+          "description": "An API key cannot delete keys: 403.",
+          "principal": {
+            "class": "api_key"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/1"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Preserve the original key authority oracle. V2 uses typed Problems and permits unscoped account reads. Observe actual asynchronous last-used commits only for middleware-admitted keys; scope/public refusals do not touch usage.",
+            "recorded_in": "internal/scenariocatalog/executor/key_authority_usage_pairing_test.go",
+            "operation_id": "revokePersonalAPIKey",
+            "method": "DELETE",
+            "request": {
+              "path": "/api/v2/api-keys/1"
+            },
+            "expect": {
+              "status": 403,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 403
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/permission_denied$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/access_token",
+                  "op": "absent"
+                },
+                {
+                  "pointer": "/refresh_token",
+                  "op": "absent"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_delete.demo",
+          "category": "authorization",
+          "description": "In demo mode a non-admin mutation on this path is 403 demo_restricted.",
+          "principal": {
+            "class": "demo"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/${member_api_key_id}"
+          },
+          "expect": {
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "",
+                "op": "equals",
+                "value": {
+                  "error": "demo_restricted",
+                  "message": "This action is not available in demo mode."
+                }
+              }
+            ]
+          },
+          "settings": {
+            "demo.enabled": "true"
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Account-owned deletion and repeated/missing refusal retain their meaning; v2 uses Problem Details and rejects a malformed identifier with validation 422. Full-table effects are checked independently for each transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_delete_pairing_test.go",
+            "operation_id": "revokePersonalAPIKey",
+            "method": "DELETE",
+            "request": {
+              "path": "/api/v2/api-keys/${member_api_key_id}"
+            },
+            "expect": {
+              "status": 403,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 403
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/permission_denied$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "keys_delete.shape",
+          "category": "field_presence_nullability",
+          "description": "Success has no body.",
+          "principal": {
+            "class": "authenticated"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/${member_api_key_id}"
+          },
+          "expect": {
+            "status": 204,
+            "body_kind": "empty"
+          },
+          "fresh_state": true,
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Account-owned deletion and repeated/missing refusal retain their meaning; v2 uses Problem Details and rejects a malformed identifier with validation 422. Full-table effects are checked independently for each transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_delete_pairing_test.go",
+            "operation_id": "revokePersonalAPIKey",
+            "method": "DELETE",
+            "request": {
+              "path": "/api/v2/api-keys/${member_api_key_id}"
+            },
+            "expect": {
+              "status": 204,
+              "body_kind": "empty",
+              "headers": [],
+              "body": []
+            }
+          }
+        },
+        {
+          "id": "keys_delete.no_token",
+          "category": "authorization",
+          "description": "Without a bearer the auth middleware refuses the request before the handler runs.",
+          "principal": {
+            "class": "public"
+          },
+          "request": {
+            "path": "/api/v1/api-keys/1"
+          },
+          "expect": {
+            "status": 401,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "unauthorized"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Missing or malformed authorization header"
+              }
+            ]
+          },
+          "v2_expectation": {
+            "kind": "intentional_difference",
+            "summary": "Account-owned deletion and repeated/missing refusal retain their meaning; v2 uses Problem Details and rejects a malformed identifier with validation 422. Full-table effects are checked independently for each transport.",
+            "recorded_in": "internal/scenariocatalog/executor/api_key_delete_pairing_test.go",
+            "operation_id": "revokePersonalAPIKey",
+            "method": "DELETE",
+            "request": {
+              "path": "/api/v2/api-keys/1"
+            },
+            "expect": {
+              "status": 401,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
+              "body": [
+                {
+                  "pointer": "/status",
+                  "op": "equals",
+                  "value": 401
+                },
+                {
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/authentication_required$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

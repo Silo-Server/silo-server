@@ -26,7 +26,7 @@ interface FacetSearchSelectProps {
 /**
  * FacetSearchSelect is the typeahead counterpart to SearchableSelect for
  * high-cardinality catalog facets (Author, Narrator, Series). It debounces
- * the user's input then queries /api/v1/catalog/filters/search with the
+ * the user's input then queries /api/v2/catalog/filters/search with the
  * given facet + prefix. The dropdown lists matches in alphabetical order
  * with the currently selected value pinned first so users can clear it
  * without re-searching.

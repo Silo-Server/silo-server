@@ -19,7 +19,7 @@ func TestMediaRouteManifest(t *testing.T) {
 	makeRouter := func() chi.Routes {
 		// Handler's idle reaper is guarded by reaperOnce, so repeated fixtures
 		// start only the single process-wide goroutine existing tests already use.
-		return NewServer(nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{}), nodesessions.NewTracker(nil, "", "", "")).Handler().(chi.Routes)
+		return NewServer(nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{}), nodesessions.NewTracker(nil, "", "", "")).router()
 	}
 	actual, err := streamtelemetry.BuildRouteManifest([]chi.Routes{makeRouter(), makeRouter()}, transcodeNodeMediaRoutes)
 	if err != nil {

@@ -93,7 +93,7 @@ describe("LibraryMetadataSettings", () => {
   it("renders every field group heading", () => {
     const rendered = text(render({ "catalog.search.provider": "meilisearch" }));
 
-    for (const heading of ["Artwork", "Scanning", "Intro and credits markers", "Search"]) {
+    for (const heading of ["Artwork", "Browsing", "Scanning", "Skip markers", "Search"]) {
       expect(rendered).toContain(heading);
     }
   });
@@ -102,15 +102,16 @@ describe("LibraryMetadataSettings", () => {
     const rendered = text(render({ "catalog.search.provider": "postgres" }));
 
     expect(rendered).toContain("Library & Metadata");
-    expect(rendered).toContain("Store artwork in your bucket");
-    expect(rendered).toContain("Find intros and credits");
+    expect(rendered).toContain("Keep provider artwork");
+    expect(rendered).toContain("Marker source");
     expect(rendered).toContain("Search engine");
   });
 
   it("states the CPU cost of local detection and the search fallback guarantee", () => {
     const rendered = text(render({ "catalog.search.provider": "meilisearch" }));
 
-    expect(rendered).toContain("Detecting on this server utilizes CPU.");
+    expect(rendered).toContain("Online markers take priority.");
+    expect(rendered).toContain("Local detection uses CPU.");
     expect(rendered).toContain(
       "Meilisearch tolerates typos but runs as its own service. If it goes down, search falls back to the built-in engine automatically.",
     );
@@ -130,6 +131,18 @@ describe("LibraryMetadataSettings", () => {
     expect(button?.getAttribute("data-variant")).toBe("secondary");
   });
 
+  it.each(["stored", "on_demand"])("explains scheduled sync for %s storage", (storage) => {
+    const rendered = text(render({ "markers.mode": "online", "markers.online_storage": storage }));
+
+    if (storage === "stored") {
+      expect(rendered).toContain("daily at 03:00 (server time) by default");
+      expect(rendered).not.toContain("Scheduled online sync is disabled.");
+    } else {
+      expect(rendered).toContain("Scheduled online sync is disabled.");
+      expect(rendered).not.toContain("daily at 03:00");
+    }
+  });
+
   it("manages the merged key set of the three tabs it replaces", () => {
     render({});
 
@@ -138,11 +151,15 @@ describe("LibraryMetadataSettings", () => {
     expect(keys).toEqual(
       expect.arrayContaining([
         "metadata.cache_images",
+        "catalog.scope_versions_to_library",
         "scanner.workers",
         "matcher.workers",
         "matcher.batch_size",
+        "metadata.image_workers",
         "markers.mode",
         "markers.lazy_playback",
+        "markers.online_storage",
+        "markers.detection_workers",
         "catalog.search.provider",
         "catalog.search.meilisearch.url",
         "catalog.search.meilisearch.api_key",
@@ -158,10 +175,10 @@ describe("LibraryMetadataSettings", () => {
   it("keeps marker behavior and points provider setup at the providers page", () => {
     const rendered = render({ "catalog.search.provider": "postgres" });
 
-    expect(text(rendered)).toContain("Find intros and credits");
+    expect(text(rendered)).toContain("Marker source");
     // Per-provider configuration moved to Subtitles & Metadata; only the link
     // to it is left here.
-    expect(text(rendered)).not.toContain("Use for online marker lookup");
+    expect(text(rendered)).not.toContain("Get markers from this provider");
     expect(text(rendered)).not.toContain("Minimum confidence");
     expect(text(rendered)).toContain("Marker providers");
     expect(rendered).toContain("/admin/settings/providers");
@@ -175,6 +192,23 @@ describe("LibraryMetadataSettings", () => {
     expect(text(render({ "catalog.search.provider": "postgres" }, ["scanner.workers"]))).toContain(
       "Scanner workers",
     );
+    expect(
+      text(render({ "catalog.search.provider": "postgres" }, ["metadata.image_workers"])),
+    ).toContain("Image encoding workers");
+  });
+
+  it("offers to restore worker defaults only while a value differs from them", () => {
+    const untouched = { "catalog.search.provider": "postgres", "scanner.workers": "8" };
+    expect(text(render(untouched))).not.toContain("Restore defaults");
+
+    const form = makeForm({ ...untouched, "metadata.image_workers": "2" });
+    useSettingsFormMock.mockReturnValue(form);
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <LibraryMetadataSettings />
+      </MemoryRouter>,
+    );
+    expect(text(markup)).toContain("Restore defaults");
   });
 
   it("hides Meilisearch connection fields until that engine is selected", () => {
@@ -188,43 +222,35 @@ describe("LibraryMetadataSettings", () => {
   it("leaves artwork storage editable and unannotated while public storage is active", () => {
     const rendered = render({ "s3.public_bucket": "silo-public" });
 
-    expect(text(rendered)).toContain("Store artwork in your bucket");
+    expect(text(rendered)).toContain("Keep provider artwork");
     expect(text(rendered)).not.toContain("Restart the server for artwork storage to start");
     expect(text(rendered)).not.toContain("Artwork storage needs a public S3 bucket");
-    expect(toggleDisabled(rendered, "Store artwork in your bucket")).toBe(false);
+    expect(toggleDisabled(rendered, "Keep provider artwork")).toBe(false);
   });
 
-  it("keeps artwork storage settable when the bucket is saved but not active yet", () => {
+  it("allows caching provider artwork without an S3 bucket", () => {
     storageAvailableMock.mockReturnValue(false);
-
-    const rendered = render({ "s3.public_bucket": "silo-public" });
-
-    expect(text(rendered)).toContain("Restart the server for artwork storage to start");
-    expect(toggleDisabled(rendered, "Store artwork in your bucket")).toBe(false);
-  });
-
-  it("disables artwork storage and links to Storage & Database when no bucket is configured", () => {
-    storageAvailableMock.mockReturnValue(false);
-
     const rendered = render({});
-
-    expect(text(rendered)).toContain("Artwork storage needs a public S3 bucket");
-    expect(text(rendered)).toContain("Storage & Database");
-    expect(rendered).toContain("/admin/settings/infrastructure");
-    expect(toggleDisabled(rendered, "Store artwork in your bucket")).toBe(true);
+    expect(text(rendered)).not.toContain("Artwork storage needs a public S3 bucket");
+    expect(toggleDisabled(rendered, "Keep provider artwork")).toBe(false);
   });
 
-  it("still allows switching artwork storage off when the bucket went away", () => {
-    storageAvailableMock.mockReturnValue(false);
-
-    const rendered = render({ "metadata.cache_images": "true" });
-
-    expect(text(rendered)).toContain("Artwork storage needs a public S3 bucket");
-    expect(toggleDisabled(rendered, "Store artwork in your bucket")).toBe(false);
+  it("shows detection workers only while this server detects markers", () => {
+    expect(text(render({ "markers.mode": "local" }))).toContain("Detection workers");
+    expect(text(render({ "markers.mode": "both" }))).toContain("Detection workers");
+    expect(text(render({ "markers.mode": "online" }))).not.toContain("Detection workers");
+    expect(text(render({ "markers.mode": "off" }))).not.toContain("Detection workers");
   });
 
   it("says it once for a group where every field needs a restart", () => {
-    useRestartKeysMock.mockReturnValue(new Set(["markers.mode", "markers.lazy_playback"]));
+    useRestartKeysMock.mockReturnValue(
+      new Set([
+        "markers.mode",
+        "markers.lazy_playback",
+        "markers.online_storage",
+        "markers.detection_workers",
+      ]),
+    );
 
     const rendered = render({ "catalog.search.provider": "postgres" });
 

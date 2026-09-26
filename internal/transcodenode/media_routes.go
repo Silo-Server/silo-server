@@ -10,6 +10,8 @@ import (
 var transcodeNodeMediaRoutes = []streamtelemetry.MediaRoute{
 	nodeRoute(http.MethodGet, "/downloads/artifacts/{artifact_id}", streamtelemetry.ClassTransfer),
 	nodeRoute(http.MethodHead, "/downloads/artifacts/{artifact_id}", streamtelemetry.ClassTransfer),
+	nodeRoute(http.MethodGet, "/remux/{session_id}", streamtelemetry.ClassPlayback),
+	nodeRoute(http.MethodHead, "/remux/{session_id}", streamtelemetry.ClassPlayback),
 	nodeRoute(http.MethodGet, "/transcode/{session_id}/master.m3u8", streamtelemetry.ClassManifest),
 	nodeRoute(http.MethodGet, "/transcode/{session_id}/segment/{name}", streamtelemetry.ClassPlayback),
 }

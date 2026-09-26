@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - main
+      # Integration branch for the API v2 program (#135). Stacked PRs merge
+      # here first; the merge commits need the same gate as main.
+      - apiv2
   workflow_dispatch:
 
 concurrency:
@@ -27,8 +30,12 @@ permissions:
   contents: read
 
 jobs:
-  go:
-    name: Go
+  # The Go gate is four jobs so that lint, the contract checks, the test suite
+  # and the DB-backed pins run side by side; each one alone is shorter than a
+  # serial job would be. They share the composite setup action under
+  # .github/actions.
+  go-lint:
+    name: Go lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -39,28 +46,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # github.com/h2non/bimg binds libvips through cgo and pkg-config, so
-      # nothing under ./... compiles without the headers. The Dockerfile
-      # installs the same package in its build stage.
-      - name: Install libvips
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libvips-dev
-
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: ./.github/actions/setup-go
         with:
-          go-version-file: go.mod
-          cache: true
-
-      # cmd/silo embeds the built frontend, so nothing under ./... compiles
-      # without web/dist. The Go jobs never serve it, so a placeholder is
-      # enough; the Docker workflow builds the real bundle.
-      - name: Stub the embedded frontend bundle
-        run: make embed-stub
-
-      - name: Build
-        run: go build ./...
+          cache-name: lint
 
       - name: gofmt
         run: |
@@ -74,15 +63,36 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # Built from source (see GOLANGCI_LINT_VERSION) but only once per
+      # version: the binary is cached, and so is the analysis cache that lets
+      # a run over an unchanged package skip the type-check and the linters.
+      # Without the second cache both lint steps below analyzed all of ./...
+      # from scratch on every run, which was most of the old job's time.
+      - name: Restore the golangci-lint binary
+        id: golangci-lint-binary
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/golangci-lint
+          key: golangci-lint-binary-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}-${{ hashFiles('go.mod') }}
+
+      - name: Install golangci-lint
+        if: steps.golangci-lint-binary.outputs.cache-hit != 'true'
+        run: go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+
+      - name: Restore the golangci-lint analysis cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-cache-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}-${{ github.sha }}
+          restore-keys: |
+            golangci-lint-cache-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}-
+
       # Scoped to the lines this branch touched. The repo does not pass a full
       # golangci-lint run today — there are a few hundred pre-existing findings,
       # which is why the Go half of `make lint` has never been enforced — and
       # blocking every PR on a cleanup nobody has done would just get the gate
       # removed again. New and changed lines have to be clean, so the count only
       # falls from here.
-      - name: Install golangci-lint
-        run: go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
-
       - name: Lint changed lines
         env:
           # A PR carries its target branch; a push to main compares against
@@ -93,6 +103,28 @@ jobs:
         run: |
           git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           golangci-lint run --new-from-merge-base="origin/${BASE_REF}" ./...
+
+      # The inventory's lint rule (recovering a router from a handler) has to
+      # hold over the whole tree, not only the lines a branch touched: an old
+      # line folded in by a rebase is as much of a hole as a new one.
+      - name: Lint router recovery full-tree
+        run: make lint-router-recovery
+
+  go-verify:
+    name: Go contract checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # The contract diff compares against the PR's merge base.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          cache-name: verify
 
       # A manifest change that does not regenerate leaves every client reading
       # stale keys, which the contract exists to prevent.
@@ -107,12 +139,159 @@ jobs:
       - name: Verify playback protocol fixtures are current
         run: make verify-playback-fixtures
 
+      # The API v2 migration needs every legacy native route accounted for
+      # before anything is ported. The generator reads registration source, so
+      # a route hidden behind optional dependency wiring still has to appear,
+      # and a registration it cannot follow fails here rather than shrinking
+      # the inventory in silence.
+      - name: Verify the legacy native route inventory is current
+        run: make verify-route-inventory
+
+      # Every inventoried route needs a migration decision before v2 work
+      # ports it. The ledger is schema-checked and reconciled against the
+      # inventory one-to-one, so a new route without a ledger entry, or a
+      # stale entry for a removed route, fails here.
+      - name: Verify the v2 migration ledger covers the route inventory
+        run: make verify-migration-ledger
+
+      # Every tier-1 row in a migration wave needs an executable scenario
+      # catalog before that wave's first section PR. The catalogs are
+      # schema-checked and reconciled against the ledger here; the executor
+      # runs their public subset under make test-go and the rest locally
+      # against an empty database named by SILO_SCENARIO_DATABASE_URL (a
+      # dedicated variable: the executor truncates, so it never shares
+      # SILO_TEST_DATABASE_URL with the other DB-gated packages).
+      - name: Verify the tier-1 scenario catalogs cover their waves
+        run: make verify-scenario-catalogs
+
+      # The executor's offline run-vs-skip decision reads a committed list of
+      # the routes the no-database API router registers, because the sealed
+      # router cannot be walked from outside internal/api. This regenerates
+      # that list from the real router and fails if the committed file drifted.
+      - name: Verify the offline route set matches the API router
+        run: make verify-offline-routes
+
+      # The v2 OpenAPI artifact is rendered from the Go registries and the
+      # binary serves the committed bytes, so a registration change that does
+      # not regenerate leaves clients reading a contract the server no longer
+      # matches. This byte-compares a fresh generation.
+      - name: Verify the v2 OpenAPI artifact is current
+        run: make verify-apiv2-openapi
+
+      # Spec lint and the semantic diff against the PR's base. A breaking
+      # change fails unless contracts/api/v2/breaking-approvals.json names
+      # that exact operation, rule and fingerprint; after the LOCKED marker
+      # nothing is approvable. On a push to main the base is main itself, so
+      # both documents are identical and the diff tool compares nothing (an
+      # approval a just-merged PR carried is not stale there); the lint still
+      # runs. The base is read through the environment, as the lint step
+      # does, never interpolated into the script.
+      - name: Verify the v2 contract diff and spec lint
+        env:
+          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
+        run: |
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          make verify-apiv2-contract BASE_REF="origin/${BASE_REF}"
+
+      # The v2 fixtures are generated through the real router and every body
+      # is validated against the committed OpenAPI schema its index names, so
+      # a client testing against them tests against what the server sends.
+      - name: Verify the v2 contract fixtures are current and valid
+        run: make verify-apiv2-fixtures
+
+  go-test:
+    name: Go test
+    runs-on: ubuntu-latest
+    services:
+      watch-party-postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: watch_party
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d watch_party"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          cache-name: test
+
       # Runs the settings-contract gate among everything else: the embedded
       # manifest must parse, satisfy its own schema, hold every structural
       # invariant, and agree with the live settings registry on keys and
       # defaults. Without this job those tests exist but never run.
+      - name: Test Watch Party coordination against Postgres
+        env:
+          SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable
+        run: go test -race -count=1 ./internal/watchtogether/
+
+      - name: Test history import cancellation against Postgres
+        env:
+          SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable
+        run: go test -race -count=1 -run '^(TestHistoryImportCancellation.*|TestQueue.*)$' ./migrations/ ./internal/historyimport/
+
+      # Compiles every package on the way, so there is no separate build step.
       - name: Test
         run: make test-go
+
+  # make test-go has no database, so every DB-backed test in it skips, and go
+  # test counts a skip as a pass. This job migrates a fresh database and runs
+  # the query-budget pins listed in scripts/ci/db-pins.txt, failing when one
+  # is missing, skipped or failing, so a PR that turns a pinned budget into an
+  # N+1 fails here. It is a job of its own so it adds no time to go-test, and
+  # because the full schema needs pgvector, which go-test's image lacks.
+  go-db-pins:
+    name: Go DB pins
+    runs-on: ubuntu-latest
+    services:
+      # The image docker-compose.yml runs: the schema needs pgvector.
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: silo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d silo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/silo_test?sslmode=disable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          cache-name: db-pins
+
+      # A throwaway key: it only has to pass the bootstrap length check, and
+      # nothing encrypted with it outlives the job.
+      - name: Migrate the test database
+        run: DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" go run ./cmd/silo/ --migrate-only
+
+      - name: Run the query-budget pins
+        run: make test-db-pins
+
+      - name: Test taste cluster replacement against Postgres
+        run: go test -race -count=1 -run '^TestUpsertTasteClusters.*Postgres$' ./internal/recommendations/
 
   web:
     name: Web
@@ -153,11 +332,18 @@ jobs:
       - name: Typecheck and build
         run: pnpm run build
 
-      # Includes the appearance-cache ownership tests, which are the regression
-      # guard for cross-account leaks in the localStorage warm start.
-      - name: Test
-        working-directory: .
-        run: make test-web
+      # Fails when the launch bundle grows past web/perf-budget.json, and when it
+      # shrinks without the budget following it down.
+      - name: Check the launch bundle budget
+        run: pnpm run budget:check
+
+      - name: Upload frontend bundle for image builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist-${{ github.sha }}
+          path: web/dist
+          if-no-files-found: error
+          retention-days: 1
 
       # The generated web binding is compared after prettier, so this half of
       # the bindings check lives here rather than in the Go job, which has no
@@ -172,14 +358,50 @@ jobs:
         working-directory: .
         run: make verify-settings-bindings-web
 
-  docs:
-    name: Docs hygiene
+      # The web v2 contract types are generated from the committed OpenAPI
+      # artifact with the pinned openapi-typescript; this byte-compares a
+      # fresh generation so the typed request boundary never drifts from the
+      # spec the server serves.
+      - name: Verify the generated web v2 contract types are current
+        working-directory: .
+        run: make verify-apiv2-web-types
+
+      - name: Verify no local paths leaked into committed docs
+        working-directory: .
+        run: make verify-local-paths
+
+  web-test:
+    name: Web test (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
           persist-credentials: false
 
-      - name: Verify no local paths leaked into committed docs
-        run: make verify-local-paths
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      # Includes the appearance-cache ownership tests, which are the regression
+      # guard for cross-account leaks in the localStorage warm start. The
+      # suite is split across two runners; vitest assigns files to a shard
+      # deterministically, so every file runs exactly once.
+      - name: Test
+        run: make test-web WEBTEST_ARGS="--shard=${{ matrix.shard }}/2"

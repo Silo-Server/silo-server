@@ -8,14 +8,8 @@ import "testing"
 // preset must ship defaults that pass its own recipe's Validate — a preset
 // that fails validation out of the box is un-addable from the gallery.
 var presetsRequiringInput = map[string]bool{
-	"collection_pick":          true, // collection: requires picking a collection
-	"trakt_trending_movies":    true, // collection: Trakt sync target chosen/created at add time
-	"trakt_trending_shows":     true,
-	"trakt_popular_movies":     true,
-	"trakt_popular_shows":      true,
-	"trakt_recommended_movies": true,
-	"trakt_recommended_shows":  true,
-	"acl_blank":                true, // admin_curated_list: drawer requires at least one item
+	"collection_pick": true, // collection: requires picking a collection
+	"acl_blank":       true, // admin_curated_list: drawer requires at least one item
 }
 
 func TestAllGalleryPresetDefaultsValidate(t *testing.T) {

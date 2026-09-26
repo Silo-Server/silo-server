@@ -130,6 +130,54 @@ func TestRecentTVRepositoryGroupsScanBatchesAndPaginates(t *testing.T) {
 	if err != nil || previewTotal != 0 || !previewHasMore || !equalRecentTVTargets(preview, want[1:3]) {
 		t.Fatalf("count-free page = %#v, total %d, hasMore %v, err %v", preview, previewTotal, previewHasMore, err)
 	}
+
+	uniqueWant := []RecentTVTarget{
+		{ContentID: epA2, Type: "episode", AddedAt: base.Add(10 * time.Minute), PlayContentID: epA2},
+		{ContentID: seriesB, Type: "series", AddedAt: base.Add(9 * time.Minute), PlayContentID: epB3},
+		{ContentID: epA1, Type: "episode", AddedAt: base.Add(5 * time.Minute), PlayContentID: epA1},
+		{ContentID: seriesD, Type: "series", AddedAt: base.Add(3 * time.Minute)},
+		{ContentID: seriesC, Type: "series", AddedAt: base.Add(2 * time.Minute), PlayContentID: epC1},
+	}
+	unique, uniqueTotal, uniqueHasMore, err := repo.List(ctx, RecentTVQuery{
+		LibraryIDs:    []int{tvFolderID},
+		Limit:         20,
+		UniqueTargets: true,
+	})
+	if err != nil || uniqueTotal != len(uniqueWant) || uniqueHasMore || !equalRecentTVTargets(unique, uniqueWant) {
+		t.Fatalf("unique targets = %#v, total %d, hasMore %v, err %v; want %#v", unique, uniqueTotal, uniqueHasMore, err, uniqueWant)
+	}
+
+	uniquePage, uniquePageTotal, uniquePageHasMore, err := repo.List(ctx, RecentTVQuery{
+		LibraryIDs:    []int{tvFolderID},
+		Limit:         2,
+		Offset:        1,
+		UniqueTargets: true,
+	})
+	if err != nil || uniquePageTotal != len(uniqueWant) || !uniquePageHasMore || !equalRecentTVTargets(uniquePage, uniqueWant[1:3]) {
+		t.Fatalf("unique page = %#v, total %d, hasMore %v, err %v; want %#v", uniquePage, uniquePageTotal, uniquePageHasMore, err, uniqueWant[1:3])
+	}
+
+	uniquePreview, uniquePreviewTotal, uniquePreviewHasMore, err := repo.List(ctx, RecentTVQuery{
+		LibraryIDs:    []int{tvFolderID},
+		Limit:         2,
+		Offset:        1,
+		SkipTotal:     true,
+		UniqueTargets: true,
+	})
+	if err != nil || uniquePreviewTotal != 0 || !uniquePreviewHasMore || !equalRecentTVTargets(uniquePreview, uniqueWant[1:3]) {
+		t.Fatalf("count-free unique page = %#v, total %d, hasMore %v, err %v; want %#v", uniquePreview, uniquePreviewTotal, uniquePreviewHasMore, err, uniqueWant[1:3])
+	}
+
+	uniqueNamed, uniqueNamedTotal, uniqueNamedHasMore, err := repo.List(ctx, RecentTVQuery{
+		LibraryIDs:    []int{tvFolderID},
+		NamePrefix:    "Beta",
+		Limit:         20,
+		UniqueTargets: true,
+	})
+	if err != nil || uniqueNamedTotal != 1 || uniqueNamedHasMore || !equalRecentTVTargets(uniqueNamed, []RecentTVTarget{uniqueWant[1]}) {
+		t.Fatalf("named unique targets = %#v, total %d, hasMore %v, err %v; want newest Beta event", uniqueNamed, uniqueNamedTotal, uniqueNamedHasMore, err)
+	}
+
 	empty, emptyTotal, emptyHasMore, err := repo.List(ctx, RecentTVQuery{LibraryIDs: []int{tvFolderID}, Limit: 2, Offset: 99})
 	if err != nil || emptyTotal != len(want) || emptyHasMore || len(empty) != 0 {
 		t.Fatalf("past-end page = %#v, total %d, hasMore %v, err %v", empty, emptyTotal, emptyHasMore, err)

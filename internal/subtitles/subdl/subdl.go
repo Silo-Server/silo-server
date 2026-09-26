@@ -73,7 +73,11 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 		params.Set("imdb_id", req.IMDbID)
 	}
 	if len(req.Languages) > 0 {
-		params.Set("languages", strings.Join(req.Languages, ","))
+		codes := make([]string, 0, len(req.Languages))
+		for _, language := range req.Languages {
+			codes = append(codes, subtitles.SubDLLanguageCode(language))
+		}
+		params.Set("languages", strings.Join(codes, ","))
 	}
 	if req.Season > 0 {
 		params.Set("type", "tv")
@@ -116,16 +120,22 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 		if req.Episode > 0 && s.Episode > 0 && s.Episode != req.Episode {
 			continue
 		}
+		rawLanguage := s.Language
+		if strings.TrimSpace(rawLanguage) == "" {
+			rawLanguage = s.Lang
+		}
+		language := subtitles.NormalizeProviderLanguage("subdl", rawLanguage)
 		format := detectFormat(s.ReleaseName)
-		results = append(results, subtitles.SubtitleResult{
+		result := subtitles.SubtitleResult{
 			ID:              s.URL, // relative download path
 			Provider:        "subdl",
-			Language:        s.Lang,
+			Language:        language,
 			ReleaseName:     s.ReleaseName,
 			Format:          format,
 			Downloads:       s.DownloadCount,
 			HearingImpaired: s.HearingImpaired,
-		})
+		}
+		results = append(results, result)
 	}
 	return results, nil
 }

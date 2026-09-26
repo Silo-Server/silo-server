@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -50,9 +51,26 @@ func (h *EmailHandler) HandleTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	duration, err := h.sendTestEmail(r.Context(), req.To)
+	response := emailTestResponse{
+		OK:         err == nil,
+		DurationMS: duration,
+	}
+	switch {
+	case err == nil:
+	case errors.Is(err, silomail.ErrNotConfigured):
+		response.Message = "Email is not configured. Set the SMTP host, from address, and enable email first."
+	default:
+		response.Message = err.Error()
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+// sendTestEmail constructs and dispatches the same message for both transports.
+func (h *EmailHandler) sendTestEmail(ctx context.Context, to string) (int64, error) {
 	started := time.Now()
-	err := h.sender.Send(r.Context(), silomail.Message{
-		To:      []string{req.To},
+	err := h.sender.Send(ctx, silomail.Message{
+		To:      []string{to},
 		Subject: "Silo test email",
 		TextBody: "This is a test email from your Silo server.\n\n" +
 			"If you received it, outbound email is configured correctly.",
@@ -64,16 +82,5 @@ func (h *EmailHandler) HandleTest(w http.ResponseWriter, r *http.Request) {
 					"notification emails will look like this one."),
 		}),
 	})
-	response := emailTestResponse{
-		OK:         err == nil,
-		DurationMS: time.Since(started).Milliseconds(),
-	}
-	switch {
-	case err == nil:
-	case errors.Is(err, silomail.ErrNotConfigured):
-		response.Message = "Email is not configured. Set the SMTP host, from address, and enable email first."
-	default:
-		response.Message = err.Error()
-	}
-	writeJSON(w, http.StatusOK, response)
+	return time.Since(started).Milliseconds(), err
 }

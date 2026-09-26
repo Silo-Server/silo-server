@@ -1,51 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  applyAdminLogAppend,
-  applyAdminLogAppends,
-  buildAdminLogStreamQuery,
-  buildAdminLogStreamUrl,
-} from "./useAdminLogStream";
-
-describe("buildAdminLogStreamQuery", () => {
-  it("serializes only defined log filters", () => {
-    expect(
-      buildAdminLogStreamQuery({
-        request_id: "req-1",
-        component: "api",
-        playback_session_id: "playback-123",
-        q: "",
-        limit: 50,
-      }),
-    ).toBe("request_id=req-1&component=api&playback_session_id=playback-123&limit=50");
-  });
-});
-
-describe("buildAdminLogStreamUrl", () => {
-  it("includes stream, filters, and auth token", () => {
-    expect(
-      buildAdminLogStreamUrl("app", { request_id: "req-1", component: "api" }, "token-123", {
-        protocol: "https:",
-        host: "example.com",
-      }),
-    ).toBe(
-      "wss://example.com/api/v1/admin/logs/ws?stream=app&request_id=req-1&component=api&token=token-123",
-    );
-
-    expect(
-      buildAdminLogStreamUrl(
-        "audit",
-        { playback_session_id: "playback-123", request_id: "req-9" },
-        "token-123",
-        {
-          protocol: "https:",
-          host: "example.com",
-        },
-      ),
-    ).toBe(
-      "wss://example.com/api/v1/admin/logs/ws?stream=audit&playback_session_id=playback-123&request_id=req-9&token=token-123",
-    );
-  });
-});
+import { applyAdminLogAppend, applyAdminLogAppends } from "./useAdminLogStream";
 
 describe("applyAdminLogAppend", () => {
   it("prepends new rows, dedupes by id, and enforces the limit", () => {

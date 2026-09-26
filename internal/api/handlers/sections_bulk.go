@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/sections"
-	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 )
 
 // BulkSectionRepo is the minimal repo surface needed for bulk-create.
@@ -45,80 +44,10 @@ func (h *SectionBulkHandler) HandleBulkCreate(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	scope := req.Scope
-	if scope == "" {
-		scope = "home"
-	}
-
-	// Validate scope.
-	switch scope {
-	case "home", "library":
-	default:
-		writeError(w, http.StatusBadRequest, "bad_request", "scope must be 'home' or 'library'")
+	resp, err := h.BulkCreateAdminSections(r.Context(), req)
+	if err != nil {
+		writeAPIError(w, err)
 		return
 	}
-
-	// Library scope requires at least one library_id.
-	if scope == "library" && len(req.LibraryIDs) == 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "library_ids must not be empty for library scope")
-		return
-	}
-
-	// Validate section_type via recipe registry (catches unknown types and invalid config).
-	if req.SectionType == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "section_type is required")
-		return
-	}
-	rec, ok := recipes.Get(req.SectionType)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "bad_request", "unknown section_type")
-		return
-	}
-	if err := rec.Validate(req.Config); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	itemLimit := req.ItemLimit
-	if itemLimit <= 0 {
-		itemLimit = 20
-	}
-
-	// Build the rows to insert.
-	var rows []*sections.PageSection
-
-	switch scope {
-	case "home":
-		rows = append(rows, &sections.PageSection{
-			Scope:       "home",
-			LibraryID:   nil,
-			SectionType: sections.SectionType(req.SectionType),
-			Title:       req.Title,
-			Featured:    req.Featured,
-			ItemLimit:   itemLimit,
-			Config:      req.Config,
-			Enabled:     req.Enabled,
-		})
-	case "library":
-		for _, libID := range req.LibraryIDs {
-			id := libID // capture loop variable
-			rows = append(rows, &sections.PageSection{
-				Scope:       "library",
-				LibraryID:   &id,
-				SectionType: sections.SectionType(req.SectionType),
-				Title:       req.Title,
-				Featured:    req.Featured,
-				ItemLimit:   itemLimit,
-				Config:      req.Config,
-				Enabled:     req.Enabled,
-			})
-		}
-	}
-
-	if err := h.Repo.CreateMany(r.Context(), rows); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create sections")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, bulkCreateSectionResponse{Created: len(rows)})
+	writeJSON(w, http.StatusOK, resp)
 }

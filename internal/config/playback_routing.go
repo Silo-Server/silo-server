@@ -11,15 +11,17 @@ const (
 )
 
 // PlaybackExecutionPreference controls whether server-side media work should
-// run on a worker or on the integrated API process. A preference permits
-// fallback; an "only" value is a hard routing constraint.
+// run on a worker or on the integrated API process. A worker is either a proxy
+// node or a transcode node, depending on the delivery's legal route shapes. A
+// preference permits fallback; an "only" value is a hard routing constraint.
 type PlaybackExecutionPreference string
 
 const (
-	PlaybackExecutionPreferWorker PlaybackExecutionPreference = "prefer_worker"
-	PlaybackExecutionWorkerOnly   PlaybackExecutionPreference = "worker_only"
-	PlaybackExecutionPreferAPI    PlaybackExecutionPreference = "prefer_api"
-	PlaybackExecutionAPIOnly      PlaybackExecutionPreference = "api_only"
+	PlaybackExecutionPreferWorker    PlaybackExecutionPreference = "prefer_worker"
+	PlaybackExecutionPreferTranscode PlaybackExecutionPreference = "prefer_transcode"
+	PlaybackExecutionWorkerOnly      PlaybackExecutionPreference = "worker_only"
+	PlaybackExecutionPreferAPI       PlaybackExecutionPreference = "prefer_api"
+	PlaybackExecutionAPIOnly         PlaybackExecutionPreference = "api_only"
 )
 
 // PlaybackEgressPreference controls which Silo process is the client-facing
@@ -47,9 +49,9 @@ type PlaybackRoutingPolicy struct {
 func DefaultPlaybackRoutingPolicy() PlaybackRoutingPolicy {
 	return PlaybackRoutingPolicy{
 		DirectPlayEgress:        PlaybackEgressPreferProxy,
-		RemuxExecution:          PlaybackExecutionPreferWorker,
+		RemuxExecution:          PlaybackExecutionPreferTranscode,
 		RemuxEgress:             PlaybackEgressPreferProxy,
-		VideoTranscodeExecution: PlaybackExecutionPreferWorker,
+		VideoTranscodeExecution: PlaybackExecutionPreferTranscode,
 		VideoTranscodeEgress:    PlaybackEgressPreferProxy,
 	}
 }
@@ -103,7 +105,7 @@ func validatePlaybackRoutingPolicy(policy PlaybackRoutingPolicy) error {
 		{PlaybackRoutingVideoTranscodeExecutionSettingKey, policy.VideoTranscodeExecution},
 	} {
 		switch setting.value {
-		case PlaybackExecutionPreferWorker, PlaybackExecutionWorkerOnly,
+		case PlaybackExecutionPreferWorker, PlaybackExecutionPreferTranscode, PlaybackExecutionWorkerOnly,
 			PlaybackExecutionPreferAPI, PlaybackExecutionAPIOnly:
 		default:
 			return fmt.Errorf("%s has invalid execution preference %q", setting.key, setting.value)

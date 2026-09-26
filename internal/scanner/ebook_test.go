@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -76,6 +78,7 @@ func TestScannerEbookEnrichmentReconciliationIsBoundedAndNonFatal(t *testing.T) 
 		nil,
 		nil,
 		true,
+		catalog.ScanWarning{},
 	); err != nil {
 		t.Fatalf("reconcileEbookScan() error = %v", err)
 	}
@@ -675,7 +678,7 @@ func TestParseEbookFBZMetadata(t *testing.T) {
 
 func TestParseEbookPDFInfoMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, []byte(`%PDF-1.7
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte(`%PDF-1.7
 1 0 obj
 << /Title (PDF Test Ebook)
    /Author (Ada Writer; Ben Author)
@@ -686,7 +689,7 @@ func TestParseEbookPDFInfoMetadata(t *testing.T) {
 endobj
 trailer
 << /Info 1 0 R >>
-%%EOF`), 0o644); err != nil {
+%%EOF`)), 0o644); err != nil {
 		t.Fatalf("write pdf: %v", err)
 	}
 
@@ -714,11 +717,11 @@ trailer
 
 func TestParseEbookPDFInfoMetadataDecodesUTF16BELiterals(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, []byte("%PDF-1.7\n"+
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+
 		"1 0 obj\n"+
 		"<< /Title (\xfe\xff\x00C\x00a\x00f\x00e)\n"+
 		"   /Author (\xfe\xff\x00T\x00h\x00o\x00m\x00a\x00s\x00 \x00D\x00 \x00S\x00e\x00e\x00l\x00e\x00y)\n"+
-		">>\nendobj\n%%EOF"), 0o644); err != nil {
+		">>\nendobj\n%%EOF")), 0o644); err != nil {
 		t.Fatalf("write pdf: %v", err)
 	}
 
@@ -734,11 +737,11 @@ func TestParseEbookPDFInfoMetadataDecodesUTF16BELiterals(t *testing.T) {
 
 func TestParseEbookPDFInfoMetadataPreservesUTF8Literals(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, []byte("%PDF-1.7\n"+
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+
 		"1 0 obj\n"+
 		"<< /Title (Caf\xc3\xa9 Society)\n"+
 		"   /Author (\xef\xbb\xbfFran\xc3\xa7ois Author)\n"+
-		">>\nendobj\n%%EOF"), 0o644); err != nil {
+		">>\nendobj\n%%EOF")), 0o644); err != nil {
 		t.Fatalf("write pdf: %v", err)
 	}
 
@@ -757,10 +760,10 @@ func TestParseEbookPDFInfoMetadataPreservesUTF8Literals(t *testing.T) {
 
 func TestParseEbookPDFInfoMetadataFallsBackToWindows1252(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, []byte("%PDF-1.7\n"+
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+
 		"1 0 obj\n"+
 		"<< /Title (Caf\xe9 Society)\n"+
-		">>\nendobj\n%%EOF"), 0o644); err != nil {
+		">>\nendobj\n%%EOF")), 0o644); err != nil {
 		t.Fatalf("write pdf: %v", err)
 	}
 
@@ -776,14 +779,14 @@ func TestParseEbookPDFInfoMetadataFallsBackToWindows1252(t *testing.T) {
 
 func TestParseEbookPDFInfoMetadataDecodesHexStrings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, []byte(`%PDF-1.7
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte(`%PDF-1.7
 1 0 obj
 << /Title <FEFF00480065007800200042006F006F006B>
    /Author <41646120577269746572>
    /CreationDate (0000-01-01)
 >>
 endobj
-%%EOF`), 0o644); err != nil {
+%%EOF`)), 0o644); err != nil {
 		t.Fatalf("write pdf: %v", err)
 	}
 
@@ -1523,7 +1526,7 @@ func TestCollectEbookRootScansExcludesUnmountedRootFromReconciliation(t *testing
 	}
 	unmounted := filepath.Join(t.TempDir(), "gone")
 
-	scans, err := collectEbookRootScans(context.Background(), 44, []string{unmounted, healthy})
+	scans, err := collectEbookRootScans(t.Context(), 44, []string{unmounted, healthy}, nil)
 	if err != nil {
 		t.Fatalf("collectEbookRootScans: %v", err)
 	}
@@ -1553,7 +1556,7 @@ func TestCollectEbookRootScansTreatsSingleFileRootAsNonReconciling(t *testing.T)
 		t.Fatalf("write ebook: %v", err)
 	}
 
-	scans, err := collectEbookRootScans(context.Background(), 44, []string{fileRoot})
+	scans, err := collectEbookRootScans(t.Context(), 44, []string{fileRoot}, nil)
 	if err != nil {
 		t.Fatalf("collectEbookRootScans: %v", err)
 	}
@@ -1575,7 +1578,7 @@ func TestCollectEbookRootScansIncludesCompoundFB2ZipFile(t *testing.T) {
 		t.Fatalf("write ebook: %v", err)
 	}
 
-	scans, err := collectEbookRootScans(context.Background(), 44, []string{fileRoot})
+	scans, err := collectEbookRootScans(t.Context(), 44, []string{fileRoot}, nil)
 	if err != nil {
 		t.Fatalf("collectEbookRootScans: %v", err)
 	}
@@ -1604,7 +1607,7 @@ func TestCollectEbookRootScansMidWalkSubtreeErrorExcludesRoot(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
 
-	scans, err := collectEbookRootScans(context.Background(), 44, []string{root})
+	scans, err := collectEbookRootScans(t.Context(), 44, []string{root}, nil)
 	if err != nil {
 		t.Fatalf("collectEbookRootScans: %v", err)
 	}
@@ -1634,7 +1637,7 @@ func TestCollectEbookRootScansFollowsSymlinkedRoot(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	scans, err := collectEbookRootScans(context.Background(), 44, []string{link})
+	scans, err := collectEbookRootScans(t.Context(), 44, []string{link}, nil)
 	if err != nil {
 		t.Fatalf("collectEbookRootScans: %v", err)
 	}
@@ -1985,7 +1988,7 @@ func TestParseEbookPDFReadsInfoDictionaryFromFileTail(t *testing.T) {
 	padding := strings.Repeat("x", maxPDFMetadataScanSize)
 
 	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, []byte(head+padding+tail), 0o644); err != nil {
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte(head+padding+tail)), 0o644); err != nil {
 		t.Fatalf("write pdf: %v", err)
 	}
 
@@ -2023,7 +2026,7 @@ func TestParseEbookPDFHeadInfoWinsOverTailStreamGarbage(t *testing.T) {
 	padding := strings.Repeat("x", maxPDFMetadataScanSize)
 
 	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, []byte(head+padding+tail), 0o644); err != nil {
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte(head+padding+tail)), 0o644); err != nil {
 		t.Fatalf("write pdf: %v", err)
 	}
 
@@ -2201,5 +2204,205 @@ func TestEbookAuthorFromPath(t *testing.T) {
 				t.Fatalf("ebookAuthorFromPath(%q) = %q, want %q", tc.path, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseEbookPDFSkipsControlCharacterInfoNoise(t *testing.T) {
+	// A compressed stream can hold "/Subject"-shaped bytes that parse as a
+	// well-formed hex string. Parsing is therefore not evidence that the match
+	// was the Info dictionary, and the noise sorts before the real dictionary
+	// here, so only the control-character check keeps it out.
+	noise := "5 0 obj\n<< /Length 20 >>\nstream\n/Subject <0041000212>\nendstream\nendobj\n"
+	info := "1 0 obj\n" +
+		"<< /Title (Real Title)\n" +
+		"   /Author (Ada Writer)\n" +
+		"   /Subject (A real subject)\n" +
+		">>\nendobj\ntrailer\n<< /Info 1 0 R >>\n%%EOF"
+
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+noise+info)), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+	if got.Description != "A real subject" {
+		t.Fatalf("Description = %q, want the real Info value", got.Description)
+	}
+	if got.Title != "Real Title" {
+		t.Fatalf("Title = %q, want Real Title", got.Title)
+	}
+}
+
+func TestParseEbookPDFDropsInfoKeyPresentOnlyAsStreamNoise(t *testing.T) {
+	// The production case: the file has no /Subject anywhere, so the only
+	// match is stream noise. The right answer is an empty description, not the
+	// noise -- which carries a NUL and fails the media_items insert outright.
+	noise := "5 0 obj\n<< /Length 20 >>\nstream\n/Subject <0041000212>\nendstream\nendobj\n"
+	info := "1 0 obj\n" +
+		"<< /Title (Real Title)\n" +
+		"   /Author (Ada Writer)\n" +
+		">>\nendobj\ntrailer\n<< /Info 1 0 R >>\n%%EOF"
+
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+noise+info)), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+	if got.Description != "" {
+		t.Fatalf("Description = %q, want empty when the key is only stream noise", got.Description)
+	}
+	if got.Title != "Real Title" || strings.Join(got.Authors, ", ") != "Ada Writer" {
+		t.Fatalf("title/authors = %q/%v, want the real Info values kept", got.Title, got.Authors)
+	}
+}
+
+func TestParseEbookPDFKeepsNewlinesInsideInfoValues(t *testing.T) {
+	// Tab, newline, and carriage return are legitimate inside a description
+	// and must not trip the binary check.
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+
+		"1 0 obj\n<< /Subject (First line\nSecond line) >>\nendobj\n"+
+		"trailer\n<< /Info 1 0 R >>\n%%EOF")), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+	if got.Description != "First line Second line" {
+		t.Fatalf("Description = %q, want the newline collapsed to a space", got.Description)
+	}
+}
+
+func TestEbookSanitizeStripsControlCharacters(t *testing.T) {
+	// Backstop for every format: Postgres rejects U+0000 anywhere in a text
+	// value, and NUL is valid UTF-8 so a UTF-8 check does not catch it.
+	book := parsedEbook{
+		Format:      ".pdf",
+		Title:       "Good\x00Title",
+		Description: "First\x01Second",
+		Publisher:   "Pub\x00lisher",
+		Language:    "en\x02",
+		Series:      "Series\x00One",
+		SeriesIndex: "3\x00",
+		Authors:     []string{"Ada\x00Writer"},
+		Genres:      []string{"sci\x1bfi"},
+	}
+	book.sanitize()
+
+	for name, value := range map[string]string{
+		"Title":       book.Title,
+		"Description": book.Description,
+		"Publisher":   book.Publisher,
+		"Language":    book.Language,
+		"Series":      book.Series,
+		"SeriesIndex": book.SeriesIndex,
+		"Authors[0]":  book.Authors[0],
+		"Genres[0]":   book.Genres[0],
+	} {
+		if strings.ContainsFunc(value, unicode.IsControl) {
+			t.Fatalf("%s = %q, want control characters removed", name, value)
+		}
+	}
+	if book.Title != "GoodTitle" || book.Authors[0] != "AdaWriter" {
+		t.Fatalf("title/author = %q/%q, want the surrounding text preserved", book.Title, book.Authors[0])
+	}
+}
+
+func TestScrubEbookMetadataTextLeavesOrdinaryTextAlone(t *testing.T) {
+	const value = "Ibañez, Isabel (Novelist), author"
+	if got := scrubEbookMetadataText(value); got != value {
+		t.Fatalf("scrubEbookMetadataText(%q) = %q, want it unchanged", value, got)
+	}
+}
+
+func TestParseEbookPDFPreservesMetadataWordBoundaries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	data := "%PDF-1.7\n1 0 obj\n<< /Title (A\nReal\tTitle) " +
+		"/Author (Ada\tWriter) /Keywords (science\rfiction) >>\nendobj\n" +
+		"trailer\n<< /Info 1 0 R >>\n%%EOF"
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte(data)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := parsedEbook{Title: "A Real Title", Authors: []string{"Ada Writer"}, Genres: []string{"science fiction"}}
+	if got.Title != want.Title || strings.Join(got.Authors, ",") != strings.Join(want.Authors, ",") ||
+		strings.Join(got.Genres, ",") != strings.Join(want.Genres, ",") {
+		t.Errorf("metadata = %q / %v / %v, want %q / %v / %v", got.Title, got.Authors, got.Genres, want.Title, want.Authors, want.Genres)
+	}
+	if gotKey, wantKey := ebookContentGroupKey(&got, path), ebookContentGroupKey(&want, path); gotKey != wantKey {
+		t.Errorf("content group = %q, want %q", gotKey, wantKey)
+	}
+}
+
+func TestParseEbookPDFSkipsEncryptedDocumentMetadata(t *testing.T) {
+	// Strings in an encrypted PDF are ciphertext. Storing them yields a
+	// random-looking title, so extraction is skipped entirely.
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+
+		"1 0 obj\n<< /Title (Looks Real But Is Ciphertext) >>\nendobj\n"+
+		"trailer\n<< /Info 1 0 R /Encrypt 9 0 R >>\n%%EOF")), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+	if got.Format != "pdf" {
+		t.Fatalf("Format = %q, want pdf", got.Format)
+	}
+	if got.Title != "" || len(got.Authors) != 0 {
+		t.Fatalf("title/authors = %q/%v, want no metadata from an encrypted PDF", got.Title, got.Authors)
+	}
+}
+
+func TestParseEbookPDFKeepsMetadataWhenEncryptIsStreamNoise(t *testing.T) {
+	// A bare "/Encrypt" without an indirect reference is not a trailer
+	// declaration and must not cost the file its metadata.
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+
+		"5 0 obj\n<< /Length 12 >>\nstream\n/Encrypt xy\nendstream\nendobj\n"+
+		"1 0 obj\n<< /Title (Real Title) >>\nendobj\n"+
+		"trailer\n<< /Info 1 0 R >>\n%%EOF")), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+	if got.Title != "Real Title" {
+		t.Fatalf("Title = %q, want Real Title", got.Title)
+	}
+}
+
+func TestParseEbookPDFKeepsMetadataWhenEncryptReferenceIsUndelimited(t *testing.T) {
+	// "9 0 R2" is not an indirect reference, so it does not declare encryption.
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+
+		"5 0 obj\n<< /Length 16 >>\nstream\n/Encrypt 9 0 R2\nendstream\nendobj\n"+
+		"1 0 obj\n<< /Title (Real Title) >>\nendobj\n"+
+		"trailer\n<< /Info 1 0 R >>\n%%EOF")), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+	if got.Title != "Real Title" {
+		t.Fatalf("Title = %q, want Real Title", got.Title)
 	}
 }

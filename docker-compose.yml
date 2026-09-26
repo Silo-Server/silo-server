@@ -32,7 +32,8 @@ services:
       retries: 5
 
   meilisearch:
-    image: ${MEILISEARCH_IMAGE:-getmeili/meilisearch:latest}
+    # Pinned: Meilisearch will not open data written by another version.
+    image: ${MEILISEARCH_IMAGE:-getmeili/meilisearch:v1.54.0}
     restart: unless-stopped
     profiles: [search]
     entrypoint:
@@ -46,6 +47,7 @@ services:
         exec /bin/meilisearch
     environment:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+      MEILI_UPGRADE_DB: ${MEILI_UPGRADE_DB:-false}
     ports:
       - "${MEILISEARCH_HOST:-127.0.0.1}:${MEILISEARCH_PORT:-7700}:7700"
     volumes:
@@ -76,6 +78,7 @@ services:
     volumes:
       - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
       - ${SILO_DATA_ROOT:-/opt/silo}/plugins:/var/lib/silo/plugins
+      - ${SILO_DATA_ROOT:-/opt/silo}/artwork:/var/lib/silo/artwork
       - ${SILO_DATA_ROOT:-/opt/silo}/compat:/var/lib/silo/compat
       - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
       - ${SILO_DATA_ROOT:-/opt/silo}/catalog-seeds:/catalog-seeds:ro
@@ -110,11 +113,16 @@ services:
   #     SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env — generate one with openssl rand -base64 48}
   #     DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
   #     REDIS_URL: redis://redis:6379
+  #     # Network access provider plugins run on proxies too. The proxy keeps
+  #     # its own copies, rehydrated from the database, under this dir; it
+  #     # does not need the primary node's plugin volume.
+  #     SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins
   #     PORT: "8080"
   #   ports:
   #     - "${PROXY_PORT:-8083}:8080"
   #   volumes:
   #     - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
+  #     - ${SILO_DATA_ROOT:-/opt/silo}/proxy-plugins:/var/lib/silo/plugins
   #     # See the note on the integrated service above: a node reports its own
   #     # CPU, load, and memory rather than the physical machine's only with
   #     # these mounted, and the Nodes page reads exactly what the node reports.
@@ -149,6 +157,7 @@ services:
   #   volumes:
   #     - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
   #     - ${SILO_DATA_ROOT:-/opt/silo}/plugins:/var/lib/silo/plugins
+  #     - ${SILO_DATA_ROOT:-/opt/silo}/artwork:/var/lib/silo/artwork
   #     - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
   #     # See the note on the integrated service above: a node reports its own
   #     # CPU, load, and memory rather than the physical machine's only with

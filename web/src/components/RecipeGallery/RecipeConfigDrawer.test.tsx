@@ -4,15 +4,15 @@ import { describe, it, expect, vi } from "vitest";
 import RecipeConfigDrawer from "./RecipeConfigDrawer";
 
 vi.mock("@/api/client", () => ({
-  api: vi.fn(async (path: string) => {
-    if (path === "/libraries") {
-      return [
-        { id: 1, name: "Movies" },
-        { id: 2, name: "Shows" },
-      ];
-    }
-    return {};
-  }),
+  api: vi.fn(async () => ({})),
+}));
+
+// The bulk-apply dialog lists libraries through the v2 listLibraries hook.
+vi.mock("@/hooks/queries/admin/libraries", () => ({
+  fetchAdminLibraries: vi.fn(async () => [
+    { id: 1, name: "Movies" },
+    { id: 2, name: "Shows" },
+  ]),
 }));
 
 vi.mock("@/hooks/queries/useAllUserCollections", () => ({

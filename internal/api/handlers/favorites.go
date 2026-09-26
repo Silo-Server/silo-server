@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
@@ -136,37 +137,141 @@ func (h *PersonalDataHandler) HandleListFavorites(w http.ResponseWriter, r *http
 	if !rejectInvalidImageSize(w, r) {
 		return
 	}
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
 	limit, offset := parsePagination(r)
-
-	favorites, err := store.ListFavorites(r.Context(), profileID, limit, offset)
+	favorites, items, err := h.ListFavorites(r.Context(), personalListViewerFromRequest(r), limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list favorites")
+		writeAPIError(w, err)
 		return
 	}
-
-	items, err := resolveItems(h, r, favorites, func(f userstore.Favorite) string { return f.MediaItemID })
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve favorite items")
-		return
-	}
-
 	writeJSON(w, http.StatusOK, itemsListResponse{Items: items, HasMore: len(favorites) == limit})
+}
+
+// PersonalListViewer is the identity a personal-list seam acts as: the
+// account and profile the list belongs to, the viewer access filter that
+// hides items the profile may not see, and the artwork size of the cards.
+type PersonalListViewer struct {
+	UserID    int
+	ProfileID string
+	Access    catalog.AccessFilter
+	ImageSize imagesize.Size
+}
+
+func personalListViewerFromRequest(r *http.Request) PersonalListViewer {
+	return PersonalListViewer{
+		UserID:    apimw.GetUserID(r.Context()),
+		ProfileID: apimw.GetProfileID(r.Context()),
+		Access:    requestAccessFilter(r),
+		ImageSize: requestImageSize(r),
+	}
+}
+
+// ListFavorites answers the store page [offset, offset+limit) of the
+// profile's favorites, newest first, and the cards of those entries in the
+// same order. Entries the catalog no longer has or the viewer may not see
+// have no card, so the raw entries, not the cards, decide whether another
+// page follows.
+func (h *PersonalDataHandler) ListFavorites(ctx context.Context, viewer PersonalListViewer, limit, offset int) ([]userstore.Favorite, []CollectionItemView, error) {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	favorites, err := store.ListFavorites(ctx, viewer.ProfileID, limit, offset)
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list favorites")
+	}
+	items, err := resolveItems(h, ctx, viewer, favorites, func(f userstore.Favorite) string { return f.MediaItemID })
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve favorite items")
+	}
+	return favorites, items, nil
+}
+
+// ListFavoritesPage is the keyset form of ListFavorites the v2 listing
+// uses: at most limit entries ordered by (added_at DESC, media_item_id DESC)
+// strictly after the key (nil = from the newest row), and the cards of those
+// entries in the same order, resolved exactly as ListFavorites resolves them.
+func (h *PersonalDataHandler) ListFavoritesPage(ctx context.Context, viewer PersonalListViewer, after *userstore.ListKey, limit int) ([]userstore.Favorite, []CollectionItemView, error) {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	favorites, err := store.ListFavoritesPage(ctx, viewer.ProfileID, after, limit)
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list favorites")
+	}
+	items, err := resolveItems(h, ctx, viewer, favorites, func(f userstore.Favorite) string { return f.MediaItemID })
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve favorite items")
+	}
+	return favorites, items, nil
+}
+
+// GetFavorite answers the profile's favorite entry for an item the viewer
+// may see. found is false when the item is not a favorite; an item the
+// viewer may not see is a 404 error, as v1 answers it.
+func (h *PersonalDataHandler) GetFavorite(ctx context.Context, viewer PersonalListViewer, itemID string) (entry userstore.Favorite, found bool, err error) {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return userstore.Favorite{}, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
+		return userstore.Favorite{}, false, apiError(http.StatusNotFound, "not_found", "Item not found")
+	}
+	fav, err := store.GetFavorite(ctx, viewer.ProfileID, itemID)
+	if err != nil {
+		return userstore.Favorite{}, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to check favorite")
+	}
+	if fav == nil {
+		return userstore.Favorite{}, false, nil
+	}
+	return *fav, true, nil
+}
+
+// AddFavorite adds an item the viewer may see to the profile's favorites.
+// Adding an item that is already a favorite is a no-op that still notifies
+// the same listeners, so a retried add converges.
+func (h *PersonalDataHandler) AddFavorite(ctx context.Context, viewer PersonalListViewer, itemID string) error {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
+		return apiError(http.StatusNotFound, "not_found", "Item not found")
+	}
+	if err := store.AddFavorite(ctx, viewer.ProfileID, itemID); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to add favorite")
+	}
+	h.dispatchLocalListEvent(ctx, watchsync.ListKindFavorites, watchsync.ListChangeAdded, viewer.UserID, viewer.ProfileID, itemID)
+	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
+	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "favorite", userStateEventState{
+		IsFavorite: boolPtr(true),
+	})
+	return nil
+}
+
+// RemoveFavorite removes an item from the profile's favorites. Removing an
+// item that is not a favorite succeeds, so a retried remove converges. No
+// access check runs: the item may have left the viewer's scope since it was
+// added, and the profile must still be able to drop it.
+func (h *PersonalDataHandler) RemoveFavorite(ctx context.Context, viewer PersonalListViewer, itemID string) error {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	if err := store.RemoveFavorite(ctx, viewer.ProfileID, itemID); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove favorite")
+	}
+	h.dispatchLocalListEvent(ctx, watchsync.ListKindFavorites, watchsync.ListChangeRemoved, viewer.UserID, viewer.ProfileID, itemID)
+	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
+	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "favorite", userStateEventState{
+		IsFavorite: boolPtr(false),
+	})
+	return nil
 }
 
 // HandleCheckFavorite handles GET /favorites/{item_id}.
 // Returns 204 if the item is a favorite, 404 if not.
 func (h *PersonalDataHandler) HandleCheckFavorite(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
 	itemID := chi.URLParam(r, "item_id")
 
 	if itemID == "" {
@@ -174,22 +279,11 @@ func (h *PersonalDataHandler) HandleCheckFavorite(w http.ResponseWriter, r *http
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	_, ok, err := h.GetFavorite(r.Context(), personalListViewerFromRequest(r), itemID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+		writeAPIError(w, err)
 		return
 	}
-	if err := h.ensureAccessibleItem(r, itemID); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Item not found")
-		return
-	}
-
-	ok, err := store.IsFavorite(r.Context(), profileID, itemID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check favorite")
-		return
-	}
-
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -199,8 +293,6 @@ func (h *PersonalDataHandler) HandleCheckFavorite(w http.ResponseWriter, r *http
 
 // HandleAddFavorite handles PUT /favorites/{item_id}.
 func (h *PersonalDataHandler) HandleAddFavorite(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
 	itemID := chi.URLParam(r, "item_id")
 
 	if itemID == "" {
@@ -208,33 +300,15 @@ func (h *PersonalDataHandler) HandleAddFavorite(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	if err := h.AddFavorite(r.Context(), personalListViewerFromRequest(r), itemID); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-	if err := h.ensureAccessibleItem(r, itemID); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Item not found")
-		return
-	}
-
-	if err := store.AddFavorite(r.Context(), profileID, itemID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to add favorite")
-		return
-	}
-
-	h.dispatchLocalListEvent(r.Context(), watchsync.ListKindFavorites, watchsync.ListChangeAdded, userID, profileID, itemID)
-	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "favorite", userStateEventState{
-		IsFavorite: boolPtr(true),
-	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // HandleRemoveFavorite handles DELETE /favorites/{item_id}.
 func (h *PersonalDataHandler) HandleRemoveFavorite(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
 	itemID := chi.URLParam(r, "item_id")
 
 	if itemID == "" {
@@ -242,22 +316,10 @@ func (h *PersonalDataHandler) HandleRemoveFavorite(w http.ResponseWriter, r *htt
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	if err := h.RemoveFavorite(r.Context(), personalListViewerFromRequest(r), itemID); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-
-	if err := store.RemoveFavorite(r.Context(), profileID, itemID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to remove favorite")
-		return
-	}
-
-	h.dispatchLocalListEvent(r.Context(), watchsync.ListKindFavorites, watchsync.ListChangeRemoved, userID, profileID, itemID)
-	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "favorite", userStateEventState{
-		IsFavorite: boolPtr(false),
-	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -295,38 +357,64 @@ func (h *PersonalDataHandler) HandleListWatchlist(w http.ResponseWriter, r *http
 	if !rejectInvalidImageSize(w, r) {
 		return
 	}
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
 	limit, offset := parsePagination(r)
-
-	entries, err := store.ListWatchlist(r.Context(), profileID, limit, offset)
+	entries, items, err := h.ListWatchlist(r.Context(), personalListViewerFromRequest(r), limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list watchlist")
+		writeAPIError(w, err)
 		return
 	}
-	// Capture has_more from the raw store page, before hidden-series filtering
+	// has_more comes from the raw store page, before hidden-series filtering
 	// shrinks it — a full page that filters down still has more to fetch.
-	watchlistHasMore := len(entries) == limit
-	entries, err = h.filterHiddenWatchlistSeries(r.Context(), store, profileID, entries)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to filter watchlist")
-		return
-	}
+	writeJSON(w, http.StatusOK, itemsListResponse{Items: items, HasMore: len(entries) == limit})
+}
 
-	items, err := resolveItems(h, r, entries, func(e userstore.WatchlistEntry) string { return e.MediaItemID })
+// ListWatchlist answers the store page [offset, offset+limit) of the
+// profile's watchlist, newest first, and the cards of those entries in the
+// same order. Fully-watched series, entries the catalog no longer has, and
+// entries the viewer may not see have no card, so the raw entries, not the
+// cards, decide whether another page follows.
+func (h *PersonalDataHandler) ListWatchlist(ctx context.Context, viewer PersonalListViewer, limit, offset int) ([]userstore.WatchlistEntry, []CollectionItemView, error) {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve watchlist items")
-		return
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
+	entries, err := store.ListWatchlist(ctx, viewer.ProfileID, limit, offset)
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list watchlist")
+	}
+	visible, err := h.filterHiddenWatchlistSeries(ctx, store, viewer.ProfileID, append([]userstore.WatchlistEntry(nil), entries...))
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to filter watchlist")
+	}
+	items, err := resolveItems(h, ctx, viewer, visible, func(e userstore.WatchlistEntry) string { return e.MediaItemID })
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve watchlist items")
+	}
+	return entries, items, nil
+}
 
-	writeJSON(w, http.StatusOK, itemsListResponse{Items: items, HasMore: watchlistHasMore})
+// ListWatchlistPage is the keyset form of ListWatchlist the v2 listing
+// uses: at most limit entries ordered by (added_at DESC, media_item_id DESC)
+// strictly after the key (nil = from the newest row), and the cards of the
+// entries the viewer may see (fully-watched series hidden) in the same order.
+func (h *PersonalDataHandler) ListWatchlistPage(ctx context.Context, viewer PersonalListViewer, after *userstore.ListKey, limit int) ([]userstore.WatchlistEntry, []CollectionItemView, error) {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	entries, err := store.ListWatchlistPage(ctx, viewer.ProfileID, after, limit)
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list watchlist")
+	}
+	visible, err := h.filterHiddenWatchlistSeries(ctx, store, viewer.ProfileID, append([]userstore.WatchlistEntry(nil), entries...))
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to filter watchlist")
+	}
+	items, err := resolveItems(h, ctx, viewer, visible, func(e userstore.WatchlistEntry) string { return e.MediaItemID })
+	if err != nil {
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve watchlist items")
+	}
+	return entries, items, nil
 }
 
 // filterHiddenWatchlistSeries drops fully-watched series from a watchlist page.
@@ -357,11 +445,72 @@ func (h *PersonalDataHandler) filterHiddenWatchlistSeries(ctx context.Context, s
 	return filtered, nil
 }
 
+// GetWatchlistEntry answers the profile's watchlist entry for an item the
+// viewer may see. found is false when the item is not on the watchlist; an
+// item the viewer may not see is a 404 error, as v1 answers it.
+func (h *PersonalDataHandler) GetWatchlistEntry(ctx context.Context, viewer PersonalListViewer, itemID string) (entry userstore.WatchlistEntry, found bool, err error) {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return userstore.WatchlistEntry{}, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
+		return userstore.WatchlistEntry{}, false, apiError(http.StatusNotFound, "not_found", "Item not found")
+	}
+	e, err := store.GetWatchlistEntry(ctx, viewer.ProfileID, itemID)
+	if err != nil {
+		return userstore.WatchlistEntry{}, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to check watchlist")
+	}
+	if e == nil {
+		return userstore.WatchlistEntry{}, false, nil
+	}
+	return *e, true, nil
+}
+
+// AddToWatchlist adds an item the viewer may see to the profile's
+// watchlist. Adding an item that is already on it is a no-op that still
+// notifies the same listeners, so a retried add converges.
+func (h *PersonalDataHandler) AddToWatchlist(ctx context.Context, viewer PersonalListViewer, itemID string) error {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
+		return apiError(http.StatusNotFound, "not_found", "Item not found")
+	}
+	if err := store.AddToWatchlist(ctx, viewer.ProfileID, itemID); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to add to watchlist")
+	}
+	h.dispatchLocalListEvent(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeAdded, viewer.UserID, viewer.ProfileID, itemID)
+	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
+	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "watchlist", userStateEventState{
+		InWatchlist: boolPtr(true),
+	})
+	return nil
+}
+
+// RemoveFromWatchlist removes an item from the profile's watchlist.
+// Removing an item that is not on it succeeds, so a retried remove
+// converges. No access check runs: the item may have left the viewer's
+// scope since it was added, and the profile must still be able to drop it.
+func (h *PersonalDataHandler) RemoveFromWatchlist(ctx context.Context, viewer PersonalListViewer, itemID string) error {
+	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	if err := store.RemoveFromWatchlist(ctx, viewer.ProfileID, itemID); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove from watchlist")
+	}
+	h.dispatchLocalListEvent(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeRemoved, viewer.UserID, viewer.ProfileID, itemID)
+	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
+	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "watchlist", userStateEventState{
+		InWatchlist: boolPtr(false),
+	})
+	return nil
+}
+
 // HandleCheckWatchlist handles GET /watchlist/{item_id}.
 // Returns 204 if the item is on the watchlist, 404 if not.
 func (h *PersonalDataHandler) HandleCheckWatchlist(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
 	itemID := chi.URLParam(r, "item_id")
 
 	if itemID == "" {
@@ -369,22 +518,11 @@ func (h *PersonalDataHandler) HandleCheckWatchlist(w http.ResponseWriter, r *htt
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	_, ok, err := h.GetWatchlistEntry(r.Context(), personalListViewerFromRequest(r), itemID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+		writeAPIError(w, err)
 		return
 	}
-	if err := h.ensureAccessibleItem(r, itemID); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Item not found")
-		return
-	}
-
-	ok, err := store.InWatchlist(r.Context(), profileID, itemID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check watchlist")
-		return
-	}
-
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -394,8 +532,6 @@ func (h *PersonalDataHandler) HandleCheckWatchlist(w http.ResponseWriter, r *htt
 
 // HandleAddToWatchlist handles PUT /watchlist/{item_id}.
 func (h *PersonalDataHandler) HandleAddToWatchlist(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
 	itemID := chi.URLParam(r, "item_id")
 
 	if itemID == "" {
@@ -403,33 +539,15 @@ func (h *PersonalDataHandler) HandleAddToWatchlist(w http.ResponseWriter, r *htt
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	if err := h.AddToWatchlist(r.Context(), personalListViewerFromRequest(r), itemID); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-	if err := h.ensureAccessibleItem(r, itemID); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Item not found")
-		return
-	}
-
-	if err := store.AddToWatchlist(r.Context(), profileID, itemID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to add to watchlist")
-		return
-	}
-
-	h.dispatchLocalListEvent(r.Context(), watchsync.ListKindWatchlist, watchsync.ListChangeAdded, userID, profileID, itemID)
-	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "watchlist", userStateEventState{
-		InWatchlist: boolPtr(true),
-	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // HandleRemoveFromWatchlist handles DELETE /watchlist/{item_id}.
 func (h *PersonalDataHandler) HandleRemoveFromWatchlist(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
 	itemID := chi.URLParam(r, "item_id")
 
 	if itemID == "" {
@@ -437,22 +555,10 @@ func (h *PersonalDataHandler) HandleRemoveFromWatchlist(w http.ResponseWriter, r
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	if err := h.RemoveFromWatchlist(r.Context(), personalListViewerFromRequest(r), itemID); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-
-	if err := store.RemoveFromWatchlist(r.Context(), profileID, itemID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to remove from watchlist")
-		return
-	}
-
-	h.dispatchLocalListEvent(r.Context(), watchsync.ListKindWatchlist, watchsync.ListChangeRemoved, userID, profileID, itemID)
-	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "watchlist", userStateEventState{
-		InWatchlist: boolPtr(false),
-	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -466,33 +572,183 @@ func (h *PersonalDataHandler) HandleListHistory(w http.ResponseWriter, r *http.R
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
 	limit, offset := parsePagination(r)
 
-	entries, err := store.ListHistory(r.Context(), profileID, limit, offset)
+	entries, err := h.HistoryEntries(r.Context(), userID, profileID, limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list history")
+		writeAPIError(w, err)
 		return
 	}
 
-	ids, err := catalog.ResolveHistoryDisplayIDs(r.Context(), entries, h.episodeRepo)
+	cards, err := h.HistoryCards(r.Context(), sectionViewerFromRequest(r), entries)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve history items")
+		writeAPIError(w, err)
 		return
 	}
-
-	items, err := resolveItemsByIDs(h, r, ids)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve history items")
-		return
+	items := make([]itemListResponse, 0, len(cards))
+	for _, card := range cards {
+		items = append(items, card.Item)
 	}
 
 	writeJSON(w, http.StatusOK, itemsListResponse{Items: items, HasMore: len(entries) == limit})
+}
+
+// History seams: the v1 handlers and the v2 history operations share them.
+// Each returns an *APIError on failure.
+
+// HistoryRemovalTarget is one thing to hide from history: an item, or a
+// season/episode widened to its show.
+type HistoryRemovalTarget = historyRemovalTargetRequest
+
+// HistoryCardView is one history card: the catalog card rendered for the
+// display item (an episode collapses to its series) and the most recent
+// watch record behind it.
+type HistoryCardView struct {
+	Item  CollectionItemView
+	Entry userstore.WatchHistoryEntry
+}
+
+// HistoryEntries pages the profile's visible history rows, most recent
+// watch first.
+func (h *PersonalDataHandler) HistoryEntries(ctx context.Context, userID int, profileID string, limit, offset int) ([]userstore.WatchHistoryEntry, error) {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	entries, err := store.ListHistory(ctx, profileID, limit, offset)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list history")
+	}
+	return entries, nil
+}
+
+// HistoryPage is the keyset form of HistoryEntries: at most limit visible
+// history rows strictly after the key in (watched_at DESC, id DESC) order,
+// nil starting at the most recent watch. The v2 listHistory operation pages
+// with it so a watch recorded or hidden mid-pagination never repeats or
+// skips a row.
+func (h *PersonalDataHandler) HistoryPage(ctx context.Context, userID int, profileID string, after *userstore.HistoryKey, limit int) ([]userstore.WatchHistoryEntry, error) {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	entries, err := store.ListHistoryPage(ctx, profileID, after, limit)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list history")
+	}
+	return entries, nil
+}
+
+// HistoryCards renders the cards of a history page in entry order, one per
+// display item, omitting items the viewer cannot see or that left the
+// catalog.
+func (h *PersonalDataHandler) HistoryCards(ctx context.Context, viewer SectionViewer, entries []userstore.WatchHistoryEntry) ([]HistoryCardView, error) {
+	display, err := catalog.ResolveHistoryDisplayEntries(ctx, entries, h.episodeRepo)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve history items")
+	}
+	return h.historyDisplayCards(ctx, viewer, display)
+}
+
+// HistoryPageCards keeps only the newest visible watch of each display card.
+// Witnesses are selected across the whole group, not just the bounded raw
+// page, so older repeats on later pages cannot emit that card again.
+func (h *PersonalDataHandler) HistoryPageCards(ctx context.Context, viewer SectionViewer, entries []userstore.WatchHistoryEntry) ([]HistoryCardView, error) {
+	display, err := catalog.ResolveHistoryDisplayEntries(ctx, entries, h.episodeRepo)
+	if err != nil {
+		return nil, err
+	}
+	groups, err := catalog.HistoryDisplayGroups(ctx, display, h.episodeRepo)
+	if err != nil {
+		return nil, err
+	}
+	store, err := h.storeProvider.ForUser(ctx, viewer.Access.UserID)
+	if err != nil {
+		return nil, err
+	}
+	witnesses, err := store.LatestHistoryIDs(ctx, viewer.Access.ProfileID, groups)
+	if err != nil {
+		return nil, err
+	}
+	latest := display[:0]
+	for _, d := range display {
+		if witnesses[d.DisplayID] == d.Entry.ID {
+			latest = append(latest, d)
+		}
+	}
+	return h.historyDisplayCards(ctx, viewer, latest)
+}
+
+func (h *PersonalDataHandler) historyDisplayCards(ctx context.Context, viewer SectionViewer, display []catalog.HistoryDisplayEntry) ([]HistoryCardView, error) {
+	ids := make([]string, 0, len(display))
+	for _, d := range display {
+		ids = append(ids, d.DisplayID)
+	}
+	items, err := resolveItemsByIDs(h, ctx, PersonalListViewer{UserID: apimw.GetUserID(ctx), ProfileID: apimw.GetProfileID(ctx), Access: viewer.Access, ImageSize: viewer.ImageSize}, ids)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve history items")
+	}
+	byID := make(map[string]itemListResponse, len(items))
+	for _, item := range items {
+		byID[item.ContentID] = item
+	}
+	cards := make([]HistoryCardView, 0, len(items))
+	for _, d := range display {
+		item, ok := byID[d.DisplayID]
+		if !ok {
+			continue
+		}
+		cards = append(cards, HistoryCardView{Item: item, Entry: d.Entry})
+	}
+	return cards, nil
+}
+
+// RemoveHistory hides every watch of the targets from the profile's history
+// and notifies the profile's sessions. Removing an already hidden item is a
+// no-op, so a replay converges.
+func (h *PersonalDataHandler) RemoveHistory(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, targets []HistoryRemovalTarget) error {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+
+	mediaItemSet := make(map[string]struct{})
+	mediaItemIDs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		resolvedIDs, resolveErr := h.resolveHistoryRemovalMediaItemIDs(ctx, target, filter)
+		if resolveErr != nil {
+			if isNotFound(resolveErr) {
+				return apiError(http.StatusNotFound, "not_found", "History target not found")
+			}
+			return fieldError("targets", resolveErr.Error())
+		}
+		for _, mediaItemID := range resolvedIDs {
+			if _, ok := mediaItemSet[mediaItemID]; ok {
+				continue
+			}
+			mediaItemSet[mediaItemID] = struct{}{}
+			mediaItemIDs = append(mediaItemIDs, mediaItemID)
+		}
+	}
+
+	if err := store.RemoveHistoryItems(ctx, profileID, mediaItemIDs, time.Now().UTC()); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove history")
+	}
+
+	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+	for _, mediaItemID := range mediaItemIDs {
+		publishUserStateEvent(
+			ctx,
+			h.EventsHub,
+			userID,
+			profileID,
+			mediaItemID,
+			"",
+			"history",
+			userStateEventState{},
+		)
+	}
+	return nil
 }
 
 // HandleRemoveHistory handles POST /history/remove.
@@ -510,52 +766,9 @@ func (h *PersonalDataHandler) HandleRemoveHistory(w http.ResponseWriter, r *http
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	if err := h.RemoveHistory(r.Context(), userID, profileID, requestAccessFilter(r), req.Targets); err != nil {
+		writeAPIError(w, err)
 		return
-	}
-
-	filter := requestAccessFilter(r)
-	mediaItemSet := make(map[string]struct{})
-	mediaItemIDs := make([]string, 0, len(req.Targets))
-	for _, target := range req.Targets {
-		resolvedIDs, resolveErr := h.resolveHistoryRemovalMediaItemIDs(r.Context(), target, filter)
-		if resolveErr != nil {
-			switch {
-			case isNotFound(resolveErr):
-				writeError(w, http.StatusNotFound, "not_found", "History target not found")
-			default:
-				writeError(w, http.StatusBadRequest, "bad_request", resolveErr.Error())
-			}
-			return
-		}
-		for _, mediaItemID := range resolvedIDs {
-			if _, ok := mediaItemSet[mediaItemID]; ok {
-				continue
-			}
-			mediaItemSet[mediaItemID] = struct{}{}
-			mediaItemIDs = append(mediaItemIDs, mediaItemID)
-		}
-	}
-
-	if err := store.RemoveHistoryItems(r.Context(), profileID, mediaItemIDs, time.Now().UTC()); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to remove history")
-		return
-	}
-
-	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	for _, mediaItemID := range mediaItemIDs {
-		publishUserStateEvent(
-			r.Context(),
-			h.EventsHub,
-			userID,
-			profileID,
-			mediaItemID,
-			"",
-			"history",
-			userStateEventState{},
-		)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -573,7 +786,7 @@ type itemsListResponse struct {
 
 // resolveItems fetches full media item data for a list of entries.
 // It preserves the order of the input slice and silently omits items not found in the catalog.
-func resolveItems[T any](h *PersonalDataHandler, r *http.Request, entries []T, getID func(T) string) ([]itemListResponse, error) {
+func resolveItems[T any](h *PersonalDataHandler, ctx context.Context, viewer PersonalListViewer, entries []T, getID func(T) string) ([]itemListResponse, error) {
 	if len(entries) == 0 || h.itemRepo == nil {
 		return []itemListResponse{}, nil
 	}
@@ -582,31 +795,31 @@ func resolveItems[T any](h *PersonalDataHandler, r *http.Request, entries []T, g
 	for i, e := range entries {
 		ids[i] = getID(e)
 	}
-	return resolveItemsByIDs(h, r, ids)
+	return resolveItemsByIDs(h, ctx, viewer, ids)
 }
 
-func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([]itemListResponse, error) {
+func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer PersonalListViewer, ids []string) ([]itemListResponse, error) {
 	if len(ids) == 0 || h.itemRepo == nil {
 		return []itemListResponse{}, nil
 	}
-	mediaItems, err := h.itemRepo.GetByIDs(r.Context(), ids)
+	mediaItems, err := h.itemRepo.GetByIDs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
 
 	// Index by content ID for order-preserving lookup.
 	byID := make(map[string]*itemListResponse, len(mediaItems))
-	filter := requestAccessFilter(r)
+	filter := viewer.Access
 	// Parsed once for the whole list; the calling handler has already rejected
 	// an unrecognized value. Unset keeps the per-slot defaults below, which are
 	// deliberately asymmetric (a featured poster beside a card backdrop); an
 	// explicit size applies to every image in the response instead.
-	size := requestImageSize(r)
+	size := viewer.ImageSize
 	posterHint := requestVariantHint("featured", size)
 	cardHint := requestVariantHint("card", size)
 	accessibleItems := make([]*models.MediaItem, 0, len(mediaItems))
 	for _, mi := range mediaItems {
-		if err := h.itemRepo.EnsureAccessible(r.Context(), mi.ContentID, filter); err != nil {
+		if err := h.itemRepo.EnsureAccessible(ctx, mi.ContentID, filter); err != nil {
 			if errors.Is(err, catalog.ErrItemNotFound) {
 				continue
 			}
@@ -616,9 +829,9 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 	}
 
 	userStates := map[string]*itemUserStateResponse{}
-	if store, profileID, ok := h.userStoreForRequest(r); ok {
-		if resolvedStates, err := resolveItemUserStatesWithOptions(r.Context(), store, profileID, h.episodeRepo, accessibleItems, itemUserStateOptions{
-			UserID:             apimw.GetUserID(r.Context()),
+	if store, profileID, ok := h.userStoreFor(ctx, viewer.UserID, viewer.ProfileID); ok {
+		if resolvedStates, err := resolveItemUserStatesWithOptions(ctx, store, profileID, h.episodeRepo, accessibleItems, itemUserStateOptions{
+			UserID:             viewer.UserID,
 			EbookProgressStore: h.ebookProgressStore,
 		}); err == nil {
 			userStates = resolvedStates
@@ -633,14 +846,16 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 			Year:              mi.Year,
 			Genres:            mi.Genres,
 			ContentRating:     mi.ContentRating,
+			AdvisoryAge:       mi.AdvisoryAge,
+			AdvisorySource:    mi.AdvisorySource,
 			RatingIMDB:        mi.RatingIMDB,
 			Overview:          mi.Overview,
 			PosterThumbhash:   mi.PosterThumbhash,
 			BackdropThumbhash: mi.BackdropThumbhash,
 			UserState:         userStates[mi.ContentID],
 		}
-		resp.PosterURL = h.presignURL(r, sizedPosterPath(mi.PosterPath, size), posterHint)
-		resp.BackdropURL = h.presignURL(r, sizedCardBackdropPath(mi.BackdropPath, size), cardHint)
+		resp.PosterURL = h.presignURL(ctx, sizedPosterPath(mi.PosterPath, size), posterHint)
+		resp.BackdropURL = h.presignURL(ctx, sizedCardBackdropPath(mi.BackdropPath, size), cardHint)
 		byID[mi.ContentID] = &resp
 	}
 
@@ -653,14 +868,14 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 			}
 		}
 		if len(unresolvedIDs) > 0 {
-			episodes, epErr := h.episodeRepo.GetByIDs(r.Context(), unresolvedIDs)
+			episodes, epErr := h.episodeRepo.GetByIDs(ctx, unresolvedIDs)
 			if epErr == nil && len(episodes) > 0 {
 				// Gather parent series for poster/metadata fallback.
 				seriesIDs := make([]string, 0, len(episodes))
 				for _, ep := range episodes {
 					seriesIDs = append(seriesIDs, ep.SeriesID)
 				}
-				parentItems, _ := h.itemRepo.GetByIDs(r.Context(), seriesIDs)
+				parentItems, _ := h.itemRepo.GetByIDs(ctx, seriesIDs)
 				parentByID := make(map[string]*models.MediaItem, len(parentItems))
 				for _, mi := range parentItems {
 					parentByID[mi.ContentID] = mi
@@ -668,7 +883,7 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 
 				for _, ep := range episodes {
 					// Verify the parent series is accessible.
-					if err := h.itemRepo.EnsureAccessible(r.Context(), ep.SeriesID, filter); err != nil {
+					if err := h.itemRepo.EnsureAccessible(ctx, ep.SeriesID, filter); err != nil {
 						continue
 					}
 					parent := parentByID[ep.SeriesID]
@@ -681,14 +896,14 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 					}
 					// Use episode still as backdrop, fall back to parent series images.
 					if ep.StillPath != "" {
-						resp.BackdropURL = h.presignURL(r, sizedCardPath(ep.StillPath, artworkkey.ImageStill, size), cardHint)
+						resp.BackdropURL = h.presignURL(ctx, sizedCardPath(ep.StillPath, artworkkey.ImageStill, size), cardHint)
 						resp.BackdropThumbhash = ep.StillThumbhash
 					} else if parent != nil {
-						resp.BackdropURL = h.presignURL(r, sizedCardBackdropPath(parent.BackdropPath, size), cardHint)
+						resp.BackdropURL = h.presignURL(ctx, sizedCardBackdropPath(parent.BackdropPath, size), cardHint)
 						resp.BackdropThumbhash = parent.BackdropThumbhash
 					}
 					if parent != nil {
-						resp.PosterURL = h.presignURL(r, sizedPosterPath(parent.PosterPath, size), posterHint)
+						resp.PosterURL = h.presignURL(ctx, sizedPosterPath(parent.PosterPath, size), posterHint)
 						resp.PosterThumbhash = parent.PosterThumbhash
 						resp.Year = parent.Year
 						resp.Genres = parent.Genres
@@ -817,35 +1032,30 @@ func historyEpisodeIDs(episodes []*models.Episode) []string {
 	return ids
 }
 
-func (h *PersonalDataHandler) userStoreForRequest(r *http.Request) (userstore.UserStore, string, bool) {
-	if h.storeProvider == nil {
+func (h *PersonalDataHandler) userStoreFor(ctx context.Context, userID int, profileID string) (userstore.UserStore, string, bool) {
+	if h.storeProvider == nil || userID == 0 || profileID == "" {
 		return nil, "", false
 	}
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	if userID == 0 || profileID == "" {
-		return nil, "", false
-	}
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil || store == nil {
 		return nil, "", false
 	}
 	return store, profileID, true
 }
 
-func (h *PersonalDataHandler) ensureAccessibleItem(r *http.Request, itemID string) error {
+func (h *PersonalDataHandler) ensureAccessibleItem(ctx context.Context, itemID string, access catalog.AccessFilter) error {
 	if h.itemRepo == nil {
 		return nil
 	}
-	err := h.itemRepo.EnsureAccessible(r.Context(), itemID, requestAccessFilter(r))
+	err := h.itemRepo.EnsureAccessible(ctx, itemID, access)
 	if err == nil {
 		return nil
 	}
 	// If not found in media_items, check if it's an episode and verify its parent series is accessible.
 	if errors.Is(err, catalog.ErrItemNotFound) && h.episodeRepo != nil {
-		ep, epErr := h.episodeRepo.GetByID(r.Context(), itemID)
+		ep, epErr := h.episodeRepo.GetByID(ctx, itemID)
 		if epErr == nil {
-			return h.itemRepo.EnsureAccessible(r.Context(), ep.SeriesID, requestAccessFilter(r))
+			return h.itemRepo.EnsureAccessible(ctx, ep.SeriesID, access)
 		}
 	}
 	return err
@@ -854,9 +1064,9 @@ func (h *PersonalDataHandler) ensureAccessibleItem(r *http.Request, itemID strin
 // presignURL resolves an image path to a usable URL, delegating to the
 // DetailService which handles plugin-prefixed paths, HTTP pass-through,
 // and legacy S3 presigning.
-func (h *PersonalDataHandler) presignURL(r *http.Request, path string, variant string) string {
+func (h *PersonalDataHandler) presignURL(ctx context.Context, path string, variant string) string {
 	if h.detailSvc != nil {
-		return h.detailSvc.PresignURL(r.Context(), path, variant)
+		return h.detailSvc.PresignURL(ctx, path, variant)
 	}
 	return ""
 }

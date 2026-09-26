@@ -32,7 +32,7 @@ func (t *SyncCollectionsTask) Description() string {
 func (t *SyncCollectionsTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary
 }
-func (t *SyncCollectionsTask) IsHidden() bool { return false }
+func (t *SyncCollectionsTask) IsHidden() bool { return true }
 
 func (t *SyncCollectionsTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{

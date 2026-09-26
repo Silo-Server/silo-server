@@ -36,9 +36,47 @@ const (
 	simklCursorRemovedAnime  = "simkl.inbound.anime.removed_from_list"
 )
 
+// Simkl rate limits, from its rate-limits and errors docs: 10 GETs and 1 POST
+// per second, plus a per-user daily quota. Sync GETs are sequential and few,
+// so only POSTs are paced. Repeated POST overages can also earn the token or
+// client_id a temporary throttling block (412 client_id_failed), which is
+// not retried, so pacing is the main defense.
+const (
+	writeInterval = time.Second
+	writeBurst    = 1
+
+	// Simkl answers per-second overages with 429 {"error":"rate_limit"} and
+	// says to retry in about a second. Its Retry-After on that response
+	// carries the daily reset, so it is ignored.
+	perSecondRetryWait = time.Second
+	// A 400 {"error":"RATE_LIMIT"} is not a quota: it is a 20-second per-user
+	// lock on /scrobble and on the sync writes /sync/history,
+	// /sync/history/remove, /sync/add-to-list, /sync/ratings,
+	// /sync/ratings/remove, and /sync/watched. It clears as soon as the
+	// user's in-flight write finishes, and Simkl says to retry shortly,
+	// without exponential backoff.
+	writeLockRetryWait = 5 * time.Second
+
+	maxInPlaceRetryWait = 10 * time.Second
+	maxRetryAttempts    = 2
+
+	// Daily-quota 429s (user_limit_exceeded, app_limit_exceeded) carry
+	// Retry-After, and per-second 429s clear in about a second, so a 429
+	// without a usable Retry-After matches neither documented case. A minute
+	// clears any per-second throttle or write lock with a wide margin without
+	// parking the connection for long on a guess.
+	defaultRetryAfter = time.Minute
+
+	maxErrorBodyBytes = 4 << 10
+)
+
 type Provider struct {
 	client  *http.Client
 	baseURL string
+	// writes paces POSTs per access token.
+	writes *watchsync.CredentialLimiter
+	// sleep waits between in-place rate-limit retries; tests replace it.
+	sleep func(context.Context, time.Duration) error
 }
 
 func NewProvider(client *http.Client, baseURL string) *Provider {
@@ -48,7 +86,12 @@ func NewProvider(client *http.Client, baseURL string) *Provider {
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = defaultBaseURL
 	}
-	return &Provider{client: client, baseURL: strings.TrimRight(baseURL, "/")}
+	return &Provider{
+		client:  client,
+		baseURL: strings.TrimRight(baseURL, "/"),
+		writes:  watchsync.NewCredentialLimiter(writeInterval, writeBurst),
+		sleep:   watchsync.SleepContext,
+	}
 }
 
 func (p *Provider) Key() string {
@@ -69,6 +112,8 @@ func (p *Provider) Capabilities() watchsync.Capabilities {
 		ExportWatchlist:  true,
 		RemoveWatchlist:  true,
 		ScrobblePlayback: true,
+		ImportRatings:    true,
+		ExportRatings:    true,
 	}
 }
 
@@ -467,9 +512,52 @@ func (p *Provider) scrobble(ctx context.Context, path string, cfg watchsync.Serv
 }
 
 func (p *Provider) do(ctx context.Context, method string, path string, cfg watchsync.ServerConfig, token string, body io.Reader, out any) error {
+	// Buffer the body so a rate-limited request can be replayed.
+	var payload []byte
+	if body != nil {
+		buffered, err := io.ReadAll(body)
+		if err != nil {
+			return fmt.Errorf("read simkl request body: %w", err)
+		}
+		payload = buffered
+	}
+	paced := token != "" && method != http.MethodGet
+	for attempt := 0; ; attempt++ {
+		if paced {
+			if err := p.writes.Wait(ctx, token); err != nil {
+				return watchsync.LimiterWaitError(ctx, p.Key(), writeInterval, err)
+			}
+		}
+		wait, limited, err := p.doOnce(ctx, method, path, cfg, token, payload, out)
+		if !limited {
+			return err
+		}
+		if attempt < maxRetryAttempts && wait <= maxInPlaceRetryWait {
+			if err := p.sleep(ctx, wait); err != nil {
+				return err
+			}
+			continue
+		}
+		// Repeated short waits that still end rate limited are not
+		// trustworthy, so back off for a full fallback window instead.
+		if attempt >= maxRetryAttempts && wait < defaultRetryAfter {
+			wait = defaultRetryAfter
+		}
+		return watchsync.RateLimitedError{Provider: p.Key(), RetryAfter: wait}
+	}
+}
+
+// doOnce performs a single HTTP attempt. A rate-limit response reports
+// limited with how long to wait before retrying; every other outcome reports
+// its error, if any.
+func (p *Provider) doOnce(ctx context.Context, method string, path string, cfg watchsync.ServerConfig, token string, payload []byte, out any) (wait time.Duration, limited bool, err error) {
+	var body io.Reader
+	if payload != nil {
+		body = bytes.NewReader(payload)
+	}
 	req, err := http.NewRequestWithContext(ctx, method, p.baseURL+path, body)
 	if err != nil {
-		return fmt.Errorf("create simkl request: %w", err)
+		return 0, false, fmt.Errorf("create simkl request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("simkl-api-key", cfg.ClientID)
@@ -478,22 +566,59 @@ func (p *Provider) do(ctx context.Context, method string, path string, cfg watch
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("send simkl request: %w", err)
+		return 0, false, fmt.Errorf("send simkl request: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusConflict {
-		return simklConflictError{method: method, path: path}
+		return 0, false, simklConflictError{method: method, path: path}
+	}
+	if wait, limited := rateLimitWait(resp); limited {
+		return wait, true, nil
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("simkl request %s %s failed: status %d", method, path, resp.StatusCode)
+		return 0, false, fmt.Errorf("simkl request %s %s failed: status %d", method, path, resp.StatusCode)
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
-		return nil
+		return 0, false, nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode simkl response: %w", err)
+		return 0, false, fmt.Errorf("decode simkl response: %w", err)
 	}
-	return nil
+	return 0, false, nil
+}
+
+// rateLimitWait classifies Simkl's throttling responses, which share status
+// codes with unrelated errors and are told apart by the body's error field.
+func rateLimitWait(resp *http.Response) (time.Duration, bool) {
+	if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusBadRequest {
+		return 0, false
+	}
+	code := errorCode(resp.Body)
+	switch {
+	case resp.StatusCode == http.StatusTooManyRequests && strings.EqualFold(code, "rate_limit"):
+		return perSecondRetryWait, true
+	case resp.StatusCode == http.StatusTooManyRequests:
+		wait, ok := watchsync.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		if !ok {
+			wait = defaultRetryAfter
+		}
+		return wait, true
+	case strings.EqualFold(code, "rate_limit"):
+		return writeLockRetryWait, true
+	default:
+		return 0, false
+	}
+}
+
+// errorCode reads the machine-readable error field from a Simkl error body.
+func errorCode(body io.Reader) string {
+	var envelope struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(io.LimitReader(body, maxErrorBodyBytes)).Decode(&envelope); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(envelope.Error)
 }
 
 type simklConflictError struct {
@@ -533,6 +658,7 @@ type simklActivityBucket struct {
 	Watching        string `json:"watching"`
 	Completed       string `json:"completed"`
 	RemovedFromList string `json:"removed_from_list"`
+	RatedAt         string `json:"rated_at"`
 }
 
 type simklWatchedBucket struct {
@@ -1164,10 +1290,7 @@ type simklListItem struct {
 func buildSimklListPayload(items []watchsync.LocalFavorite, to string) simklListPayload {
 	var payload simklListPayload
 	for _, item := range items {
-		ids := idsFromLocal(item.IMDbID, item.TMDBID, item.TVDBID)
-		if ids == (simklIDs{}) {
-			ids = idsFromProviderItemKey(item.ProviderItemKey)
-		}
+		ids := localItemIDs(item)
 		if ids == (simklIDs{}) {
 			continue
 		}
@@ -1180,6 +1303,16 @@ func buildSimklListPayload(items []watchsync.LocalFavorite, to string) simklList
 		}
 	}
 	return payload
+}
+
+// localItemIDs returns the ids a list or rating item is sent to Simkl with: its
+// own external ids, falling back to the id its provider item key encodes.
+func localItemIDs(item watchsync.LocalFavorite) simklIDs {
+	ids := idsFromLocal(item.IMDbID, item.TMDBID, item.TVDBID)
+	if ids == (simklIDs{}) {
+		ids = idsFromProviderItemKey(item.ProviderItemKey)
+	}
+	return ids
 }
 
 func idsFromProviderItemKey(key string) simklIDs {

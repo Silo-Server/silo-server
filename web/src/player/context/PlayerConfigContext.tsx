@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
  * values so the player module never imports app-specific code.
  */
 export interface PlayerConfig {
-  /** Base URL for API calls, e.g. "/api/v1" */
+  /** Base URL for API calls, e.g. "/api/v2" */
   apiBaseUrl: string;
   /** Sync getter for the current JWT access token. */
   getAccessToken: () => string | null;
@@ -16,6 +16,10 @@ export interface PlayerConfig {
   getProfileToken?: () => string | null;
   /** Stable device identity used for device-scoped playback settings. */
   getDeviceId: () => string;
+  /** Optional async token refresh callback on 401 response. */
+  refreshToken?: () => Promise<boolean>;
+  /** Account/server generation; unchanged by automatic token rotation. */
+  getAuthContext?: () => unknown;
 }
 
 const PlayerConfigCtx = createContext<PlayerConfig | null>(null);

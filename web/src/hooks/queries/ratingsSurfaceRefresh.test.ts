@@ -1,7 +1,10 @@
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import { catalogKeys, ratingKeys, recKeys, sectionKeys } from "./keys";
-import { invalidateRatingSurfaceQueries } from "./ratingsSurfaceRefresh";
+import {
+  invalidateAllRatingSurfaceQueries,
+  invalidateRatingSurfaceQueries,
+} from "./ratingsSurfaceRefresh";
 
 describe("invalidateRatingSurfaceQueries", () => {
   it("marks rating and recommendation-derived surfaces stale", async () => {
@@ -35,5 +38,24 @@ describe("invalidateRatingSurfaceQueries", () => {
     expect(queryClient.getQueryState(recKeys.similar("item-1"))?.isInvalidated).toBe(false);
     expect(queryClient.getQueryState(sectionKeys.homeItems("for-you"))?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(catalogKeys.itemDetail("item-1"))?.isInvalidated).toBe(false);
+  });
+});
+
+describe("invalidateAllRatingSurfaceQueries", () => {
+  it("marks every rating-derived surface stale", async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(ratingKeys.list(), { items: [] });
+    queryClient.setQueryData(catalogKeys.itemDetail("item-1"), { content_id: "item-1" });
+    queryClient.setQueryData(recKeys.forYouMain(), { row: null });
+    queryClient.setQueryData(sectionKeys.homeItems("for-you"), { section: { id: "for-you" } });
+    queryClient.setQueryData(["unrelated"], {});
+
+    await invalidateAllRatingSurfaceQueries(queryClient);
+
+    expect(queryClient.getQueryState(ratingKeys.list())?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(catalogKeys.itemDetail("item-1"))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(recKeys.forYouMain())?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(sectionKeys.homeItems("for-you"))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(["unrelated"])?.isInvalidated).toBe(false);
   });
 });

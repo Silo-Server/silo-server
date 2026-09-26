@@ -10,6 +10,8 @@ HEAD /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
 POST /downloads/prepare	non-media
 GET /hw-capabilities	non-media
 GET /metrics	non-media
+GET /remux/{session_id}	media	playback	internal_relay	false	true
+HEAD /remux/{session_id}	media	playback	internal_relay	false	true
 GET /status	non-media
 POST /transcode/start	non-media
 DELETE /transcode/{session_id}	non-media
@@ -28,6 +30,8 @@ HEAD /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
 POST /downloads/prepare	non-media
 GET /hw-capabilities	non-media
 GET /metrics	non-media
+GET /remux/{session_id}	media	playback	internal_relay	false	true
+HEAD /remux/{session_id}	media	playback	internal_relay	false	true
 GET /status	non-media
 POST /transcode/start	non-media
 DELETE /transcode/{session_id}	non-media

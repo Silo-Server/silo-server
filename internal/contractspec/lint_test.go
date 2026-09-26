@@ -1,0 +1,280 @@
+package contractspec
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	contracts "github.com/Silo-Server/silo-server/contracts/api/v2"
+)
+
+// TestCommittedArtifactPassesLint is the spec-lint gate over the committed
+// artifact.
+func TestCommittedArtifactPassesLint(t *testing.T) {
+	if findings := Lint(contracts.OpenAPI); len(findings) != 0 {
+		t.Fatalf("committed openapi.json fails lint:\n  %s", strings.Join(findings, "\n  "))
+	}
+}
+
+// mutate decodes the committed artifact, applies fn, and re-encodes it.
+func mutate(t *testing.T, fn func(doc map[string]any)) []byte {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal(contracts.OpenAPI, &doc); err != nil {
+		t.Fatal(err)
+	}
+	fn(doc)
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func op(doc map[string]any, path, method string) map[string]any {
+	return doc["paths"].(map[string]any)[path].(map[string]any)[method].(map[string]any)
+}
+
+func schemas(doc map[string]any) map[string]any {
+	return doc["components"].(map[string]any)["schemas"].(map[string]any)
+}
+
+// TestLintSeededFailures seeds each rule violation into a copy of the
+// committed artifact and proves the lint names it.
+func TestLintSeededFailures(t *testing.T) {
+	const info = "/api/v2/system/info"
+	cases := map[string]struct {
+		seed func(doc map[string]any)
+		want string
+	}{
+		"deprecated flag without the extension": {
+			seed: func(doc map[string]any) { op(doc, info, "get")["deprecated"] = true },
+			want: "GET /api/v2/system/info: deprecated: true without x-silo-deprecation",
+		},
+		"deprecation extension without the flag": {
+			seed: func(doc map[string]any) {
+				op(doc, info, "get")["x-silo-deprecation"] = map[string]any{"at": "2026-09-01T12:30:45Z", "link": "https://siloserver.org/docs/api/v2/migration/info"}
+			},
+			want: "GET /api/v2/system/info: x-silo-deprecation without deprecated: true",
+		},
+		"deprecation with a bad instant": {
+			seed: func(doc map[string]any) {
+				o := op(doc, info, "get")
+				o["deprecated"] = true
+				o["x-silo-deprecation"] = map[string]any{"at": "@1788265845", "link": "https://siloserver.org/docs/api/v2/migration/info"}
+			},
+			want: "x-silo-deprecation.at is not an RFC 3339 instant",
+		},
+		"deprecation with a foreign link": {
+			seed: func(doc map[string]any) {
+				o := op(doc, info, "get")
+				o["deprecated"] = true
+				o["x-silo-deprecation"] = map[string]any{"at": "2026-09-01T12:30:45Z", "link": "http://siloserver.org/docs/api/v2/migration/info"}
+			},
+			want: "x-silo-deprecation.link \"http://siloserver.org/docs/api/v2/migration/info\" is not an https URL under",
+		},
+		"deprecation sunset before at": {
+			seed: func(doc map[string]any) {
+				o := op(doc, info, "get")
+				o["deprecated"] = true
+				o["x-silo-deprecation"] = map[string]any{"at": "2026-09-01T12:30:45Z", "link": "https://siloserver.org/docs/api/v2/migration/info", "sunset": "2026-09-01T00:00:00Z"}
+			},
+			want: "x-silo-deprecation.sunset precedes at",
+		},
+		"duplicate operation id": {
+			seed: func(doc map[string]any) { op(doc, info, "get")["operationId"] = "getOpenAPIDocument" },
+			want: `operationId "getOpenAPIDocument" duplicates`,
+		},
+		"implicit operation id": {
+			seed: func(doc map[string]any) { delete(op(doc, info, "get"), "operationId") },
+			want: "has no operationId",
+		},
+		"non lowerCamel operation id": {
+			seed: func(doc map[string]any) { op(doc, info, "get")["operationId"] = "GetSystemInfo" },
+			want: "is not lowerCamelCase",
+		},
+		"non-PascalCase top-level schema": {
+			seed: func(doc map[string]any) { schemas(doc)["system_info"] = schemas(doc)["SystemInfo"] },
+			want: "components.schemas.system_info: schema name is not PascalCase",
+		},
+		"anonymous response schema": {
+			seed: func(doc map[string]any) {
+				content := op(doc, info, "get")["responses"].(map[string]any)["200"].(map[string]any)["content"].(map[string]any)
+				content["application/json"] = map[string]any{"schema": map[string]any{"type": "object", "properties": map[string]any{"a": map[string]any{"type": "string"}}, "additionalProperties": false}}
+			},
+			want: "anonymous object schema",
+		},
+		"undocumented implied status": {
+			seed: func(doc map[string]any) { delete(op(doc, info, "get")["responses"].(map[string]any), "406") },
+			want: "status 406 is implied by class public but not documented",
+		},
+		"undocumented body-read timeout": {
+			seed: func(doc map[string]any) {
+				delete(op(doc, "/api/v2/profiles/{id}", "patch")["responses"].(map[string]any), "408")
+			},
+			want: "status 408 is implied by class profile_scoped but not documented",
+		},
+		"undocumented profile 404": {
+			seed: func(doc map[string]any) {
+				delete(op(doc, "/api/v2/progress", "get")["responses"].(map[string]any), "404")
+			},
+			want: "status 404 is implied by class profile_scoped but not documented",
+		},
+		"undocumented 503 on a service-backed public operation": {
+			seed: func(doc map[string]any) {
+				delete(op(doc, "/api/v2/system/setup", "get")["responses"].(map[string]any), "503")
+			},
+			want: "status 503 is implied by class public but not documented",
+		},
+		"undocumented gated status": {
+			seed: func(doc map[string]any) {
+				o := op(doc, info, "get")
+				o["x-silo-class"] = "authenticated"
+				o["security"] = []any{map[string]any{"bearerAuth": []any{}}}
+			},
+			want: "status 401 is implied by class authenticated but not documented",
+		},
+		"missing success status": {
+			seed: func(doc map[string]any) { delete(op(doc, info, "get")["responses"].(map[string]any), "200") },
+			want: "no success status is documented",
+		},
+		"default response": {
+			seed: func(doc map[string]any) {
+				op(doc, info, "get")["responses"].(map[string]any)["default"] = map[string]any{"description": "Error"}
+			},
+			want: "a default response hides undocumented statuses",
+		},
+		"missing class extension": {
+			seed: func(doc map[string]any) { delete(op(doc, info, "get"), "x-silo-class") },
+			want: "x-silo-class is missing",
+		},
+		"missing security on non-public operation": {
+			seed: func(doc map[string]any) { op(doc, info, "get")["x-silo-class"] = "authenticated" },
+			want: "class authenticated requires the bearerAuth security scheme",
+		},
+		"security on public operation": {
+			seed: func(doc map[string]any) {
+				op(doc, info, "get")["security"] = []any{map[string]any{"bearerAuth": []any{}}}
+			},
+			want: "a public operation must not declare security",
+		},
+		"free-form response object": {
+			seed: func(doc map[string]any) { schemas(doc)["SystemInfo"].(map[string]any)["additionalProperties"] = true },
+			want: "components.schemas.SystemInfo: additionalProperties:true without x-silo-extension-bag",
+		},
+		"free-form nested object": {
+			seed: func(doc map[string]any) {
+				props := schemas(doc)["SystemInfo"].(map[string]any)["properties"].(map[string]any)
+				props["extra"] = map[string]any{"type": "object"}
+			},
+			want: "components.schemas.SystemInfo.extra: object without properties or additionalProperties:false is free-form",
+		},
+		"missing security scheme": {
+			seed: func(doc map[string]any) { delete(doc["components"].(map[string]any), "securitySchemes") },
+			want: "components.securitySchemes.bearerAuth is missing",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			findings := Lint(mutate(t, tc.seed))
+			for _, f := range findings {
+				if strings.Contains(f, tc.want) {
+					return
+				}
+			}
+			t.Fatalf("lint did not report %q; findings:\n  %s", tc.want, strings.Join(findings, "\n  "))
+		})
+	}
+}
+
+func TestRawHandshakeLintKeepsAuthorizationAndJSONGates(t *testing.T) {
+	const path = "/api/v2/system/info"
+	raw := func(doc map[string]any) {
+		operation := op(doc, path, "get")
+		operation["x-silo-raw-protocol"] = "byte-range"
+		operation["x-silo-raw-reason"] = "File bytes use HTTP range semantics."
+		operation["responses"] = map[string]any{"200": map[string]any{"description": "Bytes", "content": map[string]any{"application/octet-stream": map[string]any{"schema": map[string]any{"type": "string", "format": "binary"}}}}}
+	}
+	if findings := Lint(mutate(t, raw)); len(findings) != 0 {
+		t.Fatalf("documented raw bytes: %v", findings)
+	}
+	for name, test := range map[string]struct {
+		change func(map[string]any)
+		want   string
+	}{
+		"reason": {func(o map[string]any) { delete(o, "x-silo-raw-reason") }, "raw protocol requires its exclusion reason"},
+		"auth":   {func(o map[string]any) { o["x-silo-class"] = "authenticated" }, "status 401"},
+		"JSON": {func(o map[string]any) {
+			o["responses"].(map[string]any)["200"].(map[string]any)["content"] = map[string]any{"application/json": map[string]any{"schema": map[string]any{"type": "string"}}}
+		}, "cannot replace a structured JSON operation"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			doc := mutate(t, func(d map[string]any) { raw(d); test.change(op(d, path, "get")) })
+			if findings := strings.Join(Lint(doc), "\n"); !strings.Contains(findings, test.want) {
+				t.Fatalf("findings=%s; want %s", findings, test.want)
+			}
+		})
+	}
+}
+
+func TestRawProtocolExtensionLint(t *testing.T) {
+	const path = "/api/v2/system/info"
+	fixture := func(doc map[string]any, protocol string) map[string]any {
+		operation := op(doc, path, "get")
+		operation["x-silo-raw-protocol"] = protocol
+		operation["x-silo-raw-reason"] = "Retain the actual callback or upgrade protocol."
+		headers := func(names ...string) map[string]any {
+			out := map[string]any{}
+			for _, name := range names {
+				out[name] = map[string]any{"schema": map[string]any{"type": "string"}}
+			}
+			return out
+		}
+		switch protocol {
+		case "html-callback":
+			operation["x-silo-retry-safety"] = "non_retryable"
+			operation["responses"] = map[string]any{"200": map[string]any{"description": "HTML page", "content": map[string]any{"text/html": map[string]any{"schema": map[string]any{"type": "string"}}}}}
+			item := doc["paths"].(map[string]any)[path].(map[string]any)
+			delete(item, "get")
+			item["post"] = operation
+		case "redirect":
+			operation["responses"] = map[string]any{"302": map[string]any{"description": "Redirect", "headers": headers("Location")}}
+		case "websocket":
+			operation["responses"] = map[string]any{"101": map[string]any{"description": "Upgrade", "headers": headers("Connection", "Upgrade", "Sec-WebSocket-Accept")}}
+		}
+		return operation
+	}
+	for _, protocol := range []string{"html-callback", "redirect", "websocket"} {
+		t.Run(protocol, func(t *testing.T) {
+			if findings := Lint(mutate(t, func(d map[string]any) { fixture(d, protocol) })); len(findings) != 0 {
+				t.Fatal(findings)
+			}
+		})
+	}
+	for name, tc := range map[string]struct {
+		protocol string
+		change   func(map[string]any)
+		want     string
+	}{
+		"retry":    {"html-callback", func(o map[string]any) { delete(o, "x-silo-retry-safety") }, "raw POST must declare retry safety"},
+		"location": {"redirect", func(o map[string]any) { delete(o["responses"].(map[string]any)["302"].(map[string]any), "headers") }, "redirect response must document Location"},
+		"upgrade_header": {"websocket", func(o map[string]any) {
+			delete(o["responses"].(map[string]any)["101"].(map[string]any)["headers"].(map[string]any), "Upgrade")
+		}, "websocket response must document header Upgrade"},
+		"upgrade_body": {"websocket", func(o map[string]any) {
+			o["responses"].(map[string]any)["101"].(map[string]any)["content"] = map[string]any{"text/plain": map[string]any{"schema": map[string]any{"type": "string"}}}
+		}, "bodyless GET websocket handshake"},
+		"upgrade_protocol": {"websocket", func(o map[string]any) { o["x-silo-raw-protocol"] = "other" }, "bodyless GET websocket handshake"},
+		"json_redirect": {"redirect", func(o map[string]any) {
+			o["responses"].(map[string]any)["302"].(map[string]any)["content"] = map[string]any{"application/example+json": map[string]any{"schema": map[string]any{"type": "string"}}}
+		}, "cannot replace a structured JSON operation"},
+		"native_redirect": {"redirect", func(o map[string]any) { delete(o, "x-silo-raw-protocol") }, "no success status is documented"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			data := mutate(t, func(d map[string]any) { tc.change(fixture(d, tc.protocol)) })
+			if findings := strings.Join(Lint(data), "\n"); !strings.Contains(findings, tc.want) {
+				t.Fatalf("want %s; got %s", tc.want, findings)
+			}
+		})
+	}
+}

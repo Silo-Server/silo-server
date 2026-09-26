@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -69,6 +70,25 @@ func writePlaybackSessionNotFound(w http.ResponseWriter) {
 	writeError(w, http.StatusNotFound, playbackSessionNotFoundErrorCode, "Playback session not found")
 }
 
+// playbackSessionEndedErrorCode is the answer for a session whose stream deny
+// marker is set: it has been stopped, expired, or terminated, and no token
+// may serve or reconstruct it.
+const playbackSessionEndedErrorCode = "playback_session_ended"
+
+var errPlaybackSessionEnded = errors.New("playback session has ended")
+
+func writePlaybackSessionEnded(w http.ResponseWriter) {
+	writeError(w, http.StatusGone, playbackSessionEndedErrorCode, "Playback session has ended")
+}
+
+func writePlaybackSessionEndedError(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, errPlaybackSessionEnded) {
+		return false
+	}
+	writePlaybackSessionEnded(w)
+	return true
+}
+
 func preflightPlaybackFile(
 	ctx context.Context,
 	file *models.MediaFile,
@@ -120,4 +140,22 @@ func markPlaybackFileMissing(
 	if contentID != "" && eventsHub != nil {
 		publishEventMetadataUpdate(ctx, eventsHub, file.MediaFolderID, contentID)
 	}
+}
+
+// requireOwningProfile refuses a media request that selects a profile other
+// than the one the session was started for. Account ownership is checked by
+// the session loaders; this adds the household-profile half so a restricted
+// profile cannot read another profile's session by id. A request that selects
+// no profile (media elements that cannot set headers) is admitted on account
+// ownership alone, as on the v1 bridge.
+func requireOwningProfile(w http.ResponseWriter, r *http.Request, session *playback.Session) bool {
+	if session == nil {
+		return true
+	}
+	profileID := apimw.GetProfileID(r.Context())
+	if profileID == "" || session.ProfileID == "" || profileID == session.ProfileID {
+		return true
+	}
+	writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another profile")
+	return false
 }

@@ -52,32 +52,6 @@ func scanAPIKey(row pgx.Row) (*models.APIKey, error) {
 	return &k, nil
 }
 
-// scanAPIKeys scans multiple rows into a []*models.APIKey slice.
-func scanAPIKeys(rows pgx.Rows) ([]*models.APIKey, error) {
-	var keys []*models.APIKey
-	for rows.Next() {
-		var k models.APIKey
-		err := rows.Scan(
-			&k.ID,
-			&k.UserID,
-			&k.Label,
-			&k.Key,
-			&k.RateTier,
-			&k.Scopes,
-			&k.CreatedAt,
-			&k.LastUsedAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("scanning api key row: %w", err)
-		}
-		keys = append(keys, &k)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating api key rows: %w", err)
-	}
-	return keys, nil
-}
-
 // generateAPIKey creates a cryptographically random API key with the "sa_" prefix.
 func generateAPIKey() (string, error) {
 	b := make([]byte, 32)
@@ -108,17 +82,6 @@ func (r *APIKeyRepository) Create(ctx context.Context, userID int, label string,
 	return scanAPIKey(row)
 }
 
-// ListByUser returns all API keys belonging to the given user, ordered by creation time.
-func (r *APIKeyRepository) ListByUser(ctx context.Context, userID int) ([]*models.APIKey, error) {
-	query := `SELECT ` + apiKeyColumns + ` FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC`
-	rows, err := r.pool.Query(ctx, query, userID)
-	if err != nil {
-		return nil, fmt.Errorf("listing api keys: %w", err)
-	}
-	defer rows.Close()
-	return scanAPIKeys(rows)
-}
-
 // GetByKey looks up an API key by its full key string (including "sa_" prefix).
 func (r *APIKeyRepository) GetByKey(ctx context.Context, key string) (*models.APIKey, error) {
 	query := `SELECT ` + apiKeyColumns + ` FROM api_keys WHERE api_key = $1`
@@ -147,49 +110,6 @@ func (r *APIKeyRepository) DeleteByAdmin(ctx context.Context, id int64) error {
 		return ErrAPIKeyNotFound
 	}
 	return nil
-}
-
-// ListByUserAdmin returns all API keys for a specific user (admin view).
-func (r *APIKeyRepository) ListByUserAdmin(ctx context.Context, userID int) ([]*models.APIKey, error) {
-	return r.ListByUser(ctx, userID)
-}
-
-// ListAll returns all API keys across all users, ordered by creation time descending.
-// Each entry includes the owning user's username.
-func (r *APIKeyRepository) ListAll(ctx context.Context) ([]*models.APIKeyWithUser, error) {
-	query := `SELECT ak.id, ak.user_id, u.username, ak.label, ak.api_key, ak.rate_tier, ak.scopes, ak.created_at, ak.last_used_at
-		FROM api_keys ak
-		JOIN users u ON u.id = ak.user_id
-		ORDER BY ak.created_at DESC`
-	rows, err := r.pool.Query(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("listing all api keys: %w", err)
-	}
-	defer rows.Close()
-
-	var keys []*models.APIKeyWithUser
-	for rows.Next() {
-		var k models.APIKeyWithUser
-		err := rows.Scan(
-			&k.ID,
-			&k.UserID,
-			&k.Username,
-			&k.Label,
-			&k.Key,
-			&k.RateTier,
-			&k.Scopes,
-			&k.CreatedAt,
-			&k.LastUsedAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("scanning api key with user row: %w", err)
-		}
-		keys = append(keys, &k)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating api key with user rows: %w", err)
-	}
-	return keys, nil
 }
 
 // GetByID looks up an API key by its ID.

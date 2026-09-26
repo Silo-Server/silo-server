@@ -10,6 +10,7 @@ import {
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import type { PlaybackRealtimeCommandEnvelope } from "@/player/realtime-protocol";
 import { resetCodecDetectionForTests } from "@/player/hooks/useCodecDetection";
+import { resetSessionMutations } from "@/player/session-mutations";
 
 const realtimeOptions = vi.hoisted(() => ({
   current: null as null | {
@@ -18,8 +19,40 @@ const realtimeOptions = vi.hoisted(() => ({
   },
 }));
 
+const reportBookProgress = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/queries/progress", () => ({
-  useReportMediaProgress: () => ({ mutate: vi.fn() }),
+  useReportMediaProgress: () => ({ mutate: reportBookProgress }),
+}));
+// The v2 start and replan helpers own capability discovery, installation
+// binding and retry; those are covered by their own suites. Here they are
+// reduced to the request the hook is expected to make, so the assertions stay
+// about the audiobook timeline rather than the transport.
+vi.mock("@/player/start-v2", () => ({
+  startPlaybackV2: async (config: PlayerConfig, body: unknown) => {
+    const { playerFetch } = await import("@/player/player-fetch");
+    const decision = await playerFetch<{
+      session_id?: string;
+      playback_plan?: { session_id?: string };
+    }>({ ...config, apiBaseUrl: "/api/v2" }, "/playback/start", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    const sessionId = decision?.playback_plan?.session_id ?? decision?.session_id;
+    if (decision?.playback_plan && sessionId) {
+      const { registerSessionMutations } = await import("@/player/session-mutations");
+      registerSessionMutations(sessionId, "installation");
+    }
+    return decision;
+  },
+}));
+vi.mock("@/player/lifecycle-v2", () => ({
+  replanV2: async (config: PlayerConfig, sessionId: string, body: unknown) => {
+    const { playerFetch } = await import("@/player/player-fetch");
+    return playerFetch({ ...config, apiBaseUrl: "/api/v2" }, `/playback/${sessionId}/replan`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
 }));
 vi.mock("@/player/hooks/usePlaybackRealtime", () => ({
   usePlaybackRealtime: vi.fn((options) => {
@@ -159,6 +192,14 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
   });
 }
 
+/**
+ * The v2 stop receipt. The sequenced stop reads an outcome from the body, so a
+ * bare 204 would look like a malformed reply rather than a retired session.
+ */
+function stopReceipt() {
+  return jsonResponse({ outcome: "stopped" });
+}
+
 function realtimeCommand(
   name: PlaybackRealtimeCommandEnvelope["name"],
   payload?: Record<string, unknown>,
@@ -182,6 +223,7 @@ async function flushAsyncWork() {
 
 describe("useAudiobookPlayback", () => {
   beforeEach(() => {
+    reportBookProgress.mockClear();
     vi.useFakeTimers();
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
       ["audio/mp4", "audio/mpeg", "audio/flac", "audio/ogg"].some((supported) =>
@@ -195,7 +237,7 @@ describe("useAudiobookPlayback", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
-        if (url.endsWith("/api/v1/playback/start") || url.endsWith("/playback/start")) {
+        if (url.endsWith("/playback/start")) {
           sessionCount += 1;
           const body = JSON.parse(String(init?.body)) as { start_position?: number };
           return jsonResponse(
@@ -206,8 +248,11 @@ describe("useAudiobookPlayback", () => {
         if (url.endsWith("/playback/route-events")) {
           return new Response(null, { status: 202 });
         }
-        if (url.includes("/progress") || init?.method === "DELETE") {
+        if (url.includes("/progress")) {
           return new Response(null, { status: 204 });
+        }
+        if (init?.method === "DELETE") {
+          return stopReceipt();
         }
         return jsonResponse({});
       }),
@@ -217,9 +262,72 @@ describe("useAudiobookPlayback", () => {
 
   afterEach(() => {
     resetCodecDetectionForTests();
+    resetSessionMutations();
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it.each(["missing", "terminal"])(
+    "closes a %s start without writing watch progress",
+    async (mode) => {
+      const onStopRequested = vi.fn();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          mode === "missing"
+            ? jsonResponse({ detail: "Source media file is missing." }, { status: 404 })
+            : jsonResponse({ outcome: "terminal", terminal: { reason: "no_playable_route" } }),
+        ),
+      );
+      const { result, unmount } = renderAudiobookPlayback({ onStopRequested });
+      const audio = makeAudio();
+      act(() => {
+        (result.current.audioRef as MutableRefObject<HTMLAudioElement | null>).current = audio;
+      });
+      await flushAsyncWork();
+      expect(onStopRequested).toHaveBeenCalledOnce();
+      expect(result.current.streamUrl).toBe("");
+      expect(result.current.playing).toBe(false);
+      act(() => {
+        result.current.seekTo(20);
+        fireEvent.pause(audio);
+        vi.advanceTimersByTime(20_000);
+      });
+      unmount();
+      expect(reportBookProgress).not.toHaveBeenCalled();
+      expect(vi.mocked(fetch).mock.calls.every(([url]) => !String(url).includes("/progress"))).toBe(
+        true,
+      );
+    },
+  );
+
+  it("persists the final book position once before stopping a started session", async () => {
+    const { result, unmount } = renderAudiobookPlayback();
+    act(() => {
+      (result.current.audioRef as MutableRefObject<HTMLAudioElement | null>).current = makeAudio();
+    });
+    await flushAsyncWork();
+    act(() => result.current.seekTo(42));
+    await flushAsyncWork();
+    reportBookProgress.mockClear();
+    vi.mocked(fetch).mockClear();
+    unmount();
+    await flushAsyncWork();
+    expect(reportBookProgress).toHaveBeenCalledExactlyOnceWith({
+      contentId: "c",
+      positionSeconds: 42,
+      durationSeconds: 600,
+    });
+    const progressCalls = vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) => String(url).includes("/progress"));
+    expect(progressCalls).toHaveLength(1);
+    expect(progressCalls[0]?.[1]?.keepalive).toBe(true);
+    expect(JSON.parse(String(progressCalls[0]?.[1]?.body))).toMatchObject({
+      position: 42,
+      is_paused: true,
+    });
   });
 
   it("returns a flattened chapter list across files", () => {
@@ -234,7 +342,7 @@ describe("useAudiobookPlayback", () => {
 
     await flushAsyncWork();
 
-    expect(result.current.streamUrl).toBe("/api/v1/stream/session-1?token=token");
+    expect(result.current.streamUrl).toBe("/api/v2/stream/session-1?token=token");
 
     const startCall = vi
       .mocked(fetch)
@@ -279,7 +387,7 @@ describe("useAudiobookPlayback", () => {
       await probeResult;
     });
     await flushAsyncWork();
-    expect(result.current.streamUrl).toBe("/api/v1/stream/session-1?token=token");
+    expect(result.current.streamUrl).toBe("/api/v2/stream/session-1?token=token");
     expect(
       vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/playback/start")),
     ).toHaveLength(1);
@@ -336,8 +444,11 @@ describe("useAudiobookPlayback", () => {
         if (url.endsWith("/playback/route-events")) {
           return new Response(null, { status: 202 });
         }
-        if (url.includes("/progress") || init?.method === "DELETE") {
+        if (url.includes("/progress")) {
           return new Response(null, { status: 204 });
+        }
+        if (init?.method === "DELETE") {
+          return stopReceipt();
         }
         return jsonResponse({});
       }),
@@ -407,8 +518,11 @@ describe("useAudiobookPlayback", () => {
         if (url.endsWith("/playback/route-events")) {
           return new Response(null, { status: 202 });
         }
-        if (url.includes("/progress") || init?.method === "DELETE") {
+        if (url.includes("/progress")) {
           return new Response(null, { status: 204 });
+        }
+        if (init?.method === "DELETE") {
+          return stopReceipt();
         }
         return jsonResponse({});
       }),
@@ -453,7 +567,7 @@ describe("useAudiobookPlayback", () => {
 
     await flushAsyncWork();
 
-    expect(result.current.streamUrl).toBe("/api/v1/stream/session-1?token=token");
+    expect(result.current.streamUrl).toBe("/api/v2/stream/session-1?token=token");
     expect(result.current.currentTime).toBe(450);
     expect(result.current.duration).toBe(600);
 
@@ -486,8 +600,11 @@ describe("useAudiobookPlayback", () => {
           );
         }
         if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-        if (url.includes("/progress") || init?.method === "DELETE") {
+        if (url.includes("/progress")) {
           return new Response(null, { status: 204 });
+        }
+        if (init?.method === "DELETE") {
+          return stopReceipt();
         }
         return jsonResponse({});
       }),
@@ -531,8 +648,11 @@ describe("useAudiobookPlayback", () => {
           );
         }
         if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-        if (url.includes("/progress") || init?.method === "DELETE") {
+        if (url.includes("/progress")) {
           return new Response(null, { status: 204 });
+        }
+        if (init?.method === "DELETE") {
+          return stopReceipt();
         }
         return jsonResponse({});
       }),
@@ -566,8 +686,11 @@ describe("useAudiobookPlayback", () => {
           );
         }
         if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-        if (url.includes("/progress") || init?.method === "DELETE") {
+        if (url.includes("/progress")) {
           return new Response(null, { status: 204 });
+        }
+        if (init?.method === "DELETE") {
+          return stopReceipt();
         }
         return jsonResponse({});
       }),
@@ -703,5 +826,160 @@ describe("useAudiobookPlayback", () => {
     expect(result.current.sleep.remainingMs).toBeGreaterThan(0);
     act(() => result.current.setSleep({ kind: "off" }));
     expect(result.current.sleep.remainingMs).toBeNull();
+  });
+});
+
+describe("useAudiobookPlayback sequencing", () => {
+  beforeEach(() => {
+    reportBookProgress.mockClear();
+    vi.useFakeTimers();
+    resetSessionMutations();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    resetSessionMutations();
+  });
+
+  it("waits for the previous part's stop before starting the next part", async () => {
+    let sessionCount = 0;
+    let releaseStop!: () => void;
+    const stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    const events: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/playback/start")) {
+          sessionCount += 1;
+          events.push(`start-${sessionCount}`);
+          const body = JSON.parse(String(init?.body)) as { start_position: number };
+          return jsonResponse(audioOnlyDecision(`part-${sessionCount}`, body.start_position), {
+            status: 201,
+          });
+        }
+        if (init?.method === "DELETE") {
+          events.push("stop-requested");
+          await stopGate;
+          events.push("stop-done");
+          return stopReceipt();
+        }
+        if (url.includes("/progress")) return jsonResponse({ outcome: "applied" });
+        return new Response(null, { status: 202 });
+      }),
+    );
+    const { result } = renderAudiobookPlayback({ files: multiFile, initialPositionSeconds: 0 });
+    const audio = makeAudio();
+    act(() => {
+      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
+    });
+    await flushAsyncWork();
+    expect(events).toEqual(["start-1"]);
+
+    // Crossing into the second part stops part 1 and starts part 2.
+    act(() => result.current.seekTo(310));
+    await flushAsyncWork();
+    await flushAsyncWork();
+    expect(events).toEqual(["start-1", "stop-requested"]);
+
+    releaseStop();
+    await flushAsyncWork();
+    await flushAsyncWork();
+    expect(events).toEqual(["start-1", "stop-requested", "stop-done", "start-2"]);
+  });
+
+  it("stops the session when the final part ends", async () => {
+    const events: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/playback/start")) {
+          events.push("start");
+          const body = JSON.parse(String(init?.body)) as { start_position: number };
+          return jsonResponse(audioOnlyDecision("last-part", body.start_position), { status: 201 });
+        }
+        if (init?.method === "DELETE") {
+          events.push("stop");
+          return stopReceipt();
+        }
+        if (url.includes("/progress")) return jsonResponse({ outcome: "applied" });
+        return new Response(null, { status: 202 });
+      }),
+    );
+    const { result } = renderAudiobookPlayback();
+    const audio = makeAudio();
+    act(() => {
+      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
+    });
+    await flushAsyncWork();
+    expect(events).toEqual(["start"]);
+
+    act(() => audio.dispatchEvent(new Event("ended")));
+    await flushAsyncWork();
+    await flushAsyncWork();
+    expect(events).toEqual(["start", "stop"]);
+    expect(result.current.playing).toBe(false);
+    expect(result.current.currentTime).toBe(600);
+    // The element stays mounted and nothing restarts on its own, but the
+    // control socket lets go of the stopped session.
+    expect(result.current.hasFile).toBe(true);
+    expect(realtimeOptions.current?.sessionId).toBeNull();
+
+    // Play after the end starts a new attempt from the beginning instead of
+    // playing the revoked stream.
+    act(() => result.current.togglePlay());
+    await flushAsyncWork();
+    await flushAsyncWork();
+    expect(events).toEqual(["start", "stop", "start"]);
+    expect(audio.play).not.toHaveBeenCalled();
+    const lastStart = vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) => String(url).endsWith("/playback/start"))
+      .at(-1)!;
+    expect(JSON.parse(String((lastStart[1] as RequestInit).body))).toMatchObject({
+      start_position: 0,
+    });
+  });
+
+  it("seeks the loaded element when the start position changes within the same part", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/playback/start")) {
+          const body = JSON.parse(String(init?.body)) as { start_position: number };
+          return jsonResponse(audioOnlyDecision("same-part", body.start_position), { status: 201 });
+        }
+        if (init?.method === "DELETE") return stopReceipt();
+        if (url.includes("/progress")) return jsonResponse({ outcome: "applied" });
+        return new Response(null, { status: 202 });
+      }),
+    );
+    const { result, rerender } = renderHook(
+      ({ initialPositionSeconds }: { initialPositionSeconds: number }) =>
+        useAudiobookPlayback({ contentId: "c", files, initialPositionSeconds }),
+      { wrapper, initialProps: { initialPositionSeconds: 0 } },
+    );
+    const audio = makeAudio();
+    act(() => {
+      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
+    });
+    await flushAsyncWork();
+    Object.defineProperty(audio, "readyState", { value: 4, writable: true });
+    act(() => audio.dispatchEvent(new Event("loadedmetadata")));
+    await flushAsyncWork();
+
+    // The book page picks chapter two while this part is already loaded.
+    rerender({ initialPositionSeconds: 300 });
+    await flushAsyncWork();
+    expect(audio.currentTime).toBe(300);
+    expect(result.current.currentTime).toBe(300);
+    const starts = vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) => String(url).endsWith("/playback/start"));
+    expect(starts).toHaveLength(1);
   });
 });

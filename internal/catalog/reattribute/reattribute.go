@@ -6,7 +6,7 @@
 //   - Rows carrying a media_file_id are moved exactly: the file's plays belong
 //     to whichever item the file now belongs to.
 //   - user_watch_history has no file reference; rows are classified per
-//     (user, profile) against the per-session playback_history_admin log —
+//     (user, profile) against the per-session admin_playback_history log —
 //     moved when every recorded session for the source item is on moved files,
 //     kept when none are, ambiguous otherwise (including when no session
 //     evidence exists). HistoryMode controls what happens to ambiguous rows.
@@ -191,11 +191,11 @@ func movePairs(ctx context.Context, tx pgx.Tx, pairs []IDPair, report *Report) (
 
 	// Exact tables: no cross-user PK on media_item_id, plain remap.
 	tag, err := tx.Exec(ctx, `
-		UPDATE playback_history_admin t SET media_item_id = p.to_id
+		UPDATE admin_playback_history t SET media_item_id = p.to_id
 		FROM `+pairsCTE+` WHERE t.media_item_id = p.from_id
 	`, fromIDs, toIDs)
 	if err != nil {
-		return fmt.Errorf("reattribute: playback_history_admin pairs: %w", err)
+		return fmt.Errorf("reattribute: admin_playback_history pairs: %w", err)
 	}
 	report.PlaybackSessionLog += int(tag.RowsAffected())
 
@@ -257,6 +257,33 @@ func movePairs(ctx context.Context, tx pgx.Tx, pairs []IDPair, report *Report) (
 			return err
 		}
 		report.IntentMoved += movedRows
+	}
+	return moveRatingSyncPairs(ctx, tx, fromIDs, toIDs)
+}
+
+// moveRatingSyncPairs moves watch-provider agreed ratings along with the
+// user_ratings rows they describe; the destination's row wins a collision. A
+// moved row is unconfirmed and forgets its provider key: when the destination
+// is the same title the next sync reads the rating again and confirms it, and
+// when it is a different title the rating is sent for that title. Either way
+// the move never reads as a provider removal. The rows are not counted in
+// IntentMoved, which reports user data.
+func moveRatingSyncPairs(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []string) error {
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM watch_provider_rating_items src
+		USING `+pairsCTE+`, watch_provider_rating_items dest
+		WHERE src.media_item_id = p.from_id
+		  AND dest.media_item_id = p.to_id
+		  AND dest.connection_id = src.connection_id
+	`, fromIDs, toIDs); err != nil {
+		return fmt.Errorf("reattribute: watch_provider_rating_items dedupe: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE watch_provider_rating_items t
+		SET media_item_id = p.to_id, remote_seen = false, provider_item_key = '', updated_at = now()
+		FROM `+pairsCTE+` WHERE t.media_item_id = p.from_id
+	`, fromIDs, toIDs); err != nil {
+		return fmt.Errorf("reattribute: watch_provider_rating_items move: %w", err)
 	}
 	return nil
 }
@@ -337,7 +364,7 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 	}
 
 	// History classification MUST run before the session log is re-pointed:
-	// its evidence query reads playback_history_admin rows still keyed to the
+	// its evidence query reads admin_playback_history rows still keyed to the
 	// source item. Moving the log first would erase exactly the evidence that
 	// proves a profile's plays were all on moved files, leaving that profile's
 	// history behind as "ambiguous".
@@ -347,12 +374,12 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 
 	// Per-session log: exact.
 	tag, err := tx.Exec(ctx, `
-		UPDATE playback_history_admin
+		UPDATE admin_playback_history
 		SET media_item_id = $3
-		WHERE media_item_id = $1 AND media_file_id = ANY($2::int[])
+		WHERE media_item_id = $1 AND media_file_id = ANY($2::bigint[])
 	`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID)
 	if err != nil {
-		return fmt.Errorf("reattribute: playback_history_admin subset: %w", err)
+		return fmt.Errorf("reattribute: admin_playback_history subset: %w", err)
 	}
 	report.PlaybackSessionLog = int(tag.RowsAffected())
 
@@ -360,7 +387,7 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 	tag, err = tx.Exec(ctx, `
 		UPDATE user_downloads
 		SET media_item_id = $3
-		WHERE media_item_id = $1 AND media_file_id = ANY($2::int[])
+		WHERE media_item_id = $1 AND media_file_id = ANY($2::bigint[])
 	`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID)
 	if err != nil {
 		return fmt.Errorf("reattribute: user_downloads subset: %w", err)
@@ -372,7 +399,7 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 	tag, err = tx.Exec(ctx, `
 		UPDATE downloads
 		SET content_id = $3, updated_at = NOW()
-		WHERE content_id = $1 AND media_file_id = ANY($2::int[])
+		WHERE content_id = $1 AND media_file_id = ANY($2::bigint[])
 	`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID)
 	if err != nil {
 		return fmt.Errorf("reattribute: downloads subset: %w", err)
@@ -398,6 +425,9 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 			}
 			report.IntentMoved += movedRows
 		}
+		if err := moveRatingSyncPairs(ctx, tx, []string{opts.FromContentID}, []string{opts.ToContentID}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -407,7 +437,7 @@ func moveProgressSubset(ctx context.Context, tx pgx.Tx, opts Options) (moved, co
 		DELETE FROM user_watch_progress src
 		USING user_watch_progress dest
 		WHERE src.media_item_id = $1
-		  AND src.last_file_id = ANY($2::int[])
+		  AND src.last_file_id = ANY($2::bigint[])
 		  AND dest.media_item_id = $3
 		  AND dest.user_id = src.user_id
 		  AND dest.profile_id = src.profile_id
@@ -423,7 +453,7 @@ func moveProgressSubset(ctx context.Context, tx pgx.Tx, opts Options) (moved, co
 		USING user_watch_progress src
 		WHERE dest.media_item_id = $3
 		  AND src.media_item_id = $1
-		  AND src.last_file_id = ANY($2::int[])
+		  AND src.last_file_id = ANY($2::bigint[])
 		  AND src.user_id = dest.user_id
 		  AND src.profile_id = dest.profile_id
 	`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID)
@@ -435,7 +465,7 @@ func moveProgressSubset(ctx context.Context, tx pgx.Tx, opts Options) (moved, co
 	tag, err = tx.Exec(ctx, `
 		UPDATE user_watch_progress
 		SET media_item_id = $3
-		WHERE media_item_id = $1 AND last_file_id = ANY($2::int[])
+		WHERE media_item_id = $1 AND last_file_id = ANY($2::bigint[])
 	`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID)
 	if err != nil {
 		return 0, 0, fmt.Errorf("reattribute: progress subset move: %w", err)
@@ -444,7 +474,7 @@ func moveProgressSubset(ctx context.Context, tx pgx.Tx, opts Options) (moved, co
 }
 
 // moveHistorySubset classifies user_watch_history rows per (user, profile)
-// against the playback_history_admin session log:
+// against the admin_playback_history session log:
 //
 //	unanimous moved sessions → the profile's history rows move
 //	unanimous stayed sessions → they stay
@@ -469,9 +499,9 @@ func moveHistorySubset(ctx context.Context, tx pgx.Tx, opts Options, report *Rep
 	const evidenceCTE = `
 		WITH evidence AS (
 			SELECT user_id, profile_id,
-			       bool_or(media_file_id = ANY($2::int[])) AS any_moved,
-			       bool_or(NOT (media_file_id = ANY($2::int[]))) AS any_stayed
-			FROM playback_history_admin
+			       bool_or(media_file_id = ANY($2::bigint[])) AS any_moved,
+			       bool_or(NOT (media_file_id = ANY($2::bigint[]))) AS any_stayed
+			FROM admin_playback_history
 			WHERE media_item_id = $1
 			GROUP BY user_id, profile_id
 		)`

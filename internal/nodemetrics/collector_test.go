@@ -49,14 +49,9 @@ func TestCollectorExposesSnapshot(t *testing.T) {
 
 	values := gatherNames(t, s)
 	for _, name := range []string{
-		"streamapp_node_cpu_percent",
 		"streamapp_node_load1",
-		"streamapp_node_memory_used_bytes",
-		"streamapp_node_memory_total_bytes",
 		"streamapp_node_disk_used_bytes",
 		"streamapp_node_disk_total_bytes",
-		"streamapp_node_network_rx_bps",
-		"streamapp_node_network_tx_bps",
 		"streamapp_node_gpu_video_busy_percent",
 		"streamapp_node_gpu_busy_percent",
 		"streamapp_node_gpu_sessions",
@@ -127,16 +122,15 @@ func TestCollectorDoesNotLabelDisksByPath(t *testing.T) {
 	}
 }
 
-// A host that cannot be sampled must publish nothing rather than a wall of
-// zeros that alert rules would read as a healthy idle machine.
+// An unsampled host publishes measurement health without invented resource values.
 func TestCollectorExposesNothingWhenUnavailable(t *testing.T) {
 	tree := newProcTree(t)
 	s := newTestSampler(t, tree, newFakeClock(), Options{})
 	s.goos = "darwin"
 	s.sample(context.Background())
 
-	if values := gatherNames(t, s); len(values) != 0 {
-		t.Fatalf("scrape returned %v on an unsampled host, want nothing", values)
+	if values := gatherNames(t, s); len(values) != 2 || values["silo_resource_sample_available"] != 0 || values["silo_resource_sample_stale"] != 1 {
+		t.Fatalf("scrape returned %v on an unsampled host, want only unavailable/stale health", values)
 	}
 }
 

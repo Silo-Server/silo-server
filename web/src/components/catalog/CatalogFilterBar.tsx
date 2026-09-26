@@ -1,3 +1,4 @@
+import type { PersonalizedSorts } from "@/lib/querySortOptions";
 import { Loader2, SlidersHorizontal } from "lucide-react";
 
 import type { GuidedFormState } from "@/components/collections/CollectionGuidedRulesEditor";
@@ -24,7 +25,7 @@ interface CatalogFilterBarProps {
   activeFilterCount: number;
   onOpenFilters: () => void;
   showMediaScopeSelector?: boolean;
-  allowPersonalizedSorts?: boolean;
+  allowPersonalizedSorts?: PersonalizedSorts;
   sortRelevanceScope?: QuerySortRelevanceScope;
   resultCountLabel?: string;
   resultCountLoading?: boolean;

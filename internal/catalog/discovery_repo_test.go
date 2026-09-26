@@ -8,6 +8,8 @@ package catalog
 import (
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 // ---------------------------------------------------------------------------
@@ -235,15 +237,15 @@ func TestUnplayedHighRated_ContentRatingFilter(t *testing.T) {
 		MinRating: 6.0,
 		UserID:    2,
 		ProfileID: "p",
-		Filter:    AccessFilter{MaxContentRating: "PG-13"},
+		Filter:    AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}},
 	})
 
-	if !strings.Contains(query, "mi.content_rating = ANY(") {
-		t.Fatalf("expected content_rating = ANY filter, got:\n%s", query)
+	if !strings.Contains(query, "mi.content_rating_age IS NOT NULL AND mi.content_rating_age <= $") {
+		t.Fatalf("expected stored-age ceiling filter, got:\n%s", query)
 	}
-	// args: minRating, userID, profileID, then content rating slice (one arg).
+	// args: minRating, userID, profileID, then the ceiling age (one arg).
 	if len(args) != 4 {
-		t.Fatalf("expected exactly 4 args (minRating, userID, profileID, rating slice); got %d: %v", len(args), args)
+		t.Fatalf("expected exactly 4 args (minRating, userID, profileID, ceiling age); got %d: %v", len(args), args)
 	}
 }
 
@@ -278,7 +280,7 @@ func TestForgottenFavorites_BasicQuery(t *testing.T) {
 	if !strings.Contains(query, "uwh.watched_at >= NOW()") {
 		t.Fatalf("expected watched_at recency filter, got:\n%s", query)
 	}
-	if !strings.Contains(query, "$3 || ' days'") {
+	if !strings.Contains(query, "make_interval(days => $3)") {
 		t.Fatalf("expected lookback_days at $3, got:\n%s", query)
 	}
 	if !strings.Contains(query, "ORDER BY mi.rating_imdb DESC NULLS LAST") {
@@ -289,6 +291,13 @@ func TestForgottenFavorites_BasicQuery(t *testing.T) {
 	}
 	if len(args) != 4 {
 		t.Fatalf("expected 4 args (userID, profileID, lookbackDays, limit), got %d: %v", len(args), args)
+	}
+	// The lookback must reach Postgres as an integer. This assertion is the
+	// one that was missing: the query text was checked but never executed, so
+	// `($3 || ' days')::interval` -- which makes Postgres infer $3 as text and
+	// then fails to encode the int at runtime -- passed review and shipped.
+	if _, ok := args[2].(int); !ok {
+		t.Fatalf("expected lookback_days arg to be an int, got %T (%v)", args[2], args[2])
 	}
 }
 

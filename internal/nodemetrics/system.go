@@ -1,6 +1,7 @@
 package nodemetrics
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -105,19 +106,24 @@ func cpuBusyPercent(previous, current cpuTimes) (int, bool) {
 
 // readLoad1 parses the 1-minute load average from /proc/loadavg.
 func readLoad1(procDir string) float64 {
+	value, _ := readLoad1Value(procDir)
+	return value
+}
+
+func readLoad1Value(procDir string) (float64, bool) {
 	raw, err := os.ReadFile(filepath.Join(procDir, "loadavg"))
 	if err != nil {
-		return 0
+		return 0, false
 	}
 	fields := strings.Fields(string(raw))
 	if len(fields) == 0 {
-		return 0
+		return 0, false
 	}
 	value, err := strconv.ParseFloat(fields[0], 64)
-	if err != nil || value < 0 {
-		return 0
+	if err != nil || value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, false
 	}
-	return value
+	return value, true
 }
 
 // readNetCounters sums received and transmitted bytes across every interface
@@ -222,6 +228,8 @@ func (s *Sampler) procDirFor(name string) string {
 // used figure for the same reason.
 func (s *Sampler) memoryStats() (usedBytes, totalBytes int64) {
 	fields, err := ReadMeminfoBytes(filepath.Join(s.procDirFor("meminfo"), "meminfo"))
+	_, haveAvailable := fields["MemAvailable"]
+	s.memorySource = s.procSource("meminfo", err == nil && fields["MemTotal"] > 0 && haveAvailable && fields["MemAvailable"] >= 0 && fields["MemAvailable"] <= fields["MemTotal"])
 	if err == nil {
 		totalBytes = fields["MemTotal"]
 		if available, ok := fields["MemAvailable"]; ok && totalBytes >= available {
@@ -268,8 +276,19 @@ func (s *Sampler) memoryStats() (usedBytes, totalBytes int64) {
 	// two numbers describe different domains. Whichever domain total came from,
 	// used has to come from the same one.
 	if binding != nil {
+		s.cgroupMemoryDetails = sampleCgroupMemory(*binding, s.cgroupUsagePaths)
+		s.memorySource = ResourceSource{Scope: scopeCgroup, Source: "cgroup_" + s.cgroupMemoryDetails.Version}
 		if usage, ok := cgroupMemoryUsage(*binding); ok {
+			s.memorySource.Available = s.cgroupMemoryDetails.WorkingSetBytes != nil
 			usedBytes = usage
+		}
+	}
+	if binding == nil {
+		for _, level := range s.cgroupUsagePaths {
+			if _, err := readCgroupSingleValue(level.usage); err == nil {
+				s.cgroupMemoryDetails = sampleCgroupMemory(level, s.cgroupUsagePaths)
+				break
+			}
 		}
 	}
 	if totalBytes > 0 && usedBytes > totalBytes {

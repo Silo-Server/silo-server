@@ -1,0 +1,19 @@
+{
+  "job": {
+    "id": "9007199254740993",
+    "media_file_id": "42",
+    "kind": "",
+    "source_index": 0,
+    "source_language": "",
+    "target_language": "",
+    "engine": "",
+    "model": "",
+    "status": "failed",
+    "progress": 0,
+    "progress_message": "Transcribing",
+    "result_subtitle_id": null,
+    "error_message": "Subtitle processing failed.",
+    "created_at": "2026-01-02T03:04:05.678Z",
+    "updated_at": "2026-01-02T03:04:05.678Z"
+  }
+}

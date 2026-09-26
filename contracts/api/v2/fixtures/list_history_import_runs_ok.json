@@ -1,0 +1,84 @@
+{
+  "items": [
+    {
+      "terminal": false,
+      "cancelable": false,
+      "id": "run-3",
+      "user_id": "1",
+      "profile_id": "p-owner",
+      "source_type": "plex",
+      "connection_mode": "plex_oauth",
+      "status": "running",
+      "fetched": 0,
+      "matched": 0,
+      "unmatched": 0,
+      "progress_updated": 0,
+      "history_created": 0,
+      "watchlist_added": 0,
+      "favorites_imported": 0,
+      "skipped": 0,
+      "warnings": [],
+      "unmatched_samples": [],
+      "created_at": "2026-01-02T05:04:05.678Z",
+      "started_at": "2026-01-02T03:04:06.678Z"
+    },
+    {
+      "terminal": true,
+      "cancelable": false,
+      "id": "run-2",
+      "user_id": "1",
+      "profile_id": "p-owner",
+      "source_type": "emby",
+      "connection_mode": "connect",
+      "status": "completed",
+      "mapping_id": "3",
+      "fetched": 4,
+      "matched": 3,
+      "unmatched": 1,
+      "progress_updated": 0,
+      "history_created": 0,
+      "watchlist_added": 0,
+      "favorites_imported": 0,
+      "skipped": 0,
+      "warnings": [
+        "An import item could not be processed."
+      ],
+      "unmatched_samples": [
+        {
+          "kind": "movie",
+          "title": "Example",
+          "year": 2021,
+          "reason": "No matching catalog item was imported."
+        }
+      ],
+      "created_at": "2026-01-02T04:04:05.678Z",
+      "started_at": "2026-01-02T03:04:06.678Z",
+      "completed_at": "2026-01-02T03:04:06.678Z"
+    },
+    {
+      "terminal": true,
+      "cancelable": false,
+      "id": "run-1",
+      "user_id": "1",
+      "profile_id": "p-owner",
+      "source_type": "jellyfin",
+      "connection_mode": "custom",
+      "status": "failed",
+      "fetched": 0,
+      "matched": 0,
+      "unmatched": 0,
+      "progress_updated": 0,
+      "history_created": 0,
+      "watchlist_added": 0,
+      "favorites_imported": 0,
+      "skipped": 0,
+      "warnings": [],
+      "unmatched_samples": [],
+      "error_message": "The import failed. Review the source configuration before starting a new run.",
+      "created_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

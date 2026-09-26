@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { api } from "@/api/client";
+import { v2 } from "@/api/v2/request";
 import type {
   ImportMDBListCollectionRequest,
   ImportTMDBCollectionRequest,
@@ -181,11 +181,13 @@ export const TEMPLATE_STALE_TIME = 5 * 60_000;
 export const COLLECTION_MAX_ITEMS = 500;
 
 export function fetchCollectionTemplates(): Promise<CollectionTemplateCatalog> {
-  return api<CollectionTemplateCatalog>("/admin/collections/templates");
+  return v2("GET /api/v2/admin/collections/templates").then(
+    (value) => value as CollectionTemplateCatalog,
+  );
 }
 
 export function fetchCollectionTemplateBundles(): Promise<CollectionTemplateBundleCatalog> {
-  return api<CollectionTemplateBundleCatalog>("/admin/collections/template-bundles");
+  return v2("GET /api/v2/admin/collections/template-bundles");
 }
 
 export function useCollectionTemplates(enabled = true) {

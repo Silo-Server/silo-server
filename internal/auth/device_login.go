@@ -511,9 +511,10 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 	}
 
 	pair, err := s.generateTokenPair(Claims{
-		UserID:    user.ID,
-		Role:      user.Role,
-		SessionID: sessionID,
+		UserID:                 user.ID,
+		Role:                   user.Role,
+		SessionID:              sessionID,
+		PasswordChangeRequired: user.PasswordChangeRequired,
 	})
 	if err != nil {
 		return nil, err

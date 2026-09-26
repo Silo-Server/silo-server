@@ -1,0 +1,177 @@
+package handlers
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/watchstate"
+	"github.com/Silo-Server/silo-server/internal/watchsync"
+)
+
+// Leaf item types whose progress is per item rather than aggregated.
+const (
+	itemTypeMovie     = "movie"
+	itemTypeEpisode   = "episode"
+	itemTypeEbook     = "ebook"
+	itemTypeAudiobook = "audiobook"
+)
+
+// WatchedStateView is what marking an item watched or unwatched answers:
+// the target, the kind it resolved to, and how many leaf items changed.
+type WatchedStateView = watchedStateResponse
+
+// WatchDetail resolves the playable detail v1 GET /watch/{id} answers, with
+// the profile's progress on a leaf item folded in (none when profileID is
+// empty: the route does not require a profile). A series is not directly
+// playable (400 invalid_watch_target); an unknown or inaccessible target is
+// 404. The v1 handler and the v2 operation share it.
+func (h *ItemsHandler) WatchDetail(ctx context.Context, userID int, profileID, contentID string, filter catalog.AccessFilter) (*catalog.WatchDetail, error) {
+	detail, err := h.detailSvc.GetWatchDetail(ctx, contentID, filter)
+	if err != nil {
+		switch {
+		case catalog.IsWatchTargetNotPlayable(err):
+			return nil, apiError(http.StatusBadRequest, "invalid_watch_target", "Content is not directly playable")
+		case isNotFound(err):
+			return nil, apiError(http.StatusNotFound, "not_found", "Watch target not found")
+		default:
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to get watch detail")
+		}
+	}
+
+	if detail.Type == itemTypeMovie || detail.Type == itemTypeEpisode {
+		h.populateWatchMarkers(ctx, detail, filter.SelectedFileID)
+	}
+	if detail.Type == itemTypeMovie || detail.Type == itemTypeEpisode || detail.Type == itemTypeEbook || detail.Type == itemTypeAudiobook {
+		detail.UserData = h.leafUserData(ctx, userID, profileID, detail.ContentID, detail.Type)
+		applyEffectiveEditionPreference(detail.UserData, &detail.EffectiveVersionEditionKey)
+	}
+	return detail, nil
+}
+
+func (h *ItemsHandler) populateWatchMarkers(ctx context.Context, detail *catalog.WatchDetail, selectedFileID int) {
+	if h.MarkerPopulation == nil || h.MarkerFileResolver == nil || len(detail.Versions) == 0 {
+		return
+	}
+	if selectedFileID == 0 && len(detail.PlaybackVariants) > 0 {
+		selectedFileID = detail.PlaybackVariants[0].DefaultFileID
+	}
+	if selectedFileID == 0 {
+		selectedFileID = detail.Versions[0].FileID
+	}
+	// Only a version returned by the access-filtered detail may cause a lookup.
+	var selected *catalog.FileVersion
+	for i := range detail.Versions {
+		if detail.Versions[i].FileID == selectedFileID {
+			selected = &detail.Versions[i]
+			break
+		}
+	}
+	if selected == nil {
+		return
+	}
+	file, err := h.MarkerFileResolver.GetByID(ctx, selectedFileID)
+	if err != nil {
+		slog.WarnContext(ctx, "watch marker file lookup failed", "file_id", selectedFileID, "error", err)
+		return
+	}
+	file = populateFileMarkers(ctx, h.MarkerPopulation, file)
+	if file == nil {
+		return
+	}
+	selected.SetMarkers(file)
+	detail.Intro, detail.Credits, detail.Recap, detail.Preview = selected.Intro, selected.Credits, selected.Recap, selected.Preview
+	for i := range detail.PlaybackVariants {
+		for j := range detail.PlaybackVariants[i].Parts {
+			for k := range detail.PlaybackVariants[i].Parts[j].Versions {
+				version := &detail.PlaybackVariants[i].Parts[j].Versions[k]
+				if version.FileID == selectedFileID {
+					version.SetMarkers(file)
+				}
+			}
+		}
+	}
+}
+
+// SetWatchedState marks a movie, ebook, episode, season or series watched
+// (played) or unwatched for the profile; a season or series expands to its
+// episodes and an ebook's read state lives in the reader-progress store. It
+// is the command behind v1 POST/DELETE /watched/{id} and the v2 operations.
+func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileID, contentID string, played bool, filter catalog.AccessFilter) (WatchedStateView, error) {
+	targetType, targets, err := h.resolveWatchedTargets(ctx, contentID, filter)
+	if err != nil {
+		if isNotFound(err) {
+			return WatchedStateView{}, apiError(http.StatusNotFound, "not_found", "Item not found")
+		}
+		return WatchedStateView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update watched state")
+	}
+
+	switch {
+	case targetType == itemTypeEbook:
+		// Ebook read state lives in ebook_reader_progress, not in
+		// user_watch_progress/user_watch_history; watch providers do not sync
+		// books, so no local watch event is dispatched.
+		err = h.setEbookReadState(ctx, userID, profileID, contentID, played, filter)
+	case h.watchState == nil:
+		return WatchedStateView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	case played:
+		err = h.markLeafTargetsWatched(ctx, userID, profileID, targets)
+	default:
+		err = h.markLeafTargetsUnwatched(ctx, userID, profileID, targets)
+	}
+	if err != nil {
+		if isNotFound(err) {
+			return WatchedStateView{}, apiError(http.StatusNotFound, "not_found", "Item not found")
+		}
+		return WatchedStateView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update watched state")
+	}
+
+	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, "", "watched", userStateEventState{
+		Played: boolPtr(played),
+	})
+
+	return WatchedStateView{
+		ContentID:     contentID,
+		Type:          targetType,
+		AffectedCount: len(targets),
+		Played:        played,
+	}, nil
+}
+
+// markLeafTargetsWatched records a manual play for every leaf target the
+// profile has not already completed and queues one outbound provider event
+// for the plays it recorded. A target already completed is a no-op: no
+// history row, no event, so a retried mark never double-counts a play.
+func (h *ItemsHandler) markLeafTargetsWatched(ctx context.Context, userID int, profileID string, targets []watchedLeafTarget) error {
+	leafTargets := make([]watchstate.LeafWatchTarget, 0, len(targets))
+	for _, target := range targets {
+		leafTargets = append(leafTargets, watchstate.LeafWatchTarget{
+			MediaItemID:     target.ContentID,
+			DurationSeconds: target.DurationSeconds,
+		})
+	}
+	result, err := h.watchState.RecordManualMarkWatchedWithResult(ctx, userID, profileID, leafTargets, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	h.dispatchLocalWatchEvent(ctx, watchsync.LocalWatchEventMarkedWatched, userID, profileID, result)
+	return nil
+}
+
+// markLeafTargetsUnwatched hides the targets' history and clears their
+// progress, then queues the removal of the manual plays that were visible.
+func (h *ItemsHandler) markLeafTargetsUnwatched(ctx context.Context, userID int, profileID string, targets []watchedLeafTarget) error {
+	targetIDs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		targetIDs = append(targetIDs, target.ContentID)
+	}
+	result, err := h.watchState.RecordManualMarkUnwatchedWithResult(ctx, userID, profileID, targetIDs)
+	if err != nil {
+		return err
+	}
+	h.dispatchLocalWatchEvent(ctx, watchsync.LocalWatchEventMarkedUnwatched, userID, profileID, result)
+	return nil
+}

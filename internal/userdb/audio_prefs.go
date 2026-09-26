@@ -17,6 +17,11 @@ func SetAudioPreference(db *sql.DB, pref AudioPreference) error {
 }
 
 func setAudioPreference(exec preferenceSettingsExecutor, pref AudioPreference) error {
+	// Same default pgstore applies: an empty UpdatedAt is "now", never an
+	// empty string a later read cannot parse.
+	if pref.UpdatedAt == "" {
+		pref.UpdatedAt = nowUTC()
+	}
 	signatureJSON, err := userstore.MarshalAudioTrackSignature(pref.TrackSignature)
 	if err != nil {
 		return fmt.Errorf("marshaling audio track signature for profile %q series %q: %w",
@@ -49,9 +54,13 @@ func setAudioPreference(exec preferenceSettingsExecutor, pref AudioPreference) e
 // GetAudioPreference retrieves the audio preference for a profile
 // and series. Returns nil (not an error) if no preference exists.
 func GetAudioPreference(db *sql.DB, profileID, seriesID string) (*AudioPreference, error) {
+	return getAudioPreference(db, profileID, seriesID)
+}
+
+func getAudioPreference(exec preferenceSettingsExecutor, profileID, seriesID string) (*AudioPreference, error) {
 	var pref AudioPreference
 	var signatureJSON string
-	err := db.QueryRow(`
+	err := exec.QueryRow(`
 		SELECT profile_id, series_id, audio_track_index,
 		       audio_language, audio_track_signature, updated_at
 		FROM audio_preferences

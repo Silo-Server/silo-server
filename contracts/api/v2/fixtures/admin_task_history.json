@@ -1,0 +1,26 @@
+{
+  "items": [
+    {
+      "task_key": "fixture",
+      "started_at": "2026-01-02T03:04:05.678Z",
+      "completed_at": "2026-01-02T03:04:05.678Z",
+      "status": "failed",
+      "duration_ms": 0,
+      "error_message": "Task failed. Inspect administrator diagnostics for details.",
+      "id": "3"
+    },
+    {
+      "task_key": "fixture",
+      "started_at": "2026-01-02T03:04:05.678Z",
+      "completed_at": "2026-01-02T03:04:05.678Z",
+      "status": "failed",
+      "duration_ms": 0,
+      "error_message": "Task failed. Inspect administrator diagnostics for details.",
+      "id": "2"
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7ImNvbXBsZXRlZCI6IjIwMjYtMDEtMDJUMDM6MDQ6MDUuNjc4WiIsImlkIjoyfX0.qNwvG6ieg4Cr_ihvs51vMuJWq37TkHrEwo99-PXes5w",
+    "has_more": true
+  }
+}

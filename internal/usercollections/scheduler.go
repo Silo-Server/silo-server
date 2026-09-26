@@ -10,6 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/Silo-Server/silo-server/internal/collectionutil"
 )
 
 // Scheduler picks user-owned collections whose next_sync_at is in the past
@@ -113,7 +115,9 @@ func (s *Scheduler) syncOne(ctx context.Context, dc dueCollection, mu *sync.Mute
 	defer s.inFlight.Delete(dc.CollectionID)
 
 	startedAt := time.Now()
-	_, err := s.service.SyncCollection(ctx, dc.UserID, dc.CollectionID)
+	syncCtx, cancel := context.WithTimeout(ctx, collectionutil.SyncTimeout)
+	_, err := s.service.SyncCollection(syncCtx, dc.UserID, dc.CollectionID)
+	cancel()
 	dur := time.Since(startedAt).Round(time.Millisecond)
 
 	mu.Lock()

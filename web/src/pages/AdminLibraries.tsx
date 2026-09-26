@@ -1,3 +1,4 @@
+import { JobPageControls } from "@/components/admin/JobPageControls";
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useEventChannel } from "@/components/realtimeEventsContext";
@@ -6,7 +7,6 @@ import type {
   Library,
   LibraryMountCheckResponse,
   LibraryRoot,
-  LibrarySkippedRoot,
   ScanRun,
   StaleMediaID,
   UnmatchedLibraryItem,
@@ -17,9 +17,11 @@ import {
   useReorderLibraries,
   useSkippedLibraryRoots,
   useLibraryRoots,
+  flattenLibraryRoots,
   useUpsertLibraryRootOverride,
   useDeleteLibraryRootOverride,
   useStaleMediaIDs,
+  flattenStaleMediaIDs,
   useCheckLibraryMount,
   useDeleteLibrary,
   useScanLibrary,
@@ -35,6 +37,7 @@ import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { buildLibraryReorderEntries } from "./adminLibraryOrder";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import { LibraryEditorDialog } from "@/components/admin/libraries/LibraryEditorDialog";
+import { LibraryRefreshDialog } from "@/components/admin/libraries/LibraryRefreshDialog";
 import { MetadataMatcherQueuesSection } from "@/components/admin/libraries/MetadataMatcherQueuesSection";
 import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDiagnosticsSection";
 import { Button } from "@/components/ui/button";
@@ -163,13 +166,13 @@ export default function AdminLibraries() {
 
   const { data: libraries = [], isLoading } = useAdminLibraries();
   const { data: activeScans = [] } = useActiveScans();
-  const { data: libraryRefreshJobs = [] } = useLibraryRefreshJobs();
-  const { data: skippedRoots = [] } = useSkippedLibraryRoots();
-  const { data: staleIDs = [] } = useStaleMediaIDs();
+  const refreshJobsQuery = useLibraryRefreshJobs();
+  const libraryRefreshJobs = useMemo(() => refreshJobsQuery.data ?? [], [refreshJobsQuery.data]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingLib, setEditingLib] = useState<Library | null>(null);
   const [confirmDeleteLib, setConfirmDeleteLib] = useState<Library | null>(null);
   const [confirmEmptyRootLib, setConfirmEmptyRootLib] = useState<Library | null>(null);
+  const [refreshLib, setRefreshLib] = useState<Library | null>(null);
   const [lastMountCheckByLibraryId, setLastMountCheckByLibraryId] = useState<
     Record<number, LibraryMountCheckResponse>
   >({});
@@ -322,6 +325,7 @@ export default function AdminLibraries() {
 
   return (
     <div className="space-y-6">
+      <JobPageControls query={refreshJobsQuery} label="Load older refresh jobs" />
       <ConfirmDialog
         open={confirmDeleteLib !== null}
         onOpenChange={(open) => {
@@ -404,6 +408,22 @@ export default function AdminLibraries() {
               true
             }
           />
+          <LibraryRefreshDialog
+            libraryName={refreshLib?.name ?? null}
+            onOpenChange={(open) => {
+              // Keep the dialog up until the queued request settles.
+              if (!open && !refreshMutation.isPending) setRefreshLib(null);
+            }}
+            isPending={refreshMutation.isPending}
+            onConfirm={(mode) => {
+              if (!refreshLib) return;
+              const id = refreshLib.id;
+              refreshMutation.mutate(
+                { id, mode },
+                { onSettled: () => setRefreshLib((open) => (open?.id === id ? null : open)) },
+              );
+            }}
+          />
         </div>
       </div>
 
@@ -449,7 +469,7 @@ export default function AdminLibraries() {
                       ).length;
                       const queuedLibraryScans = activeLibraryScans.length - runningLibraryScans;
                       const isRefreshStarting =
-                        refreshMutation.isPending && refreshMutation.variables === lib.id;
+                        refreshMutation.isPending && refreshMutation.variables?.id === lib.id;
                       const isCheckingMount =
                         mountCheckMutation.isPending && mountCheckMutation.variables === lib.id;
                       const mountCheck = lastMountCheckByLibraryId[lib.id];
@@ -500,6 +520,9 @@ export default function AdminLibraries() {
                                 ) : null}
                                 {lib.scan_warning_code === "dead_root" ? (
                                   <Badge variant="destructive">Root unreachable</Badge>
+                                ) : null}
+                                {lib.scan_warning_code === "partial_walk" ? (
+                                  <Badge variant="destructive">Partial scan</Badge>
                                 ) : null}
                               </div>
                             </TableCell>
@@ -575,7 +598,7 @@ export default function AdminLibraries() {
                                       cancelAdminJobMutation.mutate(activeRefreshJob.id);
                                       return;
                                     }
-                                    refreshMutation.mutate(lib.id);
+                                    setRefreshLib(lib);
                                   }}
                                 >
                                   {activeRefreshJob ? (
@@ -672,9 +695,25 @@ export default function AdminLibraries() {
                       .filter(
                         (lib) =>
                           lib.scan_warning_code === "empty_root" ||
-                          lib.scan_warning_code === "dead_root",
+                          lib.scan_warning_code === "dead_root" ||
+                          lib.scan_warning_code === "partial_walk",
                       )
                       .map((lib) => {
+                        if (lib.scan_warning_code === "partial_walk") {
+                          return (
+                            <TableRow key={`${lib.id}-warning`}>
+                              <TableCell colSpan={7} className="bg-destructive/5 text-sm">
+                                <div className="flex flex-col gap-2 py-1">
+                                  <div className="text-destructive font-medium">Partial scan</div>
+                                  <div className="text-muted-foreground">
+                                    {lib.scan_warning_message ??
+                                      "Some paths could not be read. Run another scan after storage is available."}
+                                  </div>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        }
                         const mountCheck = lastMountCheckByLibraryId[lib.id];
                         const isCheckingMount =
                           mountCheckMutation.isPending && mountCheckMutation.variables === lib.id;
@@ -767,8 +806,8 @@ export default function AdminLibraries() {
           <UnmatchedItemsSection />
           <MetadataMatcherQueuesSection libraries={libraries} />
           <AmbiguousRootsSection libraries={libraries} />
-          {skippedRoots.length > 0 ? <SkippedRootsSection skippedRoots={skippedRoots} /> : null}
-          {staleIDs.length > 0 && <StaleIDsSection staleIDs={staleIDs} />}
+          <SkippedRootsSection />
+          <StaleIDsSection />
         </TabsContent>
 
         <TabsContent value="autoscan">
@@ -1406,26 +1445,43 @@ function useSort<K extends string>(defaultField: K, defaultDir: SortDir = "desc"
 
 /* ─── Skipped Roots (Troubleshooting) ───────────────────────────── */
 
+/**
+ * AmbiguousRootsSection displays scanner roots that require manual resolution,
+ * handling loading, confirmed empty, populated warning, and error states.
+ */
 function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
   const [open, setOpen] = useState(false);
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | undefined>(libraries[0]?.id);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 250);
   const [editingRoot, setEditingRoot] = useState<LibraryRoot | null>(null);
   const effectiveSelectedLibraryId = selectedLibraryId ?? libraries[0]?.id;
-  const { data: roots = [] } = useLibraryRoots(effectiveSelectedLibraryId, "ambiguous");
+  // The listing is paged on demand: the first page loads when the section
+  // opens and "Load more" fetches the rest, so a large library does not make
+  // the server walk every root on mount. The search is server-side and spans
+  // every page, so a root on a later page is found without loading it; a new
+  // search term restarts paging from the first page.
+  const {
+    data: rootPages,
+    isError,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useLibraryRoots(effectiveSelectedLibraryId, "ambiguous", {
+    enabled: open,
+    search: debouncedSearch,
+  });
+  const roots = useMemo(() => flattenLibraryRoots(rootPages), [rootPages]);
+  const totalRoots = rootPages?.pages[0]?.total ?? 0;
+  // Until the first page arrives for the selected library and search, the
+  // count is unknown: the query is disabled while collapsed, so a missing
+  // page must not read as a confirmed zero. A failure after a page loaded
+  // (a later page or a refetch) keeps showing what already loaded.
+  const loadFailed = rootPages === undefined && isError;
+  const countUnknown = rootPages === undefined && !isError;
+  const isWarning = totalRoots > 0;
 
-  const filteredRoots = useMemo(() => {
-    if (!search) return roots;
-    const q = search.toLowerCase();
-    return roots.filter(
-      (root) =>
-        root.root_path.toLowerCase().includes(q) ||
-        root.title.toLowerCase().includes(q) ||
-        (root.sample_file_path ?? "").toLowerCase().includes(q),
-    );
-  }, [roots, search]);
-
-  const pag = usePagination(filteredRoots);
+  const pag = usePagination(roots);
 
   if (libraries.length === 0) {
     return null;
@@ -1435,8 +1491,20 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
     <CollapsibleDiagnosticsSection
       title="Ambiguous Roots"
       description="Scanner roots that stay visible but do not enter unattended metadata matching."
-      count={roots.length}
-      icon={<FolderOpen className="h-4 w-4 text-amber-500" />}
+      count={countUnknown ? undefined : totalRoots}
+      isError={loadFailed}
+      icon={
+        loadFailed ? (
+          <AlertTriangle className="text-destructive h-4 w-4" />
+        ) : (
+          <FolderOpen
+            className={cn("h-4 w-4", isWarning ? "text-amber-500" : "text-muted-foreground")}
+          />
+        )
+      }
+      iconClassName={
+        loadFailed ? "bg-destructive/10" : isWarning ? "bg-amber-500/10" : "bg-muted/50"
+      }
       open={open}
       onOpenChange={setOpen}
     >
@@ -1487,10 +1555,24 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredRoots.length === 0 ? (
+            {loadFailed ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-destructive text-center text-sm">
+                  Failed to load ambiguous roots for this library.
+                </TableCell>
+              </TableRow>
+            ) : countUnknown ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
-                  No ambiguous roots for this library.
+                  Loading ambiguous roots for this library.
+                </TableCell>
+              </TableRow>
+            ) : roots.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
+                  {debouncedSearch.trim()
+                    ? "No ambiguous roots match your filter."
+                    : "No ambiguous roots for this library."}
                 </TableCell>
               </TableRow>
             ) : (
@@ -1550,6 +1632,24 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
         </Table>
       </div>
       <PaginationBar {...pag} />
+      {hasNextPage ? (
+        <div className="mt-2 flex items-center justify-between gap-3 text-xs">
+          <span className="text-muted-foreground tabular-nums">
+            Showing {roots.length} of {totalRoots} ambiguous roots
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={isFetchingNextPage}
+            onClick={() => {
+              void fetchNextPage();
+            }}
+          >
+            {isFetchingNextPage ? "Loading…" : "Load more"}
+          </Button>
+        </div>
+      ) : null}
 
       {editingRoot ? (
         <RootOverrideDialog
@@ -1735,22 +1835,19 @@ function RootOverrideDialog({
 
 type SkippedSortField = "root_path" | "library" | "reason" | "first_seen" | "last_seen";
 
-function SkippedRootsSection({ skippedRoots }: { skippedRoots: LibrarySkippedRoot[] }) {
+function SkippedRootsSection() {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 250);
+  const { data, hasNextPage, fetchNextPage, isFetchingNextPage } = useSkippedLibraryRoots({
+    enabled: open,
+    search: debouncedSearch,
+  });
+  const skippedRoots = useMemo(() => data?.pages.flatMap((page) => page.roots) ?? [], [data]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const { sortField, sortDir, toggle } = useSort<SkippedSortField>("last_seen", "desc");
 
-  const filtered = useMemo(() => {
-    if (!search) return skippedRoots;
-    const q = search.toLowerCase();
-    return skippedRoots.filter(
-      (r) =>
-        r.root_path.toLowerCase().includes(q) ||
-        r.library_name.toLowerCase().includes(q) ||
-        r.reason.toLowerCase().includes(q),
-    );
-  }, [skippedRoots, search]);
+  const filtered = skippedRoots;
 
   const sorted = useMemo(() => {
     const cmp = sortDir === "asc" ? 1 : -1;
@@ -1778,7 +1875,7 @@ function SkippedRootsSection({ skippedRoots }: { skippedRoots: LibrarySkippedRoo
     <CollapsibleDiagnosticsSection
       title="Troubleshooting"
       description="Roots where the inferred canonical folder lacks embedded provider IDs."
-      count={skippedRoots.length}
+      count={data?.pages[0]?.total}
       icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
       open={open}
       onOpenChange={setOpen}
@@ -1911,6 +2008,16 @@ function SkippedRootsSection({ skippedRoots }: { skippedRoots: LibrarySkippedRoo
         </Table>
       </div>
       <PaginationBar {...pag} />
+      {hasNextPage ? (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={isFetchingNextPage}
+          onClick={() => void fetchNextPage()}
+        >
+          {isFetchingNextPage ? "Loading..." : "Load more"}
+        </Button>
+      ) : null}
     </CollapsibleDiagnosticsSection>
   );
 }
@@ -1919,17 +2026,52 @@ function SkippedRootsSection({ skippedRoots }: { skippedRoots: LibrarySkippedRoo
 
 function UnmatchedItemsSection() {
   const [open, setOpen] = useState(false);
+  const navigationVersion = useRef(0);
+  useEffect(
+    () => () => {
+      navigationVersion.current++;
+    },
+    [],
+  );
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
   const [matchItem, setMatchItem] = useState<UnmatchedLibraryItem | null>(null);
-  const { data } = useUnmatchedLibraryItems(page, debouncedSearch);
-  const total = data?.total ?? 0;
+  // The listing is an infinite query that retains each loaded page's cursor:
+  // `page` indexes the loaded pages, Next fetches only when the next page is
+  // not loaded yet, and a refetch refreshes the loaded pages in place.
+  const { data, hasNextPage, fetchNextPage, isFetching } =
+    useUnmatchedLibraryItems(debouncedSearch);
+  const loadedPages = data?.pages ?? [];
+  const total = loadedPages[0]?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / UNMATCHED_PAGE_SIZE));
-  const clamped = Math.min(page, totalPages - 1);
+  const clamped = Math.min(page, Math.max(loadedPages.length - 1, 0), totalPages - 1);
   const rangeStart = total === 0 ? 0 : clamped * UNMATCHED_PAGE_SIZE + 1;
   const rangeEnd = Math.min((clamped + 1) * UNMATCHED_PAGE_SIZE, total);
-  const items = data?.items ?? [];
+  const items = loadedPages[clamped]?.items ?? [];
+  const canNext = !isFetching && (clamped + 1 < loadedPages.length || hasNextPage);
+  const showPage = (index: number) => {
+    const version = ++navigationVersion.current;
+    if (index < loadedPages.length) {
+      setPage(index);
+      return;
+    }
+    // The page is not loaded yet: extend the cursor chain up to it, one
+    // request per missing page, then show it.
+    void (async () => {
+      let pages = loadedPages.length;
+      let more = hasNextPage;
+      while (pages <= index && more) {
+        const result = await fetchNextPage();
+        if (navigationVersion.current !== version) return;
+        const loaded = result.data?.pages.length ?? pages;
+        if (loaded === pages) break;
+        pages = loaded;
+        more = result.hasNextPage;
+      }
+      setPage(Math.max(0, pages - 1));
+    })();
+  };
 
   // Hide the section only when there are genuinely no unmatched items and no
   // active search — keep it mounted while searching so the box and the
@@ -1953,6 +2095,7 @@ function UnmatchedItemsSection() {
           onChange={(e) => {
             // Search is server-side and spans the whole table; jump back to
             // the first page so results start at the top as the query changes.
+            navigationVersion.current++;
             setSearch(e.target.value);
             setPage(0);
           }}
@@ -2021,11 +2164,11 @@ function UnmatchedItemsSection() {
           rangeStart={rangeStart}
           rangeEnd={rangeEnd}
           canPrev={clamped > 0}
-          canNext={clamped < totalPages - 1}
-          first={() => setPage(0)}
-          prev={() => setPage((p) => Math.max(0, p - 1))}
-          next={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-          last={() => setPage(totalPages - 1)}
+          canNext={canNext}
+          first={() => showPage(0)}
+          prev={() => showPage(Math.max(0, clamped - 1))}
+          next={() => showPage(clamped + 1)}
+          last={() => showPage(totalPages - 1)}
         />
       )}
       {matchItem && (
@@ -2049,55 +2192,30 @@ function UnmatchedItemsSection() {
 
 /* ─── Stale External IDs ────────────────────────────────────────── */
 
-type StaleSortField = "title" | "year" | "library" | "provider" | "first_seen" | "last_seen";
-
-function StaleIDsSection({ staleIDs }: { staleIDs: StaleMediaID[] }) {
+function StaleIDsSection() {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 250);
   const [matchItem, setMatchItem] = useState<StaleMediaID | null>(null);
-  const { sortField, sortDir, toggle } = useSort<StaleSortField>("last_seen", "desc");
+  // The listing is paged on demand: the first page loads when the section
+  // opens and "Load more" fetches the rest, so a large stale-id table does
+  // not make the server walk every row on mount.
+  const {
+    data: stalePages,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useStaleMediaIDs({ enabled: open, search: debouncedSearch });
+  const staleIDs = useMemo(() => flattenStaleMediaIDs(stalePages), [stalePages]);
 
-  const filtered = useMemo(() => {
-    if (!search) return staleIDs;
-    const q = search.toLowerCase();
-    return staleIDs.filter(
-      (s) =>
-        s.title.toLowerCase().includes(q) ||
-        s.provider_id.toLowerCase().includes(q) ||
-        s.provider.toLowerCase().includes(q) ||
-        s.library_name.toLowerCase().includes(q),
-    );
-  }, [staleIDs, search]);
-
-  const sorted = useMemo(() => {
-    const cmp = sortDir === "asc" ? 1 : -1;
-    return [...filtered].sort((a, b) => {
-      switch (sortField) {
-        case "title":
-          return cmp * a.title.localeCompare(b.title);
-        case "year":
-          return cmp * (a.year - b.year);
-        case "library":
-          return cmp * a.library_name.localeCompare(b.library_name);
-        case "provider":
-          return cmp * a.provider.localeCompare(b.provider);
-        case "first_seen":
-          return cmp * a.first_seen_at.localeCompare(b.first_seen_at);
-        case "last_seen":
-          return cmp * a.last_seen_at.localeCompare(b.last_seen_at);
-        default:
-          return 0;
-      }
-    });
-  }, [filtered, sortField, sortDir]);
-
-  const pag = usePagination(sorted);
+  // Preserve the server's last-seen order across the pages loaded so far.
+  const pag = usePagination(staleIDs);
 
   return (
     <CollapsibleDiagnosticsSection
       title="Stale External IDs"
-      description="Provider IDs no longer resolve; metadata refresh will fail until re-matched."
-      count={staleIDs.length}
+      description="Provider IDs no longer resolve; metadata refresh will fail until re-matched. Most recently seen first."
+      count={stalePages?.pages[0]?.total}
       icon={<Unlink className="h-4 w-4 text-red-400" />}
       iconClassName="bg-red-500/10"
       open={open}
@@ -2116,58 +2234,16 @@ function StaleIDsSection({ staleIDs }: { staleIDs: StaleMediaID[] }) {
         />
       </div>
       <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
-        <Table>
+        <Table aria-label="Stale external IDs">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <SortableHead
-                field="title"
-                activeField={sortField}
-                activeDir={sortDir}
-                onSort={toggle}
-              >
-                Title
-              </SortableHead>
-              <SortableHead
-                field="year"
-                activeField={sortField}
-                activeDir={sortDir}
-                onSort={toggle}
-              >
-                Year
-              </SortableHead>
-              <SortableHead
-                field="library"
-                activeField={sortField}
-                activeDir={sortDir}
-                onSort={toggle}
-              >
-                Library
-              </SortableHead>
-              <SortableHead
-                field="provider"
-                activeField={sortField}
-                activeDir={sortDir}
-                onSort={toggle}
-              >
-                Provider
-              </SortableHead>
+              <TableHead>Title</TableHead>
+              <TableHead>Year</TableHead>
+              <TableHead>Library</TableHead>
+              <TableHead>Provider</TableHead>
               <TableHead>Provider ID</TableHead>
-              <SortableHead
-                field="first_seen"
-                activeField={sortField}
-                activeDir={sortDir}
-                onSort={toggle}
-              >
-                First seen
-              </SortableHead>
-              <SortableHead
-                field="last_seen"
-                activeField={sortField}
-                activeDir={sortDir}
-                onSort={toggle}
-              >
-                Last seen
-              </SortableHead>
+              <TableHead>First seen</TableHead>
+              <TableHead>Last seen</TableHead>
               <TableHead className="w-[100px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -2204,6 +2280,24 @@ function StaleIDsSection({ staleIDs }: { staleIDs: StaleMediaID[] }) {
         </Table>
       </div>
       <PaginationBar {...pag} />
+      {hasNextPage ? (
+        <div className="mt-2 flex items-center justify-between gap-3 text-xs">
+          <span className="text-muted-foreground tabular-nums">
+            Showing {staleIDs.length} stale IDs
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={isFetchingNextPage}
+            onClick={() => {
+              void fetchNextPage();
+            }}
+          >
+            {isFetchingNextPage ? "Loading…" : "Load more"}
+          </Button>
+        </div>
+      ) : null}
       {matchItem && (
         <MatchItemDialog
           item={{

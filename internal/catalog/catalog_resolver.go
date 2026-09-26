@@ -23,11 +23,15 @@ var ErrInvalidCatalogRequest = errors.New("invalid catalog request")
 var ErrCatalogSourceNotFound = errors.New("catalog source not found")
 
 type CatalogResult struct {
-	Items      []*models.MediaItem
-	Total      int
-	HasMore    bool
-	TotalExact bool
-	SnapshotAt time.Time // pagination fence timestamp
+	ResultWindowLimit int
+	SessionExpiresAt  *time.Time
+	CursorScope       *QueryCursor
+	Items             []*models.MediaItem
+	Total             int
+	HasMore           bool
+	TotalExact        bool
+	SnapshotAt        time.Time // pagination fence timestamp
+	Next              *QueryCursor
 	// Provider, Mode, SemanticUsed, FallbackReason and IndexPendingEvents are
 	// per-query search diagnostics. They are only populated on the direct-search
 	// path (where a CatalogSearchProvider actually ran); browse / preview /
@@ -43,6 +47,8 @@ type CatalogResult struct {
 	// sort precedence. An empty Field means source order. Clients use it to show
 	// which sort is active when the request carried none.
 	EffectiveSort QuerySort
+	// EffectiveSortResolved distinguishes source order from an unresolved sort.
+	EffectiveSortResolved bool
 }
 
 type CatalogFiltersResult struct {
@@ -238,7 +244,7 @@ func (r *CatalogResolver) Resolve(ctx context.Context, req CatalogRequest, acces
 		}
 		return r.resolveUserCollectionSource(ctx, req, access)
 	case CatalogSourceFavorites, CatalogSourceWatchlist, CatalogSourceHistory:
-		if err := validateCatalogPersonalRequest(req); err != nil {
+		if err := validateCatalogPersonalRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
 			return nil, err
 		}
 		return r.resolvePersonalSource(ctx, req, access)
@@ -255,6 +261,12 @@ func (r *CatalogResolver) Resolve(ctx context.Context, req CatalogRequest, acces
 func (r *CatalogResolver) resolveQuerySource(ctx context.Context, req CatalogRequest, access AccessFilter) (*CatalogResult, error) {
 	if strings.TrimSpace(req.SearchQuery) == "" {
 		return r.previewQuerySource(ctx, req, access)
+	}
+	if req.CursorPaging {
+		if err := r.requireQueryStore(ctx, req.Query, access); err != nil {
+			return nil, err
+		}
+		return r.resolveDirectSearchSource(ctx, req, access)
 	}
 
 	if useDirectSearchPath(req) {
@@ -287,24 +299,33 @@ func (r *CatalogResolver) resolveDirectSearchSource(ctx context.Context, req Cat
 	if earlyEmpty {
 		return &CatalogResult{Items: []*models.MediaItem{}, Total: 0, HasMore: false, TotalExact: true}, nil
 	}
+	searchAccess.NamePrefix = req.NamePrefix
 
 	provider := r.searchProvider
 	if provider == nil {
 		provider = NewPostgresSearchProvider(r.itemRepo)
 	}
 	result, err := provider.Search(ctx, CatalogSearchRequest{
-		Query:     req.SearchQuery,
-		ItemTypes: itemTypes,
-		Limit:     req.Limit,
-		Offset:    req.Offset,
-		Access:    searchAccess,
-		SkipTotal: req.SkipTotal,
+		Definition:   req.Query,
+		CursorPaging: req.CursorPaging, GroupByWork: req.GroupByWork,
+		Continuation: catalogSearchContinuation(req.After),
+		Seek:         req.Seek,
+		Query:        req.SearchQuery,
+		ItemTypes:    itemTypes,
+		Limit:        req.Limit,
+		Offset:       req.Offset,
+		Access:       searchAccess,
+		SkipTotal:    req.SkipTotal,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("searching catalog items: %w", err)
 	}
 
 	return &CatalogResult{
+		Next:               wrapCatalogSearchCursor(result.Next),
+		CursorScope:        wrapCatalogSearchCursor(result.CursorScope),
+		ResultWindowLimit:  result.ResultWindowLimit,
+		SessionExpiresAt:   result.SessionExpiresAt,
 		Items:              result.Items,
 		Total:              result.Total,
 		HasMore:            result.HasMore,
@@ -334,6 +355,28 @@ func (r *CatalogResolver) previewQuerySource(ctx context.Context, req CatalogReq
 	// in-memory filter pass.
 	access.NamePrefix = req.NamePrefix
 
+	if req.CursorPaging {
+		if err := r.requireQueryStore(ctx, req.Query, access); err != nil {
+			return nil, err
+		}
+		pager := r.queryExecutorForScope(req.Query.MediaScope, &snapshot)
+		pager.GroupByWork = req.GroupByWork
+		if req.Seek != nil {
+			after, err := pager.SeekCursor(ctx, req.Query, access, *req.Seek)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return &CatalogResult{Items: []*models.MediaItem{}, SnapshotAt: snapshot}, nil
+			}
+			if err != nil {
+				return nil, err
+			}
+			req.After = after
+		}
+		page, err := pager.PreviewCursorPage(ctx, req.Query, access, req.Limit, req.After, !req.SkipTotal)
+		if err != nil {
+			return nil, err
+		}
+		return &CatalogResult{Items: page.Items, Total: page.Total, TotalExact: page.TotalExact, HasMore: page.HasMore, Next: page.Next, SnapshotAt: snapshot}, nil
+	}
 	items, total, hasMore, err := executor.PreviewPage(ctx, req.Query, access, req.Limit, req.Offset, !req.SkipTotal)
 	if err != nil {
 		return nil, err
@@ -358,10 +401,12 @@ func (r *CatalogResolver) resolveSectionSource(ctx context.Context, req CatalogR
 		// User collection takes precedence when set.
 		if userCollID := strings.TrimSpace(section.UserCollectionID); userCollID != "" {
 			return r.resolveUserCollectionSource(ctx, CatalogRequest{
-				Source:         CatalogSourceUserCollection,
-				CollectionID:   userCollID,
-				Limit:          req.Limit,
-				Offset:         req.Offset,
+				Source:       CatalogSourceUserCollection,
+				CollectionID: userCollID,
+				Limit:        req.Limit,
+				Offset:       req.Offset,
+				CursorPaging: req.CursorPaging, GroupByWork: req.GroupByWork, After: req.After, Seek: req.Seek,
+				ResolvedSort:   req.ResolvedSort,
 				SkipTotal:      req.SkipTotal,
 				UseSourceOrder: true,
 			}, access)
@@ -371,10 +416,12 @@ func (r *CatalogResolver) resolveSectionSource(ctx context.Context, req CatalogR
 			return &CatalogResult{Items: []*models.MediaItem{}, Total: 0, HasMore: false, TotalExact: true}, nil
 		}
 		return r.resolveLibraryCollectionSource(ctx, CatalogRequest{
-			Source:         CatalogSourceLibraryCollection,
-			CollectionID:   collectionID,
-			Limit:          req.Limit,
-			Offset:         req.Offset,
+			Source:       CatalogSourceLibraryCollection,
+			CollectionID: collectionID,
+			Limit:        req.Limit,
+			Offset:       req.Offset,
+			CursorPaging: req.CursorPaging, GroupByWork: req.GroupByWork, After: req.After, Seek: req.Seek,
+			ResolvedSort:   req.ResolvedSort,
 			SkipTotal:      req.SkipTotal,
 			UseSourceOrder: true,
 		}, access)
@@ -403,10 +450,12 @@ func (r *CatalogResolver) resolveSectionSource(ctx context.Context, req CatalogR
 			useSourceOrder = qs.Field == "added_at"
 		}
 		return r.resolvePersonalSource(ctx, CatalogRequest{
-			Source:         source,
-			Query:          query,
-			Limit:          req.Limit,
-			Offset:         req.Offset,
+			Source:       source,
+			Query:        query,
+			Limit:        req.Limit,
+			Offset:       req.Offset,
+			CursorPaging: req.CursorPaging, GroupByWork: req.GroupByWork, After: req.After, Seek: req.Seek,
+			ResolvedSort:   req.ResolvedSort,
 			SkipTotal:      req.SkipTotal,
 			UseSourceOrder: useSourceOrder,
 		}, access)
@@ -428,10 +477,11 @@ func (r *CatalogResolver) resolveSectionSource(ctx context.Context, req CatalogR
 			def.LibraryIDs = []int{*section.LibraryID}
 		}
 		return r.resolveQuerySource(ctx, CatalogRequest{
-			Source:    CatalogSourceQuery,
-			Query:     def,
-			Limit:     req.Limit,
-			Offset:    req.Offset,
+			Source:       CatalogSourceQuery,
+			Query:        def,
+			Limit:        req.Limit,
+			Offset:       req.Offset,
+			CursorPaging: req.CursorPaging, GroupByWork: req.GroupByWork, After: req.After, Seek: req.Seek,
 			SkipTotal: req.SkipTotal,
 		}, stripCatalogUserScope(access))
 	default:
@@ -466,13 +516,14 @@ func (r *CatalogResolver) resolveRecentTVSectionSource(
 		snapshot = req.SnapshotAt.UTC()
 	}
 	targets, total, hasMore, err := NewRecentTVRepository(r.itemRepo.pool).List(ctx, RecentTVQuery{
-		LibraryIDs: effectiveLibraryIDs,
-		Access:     access,
-		NamePrefix: req.NamePrefix,
-		SnapshotAt: &snapshot,
-		Limit:      req.Limit,
-		Offset:     req.Offset,
-		SkipTotal:  req.SkipTotal,
+		LibraryIDs:   effectiveLibraryIDs,
+		Access:       access,
+		NamePrefix:   req.NamePrefix,
+		SnapshotAt:   &snapshot,
+		Limit:        req.Limit,
+		Offset:       req.Offset,
+		SkipTotal:    req.SkipTotal,
+		CursorPaging: req.CursorPaging, After: req.After, Seek: req.Seek,
 	})
 	if err != nil {
 		return nil, true, err
@@ -515,10 +566,22 @@ func (r *CatalogResolver) resolveRecentTVSectionSource(
 		itemCopy.PlayContentID = target.PlayContentID
 		ordered = append(ordered, &itemCopy)
 	}
+	var next *QueryCursor
+	if req.CursorPaging && hasMore && len(targets) > 0 {
+		consumed := 0
+		if req.After != nil {
+			consumed = req.After.Consumed
+		}
+		if req.Seek != nil {
+			consumed = *req.Seek
+		}
+		next = recentTVCursor(targets[len(targets)-1], consumed+len(targets))
+	}
 	return &CatalogResult{
 		Items:      ordered,
 		Total:      total,
 		HasMore:    hasMore,
+		Next:       next,
 		TotalExact: !req.SkipTotal,
 		SnapshotAt: snapshot,
 	}, true, nil
@@ -544,14 +607,19 @@ func (r *CatalogResolver) resolveSectionBrowseSource(ctx context.Context, req Ca
 	}
 
 	browseReq := CatalogRequest{
-		Source:     CatalogSourceQuery,
-		Query:      query,
-		Limit:      req.Limit,
-		Offset:     req.Offset,
+		Source:       CatalogSourceQuery,
+		Query:        query,
+		Limit:        req.Limit,
+		Offset:       req.Offset,
+		CursorPaging: req.CursorPaging, GroupByWork: req.GroupByWork, After: req.After, Seek: req.Seek,
 		NamePrefix: req.NamePrefix,
-		SnapshotAt: req.SnapshotAt,
+		SnapshotAt: &snapshot,
+		SkipTotal:  req.SkipTotal,
 	}
 	browseAccess := stripCatalogUserScope(access)
+	if req.CursorPaging {
+		return r.resolveSectionOrderCursor(ctx, browseReq, browseAccess, snapshot, sort, order)
+	}
 	filters, earlyEmpty, err := catalogBrowseFilters(browseReq, browseAccess)
 	if err != nil {
 		return nil, err
@@ -580,6 +648,9 @@ func (r *CatalogResolver) resolveSectionBrowseSource(ctx context.Context, req Ca
 
 func (r *CatalogResolver) resolveLibraryCollectionSource(ctx context.Context, req CatalogRequest, access AccessFilter) (*CatalogResult, error) {
 	collectionRepo := NewLibraryCollectionRepository(r.itemRepo.pool)
+	if req.CursorPaging {
+		return r.resolveLibraryCollectionCursor(ctx, req, access, collectionRepo)
+	}
 	collection, err := collectionRepo.GetByID(ctx, req.CollectionID)
 	if err != nil || !CanAccessLibraryCollection(collection, access) {
 		return nil, ErrCatalogSourceNotFound
@@ -638,15 +709,19 @@ func (r *CatalogResolver) resolveLiveLibraryCollectionSource(ctx context.Context
 		return r.resolveExactOrderedMediaItems(ctx, items, req, access)
 	}
 	return r.resolveQuerySource(ctx, CatalogRequest{
-		Source:    CatalogSourceQuery,
-		Query:     def,
-		Limit:     req.Limit,
-		Offset:    req.Offset,
+		Source:       CatalogSourceQuery,
+		Query:        def,
+		Limit:        req.Limit,
+		Offset:       req.Offset,
+		CursorPaging: req.CursorPaging, GroupByWork: req.GroupByWork, After: req.After, Seek: req.Seek,
 		SkipTotal: req.SkipTotal,
 	}, stripCatalogUserScope(access))
 }
 
 func (r *CatalogResolver) resolveUserCollectionSource(ctx context.Context, req CatalogRequest, access AccessFilter) (*CatalogResult, error) {
+	if req.CursorPaging {
+		return r.resolveUserCollectionCursor(ctx, req, access)
+	}
 	store, err := r.catalogStoreForAccess(ctx, access)
 	if err != nil {
 		return nil, err
@@ -700,6 +775,7 @@ func (r *CatalogResolver) resolveCollectionWithEffectiveSort(
 		return nil, err
 	}
 	result.EffectiveSort = req.Query.Sort
+	result.EffectiveSortResolved = true
 	return result, nil
 }
 
@@ -725,23 +801,25 @@ func (r *CatalogResolver) resolveUserCollectionItems(
 			if err != nil {
 				return nil, err
 			}
-			if req.PersonID > 0 {
+			// Keep the source relation (notably episodes) when compat browse
+			// filters re-hydrate the smart collection's membership.
+			if req.Query.MediaScope == "" {
+				req.Query.MediaScope = def.MediaScope
+			}
+			if req.PersonID > 0 || req.BrowseOverlay != nil {
 				items, err = r.fetchAccessibleItemsByID(ctx, contentIDsFromMediaItems(items), catalogBaseCollectionRequest(req), access)
 				if err != nil {
 					return nil, err
 				}
 			}
-			// Keep unscoped overlays on the source's relation (notably episodes).
-			if req.Query.MediaScope == "" {
-				req.Query.MediaScope = def.MediaScope
-			}
 			return r.resolveExactOrderedMediaItems(ctx, items, req, access)
 		}
 		return r.resolveQuerySource(ctx, CatalogRequest{
-			Source:    CatalogSourceQuery,
-			Query:     def,
-			Limit:     req.Limit,
-			Offset:    req.Offset,
+			Source:       CatalogSourceQuery,
+			Query:        def,
+			Limit:        req.Limit,
+			Offset:       req.Offset,
+			CursorPaging: req.CursorPaging, GroupByWork: req.GroupByWork, After: req.After, Seek: req.Seek,
 			SkipTotal: req.SkipTotal,
 		}, access)
 	}
@@ -766,8 +844,11 @@ func (r *CatalogResolver) resolveUserCollectionItems(
 }
 
 func (r *CatalogResolver) resolvePersonalSource(ctx context.Context, req CatalogRequest, access AccessFilter) (*CatalogResult, error) {
-	if historySourceCanUseOptimizedPageQuery(req) {
-		return r.resolveHistorySourcePage(ctx, req, access)
+	if req.CursorPaging {
+		return r.resolvePersonalCursor(ctx, req, access)
+	}
+	if req.Source == CatalogSourceHistory {
+		return r.resolveHistoryQueryPage(ctx, req, access)
 	}
 
 	if req.Source == CatalogSourceFavorites || req.Source == CatalogSourceWatchlist {
@@ -779,7 +860,7 @@ func (r *CatalogResolver) resolvePersonalSource(ctx context.Context, req Catalog
 		return nil, err
 	}
 
-	contentIDs, err := r.loadPersonalSourceIDs(ctx, store, req, access.ProfileID)
+	contentIDs, err := r.loadPersonalSourceIDs(ctx, store, req, access)
 	if err != nil {
 		return nil, err
 	}
@@ -789,6 +870,7 @@ func (r *CatalogResolver) resolvePersonalSource(ctx context.Context, req Catalog
 	}
 	if req.Source == CatalogSourceFavorites || req.Source == CatalogSourceWatchlist {
 		result.EffectiveSort = req.Query.Sort
+		result.EffectiveSortResolved = true
 	}
 	return result, nil
 }
@@ -823,6 +905,9 @@ func (r *CatalogResolver) resolvePersonalSourceEffectiveSort(ctx context.Context
 }
 
 func (r *CatalogResolver) resolvePersonSource(ctx context.Context, req CatalogRequest, access AccessFilter) (*CatalogResult, error) {
+	if req.CursorPaging {
+		return r.resolvePersonCursor(ctx, req, access)
+	}
 	filters, earlyEmpty, err := catalogBrowseFilters(req, access)
 	if err != nil {
 		return nil, err
@@ -980,7 +1065,29 @@ func (r *CatalogResolver) resolveCandidateItemsWithQuery(
 	queryAccess := access
 	queryAccess.AllowedContentIDs = contentIDs
 
-	executor := r.queryExecutorForScope(req.Query.MediaScope, nil)
+	executor := r.queryExecutorForScope(req.Query.MediaScope, req.SnapshotAt)
+	executor.GroupByWork = req.GroupByWork
+	if req.CursorPaging {
+		if err := r.requireQueryStore(ctx, req.Query, access); err != nil {
+			return nil, err
+		}
+		queryAccess.NamePrefix = req.NamePrefix
+		if req.Seek != nil {
+			after, err := executor.SeekCursor(ctx, req.Query, queryAccess, *req.Seek)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return &CatalogResult{Items: []*models.MediaItem{}}, nil
+			}
+			if err != nil {
+				return nil, err
+			}
+			req.After = after
+		}
+		page, err := executor.PreviewCursorPage(ctx, req.Query, queryAccess, req.Limit, req.After, !req.SkipTotal)
+		if err != nil {
+			return nil, err
+		}
+		return &CatalogResult{Items: page.Items, Total: page.Total, TotalExact: page.TotalExact, HasMore: page.HasMore, Next: page.Next}, nil
+	}
 	if applyNamePrefixAfterQuery && strings.TrimSpace(req.NamePrefix) != "" {
 		sorted, _, err := executor.Preview(ctx, req.Query, queryAccess, len(contentIDs))
 		if err != nil {
@@ -1060,25 +1167,28 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 			return nil, err
 		}
 	case CatalogSourceFavorites, CatalogSourceWatchlist, CatalogSourceHistory:
-		if err := validateCatalogPersonalRequest(req); err != nil {
+		if err := validateCatalogPersonalRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
 			return nil, err
 		}
 		if access.UserID <= 0 || strings.TrimSpace(access.ProfileID) == "" {
 			return nil, fmt.Errorf("%w: source %q requires active user scope", ErrInvalidCatalogRequest, "personal")
 		}
-		store, err := r.catalogStoreForAccess(ctx, access)
-		if err != nil {
-			return nil, err
-		}
-		contentIDs, err := r.loadPersonalSourceIDs(ctx, store, req, access.ProfileID)
-		if err != nil {
-			return nil, err
-		}
 		filters, earlyEmpty, err = catalogBrowseFilters(req, access)
 		if err != nil {
 			return nil, err
 		}
-		filters.ContentIDs = contentIDs
+		if req.Source == CatalogSourceHistory {
+			scopeHistoryFacetFilters(&filters, req, access)
+		} else {
+			store, err := r.catalogStoreForAccess(ctx, access)
+			if err != nil {
+				return nil, err
+			}
+			filters.ContentIDs, err = r.loadPersonalSourceIDs(ctx, store, req, access)
+			if err != nil {
+				return nil, err
+			}
+		}
 	case CatalogSourcePerson:
 		if err := validateCatalogPersonRequest(req); err != nil {
 			return nil, err
@@ -1164,25 +1274,28 @@ func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, a
 			return nil, err
 		}
 	case CatalogSourceFavorites, CatalogSourceWatchlist, CatalogSourceHistory:
-		if err := validateCatalogPersonalRequest(req); err != nil {
+		if err := validateCatalogPersonalRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
 			return nil, err
 		}
 		if access.UserID <= 0 || strings.TrimSpace(access.ProfileID) == "" {
 			return nil, fmt.Errorf("%w: source %q requires active user scope", ErrInvalidCatalogRequest, "personal")
 		}
-		store, err := r.catalogStoreForAccess(ctx, access)
-		if err != nil {
-			return nil, err
-		}
-		contentIDs, err := r.loadPersonalSourceIDs(ctx, store, req, access.ProfileID)
-		if err != nil {
-			return nil, err
-		}
 		filters, earlyEmpty, err = catalogBrowseFilters(req, access)
 		if err != nil {
 			return nil, err
 		}
-		filters.ContentIDs = contentIDs
+		if req.Source == CatalogSourceHistory {
+			scopeHistoryFacetFilters(&filters, req, access)
+		} else {
+			store, err := r.catalogStoreForAccess(ctx, access)
+			if err != nil {
+				return nil, err
+			}
+			filters.ContentIDs, err = r.loadPersonalSourceIDs(ctx, store, req, access)
+			if err != nil {
+				return nil, err
+			}
+		}
 	case CatalogSourcePerson:
 		if err := validateCatalogPersonRequest(req); err != nil {
 			return nil, err
@@ -1457,13 +1570,17 @@ func validateCatalogQueryRequest(req CatalogRequest, allowPersonalizedSorts bool
 	)
 }
 
-func validateCatalogPersonalRequest(req CatalogRequest) error {
+func validateCatalogPersonalRequest(req CatalogRequest, allowPersonalizedSorts bool) error {
 	switch req.Source {
 	case CatalogSourceFavorites, CatalogSourceWatchlist, CatalogSourceHistory:
 	default:
 		return fmt.Errorf("%w: source %q is not supported", ErrInvalidCatalogRequest, req.Source)
 	}
-	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogPersonalRuleFields, catalogPersonalSortFields(), false)
+	sortFields := catalogQuerySortFields()
+	if req.Source == CatalogSourceHistory && allowPersonalizedSorts {
+		sortFields[historyDateViewedSort] = true
+	}
+	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogPersonalRuleFields, sortFields, false)
 }
 
 func validateCatalogPersonRequest(req CatalogRequest) error {
@@ -1517,6 +1634,7 @@ func catalogRequestHasOverlay(req CatalogRequest) bool {
 		req.PersonID > 0 ||
 		req.RequireBackdrop ||
 		req.Randomize ||
+		req.BrowseOverlay != nil ||
 		catalogQueryHasFilter(req.Query) ||
 		strings.TrimSpace(req.Query.Sort.Field) != ""
 }
@@ -1646,10 +1764,6 @@ var catalogPersonalRuleFields = map[string]bool{
 }
 
 func catalogQuerySortFields() map[string]bool {
-	return QuerySortFieldSet(false)
-}
-
-func catalogPersonalSortFields() map[string]bool {
 	return QuerySortFieldSet(false)
 }
 
@@ -1971,7 +2085,8 @@ func (r *CatalogResolver) watchlistVisibility() *WatchlistVisibility {
 	return NewWatchlistVisibilityFromRepos(r.itemRepo, episodes)
 }
 
-func (r *CatalogResolver) loadPersonalSourceIDs(ctx context.Context, store userstore.UserStore, req CatalogRequest, profileID string) ([]string, error) {
+func (r *CatalogResolver) loadPersonalSourceIDs(ctx context.Context, store userstore.UserStore, req CatalogRequest, access AccessFilter) ([]string, error) {
+	profileID := access.ProfileID
 	switch req.Source {
 	case CatalogSourceFavorites:
 		entries, err := store.ListFavorites(ctx, profileID, 10000, 0)
@@ -2004,17 +2119,6 @@ func (r *CatalogResolver) loadPersonalSourceIDs(ctx context.Context, store users
 			listed = append(listed, PersonalListEntry{ID: entry.MediaItemID, AddedAt: entry.AddedAt})
 		}
 		return OrderPersonalListIDs(listed, req.Query.Sort), nil
-	case CatalogSourceHistory:
-		entries, err := store.ListHistory(ctx, profileID, 10000, 0)
-		if err != nil {
-			return nil, err
-		}
-		// The episode scope shows history at episode granularity; every other
-		// scope collapses episode watch events into their series display item.
-		if isEpisodeCatalogScope(req.Query.MediaScope) {
-			return HistoryEpisodeScopeIDs(entries), nil
-		}
-		return ResolveHistoryDisplayIDs(ctx, entries, NewEpisodeRepository(r.itemRepo.pool))
 	default:
 		return nil, fmt.Errorf("%w: source %q is not a personal source", ErrInvalidCatalogRequest, req.Source)
 	}
@@ -2103,8 +2207,14 @@ func catalogBaseCollectionRequest(req CatalogRequest) CatalogRequest {
 		CollectionID:    req.CollectionID,
 		PersonID:        req.PersonID,
 		RequireBackdrop: req.RequireBackdrop,
+		BrowseOverlay:   req.BrowseOverlay,
+		Query:           QueryDefinition{MediaScope: req.Query.MediaScope},
 		Limit:           req.Limit,
 		Offset:          req.Offset,
+		CursorPaging:    req.CursorPaging,
+		GroupByWork:     req.GroupByWork,
+		After:           req.After,
+		Seek:            req.Seek,
 		SkipTotal:       req.SkipTotal,
 		UseSourceOrder:  true,
 	}
@@ -2281,7 +2391,7 @@ func catalogSearchAccess(req CatalogRequest, access AccessFilter) (AccessFilter,
 	searchAccess := AccessFilter{
 		AllowedLibraryIDs:  allowedLibraryIDs,
 		DisabledLibraryIDs: slices.Clone(access.DisabledLibraryIDs),
-		MaxContentRating:   access.MaxContentRating,
+		MaturityLimits:     access.MaturityLimits,
 	}
 
 	return searchAccess, MediaScopeItemTypes(req.Query.MediaScope), false
@@ -2293,16 +2403,32 @@ func catalogBrowseFilters(req CatalogRequest, access AccessFilter) (BrowseFilter
 		return BrowseFilters{}, true, nil
 	}
 
-	filters := BrowseFilters{
-		// BrowseFilters.Type accepts a comma-separated type list, so group
-		// scopes like "video" expand here rather than leaking downstream.
-		Type:               strings.Join(MediaScopeItemTypes(req.Query.MediaScope), ","),
-		NamePrefix:         req.NamePrefix,
-		DisabledLibraryIDs: slices.Clone(access.DisabledLibraryIDs),
-		MaxContentRating:   access.MaxContentRating,
-		PersonID:           req.PersonID,
-		RequireBackdrop:    req.RequireBackdrop,
+	filters := BrowseFilters{}
+	if req.BrowseOverlay != nil {
+		filters.Genres = req.BrowseOverlay.Genres
+		filters.Years = req.BrowseOverlay.Years
+		filters.NameLessThan = req.BrowseOverlay.NameLessThan
+		filters.NameStartsWithOrGreater = req.BrowseOverlay.NameStartsWithOrGreater
+		filters.ExcludeContentIDs = req.BrowseOverlay.ExcludeContentIDs
+		filters.Studios = req.BrowseOverlay.Studios
+		filters.OfficialRatings = req.BrowseOverlay.OfficialRatings
+		filters.MinCommunityRating = req.BrowseOverlay.MinCommunityRating
+		filters.MinPremiereDate = req.BrowseOverlay.MinPremiereDate
+		filters.MaxPremiereDate = req.BrowseOverlay.MaxPremiereDate
+		filters.AudioLanguages = req.BrowseOverlay.AudioLanguages
+		filters.SubtitleLanguages = req.BrowseOverlay.SubtitleLanguages
 	}
+	// BrowseFilters.Type accepts a comma-separated type list, so group scopes
+	// like "video" expand here rather than leaking downstream.
+	filters.Type = strings.Join(MediaScopeItemTypes(req.Query.MediaScope), ",")
+	filters.NamePrefix = req.NamePrefix
+	filters.DisabledLibraryIDs = slices.Clone(access.DisabledLibraryIDs)
+	filters.MaturityLimits = access.MaturityLimits
+	filters.MaxPlaybackQuality = access.MaxPlaybackQuality
+	filters.UserID = access.UserID
+	filters.ProfileID = access.ProfileID
+	filters.PersonID = req.PersonID
+	filters.RequireBackdrop = req.RequireBackdrop
 	applyCatalogBrowseOverlayRules(&filters, req.Query)
 
 	if len(allowedLibraryIDs) == 1 {

@@ -213,7 +213,7 @@ Force reload is a different tool: it makes a node re-read its configuration (and
 tears down its sessions to do so). Use it after changing a node's acceleration
 overrides; use Re-probe after changing the hardware or the driver under it. It
 has no button today — it is API-only, `POST
-/api/v1/admin/nodes/{id}/force-reload`.
+/api/v2/admin/nodes/{id}/force-reload`.
 
 ## Scratch admission
 
@@ -259,7 +259,7 @@ Disk series are labeled by **role**, not by path — `mount="scratch"` and
 where your media lives. A node's `/health` is unauthenticated for the same
 reason and reports the same roles without paths, which is what the Nodes page
 draws from. The real paths are behind admin authentication on
-`GET /api/v1/admin/system/resources` and behind a bearer token on each node's
+`GET /api/v2/admin/system/resources` and behind a bearer token on each node's
 `/status`. Library ordering is stable for a given configuration, but it is
 positional: adding a library root can renumber the series after it, so alert on
 `mount="scratch"` by name and on the library mounts by aggregate. A mount that
@@ -358,7 +358,7 @@ If `nvidia-smi` fails five samples running, Silo stops calling it — a host
 without the NVIDIA toolkit would otherwise spawn a doomed subprocess every few
 seconds forever. It is not retired for good: one probationary call goes out every
 ten minutes, so a driver reset or a toolkit installed after startup is picked up
-on its own. `POST /api/v1/admin/nodes/{id}/reprobe` puts it back in service
+on its own. `POST /api/v2/admin/nodes/{id}/reprobe` puts it back in service
 immediately, which is the faster path when you have just fixed the driver
 yourself.
 
@@ -370,5 +370,5 @@ yourself.
   collector.
 - `internal/playback/gpudetect.go` — the hardware verification probes behind the
   Acceleration block.
-- [Admin API](../../admin-api.md) — the `GET /api/v1/admin/nodes` field table and
+- [Admin API](../../admin-api.md) — the `GET /api/v2/admin/nodes` field table and
   the re-probe endpoint.

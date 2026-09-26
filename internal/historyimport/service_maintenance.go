@@ -2,16 +2,17 @@ package historyimport
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"time"
 )
+
+const StaleRunInterruptedMessage = "history import interrupted by deploy or app restart"
 
 const (
 	historyImportHeartbeatInterval     = 15 * time.Second
 	historyImportStaleRunThreshold     = 1 * time.Minute
 	historyImportStaleRunSweepInterval = 30 * time.Second
-	staleRunInterruptedMessage         = "history import interrupted by deploy or app restart"
+	staleRunInterruptedMessage         = StaleRunInterruptedMessage
 )
 
 func (s *Service) startStaleRunMonitor() {
@@ -37,6 +38,9 @@ func (s *Service) startStaleRunMonitor() {
 }
 
 func (s *Service) reconcileStaleRuns(ctx context.Context, now time.Time) error {
+	if err := s.repo.failStaleCancelledRuns(ctx, now.Add(historyImportStaleRunThreshold*-1)); err != nil {
+		return err
+	}
 	return sweepStaleRunsOnce(ctx, now, historyImportStaleRunThreshold, func(ctx context.Context, staleBefore time.Time, message string) (int64, error) {
 		count, err := s.repo.FailStaleRuns(ctx, staleBefore, message)
 		if err == nil && count > 0 {
@@ -44,18 +48,6 @@ func (s *Service) reconcileStaleRuns(ctx context.Context, now time.Time) error {
 		}
 		return count, err
 	})
-}
-
-func (s *Service) startRunHeartbeat(ctx context.Context, runID string) context.CancelFunc {
-	hbCtx, cancel := context.WithCancel(ctx)
-	go heartbeatLoop(hbCtx, historyImportHeartbeatInterval, func(ctx context.Context) error {
-		err := s.repo.TouchRunHeartbeat(ctx, runID)
-		if err != nil && !errors.Is(err, ErrRunNotFound) {
-			slog.WarnContext(ctx, "history import: failed to persist heartbeat", "component", "historyimport", "run_id", runID, "error", err)
-		}
-		return nil
-	})
-	return cancel
 }
 
 func heartbeatLoop(ctx context.Context, interval time.Duration, touch func(context.Context) error) {

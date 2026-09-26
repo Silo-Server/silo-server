@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "key": "playback.audio_language",
+      "scope": "profile",
+      "profile_id": "p-owner",
+      "value": "en",
+      "revision": 1
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7IktleSI6InBsYXliYWNrLmF1ZGlvX2xhbmd1YWdlIiwiU2NvcGUiOiJwcm9maWxlIiwiUHJvZmlsZUlEIjoicC1vd25lciIsIkNsaWVudEZhbWlseSI6IiIsIkRldmljZUlEIjoiIiwiTGlicmFyeUlEIjowLCJTZXJpZXNJRCI6IiJ9fQ.7UzOZip03ASK4JsBGci4VOwaoSpP7nLYEcU1-cR5_z0",
+    "has_more": true
+  },
+  "revision": 12
+}

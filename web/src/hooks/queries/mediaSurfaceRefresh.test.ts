@@ -76,7 +76,7 @@ describe("invalidateMediaSurfaceQueries", () => {
       has_more: false,
       items: [],
     });
-    queryClient.setQueryData(progressKeys.list(), { progress: [] });
+    queryClient.setQueryData(progressKeys.list(), { items: [] });
     queryClient.setQueryData(historyKeys.list(), { items: [] });
     queryClient.setQueryData(favoriteKeys.list(), { items: [] });
     queryClient.setQueryData(watchlistKeys.list(), { items: [] });

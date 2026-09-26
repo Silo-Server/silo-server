@@ -2,9 +2,10 @@ package catalog
 
 import (
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 func TestQueryExecutorGroupQueryPreservesAccessFilters(t *testing.T) {
@@ -21,7 +22,7 @@ func TestQueryExecutorGroupQueryPreservesAccessFilters(t *testing.T) {
 		}},
 	}
 
-	sql, args, err := executor.buildPreviewPageSQL(def, AccessFilter{MaxContentRating: "PG"}, 20, 0, false)
+	sql, args, err := executor.buildPreviewPageSQL(def, AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}, 20, 0, false)
 	if err != nil {
 		t.Fatalf("build preview SQL: %v", err)
 	}
@@ -33,8 +34,9 @@ func TestQueryExecutorGroupQueryPreservesAccessFilters(t *testing.T) {
 		!reflect.DeepEqual(args[2], []int{42}) || args[4] != 42 || args[5] != 21 {
 		t.Fatalf("unexpected query args: %#v", args)
 	}
-	allowedRatings, ok := args[3].([]string)
-	if !ok || !slices.Contains(allowedRatings, "PG") || slices.Contains(allowedRatings, "R") {
-		t.Fatalf("rating arg = %#v, want PG allowed and R blocked", args[3])
+	// The ceiling binds the minimum age it stands for; PG is 8, so an R title
+	// (17) cannot satisfy the predicate.
+	if args[3] != 8 {
+		t.Fatalf("ceiling arg = %#v, want the PG ceiling bound as age 8", args[3])
 	}
 }

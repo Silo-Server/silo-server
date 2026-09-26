@@ -7,147 +7,127 @@ import (
 	"time"
 )
 
-func historySourceCanUseOptimizedPageQuery(req CatalogRequest) bool {
-	if req.Source != CatalogSourceHistory || !req.UseSourceOrder {
-		return false
-	}
-	if strings.TrimSpace(req.SearchQuery) != "" || strings.TrimSpace(req.NamePrefix) != "" {
-		return false
-	}
+const (
+	historyDateViewedSort = "date_viewed"
+	historyAscendingOrder = "asc"
+)
 
-	def := req.Query.Normalize()
-	return def.MediaScope == "" &&
-		len(def.LibraryIDs) == 0 &&
-		len(def.Groups) == 0
+func historyDateViewedAscending(req CatalogRequest) bool {
+	return req.Source == CatalogSourceHistory && req.Query.Sort.Field == historyDateViewedSort && req.Query.Sort.Order == historyAscendingOrder
 }
 
-func (r *CatalogResolver) resolveHistorySourcePage(
-	ctx context.Context,
-	req CatalogRequest,
-	access AccessFilter,
-) (*CatalogResult, error) {
-	snapshot := time.Now().UTC()
-	if req.SnapshotAt != nil {
-		snapshot = *req.SnapshotAt
+// All history pages fence watch events at one timestamp. Filter and limit in
+// SQL so a small page never hydrates the viewer's entire history.
+func (r *CatalogResolver) resolveHistoryQueryPage(ctx context.Context, req CatalogRequest, access AccessFilter) (*CatalogResult, error) {
+	if access.UserID <= 0 || strings.TrimSpace(access.ProfileID) == "" {
+		return nil, fmt.Errorf("%w: history source requires active user scope", ErrInvalidCatalogRequest)
 	}
-
-	displayIDs, total, hasMore, err := r.loadHistoryDisplayPage(
-		ctx,
-		access,
-		req.Limit,
-		req.Offset,
-		!req.SkipTotal,
-		&snapshot,
-	)
+	if req.SnapshotAt == nil {
+		req.SnapshotAt = new(time.Now().UTC())
+	}
+	build, err := r.buildHistoryPreviewPagePlan(req, access)
 	if err != nil {
 		return nil, err
 	}
 
-	items, err := r.fetchAccessibleItemsByID(ctx, displayIDs, req, access)
+	// Match the existing catalog search fallback: if no strict substring match
+	// exists anywhere in the filtered source, keep its existing order. Probe
+	// before pagination so an empty later page cannot trigger the fallback.
+	if strings.TrimSpace(req.SearchQuery) != "" && eligibleForFuzzy(parseSearchQuery(req.SearchQuery)) {
+		existsSQL := fmt.Sprintf("WITH %s SELECT EXISTS (SELECT 1 %s %s)", strings.Join(build.ctes, ",\n"), build.fromClauseCount, build.whereClause)
+		args := append(append([]any{}, build.cteArgs...), build.args...)
+		var matched bool
+		if err := r.itemRepo.pool.QueryRow(ctx, existsSQL, args...).Scan(&matched); err != nil {
+			return nil, fmt.Errorf("checking history search matches: %w", err)
+		}
+		if !matched {
+			req.SearchQuery = ""
+			build, err = r.buildHistoryPreviewPagePlan(req, access)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	items, total, hasMore, err := r.queryExecutorForScope(req.Query.MediaScope, nil).executePreviewPagePlan(ctx, build, !req.SkipTotal)
 	if err != nil {
 		return nil, err
 	}
-
 	return &CatalogResult{
-		Items:      items,
-		Total:      total,
-		HasMore:    hasMore,
-		TotalExact: !req.SkipTotal,
-		SnapshotAt: snapshot,
+		Items: items, Total: total, HasMore: hasMore,
+		TotalExact: !req.SkipTotal, SnapshotAt: *req.SnapshotAt,
 	}, nil
 }
 
-func (r *CatalogResolver) loadHistoryDisplayPage(
-	ctx context.Context,
-	access AccessFilter,
-	limit int,
-	offset int,
-	includeTotal bool,
-	snapshot *time.Time,
-) ([]string, int, bool, error) {
-	if r == nil || r.itemRepo == nil || r.itemRepo.pool == nil {
-		return nil, 0, false, fmt.Errorf("catalog resolver requires an item repository")
+func (r *CatalogResolver) buildHistoryPreviewPagePlan(req CatalogRequest, access AccessFilter) (previewPagePlan, error) {
+	def := req.Query
+	useHistoryOrder := req.UseSourceOrder || def.Sort.Field == historyDateViewedSort
+	if useHistoryOrder {
+		def.Sort = QuerySort{}
 	}
-	if access.UserID <= 0 || strings.TrimSpace(access.ProfileID) == "" {
-		return nil, 0, false, fmt.Errorf("%w: history source requires active user scope", ErrInvalidCatalogRequest)
-	}
-	if limit <= 0 {
-		limit = 20
-	}
-	if offset < 0 {
-		offset = 0
-	}
-
-	baseQuery, baseArgs := buildHistoryDisplayBaseQuery(access, snapshot)
-
-	total := 0
-	if includeTotal {
-		countQuery := fmt.Sprintf(`WITH history_display AS (%s) SELECT COUNT(*) FROM history_display`, baseQuery)
-		if err := r.itemRepo.pool.QueryRow(ctx, countQuery, baseArgs...).Scan(&total); err != nil {
-			return nil, 0, false, fmt.Errorf("counting history display rows: %w", err)
-		}
-		if total == 0 {
-			return []string{}, 0, false, nil
-		}
-	}
-
-	queryLimit := limit
-	if !includeTotal {
-		queryLimit++
-	}
-
-	args := append([]any{}, baseArgs...)
-	limitArgIdx := len(args) + 1
-	args = append(args, queryLimit)
-
-	offsetClause := ""
-	if offset > 0 {
-		offsetArgIdx := len(args) + 1
-		offsetClause = fmt.Sprintf(" OFFSET $%d", offsetArgIdx)
-		args = append(args, offset)
-	}
-
-	pageQuery := fmt.Sprintf(
-		`WITH history_display AS (%s)
-		SELECT display_id
-		FROM history_display
-		ORDER BY watched_at DESC, display_id ASC
-		LIMIT $%d%s`,
-		baseQuery,
-		limitArgIdx,
-		offsetClause,
-	)
-	rows, err := r.itemRepo.pool.Query(ctx, pageQuery, args...)
+	build, err := r.queryExecutorForScope(def.MediaScope, nil).buildPreviewPagePlan(def, access, req.Limit, req.Offset)
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("querying history display page: %w", err)
+		return previewPagePlan{}, err
 	}
-	defer rows.Close()
-
-	displayIDs := make([]string, 0, limit)
-	for rows.Next() {
-		var displayID string
-		if err := rows.Scan(&displayID); err != nil {
-			return nil, 0, false, fmt.Errorf("scanning history display row: %w", err)
+	if useHistoryOrder {
+		build.fromClausePaged = build.fromClauseCount
+		build.limitArgIdx -= len(build.sortArgs)
+		build.sortArgs = nil
+		build.orderBy = "ORDER BY history_source.watched_at DESC, mi.content_id ASC"
+		if historyDateViewedAscending(req) {
+			build.orderBy = "ORDER BY history_source.watched_at ASC, mi.content_id ASC"
 		}
-		displayIDs = append(displayIDs, displayID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, false, fmt.Errorf("iterating history display rows: %w", err)
 	}
 
-	hasMore := false
-	if includeTotal {
-		hasMore = total > offset+len(displayIDs)
-		return displayIDs, total, hasMore, nil
+	historySQL, prefixArgs := buildHistoryDisplayBaseQuery(access, req.SnapshotAt, isEpisodeCatalogScope(def.MediaScope))
+	var searchConditions []string
+	query := strings.TrimSpace(req.SearchQuery)
+	if query != "" {
+		parsed := parseSearchQuery(query)
+		needle := normalizeTitleForComparison(firstNonEmptySearchValue(parsed.Text, query))
+		for token := range strings.FieldsSeq(needle) {
+			prefixArgs = append(prefixArgs, token)
+			searchConditions = append(searchConditions, fmt.Sprintf("strpos(public.normalize_search_text(concat_ws(' ', mi.title, mi.sort_title, mi.original_title, mi.overview)), $%d) > 0", len(prefixArgs)))
+		}
 	}
-	if len(displayIDs) > limit {
-		hasMore = true
-		displayIDs = displayIDs[:limit]
+	if prefix := strings.ToLower(strings.TrimSpace(req.NamePrefix)); prefix != "" {
+		prefixArgs = append(prefixArgs, prefix)
+		searchConditions = append(searchConditions, fmt.Sprintf("(starts_with(lower(btrim(mi.title)), $%d) OR starts_with(lower(btrim(mi.sort_title)), $%d))", len(prefixArgs), len(prefixArgs)))
 	}
-	return displayIDs, 0, hasMore, nil
+
+	// Put history/search arguments before the existing plan's CTE, filter, and
+	// sort arguments; every existing placeholder moves by the same amount.
+	shift := len(prefixArgs)
+	ctes := []string{"history_display AS (" + historySQL + ")"}
+	for _, cte := range build.ctes {
+		ctes = append(ctes, rebindSQLPlaceholders(cte, shift))
+	}
+	build.ctes = ctes
+	build.cteArgs = append(prefixArgs, build.cteArgs...)
+	const historyJoin = " JOIN history_display history_source ON history_source.display_id = mi.content_id"
+	build.fromClauseCount = rebindSQLPlaceholders(build.fromClauseCount, shift) + historyJoin
+	build.fromClausePaged = rebindSQLPlaceholders(build.fromClausePaged, shift) + historyJoin
+	build.whereClause = rebindSQLPlaceholders(build.whereClause, shift)
+	build.orderBy = rebindSQLPlaceholders(build.orderBy, shift)
+	build.limitArgIdx += shift
+	if len(searchConditions) > 0 {
+		build.whereClause += " AND " + strings.Join(searchConditions, " AND ")
+	}
+	return build, nil
 }
 
-func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time) (string, []any) {
+// Keep the full history scope inside each facet query, including profile,
+// hidden-event, snapshot, and episode/display identity constraints.
+func scopeHistoryFacetFilters(filters *BrowseFilters, req CatalogRequest, access AccessFilter) {
+	if req.SnapshotAt == nil {
+		req.SnapshotAt = new(time.Now().UTC())
+	}
+	baseQuery, args := buildHistoryDisplayBaseQuery(access, req.SnapshotAt, isEpisodeCatalogScope(req.Query.MediaScope))
+	filters.contentSourceSQL = "SELECT display_id FROM (" + baseQuery + ") history_source"
+	filters.contentSourceArgs = args
+}
+
+func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time, episodeScope bool) (string, []any) {
 	args := []any{access.UserID, access.ProfileID}
 	argIdx := 3
 
@@ -174,7 +154,11 @@ func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time) (str
 		if len(access.AllowedContentIDs) == 0 {
 			conditions = append(conditions, "1 = 0")
 		} else {
-			conditions = append(conditions, fmt.Sprintf("mi.content_id = ANY($%d)", argIdx))
+			contentIDExpr := "mi.content_id"
+			if episodeScope {
+				contentIDExpr = "h.media_item_id"
+			}
+			conditions = append(conditions, fmt.Sprintf("%s = ANY($%d)", contentIDExpr, argIdx))
 			args = append(args, access.AllowedContentIDs)
 			argIdx++
 		}
@@ -220,6 +204,11 @@ func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time) (str
 		seriesFromAnchoredEpisodeExpr("h.media_item_id"),
 	)
 
+	historyIDExpr := displayIDExpr
+	if episodeScope {
+		historyIDExpr = "h.media_item_id"
+	}
+
 	// Null-poison the episodes join key for fully-formed anchored episode ids so
 	// the planner skips the episodes_pkey probe for them; everything else (legacy
 	// Sonyflake, local, malformed) still falls back to the lookup.
@@ -231,7 +220,7 @@ func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time) (str
 	return fmt.Sprintf(
 		`SELECT DISTINCT ON (history_events.display_id) history_events.display_id, history_events.watched_at
 		FROM (
-			SELECT %[1]s AS display_id, h.watched_at
+			SELECT %[4]s AS display_id, h.watched_at
 			FROM user_watch_history h
 			LEFT JOIN episodes e
 				ON e.content_id = %[3]s
@@ -242,6 +231,7 @@ func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time) (str
 		displayIDExpr,
 		strings.Join(conditions, " AND "),
 		episodeJoinKey,
+		historyIDExpr,
 	), args
 }
 

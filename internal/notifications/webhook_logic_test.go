@@ -298,6 +298,33 @@ func TestDiscordPosterURLModes(t *testing.T) {
 	if got := system("server", nil).discordPosterURL(ctx, cachedKey, ""); got != "" {
 		t.Fatalf("server mode without resolver must render no image, got %q", got)
 	}
+	// Local artwork storage signs root-relative URLs; Discord fetches from
+	// outside, so they are anchored to server.public_url or dropped.
+	local := &System{
+		Settings: NewSettings(mapSettingReader{SettingDiscordPosterMode: "server", "server.public_url": "https://silo.example/"}),
+		images:   relativePresigner{},
+	}
+	if got := local.discordPosterURL(ctx, cachedKey, ""); got != "https://silo.example/api/v2/artwork/"+cachedKey+"?exp=1&sig=abc" {
+		t.Fatalf("local artwork must be anchored to the public URL, got %q", got)
+	}
+	unpublished := &System{
+		Settings: NewSettings(mapSettingReader{SettingDiscordPosterMode: "server"}),
+		images:   relativePresigner{},
+	}
+	if got := unpublished.discordPosterURL(ctx, cachedKey, ""); got != "" {
+		t.Fatalf("relative artwork without a public URL must render no image, got %q", got)
+	}
+	unpublished.SetPublicURL("https://fallback.example")
+	if got := unpublished.discordPosterURL(ctx, cachedKey, ""); got != "https://fallback.example/api/v2/artwork/"+cachedKey+"?exp=1&sig=abc" {
+		t.Fatalf("configured fallback public URL not applied, got %q", got)
+	}
+}
+
+// relativePresigner fakes local artwork delivery: signed root-relative URLs.
+type relativePresigner struct{}
+
+func (relativePresigner) PresignImageURL(_ context.Context, path, _, _ string) string {
+	return "/api/v2/artwork/" + path + "?exp=1&sig=abc"
 }
 
 func requestFulfilledTestRow() DeliveryRow {

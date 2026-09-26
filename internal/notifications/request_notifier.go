@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/requests"
@@ -20,7 +21,7 @@ const (
 	// (docs/architecture/notifications.md, "Request notifications").
 	DeliveryTypeRequestFulfilled = "request.fulfilled"
 	// DeliveryTypeRequestApproved notifies the requesting profile that an
-	// admin (or auto-approval) approved their request.
+	// admin approved their request; auto-approval does not send it.
 	DeliveryTypeRequestApproved = "request.approved"
 	// DeliveryTypeRequestDeclined notifies the requesting profile that an
 	// admin declined their request.
@@ -122,15 +123,25 @@ func (n *RequestFulfillmentNotifier) NotifyFulfilled(ctx context.Context, req re
 // requestLifecycleDispatchTimeout bounds one detached lifecycle dispatch.
 const requestLifecycleDispatchTimeout = 30 * time.Second
 
+// requestLifecycleBackend is the slice of System the lifecycle adapter uses.
+// Both methods detach internally, so the adapter itself stays synchronous.
+// The unexported method keeps the interface in-package, leaving *System as
+// the only production implementation.
+type requestLifecycleBackend interface {
+	PostServerChannelRequestEvent(ctx context.Context, event string, info RequestEventInfo)
+	dispatchRequestLifecycleDetached(ctx context.Context, req requests.Request, deliveryType string)
+}
+
 // RequestLifecycleNotifier adapts request lifecycle transitions (submitted,
 // approved, declined) to notifications: community server-channel posts for
-// every event, plus a personal delivery to the requesting profile for
-// approved and declined. Fulfillment stays on RequestFulfillmentNotifier,
+// every event, plus a personal delivery to the requesting profile on admin
+// approval and decline. Fulfillment stays on RequestFulfillmentNotifier,
 // whose presence-checked flow runs on the reconcile service. Dispatch is
 // detached and best-effort per the requests.LifecycleNotifier contract: a
 // transition never waits on or fails because of notifications.
 type RequestLifecycleNotifier struct {
-	system *System
+	backend requestLifecycleBackend
+	logger  *slog.Logger
 }
 
 // NewRequestLifecycleNotifier creates the adapter; returns nil when there is
@@ -141,37 +152,54 @@ func NewRequestLifecycleNotifier(system *System) *RequestLifecycleNotifier {
 	if system == nil {
 		return nil
 	}
-	return &RequestLifecycleNotifier{system: system}
+	return &RequestLifecycleNotifier{backend: system, logger: system.logger}
 }
 
 // RequestSubmitted implements requests.LifecycleNotifier. Submission posts to
 // server channels only: the requester performed the action themselves, so a
 // personal confirmation would be noise.
 func (n *RequestLifecycleNotifier) RequestSubmitted(ctx context.Context, req requests.Request) {
-	n.system.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestSubmitted, requestEventInfoFor(req))
+	n.backend.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestSubmitted, requestEventInfoFor(req))
 }
 
-// RequestApproved implements requests.LifecycleNotifier.
-func (n *RequestLifecycleNotifier) RequestApproved(ctx context.Context, req requests.Request) {
-	n.system.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestApproved, requestEventInfoFor(req))
-	n.dispatchPersonal(ctx, req, DeliveryTypeRequestApproved)
+// RequestApproved implements requests.LifecycleNotifier. Every approval is
+// broadcast to server channels; only an admin's approval is personal news to
+// the requester. Anything else — including an origin this build does not
+// recognize — skips the personal delivery, so the default is silence.
+func (n *RequestLifecycleNotifier) RequestApproved(
+	ctx context.Context,
+	req requests.Request,
+	origin requests.ApprovalOrigin,
+) {
+	n.backend.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestApproved, requestEventInfoFor(req))
+	switch origin {
+	case requests.ApprovalOriginAdmin:
+		n.backend.dispatchRequestLifecycleDetached(ctx, req, DeliveryTypeRequestApproved)
+	case requests.ApprovalOriginPolicy:
+		// The policy is answering the requester's own submission, so a notice
+		// about it is noise.
+	default:
+		n.logger.WarnContext(ctx, "unrecognized request approval origin; skipping requester notice",
+			"request_id", req.ID, "origin", string(origin))
+	}
 }
 
 // RequestDeclined implements requests.LifecycleNotifier.
 func (n *RequestLifecycleNotifier) RequestDeclined(ctx context.Context, req requests.Request) {
-	n.system.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestDeclined, requestEventInfoFor(req))
-	n.dispatchPersonal(ctx, req, DeliveryTypeRequestDeclined)
+	n.backend.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestDeclined, requestEventInfoFor(req))
+	n.backend.dispatchRequestLifecycleDetached(ctx, req, DeliveryTypeRequestDeclined)
 }
 
-// dispatchPersonal creates the requester's personal delivery on a detached
-// goroutine: the lifecycle contract requires non-blocking dispatch, and the
-// caller's context ends with its HTTP request.
-func (n *RequestLifecycleNotifier) dispatchPersonal(ctx context.Context, req requests.Request, deliveryType string) {
+// dispatchRequestLifecycleDetached creates the requester's delivery on its own
+// goroutine, mirroring PostServerChannelRequestEvent: the lifecycle contract
+// requires non-blocking dispatch, and the caller's context ends with its HTTP
+// request.
+func (s *System) dispatchRequestLifecycleDetached(ctx context.Context, req requests.Request, deliveryType string) {
 	dispatchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), requestLifecycleDispatchTimeout)
 	go func() {
 		defer cancel()
-		if err := n.system.dispatchRequestLifecycle(dispatchCtx, req, deliveryType); err != nil {
-			n.system.logger.WarnContext(ctx, "request lifecycle delivery failed",
+		if err := s.dispatchRequestLifecycle(dispatchCtx, req, deliveryType); err != nil {
+			s.logger.WarnContext(ctx, "request lifecycle delivery failed",
 				"request_id", req.ID, "type", deliveryType, "error", err)
 		}
 	}()

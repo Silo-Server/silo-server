@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/subtitles/opensubtitles"
@@ -53,12 +52,11 @@ var builtinSubtitleProviders = []string{"opensubtitles", "subdl", "subsource"}
 
 // HandleListProviders handles GET /api/v1/admin/subtitle-providers
 func (h *AdminSubtitleHandler) HandleListProviders(w http.ResponseWriter, r *http.Request) {
-	configs, err := h.repo.ListProviderConfigs(r.Context())
+	configs, err := h.ListSubtitleProviderConfigs(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list_error", "Failed to list providers")
 		return
 	}
-	configs = mergeSubtitleProviderConfigs(configs)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"providers": configs})
 }
 
@@ -184,56 +182,7 @@ func (h *AdminSubtitleHandler) HandleTestProvider(w http.ResponseWriter, r *http
 		return
 	}
 
-	stored, err := h.repo.GetProviderConfig(r.Context(), providerName)
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"success": false, "error": fmt.Sprintf("Failed to load config: %v", err),
-		})
-		return
-	}
-	if stored == nil && req.APIKey == "" && req.Username == "" && req.Password == "" {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"success": false, "error": "Provider credentials are not configured",
-		})
-		return
-	}
-	req = preserveSubtitleProviderFields(stored, req)
-	cfg := subtitleProviderConfigFromRequest(providerName, req)
-
-	provider, err := h.providerFactory(cfg)
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"success": false, "error": err.Error(),
-		})
-		return
-	}
-
-	// Do a test search with a well-known title.
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-
-	results, err := provider.Search(ctx, subtitles.SearchRequest{
-		Title:     "The Matrix",
-		Year:      1999,
-		Languages: []string{"en"},
-	})
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"success": false, "error": err.Error(),
-		})
-		return
-	}
-
-	if len(results) == 0 {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"success": false, "error": "Search returned no results (credentials may be invalid)",
-		})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-	})
+	writeJSON(w, http.StatusOK, h.TestSubtitleProvider(r.Context(), providerName, SubtitleProviderTestConfig{APIKey: req.APIKey, Username: req.Username, Password: req.Password, Enabled: req.Enabled}))
 }
 
 func preserveSubtitleProviderFields(stored *subtitles.ProviderConfig, req updateSubtitleProviderRequest) updateSubtitleProviderRequest {

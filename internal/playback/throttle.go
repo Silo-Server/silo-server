@@ -2,8 +2,10 @@
 package playback
 
 import (
+	"context"
 	"io"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -15,6 +17,50 @@ const (
 	// minThresholdSeconds is the minimum allowed throttle threshold.
 	minThresholdSeconds = 60
 )
+
+// TranscodeThrottleSettings reads the server settings controlling how far
+// FFmpeg may run ahead of a client.
+type TranscodeThrottleSettings interface {
+	Get(context.Context, string) (string, error)
+}
+
+// TranscodeThrottleStarter is implemented by TranscodeSession and kept small
+// so every playback frontend can share the settings policy.
+type TranscodeThrottleStarter interface {
+	StartThrottler(int)
+}
+
+// ConfiguredTranscodeThrottleSeconds resolves the configured forward-buffer
+// duration. Zero means throttling is disabled. The resolved value can cross a
+// node boundary without giving the executor access to the API server's settings
+// store.
+func ConfiguredTranscodeThrottleSeconds(ctx context.Context, settings TranscodeThrottleSettings) int {
+	if settings == nil {
+		return 0
+	}
+	enabled, _ := settings.Get(ctx, "enable_transcode_throttle")
+	if enabled != "true" {
+		return 0
+	}
+	threshold := 300
+	if raw, _ := settings.Get(ctx, "transcode_throttle_seconds"); raw != "" {
+		if configured, err := strconv.Atoi(raw); err == nil && configured > 0 {
+			threshold = max(configured, minThresholdSeconds)
+		}
+	}
+	return threshold
+}
+
+// StartConfiguredTranscodeThrottler starts throttling when enabled, using the
+// configured forward-buffer duration or the 300-second default.
+func StartConfiguredTranscodeThrottler(ctx context.Context, settings TranscodeThrottleSettings, starter TranscodeThrottleStarter) {
+	if starter == nil {
+		return
+	}
+	if threshold := ConfiguredTranscodeThrottleSeconds(ctx, settings); threshold > 0 {
+		starter.StartThrottler(threshold)
+	}
+}
 
 // TranscodeThrottler pauses and resumes an FFmpeg process by sending
 // interactive commands to its stdin. It monitors the gap

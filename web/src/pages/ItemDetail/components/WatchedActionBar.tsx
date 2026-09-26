@@ -4,7 +4,7 @@ import { useWatchedStateMutation } from "@/hooks/queries/items";
 import { getWatchedActionLabel } from "../watchedState";
 import ActionBar, { type ActionBarProps } from "./ActionBar";
 
-type WatchedActionProps = "watchedLabel" | "onToggleWatched" | "isUpdatingWatched";
+type WatchedActionProps = "isWatched" | "watchedLabel" | "onToggleWatched" | "isUpdatingWatched";
 
 interface WatchedActionBarProps extends Omit<ActionBarProps, WatchedActionProps> {
   item: ItemDetail;
@@ -22,6 +22,7 @@ export default function WatchedActionBar({ item, ...props }: WatchedActionBarPro
     <ActionBar
       {...props}
       watchedLabel={getWatchedActionLabel(item)}
+      isWatched={item.user_data?.played ?? false}
       onToggleWatched={handleToggleWatched}
       isUpdatingWatched={isUpdatingWatched}
     />

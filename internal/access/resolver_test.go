@@ -94,6 +94,9 @@ func (s stubStore) GetProgress(context.Context, string, string) (*userstore.Watc
 func (s stubStore) ListProgress(context.Context, string, string, int, int) ([]userstore.WatchProgress, error) {
 	panic("unused")
 }
+func (s stubStore) ListProgressPage(context.Context, string, string, *userstore.ProgressKey, int) ([]userstore.WatchProgress, error) {
+	panic("unused")
+}
 func (s stubStore) ListProgressFiltered(context.Context, string, string, []string, *int, int, int) ([]userstore.WatchProgress, error) {
 	panic("unused")
 }
@@ -108,6 +111,9 @@ func (s stubStore) AddHistoryIfMissing(context.Context, userstore.WatchHistoryEn
 	panic("unused")
 }
 func (s stubStore) ListHistory(context.Context, string, int, int) ([]userstore.WatchHistoryEntry, error) {
+	panic("unused")
+}
+func (s stubStore) ListHistoryPage(context.Context, string, *userstore.HistoryKey, int) ([]userstore.WatchHistoryEntry, error) {
 	panic("unused")
 }
 func (s stubStore) ListCompletedHistory(context.Context, userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
@@ -141,11 +147,20 @@ func (s stubStore) RemoveFavorite(context.Context, string, string) error {
 func (s stubStore) ListFavorites(context.Context, string, int, int) ([]userstore.Favorite, error) {
 	panic("unused")
 }
+func (s stubStore) ListFavoritesPage(context.Context, string, *userstore.ListKey, int) ([]userstore.Favorite, error) {
+	panic("unused")
+}
 func (s stubStore) ListFavoritesByMediaItems(context.Context, string, []string) (map[string]bool, error) {
 	panic("unused")
 }
 func (s stubStore) IsFavorite(context.Context, string, string) (bool, error) { panic("unused") }
-func (s stubStore) AddToWatchlist(context.Context, string, string) error     { panic("unused") }
+func (s stubStore) GetFavorite(context.Context, string, string) (*userstore.Favorite, error) {
+	panic("unused")
+}
+func (s stubStore) GetWatchlistEntry(context.Context, string, string) (*userstore.WatchlistEntry, error) {
+	panic("unused")
+}
+func (s stubStore) AddToWatchlist(context.Context, string, string) error { panic("unused") }
 func (s stubStore) AddToWatchlistAt(context.Context, string, string, time.Time) (bool, error) {
 	panic("unused")
 }
@@ -157,6 +172,9 @@ func (s stubStore) ReplaceWatchlistOrder(context.Context, string, []string) erro
 	panic("unused")
 }
 func (s stubStore) ListWatchlist(context.Context, string, int, int) ([]userstore.WatchlistEntry, error) {
+	panic("unused")
+}
+func (s stubStore) ListWatchlistPage(context.Context, string, *userstore.ListKey, int) ([]userstore.WatchlistEntry, error) {
 	panic("unused")
 }
 func (s stubStore) ListWatchlistByMediaItems(context.Context, string, []string) (map[string]bool, error) {
@@ -309,6 +327,9 @@ func (s stubStore) ListSettingValuesForResolution(context.Context, userstore.Set
 func (s stubStore) ListAllSettingValues(context.Context) ([]userstore.SettingValue, error) {
 	panic("unused")
 }
+func (s stubStore) ListSettingValuesByScope(context.Context, string, settingscontract.Scope, []string) ([]userstore.SettingValue, error) {
+	panic("unused")
+}
 func (s stubStore) UpsertSettingValue(context.Context, userstore.SettingIdentity, json.RawMessage) (*userstore.SettingValue, error) {
 	panic("unused")
 }
@@ -429,8 +450,15 @@ func TestResolver_DisabledLibraries_UnrestrictedUser(t *testing.T) {
 	resolver := NewResolver(
 		stubUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}},
 		stubStoreProvider{store: stubStore{
-			profile:  &userstore.Profile{ID: "prof-1"},
-			settings: map[string]string{"disabled_library_ids": "[3,5]"},
+			profile: &userstore.Profile{ID: "prof-1"},
+			settingValues: []userstore.SettingValue{{
+				SettingIdentity: userstore.SettingIdentity{
+					Key:       settingskeys.UiDisabledLibraryIds,
+					Scope:     settingscontract.ScopeProfile,
+					ProfileID: "prof-1",
+				},
+				Value: json.RawMessage(`[3,5]`),
+			}},
 		}},
 		nil,
 	)
@@ -452,8 +480,15 @@ func TestResolver_DisabledLibraries_RestrictedUser(t *testing.T) {
 	resolver := NewResolver(
 		stubUserRepo{user: &models.User{ID: 1, LibraryIDs: []int{1, 2, 3, 4}, AccessPolicyRevision: 5}},
 		stubStoreProvider{store: stubStore{
-			profile:  &userstore.Profile{ID: "prof-1"},
-			settings: map[string]string{"disabled_library_ids": "[2,4]"},
+			profile: &userstore.Profile{ID: "prof-1"},
+			settingValues: []userstore.SettingValue{{
+				SettingIdentity: userstore.SettingIdentity{
+					Key:       settingskeys.UiDisabledLibraryIds,
+					Scope:     settingscontract.ScopeProfile,
+					ProfileID: "prof-1",
+				},
+				Value: json.RawMessage(`[2,4]`),
+			}},
 		}},
 		nil,
 	)
@@ -471,10 +506,31 @@ func TestResolver_DisabledLibraries_RestrictedUser(t *testing.T) {
 	}
 }
 
+func TestResolver_DisabledLibraries_LegacyAccountKeyIsNotRead(t *testing.T) {
+	// The retired-fallback migration copied the legacy account value onto
+	// every profile without a canonical row, so a profile with none hides
+	// nothing even while the frozen legacy row is still stored.
+	resolver := NewResolver(
+		stubUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}},
+		stubStoreProvider{store: stubStore{
+			profile:  &userstore.Profile{ID: "prof-1"},
+			settings: map[string]string{"disabled_library_ids": "[9]"},
+		}},
+		nil,
+	)
+
+	scope, err := resolver.Resolve(context.Background(), ResolveInput{UserID: 1, ProfileID: "prof-1"})
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if len(scope.DisabledLibraryIDs) != 0 {
+		t.Fatalf("DisabledLibraryIDs = %v, want none from the legacy account key", scope.DisabledLibraryIDs)
+	}
+}
+
 func TestResolver_DisabledLibraries_CanonicalRowWins(t *testing.T) {
-	// The canonical profile-scoped ui.disabled_library_ids row wins; the
-	// legacy account key carries a decoy value that must not be read once a
-	// canonical row exists.
+	// The canonical profile-scoped ui.disabled_library_ids row decides; the
+	// legacy account key carries a decoy value that must not be read.
 	resolver := NewResolver(
 		stubUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}},
 		stubStoreProvider{store: stubStore{
@@ -559,6 +615,8 @@ func TestResolver_DisabledLibraries_ProfileIsolation(t *testing.T) {
 }
 
 func TestResolver_DisabledLibraries_NoProfile(t *testing.T) {
+	// Hidden libraries are profile-scoped, so a request without a profile
+	// hides nothing, whatever the frozen legacy account key says.
 	resolver := NewResolver(
 		stubUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}},
 		stubStoreProvider{store: stubStore{
@@ -574,8 +632,8 @@ func TestResolver_DisabledLibraries_NoProfile(t *testing.T) {
 	if scope.AllowedLibraryIDs != nil {
 		t.Fatalf("AllowedLibraryIDs = %v, want nil", scope.AllowedLibraryIDs)
 	}
-	if len(scope.DisabledLibraryIDs) != 1 || scope.DisabledLibraryIDs[0] != 7 {
-		t.Fatalf("DisabledLibraryIDs = %v, want [7]", scope.DisabledLibraryIDs)
+	if len(scope.DisabledLibraryIDs) != 0 {
+		t.Fatalf("DisabledLibraryIDs = %v, want none", scope.DisabledLibraryIDs)
 	}
 }
 
@@ -646,6 +704,63 @@ func TestResolver_MetadataLanguageIgnoresLegacyColumn(t *testing.T) {
 	}
 }
 
+func TestResolver_NextUpModeRidesTheScope(t *testing.T) {
+	// ui.next_up_mode resolves in the same read as the other viewer keys, so
+	// home-section requests can take it from the scope.
+	tests := []struct {
+		name   string
+		values []userstore.SettingValue
+		want   string
+	}{
+		{name: "contract default", want: "combined"},
+		{
+			name: "stored row",
+			values: []userstore.SettingValue{{
+				SettingIdentity: userstore.SettingIdentity{
+					Key: settingskeys.UiNextUpMode, Scope: settingscontract.ScopeProfile, ProfileID: "prof-1",
+				},
+				Value: json.RawMessage(`"separate"`),
+			}},
+			want: "separate",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := NewResolver(
+				stubUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}},
+				stubStoreProvider{store: stubStore{
+					profile:       &userstore.Profile{ID: "prof-1"},
+					settingValues: tt.values,
+				}},
+				nil,
+			)
+			scope, err := resolver.Resolve(context.Background(), ResolveInput{UserID: 1, ProfileID: "prof-1"})
+			if err != nil {
+				t.Fatalf("Resolve() error: %v", err)
+			}
+			if scope.NextUpMode != tt.want {
+				t.Fatalf("NextUpMode = %q, want %q", scope.NextUpMode, tt.want)
+			}
+		})
+	}
+}
+
+func TestScopeJSONLeavesOutNextUpMode(t *testing.T) {
+	// Socket tickets and progress snapshots hash the scope's JSON as its
+	// access fingerprint. A presentation preference must not change it.
+	withMode, err := json.Marshal(Scope{UserID: 1, ProfileID: "prof-1", NextUpMode: "separate"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	without, err := json.Marshal(Scope{UserID: 1, ProfileID: "prof-1"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(withMode) != string(without) {
+		t.Fatalf("scope JSON changed with NextUpMode:\n%s\n%s", withMode, without)
+	}
+}
+
 func TestResolver_AppliesGroupPolicy(t *testing.T) {
 	groupID := int64(9)
 	group := &GroupPolicy{
@@ -710,4 +825,8 @@ type stubGroupProvider struct {
 
 func (p stubGroupProvider) GetPolicyForUser(context.Context, int) (*GroupPolicy, error) {
 	return p.group, p.err
+}
+
+func (s stubStore) LatestHistoryIDs(context.Context, string, map[string][]string) (map[string]string, error) {
+	return nil, nil
 }

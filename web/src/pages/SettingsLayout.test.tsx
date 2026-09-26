@@ -85,10 +85,10 @@ describe("SettingsLayout", () => {
       </MemoryRouter>,
     );
 
-    // Five groups, seventeen sections — every card the same height so no group
+    // Five groups, eighteen sections — every card the same height so no group
     // is visually ranked above another.
     expect(markup.match(/2xl:grid-cols-4/g)).toHaveLength(5);
-    expect(markup.match(/lg:h-28/g)).toHaveLength(17);
+    expect(markup.match(/lg:h-28/g)).toHaveLength(18);
     expect(markup).not.toContain("max-w-5xl");
   });
 
@@ -161,6 +161,7 @@ describe("SettingsLayout", () => {
 
     expect(markup).not.toContain("/settings/profiles");
     expect(markup).not.toContain(">Profiles<");
+    expect(markup).not.toContain("/settings/account");
   });
 
   it("shows the profiles section for non-admin users on their primary profile", () => {
@@ -177,6 +178,7 @@ describe("SettingsLayout", () => {
 
     expect(markup).toContain("/settings/profiles");
     expect(markup).toContain(">Profiles<");
+    expect(markup).toContain("/settings/account");
   });
 
   it("filters personal settings sections from the search box", async () => {

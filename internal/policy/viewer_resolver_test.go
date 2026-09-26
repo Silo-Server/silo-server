@@ -31,9 +31,18 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 		wantNilAllowed   bool
 		wantEmptyAllowed bool
 		wantDisabled     []int
+		wantNoDisabled   bool
 		wantMetadataLang string
+		// wantMaxAdvisoryAge pins the limit on the policy scope, so a case
+		// cannot pass by both resolvers dropping it.
+		wantMaxAdvisoryAge int
+		// wantRequireAdvisory pins the strict flag the same way.
+		wantRequireAdvisory bool
 	}{
 		{
+			// Hidden libraries are profile-scoped, so a request without a
+			// profile hides nothing; the frozen legacy account value the
+			// resolver used to fall back to is no longer read.
 			name: "no profile unrestricted",
 			user: &models.User{
 				ID:                   1,
@@ -42,7 +51,19 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 			settings:       map[string]string{"disabled_library_ids": "[7]"},
 			input:          access.ResolveInput{UserID: 1, SessionID: "sess-1"},
 			wantNilAllowed: true,
-			wantDisabled:   []int{7},
+			wantNoDisabled: true,
+		},
+		{
+			name: "legacy account hidden libraries are not read",
+			user: &models.User{
+				ID:                   1,
+				AccessPolicyRevision: 5,
+			},
+			profile:        &userstore.Profile{ID: "prof-1"},
+			settings:       map[string]string{"disabled_library_ids": "[7]"},
+			input:          access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
+			wantNilAllowed: true,
+			wantNoDisabled: true,
 		},
 		{
 			name: "profile unrestricted",
@@ -56,6 +77,48 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 				MaxContentRating:          "PG-13",
 				MaxPlaybackQuality:        "4k",
 				PreferredMetadataLanguage: "fr",
+			},
+			input:          access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
+			wantNilAllowed: true,
+		},
+		{
+			// The advisory-age limit rides beside the ceiling through both
+			// resolvers; the DeepEqual below compares the whole scope.
+			name: "profile advisory-age limit",
+			user: &models.User{
+				ID:                   1,
+				AccessPolicyRevision: 5,
+			},
+			profile: &userstore.Profile{
+				ID:               "prof-1",
+				MaxContentRating: "PG-13",
+				MaxAdvisoryAge:   10,
+			},
+			input:              access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
+			wantNilAllowed:     true,
+			wantMaxAdvisoryAge: 10,
+		},
+		{
+			name: "profile requires an advisory age",
+			user: &models.User{ID: 1, AccessPolicyRevision: 5},
+			profile: &userstore.Profile{
+				ID:                 "prof-1",
+				MaxAdvisoryAge:     10,
+				RequireAdvisoryAge: true,
+			},
+			input:               access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
+			wantNilAllowed:      true,
+			wantMaxAdvisoryAge:  10,
+			wantRequireAdvisory: true,
+		},
+		{
+			// The flag means nothing without a limit, so both resolvers fold
+			// it to false and the scope hashes as if it were never set.
+			name: "required advisory age without a limit",
+			user: &models.User{ID: 1, AccessPolicyRevision: 5},
+			profile: &userstore.Profile{
+				ID:                 "prof-1",
+				RequireAdvisoryAge: true,
 			},
 			input:          access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
 			wantNilAllowed: true,
@@ -81,9 +144,9 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 				LibraryIDs:           []int{1, 2, 3, 4},
 				AccessPolicyRevision: 5,
 			},
-			profile:  &userstore.Profile{ID: "prof-1"},
-			settings: map[string]string{"disabled_library_ids": "[2,4]"},
-			input:    access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
+			profile:       &userstore.Profile{ID: "prof-1"},
+			settingValues: []userstore.SettingValue{hiddenLibrariesRow("prof-1", `[2,4]`)},
+			input:         access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
 		},
 		{
 			name: "unrestricted scope carries disabled libraries",
@@ -92,7 +155,7 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 				AccessPolicyRevision: 5,
 			},
 			profile:        &userstore.Profile{ID: "prof-1"},
-			settings:       map[string]string{"disabled_library_ids": "[3,5]"},
+			settingValues:  []userstore.SettingValue{hiddenLibrariesRow("prof-1", `[3,5]`)},
 			input:          access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
 			wantNilAllowed: true,
 			wantDisabled:   []int{3, 5},
@@ -230,9 +293,18 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 			if tt.wantDisabled != nil && !reflect.DeepEqual(policyScope.DisabledLibraryIDs, tt.wantDisabled) {
 				t.Fatalf("DisabledLibraryIDs = %#v, want %#v", policyScope.DisabledLibraryIDs, tt.wantDisabled)
 			}
+			if tt.wantNoDisabled && policyScope.DisabledLibraryIDs != nil {
+				t.Fatalf("DisabledLibraryIDs = %#v, want none", policyScope.DisabledLibraryIDs)
+			}
 			// Always asserted: cases with only the legacy profile column expect
 			// "" — the canonical resolution's contract default — proving the
 			// column is no longer read.
+			if policyScope.MaxAdvisoryAge != tt.wantMaxAdvisoryAge {
+				t.Fatalf("MaxAdvisoryAge = %d, want %d", policyScope.MaxAdvisoryAge, tt.wantMaxAdvisoryAge)
+			}
+			if policyScope.RequireAdvisoryAge != tt.wantRequireAdvisory {
+				t.Fatalf("RequireAdvisoryAge = %v, want %v", policyScope.RequireAdvisoryAge, tt.wantRequireAdvisory)
+			}
 			if policyScope.PreferredMetadataLanguage != tt.wantMetadataLang {
 				t.Fatalf("PreferredMetadataLanguage = %q, want %q", policyScope.PreferredMetadataLanguage, tt.wantMetadataLang)
 			}
@@ -485,6 +557,16 @@ func (p viewerResolverStoreProvider) Close() error {
 	return nil
 }
 
+// hiddenLibrariesRow is a stored profile-scope ui.disabled_library_ids row.
+func hiddenLibrariesRow(profileID, ids string) userstore.SettingValue {
+	return userstore.SettingValue{
+		SettingIdentity: userstore.SettingIdentity{
+			Key: settingskeys.UiDisabledLibraryIds, Scope: settingscontract.ScopeProfile, ProfileID: profileID,
+		},
+		Value: json.RawMessage(ids),
+	}
+}
+
 type viewerResolverTestStore struct {
 	userstore.UserStore
 	profile  *userstore.Profile
@@ -599,6 +681,7 @@ func viewerResolverExpectedInput(
 	if profile != nil {
 		out.ProfilePresent = true
 		out.ProfileMaxRating = profile.MaxContentRating
+		out.ProfileMaxAdvisoryAge = profile.MaxAdvisoryAge
 		out.ProfileMaxQuality = profile.MaxPlaybackQuality
 		out.ProfileLibraryLimited = profile.LibraryRestrictionsEnabled
 		out.ProfileLibraryIDs = cloneViewerResolverInts(profile.AllowedLibraryIDs)

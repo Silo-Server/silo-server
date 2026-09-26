@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 // ErrUnsupportedDomain is returned when a policy domain has no simulation
@@ -56,6 +58,9 @@ func Simulate(ctx context.Context, store *PolicyStore, req SimulateRequest) (Sim
 	input, err := decodeSimulateInput(req.Input)
 	if err != nil {
 		return SimulateResult{}, err
+	}
+	if domain == DomainAction {
+		input = withSimulatedRatingCeiling(input)
 	}
 
 	sources, generation, err := simulationSources(ctx, store)
@@ -150,6 +155,7 @@ func guardBenchmarkInput(domain string) (any, error) {
 			AccountMaxQuality: "2160p", AccessPolicyRevision: 1,
 			DisabledLibraryIDs: []int{4}, ProfilePresent: true,
 			ProfileMaxRating: "PG-13", ProfileMaxQuality: "1080p",
+			ProfileMaxAdvisoryAge: 12,
 			ProfileLibraryLimited: true, ProfileLibraryIDs: []int{1, 2},
 			ProfileHasPIN: true, ProfileVerified: true, RequestTime: benchTime,
 		}
@@ -184,6 +190,36 @@ func guardBenchmarkInput(domain string) (any, error) {
 		return nil, fmt.Errorf("decoding eval-cost guard input: %w", err)
 	}
 	return decoded, nil
+}
+
+// withSimulatedRatingCeiling derives content_rating_within_ceiling for an
+// action simulation exactly as PDP.CheckAction derives it before a live
+// evaluation. The flag is computed in Go because the maturity ladder lives in
+// internal/access; action.rego's rating_allowed defaults an absent flag to
+// true, so a simulation that left it to the raw input would report a download
+// of an R item under a PG ceiling as allowed while the live request denies it.
+//
+// The derived value overwrites whatever the caller sent, again matching the
+// live PDP: honoring a hand-written flag would simulate a request that cannot
+// occur, which is the one thing a simulator must not do.
+func withSimulatedRatingCeiling(input any) any {
+	object, ok := input.(map[string]any)
+	if !ok {
+		return input
+	}
+	object["content_rating_within_ceiling"] = access.RatingAllowed(
+		simulateInputString(object, "content_rating"),
+		simulateInputString(object, "max_content_rating"),
+	)
+	return object
+}
+
+// simulateInputString reads one string field out of a decoded simulation
+// input, treating a missing field or a non-string value as empty — the same
+// zero value ActionInput would carry.
+func simulateInputString(object map[string]any, key string) string {
+	value, _ := object[key].(string)
+	return value
 }
 
 func decodeSimulateInput(raw json.RawMessage) (any, error) {

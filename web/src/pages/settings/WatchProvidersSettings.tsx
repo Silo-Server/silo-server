@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { ApiClientError } from "@/api/client";
+import { V2ProblemError } from "@/api/v2/request";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -308,13 +308,20 @@ function APIKeyBlock({
 }
 
 interface ConnectedRunInfo {
-  imported: { watched: number; progress: number; favorites: number; watchlist: number };
+  imported: {
+    watched: number;
+    progress: number;
+    favorites: number;
+    watchlist: number;
+    ratings: number;
+  };
   exported: {
     watched: number;
     favorites: number;
     favoriteRemovals: number;
     watchlist: number;
     watchlistRemovals: number;
+    ratings: number;
   };
   errorMessage?: string;
   errorHint?: string;
@@ -329,6 +336,7 @@ function deriveRunInfo(
     progress: latestRun?.inbound_progress_imported ?? 0,
     favorites: latestRun?.inbound_favorites_imported ?? 0,
     watchlist: latestRun?.inbound_watchlist_imported ?? 0,
+    ratings: latestRun?.inbound_ratings_imported ?? 0,
   };
   const exported = {
     watched: latestRun?.outbound_sent ?? 0,
@@ -336,6 +344,7 @@ function deriveRunInfo(
     favoriteRemovals: latestRun?.favorite_removals_sent ?? 0,
     watchlist: latestRun?.outbound_watchlist_sent ?? 0,
     watchlistRemovals: latestRun?.watchlist_removals_sent ?? 0,
+    ratings: latestRun?.outbound_ratings_sent ?? 0,
   };
   let errorMessage: string | undefined;
   let errorHint: string | undefined;
@@ -369,7 +378,7 @@ function formatLastSync(connection: WatchProviderConnection, latestRun?: WatchPr
 }
 
 function WatchProviderCard({ providerKey }: { providerKey: string }) {
-  const { data: connection, isLoading } = useWatchProviderConnection(providerKey);
+  const { data: savedConnection, isLoading, isFetching } = useWatchProviderConnection(providerKey);
   const updateConnection = useUpdateWatchProviderConnection(providerKey);
   const startAuth = useStartWatchProviderDeviceAuth(providerKey);
   const pollAuth = usePollWatchProviderDeviceAuth(providerKey);
@@ -378,11 +387,17 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
   const syncNow = useTriggerWatchProviderSync(providerKey);
   const { data: syncRunsData } = useWatchProviderSyncRuns(
     providerKey,
-    Boolean(connection?.connected),
+    Boolean(savedConnection?.connected),
   );
   const [authSession, setAuthSession] = useState<DeviceAuthSession | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
   const [apiKeyPrompt, setApiKeyPrompt] = useState(false);
+  const settingsConflict =
+    updateConnection.error instanceof V2ProblemError && updateConnection.error.status === 412;
+  const connection =
+    savedConnection && settingsConflict
+      ? { ...savedConnection, ...updateConnection.variables }
+      : savedConnection;
 
   if (isLoading || !connection) {
     return (
@@ -396,8 +411,8 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
   const latestRun = syncRunsData?.runs?.[0];
   const syncRunning = latestRun?.status === "queued" || latestRun?.status === "running";
   const cooldownSeconds =
-    syncNow.error instanceof ApiClientError && syncNow.error.status === 429
-      ? syncNow.error.details?.retry_after_seconds
+    syncNow.error instanceof V2ProblemError && syncNow.error.status === 429
+      ? syncNow.error.retryAfterSeconds
       : undefined;
   const syncDisabled = syncNow.isPending || syncRunning || Boolean(cooldownSeconds);
   const syncButtonLabel = syncRunning
@@ -407,6 +422,7 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
       : "Sync now";
 
   const isBusy =
+    (connection.connected && !connection.etag) ||
     updateConnection.isPending ||
     startAuth.isPending ||
     pollAuth.isPending ||
@@ -422,6 +438,8 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
     connection.import_favorites_enabled || connection.export_favorites_enabled;
   const watchlistSyncEnabled =
     connection.import_watchlist_enabled || connection.export_watchlist_enabled;
+  const supportsRatings =
+    connection.capabilities.import_ratings || connection.capabilities.export_ratings;
 
   let statusVariant: StatusVariant;
   let statusLabel: string;
@@ -608,14 +626,19 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
             <div className="grid grid-cols-2 gap-3 sm:hidden">
               <StatCell
                 label="Last imported"
-                value={`${runInfo.imported.watched.toLocaleString()} watched · ${runInfo.imported.progress.toLocaleString()} progress · ${runInfo.imported.favorites.toLocaleString()} favorites · ${runInfo.imported.watchlist.toLocaleString()} watchlist`}
+                value={`${runInfo.imported.watched.toLocaleString()} watched · ${runInfo.imported.progress.toLocaleString()} progress · ${runInfo.imported.favorites.toLocaleString()} favorites · ${runInfo.imported.watchlist.toLocaleString()} watchlist${supportsRatings ? ` · ${runInfo.imported.ratings.toLocaleString()} ratings` : ""}`}
               />
               <StatCell
                 label="Last exported"
-                value={`${(runInfo.exported.watched + runInfo.exported.favorites + runInfo.exported.favoriteRemovals + runInfo.exported.watchlist + runInfo.exported.watchlistRemovals).toLocaleString()} sent`}
+                value={`${(runInfo.exported.watched + runInfo.exported.favorites + runInfo.exported.favoriteRemovals + runInfo.exported.watchlist + runInfo.exported.watchlistRemovals + runInfo.exported.ratings).toLocaleString()} sent`}
               />
             </div>
-            <div className="hidden grid-cols-5 gap-3 sm:grid">
+            <div
+              className={cn(
+                "hidden gap-3 sm:grid",
+                supportsRatings ? "grid-cols-6" : "grid-cols-5",
+              )}
+            >
               <StatCell
                 label="Watched"
                 value={`${runInfo.imported.watched.toLocaleString()} imported`}
@@ -632,13 +655,44 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
                 label="Watchlist"
                 value={`${runInfo.imported.watchlist.toLocaleString()} imported`}
               />
+              {supportsRatings ? (
+                <StatCell
+                  label="Ratings"
+                  value={`${runInfo.imported.ratings.toLocaleString()} imported`}
+                />
+              ) : null}
               <StatCell
                 label="Exported"
-                value={`${(runInfo.exported.watched + runInfo.exported.favorites + runInfo.exported.favoriteRemovals + runInfo.exported.watchlist + runInfo.exported.watchlistRemovals).toLocaleString()} sent`}
+                value={`${(runInfo.exported.watched + runInfo.exported.favorites + runInfo.exported.favoriteRemovals + runInfo.exported.watchlist + runInfo.exported.watchlistRemovals + runInfo.exported.ratings).toLocaleString()} sent`}
               />
             </div>
           </div>
 
+          {settingsConflict && (
+            <div role="alert" className="border-border mb-4 rounded-xl border p-4 text-sm">
+              <p>These settings changed elsewhere. Your change is still shown below.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  disabled={isFetching || updateConnection.isPending}
+                  onClick={() => {
+                    if (updateConnection.variables)
+                      updateConnection.mutate(updateConnection.variables);
+                  }}
+                >
+                  Apply my change
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isFetching}
+                  onClick={() => updateConnection.reset()}
+                >
+                  Use latest settings
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
             <ToggleRow
               id={`watch-provider-${providerKey}-import-watched`}
@@ -748,6 +802,26 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
                 onChange={(checked) =>
                   updateConnection.mutate({ sync_watchlist_order_enabled: checked })
                 }
+              />
+            ) : null}
+            {connection.capabilities.import_ratings ? (
+              <ToggleRow
+                id={`watch-provider-${providerKey}-import-ratings`}
+                label="Import ratings"
+                description={`Bring ${displayName} movie and show ratings in as stars. A 7/10 becomes 4 stars.`}
+                checked={connection.import_ratings_enabled}
+                disabled={isBusy}
+                onChange={(checked) => updateConnection.mutate({ import_ratings_enabled: checked })}
+              />
+            ) : null}
+            {connection.capabilities.export_ratings ? (
+              <ToggleRow
+                id={`watch-provider-${providerKey}-export-ratings`}
+                label="Send ratings"
+                description={`Send your star ratings to ${displayName} and clear ones you remove. 4 stars becomes 8/10.`}
+                checked={connection.export_ratings_enabled}
+                disabled={isBusy}
+                onChange={(checked) => updateConnection.mutate({ export_ratings_enabled: checked })}
               />
             ) : null}
             <ToggleRow

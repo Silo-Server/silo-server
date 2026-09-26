@@ -194,3 +194,7 @@ func (s *WebPushService) Unsubscribe(ctx context.Context, userID int, profileID,
 	}
 	return fmt.Errorf("%w: an id or endpoint is required", ErrWebPushInvalid)
 }
+
+func (s *WebPushService) ListPage(ctx context.Context, profile string, limit int, after *Cursor) ([]WebPushSubscription, error) {
+	return s.repo.ListPage(ctx, profile, limit, after)
+}

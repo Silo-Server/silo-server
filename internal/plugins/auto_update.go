@@ -55,7 +55,9 @@ func compareVersions(a, b string) int {
 	return 0
 }
 
-var defaultPluginIDs = []string{"silo.tmdb", "silo.tvdb"}
+const pluginIDTMDB = "silo.tmdb"
+
+var defaultPluginIDs = []string{pluginIDTMDB, "silo.tvdb", "silo.theintrodb"}
 
 type autoUpdateRepositoryStore interface {
 	List(ctx context.Context) ([]*Repository, error)
@@ -401,6 +403,12 @@ func (s *AutoUpdateService) autoUpdatePlugin(ctx context.Context, existing *Inst
 		}
 	}
 	if err != nil {
+		// The old process was stopped above and the row still names the old
+		// release. A lazily started plugin comes back on its next RPC, but a
+		// resident only restarts on a lifecycle reconcile, and the run's
+		// end-of-pass notification is skipped when nothing was applied; fire
+		// it here so the supervisor relaunches the old release now.
+		s.notifyChanged(ctx)
 		return fmt.Errorf("install updated plugin %s from %s to %s: %w", pluginID, oldVersion, newVersion, err)
 	}
 

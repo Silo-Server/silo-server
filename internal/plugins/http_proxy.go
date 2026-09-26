@@ -86,6 +86,20 @@ func NewHTTPProxyWithTypedResolver(
 	}, installations)
 }
 
+// PublicGETRoute checks route metadata using the same matcher as ServeRoute.
+// routePath is the decoded plugin-relative path, including its leading slash.
+// This does not dispatch a plugin, resolve asset bytes, or prove availability;
+// installation and metadata errors are returned unchanged to the caller.
+func (p *HTTPProxy) PublicGETRoute(ctx context.Context, installationID int, routePath string) (bool, error) {
+	const publicAccess = "public"
+	descriptors, err := p.service.RouteDescriptors(ctx, installationID)
+	if err != nil {
+		return false, err
+	}
+	descriptor := matchRouteDescriptor(descriptors, http.MethodGet, routePath)
+	return descriptor != nil && descriptor.GetAccess() == publicAccess, nil
+}
+
 func (p *HTTPProxy) ServeRoute(w http.ResponseWriter, r *http.Request, installationID int, authenticated bool, admin bool) {
 	descriptors, err := p.service.RouteDescriptors(r.Context(), installationID)
 	if err != nil {

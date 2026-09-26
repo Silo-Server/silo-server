@@ -314,6 +314,14 @@ func (r *PushDeviceRepository) UpsertApple(ctx context.Context, registration App
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	generation, err := lockApplePushInstallation(ctx, tx, registration.DeviceID)
+	if err != nil {
+		return nil, err
+	}
+	if generation > 0 {
+		return nil, ErrPushLegacyWriter
+	}
+
 	// A device install registers for the profile it is currently signed into.
 	// Purge the same install's registrations under other profiles (attempts
 	// cascade with them) so a profile switch on a shared device doesn't leave
@@ -370,6 +378,14 @@ func (r *PushDeviceRepository) UpsertFCM(ctx context.Context, registration FCMPu
 		return nil, fmt.Errorf("begin push device upsert: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	generation, err := lockAndroidPushInstallation(ctx, tx, registration.DeviceID)
+	if err != nil {
+		return nil, err
+	}
+	if generation > 0 {
+		return nil, ErrPushLegacyWriter
+	}
 
 	// Same profile-switch cleanup as UpsertApple: one install notifies one
 	// profile at a time.
@@ -430,9 +446,30 @@ func (r *PushDeviceRepository) DeleteByProfileDevice(ctx context.Context, profil
 	if r == nil || r.pool == nil {
 		return ErrPushDeviceUnavailable
 	}
-	_, err := r.pool.Exec(ctx,
-		`DELETE FROM push_devices WHERE profile_id = $1 AND device_id = $2`, profileID, deviceID)
-	return err
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	generation, err := lockAndroidPushInstallation(ctx, tx, deviceID)
+	if err != nil {
+		return err
+	}
+	if generation > 0 {
+		return ErrPushLegacyWriter
+	}
+	// Cross-platform bridge deletion always locks Android before Apple.
+	generation, err = lockApplePushInstallation(ctx, tx, deviceID)
+	if err != nil {
+		return err
+	}
+	if generation > 0 {
+		return ErrPushLegacyWriter
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM push_devices WHERE profile_id=$1 AND device_id=$2`, profileID, deviceID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *PushDeviceRepository) selectForUpdate(ctx context.Context, tx pgx.Tx, profileID, deviceID, platform string) (*PushDevice, error) {

@@ -3,9 +3,13 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -25,12 +29,38 @@ func WrapUserStoreProvider(inner userstore.UserStoreProvider, system *System) us
 	if inner == nil || system == nil {
 		return inner
 	}
-	return &interestTrackingProvider{inner: inner, system: system}
+	tracked := &interestTrackingProvider{inner: inner, system: system}
+	if profiles, ok := inner.(transactionalProfileCreator); ok {
+		return &interestTrackingProviderWithProfileTransaction{interestTrackingProvider: tracked, transactionalProfileCreator: profiles}
+	}
+	return tracked
+}
+
+// Account creation probes this whole-provider capability before inserting its
+// default profile. Preserve it only when the selected backend can join that
+// PostgreSQL transaction; advertising it for SQLite would change its fallback.
+type transactionalProfileCreator interface {
+	CreateProfileInTransaction(context.Context, pgx.Tx, int, userstore.Profile) error
+}
+
+type interestTrackingProviderWithProfileTransaction struct {
+	*interestTrackingProvider
+	transactionalProfileCreator
 }
 
 type interestTrackingProvider struct {
 	inner  userstore.UserStoreProvider
 	system *System
+}
+
+// ListAllSectionOverrides preserves the optional account-wide enumeration
+// capability of the wrapped store.
+func (s *interestTrackingStore) ListAllSectionOverrides(ctx context.Context) ([]userstore.SectionOverride, error) {
+	enumerator, ok := s.UserStore.(userstore.SectionOverrideEnumerator)
+	if !ok {
+		return nil, errors.New("section override enumeration is not supported")
+	}
+	return enumerator.ListAllSectionOverrides(ctx)
 }
 
 func (p *interestTrackingProvider) ForUser(ctx context.Context, userID int) (userstore.UserStore, error) {
@@ -39,30 +69,57 @@ func (p *interestTrackingProvider) ForUser(ctx context.Context, userID int) (use
 		return store, err
 	}
 	tracked := &interestTrackingStore{UserStore: store, userID: userID, system: p.system, updater: p.system.Interest}
-	// Preserve the interface upgrades callers probe for. Both are conditional
+	// Preserve the interface upgrades callers probe for. These are conditional
 	// on the backing store: advertising a capability it does not have would
 	// send callers down a fast path that can only fail.
 	registry, hasDevices := store.(userstore.DeviceRegistry)
 	rollup, hasRollup := store.(userstore.SeriesEpisodeRollupStore)
+	completion, hasCompletion := store.(userstore.EpisodeParentCompletionStore)
+	var wrapped userstore.UserStore = tracked
 	switch {
+	case hasDevices && hasRollup && hasCompletion:
+		wrapped = &interestTrackingStoreWithDevicesRollupAndCompletion{
+			interestTrackingStoreWithDevicesAndRollup: &interestTrackingStoreWithDevicesAndRollup{
+				interestTrackingStore: tracked, DeviceRegistry: registry, SeriesEpisodeRollupStore: rollup,
+			},
+			EpisodeParentCompletionStore: completion,
+		}
+	case hasDevices && hasCompletion:
+		wrapped = &interestTrackingStoreWithDevicesAndCompletion{
+			interestTrackingStoreWithDevices: &interestTrackingStoreWithDevices{
+				interestTrackingStore: tracked, DeviceRegistry: registry,
+			},
+			EpisodeParentCompletionStore: completion,
+		}
+	case hasRollup && hasCompletion:
+		wrapped = &interestTrackingStoreWithRollupAndCompletion{
+			interestTrackingStoreWithRollup: &interestTrackingStoreWithRollup{
+				interestTrackingStore: tracked, SeriesEpisodeRollupStore: rollup,
+			},
+			EpisodeParentCompletionStore: completion,
+		}
+	case hasCompletion:
+		wrapped = &interestTrackingStoreWithCompletion{
+			interestTrackingStore: tracked, EpisodeParentCompletionStore: completion,
+		}
 	case hasDevices && hasRollup:
-		return &interestTrackingStoreWithDevicesAndRollup{
+		wrapped = &interestTrackingStoreWithDevicesAndRollup{
 			interestTrackingStore:    tracked,
 			DeviceRegistry:           registry,
 			SeriesEpisodeRollupStore: rollup,
-		}, nil
+		}
 	case hasDevices:
-		return &interestTrackingStoreWithDevices{
+		wrapped = &interestTrackingStoreWithDevices{
 			interestTrackingStore: tracked,
 			DeviceRegistry:        registry,
-		}, nil
+		}
 	case hasRollup:
-		return &interestTrackingStoreWithRollup{
+		wrapped = &interestTrackingStoreWithRollup{
 			interestTrackingStore:    tracked,
 			SeriesEpisodeRollupStore: rollup,
-		}, nil
+		}
 	}
-	return tracked, nil
+	return preserveDeviceSettings(wrapped, store), nil
 }
 
 func (p *interestTrackingProvider) Close() error {
@@ -74,6 +131,23 @@ type interestTrackingStore struct {
 	userID  int
 	system  *System
 	updater *InterestUpdater
+}
+
+// Onboarding progress is forwarded explicitly: the decorator intercepts no
+// onboarding write, and both backing stores (SQLite and Postgres) implement it.
+func (s *interestTrackingStore) ReadOnboardingProgress(ctx context.Context, profileID, tourID string) (*userstore.OnboardingProgress, error) {
+	progress, ok := s.UserStore.(userstore.OnboardingProgressStore)
+	if !ok {
+		return nil, errors.New("onboarding progress is unavailable on the backing store")
+	}
+	return progress.ReadOnboardingProgress(ctx, profileID, tourID)
+}
+func (s *interestTrackingStore) SaveOnboardingProgress(ctx context.Context, state userstore.OnboardingState, expected int64) (*userstore.OnboardingProgress, error) {
+	progress, ok := s.UserStore.(userstore.OnboardingProgressStore)
+	if !ok {
+		return nil, errors.New("onboarding progress is unavailable on the backing store")
+	}
+	return progress.SaveOnboardingProgress(ctx, state, expected)
 }
 
 type interestTrackingStoreWithDevices struct {
@@ -100,6 +174,28 @@ type interestTrackingStoreWithDevicesAndRollup struct {
 	userstore.SeriesEpisodeRollupStore
 }
 
+// Completion reads also need catalog tables, so preserve this capability only
+// for supporting backends while retaining all mutation hooks on the base wrapper.
+type interestTrackingStoreWithCompletion struct {
+	*interestTrackingStore
+	userstore.EpisodeParentCompletionStore
+}
+
+type interestTrackingStoreWithDevicesAndCompletion struct {
+	*interestTrackingStoreWithDevices
+	userstore.EpisodeParentCompletionStore
+}
+
+type interestTrackingStoreWithRollupAndCompletion struct {
+	*interestTrackingStoreWithRollup
+	userstore.EpisodeParentCompletionStore
+}
+
+type interestTrackingStoreWithDevicesRollupAndCompletion struct {
+	*interestTrackingStoreWithDevicesAndRollup
+	userstore.EpisodeParentCompletionStore
+}
+
 var _ userstore.SettingValueCompareAndSetter = (*interestTrackingStore)(nil)
 var _ userstore.SettingMutationTransactioner = (*interestTrackingStore)(nil)
 var _ userstore.SettingValueCompareAndSetter = (*interestTrackingStoreWithDevices)(nil)
@@ -110,9 +206,9 @@ var _ userstore.SettingMutationTransactioner = (*interestTrackingStoreWithDevice
 // needs an explicit forward below; the assertions make a missing one a compile
 // error instead of a silent production slowdown.
 //
-// SeriesEpisodeRollupStore is deliberately absent here: it is conditional on
-// the backing store, so it lives on the wrapper types above rather than being
-// forwarded unconditionally.
+// SeriesEpisodeRollupStore and EpisodeParentCompletionStore are conditional
+// on the backing store, so they live on the wrapper types above rather than
+// being forwarded unconditionally.
 var _ userstore.WatchedBatchWriter = (*interestTrackingStore)(nil)
 var _ userstore.VisibleHistoryAdder = (*interestTrackingStore)(nil)
 var _ userstore.HistoryVisibilityStore = (*interestTrackingStore)(nil)
@@ -122,6 +218,11 @@ var _ userstore.HistoryVisibilityStore = (*interestTrackingStoreWithDevices)(nil
 var _ userstore.SeriesEpisodeRollupStore = (*interestTrackingStoreWithRollup)(nil)
 var _ userstore.SeriesEpisodeRollupStore = (*interestTrackingStoreWithDevicesAndRollup)(nil)
 var _ userstore.DeviceRegistry = (*interestTrackingStoreWithDevicesAndRollup)(nil)
+
+var _ userstore.EpisodeParentCompletionStore = (*interestTrackingStoreWithCompletion)(nil)
+var _ userstore.EpisodeParentCompletionStore = (*interestTrackingStoreWithDevicesAndCompletion)(nil)
+var _ userstore.EpisodeParentCompletionStore = (*interestTrackingStoreWithRollupAndCompletion)(nil)
+var _ userstore.EpisodeParentCompletionStore = (*interestTrackingStoreWithDevicesRollupAndCompletion)(nil)
 
 // WithPreferenceSettingsTransaction preserves the optional atomic-settings
 // capability of the wrapped store. Preference writes do not affect interest
@@ -168,6 +269,15 @@ func (s *interestTrackingStore) WithSettingMutationTransaction(
 		return fmt.Errorf("wrapped user store does not support atomic idempotent setting mutations")
 	}
 	return transactioner.WithSettingMutationTransaction(ctx, mutationID, fn)
+}
+
+// Preserve coherent preference reads when the store is wrapped for notifications.
+func (s *interestTrackingStore) WithPreferenceSettingsSnapshot(ctx context.Context, fn func(userstore.PreferenceSettingsReader) error) error {
+	reader, ok := s.UserStore.(userstore.PreferenceSettingsSnapshotter)
+	if !ok {
+		return fmt.Errorf("wrapped user store does not support preference snapshots")
+	}
+	return reader.WithPreferenceSettingsSnapshot(ctx, fn)
 }
 
 // progressState is the transition-relevant projection of a progress row.
@@ -274,6 +384,16 @@ func (s *interestTrackingStore) SetProgressAt(ctx context.Context, profileID, me
 		s.queueOnTransition(profileID, mediaItemID, before, after)
 	}
 	return err
+}
+
+func (s *interestTrackingStore) ListJellycompatProgressDates(ctx context.Context, profileID string, ids []string) (map[string]string, error) {
+	reader, ok := s.UserStore.(interface {
+		ListJellycompatProgressDates(context.Context, string, []string) (map[string]string, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+	return reader.ListJellycompatProgressDates(ctx, profileID, ids)
 }
 
 func (s *interestTrackingStore) SetProgressIfNewer(ctx context.Context, profileID, mediaItemID string, position, duration float64, completed bool, updatedAt time.Time) (bool, error) {
@@ -453,4 +573,101 @@ func (s *interestTrackingStore) DeleteProfile(ctx context.Context, id string) er
 		}
 	}
 	return err
+}
+
+// Preserve the optional device settings capability without claiming support
+// on backends that cannot page or atomically clear devices. Keep the existing
+// concrete decorator so its other optional capabilities survive as well.
+func preserveDeviceSettings(wrapped, inner userstore.UserStore) userstore.UserStore {
+	devices, ok := inner.(userstore.DeviceSettingsStore)
+	if !ok {
+		return wrapped
+	}
+	switch w := wrapped.(type) {
+	case *interestTrackingStoreWithDevicesRollupAndCompletion:
+		return &struct {
+			*interestTrackingStoreWithDevicesRollupAndCompletion
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	case *interestTrackingStoreWithDevicesAndCompletion:
+		return &struct {
+			*interestTrackingStoreWithDevicesAndCompletion
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	case *interestTrackingStoreWithRollupAndCompletion:
+		return &struct {
+			*interestTrackingStoreWithRollupAndCompletion
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	case *interestTrackingStoreWithCompletion:
+		return &struct {
+			*interestTrackingStoreWithCompletion
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	case *interestTrackingStoreWithDevicesAndRollup:
+		return &struct {
+			*interestTrackingStoreWithDevicesAndRollup
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	case *interestTrackingStoreWithDevices:
+		return &struct {
+			*interestTrackingStoreWithDevices
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	case *interestTrackingStoreWithRollup:
+		return &struct {
+			*interestTrackingStoreWithRollup
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	case *interestTrackingStore:
+		return &struct {
+			*interestTrackingStore
+			userstore.DeviceSettingsStore
+		}{w, devices}
+	default:
+		return wrapped
+	}
+}
+
+// The notification decorator preserves the provider's storage for every account.
+func (p *interestTrackingProvider) SupportsAtomicSectionProfileReset(pool *pgxpool.Pool) bool {
+	provider, ok := p.inner.(userstore.SectionProfileResetProvider)
+	return ok && provider.SupportsAtomicSectionProfileReset(pool)
+}
+
+func (s *interestTrackingStore) ListAdminSettingValuesPage(ctx context.Context, after userstore.SettingIdentity, limit int) ([]userstore.SettingValue, bool, error) {
+	pager, ok := s.UserStore.(userstore.AdminSettingValuePager)
+	if !ok {
+		return nil, false, fmt.Errorf("administrator setting pagination is unsupported")
+	}
+	return pager.ListAdminSettingValuesPage(ctx, after, limit)
+}
+
+// ApplyJellycompatProgress preserves the atomic leaf edit through the production
+// decorator and queues derived state only after its transaction commits.
+func (s *interestTrackingStore) ApplyJellycompatProgress(ctx context.Context, profileID string, edit userstore.JellycompatProgressEdit) error {
+	writer, ok := s.UserStore.(userstore.JellycompatProgressEditor)
+	if !ok {
+		return fmt.Errorf("atomic user progress updates unavailable")
+	}
+	if err := writer.ApplyJellycompatProgress(ctx, profileID, edit); err != nil {
+		return err
+	}
+	s.updater.QueueItemMutation(s.userID, profileID, edit.MediaItemID)
+	return nil
+}
+
+// ApplyJellycompatParent queues parent and child interest changes only after
+// their shared transaction commits.
+func (s *interestTrackingStore) ApplyJellycompatParent(ctx context.Context, profileID string, edit userstore.JellycompatParentEdit) error {
+	writer, ok := s.UserStore.(userstore.JellycompatParentEditor)
+	if !ok {
+		return fmt.Errorf("atomic parent user data updates unavailable")
+	}
+	if err := writer.ApplyJellycompatParent(ctx, profileID, edit); err != nil {
+		return err
+	}
+	s.queueTargetMutations(profileID, edit.Targets)
+	s.updater.QueueItemMutation(s.userID, profileID, edit.MediaItemID)
+	return nil
 }

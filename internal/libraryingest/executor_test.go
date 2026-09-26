@@ -25,6 +25,18 @@ func newSkippedRootMemoryRepo(roots ...models.SkippedMediaRoot) *skippedRootMemo
 	return repo
 }
 
+func TestThemeFileDoesNotCreateSkippedVideoRoot(t *testing.T) {
+	repo := newSkippedRootMemoryRepo()
+	e := &Executor{skippedRootRepo: repo}
+	path := "/movies/Title (2020)/theme-music/opening.mp3"
+	if err := e.reconcileSkippedRoots(t.Context(), 1, "movies", scopeModeFile, path, []string{path}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.roots) != 0 {
+		t.Fatalf("theme audio became a skipped video root: %+v", repo.roots)
+	}
+}
+
 func skippedRootKey(folderID int, rootPath string) string {
 	return fmt.Sprintf("%d:%s", folderID, filepath.Clean(rootPath))
 }

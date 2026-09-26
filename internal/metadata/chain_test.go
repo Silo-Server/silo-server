@@ -1,6 +1,9 @@
 package metadata
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // Capability metadata as stored in plugin_capabilities.metadata: plugin-declared
 // fields are wrapped in a "metadata" envelope.
@@ -89,6 +92,64 @@ func TestExtractDefaultEnabled(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("extractDefaultEnabled(%q) = %v, want %v",
 					tc.metadataJSON, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExtractLookupProviderIDs(t *testing.T) {
+	cases := []struct {
+		name         string
+		metadataJSON string
+		want         []string
+	}{
+		{"inside envelope", `{"metadata":{"lookup_provider_ids":["imdb","tmdb"]}}`, []string{"imdb", "tmdb"}},
+		{"top level", `{"lookup_provider_ids":["tmdb"]}`, []string{"tmdb"}},
+		{"top level wins over envelope", `{"lookup_provider_ids":["tvdb"],"metadata":{"lookup_provider_ids":["imdb"]}}`, []string{"tvdb"}},
+		{"normalized and deduplicated", `{"metadata":{"lookup_provider_ids":[" IMDb ","imdb","","TMDB"]}}`, []string{"imdb", "tmdb"}},
+
+		// Anything that is not a list of strings declares nothing, so the
+		// provider stays gated on its own ID.
+		{"absent", tmdbCapMetadata, nil},
+		{"no metadata", ``, nil},
+		{"malformed json", `{not json`, nil},
+		{"comma string is not a list", `{"metadata":{"lookup_provider_ids":"imdb,tmdb"}}`, nil},
+		{"mixed types", `{"metadata":{"lookup_provider_ids":["imdb",7]}}`, nil},
+		{"only blanks", `{"metadata":{"lookup_provider_ids":[" ",""]}}`, nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractLookupProviderIDs([]byte(tc.metadataJSON))
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("extractLookupProviderIDs(%q) = %q, want %q", tc.metadataJSON, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExtractBulkLookupLimit(t *testing.T) {
+	cases := []struct {
+		name         string
+		metadataJSON string
+		want         int
+	}{
+		{"inside envelope", `{"metadata":{"bulk_lookup_limit":100}}`, 100},
+		{"top level", `{"bulk_lookup_limit":10}`, 10},
+		{"capped", `{"metadata":{"bulk_lookup_limit":100000}}`, maxBulkLookupLimit},
+
+		// Anything but a positive integer leaves the provider out of the pass.
+		{"absent", tmdbCapMetadata, 0},
+		{"zero", `{"metadata":{"bulk_lookup_limit":0}}`, 0},
+		{"negative", `{"metadata":{"bulk_lookup_limit":-5}}`, 0},
+		{"fractional", `{"metadata":{"bulk_lookup_limit":2.5}}`, 0},
+		{"string", `{"metadata":{"bulk_lookup_limit":"100"}}`, 0},
+		{"malformed json", `{not json`, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := extractBulkLookupLimit([]byte(tc.metadataJSON)); got != tc.want {
+				t.Fatalf("extractBulkLookupLimit(%q) = %d, want %d", tc.metadataJSON, got, tc.want)
 			}
 		})
 	}

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -105,6 +106,10 @@ func (h *NotificationsHandler) HandleRequestEmailAddress(w http.ResponseWriter, 
 	err := h.system.RequestEmailAddress(r.Context(), userID, profileID, req.Email)
 	switch {
 	case err == nil:
+	case errors.Is(err, notifications.ErrEmailLegacyWriter):
+		writeError(w, http.StatusConflict, "email_verification_upgrade_required", "This profile requires durable email verification")
+		return
+
 	case errors.Is(err, notifications.ErrEmailInvalidAddress):
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid email address")
 		return
@@ -149,12 +154,17 @@ func (h *NotificationsHandler) HandleClearEmailAddress(w http.ResponseWriter, r 
 // verification and unsubscribe. Both are clicked from email clients on
 // devices that may have no Silo session, so they render minimal standalone
 // HTML instead of redirecting into the authenticated app.
+type NotificationEmailLinkProcessor interface {
+	VerifyEmailToken(context.Context, string) (notifications.EmailVerifyOutcome, error)
+	UnsubscribeEmail(context.Context, string) (bool, error)
+}
+
 type EmailLinkHandler struct {
-	system *notifications.System
+	system NotificationEmailLinkProcessor
 }
 
 // NewEmailLinkHandler creates an EmailLinkHandler.
-func NewEmailLinkHandler(system *notifications.System) *EmailLinkHandler {
+func NewEmailLinkHandler(system NotificationEmailLinkProcessor) *EmailLinkHandler {
 	return &EmailLinkHandler{system: system}
 }
 

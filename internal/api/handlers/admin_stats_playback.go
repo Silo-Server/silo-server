@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -74,7 +75,7 @@ type AdminPlaybackActivityBucket struct {
 // AdminPlaybackReliability summarizes how playback went over the window.
 //
 // Time-to-first-frame and failed-start counts are deliberately absent: nothing
-// records a playback *start* event today (playback_history_admin only gains a
+// records a playback *start* event today (admin_playback_history only gains a
 // row when a session finalizes), so both would have to be guessed from log
 // parsing. They need client telemetry first — see docs/admin-api.md.
 type AdminPlaybackReliability struct {
@@ -203,16 +204,8 @@ func (h *AdminHandler) HandleGetPlaybackActivity(w http.ResponseWriter, r *http.
 		return
 	}
 
-	var activity *AdminPlaybackActivity
-	switch {
-	case h.PlaybackActivitySource != nil:
-		if isTruthyQuery(r.URL.Query().Get("refresh")) {
-			h.PlaybackActivitySource.Invalidate()
-		}
-		activity, err = h.PlaybackActivitySource.Get(r.Context(), hours)
-	case h.pool != nil:
-		activity, err = queryAdminPlaybackActivity(r.Context(), h.pool, hours)
-	default:
+	activity, err := h.ReadAdminPlaybackActivity(r.Context(), hours, isTruthyQuery(r.URL.Query().Get("refresh")))
+	if errors.Is(err, ErrAdminDashboardUnavailable) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Database not configured")
 		return
 	}
@@ -274,7 +267,7 @@ func completionRate(completed, finalized int64) float64 {
 
 // adminPlaybackSessionsCTE is the union both activity queries aggregate over.
 //
-// playback_history_admin only gains a row when a session finalizes, so the
+// admin_playback_history only gains a row when a session finalizes, so the
 // current hour would be under-counted without the live sessions. A finalizing
 // session briefly exists on both sides — history is written before the sync
 // row is deleted, and the deletion can fail until stale-session cleanup — so
@@ -284,7 +277,7 @@ func completionRate(completed, finalized int64) float64 {
 const adminPlaybackSessionsCTE = `
 	WITH history AS (
 		SELECT session_id, started_at, play_method, completed, user_id, profile_id, FALSE AS live
-		FROM playback_history_admin
+		FROM admin_playback_history
 		WHERE started_at >= now() - make_interval(hours => $1)
 	),
 	sessions AS (

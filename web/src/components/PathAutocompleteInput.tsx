@@ -62,6 +62,7 @@ export default function PathAutocompleteInput({
   const autocompleteBrowse = useFilesystemBrowseWhen(
     autocompleteContext?.browsePath ?? "",
     !!autocompleteContext,
+    autocompleteContext?.fragment ?? "",
   );
 
   const autocompleteSuggestions = useMemo(() => {

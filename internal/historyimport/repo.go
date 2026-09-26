@@ -164,7 +164,7 @@ func (r *Repository) ListEnabledSources(ctx context.Context) ([]Source, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, name, source_type, '' AS base_url, COALESCE(system_id, ''), enabled, sort_order,
 		       (admin_token IS NOT NULL) AS has_admin_token,
-		       created_at, updated_at
+		       created_at, updated_at, revision
 		FROM history_import_sources
 		WHERE enabled = TRUE
 		ORDER BY sort_order ASC, name ASC, id ASC`)
@@ -179,7 +179,7 @@ func (r *Repository) ListAdminSources(ctx context.Context) ([]Source, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, name, source_type, base_url, COALESCE(system_id, ''), enabled, sort_order,
 		       (admin_token IS NOT NULL) AS has_admin_token,
-		       created_at, updated_at
+		       created_at, updated_at, revision
 		FROM history_import_sources
 		ORDER BY sort_order ASC, name ASC, id ASC`)
 	if err != nil {
@@ -193,7 +193,7 @@ func (r *Repository) GetSourceByID(ctx context.Context, id int) (*Source, error)
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, name, source_type, base_url, COALESCE(system_id, ''), enabled, sort_order,
 		       (admin_token IS NOT NULL) AS has_admin_token,
-		       created_at, updated_at
+		       created_at, updated_at, revision
 		FROM history_import_sources
 		WHERE id = $1`, id)
 	source, err := scanSource(row)
@@ -218,7 +218,7 @@ func (r *Repository) CreateSource(ctx context.Context, input CreateSourceInput) 
 		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6)
 		RETURNING id, name, source_type, base_url, COALESCE(system_id, ''), enabled, sort_order,
 		          (admin_token IS NOT NULL) AS has_admin_token,
-		          created_at, updated_at`,
+		          created_at, updated_at, revision`,
 		input.Name, input.SourceType, input.BaseURL, input.SystemID, input.Enabled, input.SortOrder,
 	)
 	source, err := scanSource(row)
@@ -242,6 +242,10 @@ func (r *Repository) CreateSource(ctx context.Context, input CreateSourceInput) 
 		}
 		source.HasAdminToken = true
 	}
+	source, err = scanSource(tx.QueryRow(ctx, "SELECT "+sourceEditorColumns+" FROM history_import_sources WHERE id=$1", source.ID))
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit creating history import source: %w", err)
 	}
@@ -249,40 +253,10 @@ func (r *Repository) CreateSource(ctx context.Context, input CreateSourceInput) 
 }
 
 func (r *Repository) UpdateSource(ctx context.Context, id int, input UpdateSourceInput) (*Source, error) {
-	result, err := r.pool.Exec(ctx, `
-		UPDATE history_import_sources
-		SET
-			name = COALESCE($2::text, name),
-			base_url = COALESCE($3::text, base_url),
-			system_id = CASE
-				WHEN $4::text IS NULL THEN system_id
-				WHEN $4::text = '' THEN NULL
-				ELSE $4::text
-			END,
-			enabled = COALESCE($5::boolean, enabled),
-			sort_order = COALESCE($6::integer, sort_order),
-			updated_at = NOW()
-		WHERE id = $1`,
-		id, input.Name, input.BaseURL, input.SystemID, input.Enabled, input.SortOrder,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("updating history import source %d: %w", id, err)
-	}
-	if result.RowsAffected() == 0 {
-		return nil, ErrSourceNotFound
-	}
-	return r.GetSourceByID(ctx, id)
+	return r.UpdateSourceConditional(ctx, id, input, -1)
 }
-
 func (r *Repository) DeleteSource(ctx context.Context, id int) error {
-	result, err := r.pool.Exec(ctx, `DELETE FROM history_import_sources WHERE id = $1`, id)
-	if err != nil {
-		return fmt.Errorf("deleting history import source %d: %w", id, err)
-	}
-	if result.RowsAffected() == 0 {
-		return ErrSourceNotFound
-	}
-	return nil
+	return r.DeleteSourceConditional(ctx, id, -1)
 }
 
 func (r *Repository) CreateConnectSession(ctx context.Context, session ConnectSession) (*ConnectSession, error) {
@@ -608,7 +582,7 @@ func (r *Repository) CreateRun(ctx context.Context, run Run) (*Run, error) {
 		RETURNING id, user_id, profile_id, source_type, connection_mode, status,
 			mapping_id,
 			fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
-			warnings, unmatched_samples, COALESCE(error_message, ''), created_at, started_at, completed_at`,
+			warnings, unmatched_samples, COALESCE(error_message, ''), created_at, started_at, completed_at, cancel_requested_at IS NOT NULL`,
 		run.ID, run.UserID, run.ProfileID, run.SourceType, run.ConnectionMode, run.Status,
 		run.MappingID,
 		run.Fetched, run.Matched, run.Unmatched, run.ProgressUpdated, run.HistoryCreated, run.WatchlistAdded, run.FavoritesImported, run.Skipped,
@@ -625,7 +599,7 @@ func (r *Repository) MarkRunStarted(ctx context.Context, runID string) error {
 	result, err := r.pool.Exec(ctx, `
 		UPDATE history_import_runs
 		SET status = $2, started_at = NOW(), last_heartbeat_at = NOW()
-		WHERE id = $1`, runID, RunStatusRunning)
+		WHERE id = $1 AND status = 'queued' AND dispatch_version IS NULL AND claim_generation=0 AND cancel_requested_at IS NULL`, runID, RunStatusRunning)
 	if err != nil {
 		return fmt.Errorf("marking run %s started: %w", runID, err)
 	}
@@ -639,7 +613,7 @@ func (r *Repository) TouchRunHeartbeat(ctx context.Context, runID string) error 
 	result, err := r.pool.Exec(ctx, `
 		UPDATE history_import_runs
 		SET last_heartbeat_at = NOW()
-		WHERE id = $1 AND status = $2`, runID, RunStatusRunning)
+		WHERE id = $1 AND status = $2 AND dispatch_version IS NULL AND claim_generation=0 AND cancel_requested_at IS NULL`, runID, RunStatusRunning)
 	if err != nil {
 		return fmt.Errorf("touching run %s heartbeat: %w", runID, err)
 	}
@@ -650,6 +624,11 @@ func (r *Repository) TouchRunHeartbeat(ctx context.Context, runID string) error 
 }
 
 func (r *Repository) CompleteRun(ctx context.Context, runID string, summary ExecutionSummary) error {
+	return r.completeRun(ctx, RunClaim{RunID: runID}, summary)
+}
+
+func (r *Repository) completeRun(ctx context.Context, claim RunClaim, summary ExecutionSummary) error {
+	runID := claim.RunID
 	warningsJSON, err := json.Marshal(trimWarnings(persistedWarnings(summary)))
 	if err != nil {
 		return fmt.Errorf("marshaling run warnings: %w", err)
@@ -675,9 +654,9 @@ func (r *Repository) CompleteRun(ctx context.Context, runID string, summary Exec
 			error_message = NULL,
 			completed_at = NOW(),
 			last_heartbeat_at = NOW()
-		WHERE id = $1`,
+		WHERE id = $1 AND status='running' AND claim_generation=$13 AND cancel_requested_at IS NULL`,
 		runID, RunStatusCompleted, summary.Fetched, summary.Matched, summary.Unmatched,
-		summary.ProgressUpdated, summary.HistoryCreated, summary.WatchlistAdded, summary.FavoritesImported, summary.Skipped, warningsJSON, unmatchedJSON,
+		summary.ProgressUpdated, summary.HistoryCreated, summary.WatchlistAdded, summary.FavoritesImported, summary.Skipped, warningsJSON, unmatchedJSON, claim.Generation,
 	)
 	if err != nil {
 		return fmt.Errorf("completing run %s: %w", runID, err)
@@ -689,6 +668,11 @@ func (r *Repository) CompleteRun(ctx context.Context, runID string, summary Exec
 }
 
 func (r *Repository) UpdateRunProgress(ctx context.Context, runID string, summary ExecutionSummary) error {
+	return r.updateRunProgress(ctx, RunClaim{RunID: runID}, summary)
+}
+
+func (r *Repository) updateRunProgress(ctx context.Context, claim RunClaim, summary ExecutionSummary) error {
+	runID := claim.RunID
 	warningsJSON, err := json.Marshal(trimWarnings(persistedWarnings(summary)))
 	if err != nil {
 		return fmt.Errorf("marshaling run warnings: %w", err)
@@ -711,7 +695,7 @@ func (r *Repository) UpdateRunProgress(ctx context.Context, runID string, summar
 			warnings = $10,
 			unmatched_samples = $11,
 			last_heartbeat_at = NOW()
-		WHERE id = $1 AND status = $12`,
+		WHERE id = $1 AND status = $12 AND claim_generation=$13 AND cancel_requested_at IS NULL`,
 		runID,
 		summary.Fetched,
 		summary.Matched,
@@ -723,7 +707,7 @@ func (r *Repository) UpdateRunProgress(ctx context.Context, runID string, summar
 		summary.Skipped,
 		warningsJSON,
 		unmatchedJSON,
-		RunStatusRunning,
+		RunStatusRunning, claim.Generation,
 	)
 	if err != nil {
 		return fmt.Errorf("updating run %s progress: %w", runID, err)
@@ -742,7 +726,7 @@ func (r *Repository) FailStaleRuns(ctx context.Context, staleBefore time.Time, e
 			error_message = NULLIF($2, ''),
 			completed_at = NOW()
 		WHERE status = $3
-			AND completed_at IS NULL
+			AND completed_at IS NULL AND cancel_requested_at IS NULL
 			AND COALESCE(last_heartbeat_at, started_at, created_at) < $4`,
 		RunStatusFailed,
 		errorMessage,
@@ -756,6 +740,11 @@ func (r *Repository) FailStaleRuns(ctx context.Context, staleBefore time.Time, e
 }
 
 func (r *Repository) FailRun(ctx context.Context, runID string, summary ExecutionSummary, errorMessage string) error {
+	return r.failRun(ctx, RunClaim{RunID: runID}, summary, errorMessage)
+}
+
+func (r *Repository) failRun(ctx context.Context, claim RunClaim, summary ExecutionSummary, errorMessage string) error {
+	runID := claim.RunID
 	warningsJSON, err := json.Marshal(trimWarnings(persistedWarnings(summary)))
 	if err != nil {
 		return fmt.Errorf("marshaling run warnings: %w", err)
@@ -781,9 +770,9 @@ func (r *Repository) FailRun(ctx context.Context, runID string, summary Executio
 			error_message = NULLIF($13, ''),
 			completed_at = NOW(),
 			last_heartbeat_at = NOW()
-		WHERE id = $1`,
+		WHERE id = $1 AND status='running' AND claim_generation=$14 AND cancel_requested_at IS NULL`,
 		runID, RunStatusFailed, summary.Fetched, summary.Matched, summary.Unmatched,
-		summary.ProgressUpdated, summary.HistoryCreated, summary.WatchlistAdded, summary.FavoritesImported, summary.Skipped, warningsJSON, unmatchedJSON, errorMessage,
+		summary.ProgressUpdated, summary.HistoryCreated, summary.WatchlistAdded, summary.FavoritesImported, summary.Skipped, warningsJSON, unmatchedJSON, errorMessage, claim.Generation,
 	)
 	if err != nil {
 		return fmt.Errorf("failing run %s: %w", runID, err)
@@ -799,7 +788,7 @@ func (r *Repository) ListRunsForUser(ctx context.Context, userID, limit int) ([]
 		SELECT id, user_id, profile_id, source_type, connection_mode, status,
 			mapping_id,
 			fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
-			warnings, unmatched_samples, COALESCE(error_message, ''), created_at, started_at, completed_at
+			warnings, unmatched_samples, COALESCE(error_message, ''), created_at, started_at, completed_at, cancel_requested_at IS NOT NULL
 		FROM history_import_runs
 		WHERE user_id = $1
 		ORDER BY created_at DESC
@@ -811,12 +800,56 @@ func (r *Repository) ListRunsForUser(ctx context.Context, userID, limit int) ([]
 	return scanRunsWithMappingID(rows)
 }
 
+// RunKey is the keyset position of one run in the newest-first listing:
+// its creation instant and id.
+type RunKey struct {
+	CreatedAt time.Time
+	ID        string
+}
+
+// ListRunsPageForUser returns up to limit runs of the account strictly older
+// than after in (created_at DESC, id DESC) order, and whether more follow. A
+// nil after starts from the newest run.
+func (r *Repository) ListRunsPageForUser(ctx context.Context, userID int, after *RunKey, limit int) ([]Run, bool, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	limit = min(limit, 200)
+	query := `
+		SELECT id, user_id, profile_id, source_type, connection_mode, status,
+			mapping_id,
+			fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
+			warnings, unmatched_samples, COALESCE(error_message, ''), created_at, started_at, completed_at, cancel_requested_at IS NOT NULL
+		FROM history_import_runs
+		WHERE user_id = $1`
+	args := []any{userID}
+	if after != nil {
+		query += ` AND (created_at, id) < ($2, $3)`
+		args = append(args, after.CreatedAt, after.ID)
+	}
+	query += fmt.Sprintf(` ORDER BY created_at DESC, id DESC LIMIT %d`, limit+1)
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, false, fmt.Errorf("listing history import runs page: %w", err)
+	}
+	defer rows.Close()
+	runs, err := scanRunsWithMappingID(rows)
+	if err != nil {
+		return nil, false, err
+	}
+	hasMore := len(runs) > limit
+	if hasMore {
+		runs = runs[:limit]
+	}
+	return runs, hasMore, nil
+}
+
 func (r *Repository) GetRunForUser(ctx context.Context, userID int, runID string) (*Run, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, user_id, profile_id, source_type, connection_mode, status,
 			mapping_id,
 			fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
-			warnings, unmatched_samples, COALESCE(error_message, ''), created_at, started_at, completed_at
+			warnings, unmatched_samples, COALESCE(error_message, ''), created_at, started_at, completed_at, cancel_requested_at IS NOT NULL
 		FROM history_import_runs
 		WHERE id = $1 AND user_id = $2`, runID, userID)
 	run, err := scanRunWithMappingID(row)
@@ -834,7 +867,7 @@ func (r *Repository) ListActiveRunsForUser(ctx context.Context, userID int) ([]R
 		SELECT id, user_id, profile_id, source_type, connection_mode, status,
 			mapping_id,
 			fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
-			warnings, unmatched_samples, COALESCE(error_message, ''), created_at, started_at, completed_at
+			warnings, unmatched_samples, COALESCE(error_message, ''), created_at, started_at, completed_at, cancel_requested_at IS NOT NULL
 		FROM history_import_runs
 		WHERE user_id = $1
 		  AND status IN ($2, $3)
@@ -972,35 +1005,6 @@ func (r *Repository) MatchMediaByExternalID(ctx context.Context, kind, column, v
 	return matches, nil
 }
 
-func (r *Repository) MatchMediaByTitleYear(ctx context.Context, kind, title string, year int) ([]mediaLookupRow, error) {
-	if title == "" {
-		return nil, nil
-	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT content_id, title, COALESCE(year, 0)
-		FROM media_items
-		WHERE type = $1 AND status = 'matched' AND title = $2 AND ($3 = 0 OR COALESCE(year, 0) = $3)
-		ORDER BY content_id ASC`,
-		kind, title, year,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("matching media by title/year: %w", err)
-	}
-	defer rows.Close()
-	var matches []mediaLookupRow
-	for rows.Next() {
-		var row mediaLookupRow
-		if err := rows.Scan(&row.ContentID, &row.Title, &row.Year); err != nil {
-			return nil, fmt.Errorf("scanning title/year match: %w", err)
-		}
-		matches = append(matches, row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating title/year matches: %w", err)
-	}
-	return matches, nil
-}
-
 func (r *Repository) MatchEpisodeByExternalID(ctx context.Context, column, value string) ([]mediaLookupRow, error) {
 	if value == "" {
 		return nil, nil
@@ -1028,6 +1032,45 @@ func (r *Repository) MatchEpisodeByExternalID(ctx context.Context, column, value
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating episode lookup rows: %w", err)
+	}
+	return matches, nil
+}
+
+func (r *Repository) MatchEpisodeBySeriesExternalID(
+	ctx context.Context,
+	column, value string,
+	seasonNumber, episodeNumber int,
+) ([]mediaLookupRow, error) {
+	if value == "" {
+		return nil, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT e.content_id, COALESCE(e.title, ''), COALESCE(series.year, 0)
+		FROM episodes e
+		JOIN media_items series ON series.content_id = e.series_id
+		WHERE series.type = 'series'
+		  AND series.status = 'matched'
+		  AND series.`+column+` = $1
+		  AND e.season_number = $2
+		  AND e.episode_number = $3
+		ORDER BY e.content_id ASC`,
+		value, seasonNumber, episodeNumber,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("matching episode by series %s: %w", column, err)
+	}
+	defer rows.Close()
+
+	var matches []mediaLookupRow
+	for rows.Next() {
+		var row mediaLookupRow
+		if err := rows.Scan(&row.ContentID, &row.Title, &row.Year); err != nil {
+			return nil, fmt.Errorf("scanning episode series lookup row: %w", err)
+		}
+		matches = append(matches, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating episode series lookup rows: %w", err)
 	}
 	return matches, nil
 }
@@ -1094,7 +1137,7 @@ func scanSource(scanner interface{ Scan(dest ...any) error }) (*Source, error) {
 	if err := scanner.Scan(
 		&source.ID, &source.Name, &source.SourceType, &source.BaseURL, &source.SystemID,
 		&source.Enabled, &source.SortOrder, &source.HasAdminToken,
-		&source.CreatedAt, &source.UpdatedAt,
+		&source.CreatedAt, &source.UpdatedAt, &source.Revision,
 	); err != nil {
 		return nil, err
 	}
@@ -1149,7 +1192,7 @@ func scanRun(scanner interface{ Scan(dest ...any) error }) (*Run, error) {
 	if err := scanner.Scan(
 		&run.ID, &run.UserID, &run.ProfileID, &run.SourceType, &run.ConnectionMode, &run.Status,
 		&run.Fetched, &run.Matched, &run.Unmatched, &run.ProgressUpdated, &run.HistoryCreated, &run.WatchlistAdded, &run.FavoritesImported, &run.Skipped,
-		&warningsJSON, &unmatchedJSON, &run.ErrorMessage, &run.CreatedAt, &run.StartedAt, &run.CompletedAt,
+		&warningsJSON, &unmatchedJSON, &run.ErrorMessage, &run.CreatedAt, &run.StartedAt, &run.CompletedAt, &run.CancelRequested,
 	); err != nil {
 		return nil, err
 	}
@@ -1165,7 +1208,7 @@ func scanRunWithMappingID(scanner interface{ Scan(dest ...any) error }) (*Run, e
 		&run.ID, &run.UserID, &run.ProfileID, &run.SourceType, &run.ConnectionMode, &run.Status,
 		&run.MappingID,
 		&run.Fetched, &run.Matched, &run.Unmatched, &run.ProgressUpdated, &run.HistoryCreated, &run.WatchlistAdded, &run.FavoritesImported, &run.Skipped,
-		&warningsJSON, &unmatchedJSON, &run.ErrorMessage, &run.CreatedAt, &run.StartedAt, &run.CompletedAt,
+		&warningsJSON, &unmatchedJSON, &run.ErrorMessage, &run.CreatedAt, &run.StartedAt, &run.CompletedAt, &run.CancelRequested,
 	); err != nil {
 		return nil, err
 	}
@@ -1247,7 +1290,7 @@ func persistedWarnings(summary ExecutionSummary) []string {
 		return reasons[i].reason < reasons[j].reason
 	})
 	for _, reason := range reasons {
-		warnings = append(warnings, fmt.Sprintf("unmatched items (%d): %s", reason.count, reason.reason))
+		warnings = append(warnings, fmt.Sprintf(unmatchedWarningFormat, reason.count, reason.reason))
 	}
 	return warnings
 }

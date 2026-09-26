@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
@@ -32,6 +33,10 @@ func (t *SyncPodcastFeedsTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary
 }
 func (t *SyncPodcastFeedsTask) IsHidden() bool { return false }
+
+func (t *SyncPodcastFeedsTask) ServesLibrary(libraryType string) bool {
+	return librarykind.IsPodcast(libraryType)
+}
 
 func (t *SyncPodcastFeedsTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{

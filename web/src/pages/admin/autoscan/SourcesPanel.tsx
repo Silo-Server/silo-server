@@ -1,4 +1,11 @@
-import { useCallback, useId, useMemo, useState } from "react";
+import { autoscanSourceObservation } from "@/hooks/queries/admin/autoscanSourceObservation";
+import {
+  captureAutoscanRewriteIntent,
+  type AutoscanRewriteIntent,
+} from "@/api/v2/adminAutoscanRewrites";
+import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
+import { autoscanWebhookURL } from "./webhookURL";
+import { useCallback, useLayoutEffect, useId, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -69,7 +76,11 @@ import {
   useAvailableScanSources,
   useCreateAutoscanSource,
   useCreateAutoscanWebhook,
+  captureAutoscanWebhookIntent,
+  type AutoscanWebhookIntent,
   useDeleteAutoscanSource,
+  captureSourceDeletion,
+  type AutoscanSourceDeleteIntent,
   useRotateAutoscanWebhook,
   useUpdateAutoscanSource,
 } from "@/hooks/queries/useAutoscan";
@@ -193,7 +204,7 @@ function webhookProviderOf(
 
 /** Resolve a possibly relative webhook_url against the admin UI's own origin. */
 function absoluteWebhookURL(url: string): string {
-  return url.startsWith("/") ? `${window.location.origin}${url}` : url;
+  return autoscanWebhookURL(url, window.location.origin);
 }
 
 /**
@@ -265,7 +276,7 @@ function normalizeSourceConfig(config: Record<string, string>): Record<string, s
 // RewriteEditor — expandable section inside a SourceRow
 // ---------------------------------------------------------------------------
 
-function RewriteEditor({
+export function RewriteEditor({
   sourceId,
   hasConnection,
   rewrites,
@@ -285,7 +296,24 @@ function RewriteEditor({
   const [rewriteError, setRewriteError] = useState<string | null>(null);
 
   const suggest = useAutoscanRewriteSuggestions();
-  const [preview, setPreview] = useState<AutoscanRewriteSuggestions | null>(null);
+  const [previewState, setPreview] = useState<{
+    value: AutoscanRewriteSuggestions;
+    intent: AutoscanRewriteIntent;
+  } | null>(null);
+  const preview =
+    previewState?.intent.sourceId === sourceId &&
+    isCapturedProfileAuthorityActive(previewState.intent.profileContext)
+      ? previewState.value
+      : null;
+  const requestScope = useRef({ sourceId, generation: 0 });
+  useLayoutEffect(() => {
+    const scope = requestScope.current;
+    scope.sourceId = sourceId;
+    scope.generation += 1;
+    return () => {
+      scope.generation += 1;
+    };
+  }, [sourceId]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   function updateRewrite(index: number, patch: Partial<AutoscanPathRewrite>) {
@@ -304,10 +332,22 @@ function RewriteEditor({
   }
 
   async function handleSync() {
-    const s = await suggest.mutateAsync(sourceId);
-    setPreview(s);
-    setSelected(new Set((s.proposed ?? []).map((p) => p.from)));
-    setOpen(true);
+    try {
+      const intent = captureAutoscanRewriteIntent(sourceId);
+      const generation = ++requestScope.current.generation;
+      const value = await suggest.mutateAsync(intent);
+      if (
+        requestScope.current.generation !== generation ||
+        requestScope.current.sourceId !== intent.sourceId ||
+        !isCapturedProfileAuthorityActive(intent.profileContext)
+      )
+        return;
+      setPreview({ value, intent });
+      setSelected(new Set(value.proposed.map((p) => p.from)));
+      setOpen(true);
+    } catch {
+      // The hook reports failures for the still-active authority. Preserve edits.
+    }
   }
 
   function toggleSelected(from: string) {
@@ -324,7 +364,12 @@ function RewriteEditor({
 
   /** Merge the checked proposed rewrites into the list (dedupe by `from`) and save. */
   function applySelected() {
-    if (!preview) return;
+    if (
+      !preview ||
+      !previewState ||
+      !isCapturedProfileAuthorityActive(previewState.intent.profileContext)
+    )
+      return;
     const existingFroms = new Set(rewrites.map((r) => r.from));
     const additions = preview.proposed
       .filter((p) => selected.has(p.from) && !existingFroms.has(p.from))
@@ -558,7 +603,7 @@ function CollapsibleList({ title, items }: { title: string; items: string[] }) {
 // WebhookEndpointSection — webhook-mode replacement for the poll interval
 // ---------------------------------------------------------------------------
 
-function WebhookEndpointSection({
+export function WebhookEndpointSection({
   source,
   provider,
   onProviderChange,
@@ -569,19 +614,42 @@ function WebhookEndpointSection({
   onProviderChange: (next: AutoscanWebhookProvider) => void;
   isSaving: boolean;
 }) {
-  const createWebhook = useCreateAutoscanWebhook();
-  const rotateWebhook = useRotateAutoscanWebhook();
-  const [rotateOpen, setRotateOpen] = useState(false);
+  const [endpointAuthority] = useState(captureProfileRequestContext);
+  const createWebhook = useCreateAutoscanWebhook(endpointAuthority);
+  const rotateWebhook = useRotateAutoscanWebhook(endpointAuthority);
+  const [rotateTarget, setRotateTarget] = useState<AutoscanWebhookIntent | null>(null);
+  const endpointActive =
+    endpointAuthority !== null && isCapturedProfileAuthorityActive(endpointAuthority);
 
-  const url = source.webhook_url ? absoluteWebhookURL(source.webhook_url) : "";
+  const [endpointAction, setEndpointAction] = useState<"create" | "rotate">("create");
+  const endpointChange = endpointAction === "rotate" ? rotateWebhook : createWebhook;
+  const endpointUncertain = endpointChange.isPending || endpointChange.isError;
+  const receipt =
+    endpointChange.isSuccess && endpointChange.data?.id === source.id ? endpointChange.data : null;
+  const candidate =
+    autoscanSourceObservation(receipt) > autoscanSourceObservation(source) ? receipt! : source;
+  const [latestObservation, setLatestObservation] = useState({ id: source.id, source: candidate });
+  let endpointView = latestObservation.source;
+  if (
+    latestObservation.id !== source.id ||
+    autoscanSourceObservation(candidate) > autoscanSourceObservation(latestObservation.source)
+  ) {
+    endpointView = candidate;
+    setLatestObservation({ id: source.id, source: candidate });
+  }
+  const url =
+    endpointActive && !endpointUncertain && endpointView?.webhook_url
+      ? absoluteWebhookURL(endpointView.webhook_url)
+      : "";
 
   async function copyURL() {
-    if (!url) return;
+    if (!url || !endpointAuthority || !isCapturedProfileAuthorityActive(endpointAuthority)) return;
     try {
       await navigator.clipboard.writeText(url);
-      toast.success("Webhook URL copied");
+      if (isCapturedProfileAuthorityActive(endpointAuthority)) toast.success("Webhook URL copied");
     } catch {
-      toast.error("Could not copy — select the URL manually");
+      if (isCapturedProfileAuthorityActive(endpointAuthority))
+        toast.error("Could not copy — select the URL manually");
     }
   }
 
@@ -589,12 +657,22 @@ function WebhookEndpointSection({
     <div className="space-y-3">
       <div className="space-y-1.5">
         <Label className="text-muted-foreground text-xs">Webhook URL</Label>
-        {source.webhook_configured ? (
+        <p className="text-muted-foreground text-xs">
+          For an existing connection, replace the saved URL in your download manager with this one.
+          The secret stays the same unless you rotate it.
+        </p>
+        {endpointView.webhook_configured ? (
           <>
             <div className="flex items-center gap-1.5">
               <Input
                 readOnly
-                value={url || `…${source.webhook_secret_suffix ?? ""} (URL unavailable)`}
+                value={
+                  endpointActive
+                    ? endpointUncertain
+                      ? "Reload this page before using or replacing this URL"
+                      : url || `…${endpointView?.webhook_secret_suffix ?? ""} (URL unavailable)`
+                    : "Select the original administrator profile to view this URL"
+                }
                 className="h-8 font-mono text-xs"
                 aria-label="Webhook delivery URL"
                 onFocus={(e) => e.currentTarget.select()}
@@ -613,8 +691,11 @@ function WebhookEndpointSection({
                 type="button"
                 variant="outline"
                 size="icon-sm"
-                onClick={() => setRotateOpen(true)}
-                disabled={rotateWebhook.isPending}
+                onClick={() => {
+                  if (endpointAuthority && isCapturedProfileAuthorityActive(endpointAuthority))
+                    setRotateTarget(captureAutoscanWebhookIntent(source.id, endpointAuthority));
+                }}
+                disabled={!endpointActive || endpointUncertain}
                 aria-label="Rotate webhook URL"
                 title="Replace the URL — the old one stops working immediately"
               >
@@ -634,11 +715,18 @@ function WebhookEndpointSection({
               type="button"
               variant="outline"
               size="sm"
-              disabled={createWebhook.isPending}
-              onClick={() => createWebhook.mutate(source.id)}
+              disabled={!endpointActive || endpointUncertain}
+              onClick={() => {
+                setEndpointAction("create");
+                createWebhook.mutate(source.id);
+              }}
             >
               <Webhook className="size-3.5" />
-              {createWebhook.isPending ? "Generating…" : "Generate webhook URL"}
+              {createWebhook.isPending
+                ? "Generating…"
+                : createWebhook.isError
+                  ? "Reload this page to check the endpoint"
+                  : "Generate webhook URL"}
             </Button>
             <p className="text-muted-foreground text-xs">
               Creates the URL Sonarr/Radarr will POST import, rename, and delete events to.
@@ -669,7 +757,12 @@ function WebhookEndpointSection({
       </div>
 
       {/* Rotate confirmation */}
-      <AlertDialog open={rotateOpen} onOpenChange={setRotateOpen}>
+      <AlertDialog
+        open={rotateTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRotateTarget(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Rotate webhook URL?</AlertDialogTitle>
@@ -682,8 +775,11 @@ function WebhookEndpointSection({
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                rotateWebhook.mutate(source.id);
-                setRotateOpen(false);
+                if (rotateTarget) {
+                  setEndpointAction("rotate");
+                  rotateWebhook.mutateCaptured(rotateTarget);
+                }
+                setRotateTarget(null);
               }}
             >
               Rotate
@@ -720,7 +816,7 @@ function parseInterval(intervalStr: string, current: number | null): number | nu
 // SourceRow
 // ---------------------------------------------------------------------------
 
-function SourceRow({
+export function SourceRow({
   source,
   descriptor,
   connectionOptions,
@@ -738,7 +834,8 @@ function SourceRow({
   onDelete: (source: AutoscanSource) => void;
   layout?: "table" | "card";
 }) {
-  const update = useUpdateAutoscanSource();
+  const [draftAuthority] = useState(captureProfileRequestContext);
+  const update = useUpdateAutoscanSource(draftAuthority);
   const libraries = useAdminLibraries();
   const [edit, setEdit] = useState<RowEdit>(() => sourceToRowEdit(source, descriptor));
 
@@ -1304,14 +1401,23 @@ function AddSourceDialog({
   connectionOptions: Array<{ id: string; name: string; kind: string }>;
 }) {
   const available = useAvailableScanSources();
-  const createSource = useCreateAutoscanSource();
-  const createWebhook = useCreateAutoscanWebhook();
+  const [draftAuthority, setDraftAuthority] = useState(captureProfileRequestContext);
+  const createSource = useCreateAutoscanSource(draftAuthority);
+  const createWebhook = useCreateAutoscanWebhook(draftAuthority);
   const libraries = useAdminLibraries();
   const [form, setForm] = useState<AddSourceForm>(BLANK_ADD_SOURCE);
+  const currentForm = useRef(form);
+  useLayoutEffect(() => {
+    currentForm.current = form;
+  }, [form]);
   // Set once a webhook source exists and its endpoint has been generated. The
   // dialog then shows the paste-this-into-your-arr instructions rather than
   // closing, so setup finishes in one place.
-  const [createdWebhookSource, setCreatedWebhookSource] = useState<AutoscanSource | null>(null);
+  const [createdWebhookReceipt, setCreatedWebhookSource] = useState<AutoscanSource | null>(null);
+  const createdWebhookSource =
+    draftAuthority && isCapturedProfileAuthorityActive(draftAuthority)
+      ? createdWebhookReceipt
+      : null;
 
   const plugins = available.data ?? [];
   const selectedPlugin = plugins.find(
@@ -1361,6 +1467,7 @@ function AddSourceDialog({
       : Math.max(0, stepLabels.length - 1);
 
   function close() {
+    setDraftAuthority(captureProfileRequestContext());
     setForm(BLANK_ADD_SOURCE);
     setCreatedWebhookSource(null);
     onOpenChange(false);
@@ -1398,7 +1505,8 @@ function AddSourceDialog({
   }
 
   function handleSubmit() {
-    if (!selectedPlugin) return;
+    if (!selectedPlugin || !draftAuthority || !isCapturedProfileAuthorityActive(draftAuthority))
+      return;
 
     const connectionId =
       showConnection && form.connectionId && form.connectionId !== "__none__"
@@ -1423,6 +1531,7 @@ function AddSourceDialog({
       },
       {
         onSuccess: (created) => {
+          if (currentForm.current !== form) return;
           if (!isWebhookFlow) {
             close();
             return;
@@ -1437,8 +1546,14 @@ function AddSourceDialog({
           // endpoint and no visible explanation. The instructions panel renders
           // a retry when the URL is missing.
           createWebhook.mutate(created.id, {
-            onSuccess: (withWebhook) => setCreatedWebhookSource(withWebhook),
-            onError: () => setCreatedWebhookSource(created),
+            onSuccess: (withWebhook) => {
+              if (isCapturedProfileAuthorityActive(draftAuthority) && currentForm.current === form)
+                setCreatedWebhookSource(withWebhook);
+            },
+            onError: () => {
+              if (isCapturedProfileAuthorityActive(draftAuthority) && currentForm.current === form)
+                setCreatedWebhookSource(created);
+            },
           });
         },
       },
@@ -1673,7 +1788,15 @@ export default function SourcesPanel() {
   );
   const deleteSource = useDeleteAutoscanSource();
 
-  const [deleteTarget, setDeleteTarget] = useState<AutoscanSource | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    source: AutoscanSource;
+    intent: AutoscanSourceDeleteIntent;
+  } | null>(null);
+  const renderedAuthority = captureProfileRequestContext();
+  const requestDelete = (source: AutoscanSource) => {
+    if (!renderedAuthority || !isCapturedProfileAuthorityActive(renderedAuthority)) return;
+    setDeleteTarget({ source, intent: captureSourceDeletion(source.id, renderedAuthority) });
+  };
   const [addOpen, setAddOpen] = useState(false);
 
   const connectionOptions = (connections.data ?? []).map((c) => ({
@@ -1773,7 +1896,7 @@ export default function SourcesPanel() {
             connectionOptions={connectionOptions}
             pluginDisplayNames={pluginDisplayNames}
             globalPollInterval={globalPollInterval}
-            onDelete={setDeleteTarget}
+            onDelete={requestDelete}
             layout="card"
           />
         ))}
@@ -1800,7 +1923,7 @@ export default function SourcesPanel() {
                 connectionOptions={connectionOptions}
                 pluginDisplayNames={pluginDisplayNames}
                 globalPollInterval={globalPollInterval}
-                onDelete={setDeleteTarget}
+                onDelete={requestDelete}
                 layout="table"
               />
             ))}
@@ -1819,7 +1942,7 @@ export default function SourcesPanel() {
             <AlertDialogDescription>
               &ldquo;
               {deleteTarget
-                ? resolveSourceName(deleteTarget, connectionOptions, pluginDisplayNames)
+                ? resolveSourceName(deleteTarget.source, connectionOptions, pluginDisplayNames)
                 : ""}
               &rdquo; will be permanently removed. This cannot be undone.
             </AlertDialogDescription>
@@ -1830,7 +1953,7 @@ export default function SourcesPanel() {
               variant="destructive"
               onClick={() => {
                 if (deleteTarget) {
-                  deleteSource.mutate(deleteTarget.id);
+                  deleteSource.mutateCaptured(deleteTarget.intent);
                   setDeleteTarget(null);
                 }
               }}

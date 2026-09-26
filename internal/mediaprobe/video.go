@@ -44,6 +44,7 @@ func (s *ScalarString) UnmarshalJSON(data []byte) error {
 
 // Stream is the FFprobe stream shape shared by full scans and live validation.
 type Stream struct {
+	ID                 ScalarString      `json:"id"`
 	Index              int               `json:"index"`
 	CodecName          string            `json:"codec_name"`
 	CodecLongName      string            `json:"codec_long_name"`

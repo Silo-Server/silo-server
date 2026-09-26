@@ -18,15 +18,19 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/jackc/pgx/v5"
 )
 
 var personalCollectionImageClient = imagecache.NewPublicHTTPClient()
 
 // ImagesHandler serves Jellyfin-compatible image routes.
+const compatImagePrimary = "Primary"
+
 type ImagesHandler struct {
 	content      ContentService
 	codec        *ResourceIDCodec
 	sessions     *SessionStore
+	keyAuth      *AdminAPIKeyAuthenticator
 	images       *ImageCache
 	personRepo   imagePersonRepository
 	detailSvc    *catalog.DetailService
@@ -59,6 +63,7 @@ type imageItemRepository interface {
 
 type imagePersonRepository interface {
 	Get(ctx context.Context, id int64) (*models.Person, error)
+	EnsureAccessible(ctx context.Context, id int64, filter catalog.AccessFilter) error
 }
 
 type imageSeasonRepository interface {
@@ -111,7 +116,7 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	routeID := chiURLParam(r, "id")
 	imageType := chiURLParam(r, "imageType")
 	imageSize := compatRequestImageSize(r, imageType)
-	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	tag := compatImageRequestTag(r)
 	if canonicalRouteID, ok := canonicalCompatImageRouteID(h.codec, routeID); ok {
 		routeID = canonicalRouteID
 		r = withCompatImageProxyRouteRequest(r)
@@ -137,6 +142,19 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Person IDs, unsigned tags, and the process-wide artwork cache are public
+	// identifiers, not authority. Headshots require a signed tag (minted only
+	// where a visible credit was served) or a session with a visible credit.
+	if personID, err := h.codec.DecodeIntID(EncodedIDPerson, routeID); err == nil {
+		if session == nil {
+			if token, ok := ExtractToken(r); ok {
+				session, _ = resolveCompatToken(r.Context(), h.sessions, h.keyAuth, token)
+			}
+		}
+		h.handlePersonImage(w, r, session, routeID, imageType, tag, personID)
+		return
+	}
+
 	if tag != "" {
 		imageURL, ok, err := h.resolveItemImageURLFromTag(r.Context(), routeID, imageType, imageSize, tag)
 		if err != nil {
@@ -157,9 +175,9 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if session == nil && h.sessions != nil {
+	if session == nil {
 		if token, ok := ExtractToken(r); ok {
-			session, _ = h.sessions.Get(token)
+			session, _ = resolveCompatToken(r.Context(), h.sessions, h.keyAuth, token)
 		}
 	}
 	if session == nil {
@@ -167,12 +185,6 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		// 401): media players can't attach auth headers to <img> requests, and
 		// absent or unsupported art (e.g. Chapter) must degrade to a clean 404.
 		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
-		return
-	}
-
-	// Try decoding as a person ID first.
-	if personID, err := h.codec.DecodeIntID(EncodedIDPerson, routeID); err == nil {
-		h.handlePersonImage(w, r, routeID, imageType, personID)
 		return
 	}
 
@@ -196,22 +208,54 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	h.serveImageURL(w, r, imageURL)
 }
 
-// handlePersonImage serves person photo images.
-func (h *ImagesHandler) handlePersonImage(w http.ResponseWriter, r *http.Request, routeID, imageType string, personID int64) {
-	if imageType != "Primary" {
+// handlePersonImage serves person photo images. A signed tag authorizes the
+// request on its own, because Jellyfin Web loads images anonymously; without
+// one, the session must see a credit for the person.
+func (h *ImagesHandler) handlePersonImage(w http.ResponseWriter, r *http.Request, session *Session, routeID, imageType, tag string, personID int64) {
+	if imageType != compatImagePrimary || h.personRepo == nil || h.detailSvc == nil {
 		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
 		return
 	}
-	if h.personRepo == nil || h.detailSvc == nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
-		return
+	var person *models.Person
+	if tag != "" && h.imageTags != nil {
+		if p, err := h.personRepo.Get(r.Context(), personID); err == nil && h.imageTags.Equal(personImageTagSeed(routeID, p.PhotoPath, p.PhotoThumbhash), "", tag) {
+			person = p
+		}
 	}
-	person, err := h.personRepo.Get(r.Context(), personID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Person not found")
-		return
+	if person == nil {
+		if session == nil {
+			writeError(w, http.StatusNotFound, "NotFound", "Image not found")
+			return
+		}
+		filter := catalog.AccessFilter{}
+		if h.accessFilter != nil {
+			filter = h.accessFilter(r.Context(), session.StreamAppUserID, session.ProfileID)
+		}
+		if err := h.personRepo.EnsureAccessible(r.Context(), personID, filter); err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				writeCompatUpstreamError(w, err)
+				return
+			}
+			writeError(w, http.StatusNotFound, "NotFound", "Person not found")
+			return
+		}
 	}
+	if person == nil {
+		p, err := h.personRepo.Get(r.Context(), personID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "NotFound", "Person not found")
+			return
+		}
+		person = p
+	}
+	// Key the shared cache by the current photo so a replaced photo, which
+	// also rotates the signed tag, never serves the previous photo's URL.
+	cacheRouteID := personImageCacheRouteID(routeID, person.PhotoPath)
 	imageSize := compatRequestImageSize(r, imageType)
+	if imageURL, ok := h.images.LookupSized(cacheRouteID, imageType, "", imageSize); ok {
+		h.serveImageURL(w, r, imageURL)
+		return
+	}
 	// Headshots ride the profile ladder ({500, 300}), not the poster ladder,
 	// which now carries a w780 rung. Resolving them as posters would name a
 	// profile/w780 key that is never generated — and the server-side ladder
@@ -222,8 +266,14 @@ func (h *ImagesHandler) handlePersonImage(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
 		return
 	}
-	h.images.RememberSizedUntil(routeID, imageType, imageURL, imageSize, resolvedImage.ExpiresAt)
+	h.images.RememberSizedUntil(cacheRouteID, imageType, imageURL, imageSize, resolvedImage.ExpiresAt)
 	h.serveImageURL(w, r, imageURL)
+}
+
+// personImageCacheRouteID is the ImageCache route key for a person's current
+// photo.
+func personImageCacheRouteID(routeID, photoPath string) string {
+	return routeID + "\x00" + strings.TrimSpace(photoPath)
 }
 
 func (h *ImagesHandler) resolveItemImageURL(ctx context.Context, session *Session, contentID, imageType string, r *http.Request) (catalog.ResolvedImageURL, error) {
@@ -676,10 +726,15 @@ func (h *ImagesHandler) signedImageTagMatches(routeID, contentID, imageType, tag
 	)
 }
 
+// imageURLForItem presigns the requested image type, and its fallback type
+// only when the requested one yields no URL.
 func (h *ImagesHandler) imageURLForItem(ctx context.Context, primaryPath, primaryImageType, backdropPath, logoPath, imageType, size string) catalog.ResolvedImageURL {
-	primaryURL := compatPresignImageWithExpiry(h.detailSvc, ctx, primaryPath, primaryImageType, size)
-	backdropURL := compatPresignImageWithExpiry(h.detailSvc, ctx, backdropPath, "backdrop", size)
-	logoURL := compatPresignImageWithExpiry(h.detailSvc, ctx, logoPath, "logo", size)
+	primaryURL := func() catalog.ResolvedImageURL {
+		return compatPresignImageWithExpiry(h.detailSvc, ctx, primaryPath, primaryImageType, size)
+	}
+	backdropURL := func() catalog.ResolvedImageURL {
+		return compatPresignImageWithExpiry(h.detailSvc, ctx, backdropPath, "backdrop", size)
+	}
 
 	switch imageType {
 	case "Primary":
@@ -687,15 +742,17 @@ func (h *ImagesHandler) imageURLForItem(ctx context.Context, primaryPath, primar
 	case "Backdrop", "Thumb":
 		return firstResolvedImageURL(backdropURL, primaryURL)
 	case "Logo":
-		return logoURL
+		return compatPresignImageWithExpiry(h.detailSvc, ctx, logoPath, "logo", size)
 	default:
 		return catalog.ResolvedImageURL{}
 	}
 }
 
-func firstResolvedImageURL(values ...catalog.ResolvedImageURL) catalog.ResolvedImageURL {
-	for _, value := range values {
-		if value.URL != "" {
+// firstResolvedImageURL resolves candidates in order and returns the first
+// URL produced, so later candidates are not presigned needlessly.
+func firstResolvedImageURL(candidates ...func() catalog.ResolvedImageURL) catalog.ResolvedImageURL {
+	for _, resolve := range candidates {
+		if value := resolve(); value.URL != "" {
 			return value
 		}
 	}
@@ -706,6 +763,11 @@ func (h *ImagesHandler) serveImageURL(w http.ResponseWriter, r *http.Request, im
 	// App-relative references (bundled collection-template posters) have no
 	// remote origin to redirect or proxy to, so serve their bytes from the
 	// embedded frontend assets instead.
+	if strings.HasPrefix(imageURL, "/api/") {
+		w.Header().Set("Cache-Control", "no-store")
+		http.Redirect(w, r, imageURL, http.StatusFound)
+		return
+	}
 	if strings.HasPrefix(imageURL, "/") {
 		h.serveBundledAsset(w, imageURL)
 		return

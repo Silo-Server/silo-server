@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { randomUUID } from "@/lib/uuid";
 import type { FormEvent } from "react";
-import type { InviteCode } from "@/api/types";
+import type { InviteCode } from "@/hooks/queries/admin/inviteCodes";
 import {
   useAdminInviteCodes,
   useCreateInviteCode,
@@ -37,7 +38,15 @@ import { formatDate } from "@/lib/datetime";
 import { Link } from "react-router";
 
 export default function InviteCodesTab() {
-  const { data: codes = [], isLoading } = useAdminInviteCodes();
+  const {
+    data: codes = [],
+    isLoading,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+    isError,
+    refetch,
+  } = useAdminInviteCodes();
   const { data: serverSettings } = useAdminServerSettings();
   const signupsEnabled = serverSettings?.["signup.enabled"] === "true";
   const updateCode = useUpdateInviteCode();
@@ -141,6 +150,11 @@ export default function InviteCodesTab() {
           </div>
         ))}
 
+      {isError && (
+        <div role="alert">
+          Unable to load invite codes. <Button onClick={() => void refetch()}>Retry</Button>
+        </div>
+      )}
       <Table>
         <TableHeader>
           <TableRow>
@@ -222,12 +236,17 @@ export default function InviteCodesTab() {
           ))}
         </TableBody>
       </Table>
+      {hasNextPage && (
+        <Button disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+          Load more
+        </Button>
+      )}
     </div>
   );
 }
 
 function CreateInviteCodeForm({ onClose }: { onClose: () => void }) {
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(() => randomUUID().replace(/-/g, "").slice(0, 16).toUpperCase());
   const [label, setLabel] = useState("");
   const [maxUses, setMaxUses] = useState("10");
   const createMutation = useCreateInviteCode();
@@ -239,18 +258,16 @@ function CreateInviteCodeForm({ onClose }: { onClose: () => void }) {
       toast.error("Max uses must be a positive number");
       return;
     }
-    createMutation.mutate(
-      { code: code || undefined, label, max_uses: max },
-      { onSuccess: onClose },
-    );
+    createMutation.mutate({ code, label, max_uses: max }, { onSuccess: onClose });
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
-        <Label>Code (optional, auto-generated if empty)</Label>
+        <Label>Code</Label>
         <Input
           value={code}
+          required
           onChange={(e) => setCode(e.target.value.toUpperCase())}
           placeholder="e.g. BETA2026"
         />

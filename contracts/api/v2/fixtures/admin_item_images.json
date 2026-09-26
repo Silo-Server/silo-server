@@ -1,0 +1,10 @@
+{
+  "items": [],
+  "page": {
+    "has_more": false
+  },
+  "current": {},
+  "provider_errors": {
+    "provider": "Image provider failed"
+  }
+}

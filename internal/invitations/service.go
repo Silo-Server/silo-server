@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -29,6 +30,7 @@ var (
 	ErrRoleNotAllowed = errors.New("inviter may not grant this role")
 	ErrAdminGrouped   = errors.New("admin accounts cannot belong to an access group")
 	ErrEmailTaken     = errors.New("an account with this email already exists")
+	ErrSessionStart   = errors.New("invitation accepted but login failed")
 	ErrNoLinkBase     = errors.New("no external URL is configured for invitation links")
 )
 
@@ -39,7 +41,9 @@ type repository interface {
 	GetByID(ctx context.Context, id int64) (*models.Invitation, error)
 	GetByTokenHash(ctx context.Context, tokenHash string) (*models.Invitation, error)
 	List(ctx context.Context) ([]*models.Invitation, error)
-	Accept(ctx context.Context, tokenHash string, userID int) error
+	ListPage(context.Context, *PageKey, int) ([]*models.Invitation, bool, error)
+	Accept(ctx context.Context, tokenHash string, provision func(*models.Invitation, pgx.Tx) (*models.User, error)) (*models.User, error)
+	Resend(ctx context.Context, id int64, input models.CreateInvitationInput, tokenHash string) (*models.Invitation, error)
 	Revoke(ctx context.Context, id int64) error
 	Delete(ctx context.Context, id int64) error
 }
@@ -54,7 +58,7 @@ type userDirectory interface {
 // accountCreator provisions the account plus optional default profile.
 // Satisfied by *auth.AccountProvisioner.
 type accountCreator interface {
-	CreateAccount(ctx context.Context, input auth.CreateAccountInput) (*models.User, error)
+	CreateAccountInTransaction(ctx context.Context, tx pgx.Tx, input auth.CreateAccountInput) (*models.User, error)
 }
 
 // sessionStarter logs the newly created user in. Satisfied by *auth.Service.
@@ -82,7 +86,7 @@ type Service struct {
 
 // NewService wires the invitation service. publicURL is the server's
 // externally reachable origin, used as the link-base fallback when
-// notifications.email.external_url is unset; may be empty.
+// server.public_url is unset; may be empty.
 func NewService(
 	repo *Repository,
 	users userDirectory,
@@ -105,7 +109,8 @@ func NewService(
 	}
 }
 
-// SendResult reports what happened to a newly created invitation.
+// SendResult reports a committed invitation. It may accompany a delivery error;
+// in that case EmailSent=false does not prove that the message was not delivered.
 type SendResult struct {
 	Invitation *models.Invitation
 	// ClaimURL is returned so the admin can copy the link when email is not
@@ -134,6 +139,10 @@ type SendInput struct {
 // new one, and emails the claim link. When email is not configured the
 // invitation is still created and the claim URL returned for manual delivery.
 func (s *Service) Send(ctx context.Context, input SendInput) (*SendResult, error) {
+	return s.send(ctx, input, nil)
+}
+
+func (s *Service) send(ctx context.Context, input SendInput, sourceID *int64) (*SendResult, error) {
 	parsed, err := netmail.ParseAddress(strings.TrimSpace(input.Email))
 	if err != nil || parsed.Address != strings.TrimSpace(input.Email) {
 		return nil, ErrInvalidEmail
@@ -184,7 +193,7 @@ func (s *Service) Send(ctx context.Context, input SendInput) (*SendResult, error
 		return nil, err
 	}
 
-	inv, err := s.repo.Create(ctx, models.CreateInvitationInput{
+	createInput := models.CreateInvitationInput{
 		Email:         email,
 		Role:          role,
 		AccessGroupID: input.AccessGroupID,
@@ -194,7 +203,13 @@ func (s *Service) Send(ctx context.Context, input SendInput) (*SendResult, error
 		Note:          strings.TrimSpace(input.Note),
 		InvitedBy:     input.InvitedBy,
 		ExpiresAt:     s.now().Add(s.ttl),
-	}, tokenHash)
+	}
+	var inv *models.Invitation
+	if sourceID == nil {
+		inv, err = s.repo.Create(ctx, createInput, tokenHash)
+	} else {
+		inv, err = s.repo.Resend(ctx, *sourceID, createInput, tokenHash)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +231,7 @@ func (s *Service) Send(ctx context.Context, input SendInput) (*SendResult, error
 	case errors.Is(err, mail.ErrNotConfigured):
 		// Degrade gracefully: the admin copies the link instead.
 	default:
-		return nil, fmt.Errorf("send invitation email: %w", err)
+		return result, fmt.Errorf("invitation stored; email delivery failed or is uncertain: %w", err)
 	}
 	return result, nil
 }
@@ -229,7 +244,7 @@ func (s *Service) Resend(ctx context.Context, id, resentBy int64) (*SendResult, 
 	if err != nil {
 		return nil, err
 	}
-	return s.Send(ctx, SendInput{
+	return s.send(ctx, SendInput{
 		Email:         prior.Email,
 		Role:          prior.Role,
 		AccessGroupID: prior.AccessGroupID,
@@ -238,7 +253,7 @@ func (s *Service) Resend(ctx context.Context, id, resentBy int64) (*SendResult, 
 		ShowTour:      prior.ShowTour,
 		Note:          prior.Note,
 		InvitedBy:     resentBy,
-	})
+	}, &id)
 }
 
 // List returns all invitations, newest first.
@@ -254,11 +269,12 @@ func (s *Service) Revoke(ctx context.Context, id int64) error {
 // LookupResult is the claim screen's view of an invitation: only what it
 // renders, nothing else leaves the server pre-auth.
 type LookupResult struct {
-	Email       string
-	InviterName string
-	ServerName  string
-	ExpiresAt   time.Time
-	ShowTour    bool
+	Email         string
+	InviterName   string
+	ServerName    string
+	ExpiresAt     time.Time
+	ShowTour      bool
+	CreateProfile bool
 }
 
 // Lookup resolves a raw claim token for the claim screen. Unknown, expired,
@@ -270,56 +286,40 @@ func (s *Service) Lookup(ctx context.Context, token string) (*LookupResult, erro
 		return nil, err
 	}
 	return &LookupResult{
-		Email:       inv.Email,
-		InviterName: inv.InvitedByName,
-		ServerName:  s.serverName(ctx),
-		ExpiresAt:   inv.ExpiresAt,
-		ShowTour:    inv.ShowTour,
+		Email:         inv.Email,
+		InviterName:   inv.InvitedByName,
+		ServerName:    s.serverName(ctx),
+		ExpiresAt:     inv.ExpiresAt,
+		ShowTour:      inv.ShowTour,
+		CreateProfile: inv.CreateProfile,
 	}, nil
 }
 
-// Accept redeems the invitation: creates the account with the pre-bound
-// access (username = email), claims the row, and logs the user in. Of two
-// concurrent accepts exactly one wins; the loser's account creation is
-// prevented by the users table's unique constraints, and the row claim by
-// Accept's WHERE predicate.
+// Accept commits the account, requested profile, and invitation claim together.
+// Login is a separate post-commit effect: its failure never removes the account
+// or makes the token reusable. A non-nil user with ErrSessionStart reports this
+// committed outcome so callers can direct the invitee to ordinary sign-in.
 func (s *Service) Accept(ctx context.Context, token, password, deviceName, ip string) (*auth.TokenPair, *models.User, error) {
-	inv, err := s.claimable(ctx, token)
-	if err != nil {
-		return nil, nil, err
+	if strings.TrimSpace(token) == "" {
+		return nil, nil, ErrNotFound
 	}
-
-	user, err := s.accounts.CreateAccount(ctx, auth.CreateAccountInput{
-		User: models.CreateUserInput{
-			Username:      inv.Email,
-			Email:         inv.Email,
-			Password:      password,
-			Role:          inv.Role,
-			LibraryIDs:    inv.LibraryIDs,
-			AccessGroupID: inv.AccessGroupID,
-		},
-		DefaultProfile: auth.DefaultProfileOptions{
-			Enabled: inv.CreateProfile,
-			Name:    profileNameFromEmail(inv.Email),
-		},
+	user, err := s.repo.Accept(ctx, HashToken(token), func(inv *models.Invitation, tx pgx.Tx) (*models.User, error) {
+		return s.accounts.CreateAccountInTransaction(ctx, tx, auth.CreateAccountInput{
+			User:           models.CreateUserInput{Username: inv.Email, Email: inv.Email, Password: password, Role: inv.Role, LibraryIDs: inv.LibraryIDs, AccessGroupID: inv.AccessGroupID},
+			DefaultProfile: auth.DefaultProfileOptions{Enabled: inv.CreateProfile, Name: profileNameFromEmail(inv.Email)},
+		})
 	})
 	if err != nil {
 		if auth.IsDuplicate(err) {
-			// Lost a race with a concurrent accept, or the address gained an
-			// account since the invitation was sent.
 			return nil, nil, ErrNotClaimable
 		}
-		return nil, nil, fmt.Errorf("creating invited user: %w", err)
-	}
-
-	if err := s.repo.Accept(ctx, HashToken(token), user.ID); err != nil {
-		// The row was consumed between claimable() and here. The account
-		// exists; surface the claim failure rather than leaving a half-open
-		// success. Admins can delete the orphan from the users screen.
 		return nil, nil, err
 	}
-
-	return s.sessions.Login(ctx, inv.Email, password, deviceName, ip)
+	pair, loggedIn, err := s.sessions.Login(ctx, user.Username, password, deviceName, ip)
+	if err != nil {
+		return nil, user, errors.Join(ErrSessionStart, err)
+	}
+	return pair, loggedIn, nil
 }
 
 // claimable fetches a pending, unexpired, unrevoked invitation by raw token.
@@ -337,30 +337,15 @@ func (s *Service) claimable(ctx context.Context, token string) (*models.Invitati
 	return inv, nil
 }
 
-// linkBase resolves the externally reachable base URL for claim links:
-// notifications.email.external_url, falling back to the server public URL.
+// linkBase resolves the canonical externally reachable base URL for claim links.
 func (s *Service) linkBase(ctx context.Context) string {
-	if s.settings != nil {
-		if base, err := s.settings.Get(ctx, "notifications.email.external_url"); err == nil {
-			if base = strings.TrimRight(strings.TrimSpace(base), "/"); base != "" {
-				return base
-			}
-		}
-	}
-	return s.publicURL
+	return mail.AccountLinkBase(ctx, s.settings, s.publicURL)
 }
 
 // serverName reads the branded server name for email copy and the claim
 // screen, defaulting to "Silo".
 func (s *Service) serverName(ctx context.Context) string {
-	if s.settings != nil {
-		if name, err := s.settings.Get(ctx, branding.KeyServerName); err == nil {
-			if name = strings.TrimSpace(name); name != "" {
-				return name
-			}
-		}
-	}
-	return branding.DefaultServerName
+	return mail.ServerName(ctx, s.settings)
 }
 
 // profileNameFromEmail derives the default profile name from the address's
@@ -375,4 +360,16 @@ func profileNameFromEmail(email string) string {
 		return ""
 	}
 	return strings.ToUpper(local[:1]) + local[1:]
+}
+
+// SupportsDefaultProfile reports capability, not transient storage health.
+func (s *Service) SupportsDefaultProfile() bool {
+	p, ok := s.accounts.(interface{ SupportsTransactionalProfiles() bool })
+	return ok && p.SupportsTransactionalProfiles()
+}
+func (s *Service) ListPage(ctx context.Context, after *PageKey, limit int) ([]*models.Invitation, bool, error) {
+	return s.repo.ListPage(ctx, after, limit)
+}
+func (s *Service) GetByID(ctx context.Context, id int64) (*models.Invitation, error) {
+	return s.repo.GetByID(ctx, id)
 }

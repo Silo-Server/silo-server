@@ -37,6 +37,39 @@ func NewProviderConfigStore(pool *pgxpool.Pool) *ProviderConfigStore {
 	return &ProviderConfigStore{pool: pool, cache: map[string]ProviderConfig{}}
 }
 
+// RuntimeRevision identifies the database state used to load marker providers.
+// It reads metadata only; credential values never enter the fingerprint.
+func (s *ProviderConfigStore) RuntimeRevision(ctx context.Context) (string, error) {
+	if s == nil || s.pool == nil {
+		return "", fmt.Errorf("marker provider config store unavailable")
+	}
+	var revision string
+	err := s.pool.QueryRow(ctx, `
+		SELECT md5(COALESCE(string_agg(part, E'\n' ORDER BY part COLLATE "C"), ''))
+		FROM (
+			SELECT jsonb_build_array(
+				'plugin', installation.id, installation.version,
+				capability.capability_id, extract(epoch FROM capability.updated_at),
+				config.config_key, extract(epoch FROM config.updated_at)
+			)::text AS part
+			FROM plugin_installations installation
+			JOIN plugin_capabilities capability
+				ON capability.plugin_installation_id = installation.id
+				AND capability.capability_type = 'marker_provider.v1'
+			LEFT JOIN plugin_runtime_configs config ON config.plugin_installation_id = installation.id
+			WHERE installation.enabled AND installation.kind <> 'builtin'
+			UNION ALL
+			SELECT jsonb_build_array(
+				'provider', provider, fetch_enabled, fetch_priority, extract(epoch FROM updated_at)
+			)::text
+			FROM marker_provider_config
+		) revisions`).Scan(&revision)
+	if err != nil {
+		return "", fmt.Errorf("load marker provider runtime revision: %w", err)
+	}
+	return revision, nil
+}
+
 // Reload replaces the in-memory snapshot from the database.
 func (s *ProviderConfigStore) Reload(ctx context.Context) error {
 	if s == nil || s.pool == nil {

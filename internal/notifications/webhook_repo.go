@@ -29,7 +29,7 @@ const webhookColumns = `
 	notify_requests,
 	consecutive_failures, disabled_reason,
 	last_success_at, last_failure_at, last_failure_status, last_failure_message,
-	created_at, updated_at`
+	created_at, updated_at, revision`
 
 func scanWebhook(row pgx.Row) (*Webhook, error) {
 	var hook Webhook
@@ -40,7 +40,7 @@ func scanWebhook(row pgx.Row) (*Webhook, error) {
 		&hook.NotifyRequests,
 		&hook.ConsecutiveFailures, &hook.DisabledReason,
 		&hook.LastSuccessAt, &hook.LastFailureAt, &hook.LastFailureStatus, &hook.LastFailureMessage,
-		&hook.CreatedAt, &hook.UpdatedAt,
+		&hook.CreatedAt, &hook.UpdatedAt, &hook.Revision,
 	)
 	if err != nil {
 		return nil, err
@@ -395,4 +395,98 @@ func (r *WebhookRepository) DeleteOldAttempts(ctx context.Context, now time.Time
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+// ListPage returns at most limit records in stable creation order. Callers may
+// request one lookahead row; this read does not alter delivery state.
+func (r *WebhookRepository) ListPage(ctx context.Context, profile string, limit int, after *Cursor) ([]Webhook, error) {
+	query := `SELECT ` + webhookColumns + ` FROM notification_webhooks WHERE profile_id = $1`
+	args := []any{profile}
+	if after != nil {
+		query += ` AND (created_at, id) > ($2, $3)`
+		args = append(args, after.CreatedAt, after.ID)
+	}
+	query += fmt.Sprintf(" ORDER BY created_at, id LIMIT $%d", len(args)+1)
+	args = append(args, limit)
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list notification destinations: %w", err)
+	}
+	return scanWebhooks(rows)
+}
+
+// DeleteGuarded holds the row lock across precondition evaluation and deletion.
+// The revision trigger covers bridge, configuration and provider writers too.
+func (r *WebhookRepository) DeleteGuarded(ctx context.Context, profile, id string, check func(int64) error) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var revision int64
+	err = tx.QueryRow(ctx, `SELECT revision FROM notification_webhooks WHERE profile_id=$1 AND id=$2 FOR UPDATE`, profile, id).Scan(&revision)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrWebhookNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if err = check(revision); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM notification_webhooks WHERE profile_id=$1 AND id=$2`, profile, id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// ReplaceSigningSecret changes no configuration or provider bookkeeping fields.
+func (r *WebhookRepository) ReplaceSigningSecret(ctx context.Context, profile, id, ciphertext string) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE notification_webhooks SET signing_secret_ciphertext=$3, updated_at=now() WHERE profile_id=$1 AND id=$2 AND type='generic'`, profile, id, ciphertext)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrWebhookNotFound
+	}
+	return nil
+}
+
+// UpdateGuarded reads, validates and updates configuration under the same row lock.
+// Secret/type and provider outcome columns are never copied from an editor.
+func (r *WebhookRepository) UpdateGuarded(ctx context.Context, profile, id string, apply func(*Webhook) error) (*Webhook, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	hook, err := scanWebhook(tx.QueryRow(ctx, `SELECT `+webhookColumns+` FROM notification_webhooks WHERE profile_id=$1 AND id=$2 FOR UPDATE`, profile, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrWebhookNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err = apply(hook); err != nil {
+		return nil, err
+	}
+	row, err := scanWebhook(tx.QueryRow(ctx, `UPDATE notification_webhooks SET
+ name=$3, url_ciphertext=$4, url_host=$5, enabled=$6,
+ notify_favorites=$7, notify_watchlist=$8, notify_continue_watching=$9,
+ notify_next_up=$10, notify_requests=$11, consecutive_failures=$12,
+ disabled_reason=$13, updated_at=now()
+ WHERE profile_id=$1 AND id=$2 RETURNING `+webhookColumns,
+		profile, id, hook.Name, hook.URLCiphertext, hook.URLHost, hook.Enabled,
+		hook.NotifyFavorites, hook.NotifyWatchlist, hook.NotifyContinueWatching,
+		hook.NotifyNextUp, hook.NotifyRequests, hook.ConsecutiveFailures, hook.DisabledReason))
+	if isWebhookNameViolation(err) {
+		return nil, ErrWebhookNameTaken
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return row, nil
 }

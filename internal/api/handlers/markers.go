@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -58,12 +59,13 @@ type MarkerAuditLister interface {
 // admin-only. A successful manual write fires a background contribution run
 // (see maybeContribute) so corrected markers reach enabled providers.
 type MarkersHandler struct {
-	Files         MarkerFileResolver
-	Writer        ManualMarkerWriter
-	Contributor   MarkerContributor
-	Contributions MarkerContributionLister
-	AuditHistory  MarkerAuditLister
-	Notifier      PlaybackMarkerUpdateNotifier
+	Files            MarkerFileResolver
+	Writer           ManualMarkerWriter
+	Contributor      MarkerContributor
+	Contributions    MarkerContributionLister
+	AuditHistory     MarkerAuditLister
+	Notifier         PlaybackMarkerUpdateNotifier
+	MarkerPopulation MarkerPopulationService
 	// Authorizer enforces per-item access on file lookups so a viewer can only
 	// edit markers for content they can actually watch. When nil (tests) the
 	// handler falls back to an unchecked lookup.
@@ -108,11 +110,12 @@ type segmentMarker struct {
 }
 
 type fileMarkersResponse struct {
-	FileID  int           `json:"file_id"`
-	Intro   segmentMarker `json:"intro"`
-	Credits segmentMarker `json:"credits"`
-	Recap   segmentMarker `json:"recap"`
-	Preview segmentMarker `json:"preview"`
+	FileID         int                    `json:"file_id"`
+	Intro          segmentMarker          `json:"intro"`
+	Credits        segmentMarker          `json:"credits"`
+	Recap          segmentMarker          `json:"recap"`
+	Preview        segmentMarker          `json:"preview"`
+	MarkerSegments []models.MarkerSegment `json:"-"`
 }
 
 type contributionOutcomeResponse struct {
@@ -166,7 +169,8 @@ type markerEditAuditResponse struct {
 
 func fileMarkers(file *models.MediaFile) fileMarkersResponse {
 	return fileMarkersResponse{
-		FileID: file.ID,
+		FileID:         file.ID,
+		MarkerSegments: models.EffectiveMarkerSegments(file),
 		Intro: segmentMarker{file.IntroStart, file.IntroEnd, file.IntroMarkersSource, file.IntroMarkersProvider,
 			file.IntroMarkersConfidence, file.IntroMarkersAlgorithm, file.IntroMarkersDetectedAt},
 		Credits: segmentMarker{file.CreditsStart, file.CreditsEnd, file.CreditsMarkersSource, file.CreditsMarkersProvider,
@@ -277,22 +281,27 @@ func (h *MarkersHandler) loadItemPrimaryFile(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *MarkersHandler) auditContext(r *http.Request) context.Context {
-	claims := apimw.GetClaims(r.Context())
+	return MarkerRequestAuditContext(r.Context(), r.UserAgent())
+}
+
+// MarkerRequestAuditContext records the authenticated actor, never caller-supplied identity.
+func MarkerRequestAuditContext(ctx context.Context, userAgent string) context.Context {
+	claims := apimw.GetClaims(ctx)
 	if claims == nil {
-		return r.Context()
+		return ctx
 	}
 	audit := scanner.MarkerAuditContext{
 		UserID:             &claims.UserID,
 		ImpersonatorUserID: claims.ImpersonatorUserID,
-		RequestID:          chimw.GetReqID(r.Context()),
-		ClientIP:           clientip.FromContext(r.Context()),
-		UserAgent:          r.UserAgent(),
+		RequestID:          chimw.GetReqID(ctx),
+		ClientIP:           clientip.FromContext(ctx),
+		UserAgent:          userAgent,
 	}
 	if claims.APIKeyID > 0 {
 		apiKeyID := claims.APIKeyID
 		audit.APIKeyID = &apiKeyID
 	}
-	return scanner.WithMarkerAuditContext(r.Context(), audit)
+	return scanner.WithMarkerAuditContext(ctx, audit)
 }
 
 // HandleGetFileMarkers returns the current markers + provenance for a file.
@@ -344,52 +353,33 @@ func (h *MarkersHandler) setMarkersForFile(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	duration := float64(file.Duration)
-	update := scanner.MarkerUpdate{
-		MarkersSource:     models.MarkerSourceManual,
-		MarkersConfidence: &manualMarkerConfidence,
-		MarkersAlgorithm:  manualMarkerAlgorithm,
-	}
-	var clears []string
-	var setSegs []string
-
-	for _, seg := range markerSegmentNames {
-		val, present := raw[seg]
+	changes := MarkerChanges{}
+	for _, segment := range markerSegmentNames {
+		value, present := raw[segment]
 		if !present {
 			continue
 		}
-		if isJSONNull(val) {
-			clears = append(clears, seg)
+		if isJSONNull(value) {
+			changes[segment] = nil
 			continue
 		}
-		var in segmentInput
-		if err := json.Unmarshal(val, &in); err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid "+seg+" marker")
+		var input MarkerSegmentInput
+		if err := json.Unmarshal(value, &input); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Invalid "+segment+" marker")
 			return
 		}
-		start, end, err := normalizeManualSegment(seg, in, duration)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		applyManualSegment(&update, seg, start, end)
-		setSegs = append(setSegs, seg)
+		changes[segment] = &input
 	}
-
-	if _, err := h.Writer.UpsertAndClearMarkers(h.auditContext(r), file.ID, update, clears); err != nil {
-		h.logger.ErrorContext(r.Context(), "markers: save failed", "file_id", file.ID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save markers")
-		return
-	}
-
-	refreshed, err := h.reloadAndNotify(r.Context(), file.ID)
+	result, err := h.applyManualMarkers(h.auditContext(r), file, changes)
 	if err != nil {
-		h.logger.ErrorContext(r.Context(), "markers: reload after save failed", "file_id", file.ID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Markers saved but failed to reload")
+		if apiErr, ok := errors.AsType[*APIError](err); ok {
+			writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Marker operation failed")
+		}
 		return
 	}
-	h.maybeContribute(refreshed, setSegs)
-	writeJSON(w, http.StatusOK, fileMarkers(refreshed))
+	writeJSON(w, http.StatusOK, result)
 }
 
 // HandleClearFileSegment clears a single segment.
@@ -431,30 +421,17 @@ func (h *MarkersHandler) HandleContributeFile(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Contribution is not configured")
 		return
 	}
-	var body struct {
-		Provider string   `json:"provider"`
-		Segments []string `json:"segments"`
-	}
+	var body MarkerContributionRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	var kinds []markers.MarkerKind
-	for _, name := range body.Segments {
-		kind, ok := markerKindForName(name)
-		if !ok {
-			writeError(w, http.StatusBadRequest, "bad_request", "Unknown segment "+name)
-			return
-		}
-		kinds = append(kinds, kind)
-	}
-	outcomes, err := h.Contributor.ContributeFile(r.Context(), file, markers.ContributeOptions{Provider: body.Provider, Segments: kinds})
+	out, err := h.contributeMarkers(r.Context(), file, body)
 	if err != nil {
-		h.logger.ErrorContext(r.Context(), "markers: contribute failed", "file_id", file.ID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Contribution failed")
+		writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"outcomes": contributionOutcomeResponses(outcomes)})
+	writeJSON(w, http.StatusOK, map[string]any{"outcomes": out})
 }
 
 // HandleListFileContributions returns the contribution history for a file.
@@ -756,6 +733,11 @@ func markerAuditSegmentResponse(segment *scanner.MarkerAuditSegment) *segmentMar
 // the contribution rules: intro/recap may omit start (=0); credits/preview may
 // omit end (=duration); end must exceed start and stay within the file.
 func normalizeManualSegment(seg string, in segmentInput, duration float64) (start, end float64, err error) {
+	for _, boundary := range []*float64{in.Start, in.End} {
+		if boundary != nil && (math.IsNaN(*boundary) || math.IsInf(*boundary, 0)) {
+			return 0, 0, errSegment(seg, "boundaries must be finite")
+		}
+	}
 	switch seg {
 	case "intro", "recap":
 		if in.Start != nil {

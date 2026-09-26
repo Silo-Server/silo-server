@@ -1,0 +1,14 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "The request did not pass validation; see errors.",
+  "instance": "urn:silo:request:000000000000000000000115",
+  "errors": [
+    {
+      "location": "query.sort",
+      "code": "invalid_sort_field",
+      "detail": "sort names a field this operation does not sort by, or names one twice"
+    }
+  ]
+}

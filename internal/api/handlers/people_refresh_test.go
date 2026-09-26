@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -135,5 +136,29 @@ func TestEnqueuePersonRefreshIfDue(t *testing.T) {
 				t.Fatalf("queued = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+type singlePersonRepo struct {
+	peopleRepository
+	person models.Person
+}
+
+func (r singlePersonRepo) Get(context.Context, int64) (*models.Person, error) {
+	return &r.person, nil
+}
+
+func TestPersonQueuesRefreshOnlyForViews(t *testing.T) {
+	due := models.Person{ID: 1, Name: "Incomplete", TmdbID: "1", UpdatedAt: time.Now()}
+	for _, queueRefresh := range []bool{true, false} {
+		queue := &recordingPersonRefreshQueue{}
+		handler := &PeopleHandler{personRepo: singlePersonRepo{person: due}, refreshQueue: queue}
+
+		if _, err := handler.Person(context.Background(), due.ID, queueRefresh); err != nil {
+			t.Fatal(err)
+		}
+		if queued := len(queue.ids) == 1; queued != queueRefresh {
+			t.Fatalf("queueRefresh=%v queued=%v", queueRefresh, queued)
+		}
 	}
 }

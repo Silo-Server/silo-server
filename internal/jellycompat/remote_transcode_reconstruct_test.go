@@ -72,6 +72,32 @@ func TestStartRemoteTranscodeRequiresDurableNodeRecipe(t *testing.T) {
 	}
 }
 
+func TestStartRemoteTranscodeCarriesThrottlePolicyIntoReconstructionRecipe(t *testing.T) {
+	var received transcodenode.TranscodeStartRequest
+	recipeStore := &stubRecipeNodeStore{}
+	node := fakeTranscodeNode(t, &received)
+	handler, _, playbackStore := newRemoteTranscodeHandler(t, node.URL, recipeStore)
+	handler.SettingsRepo = stubSettingsReader{values: map[string]string{
+		"enable_transcode_throttle":  "true",
+		"transcode_throttle_seconds": "180",
+	}}
+	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
+
+	if err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", testRemoteTranscodeSource(), &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, node.URL); err != nil {
+		t.Fatalf("startRemoteTranscode: %v", err)
+	}
+	if received.ThrottleSeconds != 180 {
+		t.Fatalf("remote throttle seconds = %d, want 180", received.ThrottleSeconds)
+	}
+	card, ok := recipeStore.Get("upstream-1")
+	if !ok {
+		t.Fatal("remote reconstruction recipe was not stored")
+	}
+	if card.ThrottleSeconds != 180 {
+		t.Fatalf("stored throttle seconds = %d, want 180", card.ThrottleSeconds)
+	}
+}
+
 func TestStartRemoteCopyTranscodeDoesNotAdoptUnversionedRecipe(t *testing.T) {
 	var received transcodenode.TranscodeStartRequest
 	node := fakeTranscodeNode(t, &received)
@@ -843,6 +869,7 @@ func fakeTranscodeNode(t *testing.T, received *transcodenode.TranscodeStartReque
 			SessionID: request.SessionID, Status: "started",
 			AudioRecipeVersion:    request.AudioRecipeVersion,
 			CopyFMP4RecipeVersion: request.CopyFMP4RecipeVersion,
+			ThrottleSeconds:       request.ThrottleSeconds,
 		})
 	}))
 	t.Cleanup(srv.Close)
@@ -1256,7 +1283,10 @@ func TestRemoteTranscodeStartTimeoutCoversColdProbePreflightAndReadiness(t *test
 	if got := handler.remoteTranscodeStartTimeout(request, (24 * time.Hour).Milliseconds()); got != maxWant {
 		t.Fatalf("bounded remote transcode start timeout = %v, want %v", got, maxWant)
 	}
-	fallbackWant := compatRemoteNodeProbeFallbackTimeout + playback.ManifestStartupTimeout + tonemap.SourcePreflightTimeout(100) + transcodenode.TranscodeStartReadinessTimeout
+	// Without an advertisement, the local hardware policy can price a cold
+	// probe above the fixed fallback, which is a floor rather than a ceiling.
+	coldProbeBudget := playback.ColdCapabilityRequestTimeout(nil, handler.HWAccel, "", compatRemoteNodeProbeFallbackTimeout)
+	fallbackWant := coldProbeBudget + playback.ManifestStartupTimeout + tonemap.SourcePreflightTimeout(100) + transcodenode.TranscodeStartReadinessTimeout
 	if got := handler.remoteTranscodeStartTimeout(request, 0); got != fallbackWant {
 		t.Fatalf("missing-budget remote transcode start timeout = %v, want %v", got, fallbackWant)
 	}

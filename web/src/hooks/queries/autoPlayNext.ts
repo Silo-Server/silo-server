@@ -1,6 +1,6 @@
 import { useCallback } from "react";
-import { ApiClientError } from "@/api/client";
 import {
+  isSettingValueMissing,
   useClearSettingValue,
   useEffectiveSettings,
   useSetSettingValue,
@@ -60,7 +60,7 @@ export function useAutoPlayNextSetting() {
       try {
         await clearValue.mutateAsync({ key: KEY, identity: DEVICE_SCOPE });
       } catch (error) {
-        if (error instanceof ApiClientError && error.status === 404) return;
+        if (isSettingValueMissing(error)) return;
         throw error;
       }
     },

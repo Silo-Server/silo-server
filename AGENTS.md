@@ -4,8 +4,9 @@ Go backend for Silo: API contracts, auth/session, catalog/scanner/playback servi
 migrations, Jellyfin compatibility, and the host-side plugin runtime. `cmd/silo` is the
 entrypoint, backend code is under `internal/` by domain, the React frontend is `web/src/`.
 
-This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term
-maintainability is encouraged.
+Silo is pre-1.0, with the current focus on QA, correctness, and UX polish.
+Architectural changes are welcome when they serve the requested outcome and improve
+long-term maintainability; keep unrelated redesign out of a bounded fix.
 
 ## What Silo is
 
@@ -17,14 +18,22 @@ users. Weigh every design against that full spectrum; treat a node dying mid-str
 event, not an edge case.
 
 It is an open platform, not a walled garden: third-party clients are encouraged, and other
-people's clients will depend on the v1 API once it locks — see "v1 API rules" below for the
-current pre-1.0 posture. Jellyfin-protocol compatibility is a long-term commitment as an
-on-ramp for the existing ecosystem.
+people's clients will depend on the native API once `/api/v2` locks with 1.0 — see "API contract
+rules" below for the current pre-1.0 posture. Jellyfin-protocol compatibility is a long-term
+commitment as an on-ramp for the existing ecosystem.
 
 The core/plugin line is about implementation multiplicity: library types (movies, TV,
 audiobooks, ebooks, podcasts) are core; plugins are for interfaces where many implementations
 will plausibly exist (metadata, subtitle, and watch providers). Plugins are never a loophole
 for the non-goals below.
+
+For 1.0, supported library scope is Movies and Series. Audiobooks, ebooks,
+and Audiobookshelf compatibility stay available as labeled **beta** features
+in their current state, outside the 1.0 support promise, until a consolidated
+Books effort replaces them (no assigned release date). Do not gate, remove, or
+rework them for 1.0. Existing code and protocol documentation describe beta
+behavior, not release acceptance promises. See
+[scope](docs/architecture/v1-scope.md#library-scope-books-deferred).
 
 Taste: KISS and YAGNI win — the simple design beats the clever one, provided it survives both
 the single-node and the multi-node deployment. Current posture: the 1.0 feature set is
@@ -54,8 +63,10 @@ server-side (`watchstate`, `userdb`, `settingsresolve`).
 - **Node** — a remote transcode/streaming worker in `nodepool`, not the API server.
 - **Session** — ambiguous; always say which: playback session (`internal/playback`) or login
   session (`internal/auth`).
-- **jellycompat vs v1** — jellycompat is the Jellyfin-protocol surface for ecosystem clients;
-  "the API" or "v1" means Silo's native `/api/v1`.
+- **jellycompat vs the native API** — jellycompat is the Jellyfin-protocol surface for ecosystem
+  clients; "the API" means Silo's native surface, which spans `/api/v1` (the frozen alpha
+  contract, served through the pre-1.0 bridge window) and `/api/v2` (the stable 1.0 target and the
+  native API going forward). See "API contract rules" below.
 
 ## Priorities
 
@@ -127,8 +138,8 @@ catalog, or in a specific plugin repo.
 A client-visible change (API, auth, playback, session, library, or metadata behavior) is not
 done until each of these has been handled or ruled out:
 
-- The API change fits the current v1 posture (see "v1 API rules" below); new features still
-  expose a capability endpoint.
+- The API change fits the current contract posture (see "API contract rules" below); new
+  features still expose a capability endpoint.
 - Follow-up work is done or filed for both `silo-apple` and `silo-android` — prefer
   coordinated multi-repo changes over leaving a platform behind.
 - jellycompat parity was considered (does the Jellyfin surface need the same behavior?).
@@ -155,48 +166,140 @@ Before opening a pull request, run the full gate listed once in
 lines a branch touched have to be clean. The repo does not pass a full run today; expect local
 output to include findings that are not yours and that CI will not fail on. Do not add to them.
 
+Lint Go with `make lint-changed`, not `golangci-lint run ... ./...`: it reports the same
+changed-line findings as CI while analyzing only the packages the branch touched. A cold run over
+`./...` saturates every core for minutes, and parallel agents make that worse. Never pass
+`--allow-parallel-runners`; concurrent runs queue behind one another on purpose.
+
 Go stays `gofmt`/`goimports` clean; the frontend follows `web/.prettierrc`.
 
-## Skills
+## Development environment
 
-Task-specific guides live in `.claude/skills/`, also reachable as `.agents/skills/` for agents
-that look there. Read the one that matches the task instead of working from this file alone.
-
-They share one config file: copy `.silo-dev.env.example` to `.silo-dev.env` and fill in how to
+Copy `.silo-dev.env.example` to `.silo-dev.env` and fill in how to
 reach your Silo deployment — URL, SSH target, database, an account to debug with. That file is
 gitignored and is the only place hosts, passwords, and tokens belong. `scripts/silo-dev doctor`
 checks it end to end.
 
-## v1 API rules
+## Writing
 
-Silo is alpha and `/api/v1` is not locked yet. Until it locks, restructuring the API is in
-scope — if a shape is wrong, fix it now rather than carry it into 1.0. Prefer larger
-coordinated sweeps over a drip of small breaks, and don't build backwards-compatibility shims
-for pre-lock clients. A breaking change still needs coordination with `silo-apple` and
-`silo-android`, and removals get recorded in the pre-lock removals table in
-[docs/architecture/v1-scope.md](docs/architecture/v1-scope.md) so client authors can track
-them.
+A pull request body is written in two passes. First decide what goes in, using
+[Write the description](CONTRIBUTING.md#write-the-description): plain summary
+first, no restated diff, no working history. There is no word limit; do not
+count words. Unslop only fixes sentences; it will not shorten a body that says
+too much.
 
-At v1 lock (1.0), the contract becomes additive-only and binding:
+Before creating or updating an issue or pull request, agents must read and apply
+the repository's [unslop skill](.agents/skills/unslop/SKILL.md) to the title and body.
+Use this checked-in copy even when a personal copy is installed. If the harness
+does not discover repository skills, read the file and its referenced patterns
+directly. Apply the public-content rules below before the prose pass; unslop does
+not replace privacy checks or change required disclosures.
 
-- Never rename or remove a response field, change a field's type, or repurpose a status code on
-  an existing endpoint.
-- New functionality adds new fields or endpoints. Removals go through the Deprecation/Sunset
-  header flow only.
+Run a final readability pass on other human-facing documents and status updates.
+
+- Lead with the outcome.
+- Use concrete, plain language and active voice.
+- Cut filler, stock framing, repetition, and promotional claims.
+- Preserve meaning, evidence, citations, uncertainty, and established
+  terminology.
+- Never rewrite exact quotations, commands, logs, identifiers, API names, or
+  contractual language.
+- Match the tone to the audience and use only formatting that improves
+  readability.
+
+## API contract rules
+
+`/api/v2` is Silo's first stable native API and locks with Silo 1.0. `/api/v1` is a frozen alpha
+contract: it is carried unchanged through at least two published pre-1.0 bridge releases.
+Retirement requires a separate maintainer decision tracked in issue #886, after which the main
+API listener answers the `/api/v1` business routes with a
+`410 Gone` tombstone carrying the `client_upgrade_required` problem code. The decision, the
+shared wire conventions, and the release gates live in
+[docs/architecture/api-contract.md](docs/architecture/api-contract.md); that document is the
+authority and this section is only the summary. Program tracking: issue #135.
+
+What that means for a change today:
+
+- V1 feature development is frozen. Only critical fixes that keep the bridge usable land on
+  `/api/v1`; new contract work targets `/api/v2`.
+- A client-visible change during the bridge still needs coordination with `silo-apple` and
+  `silo-android`.
+- V1 removals taken during alpha stay recorded in the pre-lock removals table in
+  [docs/architecture/v1-scope.md](docs/architecture/v1-scope.md), which remains the historical
+  record for them.
+
+At the 1.0 lock the additive-only rules bind `/api/v2`:
+
+- Never rename or remove an operation, parameter, response field, error code, operation ID, or
+  schema name; never change a field's type or meaning or repurpose a status code.
+- New functionality adds fields, enum values, or operations. Removals go through the
+  Deprecation/Sunset header flow only.
 - New features expose capability endpoints for feature detection rather than relying on version
-  sniffing. Contract strategy and tooling: issue #135.
+  sniffing.
 
 Design new endpoints today so they can live under that regime tomorrow.
 
+## 1.0 validation
+
+Until 1.0 ships, maintainers check each 1.0 feature by hand on the
+[Silo v1.0.0 board](https://github.com/orgs/Silo-Server/projects/5). A `[v1] <Feature>` issue
+holds the acceptance criteria. Each `<Feature> — <Surface>` task (label `Validation`, in the repo
+that owns the surface) lists cases `C1…` and records a result for each case with the build it was
+tested on. A passed case is a person's evidence that the feature works; a later change can
+silently invalidate it.
+
+- Validation issues are the validators' record. Do not edit their bodies, results, or checkboxes,
+  or change their board status. Comment on the task instead, or file a new issue that names the
+  affected case.
+- Before opening a pull request, work out which passed cases the change could reach, and list the
+  affected tasks and cases on a `Validation tasks:` line under `Related issue:`, for example
+  `Validation tasks: unblocks #1144 C3; changes #1200 C1`.
+- Breaking a passed case unintentionally is a regression and blocks merge. A deliberate change to
+  validated behavior must say why and still meet the published criterion; changing the criterion
+  itself needs a maintainer decision.
+- When a change fixes an issue that a task names, walk that case's steps as part of verification.
+- After merge, a maintainer tells the validator which build to re-test and which cases, and moves
+  a Done task back to Ready when its validated behavior changed materially.
+
 ## Pull requests
 
-Conventional Commit subjects (`feat(playback): add realtime session hub`). One concern per PR.
-Explain the problem, why this approach, the linked issue/spec/plan, and risks or follow-up work.
-Include screenshots or recordings for UI changes. Link the capability epic or sub-issue the PR
-serves (`Related issue: #NNN`); write `Related issue: N/A — narrow fix` only when no prior
-coordination was needed, otherwise an unlinked PR gets questioned at review. For non-trivial
-work, open an issue or discussion first; this codebase moves quickly.
+Never create a pull request unless the developer explicitly asks for one.
 
-AI-use disclosure is required in the PR body. If you are an AI agent contributing on behalf of a
-non-maintainer, follow [docs/ai-contributions.md](docs/ai-contributions.md) — it has the required
-disclosure block and the evidence standard.
+Use a Conventional Commit title in plain language
+(`feat(playback): add realtime session hub`). Fill in the PR template following
+[Write the description](CONTRIBUTING.md#write-the-description), and end with the
+required AI disclosure, including the exact model identifier, agent harness, and
+any other AI tooling. Omit session history, full command output, and private
+working reports.
+
+Treat PR bodies, comments, commit messages, and attachments as public. Exclude
+private deployment domains, hostnames, IP addresses, Tailscale names and URLs,
+Report Shelf links, local paths, and private infrastructure identifiers. Use
+neutral placeholders where context is needed. Never publish credentials, tokens,
+personal data, or private media details. Check text and attachments before posting;
+authorization to open a PR does not authorize publishing private evidence.
+
+- Keep one concern per pull request. Split changes that solve independent
+  problems or can be reviewed and shipped separately.
+- Do not capture screenshots or record videos just to prepare a PR. Attach media
+  only when the user explicitly requests it. Verify UI behavior as needed without
+  turning verification into a media deliverable. Do not explain omitted media.
+- When the user requests PR media, check it for private information and upload it
+  to GitHub. Never commit PR-only assets such as `.github/pr-assets/`.
+- An open issue is not a precondition for a pull request. Link the capability
+  epic or sub-issue the pull request serves with `Related issue: #NNN` when one
+  covers the work, and write `Related issue: N/A` when none does. Either way, the
+  Problem section must state the problem on its own: what breaks or is missing,
+  who it affects, and why this change is the right answer.
+- Do not open a pull request against an issue someone else is working on. Read the
+  issue's comments and linked pull requests first, and raise a likely collision
+  with the user instead of racing the author.
+- When babysitting a pull request, poll checks and review comments created
+  after the last push. Verify bot findings against the source, fix real issues,
+  and dismiss false positives with a written reason. Remain quiet when nothing
+  new has appeared. Stop when the latest commit is green.
+
+AI-use disclosure is required in the pull request body. If you are an AI agent
+contributing on behalf of a non-maintainer, follow
+[docs/ai-contributions.md](docs/ai-contributions.md) for the required disclosure
+block and evidence standard.

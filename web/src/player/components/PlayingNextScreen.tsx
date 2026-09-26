@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Play, X } from "lucide-react";
-import type { EpisodeRef } from "../types";
+import type { EpisodeRef, PlaybackStartTrigger } from "../types";
 import type { ContinueWatchingItem } from "@/hooks/queries/progress";
 import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import { decodeThumbhash } from "@/lib/thumbhash";
@@ -15,7 +15,8 @@ interface PlayingNextScreenProps {
   nextEpisode?: EpisodeRef;
   continueWatchingItems: ContinueWatchingItem[];
   videoEnded: boolean;
-  onPlayNow?: () => void;
+  /** Plays the next episode: `viewer` from Play Now or Enter, `automatic` from the countdown. */
+  onPlayNow?: (trigger: PlaybackStartTrigger) => void;
   onPlayItem: (contentId: string) => void;
   onClose: () => void;
 }
@@ -64,7 +65,7 @@ export function PlayingNextScreen({
       setSecondsRemaining((prev) => {
         if (prev <= 1) {
           if (countdownRef.current) clearInterval(countdownRef.current);
-          onPlayNowRef.current?.();
+          onPlayNowRef.current?.("automatic");
           return 0;
         }
         return prev - 1;
@@ -84,7 +85,7 @@ export function PlayingNextScreen({
         onClose();
       } else if (e.key === "Enter" && onPlayNow) {
         e.preventDefault();
-        onPlayNow();
+        onPlayNow("viewer");
       }
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -233,7 +234,7 @@ export function PlayingNextScreen({
                 className="mt-3 flex items-center gap-3 sm:mt-4 sm:gap-4"
               >
                 <button
-                  onClick={onPlayNow}
+                  onClick={() => onPlayNow?.("viewer")}
                   type="button"
                   className="bg-primary text-primary-foreground flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold shadow-lg transition-all hover:scale-105 hover:shadow-xl sm:px-7 sm:py-3"
                 >

@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
-import type { ItemDetail, LeafItemUserData, ProgressListResponse, WatchDetail } from "@/api/types";
+import type { ItemDetail, LeafItemUserData, WatchDetail } from "@/api/types";
+import type { ProgressList } from "./progress";
 import { progressKeys } from "./keys";
 
 export interface PlaybackProgressSnapshot {
@@ -89,12 +90,12 @@ export function applyPlaybackProgressToCache(
   }
 
   const updatedAt = snapshot.updatedAt ?? new Date().toISOString();
-  for (const [queryKey, existing] of queryClient.getQueriesData<ProgressListResponse>({
+  for (const [queryKey, existing] of queryClient.getQueriesData<ProgressList>({
     queryKey: progressKeys.all,
   })) {
     if (!existing) continue;
 
-    const nextProgress = existing.progress.map((entry) => {
+    const nextItems = existing.items.map((entry) => {
       if (entry.media_item_id !== snapshot.contentId) return entry;
       const rawPosition = Math.max(0, snapshot.positionSeconds);
       const duration = snapshot.durationSeconds ?? entry.duration_seconds;
@@ -109,9 +110,9 @@ export function applyPlaybackProgressToCache(
       };
     });
 
-    queryClient.setQueryData<ProgressListResponse>(queryKey, {
+    queryClient.setQueryData<ProgressList>(queryKey, {
       ...existing,
-      progress: nextProgress,
+      items: nextItems,
     });
   }
 }

@@ -34,6 +34,24 @@ func TestEffectiveAdminSettingsUsesRuntimeDefaults(t *testing.T) {
 	}
 }
 
+func TestEffectiveAdminSettingsMarkerDefaultsPreserveExplicitModes(t *testing.T) {
+	for _, mode := range []string{"", "off", "local", "online", "both"} {
+		t.Run("mode_"+mode, func(t *testing.T) {
+			effective := EffectiveAdminSettings(map[string]string{"markers.mode": mode})
+			want := mode
+			if want == "" {
+				want = "both"
+			}
+			if got := effective["markers.mode"]; got != want {
+				t.Fatalf("markers.mode = %q, want %q", got, want)
+			}
+			if got := effective["markers.online_storage"]; got != "stored" {
+				t.Fatalf("markers.online_storage = %q, want stored", got)
+			}
+		})
+	}
+}
+
 func TestEffectiveAdminSettingsUsesLegacyS3FallbacksBeforeDefaults(t *testing.T) {
 	effective := EffectiveAdminSettings(map[string]string{
 		"s3.operational_path_style": "false",
@@ -303,7 +321,7 @@ func TestNormalizeAdminSettingAcceptsVideoToolbox(t *testing.T) {
 
 func TestNormalizeAdminSettingAcceptsPlaybackRoutingEnums(t *testing.T) {
 	tests := map[string]string{
-		PlaybackRoutingRemuxExecutionSettingKey:          "worker_only",
+		PlaybackRoutingRemuxExecutionSettingKey:          "prefer_transcode",
 		PlaybackRoutingVideoTranscodeExecutionSettingKey: "prefer_api",
 		PlaybackRoutingDirectPlayEgressSettingKey:        "proxy_only",
 		PlaybackRoutingRemuxEgressSettingKey:             "api_only",
@@ -326,14 +344,23 @@ func TestNormalizeAdminSettingAcceptsPlaybackRoutingEnums(t *testing.T) {
 	}
 }
 
-func TestPlaybackRoutingDefaultsMatchCurrentClusterBehavior(t *testing.T) {
+func TestPlaybackRoutingDefaultsPreferTranscodeExecutionAndProxyEgress(t *testing.T) {
 	cfg, err := LoadFromDB(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := DefaultPlaybackRoutingPolicy()
+	want := PlaybackRoutingPolicy{
+		DirectPlayEgress:        PlaybackEgressPreferProxy,
+		RemuxExecution:          PlaybackExecutionPreferTranscode,
+		RemuxEgress:             PlaybackEgressPreferProxy,
+		VideoTranscodeExecution: PlaybackExecutionPreferTranscode,
+		VideoTranscodeEgress:    PlaybackEgressPreferProxy,
+	}
 	if cfg.Playback.Routing != want {
 		t.Fatalf("routing = %#v, want %#v", cfg.Playback.Routing, want)
+	}
+	if defaults := DefaultPlaybackRoutingPolicy(); defaults != want {
+		t.Fatalf("runtime defaults = %#v, want %#v", defaults, want)
 	}
 }
 
@@ -453,7 +480,7 @@ func TestHiddenTierDefaultsAreExposed(t *testing.T) {
 		"recommendations.embedding_provider":     "ollama",
 		"recommendations.embeddings_job_timeout": "24h",
 		"policy.editor_enabled":                  "false",
-		"policy.eval_timeout_ms":                 "25",
+		"policy.eval_timeout_ms":                 "100",
 		"subtitle_ai.live_asr_chunk_seconds":     "30",
 		"scanner.max_concurrent_libraries":       "1",
 		"scanner.max_concurrent_scoped":          "2",

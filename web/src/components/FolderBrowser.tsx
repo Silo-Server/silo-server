@@ -37,7 +37,8 @@ export default function FolderBrowser({
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
   const debouncedDraftPath = useDebounce(draftPath.trim(), 200);
-  const { data, isLoading, isFetching, error, refetch } = useFilesystemBrowse(currentPath);
+  const browseQuery = useFilesystemBrowse(currentPath);
+  const { data, isLoading, isFetching, error, refetch } = browseQuery;
 
   const resolvedPath = data?.path ?? currentPath;
   const alreadyAdded = existingPaths.includes(resolvedPath);
@@ -275,6 +276,21 @@ export default function FolderBrowser({
           </div>
         </div>
 
+        {browseQuery.hasNextPage && (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={browseQuery.isFetchingNextPage}
+            onClick={() => void browseQuery.fetchNextPage()}
+          >
+            Load more folders
+          </Button>
+        )}
+        {browseQuery.isError && (
+          <Button type="button" variant="outline" onClick={() => void browseQuery.restart()}>
+            Restart folder listing
+          </Button>
+        )}
         <DialogFooter className="flex-row items-center gap-2 sm:justify-between">
           <div className="text-muted-foreground text-xs">
             {selectedPaths.size > 0

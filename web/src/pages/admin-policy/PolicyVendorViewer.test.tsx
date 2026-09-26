@@ -33,10 +33,12 @@ describe("PolicyVendorViewer", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async () =>
-        jsonResponse([
-          { path: "vendor/scope.rego", source: "package silo.scope" },
-          { path: "vendor/lib/ratings.rego", source: RATINGS_SOURCE },
-        ]),
+        jsonResponse({
+          items: [
+            { path: "vendor/scope.rego", source: "package silo.scope" },
+            { path: "vendor/lib/ratings.rego", source: RATINGS_SOURCE },
+          ],
+        }),
       ),
     );
   });

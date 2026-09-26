@@ -1,0 +1,46 @@
+{
+  "items": [
+    {
+      "id": "c",
+      "kind": "item_refresh",
+      "state": "succeeded",
+      "terminal": true,
+      "cancelable": false,
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "library_ids": [],
+      "item_result": {
+        "new_files": 3,
+        "artwork_cache_incomplete": true,
+        "requested_content_id": "item",
+        "refresh_content_id": "item",
+        "detail_content_id": "detail",
+        "matched_files": 0
+      },
+      "artifact_size_bytes": 0,
+      "public_link_supported": false
+    },
+    {
+      "id": "b",
+      "kind": "item_refresh",
+      "state": "succeeded",
+      "terminal": true,
+      "cancelable": false,
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "library_ids": [],
+      "item_result": {
+        "new_files": 3,
+        "artwork_cache_incomplete": true,
+        "requested_content_id": "item",
+        "refresh_content_id": "item",
+        "detail_content_id": "detail",
+        "matched_files": 0
+      },
+      "artifact_size_bytes": 0,
+      "public_link_supported": false
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7InJlcXVlc3RlZCI6IjIwMjYtMDEtMDJUMDM6MDQ6MDUuNjc4WiIsImlkIjoiYiJ9fQ.b3w90cBI-o1gPXGMHI4vow7btdzFbDxkiEKFbT8xBSk",
+    "has_more": true
+  }
+}

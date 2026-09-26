@@ -20,6 +20,7 @@ import {
   Bell,
   MonitorSmartphone,
   PanelTop,
+  KeyRound,
 } from "lucide-react";
 // Sparkles is used by the Personalization nav entry below.
 import type { LucideIcon } from "lucide-react";
@@ -87,6 +88,14 @@ const NAV_SECTIONS: NavSection[] = [
           "auto play",
           "next up",
           "preview",
+          "rewind",
+          "fast forward",
+          "fast-forward",
+          "skip",
+          "seek",
+          "seek controls",
+          "skip interval",
+          "audiobook skip",
         ],
         settings: settingIndex(
           "Preferred quality",
@@ -99,6 +108,10 @@ const NAV_SECTIONS: NavSection[] = [
           "Start next at preview",
           "Auto-play next episode",
           "Next up episodes",
+          "Seek controls",
+          "Rewind interval",
+          "Fast-forward interval",
+          "Use this browser's audiobook intervals",
         ),
       },
       {
@@ -400,6 +413,15 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: "Account",
     items: [
+      {
+        path: "account",
+        label: "Account",
+        icon: KeyRound,
+        description: "Change the password shared by every household profile.",
+        keywords: ["password", "credential", "sign in", "security", "account"],
+        settings: settingIndex("Current password", "New password", "Confirm new password"),
+        primaryOrAdmin: true,
+      },
       {
         path: "profiles",
         label: "Profiles",

@@ -1,11 +1,67 @@
 package playback
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestStreamExtractSubtitleBoundsWindow(t *testing.T) {
+	bin, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is required to verify subtitle window timestamps")
+	}
+	source := filepath.Join(t.TempDir(), "captions.srt")
+	const input = "1\n00:00:00,000 --> 00:00:05,000\nBefore window\n\n2\n00:13:20,000 --> 00:13:25,000\nInside window\n\n3\n00:16:40,000 --> 00:16:45,000\nAfter window\n"
+	if err := os.WriteFile(source, []byte(input), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := StreamExtractSubtitle(t.Context(), StreamExtractOpts{
+		InputPath: source, SourceCodec: "subrip", SeekSeconds: 800, DurationSeconds: 100,
+		FFmpegPath: bin, Writer: &output,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := output.String(); !strings.Contains(got, "Inside window") ||
+		!strings.Contains(got, "13:20.000 --> 13:25.000") ||
+		strings.Contains(got, "Before window") || strings.Contains(got, "After window") {
+		t.Fatalf("expected only the in-window cue at its absolute timestamp, got %q", got)
+	}
+}
+
+type failingSubtitleWriter struct{ err error }
+
+func (w failingSubtitleWriter) Write([]byte) (int, error) { return 0, w.err }
+
+func TestStreamExtractSubtitleStopsOnWriterFailure(t *testing.T) {
+	// Keep the extractor producing output after the response writer fails.
+	// Waiting for it without canceling first leaves it blocked on a full pipe.
+	bin := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec cat /dev/zero\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	writeErr := errors.New("response writer disconnected")
+	err := StreamExtractSubtitle(ctx, StreamExtractOpts{
+		InputPath: "unused.mkv", FFmpegPath: bin, Writer: failingSubtitleWriter{writeErr},
+	})
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("extract error = %v, want writer error %v", err, writeErr)
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("extract required request timeout to stop: %v", ctx.Err())
+	}
+}
 
 func TestIsPGS(t *testing.T) {
 	cases := []struct {
@@ -65,7 +121,7 @@ func TestStreamExtractArgs_TextCodecIsWindowed(t *testing.T) {
 	if !strings.Contains(joined, "-ss 120.000") {
 		t.Fatalf("text extract should seek the input: %s", joined)
 	}
-	if !strings.Contains(joined, "-t 600.000") {
+	if !strings.Contains(joined, "-to 720.000") {
 		t.Fatalf("text extract should cap the read duration: %s", joined)
 	}
 	if !strings.Contains(joined, "-copyts") {
@@ -92,7 +148,7 @@ func TestStreamExtractArgs_WholeTrackCodecsIgnoreWindow(t *testing.T) {
 		if slices.Contains(args, "-ss") {
 			t.Errorf("%s extract must not seek the input: %v", codec, args)
 		}
-		if slices.Contains(args, "-t") {
+		if slices.Contains(args, "-to") {
 			t.Errorf("%s extract must not cap the read duration: %v", codec, args)
 		}
 		if !slices.Contains(args, "copy") {
@@ -123,7 +179,7 @@ func TestStreamExtractArgs_WindowedPGS(t *testing.T) {
 	if ssIdx < 0 || inIdx < 0 || ssIdx > inIdx {
 		t.Fatalf("-ss must be an input option (before -i): %s", joined)
 	}
-	if !strings.Contains(joined, "-t 3600.000") {
+	if !strings.Contains(joined, "-to 4800.000") {
 		t.Fatalf("windowed PGS extract should cap the read duration: %s", joined)
 	}
 	if !strings.Contains(joined, "-copyts") {
@@ -160,7 +216,7 @@ func TestStreamExtractArgs_ExtractedSupInput(t *testing.T) {
 	if strings.Contains(joined, "0:s:3") {
 		t.Fatalf("original container track ordinal must not leak into sup input mapping: %s", joined)
 	}
-	if !strings.Contains(joined, "-ss 1200.000") || !strings.Contains(joined, "-t 3600.000") {
+	if !strings.Contains(joined, "-ss 1200.000") || !strings.Contains(joined, "-to 4800.000") {
 		t.Fatalf("cached sup extract must still window the input: %s", joined)
 	}
 	ssIdx := slices.Index(args, "-ss")
@@ -176,8 +232,8 @@ func TestStreamExtractArgs_ExtractedSupInput(t *testing.T) {
 	}
 }
 
-// AllowWindow must not override the ASS guard — its [Script Info] header
-// only exists at stream offset 0, so a seeked extract would be broken.
+// AllowWindow must not truncate the script consumed by an ASS renderer that
+// fetches the complete event timeline once.
 func TestStreamExtractArgs_ASSIgnoresAllowWindow(t *testing.T) {
 	args := streamExtractArgs(StreamExtractOpts{
 		InputPath:       "/media/movie.mkv",
@@ -191,7 +247,7 @@ func TestStreamExtractArgs_ASSIgnoresAllowWindow(t *testing.T) {
 	if slices.Contains(args, "-ss") {
 		t.Errorf("ass extract must not seek the input even with AllowWindow: %v", args)
 	}
-	if slices.Contains(args, "-t") {
+	if slices.Contains(args, "-to") {
 		t.Errorf("ass extract must not cap the read duration even with AllowWindow: %v", args)
 	}
 }

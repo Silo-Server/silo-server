@@ -172,6 +172,18 @@ describe("describePlaybackTransportError", () => {
     });
   });
 
+  it("describes 401 authentication errors distinctly from 403 permissions errors", () => {
+    expect(describePlaybackTransportError(new PlayerFetchError(401, "Unauthorized"))).toEqual({
+      title: "Authentication required",
+      message: "Your sign-in session has expired. Sign in again to continue playback.",
+    });
+
+    expect(describePlaybackTransportError(new PlayerFetchError(403, "Forbidden"))).toEqual({
+      title: "Playback unavailable",
+      message: "You do not have permission to play this item.",
+    });
+  });
+
   it("ignores 4xx statuses it has nothing specific to say about", () => {
     expect(
       describePlaybackTransportError(new PlayerFetchError(409, "Conflict", "stale_playback_plan")),

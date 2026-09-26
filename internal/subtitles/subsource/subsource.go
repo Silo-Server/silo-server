@@ -23,7 +23,7 @@ const defaultBaseURL = "https://api.subsource.net/api/v1"
 // languageMap maps ISO 639-1 codes to full English names used by SubSource.
 var languageMap = map[string]string{
 	"en": "english", "es": "spanish", "fr": "french", "de": "german",
-	"it": "italian", "pt": "portuguese", "nl": "dutch", "pl": "polish",
+	"it": "italian", "pt": "portuguese", "pt-BR": "brazillian portuguese", "nl": "dutch", "pl": "polish",
 	"sv": "swedish", "no": "norwegian", "da": "danish", "fi": "finnish",
 	"ru": "russian", "uk": "ukrainian", "cs": "czech", "sk": "slovak",
 	"hu": "hungarian", "ro": "romanian", "bg": "bulgarian", "hr": "croatian",
@@ -179,15 +179,17 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 		lang := reverseLanguageMap(s.Language)
 		releaseName := strings.Join(s.ReleaseInfo, " ")
 		format := detectFormat(releaseName)
-		results = append(results, subtitles.SubtitleResult{
+		result := subtitles.SubtitleResult{
 			ID:              strconv.Itoa(s.SubtitleID),
 			Provider:        "subsource",
-			Language:        lang,
+			Language:        subtitles.NormalizeProviderLanguage("subsource", lang),
 			ReleaseName:     releaseName,
 			Format:          format,
 			Downloads:       s.Downloads,
 			HearingImpaired: s.HearingImpaired,
-		})
+		}
+		result.SetRawLanguageForBridge(lang)
+		results = append(results, result)
 	}
 	return results, nil
 }
@@ -309,6 +311,9 @@ func reverseLanguageMap(name string) string {
 		if strings.EqualFold(fullName, name) {
 			return code
 		}
+	}
+	if strings.EqualFold(name, "brazilian portuguese") {
+		return "pt-BR"
 	}
 	return strings.ToLower(name)
 }

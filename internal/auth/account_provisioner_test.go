@@ -209,3 +209,10 @@ func TestAccountProvisionerCreateAccount_DeletesUserWhenProfileCreationFails(t *
 		t.Fatalf("deletedUserID = %d, want 9", deletedUserID)
 	}
 }
+
+func TestAccountProvisionerInvitedRequiresAtomicRepository(t *testing.T) {
+	provisioner := NewAccountProvisioner(stubAccountUsers{}, nil)
+	if _, err := provisioner.CreateInvitedAccount(t.Context(), CreateAccountInput{}, "code"); err == nil {
+		t.Fatal("invited provisioning must reject a repository without atomic invite support")
+	}
+}

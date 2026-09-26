@@ -65,10 +65,12 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 
 	// Try auth with full password first, fall back to base#pin split.
 	basePw, pinCandidate := splitPasswordPIN(password)
-	tokenPair, user, err := r.authService.Login(ctx, accountUsername, password, userAgent, remoteIP)
-	if err != nil && basePw != "" {
+	// CompatLogin refuses a temporary password: Jellyfin clients cannot run the
+	// password change it requires.
+	tokenPair, user, err := r.authService.CompatLogin(ctx, accountUsername, password, userAgent, remoteIP)
+	if err != nil && basePw != "" && !errors.Is(err, auth.ErrPasswordChangeRequired) {
 		// Full password failed and there's a # — try the base portion.
-		tokenPair, user, err = r.authService.Login(ctx, accountUsername, basePw, userAgent, remoteIP)
+		tokenPair, user, err = r.authService.CompatLogin(ctx, accountUsername, basePw, userAgent, remoteIP)
 		if err != nil {
 			return nil, mapAuthError(err)
 		}
@@ -234,7 +236,7 @@ func mapLoginError(err error) (int, string, string) {
 		}
 		return http.StatusBadGateway, "UpstreamError", httpErr.Error()
 	}
-	if errors.Is(err, ErrProfileRequired) || errors.Is(err, ErrProfileNotFound) || errors.Is(err, ErrProfileAmbiguous) || errors.Is(err, ErrProfileHasPIN) || errors.Is(err, ErrInvalidPIN) {
+	if errors.Is(err, ErrProfileRequired) || errors.Is(err, ErrProfileNotFound) || errors.Is(err, ErrProfileAmbiguous) || errors.Is(err, ErrProfileHasPIN) || errors.Is(err, ErrInvalidPIN) || errors.Is(err, auth.ErrPasswordChangeRequired) {
 		return http.StatusUnauthorized, "InvalidUsernameOrPassword", err.Error()
 	}
 	return http.StatusInternalServerError, "ServerError", "Unexpected login failure"
@@ -244,6 +246,10 @@ func mapLoginError(err error) (int, string, string) {
 func mapAuthError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, auth.ErrPasswordChangeRequired) {
+		// Kept as the sentinel, like the PIN errors, so the client sees why.
+		return fmt.Errorf("%w: sign in to Silo to replace your temporary password", err)
 	}
 	// auth.Service returns plain errors for bad credentials
 	errMsg := err.Error()

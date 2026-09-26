@@ -80,7 +80,9 @@ describe("AdminCollections helpers", () => {
     const body = toAdminCollectionRequest(toAdminCollectionBuilderValue(null, 4));
 
     expect(body.library_ids).toEqual([4]);
-    expect(body.collection_type).toBe("smart");
+    expect(body.collection_type).toBe("manual");
+    expect(body.query_definition).toBeUndefined();
+    expect(body.sort_config).toBeUndefined();
   });
 
   it("builds a create route that preserves the current library selection", () => {

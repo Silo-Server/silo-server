@@ -1,0 +1,17 @@
+{
+  "results": [
+    {
+      "id": "opaque-result",
+      "provider": "example",
+      "language": "en",
+      "release_name": "",
+      "format": "srt",
+      "score": 0,
+      "downloads": 0,
+      "hearing_impaired": false
+    }
+  ],
+  "warnings": [
+    "One or more subtitle providers could not complete the search."
+  ]
+}

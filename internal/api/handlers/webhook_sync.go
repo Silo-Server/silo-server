@@ -357,10 +357,23 @@ func (h *WebhookSyncHandler) HandleWebhook(w http.ResponseWriter, r *http.Reques
 		http.NotFound(w, r)
 		return
 	}
+	if err := h.receiveWebhook(r, secret, 0); err != nil {
+		h.writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ReceiveWebhook applies a v2 delivery through the shared processor and delivery log.
+func (h *WebhookSyncHandler) ReceiveWebhook(r *http.Request, secret string, limit int64) error {
+	return webhookManagementError(h.receiveWebhook(r, secret, limit))
+}
+
+func (h *WebhookSyncHandler) receiveWebhook(r *http.Request, secret string, limit int64) error {
 	capture := webhooksync.NewBodyCaptureReadCloser(r.Body, webhooksync.WebhookBodyCaptureLimit)
 	r.Body = capture
 
-	result, err := h.service.ProcessWebhook(r.Context(), secret, r)
+	result, err := h.service.ProcessWebhookBounded(r.Context(), secret, r, limit)
 	logContext := webhooksync.BuildWebhookRequestLogContext(
 		r,
 		webhooksync.SanitizeWebhookBodyExcerpt(r.Header.Get("Content-Type"), capture.Captured()),
@@ -386,15 +399,15 @@ func (h *WebhookSyncHandler) HandleWebhook(w http.ResponseWriter, r *http.Reques
 	}
 	logWebhookDelivery(result, logContext, statusCode, err)
 
-	if err != nil {
-		h.writeError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	return err
 }
 
 func (h *WebhookSyncHandler) writeError(w http.ResponseWriter, err error) {
 	statusCode := webhookErrorStatus(err)
+	if message, refused := historyimport.ServerAddressMessage(err); refused {
+		writeError(w, statusCode, "bad_request", message)
+		return
+	}
 	switch {
 	case errors.Is(err, webhooksync.ErrConnectionNotFound), errors.Is(err, historyimport.ErrProfileNotFound):
 		writeError(w, statusCode, "not_found", err.Error())
@@ -420,7 +433,14 @@ func (h *WebhookSyncHandler) writeError(w http.ResponseWriter, err error) {
 }
 
 func webhookErrorStatus(err error) int {
+	if _, refused := historyimport.ServerAddressMessage(err); refused {
+		return http.StatusBadRequest
+	}
 	switch {
+	case errors.Is(err, webhooksync.ErrWebhookTooLarge):
+		return http.StatusRequestEntityTooLarge
+	case errors.Is(err, webhooksync.ErrWebhookBody):
+		return http.StatusBadRequest
 	case errors.Is(err, webhooksync.ErrConnectionNotFound), errors.Is(err, historyimport.ErrProfileNotFound):
 		return http.StatusNotFound
 	default:
@@ -565,7 +585,7 @@ func requestWebhookURLWithPrefix(baseURL, prefix, secret string) string {
 }
 
 const (
-	webhookSyncPathPrefix    = "/api/v1/webhook-sync/webhooks/"
+	webhookSyncPathPrefix    = "/api/v2/webhook-sync/webhooks/"
 	legacyPlexSyncPathPrefix = "/api/v1/plex-sync/webhooks/"
 )
 

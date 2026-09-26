@@ -37,6 +37,7 @@ type AdminIntroHandler struct {
 	Settings             MarkerSettingsReader
 	FileResolver         AdminIntroFileResolver
 	MarkerUpdateNotifier PlaybackMarkerUpdateNotifier
+	OnlineMarkers        MarkerRefreshService
 	baseContext          context.Context
 	inFlight             sync.Map
 	logger               *slog.Logger
@@ -75,77 +76,78 @@ func (h *AdminIntroHandler) HandleRedetectEpisodeIntro(w http.ResponseWriter, r 
 }
 
 func (h *AdminIntroHandler) handleEpisodeMarkers(w http.ResponseWriter, r *http.Request, action string) {
+	status, err := h.RefreshEpisodeMarkers(r.Context(), chi.URLParam(r, "id"), action)
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, redetectIntroResponse{Status: status})
+}
+
+func (h *AdminIntroHandler) RefreshEpisodeMarkers(ctx context.Context, episodeID, action string) (string, error) {
+	if action == "refresh-v2" {
+		return h.refreshEpisodeMarkersV2(ctx, episodeID)
+	}
 	if h == nil || h.analyzer == nil || h.eligibility == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Intro detection is not configured")
-		return
+		return "", apiError(http.StatusServiceUnavailable, "unavailable", "Intro detection is not configured")
 	}
 
-	episodeID := chi.URLParam(r, "id")
 	if episodeID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
+		return "", apiError(http.StatusBadRequest, "bad_request", "Item ID is required")
 	}
 
-	eligibility, err := h.eligibility.EpisodeIntroEligibility(r.Context(), episodeID)
+	eligibility, err := h.eligibility.EpisodeIntroEligibility(ctx, episodeID)
 	if err != nil {
 		if errors.Is(err, intromarkers.ErrEpisodeNotFound) {
-			writeError(w, http.StatusBadRequest, "bad_request", "Item must be an episode")
-			return
+			return "", apiError(http.StatusBadRequest, "bad_request", "Item must be an episode")
 		}
-		h.logger.ErrorContext(r.Context(), "admin intro: resolve episode failed", "episode_id", episodeID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve episode")
-		return
+		h.logger.ErrorContext(ctx, "admin intro: resolve episode failed", "episode_id", episodeID, "error", err)
+		return "", apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve episode")
 	}
 	if !eligibility.HasMediaFiles {
-		writeError(w, http.StatusConflict, "conflict", "Episode has no media files to analyze")
-		return
+		return "", apiError(http.StatusConflict, "conflict", "Episode has no media files to analyze")
 	}
 	if !eligibility.IntroDetectionEnabled {
-		writeError(w, http.StatusConflict, "conflict", "Intro detection is disabled for this episode's library")
-		return
+		return "", apiError(http.StatusConflict, "conflict", "Intro detection is disabled for this episode's library")
 	}
 	if h.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Marker settings are not configured")
-		return
+		return "", apiError(http.StatusServiceUnavailable, "unavailable", "Marker settings are not configured")
 	}
-	raw, err := h.Settings.Get(r.Context(), markers.SettingMode)
+	raw, err := h.Settings.Get(ctx, markers.SettingMode)
 	if err != nil {
-		h.logger.ErrorContext(r.Context(), "admin markers: load mode failed", "episode_id", episodeID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load marker settings")
-		return
+		h.logger.ErrorContext(ctx, "admin markers: load mode failed", "episode_id", episodeID, "error", err)
+		return "", apiError(http.StatusInternalServerError, "internal_error", "Failed to load marker settings")
 	}
 	mode := markers.NormalizeMode(raw)
 	if !markers.ShouldRunLocal(mode) {
+		message := "Local intro detection is disabled"
 		switch mode {
 		case markers.ModeOff:
-			writeError(w, http.StatusConflict, "conflict", "Marker detection is disabled")
+			message = "Marker detection is disabled"
 		case markers.ModeOnline:
-			writeError(w, http.StatusConflict, "conflict", "Online-only marker refresh is not available for this endpoint")
-		default:
-			writeError(w, http.StatusConflict, "conflict", "Local intro detection is disabled")
+			message = "Online-only marker refresh is not available for this endpoint"
 		}
-		return
+		return "", apiError(http.StatusConflict, "conflict", message)
 	}
 
 	if _, loaded := h.inFlight.LoadOrStore(episodeID, struct{}{}); loaded {
-		writeJSON(w, http.StatusAccepted, redetectIntroResponse{Status: "already_running"})
-		return
+		return markerRefreshAlreadyRunning, nil
 	}
 
 	go func() {
 		defer h.inFlight.Delete(episodeID)
 		start := time.Now()
-		h.logger.InfoContext(r.Context(), "admin markers: episode refresh started", "episode_id", episodeID, "action", action)
+		h.logger.InfoContext(ctx, "admin markers: episode refresh started", "episode_id", episodeID, "action", action)
 		summary, err := h.analyzer.AnalyzeEpisode(h.baseContext, episodeID)
 		if err != nil {
-			h.logger.ErrorContext(r.Context(), "admin markers: episode refresh failed",
+			h.logger.ErrorContext(ctx, "admin markers: episode refresh failed",
 				"episode_id", episodeID,
 				"action", action,
 				"duration", time.Since(start),
 				"error", err)
 			return
 		}
-		h.logger.InfoContext(r.Context(), "admin markers: episode refresh finished",
+		h.logger.InfoContext(ctx, "admin markers: episode refresh finished",
 			"episode_id", episodeID,
 			"action", action,
 			"duration", time.Since(start),
@@ -159,7 +161,7 @@ func (h *AdminIntroHandler) handleEpisodeMarkers(w http.ResponseWriter, r *http.
 		h.notifyEpisodeMarkerUpdates(h.baseContext, episodeID, action)
 	}()
 
-	writeJSON(w, http.StatusAccepted, redetectIntroResponse{Status: "queued"})
+	return markerRefreshQueued, nil
 }
 
 func (h *AdminIntroHandler) notifyEpisodeMarkerUpdates(ctx context.Context, episodeID, action string) {

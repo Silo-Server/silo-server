@@ -1,0 +1,28 @@
+{
+  "revision": "82278f19ff5dc619091bee7b0efe5f375a0b25ec07002a424a5d15efbdc66900",
+  "state": "available",
+  "allowed": true,
+  "server_id": "3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35",
+  "current": {
+    "kind": "default"
+  },
+  "endpoints": [
+    {
+      "kind": "public",
+      "url": "https://silo.example.test"
+    },
+    {
+      "kind": "provider",
+      "provider": "down",
+      "display_name": "Down Overlay",
+      "state": "unavailable"
+    },
+    {
+      "kind": "provider",
+      "url": "https://silo.overlay.example.test",
+      "provider": "stub",
+      "display_name": "Stub Overlay",
+      "state": "connected"
+    }
+  ]
+}

@@ -5,7 +5,30 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+func TestNormalizeModeDefaultsToOnlineAndLocalWithoutChangingExplicitModes(t *testing.T) {
+	for _, tt := range []struct {
+		raw  string
+		want Mode
+	}{
+		{"", ModeBoth},
+		{" ", ModeBoth},
+		{"off", ModeOff},
+		{"local", ModeLocal},
+		{"online", ModeOnline},
+		{"both", ModeBoth},
+		{"invalid", ModeLocal},
+	} {
+		t.Run("mode_"+tt.raw, func(t *testing.T) {
+			if got := NormalizeMode(tt.raw); got != tt.want {
+				t.Fatalf("NormalizeMode(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
 
 type fakeProvider struct {
 	id     string
@@ -21,7 +44,22 @@ func (p *fakeProvider) FetchMarkers(context.Context, Request) (Result, error) {
 	return p.result, p.err
 }
 
-func TestRegistryFetchFirstHitUsesPriorityOrder(t *testing.T) {
+func populateRegistryForTest(ctx context.Context, registry *Registry) (Result, bool, error) {
+	var result Result
+	service := NewPopulationService(PopulationOptions{
+		Registry: registry, Store: &populationRecorder{},
+		Settings: populationSettings{"setup.completed": "true", SettingMode: "online", SettingOnlineStorage: "stored"},
+		Resolver: populationResolver{ids: ExternalIDs{Kind: ItemKindEpisode, TmdbID: "42", SeasonNumber: 1, EpisodeNumber: 1}},
+		Write: func(_ context.Context, _ *models.MediaFile, selected Result) (bool, error) {
+			result = selected
+			return true, nil
+		},
+	})
+	_, _, err := service.Refresh(ctx, &models.MediaFile{ID: 1, Duration: 2000})
+	return result, len(result.Markers) > 0, err
+}
+
+func TestPopulationRegistryUsesRegistrationPriority(t *testing.T) {
 	first := &fakeProvider{id: "first"}
 	second := &fakeProvider{
 		id: "second",
@@ -47,25 +85,25 @@ func TestRegistryFetchFirstHitUsesPriorityOrder(t *testing.T) {
 		t.Fatalf("register third: %v", err)
 	}
 
-	result, ok, err := registry.FetchFirstHit(context.Background(), Request{Kind: ItemKindEpisode})
+	result, ok, err := populateRegistryForTest(context.Background(), registry)
 	if err != nil {
-		t.Fatalf("FetchFirstHit returned error: %v", err)
+		t.Fatalf("population returned error: %v", err)
 	}
 	if !ok {
 		t.Fatal("expected hit")
 	}
-	if result.ProviderID != "second" {
-		t.Fatalf("ProviderID = %q, want second", result.ProviderID)
+	if len(result.Markers) != 1 || result.Markers[0].ProviderID != "second" {
+		t.Fatalf("markers = %+v, want second provider", result.Markers)
 	}
 	if result.SourceClass != "online" {
 		t.Fatalf("SourceClass = %q, want online", result.SourceClass)
 	}
-	if third.calls != 0 {
-		t.Fatalf("third provider should not be called after hit, got %d calls", third.calls)
+	if third.calls != 1 {
+		t.Fatalf("third provider calls = %d, want 1", third.calls)
 	}
 }
 
-func TestRegistryFetchFirstHitReturnsLastProviderErrorAsMiss(t *testing.T) {
+func TestPopulationRegistryReturnsLastProviderErrorAsMiss(t *testing.T) {
 	wantErr := errors.New("provider unavailable")
 	registry := NewRegistry(nil)
 	if err := registry.Register(&fakeProvider{id: "first", err: errors.New("temporary")}); err != nil {
@@ -75,7 +113,7 @@ func TestRegistryFetchFirstHitReturnsLastProviderErrorAsMiss(t *testing.T) {
 		t.Fatalf("register second: %v", err)
 	}
 
-	_, ok, err := registry.FetchFirstHit(context.Background(), Request{Kind: ItemKindEpisode})
+	_, ok, err := populateRegistryForTest(context.Background(), registry)
 	if ok {
 		t.Fatal("expected miss")
 	}
@@ -84,7 +122,7 @@ func TestRegistryFetchFirstHitReturnsLastProviderErrorAsMiss(t *testing.T) {
 	}
 }
 
-func TestRegistryFetchMergedKeepsBestPerSegmentByProviderPriority(t *testing.T) {
+func TestPopulationRegistryKeepsBestPerSegmentByProviderPriority(t *testing.T) {
 	a := &fakeProvider{id: "a", result: Result{ProviderID: "a", Algorithm: "a:v1", Markers: []Marker{
 		{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second, Confidence: 0.7, SubmissionCount: 1},
 		{Kind: MarkerKindCredits, Start: 100 * time.Second, End: 110 * time.Second, Confidence: 0.5, SubmissionCount: 1},
@@ -102,9 +140,9 @@ func TestRegistryFetchMergedKeepsBestPerSegmentByProviderPriority(t *testing.T) 
 		t.Fatalf("register b: %v", err)
 	}
 
-	res, ok, err := registry.FetchMerged(context.Background(), Request{Kind: ItemKindEpisode})
+	res, ok, err := populateRegistryForTest(context.Background(), registry)
 	if err != nil {
-		t.Fatalf("FetchMerged: %v", err)
+		t.Fatalf("population: %v", err)
 	}
 	if !ok {
 		t.Fatal("expected hit")
@@ -122,7 +160,7 @@ func TestRegistryFetchMergedKeepsBestPerSegmentByProviderPriority(t *testing.T) 
 	}
 }
 
-func TestRegistryFetchMergedUsesConfiguredProviderPriority(t *testing.T) {
+func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 	a := &fakeProvider{id: "a", result: Result{ProviderID: "a", Markers: []Marker{
 		{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second, Confidence: 0.9, SubmissionCount: 500},
 	}}}
@@ -138,9 +176,9 @@ func TestRegistryFetchMergedUsesConfiguredProviderPriority(t *testing.T) {
 		"b": {Provider: "b", FetchEnabled: true, FetchPriority: 10},
 	}}
 
-	res, ok, err := registry.FetchMerged(context.Background(), Request{Kind: ItemKindEpisode})
+	res, ok, err := populateRegistryForTest(context.Background(), registry)
 	if err != nil {
-		t.Fatalf("FetchMerged: %v", err)
+		t.Fatalf("population: %v", err)
 	}
 	if !ok || len(res.Markers) != 1 {
 		t.Fatalf("merged = %+v, ok=%v", res.Markers, ok)
@@ -150,7 +188,7 @@ func TestRegistryFetchMergedUsesConfiguredProviderPriority(t *testing.T) {
 	}
 }
 
-func TestRegistryFetchMergedFallsBackWhenHigherPriorityProviderErrors(t *testing.T) {
+func TestPopulationRegistryFallsBackWhenHigherPriorityProviderErrors(t *testing.T) {
 	higher := &fakeProvider{id: "higher", err: errors.New("temporary provider failure")}
 	lower := &fakeProvider{id: "lower", result: Result{ProviderID: "lower", Markers: []Marker{
 		{Kind: MarkerKindIntro, Start: 0, End: 25 * time.Second, Confidence: 0.6},
@@ -164,9 +202,9 @@ func TestRegistryFetchMergedFallsBackWhenHigherPriorityProviderErrors(t *testing
 		"lower":  {Provider: "lower", FetchEnabled: true, FetchPriority: 20},
 	}}
 
-	res, ok, err := registry.FetchMerged(context.Background(), Request{Kind: ItemKindEpisode})
-	if err != nil {
-		t.Fatalf("FetchMerged returned error despite fallback marker: %v", err)
+	res, ok, err := populateRegistryForTest(context.Background(), registry)
+	if err == nil {
+		t.Fatal("expected partial provider failure alongside fallback markers")
 	}
 	if !ok || len(res.Markers) != 1 {
 		t.Fatalf("merged = %+v, ok=%v", res.Markers, ok)
@@ -176,7 +214,7 @@ func TestRegistryFetchMergedFallsBackWhenHigherPriorityProviderErrors(t *testing
 	}
 }
 
-func TestRegistryFetchMergedTieBreaksSamePriorityByQuality(t *testing.T) {
+func TestPopulationRegistryTieBreaksSamePriorityByQuality(t *testing.T) {
 	a := &fakeProvider{id: "a", result: Result{ProviderID: "a", Markers: []Marker{
 		{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second, Confidence: 0.7, SubmissionCount: 1},
 	}}}
@@ -191,9 +229,9 @@ func TestRegistryFetchMergedTieBreaksSamePriorityByQuality(t *testing.T) {
 		"b": {Provider: "b", FetchEnabled: true, FetchPriority: 10},
 	}}
 
-	res, ok, err := registry.FetchMerged(context.Background(), Request{Kind: ItemKindEpisode})
+	res, ok, err := populateRegistryForTest(context.Background(), registry)
 	if err != nil {
-		t.Fatalf("FetchMerged: %v", err)
+		t.Fatalf("population: %v", err)
 	}
 	if !ok || len(res.Markers) != 1 {
 		t.Fatalf("merged = %+v, ok=%v", res.Markers, ok)
@@ -203,7 +241,7 @@ func TestRegistryFetchMergedTieBreaksSamePriorityByQuality(t *testing.T) {
 	}
 }
 
-func TestRegistryFetchMergedSingleProviderParity(t *testing.T) {
+func TestPopulationRegistrySingleProviderParity(t *testing.T) {
 	only := &fakeProvider{id: "introdb", result: Result{
 		ProviderID:  "introdb",
 		SourceClass: "online",
@@ -214,9 +252,9 @@ func TestRegistryFetchMergedSingleProviderParity(t *testing.T) {
 	if err := registry.Register(only); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	res, ok, err := registry.FetchMerged(context.Background(), Request{Kind: ItemKindEpisode})
+	res, ok, err := populateRegistryForTest(context.Background(), registry)
 	if err != nil {
-		t.Fatalf("FetchMerged: %v", err)
+		t.Fatalf("population: %v", err)
 	}
 	if !ok || len(res.Markers) != 1 || res.Markers[0].Kind != MarkerKindIntro {
 		t.Fatalf("single-provider merge = %+v, ok=%v", res.Markers, ok)

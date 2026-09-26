@@ -1,6 +1,14 @@
 package catalog
 
-import "github.com/Silo-Server/silo-server/internal/models"
+import (
+	"slices"
+
+	"github.com/Silo-Server/silo-server/internal/models"
+)
+
+// fieldImagesLocked matches metadata.FieldImages. Catalog cannot import
+// metadata because metadata already depends on catalog.
+const fieldImagesLocked = 10
 
 // applyItemLocalization merges a localization onto a clone of item. Only
 // non-empty localized fields override the base — localization rows are
@@ -24,17 +32,18 @@ func applyItemLocalization(item *models.MediaItem, loc *models.MediaItemLocaliza
 	if loc.Tagline != "" {
 		localized.Tagline = loc.Tagline
 	}
-	if loc.PosterPath != "" {
+	imagesLocked := slices.Contains(item.LockedFields, fieldImagesLocked)
+	if !imagesLocked && loc.PosterPath != "" {
 		localized.PosterPath = loc.PosterPath
 		localized.PosterSourcePath = loc.PosterSourcePath
 		localized.PosterThumbhash = loc.PosterThumbhash
 	}
-	if loc.BackdropPath != "" {
+	if !imagesLocked && loc.BackdropPath != "" {
 		localized.BackdropPath = loc.BackdropPath
 		localized.BackdropSourcePath = loc.BackdropSourcePath
 		localized.BackdropThumbhash = loc.BackdropThumbhash
 	}
-	if loc.LogoPath != "" {
+	if !imagesLocked && loc.LogoPath != "" {
 		localized.LogoPath = loc.LogoPath
 		localized.LogoSourcePath = loc.LogoSourcePath
 	}
@@ -43,7 +52,7 @@ func applyItemLocalization(item *models.MediaItem, loc *models.MediaItemLocaliza
 
 // applySeasonLocalization merges a localization onto a clone of season; see
 // applyItemLocalization for the empty-field semantics.
-func applySeasonLocalization(season *models.Season, loc *models.SeasonLocalization) *models.Season {
+func applySeasonLocalization(season *models.Season, loc *models.SeasonLocalization, imagesLocked bool) *models.Season {
 	localized := cloneSeason(season)
 	if localized == nil || loc == nil {
 		return localized
@@ -54,7 +63,7 @@ func applySeasonLocalization(season *models.Season, loc *models.SeasonLocalizati
 	if loc.Overview != "" {
 		localized.Overview = loc.Overview
 	}
-	if loc.PosterPath != "" {
+	if !imagesLocked && loc.PosterPath != "" {
 		localized.PosterPath = loc.PosterPath
 		localized.PosterSourcePath = loc.PosterSourcePath
 		localized.PosterThumbhash = loc.PosterThumbhash

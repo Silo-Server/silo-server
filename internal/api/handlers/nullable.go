@@ -10,6 +10,18 @@ type optionalNullableString struct {
 	value *string
 }
 
+// SetValue lets typed adapters preserve omitted, null, and value states
+// without round-tripping an entire request through JSON.
+func (o *optionalNullableString) SetValue(value *string, set bool) {
+	o.set = set
+	if value == nil {
+		o.value = nil
+		return
+	}
+	v := *value
+	o.value = &v
+}
+
 func (o *optionalNullableString) UnmarshalJSON(data []byte) error {
 	o.set = true
 	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {

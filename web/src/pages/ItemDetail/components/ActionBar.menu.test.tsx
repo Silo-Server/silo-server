@@ -47,3 +47,41 @@ describe("ActionBar detail menu", () => {
     ).toBeTruthy();
   });
 });
+
+describe("ActionBar watch together group", () => {
+  it("shows the group only with the prop, and live-room items only with a live room", async () => {
+    const onStartParty = vi.fn();
+    const onSuggest = vi.fn();
+    const onPlay = vi.fn();
+    const view = render(
+      <MemoryRouter>
+        <ActionBar contentId="movie-1" watchTogether={{ onStartParty }} />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByTitle("More"));
+    expect(screen.getByText("Watch Together")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Start a party with this" }));
+    expect(onStartParty).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menuitem", { name: /Suggest to/ })).toBeNull();
+    view.unmount();
+
+    render(
+      <MemoryRouter>
+        <ActionBar
+          contentId="movie-1"
+          watchTogether={{ onStartParty, liveRoom: { code: "KX7Q2M", onSuggest, onPlay } }}
+        />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByTitle("More"));
+    expect(screen.getByText(/KX7Q2M is live/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Suggest to KX7Q2M" }));
+    expect(onSuggest).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByTitle("More"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Play in KX7Q2M" }));
+    expect(onPlay).toHaveBeenCalledTimes(1);
+    for (const item of screen.queryAllByRole("menuitem")) {
+      expect(item.querySelector("svg")).toBeTruthy();
+    }
+  });
+});

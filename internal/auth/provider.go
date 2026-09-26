@@ -54,6 +54,29 @@ func looksLikeEmail(identifier string) bool {
 	return err == nil && parsed.Address == identifier
 }
 
+// LoginDirectory is the account lookup behind a typed sign-in name.
+// Satisfied by *UserRepository.
+type LoginDirectory interface {
+	GetByUsername(ctx context.Context, username string) (*models.User, error)
+	GetByEmail(ctx context.Context, email string) (*models.User, error)
+}
+
+// LookupLogin resolves what someone types as their sign-in name to an
+// account. The identifier may also be an email address: when the username
+// lookup misses and the input parses as an email, the email column is tried.
+// Invited accounts have username == email, but someone who signed up with a
+// separate username should still be able to type the address they remember.
+// Both columns are citext UNIQUE, and the user_login_identifiers table keeps
+// them one identity space (no username equals another account's email), so
+// the fallback cannot resolve ambiguously for accounts written since then.
+func LookupLogin(ctx context.Context, users LoginDirectory, identifier string) (*models.User, error) {
+	user, err := users.GetByUsername(ctx, identifier)
+	if err != nil && IsNotFound(err) && looksLikeEmail(identifier) {
+		user, err = users.GetByEmail(ctx, identifier)
+	}
+	return user, err
+}
+
 // NewLocalProvider creates a new LocalProvider backed by the given repositories.
 func NewLocalProvider(users *UserRepository, sessions *SessionRepository) *LocalProvider {
 	return &LocalProvider{
@@ -65,18 +88,9 @@ func NewLocalProvider(users *UserRepository, sessions *SessionRepository) *Local
 // Authenticate validates the username/password pair against the database.
 // Returns ErrInvalidCredentials if the user is not found or the password
 // does not match. Returns ErrUserDisabled if the user's account is disabled.
-//
-// The identifier may also be an email address: when the username lookup
-// misses and the input parses as an email, the email column is tried.
-// Invited accounts have username == email, but someone who signed up with a
-// separate username should still be able to type the address they remember.
-// Both columns are citext UNIQUE over the same identity space, so the
-// fallback cannot resolve ambiguously.
+// The username may also be the account's email address (see LookupLogin).
 func (p *LocalProvider) Authenticate(ctx context.Context, creds Credentials) (*models.User, error) {
-	user, err := p.users.GetByUsername(ctx, creds.Username)
-	if err != nil && IsNotFound(err) && looksLikeEmail(creds.Username) {
-		user, err = p.users.GetByEmail(ctx, creds.Username)
-	}
+	user, err := LookupLogin(ctx, p.users, creds.Username)
 	if err != nil {
 		if IsNotFound(err) {
 			return nil, ErrInvalidCredentials

@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { captureProfileRequestContext } from "@/api/client";
+import type { NodeDeleteIntent } from "@/hooks/queries/admin/nodes";
 import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import type { FormEvent, ReactNode } from "react";
 import type { StreamNode, CreateNodeRequest, UpdateNodeRequest } from "@/api/types";
@@ -176,7 +178,7 @@ function NodeLoadBlock({ node }: { node: StreamNode }) {
       <UnitLabel>Load</UnitLabel>
       {system.kind === "unreported" ? (
         <p className="text-muted-foreground text-xs" title={system.title}>
-          No resource sample
+          {system.label === "Stale" ? "Stale resource sample" : "No resource sample"}
         </p>
       ) : (
         <div className={METRIC_GRID}>
@@ -184,6 +186,7 @@ function NodeLoadBlock({ node }: { node: StreamNode }) {
           <NodeMetricRow metric={system.memory} />
           <NodeMetricRow metric={system.disk} />
           <NodeMetricRow metric={system.network} />
+          {system.processMemory ? <NodeMetricRow metric={system.processMemory} /> : null}
         </div>
       )}
     </div>
@@ -652,6 +655,13 @@ function NodeUnit({
         </div>
       </div>
 
+      {!node.enabled && (
+        <p className="text-muted-foreground mt-3 text-xs">
+          New placement and routine health checks stop after reconciliation. Existing streams
+          continue. Health and load readings are from the last health check.
+        </p>
+      )}
+
       {/* Two blocks on a proxy, three on a transcode node. The track list is
           picked to match, so the survivors fill the row rather than leaving a
           column-shaped hole where acceleration used to be. */}
@@ -685,9 +695,9 @@ interface NodeSectionProps {
   onDelete: (node: StreamNode) => void;
   onToggle: (node: StreamNode) => void;
   onCheckHealth: (node: StreamNode) => void;
-  checkingHealthId: number | null;
+  checkingHealthId: StreamNode["id"] | null;
   onReprobe: (node: StreamNode) => void;
-  reprobingId: number | null;
+  reprobingId: StreamNode["id"] | null;
 }
 
 function NodeSection({
@@ -933,7 +943,7 @@ function NodeForm({
         body.hw_accel_override = hwAccelOverride === HW_ACCEL_INHERIT ? null : hwAccelOverride;
         body.hw_device_override = overrideDevices.length > 0 ? overrideDevices.join(",") : null;
       }
-      updateMutation.mutate({ id: node.id, body }, { onSuccess: onClose });
+      updateMutation.mutate({ node, body }, { onSuccess: onClose });
     } else {
       const body: CreateNodeRequest = { type: nodeType, ...fields };
       if (nodeType === "proxy" && publicUrl.trim() !== "") {
@@ -945,161 +955,166 @@ function NodeForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-2">
-        <Label>Name</Label>
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={nodeType === "proxy" ? "Proxy Node 1" : "Transcode Node 1"}
-          required
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label>Type</Label>
-        <Badge variant="secondary" className="text-sm">
-          {nodeType === "proxy" ? "Proxy" : "Transcode"}
-        </Badge>
-      </div>
-
-      <div className="space-y-2">
-        <Label>URL</Label>
-        <Input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder={urlPlaceholder}
-          required
-        />
-        {nodeType === "transcode" ? (
-          <p className="text-muted-foreground text-sm">
-            Must be reachable from proxy nodes and the backend server. A private/internal IP or
-            localhost is fine — no public URL needed.
-          </p>
-        ) : (
-          <p className="text-muted-foreground text-sm">
-            How the server reaches this node — health checks and capability fetches use it, so a
-            private/internal address is fine and keeps that traffic off the public network. Without
-            a Public URL below, streaming clients use this address too, so it must then be publicly
-            accessible.
-          </p>
-        )}
-      </div>
-
-      {nodeType === "proxy" && (
+      <fieldset disabled={isPending} className="space-y-4">
         <div className="space-y-2">
-          <Label>Public URL</Label>
+          <Label>Name</Label>
           <Input
-            value={publicUrl}
-            onChange={(e) => setPublicUrl(e.target.value)}
-            placeholder="Same as URL"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={nodeType === "proxy" ? "Proxy Node 1" : "Transcode Node 1"}
+            required
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label>Type</Label>
+          <Badge variant="secondary" className="text-sm">
+            {nodeType === "proxy" ? "Proxy" : "Transcode"}
+          </Badge>
+        </div>
+
+        <div className="space-y-2">
+          <Label>URL</Label>
+          <Input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder={urlPlaceholder}
+            required
+          />
+          {nodeType === "transcode" ? (
+            <p className="text-muted-foreground text-sm">
+              Must be reachable from proxy nodes and the backend server. A private/internal IP or
+              localhost is fine — no public URL needed.
+            </p>
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              How the server reaches this node — health checks and capability fetches use it, so a
+              private/internal address is fine and keeps that traffic off the public network.
+              Without a Public URL below, streaming clients use this address too, so it must then be
+              publicly accessible.
+            </p>
+          )}
+        </div>
+
+        {nodeType === "proxy" && (
+          <div className="space-y-2">
+            <Label>Public URL</Label>
+            <Input
+              value={publicUrl}
+              onChange={(e) => setPublicUrl(e.target.value)}
+              placeholder="Same as URL"
+            />
+            <p className="text-muted-foreground text-sm">
+              Optional. What streaming clients connect to, when it differs from the URL above — a
+              CDN or load-balancer hostname in front of this node. Stream and download links are
+              built on it; everything the server does keeps using the URL above. Leave empty to give
+              clients the URL above.
+            </p>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <Label>Group</Label>
+          <Input
+            value={group}
+            onChange={(e) => setGroup(e.target.value)}
+            placeholder="e.g. rack-1"
           />
           <p className="text-muted-foreground text-sm">
-            Optional. What streaming clients connect to, when it differs from the URL above — a CDN
-            or load-balancer hostname in front of this node. Stream and download links are built on
-            it; everything the server does keeps using the URL above. Leave empty to give clients
-            the URL above.
+            Optional. Nodes in the same group are treated as co-located: transcoded streams are
+            served by a proxy from the transcode node's group, keeping traffic on the same LAN. A
+            group is only used while all of its nodes are healthy.
           </p>
         </div>
-      )}
 
-      <div className="space-y-2">
-        <Label>Group</Label>
-        <Input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="e.g. rack-1" />
-        <p className="text-muted-foreground text-sm">
-          Optional. Nodes in the same group are treated as co-located: transcoded streams are served
-          by a proxy from the transcode node's group, keeping traffic on the same LAN. A group is
-          only used while all of its nodes are healthy.
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label>{nodeType === "proxy" ? "Max Streams" : "Max Transcodes"}</Label>
-        <Input
-          type="number"
-          min={0}
-          value={maxJobs}
-          onChange={(e) => setMaxJobs(e.target.value)}
-          placeholder="Unlimited"
-        />
-        <p className="text-muted-foreground text-sm">
-          Optional concurrency cap for this node. Leave empty (or 0) for unlimited.
-        </p>
-      </div>
-
-      {nodeType === "proxy" && (
         <div className="space-y-2">
-          <Label>Max Egress Bandwidth (Mbps)</Label>
+          <Label>{nodeType === "proxy" ? "Max Streams" : "Max Transcodes"}</Label>
           <Input
             type="number"
             min={0}
-            step="any"
-            value={maxBandwidthMbps}
-            onChange={(e) => setMaxBandwidthMbps(e.target.value)}
+            value={maxJobs}
+            onChange={(e) => setMaxJobs(e.target.value)}
             placeholder="Unlimited"
           />
           <p className="text-muted-foreground text-sm">
-            Optional. New streams are routed elsewhere once this node's measured egress (plus the
-            expected bitrate of the new stream) would exceed the cap. Active streams are never
-            interrupted. Leave empty (or 0) for unlimited.
+            Optional concurrency cap for this node. Leave empty (or 0) for unlimited.
           </p>
         </div>
-      )}
 
-      {/* Overrides are edit-only: the create endpoint takes no acceleration
+        {nodeType === "proxy" && (
+          <div className="space-y-2">
+            <Label>Max Egress Bandwidth (Mbps)</Label>
+            <Input
+              type="number"
+              min={0}
+              step="any"
+              value={maxBandwidthMbps}
+              onChange={(e) => setMaxBandwidthMbps(e.target.value)}
+              placeholder="Unlimited"
+            />
+            <p className="text-muted-foreground text-sm">
+              Optional. New streams are routed elsewhere once this node's measured egress (plus the
+              expected bitrate of the new stream) would exceed the cap. Active streams are never
+              interrupted. Leave empty (or 0) for unlimited.
+            </p>
+          </div>
+        )}
+
+        {/* Overrides are edit-only: the create endpoint takes no acceleration
           fields, so offering them here would silently drop what was typed.
           They are also transcode-only: a proxy node only remuxes/strips
           bitstreams, so it never encodes and these fields would be
           meaningless — and their absence keeps a proxy edit from sending
           override fields at all. */}
-      {node && nodeType === "transcode" && (
-        <>
-          <div className="space-y-2">
-            <Label htmlFor="node-hw-accel-override">Hardware Acceleration</Label>
-            <Select value={hwAccelOverride} onValueChange={selectHWAccelOverride}>
-              <SelectTrigger id="node-hw-accel-override" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {HW_ACCEL_OVERRIDE_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-muted-foreground text-sm">
-              Optional. Overrides the cluster-wide Hardware Acceleration setting for this node only
-              — use it when this node's hardware differs from the rest of the cluster. The cluster
-              default is Auto unless changed on the Playback settings page, and Auto detects this
-              node's own hardware, not the server's. Applies to new transcodes within a minute;
-              restart the node to re-prime its encoder for the new backend.
-            </p>
-            {effectiveAcceleration && (
-              <p className="text-muted-foreground text-sm">{effectiveAcceleration}</p>
-            )}
-          </div>
+        {node && nodeType === "transcode" && (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="node-hw-accel-override">Hardware Acceleration</Label>
+              <Select value={hwAccelOverride} onValueChange={selectHWAccelOverride}>
+                <SelectTrigger id="node-hw-accel-override" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {HW_ACCEL_OVERRIDE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-muted-foreground text-sm">
+                Optional. Overrides the cluster-wide Hardware Acceleration setting for this node
+                only — use it when this node's hardware differs from the rest of the cluster. The
+                cluster default is Auto unless changed on the Playback settings page, and Auto
+                detects this node's own hardware, not the server's. Applies to new transcodes within
+                a minute; restart the node to re-prime its encoder for the new backend.
+              </p>
+              {effectiveAcceleration && (
+                <p className="text-muted-foreground text-sm">{effectiveAcceleration}</p>
+              )}
+            </div>
 
-          <div className="space-y-2">
-            <Label htmlFor={hasDeviceInventory ? undefined : "node-hw-device-override"}>
-              GPU Devices
-            </Label>
-            {hasDeviceInventory ? (
-              <NodeDevicePicker
-                rows={deviceRows}
-                onToggle={(path) =>
-                  setHwDeviceOverride(toggleHWDevice(hwDeviceOverride, path, devicePaths))
-                }
-                onInherit={() => setHwDeviceOverride("")}
-              />
-            ) : (
-              <>
-                <Input
-                  id="node-hw-device-override"
-                  value={hwDeviceOverride}
-                  onChange={(e) => setHwDeviceOverride(e.target.value)}
-                  placeholder="Cluster default"
+            <div className="space-y-2">
+              <Label htmlFor={hasDeviceInventory ? undefined : "node-hw-device-override"}>
+                GPU Devices
+              </Label>
+              {hasDeviceInventory ? (
+                <NodeDevicePicker
+                  rows={deviceRows}
+                  onToggle={(path) =>
+                    setHwDeviceOverride(toggleHWDevice(hwDeviceOverride, path, devicePaths))
+                  }
+                  onInherit={() => setHwDeviceOverride("")}
                 />
-                {/*
+              ) : (
+                <>
+                  <Input
+                    id="node-hw-device-override"
+                    value={hwDeviceOverride}
+                    onChange={(e) => setHwDeviceOverride(e.target.value)}
+                    placeholder="Cluster default"
+                  />
+                  {/*
                   Each branch is a whole sentence rather than a shared tail: an
                   NVENC node reaches the free-text field *with* a reported
                   inventory (its render devices are real, they are just not what
@@ -1113,35 +1128,37 @@ function NodeForm({
                   a guess, and on the NVENC branch a dangerous one, since an
                   inherited /dev/dri path reaches NVENC as a CUDA identity.
                 */}
-                <p className="text-muted-foreground text-sm">
-                  {usesCUDADevices ? (
-                    <>
-                      Optional. The CUDA device this node encodes on — an index or a GPU UUID (e.g.{" "}
-                      <span className="font-mono">0</span> or{" "}
-                      <span className="font-mono">GPU-a1b2c3d4</span>). NVENC addresses GPUs by CUDA
-                      identity, not by <span className="font-mono">/dev/dri</span> render path, so
-                      the device picker does not apply to it. Leaving this empty inherits the
-                      cluster-wide device setting, which must itself be a CUDA identity for NVENC to
-                      use it — set one here when the cluster is configured with render paths.
-                    </>
-                  ) : (
-                    <>
-                      Optional. Comma-separated render device paths this node transcodes on (e.g.{" "}
-                      <span className="font-mono">/dev/dri/renderD128,/dev/dri/renderD129</span>).
-                      This node has reported no device inventory yet, so there is nothing to pick
-                      from. Leave empty to inherit the cluster-wide device setting.
-                    </>
-                  )}
-                </p>
-              </>
-            )}
-          </div>
-        </>
-      )}
+                  <p className="text-muted-foreground text-sm">
+                    {usesCUDADevices ? (
+                      <>
+                        Optional. The CUDA device this node encodes on — an index or a GPU UUID
+                        (e.g. <span className="font-mono">0</span> or{" "}
+                        <span className="font-mono">GPU-a1b2c3d4</span>). NVENC addresses GPUs by
+                        CUDA identity, not by <span className="font-mono">/dev/dri</span> render
+                        path, so the device picker does not apply to it. Leaving this empty inherits
+                        the cluster-wide device setting, which must itself be a CUDA identity for
+                        NVENC to use it — set one here when the cluster is configured with render
+                        paths.
+                      </>
+                    ) : (
+                      <>
+                        Optional. Comma-separated render device paths this node transcodes on (e.g.{" "}
+                        <span className="font-mono">/dev/dri/renderD128,/dev/dri/renderD129</span>).
+                        This node has reported no device inventory yet, so there is nothing to pick
+                        from. Leave empty to inherit the cluster-wide device setting.
+                      </>
+                    )}
+                  </p>
+                </>
+              )}
+            </div>
+          </>
+        )}
 
-      <Button type="submit" className="w-full" disabled={isPending}>
-        {isPending ? "Saving..." : "Save"}
-      </Button>
+        <Button type="submit" className="w-full" disabled={isPending}>
+          {isPending ? "Saving..." : "Save"}
+        </Button>
+      </fieldset>
     </form>
   );
 }
@@ -1149,9 +1166,12 @@ function NodeForm({
 export default function AdminNodes() {
   const { data: nodes = [], isLoading } = useAdminNodes();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [formVersion, setFormVersion] = useState(0);
   const [editingNode, setEditingNode] = useState<StreamNode | null>(null);
   const [addingNodeType, setAddingNodeType] = useState<NodeType | null>(null);
-  const [confirmDeleteNode, setConfirmDeleteNode] = useState<StreamNode | null>(null);
+  const [deleteIntent, setDeleteIntent] = useState<NodeDeleteIntent | null>(null);
+  const confirmDeleteNode = deleteIntent?.node ?? null;
+  const renderedAuthority = captureProfileRequestContext();
   const [groupFilter, setGroupFilter] = useState<string | null>(null);
   const deleteMutation = useDeleteNode();
   const checkHealthMutation = useCheckNodeHealth();
@@ -1187,19 +1207,21 @@ export default function AdminNodes() {
     : (addingNodeType ?? "proxy");
 
   function handleAdd(type: NodeType) {
+    setFormVersion((version) => version + 1);
     setAddingNodeType(type);
     setEditingNode(null);
     setDialogOpen(true);
   }
 
   function handleEdit(node: StreamNode) {
+    setFormVersion((version) => version + 1);
     setEditingNode(node);
     setAddingNodeType(null);
     setDialogOpen(true);
   }
 
   function handleDelete(node: StreamNode) {
-    setConfirmDeleteNode(node);
+    setDeleteIntent({ node: structuredClone(node), authority: renderedAuthority });
   }
 
   function handleDialogChange(open: boolean) {
@@ -1234,15 +1256,15 @@ export default function AdminNodes() {
       <ConfirmDialog
         open={confirmDeleteNode !== null}
         onOpenChange={(open) => {
-          if (!open) setConfirmDeleteNode(null);
+          if (!open) setDeleteIntent(null);
         }}
         title="Delete node"
         description={`Delete stream node "${confirmDeleteNode?.name}"? This action cannot be undone.`}
         confirmLabel="Delete"
         variant="destructive"
         onConfirm={() => {
-          if (confirmDeleteNode) deleteMutation.mutate(confirmDeleteNode.id);
-          setConfirmDeleteNode(null);
+          if (deleteIntent) deleteMutation.mutate(deleteIntent);
+          setDeleteIntent(null);
         }}
       />
 
@@ -1304,6 +1326,7 @@ export default function AdminNodes() {
             </DialogTitle>
           </DialogHeader>
           <NodeForm
+            key={formVersion}
             node={editingNode}
             nodeType={resolvedNodeType}
             defaultGroup={activeGroup ?? ""}

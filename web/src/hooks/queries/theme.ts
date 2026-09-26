@@ -1,11 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import { v2, type V2Result } from "@/api/v2/request";
 import { themeKeys } from "./keys";
-
-interface AdminCssResponse {
-  vars: string; // JSON-encoded Record<string, string>
-  raw_css: string;
-}
 
 /** Fetch the admin's server-wide custom CSS config. Public endpoint (no auth needed). */
 export function useAdminPublicCss() {
@@ -13,7 +8,7 @@ export function useAdminPublicCss() {
     queryKey: themeKeys.adminCss(),
     queryFn: async () => {
       try {
-        const result = await api<AdminCssResponse>("/theme/admin-css");
+        const result = await v2("GET /api/v2/theme/admin-css");
         let vars: Record<string, string> = {};
         if (result.vars) {
           try {
@@ -34,31 +29,15 @@ export function useAdminPublicCss() {
   });
 }
 
-export interface ThemeCatalogEntry {
-  id: string;
-  name: string;
-  description: string;
-  author: string;
-  previewAccent: string;
-  previewBg: string;
-  tags: string[];
-  downloadUrl: string;
-  version: string;
-}
-
-interface ThemeCatalogIndex {
-  version: number;
-  updatedAt?: string;
-  themes: ThemeCatalogEntry[];
-}
+export type ThemeCatalogEntry = V2Result<"GET /api/v2/theme/catalog">["document"]["themes"][number];
 
 /** Fetch the theme catalog from the server proxy. */
 export function useThemeCatalog(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: themeKeys.catalogIndex(),
     queryFn: async () => {
-      const result = await api<ThemeCatalogIndex>("/theme/catalog");
-      return result.themes ?? [];
+      const result = await v2("GET /api/v2/theme/catalog");
+      return result.document.themes;
     },
     enabled: options?.enabled ?? true,
     staleTime: 10 * 60_000,
@@ -69,9 +48,10 @@ export function useThemeCatalog(options?: { enabled?: boolean }) {
 export function useRefreshThemeCatalog() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api<ThemeCatalogIndex>("/theme/catalog/refresh", { method: "POST" }),
+    retry: false,
+    mutationFn: () => v2("POST /api/v2/theme/catalog/refresh", { retryAuthentication: false }),
     onSuccess: (data) => {
-      queryClient.setQueryData(themeKeys.catalogIndex(), data.themes ?? []);
+      queryClient.setQueryData(themeKeys.catalogIndex(), data.document.themes);
     },
   });
 }

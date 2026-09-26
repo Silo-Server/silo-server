@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -170,6 +171,76 @@ func RequestRelayCredential(ctx context.Context, client RelayHTTPDoer, relayURL,
 		RequestID:  parsed.RequestID,
 		APNsTopics: parsed.APNsTopics,
 	}, nil
+}
+
+// settingsAtomicUpdater is the settings store's cross-process
+// read-validate-write primitive (satisfied by the server settings repository).
+type settingsAtomicUpdater interface {
+	UpdateAtomic(ctx context.Context, update func(current map[string]string) (map[string]string, error)) error
+}
+
+// ErrRelayReregistrationRequired reports that the stored relay state is
+// parked behind an explicit administrator re-registration.
+var ErrRelayReregistrationRequired = errors.New("push relay re-registration required")
+
+// RegisterRelayCredentialIfAbsent registers with the relay and persists the
+// result only if no usable credential landed in the meantime. Registration on
+// the relay is stateless (it mints an identity and signs a capability without
+// storing anything), so a losing registration is simply discarded and the
+// stored winner is returned with registered=false. This is what keeps API
+// replicas and the admin endpoint from overwriting each other without holding
+// a database connection across the relay round trip, which would deadlock on
+// a single-connection pool. force persists regardless, for explicit
+// re-registration after the relay rejected the stored capability.
+func RegisterRelayCredentialIfAbsent(ctx context.Context, settings *Settings, client RelayHTTPDoer, relayURL string, force bool) (RelayCredentialResult, bool, error) {
+	updater, ok := settings.reader.(settingsAtomicUpdater)
+	if !ok || force {
+		result, err := RegisterRelayCredential(ctx, settings, client, relayURL)
+		return result, err == nil, err
+	}
+	result, err := RequestRelayCredential(ctx, client, relayURL, relayRegisterPath, "", "")
+	if err != nil {
+		return RelayCredentialResult{}, false, err
+	}
+	var stored PushRelayCredential
+	won := false
+	err = updater.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
+		stored = credentialFromValues(current)
+		// Yield to a usable credential that landed meanwhile, and to an
+		// administrator's clear or a relay rejection (marker set): both park
+		// the deployment behind an explicit re-register.
+		if stored.ReregistrationRequired || (stored.APIKey != "" && !IsLegacyPushRelayKey(stored.APIKey)) {
+			return nil, nil
+		}
+		won = true
+		return relayCredentialValues(result.Credential), nil
+	})
+	if err != nil {
+		return RelayCredentialResult{}, false, err
+	}
+	settings.Invalidate(SettingPushRelayURL, SettingPushRelayDeploymentID, SettingPushRelayAPIKey,
+		SettingPushRelayExpiresAt, SettingPushRelayKeyPrefix, SettingPushRelayReregister)
+	if !won {
+		return RelayCredentialResult{Credential: stored}, false, nil
+	}
+	return result, true, nil
+}
+
+func credentialFromValues(values map[string]string) PushRelayCredential {
+	expiresAt, _ := time.Parse(time.RFC3339, strings.TrimSpace(values[SettingPushRelayExpiresAt]))
+	rereg, _ := strconv.ParseBool(strings.TrimSpace(values[SettingPushRelayReregister]))
+	relayURL := strings.TrimRight(strings.TrimSpace(values[SettingPushRelayURL]), "/")
+	if relayURL == "" {
+		relayURL = DefaultPushRelayURL
+	}
+	return PushRelayCredential{
+		RelayURL:               relayURL,
+		DeploymentID:           strings.TrimSpace(values[SettingPushRelayDeploymentID]),
+		APIKey:                 strings.TrimSpace(values[SettingPushRelayAPIKey]),
+		ExpiresAt:              expiresAt,
+		KeyPrefix:              strings.TrimSpace(values[SettingPushRelayKeyPrefix]),
+		ReregistrationRequired: rereg,
+	}
 }
 
 func RegisterRelayCredential(ctx context.Context, settings *Settings, client RelayHTTPDoer, relayURL string) (RelayCredentialResult, error) {

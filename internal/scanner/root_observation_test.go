@@ -21,6 +21,16 @@ func TestObserveRoot_ReportedMovieFolderStaysMovie(t *testing.T) {
 	}
 }
 
+func TestObserveRootUnknownLibraryKeepsAudioRoot(t *testing.T) {
+	path := "/media/Show/theme.mp3"
+	if _, ok := ObserveRoot(path, "future-audio-kind", "/media"); !ok {
+		t.Fatal("unknown library type discarded its audio root as a video theme")
+	}
+	if _, ok := ObserveRoot(path, "movies", "/media"); ok {
+		t.Fatal("movie theme became a media root")
+	}
+}
+
 func TestObserveRoot_FlatTVFolderStaysSeries(t *testing.T) {
 	observation, ok := ObserveRoot("/mixed/Show Name/Show Name S01E03.mkv", "mixed")
 	if !ok {

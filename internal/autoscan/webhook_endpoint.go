@@ -63,6 +63,9 @@ func scanWebhookEndpoint(row interface{ Scan(...any) error }) (WebhookEndpoint, 
 // redisplay goes through RevealWebhookToken). An unknown source maps to
 // ErrNotFound.
 func (r *Repository) CreateWebhookEndpoint(ctx context.Context, sourceID string) (WebhookEndpoint, string, error) {
+	if err := missingID("source", sourceID); err != nil {
+		return WebhookEndpoint{}, "", err
+	}
 	token, hash, suffix, err := newWebhookToken()
 	if err != nil {
 		return WebhookEndpoint{}, "", err
@@ -101,6 +104,9 @@ func (r *Repository) CreateWebhookEndpoint(ctx context.Context, sourceID string)
 // old URL immediately, and returns the new plaintext token. An unknown
 // source/endpoint maps to ErrNotFound.
 func (r *Repository) RotateWebhookEndpoint(ctx context.Context, sourceID string) (WebhookEndpoint, string, error) {
+	if err := missingID("source", sourceID); err != nil {
+		return WebhookEndpoint{}, "", err
+	}
 	token, hash, suffix, err := newWebhookToken()
 	if err != nil {
 		return WebhookEndpoint{}, "", err
@@ -128,6 +134,9 @@ func (r *Repository) RotateWebhookEndpoint(ctx context.Context, sourceID string)
 // DeleteWebhookEndpoint removes a source's webhook endpoint; future deliveries
 // to the old URL return not found. An unknown endpoint maps to ErrNotFound.
 func (r *Repository) DeleteWebhookEndpoint(ctx context.Context, sourceID string) error {
+	if err := missingID("source", sourceID); err != nil {
+		return err
+	}
 	tag, err := r.pool.Exec(ctx, `DELETE FROM autoscan_webhook_endpoints WHERE source_id = $1`, sourceID)
 	if err != nil {
 		return fmt.Errorf("delete autoscan webhook endpoint: %w", err)
@@ -141,6 +150,9 @@ func (r *Repository) DeleteWebhookEndpoint(ctx context.Context, sourceID string)
 // GetWebhookEndpoint loads a source's webhook endpoint state. An unknown
 // endpoint maps to ErrNotFound.
 func (r *Repository) GetWebhookEndpoint(ctx context.Context, sourceID string) (WebhookEndpoint, error) {
+	if err := missingID("source", sourceID); err != nil {
+		return WebhookEndpoint{}, err
+	}
 	row := r.pool.QueryRow(ctx, `SELECT `+webhookEndpointColumns+`
 		FROM autoscan_webhook_endpoints WHERE source_id = $1`, sourceID)
 	endpoint, err := scanWebhookEndpoint(row)
@@ -175,6 +187,9 @@ func (r *Repository) ListWebhookEndpoints(ctx context.Context) ([]WebhookEndpoin
 
 // RevealWebhookToken decrypts the stored bearer token for admin redisplay.
 func (r *Repository) RevealWebhookToken(ctx context.Context, sourceID string) (string, error) {
+	if err := missingID("source", sourceID); err != nil {
+		return "", err
+	}
 	var ref string
 	err := r.pool.QueryRow(ctx, `SELECT secret_ref
 		FROM autoscan_webhook_endpoints WHERE source_id = $1`, sourceID).Scan(&ref)

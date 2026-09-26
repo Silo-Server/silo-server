@@ -34,10 +34,10 @@ func TestShouldApplyPlexWebhookEvent(t *testing.T) {
 func TestBuildWebhookURL(t *testing.T) {
 	t.Parallel()
 
-	if got := buildWebhookURL("", "abc123"); got != "/api/v1/webhook-sync/webhooks/abc123" {
+	if got := buildWebhookURL("", "abc123"); got != "/api/v2/webhook-sync/webhooks/abc123" {
 		t.Fatalf("unexpected relative webhook URL: %q", got)
 	}
-	if got := buildWebhookURL("https://example.com/", "abc123"); got != "https://example.com/api/v1/webhook-sync/webhooks/abc123" {
+	if got := buildWebhookURL("https://example.com/", "abc123"); got != "https://example.com/api/v2/webhook-sync/webhooks/abc123" {
 		t.Fatalf("unexpected absolute webhook URL: %q", got)
 	}
 }

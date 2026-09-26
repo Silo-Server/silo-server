@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
@@ -82,7 +84,7 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 		client = &http.Client{Timeout: timeout}
 	}
 
-	resp, err := client.Do(httpReq)
+	resp, err := telemetry.DoTrustedNode(client, httpReq, "chapter_extract")
 	if err != nil {
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: request failed: %w", err)
 	}

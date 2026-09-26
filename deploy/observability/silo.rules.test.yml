@@ -1,0 +1,253 @@
+# Deterministic alert and replica-aggregation regression cases.
+rule_files:
+- silo.rules.yml
+evaluation_interval: 1m
+tests:
+- name: missing target is distinct from idle work
+  interval: 1m
+  input_series:
+  - series: up{job="silo",cluster="fixture",instance="api-one"}
+    values: 0+0x3
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: SiloTargetUnavailable
+    exp_alerts:
+    - exp_labels:
+        job: silo
+        cluster: fixture
+        instance: api-one
+        severity: warning
+      exp_annotations:
+        summary: Silo scrape target is unavailable
+        description: Check process/container health and network access before interpreting missing metrics as idle work.
+- name: stopped resource sampler
+  interval: 1m
+  input_series:
+  - series: silo_resource_sample_stale{job="silo",cluster="fixture",instance="api-one"}
+    values: 1+0x2
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: SiloResourceSampleStale
+    exp_alerts:
+    - exp_labels:
+        job: silo
+        cluster: fixture
+        instance: api-one
+        severity: warning
+      exp_annotations:
+        summary: Silo resource sampling stopped advancing
+        description: Inspect source availability and the local profiler for blocked sampling; check mount and GPU probe health.
+- name: queue measurement failure
+  interval: 1m
+  input_series:
+  - series: silo_queue_sample_available{job="silo",cluster="fixture",instance="api-one",queue="scan"}
+    values: 0+0x3
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: SiloQueueSamplingFailed
+    exp_alerts:
+    - exp_labels:
+        job: silo
+        cluster: fixture
+        instance: api-one
+        queue: scan
+        severity: warning
+      exp_annotations:
+        summary: A shared queue cannot be measured
+        description: Check PostgreSQL pool waits and dependency errors; absent queue values do not mean an empty queue.
+- name: old queued work persists
+  interval: 1m
+  input_series:
+  - series: silo_queue_oldest_requested_timestamp_seconds{job="silo",cluster="fixture",instance="api-one",queue="scan",state="queued"}
+    values: 0+0x42
+  alert_rule_test:
+  - eval_time: 41m
+    alertname: SiloQueueAgeHigh
+    exp_alerts:
+    - exp_labels:
+        cluster: fixture
+        queue: scan
+        state: queued
+        severity: warning
+      exp_annotations:
+        summary: Silo has old queued work
+        description: Includes delayed retries. Inspect queue retry gates, worker attempts and admin job progress before treating
+          this as a stall.
+- name: memory pressure and cgroup OOM
+  interval: 1m
+  input_series:
+  - series: silo_cgroup_memory_current_bytes{job="silo",cluster="fixture",instance="api-one",version="v2",scope="leaf"}
+    values: 950+0x6
+  - series: silo_cgroup_memory_limit_bytes{job="silo",cluster="fixture",instance="api-one",version="v2",scope="leaf"}
+    values: 1000+0x6
+  - series: silo_cgroup_memory_oom_kills_total{job="silo",cluster="fixture",instance="api-one",version="v2",scope="leaf"}
+    values: 0+1x6
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: SiloCgroupMemoryHigh
+    exp_alerts:
+    - exp_labels:
+        job: silo
+        cluster: fixture
+        instance: api-one
+        version: v2
+        scope: leaf
+        severity: warning
+      exp_annotations:
+        summary: Silo cgroup memory is near its reported limit
+        description: Compare Go heap, process RSS, children and cache; these populations overlap. Check cgroup events and
+          container history.
+  - eval_time: 3m
+    alertname: SiloCgroupOOM
+    exp_alerts:
+    - exp_labels:
+        job: silo
+        cluster: fixture
+        instance: api-one
+        version: v2
+        scope: leaf
+        severity: warning
+      exp_annotations:
+        summary: An OOM kill occurred in the measured cgroup
+        description: The killed process may be a child. Also check orchestrator restart/OOM status because a dead Silo cannot
+          scrape its own event.
+- name: throttling under stable CPU demand
+  interval: 1m
+  input_series:
+  - series: silo_cgroup_cpu_periods_total{job="silo",cluster="fixture",instance="api-one",version="v2",scope="leaf"}
+    values: 0+100x13
+  - series: silo_cgroup_cpu_throttled_periods_total{job="silo",cluster="fixture",instance="api-one",version="v2",scope="leaf"}
+    values: 0+30x13
+  alert_rule_test:
+  - eval_time: 12m
+    alertname: SiloCPUThrottled
+    exp_alerts:
+    - exp_labels:
+        job: silo
+        cluster: fixture
+        instance: api-one
+        version: v2
+        scope: leaf
+        severity: warning
+      exp_annotations:
+        summary: Silo cgroup CPU throttling is sustained
+        description: Compare quota cores, request latency and task demand; capture CPU for one process and inspect owned FFmpeg
+          usage separately.
+- name: OTLP exporter outage
+  interval: 1m
+  input_series:
+  - series: silo_otel_export_records_total{job="silo",cluster="fixture",instance="api-one",signal="traces",outcome="error"}
+    values: 0+10x5
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: SiloOTLPExportFailure
+    exp_alerts:
+    - exp_labels:
+        cluster: fixture
+        instance: api-one
+        signal: traces
+        severity: warning
+      exp_annotations:
+        summary: Silo telemetry exports are failing
+        description: Check collector health and bounded queue loss after drain. Telemetry failure must not block requests.
+- name: slow scrape budget
+  interval: 1m
+  input_series:
+  - series: scrape_duration_seconds{job="silo",cluster="fixture",instance="api-one"}
+    values: 2+0x6
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: SiloScrapeSlow
+    exp_alerts:
+    - exp_labels:
+        job: silo
+        cluster: fixture
+        instance: api-one
+        severity: warning
+      exp_annotations:
+        summary: Silo scrapes exceed the target budget
+        description: Inspect sample count and collector contention before increasing the timeout.
+- name: replicas deduplicate shared queues and retain cluster boundaries
+  interval: 1m
+  input_series:
+  - series: silo_queue_items{job="silo",cluster="fixture",instance="api-one",queue="scan",state="queued"}
+    values: '5'
+  - series: silo_queue_items{job="silo",cluster="fixture",instance="api-two",queue="scan",state="queued"}
+    values: '7'
+  - series: silo_queue_items{job="silo",cluster="other",instance="api-one",queue="scan",state="queued"}
+    values: '11'
+  - series: silo_queue_oldest_requested_timestamp_seconds{job="silo",cluster="fixture",instance="api-one",queue="scan",state="queued"}
+    values: '100'
+  - series: silo_queue_oldest_requested_timestamp_seconds{job="silo",cluster="fixture",instance="api-two",queue="scan",state="queued"}
+    values: '200'
+  promql_expr_test:
+  - expr: silo:queue_items:max
+    eval_time: 0m
+    exp_samples:
+    - labels: silo:queue_items:max{cluster="fixture",queue="scan",state="queued"}
+      value: 7
+    - labels: silo:queue_items:max{cluster="other",queue="scan",state="queued"}
+      value: 11
+  - expr: silo:queue_oldest_requested_timestamp_seconds:min
+    eval_time: 0m
+    exp_samples:
+    - labels: silo:queue_oldest_requested_timestamp_seconds:min{cluster="fixture",queue="scan",state="queued"}
+      value: 100
+- name: healthy empty queues and unbounded memory do not alert
+  interval: 1m
+  input_series:
+  - series: up{job="silo",cluster="fixture",instance="api-one"}
+    values: 1+0x45
+  - series: silo_resource_sample_stale{job="silo",cluster="fixture",instance="api-one"}
+    values: 0+0x45
+  - series: silo_queue_sample_available{job="silo",cluster="fixture",instance="api-one",queue="scan"}
+    values: 1+0x45
+  - series: silo_queue_items{job="silo",cluster="fixture",instance="api-one",queue="scan",state="queued"}
+    values: 0+0x45
+  - series: silo_cgroup_memory_current_bytes{job="silo",cluster="fixture",instance="api-one",version="v2",scope="leaf"}
+    values: 1000+0x45
+  alert_rule_test:
+  - eval_time: 45m
+    alertname: SiloTargetUnavailable
+    exp_alerts: []
+  - eval_time: 45m
+    alertname: SiloResourceSampleStale
+    exp_alerts: []
+  - eval_time: 45m
+    alertname: SiloQueueSamplingFailed
+    exp_alerts: []
+  - eval_time: 45m
+    alertname: SiloQueueAgeHigh
+    exp_alerts: []
+  - eval_time: 45m
+    alertname: SiloCgroupMemoryHigh
+    exp_alerts: []
+- name: Postgres saturation keeps topology and pool roles distinct
+  interval: 1m
+  input_series:
+  - series: silo_postgres_pool_connections{job="silo",cluster="fixture",instance="api-one",process_role="api",role="application",state="acquired"}
+    values: 19+0x4
+  - series: silo_postgres_pool_connections{job="silo",cluster="fixture",instance="api-one",process_role="api",role="application",state="maximum"}
+    values: 20+0x4
+  - series: silo_postgres_pool_connections{job="silo",cluster="fixture",instance="api-one",process_role="api",role="worker",state="acquired"}
+    values: 1+0x4
+  - series: silo_postgres_pool_connections{job="silo",cluster="fixture",instance="api-one",process_role="api",role="worker",state="maximum"}
+    values: 10+0x4
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: SiloPostgresPoolSaturated
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: SiloPostgresPoolSaturated
+    exp_alerts:
+    - exp_labels:
+        job: silo
+        cluster: fixture
+        instance: api-one
+        process_role: api
+        role: application
+        severity: warning
+      exp_annotations:
+        summary: A Silo PostgreSQL pool is near capacity
+        description: Compare postgres acquire duration and timeout/error outcomes by pool role, then inspect long transactions
+          and query spans before increasing the connection limit.

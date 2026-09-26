@@ -1,0 +1,35 @@
+{
+  "configured_provider": "",
+  "active_provider": "",
+  "degraded": false,
+  "meilisearch": {
+    "configured": false,
+    "healthy": false,
+    "circuit_state": "",
+    "timeout_ms": 0,
+    "matching_strategy": "",
+    "semantic_enabled": false,
+    "binary_quantized": false,
+    "semantic_ratio": 0,
+    "embedder": ""
+  },
+  "index": {
+    "active_index_uid": "",
+    "schema_version": 0,
+    "expected_schema_version": 0,
+    "rebuild_required": false,
+    "document_count": 0,
+    "vector_document_count": 0,
+    "pending_events": 0,
+    "dead_lettered_events": 0,
+    "last_processed_event_id": "9007199254740993"
+  },
+  "tasks": [],
+  "semantic": {
+    "ready": false,
+    "vector_coverage_ratio": 0,
+    "capability": {
+      "ok": false
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import { messageFromError } from "./policyPageUtils";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 
@@ -55,7 +56,7 @@ export function PolicyDecisionLogTable({ domains }: PolicyDecisionLogTableProps)
   const [to, setTo] = useState("");
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
-  const [selectedID, setSelectedID] = useState<number | undefined>(undefined);
+  const [selectedID, setSelectedID] = useState<string | undefined>(undefined);
   const [appliedFilters, setAppliedFilters] = useState<PolicyDecisionFilters>({ limit: 25 });
 
   const filters = useMemo(
@@ -69,12 +70,12 @@ export function PolicyDecisionLogTable({ domains }: PolicyDecisionLogTableProps)
   const selectedDecision = usePolicyDecision(selectedID);
 
   function applyFilters() {
-    const parsedUserID = Number.parseInt(userID, 10);
+    const parsedUserID = userID.trim();
     setAppliedFilters({
       limit: 25,
       decision_name: decisionName === "all" ? undefined : decisionName,
-      user_id: Number.isFinite(parsedUserID) ? parsedUserID : undefined,
-      allowed: allowed === "all" ? undefined : allowed === "true",
+      user_id: parsedUserID || undefined,
+      allowed: allowed === "all" ? undefined : allowed === "true" ? "true" : "false",
       from: toRFC3339FromLocalInput(from),
       to: toRFC3339FromLocalInput(to),
     });
@@ -96,9 +97,9 @@ export function PolicyDecisionLogTable({ domains }: PolicyDecisionLogTableProps)
   }
 
   function goNext() {
-    if (!decisions.data?.next_cursor) return;
+    if (!decisions.data?.page?.next_cursor) return;
     setCursorStack((prev) => [...prev, cursor ?? ""]);
-    setCursor(decisions.data.next_cursor);
+    setCursor(decisions.data.page?.next_cursor);
     setSelectedID(undefined);
   }
 
@@ -112,6 +113,12 @@ export function PolicyDecisionLogTable({ domains }: PolicyDecisionLogTableProps)
 
   return (
     <div className="space-y-4">
+      {decisions.error && (
+        <div role="alert">
+          <p>{messageFromError(decisions.error, "Unable to load decisions. Restart the list.")}</p>
+          <Button onClick={resetFilters}>Restart decisions</Button>
+        </div>
+      )}
       <div className="surface-panel-subtle grid gap-3 rounded-2xl p-4 md:grid-cols-[minmax(160px,220px)_120px_130px_1fr_1fr_auto] md:items-end">
         <div className="space-y-2">
           <Label htmlFor="policy-decision-name">Decision</Label>
@@ -209,14 +216,14 @@ export function PolicyDecisionLogTable({ domains }: PolicyDecisionLogTableProps)
                 </TableCell>
               </TableRow>
             )}
-            {!decisions.isLoading && decisions.data?.entries.length === 0 && (
+            {!decisions.isLoading && decisions.data?.items.length === 0 && (
               <TableRow>
                 <TableCell colSpan={7} className="text-muted-foreground py-6 text-center">
                   No policy decisions matched the current filters.
                 </TableCell>
               </TableRow>
             )}
-            {decisions.data?.entries.map((entry) => {
+            {decisions.data?.items.map((entry) => {
               const expanded = selectedID === entry.id;
               return (
                 <Fragment key={entry.id}>
@@ -287,12 +294,16 @@ export function PolicyDecisionLogTable({ domains }: PolicyDecisionLogTableProps)
           Previous
         </Button>
         <div className="text-muted-foreground text-xs">
-          {decisions.isFetching ? "Refreshing..." : decisions.data?.next_cursor ? "More rows" : ""}
+          {decisions.isFetching
+            ? "Refreshing..."
+            : decisions.data?.page?.next_cursor
+              ? "More rows"
+              : ""}
         </div>
         <Button
           type="button"
           variant="outline"
-          disabled={!decisions.data?.next_cursor || decisions.isFetching}
+          disabled={!decisions.data?.page?.next_cursor || decisions.isFetching}
           onClick={goNext}
         >
           Next

@@ -303,42 +303,44 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
           onCheckedChange={form.setAutoTranslateMetadata}
         />
       </div>
-      <div className="space-y-1.5">
-        <Label>Trailer &amp; extras types</Label>
-        <p className="text-muted-foreground text-xs">
-          Video types fetched from metadata providers during refresh. Uncheck everything to disable
-          remote trailers for this library.
-        </p>
-        <div
-          className="grid grid-cols-1 gap-1.5 sm:grid-cols-2"
-          role="group"
-          aria-label="Trailer and extras types"
-        >
-          {PROVIDER_TRAILER_KINDS.map((kind) => {
-            const checked = form.trailerKinds.includes(kind);
-            return (
-              <label
-                key={kind}
-                className={cn(
-                  "flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm",
-                  checked
-                    ? "border-border bg-muted text-foreground"
-                    : "border-border/50 bg-muted/30 text-muted-foreground",
-                )}
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => form.toggleTrailerKind(kind)}
-                  className="h-3.5 w-3.5"
-                  style={{ accentColor: "var(--primary)" }}
-                />
-                {extraKindGroupLabel(kind)}
-              </label>
-            );
-          })}
+      {form.settingSupport.trailers && (
+        <div className="space-y-1.5">
+          <Label>Trailer &amp; extras types</Label>
+          <p className="text-muted-foreground text-xs">
+            Video types fetched from metadata providers during refresh. Uncheck everything to
+            disable remote trailers for this library.
+          </p>
+          <div
+            className="grid grid-cols-1 gap-1.5 sm:grid-cols-2"
+            role="group"
+            aria-label="Trailer and extras types"
+          >
+            {PROVIDER_TRAILER_KINDS.map((kind) => {
+              const checked = form.trailerKinds.includes(kind);
+              return (
+                <label
+                  key={kind}
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm",
+                    checked
+                      ? "border-border bg-muted text-foreground"
+                      : "border-border/50 bg-muted/30 text-muted-foreground",
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => form.toggleTrailerKind(kind)}
+                    className="h-3.5 w-3.5"
+                    style={{ accentColor: "var(--primary)" }}
+                  />
+                  {extraKindGroupLabel(kind)}
+                </label>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
       {form.contentLevels.length > 0 && (
         <div className="space-y-1.5">
           <Label>Provider Priority</Label>
@@ -382,36 +384,40 @@ export function AdvancedFields({
 }) {
   return (
     <div className="space-y-3">
-      <SettingCard
-        htmlFor="chapter-thumbnails-switch"
-        title="Generate chapter thumbnails"
-        description="Stores chapter preview images in the configured public asset S3 bucket. Chapter markers and chapter menus still work without thumbnails."
-        footer={
-          !chapterThumbnailsSupported ? (
-            <p className="text-warning text-xs">
-              Public asset S3 storage is required before this can be enabled.
-            </p>
-          ) : null
-        }
-      >
-        <Switch
-          id="chapter-thumbnails-switch"
-          checked={form.chapterThumbnailsEnabled}
-          disabled={!chapterThumbnailsSupported}
-          onCheckedChange={form.setChapterThumbnailsEnabled}
-        />
-      </SettingCard>
-      <SettingCard
-        htmlFor="intro-detection-switch"
-        title="Detect intro markers"
-        description="Runs background audio analysis for episodes in this library. Embedded intro chapters are used when available."
-      >
-        <Switch
-          id="intro-detection-switch"
-          checked={form.introDetectionEnabled}
-          onCheckedChange={form.setIntroDetectionEnabled}
-        />
-      </SettingCard>
+      {form.settingSupport.chapterThumbnails && (
+        <SettingCard
+          htmlFor="chapter-thumbnails-switch"
+          title="Generate chapter thumbnails"
+          description="Stores chapter preview images in the configured public asset S3 bucket. Chapter markers and chapter menus still work without thumbnails."
+          footer={
+            !chapterThumbnailsSupported ? (
+              <p className="text-warning text-xs">
+                Public asset S3 storage is required before this can be enabled.
+              </p>
+            ) : null
+          }
+        >
+          <Switch
+            id="chapter-thumbnails-switch"
+            checked={form.chapterThumbnailsEnabled}
+            disabled={!chapterThumbnailsSupported}
+            onCheckedChange={form.setChapterThumbnailsEnabled}
+          />
+        </SettingCard>
+      )}
+      {form.settingSupport.introDetection && (
+        <SettingCard
+          htmlFor="intro-detection-switch"
+          title="Detect intro markers"
+          description="Runs background audio analysis for episodes in this library. Embedded intro chapters are used when available."
+        >
+          <Switch
+            id="intro-detection-switch"
+            checked={form.introDetectionEnabled}
+            onCheckedChange={form.setIntroDetectionEnabled}
+          />
+        </SettingCard>
+      )}
     </div>
   );
 }

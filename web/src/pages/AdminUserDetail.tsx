@@ -1,14 +1,26 @@
-import { useId, useMemo, useState } from "react";
+import { AdminUserDeleteDialog } from "@/components/AdminUserDeleteDialog";
+import { AdminUserPasswordResetDialog } from "@/components/AdminUserPasswordResetDialog";
+import {
+  adminUserScope,
+  captureAdminUserAuthority,
+  getAdminUser,
+  type AdminUserEditor,
+} from "@/api/v2/adminUsers";
+import { isNotFoundProblem, V2ProblemError } from "@/api/v2/request";
+import PageUnavailable from "@/components/PageUnavailable";
+import { guardRedirectTarget } from "@/lib/authRedirect";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { useId, useMemo, useState, useRef } from "react";
 import type { FormEvent } from "react";
-import { useParams, Link } from "react-router";
+import { useLocation, useParams, Link } from "react-router";
 import {
   type AdminDeviceSetting,
   type AdminSettingIdentity,
   type AdminUserSettingEntry,
   useAdminUser,
   useUpdateUser,
-  useDeleteUser,
-  useImpersonateUser,
+  useAdminUserCapabilities,
+  useViewerIsOwner,
   useAdminUserDeviceSettings,
   useAdminUserSettings,
   useDeleteAdminUserDeviceSetting,
@@ -29,6 +41,7 @@ import {
   PolicyAccessFields,
   PolicyLimitFields,
   effectiveAccessGroupID,
+  policyDefaultSource,
   policyInheritHints,
   policyStateFromUser,
   policyUpdateFields,
@@ -45,13 +58,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -59,11 +66,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowUpRight, ChevronRight, Pencil, RotateCcw, Settings2, UserCircle } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronRight,
+  KeyRound,
+  Pencil,
+  RotateCcw,
+  Settings2,
+  UserCircle,
+} from "lucide-react";
 import { useNavigate } from "react-router";
+import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
+import { canManageAccount, canViewAsAccount } from "@/lib/accountOwner";
 import { formatPlaybackQualityPreset } from "@/lib/playback-quality";
+import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
+import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import {
   PERMISSION_MARKER_EDIT,
   PERMISSION_METADATA_CURATION,
@@ -86,36 +105,111 @@ import {
   shortenId,
   type DeviceProfileTabEntry,
 } from "@/components/admin/deviceOverrides";
-import { toast } from "sonner";
 import {
   formatDate as formatPreferredDate,
   formatDateTime as formatDateTimePreferred,
 } from "@/lib/datetime";
 
+import { formatDecisionLabel } from "./adminActivityPresentation";
+
 export default function AdminUserDetail() {
+  useAuth();
+  const { id } = useParams<{ id: string }>();
+  return <AdminUserDetailPage key={`${adminUserScope()}:${id}`} />;
+}
+function AdminUserDetailPage() {
   const { id } = useParams<{ id: string }>();
   const userId = Number(id);
   const navigate = useNavigate();
-  const { beginImpersonation } = useAuth();
-  const { data: user, isLoading, error } = useAdminUser(userId);
+  const location = useLocation();
+  const { data: cachedUser, isLoading, isFetching, error, refetch } = useAdminUser(userId);
+  const viewerId = useAuth().user?.id;
+  const viewerIsOwner = useViewerIsOwner(viewerId);
+  // A background read that fails leaves the loaded account up, but a 404 means
+  // it is gone (another admin deleted it) and outranks the cached copy.
+  const user = isNotFoundProblem(error) ? undefined : cachedUser;
   const [editOpen, setEditOpen] = useState(false);
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleteEditor, setDeleteEditor] = useState<AdminUserEditor | null>(null);
+  const [editEditor, setEditEditor] = useState<AdminUserEditor | null>(null);
+  const [authority] = useState(captureAdminUserAuthority);
+  const busy = useRef(false);
+  const formBusy = useRef(false);
+  const [actionError, setActionError] = useState("");
+  const capabilities = useAdminUserCapabilities();
+  const available = capabilities.data?.available === true;
   const [confirmImpersonateOpen, setConfirmImpersonateOpen] = useState(false);
-  const deleteMutation = useDeleteUser();
-  const impersonateMutation = useImpersonateUser();
+  const [resetOpen, setResetOpen] = useState(false);
 
   if (isLoading) return <div className="page-shell py-8">Loading user...</div>;
-  if (error || !user)
-    return <div className="page-shell text-destructive py-8">User not found.</div>;
+  if (!user) {
+    if (error && !isNotFoundProblem(error)) {
+      return (
+        <PageUnavailable
+          title="Couldn't load this user"
+          description="Something went wrong while loading the account. Try again in a moment."
+          onRetry={() => void refetch()}
+          retrying={isFetching}
+        />
+      );
+    }
+    // With a valid id and no error, the read never ran: account reads act as a
+    // profile, and none is selected. Nothing says the account is gone.
+    if (!error && Number.isSafeInteger(userId) && userId > 0) {
+      return (
+        <PageUnavailable
+          title="Choose a profile first"
+          description="Managing accounts acts as one of your profiles. Choose a profile, then open this account again."
+        >
+          <Button asChild variant="outline">
+            <ViewTransitionLink to={guardRedirectTarget("/profiles", location)}>
+              Choose profile
+            </ViewTransitionLink>
+          </Button>
+        </PageUnavailable>
+      );
+    }
+    return (
+      <PageUnavailable
+        title="User not found"
+        description="The account may have been deleted, or the link may be wrong."
+      >
+        <Button asChild variant="outline">
+          <ViewTransitionLink to="/admin/users" up>
+            All users
+          </ViewTransitionLink>
+        </Button>
+      </PageUnavailable>
+    );
+  }
 
-  const impersonationDisabled = user.role === "admin" || !user.enabled;
+  const impersonationDisabled = !canViewAsAccount(user, viewerId, viewerIsOwner);
+  const manageable = canManageAccount(user, viewerId);
 
+  async function loadEditor(deleting = false) {
+    if (busy.current || !available) return;
+    busy.current = true;
+    setActionError("");
+    try {
+      const editor = await getAdminUser(userId, authority);
+      if (deleting) setDeleteEditor(editor);
+      else {
+        setEditEditor(editor);
+        setEditOpen(true);
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not load user.");
+    } finally {
+      busy.current = false;
+    }
+  }
   function handleDelete() {
-    setConfirmDeleteOpen(true);
+    void loadEditor(true);
   }
 
   return (
     <div className="page-shell space-y-6 py-4 sm:py-6">
+      {actionError && <p role="alert">{actionError}</p>}
+      {!available && <p role="status">User administration is unavailable.</p>}
       <nav
         aria-label="Breadcrumb"
         className="text-muted-foreground flex items-center gap-1.5 text-sm"
@@ -136,11 +230,18 @@ export default function AdminUserDetail() {
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">{user.username}</h1>
             <Badge variant={user.role === "admin" ? "default" : "secondary"}>{user.role}</Badge>
+            {user.is_owner && <Badge variant="outline">Owner</Badge>}
             <Badge variant={user.enabled ? "outline" : "destructive"}>
               {user.enabled ? "Active" : "Disabled"}
             </Badge>
+            {user.password_change_required && <Badge variant="outline">Temporary password</Badge>}
           </div>
           <p className="page-subtitle text-sm sm:text-base">{user.email}</p>
+          {!manageable && (
+            <p className="text-muted-foreground text-sm">
+              This is the server owner. Only the owner can change this account.
+            </p>
+          )}
         </div>
         <div className="flex w-full flex-wrap gap-2 sm:w-auto">
           <Button
@@ -148,32 +249,63 @@ export default function AdminUserDetail() {
             size="sm"
             className="flex-1 sm:flex-none"
             onClick={() => setConfirmImpersonateOpen(true)}
-            disabled={impersonationDisabled || impersonateMutation.isPending}
+            disabled={!available || impersonationDisabled}
           >
-            Impersonate
+            View as user
           </Button>
-          <Dialog open={editOpen} onOpenChange={setEditOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm" className="flex-1 sm:flex-none">
-                <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
-              </Button>
-            </DialogTrigger>
+          <Dialog
+            open={editOpen}
+            onOpenChange={(open) => {
+              if (!formBusy.current && !open) setEditOpen(false);
+            }}
+          >
+            <Button
+              disabled={!available || !manageable}
+              onClick={() => void loadEditor()}
+              variant="outline"
+              size="sm"
+              className="flex-1 sm:flex-none"
+            >
+              <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
+            </Button>
             <DialogContent className="sm:max-w-2xl">
               <DialogHeader>
                 <DialogTitle>Edit User</DialogTitle>
               </DialogHeader>
-              <EditUserForm user={user} onClose={() => setEditOpen(false)} />
+              {editEditor && (
+                <EditUserForm
+                  initialEditor={editEditor}
+                  onBusy={(value) => {
+                    formBusy.current = value;
+                  }}
+                  onClose={() => setEditOpen(false)}
+                />
+              )}
             </DialogContent>
           </Dialog>
-          <Button
-            variant="destructive"
-            size="sm"
-            className="flex-1 sm:flex-none"
-            onClick={handleDelete}
-            disabled={deleteMutation.isPending}
-          >
-            Delete
-          </Button>
+          {/* An external provider manages this account's sign-in: it has no password to reset. */}
+          {user.password_login && manageable && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 sm:flex-none"
+              onClick={() => setResetOpen(true)}
+              disabled={!available || !user.enabled}
+            >
+              <KeyRound className="mr-1 h-3.5 w-3.5" /> Reset password
+            </Button>
+          )}
+          {!user.is_owner && (
+            <Button
+              variant="destructive"
+              size="sm"
+              className="flex-1 sm:flex-none"
+              onClick={handleDelete}
+              disabled={!available}
+            >
+              Delete
+            </Button>
+          )}
         </div>
       </div>
 
@@ -209,43 +341,29 @@ export default function AdminUserDetail() {
           <IPHistoryTab userId={userId} />
         </TabsContent>
       </Tabs>
-      <ConfirmDialog
-        open={confirmImpersonateOpen}
-        onOpenChange={(open) => {
-          if (!open) setConfirmImpersonateOpen(false);
-        }}
-        title="Impersonate user"
-        description={`Continue as "${user.username}"? Admin access will be removed until you end impersonation.`}
-        confirmLabel="Impersonate"
-        onConfirm={() => {
-          setConfirmImpersonateOpen(false);
-          void impersonateMutation
-            .mutateAsync(user.id)
-            .then((result) => {
-              beginImpersonation(result, `/admin/users/${user.id}`);
-              navigate("/profiles");
-            })
-            .catch((error: unknown) => {
-              toast.error(error instanceof Error ? error.message : "Failed to start impersonation");
-            });
-        }}
-      />
-      <ConfirmDialog
-        open={confirmDeleteOpen}
-        onOpenChange={(open) => {
-          if (!open) setConfirmDeleteOpen(false);
-        }}
-        title="Delete user"
-        description={`Delete user "${user.username}"? This cannot be undone.`}
-        confirmLabel="Delete"
-        variant="destructive"
-        onConfirm={() => {
-          setConfirmDeleteOpen(false);
-          deleteMutation.mutate(user.id, {
-            onSuccess: () => navigate("/admin/users"),
-          });
-        }}
-      />
+      {confirmImpersonateOpen && (
+        <AdminUserImpersonationDialog
+          user={user}
+          returnPath={`/admin/users/${user.id}`}
+          onClose={() => setConfirmImpersonateOpen(false)}
+          onError={setActionError}
+        />
+      )}
+      {resetOpen && (
+        <AdminUserPasswordResetDialog
+          user={user}
+          emailAvailable={capabilities.data?.password_reset_email === true}
+          linkAvailable={capabilities.data?.password_reset_link === true}
+          onClose={() => setResetOpen(false)}
+        />
+      )}
+      {deleteEditor && (
+        <AdminUserDeleteDialog
+          initialEditor={deleteEditor}
+          onClose={() => setDeleteEditor(null)}
+          onDeleted={() => navigate("/admin/users")}
+        />
+      )}
     </div>
   );
 }
@@ -341,6 +459,20 @@ function OverviewTab({ user }: { user: AdminUser }) {
             }
           />
           <DetailRow
+            label="Max remote stream bitrate"
+            value={
+              formatStreamBitrateLimit(effective.max_remote_stream_bitrate_kbps) +
+              overridden(user.max_remote_stream_bitrate_kbps !== null)
+            }
+          />
+          <DetailRow
+            label="Max local stream bitrate"
+            value={
+              formatStreamBitrateLimit(effective.max_local_stream_bitrate_kbps) +
+              overridden(user.max_local_stream_bitrate_kbps !== null)
+            }
+          />
+          <DetailRow
             label="Audio Transcodes"
             value={
               allowed(effective.audio_transcode_allowed) +
@@ -379,11 +511,20 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 function ProfilesTab({ userId }: { userId: number }) {
-  const { data: profiles, isLoading } = useAdminUserProfiles(userId);
+  const query = useAdminUserProfiles(userId);
+  const { data: profiles, isLoading } = query;
 
   if (isLoading)
     return (
       <div className="text-muted-foreground py-8 text-center text-sm">Loading profiles...</div>
+    );
+
+  if (query.isError)
+    return (
+      <div role="alert">
+        Could not load profiles.{" "}
+        <Button onClick={() => void query.refetch()}>Reload profiles</Button>
+      </div>
     );
 
   if (!profiles || profiles.length === 0)
@@ -481,7 +622,7 @@ function WatchHistoryTab({ userId }: { userId: number }) {
                   </Link>
                 </TableCell>
                 <TableCell>
-                  <Badge variant="secondary">{row.play_method}</Badge>
+                  <Badge variant="secondary">{formatDecisionLabel(row.play_method)}</Badge>
                 </TableCell>
                 <TableCell>
                   <div>{formatDuration(row.watched_seconds)}</div>
@@ -510,14 +651,15 @@ function WatchHistoryTab({ userId }: { userId: number }) {
 }
 
 function IPHistoryTab({ userId }: { userId: number }) {
-  const { data: ips = [], isLoading } = useUserIPs(userId);
+  const history = useUserIPs(userId);
+  const { data: ips = [], isLoading } = history;
 
   if (isLoading)
     return (
       <div className="text-muted-foreground py-8 text-center text-sm">Loading IP history...</div>
     );
 
-  if (ips.length === 0)
+  if (ips.length === 0 && !history.isError)
     return (
       <div className="surface-panel text-muted-foreground rounded-2xl py-10 text-center text-sm">
         No IP history found for this user.
@@ -526,6 +668,17 @@ function IPHistoryTab({ userId }: { userId: number }) {
 
   return (
     <div className="surface-panel overflow-x-auto rounded-2xl border-0">
+      {history.isError && (
+        <div role="alert">
+          Could not load IP history.{" "}
+          <Button onClick={() => void history.restart()}>Reload history</Button>
+        </div>
+      )}
+      {history.hasNextPage && (
+        <Button disabled={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>
+          Load more
+        </Button>
+      )}
       <Table>
         <TableHeader>
           <TableRow>
@@ -1044,12 +1197,47 @@ function DeviceOverridesTab({ userId }: { userId: number }) {
   );
 }
 
-function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void }) {
+function EditUserForm({
+  initialEditor,
+  onClose,
+  onBusy,
+}: {
+  initialEditor: AdminUserEditor;
+  onClose: () => void;
+  onBusy: (value: boolean) => void;
+}) {
+  const [editor, setEditor] = useState(initialEditor);
+  const user = editor.user;
+  const busy = useRef(false);
+  const [conflict, setConflict] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+  const [reloading, setReloading] = useState(false);
+  async function reload() {
+    if (busy.current) return;
+    busy.current = true;
+    setReloading(true);
+    onBusy(true);
+    try {
+      setEditor(await getAdminUser(user.id, editor.profileContext));
+      setConflict(false);
+      setError("");
+      if (saved) onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not reload user.");
+    } finally {
+      busy.current = false;
+      setReloading(false);
+      onBusy(false);
+    }
+  }
+
   const { data: libraries = [] } = useAdminLibraries();
   const { data: accessGroups = [] } = useAccessGroups();
   const [username, setUsername] = useState(user.username);
   const [email, setEmail] = useState(user.email);
   const [password, setPassword] = useState("");
+  const [requirePasswordChange, setRequirePasswordChange] = useState(false);
   const [role, setRole] = useState(user.role);
   const [enabled, setEnabled] = useState(user.enabled);
   const [permissions, setPermissions] = useState<string[]>(user.permissions ?? []);
@@ -1058,6 +1246,8 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
   const [maxProfiles, setMaxProfiles] = useState(user.max_profiles);
   const accessGroupSelectId = useId();
   const roleSelectId = useId();
+  const passwordInputId = useId();
+  const requireChangeId = useId();
   const markerEditId = useId();
   const metadataCurationId = useId();
   const updateMutation = useUpdateUser();
@@ -1069,14 +1259,23 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
   // An admin inherits from no group, so preview the no-group policy while the
   // picked group is kept for toggling the role back.
   const hintGroupID = effectiveAccessGroupID(role, accessGroupID);
+  const hintSource = policyDefaultSource(role, hintGroupID);
   const inheritHints =
     policyInheritHints(hintGroupID, accessGroups) ??
     (hintGroupID === user.access_group_id ? user.effective_policy : undefined);
   const selectedGroupMissing =
     accessGroupID !== null && !accessGroups.some((group) => group.id === accessGroupID);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (busy.current || conflict || saved) return;
+    if (!isValidEmail(email)) {
+      setError(INVALID_EMAIL_MESSAGE);
+      return;
+    }
+    busy.current = true;
+    onBusy(true);
+    setError("");
     const body: UpdateUserRequest = {
       username,
       email,
@@ -1089,12 +1288,37 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
       max_profiles: maxProfiles,
       ...policyUpdateFields(policy),
     };
-    if (password) body.password = password;
-    updateMutation.mutate({ id: user.id, body }, { onSuccess: onClose });
+    if (password) {
+      body.password = password;
+      if (requirePasswordChange) body.require_password_change = true;
+    }
+    try {
+      await updateMutation.mutateAsync({ editor, body });
+      setSaved(true);
+      await getAdminUser(user.id, editor.profileContext);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save user.");
+      if (err instanceof V2ProblemError && err.status === 412) setConflict(true);
+    } finally {
+      busy.current = false;
+      onBusy(false);
+    }
   }
 
   return (
     <form onSubmit={handleSubmit} className="flex max-h-[70vh] flex-col">
+      {error && <p role="alert">{error}</p>}
+      {(conflict || saved) && (
+        <div>
+          {saved
+            ? "Saved. Reload to confirm the current state."
+            : "Your draft is preserved. Reload before submitting again."}
+          <Button type="button" disabled={reloading} onClick={() => void reload()}>
+            Reload current user
+          </Button>
+        </div>
+      )}
       <Tabs defaultValue="account" className="min-h-0 flex-1">
         <TabsList variant="line" className="border-border mb-4 w-full justify-start border-b pb-1">
           <TabsTrigger value="account" className="flex-none px-1">
@@ -1124,17 +1348,39 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Password (leave blank to keep current)</Label>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
+              {user.password_login ? (
+                <div className="space-y-2">
+                  <Label htmlFor={passwordInputId}>Password (leave blank to keep current)</Label>
+                  <Input
+                    id={passwordInputId}
+                    type="password"
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id={requireChangeId}
+                      checked={requirePasswordChange && password !== ""}
+                      disabled={password === ""}
+                      onCheckedChange={setRequirePasswordChange}
+                    />
+                    <Label htmlFor={requireChangeId} className="text-xs font-normal">
+                      Require change at next sign-in
+                    </Label>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label>Password</Label>
+                  <p className="text-muted-foreground text-xs">
+                    An external sign-in provider manages this account's password.
+                  </p>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor={roleSelectId}>Role</Label>
-                <Select value={role} onValueChange={setRole}>
+                <Select value={role} onValueChange={setRole} disabled={user.is_owner}>
                   <SelectTrigger id={roleSelectId}>
                     <SelectValue />
                   </SelectTrigger>
@@ -1149,12 +1395,14 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
               <div>
                 <div className="text-sm font-medium">Account status</div>
                 <div className="text-muted-foreground text-xs">
-                  Disable access without deleting the user.
+                  {user.is_owner
+                    ? "The server owner stays an enabled admin."
+                    : "Disable access without deleting the user."}
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <Label className="text-xs">Enabled</Label>
-                <Switch checked={enabled} onCheckedChange={setEnabled} />
+                <Switch checked={enabled} onCheckedChange={setEnabled} disabled={user.is_owner} />
               </div>
             </div>
           </TabsContent>
@@ -1222,13 +1470,19 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
             <PolicyAccessFields
               state={policy}
               onChange={setPolicy}
+              source={hintSource}
               effective={inheritHints}
               libraries={libraries}
             />
           </TabsContent>
 
           <TabsContent value="limits" className="mt-0 space-y-4">
-            <PolicyLimitFields state={policy} onChange={setPolicy} effective={inheritHints} />
+            <PolicyLimitFields
+              state={policy}
+              onChange={setPolicy}
+              source={hintSource}
+              effective={inheritHints}
+            />
             <div className="space-y-1">
               <Label>Max Profiles</Label>
               <Input
@@ -1243,7 +1497,11 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
       </Tabs>
 
       <div className="border-border mt-4 border-t pt-4">
-        <Button type="submit" className="w-full" disabled={updateMutation.isPending}>
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={updateMutation.isPending || conflict || saved || reloading}
+        >
           {updateMutation.isPending ? "Saving..." : "Save"}
         </Button>
       </div>

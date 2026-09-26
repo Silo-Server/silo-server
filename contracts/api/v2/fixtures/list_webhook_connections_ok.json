@@ -1,0 +1,20 @@
+{
+  "items": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "provider": "plex",
+      "server_id": "external",
+      "server_name": "Example",
+      "default_profile_id": "p-owner",
+      "webhook_url": "/api/v2/webhook-sync/webhooks/receiver-secret",
+      "account_discovery_available": false,
+      "user_count": 0,
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "updated_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7ImF0IjoiMjAyNi0wMS0wMlQwMzowNDowNS42NzhaIiwiaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEifX0.KLOObFfY6HZsofcrDw2D1FJchYamHuMse7QY4Q6XQ4s",
+    "has_more": true
+  }
+}

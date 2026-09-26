@@ -26,11 +26,16 @@ type CatalogRequest struct {
 	PersonID        int64
 	RequireBackdrop bool
 	Randomize       bool
+	BrowseOverlay   *BrowseFilters
 	NamePrefix      string
 	SearchQuery     string
 	Query           QueryDefinition
 	Limit           int
 	Offset          int
+	CursorPaging    bool
+	GroupByWork     bool
+	After           *QueryCursor
+	Seek            *int
 	UseSourceOrder  bool
 	SkipTotal       bool
 	// SnapshotAt freezes the result set to items created at or before this

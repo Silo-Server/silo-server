@@ -74,7 +74,7 @@ var tourSteps = []Step{
 		Title:        "Watch Party: same movie, different couches",
 		Body:         "Start a Watch Party, send the link, and play, pause, and seek stay in sync for everyone — no browser extension, no screen share. You'll find it in the sidebar whenever you want a movie night.",
 		Illustration: StepIDWatchTogether,
-		Route:        "/rooms/join",
+		Route:        "/rooms",
 		ActionLabel:  "Open Watch Party",
 		gate:         gateWatchTogether,
 	},

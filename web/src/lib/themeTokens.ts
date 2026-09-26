@@ -141,7 +141,7 @@ export const TOKEN_GROUP_ORDER: TokenGroup[] = [
   "Shape & Font",
 ];
 
-/** Available font families from the loaded Google Fonts. */
+/** Available font families, self-hosted by fonts.css. */
 export const AVAILABLE_FONTS = ["Outfit", "Sora", "Urbanist", "Manrope"];
 
 /** Read the current computed value of a CSS custom property from the DOM. */

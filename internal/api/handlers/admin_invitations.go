@@ -207,7 +207,7 @@ func writeInvitationSendError(w http.ResponseWriter, err error) {
 			"Admin accounts cannot belong to an access group")
 	case errors.Is(err, invitations.ErrNoLinkBase):
 		writeError(w, http.StatusConflict, "no_link_base",
-			"Configure notifications.email.external_url (or a server public URL) so invitation links can be built")
+			"Configure the Silo public URL so invitation links can be built")
 	default:
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to send invitation")
 	}

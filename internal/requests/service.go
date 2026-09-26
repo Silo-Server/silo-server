@@ -140,6 +140,11 @@ func (s *Service) requesterCeiling(ctx context.Context, userID int, profileID st
 // treating a failed lookup as "unrestricted" would leak adult content to a
 // kid profile, and treating it as "restricted" would render every carousel
 // empty with no visible cause.
+//
+// access.unrated_content does not apply here. It governs titles already in
+// the library; a TMDB title with no US certification stays hidden from a
+// ceilinged profile, which is also all the certification.lte push-down can
+// express.
 func (s *Service) viewerContentCeiling(ctx context.Context, viewer Viewer) (string, error) {
 	resolver, ok := s.entitlements.(ContentRatingResolver)
 	if !ok {
@@ -756,7 +761,7 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 	if req.Status == StatusApproved {
 		// Auto-approval is a real approval transition; channels subscribed to
 		// approvals see it alongside the submission.
-		s.notifyLifecycle(ctx, *req, LifecycleNotifier.RequestApproved)
+		s.notifyApproval(ctx, *req, ApprovalOriginPolicy)
 		return s.submitApprovedRequest(ctx, *req, viewer, nil)
 	}
 	return req, nil
@@ -893,7 +898,7 @@ func (s *Service) Approve(ctx context.Context, viewer Viewer, id string) (*Reque
 	if err != nil {
 		return nil, err
 	}
-	s.notifyLifecycle(ctx, *approved, LifecycleNotifier.RequestApproved)
+	s.notifyApproval(ctx, *approved, ApprovalOriginAdmin)
 	return s.submitApprovedRequest(ctx, *approved, viewer, nil)
 }
 
@@ -1110,6 +1115,17 @@ func (s *Service) GetUserLimit(ctx context.Context, viewer Viewer, userID int) (
 	if userID <= 0 {
 		return nil, fmt.Errorf("%w: invalid user id", ErrInvalidInput)
 	}
+	if store, ok := s.store.(interface {
+		UserExists(context.Context, int) (bool, error)
+	}); ok {
+		exists, err := store.UserExists(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, ErrNotFound
+		}
+	}
 	limit, err := s.store.GetUserLimit(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -1319,7 +1335,42 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 		return nil, fmt.Errorf("no fulfillment backend configured")
 	}
 	conn := ResolvedRouterConnection{ID: integration.ID, BaseURL: integration.BaseURL, APIKey: apiKey, Config: integration.PluginConfig}
-	return s.router.ListConfigOptions(ctx, *integration.InstallationID, integration.CapabilityID, conn)
+	options, err := s.router.ListConfigOptions(ctx, *integration.InstallationID, integration.CapabilityID, conn)
+	if err != nil {
+		return nil, classifyIntegrationTransportError(err)
+	}
+	return options, nil
+}
+
+// classifyIntegrationTransportError marks a failure to reach the configured
+// integration as a dependency failure. Errors the router already classifies
+// (plugin validation results and the request-domain sentinels) pass through
+// untouched so the API keeps rendering them as client problems.
+func classifyIntegrationTransportError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var validation *ValidationError
+	if errors.As(err, &validation) {
+		return err
+	}
+	for _, sentinel := range []error{
+		ErrInvalidInput,
+		ErrInvalidMediaType,
+		ErrRequestsDisabled,
+		ErrUserBlocked,
+		ErrQuotaExceeded,
+		ErrAlreadyAvailable,
+		ErrAlreadyRequested,
+		ErrNotFound,
+		ErrForbidden,
+		ErrInvalidState,
+	} {
+		if errors.Is(err, sentinel) {
+			return err
+		}
+	}
+	return fmt.Errorf("%w: %w", ErrIntegrationUnreachable, err)
 }
 
 func (s *Service) EffectivePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {

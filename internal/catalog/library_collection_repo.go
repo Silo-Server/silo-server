@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -46,6 +47,7 @@ type CreateLibraryCollectionInput struct {
 }
 
 type UpdateLibraryCollectionInput struct {
+	ExpectedRevision    *int64
 	ID                  string
 	LibraryIDs          *[]int
 	Slug                *string
@@ -203,7 +205,7 @@ func (r *LibraryCollectionRepository) Create(ctx context.Context, input CreateLi
 		input.Visibility = LibraryCollectionVisibilityVisible
 	}
 	if input.CollectionType == "" {
-		input.CollectionType = "manual"
+		input.CollectionType = libraryCollectionTypeManual
 	}
 	if input.ManagementMode == "" {
 		input.ManagementMode = "manual"
@@ -293,6 +295,10 @@ func (r *LibraryCollectionRepository) Create(ctx context.Context, input CreateLi
 			return nil, fmt.Errorf("user-collections group cannot accept admin collections")
 		}
 		groupLibraryID = &libraryID
+	}
+
+	if err := lockLibraryCollectionOrderRevisions(ctx, tx, input.LibraryIDs); err != nil {
+		return nil, err
 	}
 
 	groupMatchedLibrary := input.GroupID == nil
@@ -401,6 +407,37 @@ func (r *LibraryCollectionRepository) ListAll(ctx context.Context, libraryID *in
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing library collections: %w", err)
+	}
+	defer rows.Close()
+
+	return scanLibraryCollections(rows)
+}
+
+// ListContainingItem returns the visible collections that store a membership
+// row for mediaItemID, ordered by title. The membership subquery is served by
+// the library_collection_items media_item_id index. Smart (live-query)
+// collections derive their members at read time and store no rows, so they are
+// not reported.
+func (r *LibraryCollectionRepository) ListContainingItem(ctx context.Context, mediaItemID string) ([]*models.LibraryCollection, error) {
+	query := fmt.Sprintf(`
+		SELECT %s
+		FROM library_collections lc
+		%s
+		LEFT JOIN library_collection_items lci ON lci.collection_id = lc.id
+		LEFT JOIN library_collection_libraries lcl ON lcl.collection_id = lc.id
+		WHERE lc.visibility = 'visible'
+		  AND lc.id IN (
+			SELECT member.collection_id
+			FROM library_collection_items member
+			WHERE member.media_item_id = $1
+		  )
+		GROUP BY lc.id, scope_lcl.group_id, scope_lcl.sort_order
+		ORDER BY lower(lc.title) ASC, lc.title ASC, lc.id ASC
+	`, libraryCollectionColumns, libraryCollectionScopeFallbackJoin)
+
+	rows, err := r.pool.Query(ctx, query, mediaItemID)
+	if err != nil {
+		return nil, fmt.Errorf("listing collections containing item: %w", err)
 	}
 	defer rows.Close()
 
@@ -573,50 +610,49 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 		argIdx++
 	}
 
-	if len(sets) == 0 && input.LibraryIDs == nil && input.SetGroupID == nil {
+	if len(sets) == 0 && input.LibraryIDs == nil && input.SetGroupID == nil && input.ExpectedRevision == nil {
 		_, err := r.GetByID(ctx, input.ID)
 		return err
 	}
 
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("beginning library collection update: %w", err)
-	}
-	defer tx.Rollback(ctx)
+	return (libraryCollectionMutation{pool: r.pool, collectionID: input.ID}).run(ctx, input.ExpectedRevision, func(tx pgx.Tx) error {
+		if err := lockLibraryCollectionParent(ctx, tx, input.ID); err != nil {
+			return err
+		}
 
-	if len(sets) > 0 {
-		sets = append(sets, "updated_at = NOW()")
-		args = append(args, input.ID)
+		if input.LibraryIDs != nil || input.SetGroupID != nil {
+			var requested []int
+			if input.LibraryIDs != nil {
+				requested = normalizeCollectionLibraryIDs(0, *input.LibraryIDs)
+			}
+			if err := lockLibraryCollectionMembershipOrders(ctx, tx, input.ID, requested); err != nil {
+				return err
+			}
+		}
 
-		query := fmt.Sprintf("UPDATE library_collections SET %s WHERE id = $%d", strings.Join(sets, ", "), argIdx)
-		tag, err := tx.Exec(ctx, query, args...)
-		if err != nil {
-			return fmt.Errorf("updating library collection: %w", err)
+		if len(sets) > 0 {
+			query := fmt.Sprintf("UPDATE library_collections SET %s, updated_at = NOW() WHERE id = $%d", strings.Join(sets, ", "), argIdx)
+			queryArgs := append(slices.Clone(args), input.ID)
+			tag, err := tx.Exec(ctx, query, queryArgs...)
+			if err != nil {
+				return fmt.Errorf("updating library collection: %w", err)
+			}
+			if tag.RowsAffected() == 0 {
+				return ErrLibraryCollectionNotFound
+			}
 		}
-		if tag.RowsAffected() == 0 {
-			return ErrLibraryCollectionNotFound
-		}
-	} else {
-		var exists bool
-		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM library_collections WHERE id = $1)", input.ID).Scan(&exists); err != nil {
-			return fmt.Errorf("checking library collection existence: %w", err)
-		}
-		if !exists {
-			return ErrLibraryCollectionNotFound
-		}
-	}
-	var updatedLibraryIDs []int
-	if input.LibraryIDs != nil {
-		updatedLibraryIDs = normalizeCollectionLibraryIDs(0, *input.LibraryIDs)
-		if _, err := tx.Exec(ctx, `
+		var updatedLibraryIDs []int
+		if input.LibraryIDs != nil {
+			updatedLibraryIDs = normalizeCollectionLibraryIDs(0, *input.LibraryIDs)
+			if _, err := tx.Exec(ctx, `
 			DELETE FROM library_collection_libraries
 			WHERE collection_id = $1
-			  AND NOT (library_id = ANY($2::int[]))
+			  AND NOT (library_id = ANY($2::bigint[]))
 		`, input.ID, updatedLibraryIDs); err != nil {
-			return fmt.Errorf("deleting removed collection library scopes: %w", err)
-		}
-		for _, libraryID := range updatedLibraryIDs {
-			if _, err := tx.Exec(ctx, `
+				return fmt.Errorf("deleting removed collection library scopes: %w", err)
+			}
+			for _, libraryID := range updatedLibraryIDs {
+				if _, err := tx.Exec(ctx, `
 				INSERT INTO library_collection_libraries (collection_id, library_id, group_id, sort_order)
 				SELECT $1, $2, NULL,
 				       COALESCE((
@@ -626,65 +662,65 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 				       ), 0)
 				ON CONFLICT (collection_id, library_id) DO NOTHING
 			`, input.ID, libraryID); err != nil {
-				return fmt.Errorf("writing collection library scope: %w", err)
+					return fmt.Errorf("writing collection library scope: %w", err)
+				}
+			}
+			legacyLibraryID := 0
+			if len(updatedLibraryIDs) > 0 {
+				legacyLibraryID = updatedLibraryIDs[0]
+			}
+			if _, err := tx.Exec(ctx, "UPDATE library_collections SET library_id = $2 WHERE id = $1", input.ID, legacyLibraryID); err != nil {
+				return fmt.Errorf("updating legacy library_id: %w", err)
 			}
 		}
-		legacyLibraryID := 0
-		if len(updatedLibraryIDs) > 0 {
-			legacyLibraryID = updatedLibraryIDs[0]
-		}
-		if _, err := tx.Exec(ctx, "UPDATE library_collections SET library_id = $2 WHERE id = $1", input.ID, legacyLibraryID); err != nil {
-			return fmt.Errorf("updating legacy library_id: %w", err)
-		}
-	}
-	if input.SetGroupID != nil {
-		targetGroupID := *input.SetGroupID
-		targetLibraryIDs := updatedLibraryIDs
-		if targetGroupID != nil {
-			var (
-				libraryID int
-				kind      models.LibraryCollectionGroupKind
-			)
-			if err := tx.QueryRow(ctx, `
+		if input.SetGroupID != nil {
+			targetGroupID := *input.SetGroupID
+			targetLibraryIDs := updatedLibraryIDs
+			if targetGroupID != nil {
+				var (
+					libraryID int
+					kind      models.LibraryCollectionGroupKind
+				)
+				if err := tx.QueryRow(ctx, `
 				SELECT library_id, kind
 				FROM library_collection_groups
 				WHERE id = $1
 			`, *targetGroupID).Scan(&libraryID, &kind); err != nil {
-				if errors.Is(err, pgx.ErrNoRows) {
-					return ErrLibraryCollectionGroupNotFound
+					if errors.Is(err, pgx.ErrNoRows) {
+						return ErrLibraryCollectionGroupNotFound
+					}
+					return fmt.Errorf("loading collection group: %w", err)
 				}
-				return fmt.Errorf("loading collection group: %w", err)
-			}
-			if kind == models.GroupKindUserCollections {
-				return fmt.Errorf("user-collections group cannot accept admin collections")
-			}
-			targetLibraryIDs = []int{libraryID}
-		} else if input.LibraryIDs == nil {
-			rows, err := tx.Query(ctx, `
+				if kind == models.GroupKindUserCollections {
+					return fmt.Errorf("user-collections group cannot accept admin collections")
+				}
+				targetLibraryIDs = []int{libraryID}
+			} else if input.LibraryIDs == nil {
+				rows, err := tx.Query(ctx, `
 				SELECT library_id
 				FROM library_collection_libraries
 				WHERE collection_id = $1
 				ORDER BY library_id ASC
 			`, input.ID)
-			if err != nil {
-				return fmt.Errorf("loading collection memberships for group update: %w", err)
-			}
-			for rows.Next() {
-				var libraryID int
-				if err := rows.Scan(&libraryID); err != nil {
-					rows.Close()
-					return fmt.Errorf("scanning collection membership: %w", err)
+				if err != nil {
+					return fmt.Errorf("loading collection memberships for group update: %w", err)
 				}
-				targetLibraryIDs = append(targetLibraryIDs, libraryID)
+				for rows.Next() {
+					var libraryID int
+					if err := rows.Scan(&libraryID); err != nil {
+						rows.Close()
+						return fmt.Errorf("scanning collection membership: %w", err)
+					}
+					targetLibraryIDs = append(targetLibraryIDs, libraryID)
+				}
+				rows.Close()
+				if err := rows.Err(); err != nil {
+					return fmt.Errorf("iterating collection memberships: %w", err)
+				}
 			}
-			rows.Close()
-			if err := rows.Err(); err != nil {
-				return fmt.Errorf("iterating collection memberships: %w", err)
-			}
-		}
 
-		for _, libraryID := range targetLibraryIDs {
-			tag, err := tx.Exec(ctx, `
+			for _, libraryID := range targetLibraryIDs {
+				tag, err := tx.Exec(ctx, `
 				UPDATE library_collection_libraries
 				SET group_id = $1,
 				    sort_order = COALESCE((
@@ -696,29 +732,21 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 				    updated_at = NOW()
 				WHERE collection_id = $3 AND library_id = $2
 			`, targetGroupID, libraryID, input.ID)
-			if err != nil {
-				return fmt.Errorf("updating collection group membership: %w", err)
-			}
-			if tag.RowsAffected() == 0 {
-				return ErrLibraryCollectionNotFound
+				if err != nil {
+					return fmt.Errorf("updating collection group membership: %w", err)
+				}
+				if tag.RowsAffected() == 0 {
+					return ErrLibraryCollectionNotFound
+				}
 			}
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("committing library collection update: %w", err)
-	}
-	return nil
+		return nil
+	})
 }
 
 func (r *LibraryCollectionRepository) Delete(ctx context.Context, id string) error {
-	tag, err := r.pool.Exec(ctx, "DELETE FROM library_collections WHERE id = $1", id)
-	if err != nil {
-		return fmt.Errorf("deleting library collection: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrLibraryCollectionNotFound
-	}
-	return nil
+	_, err := r.deleteCollection(ctx, id, nil, false)
+	return err
 }
 
 func (r *LibraryCollectionRepository) ReplaceItems(ctx context.Context, collectionID string, items []LibraryCollectionItemInput) error {
@@ -727,6 +755,10 @@ func (r *LibraryCollectionRepository) ReplaceItems(ctx context.Context, collecti
 		return fmt.Errorf("beginning collection item replacement: %w", err)
 	}
 	defer tx.Rollback(ctx)
+
+	if err := lockLibraryCollectionParent(ctx, tx, collectionID); err != nil {
+		return err
+	}
 
 	if _, err := tx.Exec(ctx, "DELETE FROM library_collection_items WHERE collection_id = $1", collectionID); err != nil {
 		return fmt.Errorf("clearing collection items: %w", err)
@@ -765,6 +797,48 @@ func (r *LibraryCollectionRepository) ReplaceItems(ctx context.Context, collecti
 		return fmt.Errorf("committing collection item replacement: %w", err)
 	}
 	return nil
+}
+
+// ListItemIDsPage answers one window of a collection's stored item order:
+// the media item IDs at positions [offset, offset+limit) in the same order
+// ListItems uses, and whether stored positions follow the window. It probes
+// one row past the window so a caller never has to count the collection to
+// learn that. A limit of zero or less answers an empty window.
+func (r *LibraryCollectionRepository) ListItemIDsPage(ctx context.Context, collectionID string, limit, offset int) ([]string, bool, error) {
+	if limit <= 0 {
+		return []string{}, false, nil
+	}
+	offset = max(offset, 0)
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT media_item_id
+		FROM library_collection_items
+		WHERE collection_id = $1
+		ORDER BY position ASC, source_rank ASC, media_item_id ASC
+		LIMIT $2 OFFSET $3
+	`, collectionID, limit+1, offset)
+	if err != nil {
+		return nil, false, fmt.Errorf("listing collection item page: %w", err)
+	}
+	defer rows.Close()
+
+	ids := make([]string, 0, limit+1)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, false, fmt.Errorf("scanning collection item page: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("iterating collection item page: %w", err)
+	}
+
+	hasMore := len(ids) > limit
+	if hasMore {
+		ids = ids[:limit]
+	}
+	return ids, hasMore, nil
 }
 
 func (r *LibraryCollectionRepository) ListItems(ctx context.Context, collectionID string) ([]*models.LibraryCollectionItem, error) {
@@ -812,6 +886,10 @@ func (r *LibraryCollectionRepository) AddItem(ctx context.Context, collectionID,
 	}
 	defer tx.Rollback(ctx)
 
+	if err := lockLibraryCollectionParent(ctx, tx, collectionID); err != nil {
+		return err
+	}
+
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO library_collection_items (collection_id, media_item_id, position, source_rank)
 		VALUES ($1, $2, $3, 0)
@@ -834,6 +912,10 @@ func (r *LibraryCollectionRepository) RemoveItem(ctx context.Context, collection
 	}
 	defer tx.Rollback(ctx)
 
+	if err := lockLibraryCollectionParent(ctx, tx, collectionID); err != nil {
+		return err
+	}
+
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM library_collection_items
 		WHERE collection_id = $1 AND media_item_id = $2
@@ -849,18 +931,27 @@ func (r *LibraryCollectionRepository) RemoveItem(ctx context.Context, collection
 // ReorderItems sets each item's position to its index in the supplied list.
 // The list must be a permutation of the existing membership.
 func (r *LibraryCollectionRepository) ReorderItems(ctx context.Context, collectionID string, orderedMediaItemIDs []string) error {
+	return r.reorderItems(ctx, collectionID, orderedMediaItemIDs, nil)
+}
+func (r *LibraryCollectionRepository) ReorderItemsIfRevision(ctx context.Context, collectionID string, orderedMediaItemIDs []string, expected int64) error {
+	return r.reorderItems(ctx, collectionID, orderedMediaItemIDs, &expected)
+}
+func (r *LibraryCollectionRepository) reorderItems(ctx context.Context, collectionID string, orderedMediaItemIDs []string, expected *int64) error {
 	if collectionutil.HasDuplicateOrderedIDs(orderedMediaItemIDs) {
 		return fmt.Errorf("ordered_ids contains duplicates")
 	}
 
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("beginning collection items reorder: %w", err)
-	}
-	defer tx.Rollback(ctx)
+	return (libraryCollectionMutation{pool: r.pool, collectionID: collectionID}).run(ctx, expected, func(tx pgx.Tx) error {
+		if expected != nil {
+			if _, err := lockManualLibraryCollection(ctx, tx, collectionID); err != nil {
+				return err
+			}
+		} else if err := lockLibraryCollectionParent(ctx, tx, collectionID); err != nil {
+			return err
+		}
 
-	var updated, total int
-	if err := tx.QueryRow(ctx, `
+		var updated, total int
+		if err := tx.QueryRow(ctx, `
 		WITH supplied AS (
 		  SELECT id, pos FROM unnest($1::text[]) WITH ORDINALITY AS u(id, pos)
 		),
@@ -874,16 +965,17 @@ func (r *LibraryCollectionRepository) ReorderItems(ctx context.Context, collecti
 		SELECT (SELECT count(*) FROM upd),
 		       (SELECT count(*) FROM library_collection_items WHERE collection_id = $2)
 	`, orderedMediaItemIDs, collectionID).Scan(&updated, &total); err != nil {
-		return fmt.Errorf("reordering collection items: %w", err)
-	}
-	if updated != len(orderedMediaItemIDs) || updated != total {
-		return collectionutil.ErrOrderedIDsMismatch
-	}
+			return fmt.Errorf("reordering collection items: %w", err)
+		}
+		if updated != len(orderedMediaItemIDs) || updated != total {
+			return collectionutil.ErrOrderedIDsMismatch
+		}
 
-	if _, err := tx.Exec(ctx, "UPDATE library_collections SET updated_at = NOW() WHERE id = $1", collectionID); err != nil {
-		return fmt.Errorf("touching library collection: %w", err)
-	}
-	return tx.Commit(ctx)
+		if _, err := tx.Exec(ctx, "UPDATE library_collections SET updated_at = NOW() WHERE id = $1", collectionID); err != nil {
+			return fmt.Errorf("touching library collection: %w", err)
+		}
+		return nil
+	})
 }
 
 // ReorderCollections sets each membership row's sort_order to its index in the
@@ -891,18 +983,23 @@ func (r *LibraryCollectionRepository) ReorderItems(ctx context.Context, collecti
 // the collections currently exposed in that library, or when groupID is non-nil
 // just the memberships in that group.
 func (r *LibraryCollectionRepository) ReorderCollections(ctx context.Context, libraryID int, groupID *string, orderedIDs []string) error {
+	return r.reorderCollections(ctx, libraryID, groupID, orderedIDs, nil)
+}
+func (r *LibraryCollectionRepository) ReorderCollectionsIfRevision(ctx context.Context, libraryID int, groupID *string, orderedIDs []string, expected int64) error {
+	return r.reorderCollections(ctx, libraryID, groupID, orderedIDs, &expected)
+}
+func (r *LibraryCollectionRepository) reorderCollections(ctx context.Context, libraryID int, groupID *string, orderedIDs []string, expected *int64) error {
 	if collectionutil.HasDuplicateOrderedIDs(orderedIDs) {
 		return fmt.Errorf("ordered_ids contains duplicates")
 	}
 
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("beginning collection reorder: %w", err)
-	}
-	defer tx.Rollback(ctx)
+	return (libraryCollectionMutation{pool: r.pool, libraryID: libraryID}).run(ctx, expected, func(tx pgx.Tx) error {
+		if err := lockLibraryCollectionParents(ctx, tx, libraryID); err != nil {
+			return err
+		}
 
-	var updated, total int
-	if err := tx.QueryRow(ctx, `
+		var updated, total int
+		if err := tx.QueryRow(ctx, `
 		WITH supplied AS (
 		  SELECT id, pos FROM unnest($1::text[]) WITH ORDINALITY AS u(id, pos)
 		),
@@ -920,13 +1017,14 @@ func (r *LibraryCollectionRepository) ReorderCollections(ctx context.Context, li
 		         WHERE library_id = $2
 		           AND group_id IS NOT DISTINCT FROM $3)
 	`, orderedIDs, libraryID, groupID).Scan(&updated, &total); err != nil {
-		return fmt.Errorf("reordering collections: %w", err)
-	}
-	if updated != len(orderedIDs) || updated != total {
-		return collectionutil.ErrOrderedIDsMismatch
-	}
+			return fmt.Errorf("reordering collections: %w", err)
+		}
+		if updated != len(orderedIDs) || updated != total {
+			return collectionutil.ErrOrderedIDsMismatch
+		}
 
-	return tx.Commit(ctx)
+		return nil
+	})
 }
 
 // ListByGroup returns all visible collections in a library that belong to the
@@ -952,10 +1050,11 @@ func (r *LibraryCollectionRepository) ListByGroup(ctx context.Context, libraryID
 }
 
 type MoveAndReorderInput struct {
-	LibraryID     int
-	TargetGroupID *string
-	OrderedIDs    []string
-	Strict        bool
+	ExpectedRevision *int64
+	LibraryID        int
+	TargetGroupID    *string
+	OrderedIDs       []string
+	Strict           bool
 }
 
 type StrictReorderError struct {
@@ -973,113 +1072,113 @@ func (r *LibraryCollectionRepository) MoveAndReorder(ctx context.Context, in Mov
 		return fmt.Errorf("ordered_ids contains duplicates")
 	}
 
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("beginning collection move/reorder: %w", err)
-	}
-	defer tx.Rollback(ctx)
+	return (libraryCollectionMutation{pool: r.pool, libraryID: in.LibraryID}).run(ctx, in.ExpectedRevision, func(tx pgx.Tx) error {
+		if err := lockLibraryCollectionParents(ctx, tx, in.LibraryID); err != nil {
+			return err
+		}
 
-	if in.TargetGroupID != nil {
-		var kind models.LibraryCollectionGroupKind
-		if err := tx.QueryRow(ctx, `
+		if in.TargetGroupID != nil {
+			var kind models.LibraryCollectionGroupKind
+			if err := tx.QueryRow(ctx, `
 			SELECT kind
 			FROM library_collection_groups
 			WHERE id = $1 AND library_id = $2
 		`, *in.TargetGroupID, in.LibraryID).Scan(&kind); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrLibraryCollectionGroupNotFound
+				if errors.Is(err, pgx.ErrNoRows) {
+					return ErrLibraryCollectionGroupNotFound
+				}
+				return fmt.Errorf("loading target group: %w", err)
 			}
-			return fmt.Errorf("loading target group: %w", err)
+			if kind == models.GroupKindUserCollections {
+				return fmt.Errorf("user-collections group cannot accept admin collections")
+			}
 		}
-		if kind == models.GroupKindUserCollections {
-			return fmt.Errorf("user-collections group cannot accept admin collections")
-		}
-	}
 
-	rows, err := tx.Query(ctx, `
+		rows, err := tx.Query(ctx, `
 		SELECT collection_id, group_id
 		FROM library_collection_libraries
 		WHERE library_id = $1
 		  AND collection_id = ANY($2::text[])
 		FOR UPDATE
 	`, in.LibraryID, in.OrderedIDs)
-	if err != nil {
-		return fmt.Errorf("locking collection memberships: %w", err)
-	}
-	seen := map[string]*string{}
-	sourceGroups := map[string]*string{}
-	for rows.Next() {
-		var id string
-		var groupID *string
-		if err := rows.Scan(&id, &groupID); err != nil {
-			rows.Close()
-			return fmt.Errorf("scanning collection membership: %w", err)
+		if err != nil {
+			return fmt.Errorf("locking collection memberships: %w", err)
 		}
-		seen[id] = groupID
-		sourceGroups[groupKey(groupID)] = groupID
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterating collection memberships: %w", err)
-	}
-	for _, id := range in.OrderedIDs {
-		if _, ok := seen[id]; !ok {
-			return fmt.Errorf("collection %q not found in library %d", id, in.LibraryID)
+		seen := map[string]*string{}
+		sourceGroups := map[string]*string{}
+		for rows.Next() {
+			var id string
+			var groupID *string
+			if err := rows.Scan(&id, &groupID); err != nil {
+				rows.Close()
+				return fmt.Errorf("scanning collection membership: %w", err)
+			}
+			seen[id] = groupID
+			sourceGroups[groupKey(groupID)] = groupID
 		}
-	}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterating collection memberships: %w", err)
+		}
+		for _, id := range in.OrderedIDs {
+			if _, ok := seen[id]; !ok {
+				return fmt.Errorf("collection %q not found in library %d", id, in.LibraryID)
+			}
+		}
 
-	if in.Strict {
-		rows, err := tx.Query(ctx, `
+		if in.Strict {
+			rows, err := tx.Query(ctx, `
 			SELECT collection_id
 			FROM library_collection_libraries
 			WHERE library_id = $1
 			  AND group_id IS NOT DISTINCT FROM $2
 		`, in.LibraryID, in.TargetGroupID)
-		if err != nil {
-			return fmt.Errorf("listing target group membership: %w", err)
-		}
-		want := map[string]bool{}
-		for _, id := range in.OrderedIDs {
-			want[id] = true
-		}
-		var missing []string
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return fmt.Errorf("scanning target group membership: %w", err)
+			if err != nil {
+				return fmt.Errorf("listing target group membership: %w", err)
 			}
-			if !want[id] {
-				missing = append(missing, id)
+			want := map[string]bool{}
+			for _, id := range in.OrderedIDs {
+				want[id] = true
+			}
+			var missing []string
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err != nil {
+					rows.Close()
+					return fmt.Errorf("scanning target group membership: %w", err)
+				}
+				if !want[id] {
+					missing = append(missing, id)
+				}
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterating target group membership: %w", err)
+			}
+			if len(missing) > 0 {
+				return &StrictReorderError{MissingIDs: missing}
 			}
 		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterating target group membership: %w", err)
-		}
-		if len(missing) > 0 {
-			return &StrictReorderError{MissingIDs: missing}
-		}
-	}
 
-	for idx, id := range in.OrderedIDs {
-		if _, err := tx.Exec(ctx, `
+		for idx, id := range in.OrderedIDs {
+			if _, err := tx.Exec(ctx, `
 			UPDATE library_collection_libraries
 			SET group_id = $1, sort_order = $2, updated_at = NOW()
 			WHERE library_id = $3 AND collection_id = $4
 		`, in.TargetGroupID, idx, in.LibraryID, id); err != nil {
-			return fmt.Errorf("updating collection membership: %w", err)
+				return fmt.Errorf("updating collection membership: %w", err)
+			}
 		}
-	}
 
-	sourceGroups[groupKey(in.TargetGroupID)] = in.TargetGroupID
-	for _, groupID := range sourceGroups {
-		if err := compactCollectionMembershipOrder(ctx, tx, in.LibraryID, groupID); err != nil {
-			return err
+		sourceGroups[groupKey(in.TargetGroupID)] = in.TargetGroupID
+		for _, groupID := range sourceGroups {
+			if err := compactCollectionMembershipOrder(ctx, tx, in.LibraryID, groupID); err != nil {
+				return err
+			}
 		}
-	}
 
-	return tx.Commit(ctx)
+		return nil
+	})
 }
 
 func (r *LibraryCollectionRepository) RecordSyncRun(ctx context.Context, input RecordLibraryCollectionSyncRunInput) (*models.LibraryCollectionSyncRun, error) {

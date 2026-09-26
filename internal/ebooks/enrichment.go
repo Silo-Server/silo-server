@@ -1088,8 +1088,8 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 		admittedResult := *result
 		admittedResult.ProviderIDs = identity.ProviderIDs
 		result = &admittedResult
-		accumulator.HasMetadata = true
 		mergeEnrichmentProviderIDs(accumulator, result)
+		accumulator.HasMetadata = true
 		metadata.MergeMetadata(result, accumulator, nil, metadata.MergeFillEmpty)
 
 		slog.DebugContext(ctx, "ebook enrichment: metadata received", "component", "ebooks",
@@ -1525,6 +1525,9 @@ func buildEbookMetadataRequest(providerIDs map[string]string, language string) m
 	}
 }
 
+// mergeEnrichmentProviderIDs keeps the ebook-specific provider allowlist while
+// accumulating IDs for subsequent provider calls. Generic media types can use
+// metadata.MergeMetadata directly; ebooks intentionally exclude ASIN aliases.
 func mergeEnrichmentProviderIDs(dst *metadata.MetadataResult, src *metadata.MetadataResult) {
 	if src == nil || len(src.ProviderIDs) == 0 {
 		return

@@ -57,7 +57,7 @@ func (r *ABSAccessResolver) ResolveABSAccess(ctx context.Context, userID, profil
 	return catalog.AccessFilter{
 		AllowedLibraryIDs:  scope.AllowedLibraryIDs,
 		DisabledLibraryIDs: scope.DisabledLibraryIDs,
-		MaxContentRating:   scope.MaxContentRating,
+		MaturityLimits:     scope.MaturityLimits,
 		MaxPlaybackQuality: scope.MaxPlaybackQuality,
 		UserID:             scope.UserID,
 		ProfileID:          scope.ProfileID,

@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,12 +35,17 @@ const imageCacheWorkerMemoryBudget = 512 << 20
 
 // imageCacheWorkerCount sizes the image-cache worker pool for the host. Each
 // job downloads an original (30s timeout in imagecache) and runs a libvips
-// WEBP encode ladder, so the work is a CPU/network mix: 4× the scheduler's
-// CPU count keeps cores busy while other workers wait on downloads, and the
+// WEBP encode ladder. libvips is pinned to one thread per encode (see
+// imageutil), so the pool is the only source of parallelism and one worker
+// per CPU core keeps every core busy without oversubscribing the host; the
 // cap keeps a many-core server from monopolizing provider connections. The
-// previous fixed pool of 2 measured roughly 60 images/minute on a ~600k-item
+// original fixed pool of 2 measured roughly 60 images/minute on a ~600k-item
 // library; 48 workers measured roughly 2,900/minute over a 60-minute window
 // (RXWatcher/silo-server@3b377f5c2).
+//
+// configured, when positive, is the administrator's metadata.image_workers
+// value and replaces the CPU-derived size outright; the memory cap still
+// applies so a setting cannot OOM-kill the container.
 //
 // memoryBytes, when positive, is the tightest detected memory bound for this
 // process (GOMEMLIMIT, cgroup limit, or system memory) and caps the pool at
@@ -50,11 +56,17 @@ const imageCacheWorkerMemoryBudget = 512 << 20
 // overrides the per-worker budget below 2×imageCacheWorkerMemoryBudget: a
 // sub-1GiB deployment ran 2 workers before this sizing existed, so the memory
 // cap never reduces such a host below its long-standing baseline. The budget
-// is a sizing heuristic for how far to scale up, not a reservation.
-func imageCacheWorkerCount(numCPU int, memoryBytes int64) int {
-	workers := min(48, 4*max(numCPU, 1))
+// is a sizing heuristic for how far to scale up, not a reservation. An
+// explicit setting of 1 is honored as 1.
+func imageCacheWorkerCount(configured, numCPU int, memoryBytes int64) int {
+	workers := min(48, max(numCPU, 1))
+	floor := 2
+	if configured > 0 {
+		workers = configured
+		floor = 1
+	}
 	if memoryBytes > 0 {
-		workers = min(workers, max(int(memoryBytes/imageCacheWorkerMemoryBudget), 2))
+		workers = min(workers, max(int(memoryBytes/imageCacheWorkerMemoryBudget), floor))
 	}
 	return workers
 }
@@ -86,7 +98,20 @@ func tightestMemoryLimit(limits ...int64) int64 {
 	return tightest
 }
 
-var cacheMetadataImagesWorkers = imageCacheWorkerCount(runtime.GOMAXPROCS(0), detectImageCacheMemoryBytes())
+// cacheMetadataImagesConfiguredWorkers is the administrator's
+// metadata.image_workers value, hot-reloaded through SetImageWorkers. Zero
+// selects the CPU-derived default.
+var cacheMetadataImagesConfiguredWorkers atomic.Int64
+
+// SetImageWorkers applies the metadata.image_workers setting to every artwork
+// task in this process. The next run picks it up; a run in progress keeps
+// its pool.
+func SetImageWorkers(n int) { cacheMetadataImagesConfiguredWorkers.Store(int64(max(n, 0))) }
+
+// cacheMetadataImagesWorkers resolves the pool size for a run.
+func cacheMetadataImagesWorkers() int {
+	return imageCacheWorkerCount(int(cacheMetadataImagesConfiguredWorkers.Load()), runtime.GOMAXPROCS(0), detectImageCacheMemoryBytes())
+}
 
 // cacheMetadataImagesClaimPerWorker sizes the queue page stamped with one
 // lease up front. processClaimedJobs dispatches the page through a semaphore,
@@ -108,7 +133,9 @@ var cacheMetadataImagesWorkers = imageCacheWorkerCount(runtime.GOMAXPROCS(0), de
 // against the exported constants.
 const cacheMetadataImagesClaimPerWorker = 4
 
-var cacheMetadataImagesClaimLimit = cacheMetadataImagesClaimPerWorker * cacheMetadataImagesWorkers
+func cacheMetadataImagesClaimLimit(workers int) int {
+	return cacheMetadataImagesClaimPerWorker * workers
+}
 
 type MetadataImageCacheRunner interface {
 	DrainUntilIdle(ctx context.Context, workerID string, claimLimit int, concurrency int, maxRuntime time.Duration, reportProgress metadata.ImageCacheRunProgressReporter) (metadata.ImageCacheRunStats, error)
@@ -174,7 +201,7 @@ func (t *CacheMetadataImagesTask) Description() string {
 func (t *CacheMetadataImagesTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryMetadata
 }
-func (t *CacheMetadataImagesTask) IsHidden() bool { return false }
+func (t *CacheMetadataImagesTask) IsHidden() bool { return true }
 
 func (t *BackfillMetadataImagesTask) Key() string  { return "backfill_metadata_images" }
 func (t *BackfillMetadataImagesTask) Name() string { return "Backfill Metadata Images" }
@@ -300,11 +327,12 @@ func (t *CacheMetadataImagesTask) runLadderBackfill(
 	progress.Report(0, "Regenerating cached artwork for the current image size ladder")
 	reportedPercent := 0.0
 
+	workers := cacheMetadataImagesWorkers()
 	stats, complete, err := backfiller.RunLadderBackfill(
 		ctx,
 		workerID,
-		cacheMetadataImagesClaimLimit,
-		cacheMetadataImagesWorkers,
+		cacheMetadataImagesClaimLimit(workers),
+		workers,
 		cacheMetadataImagesMaxRuntime,
 		func(update metadata.ImageCacheRunStats) {
 			percent := cacheMetadataImagesPercent(update)
@@ -372,11 +400,12 @@ func executeMetadataImages(ctx context.Context, progress taskmanager.ProgressRep
 	// sweep enqueues a fresh page. Reports are sequential, so a high-water mark
 	// is enough to keep what the user sees from walking backwards.
 	reportedPercent := 0.0
+	workers := cacheMetadataImagesWorkers()
 	stats, err := run(
 		ctx,
 		workerID,
-		cacheMetadataImagesClaimLimit,
-		cacheMetadataImagesWorkers,
+		cacheMetadataImagesClaimLimit(workers),
+		workers,
 		maxRuntime,
 		func(update metadata.ImageCacheRunStats) {
 			percent := cacheMetadataImagesPercent(update)

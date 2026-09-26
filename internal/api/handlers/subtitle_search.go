@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -98,7 +97,7 @@ func (h *SubtitleSearchHandler) authorizeMediaFile(w http.ResponseWriter, r *htt
 	return authorizeMediaFileAccess(w, r, h.FileAuthorizer, fileID)
 }
 
-// subtitleProviderStatusResponse tells a client whether this deployment can
+// SubtitleProviderStatusView tells a client whether this deployment can
 // search external subtitle providers at all, following the per-subsystem
 // capability convention (/subtitles/ai/status, /items/trailers/capability).
 //
@@ -112,7 +111,7 @@ func (h *SubtitleSearchHandler) authorizeMediaFile(w http.ResponseWriter, r *htt
 // Provider names are safe to return to any authenticated viewer: they already
 // travel in every SubtitleResult.provider and DownloadedSubtitle.provider. The
 // credentials behind them stay in the admin-only provider config.
-type subtitleProviderStatusResponse struct {
+type SubtitleProviderStatusView struct {
 	SchemaVersion int `json:"schema_version"`
 	// Enabled reports that at least one provider is registered, so
 	// POST /subtitles/search can actually reach an upstream.
@@ -130,15 +129,21 @@ type subtitleProviderStatusResponse struct {
 // is the answer in that case; the router registers a fallback so a client never
 // has to interpret a 404 on the probe itself.
 func (h *SubtitleSearchHandler) HandleProviderStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, h.SubtitleProviderStatus())
+}
+
+// SubtitleProviderStatus returns public provider identifiers without credentials.
+// A missing subsystem is a disabled capability, not an unavailable endpoint.
+func (h *SubtitleSearchHandler) SubtitleProviderStatus() SubtitleProviderStatusView {
 	providers := []string{}
 	if h != nil && h.manager != nil {
 		providers = h.manager.ProviderNames()
 	}
-	writeJSON(w, http.StatusOK, subtitleProviderStatusResponse{
+	return SubtitleProviderStatusView{
 		SchemaVersion: 1,
 		Enabled:       len(providers) > 0,
 		Providers:     providers,
-	})
+	}
 }
 
 // WriteSubtitleProvidersDisabledStatus answers the subtitle provider capability
@@ -147,7 +152,7 @@ func (h *SubtitleSearchHandler) HandleProviderStatus(w http.ResponseWriter, _ *h
 // /providers/status path is not shadowed by the 1-segment /{media_file_id}
 // route — they never compete in chi's router).
 func WriteSubtitleProvidersDisabledStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, subtitleProviderStatusResponse{
+	writeJSON(w, http.StatusOK, SubtitleProviderStatusView{
 		SchemaVersion: 1,
 		Enabled:       false,
 		Providers:     []string{},
@@ -166,14 +171,22 @@ func (h *SubtitleSearchHandler) HandleSearch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	meta, err := h.mediaResolver.GetMediaFileWithMetadata(r.Context(), req.MediaFileID)
+	resp, err := h.searchAuthorizedSubtitles(r.Context(), req.MediaFileID, req.Languages, true)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "metadata_error", "Failed to look up media metadata")
+		writeError(w, err.Status, err.Code, err.Message)
 		return
 	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *SubtitleSearchHandler) searchAuthorizedSubtitles(ctx context.Context, fileID int, languages []string, bridge bool) (*subtitles.SearchResponse, *APIError) {
+	languages = subtitles.NormalizeBridgeSearchLanguages(languages)
+	meta, err := h.mediaResolver.GetMediaFileWithMetadata(ctx, fileID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "metadata_error", "Failed to look up media metadata")
+	}
 	if meta == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
-		return
+		return nil, apiError(http.StatusNotFound, "not_found", "Media file not found")
 	}
 
 	releaseInfo := subtitles.ParseReleaseInfo(meta.FilePath)
@@ -183,7 +196,7 @@ func (h *SubtitleSearchHandler) HandleSearch(w http.ResponseWriter, r *http.Requ
 		Year:      meta.Year,
 		Season:    meta.Season,
 		Episode:   meta.Episode,
-		Languages: req.Languages,
+		Languages: languages,
 		Filename:  filepath.Base(meta.FilePath),
 		FileHash:  meta.FileHash,
 		MediaInfo: &subtitles.MediaMatchInfo{
@@ -195,13 +208,17 @@ func (h *SubtitleSearchHandler) HandleSearch(w http.ResponseWriter, r *http.Requ
 		},
 	}
 
-	resp, err := h.manager.Search(r.Context(), searchReq)
+	var resp *subtitles.SearchResponse
+	if bridge {
+		resp, err = h.manager.SearchBridge(ctx, searchReq)
+	} else {
+		resp, err = h.manager.Search(ctx, searchReq)
+	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "search_error", "Subtitle search failed")
-		return
+		return nil, apiError(http.StatusInternalServerError, "search_error", "Subtitle search failed")
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	return resp, nil
 }
 
 // HandleDownload handles POST /api/v1/subtitles/download
@@ -218,7 +235,7 @@ func (h *SubtitleSearchHandler) HandleDownload(w http.ResponseWriter, r *http.Re
 
 	userID := apimw.GetUserID(r.Context())
 
-	sub, err := h.manager.Download(r.Context(), subtitles.DownloadRequest{
+	sub, err := h.downloadAuthorizedSubtitle(r.Context(), subtitles.DownloadRequest{
 		ProviderName:    req.Provider,
 		SubtitleID:      req.SubtitleID,
 		MediaFileID:     req.MediaFileID,
@@ -229,7 +246,10 @@ func (h *SubtitleSearchHandler) HandleDownload(w http.ResponseWriter, r *http.Re
 		HearingImpaired: req.HearingImpaired,
 	})
 	if err != nil {
-		slog.ErrorContext(r.Context(), "subtitle download failed", "component", "api", "provider", req.Provider, "subtitle_id", req.SubtitleID, "error", err)
+		if errors.Is(err, subtitles.ErrUnknownProvider) {
+			writeError(w, http.StatusNotFound, "provider_not_found", "Subtitle provider not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "download_error", "Failed to download subtitle")
 		return
 	}
@@ -277,7 +297,7 @@ func (h *SubtitleSearchHandler) HandleUpload(w http.ResponseWriter, r *http.Requ
 	userLanguage := strings.TrimSpace(r.FormValue("language"))
 	preferUserLanguage := parseBoolFormValue(r.FormValue("language_override"))
 
-	sub, err := h.manager.Upload(r.Context(), subtitles.UploadRequest{
+	sub, err := h.uploadAuthorizedSubtitle(r.Context(), subtitles.UploadRequest{
 		MediaFileID:        mediaFileID,
 		UserID:             &userID,
 		Language:           userLanguage,
@@ -288,19 +308,7 @@ func (h *SubtitleSearchHandler) HandleUpload(w http.ResponseWriter, r *http.Requ
 		Data:               data,
 	})
 	if err != nil {
-		switch {
-		case strings.Contains(err.Error(), "unsupported subtitle format"),
-			strings.Contains(err.Error(), "missing file extension"),
-			strings.Contains(err.Error(), "empty subtitle file"),
-			strings.Contains(err.Error(), "could not detect subtitle language"),
-			strings.Contains(err.Error(), "invalid subtitle language"):
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		case strings.Contains(err.Error(), "exceeds maximum size"):
-			writeError(w, http.StatusRequestEntityTooLarge, "too_large", "Subtitle file must be under 5 MB")
-		default:
-			slog.ErrorContext(r.Context(), "subtitle upload failed", "component", "api", "media_file_id", mediaFileID, "error", err)
-			writeError(w, http.StatusInternalServerError, "upload_error", "Failed to upload subtitle")
-		}
+		writeAPIError(w, err)
 		return
 	}
 

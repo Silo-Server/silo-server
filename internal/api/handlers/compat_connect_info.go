@@ -39,7 +39,7 @@ func NewCompatConnectInfoHandler(
 	return &CompatConnectInfoHandler{Config: cfg, SettingsRepo: settings, Users: users}
 }
 
-type compatConnectAccountInfo struct {
+type CompatConnectAccountInfo struct {
 	// PasswordLoginAvailable reports whether this account can authenticate
 	// with a password at all. Compat login is hardwired to the local provider,
 	// so SSO/plugin-provisioned accounts cannot sign in to a Jellyfin client
@@ -47,21 +47,24 @@ type compatConnectAccountInfo struct {
 	PasswordLoginAvailable bool `json:"password_login_available"`
 }
 
-type compatConnectInfoResponse struct {
+type CompatConnectInfoResponse struct {
 	Jellyfin jellycompat.ConnectInfo  `json:"jellyfin"`
-	Account  compatConnectAccountInfo `json:"account"`
+	Account  CompatConnectAccountInfo `json:"account"`
 }
 
 // HandleGetConnectInfo handles GET /compat/connect-info.
 func (h *CompatConnectInfoHandler) HandleGetConnectInfo(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+	writeJSON(w, http.StatusOK, h.GetConnectInfo(r.Context()))
+}
 
-	writeJSON(w, http.StatusOK, compatConnectInfoResponse{
+// GetConnectInfo is the shared account-facing view used by both API versions.
+func (h *CompatConnectInfoHandler) GetConnectInfo(ctx context.Context) CompatConnectInfoResponse {
+	return CompatConnectInfoResponse{
 		Jellyfin: jellycompat.ConnectInfoForConfig(h.Config, h.compatSettings(ctx)),
-		Account: compatConnectAccountInfo{
+		Account: CompatConnectAccountInfo{
 			PasswordLoginAvailable: h.passwordLoginAvailable(ctx),
 		},
-	})
+	}
 }
 
 // compatSettings loads the stored overrides this endpoint cares about. A

@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"cmp"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"sort"
+	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/markers"
@@ -85,9 +87,20 @@ func (h *AdminMarkerProvidersHandler) providerDescriptions() map[string]markers.
 
 // HandleListProviders lists registered providers with their config + capability.
 func (h *AdminMarkerProvidersHandler) HandleListProviders(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.Config == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Marker providers are not configured")
+	out, err := h.ListMarkerProviders(r.Context())
+	if err != nil {
+		writeAPIError(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
+}
+
+type MarkerProviderConfigView = providerConfigResponse
+type MarkerUserStatsView = markerUserStatsResponse
+
+func (h *AdminMarkerProvidersHandler) ListMarkerProviders(ctx context.Context) ([]MarkerProviderConfigView, error) {
+	if h == nil || h.Config == nil {
+		return nil, apiError(http.StatusServiceUnavailable, "unavailable", "Marker providers are not configured")
 	}
 	submitters := h.submitterIDs()
 	descriptions := h.providerDescriptions()
@@ -105,13 +118,13 @@ func (h *AdminMarkerProvidersHandler) HandleListProviders(w http.ResponseWriter,
 			out = append(out, toProviderConfigResponse(c, submitters[c.Provider], descriptions[c.Provider]))
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].FetchPriority != out[j].FetchPriority {
-			return out[i].FetchPriority < out[j].FetchPriority
+	slices.SortFunc(out, func(a, b providerConfigResponse) int {
+		if c := cmp.Compare(a.FetchPriority, b.FetchPriority); c != 0 {
+			return c
 		}
-		return out[i].Provider < out[j].Provider
+		return cmp.Compare(a.Provider, b.Provider)
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
+	return out, nil
 }
 
 // HandleUpdateProvider updates a provider's config row.
@@ -130,49 +143,17 @@ func (h *AdminMarkerProvidersHandler) HandleUpdateProvider(w http.ResponseWriter
 		writeError(w, http.StatusNotFound, "not_found", "Unknown marker provider")
 		return
 	}
-	var body struct {
-		FetchEnabled            *bool    `json:"fetch_enabled"`
-		FetchPriority           *int     `json:"fetch_priority"`
-		ContributeEnabled       *bool    `json:"contribute_enabled"`
-		ContributeAutoLocal     *bool    `json:"contribute_auto_local"`
-		ContributeMinConfidence *float64 `json:"contribute_min_confidence"`
-	}
+	var body MarkerProviderUpdate
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if body.FetchEnabled != nil {
-		existing.FetchEnabled = *body.FetchEnabled
-	}
-	if body.FetchPriority != nil {
-		existing.FetchPriority = *body.FetchPriority
-	}
-	if body.ContributeEnabled != nil {
-		existing.ContributeEnabled = *body.ContributeEnabled
-	}
-	if body.ContributeAutoLocal != nil {
-		existing.ContributeAutoLocal = *body.ContributeAutoLocal
-	}
-	if body.ContributeMinConfidence != nil {
-		v := *body.ContributeMinConfidence
-		if v < 0 || v > 1 {
-			writeError(w, http.StatusBadRequest, "bad_request", "contribute_min_confidence must be between 0 and 1")
-			return
-		}
-		existing.ContributeMinConfidence = v
-	}
-	if err := h.Config.Update(r.Context(), existing); err != nil {
-		h.logger.ErrorContext(r.Context(), "admin markers: update provider config failed", "provider", provider, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update provider")
+	out, err := h.updateMarkerProvider(r.Context(), provider, existing, body)
+	if err != nil {
+		writeAPIError(w, err)
 		return
 	}
-	if h.EventBus != nil {
-		_ = h.EventBus.Publish(r.Context(), cache.ChannelAdmin, cache.Event{
-			Type:    cache.EventMarkerProviderConfigChanged,
-			Payload: provider,
-		})
-	}
-	writeJSON(w, http.StatusOK, toProviderConfigResponse(existing, h.submitterIDs()[provider], h.providerDescriptions()[provider]))
+	writeJSON(w, http.StatusOK, out)
 }
 
 // HandleValidateProvider validates the provider's configured key and returns stats.
@@ -186,24 +167,16 @@ func (h *AdminMarkerProvidersHandler) HandleValidateProvider(w http.ResponseWrit
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid provider ID")
 		return
 	}
-	var submitter markers.Submitter
-	for _, p := range h.Registry.Providers() {
-		if p.ID() == provider {
-			if s, ok := p.(markers.Submitter); ok {
-				submitter = s
-			}
-		}
-	}
-	if submitter == nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Provider does not support contribution")
-		return
-	}
-	stats, err := submitter.FetchUserStats(r.Context())
+	out, err := h.ValidateMarkerProvider(r.Context(), provider)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"valid": false, "error": err.Error()})
+		writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"valid": true, "stats": toMarkerUserStatsResponse(stats)})
+	if !out.Valid {
+		writeJSON(w, http.StatusOK, map[string]any{"valid": false, "error": out.Error})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"valid": true, "stats": out.Stats})
 }
 
 func toProviderConfigResponse(c markers.ProviderConfig, isSubmitter bool, desc markers.ProviderDescriptor) providerConfigResponse {
@@ -233,4 +206,83 @@ func toMarkerUserStatsResponse(s markers.UserStats) markerUserStatsResponse {
 		CurrentStreak:  s.CurrentStreak,
 		BestStreak:     s.BestStreak,
 	}
+}
+
+type MarkerProviderUpdate struct {
+	FetchEnabled            *bool    `json:"fetch_enabled"`
+	FetchPriority           *int     `json:"fetch_priority"`
+	ContributeEnabled       *bool    `json:"contribute_enabled"`
+	ContributeAutoLocal     *bool    `json:"contribute_auto_local"`
+	ContributeMinConfidence *float64 `json:"contribute_min_confidence"`
+}
+
+func (h *AdminMarkerProvidersHandler) UpdateMarkerProvider(ctx context.Context, provider string, body MarkerProviderUpdate) (MarkerProviderConfigView, error) {
+	if h == nil || h.Config == nil {
+		return MarkerProviderConfigView{}, apiError(http.StatusServiceUnavailable, "unavailable", "Marker providers are not configured")
+	}
+	existing, ok := h.Config.Get(provider)
+	if !ok {
+		return MarkerProviderConfigView{}, apiError(http.StatusNotFound, "not_found", "Unknown marker provider")
+	}
+	return h.updateMarkerProvider(ctx, provider, existing, body)
+}
+func (h *AdminMarkerProvidersHandler) updateMarkerProvider(ctx context.Context, provider string, existing markers.ProviderConfig, body MarkerProviderUpdate) (MarkerProviderConfigView, error) {
+	if body.FetchEnabled != nil {
+		existing.FetchEnabled = *body.FetchEnabled
+	}
+	if body.FetchPriority != nil {
+		existing.FetchPriority = *body.FetchPriority
+	}
+	if body.ContributeEnabled != nil {
+		existing.ContributeEnabled = *body.ContributeEnabled
+	}
+	if body.ContributeAutoLocal != nil {
+		existing.ContributeAutoLocal = *body.ContributeAutoLocal
+	}
+	if body.ContributeMinConfidence != nil {
+		v := *body.ContributeMinConfidence
+		if v < 0 || v > 1 {
+			return MarkerProviderConfigView{}, apiError(http.StatusBadRequest, "bad_request", "contribute_min_confidence must be between 0 and 1")
+		}
+		existing.ContributeMinConfidence = v
+	}
+	if err := h.Config.Update(ctx, existing); err != nil {
+		h.logger.ErrorContext(ctx, "admin markers: update provider config failed", "provider", provider, "error", err)
+		return MarkerProviderConfigView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update provider")
+	}
+	if h.EventBus != nil {
+		_ = h.EventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{
+			Type:    cache.EventMarkerProviderConfigChanged,
+			Payload: provider,
+		})
+	}
+	return toProviderConfigResponse(existing, h.submitterIDs()[provider], h.providerDescriptions()[provider]), nil
+}
+
+type MarkerProviderValidationView struct {
+	Valid bool                 `json:"valid"`
+	Error string               `json:"error,omitempty"`
+	Stats *MarkerUserStatsView `json:"stats,omitempty"`
+}
+
+func (h *AdminMarkerProvidersHandler) ValidateMarkerProvider(ctx context.Context, provider string) (MarkerProviderValidationView, error) {
+	if h == nil || h.Registry == nil {
+		return MarkerProviderValidationView{}, apiError(http.StatusServiceUnavailable, "unavailable", "Marker providers are not configured")
+	}
+	var submitter markers.Submitter
+	for _, p := range h.Registry.Providers() {
+		if p.ID() == provider {
+			if s, ok := p.(markers.Submitter); ok {
+				submitter = s
+			}
+		}
+	}
+	if submitter == nil {
+		return MarkerProviderValidationView{}, apiError(http.StatusBadRequest, "bad_request", "Provider does not support contribution")
+	}
+	stats, err := submitter.FetchUserStats(ctx)
+	if err != nil {
+		return MarkerProviderValidationView{Error: err.Error()}, nil
+	}
+	return MarkerProviderValidationView{Valid: true, Stats: new(toMarkerUserStatsResponse(stats))}, nil
 }
