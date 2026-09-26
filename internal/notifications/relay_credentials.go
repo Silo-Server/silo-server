@@ -198,6 +198,11 @@ type settingsAtomicUpdater interface {
 	UpdateAtomic(ctx context.Context, update func(current map[string]string) (map[string]string, error)) error
 }
 
+// errRelaySettingsNotAtomic refuses a conditional credential write on a
+// settings store without a read-validate-write primitive; a separate read and
+// write could overwrite a concurrent administrator's clear or registration.
+var errRelaySettingsNotAtomic = errors.New("push relay settings do not support atomic updates")
+
 // ErrRelayReregistrationRequired reports that the stored relay state is
 // parked behind an explicit administrator re-registration.
 var ErrRelayReregistrationRequired = errors.New("push relay re-registration required")
@@ -327,21 +332,13 @@ func replaceRejectedRelayCredential(ctx context.Context, settings *Settings, cli
 	if err != nil {
 		return RelayCredentialResult{}, false, err
 	}
-	yield := func(stored PushRelayCredential) bool {
-		return stored.Parked() || stored.APIKey != rejectedKey
-	}
 	updater, ok := settings.reader.(settingsAtomicUpdater)
 	if !ok {
-		current := LoadPushRelayCredential(ctx, settings)
-		if yield(current) {
-			return RelayCredentialResult{Credential: current}, false, nil
-		}
-		if err := settings.UpdatePushRelayCredential(ctx, result.Credential); err != nil {
-			return RelayCredentialResult{}, false, err
-		}
-		return result, true, nil
+		return RelayCredentialResult{}, false, errRelaySettingsNotAtomic
 	}
-	return storeRelayCredentialUnless(ctx, updater, settings, result, yield)
+	return storeRelayCredentialUnless(ctx, updater, settings, result, func(stored PushRelayCredential) bool {
+		return stored.Parked() || stored.APIKey != rejectedKey
+	})
 }
 
 // parkRelayCredential discards a credential the relay disabled and waits for
@@ -350,21 +347,13 @@ func replaceRejectedRelayCredential(ctx context.Context, settings *Settings, cli
 // stored, so a credential registered meanwhile (by an administrator or
 // another replica) is kept and returned with parked=false.
 func parkRelayCredential(ctx context.Context, settings *Settings, disabled PushRelayCredential) (PushRelayCredential, bool, error) {
-	cleared := PushRelayCredential{RelayURL: disabled.RelayURL, ReregistrationRequired: true}
-	yield := func(stored PushRelayCredential) bool {
-		return stored.APIKey != disabled.APIKey
-	}
 	updater, ok := settings.reader.(settingsAtomicUpdater)
 	if !ok {
-		current := LoadPushRelayCredential(ctx, settings)
-		if yield(current) {
-			return current, false, nil
-		}
-		if err := settings.UpdatePushRelayCredential(ctx, cleared); err != nil {
-			return PushRelayCredential{}, false, err
-		}
-		return cleared, true, nil
+		return PushRelayCredential{}, false, errRelaySettingsNotAtomic
 	}
-	result, parked, err := storeRelayCredentialUnless(ctx, updater, settings, RelayCredentialResult{Credential: cleared}, yield)
+	cleared := PushRelayCredential{RelayURL: disabled.RelayURL, ReregistrationRequired: true}
+	result, parked, err := storeRelayCredentialUnless(ctx, updater, settings, RelayCredentialResult{Credential: cleared}, func(stored PushRelayCredential) bool {
+		return stored.APIKey != disabled.APIKey
+	})
 	return result.Credential, parked, err
 }

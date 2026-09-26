@@ -337,3 +337,21 @@ func TestRegisterRelayCredentialIfAbsentYieldsToConcurrentClear(t *testing.T) {
 		t.Fatalf("stored key = %q, in-flight registration overwrote the clear", got)
 	}
 }
+
+func TestConditionalRelayWritesRequireAtomicSettings(t *testing.T) {
+	store := &lockedRelaySettings{values: map[string]string{SettingPushRelayAPIKey: "rejected.capability"}}
+	settings := NewSettings(store)
+	client := &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return relayResponse(http.StatusOK, credentialJSON("deployment-fresh", "fresh.capability", time.Now().Add(24*time.Hour))), nil
+	})}
+
+	if _, _, err := replaceRejectedRelayCredential(context.Background(), settings, client, DefaultPushRelayURL, "rejected.capability"); !errors.Is(err, errRelaySettingsNotAtomic) {
+		t.Fatalf("replace err = %v", err)
+	}
+	if _, _, err := parkRelayCredential(context.Background(), settings, PushRelayCredential{APIKey: "rejected.capability"}); !errors.Is(err, errRelaySettingsNotAtomic) {
+		t.Fatalf("park err = %v", err)
+	}
+	if got := store.values[SettingPushRelayAPIKey]; got != "rejected.capability" {
+		t.Fatalf("stored key = %q, a non-atomic store was written", got)
+	}
+}
