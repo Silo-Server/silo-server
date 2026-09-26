@@ -665,7 +665,7 @@ func (s *Service) attachSessionForConnection(
 
 	for _, dispatch := range commandDispatches {
 		slog.DebugContext(ctx, "watch together sync queued",
-			append(memberCommandLogAttrs(roomID, userID, dispatch), "reattaching", reattaching)...)
+			append(memberCommandLogAttrs(roomID, userID, dispatch), "trigger", "attach", "reattaching", reattaching)...)
 	}
 	s.sendDispatches(ctx, dispatches)
 	s.sendCommandDispatches(ctx, commandDispatches)
@@ -1086,7 +1086,8 @@ func (s *Service) finishReadyLocked(
 	// Past the deadline, the first viewer to become ready resumes the room.
 	force := s.skipUnreadyMembersLocked(live, s.now())
 	dispatches, commandDispatches := s.maybeResumeFromWaitingLocked(ctx, live, force)
-	if len(commandDispatches) == 0 && live.room.Phase == RoomPhasePlaying && live.room.PlaybackState == RoomPlaybackStatePlaying {
+	syncToRoom := len(commandDispatches) == 0 && live.room.Phase == RoomPhasePlaying && live.room.PlaybackState == RoomPlaybackStatePlaying
+	if syncToRoom {
 		commandDispatches = s.syncMemberToRoomLocked(live, member.sessionID)
 		// Until the member reaches that position its reports describe where
 		// it recovered, not a decision; a host must not rewind the room there.
@@ -1096,8 +1097,15 @@ func (s *Service) finishReadyLocked(
 	if dispatches == nil {
 		dispatches = s.prepareSnapshotDispatchesLocked(live)
 	}
+	roomID := live.room.ID
 	s.mu.Unlock()
 
+	if syncToRoom {
+		for _, dispatch := range commandDispatches {
+			slog.DebugContext(ctx, "watch together sync queued",
+				append(memberCommandLogAttrs(roomID, userID, dispatch), "trigger", "ready")...)
+		}
+	}
 	s.sendDispatches(ctx, dispatches)
 	s.sendCommandDispatches(ctx, commandDispatches)
 	return snapshot, nil

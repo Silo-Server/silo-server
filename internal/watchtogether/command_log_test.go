@@ -90,6 +90,35 @@ func TestReattachSyncIsLogged(t *testing.T) {
 
 	requireLogged(t, logs.String(),
 		`msg="watch together sync queued"`, "room_id=room-1", "user_id=7", "session_id=host-session",
-		"action=play", "target_position_seconds=20", "reattaching=true",
+		"action=play", "target_position_seconds=20", "trigger=attach", "reattaching=true",
 	)
+}
+
+func TestRecoverySyncIsLogged(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	f.member("host").lastStallAt = f.now
+	if snapshot := f.buffer("host"); snapshot.PlaybackState != RoomPlaybackStatePlaying {
+		t.Fatalf("host within cooldown paused the room: %+v", snapshot)
+	}
+	f.now = f.now.Add(10 * time.Second)
+	logs := captureDebugLogs(t)
+
+	f.ready("host", 100)
+
+	requireLogged(t, logs.String(),
+		`msg="watch together sync queued"`, "room_id=room-1", "user_id=7", "session_id=host-session",
+		"action=play", "target_position_seconds=110", "trigger=ready",
+	)
+}
+
+func TestBarrierResumeIsNotLoggedAsSync(t *testing.T) {
+	f := newBufferingRoom(t, "guest")
+	f.buffer("guest")
+	logs := captureDebugLogs(t)
+
+	f.resumeAll()
+
+	if strings.Contains(logs.String(), "watch together sync queued") {
+		t.Fatalf("room-wide resume logged as a member sync:\n%s", logs.String())
+	}
 }
