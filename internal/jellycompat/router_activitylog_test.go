@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -108,6 +109,57 @@ func TestRouter_ActivityLog(t *testing.T) {
 				t.Fatalf("entries = %+v, want none", entries)
 			}
 		})
+	}
+}
+
+// activityLoginResolver accepts one password and signs in to account 42.
+type activityLoginResolver struct{}
+
+func (activityLoginResolver) Resolve(_ context.Context, username, password, _, _ string) (*Session, error) {
+	if password != "right" {
+		return nil, &HTTPError{StatusCode: http.StatusUnauthorized, Message: "invalid credentials"}
+	}
+	return &Session{Token: "login-token", Username: username, StreamAppUserID: 42, ProfileID: "p1", PseudoUserID: PseudoUserID(42, "p1")}, nil
+}
+
+// TestRouter_ActivityLogSignIn pins that a failed Jellyfin sign-in is logged
+// without a user and a successful one is attributed to the signed-in account,
+// so the first request of a new compat session already counts as activity.
+func TestRouter_ActivityLogSignIn(t *testing.T) {
+	cfg, err := config.LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	capture := &activityCapture{}
+	router := NewRouter(Dependencies{
+		Config:            cfg,
+		LoginResolver:     activityLoginResolver{},
+		ActivityLogWriter: capture,
+	})
+
+	signIn := func(password string) (int, []activitylog.LogEntry) {
+		t.Helper()
+		body := strings.NewReader(`{"Username":"alice","Pw":"` + password + `"}`)
+		req := httptest.NewRequest(http.MethodPost, "/Users/AuthenticateByName", body)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec.Code, capture.take()
+	}
+
+	status, entries := signIn("wrong")
+	if status != http.StatusUnauthorized || len(entries) != 1 {
+		t.Fatalf("failed sign-in: status %d, %d entries; want 401 and 1 entry", status, len(entries))
+	}
+	if entries[0].UserID != nil || entries[0].StatusCode != http.StatusUnauthorized {
+		t.Fatalf("failed sign-in entry = %+v, want no user and status 401", entries[0])
+	}
+
+	status, entries = signIn("right")
+	if status != http.StatusOK || len(entries) != 1 {
+		t.Fatalf("successful sign-in: status %d, %d entries; want 200 and 1 entry", status, len(entries))
+	}
+	if entries[0].UserID == nil || *entries[0].UserID != 42 {
+		t.Fatalf("successful sign-in UserID = %v, want 42", entries[0].UserID)
 	}
 }
 
