@@ -20,22 +20,35 @@ var migrationHeartbeatInterval = 20 * time.Second
 // migrationStepper is the part of *goose.Provider the logged runner uses.
 type migrationStepper interface {
 	Status(ctx context.Context) ([]*goose.MigrationStatus, error)
-	UpByOne(ctx context.Context) (*goose.MigrationResult, error)
+	HasPending(ctx context.Context) (bool, error)
+	ApplyVersion(ctx context.Context, version int64, direction bool) (*goose.MigrationResult, error)
 }
 
 // applyMigrationsLogged applies pending migrations one at a time so each can be
 // logged with its version, name and duration, and so a heartbeat can name the
-// migration that is running. Goose applies pending versions in ascending
-// order, including out-of-order ones, so the pending list read up front names
-// the migration each step runs.
+// migration that is running. Applying each listed version under Goose's lock
+// keeps the logged identity accurate when another node applies a migration
+// between the status read and the next step.
 //
 // Long data migrations written in Go should also log their own batch progress
 // (rows done, and the total when known), as the subtitle language backfill
 // does: the heartbeat can only report elapsed time.
 func applyMigrationsLogged(ctx context.Context, runner migrationStepper, logger *slog.Logger, heartbeat time.Duration) error {
+	logger.InfoContext(ctx, "checking database migration status")
+	stop := startMigrationHeartbeat(heartbeat, func(elapsed string) {
+		logger.InfoContext(ctx, "database migration status check still running", "elapsed", elapsed)
+	})
 	statuses, err := runner.Status(ctx)
 	if err != nil {
+		stop()
 		return fmt.Errorf("reading goose migration status: %w", err)
+	}
+	// ApplyVersion checks a particular version, so retain Goose's check for
+	// missing or out-of-order sources before applying the status snapshot.
+	_, err = runner.HasPending(ctx)
+	stop()
+	if err != nil {
+		return fmt.Errorf("checking goose pending migrations: %w", err)
 	}
 	var pending []*goose.Source
 	for _, status := range statuses {
@@ -60,18 +73,21 @@ func applyMigrationsLogged(ctx context.Context, runner migrationStepper, logger 
 			"version", next.Version,
 			"name", migrationName(next),
 			"progress", progress)
-		stop := startMigrationHeartbeat(heartbeat, func(elapsed string) {
+		stop = startMigrationHeartbeat(heartbeat, func(elapsed string) {
 			logger.InfoContext(ctx, "database migration still running",
 				"version", next.Version,
 				"name", migrationName(next),
 				"progress", progress,
 				"elapsed", elapsed)
 		})
-		result, err := runner.UpByOne(ctx)
+		result, err := runner.ApplyVersion(ctx, next.Version, true)
 		stop()
-		if errors.Is(err, goose.ErrNoNextVersion) {
-			// Another node applied the rest while this one waited for the lock.
-			break
+		if errors.Is(err, goose.ErrAlreadyApplied) {
+			logger.InfoContext(ctx, "database migration already applied",
+				"version", next.Version,
+				"name", migrationName(next),
+				"progress", progress)
+			continue
 		}
 		if err != nil {
 			logger.ErrorContext(ctx, "database migration failed",
@@ -100,6 +116,37 @@ func applyMigrationsLogged(ctx context.Context, runner migrationStepper, logger 
 		"applied", applied,
 		"duration", roundMigrationDuration(time.Since(started)))
 	return nil
+}
+
+func logMigrationRollbackResults(ctx context.Context, logger *slog.Logger, toVersion int64, results []*goose.MigrationResult, err error) int {
+	partial, isPartial := errors.AsType[*goose.PartialError](err)
+	if isPartial {
+		results = partial.Applied
+	}
+	rolledBack := 0
+	for _, result := range results {
+		if result == nil || result.Source == nil || result.Error != nil {
+			continue
+		}
+		rolledBack++
+		logger.InfoContext(ctx, "database migration rolled back",
+			"version", result.Source.Version,
+			"name", migrationName(result.Source),
+			"duration", roundMigrationDuration(result.Duration))
+	}
+	if err != nil {
+		if isPartial && partial.Failed != nil && partial.Failed.Source != nil {
+			logger.ErrorContext(ctx, "database migration rollback failed",
+				"version", partial.Failed.Source.Version,
+				"name", migrationName(partial.Failed.Source),
+				"duration", roundMigrationDuration(partial.Failed.Duration),
+				"error", err)
+		} else {
+			logger.ErrorContext(ctx, "database migration rollback failed",
+				"to_version", toVersion, "error", err)
+		}
+	}
+	return rolledBack
 }
 
 // startMigrationHeartbeat calls beat with the elapsed time every interval until

@@ -98,21 +98,13 @@ func MigrateDownTo(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir stri
 	})
 	results, err := provider.DownTo(ctx, version)
 	stop()
-	for _, result := range results {
-		if result == nil || result.Source == nil || result.Error != nil {
-			continue
-		}
-		logger.InfoContext(ctx, "database migration rolled back",
-			"version", result.Source.Version,
-			"name", migrationName(result.Source),
-			"duration", roundMigrationDuration(result.Duration))
-	}
+	rolledBack := logMigrationRollbackResults(ctx, logger, version, results, err)
 	if err != nil {
 		return fmt.Errorf("rolling back goose migrations to %d: %w", version, err)
 	}
 	logger.InfoContext(ctx, "database migration rollback finished",
 		"to_version", version,
-		"rolled_back", len(results),
+		"rolled_back", rolledBack,
 		"duration", roundMigrationDuration(time.Since(started)))
 	return nil
 }

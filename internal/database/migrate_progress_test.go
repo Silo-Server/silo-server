@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -14,41 +16,90 @@ import (
 )
 
 type fakeMigrationStepper struct {
-	statuses []*goose.MigrationStatus
-	// steps are returned by successive UpByOne calls.
-	steps []fakeMigrationStep
-	calls int
+	statuses      []*goose.MigrationStatus
+	statusStarted chan struct{}
+	statusRelease chan struct{}
+	statusErr     error
+	pendingErr    error
+	// steps are returned by successive ApplyVersion calls.
+	steps    []fakeMigrationStep
+	calls    int
+	versions []int64
 }
 
 type fakeMigrationStep struct {
-	result *goose.MigrationResult
-	err    error
-	delay  time.Duration
+	result  *goose.MigrationResult
+	err     error
+	started chan struct{}
+	release chan struct{}
 }
 
-func (f *fakeMigrationStepper) Status(context.Context) ([]*goose.MigrationStatus, error) {
-	return f.statuses, nil
+func (f *fakeMigrationStepper) Status(ctx context.Context) ([]*goose.MigrationStatus, error) {
+	if f.statusStarted != nil {
+		close(f.statusStarted)
+	}
+	if f.statusRelease != nil {
+		select {
+		case <-f.statusRelease:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return f.statuses, f.statusErr
 }
 
-func (f *fakeMigrationStepper) UpByOne(context.Context) (*goose.MigrationResult, error) {
+func (f *fakeMigrationStepper) HasPending(context.Context) (bool, error) {
+	if f.pendingErr != nil {
+		return false, f.pendingErr
+	}
+	for _, status := range f.statuses {
+		if status != nil && status.State == goose.StatePending {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (f *fakeMigrationStepper) ApplyVersion(ctx context.Context, version int64, direction bool) (*goose.MigrationResult, error) {
+	if !direction {
+		panic("expected an up migration")
+	}
+	f.versions = append(f.versions, version)
 	if f.calls >= len(f.steps) {
-		return nil, goose.ErrNoNextVersion
+		f.calls++
+		return nil, goose.ErrAlreadyApplied
 	}
 	step := f.steps[f.calls]
 	f.calls++
-	time.Sleep(step.delay)
+	if step.started != nil {
+		close(step.started)
+	}
+	if step.release != nil {
+		select {
+		case <-step.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	return step.result, step.err
 }
 
 // syncBuffer lets the heartbeat goroutine and the test share a log buffer.
 type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
+	mu     sync.Mutex
+	buf    bytes.Buffer
+	writes chan string
 }
 
 func (b *syncBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.writes != nil {
+		select {
+		case b.writes <- string(p):
+		default:
+		}
+	}
 	return b.buf.Write(p)
 }
 
@@ -99,7 +150,7 @@ func TestApplyMigrationsLoggedLogsEachMigration(t *testing.T) {
 		}
 	}
 	if stepper.calls != 2 {
-		t.Fatalf("UpByOne calls = %d, want 2", stepper.calls)
+		t.Fatalf("ApplyVersion calls = %d, want 2", stepper.calls)
 	}
 }
 
@@ -116,27 +167,56 @@ func TestApplyMigrationsLoggedReportsNothingPending(t *testing.T) {
 	}
 }
 
+func TestApplyMigrationsLoggedPreservesGoosePendingCheck(t *testing.T) {
+	boom := errors.New("applied migration source is missing")
+	stepper := &fakeMigrationStepper{
+		statuses:   []*goose.MigrationStatus{{Source: source(201, "201_pending.sql"), State: goose.StatePending}},
+		pendingErr: boom,
+	}
+	logger, _ := newMigrationTestLogger()
+	err := applyMigrationsLogged(t.Context(), stepper, logger, 0)
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want pending check error", err)
+	}
+	if stepper.calls != 0 {
+		t.Fatalf("applied migrations after pending check failed: %d calls", stepper.calls)
+	}
+}
+
 func TestApplyMigrationsLoggedHeartbeatsWhileAMigrationRuns(t *testing.T) {
 	slow := source(301, "301_slow_backfill.sql")
+	stepStarted := make(chan struct{})
+	stepRelease := make(chan struct{})
 	stepper := &fakeMigrationStepper{
 		statuses: []*goose.MigrationStatus{{Source: slow, State: goose.StatePending}},
 		steps: []fakeMigrationStep{
-			{result: &goose.MigrationResult{Source: slow}, delay: 120 * time.Millisecond},
+			{result: &goose.MigrationResult{Source: slow}, started: stepStarted, release: stepRelease},
 		},
 	}
 	logger, out := newMigrationTestLogger()
-	if err := applyMigrationsLogged(t.Context(), stepper, logger, 20*time.Millisecond); err != nil {
-		t.Fatal(err)
-	}
-	logs := out.String()
-	if !strings.Contains(logs, `msg="database migration still running" version=301 name=301_slow_backfill.sql progress=1/1 elapsed=`) {
-		t.Fatalf("no heartbeat naming the running migration:\n%s", logs)
-	}
-	// The heartbeat stops with the migration.
-	heartbeats := strings.Count(logs, "still running")
-	time.Sleep(80 * time.Millisecond)
-	if after := strings.Count(out.String(), "still running"); after != heartbeats {
-		t.Fatalf("heartbeat kept running after the migration: %d then %d", heartbeats, after)
+	out.writes = make(chan string, 16)
+	done := make(chan error, 1)
+	go func() {
+		done <- applyMigrationsLogged(t.Context(), stepper, logger, 10*time.Millisecond)
+	}()
+	<-stepStarted
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case line := <-out.writes:
+			if strings.Contains(line, `msg="database migration still running" version=301 name=301_slow_backfill.sql progress=1/1 elapsed=`) {
+				close(stepRelease)
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+		case <-deadline.C:
+			close(stepRelease)
+			<-done
+			t.Fatalf("no heartbeat naming the running migration:\n%s", out.String())
+		}
 	}
 }
 
@@ -166,13 +246,16 @@ func TestApplyMigrationsLoggedNamesTheFailedMigration(t *testing.T) {
 
 func TestApplyMigrationsLoggedStopsWhenAnotherNodeFinished(t *testing.T) {
 	first := source(501, "501_first.sql")
+	second := source(502, "502_second.sql")
 	stepper := &fakeMigrationStepper{
 		statuses: []*goose.MigrationStatus{
 			{Source: first, State: goose.StatePending},
-			{Source: source(502, "502_second.sql"), State: goose.StatePending},
+			{Source: second, State: goose.StatePending},
 		},
-		// The second step finds nothing left: another node applied it.
-		steps: []fakeMigrationStep{{result: &goose.MigrationResult{Source: first}}},
+		steps: []fakeMigrationStep{
+			{err: goose.ErrAlreadyApplied},
+			{result: &goose.MigrationResult{Source: second}},
+		},
 	}
 	logger, out := newMigrationTestLogger()
 	if err := applyMigrationsLogged(t.Context(), stepper, logger, 0); err != nil {
@@ -180,5 +263,72 @@ func TestApplyMigrationsLoggedStopsWhenAnotherNodeFinished(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `msg="database migrations finished" applied=1`) {
 		t.Fatalf("logs:\n%s", out.String())
+	}
+	if !slices.Equal(stepper.versions, []int64{501, 502}) {
+		t.Fatalf("versions = %v, want [501 502]", stepper.versions)
+	}
+	if !strings.Contains(out.String(), `msg="database migration already applied" version=501`) ||
+		!strings.Contains(out.String(), `msg="database migration applied" version=502`) {
+		t.Fatalf("concurrent completion logged incorrectly:\n%s", out.String())
+	}
+}
+
+func TestApplyMigrationsLoggedHeartbeatsWhileStatusWaits(t *testing.T) {
+	statusStarted := make(chan struct{})
+	statusRelease := make(chan struct{})
+	item := source(601, "601_pending.sql")
+	stepper := &fakeMigrationStepper{
+		statuses:      []*goose.MigrationStatus{{Source: item, State: goose.StatePending}},
+		statusStarted: statusStarted,
+		statusRelease: statusRelease,
+		steps:         []fakeMigrationStep{{result: &goose.MigrationResult{Source: item}}},
+	}
+	logger, out := newMigrationTestLogger()
+	out.writes = make(chan string, 16)
+	done := make(chan error, 1)
+	go func() {
+		done <- applyMigrationsLogged(t.Context(), stepper, logger, 10*time.Millisecond)
+	}()
+	<-statusStarted
+
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case line := <-out.writes:
+			if strings.Contains(line, "database migration status check still running") {
+				close(statusRelease)
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+		case <-deadline.C:
+			close(statusRelease)
+			<-done
+			t.Fatal("no heartbeat while migration status waited for the lock")
+		}
+	}
+}
+
+func TestLogMigrationRollbackResultsReportsPartialFailure(t *testing.T) {
+	logger, out := newMigrationTestLogger()
+	boom := errors.New("rollback failed")
+	partial := &goose.PartialError{
+		Applied: []*goose.MigrationResult{{
+			Source: source(702, "702_rolled_back.sql"), Duration: 2 * time.Second,
+		}},
+		Failed: &goose.MigrationResult{
+			Source: source(701, "701_failed.sql"), Duration: 3 * time.Second, Error: boom,
+		},
+		Err: boom,
+	}
+	if count := logMigrationRollbackResults(t.Context(), logger, 700, nil, fmt.Errorf("down to 700: %w", partial)); count != 1 {
+		t.Fatalf("rolled back = %d, want 1", count)
+	}
+	logs := out.String()
+	if !strings.Contains(logs, `msg="database migration rolled back" version=702 name=702_rolled_back.sql duration=2s`) ||
+		!strings.Contains(logs, `msg="database migration rollback failed" version=701 name=701_failed.sql duration=3s`) {
+		t.Fatalf("partial rollback results missing:\n%s", logs)
 	}
 }
