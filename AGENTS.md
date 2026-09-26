@@ -286,11 +286,15 @@ authorization to open a PR does not authorize publishing private evidence.
   turning verification into a media deliverable. Do not explain omitted media.
 - When the user requests PR media, check it for private information and upload it
   to GitHub. Never commit PR-only assets such as `.github/pr-assets/`.
-- An open issue is not a precondition for a pull request. Link the capability
-  epic or sub-issue the pull request serves with `Related issue: #NNN` when one
-  covers the work, and write `Related issue: N/A` when none does. Either way, the
-  Problem section must state the problem on its own: what breaks or is missing,
-  who it affects, and why this change is the right answer.
+- Put a `Closes #NNN` line in the body for every issue the pull request fully
+  resolves (`Closes Silo-Server/<repo>#NNN` across repositories), so GitHub closes
+  it on merge to `main`. `Related issue:` does not close anything; use it for the
+  capability epic, sub-issue, or partly addressed issue the work serves, and write
+  `Related issue: N/A` when none applies. Keep both lines accurate when the pull
+  request's scope changes.
+- An open issue is not a precondition for a pull request. Either way, the Problem
+  section must state the problem on its own: what breaks or is missing, who it
+  affects, and why this change is the right answer.
 - Do not open a pull request against an issue someone else is working on. Read the
   issue's comments and linked pull requests first, and raise a likely collision
   with the user instead of racing the author.

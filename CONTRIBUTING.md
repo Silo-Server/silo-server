@@ -155,9 +155,12 @@ template or issue form.
 ## Open the pull request
 
 Use a [Conventional Commit](https://www.conventionalcommits.org/) title and fill
-in the pull request template. Link an issue or scope item when one covers the
-work; write `Related issue: N/A` when none does. Either way, the Problem section
-has to stand on its own. Keep the commit history intentional and the diff
+in the pull request template. For each issue the change fully resolves, add a
+`Closes #NNN` line (`Closes Silo-Server/<repo>#NNN` for another repository) so
+GitHub closes the issue when the pull request merges into `main`; the
+`Related issue:` line alone does not close anything. Name an epic, scope item,
+or partly addressed issue on `Related issue:`, and write `Related issue: N/A`
+when none applies. Either way, the Problem section has to stand on its own. Keep the commit history intentional and the diff
 limited to the stated problem. Keep the description proportional to the change;
 omit session history, full logs, and private report links. Follow the
 [public-content and media rules](AGENTS.md#pull-requests). Screenshots and recordings
