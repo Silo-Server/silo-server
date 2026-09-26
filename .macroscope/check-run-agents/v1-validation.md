@@ -46,11 +46,15 @@ that task directly.
 
 1. Read the PR title, body, and full diff.
 2. Collect candidate tasks: tasks that name an issue this PR closes or mentions, tasks the PR body
-   lists on its `Validation tasks:` line, and tasks whose feature the changed code serves.
-3. For each passed case in a candidate task, trace the case's steps to the code that serves them:
-   route, screen or component, handler, service, query. Include shared layers on that path, such as
-   the layout shell, auth or profile middleware, API client, serializers, or playback resolution.
-   Use `browse_code` and `git_tools` to read the code; do not match on keywords alone.
+   lists on its `Validation tasks:` line, and tasks whose feature the changed code serves. Search
+   the whole organization, not only this repository: client tasks in `silo-apple` and
+   `silo-android` depend on server behavior.
+3. For each passed, failed, or blocked case in a candidate task, trace the case's steps to the code
+   that serves them: route, screen or component, handler, service, query. Include shared layers on
+   that path, such as the layout shell, auth or profile middleware, API client, serializers, or
+   playback resolution. Use `browse_code` and `git_tools` to read the code; do not match on
+   keywords alone. For a failed or blocked case, also read the finding its results row or
+   *Related findings* names, and decide whether this PR fixes it.
 4. Classify each case you examined:
    - **unaffected**: the diff does not reach the case's path.
    - **no behavior change**: the path is touched, but the case's steps and outcome cannot differ
@@ -62,7 +66,8 @@ that task directly.
      enough that the earlier pass no longer demonstrates the behavior. Needs re-validation.
    - **regression**: the change breaks a passed case or contradicts the criterion it proves, and
      the PR does not set out to change that behavior.
-   - **unblocks**: the PR fixes a finding that a task marks as blocking or failing for a case.
+   - **unblocks**: the case is failed or blocked, and the PR fixes the finding behind it, whether
+     or not the PR names that finding. The case is ready to re-test after merge, not passed.
 5. Check the PR body's `Validation tasks:` line. It must exist, must not still read the template
    placeholder `#NNN C1`, and must agree with what you found, for example
    `Validation tasks: unblocks #1144 C3; changes #1200 C1`, with `owner/repo#n` for tasks in other
