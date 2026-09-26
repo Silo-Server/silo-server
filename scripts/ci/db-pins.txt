@@ -24,6 +24,10 @@
 ./internal/catalog TestGetItemVersionsMatchesDetail
 ./internal/catalog TestGetItemVersionsAccessAndMissing
 
+# Episode batches: the viewer's preference lookups run once per series, not
+# once per episode, on the Jellyfin season page path.
+./internal/catalog TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries
+
 # Listings: COUNT queries only when a total is requested and cannot be derived
 # from the page.
 ./internal/catalog TestQueryExecutorTerminalPageTotals
