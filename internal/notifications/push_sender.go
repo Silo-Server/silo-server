@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
@@ -242,12 +244,14 @@ func (s *pushSender) finalize(ctx context.Context, attempt PushDeliveryAttempt, 
 	return updated
 }
 
-func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string) pushSendResult {
+func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string) (result pushSendResult) {
+	ctx, finishObservation := telemetry.StartDependency(ctx, "notifications", "worker", "push")
+	defer func() { finishObservation(deliveryObservationError(ctx, result.OK)) }()
 	credential, err := s.prepareRelayCredential(ctx)
 	if err != nil {
 		return pushSendResult{HTTPStatus: http.StatusServiceUnavailable, Message: err.Error(), UpstreamReason: "relay_credential_unavailable"}
 	}
-	result := s.sendWithCapability(ctx, attempt, device, token, credential.RelayURL, credential.APIKey)
+	result = s.sendWithCapability(ctx, attempt, device, token, credential.RelayURL, credential.APIKey)
 	if result.HTTPStatus != http.StatusUnauthorized || result.UpstreamReason != "token_expired" {
 		if result.HTTPStatus == http.StatusUnauthorized {
 			_ = s.markReregistrationRequired(ctx, credential)
@@ -275,15 +279,17 @@ func (s *pushSender) prepareRelayCredential(ctx context.Context) (PushRelayCrede
 		return PushRelayCredential{}, err
 	}
 	current.RelayURL = relayURL
-	if current.APIKey == "" {
-		return PushRelayCredential{}, fmt.Errorf("push relay API key not configured")
-	}
-	if IsLegacyPushRelayKey(current.APIKey) {
-		result, err := RegisterRelayCredential(ctx, s.settings, s.client, relayURL)
-		return result.Credential, err
-	}
+	// An administrator's clear, or a relay rejection, parks the credential
+	// behind an explicit re-register; first-use registration must not undo
+	// that decision.
 	if current.ReregistrationRequired {
-		return PushRelayCredential{}, fmt.Errorf("push relay re-registration required")
+		return PushRelayCredential{}, ErrRelayReregistrationRequired
+	}
+	// Delivery is on by default, so the first send on a server that has never
+	// registered self-registers with the relay instead of failing. Legacy
+	// pre-capability keys take the same path.
+	if current.APIKey == "" || IsLegacyPushRelayKey(current.APIKey) {
+		return s.registerRelayCredential(ctx, relayURL)
 	}
 	if RelayCredentialNeedsRenewal(s.now(), current.ExpiresAt, current.DeploymentID) {
 		result, err := RenewRelayCredential(ctx, s.settings, s.client, current)
@@ -296,6 +302,31 @@ func (s *pushSender) prepareRelayCredential(ctx context.Context) (PushRelayCrede
 		return result.Credential, err
 	}
 	return current, nil
+}
+
+// registerRelayCredential provisions the relay credential on first use. If
+// another replica or the admin endpoint won the race, the stored credential
+// is returned instead and its own relay origin is kept: a capability only
+// works against the relay that issued it.
+func (s *pushSender) registerRelayCredential(ctx context.Context, relayURL string) (PushRelayCredential, error) {
+	result, registered, err := RegisterRelayCredentialIfAbsent(ctx, s.settings, s.client, relayURL, false)
+	if err != nil {
+		return PushRelayCredential{}, err
+	}
+	credential := result.Credential
+	if !registered {
+		if credential.ReregistrationRequired || credential.APIKey == "" {
+			// An administrator cleared the relay while this registration was
+			// in flight; the clear wins.
+			return PushRelayCredential{}, ErrRelayReregistrationRequired
+		}
+		storedURL, err := NormalizePushRelayURL(credential.RelayURL, s.developmentRelayURL)
+		if err != nil {
+			return PushRelayCredential{}, err
+		}
+		credential.RelayURL = storedURL
+	}
+	return credential, nil
 }
 
 func (s *pushSender) sendWithCapability(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token, relayURL, apiKey string) pushSendResult {
@@ -483,9 +514,8 @@ func (s *System) sendPushTest(ctx context.Context, platform, profileID, serverDe
 	if !deliveryEnabled {
 		return nil, ErrPushDeliveryUnavailable
 	}
-	if s.Settings.PushRelayAPIKey(ctx) == "" {
-		return nil, ErrPushDeliveryUnavailable
-	}
+	// No relay-credential gate here: a test push on a fresh install goes
+	// through the same first-use registration as an ordinary delivery.
 	attempt, device, err := s.pushDeviceRepo.EnqueueTestAttempt(ctx, platform, profileID, serverDeviceID)
 	if err != nil {
 		return nil, err

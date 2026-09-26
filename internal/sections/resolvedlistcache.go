@@ -51,6 +51,11 @@ const (
 	// resolvedListInvalidationInterval coalesces scan-complete bursts so file
 	// scans cannot keep the recently-added cache permanently cold.
 	resolvedListInvalidationInterval = 30 * time.Second
+	// A scan starts a refresh immediately on the next read. Keep the prior
+	// membership usable only while that bounded refresh runs, never for a
+	// full cache TTL or across repeated failed refreshes. Badges and per-user
+	// access/playability are still recomputed from current data on every read.
+	resolvedListInvalidationGrace = 30 * time.Second
 	// resolvedListGenerationPrefix heads every generation-scoped cache key.
 	// Keys without it (every non-recently-added section) are generation
 	// independent and must never be swept by an invalidation.
@@ -69,11 +74,12 @@ func resolvedListGenerationKeyPrefix(generation uint64) string {
 type resolvedListLoader func(context.Context) ([]*models.MediaItem, int, error)
 
 type resolvedListEntry struct {
-	items        []*models.MediaItem
-	total        int
-	builtAt      time.Time
-	refreshAfter time.Time
-	expiresAt    time.Time
+	items          []*models.MediaItem
+	total          int
+	builtAt        time.Time
+	refreshAfter   time.Time
+	expiresAt      time.Time
+	refreshPending bool // scan invalidation; first reader starts the bounded grace
 }
 
 var (
@@ -106,8 +112,8 @@ var (
 	}
 )
 
-// InvalidateResolvedListCache advances the cache namespace and releases the
-// entries the bump supersedes. In-flight refreshes remain under the old
+// InvalidateResolvedListCache advances the cache namespace and requests an
+// immediate refresh, allowing a bounded grace period for existing membership. In-flight refreshes remain under the old
 // generation and therefore cannot repopulate reads after a catalog scan
 // completes. Scan-complete bursts are coalesced so large batches advance the
 // namespace at most once per 30 seconds.
@@ -146,25 +152,19 @@ func InvalidateResolvedListCache() {
 	dropSupersededResolvedListEntries(resolvedListGeneration.Add(1))
 }
 
-// dropSupersededResolvedListEntries releases the cache entries a generation bump
-// leaves behind. Advancing the generation only changes FUTURE keys, so without
-// this every obsolete (library × access-scope) recently-added entry would stay
-// resident until its 15-minute expiry and be swept only opportunistically by
-// pruneExpiredResolvedListEntriesLocked. A long multi-library rescan bumps the
-// generation every 30s, which would otherwise keep up to 30 generations of every
-// entry — each holding an ItemLimit-sized item slice — alive at once.
+// dropSupersededResolvedListEntries moves the immediately preceding generation's
+// still-usable membership into the new namespace, marked for immediate refresh.
+// On the first read, readers can use that membership for one build timeout while a single
+// refresh runs. Repeated invalidations never extend its existing deadline, and
+// a late loader from an older generation cannot overwrite the current entry.
+// Only the generation prefix changes: library and access scope stay identical.
 //
-// Entries with an in-flight background refresh are left in place so a refresh
-// that started under the old generation can still finish writing to its own old
-// key (it can never repopulate the active key, whose generation differs). Those
-// keys are superseded too, so the next bump releases them.
-//
-// Concurrency: the caller holds resolvedListInvalidationMu. This takes
-// resolvedListRefreshMu and resolvedListCacheMu one after the other and never
-// nests them, and no cache path ever acquires resolvedListInvalidationMu, so the
-// immediate and trailing-edge invalidation paths cannot deadlock.
+// The caller holds resolvedListInvalidationMu. Refresh and cache locks are taken
+// separately; no cache path acquires resolvedListInvalidationMu.
 func dropSupersededResolvedListEntries(generation uint64) {
 	current := resolvedListGenerationKeyPrefix(generation)
+	previous := resolvedListGenerationKeyPrefix(generation - 1)
+	now := resolvedListNow()
 
 	resolvedListRefreshMu.Lock()
 	refreshing := make(map[string]struct{}, len(resolvedListRefreshing))
@@ -174,9 +174,18 @@ func dropSupersededResolvedListEntries(generation uint64) {
 	resolvedListRefreshMu.Unlock()
 
 	resolvedListCacheMu.Lock()
-	for key := range resolvedListCache {
+	for key, entry := range resolvedListCache {
 		if !strings.HasPrefix(key, resolvedListGenerationPrefix) || strings.HasPrefix(key, current) {
 			continue
+		}
+		if suffix, ok := strings.CutPrefix(key, previous); ok && now.Before(entry.expiresAt) {
+			entry.refreshAfter = now
+			entry.refreshPending = true
+			// The generation was published before taking the cache lock. A
+			// request may already have completed a fresh load in that namespace.
+			if _, loaded := resolvedListCache[current+suffix]; !loaded {
+				resolvedListCache[current+suffix] = entry
+			}
 		}
 		if _, inflight := refreshing[key]; inflight {
 			continue
@@ -197,7 +206,7 @@ func dropSupersededResolvedListEntries(generation uint64) {
 // Returned slices are defensive copies so a caller mutating the result can never
 // corrupt the cached entry.
 func getOrRefresh(ctx context.Context, key string, now time.Time, loader resolvedListLoader) ([]*models.MediaItem, int, error) {
-	if entry, ok := resolvedListGet(key); ok {
+	if entry, ok := resolvedListRead(key, now); ok {
 		switch {
 		case now.Before(entry.refreshAfter):
 			return cloneMediaItems(entry.items), entry.total, nil
@@ -293,6 +302,29 @@ func scheduleResolvedListRefresh(key string, now time.Time, loader resolvedListL
 		}
 		resolvedListSet(key, items, total, now)
 	}()
+}
+
+// resolvedListRead starts scan grace when a reader actually requests the
+// refresh. An idle scope keeps its original hard expiry, rather than becoming
+// cold simply because nobody requested it within 30 seconds of a scan. The
+// deadline is set under the cache lock and can only move earlier, so concurrent
+// readers and repeated invalidations cannot prolong an active grace period.
+func resolvedListRead(key string, now time.Time) (resolvedListEntry, bool) {
+	entry, ok := resolvedListGet(key)
+	if !ok || !entry.refreshPending {
+		return entry, ok
+	}
+	resolvedListCacheMu.Lock()
+	defer resolvedListCacheMu.Unlock()
+	entry, ok = resolvedListCache[key]
+	if ok && entry.refreshPending {
+		entry.refreshPending = false
+		if deadline := now.Add(resolvedListInvalidationGrace); deadline.Before(entry.expiresAt) {
+			entry.expiresAt = deadline
+		}
+		resolvedListCache[key] = entry
+	}
+	return entry, ok
 }
 
 func resolvedListGet(key string) (resolvedListEntry, bool) {

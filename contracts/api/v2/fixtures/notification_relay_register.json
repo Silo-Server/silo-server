@@ -1,0 +1,7 @@
+{
+  "relay_url": "https://relay.example.test",
+  "deployment_id": "deployment-1",
+  "key_prefix": "prefix",
+  "api_key_configured": true,
+  "expires_at": "2026-01-02T03:04:05.678Z"
+}

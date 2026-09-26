@@ -1,4 +1,4 @@
-import type { PolicyVendorModule } from "@/api/types";
+import type { PolicyVendorModule } from "@/api/adminPolicy";
 
 /**
  * The baseline ships as Rego modules; this module turns them into something an

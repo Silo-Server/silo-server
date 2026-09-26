@@ -89,7 +89,7 @@ func (s *PGOAuthStore) Insert(ctx context.Context, sess OAuthSession) error {
 		return err
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO oauth_session (state, install_id, redirect_uri, linking_user_id, provider_state, next_url, expires_at)
+		INSERT INTO oauth_sessions (state, install_id, redirect_uri, linking_user_id, provider_state, next_url, expires_at)
 		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7)
 	`, sess.State, sess.InstallID, sess.RedirectURI, sess.LinkingUserID, sess.ProviderState, sess.NextURL, sess.ExpiresAt)
 	if err != nil {
@@ -100,7 +100,7 @@ func (s *PGOAuthStore) Insert(ctx context.Context, sess OAuthSession) error {
 
 func (s *PGOAuthStore) GetAndDelete(ctx context.Context, state string) (OAuthSession, error) {
 	row := s.pool.QueryRow(ctx, `
-		DELETE FROM oauth_session WHERE state = $1
+		DELETE FROM oauth_sessions WHERE state = $1
 		RETURNING state, install_id, redirect_uri, COALESCE(linking_user_id, ''), provider_state, next_url, created_at, expires_at
 	`, state)
 	var out OAuthSession
@@ -114,7 +114,7 @@ func (s *PGOAuthStore) GetAndDelete(ctx context.Context, state string) (OAuthSes
 }
 
 func (s *PGOAuthStore) DeleteExpired(ctx context.Context, now time.Time) (int, error) {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM oauth_session WHERE expires_at < $1`, now)
+	tag, err := s.pool.Exec(ctx, `DELETE FROM oauth_sessions WHERE expires_at < $1`, now)
 	if err != nil {
 		return 0, fmt.Errorf("delete expired oauth_session: %w", err)
 	}
@@ -131,7 +131,7 @@ func (s *PGOAuthStore) InsertCompletion(ctx context.Context, c OAuthCompletion) 
 		return fmt.Errorf("encrypt oauth_completion tokens: %w", err)
 	}
 	_, err = s.pool.Exec(ctx, `
-		INSERT INTO oauth_completion (code_hash, token_ciphertext, expires_in, next_url, expires_at)
+		INSERT INTO oauth_completions (code_hash, token_ciphertext, expires_in, next_url, expires_at)
 		VALUES ($1, $2, $3, $4, $5)
 	`, codeHash, tokenCiphertext, c.ExpiresIn, c.NextURL, c.ExpiresAt)
 	if err != nil {
@@ -143,7 +143,7 @@ func (s *PGOAuthStore) InsertCompletion(ctx context.Context, c OAuthCompletion) 
 func (s *PGOAuthStore) GetAndDeleteCompletion(ctx context.Context, code string) (OAuthCompletion, error) {
 	codeHash := oauthCompletionCodeHash(code)
 	row := s.pool.QueryRow(ctx, `
-		DELETE FROM oauth_completion WHERE code_hash = $1 AND expires_at >= now()
+		DELETE FROM oauth_completions WHERE code_hash = $1 AND expires_at >= now()
 		RETURNING token_ciphertext, expires_in, next_url, created_at, expires_at
 	`, codeHash)
 	var out OAuthCompletion
@@ -162,7 +162,7 @@ func (s *PGOAuthStore) GetAndDeleteCompletion(ctx context.Context, code string) 
 }
 
 func (s *PGOAuthStore) DeleteExpiredCompletions(ctx context.Context, now time.Time) (int, error) {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM oauth_completion WHERE expires_at < $1`, now)
+	tag, err := s.pool.Exec(ctx, `DELETE FROM oauth_completions WHERE expires_at < $1`, now)
 	if err != nil {
 		return 0, fmt.Errorf("delete expired oauth_completion: %w", err)
 	}

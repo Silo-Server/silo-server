@@ -12,6 +12,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -22,6 +23,7 @@ import (
 // subtitle pipeline.
 type SubtitleAIHandler struct {
 	service        *ai.Service
+	LiveNotifier   *playback.SubtitleReadyNotifier
 	FileAuthorizer *MediaFileAuthorizer
 	// StoreProvider resolves household profiles for the transcription quota
 	// exemption check; when nil the whole admin account is exempt.
@@ -69,11 +71,21 @@ type translateSubtitleRequest struct {
 // HandleStatus reports whether AI subtitle translation / ASR generation are
 // available, so the player can show or hide the entry points.
 // GET /api/v1/subtitles/ai/status
-func (h *SubtitleAIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":            h.service.Enabled(),
-		"transcribe_enabled": h.service.TranscribeEnabled(),
-	})
+func (h *SubtitleAIHandler) HandleStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, h.SubtitleAIStatus())
+}
+
+type SubtitleAIStatusView struct {
+	Enabled           bool `json:"enabled"`
+	TranscribeEnabled bool `json:"transcribe_enabled"`
+}
+
+// SubtitleAIStatus reports configured engine capabilities without starting work.
+func (h *SubtitleAIHandler) SubtitleAIStatus() SubtitleAIStatusView {
+	if h == nil || h.service == nil {
+		return SubtitleAIStatusView{}
+	}
+	return SubtitleAIStatusView{Enabled: h.service.Enabled(), TranscribeEnabled: h.service.TranscribeEnabled()}
 }
 
 // WriteSubtitleAIDisabledStatus answers the AI status capability probe with a
@@ -154,25 +166,11 @@ func (h *SubtitleAIHandler) HandleTranslate(w http.ResponseWriter, r *http.Reque
 // budgeting gate, not a security boundary; the quota itself is account-scoped.
 func (h *SubtitleAIHandler) quotaExempt(r *http.Request) bool {
 	ctx := r.Context()
-	if !apimw.IsAdmin(ctx) {
-		return false
-	}
 	profileID := apimw.GetProfileID(ctx)
 	if profileID == "" {
 		profileID = r.Header.Get("X-Profile-Id")
 	}
-	if profileID == "" || h.StoreProvider == nil {
-		return true
-	}
-	store, err := h.StoreProvider.ForUser(ctx, apimw.GetUserID(ctx))
-	if err != nil {
-		return false // fail closed: the quota still applies
-	}
-	profile, err := store.GetProfile(ctx, profileID)
-	if err != nil || profile == nil {
-		return false
-	}
-	return profile.IsPrimary
+	return h.subtitleQuotaExempt(ctx, apimw.GetUserID(ctx), profileID, apimw.IsAdmin(ctx))
 }
 
 // quotaExceededMessage turns a quota error into a user-facing message with the

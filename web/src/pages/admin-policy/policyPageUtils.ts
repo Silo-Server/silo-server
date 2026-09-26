@@ -1,5 +1,5 @@
 import { ApiClientError } from "@/api/client";
-import type { PolicyCompileIssue } from "@/api/types";
+import type { PolicyCompileIssue } from "@/api/adminPolicy";
 
 export function formatPolicyDate(value?: string | null) {
   if (!value) return "—";

@@ -15,10 +15,12 @@ type Provider interface {
 	Download(ctx context.Context, id string) ([]byte, SubtitleFormat, error)
 }
 
-// S3Client is the interface for S3 operations needed by the subtitle system.
-// Defined here for testability — the concrete implementation is s3client.Client.
-type S3Client interface {
-	PutObject(ctx context.Context, bucket, key string, data []byte) error
-	GetObject(ctx context.Context, bucket, key string) ([]byte, error)
-	DeleteObject(ctx context.Context, bucket, key string) error
+// BlobStore is the object storage the subtitle system needs. Subtitle objects
+// are always read through the server, never by a redirect to storage, so this
+// is key-only: no bucket, no signed URLs. blobstore.NewByteStore adapts either
+// backend to it.
+type BlobStore interface {
+	Put(ctx context.Context, key string, data []byte) error
+	Get(ctx context.Context, key string) ([]byte, error)
+	Delete(ctx context.Context, key string) error
 }

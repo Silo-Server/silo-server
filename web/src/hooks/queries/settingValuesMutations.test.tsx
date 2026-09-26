@@ -3,15 +3,15 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiClientError } from "@/api/client";
+import { v2Problem } from "@/api/v2/problems.test-support";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { deviceKeys, settingsKeys } from "./keys";
 import { useClearSettingValue, useSetSettingValue } from "./settingValues";
 
-const apiMock = vi.hoisted(() => vi.fn());
-vi.mock("@/api/client", async () => {
-  const actual = await vi.importActual<typeof import("@/api/client")>("@/api/client");
-  return { ...actual, api: apiMock };
+const v2Mock = vi.hoisted(() => vi.fn());
+vi.mock("@/api/v2/request", async () => {
+  const actual = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
+  return { ...actual, v2: v2Mock };
 });
 
 function createHarness() {
@@ -26,11 +26,11 @@ function createHarness() {
 
 describe("typed setting mutations", () => {
   beforeEach(() => {
-    apiMock.mockReset();
+    v2Mock.mockReset();
   });
 
   it("does not invalidate effective settings after a definitive rejected write", async () => {
-    apiMock.mockRejectedValueOnce(new ApiClientError(429, "rate_limited", "rate limited"));
+    v2Mock.mockRejectedValueOnce(v2Problem(429, "rate_limited", "rate limited"));
     const { queryClient, wrapper } = createHarness();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useSetSettingValue(), { wrapper });
@@ -49,7 +49,7 @@ describe("typed setting mutations", () => {
   });
 
   it("invalidates effective settings and device summaries after a successful device write", async () => {
-    apiMock.mockResolvedValueOnce({});
+    v2Mock.mockResolvedValueOnce({});
     const { queryClient, wrapper } = createHarness();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useSetSettingValue(), { wrapper });
@@ -69,7 +69,7 @@ describe("typed setting mutations", () => {
   });
 
   it("reconciles effective settings and device summaries after an ambiguous write failure", async () => {
-    apiMock.mockRejectedValueOnce(new TypeError("network connection lost"));
+    v2Mock.mockRejectedValueOnce(new TypeError("network connection lost"));
     const { queryClient, wrapper } = createHarness();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useSetSettingValue(), { wrapper });
@@ -91,7 +91,7 @@ describe("typed setting mutations", () => {
   });
 
   it("reconciles effective settings and device summaries after a server write failure", async () => {
-    apiMock.mockRejectedValueOnce(new ApiClientError(503, "unavailable", "service unavailable"));
+    v2Mock.mockRejectedValueOnce(v2Problem(503, "unavailable", "service unavailable"));
     const { queryClient, wrapper } = createHarness();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useSetSettingValue(), { wrapper });
@@ -113,7 +113,7 @@ describe("typed setting mutations", () => {
   });
 
   it("does not invalidate effective settings after a definitive rejected clear", async () => {
-    apiMock.mockRejectedValueOnce(new ApiClientError(429, "rate_limited", "rate limited"));
+    v2Mock.mockRejectedValueOnce(v2Problem(429, "rate_limited", "rate limited"));
     const { queryClient, wrapper } = createHarness();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useClearSettingValue(), { wrapper });
@@ -131,7 +131,7 @@ describe("typed setting mutations", () => {
   });
 
   it("reconciles effective settings and device summaries after an already-cleared response", async () => {
-    apiMock.mockRejectedValueOnce(new ApiClientError(404, "not_found", "setting not found"));
+    v2Mock.mockRejectedValueOnce(v2Problem(404, "not_found", "setting not found"));
     const { queryClient, wrapper } = createHarness();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useClearSettingValue(), { wrapper });
@@ -152,7 +152,7 @@ describe("typed setting mutations", () => {
   });
 
   it("invalidates effective settings and device summaries after a successful device clear", async () => {
-    apiMock.mockResolvedValueOnce({});
+    v2Mock.mockResolvedValueOnce({});
     const { queryClient, wrapper } = createHarness();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useClearSettingValue(), { wrapper });
@@ -171,7 +171,7 @@ describe("typed setting mutations", () => {
   });
 
   it("reconciles effective settings and device summaries after an ambiguous clear failure", async () => {
-    apiMock.mockRejectedValueOnce(new TypeError("response connection lost"));
+    v2Mock.mockRejectedValueOnce(new TypeError("response connection lost"));
     const { queryClient, wrapper } = createHarness();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useClearSettingValue(), { wrapper });

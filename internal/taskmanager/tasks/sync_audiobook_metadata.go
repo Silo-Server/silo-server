@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
@@ -31,6 +32,10 @@ func (t *SyncAudiobookMetadataTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryMetadata
 }
 func (t *SyncAudiobookMetadataTask) IsHidden() bool { return false }
+
+func (t *SyncAudiobookMetadataTask) ServesLibrary(libraryType string) bool {
+	return librarykind.IsAudiobook(libraryType)
+}
 
 func (t *SyncAudiobookMetadataTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{

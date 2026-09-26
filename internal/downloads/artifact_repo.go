@@ -298,30 +298,152 @@ func (r *ArtifactRepository) Requeue(ctx context.Context, id string) error {
 	return nil
 }
 
+// artifactRecovery reports how a ready artifact with missing or invalid output
+// was resolved.
+type artifactRecovery int
+
+const (
+	// artifactUnchanged means the row changed concurrently or no longer exists.
+	artifactUnchanged artifactRecovery = iota
+	artifactRequeued
+	// artifactRetired means no download could use the artifact, so its row was
+	// deleted instead of being rebuilt.
+	artifactRetired
+)
+
+// missingArtifactRetireGrace protects a ready artifact that a download create
+// is linking. Ensure refreshes last_used_at through TouchReady before it
+// inserts the download row, so recovery never retires a row in that window.
+const missingArtifactRetireGrace = 10 * time.Minute
+
+// unusedReadyArtifactPredicate selects ready rows that no active download
+// references and that nothing has used within the grace interval ($2, seconds).
+// Completed rows count as active because they remain re-downloadable.
+const unusedReadyArtifactPredicate = `a.status IN ('ready', 'tone_map_ready', 'audio_v2_ready')
+	AND a.last_used_at < now() - make_interval(secs => $2)
+	AND NOT EXISTS (SELECT 1 FROM downloads d
+	                WHERE d.artifact_id = a.id AND d.status NOT IN ('cancelled', 'failed', 'revoked'))`
+
+// RecoverMissing resolves a ready local artifact whose output file vanished.
+// It deletes the row when no download can use it, so lost output is never
+// rebuilt for nobody. Otherwise it requeues the artifact and returns its
+// linked downloads to preparing in the same transaction, so the caller can
+// publish them. The result is artifactUnchanged when the row is no longer ready.
+func (r *ArtifactRepository) RecoverMissing(ctx context.Context, id string, grace time.Duration) (linked []*Download, result artifactRecovery, err error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, artifactUnchanged, fmt.Errorf("beginning missing artifact recovery: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx,
+		`DELETE FROM download_artifacts a WHERE a.id = $1 AND `+unusedReadyArtifactPredicate,
+		id, grace.Seconds(),
+	)
+	if err != nil {
+		return nil, artifactUnchanged, fmt.Errorf("retiring unused artifact: %w", err)
+	}
+	result = artifactRetired
+	if tag.RowsAffected() == 0 {
+		tag, err = tx.Exec(ctx,
+			`UPDATE download_artifacts
+			 SET status = CASE
+			                  WHEN audio_recipe_version <> '' THEN 'audio_v2_queued'
+			                  WHEN tone_map_mode <> '' THEN 'tone_map_queued'
+			                  ELSE 'queued'
+			              END,
+			     attempts = 0, error_message = '', next_retry_at = NULL,
+			     lease_owner = NULL, lease_expires_at = NULL, completed_at = NULL
+			 WHERE id = $1 AND status IN ('ready', 'tone_map_ready', 'audio_v2_ready')`,
+			id,
+		)
+		if err != nil {
+			return nil, artifactUnchanged, fmt.Errorf("requeuing missing artifact: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return nil, artifactUnchanged, nil
+		}
+		if linked, err = resetLinkedDownloadsForRequeue(ctx, tx, id); err != nil {
+			return nil, artifactUnchanged, err
+		}
+		result = artifactRequeued
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, artifactUnchanged, fmt.Errorf("committing missing artifact recovery: %w", err)
+	}
+	return linked, result, nil
+}
+
+// resetLinkedDownloadsForRequeue returns every live download of a requeued
+// artifact to preparing. It runs in the requeue transaction so a download is
+// never left ready while its artifact is back in the prepare queue.
+func resetLinkedDownloadsForRequeue(ctx context.Context, tx pgx.Tx, artifactID string) ([]*Download, error) {
+	rows, err := tx.Query(ctx,
+		`UPDATE downloads
+		 SET status = 'preparing', bytes_sent = 0, completed_at = NULL,
+		     error_message = '', updated_at = now()
+		 WHERE artifact_id = $1 AND status NOT IN ('cancelled', 'failed', 'revoked')
+		 RETURNING `+downloadColumns,
+		artifactID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("resetting linked downloads for artifact requeue: %w", err)
+	}
+	linked, err := scanDownloads(rows)
+	rows.Close()
+	if err != nil {
+		return nil, fmt.Errorf("scanning reset downloads for artifact requeue: %w", err)
+	}
+	return linked, nil
+}
+
 // RequeueRemote atomically transfers a ready remote locator into the cleanup
 // queue and clears it from the artifact row. The locator can therefore never
 // be deleted while the row still advertises it if either database write fails.
-// applied is false when the row changed concurrently or no longer exists.
-func (r *ArtifactRepository) RequeueRemote(ctx context.Context, artifact *Artifact) (linked []*Download, applied bool, err error) {
+// An artifact no active download can use is retired (deleted) rather than
+// requeued. The result is artifactUnchanged when the row changed concurrently
+// or no longer exists.
+func (r *ArtifactRepository) RequeueRemote(ctx context.Context, artifact *Artifact) (linked []*Download, result artifactRecovery, err error) {
 	return r.requeueRemote(ctx, artifact, false)
 }
 
 // RequeueRemoteExactLocator additionally fences on the origin URL. Proxy miss
 // reports use it so an older signed URL cannot requeue a row after an
 // administrator has moved the same node/artifact locator to a new endpoint.
-func (r *ArtifactRepository) RequeueRemoteExactLocator(ctx context.Context, artifact *Artifact) (linked []*Download, applied bool, err error) {
+func (r *ArtifactRepository) RequeueRemoteExactLocator(ctx context.Context, artifact *Artifact) (linked []*Download, result artifactRecovery, err error) {
 	return r.requeueRemote(ctx, artifact, true)
 }
 
-func (r *ArtifactRepository) requeueRemote(ctx context.Context, artifact *Artifact, fenceURL bool) (linked []*Download, applied bool, err error) {
+func (r *ArtifactRepository) requeueRemote(ctx context.Context, artifact *Artifact, fenceURL bool) (linked []*Download, result artifactRecovery, err error) {
 	if artifact == nil {
-		return nil, false, nil
+		return nil, artifactUnchanged, nil
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, false, fmt.Errorf("beginning remote artifact requeue: %w", err)
+		return nil, artifactUnchanged, fmt.Errorf("beginning remote artifact requeue: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	locatorFence := ` AND a.origin_node_id = $3 AND a.origin_artifact_id = $4`
+	retireArgs := []any{artifact.ID, missingArtifactRetireGrace.Seconds(), artifact.OriginNodeID, artifact.OriginArtifactID}
+	if fenceURL {
+		locatorFence += ` AND a.origin_node_url = $5`
+		retireArgs = append(retireArgs, artifact.OriginNodeURL)
+	}
+	tag, err := tx.Exec(ctx,
+		`DELETE FROM download_artifacts a WHERE a.id = $1 AND `+unusedReadyArtifactPredicate+locatorFence,
+		retireArgs...,
+	)
+	if err != nil {
+		return nil, artifactUnchanged, fmt.Errorf("retiring unused remote artifact: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		if err := enqueueRemoteArtifactCleanup(ctx, tx, artifact); err != nil {
+			return nil, artifactUnchanged, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, artifactUnchanged, fmt.Errorf("committing remote artifact retirement: %w", err)
+		}
+		return nil, artifactRetired, nil
+	}
 	query := `UPDATE download_artifacts
 		 SET status = CASE
 		                  WHEN audio_recipe_version <> '' THEN 'audio_v2_queued'
@@ -337,29 +459,28 @@ func (r *ArtifactRepository) requeueRemote(ctx context.Context, artifact *Artifa
 		query += ` AND origin_node_url = $4`
 		args = append(args, artifact.OriginNodeURL)
 	}
-	tag, err := tx.Exec(ctx, query, args...)
+	tag, err = tx.Exec(ctx, query, args...)
 	if err != nil {
-		return nil, false, fmt.Errorf("requeuing remote artifact: %w", err)
+		return nil, artifactUnchanged, fmt.Errorf("requeuing remote artifact: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return nil, false, nil
+		return nil, artifactUnchanged, nil
 	}
-	rows, err := tx.Query(ctx,
-		`UPDATE downloads
-		 SET status = 'preparing', bytes_sent = 0, completed_at = NULL,
-		     error_message = '', updated_at = now()
-		 WHERE artifact_id = $1 AND status NOT IN ('cancelled', 'failed', 'revoked')
-		 RETURNING `+downloadColumns,
-		artifact.ID,
-	)
-	if err != nil {
-		return nil, false, fmt.Errorf("resetting linked downloads for remote artifact requeue: %w", err)
+	if linked, err = resetLinkedDownloadsForRequeue(ctx, tx, artifact.ID); err != nil {
+		return nil, artifactUnchanged, err
 	}
-	linked, err = scanDownloads(rows)
-	rows.Close()
-	if err != nil {
-		return nil, false, fmt.Errorf("scanning reset downloads for remote artifact requeue: %w", err)
+	if err := enqueueRemoteArtifactCleanup(ctx, tx, artifact); err != nil {
+		return nil, artifactUnchanged, err
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, artifactUnchanged, fmt.Errorf("committing remote artifact requeue: %w", err)
+	}
+	return linked, artifactRequeued, nil
+}
+
+// enqueueRemoteArtifactCleanup records a locator the artifact row no longer
+// advertises so the cleanup pass deletes its node-local bytes.
+func enqueueRemoteArtifactCleanup(ctx context.Context, tx pgx.Tx, artifact *Artifact) error {
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO download_artifact_orphans (download_artifact_id, origin_node_id, origin_node_url, origin_artifact_id)
 		 VALUES ($1, $2, $3, $4)
@@ -368,12 +489,9 @@ func (r *ArtifactRepository) requeueRemote(ctx context.Context, artifact *Artifa
 		     origin_node_url = EXCLUDED.origin_node_url, next_retry_at = NULL`,
 		artifact.ID, artifact.OriginNodeID, artifact.OriginNodeURL, artifact.OriginArtifactID,
 	); err != nil {
-		return nil, false, fmt.Errorf("enqueueing remote artifact cleanup during requeue: %w", err)
+		return fmt.Errorf("enqueueing remote artifact cleanup: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, false, fmt.Errorf("committing remote artifact requeue: %w", err)
-	}
-	return linked, true, nil
+	return nil
 }
 
 // TouchLastUsed bumps last_used_at for LRU accounting (called on serve).
@@ -383,6 +501,19 @@ func (r *ArtifactRepository) TouchLastUsed(ctx context.Context, id string) error
 		return fmt.Errorf("touching artifact: %w", err)
 	}
 	return nil
+}
+
+// TouchReady bumps last_used_at only while the artifact is still ready. It
+// returns false when missing-output recovery retired or requeued the row
+// first, so a caller never links a download to an artifact that is gone.
+func (r *ArtifactRepository) TouchReady(ctx context.Context, id string) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE download_artifacts SET last_used_at = now()
+		 WHERE id = $1 AND status IN ('ready', 'tone_map_ready', 'audio_v2_ready')`, id)
+	if err != nil {
+		return false, fmt.Errorf("touching ready artifact: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // RefreshRemoteLocator persists an enabled node's current URL/group while

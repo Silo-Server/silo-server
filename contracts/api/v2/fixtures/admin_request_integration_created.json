@@ -1,0 +1,17 @@
+{
+  "id": "created-1",
+  "name": "Router",
+  "capability_id": "arr",
+  "installation_id": "7",
+  "supported_media_types": [
+    "movie"
+  ],
+  "plugin_config": {},
+  "enabled": true,
+  "base_url": "https://router.example.test",
+  "has_api_key": true,
+  "last_check_at": null,
+  "last_check_status": "",
+  "last_check_error": "",
+  "updated_at": "2026-01-02T03:04:05.678Z"
+}

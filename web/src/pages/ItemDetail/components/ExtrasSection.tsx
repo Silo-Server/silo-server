@@ -37,10 +37,13 @@ export default function ExtrasSection({ extras }: ExtrasSectionProps) {
   if (groups.length === 0) return null;
 
   const playExtra = (extra: ItemExtra) => {
-    playbackController.startPlayback({
-      contentId: extra.content_id,
-      returnHref: currentHref,
-    });
+    playbackController.startPlayback(
+      {
+        contentId: extra.content_id,
+        returnHref: currentHref,
+      },
+      "viewer",
+    );
   };
 
   return (

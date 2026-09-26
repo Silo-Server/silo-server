@@ -69,7 +69,7 @@ interface CatalogFilterSheetProps {
   filtersLoading?: boolean;
   libraryType?: string;
   // Forwarded into the editor so audiobook-native facet sections can
-  // typeahead-search /api/v1/catalog/filters/search at the same scope.
+  // typeahead-search /api/v2/catalog/filters/search at the same scope.
   catalogState?: CatalogSearchState;
 }
 
@@ -137,7 +137,7 @@ export default function CatalogFilterSheet({
             </div>
           </SheetHeader>
 
-          <ScrollArea className="flex-1">
+          <ScrollArea className="min-h-0 flex-1">
             <div className="space-y-4 px-4 pb-4">
               {editorMode === "advanced" ? (
                 <CollectionRulesEditor

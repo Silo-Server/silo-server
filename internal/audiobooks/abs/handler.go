@@ -233,10 +233,10 @@ type Dependencies struct {
 	CredValidator  ProfileCredentialValidator
 	AccessResolver AccessResolver
 	// UsernameResolver returns the display username for an ABS principal
-	// (userID, profileID) without re-authenticating. Optional; GET /me falls
-	// back to the userID when this is nil or returns "". Login gets the
-	// display name from the credential validator, but /me only has the token
-	// claims, so it needs this to show the real username instead of the id.
+	// (userID, profileID) without re-authenticating. Optional; token-based
+	// endpoints fall back to the userID when this is nil or returns "". Login
+	// gets the display name from the credential validator, while /me,
+	// /authorize, and /auth/refresh only have the token claims.
 	UsernameResolver func(ctx context.Context, userID, profileID string) string
 	Config           ConfigProvider
 	Publisher        EventPublisher // may be nil
@@ -765,8 +765,8 @@ func (h *Handler) broadcast(event string, payload any) {
 // absBaseURL returns the server address prefix ABS clients should use to
 // resolve response-embedded URLs.
 //
-//   - Host-proxied (X-Silo-User-Id header present): returns the plugin-proxy
-//     path "<scheme>://<host>/api/v1/plugins/<installID>".
+//   - Host-proxied (X-Silo-User-Id header present): returns the plugin-content
+//     path "<scheme>://<host>/api/v2/plugin-content/plugins/<installID>".
 //   - Standalone listener: returns "<scheme>://<host>" — origin only.
 //
 // Honors X-Forwarded-Proto / X-Forwarded-Host for TLS-terminating proxies.
@@ -784,7 +784,7 @@ func (h *Handler) absBaseURL(r *http.Request) string {
 		host = r.Host
 	}
 	if r.Header.Get("X-Silo-User-Id") != "" {
-		return scheme + "://" + host + "/api/v1/plugins/" + h.deps.InstallID()
+		return scheme + "://" + host + "/api/v2/plugin-content/plugins/" + h.deps.InstallID()
 	}
 	return scheme + "://" + host
 }

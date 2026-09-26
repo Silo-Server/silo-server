@@ -112,6 +112,7 @@ var restartRequiredPrefixes = []string{
 	"database.",
 	"userdb.",
 	"s3.",
+	"artwork.",
 	"redis.",
 	"recommendations.",
 }

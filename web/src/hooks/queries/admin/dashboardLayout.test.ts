@@ -1,246 +1,168 @@
 import { createElement, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import type { AdminDashboardLayoutResponse } from "@/api/types";
-
-const mocks = vi.hoisted(() => ({
-  api: vi.fn(),
-  toastError: vi.fn(),
-  toastSuccess: vi.fn(),
-}));
-
-vi.mock("@/api/client", () => ({
-  api: mocks.api,
-}));
-
-vi.mock("sonner", () => ({
-  toast: {
-    error: mocks.toastError,
-    success: mocks.toastSuccess,
-  },
-}));
-
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
 import {
   useAdminDashboardLayout,
   useResetAdminDashboardLayout,
   useSaveAdminDashboardLayout,
 } from "./dashboardLayout";
 
-function createQueryClient() {
-  return new QueryClient({
-    defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+const layout = { version: 1, entries: [{ id: "libraries", span: 7, rows: 4 }] };
+const saved = { layout, updated_at: "2026-09-06T10:00:00.123Z" };
+const absent = { layout: null, updated_at: null };
+const response = (body: unknown, etag = '"A"') =>
+  new Response(JSON.stringify(body), {
+    headers: { "Content-Type": "application/json", ETag: etag },
   });
-}
-
-function createWrapper(queryClient: QueryClient) {
-  return function Wrapper({ children }: { children: ReactNode }) {
-    return createElement(QueryClientProvider, { client: queryClient }, children);
+function fixture() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return {
+    client,
+    wrapper: ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children),
   };
 }
-
-const layoutDocument = {
-  version: 1,
-  entries: [{ id: "libraries", span: 7, rows: 4 }],
-};
-
-describe("useAdminDashboardLayout", () => {
-  beforeEach(() => {
-    mocks.api.mockReset();
-    mocks.toastError.mockReset();
-    mocks.toastSuccess.mockReset();
-  });
-
-  it("reads the saved layout for the current admin", async () => {
-    const response: AdminDashboardLayoutResponse = {
-      layout: layoutDocument,
-      updated_at: "2026-08-26T10:00:00Z",
-    };
-    mocks.api.mockResolvedValue(response);
-    const { result } = renderHook(() => useAdminDashboardLayout(), {
-      wrapper: createWrapper(createQueryClient()),
-    });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(mocks.api).toHaveBeenCalledWith("/admin/dashboard/layout");
-    expect(result.current.data).toEqual(response);
-  });
-
-  it("reports a never-saved layout as null rather than an error", async () => {
-    mocks.api.mockResolvedValue({ layout: null, updated_at: null });
-    const { result } = renderHook(() => useAdminDashboardLayout(), {
-      wrapper: createWrapper(createQueryClient()),
-    });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(result.current.data).toEqual({ layout: null, updated_at: null });
-  });
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+  setAccessToken("synthetic-admin");
+  setRefreshToken(null);
+  setProfileId("profile-a");
+  setProfileToken("pin-a");
 });
-
-describe("useSaveAdminDashboardLayout", () => {
-  beforeEach(() => {
-    mocks.api.mockReset();
-    mocks.toastError.mockReset();
-    mocks.toastSuccess.mockReset();
-  });
-
-  it("PUTs the layout document and seeds the query cache", async () => {
-    const queryClient = createQueryClient();
-    mocks.api.mockResolvedValue(undefined);
-    const { result } = renderHook(() => useSaveAdminDashboardLayout(), {
-      wrapper: createWrapper(queryClient),
-    });
-
-    await act(async () => {
-      await result.current.mutateAsync(layoutDocument);
-    });
-
-    expect(mocks.api).toHaveBeenCalledWith("/admin/dashboard/layout", {
-      method: "PUT",
-      body: JSON.stringify({ layout: layoutDocument }),
-    });
-    const cached = queryClient.getQueryData<AdminDashboardLayoutResponse>([
-      "admin",
-      "dashboard",
-      "layout",
-    ]);
-    expect(cached?.layout).toEqual(layoutDocument);
-    expect(cached?.updated_at).toEqual(expect.any(String));
-    expect(mocks.toastError).not.toHaveBeenCalled();
-  });
-
-  it("surfaces a save failure once without discarding local state", async () => {
-    const queryClient = createQueryClient();
-    mocks.api.mockRejectedValue(new Error("offline"));
-    const { result } = renderHook(() => useSaveAdminDashboardLayout(), {
-      wrapper: createWrapper(queryClient),
-    });
-
-    await act(async () => {
-      try {
-        await result.current.mutateAsync(layoutDocument);
-      } catch {
-        // The hook reports the failure through a toast; local state is kept.
-      }
-    });
-
-    expect(mocks.toastError).toHaveBeenCalledTimes(1);
-    expect(queryClient.getQueryData(["admin", "dashboard", "layout"])).toBeUndefined();
-  });
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
 });
-
-// Both mutations share one scope, so react-query runs them one at a time in
-// the order they were started. Without that an older PUT can land last and
-// seed the cache with a stale document, and a reset can be overtaken by a save
-// that resurrects the arrangement it discarded.
-describe("dashboard layout writes are serialized", () => {
-  beforeEach(() => {
-    mocks.api.mockReset();
-    mocks.toastError.mockReset();
-    mocks.toastSuccess.mockReset();
-  });
-
-  function renderWriters(queryClient: QueryClient) {
-    return renderHook(
-      () => ({
-        save: useSaveAdminDashboardLayout(),
-        reset: useResetAdminDashboardLayout(),
-      }),
-      { wrapper: createWrapper(queryClient) },
-    );
-  }
-
-  it("holds a second save until the first one finishes", async () => {
-    const queryClient = createQueryClient();
-    const started: string[] = [];
-    const release: (() => void)[] = [];
-    mocks.api.mockImplementation(() => {
-      started.push("PUT");
-      return new Promise<void>((resolve) => release.push(() => resolve()));
+it.each([saved, absent])("reads canonical v2 saved/null layout", async (body) => {
+  const fetchMock = vi.fn().mockResolvedValue(response(body));
+  vi.stubGlobal("fetch", fetchMock);
+  const { result } = renderHook(useAdminDashboardLayout, fixture());
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/v2/admin/dashboard/layout");
+  expect(result.current.data).toEqual({ ...body, etag: '"A"' });
+});
+it.each([null, "pin-b", "pin-a"])("hides cached success after PIN transition %s", async (pin) => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(response(saved))
+    .mockImplementation(() => new Promise(() => {}));
+  vi.stubGlobal("fetch", fetchMock);
+  const { client, wrapper } = fixture();
+  const { result, rerender } = renderHook(useAdminDashboardLayout, { wrapper });
+  await waitFor(() => expect(result.current.data).toEqual({ ...saved, etag: '"A"' }));
+  act(() => setProfileToken(pin));
+  rerender();
+  expect(result.current.data).toBeUndefined();
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  expect(
+    JSON.stringify(
+      client
+        .getQueryCache()
+        .getAll()
+        .map((q) => q.queryKey),
+    ),
+  ).not.toMatch(/pin-a|pin-b|synthetic-admin/);
+});
+it("rejects an old authority response after asynchronous decode", async () => {
+  let release!: (s: string) => void;
+  const deferred = response({});
+  deferred.text = () =>
+    new Promise((resolve) => {
+      release = resolve;
     });
-    const { result } = renderWriters(queryClient);
-
-    const second = { version: 1, entries: [{ id: "users", span: 5, rows: 4 }] };
-    act(() => {
-      result.current.save.mutate(layoutDocument);
-      result.current.save.mutate(second);
-    });
-
-    await waitFor(() => expect(started).toEqual(["PUT"]));
-    act(() => release[0]?.());
-    await waitFor(() => expect(started).toEqual(["PUT", "PUT"]));
-    act(() => release[1]?.());
-
-    await waitFor(() =>
-      expect(
-        queryClient.getQueryData<AdminDashboardLayoutResponse>(["admin", "dashboard", "layout"])
-          ?.layout,
-      ).toEqual(second),
-    );
-  });
-
-  it("runs a reset after a save that is already in flight", async () => {
-    const queryClient = createQueryClient();
-    const started: string[] = [];
-    let releaseSave: (() => void) | undefined;
-    mocks.api.mockImplementation((_path: string, init?: { method?: string }) => {
-      started.push(init?.method ?? "GET");
-      if (init?.method === "PUT") {
-        return new Promise<void>((resolve) => {
-          releaseSave = () => resolve();
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce(deferred)
+      .mockImplementation(() => new Promise(() => {})),
+  );
+  const { client, wrapper } = fixture();
+  renderHook(useAdminDashboardLayout, { wrapper });
+  await waitFor(() => expect(release).toBeTypeOf("function"));
+  const key = client.getQueryCache().getAll()[0]!.queryKey;
+  act(() => setProfileId("profile-b"));
+  await act(async () => release(JSON.stringify(saved)));
+  await waitFor(() => expect(client.getQueryState(key)?.status).toBe("error"));
+  expect(client.getQueryData(key)).toBeUndefined();
+});
+it("serializes guarded v2 save/reset and refetches canonical data without fabricating a document from the acknowledgement", async () => {
+  let canonical: unknown = absent;
+  let canonicalTag = '"A"';
+  let release!: () => void;
+  const writes: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation((_url: unknown, init: RequestInit) => {
+      if (init.method === "PUT") {
+        expect(new Headers(init.headers).get("If-Match")).toBe('"A"');
+        writes.push("PUT");
+        return new Promise<Response>((resolve) => {
+          release = () => {
+            canonical = saved;
+            canonicalTag = '"B"';
+            resolve(new Response(null, { status: 204, headers: { ETag: canonicalTag } }));
+          };
         });
       }
-      return Promise.resolve(undefined);
-    });
-    const { result } = renderWriters(queryClient);
-
-    act(() => {
-      result.current.save.mutate(layoutDocument);
-      result.current.reset.mutate();
-    });
-
-    await waitFor(() => expect(started).toEqual(["PUT"]));
-    act(() => releaseSave?.());
-
-    await waitFor(() => expect(started).toEqual(["PUT", "DELETE"]));
-    await waitFor(() =>
-      expect(queryClient.getQueryData(["admin", "dashboard", "layout"])).toEqual({
-        layout: null,
-        updated_at: null,
-      }),
-    );
+      if (init.method === "DELETE") {
+        writes.push("DELETE");
+        canonical = absent;
+        canonicalTag = '"C"';
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      return Promise.resolve(response(canonical, canonicalTag));
+    }),
+  );
+  const { result } = renderHook(
+    () => ({
+      read: useAdminDashboardLayout(),
+      save: useSaveAdminDashboardLayout(),
+      reset: useResetAdminDashboardLayout(),
+    }),
+    fixture(),
+  );
+  await waitFor(() => expect(result.current.read.data).toEqual({ ...absent, etag: '"A"' }));
+  act(() => {
+    result.current.save.mutate(layout, result.current.read.data!.etag);
+    result.current.reset.mutate();
   });
+  await waitFor(() => expect(writes).toEqual(["PUT"]));
+  act(() => release());
+  await waitFor(() => expect(writes).toEqual(["PUT", "DELETE"]));
+  await waitFor(() => expect(result.current.reset.isSuccess).toBe(true));
+  expect(result.current.read.data).toEqual({ ...absent, etag: '"C"' });
 });
-
-describe("useResetAdminDashboardLayout", () => {
-  beforeEach(() => {
-    mocks.api.mockReset();
-    mocks.toastError.mockReset();
-    mocks.toastSuccess.mockReset();
-  });
-
-  it("DELETEs the layout and clears the cached document", async () => {
-    const queryClient = createQueryClient();
-    queryClient.setQueryData<AdminDashboardLayoutResponse>(["admin", "dashboard", "layout"], {
-      layout: layoutDocument,
-      updated_at: "2026-08-26T10:00:00Z",
-    });
-    mocks.api.mockResolvedValue(undefined);
-    const { result } = renderHook(() => useResetAdminDashboardLayout(), {
-      wrapper: createWrapper(queryClient),
-    });
-
-    await act(async () => {
-      await result.current.mutateAsync();
-    });
-
-    expect(mocks.api).toHaveBeenCalledWith("/admin/dashboard/layout", { method: "DELETE" });
-    expect(queryClient.getQueryData(["admin", "dashboard", "layout"])).toEqual({
-      layout: null,
-      updated_at: null,
-    });
-  });
+it("a late acknowledged v2 write is rejected locally and never seeds the new authority cache", async () => {
+  let release!: () => void;
+  const { client, wrapper } = fixture();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation((_url: unknown, init: RequestInit) =>
+      init.method === "PUT"
+        ? new Promise<Response>((resolve) => {
+            release = () => resolve(new Response(null, { status: 204, headers: { ETag: '"B"' } }));
+          })
+        : Promise.resolve(response(absent)),
+    ),
+  );
+  const { result, rerender } = renderHook(
+    () => ({ read: useAdminDashboardLayout(), save: useSaveAdminDashboardLayout() }),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.read.isSuccess).toBe(true));
+  act(() => result.current.save.mutate(layout, result.current.read.data!.etag));
+  await waitFor(() => expect(release).toBeTypeOf("function"));
+  act(() => setProfileId("profile-b"));
+  rerender();
+  await waitFor(() => expect(result.current.read.isSuccess).toBe(true));
+  act(() => release());
+  await waitFor(() => expect(result.current.save.isError).toBe(true));
+  expect(result.current.read.data).toEqual({ ...absent, etag: '"A"' });
+  expect(client.getQueryData(["admin", "dashboard", "layout"])).toBeUndefined();
 });

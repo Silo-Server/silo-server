@@ -1,6 +1,8 @@
 package catalogseed
 
 import (
+	"bytes"
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -55,5 +57,52 @@ func TestCatalogSeedSearchUpsertIDsIncludesChangedItemsAndEmbeddings(t *testing.
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("catalogSeedSearchUpsertIDs = %#v, want %#v", got, want)
+	}
+}
+
+// TestItemToRecordCarriesTheAdvisory proves the display-only advisory survives
+// an export. Unlike content_rating_age it cannot be re-derived from anything
+// else in the bundle, and the providers that supply it are rate limited, so an
+// export that dropped it would force a re-enrichment pass on restore.
+func TestItemToRecordCarriesTheAdvisory(t *testing.T) {
+	age := 13
+	record := itemToRecord(&models.MediaItem{
+		ContentID:      "advisory-1",
+		Type:           "movie",
+		Title:          "Jaws",
+		ContentRating:  "PG",
+		AdvisoryAge:    &age,
+		AdvisorySource: "commonsense",
+	})
+	if record.AdvisoryAge == nil || *record.AdvisoryAge != 13 {
+		t.Fatalf("AdvisoryAge = %v, want 13", record.AdvisoryAge)
+	}
+	if record.AdvisorySource != "commonsense" {
+		t.Fatalf("AdvisorySource = %q, want \"commonsense\"", record.AdvisorySource)
+	}
+	// The certification is a separate column and must not be disturbed.
+	if record.ContentRating != "PG" {
+		t.Fatalf("ContentRating = %q, want \"PG\"", record.ContentRating)
+	}
+}
+
+// TestItemToRecordOmitsAnAbsentAdvisory keeps a bundle free of empty advisory
+// keys, so an older bundle and a new one with no advisory decode identically.
+func TestItemToRecordOmitsAnAbsentAdvisory(t *testing.T) {
+	record := itemToRecord(&models.MediaItem{ContentID: "advisory-2", Type: "movie", Title: "Jaws"})
+	if record.AdvisoryAge != nil {
+		t.Fatalf("AdvisoryAge = %v, want nil", *record.AdvisoryAge)
+	}
+	if record.AdvisorySource != "" {
+		t.Fatalf("AdvisorySource = %q, want empty", record.AdvisorySource)
+	}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("marshaling record: %v", err)
+	}
+	for _, key := range []string{"advisory_age", "advisory_source"} {
+		if bytes.Contains(encoded, []byte(key)) {
+			t.Fatalf("bundle carries %q for an item with no advisory: %s", key, encoded)
+		}
 	}
 }

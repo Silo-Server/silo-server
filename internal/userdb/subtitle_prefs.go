@@ -17,6 +17,11 @@ func SetSubtitlePreference(db *sql.DB, pref SubtitlePreference) error {
 }
 
 func setSubtitlePreference(exec preferenceSettingsExecutor, pref SubtitlePreference) error {
+	// Same default pgstore applies: an empty UpdatedAt is "now", never an
+	// empty string a later read cannot parse.
+	if pref.UpdatedAt == "" {
+		pref.UpdatedAt = nowUTC()
+	}
 	if pref.ShowForcedSubtitles {
 		pref.HasShowForcedSubtitles = true
 	}
@@ -58,10 +63,14 @@ func setSubtitlePreference(exec preferenceSettingsExecutor, pref SubtitlePrefere
 // GetSubtitlePreference retrieves the subtitle preference for a profile
 // and series. Returns nil (not an error) if no preference exists.
 func GetSubtitlePreference(db *sql.DB, profileID, seriesID string) (*SubtitlePreference, error) {
+	return getSubtitlePreference(db, profileID, seriesID)
+}
+
+func getSubtitlePreference(exec preferenceSettingsExecutor, profileID, seriesID string) (*SubtitlePreference, error) {
 	var pref SubtitlePreference
 	var showForcedSubtitles sql.NullBool
 	var signatureJSON string
-	err := db.QueryRow(`
+	err := exec.QueryRow(`
 		SELECT profile_id, series_id, subtitle_language, subtitle_track_index,
 		       external_subtitle_path, subtitle_mode, subtitle_track_signature, show_forced_subtitles, updated_at
 		FROM subtitle_preferences

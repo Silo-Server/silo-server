@@ -33,11 +33,13 @@ func MergeMetadata(source, target *MetadataResult, locked []MetadataField, mode 
 	if !isLocked(FieldContentRating) {
 		mergeScalar(&target.ContentRating, source.ContentRating, mode)
 	}
+	mergeAdvisory(target, source, mode)
 	if !isLocked(FieldRating) {
 		mergeFloat(&target.Ratings.IMDB, source.Ratings.IMDB, mode)
 		mergeFloat(&target.Ratings.TMDB, source.Ratings.TMDB, mode)
 		mergeFloat(&target.Ratings.RTCritic, source.Ratings.RTCritic, mode)
 		mergeFloat(&target.Ratings.RTAudience, source.Ratings.RTAudience, mode)
+		mergeRatingSources(&target.RatingSources, source.RatingSources, mode)
 	}
 
 	// Year and release/air dates lock together under FieldReleaseDates.
@@ -112,11 +114,13 @@ func MergeGlobalMetadata(source, target *MetadataResult, locked []MetadataField,
 	if !isLocked(FieldContentRating) {
 		mergeScalar(&target.ContentRating, source.ContentRating, mode)
 	}
+	mergeAdvisory(target, source, mode)
 	if !isLocked(FieldRating) {
 		mergeFloat(&target.Ratings.IMDB, source.Ratings.IMDB, mode)
 		mergeFloat(&target.Ratings.TMDB, source.Ratings.TMDB, mode)
 		mergeFloat(&target.Ratings.RTCritic, source.Ratings.RTCritic, mode)
 		mergeFloat(&target.Ratings.RTAudience, source.Ratings.RTAudience, mode)
+		mergeRatingSources(&target.RatingSources, source.RatingSources, mode)
 	}
 
 	if !isLocked(FieldReleaseDates) {
@@ -272,6 +276,45 @@ func mergeProviderIDMap(target *map[string]string, source map[string]string) {
 		if (*target)[key] == "" {
 			(*target)[key] = value
 		}
+	}
+}
+
+// mergeRatingSources merges per-source ratings one source at a time, with the
+// scalar rating rules: fill-empty keeps a source the target already has, and
+// replace-unlocked takes the incoming score for every source the source
+// reports. Neither mode removes a source the incoming result lacks.
+func mergeRatingSources(target *map[string]RatingSource, source map[string]RatingSource, mode MergeMode) {
+	if len(source) == 0 {
+		return
+	}
+	if *target == nil {
+		*target = make(map[string]RatingSource, len(source))
+	}
+	for name, rating := range source {
+		if _, exists := (*target)[name]; exists && mode != MergeReplaceUnlocked {
+			continue
+		}
+		(*target)[name] = rating
+	}
+}
+
+// mergeAdvisory merges the advisory age and its source as one unit.
+//
+// Merging them as separate scalars would let a new age land beside the
+// previous provider's source and misattribute the recommendation. They move
+// together or not at all.
+//
+// The advisory is deliberately not gated on FieldContentRating: that lock
+// protects a manual certification correction, and the advisory is a different
+// number from a different body that no one can edit by hand. It has no lock of
+// its own for the same reason.
+func mergeAdvisory(target, source *MetadataResult, mode MergeMode) {
+	if source.AdvisoryAge <= 0 || source.AdvisorySource == "" {
+		return
+	}
+	if mode == MergeReplaceUnlocked || target.AdvisoryAge <= 0 {
+		target.AdvisoryAge = source.AdvisoryAge
+		target.AdvisorySource = source.AdvisorySource
 	}
 }
 

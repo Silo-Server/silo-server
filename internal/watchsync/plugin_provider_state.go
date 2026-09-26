@@ -17,8 +17,11 @@ const (
 	pluginProgressCursorKey  = "plugin.remote.progress"
 	pluginFavoritesCursorKey = "plugin.remote.favorites"
 	pluginWatchlistCursorKey = "plugin.remote.watchlist"
+	pluginRatingsCursorKey   = "plugin.remote.ratings"
 	maxRemoteStatePages      = 10_000
 	maxRemoteStateItems      = 100_000
+
+	watchSyncIncompleteRatingSnapshotWarning = "watch sync plugin returned unreadable ratings, so ratings missing from this read are left unchanged"
 )
 
 type pluginRemoteTraversal struct {
@@ -136,6 +139,76 @@ func (p *PluginProvider) FetchWatchlistBatch(
 ) (FavoriteImportBatch, error) {
 	return p.fetchListState(ctx, conn, pluginWatchlistCursorKey,
 		pluginv1.WatchSyncRemoteStateKind_WATCH_SYNC_REMOTE_STATE_KIND_WATCHLIST)
+}
+
+// FetchRatings reads the plugin's RATING states. A complete snapshot is the
+// full set for every rateable kind the plugin supports; an incremental
+// traversal covers no kind, so a rating missing from it stays unknown. A
+// complete snapshot with an unreadable rating row also covers no kind: the
+// dropped row's kind is unknowable, and its title would otherwise read as
+// unrated.
+func (p *PluginProvider) FetchRatings(
+	ctx context.Context,
+	_ ServerConfig,
+	conn Connection,
+) (RatingImportBatch, error) {
+	traversal, err := p.listRemoteState(ctx, conn, pluginRatingsCursorKey,
+		pluginv1.WatchSyncRemoteStateKind_WATCH_SYNC_REMOTE_STATE_KIND_RATING)
+	if err != nil {
+		return RatingImportBatch{}, err
+	}
+	batch := RatingImportBatch{
+		UpdatedCursors: cursorUpdate(pluginRatingsCursorKey, traversal.nextCursor),
+		Warnings:       traversal.warnings,
+	}
+	droppedRating := false
+	for _, state := range traversal.items {
+		// A RATING traversal must return rating state only. A missing item or
+		// rating payload may hide a title that is still rated, so it is
+		// unreadable like a malformed rating.
+		if state.GetRating() == nil {
+			batch.Warnings = append(batch.Warnings, "watch sync plugin returned remote state without a rating")
+			droppedRating = true
+			continue
+		}
+		row, err := remoteRatingFromProto(p.Key(), state)
+		if err != nil {
+			batch.Warnings = append(batch.Warnings, err.Error())
+			// A dropped tombstone reads as absent, which a complete snapshot
+			// already means removed. Only a dropped rating can hide a title
+			// that is still rated.
+			if !state.GetRating().GetRemoved() {
+				droppedRating = true
+			}
+			continue
+		}
+		// Silo rates only movies and series, so an episode rating is not an
+		// error, just nothing to sync.
+		if !row.Removed && !ratingSyncKind(row.Kind) {
+			continue
+		}
+		batch.Rows = append(batch.Rows, row)
+	}
+	if traversal.completeSnapshot {
+		if droppedRating {
+			batch.Warnings = append(batch.Warnings, watchSyncIncompleteRatingSnapshotWarning)
+		} else {
+			batch.SnapshotKinds = p.rateableKinds()
+		}
+	}
+	return batch, nil
+}
+
+// rateableKinds lists the rating kinds the plugin supports, movies first.
+func (p *PluginProvider) rateableKinds() []string {
+	var kinds []string
+	if p.supportsMedia(pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE) {
+		kinds = append(kinds, historyimport.KindMovie)
+	}
+	if p.supportsMedia(pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES) {
+		kinds = append(kinds, historyimport.KindSeries)
+	}
+	return kinds
 }
 
 func (p *PluginProvider) fetchListState(
@@ -295,9 +368,7 @@ func (p *PluginProvider) applyListEvents(
 	events := make([]*pluginv1.WatchSyncEvent, 0, len(items))
 	keys := make([]string, 0, len(items))
 	for _, item := range items {
-		media := mediaFromIdentity(item.MediaItemID, item.Kind, item.Title, item.Year,
-			item.IMDbID, item.TMDBID, item.TVDBID, "", 0,
-			item.SeriesIMDbID, item.SeriesTMDBID, item.SeriesTVDBID, 0, 0)
+		media := mediaFromLocalFavorite(item)
 		if !p.supportsMedia(media.GetMediaType()) {
 			result.Failed[item.MediaItemID] = unsupportedWatchSyncMediaMessage(media.GetMediaType())
 			continue
@@ -319,6 +390,70 @@ func (p *PluginProvider) applyListEvents(
 	}
 	applied, err := p.applyPluginEvents(ctx, conn, events, keys)
 	return mergeExportFailures(applied, result.Failed), err
+}
+
+// ExportRatings sends SET_RATING events. The event ID carries the rating and
+// the local rating time, so a retry of one change reuses its ID while a later
+// re-rate to the same value, which moves the rating time, gets a new one.
+func (p *PluginProvider) ExportRatings(ctx context.Context, _ ServerConfig, conn Connection, items []LocalRating) (ExportResult, error) {
+	return p.applyRatingEvents(ctx, conn, items, pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SET_RATING)
+}
+
+// RemoveRatings sends REMOVE_RATING events. The host does not record when a
+// rating was cleared, so the event ID carries the send time instead: it never
+// repeats for a later removal, and a retry in a later run gets a fresh ID,
+// which is safe because clearing an absent rating is a no-op for the plugin.
+// For the same reason a REJECTED removal is reported as failed, not not-found.
+func (p *PluginProvider) RemoveRatings(ctx context.Context, _ ServerConfig, conn Connection, items []LocalFavorite) (ExportResult, error) {
+	removals := make([]LocalRating, 0, len(items))
+	for _, item := range items {
+		removals = append(removals, LocalRating{LocalFavorite: item})
+	}
+	return p.applyRatingEvents(ctx, conn, removals, pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_REMOVE_RATING)
+}
+
+func (p *PluginProvider) applyRatingEvents(
+	ctx context.Context,
+	conn Connection,
+	items []LocalRating,
+	operation pluginv1.WatchSyncOperation,
+) (ExportResult, error) {
+	failed := make(map[string]string)
+	events := make([]*pluginv1.WatchSyncEvent, 0, len(items))
+	keys := make([]string, 0, len(items))
+	sentAt := p.now().UnixNano()
+	for _, item := range items {
+		media := mediaFromLocalFavorite(item.LocalFavorite)
+		if !p.supportsMedia(media.GetMediaType()) {
+			failed[item.MediaItemID] = unsupportedWatchSyncMediaMessage(media.GetMediaType())
+			continue
+		}
+		event := &pluginv1.WatchSyncEvent{
+			Operation:       operation,
+			Origin:          pluginv1.WatchSyncOrigin_WATCH_SYNC_ORIGIN_MANUAL,
+			Media:           media,
+			ProviderItemKey: item.ProviderItemKey,
+		}
+		if operation == pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SET_RATING {
+			if item.Rating < 1 || item.Rating > 10 {
+				failed[item.MediaItemID] = "watch sync rating must be from 1 to 10"
+				continue
+			}
+			ratedAt := int64(0)
+			if !item.RatedAt.IsZero() {
+				ratedAt = item.RatedAt.UnixNano()
+			}
+			event.EventId = fmt.Sprintf("%s:%s:%d:%d", operation.String(), item.MediaItemID, item.Rating, ratedAt)
+			event.OccurredAt = timestampOrNil(item.RatedAt)
+			event.Rating = int32(item.Rating)
+		} else {
+			event.EventId = fmt.Sprintf("%s:%s:%d", operation.String(), item.MediaItemID, sentAt)
+		}
+		events = append(events, event)
+		keys = append(keys, item.MediaItemID)
+	}
+	applied, err := p.applyPluginEvents(ctx, conn, events, keys)
+	return mergeExportFailures(applied, failed), err
 }
 
 func (p *PluginProvider) applyPluginEvents(
@@ -377,7 +512,14 @@ func (p *PluginProvider) applyPluginEventsDetailed(
 				pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_NO_CHANGE:
 				result.Sent = append(result.Sent, key)
 			case pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_REJECTED:
-				result.NotFound = append(result.NotFound, key)
+				// Clearing an absent rating must be APPLIED or NO_CHANGE, so a
+				// rejected removal is a failure to retry, not a missing title:
+				// reading it as cleared would let the rating come back.
+				if event.GetOperation() == pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_REMOVE_RATING {
+					result.Failed[key] = safeApplyMessage(apply, conn.AccessToken, conn.RefreshToken)
+				} else {
+					result.NotFound = append(result.NotFound, key)
+				}
 			case pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_RETRY:
 				fault := apply.GetFault()
 				if fault.GetCode() == pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_RATE_LIMITED {
@@ -411,6 +553,11 @@ func remoteWatchFromProto(provider string, state *pluginv1.WatchSyncRemoteState)
 	if err != nil {
 		return RemoteWatch{}, err
 	}
+	// The plugin contract defines SERIES for list and rating state only. A
+	// series-level watched row would otherwise expand to every local episode.
+	if identity.kind == historyimport.KindSeries {
+		return RemoteWatch{}, errors.New("watch sync plugin returned series-level watched state")
+	}
 	watched := state.GetWatched()
 	if watched.GetPlayCount() < 1 {
 		return RemoteWatch{}, errors.New("watch sync plugin returned watched state with no plays")
@@ -430,6 +577,9 @@ func remoteProgressFromProto(provider string, state *pluginv1.WatchSyncRemoteSta
 	identity, err := remoteIdentityFromProto(state)
 	if err != nil {
 		return RemoteProgress{}, err
+	}
+	if identity.kind == historyimport.KindSeries {
+		return RemoteProgress{}, errors.New("watch sync plugin returned series-level progress state")
 	}
 	progress := state.GetProgress()
 	if progress.GetProgressPercent() < 0 || progress.GetProgressPercent() >= 100 {
@@ -469,24 +619,64 @@ func remoteFavoriteFromProto(provider string, state *pluginv1.WatchSyncRemoteSta
 	if err != nil {
 		return RemoteFavorite{}, err
 	}
-	listedAt := time.Now().UTC()
+	row := identity.favorite(provider, providerItemKey)
+	row.FavoritedAt = time.Now().UTC()
 	if value := timePointer(listed.GetListedAt()); value != nil {
-		listedAt = *value
+		row.FavoritedAt = *value
 	}
-	return RemoteFavorite{
-		Provider: provider, ProviderItemKey: providerItemKey,
-		Kind: identity.kind, Title: identity.title, Year: identity.year,
-		IMDbID: identity.imdbID, TMDBID: identity.tmdbID, TVDBID: identity.tvdbID,
-		SeriesTitle: identity.seriesTitle, SeriesYear: identity.seriesYear,
-		SeriesIMDbID: identity.seriesIMDbID, SeriesTMDBID: identity.seriesTMDBID, SeriesTVDBID: identity.seriesTVDBID,
-		SeasonNumber: identity.season, EpisodeNumber: identity.episode, FavoritedAt: listedAt,
-	}, nil
+	return row, nil
+}
+
+// remoteRatingFromProto decodes one RATING state. A tombstone needs only its
+// provider key; any other state needs media and a rating from 1 to 10.
+func remoteRatingFromProto(provider string, state *pluginv1.WatchSyncRemoteState) (RemoteRating, error) {
+	rating := state.GetRating()
+	if rating == nil {
+		return RemoteRating{}, errors.New("watch sync plugin returned remote state without a rating")
+	}
+	providerItemKey := strings.TrimSpace(state.GetProviderItemKey())
+	if rating.GetRemoved() {
+		if providerItemKey == "" {
+			return RemoteRating{}, errors.New("watch sync plugin returned a rating tombstone without provider identity")
+		}
+		return RemoteRating{RemoteFavorite: RemoteFavorite{
+			Provider:        provider,
+			ProviderItemKey: providerItemKey,
+			Removed:         true,
+		}}, nil
+	}
+	identity, err := remoteIdentityFromProto(state)
+	if err != nil {
+		return RemoteRating{}, err
+	}
+	if rating.GetRating() < 1 || rating.GetRating() > 10 {
+		return RemoteRating{}, fmt.Errorf("watch sync plugin returned an out-of-range rating %d", rating.GetRating())
+	}
+	row := RemoteRating{
+		RemoteFavorite: identity.favorite(provider, providerItemKey),
+		Rating:         int(rating.GetRating()),
+	}
+	if value := timePointer(rating.GetRatedAt()); value != nil {
+		row.RatedAt = *value
+	}
+	return row, nil
 }
 
 type remoteIdentity struct {
 	kind, title, imdbID, tmdbID, tvdbID                   string
 	seriesTitle, seriesIMDbID, seriesTMDBID, seriesTVDBID string
 	year, seriesYear, season, episode                     int
+}
+
+func (identity remoteIdentity) favorite(provider, providerItemKey string) RemoteFavorite {
+	return RemoteFavorite{
+		Provider: provider, ProviderItemKey: providerItemKey,
+		Kind: identity.kind, Title: identity.title, Year: identity.year,
+		IMDbID: identity.imdbID, TMDBID: identity.tmdbID, TVDBID: identity.tvdbID,
+		SeriesTitle: identity.seriesTitle, SeriesYear: identity.seriesYear,
+		SeriesIMDbID: identity.seriesIMDbID, SeriesTMDBID: identity.seriesTMDBID, SeriesTVDBID: identity.seriesTVDBID,
+		SeasonNumber: identity.season, EpisodeNumber: identity.episode,
+	}
 }
 
 func remoteIdentityFromProto(state *pluginv1.WatchSyncRemoteState) (remoteIdentity, error) {
@@ -500,6 +690,8 @@ func remoteIdentityFromProto(state *pluginv1.WatchSyncRemoteState) (remoteIdenti
 		kind = historyimport.KindMovie
 	case pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE:
 		kind = historyimport.KindEpisode
+	case pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES:
+		kind = historyimport.KindSeries
 	default:
 		return remoteIdentity{}, errors.New("watch sync plugin returned unsupported remote media")
 	}

@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 type manifestReader map[string]ArtworkAvailability
@@ -16,9 +17,12 @@ func (m manifestReader) ArtworkAvailability(context.Context, []string) (map[stri
 
 type noProbeStore struct{ t *testing.T }
 
-func (s noProbeStore) Bucket() string { return "media" }
-func (s noProbeStore) PresignGetURL(_ context.Context, _, key string, _ time.Duration) (string, error) {
-	return "https://images.example/" + key, nil
+func (s noProbeStore) ResolveURLs(_ context.Context, keys []string) map[string]catalog.ResolvedImageURL {
+	out := make(map[string]catalog.ResolvedImageURL, len(keys))
+	for _, key := range keys {
+		out[key] = catalog.ResolvedImageURL{URL: "https://images.example/" + key}
+	}
+	return out
 }
 func (s noProbeStore) ObjectExists(context.Context, string, string) (bool, error) {
 	s.t.Fatal("catalog read checked storage")
@@ -37,7 +41,7 @@ func TestCatalogArtworkColdReadsNeverProbe(t *testing.T) {
 	for range 2 {
 		resolver := NewPluginImageResolver()
 		t.Cleanup(resolver.Close)
-		resolver.SetS3Presigner(noProbeStore{t}, time.Hour)
+		resolver.SetArtworkResolver(noProbeStore{t})
 		manifest := manifestReader{}
 		var paths []string
 		for i := range 37 {
@@ -140,5 +144,17 @@ func TestOriginalArtworkFallsBackToResizedVariant(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestStoredKeysResolveDirectlyWithoutAvailabilityReader(t *testing.T) {
+	// Local storage and direct S3 publish atomically, so the catalog trusts
+	// the manifest key it holds and asks for exactly that object.
+	resolver := NewPluginImageResolver()
+	t.Cleanup(resolver.Close)
+	resolver.SetArtworkResolver(noProbeStore{t})
+	key := "tmdb/series/1/seasons/3/poster/w780.rev.webp"
+	if got := resolver.ResolveImageURL(t.Context(), key, "large"); got != "https://images.example/"+key {
+		t.Fatalf("stored key was rewritten: %s", got)
 	}
 }

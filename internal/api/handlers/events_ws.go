@@ -144,7 +144,11 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	h.serveWebSocket(w, r, claims, boundProfileID, wsUpgrader)
+}
+
+func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, claims *auth.Claims, boundProfileID string, upgrader websocket.Upgrader) {
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		// The Android/KMP client has a long history of silent handshake
 		// failures here (gorilla writes the 4xx itself); log the exact
@@ -164,6 +168,8 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer conn.Close()
+	stopClose := context.AfterFunc(r.Context(), func() { _ = conn.Close() })
+	defer stopClose()
 	configureWebSocket(conn)
 	conn.SetReadLimit(maxEventsFrameBytes)
 
@@ -633,6 +639,9 @@ func (h *EventsHandler) snapshotForChannel(
 		runs, err := h.historyImports.ListActiveRuns(r.Context(), claims.UserID)
 		if err != nil {
 			return nil, err
+		}
+		for i := range runs {
+			runs[i] = historyimport.PublicRun(runs[i])
 		}
 		return marshalJSON(runs), nil
 	default:

@@ -242,7 +242,7 @@ function DeviceDetail({
   const capabilities = useSettingsCapabilities();
   const supportedKeys = useMemo(
     () =>
-      deviceSettingKeysForRevision(capabilities.data?.revision).filter((key) =>
+      deviceSettingKeysForRevision(capabilities.data?.manifest_revision).filter((key) =>
         settingsCapabilitiesSupportKey(capabilities.data, key),
       ),
     [capabilities.data],

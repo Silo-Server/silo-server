@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import type { PlayerChapter } from "@/player/types";
 import type { AudiobookPlayback } from "./useAudiobookPlayback";
+import { SEEK_CHOICES } from "@/lib/seekIntervals";
 import {
   DEFAULT_SKIP_BACK_SECONDS,
   DEFAULT_SKIP_FORWARD_SECONDS,
@@ -40,6 +41,11 @@ export function makePrefs(over: Partial<AudiobookPrefs> = {}): AudiobookPrefs {
     skipBack: DEFAULT_SKIP_BACK_SECONDS,
     skipForward: DEFAULT_SKIP_FORWARD_SECONDS,
     smartRewind: true,
+    choices: SEEK_CHOICES.audiobook,
+    canEditSkipIntervals: true,
+    hasSharedSkipIntervals: true,
+    sharedSkipIntervalsError: false,
+    isSavingSkipIntervals: false,
     setSkipBack: vi.fn(),
     setSkipForward: vi.fn(),
     setSmartRewind: vi.fn(),

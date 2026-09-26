@@ -56,7 +56,7 @@ func (h *BrandingHandler) HandleGetBranding(w http.ResponseWriter, r *http.Reque
 		MarkLightURL:     snap.AssetURL(branding.KindMarkLight),
 		FaviconURL:       snap.AssetURL(branding.KindFavicon),
 		LoginBgURL:       snap.AssetURL(branding.KindLoginBg),
-		StorageAvailable: h.svc.HasStorage(),
+		StorageAvailable: h.svc != nil && h.svc.HasStorage(),
 	})
 }
 
@@ -109,7 +109,7 @@ func (h *BrandingHandler) HandleUploadAsset(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if !h.svc.HasStorage() {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Asset upload storage (S3) is not configured")
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Asset upload storage is not configured")
 		return
 	}
 
@@ -140,11 +140,11 @@ func (h *BrandingHandler) HandleUploadAsset(w http.ResponseWriter, r *http.Reque
 	case errors.Is(err, branding.ErrUnsupportedImage):
 		writeError(w, http.StatusBadRequest, "bad_request", "Unsupported image type; use PNG, JPEG, WebP (or PNG/ICO/SVG for favicon)")
 		return
-	case errors.Is(err, branding.ErrStorageUnavailable):
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Asset upload storage (S3) is not configured")
-		return
 	case errors.Is(err, branding.ErrInvalidKind):
 		writeError(w, http.StatusBadRequest, "bad_request", "Unknown branding asset")
+		return
+	case errors.Is(err, branding.ErrStorageUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Asset storage is not configured")
 		return
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store asset")

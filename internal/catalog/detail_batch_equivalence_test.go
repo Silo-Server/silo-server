@@ -143,16 +143,17 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 		batchEquivExec(t, pool, `DELETE FROM people WHERE id = ANY($1)`, []int64{personActor1, personActor2, personDirector})
 		batchEquivExec(t, pool, `DELETE FROM media_item_localizations WHERE content_id = ANY($1)`, ids)
 		// Deleting the folder cascades the extra's media_files row; deleting
-		// the items cascades item_videos and media_extras.
+		// the items cascades item_videos, media_item_rating_sources and
+		// media_extras.
 		batchEquivExec(t, pool, `DELETE FROM media_folders WHERE name = $1`, extraFolderName)
 		batchEquivExec(t, pool, `DELETE FROM media_items WHERE content_id = ANY($1)`, ids)
 	})
 
 	insertItem := func(contentID, mediaType, title, overview, rating, originalLanguage string) {
 		batchEquivExec(t, pool, `
-			INSERT INTO media_items (content_id, type, title, genres, overview, content_rating, default_metadata_language, original_language)
-			VALUES ($1, $2, $3, '{}'::text[], $4, $5, 'en', $6)
-		`, contentID, mediaType, title, overview, rating, originalLanguage)
+			INSERT INTO media_items (content_id, type, title, genres, overview, content_rating, content_rating_age, default_metadata_language, original_language)
+			VALUES ($1, $2, $3, '{}'::text[], $4, $5, $7, 'en', $6)
+		`, contentID, mediaType, title, overview, rating, originalLanguage, access.StoredRating(rating))
 	}
 	// movieA: localized into fr, credited, has files. content_rating PG -> visible.
 	insertItem(movieA, "movie", "Movie A", "Movie A overview (en)", "PG", "en")
@@ -206,6 +207,20 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 	insertVideo(suffix+10, movieA, "v1", "trailer", true, 0)
 	insertVideo(suffix+11, movieA, "v2", "featurette", false, 1)
 	insertVideo(suffix+12, series, "v3", "teaser", false, 0)
+
+	// Per-source ratings on movieA and the series: exercises the batched
+	// ratingSourceRepo.ListByContentIDs prefetch against per-item
+	// GetByContentID, including display order and a NULL vote count.
+	insertRatingSource := func(contentID, source string, score float64, votes *int64) {
+		batchEquivExec(t, pool, `
+			INSERT INTO media_item_rating_sources (content_id, source, score, votes, provider)
+			VALUES ($1, $2, $3, $4, 'mdblist')
+		`, contentID, source, score, votes)
+	}
+	imdbVotes := int64(673852)
+	insertRatingSource(movieA, models.RatingSourceMDBList, 86, nil)
+	insertRatingSource(movieA, models.RatingSourceIMDB, 81, &imdbVotes)
+	insertRatingSource(series, models.RatingSourceLetterboxd, 80, nil)
 
 	// A local extra on movieA backed by a live media_files row: exercises the
 	// batched extraRepo.ListWithFilesByParentIDs prefetch against the per-item
@@ -261,9 +276,9 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 		MetadataLanguageOverrides: map[string]string{
 			"no": access.OriginalMetadataLanguage,
 		},
-		MaxContentRating: "PG-13",
-		UserID:           1,
-		ProfileID:        "profile-1",
+		MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"},
+		UserID:         1,
+		ProfileID:      "profile-1",
 	}
 
 	visibleIDs := []string{movieA, movieB, series}
@@ -323,6 +338,14 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 	}
 	if got := batch[series]; len(got.Videos) != 1 || got.Videos[0].Kind != "teaser" {
 		t.Fatalf("series videos prefetch mismatch: %#v", got.Videos)
+	}
+	if got := batch[movieA]; len(got.RatingSources) != 2 ||
+		got.RatingSources[0].Source != models.RatingSourceIMDB || got.RatingSources[0].Votes == nil || *got.RatingSources[0].Votes != imdbVotes ||
+		got.RatingSources[1].Source != models.RatingSourceMDBList || got.RatingSources[1].Votes != nil {
+		t.Fatalf("movieA rating sources prefetch mismatch: %#v", got.RatingSources)
+	}
+	if got := batch[series]; len(got.RatingSources) != 1 || got.RatingSources[0].Score != 80 {
+		t.Fatalf("series rating sources prefetch mismatch: %#v", got.RatingSources)
 	}
 	if got := batch[movieA]; len(got.Extras) != 1 || got.Extras[0].ContentID != extraA ||
 		got.Extras[0].DurationSeconds != 120 || got.Extras[0].FileID == 0 {

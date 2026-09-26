@@ -1,0 +1,24 @@
+{
+  "items": [
+    {
+      "id": "entry",
+      "content_id": "movie",
+      "device_id": "device-one",
+      "media_file_id": "42",
+      "file_size": 0,
+      "bytes_sent": 0,
+      "kind": "",
+      "status": "ready",
+      "quality": "original",
+      "effective_quality": "original",
+      "delivery_format": "original",
+      "target_bitrate_kbps": 0,
+      "revision": 1,
+      "created_at": "2026-01-02T03:04:05.000Z"
+    }
+  ],
+  "skipped": [],
+  "page": {
+    "has_more": false
+  }
+}

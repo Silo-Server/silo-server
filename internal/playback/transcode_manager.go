@@ -81,6 +81,7 @@ type TranscodeManager struct {
 	// falls through to ResolveToneMapExecutor and StartTranscode.
 	resolveToneMapExecutor func(context.Context, TranscodeOpts) (TranscodeOpts, error)
 	startTranscode         func(context.Context, TranscodeOpts) (*TranscodeSession, error)
+	autoTranscodePipeline  func(context.Context, TranscodeOpts) *AutoTranscodePipeline
 
 	transcodeMu sync.RWMutex
 	transcodes  map[string]*TranscodeSession
@@ -679,8 +680,11 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		BasePlayMethod:         method,
 		TranscodeNodeURL:       card.TranscodeNodeURL,
 		TranscodeTransportID:   card.TranscodeTransportID,
+		RoutingNetworkProvider: card.RoutingNetworkProvider,
+		StreamLocation:         card.StreamLocation,
 		RoutingWorkload:        card.RoutingWorkload,
 		RoutingExecution:       card.RoutingExecution,
+		RoutingExecutionNodeID: card.RoutingExecutionNodeID,
 		RoutingEgress:          card.RoutingEgress,
 		RoutingEgressNodeID:    card.RoutingEgressNodeID,
 		AudioTrackIndex:        card.AudioTrackIndex,
@@ -708,6 +712,12 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		SubtitleTrackIndex: card.SubtitleTrackIndex,
 		SubtitleBurnIn:     card.SubtitleBurnIn,
 		SegmentDuration:    card.SegmentDuration,
+	}
+	if card.IsTranscodeRecipe() {
+		s.OutputContainer = HLSOutputContainer(card.TranscodeOpts("", "", nil))
+		s.OutputProtocol = OutputProtocolHLS
+	} else if method == PlayRemux {
+		s.OutputContainer, s.OutputProtocol = OutputContainerFMP4, OutputProtocolHTTP
 	}
 	// Enforce the same per-user concurrency caps a fresh StartSession would, so a
 	// replayed token cannot reconstruct past the user's limit. Reconstructing the
@@ -916,7 +926,15 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	if startTranscode == nil {
 		startTranscode = StartTranscode
 	}
-	transcodeSession, err := startTranscode(ctx, opts)
+	newPipeline := m.autoTranscodePipeline
+	if newPipeline == nil {
+		newPipeline = NewAutoTranscodePipeline
+	}
+	// Under hw_accel=auto a reconstruct walks the same safer paths as a fresh
+	// start, keeping a slow process rather than duplicating it. Every other
+	// recipe starts once without waiting, as segment requests already wait for
+	// a reconstructed process.
+	transcodeSession, err := StartReconstructTranscode(ctx, newPipeline(ctx, opts), TranscodeStartup{Start: startTranscode})
 	if err != nil {
 		slog.ErrorContext(ctx, "reconstruct transcode start failed", "component", "playback", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		return nil, err

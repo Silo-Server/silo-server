@@ -1,0 +1,10 @@
+{
+  "outcome": "replayed",
+  "accepted": {
+    "sequence": 42,
+    "position": 120,
+    "is_paused": false
+  },
+  "stop_id": "22222222-2222-4222-8222-222222222222",
+  "history_id": "33333333-3333-4333-8333-333333333333"
+}

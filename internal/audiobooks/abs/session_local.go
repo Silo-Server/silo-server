@@ -184,9 +184,10 @@ func (h *Handler) syncOneLocalSession(ctx context.Context, a ctxAuth, access cat
 				ProfileID:      a.ProfileID,
 				ContentID:      sess.LibraryItemID,
 				CurrentSeconds: sess.CurrentTime,
-				// For audiobooks MediaItem.Runtime holds total seconds (set by the
-				// scanner), matching what the ABS libraries handler reads.
-				DurationSeconds: float64(item.Runtime),
+				// MediaItem.Runtime is the catalog's minute unit; ABS progress
+				// stores seconds. The media store hydrates this from active-file
+				// stats when available.
+				DurationSeconds: audiobookDurationSeconds(item),
 				UpdatedAt:       time.Now(),
 			})
 		} else {

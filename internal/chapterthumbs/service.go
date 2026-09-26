@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -87,10 +88,7 @@ type SettingsReader interface {
 	Get(ctx context.Context, key string) (string, error)
 }
 
-type ObjectStore interface {
-	PutObject(ctx context.Context, bucket, key string, data []byte) error
-	Bucket() string
-}
+type ObjectStore = blobstore.Store
 
 type ThumbnailNotifier interface {
 	ChapterThumbnailReady(ctx context.Context, fileID int, chapterIndex int, thumbnailPath string, thumbnailThumbhash string)
@@ -858,12 +856,11 @@ func (s *Service) uploadChapterThumbnail(ctx context.Context, fileID, chapterInd
 		return "", "", fmt.Errorf("generate variants: %w", err)
 	}
 
-	bucket := s.store.Bucket()
 	var originalKey string
 	var w300Data []byte
 	for _, variant := range result.Variants {
 		key := filepath.ToSlash(fmt.Sprintf("chapter-images/%d/%d/%s%s", fileID, chapterIndex, variant.Key, result.Ext))
-		if err := s.store.PutObject(ctx, bucket, key, variant.Data); err != nil {
+		if err := s.store.Put(ctx, key, variant.Data); err != nil {
 			return "", "", fmt.Errorf("upload %s: %w", key, err)
 		}
 		if variant.Key == "original" {

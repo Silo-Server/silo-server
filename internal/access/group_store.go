@@ -14,74 +14,83 @@ import (
 
 // Group is an access group with its admin-facing member count.
 type Group struct {
-	ID                       int64
-	Name                     string
-	Description              string
-	LibraryIDs               []int
-	MaxPlaybackQuality       string
-	DownloadAllowed          bool
-	DownloadTranscodeAllowed bool
-	TranscodeAllowed         bool
-	AudioTranscodeAllowed    bool
-	MaxStreams               int
-	MaxTranscodes            int
-	AllowedPermissions       []string
-	RequestsAllowed          bool
-	IsDefault                bool
-	MemberCount              int
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
+	ID                         int64
+	Revision                   int64
+	Name                       string
+	Description                string
+	LibraryIDs                 []int
+	MaxPlaybackQuality         string
+	DownloadAllowed            bool
+	DownloadTranscodeAllowed   bool
+	TranscodeAllowed           bool
+	AudioTranscodeAllowed      bool
+	MaxStreams                 int
+	MaxTranscodes              int
+	MaxRemoteStreamBitrateKbps int
+	MaxLocalStreamBitrateKbps  int
+	AllowedPermissions         []string
+	RequestsAllowed            bool
+	IsDefault                  bool
+	MemberCount                int
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
 }
 
 // Policy returns the group's policy layer as consumed by ApplyGroupPolicy.
 func (g Group) Policy() GroupPolicy {
 	return GroupPolicy{
-		ID:                       g.ID,
-		LibraryIDs:               cloneInts(g.LibraryIDs),
-		MaxPlaybackQuality:       g.MaxPlaybackQuality,
-		DownloadAllowed:          g.DownloadAllowed,
-		DownloadTranscodeAllowed: g.DownloadTranscodeAllowed,
-		TranscodeAllowed:         g.TranscodeAllowed,
-		AudioTranscodeAllowed:    g.AudioTranscodeAllowed,
-		MaxStreams:               g.MaxStreams,
-		MaxTranscodes:            g.MaxTranscodes,
-		AllowedPermissions:       cloneStrings(g.AllowedPermissions),
-		RequestsAllowed:          g.RequestsAllowed,
+		ID:                         g.ID,
+		LibraryIDs:                 cloneInts(g.LibraryIDs),
+		MaxPlaybackQuality:         g.MaxPlaybackQuality,
+		DownloadAllowed:            g.DownloadAllowed,
+		DownloadTranscodeAllowed:   g.DownloadTranscodeAllowed,
+		TranscodeAllowed:           g.TranscodeAllowed,
+		AudioTranscodeAllowed:      g.AudioTranscodeAllowed,
+		MaxStreams:                 g.MaxStreams,
+		MaxTranscodes:              g.MaxTranscodes,
+		MaxRemoteStreamBitrateKbps: g.MaxRemoteStreamBitrateKbps,
+		MaxLocalStreamBitrateKbps:  g.MaxLocalStreamBitrateKbps,
+		AllowedPermissions:         cloneStrings(g.AllowedPermissions),
+		RequestsAllowed:            g.RequestsAllowed,
 	}
 }
 
 // CreateGroupInput contains the required fields for creating an access group.
 type CreateGroupInput struct {
-	Name                     string
-	Description              string
-	LibraryIDs               []int
-	MaxPlaybackQuality       string
-	DownloadAllowed          bool
-	DownloadTranscodeAllowed bool
-	TranscodeAllowed         bool
-	AudioTranscodeAllowed    bool
-	MaxStreams               int
-	MaxTranscodes            int
-	AllowedPermissions       []string
-	RequestsAllowed          bool
-	IsDefault                bool
+	Name                       string
+	Description                string
+	LibraryIDs                 []int
+	MaxPlaybackQuality         string
+	DownloadAllowed            bool
+	DownloadTranscodeAllowed   bool
+	TranscodeAllowed           bool
+	AudioTranscodeAllowed      bool
+	MaxStreams                 int
+	MaxTranscodes              int
+	MaxRemoteStreamBitrateKbps int
+	MaxLocalStreamBitrateKbps  int
+	AllowedPermissions         []string
+	RequestsAllowed            bool
+	IsDefault                  bool
 }
 
 // UpdateGroupInput contains optional fields for updating an access group.
 type UpdateGroupInput struct {
-	Name                     *string
-	Description              *string
-	LibraryIDs               *[]int
-	MaxPlaybackQuality       *string
-	DownloadAllowed          *bool
-	DownloadTranscodeAllowed *bool
-	TranscodeAllowed         *bool
-	AudioTranscodeAllowed    *bool
-	MaxStreams               *int
-	MaxTranscodes            *int
-	AllowedPermissions       *[]string
-	RequestsAllowed          *bool
-	IsDefault                *bool
+	Name                       *string
+	Description                *string
+	LibraryIDs                 *[]int
+	MaxPlaybackQuality         *string
+	DownloadAllowed            *bool
+	DownloadTranscodeAllowed   *bool
+	TranscodeAllowed           *bool
+	AudioTranscodeAllowed      *bool
+	MaxStreams                 *int
+	MaxTranscodes              *int
+	MaxRemoteStreamBitrateKbps *int
+	MaxLocalStreamBitrateKbps  *int
+	AllowedPermissions         *[]string
+	RequestsAllowed            *bool
+	IsDefault                  *bool
 }
 
 var (
@@ -108,8 +117,8 @@ func NewGroupStore(pool *pgxpool.Pool) *GroupStore {
 
 const accessGroupSelectColumns = `g.id, g.name, g.description, g.library_ids, g.max_playback_quality,
 	g.download_allowed, g.download_transcode_allowed, g.transcode_allowed, g.audio_transcode_allowed,
-	g.max_streams, g.max_transcodes,
-	g.allowed_permissions, g.requests_allowed, g.is_default, g.created_at, g.updated_at`
+	g.max_streams, g.max_transcodes, g.max_remote_stream_bitrate_kbps, g.max_local_stream_bitrate_kbps,
+	g.allowed_permissions, g.requests_allowed, g.is_default, g.created_at, g.updated_at, g.configuration_revision`
 
 type groupScanner interface {
 	Scan(dest ...any) error
@@ -129,11 +138,14 @@ func scanGroup(row groupScanner) (*Group, error) {
 		&g.AudioTranscodeAllowed,
 		&g.MaxStreams,
 		&g.MaxTranscodes,
+		&g.MaxRemoteStreamBitrateKbps,
+		&g.MaxLocalStreamBitrateKbps,
 		&g.AllowedPermissions,
 		&g.RequestsAllowed,
 		&g.IsDefault,
 		&g.CreatedAt,
 		&g.UpdatedAt,
+		&g.Revision,
 		&g.MemberCount,
 	); err != nil {
 		return nil, err
@@ -153,6 +165,8 @@ func scanGroupPolicy(row groupScanner) (*GroupPolicy, error) {
 		&p.AudioTranscodeAllowed,
 		&p.MaxStreams,
 		&p.MaxTranscodes,
+		&p.MaxRemoteStreamBitrateKbps,
+		&p.MaxLocalStreamBitrateKbps,
 		&p.AllowedPermissions,
 		&p.RequestsAllowed,
 	); err != nil {
@@ -218,6 +232,9 @@ func (s *GroupStore) Create(ctx context.Context, input CreateGroupInput) (*Group
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := lockGroupWriters(ctx, tx); err != nil {
+		return nil, err
+	}
 	if input.IsDefault {
 		if _, err := tx.Exec(ctx, `UPDATE access_groups SET is_default = false WHERE is_default`); err != nil {
 			return nil, fmt.Errorf("clearing previous default access group: %w", err)
@@ -229,10 +246,10 @@ func (s *GroupStore) Create(ctx context.Context, input CreateGroupInput) (*Group
 		INSERT INTO access_groups (
 			name, description, library_ids, max_playback_quality,
 			download_allowed, download_transcode_allowed, transcode_allowed, audio_transcode_allowed,
-			max_streams, max_transcodes,
+			max_streams, max_transcodes, max_remote_stream_bitrate_kbps, max_local_stream_bitrate_kbps,
 			allowed_permissions, requests_allowed, is_default
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		RETURNING id`,
 		name,
 		input.Description,
@@ -244,6 +261,8 @@ func (s *GroupStore) Create(ctx context.Context, input CreateGroupInput) (*Group
 		input.AudioTranscodeAllowed,
 		input.MaxStreams,
 		input.MaxTranscodes,
+		input.MaxRemoteStreamBitrateKbps,
+		input.MaxLocalStreamBitrateKbps,
 		input.AllowedPermissions,
 		input.RequestsAllowed,
 		input.IsDefault,
@@ -254,10 +273,14 @@ func (s *GroupStore) Create(ctx context.Context, input CreateGroupInput) (*Group
 		}
 		return nil, fmt.Errorf("creating access group: %w", err)
 	}
+	created, err := ReadGroupInTransaction(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("committing access group create: %w", err)
 	}
-	return s.Get(ctx, id)
+	return created, nil
 }
 
 // Update modifies an access group. Setting IsDefault true clears the previous
@@ -265,6 +288,13 @@ func (s *GroupStore) Create(ctx context.Context, input CreateGroupInput) (*Group
 // revisions in the same transaction. The current default cannot be demoted
 // directly (which would leave no default) — promote another group instead.
 func (s *GroupStore) Update(ctx context.Context, id int64, input UpdateGroupInput) (*Group, error) {
+	return s.UpdateConditional(ctx, id, input, GroupPrecondition{Any: true})
+}
+
+func (s *GroupStore) UpdateConditional(ctx context.Context, id int64, input UpdateGroupInput, guard GroupPrecondition) (*Group, error) {
+	if !guard.valid() {
+		return nil, ErrGroupInvalidPrecondition
+	}
 	sets := []string{}
 	args := []any{}
 	arg := 1
@@ -320,6 +350,16 @@ func (s *GroupStore) Update(ctx context.Context, id int64, input UpdateGroupInpu
 		args = append(args, *input.MaxTranscodes)
 		arg++
 	}
+	if input.MaxRemoteStreamBitrateKbps != nil {
+		sets = append(sets, fmt.Sprintf("max_remote_stream_bitrate_kbps = $%d", arg))
+		args = append(args, *input.MaxRemoteStreamBitrateKbps)
+		arg++
+	}
+	if input.MaxLocalStreamBitrateKbps != nil {
+		sets = append(sets, fmt.Sprintf("max_local_stream_bitrate_kbps = $%d", arg))
+		args = append(args, *input.MaxLocalStreamBitrateKbps)
+		arg++
+	}
 	if input.AllowedPermissions != nil {
 		sets = append(sets, fmt.Sprintf("allowed_permissions = $%d", arg))
 		args = append(args, *input.AllowedPermissions)
@@ -335,9 +375,6 @@ func (s *GroupStore) Update(ctx context.Context, id int64, input UpdateGroupInpu
 		args = append(args, *input.IsDefault)
 		arg++
 	}
-	if len(sets) == 0 {
-		return s.Get(ctx, id)
-	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -345,21 +382,17 @@ func (s *GroupStore) Update(ctx context.Context, id int64, input UpdateGroupInpu
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	qualityChanged := false
-	if input.MaxPlaybackQuality != nil {
-		var current string
-		if err := tx.QueryRow(ctx, `
-			SELECT max_playback_quality
-			FROM access_groups
-			WHERE id = $1
-			FOR UPDATE`, id).Scan(&current); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return nil, ErrGroupNotFound
-			}
-			return nil, fmt.Errorf("loading access group for update: %w", err)
-		}
-		qualityChanged = NormalizePlaybackQuality(current) != NormalizePlaybackQuality(*input.MaxPlaybackQuality)
+	if err := lockGroupWriters(ctx, tx); err != nil {
+		return nil, err
 	}
+	currentGroup, err := lockGroup(ctx, tx, id, guard)
+	if err != nil {
+		return nil, err
+	}
+	if len(sets) == 0 {
+		return currentGroup, nil
+	}
+	qualityChanged := input.MaxPlaybackQuality != nil && NormalizePlaybackQuality(currentGroup.MaxPlaybackQuality) != NormalizePlaybackQuality(*input.MaxPlaybackQuality)
 	if input.IsDefault != nil && *input.IsDefault {
 		if _, err := tx.Exec(ctx, `
 			UPDATE access_groups
@@ -369,21 +402,8 @@ func (s *GroupStore) Update(ctx context.Context, id int64, input UpdateGroupInpu
 			return nil, fmt.Errorf("clearing previous default access group: %w", err)
 		}
 	}
-	if input.IsDefault != nil && !*input.IsDefault {
-		var isDefault bool
-		if err := tx.QueryRow(ctx, `
-			SELECT is_default
-			FROM access_groups
-			WHERE id = $1
-			FOR UPDATE`, id).Scan(&isDefault); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return nil, ErrGroupNotFound
-			}
-			return nil, fmt.Errorf("loading access group for update: %w", err)
-		}
-		if isDefault {
-			return nil, ErrDefaultGroupRequired
-		}
+	if input.IsDefault != nil && !*input.IsDefault && currentGroup.IsDefault {
+		return nil, ErrDefaultGroupRequired
 	}
 
 	sets = append(sets, "updated_at = NOW()")
@@ -407,37 +427,45 @@ func (s *GroupStore) Update(ctx context.Context, id int64, input UpdateGroupInpu
 			return nil, fmt.Errorf("bumping access group member revisions: %w", err)
 		}
 	}
+	updated, err := ReadGroupInTransaction(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("committing access group update: %w", err)
 	}
-	return s.Get(ctx, id)
+	return updated, nil
 }
 
 // Delete removes an access group. User memberships are cleared by the FK.
 // The default group cannot be deleted — promote another group to default
 // first — so new-user creation always finds a governing group.
 func (s *GroupStore) Delete(ctx context.Context, id int64) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM access_groups WHERE id = $1 AND NOT is_default`, id)
+	return s.DeleteConditional(ctx, id, GroupPrecondition{Any: true})
+}
+func (s *GroupStore) DeleteConditional(ctx context.Context, id int64, guard GroupPrecondition) error {
+	if !guard.valid() {
+		return ErrGroupInvalidPrecondition
+	}
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("deleting access group: %w", err)
+		return err
 	}
-	if tag.RowsAffected() == 0 {
-		var isDefault bool
-		err := s.pool.QueryRow(ctx, `SELECT is_default FROM access_groups WHERE id = $1`, id).Scan(&isDefault)
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-			return ErrGroupNotFound
-		case err != nil:
-			return fmt.Errorf("checking access group default flag: %w", err)
-		case isDefault:
-			return ErrDefaultGroupRequired
-		default:
-			// The row reappeared between DELETE and the check; treat the
-			// original miss as not-found rather than retrying.
-			return ErrGroupNotFound
-		}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err = lockGroupWriters(ctx, tx); err != nil {
+		return err
 	}
-	return nil
+	row, err := lockGroup(ctx, tx, id, guard)
+	if err != nil {
+		return err
+	}
+	if row.IsDefault {
+		return ErrDefaultGroupRequired
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM access_groups WHERE id=$1`, id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // GetPolicyForUser returns the access-group policy for a user, or nil when
@@ -448,10 +476,20 @@ func (s *GroupStore) GetPolicyForUser(ctx context.Context, userID int) (*GroupPo
 		// "no access groups", not a failure.
 		return nil, nil
 	}
-	policy, err := scanGroupPolicy(s.pool.QueryRow(ctx, `
+	return groupPolicyForUser(ctx, s.pool, userID)
+}
+
+// GroupPolicyInTransaction reads group authority in the caller's snapshot.
+func GroupPolicyInTransaction(ctx context.Context, tx pgx.Tx, userID int) (*GroupPolicy, error) {
+	return groupPolicyForUser(ctx, tx, userID)
+}
+func groupPolicyForUser(ctx context.Context, db interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, userID int) (*GroupPolicy, error) {
+	policy, err := scanGroupPolicy(db.QueryRow(ctx, `
 		SELECT g.id, g.library_ids, g.max_playback_quality, g.download_allowed,
 			g.download_transcode_allowed, g.transcode_allowed, g.audio_transcode_allowed,
-			g.max_streams, g.max_transcodes,
+			g.max_streams, g.max_transcodes, g.max_remote_stream_bitrate_kbps, g.max_local_stream_bitrate_kbps,
 			g.allowed_permissions, g.requests_allowed
 		FROM users u
 		JOIN access_groups g ON g.id = u.access_group_id
@@ -468,4 +506,84 @@ func (s *GroupStore) GetPolicyForUser(ctx context.Context, userID int) (*GroupPo
 func isGroupDuplicate(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// GroupPrecondition explicitly distinguishes a current-resource wildcard from a revision.
+type GroupPrecondition struct {
+	Revision int64
+	Any      bool
+}
+
+func (g GroupPrecondition) valid() bool { return g.Any && g.Revision == 0 || !g.Any && g.Revision > 0 }
+
+var ErrGroupInvalidPrecondition = errors.New("invalid access group precondition")
+var ErrGroupRevisionConflict = errors.New("access group configuration changed")
+
+type GroupRevisionConflict struct{ Current *Group }
+
+func (e *GroupRevisionConflict) Error() string { return ErrGroupRevisionConflict.Error() }
+func (e *GroupRevisionConflict) Unwrap() error { return ErrGroupRevisionConflict }
+
+// Serialize the small administrator-maintained configuration set before row
+// locks. Default promotion edits a sibling, so target-first locks can deadlock.
+func lockGroupWriters(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `LOCK TABLE access_groups IN SHARE ROW EXCLUSIVE MODE`)
+	return err
+}
+
+// ReadGroupInTransaction reads group configuration using the caller's existing transaction.
+// Callers coordinating user assignment must acquire their group lock before user locks.
+func ReadGroupInTransaction(ctx context.Context, tx pgx.Tx, id int64) (*Group, error) {
+	g, err := scanGroup(tx.QueryRow(ctx, `SELECT `+accessGroupSelectColumns+`,(SELECT count(*)::int FROM users u WHERE u.access_group_id=g.id) FROM access_groups g WHERE g.id=$1`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrGroupNotFound
+	}
+	return g, err
+}
+func lockGroup(ctx context.Context, tx pgx.Tx, id int64, guard GroupPrecondition) (*Group, error) {
+	if _, err := tx.Exec(ctx, `SELECT id FROM access_groups WHERE id=$1 FOR UPDATE`, id); err != nil {
+		return nil, err
+	}
+	g, err := ReadGroupInTransaction(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !guard.Any && guard.Revision != g.Revision {
+		return nil, &GroupRevisionConflict{Current: g}
+	}
+	return g, nil
+}
+
+type GroupPageKey struct{ ID int64 }
+
+func (s *GroupStore) ListPage(ctx context.Context, after *GroupPageKey, limit int) ([]Group, bool, error) {
+	if limit < 1 {
+		limit = 50
+	}
+	limit = min(limit, 200)
+	var id int64
+	if after != nil {
+		id = after.ID
+	}
+	rows, err := s.pool.Query(ctx, `SELECT `+accessGroupSelectColumns+`,(SELECT count(*)::int FROM users u WHERE u.access_group_id=g.id) FROM access_groups g WHERE g.id>$1 ORDER BY g.id LIMIT $2`, id, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	out := []Group{}
+	for rows.Next() {
+		g, err := scanGroup(rows)
+		if err != nil {
+			return nil, false, err
+		}
+		out = append(out, *g)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, false, err
+	}
+	more := len(out) > limit
+	if more {
+		out = out[:limit]
+	}
+	return out, more, nil
 }

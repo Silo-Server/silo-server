@@ -1,3 +1,4 @@
+import { buildLibraryCollectionCatalogHref } from "./catalogSearchParams";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { HomeSectionItemsResponse, ResolvedSection } from "@/api/types";
@@ -48,7 +49,9 @@ export default function LibraryRecommended({
   const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
   const [inFlightIds, setInFlightIds] = useState<Set<string>>(new Set());
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
-  const activeSectionIdsRef = useRef<Set<string>>(new Set());
+  // Every reset below starts a new load generation. A request only reports
+  // back into the generation that started it.
+  const loadGenerationRef = useRef(0);
 
   const layout = useMemo(() => data?.sections ?? [], [data?.sections]);
   const layoutResetKey = layout
@@ -60,7 +63,6 @@ export default function LibraryRecommended({
 
   useEffect(() => {
     const activeIds = layout.map((section) => section.id);
-    activeSectionIdsRef.current = new Set(activeIds);
     setLoadedSections(
       collectCachedHomeSections(layout, (sectionId) =>
         queryClient.getQueryData<HomeSectionItemsResponse>(
@@ -73,7 +75,10 @@ export default function LibraryRecommended({
     setCompletedIds(new Set());
 
     return () => {
-      activeSectionIdsRef.current = new Set();
+      // Cancelling settles each in-flight request with its pre-fetch data, or
+      // a CancelledError when there was none. Neither answers the next
+      // generation, which re-requests these sections itself.
+      loadGenerationRef.current += 1;
       activeIds.forEach((sectionId) => {
         void queryClient.cancelQueries({
           queryKey: sectionKeys.libraryItems(libraryId, sectionId),
@@ -94,6 +99,7 @@ export default function LibraryRecommended({
 
     if (nextIds.length === 0) return;
 
+    const generation = loadGenerationRef.current;
     setInFlightIds((prev) => {
       const next = new Set(prev);
       nextIds.forEach((id) => next.add(id));
@@ -108,7 +114,7 @@ export default function LibraryRecommended({
           staleTime: SECTION_STALE_TIME,
         })
         .then((response) => {
-          if (!activeSectionIdsRef.current.has(sectionId)) return;
+          if (loadGenerationRef.current !== generation) return;
 
           setLoadedSections((prev) => {
             const next = new Map(prev);
@@ -128,7 +134,7 @@ export default function LibraryRecommended({
           });
         })
         .catch(() => {
-          if (!activeSectionIdsRef.current.has(sectionId)) return;
+          if (loadGenerationRef.current !== generation) return;
 
           setFailedIds((prev) => {
             const next = new Set(prev);
@@ -142,7 +148,7 @@ export default function LibraryRecommended({
           });
         })
         .finally(() => {
-          if (!activeSectionIdsRef.current.has(sectionId)) return;
+          if (loadGenerationRef.current !== generation) return;
 
           setInFlightIds((prev) => {
             if (!prev.has(sectionId)) return prev;
@@ -326,16 +332,21 @@ function PinnedCollectionCarousel({
   collectionId: string;
   name: string;
 }) {
-  const { data: items, isLoading } = useLibraryCollectionItems(libraryId, collectionId);
+  const { data, isLoading } = useLibraryCollectionItems(libraryId, collectionId);
+  const items = data?.items ?? [];
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
   const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
 
-  if (!isLoading && (!items || items.length === 0)) return null;
+  if (items.length === 0 && !isLoading && !data?.has_more) return null;
 
   return (
-    <MediaCarousel title={name} loading={isLoading}>
-      {(items ?? []).map((item) => (
+    <MediaCarousel
+      title={name}
+      titleHref={buildLibraryCollectionCatalogHref(collectionId, name, libraryId)}
+      loading={isLoading}
+    >
+      {items.map((item) => (
         <div key={item.content_id} className={posterWidthClasses}>
           <ItemCard item={item} overlayPrefs={overlayPrefs} quickActionMode={quickActionMode} />
         </div>

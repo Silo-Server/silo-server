@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -57,10 +58,28 @@ type MetadataUpdate struct {
 
 // UpdateMediaItemMetadata updates specific metadata fields on a media_items row.
 func (s *DetailService) UpdateMediaItemMetadata(ctx context.Context, contentID string, upd *MetadataUpdate) error {
+	relinkWork := false
+	if s.workLinker != nil && upd.Title != nil {
+		item, err := s.itemRepo.GetByID(ctx, contentID)
+		if err != nil {
+			return err
+		}
+		relinkWork = item.Type == searchTypeEbook || item.Type == detailTypeAudiobook
+	}
 	if err := applyDefaultSortTitleOnAdminUpdate(ctx, s.itemRepo, contentID, upd); err != nil {
 		return err
 	}
-	return s.itemRepo.UpdateMetadata(ctx, contentID, upd)
+	if err := s.itemRepo.UpdateMetadata(ctx, contentID, upd); err != nil {
+		return err
+	}
+	// Every explicit book-title save retries best-effort linking, including
+	// resubmitting a saved title after an earlier linking failure.
+	if relinkWork {
+		if _, _, err := s.workLinker.AutoLinkContent(ctx, contentID); err != nil {
+			slog.WarnContext(ctx, "catalog: literary work auto-link after metadata update failed", "content_id", contentID, "error", err)
+		}
+	}
+	return nil
 }
 
 // UpdateSeasonMetadata updates specific metadata fields on a seasons row.

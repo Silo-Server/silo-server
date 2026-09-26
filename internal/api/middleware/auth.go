@@ -40,8 +40,7 @@ type APIKeyUserLoader interface {
 	GetByID(ctx context.Context, id int) (*models.User, error)
 }
 
-// AuthMiddleware provides HTTP middleware for JWT-based authentication with
-// session validity caching.
+// AuthMiddleware provides HTTP middleware for JWT and API key authentication.
 type AuthMiddleware struct {
 	tokenValidator   TokenValidator
 	sessionValidator SessionValidator
@@ -65,13 +64,15 @@ func NewAuthMiddleware(tv TokenValidator, sv SessionValidator, akv APIKeyValidat
 
 // RequireAuth is an HTTP middleware that enforces JWT authentication.
 // It extracts the Bearer token from the Authorization header, validates the
-// JWT, checks session validity (with an in-memory cache), and sets the
-// parsed claims in the request context for downstream handlers.
+// JWT, checks session validity with the SessionValidator on every request (the
+// middleware keeps no cache, so a revocation applies to the session's next
+// request), and sets the parsed claims in the request context for downstream
+// handlers.
 func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := extractBearerToken(r)
 		if !ok {
-			writeUnauthorized(w, "Missing or malformed authorization header")
+			writeUnauthorized(w, "Missing or malformed authorization header", ReasonAuthenticationRequired)
 			return
 		}
 
@@ -80,24 +81,24 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		if strings.HasPrefix(token, "sa_") {
 			// API key authentication.
 			if am.apiKeyValidator == nil {
-				writeUnauthorized(w, "API key authentication not available")
+				writeUnauthorized(w, "API key authentication not available", ReasonAuthenticationRequired)
 				return
 			}
 
 			apiKey, err := am.apiKeyValidator.GetByKey(r.Context(), token)
-			if err != nil {
-				writeUnauthorized(w, "Invalid API key")
+			if err != nil || apiKey == nil || apiKey.UserID <= 0 || am.apiKeyUserLoader == nil {
+				writeUnauthorized(w, "Invalid API key", ReasonInvalidCredential)
 				return
 			}
 
 			user, err := am.apiKeyUserLoader.GetByID(r.Context(), apiKey.UserID)
-			if err != nil {
-				writeUnauthorized(w, "Invalid API key")
+			if err != nil || user == nil || user.ID <= 0 {
+				writeUnauthorized(w, "Invalid API key", ReasonInvalidCredential)
 				return
 			}
 
 			if !user.Enabled {
-				writeUnauthorized(w, "User account is disabled")
+				writeUnauthorized(w, "User account is disabled", ReasonAccountDisabled)
 				return
 			}
 
@@ -122,17 +123,17 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			var err error
 			claims, err = am.tokenValidator.ValidateToken(token)
 			if err != nil {
-				writeUnauthorized(w, "Invalid or expired token")
+				writeUnauthorized(w, "Invalid or expired token", ReasonInvalidCredential)
 				return
 			}
-			if claims.TokenType != auth.TokenTypeAccess {
-				writeUnauthorized(w, "Invalid or expired token")
+			if claims == nil || claims.UserID <= 0 || claims.TokenType != auth.TokenTypeAccess {
+				writeUnauthorized(w, "Invalid or expired token", ReasonInvalidCredential)
 				return
 			}
 
-			valid, err := am.checkSession(r.Context(), claims.SessionID)
+			valid, err := am.sessionValidator.IsValid(r.Context(), claims.SessionID)
 			if err != nil || !valid {
-				writeUnauthorized(w, "Session is no longer valid")
+				writeUnauthorized(w, "Session is no longer valid", ReasonSessionInvalid)
 				return
 			}
 		}
@@ -145,9 +146,31 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			lc.SessionID = claims.SessionID
 		}
 
+		// Attributed above, so the audit log shows whose restricted session
+		// was refused.
+		if claims.PasswordChangeRequired && !passwordChangeRoutes[r.Method+" "+r.URL.Path] {
+			writePasswordChangeRequired(w)
+			return
+		}
+
 		ctx := context.WithValue(r.Context(), claimsKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// passwordChangeRoutes are the only routes a session holding a temporary
+// password may call: enough to read the account, replace the password, and
+// sign out. Refreshing the session afterwards is a public route; the refreshed
+// tokens drop the restriction once the account has a new password.
+var passwordChangeRoutes = map[string]bool{
+	"GET /api/v1/auth/me":                     true,
+	"GET /api/v1/auth/account/capability":     true,
+	"POST /api/v1/auth/account/password":      true,
+	"POST /api/v1/auth/logout":                true,
+	"GET /api/v2/account/me":                  true,
+	"GET /api/v2/account/password/capability": true,
+	"POST /api/v2/account/password":           true,
+	"POST /api/v2/auth/logout":                true,
 }
 
 // RequireAdmin is a standalone HTTP middleware that checks if the authenticated
@@ -157,7 +180,7 @@ func RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := GetClaims(r.Context())
 		if claims == nil {
-			writeUnauthorized(w, "Authentication required")
+			writeUnauthorized(w, "Authentication required", ReasonAuthenticationRequired)
 			return
 		}
 
@@ -192,7 +215,7 @@ func RequireActingAdmin(checkPrimary PrimaryProfileChecker) func(http.Handler) h
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := GetClaims(r.Context())
 			if claims == nil {
-				writeUnauthorized(w, "Authentication required")
+				writeUnauthorized(w, "Authentication required", ReasonAuthenticationRequired)
 				return
 			}
 
@@ -282,24 +305,12 @@ func GetUserID(ctx context.Context) int {
 	return claims.UserID
 }
 
-// checkSession checks whether the session is valid, using the in-memory cache
-// first and falling back to the session validator on cache miss.
-func (am *AuthMiddleware) checkSession(ctx context.Context, sessionID string) (bool, error) {
-	return am.sessionValidator.IsValid(ctx, sessionID)
-}
-
 // extractBearerToken extracts a JWT from the request. It checks (in order):
 //  1. Authorization: Bearer <token> header
 //  2. ?token=<token> query parameter (for native media elements that can't set headers)
 func extractBearerToken(r *http.Request) (string, bool) {
-	// Try Authorization header first.
-	if header := r.Header.Get("Authorization"); header != "" {
-		parts := strings.SplitN(header, " ", 2)
-		if len(parts) == 2 && strings.EqualFold(parts[0], "bearer") {
-			if token := strings.TrimSpace(parts[1]); token != "" {
-				return token, true
-			}
-		}
+	if token, ok := parseBearerHeader(r.Header.Get("Authorization")); ok {
+		return token, true
 	}
 
 	// Fall back to query parameter (used by <video> / <audio> src URLs).
@@ -310,19 +321,91 @@ func extractBearerToken(r *http.Request) (string, bool) {
 	return "", false
 }
 
+// parseBearerHeader parses only the captured Authorization header, without
+// accepting the media URL query-credential fallback.
+func parseBearerHeader(header string) (string, bool) {
+	parts := strings.SplitN(header, " ", 2)
+	if len(parts) == 2 && strings.EqualFold(parts[0], "bearer") {
+		if token := strings.TrimSpace(parts[1]); token != "" {
+			return token, true
+		}
+	}
+	return "", false
+}
+
 // errorResponse is the JSON structure for error responses.
 type errorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
 }
 
-// writeUnauthorized writes a 401 JSON error response.
-func writeUnauthorized(w http.ResponseWriter, message string) {
+// DenialReasonRecorder is implemented by a ResponseWriter that wants the
+// machine-readable reason behind a denial as well as the JSON body. The v1
+// wire response is unchanged — the reason is never written to it, because the
+// ratified v1 error body is exactly {"error","message"} — so this is purely
+// additive. internal/apiv2 wraps its gate chain in such a writer and
+// translates the reason into the matching Problem Details type.
+type DenialReasonRecorder interface {
+	RecordDenialReason(reason string)
+}
+
+// recordDenialReason hands the reason to a writer that asked for it, and does
+// nothing for every other writer.
+func recordDenialReason(w http.ResponseWriter, reason string) {
+	if reason == "" {
+		return
+	}
+	if rec, ok := w.(DenialReasonRecorder); ok {
+		rec.RecordDenialReason(reason)
+	}
+}
+
+// Denial reasons. They refine an error code that covers denials a caller must
+// tell apart (every 401 is "unauthorized"; two different gates write
+// "bad_request"). Add, never rename: internal/apiv2 switches on these, and
+// TestDenialCodesAreStable pins them.
+const (
+	// ReasonAuthenticationRequired: no usable credential was presented.
+	ReasonAuthenticationRequired = "authentication_required"
+	// ReasonInvalidCredential: a credential was presented and rejected.
+	ReasonInvalidCredential = "invalid_credential"
+	// ReasonAccountDisabled: the credential resolves to a disabled account.
+	ReasonAccountDisabled = "account_disabled"
+	// ReasonSessionInvalid: the credential is well-formed but its login
+	// session no longer exists.
+	ReasonSessionInvalid = "session_invalid"
+	// ReasonProfileHeaderRequired: RequireProfile found no X-Profile-Id.
+	ReasonProfileHeaderRequired = "profile_header_required"
+	// ReasonItemIDRequired: an item-scoped permission gate found no {id} path
+	// parameter on the route it was mounted on.
+	ReasonItemIDRequired = "item_id_required"
+)
+
+// writeUnauthorized writes a 401 JSON error response. reason is one of the
+// Reason* constants and names which 401 this is.
+func writeUnauthorized(w http.ResponseWriter, message, reason string) {
+	recordDenialReason(w, reason)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
 	_ = json.NewEncoder(w).Encode(errorResponse{
 		Error:   "unauthorized",
 		Message: message,
+	})
+}
+
+// CodePasswordChangeRequired is the error code of a request a session made
+// before replacing its temporary password. internal/apiv2 renders it as the
+// password_change_required problem type.
+const CodePasswordChangeRequired = "password_change_required"
+
+// writePasswordChangeRequired writes the 403 a restricted session gets for
+// any route outside passwordChangeRoutes.
+func writePasswordChangeRequired(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(errorResponse{
+		Error:   CodePasswordChangeRequired,
+		Message: "Choose a new password to continue",
 	})
 }
 

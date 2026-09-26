@@ -1,6 +1,13 @@
 # Silo v1 Scope
 
-**Status: NOT LOCKED — proposal window open.**
+**Status: NOT LOCKED — proposal window open. The API-contract portion of this file is superseded
+by [the native API contract](api-contract.md).**
+
+This file governs v1 **capability** scope: which user-facing capabilities Silo 1.0 ships. It no
+longer decides the API contract. Silo 1.0's stable native API is `/api/v2`; `/api/v1` is a frozen
+alpha contract carried through the pre-1.0 bridge window and then retired behind a `410 Gone`
+tombstone. The removals table below remains the authoritative record of the v1 removals taken
+during alpha.
 
 Propose capabilities with the **v1 capability proposal** issue template; triage happens on the
 [Silo v1 project](https://github.com/orgs/Silo-Server/projects/5).
@@ -8,9 +15,11 @@ Propose capabilities with the **v1 capability proposal** issue template; triage 
 When the scope locks, this file becomes the source of truth and will contain:
 
 1. **Locked capabilities** — a table of capability epics (issue links) with one-line scope statements.
-2. **API policy** — additive-only within `/api/v1` (no field renames/removals, no type changes,
-   no status-code repurposing; removals only via the Deprecation/Sunset header flow; capability
-   endpoints for feature detection). Contract tooling: #135.
+2. **API policy** — superseded by [the native API contract](api-contract.md). The additive-only
+   rules (no field renames/removals, no type changes, no status-code repurposing; removals only
+   via the Deprecation/Sunset header flow; capability endpoints for feature detection) bind
+   `/api/v2` at the 1.0 lock. `/api/v1` never locks: it is frozen and retired after the bridge
+   release. Contract tooling: #135.
 3. **Amendment rules** — after lock, this file changes only via PR with code-owner review.
    An amendment PR is the exception process: it must say what changes, why it cannot wait
    for v1.1, and what it displaces.
@@ -18,24 +27,51 @@ When the scope locks, this file becomes the source of truth and will contain:
 Until lock: treat any capability not tracked as `Proposed`/`Locked` on the project as out of scope
 for feature PRs (see the scope gate in `CLAUDE.md`).
 
+## Library scope: Books deferred
+
+The [published 1.0 milestone](https://siloserver.org/milestone/1.0/#libraries)
+limits supported 1.0 libraries to **Movies and Series**. Audiobooks and ebooks
+are deferred together to a consolidated **Books** effort after 1.0, with no
+assigned release version or date. This replaces the earlier audiobook 1.0
+commitment and ebook 1.1 target.
+
+Audiobooks, ebooks, manga, and Audiobookshelf compatibility are **not gated,
+removed, or reworked** for 1.0. They remain available in their current state
+as labeled **beta** features, outside the 1.0 support promise and outside
+compatibility certification, until the Books effort replaces them. Jellyfin
+compatibility remains in scope; its acceptance is the named-client smoke-test
+matrix in the milestone's release gates. Existing audiobook/ebook code and API
+documentation describe beta behavior, not a 1.0 support promise. Do not delete
+existing libraries, files, or progress.
+
+Validate Movies and Series for 1.0 library acceptance. Do not require audiobook
+playback, chapters, sleep timers, audiobook metadata plugins, or Audiobookshelf
+client certification to close that acceptance. Beta labeling in clients and
+docs, and upgrade safety for existing libraries, still apply. Track future
+Books acceptance separately from 1.0.
+
 ## Breaking removals taken before lock
 
-The additive-only rule in item 2 binds at lock. Before then a removal is in scope, and there is no
-amendment to write because the amendment process in item 3 does not exist yet. `CLAUDE.md` states
-the rule without that qualifier, which reads as a contradiction — it is not, but a removal taken
-now has to be recorded here so a reader after lock can tell a deliberate decision from a violation.
+Additive-only never bound the alpha `/api/v1` contract; per item 2 it binds `/api/v2` at the 1.0
+lock. A v1 removal was in scope while v1 was alpha, and there is no amendment to write because the
+amendment process in item 3 does not exist yet. Each removal is still recorded here so a reader can
+tell a deliberate decision from a violation.
 
 Each entry names what goes, why waiting is worse, and the design that decided it. **Every removal
-listed here must have shipped before the scope locks.** One still outstanding at lock loses its
-justification and falls back to the Deprecation/Sunset flow like anything else.
+listed here must have shipped before the scope locks.** One still outstanding at lock needs no
+deprecation window: the route simply rides the frozen `/api/v1` bridge surface until the
+retirement tombstone removes it with everything else, and its successor shape is decided in the v2
+migration ledger.
 
 | Removed | Release | Rationale |
 |---|---|---|
+| The `key` field from `GET /api/v1/api-keys`, `GET /api/v1/admin/api-keys`, and `GET /api/v1/admin/users/{userId}/api-keys` | API v2 migration, admin API-key lifecycle | Listing credentials returned reusable secrets on every read. Lists now return metadata and a short `key_prefix`; only creation responses contain the full key. Existing keys and their authentication behavior are unchanged. The bundled admin web editor is coordinated with this change before integration; native clients have no callers of these list routes. |
 | Playback v3 subtitle artifacts reporting the source codec as `format` and the video resume origin as `timing_origin_seconds` | Subtitle reliability, before v1 lock, [contract](playback-protocol-v3.md#8-track-identity-and-the-subtitle-ordinal-space) | Artifact metadata now describes actual served bytes and absolute source cue timestamps (origin zero). Apple clock mapping is coordinated; Android and web already map sidecar source time separately from the video timeline. Native embedded selection is separately negotiated with `embedded_subtitles_v1`, so clients cannot mistake an embedded decision for a missing sidecar. |
 | String `GET`/`PUT`/`DELETE /api/v1/settings…`, the unknown-key extension bag, preference fields on profile/library/series DTOs | Cross-platform settings contract, [design](settings-contract.md) | Replaced wholesale by the typed settings contract. Deferring past lock would mean carrying the Deprecation/Sunset surface *and* the untyped key bag — which lets any client invent a production setting the server stores unvalidated — through the deprecation window, which is the exact surface the contract exists to close. |
 | The ten string-registry admin user-settings routes: `GET /api/v1/admin/users/{id}/settings`, `GET /api/v1/admin/users/{id}/settings/{key}`, `PUT /api/v1/admin/users/{id}/settings/{key}`, `DELETE /api/v1/admin/users/{id}/settings/{key}`, `GET /api/v1/admin/users/{id}/device-settings`, `GET /api/v1/admin/users/{id}/device-settings/{key}`, `DELETE /api/v1/admin/users/{id}/device-settings/{key}`, `PUT /api/v1/admin/users/{id}/profiles/{profile_id}/device-settings/{key}/{device_id}`, `DELETE /api/v1/admin/users/{id}/profiles/{profile_id}/device-settings/{key}/{device_id}`, `DELETE /api/v1/admin/users/{id}/profiles/{profile_id}/devices/{device_id}/settings` | Cross-platform settings contract, [design](settings-contract.md) | The admin projection of the removal above: these routes read and wrote the string registry the contract replaces. Their canonical successors are `GET /api/v1/admin/users/{id}/settings/values` (every stored value across all scopes) and `PUT`/`DELETE /api/v1/admin/users/{id}/settings/values/{key}` at an explicit scope, sharing the session routes' validation. Keeping the string routes past lock would preserve an admin-only write path into the untyped bag after the user-facing one closed. |
 | The legacy (pre-v3) request and response bodies of `POST /api/v1/playback/start`. The route stays; a body that does not declare `protocol_version: 3` now gets `426 client_upgrade_required` instead of a legacy plan | Playback protocol v3, [spec](playback-protocol-v3.md) | v3 is a platform-neutral contract that moves route selection, quality laddering and track choice server-side. The legacy body carried the opposite model — the client posted a decision it had already made. Running both means every planner change has to be made twice, in two shapes that disagree about who decides, and the legacy shape is the one the client-specific bugs live in. A deprecation window would extend that duplication across the whole window for a protocol no shipping client will still speak by lock. |
 | `POST /api/v1/playback/transcode/start` | Playback protocol v3, [spec](playback-protocol-v3.md) | Client-posted transcode recipes. Superseded by the `quality_change` replan operation: the client sends a label from `playback_plan.available_qualities` and the server picks the encode. Keeping the endpoint keeps a second, unvalidated way to start a transcode that bypasses plan identity entirely. |
+| The legacy `/api/v1/plex-sync/*` aliases of the webhook-sync surface: `GET /api/v1/plex-sync/connections`, `POST /api/v1/plex-sync/connections`, `DELETE /api/v1/plex-sync/connections/{id}`, `GET /api/v1/plex-sync/connections/{id}/actors`, `PUT /api/v1/plex-sync/connections/{id}/actors`, `POST /api/v1/plex-sync/connections/{id}/webhook/rotate` | API v2 migration, personal-imports section ([ledger](../../contracts/api/v2/migration.json)) | Plex-only projections of the provider-neutral `/api/v1/webhook-sync/*` routes, served by the same handler over the same connection rows, with no first-party consumer. Their successors are the `/api/v2/webhook-sync/*` operations; carrying a second, Plex-shaped spelling of every connection operation into v2 would double the contract for one provider. The public inbound receiver `POST /api/v1/plex-sync/webhooks/{secret}` is not in this entry: external Plex servers were configured with that URL, so it keeps working on v1 (see its ledger row). |
 | `PATCH /api/v1/playback/{session_id}/audio` | Playback protocol v3, [spec](playback-protocol-v3.md) | Superseded by the `track_change` replan operation, which changes the audio track *and* returns the resulting plan. The PATCH mutated the session without re-planning, so a track change that invalidated the route left the client playing a plan the server no longer agreed with. |
 | `409 protocol_disabled` on `POST /api/v1/playback/route-events`, and the `"enabled": false` shape of `GET /api/v1/playback/capability` | Playback protocol v3, [spec](playback-protocol-v3.md) | Both described a server with v3 switched off. With v3 the only playback protocol that state cannot exist — "disabled" would mean "no playback at all". The `enabled` field itself is kept and is constant `true`, so clients that feature-detect against it keep working; only the negative shape and the status code go. |
 | The draft-v3 platform-specific wire vocabulary: `ClientPlaybackContextV3.features`, `.platform`, and `.engines`; `PlanV3.engine`; `output_route_generation` in start, replan, output-context, and route-event bodies; Android device/build fields (`brand`, `device`, `product`, `soc_*`, `build_*`, `security_patch`, `sdk_int`, `abis`); and the `media3_only` / `detailed_decode_capabilities` feature tokens | Platform-neutral playback protocol v3, [spec](playback-protocol-v3.md) | These names exposed one client's implementation as the cross-platform contract. Before v1 lock they are replaced by neutral delivery classes, evidence tiers, `device.platform` / `device.os_version` / bounded `platform_details`, opaque `output_context_id`, and top-level feature advertisement. Carrying both drafts through lock would force every client to translate Media3-specific aliases indefinitely and leave two conflicting sources of capability truth. |

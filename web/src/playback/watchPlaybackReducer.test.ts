@@ -31,10 +31,11 @@ describe("watchPlaybackReducer", () => {
     const next = watchPlaybackReducer(
       makeState({
         pictureInPictureActive: true,
-        snapshot: { currentTime: 120, duration: 3600, playing: true },
         transport: {
           playPause: () => {},
           seekBy: () => {},
+          skipBack: () => {},
+          skipForward: () => {},
           seekTo: () => {},
           togglePictureInPicture: () => {},
         },

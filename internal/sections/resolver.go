@@ -5,6 +5,8 @@ import (
 	"sort"
 )
 
+const jsonNullLiteral = "null"
+
 // Resolve merges admin sections with profile overrides, producing the final ordered list.
 func Resolve(admin []*PageSection, overrides []ProfileSectionOverride) []ResolvedSection {
 	overrideBySection := make(map[string]*ProfileSectionOverride)
@@ -54,7 +56,7 @@ func Resolve(admin []*PageSection, overrides []ProfileSectionOverride) []Resolve
 			if o.ItemLimit != nil {
 				rs.ItemLimit = *o.ItemLimit
 			}
-			if len(o.Config) > 0 && string(o.Config) != "" && string(o.Config) != "null" {
+			if len(o.Config) > 0 && string(o.Config) != "" && string(o.Config) != jsonNullLiteral {
 				rs.Config = o.Config
 			}
 		}
@@ -63,7 +65,7 @@ func Resolve(admin []*PageSection, overrides []ProfileSectionOverride) []Resolve
 	}
 
 	for _, o := range userAdded {
-		if o.Removed {
+		if o.Removed || o.Hidden {
 			continue
 		}
 		result = append(result, resolveUserAdded(o))
@@ -123,7 +125,7 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 			if o.ItemLimit != nil {
 				rs.ItemLimit = *o.ItemLimit
 			}
-			if len(o.Config) > 0 && string(o.Config) != "" && string(o.Config) != "null" {
+			if len(o.Config) > 0 && string(o.Config) != "" && string(o.Config) != jsonNullLiteral {
 				rs.Config = o.Config
 			}
 		}
@@ -166,15 +168,15 @@ func resolveUserAdded(o ProfileSectionOverride) ResolvedSection {
 	// Prefer the explicit user-added fields when present; fall back to the
 	// legacy fields for backward compatibility with existing data.
 	sectionType := o.SectionType
-	if o.IsUserAdded && o.UserSectionType != "" {
+	if o.UserSectionType != "" {
 		sectionType = o.UserSectionType
 	}
 	title := o.Title
-	if o.IsUserAdded && o.UserTitle != "" {
+	if o.UserTitle != "" {
 		title = o.UserTitle
 	}
 	cfg := json.RawMessage(`{}`)
-	if o.IsUserAdded && len(o.UserConfig) > 0 {
+	if len(o.UserConfig) > 0 {
 		cfg = o.UserConfig
 	} else if len(o.Config) > 0 {
 		cfg = o.Config
@@ -189,5 +191,6 @@ func resolveUserAdded(o ProfileSectionOverride) ResolvedSection {
 		Config:      cfg,
 		Position:    pos,
 		IsCustom:    true,
+		Hidden:      o.Hidden,
 	}
 }

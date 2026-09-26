@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router";
 import { Play, Square, Plus, Trash2, ChevronRight, ChevronDown } from "lucide-react";
+import { isNotFoundProblem } from "@/api/v2/request";
 import { Button } from "@/components/ui/button";
+import PageUnavailable from "@/components/PageUnavailable";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { Badge } from "@/components/ui/badge";
 import { TaskStatusBadge } from "@/components/admin/TaskStatusBadge";
 import { Input } from "@/components/ui/input";
@@ -20,6 +23,9 @@ import {
   useUpdateTriggers,
   useTaskMetrics,
   type MetadataRefreshMetrics,
+  fetchTaskSchedule,
+  taskMutationMessage,
+  type TaskSchedule,
 } from "@/hooks/queries/admin/tasks";
 import type { ExecutionResult, TriggerConfig, TriggerType } from "@/api/types";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
@@ -333,7 +339,9 @@ function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowProps) {
         )}
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <label className="text-muted-foreground text-xs whitespace-nowrap">Max runtime:</label>
+          <label className="text-muted-foreground text-xs whitespace-nowrap">
+            Max runtime (not enforced):
+          </label>
           <Input
             type="number"
             min={0}
@@ -364,6 +372,172 @@ function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowProps) {
   );
 }
 
+function TaskSchedulePanel({
+  taskKey,
+  manualOnly,
+  triggers,
+}: {
+  taskKey: string;
+  manualOnly: boolean;
+  triggers: TriggerConfig[];
+}) {
+  const update = useUpdateTriggers();
+  const [snapshot, setSnapshot] = useState<TaskSchedule | null>(null);
+  const [draft, setDraft] = useState<TriggerConfig[]>([]);
+  const [candidate, setCandidate] = useState<TaskSchedule | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [needsReview, setNeedsReview] = useState(false);
+  const [error, setError] = useState("");
+  const startEditing = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const value = await fetchTaskSchedule(taskKey);
+      setSnapshot(value);
+      setDraft(value.triggers);
+      setNeedsReview(false);
+    } catch (error) {
+      setError(taskMutationMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const review = async () => {
+    setBusy(true);
+    setCandidate(null);
+    setError("");
+    try {
+      setCandidate(await fetchTaskSchedule(taskKey));
+    } catch (error) {
+      setError(taskMutationMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const save = async () => {
+    if (!snapshot) return;
+    setError("");
+    try {
+      await update.mutateAsync({ key: taskKey, triggers: draft, etag: snapshot.etag });
+      setSnapshot(null);
+      setCandidate(null);
+    } catch (error) {
+      setNeedsReview(true);
+      setError(taskMutationMessage(error));
+    }
+  };
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-medium">Schedule</h2>
+        {!manualOnly && !snapshot && (
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => void startEditing()}>
+            Edit Schedule
+          </Button>
+        )}
+      </div>
+      {error && (
+        <p role="alert" className="text-destructive text-sm">
+          {error}
+        </p>
+      )}
+      {manualOnly ? (
+        <p className="text-muted-foreground text-sm">
+          Manual only. Select Run Now to start this task.
+        </p>
+      ) : !snapshot ? (
+        <div className="surface-panel rounded-2xl p-4">
+          {triggers.length === 0
+            ? "No triggers configured."
+            : triggers.map((trigger, i) => (
+                <p key={i} className="py-2 text-sm">
+                  {describeTrigger(trigger)}
+                </p>
+              ))}
+        </div>
+      ) : (
+        <div className="surface-panel space-y-3 rounded-2xl p-4">
+          <fieldset disabled={update.isPending || busy} className="space-y-3">
+            {draft.map((trigger, i) => (
+              <TriggerFormRow
+                key={i}
+                trigger={trigger}
+                onChange={(value) =>
+                  setDraft(draft.map((old, index) => (index === i ? value : old)))
+                }
+                onRemove={() => setDraft(draft.filter((_, index) => index !== i))}
+              />
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDraft([...draft, { type: "interval", interval_ms: 3_600_000 }])}
+            >
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              Add Trigger
+            </Button>
+          </fieldset>
+          {needsReview && (
+            <div className="space-y-2 text-sm">
+              <Button
+                variant="outline"
+                disabled={busy || update.isPending}
+                onClick={() => void review()}
+              >
+                Review current schedule
+              </Button>
+              {candidate && (
+                <div className="space-y-2">
+                  <p>Current saved schedule:</p>
+                  {candidate.triggers.length === 0 ? (
+                    <p>No triggers configured.</p>
+                  ) : (
+                    candidate.triggers.map((trigger, i) => (
+                      <p key={i}>{describeTrigger(trigger)}</p>
+                    ))
+                  )}
+                  <Button
+                    disabled={busy || update.isPending}
+                    onClick={() => {
+                      setSnapshot(candidate);
+                      setCandidate(null);
+                      setNeedsReview(false);
+                      setError("");
+                    }}
+                  >
+                    Use this revision and keep my draft
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              onClick={() => void save()}
+              disabled={needsReview || busy || update.isPending}
+            >
+              Save
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy || update.isPending}
+              onClick={() => {
+                setSnapshot(null);
+                setCandidate(null);
+                setError("");
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // --- History row with expandable result_data ---
 
 function HistoryRow({
@@ -376,6 +550,13 @@ function HistoryRow({
   onToggle: () => void;
 }) {
   const hasResultData = result.result_data && Object.keys(result.result_data).length > 0;
+  const failedSteps = (result.steps ?? [])
+    .filter((step) => step.status === "failed")
+    .map((step) => step.name);
+  const errorText =
+    failedSteps.length > 0
+      ? `Failed steps: ${failedSteps.join(", ")}`
+      : result.error_message || "—";
 
   return (
     <>
@@ -400,8 +581,8 @@ function HistoryRow({
         <td className="px-4 py-2">
           <TaskStatusBadge result={result} />
         </td>
-        <td className="text-muted-foreground max-w-xs truncate px-4 py-2">
-          {result.error_message || "—"}
+        <td className="text-muted-foreground max-w-xs truncate px-4 py-2" title={errorText}>
+          {errorText}
         </td>
       </tr>
       {expanded && hasResultData && (
@@ -421,18 +602,19 @@ function HistoryRow({
 
 export default function AdminTaskDetail() {
   const { key } = useParams<{ key: string }>();
-  const { data: task, isLoading } = useTask(key!);
-  const { data: history } = useTaskHistory(key!);
+  const { data: cachedTask, isLoading, isFetching, error, refetch } = useTask(key!);
+  // A 404 outranks a cached task: a refetch that finds it gone must not leave
+  // its old runtime state on screen.
+  const task = isNotFoundProblem(error) ? undefined : cachedTask;
+  const historyQuery = useTaskHistory(key!);
+  const history = historyQuery.data;
   const { data: metrics } = useTaskMetrics(key!);
   const runTask = useRunTask();
   const cancelTask = useCancelTask();
-  const updateTriggers = useUpdateTriggers();
 
-  const [editing, setEditing] = useState(false);
-  const [editTriggers, setEditTriggers] = useState<TriggerConfig[]>([]);
-  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
-  const toggleRow = (id: number) => {
+  const toggleRow = (id: string) => {
     setExpandedRows((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -441,37 +623,37 @@ export default function AdminTaskDetail() {
     });
   };
 
-  if (isLoading || !task) {
+  if (isLoading) {
     return <p className="page-shell text-muted-foreground py-8 text-sm">Loading...</p>;
   }
 
-  const isRunning = task.state === "running" || task.state === "cancelling";
-
-  const startEditing = () => {
-    setEditTriggers(task.triggers.map((t) => ({ ...t })));
-    setEditing(true);
-  };
-
-  const saveTriggers = () => {
-    updateTriggers.mutate(
-      { key: task.key, triggers: editTriggers },
-      {
-        onSuccess: () => setEditing(false),
-      },
+  // A key that names no task used to leave this on "Loading..." for good.
+  if (!task) {
+    if (error && !isNotFoundProblem(error)) {
+      return (
+        <PageUnavailable
+          title="Couldn't load this task"
+          description="Something went wrong while loading it. Try again in a moment."
+          onRetry={() => void refetch()}
+          retrying={isFetching}
+        />
+      );
+    }
+    return (
+      <PageUnavailable
+        title="Task not found"
+        description="No scheduled task uses this key. It may have been removed, or the link may be wrong."
+      >
+        <Button asChild variant="outline">
+          <ViewTransitionLink to="/admin/tasks" up>
+            All tasks
+          </ViewTransitionLink>
+        </Button>
+      </PageUnavailable>
     );
-  };
+  }
 
-  const addTrigger = () => {
-    setEditTriggers([...editTriggers, { type: "interval", interval_ms: 3_600_000 }]);
-  };
-
-  const removeTrigger = (index: number) => {
-    setEditTriggers(editTriggers.filter((_, i) => i !== index));
-  };
-
-  const updateTrigger = (index: number, updated: TriggerConfig) => {
-    setEditTriggers(editTriggers.map((t, i) => (i === index ? updated : t)));
-  };
+  const isRunning = task.state === "running" || task.state === "cancelling";
 
   return (
     <div className="page-shell space-y-6 py-4 sm:py-6">
@@ -547,7 +729,7 @@ export default function AdminTaskDetail() {
           </div>
           <div className="text-muted-foreground flex items-center justify-between gap-3 text-sm">
             <p className="min-w-0 truncate">
-              {task.state === "cancelling" ? "Cancelling..." : task.progress_message || "Running"}
+              {task.state === "cancelling" ? "Cancelling..." : "Running"}
             </p>
             {task.state !== "cancelling" && task.progress > 0 && (
               <span className="shrink-0 font-medium tabular-nums">
@@ -565,67 +747,24 @@ export default function AdminTaskDetail() {
         </div>
       )}
 
-      <div className="space-y-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg font-medium tracking-tight">Schedule</h2>
-          {!task.manual_only && !editing && (
-            <Button variant="outline" size="sm" onClick={startEditing}>
-              Edit Schedule
-            </Button>
-          )}
-        </div>
-
-        {task.manual_only ? (
-          <div className="surface-panel-subtle rounded-xl p-4 text-sm">
-            <p className="text-muted-foreground">
-              Manual only. This task runs only when you select Run Now; scheduled triggers cannot be
-              configured.
-            </p>
-          </div>
-        ) : !editing ? (
-          <div className="surface-panel overflow-hidden rounded-2xl border-0">
-            {task.triggers.length === 0 && (
-              <p className="text-muted-foreground p-4 text-sm">No triggers configured.</p>
-            )}
-            {task.triggers.map((trigger, i) => (
-              <div key={i} className="border-border border-b px-4 py-2.5 text-sm last:border-b-0">
-                {describeTrigger(trigger)}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="surface-panel rounded-2xl border-0 p-4">
-            <div className="space-y-3">
-              {editTriggers.map((trigger, i) => (
-                <TriggerFormRow
-                  key={i}
-                  trigger={trigger}
-                  onChange={(updated) => updateTrigger(i, updated)}
-                  onRemove={() => removeTrigger(i)}
-                />
-              ))}
-
-              <Button variant="outline" size="sm" onClick={addTrigger}>
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                Add Trigger
-              </Button>
-
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Button size="sm" onClick={saveTriggers} disabled={updateTriggers.isPending}>
-                  Save
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      <TaskSchedulePanel
+        key={task.key}
+        taskKey={task.key}
+        manualOnly={task.manual_only}
+        triggers={task.triggers}
+      />
 
       <div className="space-y-3">
         <h2 className="text-lg font-medium tracking-tight">Execution history</h2>
 
+        {historyQuery.isError && (
+          <div role="alert">
+            History could not load.{" "}
+            <Button variant="outline" onClick={() => void historyQuery.restart()}>
+              Restart history
+            </Button>
+          </div>
+        )}
         <div className="surface-panel overflow-hidden rounded-2xl border-0">
           <table className="w-full text-sm">
             <thead>
@@ -655,6 +794,15 @@ export default function AdminTaskDetail() {
             </tbody>
           </table>
         </div>
+        {historyQuery.hasNextPage && (
+          <Button
+            variant="outline"
+            disabled={historyQuery.isFetchingNextPage}
+            onClick={() => void historyQuery.fetchNextPage()}
+          >
+            Load older executions
+          </Button>
+        )}
       </div>
     </div>
   );

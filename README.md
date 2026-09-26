@@ -32,6 +32,16 @@
 > Silo is pre-release. APIs, configuration, and database migrations may change
 > before the first stable release. Back up your deployment before updating.
 
+## 1.0 release scope
+
+The [1.0 milestone](https://siloserver.org/milestone/1.0/) covers movies and
+series. Audiobooks, ebooks, and Audiobookshelf compatibility keep working as
+they do today and are labeled **beta**: they are outside the 1.0 support
+promise and will be replaced by a consolidated Books effort with no assigned
+release date. The broader capabilities below include those beta
+implementations, not a promise that every media type is supported in 1.0.
+Existing library data is preserved when upgrading.
+
 ## What Silo does
 
 <table>
@@ -135,6 +145,15 @@ Silo is developed in spare time and funded out of pocket, and will stay free and
 open source. [GitHub Sponsors](https://github.com/sponsors/quick104) covers AI
 development tooling (Claude, Codex), push-notification relay infrastructure, and
 future project costs. Bug reports, code, and documentation help just as much.
+
+Code review is supported by [Macroscope](https://macroscope.com) through its
+open source program.
+
+<p>
+  <a href="https://macroscope.com">
+    <img alt="Sponsored by Macroscope" src="assets/macroscope-banner.png" width="400">
+  </a>
+</p>
 
 ## License and trademarks
 

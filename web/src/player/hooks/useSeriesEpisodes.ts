@@ -17,7 +17,7 @@ export function useSeriesEpisodes(
   // Fetch the seasons list so we know whether a next season exists.
   const { data: seasonsData, isLoading: seasonsLoading } = useQuery({
     queryKey: catalogKeys.seriesSeasons(seriesId!, libraryId),
-    queryFn: () => fetchCatalogSeriesSeasons(seriesId!, libraryId),
+    queryFn: ({ signal }) => fetchCatalogSeriesSeasons(seriesId!, libraryId, { signal }),
     enabled: !!seriesId,
     staleTime: 5 * 60 * 1000,
   });
@@ -29,7 +29,8 @@ export function useSeriesEpisodes(
   // Fetch current season episodes.
   const { data: currentEpisodesData, isLoading: currentLoading } = useQuery({
     queryKey: catalogKeys.seasonEpisodes(seriesId!, currentSeason, libraryId),
-    queryFn: () => fetchCatalogSeasonEpisodes(seriesId!, currentSeason, libraryId),
+    queryFn: ({ signal }) =>
+      fetchCatalogSeasonEpisodes(seriesId!, currentSeason, libraryId, { signal }),
     enabled: !!seriesId && currentSeason >= 0 && !!currentSeasonInfo,
     staleTime: 5 * 60 * 1000,
   });
@@ -37,7 +38,8 @@ export function useSeriesEpisodes(
   // Fetch next season episodes only when a next season exists.
   const { data: nextEpisodesData, isLoading: nextLoading } = useQuery({
     queryKey: catalogKeys.seasonEpisodes(seriesId!, currentSeason + 1, libraryId),
-    queryFn: () => fetchCatalogSeasonEpisodes(seriesId!, currentSeason + 1, libraryId),
+    queryFn: ({ signal }) =>
+      fetchCatalogSeasonEpisodes(seriesId!, currentSeason + 1, libraryId, { signal }),
     enabled: !!seriesId && !!nextSeasonInfo,
     staleTime: 5 * 60 * 1000,
   });

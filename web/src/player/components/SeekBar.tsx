@@ -15,6 +15,8 @@ interface SeekBarProps {
   /** Fires continuously while a handle is dragged. */
   onRegionEdgeChange?: (kind: MarkerKind, edge: "start" | "end", seconds: number) => void;
   onSeek: (seconds: number) => void;
+  /** Unmodified arrow keys skip by the profile's intervals; Shift+Arrow nudges 5s. */
+  onSkip: { back: () => void; forward: () => void };
 }
 
 /** Region tint per marker kind (normal playback). */
@@ -90,6 +92,7 @@ export function SeekBar({
   activeEditKind = null,
   onRegionEdgeChange,
   onSeek,
+  onSkip,
 }: SeekBarProps) {
   const barRef = useRef<HTMLDivElement>(null);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
@@ -229,6 +232,14 @@ export function SeekBar({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Browser and platform shortcuts keep their modifier combinations.
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (!e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        e.preventDefault();
+        if (e.key === "ArrowLeft") onSkip.back();
+        else onSkip.forward();
+        return;
+      }
       let newTime: number | null = null;
       switch (e.key) {
         case "ArrowRight":
@@ -249,7 +260,7 @@ export function SeekBar({
       e.preventDefault();
       onSeek(newTime);
     },
-    [duration, displayTime, onSeek],
+    [duration, displayTime, onSeek, onSkip],
   );
 
   // Calculate all buffered ranges as percentages.
@@ -414,11 +425,11 @@ export function SeekBar({
           {duration > 0 &&
             regions.map((region) => {
               const isActive = editing && region.kind === activeEditKind;
-              const isHovered = hoverRegion?.kind === region.kind && !dragging && edgeDrag === null;
+              const isHovered = hoverRegion === region && !dragging && edgeDrag === null;
               return (
                 <div
                   aria-hidden="true"
-                  key={region.kind}
+                  key={`${region.kind}:${region.start}:${region.end}`}
                   className={[
                     "absolute top-1/2 -translate-y-1/2 rounded-full transition-[height,box-shadow] duration-150 ease-out",
                     editing ? (isActive ? "h-2.5" : "h-2") : isHovered ? "h-2" : "h-full",

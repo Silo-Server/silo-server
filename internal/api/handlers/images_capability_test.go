@@ -19,7 +19,7 @@ func TestHandleImagesCapability(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 
-	var got imagesCapabilityResponse
+	var got ImagesCapabilityResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}

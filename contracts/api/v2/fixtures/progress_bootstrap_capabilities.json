@@ -1,0 +1,14 @@
+{
+  "revision": "20773be8bbba66ffa43859ee288aa59efe39a4237d60d33a080365b3b17e720a",
+  "state": "available",
+  "allowed": true,
+  "mode": "full_replace",
+  "incremental": false,
+  "installation_id": "installation",
+  "generation": "generation",
+  "max_page_size": 200,
+  "max_snapshot_items": 100000,
+  "max_snapshot_bytes": 67108864,
+  "snapshot_ttl_seconds": 900,
+  "max_active_snapshots_per_account": 2
+}

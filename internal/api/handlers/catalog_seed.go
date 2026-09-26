@@ -27,11 +27,7 @@ import (
 type CatalogSeedArtifactStore interface {
 	AdminJobArtifactStore
 	GetObject(ctx context.Context, bucket, key string) ([]byte, error)
-	UploadFile(ctx context.Context, bucket, key, path, contentType string) (int64, error)
 	ListObjectInfos(ctx context.Context, bucket, prefix string) ([]s3client.ObjectInfo, error)
-	DeleteObject(ctx context.Context, bucket, key string) error
-	MakeObjectPublic(ctx context.Context, bucket, key string) error
-	PublicURL(bucket, key string) (string, error)
 }
 
 type CatalogSeedHandler struct {
@@ -83,7 +79,7 @@ func (h *CatalogSeedHandler) HandleExport(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	data, err := h.service.Export(r.Context(), catalogseed.ExportOptions{LibraryIDs: req.LibraryIDs})
+	data, err := h.ExportCatalog(r.Context(), catalogseed.ExportOptions{LibraryIDs: req.LibraryIDs})
 	if err != nil {
 		log.Printf("catalog seed export failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to export catalog seed")
@@ -100,6 +96,14 @@ func (h *CatalogSeedHandler) HandleExport(w http.ResponseWriter, r *http.Request
 
 func (h *CatalogSeedHandler) HandleCreateExportJob(w http.ResponseWriter, r *http.Request) {
 	if h.jobRepo == nil || h.store == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "Catalog export jobs require configured storage")
+		return
+	}
+	// The frozen v1 job projection only presigns, and the streaming artifact
+	// route exists only under v2. On a store that cannot presign, a v1 client
+	// could queue an export it has no way to retrieve, so v1 keeps refusing
+	// exactly as it did before local storage existed.
+	if presigner, ok := h.store.(interface{ SupportsPresign() bool }); ok && !presigner.SupportsPresign() {
 		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "Catalog export jobs require the private internal S3 bucket")
 		return
 	}
@@ -112,14 +116,7 @@ func (h *CatalogSeedHandler) HandleCreateExportJob(w http.ResponseWriter, r *htt
 		}
 	}
 
-	job, err := h.jobRepo.Create(r.Context(), adminjob.CreateJobInput{
-		JobType:         adminjob.JobTypeCatalogExport,
-		CreatedByUserID: currentAdminUserID(r),
-		RequestPayload: catalogseed.ExportOptions{
-			LibraryIDs: req.LibraryIDs,
-		},
-		Message: "Queued catalog export",
-	})
+	job, err := h.CreateCatalogExportJob(r.Context(), currentAdminUserID(r), catalogseed.ExportOptions{LibraryIDs: req.LibraryIDs})
 	if err != nil {
 		var conflict *adminjob.ActiveJobConflictError
 		switch {
@@ -137,78 +134,26 @@ func (h *CatalogSeedHandler) HandleCreateExportJob(w http.ResponseWriter, r *htt
 	}
 
 	jobsHandler := NewAdminJobsHandler(h.jobRepo, h.store)
-	if h.RealtimeHub != nil {
-		publishEventJob(r.Context(), h.RealtimeHub.EventsHub(), "job.created", job)
-	}
+
 	writeJSON(w, http.StatusAccepted, adminJobToResponse(r, job, jobsHandler.store))
 }
 
 func (h *CatalogSeedHandler) HandlePublishExportJob(w http.ResponseWriter, r *http.Request) {
-	if h.jobRepo == nil || h.store == nil {
-		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "Catalog export publishing requires the private internal S3 bucket")
-		return
-	}
-
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Job ID is required")
-		return
-	}
-
-	job, err := h.jobRepo.GetByID(r.Context(), id)
+	job, err := h.PublishCatalogExportJob(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		if errors.Is(err, adminjob.ErrJobNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "Job not found")
 			return
 		}
-		log.Printf("catalog export publish load failed: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load catalog export job")
+		writeCatalogTransferFailure(w, err, "Failed to create catalog export URL")
 		return
 	}
-
-	if job.JobType != adminjob.JobTypeCatalogExport {
-		writeError(w, http.StatusBadRequest, "bad_request", "Only catalog export jobs can be published")
-		return
-	}
-	if job.Status != adminjob.StatusCompleted {
-		writeError(w, http.StatusBadRequest, "bad_request", "Only completed catalog export jobs can be published")
-		return
-	}
-	if job.ArtifactBucket == "" || job.ArtifactKey == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Catalog export job does not have an artifact to publish")
-		return
-	}
-	if job.PublicURL != "" {
-		writeJSON(w, http.StatusOK, adminJobToResponse(r, job, h.store))
-		return
-	}
-
-	publicURL, err := h.store.PresignGetURL(r.Context(), job.ArtifactBucket, job.ArtifactKey, catalogSeedPublishExpiry)
-	if err != nil {
-		log.Printf("catalog export publish failed: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("Failed to create catalog export URL: %v", err))
-		return
-	}
-
-	publishedAt := time.Now().UTC()
-	if err := h.jobRepo.MarkPublic(r.Context(), job.ID, publicURL, publishedAt); err != nil {
-		if errors.Is(err, adminjob.ErrJobNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Job not found")
-			return
-		}
-		log.Printf("catalog export mark public failed: %v", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to persist catalog export public URL")
-		return
-	}
-
-	job.PublicURL = publicURL
-	job.PublishedAt = &publishedAt
 	writeJSON(w, http.StatusOK, adminJobToResponse(r, job, h.store))
 }
 
 func (h *CatalogSeedHandler) HandleListImportSources(w http.ResponseWriter, r *http.Request) {
 	if h.store == nil {
-		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "Catalog imports from S3 require the private internal S3 bucket")
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "Catalog imports from stored artifacts require configured storage")
 		return
 	}
 
@@ -252,162 +197,30 @@ func (h *CatalogSeedHandler) HandleListImportSources(w http.ResponseWriter, r *h
 }
 
 func (h *CatalogSeedHandler) HandleCreateImportJob(w http.ResponseWriter, r *http.Request) {
-	if h.jobRepo == nil {
-		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "Job repository is not configured")
-		return
-	}
-
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid multipart form")
 		return
 	}
-
 	opts, err := parseCatalogImportOptions(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid import options")
 		return
 	}
-
-	localPath := r.FormValue("local_path")
-	if localPath != "" {
-		cleaned := filepath.Clean(localPath)
-		abs, absErr := filepath.Abs(cleaned)
-		if absErr != nil || !strings.HasSuffix(strings.ToLower(abs), ".json.gz") {
-			writeError(w, http.StatusBadRequest, "bad_request", "Local path must point to a .json.gz file")
-			return
-		}
-		info, statErr := os.Stat(abs)
-		if statErr != nil || !info.Mode().IsRegular() {
-			writeError(w, http.StatusBadRequest, "bad_request", "Local file not found or not a regular file")
-			return
-		}
-
-		job, err := h.jobRepo.Create(r.Context(), adminjob.CreateJobInput{
-			JobType:         adminjob.JobTypeCatalogImport,
-			CreatedByUserID: currentAdminUserID(r),
-			RequestPayload: adminjob.CatalogImportRequest{
-				LocalPath:   abs,
-				SourceLabel: filepath.Base(abs),
-				Options:     opts,
-			},
-			Message: "Queued catalog import from local file",
-		})
-		if err != nil {
-			var conflict *adminjob.ActiveJobConflictError
-			if errors.As(err, &conflict) {
-				jobsHandler := NewAdminJobsHandler(h.jobRepo, h.store)
-				writeAdminJobConflict(w, "A catalog import is already queued or running", conflict.Job, jobsHandler, r)
-			} else {
-				log.Printf("catalog import job creation failed: %v", err)
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to queue catalog import")
-			}
-			return
-		}
-
-		jobsHandler := NewAdminJobsHandler(h.jobRepo, h.store)
-		if h.RealtimeHub != nil {
-			publishEventJob(r.Context(), h.RealtimeHub.EventsHub(), "job.created", job)
-		}
-		writeJSON(w, http.StatusAccepted, adminJobToResponse(r, job, jobsHandler.store))
-		return
-	}
-
-	remoteURL := r.FormValue("remote_url")
-	if remoteURL != "" {
-		if _, err := readImportDataFromRemoteURL(r.Context(), remoteURL); err != nil {
-			if errors.Is(err, errCatalogSeedImportInvalidRemoteURL) {
-				writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-				return
-			}
-			writeError(w, http.StatusBadRequest, "bad_request", "Failed to load catalog seed source")
-			return
-		}
-
-		job, err := h.jobRepo.Create(r.Context(), adminjob.CreateJobInput{
-			JobType:         adminjob.JobTypeCatalogImport,
-			CreatedByUserID: currentAdminUserID(r),
-			RequestPayload: adminjob.CatalogImportRequest{
-				RemoteURL:   remoteURL,
-				SourceLabel: remoteURL,
-				Options:     opts,
-			},
-			Message: "Queued catalog import from remote URL",
-		})
-		if err != nil {
-			var conflict *adminjob.ActiveJobConflictError
-			if errors.As(err, &conflict) {
-				jobsHandler := NewAdminJobsHandler(h.jobRepo, h.store)
-				writeAdminJobConflict(w, "A catalog import is already queued or running", conflict.Job, jobsHandler, r)
-			} else {
-				log.Printf("catalog import remote job creation failed: %v", err)
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to queue catalog import")
-			}
-			return
-		}
-
-		jobsHandler := NewAdminJobsHandler(h.jobRepo, h.store)
-		if h.RealtimeHub != nil {
-			publishEventJob(r.Context(), h.RealtimeHub.EventsHub(), "job.created", job)
-		}
-		writeJSON(w, http.StatusAccepted, adminJobToResponse(r, job, jobsHandler.store))
-		return
-	}
-
-	// S3-based sources — require store
-	if h.store == nil {
-		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "Catalog import jobs require the private internal S3 bucket")
-		return
-	}
-
-	sourceBucket, sourceKey, sourceLabel, cleanupSource, err := h.resolveImportJobSource(r)
+	source := catalogImportSelectionFromForm(r)
+	job, err := h.CreateCatalogImportJob(r.Context(), currentAdminUserID(r), source, opts)
 	if err != nil {
-		switch {
-		case errors.Is(err, errCatalogSeedImportSourceRequired), errors.Is(err, errCatalogSeedImportSourceConflict):
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		case errors.Is(err, errCatalogSeedImportSourceUnavailable):
-			writeError(w, http.StatusServiceUnavailable, "service_unavailable", err.Error())
-		case errors.Is(err, adminjob.ErrJobNotFound), errors.Is(err, s3client.ErrNotFound):
-			writeError(w, http.StatusBadRequest, "bad_request", "Catalog export artifact not found")
-		default:
-			log.Printf("catalog import job source failed: %v", err)
-			writeError(w, http.StatusBadRequest, "bad_request", "Failed to load catalog seed source")
+		if conflict, ok := errors.AsType[*adminjob.ActiveJobConflictError](err); ok {
+			writeAdminJobConflict(w, "A catalog import is already queued or running", conflict.Job, NewAdminJobsHandler(h.jobRepo, h.store), r)
+			return
 		}
+		writeCatalogTransferFailure(w, err, "Failed to queue catalog import")
 		return
 	}
+	writeJSON(w, http.StatusAccepted, adminJobToResponse(r, job, h.store))
+}
 
-	job, err := h.jobRepo.Create(r.Context(), adminjob.CreateJobInput{
-		JobType:         adminjob.JobTypeCatalogImport,
-		CreatedByUserID: currentAdminUserID(r),
-		RequestPayload: adminjob.CatalogImportRequest{
-			SourceBucket:  sourceBucket,
-			SourceKey:     sourceKey,
-			SourceLabel:   sourceLabel,
-			CleanupSource: cleanupSource,
-			Options:       opts,
-		},
-		Message: "Queued catalog import",
-	})
-	if err != nil {
-		if cleanupSource {
-			_ = h.store.DeleteObject(context.Background(), sourceBucket, sourceKey)
-		}
-		var conflict *adminjob.ActiveJobConflictError
-		switch {
-		case errors.As(err, &conflict):
-			jobsHandler := NewAdminJobsHandler(h.jobRepo, h.store)
-			writeAdminJobConflict(w, "A catalog import is already queued or running", conflict.Job, jobsHandler, r)
-		default:
-			log.Printf("catalog import job creation failed: %v", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to queue catalog import")
-		}
-		return
-	}
-
-	jobsHandler := NewAdminJobsHandler(h.jobRepo, h.store)
-	if h.RealtimeHub != nil {
-		publishEventJob(r.Context(), h.RealtimeHub.EventsHub(), "job.created", job)
-	}
-	writeJSON(w, http.StatusAccepted, adminJobToResponse(r, job, jobsHandler.store))
+func catalogImportSelectionFromForm(r *http.Request) CatalogImportSourceSelection {
+	return CatalogImportSourceSelection{LocalPath: r.FormValue("local_path"), ExportJobID: r.FormValue("export_job_id"), ArtifactKey: r.FormValue("artifact_key"), RemoteURL: r.FormValue("remote_url")}
 }
 
 func (h *CatalogSeedHandler) HandleListLocalImportSources(w http.ResponseWriter, r *http.Request) {
@@ -456,34 +269,18 @@ func (h *CatalogSeedHandler) HandleImport(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	data, err := h.readImportData(r)
-	if err != nil {
-		switch {
-		case errors.Is(err, errCatalogSeedImportSourceRequired), errors.Is(err, errCatalogSeedImportSourceConflict):
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		case errors.Is(err, errCatalogSeedImportInvalidRemoteURL):
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		case errors.Is(err, errCatalogSeedImportInvalidLocalPath):
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		case errors.Is(err, errCatalogSeedImportSourceUnavailable):
-			writeError(w, http.StatusServiceUnavailable, "service_unavailable", err.Error())
-		case errors.Is(err, adminjob.ErrJobNotFound), errors.Is(err, s3client.ErrNotFound):
-			writeError(w, http.StatusBadRequest, "bad_request", "Catalog export artifact not found")
-		default:
-			log.Printf("catalog seed import source failed: %v", err)
-			writeError(w, http.StatusBadRequest, "bad_request", "Failed to load catalog seed source")
-		}
-		return
-	}
-
 	opts, err := parseCatalogImportOptions(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid import options")
 		return
 	}
 
-	result, err := h.service.Import(r.Context(), data, opts)
+	result, err := h.ImportCatalog(r.Context(), catalogImportSelectionFromForm(r), opts)
 	if err != nil {
+		if apiErr, ok := errors.AsType[*APIError](err); ok {
+			writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
+			return
+		}
 		var unmatched *catalogseed.UnmatchedRootsError
 		switch {
 		case errors.As(err, &unmatched):
@@ -517,9 +314,7 @@ func writeCatalogSeedError(w http.ResponseWriter, status int, code, message stri
 const defaultLocalImportDir = "/catalog-seeds"
 
 var (
-	errCatalogSeedImportSourceRequired    = errors.New("Provide exactly one source: local_path, export_job_id, artifact_key, or remote_url")
-	errCatalogSeedImportSourceConflict    = errors.New("Provide only one catalog seed source")
-	errCatalogSeedImportSourceUnavailable = errors.New("Catalog imports from S3 require the private internal S3 bucket")
+	errCatalogSeedImportSourceUnavailable = errors.New("catalog imports from stored artifacts require configured storage")
 	errCatalogSeedImportInvalidLocalPath  = errors.New("Local path must point to an existing .json.gz file")
 	errCatalogSeedImportInvalidRemoteURL  = errors.New("Remote URL must point to an http(s) .json.gz file")
 )
@@ -553,45 +348,6 @@ func readLocalImportFile(localPath string) ([]byte, error) {
 		return nil, fmt.Errorf("reading local import file: %w", err)
 	}
 	return data, nil
-}
-
-func (h *CatalogSeedHandler) readImportData(r *http.Request) ([]byte, error) {
-	localPath := r.FormValue("local_path")
-	jobID := r.FormValue("export_job_id")
-	artifactKey := r.FormValue("artifact_key")
-	remoteURL := r.FormValue("remote_url")
-	hasLocal := localPath != ""
-	hasJob := jobID != ""
-	hasArtifact := artifactKey != ""
-	hasRemoteURL := remoteURL != ""
-	sourceCount := 0
-	if hasLocal {
-		sourceCount++
-	}
-	if hasJob {
-		sourceCount++
-	}
-	if hasArtifact {
-		sourceCount++
-	}
-	if hasRemoteURL {
-		sourceCount++
-	}
-
-	switch {
-	case sourceCount == 0:
-		return nil, errCatalogSeedImportSourceRequired
-	case sourceCount > 1:
-		return nil, errCatalogSeedImportSourceConflict
-	case hasLocal:
-		return readLocalImportFile(localPath)
-	case hasRemoteURL:
-		return readImportDataFromRemoteURL(r.Context(), remoteURL)
-	case hasArtifact:
-		return h.readImportDataFromArtifactKey(r.Context(), artifactKey)
-	default:
-		return h.readImportDataFromExportJob(r.Context(), jobID)
-	}
 }
 
 func (h *CatalogSeedHandler) readImportDataFromExportJob(ctx context.Context, jobID string) ([]byte, error) {
@@ -648,45 +404,6 @@ func readImportDataFromRemoteURL(ctx context.Context, remoteURL string) ([]byte,
 	return data, nil
 }
 
-func (h *CatalogSeedHandler) resolveImportJobSource(r *http.Request) (bucket string, key string, label string, cleanup bool, err error) {
-	jobID := r.FormValue("export_job_id")
-	artifactKey := r.FormValue("artifact_key")
-	remoteURL := r.FormValue("remote_url")
-	hasJob := jobID != ""
-	hasArtifact := artifactKey != ""
-	hasRemoteURL := remoteURL != ""
-	sourceCount := 0
-	if hasJob {
-		sourceCount++
-	}
-	if hasArtifact {
-		sourceCount++
-	}
-	if hasRemoteURL {
-		sourceCount++
-	}
-
-	switch {
-	case sourceCount == 0:
-		return "", "", "", false, errCatalogSeedImportSourceRequired
-	case sourceCount > 1:
-		return "", "", "", false, errCatalogSeedImportSourceConflict
-	case hasRemoteURL:
-		return "", "", remoteURL, false, errCatalogSeedImportInvalidRemoteURL
-	case hasArtifact:
-		if h.store == nil {
-			return "", "", "", false, errCatalogSeedImportSourceUnavailable
-		}
-		return h.store.Bucket(), artifactKey, filepath.Base(artifactKey), false, nil
-	default:
-		bucket, key, resolveErr := h.resolveExportJobArtifactRef(r.Context(), jobID)
-		if resolveErr != nil {
-			return "", "", "", false, resolveErr
-		}
-		return bucket, key, "Export job " + jobID, false, nil
-	}
-}
-
 func (h *CatalogSeedHandler) resolveExportJobArtifactRef(ctx context.Context, jobID string) (string, string, error) {
 	if h.jobRepo == nil || h.store == nil {
 		return "", "", errCatalogSeedImportSourceUnavailable
@@ -714,4 +431,18 @@ func parseCatalogImportOptions(r *http.Request) (catalogseed.ImportOptions, erro
 		ConflictMode: catalogseed.ConflictMode(r.FormValue("conflict_mode")),
 		PathRewrites: rewrites,
 	}, nil
+}
+
+func writeCatalogTransferFailure(w http.ResponseWriter, err error, message string) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
+		status := apiErr.Status
+		code := apiErr.Code
+		if status == http.StatusConflict {
+			status = http.StatusBadRequest
+			code = "bad_request"
+		}
+		writeError(w, status, code, apiErr.Message)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "internal_error", message)
 }

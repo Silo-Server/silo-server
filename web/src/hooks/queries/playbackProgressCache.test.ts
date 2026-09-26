@@ -1,6 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
-import type { ItemDetail, ProgressListResponse, WatchDetail } from "@/api/types";
+import type { ItemDetail, WatchDetail } from "@/api/types";
+import { v2Fixture } from "@/api/v2/testing";
+import type { ProgressList } from "./progress";
 import { catalogKeys, itemKeys, progressKeys } from "./keys";
 import { applyPlaybackProgressToCache } from "./playbackProgressCache";
 
@@ -83,17 +85,20 @@ describe("applyPlaybackProgressToCache", () => {
     queryClient.setQueryData(itemKeys.detail("movie-1"), makeItemDetail());
     queryClient.setQueryData(catalogKeys.itemDetail("movie-1"), makeItemDetail());
     queryClient.setQueryData(itemKeys.watchDetail("movie-1"), makeWatchDetail());
-    queryClient.setQueryData<ProgressListResponse>(progressKeys.list("in_progress"), {
-      progress: [
-        {
-          media_item_id: "movie-1",
-          position_seconds: 120,
-          duration_seconds: 3600,
-          completed: false,
-          updated_at: "2026-03-21T00:00:00.000Z",
-        },
-      ],
-    });
+    queryClient.setQueryData<ProgressList>(
+      progressKeys.list("in_progress"),
+      v2Fixture<"GET /api/v2/progress">({
+        items: [
+          {
+            media_item_id: "movie-1",
+            position_seconds: 120,
+            duration_seconds: 3600,
+            completed: false,
+            updated_at: "2026-03-21T00:00:00.000Z",
+          },
+        ],
+      }),
+    );
 
     applyPlaybackProgressToCache(queryClient, {
       contentId: "movie-1",
@@ -110,9 +115,7 @@ describe("applyPlaybackProgressToCache", () => {
       catalogKeys.itemDetail("movie-1"),
     );
     const watchDetail = queryClient.getQueryData<WatchDetail>(itemKeys.watchDetail("movie-1"));
-    const progressList = queryClient.getQueryData<ProgressListResponse>(
-      progressKeys.list("in_progress"),
-    );
+    const progressList = queryClient.getQueryData<ProgressList>(progressKeys.list("in_progress"));
 
     expect(itemDetail?.user_data).toMatchObject({
       played: false,
@@ -144,7 +147,7 @@ describe("applyPlaybackProgressToCache", () => {
       last_hdr: true,
       last_codec_video: "hevc",
     });
-    expect(progressList?.progress).toEqual([
+    expect(progressList?.items).toEqual([
       expect.objectContaining({
         media_item_id: "movie-1",
         position_seconds: 900,

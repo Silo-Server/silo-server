@@ -55,6 +55,9 @@ func TestCleanupOrphanedMediaItemsTask(t *testing.T) {
 	if triggers := task.DefaultTriggers(); len(triggers) != 0 {
 		t.Fatalf("DefaultTriggers() = %#v, want none", triggers)
 	}
+	if !task.ManualOnly() {
+		t.Fatal("ManualOnly() = false, want true")
+	}
 
 	progress := &orphanedMediaCleanupProgress{}
 	if err := task.Execute(context.Background(), progress); err != nil {

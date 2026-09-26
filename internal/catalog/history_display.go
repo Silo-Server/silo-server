@@ -8,6 +8,28 @@ import (
 )
 
 func ResolveHistoryDisplayIDs(ctx context.Context, entries []userstore.WatchHistoryEntry, episodeRepo *EpisodeRepository) ([]string, error) {
+	display, err := ResolveHistoryDisplayEntries(ctx, entries, episodeRepo)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(display))
+	for _, d := range display {
+		ids = append(ids, d.DisplayID)
+	}
+	return ids, nil
+}
+
+// HistoryDisplayEntry is one history card: the id the card is rendered
+// from and the most recent watch it stands for.
+type HistoryDisplayEntry struct {
+	DisplayID string
+	Entry     userstore.WatchHistoryEntry
+}
+
+// ResolveHistoryDisplayEntries is ResolveHistoryDisplayIDs keeping the
+// history row each display id was first seen on, so a listing can compose
+// the card with its watch record.
+func ResolveHistoryDisplayEntries(ctx context.Context, entries []userstore.WatchHistoryEntry, episodeRepo *EpisodeRepository) ([]HistoryDisplayEntry, error) {
 	episodeSeriesByID := make(map[string]string)
 	if episodeRepo != nil {
 		episodeIDs := make([]string, 0, len(entries))
@@ -38,7 +60,7 @@ func ResolveHistoryDisplayIDs(ctx context.Context, entries []userstore.WatchHist
 		}
 	}
 
-	ids := make([]string, 0, len(entries))
+	display := make([]HistoryDisplayEntry, 0, len(entries))
 	seen := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
 		displayID := strings.TrimSpace(entry.MediaItemID)
@@ -52,7 +74,35 @@ func ResolveHistoryDisplayIDs(ctx context.Context, entries []userstore.WatchHist
 			continue
 		}
 		seen[displayID] = struct{}{}
-		ids = append(ids, displayID)
+		display = append(display, HistoryDisplayEntry{DisplayID: displayID, Entry: entry})
 	}
-	return ids, nil
+	return display, nil
+}
+
+// HistoryDisplayGroups expands candidate display IDs to their constituent
+// history IDs in one catalog query. Movies retain their own ID; a series also
+// includes every episode, so a watch outside the raw page can be its witness.
+func HistoryDisplayGroups(ctx context.Context, display []HistoryDisplayEntry, episodes *EpisodeRepository) (map[string][]string, error) {
+	groups := make(map[string][]string, len(display))
+	ids := make([]string, 0, len(display))
+	for _, d := range display {
+		groups[d.DisplayID] = []string{d.DisplayID}
+		ids = append(ids, d.DisplayID)
+	}
+	if episodes == nil || len(ids) == 0 {
+		return groups, nil
+	}
+	rows, err := episodes.pool.Query(ctx, `SELECT series_id, content_id FROM episodes WHERE series_id = ANY($1)`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var seriesID, episodeID string
+		if err := rows.Scan(&seriesID, &episodeID); err != nil {
+			return nil, err
+		}
+		groups[seriesID] = append(groups[seriesID], episodeID)
+	}
+	return groups, rows.Err()
 }

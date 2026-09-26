@@ -7,6 +7,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
 )
 
 // taskWorker wraps a Task with in-memory runtime state and trigger management.
@@ -24,6 +27,7 @@ type taskWorker struct {
 	triggerUpdate   chan struct{}
 	triggerChanged  atomic.Bool
 	mu              sync.RWMutex
+	scheduleMu      sync.Mutex
 }
 
 func newTaskWorker(task Task, manager *TaskManager) *taskWorker {
@@ -50,9 +54,7 @@ func (w *taskWorker) info() TaskInfo {
 		ProgressMessage: w.progressMessage,
 		LastExecution:   w.lastResult,
 	}
-	if task, ok := w.task.(ManualOnlyTask); ok {
-		info.ManualOnly = task.ManualOnly()
-	}
+	info.ManualOnly = isManualOnly(w.task)
 
 	var earliest time.Time
 	for _, tr := range w.triggers {
@@ -123,6 +125,7 @@ type progressReporter struct {
 }
 
 func (p *progressReporter) Report(percent float64, message string) {
+	workmetrics.Progress(p.worker.task.Key())
 	p.worker.mu.Lock()
 	p.worker.progress = percent
 	p.worker.progressMessage = message
@@ -134,33 +137,41 @@ func (p *progressReporter) SetResultData(data json.RawMessage) {
 	p.resultData = data
 }
 
-// run executes the task. Returns ErrTaskAlreadyRunning if already running.
-func (w *taskWorker) run(ctx context.Context) (*ExecutionResult, error) {
+// reserve claims the local worker before an asynchronous caller acknowledges it.
+func (w *taskWorker) reserve(ctx context.Context) (context.Context, context.CancelFunc, error) {
 	w.mu.Lock()
+	defer w.mu.Unlock()
 	if w.state == TaskStateRunning || w.state == TaskStateCancelling {
-		w.mu.Unlock()
-		return nil, ErrTaskAlreadyRunning
+		return nil, nil, ErrTaskAlreadyRunning
 	}
 	w.state = TaskStateRunning
 	w.progress = 0
 	w.progressMessage = ""
 	w.lastStarted = time.Now()
-
 	execCtx, cancel := context.WithCancel(ctx)
 	w.cancel = cancel
-	w.mu.Unlock()
+	return execCtx, cancel, nil
+}
+
+// run executes the task. Returns ErrTaskAlreadyRunning if already running.
+func (w *taskWorker) run(ctx context.Context) (*ExecutionResult, error) {
+	execCtx, cancel, err := w.reserve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return w.executeReserved(execCtx, cancel), nil
+}
+
+func (w *taskWorker) executeReserved(execCtx context.Context, cancel context.CancelFunc) *ExecutionResult {
 	w.notify()
+	defer cancel()
 
-	defer func() {
-		cancel()
-		w.mu.Lock()
-		w.cancel = nil
-		w.mu.Unlock()
-	}()
-
+	execCtx, observation := workmetrics.Start(execCtx, w.task.Key(), time.Time{})
+	defer observation.Finish("unknown")
 	reporter := &progressReporter{worker: w}
 	startedAt := time.Now()
-	err := w.task.Execute(execCtx, reporter)
+	var err error
+	workmetrics.Do(execCtx, func(ctx context.Context) { err = w.task.Execute(ctx, reporter) })
 	completedAt := time.Now()
 
 	result := &ExecutionResult{
@@ -171,10 +182,12 @@ func (w *taskWorker) run(ctx context.Context) (*ExecutionResult, error) {
 		ResultData:  reporter.resultData,
 	}
 
+	metricOutcome := telemetry.Outcome(err)
 	w.mu.Lock()
 	switch {
 	case w.state == TaskStateCancelling:
 		result.Status = "cancelled"
+		metricOutcome = "canceled"
 	case err != nil:
 		result.Status = "failed"
 		result.ErrorMessage = err.Error()
@@ -182,6 +195,7 @@ func (w *taskWorker) run(ctx context.Context) (*ExecutionResult, error) {
 		result.Status = "completed"
 	}
 
+	w.cancel = nil
 	w.state = TaskStateIdle
 	w.lastCompleted = completedAt
 	w.lastResult = result
@@ -189,8 +203,9 @@ func (w *taskWorker) run(ctx context.Context) (*ExecutionResult, error) {
 	w.progressMessage = ""
 	w.mu.Unlock()
 	w.notify()
+	observation.Finish(metricOutcome)
 
-	return result, nil
+	return result
 }
 
 // requestCancel sets state to Cancelling and calls the cancel func.

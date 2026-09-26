@@ -14,7 +14,7 @@ import (
 
 const downloadColumns = `id, user_id, profile_id, device_id, media_file_id, content_id, episode_id, batch_id,
 	kind, status, format, quality, effective_quality, target_bitrate_kbps, revision, artifact_id, file_size, bytes_sent, error_message,
-	created_at, updated_at, completed_at`
+	created_at, updated_at, completed_at, status_event_at`
 
 const insertDownloadSQL = `INSERT INTO downloads (id, user_id, profile_id, device_id, media_file_id, content_id,
 		episode_id, batch_id, kind, status, format, quality, effective_quality, target_bitrate_kbps, revision, artifact_id, file_size, bytes_sent, error_message,
@@ -29,6 +29,20 @@ type Repository struct {
 // NewRepository creates a new Repository backed by the given pool.
 func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
+}
+
+// managedQueryer lets subscription registration use its monitor transaction.
+// Only registration reads/writes use this seam; transfer/quota lifecycle stays
+// on the ordinary repository.
+type managedQueryer interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+type managedRegistryStore struct{ db managedQueryer }
+type managedRegistrationRepository interface {
+	MonitorEntriesToRegister(context.Context, *Subscription, []ManagedEntryKey) (map[ManagedEntryKey]bool, error)
+	CreateManagedEntriesBatch(context.Context, []*Download) ([]*Download, error)
+	SumManagedFileSize(context.Context, int, string, string) (int64, error)
 }
 
 // downloadQuotaLockClassID is the advisory-lock classid for per-user download
@@ -61,7 +75,7 @@ func scanInto(row pgx.Row, d *Download) error {
 	err := row.Scan(
 		&d.ID, &d.UserID, &profileID, &deviceID, &d.MediaFileID, &d.ContentID, &episodeID, &batchID,
 		&d.Kind, &d.Status, &d.Format, &d.Quality, &d.EffectiveQuality, &d.TargetBitrateKbps, &d.Revision, &artifactID, &d.FileSize, &d.BytesSent, &d.ErrorMessage,
-		&d.CreatedAt, &d.UpdatedAt, &d.CompletedAt,
+		&d.CreatedAt, &d.UpdatedAt, &d.CompletedAt, &d.StatusEventAt,
 	)
 	if err != nil {
 		return err
@@ -97,7 +111,7 @@ func scanDownloads(rows pgx.Rows) ([]*Download, error) {
 	return downloads, rows.Err()
 }
 
-func (r *Repository) insertArgs(d *Download) []any {
+func downloadInsertArgs(d *Download) []any {
 	format := d.Format
 	if format == "" {
 		format = FormatOriginal
@@ -124,7 +138,7 @@ func (r *Repository) insertArgs(d *Download) []any {
 
 // Create inserts a new download record.
 func (r *Repository) Create(ctx context.Context, d *Download) error {
-	if _, err := r.pool.Exec(ctx, insertDownloadSQL, r.insertArgs(d)...); err != nil {
+	if _, err := r.pool.Exec(ctx, insertDownloadSQL, downloadInsertArgs(d)...); err != nil {
 		return fmt.Errorf("inserting download: %w", err)
 	}
 	return nil
@@ -139,7 +153,7 @@ func (r *Repository) CreateBatch(ctx context.Context, downloads []*Download) err
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	for _, d := range downloads {
-		if _, err := tx.Exec(ctx, insertDownloadSQL, r.insertArgs(d)...); err != nil {
+		if _, err := tx.Exec(ctx, insertDownloadSQL, downloadInsertArgs(d)...); err != nil {
 			return fmt.Errorf("inserting batch download: %w", err)
 		}
 	}
@@ -340,6 +354,10 @@ type ManagedEntryKey struct {
 // registration paths use this instead of a per-item GetManagedEntry loop (a
 // 300-episode series would otherwise issue 300 sequential lookups).
 func (r *Repository) GetManagedEntriesByKeys(ctx context.Context, userID int, profileID, deviceID string, keys []ManagedEntryKey) (map[ManagedEntryKey]*Download, error) {
+	return (managedRegistryStore{r.pool}).GetManagedEntriesByKeys(ctx, userID, profileID, deviceID, keys)
+}
+
+func (r managedRegistryStore) GetManagedEntriesByKeys(ctx context.Context, userID int, profileID, deviceID string, keys []ManagedEntryKey) (map[ManagedEntryKey]*Download, error) {
 	out := make(map[ManagedEntryKey]*Download, len(keys))
 	if len(keys) == 0 {
 		return out, nil
@@ -354,7 +372,7 @@ func (r *Repository) GetManagedEntriesByKeys(ctx context.Context, userID int, pr
 	}
 	// ANY() on each column over-selects the cross product within this device's
 	// rows; the exact-pair filter below trims it.
-	rows, err := r.pool.Query(ctx,
+	rows, err := r.db.Query(ctx,
 		`SELECT `+downloadColumns+` FROM downloads
 		 WHERE user_id = $1 AND profile_id = $2 AND device_id = $3
 		   AND content_id = ANY($4) AND COALESCE(episode_id, '') = ANY($5)`,
@@ -377,11 +395,56 @@ func (r *Repository) GetManagedEntriesByKeys(ctx context.Context, userID int, pr
 	return out, nil
 }
 
+// MonitorEntriesToRegister returns which of keys the monitor may register on
+// its device: the device holds no entry with that key, and the monitor has no
+// exclusion for the episode (see Repository.DeleteManaged). One statement
+// reads both, so a concurrent delete, which removes the row and records its
+// exclusion in one commit, is seen as one or the other.
+func (r managedRegistryStore) MonitorEntriesToRegister(ctx context.Context, sub *Subscription, keys []ManagedEntryKey) (map[ManagedEntryKey]bool, error) {
+	out := make(map[ManagedEntryKey]bool, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	contentIDs := make([]string, len(keys))
+	episodeIDs := make([]string, len(keys))
+	for i, k := range keys {
+		contentIDs[i], episodeIDs[i] = k.ContentID, k.EpisodeID
+	}
+	rows, err := r.db.Query(ctx,
+		`SELECT k.content_id, k.episode_id
+		 FROM unnest($4::text[], $5::text[]) AS k(content_id, episode_id)
+		 WHERE NOT EXISTS (
+		         SELECT 1 FROM downloads d
+		         WHERE d.user_id = $1 AND d.profile_id = $2 AND d.device_id = $3
+		           AND d.content_id = k.content_id AND COALESCE(d.episode_id, '') = k.episode_id)
+		   AND NOT EXISTS (
+		         SELECT 1 FROM download_subscription_exclusions x
+		         WHERE x.subscription_id = $6 AND x.episode_id = k.episode_id)`,
+		sub.UserID, sub.ProfileID, sub.DeviceID, contentIDs, episodeIDs, sub.ID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing monitor entries to register: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k ManagedEntryKey
+		if err := rows.Scan(&k.ContentID, &k.EpisodeID); err != nil {
+			return nil, fmt.Errorf("scanning monitor entry to register: %w", err)
+		}
+		out[k] = true
+	}
+	return out, rows.Err()
+}
+
 // CreateManagedEntriesBatch inserts managed rows in one statement, skipping
 // identities that already exist (including concurrent-insert races) via ON
 // CONFLICT DO NOTHING on the managed-entry unique index. Returns only the rows
 // actually inserted, so callers can report an honest newly-registered count.
 func (r *Repository) CreateManagedEntriesBatch(ctx context.Context, ds []*Download) ([]*Download, error) {
+	return (managedRegistryStore{r.pool}).CreateManagedEntriesBatch(ctx, ds)
+}
+
+func (r managedRegistryStore) CreateManagedEntriesBatch(ctx context.Context, ds []*Download) ([]*Download, error) {
 	if len(ds) == 0 {
 		return nil, nil
 	}
@@ -404,10 +467,10 @@ func (r *Repository) CreateManagedEntriesBatch(ctx context.Context, ds []*Downlo
 			sb.WriteString(strconv.Itoa(i*insertCols + j + 1))
 		}
 		sb.WriteByte(')')
-		args = append(args, r.insertArgs(d)...)
+		args = append(args, downloadInsertArgs(d)...)
 	}
 	sb.WriteString(` ON CONFLICT (user_id, profile_id, device_id, content_id, (COALESCE(episode_id, ''))) WHERE device_id IS NOT NULL DO NOTHING RETURNING ` + downloadColumns)
-	rows, err := r.pool.Query(ctx, sb.String(), args...)
+	rows, err := r.db.Query(ctx, sb.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("batch inserting managed entries: %w", err)
 	}
@@ -433,6 +496,7 @@ func (r *Repository) ReplaceManagedEntry(ctx context.Context, existing *Download
 			error_message = '',
 			completed_at = NULL,
 			revision = revision + 1,
+ status_event_at = NULL,
 			updated_at = now()
 		WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4 AND revision = $5
 		RETURNING ` + downloadColumns
@@ -480,8 +544,12 @@ func (r *Repository) UpdateManagedBatch(ctx context.Context, existing *Download,
 // best-effort view, since the client is the source of truth for what is actually
 // on disk.
 func (r *Repository) SumManagedFileSize(ctx context.Context, userID int, profileID, deviceID string) (int64, error) {
+	return (managedRegistryStore{r.pool}).SumManagedFileSize(ctx, userID, profileID, deviceID)
+}
+
+func (r managedRegistryStore) SumManagedFileSize(ctx context.Context, userID int, profileID, deviceID string) (int64, error) {
 	var total int64
-	err := r.pool.QueryRow(ctx,
+	err := r.db.QueryRow(ctx,
 		`SELECT COALESCE(SUM(file_size), 0) FROM downloads
 		 WHERE user_id = $1 AND profile_id = $2 AND device_id = $3
 		   AND status NOT IN ('revoked', 'failed', 'cancelled')`,
@@ -562,7 +630,7 @@ func (r *Repository) ListEphemeral(ctx context.Context, userID int) ([]*Download
 // downloading/completed. Returns ErrNotFound when nothing matches the gate.
 func (r *Repository) UpdateManagedStatus(ctx context.Context, id string, userID int, profileID, deviceID, status string, completedAt *time.Time) error {
 	tag, err := r.pool.Exec(ctx,
-		`UPDATE downloads SET status = $5, completed_at = $6, updated_at = now()
+		`UPDATE downloads SET status = $5, completed_at = $6, status_event_at = now(), updated_at = now()
 		WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4
 		  AND status IN ('ready', 'downloading', 'completed')`,
 		id, userID, profileID, deviceID, status, completedAt,
@@ -576,18 +644,88 @@ func (r *Repository) UpdateManagedStatus(ctx context.Context, id string, userID 
 	return nil
 }
 
+// deleteManagedSQL is DeleteManaged's statement: it returns the number of rows
+// deleted. Tests run it inside an open transaction to hold a delete between its
+// statement and its commit.
+const deleteManagedSQL = `WITH deleted AS (
+	DELETE FROM downloads WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4
+	RETURNING content_id, episode_id
+), monitor AS (
+	SELECT s.id, d.episode_id FROM deleted d
+	JOIN download_subscriptions s
+	  ON s.user_id = $2 AND s.profile_id = $3 AND s.device_id = $4 AND s.series_id = d.content_id
+	WHERE d.episode_id IS NOT NULL
+	FOR KEY SHARE OF s
+), excluded AS (
+	INSERT INTO download_subscription_exclusions (subscription_id, episode_id)
+	SELECT id, episode_id FROM monitor
+	ON CONFLICT DO NOTHING
+)
+SELECT count(*) FROM deleted`
+
 // DeleteManaged removes a managed entry, authorized on (user, profile, device).
-// Returns ErrNotFound when nothing matches.
+// Deleting an episode of a series this device monitors also records a monitor
+// exclusion in the same statement, so later syncs do not register the episode
+// again. The row and its exclusion commit together, so a sync, which reads
+// both in one statement (MonitorEntriesToRegister), sees one or the other.
+// The statement locks the monitor FOR KEY SHARE, waiting out a sync or edit
+// that holds it, so a monitor deleted meanwhile yields no row and the delete
+// records nothing instead of failing the exclusion's foreign key. It deletes
+// the downloads row before locking the monitor. A device delete cascades in
+// the same order when the downloads cascade trigger fires first; Postgres
+// fires triggers in name order, and the cascade triggers' names end in their
+// OIDs compared as text, so a database can get the opposite order. There a
+// device delete racing this one can fail one of them with a deadlock error,
+// which a retry resolves. Returns ErrNotFound when nothing matches.
 func (r *Repository) DeleteManaged(ctx context.Context, id string, userID int, profileID, deviceID string) error {
-	tag, err := r.pool.Exec(ctx,
-		`DELETE FROM downloads WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4`,
-		id, userID, profileID, deviceID,
-	)
+	var deleted int
+	err := r.pool.QueryRow(ctx, deleteManagedSQL, id, userID, profileID, deviceID).Scan(&deleted)
 	if err != nil {
 		return fmt.Errorf("deleting managed download: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	if deleted == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// ClearMonitorExclusions forgets the device's monitor exclusions for episodes
+// of seriesID that the user downloaded explicitly: an explicit download
+// overrides the earlier delete. It runs after the download commits, so it
+// forgets an episode only while the device still holds the episode's row. A
+// delete that removed the row in between came after the download, so its
+// exclusion stays. The row is locked FOR KEY SHARE SKIP LOCKED: a delete that
+// has run its statement but not committed still holds the row, and a plain
+// read would see the row and erase that delete's exclusion. The exclusion is
+// locked FOR UPDATE SKIP LOCKED. The clear is best-effort cleanup after the
+// download succeeded, so it never makes the download wait on another
+// transaction's row lock, such as a delete of the row that is itself waiting
+// on the monitor behind a sync. A skipped row or exclusion keeps the
+// exclusion, the direction forgetMonitorDeletes already tolerates.
+func (r *Repository) ClearMonitorExclusions(ctx context.Context, userID int, profileID, deviceID, seriesID string, episodeIDs []string) error {
+	if profileID == "" || deviceID == "" || len(episodeIDs) == 0 {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx,
+		`WITH forgotten AS (
+			SELECT x.subscription_id, x.episode_id
+			FROM download_subscription_exclusions x
+			JOIN download_subscriptions s ON s.id = x.subscription_id
+			WHERE s.user_id = $1 AND s.profile_id = $2 AND s.device_id = $3 AND s.series_id = $4
+			  AND x.episode_id = ANY($5)
+			  AND EXISTS (
+			        SELECT 1 FROM downloads d
+			        WHERE d.user_id = $1 AND d.profile_id = $2 AND d.device_id = $3
+			          AND d.content_id = $4 AND COALESCE(d.episode_id, '') = x.episode_id
+			        FOR KEY SHARE SKIP LOCKED)
+			FOR UPDATE OF x SKIP LOCKED
+		)
+		DELETE FROM download_subscription_exclusions x USING forgotten f
+		WHERE x.subscription_id = f.subscription_id AND x.episode_id = f.episode_id`,
+		userID, profileID, deviceID, seriesID, episodeIDs,
+	)
+	if err != nil {
+		return fmt.Errorf("clearing monitor exclusions: %w", err)
 	}
 	return nil
 }
@@ -623,6 +761,53 @@ func (r *Repository) MarkLinkedDownloadsFailed(ctx context.Context, artifactID, 
 	}
 	defer rows.Close()
 	return scanDownloads(rows)
+}
+
+// ConfirmArtifactLink reconciles a just-created or reused download with its
+// artifact and returns the stored row. Missing-output recovery can requeue
+// the artifact after the create read it: a 'ready' row linked afterwards is
+// returned to 'preparing' here, and a row that existed earlier was already
+// reset by the requeue, so the caller's copy is stale either way. FOR SHARE
+// waits for an in-flight requeue to commit, so either this read sees the
+// queued artifact or the requeue's linked-download reset sees this row. The
+// reset is fenced on the artifact so a concurrent create that relinked the
+// row elsewhere is left alone.
+func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Download, error) {
+	if d == nil || d.ArtifactID == "" {
+		return d, nil
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("beginning artifact link check: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var artifactStatus string
+	err = tx.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1 FOR SHARE`, d.ArtifactID).Scan(&artifactStatus)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("checking linked artifact status: %w", err)
+	}
+	switch artifactStatus {
+	case "queued", "tone_map_queued", "audio_v2_queued", "running", "tone_map_running", "audio_v2_running":
+		if _, err := tx.Exec(ctx,
+			`UPDATE downloads SET status = 'preparing', bytes_sent = 0, completed_at = NULL,
+			     error_message = '', updated_at = now()
+			 WHERE id = $1 AND artifact_id = $2 AND status = 'ready'`,
+			d.ID, d.ArtifactID,
+		); err != nil {
+			return nil, fmt.Errorf("resetting download of requeued artifact: %w", err)
+		}
+	}
+	current, err := scanDownload(tx.QueryRow(ctx, `SELECT `+downloadColumns+` FROM downloads WHERE id = $1`, d.ID))
+	if errors.Is(err, ErrNotFound) {
+		return d, nil // deleted concurrently; the caller's copy is all that remains
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing artifact link check: %w", err)
+	}
+	return current, nil
 }
 
 // ReconcileLinkedDownloads repairs downloads stranded in 'preparing' against a

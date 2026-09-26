@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const ReportDownloadContentType = BundleContentType
@@ -20,9 +22,21 @@ func (s *Service) ListForAdmin(ctx context.Context, filters ListFilters) (ListRe
 	return s.reports.ListForAdmin(ctx, filters)
 }
 
+// reportIDMisses reports whether a caller-supplied report id can be rejected
+// without a query. client_diagnostic_reports.id is a `uuid` column, so a
+// malformed id can only ever miss; handing it to Postgres raises SQLSTATE 22P02
+// and would surface to the client as a 500 instead of a 404.
+func reportIDMisses(id string) bool {
+	// The exact value is bound to the uuid column, so padding counts as a miss.
+	return uuid.Validate(id) != nil
+}
+
 func (s *Service) GetReport(ctx context.Context, id string) (*Report, error) {
 	if s.reports == nil {
 		return nil, ErrReportStoreUnavailable
+	}
+	if reportIDMisses(id) {
+		return nil, ErrNotFound
 	}
 	return s.reports.GetByID(ctx, id)
 }
@@ -73,6 +87,9 @@ func (s *Service) DeleteReport(ctx context.Context, id string) (*Report, error) 
 	// absent), so the blob location is captured from it. If the blob delete
 	// fails the row is already gone, so log the bucket/key for an operator (and
 	// the orphan reconciler) to reap instead of failing the delete.
+	if reportIDMisses(id) {
+		return nil, ErrNotFound
+	}
 	deleted, err := s.reports.DeleteByID(ctx, id)
 	if err != nil {
 		return nil, err

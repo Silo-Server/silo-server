@@ -4,7 +4,7 @@ import { EditorView, lineNumbers } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo } from "react";
 
-import type { PolicyCompileIssue } from "@/api/types";
+import type { PolicyCompileIssue } from "@/api/adminPolicy";
 import { mapPolicyIssuesToDiagnostics } from "@/lib/policyDiagnostics";
 import { regoLanguage } from "@/lib/regoLanguage";
 import { cn } from "@/lib/utils";

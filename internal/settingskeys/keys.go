@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 8
+const Revision = 11
 
 // Setting keys, one constant per definition.
 const (
@@ -17,6 +17,8 @@ const (
 	CatalogMetadataLanguage = "catalog.metadata_language"
 	// Metadata language exceptions
 	CatalogMetadataLanguageOverrides = "catalog.metadata_language_overrides"
+	// Show advisory age
+	CatalogShowAdvisoryAge = "catalog.show_advisory_age"
 	// Download quality
 	DownloadsDefaultQuality = "downloads.default_quality"
 	// Keep watched downloads
@@ -59,6 +61,10 @@ const (
 	PlaybackSubtitleMode = "playback.subtitle_mode"
 	// Audio sync offset
 	PlayerAudioSyncMs = "player.audio_sync_ms"
+	// Audiobook rewind interval
+	PlayerAudiobookSkipBackSeconds = "player.audiobook_skip_back_seconds"
+	// Audiobook fast-forward interval
+	PlayerAudiobookSkipForwardSeconds = "player.audiobook_skip_forward_seconds"
 	// Dolby Vision
 	PlayerDolbyVisionEnabled = "player.dolby_vision_enabled"
 	// Dolby Vision Profile 7 fallback
@@ -85,6 +91,10 @@ const (
 	PlayerSubtitleSyncMs = "player.subtitle_sync_ms"
 	// Video sizing
 	PlayerVideoGravity = "player.video_gravity"
+	// Video rewind interval
+	PlayerVideoSkipBackSeconds = "player.video_skip_back_seconds"
+	// Video fast-forward interval
+	PlayerVideoSkipForwardSeconds = "player.video_skip_forward_seconds"
 	// Search scope
 	SearchMediaScope = "search.media_scope"
 	// Match device caption settings
@@ -125,6 +135,10 @@ const (
 	UiTextWeight = "ui.text_weight"
 	// Theme
 	UiTheme = "ui.theme"
+	// Theme music
+	UiThemeMusicEnabled = "ui.theme_music_enabled"
+	// Loop theme music
+	UiThemeMusicLoop = "ui.theme_music_loop"
 	// Time format
 	UiTimeFormat = "ui.time_format"
 )
@@ -133,6 +147,7 @@ const (
 var Remote = []string{
 	CatalogMetadataLanguage,
 	CatalogMetadataLanguageOverrides,
+	CatalogShowAdvisoryAge,
 	NavPrimaryMenu,
 	NavShortcuts,
 	PlaybackAudioLanguage,
@@ -150,6 +165,8 @@ var Remote = []string{
 	PlaybackSubtitleLanguage,
 	PlaybackSubtitleMode,
 	PlayerAudioSyncMs,
+	PlayerAudiobookSkipBackSeconds,
+	PlayerAudiobookSkipForwardSeconds,
 	PlayerDolbyVisionEnabled,
 	PlayerDvProfile7Hdr10Fallback,
 	PlayerHdrEnabled,
@@ -160,6 +177,8 @@ var Remote = []string{
 	PlayerSleepTimerDefaultMinutes,
 	PlayerSubtitleSyncMs,
 	PlayerVideoGravity,
+	PlayerVideoSkipBackSeconds,
+	PlayerVideoSkipForwardSeconds,
 	SearchMediaScope,
 	UiCardOverlays,
 	UiCardOverlaysEnabled,
@@ -179,6 +198,8 @@ var Remote = []string{
 	UiTextScale,
 	UiTextWeight,
 	UiTheme,
+	UiThemeMusicEnabled,
+	UiThemeMusicLoop,
 	UiTimeFormat,
 }
 

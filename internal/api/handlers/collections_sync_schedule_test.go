@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,6 +20,8 @@ type syncScheduleTestStore struct {
 	collection userstore.Collection
 	updates    []userstore.UpdateCollectionInput
 }
+
+const syncScheduleTestCollectionType = "mdblist"
 
 func (s *syncScheduleTestStore) GetCollection(_ context.Context, id string) (*userstore.Collection, error) {
 	copy := s.collection
@@ -58,7 +61,7 @@ func TestUpdatePersonalCollectionSyncSchedule(t *testing.T) {
 	tests := []struct {
 		name           string
 		role           string
-		body           string
+		schedule       string
 		collectionType string
 		wantStatus     int
 		wantSchedule   *string
@@ -67,38 +70,38 @@ func TestUpdatePersonalCollectionSyncSchedule(t *testing.T) {
 		{
 			name:           "server admin sets server collection preset",
 			role:           "admin",
-			body:           `{"sync_schedule":"0 */6 * * *"}`,
-			collectionType: mdblistSourceKey,
+			schedule:       "0 */6 * * *",
+			collectionType: syncScheduleTestCollectionType,
 			wantStatus:     http.StatusOK,
 			wantSchedule:   stringPointer("0 */6 * * *"),
 		},
 		{
 			name:           "regular account changes bounded cadence",
 			role:           "user",
-			body:           `{"sync_schedule":"weekly"}`,
-			collectionType: mdblistSourceKey,
+			schedule:       "weekly",
+			collectionType: syncScheduleTestCollectionType,
 			wantStatus:     http.StatusOK,
 			wantSchedule:   stringPointer("0 3 * * 0"),
 		},
 		{
 			name:           "regular account cannot set cron",
 			role:           "user",
-			body:           `{"sync_schedule":"0 * * * *"}`,
-			collectionType: mdblistSourceKey,
+			schedule:       "0 * * * *",
+			collectionType: syncScheduleTestCollectionType,
 			wantStatus:     http.StatusBadRequest,
 		},
 		{
 			name:           "automatic sync can be disabled",
 			role:           "user",
-			body:           `{"sync_schedule":""}`,
-			collectionType: mdblistSourceKey,
+			schedule:       "",
+			collectionType: syncScheduleTestCollectionType,
 			wantStatus:     http.StatusOK,
 			wantCleared:    true,
 		},
 		{
 			name:           "manual collection rejects schedule",
 			role:           "admin",
-			body:           `{"sync_schedule":"0 * * * *"}`,
+			schedule:       "0 * * * *",
 			collectionType: "manual",
 			wantStatus:     http.StatusBadRequest,
 		},
@@ -109,29 +112,34 @@ func TestUpdatePersonalCollectionSyncSchedule(t *testing.T) {
 			t.Parallel()
 
 			store := &syncScheduleTestStore{collection: userstore.Collection{
-				ID:               "collection-1",
-				CreatorProfileID: "profile-1",
-				ProfileID:        "profile-1",
-				Name:             "Imported list",
-				CollectionType:   tt.collectionType,
-				QueryDefinition:  "{}",
-				SortConfig:       "{}",
-				SourceConfig:     "{}",
+				ID:                "collection-1",
+				CreatorProfileID:  "profile-1",
+				ProfileID:         "profile-1",
+				AllowedProfileIDs: []string{"profile-1"},
+				Name:              "Imported list",
+				CollectionType:    tt.collectionType,
+				QueryDefinition:   "{}",
+				SortConfig:        "{}",
+				SourceConfig:      "{}",
 			}}
 			handler := NewCollectionHandler(syncScheduleTestProvider{store: store})
-			req := httptest.NewRequest(http.MethodPut, "/collections/collection-1", strings.NewReader(tt.body))
-			routeCtx := chi.NewRouteContext()
-			routeCtx.URLParams.Add("id", "collection-1")
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
-			ctx = apimw.SetClaims(ctx, &auth.Claims{UserID: 7, Role: tt.role})
-			ctx = apimw.SetProfileID(ctx, "profile-1")
-			req = req.WithContext(ctx)
-			rec := httptest.NewRecorder()
-
-			handler.HandleUpdateCollection(rec, req)
-
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, body = %s, want %d", rec.Code, rec.Body.String(), tt.wantStatus)
+			ctx := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 7, Role: tt.role})
+			_, err := handler.UpdatePersonalCollection(ctx, PersonalCollectionUpdateCommand{
+				UserID:       7,
+				ProfileID:    "profile-1",
+				CollectionID: "collection-1",
+				Request:      PersonalCollectionUpdateRequest{SyncSchedule: &tt.schedule},
+			})
+			gotStatus := http.StatusOK
+			if err != nil {
+				var apiErr *APIError
+				if !errors.As(err, &apiErr) {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				gotStatus = apiErr.Status
+			}
+			if gotStatus != tt.wantStatus {
+				t.Fatalf("status = %d, error = %v, want %d", gotStatus, err, tt.wantStatus)
 			}
 			if tt.wantStatus != http.StatusOK {
 				if len(store.updates) != 0 {
@@ -159,6 +167,31 @@ func TestUpdatePersonalCollectionSyncSchedule(t *testing.T) {
 				t.Fatal("next_sync_at was not reset for the new schedule")
 			}
 		})
+	}
+}
+
+func TestV1UpdateDoesNotActivateSyncScheduleContract(t *testing.T) {
+	store := &syncScheduleTestStore{collection: userstore.Collection{
+		ID: "collection-1", CreatorProfileID: "profile-1", ProfileID: "profile-1",
+		AllowedProfileIDs: []string{"profile-1"}, Name: "Imported list", CollectionType: syncScheduleTestCollectionType,
+		QueryDefinition: "{}", SortConfig: "{}", SourceConfig: "{}",
+	}}
+	handler := NewCollectionHandler(syncScheduleTestProvider{store: store})
+	req := httptest.NewRequest(http.MethodPut, "/collections/collection-1", strings.NewReader(`{"sync_schedule":"0 */6 * * *"}`))
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", "collection-1")
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+	ctx = apimw.SetClaims(ctx, &auth.Claims{UserID: 7, Role: "admin"})
+	ctx = apimw.SetProfileID(ctx, "profile-1")
+	rec := httptest.NewRecorder()
+
+	handler.HandleUpdateCollection(rec, req.WithContext(ctx))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(store.updates) != 1 || store.updates[0].SyncSchedule != nil || store.updates[0].ClearSyncSchedule {
+		t.Fatalf("v1 schedule field became active: %+v", store.updates)
 	}
 }
 

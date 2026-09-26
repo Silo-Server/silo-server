@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
+
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	aitranslate "github.com/Silo-Server/silo-server/internal/ai/translate"
@@ -209,6 +211,7 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 		IdempotencyKey:  key,
 		RequestedBy:     req.RequestedBy,
 		SessionID:       req.SessionID,
+		LiveNotifier:    req.LiveNotifier,
 		StartPosition:   req.StartPosition,
 	}
 	if err := s.repo.InsertJob(ctx, job, quota); err != nil {
@@ -252,15 +255,17 @@ func (s *Service) Cancel(ctx context.Context, id int64) error {
 		return ErrJobNotFound
 	}
 
-	if s.runner.Cancel(id) {
-		return nil
-	}
-	// No in-flight goroutine (e.g. another node, or never started): best-effort
-	// terminal transition if it is still active.
+	// Persist the terminal transition even when this process owns the work.
+	// Canceling a context alone cannot acknowledge a job-state change: the
+	// provider may ignore it, and the process may exit before its cleanup runs.
 	if !job.Status.Terminal() {
-		return s.repo.FailJob(ctx, id, JobStatusCancelled, "cancelled")
+		err = s.repo.FailJob(ctx, id, JobStatusCancelled, "cancelled") //nolint:misspell // Preserve the existing persisted message.
 	}
-	return nil
+	// Still ask local work to stop if the database outcome is uncertain, but
+	// return that error rather than reporting a successful cancellation. This
+	// does not fence subtitle publication by an already-running worker.
+	s.runner.Cancel(id)
+	return err
 }
 
 // dispatch launches a bounded background goroutine to run the job.
@@ -273,6 +278,16 @@ func (s *Service) dispatch(job Job) {
 }
 
 func (s *Service) run(ctx context.Context, job *Job) {
+	// Read the committed outcome; publication and cancellation can race and a
+	// failed commit response alone cannot establish the durable state.
+	defer func() {
+		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		if finished, err := s.repo.GetJob(finishCtx, job.ID); err == nil && finished != nil {
+			workmetrics.FinishContext(ctx, string(finished.Status))
+		}
+	}()
+
 	if job.Kind.IsTranscribe() {
 		s.runTranscribe(ctx, job)
 		return
@@ -291,10 +306,10 @@ func (s *Service) run(ctx context.Context, job *Job) {
 	}
 
 	releaseName := translatedReleaseName(job.SourceLanguage, job.TargetLanguage)
-	streaming := job.SessionID != "" && s.notifier != nil
+	streaming := job.SessionID != "" && s.notifierFor(job) != nil
 	trackKey := liveTrackKey(job.ID)
 	if streaming {
-		s.notifier.TranslationStarted(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey,
+		s.notifierFor(job).TranslationStarted(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey,
 			job.TargetLanguage, releaseName, len(cues))
 	}
 
@@ -311,7 +326,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		// Map cue progress into the 5%..95% band; push the batch live.
 		_ = s.repo.UpdateProgress(ctx, job.ID, JobStatusRunning, progressInBand(0.05, 0.9, done, total), "Translating")
 		if streaming {
-			s.notifier.TranslationCues(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey,
+			s.notifierFor(job).TranslationCues(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey,
 				toStreamCues(batch), done, total)
 		}
 	})
@@ -320,7 +335,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		return
 	}
 
-	// A finished translation should not be thrown away by a last-moment cancel.
+	// The database publication fence decides whether cancellation or output wins.
 	storeCtx := context.WithoutCancel(ctx)
 
 	// Persist in chronological order regardless of the playhead-first order used
@@ -374,7 +389,7 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 		hint = normalizeOptionalLanguageCode(job.TargetLanguage)
 	}
 
-	streaming := job.SessionID != "" && s.notifier != nil
+	streaming := job.SessionID != "" && s.notifierFor(job) != nil
 	trackKey := liveTrackKey(job.ID)
 	if streaming {
 		liveLang, liveLabel := job.TargetLanguage, transcribedReleaseName(hint)
@@ -384,7 +399,7 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 			liveLang = hint
 		}
 		// Cue total is unknown before transcription; 0 means indeterminate.
-		s.notifier.TranslationStarted(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey, liveLang, liveLabel, 0)
+		s.notifierFor(job).TranslationStarted(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey, liveLang, liveLabel, 0)
 	}
 
 	cfg := s.config()
@@ -419,7 +434,7 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 		// Transcription occupies the 5%..70% progress band (chunk granularity).
 		_ = s.repo.UpdateProgress(ctx, job.ID, JobStatusRunning, progressInBand(0.05, 0.65, done, total), "Transcribing")
 		if streamTranscript {
-			s.notifier.TranslationCues(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey,
+			s.notifierFor(job).TranslationCues(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey,
 				toStreamCues(chunk), done, total)
 		}
 	})
@@ -436,7 +451,7 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 		job.SourceLanguage = language
 	}
 
-	// A finished transcription should not be thrown away by a last-moment cancel.
+	// Upload may finish after context cancellation; the database still fences publication.
 	storeCtx := context.WithoutCancel(ctx)
 
 	transcriptCues := make([]SubtitleCue, len(cues))
@@ -444,6 +459,7 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 	sortCuesByStart(transcriptCues)
 	transcriptLabel := transcribedReleaseName(language)
 	transcript, err := s.store.StoreSubtitle(storeCtx, subtitles.StoreSubtitleRequest{
+		Publication: &subtitles.AIJobPublication{JobID: job.ID, Complete: job.Kind == JobKindTranscribe},
 		MediaFileID: job.MediaFileID,
 		UserID:      job.RequestedBy,
 		Provider:    providerTranscribed,
@@ -456,16 +472,13 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 		s.finishWithError(ctx, job, fmt.Errorf("store transcribed subtitle: %w", err))
 		return
 	}
-	if s.notifier != nil {
-		s.notifier.SubtitleReady(storeCtx, job.MediaFileID, transcript.ID, language, transcriptLabel)
+	if s.notifierFor(job) != nil {
+		s.notifierFor(job).SubtitleReady(storeCtx, job.MediaFileID, transcript.ID, language, transcriptLabel)
 	}
 
 	if job.Kind == JobKindTranscribe {
-		if err := s.repo.CompleteJob(storeCtx, job.ID, transcript.ID); err != nil {
-			s.logger.WarnContext(ctx, "failed to mark subtitle ai job complete", "job", job.ID, "error", err)
-		}
 		if streaming {
-			s.notifier.TranslationCompleted(storeCtx, job.SessionID, job.MediaFileID, job.ID, trackKey,
+			s.notifierFor(job).TranslationCompleted(storeCtx, job.SessionID, job.MediaFileID, job.ID, trackKey,
 				transcript.ID, language, transcriptLabel)
 		}
 		return
@@ -492,7 +505,7 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 		// Translation occupies the 70%..95% band.
 		_ = s.repo.UpdateProgress(ctx, job.ID, JobStatusRunning, progressInBand(0.7, 0.25, done, total), "Translating")
 		if streaming {
-			s.notifier.TranslationCues(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey,
+			s.notifierFor(job).TranslationCues(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey,
 				toStreamCues(batch), done, total)
 		}
 	})
@@ -531,13 +544,13 @@ func (s *Service) translateLiveChunk(
 		SourceLanguage: state.sourceLanguage,
 		TargetLanguage: job.TargetLanguage,
 	}, func(batch []SubtitleCue, _, _ int) {
-		s.notifier.TranslationCues(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey,
+		s.notifierFor(job).TranslationCues(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey,
 			toStreamCues(batch), done, total)
 	})
 	if err != nil {
 		state.err = err
 		if !state.failedNotified {
-			s.notifier.TranslationFailed(ctx, job.SessionID, job.MediaFileID, job.ID,
+			s.notifierFor(job).TranslationFailed(ctx, job.SessionID, job.MediaFileID, job.ID,
 				trackKey, llm.Truncate(err.Error(), 500))
 			state.failedNotified = true
 		}
@@ -557,6 +570,7 @@ func (s *Service) finishTranslatedTrack(
 ) bool {
 	sortCuesByStart(cues)
 	sub, err := s.store.StoreSubtitle(storeCtx, subtitles.StoreSubtitleRequest{
+		Publication: &subtitles.AIJobPublication{JobID: job.ID, Complete: true},
 		MediaFileID: job.MediaFileID,
 		UserID:      job.RequestedBy,
 		Provider:    providerTranslated,
@@ -570,16 +584,12 @@ func (s *Service) finishTranslatedTrack(
 		return false
 	}
 
-	if err := s.repo.CompleteJob(storeCtx, job.ID, sub.ID); err != nil {
-		s.logger.WarnContext(ctx, "failed to mark subtitle ai job complete", "job", job.ID, "error", err)
-	}
-
-	if s.notifier != nil {
+	if s.notifierFor(job) != nil {
 		if streaming {
-			s.notifier.TranslationCompleted(storeCtx, job.SessionID, job.MediaFileID, job.ID, trackKey,
+			s.notifierFor(job).TranslationCompleted(storeCtx, job.SessionID, job.MediaFileID, job.ID, trackKey,
 				sub.ID, job.TargetLanguage, releaseName)
 		}
-		s.notifier.SubtitleReady(storeCtx, job.MediaFileID, sub.ID, job.TargetLanguage, releaseName)
+		s.notifierFor(job).SubtitleReady(storeCtx, job.MediaFileID, sub.ID, job.TargetLanguage, releaseName)
 	}
 	return true
 }
@@ -608,6 +618,12 @@ func (s *Service) finishWithError(ctx context.Context, job *Job, err error) {
 }
 
 func (s *Service) finishWithErrorNotify(ctx context.Context, job *Job, err error, notify bool) {
+	// Another terminal transition may already own the outcome. An uncertain
+	// commit can have completed successfully, so neither a failure write nor
+	// a definitive notification is justified until that state is reconciled.
+	if errors.Is(err, subtitles.ErrAIJobInactive) || errors.Is(err, subtitles.ErrAIPublicationUncertain) {
+		return
+	}
 	status := JobStatusFailed
 	msg := llm.Truncate(err.Error(), 500)
 	// Only a genuine cancellation (user cancel, or shutdown via cancel) becomes
@@ -619,8 +635,8 @@ func (s *Service) finishWithErrorNotify(ctx context.Context, job *Job, err error
 	if dbErr := s.repo.FailJob(context.WithoutCancel(ctx), job.ID, status, msg); dbErr != nil {
 		s.logger.WarnContext(ctx, "failed to record subtitle ai job failure", "job", job.ID, "error", dbErr)
 	}
-	if notify && job.SessionID != "" && s.notifier != nil {
-		s.notifier.TranslationFailed(context.WithoutCancel(ctx), job.SessionID, job.MediaFileID, job.ID,
+	if notify && job.SessionID != "" && s.notifierFor(job) != nil {
+		s.notifierFor(job).TranslationFailed(context.WithoutCancel(ctx), job.SessionID, job.MediaFileID, job.ID,
 			liveTrackKey(job.ID), msg)
 	}
 	if status == JobStatusFailed {
@@ -790,4 +806,14 @@ func toStreamCues(cues []SubtitleCue) []playback.StreamCue {
 
 func sortCuesByStart(cues []SubtitleCue) {
 	sort.SliceStable(cues, func(i, j int) bool { return cues[i].Start < cues[j].Start })
+}
+
+// notifierFor preserves the bridge default while allowing a new request to
+// capture viewer-bound live delivery. SubtitleReady still uses that notifier's
+// ordinary file broadcast; live delivery is never rebound on deduplication.
+func (s *Service) notifierFor(job *Job) Notifier {
+	if job.LiveNotifier != nil {
+		return job.LiveNotifier
+	}
+	return s.notifier
 }

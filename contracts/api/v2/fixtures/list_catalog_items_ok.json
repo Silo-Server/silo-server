@@ -1,0 +1,37 @@
+{
+  "window_cursor": "eyJ2IjoxLCJwIjp7InNvcnQiOnsiZmllbGQiOiJ0aXRsZSIsIm9yZGVyIjoiYXNjIn0sIm8iOjAsInMiOiIyMDI2LTAxLTAyVDAzOjA0OjA1LjY3OFoifX0.l3r0cymmYt5q06QA_Q6zkGSxgPPn-9DxSGvD7GBs8q0",
+  "items": [
+    {
+      "content_id": "movie:heat-1995",
+      "type": "movie",
+      "title": "Heat",
+      "year": 1995,
+      "genres": [
+        "Crime"
+      ],
+      "keywords": [],
+      "status": "matched"
+    },
+    {
+      "content_id": "movie:alien-1979",
+      "type": "movie",
+      "title": "Heat",
+      "year": 1995,
+      "genres": [
+        "Crime"
+      ],
+      "keywords": [],
+      "status": "matched"
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7InNvcnQiOnsiZmllbGQiOiJ0aXRsZSIsIm9yZGVyIjoiYXNjIn0sIm8iOjIsInMiOiIyMDI2LTAxLTAyVDAzOjA0OjA1LjY3OFoifX0.48NBwIGdRdssBNjAW0DU7nGnU-tO-q3QyqbqD0sfqYA",
+    "has_more": true
+  },
+  "total": 3,
+  "total_exact": true,
+  "effective_sort": {
+    "field": "title",
+    "order": "asc"
+  }
+}

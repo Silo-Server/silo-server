@@ -61,7 +61,7 @@ func (r *SuggestionRepository) GetSuggestion(ctx context.Context, id string) (*S
 	return scanSuggestion(row)
 }
 
-func (r *SuggestionRepository) ListSuggestions(ctx context.Context, roomID string, voterProfileID string) ([]Suggestion, error) {
+func (r *SuggestionRepository) ListSuggestions(ctx context.Context, roomID string, voterUserID int, voterProfileID string) ([]Suggestion, error) {
 	if r == nil || r.pool == nil {
 		return nil, fmt.Errorf("suggestion repository unavailable")
 	}
@@ -73,12 +73,12 @@ func (r *SuggestionRepository) ListSuggestions(ctx context.Context, roomID strin
 			(v.suggestion_id IS NOT NULL) AS voted_by_me
 		FROM watch_together_suggestions s
 		LEFT JOIN watch_together_votes v
-			ON v.suggestion_id = s.id AND v.voter_profile_id = $2
+			ON v.suggestion_id = s.id AND v.voter_user_id = $2 AND v.voter_profile_id = $3
 		WHERE s.room_id = $1
 		ORDER BY s.vote_count DESC, s.created_at ASC
 	`
 
-	rows, err := r.pool.Query(ctx, query, roomID, voterProfileID)
+	rows, err := r.pool.Query(ctx, query, roomID, voterUserID, voterProfileID)
 	if err != nil {
 		return nil, fmt.Errorf("list suggestions: %w", err)
 	}
@@ -118,7 +118,7 @@ func (r *SuggestionRepository) DeleteSuggestion(ctx context.Context, id string) 
 	return nil
 }
 
-func (r *SuggestionRepository) AddVote(ctx context.Context, suggestionID string, voterProfileID string) error {
+func (r *SuggestionRepository) AddVote(ctx context.Context, suggestionID string, voterUserID int, voterProfileID string) error {
 	if r == nil || r.pool == nil {
 		return fmt.Errorf("suggestion repository unavailable")
 	}
@@ -130,10 +130,10 @@ func (r *SuggestionRepository) AddVote(ctx context.Context, suggestionID string,
 	defer tx.Rollback(ctx)
 
 	tag, err := tx.Exec(ctx,
-		`INSERT INTO watch_together_votes (suggestion_id, voter_profile_id, created_at)
-		 VALUES ($1, $2, $3)
+		`INSERT INTO watch_together_votes (suggestion_id, voter_user_id, voter_profile_id, created_at)
+			 VALUES ($1, $2, $3, $4)
 		 ON CONFLICT DO NOTHING`,
-		suggestionID, voterProfileID, time.Now().UTC(),
+		suggestionID, voterUserID, voterProfileID, time.Now().UTC(),
 	)
 	if err != nil {
 		return fmt.Errorf("insert vote: %w", err)
@@ -153,7 +153,7 @@ func (r *SuggestionRepository) AddVote(ctx context.Context, suggestionID string,
 	return tx.Commit(ctx)
 }
 
-func (r *SuggestionRepository) RemoveVote(ctx context.Context, suggestionID string, voterProfileID string) error {
+func (r *SuggestionRepository) RemoveVote(ctx context.Context, suggestionID string, voterUserID int, voterProfileID string) error {
 	if r == nil || r.pool == nil {
 		return fmt.Errorf("suggestion repository unavailable")
 	}
@@ -165,8 +165,8 @@ func (r *SuggestionRepository) RemoveVote(ctx context.Context, suggestionID stri
 	defer tx.Rollback(ctx)
 
 	tag, err := tx.Exec(ctx,
-		`DELETE FROM watch_together_votes WHERE suggestion_id = $1 AND voter_profile_id = $2`,
-		suggestionID, voterProfileID,
+		`DELETE FROM watch_together_votes WHERE suggestion_id = $1 AND voter_user_id = $2 AND voter_profile_id = $3`,
+		suggestionID, voterUserID, voterProfileID,
 	)
 	if err != nil {
 		return fmt.Errorf("delete vote: %w", err)

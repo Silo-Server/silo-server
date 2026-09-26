@@ -34,17 +34,18 @@ const (
 )
 
 type Installation struct {
-	ID               int
-	RepositoryID     *int
-	PluginID         string
-	Version          string
-	InstallPath      string
-	Enabled          bool
-	Kind             string  `json:"kind"`
-	UpdatePolicy     string  `json:"update_policy"`
-	AvailableVersion *string `json:"available_version,omitempty"`
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                int
+	RepositoryID      *int
+	PluginID          string
+	Version           string
+	InstallPath       string
+	Enabled           bool
+	Kind              string  `json:"kind"`
+	UpdatePolicy      string  `json:"update_policy"`
+	AvailableVersion  *string `json:"available_version,omitempty"`
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	RuntimeGeneration int64 `json:"-"`
 }
 
 // IsBuiltin reports whether this is the reserved builtin-host installation.
@@ -87,6 +88,8 @@ type UpdateInstallationInput struct {
 	UpdatePolicy     *string
 	AvailableVersion *string
 	Capabilities     []Capability
+	// Restart durably requests a new process on every resident host.
+	Restart bool
 }
 
 type InstallationStore struct {
@@ -97,7 +100,7 @@ func NewInstallationStore(pool *pgxpool.Pool) *InstallationStore {
 	return &InstallationStore{pool: pool}
 }
 
-const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at`
+const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at, runtime_generation`
 const capabilityColumns = `plugin_installation_id, capability_type, capability_id, metadata, created_at, updated_at`
 const archiveColumns = `plugin_installation_id, manifest_json, checksum, archive_bytes, created_at, updated_at`
 
@@ -116,6 +119,7 @@ func scanInstallation(row pgx.Row) (*Installation, error) {
 		&installation.AvailableVersion,
 		&installation.CreatedAt,
 		&installation.UpdatedAt,
+		&installation.RuntimeGeneration,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrInstallationNotFound
@@ -330,6 +334,9 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 		args = append(args, *input.AvailableVersion)
 		argIndex++
 	}
+	if input.Restart {
+		setClauses = append(setClauses, "runtime_generation = runtime_generation + 1")
+	}
 
 	if len(setClauses) > 0 {
 		setClauses = append(setClauses, "updated_at = NOW()")
@@ -358,6 +365,42 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 		return fmt.Errorf("commit update installation transaction: %w", err)
 	}
 	return nil
+}
+
+// ListEnabledWithCapabilityTypes returns the enabled installations that
+// declare at least one capability of the given types, in id order. One
+// query replaces a ListEnabled + per-installation ListCapabilities fan-out
+// for callers that only need membership, such as the resident supervisor.
+func (s *InstallationStore) ListEnabledWithCapabilityTypes(ctx context.Context, capabilityTypes []string) ([]*Installation, error) {
+	if len(capabilityTypes) == 0 {
+		return nil, nil
+	}
+	query := `SELECT ` + installationColumns + ` FROM plugin_installations
+		WHERE enabled = true
+		  AND EXISTS (
+			SELECT 1 FROM plugin_capabilities
+			WHERE plugin_capabilities.plugin_installation_id = plugin_installations.id
+			  AND plugin_capabilities.capability_type = ANY($1)
+		  )
+		ORDER BY id ASC`
+	rows, err := s.pool.Query(ctx, query, capabilityTypes)
+	if err != nil {
+		return nil, fmt.Errorf("listing enabled plugin installations by capability type: %w", err)
+	}
+	defer rows.Close()
+
+	var installations []*Installation
+	for rows.Next() {
+		installation, err := scanInstallation(rows)
+		if err != nil {
+			return nil, err
+		}
+		installations = append(installations, installation)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating enabled plugin installations by capability type: %w", err)
+	}
+	return installations, nil
 }
 
 func (s *InstallationStore) ListCapabilities(ctx context.Context, installationID int) ([]*Capability, error) {

@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "media_file_id": "42",
+      "provider": "p",
+      "segment": "intro",
+      "source": "",
+      "content_hash": "",
+      "status": "submitted",
+      "updated_at": "2026-01-02T03:04:05.000Z"
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

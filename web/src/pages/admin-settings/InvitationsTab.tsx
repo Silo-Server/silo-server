@@ -1,8 +1,17 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import type { FormEvent } from "react";
-import type { Invitation, InvitationStatus, SendInvitationResponse } from "@/api/types";
+import {
+  captureInvitationAuthority,
+  invitationScope,
+  type AdminInvitation as Invitation,
+  type InvitationDelivery,
+  type InvitationAuthority,
+} from "@/api/v2/invitations";
+type InvitationStatus = Invitation["status"];
 import {
   useAdminInvitations,
+  useInvitationCapabilities,
   useCreateInvitation,
   useResendInvitation,
   useRevokeInvitation,
@@ -39,9 +48,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
+
 import { Copy, MailPlus, RotateCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import { formatDate } from "@/lib/datetime";
 
 // The claim-link box shown after create/resend. min-w-0 + overflow-hidden on
@@ -55,7 +65,7 @@ function ClaimLinkBox({
 }: {
   claimUrl: string;
   finePrint: string;
-  onCopy: (text: string) => void;
+  onCopy: (text: string) => Promise<void>;
   onDone: () => void;
 }) {
   return (
@@ -75,131 +85,313 @@ function ClaimLinkBox({
 }
 
 const STATUS_BADGES: Record<InvitationStatus, { label: string; variant: "default" | "outline" }> = {
-  pending: { label: "Sent", variant: "default" },
+  pending: { label: "Pending", variant: "default" },
   accepted: { label: "Accepted", variant: "outline" },
   expired: { label: "Expired", variant: "outline" },
   revoked: { label: "Revoked", variant: "outline" },
 };
 
+function deliveryMessage(result: InvitationDelivery) {
+  if (result.delivery_status === "sent")
+    return `Email sent to ${result.invitation.email}. Recipient delivery is not guaranteed. You can copy the link below.`;
+  if (result.delivery_status === "not_configured")
+    return "Email is not configured. The invitation was created; deliver this link yourself.";
+  return "The invitation was created, but email delivery failed or is uncertain. This link remains active; deliver it yourself.";
+}
+function useMounted() {
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  return mounted;
+}
 export default function InvitationsTab() {
-  const { data: invitations = [], isLoading } = useAdminInvitations();
+  useAuth();
+  return <InvitationManager key={invitationScope()} />;
+}
+function InvitationManager() {
+  const capabilities = useInvitationCapabilities();
+  const available = capabilities.data?.state === "available";
+  const history = useAdminInvitations(available);
+  const invitations = history.data?.pages.flatMap((page) => page.items) ?? [];
   const resend = useResendInvitation();
   const revoke = useRevokeInvitation();
+  const mounted = useMounted();
+  const busy = useRef(false);
+  const createBusy = useRef(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const [confirmRevoke, setConfirmRevoke] = useState<Invitation | null>(null);
-  // A resend mints a fresh single-use link; the response is the only chance
-  // to read it, so we offer it for copying right away.
-  const [resendResult, setResendResult] = useState<SendInvitationResponse | null>(null);
-
-  function handleCopy(text: string) {
-    navigator.clipboard.writeText(text);
-    toast.success("Copied to clipboard");
+  const [confirmRevoke, setConfirmRevoke] = useState<{
+    row: Invitation;
+    profileContext: InvitationAuthority;
+  } | null>(null);
+  const [revokeError, setRevokeError] = useState("");
+  const [resendOpen, setResendOpen] = useState(false);
+  const [resendResult, setResendResult] = useState<InvitationDelivery | null>(null);
+  const [resendError, setResendError] = useState("");
+  const [copyError, setCopyError] = useState("");
+  async function handleCopy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      if (mounted.current) {
+        setCopyError("");
+        toast.success("Copied to clipboard");
+      }
+    } catch {
+      if (mounted.current)
+        setCopyError("Could not copy the link. Select and copy it manually, or try again.");
+    }
   }
-
-  function handleResend(id: number) {
-    resend.mutate(id, {
-      onSuccess: (data) => {
-        if (data.claim_url) setResendResult(data);
-      },
-    });
+  async function handleResend(id: string) {
+    if (busy.current) return;
+    busy.current = true;
+    setResendOpen(true);
+    setResendError("");
+    setResendResult(null);
+    setCopyError("");
+    try {
+      const result = await resend.mutateAsync({ id, profileContext: captureInvitationAuthority() });
+      if (mounted.current) setResendResult(result);
+    } catch (error) {
+      if (mounted.current)
+        setResendError(
+          error instanceof Error
+            ? error.message
+            : "Unable to resend invitation. Reload history before continuing.",
+        );
+    } finally {
+      resend.reset();
+      busy.current = false;
+    }
   }
-
-  if (isLoading) return <div>Loading invitations...</div>;
-
+  async function handleRevoke() {
+    if (busy.current || !confirmRevoke) return;
+    busy.current = true;
+    setRevokeError("");
+    try {
+      await revoke.mutateAsync({
+        id: confirmRevoke.row.id,
+        profileContext: confirmRevoke.profileContext,
+      });
+      if (mounted.current) setConfirmRevoke(null);
+    } catch (error) {
+      if (mounted.current)
+        setRevokeError(error instanceof Error ? error.message : "Unable to revoke invitation.");
+    } finally {
+      revoke.reset();
+      busy.current = false;
+    }
+  }
+  if (capabilities.isPending) return <p>Loading invitation capabilities...</p>;
+  if (capabilities.isError)
+    return (
+      <div role="alert">
+        Could not load invitation capabilities.{" "}
+        <Button onClick={() => void capabilities.refetch()}>Reload capabilities</Button>
+      </div>
+    );
+  if (!available) return <p>Invitations are not configured on this server.</p>;
   return (
     <div className="space-y-6">
-      <ConfirmDialog
+      <Dialog
         open={confirmRevoke !== null}
         onOpenChange={(open) => {
-          if (!open) setConfirmRevoke(null);
-        }}
-        title="Revoke invitation"
-        description={`Revoke the invitation for ${confirmRevoke?.email}? Their link will stop working immediately.`}
-        confirmLabel="Revoke"
-        variant="destructive"
-        onConfirm={() => {
-          if (confirmRevoke) revoke.mutate(confirmRevoke.id);
-          setConfirmRevoke(null);
-        }}
-      />
-
-      <Dialog
-        open={resendResult !== null}
-        onOpenChange={(open) => {
-          if (!open) setResendResult(null);
+          if (!open && !busy.current) setConfirmRevoke(null);
         }}
       >
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Revoke invitation</DialogTitle>
+            <DialogDescription>
+              Revoke the invitation for {confirmRevoke?.row.email}? Their link will stop working.
+            </DialogDescription>
+          </DialogHeader>
+          {revokeError && <p role="alert">{revokeError}</p>}
+          <Button
+            variant="outline"
+            disabled={revoke.isPending}
+            onClick={() => {
+              if (!busy.current) setConfirmRevoke(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={revoke.isPending}
+            onClick={() => void handleRevoke()}
+          >
+            Revoke
+          </Button>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={resendOpen}
+        onOpenChange={(open) => {
+          if (!open && !busy.current) {
+            setResendOpen(false);
+            setResendResult(null);
+            setCopyError("");
+          }
+        }}
+      >
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>Fresh invitation link</DialogTitle>
             <DialogDescription>
-              {resendResult?.email_sent
-                ? `Emailed to ${resendResult.invitation.email}. You can also copy the link and send it to them directly.`
-                : "Email isn't configured on this server, so nothing was sent — deliver this link yourself."}
+              {resendResult
+                ? deliveryMessage(resendResult)
+                : "A replacement invalidates the previous link."}
             </DialogDescription>
           </DialogHeader>
-          {resendResult?.claim_url && (
+          {resend.isPending && <p>Creating a fresh invitation...</p>}
+          {resendError && (
+            <div role="alert">
+              <p>{resendError}</p>
+              <p>The outcome may be uncertain. Reload history before another deliberate resend.</p>
+              <Button
+                onClick={async () => {
+                  try {
+                    await history.restart();
+                  } catch {
+                    return;
+                  }
+                  if (mounted.current) {
+                    setResendOpen(false);
+                    setResendError("");
+                  }
+                }}
+              >
+                Reload history
+              </Button>
+            </div>
+          )}
+          {copyError && <p role="alert">{copyError}</p>}
+          {resendResult && (
             <ClaimLinkBox
               claimUrl={resendResult.claim_url}
-              finePrint="The link works once; any previous link for this invitation has stopped working."
+              finePrint="The link works once. Any previous link has stopped working."
               onCopy={handleCopy}
-              onDone={() => setResendResult(null)}
+              onDone={() => {
+                setResendOpen(false);
+                setResendResult(null);
+                setCopyError("");
+              }}
             />
           )}
         </DialogContent>
       </Dialog>
-
       <div className="flex items-start justify-between gap-4">
         <p className="text-muted-foreground max-w-xl text-sm">
-          Email someone a personal link. Their access is set here, so all they choose is a password
-          — their email address becomes their username.
+          Invite someone with a personal link. Their email address becomes their username.
         </p>
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <Dialog
+          open={createOpen}
+          onOpenChange={(open) => {
+            if (!createBusy.current) {
+              setCreateOpen(open);
+              setCopyError("");
+            }
+          }}
+        >
           <DialogTrigger asChild>
             <Button size="sm">
-              <MailPlus className="mr-1 h-4 w-4" /> Invite someone
+              <MailPlus className="mr-1 h-4 w-4" />
+              Invite someone
             </Button>
           </DialogTrigger>
           <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>Invite someone</DialogTitle>
               <DialogDescription>
-                They get an email with a link. Their username is their email address, so all they
-                pick is a password.
+                Choose their access. They choose a password using the invitation link.
               </DialogDescription>
             </DialogHeader>
-            <CreateInvitationForm onClose={() => setCreateOpen(false)} onCopy={handleCopy} />
+            {copyError && <p role="alert">{copyError}</p>}
+            <CreateInvitationForm
+              defaultProfile={capabilities.data?.default_profile === true}
+              onBusy={(value) => {
+                createBusy.current = value;
+              }}
+              onReload={() => history.restart()}
+              onClose={() => {
+                if (!createBusy.current) {
+                  setCreateOpen(false);
+                  setCopyError("");
+                }
+              }}
+              onCopy={handleCopy}
+            />
           </DialogContent>
         </Dialog>
       </div>
-
-      {invitations.length === 0 ? (
-        <p className="text-muted-foreground py-8 text-center text-sm">
-          No invitations yet. Invite someone to get started.
-        </p>
+      {resendError && !resendOpen && (
+        <div role="alert">
+          <p>{resendError}</p>
+          <Button
+            onClick={async () => {
+              try {
+                await history.restart();
+                if (mounted.current) setResendError("");
+              } catch {
+                /* The history query displays the failure. */
+              }
+            }}
+          >
+            Reload history
+          </Button>
+        </div>
+      )}
+      {history.isError && (
+        <div role="alert">
+          <p>Could not load invitation history. {history.error.message}</p>
+          <Button onClick={() => void history.restart().catch(() => {})}>Reload history</Button>
+        </div>
+      )}
+      {history.isPending ? (
+        <p>Loading invitations...</p>
+      ) : invitations.length === 0 && !history.isError ? (
+        <p>No invitations yet. Invite someone to get started.</p>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Recipient</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Sent</TableHead>
-              <TableHead className="w-24" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {invitations.map((inv) => (
-              <InvitationRow
-                key={inv.id}
-                invitation={inv}
-                onResend={() => handleResend(inv.id)}
-                onRevoke={() => setConfirmRevoke(inv)}
-                resending={resend.isPending}
-              />
-            ))}
-          </TableBody>
-        </Table>
+        invitations.length > 0 && (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Recipient</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead className="w-24" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {invitations.map((inv) => (
+                <InvitationRow
+                  key={inv.id}
+                  invitation={inv}
+                  onResend={() => void handleResend(inv.id)}
+                  onRevoke={() => {
+                    if (busy.current) return;
+                    setRevokeError("");
+                    setConfirmRevoke({ row: inv, profileContext: captureInvitationAuthority() });
+                  }}
+                  resending={resend.isPending || revoke.isPending || !!resendError}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        )
+      )}
+      {history.hasNextPage && (
+        <Button
+          variant="outline"
+          disabled={history.isFetchingNextPage || history.isError}
+          onClick={() => void history.fetchNextPage()}
+        >
+          Load more
+        </Button>
       )}
     </div>
   );
@@ -256,7 +448,13 @@ function InvitationRow({
             </Button>
           )}
           {showRevoke && (
-            <Button variant="ghost" size="sm" onClick={onRevoke} title="Revoke this link">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onRevoke}
+              title="Revoke this link"
+              disabled={resending}
+            >
               <Trash2 className="h-4 w-4" />
             </Button>
           )}
@@ -269,64 +467,80 @@ function InvitationRow({
 function CreateInvitationForm({
   onClose,
   onCopy,
+  defaultProfile,
+  onBusy,
+  onReload,
 }: {
+  defaultProfile: boolean;
+  onBusy: (value: boolean) => void;
+  onReload: () => Promise<void>;
   onClose: () => void;
-  onCopy: (text: string) => void;
+  onCopy: (text: string) => Promise<void>;
 }) {
   const create = useCreateInvitation();
   const { data: accessGroups = [] } = useAccessGroups();
   const { data: libraries = [] } = useAdminLibraries();
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState("user");
+  const [emailInvalid, setEmailInvalid] = useState(false);
+  const [role, setRole] = useState<"user" | "admin">("user");
   const [accessGroupID, setAccessGroupID] = useState<number | null>(null);
   const [libraryIDs, setLibraryIDs] = useState<number[] | null>(null);
   const [note, setNote] = useState("");
-  const [createProfile, setCreateProfile] = useState(true);
+  const [createProfile, setCreateProfile] = useState(defaultProfile);
   const [showTour, setShowTour] = useState(true);
   // After creation we keep the dialog open to show the claim link — the
   // token is only readable in this response, so this is the one chance to
-  // copy it. emailSent changes the copy: delivered vs deliver-it-yourself.
-  const [result, setResult] = useState<{ claimUrl: string; emailSent: boolean } | null>(null);
-
+  // copy it. The delivery outcome describes what the sender confirmed.
+  const [result, setResult] = useState<InvitationDelivery | null>(null);
+  const [error, setError] = useState("");
+  const [needsReload, setNeedsReload] = useState(false);
+  const busy = useRef(false);
+  const mounted = useMounted();
+  const [profileContext] = useState(captureInvitationAuthority);
   const defaultGroup = useMemo(() => accessGroups.find((g) => g.is_default), [accessGroups]);
-
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    create.mutate(
-      {
-        email,
-        role,
-        access_group_id: effectiveAccessGroupID(role, accessGroupID),
-        library_ids: libraryIDs,
-        create_profile: createProfile,
-        show_tour: showTour,
-        note: note.trim() || undefined,
-      },
-      {
-        onSuccess: (data: SendInvitationResponse) => {
-          if (data.email_sent) {
-            toast.success(`Invitation sent to ${data.invitation.email}`);
-          }
-          if (data.claim_url) {
-            setResult({ claimUrl: data.claim_url, emailSent: data.email_sent });
-          } else {
-            onClose();
-          }
+    if (busy.current || needsReload || (!defaultProfile && createProfile)) return;
+    if (!isValidEmail(email)) {
+      setEmailInvalid(true);
+      return;
+    }
+    busy.current = true;
+    onBusy(true);
+    setError("");
+    const group = effectiveAccessGroupID(role, accessGroupID);
+    try {
+      const delivered = await create.mutateAsync({
+        profileContext,
+        body: {
+          email,
+          role,
+          access_group_id: group == null ? undefined : String(group),
+          library_ids: libraryIDs == null ? undefined : libraryIDs.map(String),
+          create_profile: createProfile,
+          show_tour: showTour,
+          note: note.trim() || undefined,
         },
-      },
-    );
+      });
+      if (mounted.current) setResult(delivered);
+    } catch (err) {
+      if (mounted.current) {
+        setError(err instanceof Error ? err.message : "Unable to create invitation.");
+        setNeedsReload(true);
+      }
+    } finally {
+      create.reset();
+      busy.current = false;
+      onBusy(false);
+    }
   }
 
   if (result) {
     return (
       <div className="min-w-0 space-y-4">
-        <p className="text-sm">
-          {result.emailSent
-            ? "Invitation emailed. You can also copy the link and send it to them directly:"
-            : "Email isn't configured on this server, so nothing was sent. The invitation was created — deliver this link yourself:"}
-        </p>
+        <p className="text-sm">{deliveryMessage(result)}</p>
         <ClaimLinkBox
-          claimUrl={result.claimUrl}
+          claimUrl={result.claim_url}
           finePrint="The link works once and expires in 7 days. Resending later mints a fresh link and kills this one."
           onCopy={onCopy}
           onDone={onClose}
@@ -337,17 +551,59 @@ function CreateInvitationForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {error && (
+        <div role="alert">
+          <p>{error}</p>
+          <p>Reload history before another deliberate attempt; the invitation may already exist.</p>
+          <Button
+            type="button"
+            onClick={async () => {
+              try {
+                await onReload();
+              } catch {
+                if (mounted.current)
+                  setError(
+                    "Could not reload invitation history. Try again before creating another invitation.",
+                  );
+                return;
+              }
+              if (mounted.current) {
+                setNeedsReload(false);
+                setError("");
+              }
+            }}
+          >
+            Reload history
+          </Button>
+        </div>
+      )}
+      {!defaultProfile && (
+        <p role="status">
+          This server cannot create a default profile atomically. Turn off the profile option to
+          create a profileless invitation.
+        </p>
+      )}
       <div className="space-y-2">
         <Label htmlFor="invitation-email">Email address</Label>
         <Input
           id="invitation-email"
           type="email"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            if (emailInvalid) setEmailInvalid(false);
+          }}
           placeholder="them@example.com"
+          aria-invalid={emailInvalid || undefined}
+          aria-describedby={emailInvalid ? "invitation-email-error" : undefined}
           autoFocus
           required
         />
+        {emailInvalid ? (
+          <p id="invitation-email-error" className="text-destructive text-xs">
+            {INVALID_EMAIL_MESSAGE}
+          </p>
+        ) : null}
         <p className="text-muted-foreground text-xs">
           This becomes both the destination and their sign-in username.
         </p>
@@ -380,7 +636,7 @@ function CreateInvitationForm({
         </div>
         <div className="space-y-2">
           <Label>Role</Label>
-          <Select value={role} onValueChange={setRole}>
+          <Select value={role} onValueChange={(value) => setRole(value as "user" | "admin")}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -425,6 +681,7 @@ function CreateInvitationForm({
             id="invitation-create-profile"
             checked={createProfile}
             onCheckedChange={setCreateProfile}
+            disabled={!defaultProfile && !createProfile}
           />
         </div>
         <div className="flex items-center justify-between">
@@ -441,10 +698,13 @@ function CreateInvitationForm({
       <div className="flex items-center justify-between pt-2">
         <p className="text-muted-foreground text-xs">Link expires in 7 days · single use</p>
         <div className="flex gap-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
+          <Button type="button" variant="ghost" disabled={create.isPending} onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" disabled={create.isPending}>
+          <Button
+            type="submit"
+            disabled={create.isPending || needsReload || (!defaultProfile && createProfile)}
+          >
             {create.isPending ? "Sending..." : "Send invite"}
           </Button>
         </div>

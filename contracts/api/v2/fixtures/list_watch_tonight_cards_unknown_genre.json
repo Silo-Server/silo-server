@@ -1,0 +1,14 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "The request did not pass validation; see errors.",
+  "instance": "urn:silo:request:000000000000000000000092",
+  "errors": [
+    {
+      "location": "query.genres[0]",
+      "code": "invalid",
+      "detail": "not a known genre"
+    }
+  ]
+}

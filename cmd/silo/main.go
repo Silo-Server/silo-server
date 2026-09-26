@@ -5,12 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,12 +27,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -41,12 +40,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/apiv2"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/audiobooks"
-	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -56,12 +57,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/dashmetrics"
 	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
-	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
@@ -75,6 +76,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 
 	// Built-in metadata providers self-register into the metadata package's
 	// builtin registry on import; buildProviders resolves their seeded chain
@@ -104,6 +106,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/server"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/storagetransition"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
@@ -111,6 +114,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/taskmanager/tasks"
 	"github.com/Silo-Server/silo-server/internal/taskmanager/triggers"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userdb"
@@ -123,6 +127,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchsync/providers/simkl"
 	"github.com/Silo-Server/silo-server/internal/watchsync/providers/trakt"
 	"github.com/Silo-Server/silo-server/internal/worker"
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
 	"github.com/Silo-Server/silo-server/migrations"
 	siloweb "github.com/Silo-Server/silo-server/web"
 )
@@ -415,15 +420,54 @@ func mustGetSetting(store interface {
 	return value
 }
 
+// logBufferSize bounds each node's in-memory queue of log entries awaiting a
+// batch insert; a full queue drops entries and counts them.
+const logBufferSize = 10000
+
+// logDrainStopTimeout bounds how long shutdown waits for a log consumer's
+// final flush.
+const logDrainStopTimeout = 5 * time.Second
+
+// startLogDrain runs a log consumer on its own context rather than appCtx: the
+// graceful shutdown sequence keeps logging after appCtx is canceled, and those
+// entries should still reach Postgres. stop cancels the consumer and waits,
+// bounded, for its final flush.
+func startLogDrain(run func(context.Context)) (stop func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		run(ctx)
+	}()
+	return func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(logDrainStopTimeout):
+		}
+	}
+}
+
+// configureActivityLogging queues activity log entries in memory on this node
+// and persists them in batches, so the request path never waits on Redis or
+// Postgres. stop flushes what is queued.
+func configureActivityLogging(pool *pgxpool.Pool, logStreamHub *logstream.Hub) (activitylog.Writer, func()) {
+	buffer := logstream.NewBuffer[activitylog.LogEntry](logstream.StreamAudit, logBufferSize)
+	consumer := activitylog.NewConsumer(pool, logStreamHub)
+	return buffer, startLogDrain(func(ctx context.Context) { consumer.Run(ctx, buffer.Chan()) })
+}
+
+// configureOperationalLogging installs the slog default that captures records
+// into this node's in-memory operational log queue. stop flushes what is
+// queued.
 func configureOperationalLogging(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	settingsRepo catalog.SettingsStore,
-	redisCfg config.RedisConfig,
 	logStreamHub *logstream.Hub,
 	filteredHandler slog.Handler,
 	nodeID string,
-) (opslog.Writer, *opslog.Repo, *partman.Manager) {
+) (repo *opslog.Repo, pm *partman.Manager, stop func()) {
 	if err := opslog.SeedDefaults(ctx, settingsRepo); err != nil {
 		log.Fatalf("seed opslog defaults: %v", err)
 	}
@@ -438,21 +482,9 @@ func configureOperationalLogging(
 		slog.WarnContext(ctx, "ensure operational log partitions; continuing in degraded mode", "component", "app", "error", err)
 	}
 
-	var operationalWriter opslog.Writer
-	operationalConsumer := opslog.NewConsumer(pool, nil, logStreamHub)
-	if redisCfg.URL != "" {
-		redisClient, redisErr := cache.NewRedisClient(redisCfg)
-		if redisErr == nil && redisClient != nil {
-			operationalWriter = opslog.NewRedisWriter(redisClient)
-			operationalConsumer = opslog.NewConsumer(pool, redisClient, logStreamHub)
-			go operationalConsumer.RunRedis(ctx)
-		}
-	}
-	if operationalWriter == nil {
-		memWriter := opslog.NewMemoryWriter(10000)
-		operationalWriter = memWriter
-		go operationalConsumer.RunMemory(ctx, memWriter.Chan())
-	}
+	buffer := logstream.NewBuffer[opslog.Entry](logstream.StreamApp, logBufferSize)
+	consumer := opslog.NewConsumer(pool, logStreamHub)
+	stop = startLogDrain(func(ctx context.Context) { consumer.Run(ctx, buffer.Chan()) })
 
 	opsCaptureLevel := slog.LevelInfo
 	switch strings.ToLower(strings.TrimSpace(mustGetSetting(settingsRepo, ctx, "opslog.capture_level", "info"))) {
@@ -464,9 +496,9 @@ func configureOperationalLogging(
 		opsCaptureLevel = slog.LevelError
 	}
 
-	slog.SetDefault(slog.New(opslog.NewHandler(filteredHandler, operationalWriter, opsCaptureLevel, nodeID)))
+	slog.SetDefault(slog.New(opslog.NewHandler(filteredHandler, buffer, opsCaptureLevel, nodeID)))
 
-	return operationalWriter, opslog.NewRepo(pool), opsPM
+	return opslog.NewRepo(pool), opsPM, stop
 }
 
 func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxConnections int, mode string) {
@@ -633,6 +665,14 @@ func normalizeLoadedConfig(cfg *config.Config) {
 
 // main starts the Silo server or a requested maintenance command.
 func main() {
+	var storageAdmission *pglock.NodeAdmission
+	// The admission session is detached from the pool and lives until process
+	// exit. Worker Stop methods do not all wait for in-flight writes, so closing
+	// the session in a defer could admit another node while this one still has
+	// a writer. Process exit stops those goroutines and closes the socket.
+	if err := telemetry.ConfigureRuntimeMetrics(); err != nil {
+		slog.Warn("runtime metrics configuration failed", "error", err)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "compat-web" {
 		if err := runCompatWebCommand(context.Background(), os.Args[2:]); err != nil {
 			log.Fatalf("compat-web: %v", err)
@@ -672,6 +712,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("bootstrap: %v", err)
 	}
+	stopDebugListener, err := startBootstrapDebugListener(!*migrateOnly && !*migrateStatus && *migrateDownTo < 0)
+	if err != nil {
+		log.Fatalf("local profiling configuration: %v", err)
+	}
+	defer stopDebugListener()
 
 	// Construct the at-rest credential cipher from SECRET_KEY immediately after
 	// bootstrap, before any settings repo is built. It is threaded explicitly as
@@ -684,11 +729,11 @@ func main() {
 
 	// Step 2: Connect to PostgreSQL (bootstrap pool with default max connections)
 	bootstrapDBCfg := config.DatabaseConfig{URL: bc.DatabaseURL, MaxConnections: 20}
-	pool, err := database.NewPool(ctx, bootstrapDBCfg)
+	pool, err := database.NewPoolForRole(ctx, bootstrapDBCfg, "application")
 	if err != nil {
 		log.Fatalf("database pool: %v", err)
 	}
-	defer pool.Close()
+	defer func() { database.ClosePool(pool) }()
 	slog.Info("connected to PostgreSQL")
 
 	if *migrateStatus {
@@ -832,8 +877,8 @@ func main() {
 
 	// Step 8: Recreate pool if max_connections differs from bootstrap default
 	if cfg.Database.MaxConnections != bootstrapDBCfg.MaxConnections {
-		pool.Close()
-		pool, err = database.NewPool(ctx, cfg.Database)
+		database.ClosePool(pool)
+		pool, err = database.NewPoolForRole(ctx, cfg.Database, "application")
 		if err != nil {
 			log.Fatalf("recreating pool with configured max_connections: %v", err)
 		}
@@ -841,6 +886,10 @@ func main() {
 	// Re-wrap with the encrypting decorator so the recreated pool's settings repo
 	// still encrypts/decrypts — no raw settings repo may escape into later wiring.
 	settingsRepo = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
+	// One reader for access.unrated_content, shared by every scope resolver and
+	// the recommendations engine: forgetting the builder call at a construction
+	// site fails silently (unrated titles hidden, no error).
+	unratedContent := config.NewUnratedContentPolicy(settingsRepo)
 	nodeID := resolveNodeIdentity()
 	catalogSearchStartupSettings, err := catalog.CatalogSearchSettingsFromMap(settings)
 	if err != nil {
@@ -896,10 +945,40 @@ func main() {
 
 	appCtx, appCancel := context.WithCancel(ctx)
 	defer appCancel()
+	stopDebugOnCancel := context.AfterFunc(appCtx, stopDebugListener)
+	defer stopDebugOnCancel()
 	var streamTelemetryRegistry *streamtelemetry.Registry
 	var streamTelemetryViewCache *streamtelemetry.ViewCache
 	restartReqCh := make(chan struct{}, 1)
 	var restartRequested atomic.Bool
+	if mode == "integrated" || mode == "api" {
+		// Join the storage writer set before any blob store or worker starts.
+		// A transition owner holds this gate exclusively through its restart;
+		// the config watcher below rereads settings after admission returns.
+		storageAdmission, err = pglock.AdmitNode(appCtx, pool, pglock.StorageNodeAdmissionLockKey)
+		if err != nil {
+			log.Fatalf("storage node admission: %v", err)
+		}
+		go storageAdmission.Monitor(appCtx, time.Second)
+		go func() {
+			// A failed session is replaced while no transition runs; Lost
+			// closes only when this node owned a transition or another node
+			// took ownership while it was out. Either way it must restart.
+			select {
+			case <-storageAdmission.Lost():
+				if appCtx.Err() != nil {
+					return
+				}
+				slog.Error("storage node admission lost to a storage transition; stopping storage writers")
+				appCancel()
+				select {
+				case restartReqCh <- struct{}{}:
+				default:
+				}
+			case <-appCtx.Done():
+			}
+		}()
+	}
 
 	eventBus := cache.NewEventBus(cfg.Redis.URL)
 	if err := eventBus.Subscribe(appCtx, cache.ChannelCatalog, func(event cache.Event) {
@@ -919,16 +998,21 @@ func main() {
 	}
 	eventsHub := realtimeHub.EventsHub()
 	scanRegistry := evt.NewScanRegistry()
-	operationalWriter, opsRepo, opsPM := configureOperationalLogging(appCtx, pool, settingsRepo, cfg.Redis, logStreamHub, quietFilter, nodeID)
+	opsRepo, opsPM, stopOperationalLog := configureOperationalLogging(appCtx, pool, settingsRepo, logStreamHub, quietFilter, nodeID)
 	defer func() {
 		if err := eventBus.Close(); err != nil {
 			slog.Warn("event bus close error", "error", err)
 		}
 	}()
+	// Deferred calls run in reverse: the log consumers flush first (the
+	// activity consumer is deferred later in main), the hub then sends their
+	// rows to other nodes' live tails, and the event bus closes last.
+	defer logStreamHub.Close()
+	defer stopOperationalLog()
 
 	// Proxy and transcode modes run with DB + Redis for hot-reload.
 	if mode == "proxy" || mode == "transcode" {
-		redisClient, err := cache.NewRedisClient(cfg.Redis)
+		redisClient, err := cache.NewRedisClientForRole(cfg.Redis, "worker")
 		if err != nil || redisClient == nil {
 			slog.Error("redis is required for this mode", "mode", mode, "error", err)
 			os.Exit(1)
@@ -987,6 +1071,7 @@ func main() {
 
 		var handler http.Handler
 		var shutdownStandalone func(context.Context) error
+		var standaloneHooks standaloneServerHooks
 		if mode == "proxy" {
 			srv := proxy.NewServer(watcher, tracker)
 			proxyIPResolver, resolverErr := clientIPResolverFromConfig(watcher.Config())
@@ -996,11 +1081,22 @@ func main() {
 			registerClientIPConfigReload(watcher, proxyIPResolver)
 			srv.SetClientIPResolver(proxyIPResolver)
 			srv.SetStreamTelemetry(streamTelemetryRegistry)
+			// Network access providers run on this proxy too, one instance per
+			// node with its own overlay identity; see newProxyPluginHost.
+			proxyPlugins := newProxyPluginHost(appCtx, pool, dataCipher, eventBus, watcher, nodeName, cfg.Server.Listen, resolvePluginCacheDir())
+			srv.SetIngressTokens(proxyPlugins.broker.Registry)
+			srv.SetNetworkAccessStatus(proxyPlugins.broker.Status)
+			srv.SetNetworkAccessProviderHost(proxyPlugins.service)
+			standaloneHooks = proxyPlugins.hooks()
 			// Serve header-authenticated sessions: the recipe comes from the
 			// shared grant store central wrote at plan time, and the caller's
 			// own access token is re-checked against the live login session in
 			// Postgres, so a revoked login stops streaming here immediately.
 			srv.SetMediaGrantAuthority(noderecipe.NewProxyGrantStore(redisClient, 0), auth.NewSessionRepository(pool))
+			// Consult the session-deny marker central writes on stop, expiry,
+			// and admin terminate before serving media, so a revoked stream
+			// token or grant stops here instead of at its 24h TTL.
+			srv.SetStreamDeny(playback.NewStreamDeny(redisClient))
 			srv.SetRemoteArtifactMissReporter(downloads.NewArtifactManager(
 				downloads.NewArtifactRepository(pool),
 				downloads.NewRepository(pool),
@@ -1020,6 +1116,11 @@ func main() {
 		} else {
 			srv := transcodenode.NewServer(watcher, tracker)
 			srv.SetInputPathAuthorizer(transcodenode.NewCatalogPathAuthorizer(scanner.NewFileRepository(pool)))
+			srv.SetThemeInputAuthorizer(transcodenode.NewThemeInputAuthorizer(themesongs.NewRepository(pool)))
+			// Consult the session-deny marker central writes on stop, expiry,
+			// and admin terminate before serving or reconstructing a session,
+			// so a revoked stream token stops here instead of at its 24h TTL.
+			srv.SetStreamDeny(playback.NewStreamDeny(redisClient))
 			srv.SetFFmpegLogSink(playback.NewSlogFFmpegLogSink(slog.Default(), nodeID))
 			// Read jellycompat reconstruction recipes central wrote at transcode
 			// start, so this node can rebuild a Jellyfin transcode after its own
@@ -1039,9 +1140,8 @@ func main() {
 			shutdownStandalone = srv.Shutdown
 		}
 
-		_ = operationalWriter
 		_ = opsRepo
-		startStandaloneServer(cfg.Server.Listen, handler, shutdownStandalone)
+		startStandaloneServer(cfg.Server.Listen, handler, appCancel, shutdownStandalone, standaloneHooks)
 		return
 	}
 
@@ -1095,11 +1195,14 @@ func main() {
 	// Shared Redis client for components needing raw Redis beyond the event
 	// bus (websocket handshake tickets, session listing). Nil on Redis-less
 	// deployments; consumers fall back to in-process implementations.
-	apiRedisClient, apiRedisErr := cache.NewRedisClient(cfg.Redis)
+	if err := workmetrics.StartQueueSampler(appCtx, pool); err != nil {
+		slog.Warn("queue metrics registration failed", "error", err)
+	}
+	apiRedisClient, apiRedisErr := cache.NewRedisClientForRole(cfg.Redis, "api")
 	if apiRedisErr != nil {
 		slog.Warn("redis client init failed; multi-node websocket tickets disabled", "error", apiRedisErr)
 	} else if apiRedisClient != nil {
-		defer func() { _ = apiRedisClient.Close() }()
+		defer func() { _ = cache.CloseRedisClient(apiRedisClient) }()
 	}
 
 	if mode == "" || mode == "integrated" || mode == "api" {
@@ -1141,7 +1244,7 @@ func main() {
 		ScanRegistry:                 scanRegistry,
 		OpsLogRepo:                   opsRepo,
 		FFmpegLogSink:                playback.NewSlogFFmpegLogSink(slog.Default(), nodeID),
-		PublicURL:                    os.Getenv("SILO_PUBLIC_URL"),
+		PublicURL:                    cfg.Server.PublicURL,
 		CatalogSearchSettings:        new(catalogSearchStartupSettings),
 		RequestServerRestart: func(context.Context) error {
 			if !restartRequested.CompareAndSwap(false, true) {
@@ -1157,10 +1260,8 @@ func main() {
 			// fresh context — the setting is already persisted, so the reload
 			// must not be skipped because the admin request was canceled.
 			if key == clientip.SettingTrustedProxies && ipResolver != nil {
-				if cidrs, loadErr := clientip.LoadTrustedCIDRs(context.Background(), settingsRepo); loadErr != nil {
+				if loadErr := ipResolver.ReloadTrustedCIDRs(context.Background(), settingsRepo); loadErr != nil {
 					slog.WarnContext(context.Background(), "clientip config reload failed", "component", "app", "error", loadErr)
-				} else {
-					ipResolver.UpdateTrustedCIDRs(cidrs)
 				}
 			}
 			// Nudge the hot-reload watcher so same-process settings changes
@@ -1185,26 +1286,31 @@ func main() {
 			intromarkers.DefaultConfig(cfg.Playback.FFmpegPath),
 			slog.Default(),
 		)
+		// markers.detection_workers applies without a restart.
+		introAnalyzer := deps.IntroAnalyzer
+		introAnalyzer.SetWorkers(cfg.Markers.DetectionWorkers)
+		configWatcher.OnChange(func(_, updated *config.Config) {
+			introAnalyzer.SetWorkers(updated.Markers.DetectionWorkers)
+		})
 	}
 	if deps.DB != nil {
 		markerRegistry := markers.NewRegistry(slog.Default())
 		markerProviderConfig := markers.NewProviderConfigStore(deps.DB)
+		markerRegistry.UseConfigStore(markerProviderConfig)
 		if err := markerProviderConfig.Reload(appCtx); err != nil {
-			slog.Warn("load marker provider config failed; falling back to registration-order fetch",
+			slog.Warn("load marker provider config failed; online fetching remains disabled until settings load",
 				"error", err)
-		} else {
-			markerRegistry.UseConfigStore(markerProviderConfig)
-			if deps.EventBus != nil {
-				if err := deps.EventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
-					if event.Type != cache.EventMarkerProviderConfigChanged {
-						return
-					}
-					if err := markerProviderConfig.Reload(appCtx); err != nil {
-						slog.Warn("reload marker provider config failed", "provider", event.Payload, "error", err)
-					}
-				}); err != nil {
-					slog.Warn("subscribe marker provider config reload failed", "error", err)
+		}
+		if deps.EventBus != nil {
+			if err := deps.EventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+				if event.Type != cache.EventMarkerProviderConfigChanged {
+					return
 				}
+				if err := markerProviderConfig.Reload(appCtx); err != nil {
+					slog.Warn("reload marker provider config failed", "provider", event.Payload, "error", err)
+				}
+			}); err != nil {
+				slog.Warn("subscribe marker provider config reload failed", "error", err)
 			}
 		}
 		deps.MarkerProviderConfig = markerProviderConfig
@@ -1312,8 +1418,43 @@ func main() {
 	}
 
 	// Step 3: Create S3 clients (if needed).
+	if storageAdmission != nil {
+		if err := storageAdmission.Probe(appCtx); err != nil {
+			log.Fatalf("storage node admission before opening storage: %v", err)
+		}
+	}
 	if needsS3 {
 		configureS3Clients(cfg, &deps)
+	}
+	// Runs after configureS3Clients: an S3 backend takes both buckets from deps.
+	if err := configureBlobStorage(appCtx, mode, cfg, &deps, settingsRepo); err != nil {
+		log.Fatalf("configure blob storage: %v", err)
+	}
+	if storageAdmission != nil {
+		// While a failed admission session is replaced, no blob write may land:
+		// a transition elsewhere could otherwise miss it. Reads keep serving.
+		storageAdmission.SetWriteGate(func(ctx context.Context) (func(), error) {
+			return blobstore.PauseMutations(ctx, deps.Blobs.Assets, deps.Blobs.Operational)
+		})
+		// A node that was out while another node committed a transition must
+		// restart onto the new location instead of rejoining with these stores.
+		assetsIdentity, privateIdentity := deps.Blobs.Assets.Identity(), ""
+		if deps.S3Private != nil {
+			privateIdentity = blobstore.NewS3(deps.S3Private).Identity()
+		}
+		// Read the identity rows under the settings mutation lock, so a commit
+		// already in progress finishes before the check. The rows are plain,
+		// so an unreadable encrypted setting cannot block a rejoin.
+		identityRows := catalog.NewServerSettingsRepo(pool)
+		storageAdmission.SetRejoinCheck(func(ctx context.Context) error {
+			err := identityRows.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
+				return nil, blobstore.CheckRecordedLocation(current, assetsIdentity, privateIdentity)
+			})
+			if errors.Is(err, blobstore.ErrLocationMoved) {
+				return fmt.Errorf("%w: %w", pglock.ErrStorageMoved, err)
+			}
+			return err
+		})
 	}
 
 	var literaryWorkService *literaryworks.Service
@@ -1329,7 +1470,7 @@ func main() {
 		deps.FileRepo = fileRepo
 
 		ffprobePath := scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath)
-		s := scanner.NewScanner(fileRepo, ffprobePath, deps.S3Public, cfg.Scanner.Workers, cfg.Scanner.EmptyTrashAfterScan, cfg.Scanner.FileRemovalGrace)
+		s := scanner.NewScanner(fileRepo, ffprobePath, deps.Blobs.Assets, cfg.Scanner.Workers, cfg.Scanner.EmptyTrashAfterScan, cfg.Scanner.FileRemovalGrace)
 		s.SetSearchIndexProvider(activeCatalogSearchProvider)
 		configWatcher.OnChange(func(_, updated *config.Config) {
 			s.SetWorkers(updated.Scanner.Workers)
@@ -1348,13 +1489,13 @@ func main() {
 	}
 
 	var chapterThumbService *chapterthumbs.Service
-	if deps.FileRepo != nil && deps.FolderRepo != nil && deps.S3Public != nil {
+	if deps.FileRepo != nil && deps.FolderRepo != nil && deps.Blobs.Assets != nil {
 		chapterThumbService = chapterthumbs.NewService(
 			deps.FileRepo,
 			deps.FolderRepo,
 			deps.ProbeEnsurer,
 			settingsRepo,
-			deps.S3Public,
+			deps.Blobs.Assets,
 			nil,
 			deps.TranscodePool,
 			cfg.Playback.FFmpegPath,
@@ -1372,14 +1513,59 @@ func main() {
 	var pluginService *plugins.Service
 	var pluginInstallationStore *plugins.InstallationStore
 	var pluginRuntimeConfigStore *plugins.RuntimeConfigStore
+	var refreshMarkerProviders func(context.Context) error
 	var pluginHTTPProxy *plugins.HTTPProxy
 	pluginAutoUpdateDone := make(chan struct{})
 	var pluginAutoUpdater *plugins.AutoUpdateService
+	// Network access providers: ingress tokens issued per plugin start and the
+	// providers' last reported status. Shared by the plugin host (issue,
+	// revoke, status pushes) and all three listeners (token validation).
+	networkAccess := netaccess.NewBroker()
+	deps.NetworkAccess = networkAccess
 	if deps.DB != nil {
 		pluginCacheDir := resolvePluginCacheDir()
 		repositoryStore := plugins.NewRepositoryStore(deps.DB)
 		installationStore := plugins.NewInstallationStore(deps.DB)
 		runtimeConfigStore := plugins.NewRuntimeConfigStore(deps.DB, deps.SecretCipher)
+		// This process is the api host: its resident plugins keep their
+		// per-instance state (overlay node keys) under the "api" scope.
+		instanceStateStore := plugins.NewInstanceStateStore(deps.DB, deps.SecretCipher).ForScope(plugins.HostScopeAPI)
+		hostInfo := func(ctx context.Context) (pluginhost.HostInfo, error) {
+			live := configWatcher.Config()
+			if live == nil {
+				live = cfg
+			}
+			name, _ := settingsRepo.Get(ctx, branding.KeyServerName)
+			if strings.TrimSpace(name) == "" {
+				name, _ = os.Hostname()
+			}
+			info := pluginhost.HostInfo{
+				PublicBaseURL:       live.Server.PublicURL,
+				PluginContentPrefix: plugins.ContentPrefix,
+				Role:                pluginhost.HostRoleAPI,
+				Name:                name,
+				Listeners: []pluginhost.HostListener{{
+					Name:        pluginhost.ListenerAPI,
+					Address:     pluginhost.LoopbackDialAddress(live.Server.Listen),
+					DefaultPort: pluginhost.DefaultPortAPI,
+				}},
+			}
+			if live.JellyfinCompat.Enabled && live.JellyfinCompat.Listen != "" {
+				info.Listeners = append(info.Listeners, pluginhost.HostListener{
+					Name:        pluginhost.ListenerJellyfin,
+					Address:     pluginhost.LoopbackDialAddress(live.JellyfinCompat.Listen),
+					DefaultPort: pluginhost.DefaultPortJellyfin,
+				})
+			}
+			if absCompatEnabled && live.AudiobookshelfCompat.Listen != "" {
+				info.Listeners = append(info.Listeners, pluginhost.HostListener{
+					Name:        pluginhost.ListenerABS,
+					Address:     pluginhost.LoopbackDialAddress(live.AudiobookshelfCompat.Listen),
+					DefaultPort: pluginhost.DefaultPortABS,
+				})
+			}
+			return info, nil
+		}
 		catalogService := plugins.NewCatalogService(repositoryStore, plugins.CatalogServiceOptions{
 			SiloAPIVersion: plugins.DefaultSiloAPIVersion,
 		})
@@ -1473,6 +1659,9 @@ func main() {
 					return runtimeConfigStore.PutGlobalConfig(ctx, installationID, key, value)
 				},
 			),
+			HostInfo:      hostInfo,
+			InstanceState: instanceStateStore,
+			NetworkAccess: networkAccess,
 			Logger: hclog.New(&hclog.LoggerOptions{
 				Name:   "plugin-host",
 				Level:  hclog.Info,
@@ -1487,6 +1676,10 @@ func main() {
 			installer,
 			plugins.NewHostAdapter(pluginHost),
 		)
+		// Crashes of resident plugins (network access providers) reach the
+		// supervisor through the host's exit watcher so they restart with
+		// backoff instead of waiting for the next lazy RPC.
+		pluginHost.SetExitHandler(pluginService.HandleResidentExit)
 		if watchProviderRegistry != nil {
 			reloadWatchProviders := func(ctx context.Context) {
 				if err := reloadWatchSyncPluginProviders(ctx, watchProviderRegistry, installationStore, pluginService, watchProviderRepo); err != nil {
@@ -1498,16 +1691,51 @@ func main() {
 		}
 		if deps.MarkerRegistry != nil && deps.MarkerProviderConfig != nil {
 			markerPluginResolver := markers.NewPluginResolverAdapter(pluginService)
+			var refreshMu sync.Mutex
+			var loadedRevision string
+			refreshMarkerProviders = func(ctx context.Context) (err error) {
+				refreshMu.Lock()
+				defer refreshMu.Unlock()
+				reloading := false
+				defer func() {
+					if err != nil {
+						if reloading || ctx.Err() == nil {
+							loadedRevision = ""
+						}
+						if ctx.Err() == nil {
+							_ = deps.MarkerRegistry.SetProviders(nil)
+						}
+					}
+				}()
+				for range 3 {
+					revision, err := deps.MarkerProviderConfig.RuntimeRevision(ctx)
+					if err != nil {
+						return err
+					}
+					if revision == loadedRevision {
+						return nil
+					}
+					reloading = true
+					if err := deps.MarkerProviderConfig.Reload(ctx); err != nil {
+						return err
+					}
+					if err := reloadMarkerPluginProviders(ctx, deps.MarkerRegistry, deps.MarkerProviderConfig,
+						installationStore, runtimeConfigStore, settingsRepo, markerPluginResolver); err != nil {
+						return err
+					}
+					current, err := deps.MarkerProviderConfig.RuntimeRevision(ctx)
+					if err != nil {
+						return err
+					}
+					if current == revision {
+						loadedRevision = revision
+						return nil
+					}
+				}
+				return fmt.Errorf("marker provider configuration changed repeatedly during reload")
+			}
 			pluginService.AddLifecycleHook(func(ctx context.Context) {
-				if err := reloadMarkerPluginProviders(
-					ctx,
-					deps.MarkerRegistry,
-					deps.MarkerProviderConfig,
-					installationStore,
-					runtimeConfigStore,
-					settingsRepo,
-					markerPluginResolver,
-				); err != nil {
+				if err := refreshMarkerProviders(ctx); err != nil {
 					slog.WarnContext(ctx, "reload marker plugin providers failed", "component", "app", "error", err)
 				}
 			})
@@ -1544,6 +1772,13 @@ func main() {
 			pluginHTTPProxy = pluginHTTPProxy.WithUserThemeLookup(plugins.NewPgUserThemeLookup(deps.DB))
 			pluginHTTPProxy = pluginHTTPProxy.WithUserIdentityLookup(plugins.NewPgUserIdentityLookup(deps.DB))
 		}
+		// The admin network access reads name this process as the "api" host
+		// and refresh the shared status cache with what the provider answers.
+		pluginService.SetNetworkAccessHostInfo(hostInfo)
+		pluginService.SetNetworkAccessStatusSink(networkAccess)
+		// Proxy nodes run the same resident installations; every lifecycle
+		// change here is announced so they reconcile at once.
+		pluginService.PublishLifecycleChanges(eventBus)
 		deps.PluginService = pluginService
 		deps.PluginHTTPProxy = pluginHTTPProxy
 		defer func() {
@@ -1566,11 +1801,12 @@ func main() {
 			log.Fatalf("plugin event dispatcher: %v", err)
 		}
 		defer dispatcher.Stop()
-		// Backfill the capability-subscriber index from the already-preloaded
-		// installations. PreloadEnabled ran earlier (before the dispatcher
-		// existed), so its rebuildDispatcherIndex was a no-op. Without this
-		// call, capability-scoped subscriptions never fire until the next
-		// lifecycle mutation.
+		// Rerun the lifecycle hooks registered so far. PreloadEnabled ran them
+		// before PublishLifecycleChanges was registered, so this call is the
+		// first plugins_changed this API server publishes: proxy nodes
+		// reconcile when it comes up instead of on their next poll. The event
+		// dispatcher does not need the call; it builds its subscriber index
+		// from the store on the first event.
 		pluginService.OnLifecycleChange(appCtx)
 	}
 
@@ -1634,15 +1870,17 @@ func main() {
 			pluginService.AddLifecycleHook(reloadImageResolvers)
 			reloadImageResolvers(appCtx)
 		}
-		if deps.S3Public != nil {
-			presignTTL := cfg.S3.MetadataPresignExpiry
-			if presignTTL <= 0 {
-				presignTTL = 4 * time.Hour
+		if deps.Blobs.Assets != nil {
+			imageResolver.SetArtworkResolver(deps.ArtworkResolver)
+			// Local storage publishes with an atomic rename, so the catalog
+			// can trust the manifest as written. Only external delivery (a
+			// public or token-authenticated read endpoint in front of S3)
+			// can lag behind a write and needs the verified-keys lookup.
+			if deps.ArtworkDelivery.External {
+				imageResolver.SetArtworkAvailabilityReader(metadata.NewArtworkDeliveryStore(
+					deps.DB, deps.ArtworkDelivery.Scope, true,
+				))
 			}
-			imageResolver.SetS3Presigner(deps.S3Public, deps.S3Public.EffectivePresignTTL(presignTTL))
-			imageResolver.SetArtworkAvailabilityReader(metadata.NewArtworkDeliveryStore(
-				deps.DB, deps.S3Public.ArtworkDeliveryScope(), deps.S3Public.UsesExternalDelivery(),
-			))
 		}
 		deps.ImageResolver = imageResolver
 		deps.PluginImageResolver = imageResolver
@@ -1751,11 +1989,12 @@ func main() {
 
 		// Wire the image cacher whenever object storage is available so explicit
 		// admin image applies can succeed even if automatic metadata caching is off.
-		if deps.S3Public != nil {
-			imageCacher := imagecache.New(deps.S3Public)
+		if deps.Blobs.Assets != nil {
+			imageCacher := imagecache.New(deps.Blobs.Assets)
 			imageCacher.SetArtworkRevisionTracker(catalog.NewArtworkRevisionTracker(deps.DB))
 			metadataService.SetImageCacher(imageCacher)
 			imageCacheJobs := metadata.NewImageCacheJobRepository(deps.DB)
+			deps.ArtworkRepair = imageCacheJobs
 			metadataService.SetImageCacheJobEnqueuer(imageCacheJobs)
 			metadataImageCacheProcessor = metadata.NewImageCacheProcessorWithTargets(
 				imageCacheJobs,
@@ -1774,7 +2013,7 @@ func main() {
 			// library's roots and sweep stale hashed local/ prefixes on re-cache.
 			// The processor host must mount the libraries, like the metadata worker.
 			metadataImageCacheProcessor.SetLibraryRootResolver(deps.FolderRepo)
-			metadataImageCacheProcessor.SetImagePrefixDeleter(deps.S3Public)
+			metadataImageCacheProcessor.SetImagePrefixDeleter(deps.Blobs.Assets)
 			metadataService.SetAutoCacheImages(cfg.Metadata.CacheImages)
 			metadataImageCacheProcessor.SetEnabled(cfg.Metadata.CacheImages)
 			configWatcher.OnChange(func(_, updated *config.Config) {
@@ -1933,6 +2172,7 @@ func main() {
 				deps.EventBus,
 				deps.RealtimeHub,
 			)
+			libraryRefreshExecutor.SetLibraryLockPool(deps.DB)
 		}
 		if metadataService != nil && deps.FileRepo != nil {
 			itemRefreshExecutor = adminjob.NewItemRefreshExecutor(
@@ -2020,10 +2260,10 @@ func main() {
 		profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
 		var notificationScopes notifications.ScopeResolver
 		if policySystem != nil {
-			notificationScopes = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore)
+			notificationScopes = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
 		} else {
 			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore)
+			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent)
 		}
 		notificationSystem = notifications.NewSystem(
 			deps.DB,
@@ -2072,7 +2312,8 @@ func main() {
 		watchProviderService.
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
-			WithUserStoreProvider(userStoreProvider)
+			WithUserStoreProvider(userStoreProvider).
+			WithRatingStore(catalog.NewRatingsRepo(deps.DB), recommendations.NewRepo(deps.DB))
 		backgroundInit = append(backgroundInit, func(ctx context.Context) {
 			if compatTerminalRecoveryReady != nil {
 				select {
@@ -2099,9 +2340,52 @@ func main() {
 	}
 	deps.SessionMgr = sessionMgr
 	deps.PlaybackRealtimeHub = playback.NewRealtimeHub()
-	if chapterThumbService != nil && deps.S3Public != nil {
+	deps.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(sessionMgr, deps.PlaybackRealtimeHub)
+	if deps.EventBus != nil {
+		publish := func(ctx context.Context, payload string) error {
+			return deps.EventBus.Publish(ctx, cache.ChannelPlayback, cache.Event{Type: cache.EventMarkersUpdated, Payload: payload})
+		}
+		subscribe := func(ctx context.Context, handler func(string)) error {
+			return deps.EventBus.Subscribe(ctx, cache.ChannelPlayback, func(event cache.Event) {
+				if event.Type == cache.EventMarkersUpdated {
+					handler(event.Payload)
+				}
+			})
+		}
+		if err := deps.MarkerUpdateNotifier.UseEventBus(appCtx, publish, subscribe); err != nil {
+			slog.Warn("subscribe marker updates failed", "error", err)
+		}
+	}
+
+	if deps.DB != nil && deps.FileRepo != nil && deps.MarkerRegistry != nil {
+		deps.MarkerPopulation = markers.NewPopulationService(markers.PopulationOptions{
+			RefreshProviders: refreshMarkerProviders,
+			Registry:         deps.MarkerRegistry,
+			Resolver:         deps.MarkerResolver,
+			Settings:         settingsRepo,
+			Store:            markers.NewPopulationStore(deps.DB),
+			LoadFile:         deps.FileRepo.GetByID,
+			Write: func(ctx context.Context, file *models.MediaFile, result markers.Result) (bool, error) {
+				update := scanner.MarkerUpdateFromPayload(markers.BuildUpdatePayload(result))
+				update.ExpectedFile = file
+				return deps.FileRepo.UpsertMarkers(ctx, file.ID, update)
+			},
+			Notify: deps.MarkerUpdateNotifier.MarkersUpdated,
+		})
+	}
+	if chapterThumbService != nil {
+		chapterThumbnailResolver := deps.ArtworkResolver
+		chapterThumbnailURLs := playback.ChapterThumbnailURLResolver(func(ctx context.Context, key string, ttl time.Duration) (string, error) {
+			if chapterThumbnailResolver == nil {
+				return "", fmt.Errorf("artwork resolver unavailable")
+			}
+			if value, ok := artworkurl.ResolveURLFor(ctx, chapterThumbnailResolver, key, ttl); ok {
+				return value.URL, nil
+			}
+			return "", fmt.Errorf("artwork URL unavailable")
+		})
 		chapterThumbService.SetNotifier(
-			playback.NewChapterThumbnailNotifier(sessionMgr, deps.PlaybackRealtimeHub, deps.S3Public, 0),
+			playback.NewChapterThumbnailNotifier(sessionMgr, deps.PlaybackRealtimeHub, chapterThumbnailURLs, 0),
 		)
 	}
 
@@ -2197,7 +2481,7 @@ func main() {
 			catalog.NewPersonRepository(deps.DB),
 			userStoreProvider,
 			cfg.Recommendations,
-		)
+		).WithUnratedContentPolicy(unratedContent)
 		deps.Recommender = recEngine
 		deps.CatalogSearchVectorizer = recEngine
 
@@ -2235,16 +2519,19 @@ func main() {
 		if event.Type != cache.EventSettingsChanged {
 			return
 		}
-		cidrs, loadErr := clientip.LoadTrustedCIDRs(context.Background(), settingsRepo)
-		if loadErr != nil {
+		if loadErr := ipResolver.ReloadTrustedCIDRs(context.Background(), settingsRepo); loadErr != nil {
 			slog.WarnContext(context.Background(), "clientip config reload failed", "component", "app", "error", loadErr)
-			return
 		}
-		ipResolver.UpdateTrustedCIDRs(cidrs)
 	})
 	// The config watcher covers the Redis-less poll/RequestReload path, so
 	// admin UI edits apply without a restart on single-node deployments too.
-	registerClientIPConfigReload(configWatcher, ipResolver)
+	configWatcher.OnChange(func(_, _ *config.Config) {
+		// Re-read under the same resolver reload lock as direct/event callbacks.
+		// The watcher snapshot may predate a committed administrator write.
+		if loadErr := ipResolver.ReloadTrustedCIDRs(context.Background(), settingsRepo); loadErr != nil {
+			slog.WarnContext(context.Background(), "clientip config reload failed", "component", "app", "error", loadErr)
+		}
+	})
 
 	// Step 6b: Create rate limiter.
 	if cfg.RateLimit.Enabled && deps.DB != nil {
@@ -2252,7 +2539,7 @@ func main() {
 		isMemory := true
 
 		if cfg.RateLimit.Backend == "redis" {
-			redisClient, redisErr := cache.NewRedisClient(cfg.Redis)
+			redisClient, redisErr := cache.NewRedisClientForRole(cfg.Redis, "tasks")
 			if redisErr != nil {
 				log.Fatalf("failed to create Redis client for rate limiting: %v", redisErr)
 			}
@@ -2260,7 +2547,7 @@ func main() {
 				perKeyLimiter = ratelimit.NewRedisLimiter(redisClient)
 				globalLimiter = ratelimit.NewRedisLimiter(redisClient)
 				isMemory = false
-				defer redisClient.Close()
+				defer func() { _ = cache.CloseRedisClient(redisClient) }()
 			}
 		}
 
@@ -2330,24 +2617,8 @@ func main() {
 		// periodic cleanup retries partition creation.
 		slog.Warn("ensure policy decision log partitions; continuing in degraded mode", "error", err)
 	}
-	var activityWriter activitylog.Writer
-	activityConsumer := activitylog.NewConsumer(pool, nil, logStreamHub)
-
-	if cfg.Redis.URL != "" {
-		actRedisClient, actRedisErr := cache.NewRedisClient(cfg.Redis)
-		if actRedisErr == nil && actRedisClient != nil {
-			activityWriter = activitylog.NewRedisWriter(actRedisClient)
-			activityConsumer = activitylog.NewConsumer(pool, actRedisClient, logStreamHub)
-			go activityConsumer.RunRedis(appCtx)
-			defer actRedisClient.Close()
-		}
-	}
-
-	if activityWriter == nil {
-		memWriter := activitylog.NewMemoryWriter(10000)
-		activityWriter = memWriter
-		go activityConsumer.RunMemory(appCtx, memWriter.Chan())
-	}
+	activityWriter, stopActivityLog := configureActivityLogging(pool, logStreamHub)
+	defer stopActivityLog()
 	deps.ActivityLogWriter = activityWriter
 	deps.ActivityLogRepo = activitylog.NewRepo(pool)
 	deps.NodeID = nodeID
@@ -2376,11 +2647,11 @@ func main() {
 		collectionSyncScheduler = catalog.NewCollectionSyncScheduler(collectionRepo, collectionService, slog.Default())
 
 		// The trending refresher reuses the section repo (to find used source/
-		// window combos), a snapshot repo, an item repo (external-ID matching),
-		// and the TMDB fetcher. The Trakt fetcher needs settingsRepo and is
+		// window combos beyond the calendar's fixed feed), a snapshot repo, an
+		// item repo (external-ID matching), and the TMDB fetcher. The Trakt fetcher needs settingsRepo and is
 		// propagated onto deps.TrendingRefresher later in router.go.
 		trendingRefresher = sections.NewTrendingRefresher(
-			sectionRepo,
+			sections.NewTrendingDemandLister(sectionRepo, auth.NewUserRepository(deps.DB), userStoreProvider),
 			sections.NewTrendingSnapshotRepository(pool),
 			catalog.NewItemRepository(deps.DB),
 			collectionService.TMDBCollections,
@@ -2410,8 +2681,8 @@ func main() {
 	// the typed-nil *s3client.Client) when it isn't configured so text branding
 	// still works without it.
 	var brandingStore branding.AssetStore
-	if deps.S3Public != nil {
-		brandingStore = deps.S3Public
+	if deps.Blobs.Assets != nil {
+		brandingStore = deps.Blobs.Assets
 	}
 	brandingSvc := branding.NewService(settingsRepo, brandingStore)
 
@@ -2423,23 +2694,31 @@ func main() {
 		if deps.EventsHub != nil {
 			taskMgr.AddObserver(evt.NewTaskObserver(deps.EventsHub))
 		}
+		if deps.FolderRepo != nil {
+			taskMgr.SetLibraryTypes(deps.FolderRepo.DistinctTypes)
+		}
+		// Routine retention sweeps run as steps of one Database Maintenance task.
+		var maintenanceSteps []taskmanager.Task
 
 		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil {
 			taskMgr.Register(tasks.NewScanLibrariesTask(deps.FolderRepo, deps.LibraryScanQueue, deps.EventBus))
 		}
 		taskMgr.Register(tasks.NewCleanupOrphanedMediaItemsTask(catalog.NewOrphanedProvisionalCleaner(deps.DB)))
 		taskMgr.Register(tasks.NewBackfillMediaItemAliasesTask(catalog.NewItemAliasRepository(deps.DB)))
-		if deps.S3Public != nil {
+		if deps.Blobs.Assets != nil {
 			taskMgr.Register(tasks.NewCleanupArtworkRevisionsTask(
-				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.S3Public),
+				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.Blobs.Assets),
 			))
 		}
 		catalogSearchIndexer := catalog.NewCatalogSearchIndexerFromSettings(deps.DB, settingsRepo, catalogSearchStartupSettings)
 		taskMgr.Register(tasks.NewSyncCatalogSearchIndexTask(catalogSearchIndexer))
 		taskMgr.Register(tasks.NewRebuildCatalogSearchIndexTask(catalogSearchIndexer))
-		taskMgr.Register(tasks.NewCatalogSearchEventRetentionTask(catalog.NewSearchIndexEventRepository(deps.DB)))
+		maintenanceSteps = append(maintenanceSteps, tasks.NewCatalogSearchEventRetentionTask(catalog.NewSearchIndexEventRepository(deps.DB)))
 		if deps.IntroAnalyzer != nil {
 			taskMgr.Register(tasks.NewDetectIntroMarkersTask(deps.IntroAnalyzer, settingsRepo))
+		}
+		if deps.MarkerPopulation != nil {
+			taskMgr.Register(tasks.NewSyncMarkersTask(deps.MarkerPopulation))
 		}
 		if deps.MarkerContributionService != nil && deps.MarkerProviderConfig != nil && deps.MarkerContributionStore != nil && deps.FileRepo != nil {
 			taskMgr.Register(tasks.NewContributeMarkersTask(
@@ -2449,19 +2728,24 @@ func main() {
 		if chapterBackfiller, ok := deps.ChapterThumbnailQueuer.(*chapterthumbs.Service); ok {
 			taskMgr.Register(tasks.NewChapterThumbnailBackfillTask(chapterBackfiller, 25))
 		}
-		taskMgr.Register(tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
+		maintenanceSteps = append(maintenanceSteps, tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
-		taskMgr.Register(tasks.NewTaskHistoryCleanupTask(historyRepo, settingsRepo))
+		maintenanceSteps = append(maintenanceSteps,
+			tasks.NewTaskHistoryCleanupTask(historyRepo, settingsRepo),
+			tasks.NewAuthSessionCleanupTask(auth.NewSessionRepository(deps.DB)),
+		)
 		var diagnosticsStore diagnostics.ObjectStore
 		if deps.S3Private != nil {
 			diagnosticsStore = diagnostics.NewS3ObjectStore(deps.S3Private)
+		} else {
+			diagnosticsStore = diagnostics.NewLocalObjectStore(deps.Blobs.Operational)
 		}
 		taskMgr.Register(tasks.NewClientDiagnosticsCleanupTask(
 			diagnostics.NewPostgresRepository(deps.DB),
 			settingsRepo,
 			diagnosticsStore,
 		))
-		taskMgr.Register(tasks.NewPolicyDecisionLogCleanupTask(deps.DB, settingsRepo, policyPM))
+		maintenanceSteps = append(maintenanceSteps, tasks.NewPolicyDecisionLogCleanupTask(deps.DB, settingsRepo, policyPM))
 		if deps.FileRepo != nil {
 			// Download prepare-to-file pipeline (Phase 3): a durable, leased encode
 			// queue hosted on the task manager. Built here (before Start) and shared
@@ -2514,7 +2798,7 @@ func main() {
 		if notificationSystem != nil {
 			taskMgr.Register(tasks.NewSeedContentAvailabilityTask(notificationSystem))
 			taskMgr.Register(tasks.NewRebuildReleaseInterestTask(notificationSystem))
-			taskMgr.Register(tasks.NewNotificationsRetentionTask(notificationSystem))
+			maintenanceSteps = append(maintenanceSteps, tasks.NewNotificationsRetentionTask(notificationSystem))
 		}
 		if userStoreProvider != nil {
 			taskMgr.Register(tasks.NewSettingMutationsRetentionTask(userstore.NewSettingMutationSweeper(
@@ -2527,7 +2811,19 @@ func main() {
 		if refreshWorker != nil && metadataService != nil {
 			taskMgr.Register(tasks.NewRefreshMetadataTask(refreshWorker, metadataService))
 		}
+		if metadataService != nil {
+			taskMgr.Register(tasks.NewBulkMetadataEnrichmentTask(metadataService, pool))
+		}
+		if libraryRefreshExecutor != nil {
+			taskMgr.Register(tasks.NewRefreshAllLibraryMetadataTask(
+				deps.DB, deps.FolderRepo, adminjob.NewRepository(deps.DB), libraryRefreshExecutor,
+			))
+		}
 		if metadataImageCacheProcessor != nil {
+			tasks.SetImageWorkers(cfg.Metadata.ImageWorkers)
+			configWatcher.OnChange(func(_, updated *config.Config) {
+				tasks.SetImageWorkers(updated.Metadata.ImageWorkers)
+			})
 			cacheImagesTask := tasks.NewCacheMetadataImagesTask(metadataImageCacheProcessor)
 			// Artwork cached under an older variant ladder is missing the rungs
 			// a client can now ask for. Arm the one-shot regeneration pass; it
@@ -2539,29 +2835,38 @@ func main() {
 			taskMgr.Register(cacheImagesTask)
 			taskMgr.Register(tasks.NewBackfillMetadataImagesTask(metadataImageCacheProcessor))
 		}
-		if deps.S3Public != nil {
-			taskMgr.Register(tasks.NewVerifyArtworkDeliveryTask(
-				metadata.NewArtworkDeliveryStore(deps.DB, deps.S3Public.ArtworkDeliveryScope(), deps.S3Public.UsesExternalDelivery()),
-				deps.S3Public,
-			))
-			identity := tasks.ArtworkStorageIdentity(cfg.S3.Public.Endpoint, cfg.S3.Public.Bucket, cfg.S3.Public.KeyPrefix)
-			// Seed the fingerprint on first boot. After a provider change the
-			// stored (old) identity survives this call, so the startup preflight
-			// can warn without mutating artwork; an administrator must migrate
-			// objects and run the reconcile task explicitly.
-			if _, err := settingsRepo.SetIfAbsent(appCtx, tasks.ArtworkStorageIdentityKey, identity); err != nil {
-				slog.Warn("artwork reconcile: seeding storage identity failed", "error", err)
+		if deps.Blobs.Assets != nil {
+			identity := deps.Blobs.Assets.Identity()
+			if deps.ArtworkDelivery.External {
+				taskMgr.Register(tasks.NewVerifyArtworkDeliveryTask(
+					metadata.NewArtworkDeliveryStore(deps.DB, deps.ArtworkDelivery.Scope, true),
+					deps.Blobs.Assets,
+				))
 			}
 			var brandingReconciler tasks.BrandingAssetReconciler
-			if brandingSvc != nil && brandingSvc.HasStorage() {
+			if brandingSvc != nil {
 				brandingReconciler = brandingSvc
 			}
-			taskMgr.Register(tasks.NewReconcileArtworkCacheTask(
-				metadata.NewArtworkCacheReconciler(deps.DB, deps.S3Public),
+			reconcileArtwork := tasks.NewReconcileArtworkCacheTask(
+				metadata.NewArtworkCacheReconciler(deps.DB, deps.Blobs.Assets),
 				settingsRepo,
 				brandingReconciler,
 				identity,
-			))
+				deps.DB,
+			)
+			taskMgr.Register(reconcileArtwork)
+			go func() {
+				if err := reconcileArtwork.CheckStorageIdentity(appCtx); err != nil {
+					slog.WarnContext(appCtx, "artwork storage preflight failed", "task", reconcileArtwork.Key(), "error", err)
+				}
+			}()
+			// The reconcile above repairs catalog rows whose objects went
+			// missing. This sweeps the other direction: objects no row
+			// references. Only the sweep can reclaim a revision whose GC
+			// candidate was never enqueued, which nothing else ever reads back.
+			if sweeper := metadata.NewArtworkStorageSweeper(deps.DB, deps.Blobs.Assets); sweeper != nil {
+				taskMgr.Register(tasks.NewSweepArtworkStorageTask(sweeper, settingsRepo, identity))
+			}
 		}
 		if pluginAutoUpdater != nil {
 			taskMgr.Register(tasks.NewCheckPluginUpdatesTask(pluginAutoUpdater))
@@ -2594,10 +2899,10 @@ func main() {
 			profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
 			var reconcileResolver scopeResolver
 			if policySystem != nil {
-				reconcileResolver = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore)
+				reconcileResolver = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
 			} else {
 				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				reconcileResolver = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore)
+				reconcileResolver = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent)
 			}
 			requestReconcileSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: reconcileResolver})
 		}
@@ -2649,6 +2954,7 @@ func main() {
 		if mangaEnricher != nil {
 			taskMgr.Register(tasks.NewSyncMangaMetadataTask(mangaEnricher))
 		}
+		taskMgr.Register(tasks.NewDatabaseMaintenanceTask(deps.DB, maintenanceSteps...))
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
 			pluginTasks, err := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService).Tasks(appCtx)
 			if err != nil {
@@ -2703,9 +3009,9 @@ func main() {
 		}
 		var absScopeResolver scopeResolver
 		if policySystem != nil {
-			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore)
+			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
 		} else {
-			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore)
+			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
 		}
 		absHDeps := audiobooks.ABSHandlerDeps{
 			Pool:     deps.DB,
@@ -2797,7 +3103,10 @@ func main() {
 						}
 					case "icon_url_path":
 						if v, ok := rc.Value["value"].(string); ok && strings.TrimSpace(v) != "" {
-							iconURL = fmt.Sprintf("/api/v1/plugins/%d/assets/%s", binding.InstallationID, strings.TrimLeft(v, "/"))
+							// Minted under the versioned plugin-content mount so the
+							// icon keeps resolving after the /api/v1 tombstone; the v2
+							// auth-providers projection validates this shape.
+							iconURL = fmt.Sprintf("%s/plugins/%d/assets/%s", plugins.ContentPrefix, binding.InstallationID, strings.TrimLeft(v, "/"))
 						}
 					}
 				}
@@ -2831,10 +3140,29 @@ func main() {
 	// Step 7: Build HTTP router with all dependencies.
 	// compatServer is populated after the compat server is constructed below;
 	// the closure captures the pointer so revocation calls reach the live instance.
-	var compatServer *jellycompat.Server
+	var compatServer atomic.Pointer[jellycompat.Server]
+	dropCompatSessions := func(userID int) {
+		if compat := compatServer.Load(); compat != nil {
+			compat.SessionStore().DeleteByUserID(userID)
+		}
+	}
+	// Every replica caches Jellyfin-compatible sessions in memory and serves a
+	// cached one without reading the database, so a revocation is announced on
+	// the admin channel for each replica to drop the account's sessions.
+	if err := eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+		if event.Type != cache.EventUserSessionsRevoked {
+			return
+		}
+		if userID, err := strconv.Atoi(event.Payload); err == nil {
+			dropCompatSessions(userID)
+		}
+	}); err != nil {
+		slog.Warn("subscribe session revocation failed", "error", err)
+	}
 	deps.OnUserSessionsRevoked = func(ctx context.Context, userID int) {
-		if compatServer != nil {
-			compatServer.SessionStore().DeleteByUserID(userID)
+		dropCompatSessions(userID)
+		if err := eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventUserSessionsRevoked, Payload: strconv.Itoa(userID)}); err != nil {
+			slog.WarnContext(ctx, "publish session revocation failed", "user_id", userID, "error", err)
 		}
 	}
 
@@ -2849,19 +3177,37 @@ func main() {
 	// API and the frontend handler.
 	deps.BrandingService = brandingSvc
 	server.Branding = brandingSvc
+	var transitionPrivate blobstore.Store
+	if deps.S3Private != nil {
+		transitionPrivate = deps.Blobs.Operational
+	}
+	storageTransitionSvc := storagetransition.New(deps.DB, settingsRepo, adminjob.NewRepository(deps.DB), deps.Blobs.Assets, transitionPrivate)
+	storageTransitionSvc.SetNodeAdmission(storageAdmission)
+	if brandingSvc != nil {
+		storageTransitionSvc.SetBrandingReconciler(brandingSvc.ReconcileMissingAssets)
+	}
+	if err := storageTransitionSvc.FinalizeCommitted(appCtx); err != nil {
+		log.Fatalf("finalize committed storage transition: %v", err)
+	}
+	deps.StorageTransition = storageTransitionSvc
+	if storageAdmission != nil {
+		// A lock lost during a long startup must stop this process before the
+		// HTTP listeners serve the old location.
+		if err := storageAdmission.Probe(appCtx); err != nil {
+			log.Fatalf("storage node admission before serving: %v", err)
+		}
+	}
 
 	router := api.NewRouter(deps)
 
-	// Step 8: Expose Prometheus metrics endpoint (not behind auth).
-	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", promhttp.Handler())
-	metricsMux.Handle("/api/", router)
-	// ABS-compat is NOT mounted on the main listener — see the "ABS compat
-	// listener" block below. It binds its own port so the discovery probes
-	// (/ping, /healthcheck, /status, /init, /login, /socket.io) own the URL
-	// space without collision with silo's SPA fallback. Mirrors how the
-	// Jellyfin compat server is set up at :8096.
-	metricsMux.Handle("/", server.FrontendHandler())
+	// Step 8: Build the handler the primary port serves — the API router and
+	// frontend. Metrics use a separate opt-in listener; see newRootHandler.
+	rootHandler := newRootHandler(router)
+	stopMetricsListener, err := startMetricsListener(true)
+	if err != nil {
+		log.Fatalf("metrics listener: %v", err)
+	}
+	defer stopMetricsListener()
 
 	// Step 9: Start background workers (if needed).
 	var sessionCleaner *worker.SessionCleaner
@@ -2903,10 +3249,10 @@ func main() {
 				collectionRepo,
 				deps.CollectionService,
 				itemRepo,
-				4*time.Hour,
 				nil,
-				deps.S3Public,
 			)
+			collectionHandler.ArtworkStore = deps.Blobs.Assets
+			collectionHandler.ArtworkResolver = deps.ArtworkResolver
 			collectionHandler.FrontendFS = deps.FrontendFS
 			collectionHandler.SectionRepo = sectionRepo
 			collectionHandler.FolderRepo = deps.FolderRepo
@@ -2916,19 +3262,29 @@ func main() {
 			templateBundleApplyExecutor = collectionHandler
 		}
 
+		// Private S3 keeps its existing artifact keys and presigned downloads.
+		// Without it, artifacts go to the operational blob store.
+		var artifactStore adminjob.ArtifactStore
+		if deps.S3Private != nil {
+			artifactStore = deps.S3Private
+		} else if api := blobstore.NewBucketAPI(deps.Blobs.Operational); api != nil {
+			artifactStore = api
+		}
 		adminJobRunner = adminjob.NewRunner(
 			adminjob.NewRepository(deps.DB),
 			catalogseed.NewService(deps.DB, catalog.NewPersonRepository(deps.DB), recommendations.NewRepo(deps.DB)),
-			deps.S3Private,
+			artifactStore,
 			itemRefreshExecutor,
 			libraryRefreshExecutor,
 			adminjob.NewLibraryDeleteExecutor(deps.FolderRepo, sectionRepo,
 				librarySettingsCleaner(deps.DB, userStoreProvider)),
-			adminjob.NewImageCacheCleanupExecutor(deps.S3Public),
+			adminjob.NewImageCacheCleanupExecutor(deps.Blobs.Assets),
 			templateBundleApplyExecutor,
 			deps.RealtimeHub,
 		)
 		adminJobRunner.SetCancelRegistry(adminJobCancelRegistry)
+		adminJobRunner.SetStorageTransitionExecutor(storageTransitionSvc)
+		adminJobRunner.SetStorageTransitionCommitted(deps.RequestServerRestart)
 		adminJobRunner.Start()
 		defer adminJobRunner.Stop()
 
@@ -2951,7 +3307,7 @@ func main() {
 	// Step 10: Create and start the HTTP server.
 	srv := &http.Server{
 		Addr:         cfg.Server.Listen,
-		Handler:      metricsMux,
+		Handler:      rootHandler,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -2960,6 +3316,7 @@ func main() {
 	var compatSrv *http.Server
 	if (mode == "integrated" || mode == "api") && cfg.JellyfinCompat.Enabled && cfg.JellyfinCompat.Listen != "" {
 		compatDeps := jellycompat.Dependencies{
+			ArtworkHandler:       apiv2.NewArtworkHandler(deps.Blobs.Assets, deps.ArtworkSigner, deps.ArtworkRepair),
 			Config:               cfg,
 			AppContext:           appCtx,
 			RegisterShutdownWork: registerShutdownWork,
@@ -2967,6 +3324,7 @@ func main() {
 			DB:                   deps.DB,
 			SecretCipher:         dataCipher,
 			ClientIPResolver:     ipResolver,
+			IngressTokens:        networkAccess.Registry,
 			StreamTelemetry:      streamTelemetryRegistry,
 			NodePlanner:          deps.NodePlanner,
 			JWTSecret:            cfg.Auth.JWTSecret,
@@ -3011,8 +3369,14 @@ func main() {
 			compatDeps.DetailSvc = detailSvc
 			compatDeps.FolderRepo = folderRepo
 			compatDeps.SessionMgr = sessionMgr
+			if deps.MarkerPopulation != nil {
+				compatDeps.MarkerPopulation = deps.MarkerPopulation
+			}
 			compatDeps.UserStoreProvider = userStoreProvider
 			compatDeps.WatchCompletionObserver = deps.WatchCompletionObserver
+			if eventsHub != nil {
+				compatDeps.UserStateEvents = eventsHub
+			}
 			compatDeps.SettingsRepo = settingsRepo
 			compatDeps.PersonRepo = personRepo
 			if watchProviderService != nil {
@@ -3037,14 +3401,14 @@ func main() {
 				catalog.SetActiveSearchIndexProvider(activeSearchProvider)
 			}
 
-			if deps.S3Public != nil {
-				compatDeps.PosterPresigner = deps.S3Public
-				compatDeps.S3Client = deps.S3Public
-				compatDeps.S3Bucket = deps.S3Public.Bucket()
+			if blobs := blobstore.NewByteStore(deps.Blobs.Assets); blobs != nil {
+				compatDeps.SubtitleBlobs = blobs
 			}
+			compatDeps.PosterPresigner = jellycompat.NewResolverPosterPresigner(deps.ArtworkResolver)
 
 			if deps.FileRepo != nil {
 				compatDeps.FileResolver = deps.FileRepo
+				compatDeps.MediaSourceOwners = deps.FileRepo
 			}
 
 			compatDeps.SubtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
@@ -3080,7 +3444,7 @@ func main() {
 						nil, // profile tokens unused: compat login already verifies PINs
 						policySystem.PDP(),
 						accessGroupStore,
-					)
+					).WithUnratedContentPolicy(unratedContent)
 				} else {
 					// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
 					compatScopeResolver = access.NewResolver(
@@ -3088,14 +3452,15 @@ func main() {
 						userStoreProvider,
 						nil, // profile tokens unused: compat login already verifies PINs
 						accessGroupStore,
-					)
+					).WithUnratedContentPolicy(unratedContent)
 				}
 				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(compatScopeResolver)
+				compatDeps.PlaybackScopeResolver = compatScopeResolver
 			}
 		}
 
 		compat := jellycompat.NewServerWithDependencies(compatDeps)
-		compatServer = compat
+		compatServer.Store(compat)
 		compatTerminalRecoveryReady = compat.StartBackgroundTasks(context.Background())
 		compatSrv = compat.HTTPServer()
 		compatSrv.ReadTimeout = 30 * time.Second
@@ -3105,27 +3470,11 @@ func main() {
 
 	// ABS-compat listener — dedicated http.Server bound to its own port
 	// (default :13378) that hosts the Audiobookshelf-compatible API.
-	// Mirrors the Jellyfin compat layout above. The ABS handler mounts
-	// onto a fresh chi router here so /ping, /healthcheck, /status, /login,
-	// /socket.io, etc. own the URL space at the root — no SPA fallback,
-	// no collision with silo's /api/v1.
+	// Mirrors the Jellyfin compat layout above. See newAudiobookshelfListener.
 	var absSrv *http.Server
 	if (mode == "integrated" || mode == "api") && deps.ABSHandler != nil && cfg.AudiobookshelfCompat.Listen != "" {
-		absRouter := chi.NewRouter()
-		if ipResolver != nil {
-			absRouter.Use(clientip.Middleware(ipResolver))
-		}
-		absRouter.Use(chimiddleware.Recoverer)
-		absRouter.Use(httpstream.CompressExcept(5, abs.SkipMediaCompression))
-		deps.ABSHandler.Mount(absRouter)
-		absSrv = &http.Server{
-			Addr:              cfg.AudiobookshelfCompat.Listen,
-			Handler:           absRouter,
-			ReadHeaderTimeout: 10 * time.Second,
-			ReadTimeout:       60 * time.Second,
-			WriteTimeout:      0,
-			IdleTimeout:       120 * time.Second,
-		}
+		absSrv = newAudiobookshelfListener(cfg.AudiobookshelfCompat.Listen, deps.ABSHandler,
+			apiv2.NewArtworkHandler(deps.Blobs.Assets, deps.ArtworkSigner, deps.ArtworkRepair), ipResolver, networkAccess.Registry)
 	}
 
 	// Run non-critical startup work in the background so it doesn't delay the
@@ -3153,12 +3502,30 @@ func main() {
 	}
 
 	errCh := make(chan error, 3)
-	go func() {
-		slog.Info("HTTP server listening", "addr", cfg.Server.Listen)
-		if listenErr := srv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
-			errCh <- fmt.Errorf("HTTP server error: %w", listenErr)
+	// Bind before serving so resident plugins, which reverse-proxy to this
+	// listener, are only started once it exists.
+	apiListener, apiListenErr := net.Listen("tcp", cfg.Server.Listen)
+	if apiListenErr != nil {
+		errCh <- fmt.Errorf("HTTP server listen: %w", apiListenErr)
+	} else {
+		go func() {
+			slog.Info("HTTP server listening", "addr", cfg.Server.Listen)
+			if serveErr := srv.Serve(apiListener); serveErr != nil && serveErr != http.ErrServerClosed {
+				errCh <- fmt.Errorf("HTTP server error: %w", serveErr)
+			}
+		}()
+		go func() {
+			if reconcileErr := storageTransitionSvc.RunPostRestartWork(appCtx); reconcileErr != nil && appCtx.Err() == nil {
+				slog.Error("post-restart storage transition reconciliation paused; it will resume on the next start", "error", reconcileErr)
+			}
+		}()
+		if pluginService != nil {
+			pluginService.StartResidents(appCtx)
+			if mode == "api" {
+				warnOnMultipleAPIReplicas(appCtx, cache.NewAPIReplicaPresence(apiRedisClient, nodeID), pluginService)
+			}
 		}
-	}()
+	}
 	if compatSrv != nil {
 		go func() {
 			slog.Info("Jellyfin compat server listening", "addr", compatSrv.Addr)
@@ -3196,6 +3563,16 @@ func main() {
 	slog.Info("beginning graceful shutdown")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
+
+	// 0. Stop resident plugins first: their overlay listeners front the HTTP
+	// servers, so ingress goes away before the servers drain.
+	if pluginService != nil {
+		residentCtx, residentCancel := context.WithTimeout(shutdownCtx, 10*time.Second)
+		if stopErr := pluginService.StopResidents(residentCtx); stopErr != nil {
+			slog.Error("resident plugin shutdown error", "error", stopErr)
+		}
+		residentCancel()
+	}
 
 	// 1. Stop accepting new requests.
 	if shutdownErr := srv.Shutdown(shutdownCtx); shutdownErr != nil {
@@ -3282,9 +3659,18 @@ func runShutdownWorkWithTimeout(timeout time.Duration, work func(context.Context
 	return work(ctx)
 }
 
+// standaloneServerHooks lets a standalone mode run work that must bracket the
+// listener's lifetime: afterListen runs once the address is bound (resident
+// plugins reverse-proxy to it, so they start only then), beforeDrain runs
+// before the HTTP server drains (their overlay ingress goes away first).
+type standaloneServerHooks struct {
+	afterListen func()
+	beforeDrain func(context.Context)
+}
+
 // startStandaloneServer runs a standalone HTTP server for proxy/transcode modes.
 // It listens on the given address, handles graceful shutdown on SIGTERM/SIGINT.
-func startStandaloneServer(addr string, handler http.Handler, shutdownWork func(context.Context) error) {
+func startStandaloneServer(addr string, handler http.Handler, appCancel context.CancelFunc, shutdownWork func(context.Context) error, hooks standaloneServerHooks) {
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      handler,
@@ -3294,15 +3680,26 @@ func startStandaloneServer(addr string, handler http.Handler, shutdownWork func(
 	}
 
 	errCh := make(chan error, 1)
-	go func() {
-		slog.Info("HTTP server listening", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- fmt.Errorf("HTTP server error: %w", err)
+	// Bind before serving so the after-listen hook runs against a listener
+	// that exists.
+	listener, listenErr := net.Listen("tcp", addr)
+	if listenErr != nil {
+		errCh <- fmt.Errorf("HTTP server listen: %w", listenErr)
+	} else {
+		go func() {
+			slog.Info("HTTP server listening", "addr", addr)
+			if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
+				errCh <- fmt.Errorf("HTTP server error: %w", err)
+			}
+		}()
+		if hooks.afterListen != nil {
+			hooks.afterListen()
 		}
-	}()
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	defer signal.Stop(sigCh)
 
 	select {
 	case sig := <-sigCh:
@@ -3310,9 +3707,15 @@ func startStandaloneServer(addr string, handler http.Handler, shutdownWork func(
 	case serverErr := <-errCh:
 		slog.Error("server error, shutting down", "error", serverErr)
 	}
+	appCancel()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if hooks.beforeDrain != nil {
+		drainCtx, drainCancel := context.WithTimeout(shutdownCtx, 10*time.Second)
+		hooks.beforeDrain(drainCtx)
+		drainCancel()
+	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("HTTP shutdown error", "error", err)
 	}
@@ -3333,8 +3736,49 @@ func newS3ClientIfConfigured(cfg s3client.BucketConfig) *s3client.Client {
 	return s3client.NewClient(cfg)
 }
 
+// configureBlobStorage initializes blob storage only in processes that own the
+// catalog. Workers share settings but do not have storage clients.
+func configureBlobStorage(ctx context.Context, mode string, cfg *config.Config, deps *api.Dependencies, settings blobstore.SettingsStore) error {
+	if mode != "integrated" && mode != "api" {
+		return nil
+	}
+	stores, backend, err := blobstore.Open(ctx, blobstore.Options{
+		Backend: cfg.Artwork.StorageBackend, LocalPath: cfg.Artwork.LocalPath,
+		S3: deps.S3Public, S3Private: deps.S3Private, Settings: settings,
+	})
+	if err != nil {
+		return err
+	}
+	store := stores.Assets
+	deps.Blobs = stores
+	deps.ArtworkBackend = backend
+	deps.ArtworkSigner = artworkurl.NewSigner(cfg.Auth.JWTSecret, cfg.S3.MetadataPresignExpiry)
+	deps.ArtworkResolver = artworkurl.NewServerResolver(deps.ArtworkSigner)
+	deps.ArtworkDelivery = api.ArtworkDelivery{Scope: store.Identity()}
+	if direct, ok := store.(blobstore.DirectURLer); ok {
+		ttl := cfg.S3.MetadataPresignExpiry
+		if ttl <= 0 {
+			ttl = 4 * time.Hour
+		}
+		deps.ArtworkResolver = artworkurl.NewDirectResolver(direct, deps.S3Public.EffectivePresignTTL(ttl))
+		deps.ArtworkDelivery = api.ArtworkDelivery{
+			Scope:    deps.S3Public.ArtworkDeliveryScope(),
+			External: deps.S3Public.UsesExternalDelivery(),
+		}
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := store.Probe(probeCtx); err != nil {
+		slog.WarnContext(ctx, "blob storage unavailable; readiness will retry", "backend", backend, "error", err)
+	}
+	slog.InfoContext(ctx, "blob storage configured", "backend", backend, "local_path", cfg.Artwork.LocalPath,
+		"operational", stores.Operational != nil)
+	return nil
+}
+
 func configureS3Clients(cfg *config.Config, deps *api.Dependencies) {
 	if s3Public := newS3ClientIfConfigured(s3client.BucketConfig{
+		Role:           "metadata",
 		Endpoint:       cfg.S3.Public.Endpoint,
 		PublicEndpoint: cfg.S3.Public.ReadEndpoint,
 		Region:         cfg.S3.Public.Region,
@@ -3363,6 +3807,7 @@ func configureS3Clients(cfg *config.Config, deps *api.Dependencies) {
 	}
 
 	if s3Private := newS3ClientIfConfigured(s3client.BucketConfig{
+		Role:      "operational",
 		Endpoint:  cfg.S3.Private.Endpoint,
 		Region:    cfg.S3.Private.Region,
 		Bucket:    cfg.S3.Private.Bucket,
@@ -3382,18 +3827,9 @@ func configureS3Clients(cfg *config.Config, deps *api.Dependencies) {
 		}
 	}
 
-	if s3UserDB := newS3ClientIfConfigured(s3client.BucketConfig{
-		Endpoint:  cfg.S3.UserDB.Endpoint,
-		Region:    cfg.S3.UserDB.Region,
-		Bucket:    cfg.S3.UserDB.Bucket,
-		KeyPrefix: cfg.S3.UserDB.KeyPrefix,
-		AccessKey: cfg.S3.UserDB.AccessKey,
-		SecretKey: cfg.S3.UserDB.SecretKey,
-		PathStyle: cfg.S3.UserDB.PathStyle,
-	}); s3UserDB != nil {
-		deps.S3UserDB = s3UserDB
-		slog.Info("S3 user-db client configured", "bucket", s3UserDB.Bucket())
-	}
+	// No user-db S3 client is built here. The SQLite user store replicates
+	// through Litestream, which takes cfg.S3.UserDB directly in
+	// internal/userdb/litestream.go and never reads an s3client.
 }
 
 type pluginImageResolverCapabilityStore interface {
@@ -3691,6 +4127,13 @@ func reloadMarkerPluginProviders(
 	if registry == nil {
 		return nil
 	}
+	previous := make(map[string]string)
+	for _, provider := range registry.Providers() {
+		if revisioned, ok := provider.(interface{ CacheRevision() string }); ok {
+			previous[provider.ID()] = revisioned.CacheRevision()
+		}
+	}
+	refreshedRuntimes := make(map[int]bool)
 	var providers []markers.Provider
 	if store == nil || resolver == nil {
 		return registry.SetProviders(providers)
@@ -3710,6 +4153,13 @@ func reloadMarkerPluginProviders(
 		return installations[i].ID < installations[j].ID
 	})
 
+	var configErr error
+	failClosed := func(err error) {
+		configErr = err
+		// A later reload error must not leave providers using an unknown
+		// configuration revision. Healthy providers are restored below.
+		_ = registry.SetProviders(nil)
+	}
 	nextPriority := 1000
 	for _, installation := range installations {
 		if installation == nil {
@@ -3742,11 +4192,39 @@ func reloadMarkerPluginProviders(
 				return fmt.Errorf("decode marker provider capability %d/%s: %w", installation.ID, capability.ID, err)
 			}
 			metadataMap := markerCapabilityMetadata(descriptor)
+			if err := copyLegacyIntroDBPluginConfig(ctx, runtimeConfigs, legacySettings, installation, capability); err != nil {
+				failClosed(err)
+				continue
+			}
+			var configRevisions []string
+			if runtimeConfigs != nil {
+				configs, err := runtimeConfigs.ListGlobalConfigs(ctx, installation.ID)
+				if err != nil {
+					failClosed(fmt.Errorf("list marker plugin configuration for installation %d: %w", installation.ID, err))
+					continue
+				}
+				for _, config := range configs {
+					if config != nil {
+						configRevisions = append(configRevisions, fmt.Sprintf("%q:%s", config.Key, config.UpdatedAt.UTC().Format(time.RFC3339Nano)))
+					}
+				}
+			}
+			sort.Strings(configRevisions)
+			cacheRevision := fmt.Sprintf("%q\n%s", installation.Version, strings.Join(configRevisions, "\n"))
+			providerID := markers.PluginProviderID(installation.ID, capability.ID)
+			if previous[providerID] != cacheRevision && !refreshedRuntimes[installation.ID] {
+				if err := resolver.RefreshMarkerRuntime(installation.ID); err != nil {
+					failClosed(fmt.Errorf("refresh marker plugin runtime %d: %w", installation.ID, err))
+					continue
+				}
+				refreshedRuntimes[installation.ID] = true
+			}
 			provider, err := markers.NewPluginProvider(markers.PluginProviderOptions{
 				InstallationID:      installation.ID,
 				CapabilityID:        capability.ID,
 				DisplayName:         firstNonEmptyMarkerText(descriptor.GetDisplayName(), capability.ID),
 				PluginID:            installation.PluginID,
+				CacheRevision:       cacheRevision,
 				RequiredExternalIDs: markers.PluginRequiredExternalIDsFromMetadata(metadataMap),
 			}, resolver)
 			if err != nil {
@@ -3775,12 +4253,14 @@ func reloadMarkerPluginProviders(
 					return err
 				}
 			}
-			if err := copyLegacyIntroDBPluginConfig(ctx, runtimeConfigs, legacySettings, installation, capability); err != nil {
-				return err
-			}
 		}
 	}
-	return registry.SetProviders(providers)
+	// Replace the registry even when configuration reads failed, so a provider
+	// cannot continue serving cached lookups with an unknown credential revision.
+	if err := registry.SetProviders(providers); err != nil {
+		return err
+	}
+	return configErr
 }
 
 func legacyIntroDBProviderConfig(

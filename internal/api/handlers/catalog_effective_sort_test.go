@@ -79,3 +79,18 @@ func TestWriteCatalogResponseKeepsEffectiveSortWhenGrouped(t *testing.T) {
 		t.Fatalf("effective_sort = %v, want title/asc", sort)
 	}
 }
+
+func TestCatalogBrowseViewFreezesOnlyResolvedSourceOrder(t *testing.T) {
+	for _, resolved := range []bool{false, true} {
+		view := catalogBrowseView(&catalog.CatalogResult{EffectiveSortResolved: resolved}, nil)
+		if (view.ResolvedSort != nil) != resolved {
+			t.Fatalf("resolved=%t cursor sort=%+v", resolved, view.ResolvedSort)
+		}
+		if view.ResolvedSort != nil && *view.ResolvedSort != (catalog.QuerySort{}) {
+			t.Fatalf("source order sentinel: %+v", view.ResolvedSort)
+		}
+		if view.EffectiveSort != nil {
+			t.Fatalf("empty source order changed public response: %+v", view.EffectiveSort)
+		}
+	}
+}

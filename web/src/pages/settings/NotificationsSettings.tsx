@@ -1,3 +1,9 @@
+import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
+import {
+  notificationScope,
+  requireNotificationAuthority,
+  captureNotificationAuthority,
+} from "@/api/v2/notifications";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -14,6 +20,7 @@ import {
   Webhook as WebhookIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import type {
   NotificationChannelMode,
   NotificationEmailPreferences,
@@ -199,7 +206,7 @@ function ChannelFrequencyRow({
 /**
  * Destination address for this profile's emails. There is no account-email
  * fallback: the profile receives nothing until an address is verified here.
- * Changing it sends a verification link to the new address; the old address
+ * Changing it queues a verification request for the new address; the old address
  * keeps receiving mail until the link is clicked. Removing the address also
  * turns the channel off. Child profiles cannot set addresses.
  */
@@ -213,7 +220,11 @@ function EmailDestinationRow({ prefs }: { prefs: NotificationEmailPreferences })
 
   const submit = () => {
     const trimmed = address.trim();
-    if (!trimmed) {
+    if (!trimmed || requestAddress.isPending) {
+      return;
+    }
+    if (!isValidEmail(trimmed)) {
+      toast.error(INVALID_EMAIL_MESSAGE);
       return;
     }
     requestAddress.mutate(trimmed, {
@@ -239,13 +250,18 @@ function EmailDestinationRow({ prefs }: { prefs: NotificationEmailPreferences })
               <Button
                 variant="ghost"
                 size="sm"
-                disabled={clearAddress.isPending}
+                disabled={clearAddress.isPending || requestAddress.isPending}
                 onClick={() => clearAddress.mutate()}
               >
                 Remove
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => setEditing((value) => !value)}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={requestAddress.isPending}
+              onClick={() => setEditing((value) => !value)}
+            >
               {editing ? "Cancel" : hasAddress ? "Change" : "Add address"}
             </Button>
           </div>
@@ -255,6 +271,7 @@ function EmailDestinationRow({ prefs }: { prefs: NotificationEmailPreferences })
         <div className="flex items-center gap-2">
           <Input
             type="email"
+            disabled={requestAddress.isPending}
             placeholder="name@example.com"
             value={address}
             onChange={(event) => setAddress(event.target.value)}
@@ -267,14 +284,14 @@ function EmailDestinationRow({ prefs }: { prefs: NotificationEmailPreferences })
           />
           <Button size="sm" disabled={requestAddress.isPending || !address.trim()} onClick={submit}>
             {requestAddress.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-            Send verification
+            Request verification
           </Button>
         </div>
       )}
       {prefs.pending_email !== "" && (
         <div className="text-xs text-amber-500">
-          Verification email sent to {prefs.pending_email} — it becomes active once the link in it
-          is opened.
+          Verification pending for {prefs.pending_email}. Open the verification link when the email
+          arrives to activate the address.
         </div>
       )}
       {!prefs.can_edit_address && (
@@ -362,6 +379,7 @@ const DISCORD_LINK_ERRORS: Record<string, string> = {
 };
 
 function DiscordSection() {
+  const authority = captureProfileRequestContext();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const capability = useNotificationCapability();
@@ -413,7 +431,8 @@ function DiscordSection() {
   const startLink = () => {
     linkInit.mutate(undefined, {
       onSuccess: (init) => {
-        window.location.assign(init.url);
+        if (authority && isCapturedProfileAuthorityActive(authority))
+          window.location.assign(init.url);
       },
     });
   };
@@ -552,30 +571,45 @@ function WebPushSection() {
       toast.error("Web push is not available on this server");
       return;
     }
+    const authority = captureNotificationAuthority();
     setBusy(true);
     try {
-      await enableWebPush(webPushCap.public_key);
+      await enableWebPush(webPushCap.public_key, authority);
+      requireNotificationAuthority(authority);
       const sub = await currentWebPushSubscription();
+      requireNotificationAuthority(authority);
       setThisEndpoint(sub?.endpoint ?? null);
       toast.success("Browser notifications enabled");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to enable notifications");
+      if (isCapturedProfileAuthorityActive(authority))
+        toast.error(error instanceof Error ? error.message : "Failed to enable notifications");
     } finally {
       setBusy(false);
-      void queryClient.invalidateQueries({ queryKey: notificationKeys.webPushSubscriptions() });
+      if (isCapturedProfileAuthorityActive(authority))
+        void queryClient.invalidateQueries({
+          queryKey: [...notificationKeys.webPushSubscriptions(), notificationScope(authority)],
+          exact: true,
+        });
     }
   };
 
   const disable = async () => {
+    const authority = captureNotificationAuthority();
     setBusy(true);
     try {
-      await disableWebPush();
+      await disableWebPush(authority);
+      requireNotificationAuthority(authority);
       setThisEndpoint(null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to disable notifications");
+      if (isCapturedProfileAuthorityActive(authority))
+        toast.error(error instanceof Error ? error.message : "Failed to disable notifications");
     } finally {
       setBusy(false);
-      void queryClient.invalidateQueries({ queryKey: notificationKeys.webPushSubscriptions() });
+      if (isCapturedProfileAuthorityActive(authority))
+        void queryClient.invalidateQueries({
+          queryKey: [...notificationKeys.webPushSubscriptions(), notificationScope(authority)],
+          exact: true,
+        });
     }
   };
 
@@ -709,7 +743,7 @@ function WebhookFormDialog({
     }
     if (editing) {
       update.mutate(
-        { id: webhook.id, ...input },
+        { id: webhook.id, etag: webhook.etag ?? "", ...input },
         {
           onSuccess: () => onOpenChange(false),
         },
@@ -720,8 +754,14 @@ function WebhookFormDialog({
       toast.error("A webhook URL is required");
       return;
     }
+    const authority = captureNotificationAuthority();
     create.mutate(input, {
       onSuccess: (created) => {
+        try {
+          requireNotificationAuthority(authority);
+        } catch {
+          return;
+        }
         onOpenChange(false);
         toast.success(`Webhook "${created.name}" created`);
         if (created.signing_secret) {
@@ -729,6 +769,11 @@ function WebhookFormDialog({
         }
       },
       onError: (error) => {
+        try {
+          requireNotificationAuthority(authority);
+        } catch {
+          return;
+        }
         toast.error(error instanceof Error ? error.message : "Failed to create webhook");
       },
     });
@@ -825,9 +870,11 @@ function WebhookCard({
 }) {
   const update = useUpdateNotificationWebhook();
   const remove = useDeleteNotificationWebhook();
+  const authority = captureProfileRequestContext();
   const test = useTestNotificationWebhook();
   const rotate = useRotateNotificationWebhookSecret();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteIntent, setDeleteIntent] = useState<{ id: string; etag: string } | null>(null);
   const [testResult, setTestResult] = useState<NotificationWebhookTestResult | null>(null);
 
   const lastSuccess = formatRelativeTime(webhook.last_success_at);
@@ -851,7 +898,9 @@ function WebhookCard({
           </span>
           <Switch
             checked={webhook.enabled}
-            onCheckedChange={(checked) => update.mutate({ id: webhook.id, enabled: checked })}
+            onCheckedChange={(checked) =>
+              update.mutate({ id: webhook.id, etag: webhook.etag ?? "", enabled: checked })
+            }
           />
         </div>
       </div>
@@ -895,8 +944,13 @@ function WebhookCard({
           disabled={test.isPending}
           onClick={() =>
             test.mutate(webhook.id, {
-              onSuccess: setTestResult,
-              onError: () => toast.error("Test request failed"),
+              onSuccess: (result) => {
+                if (authority && isCapturedProfileAuthorityActive(authority)) setTestResult(result);
+              },
+              onError: () => {
+                if (authority && isCapturedProfileAuthorityActive(authority))
+                  toast.error("Test request failed");
+              },
             })
           }
         >
@@ -930,7 +984,10 @@ function WebhookCard({
           variant="outline"
           size="sm"
           className="text-destructive"
-          onClick={() => setConfirmDelete(true)}
+          onClick={() => {
+            setDeleteIntent({ id: webhook.id, etag: webhook.etag ?? "" });
+            setConfirmDelete(true);
+          }}
         >
           <Trash2 className="mr-1.5 h-3.5 w-3.5" />
           Delete
@@ -945,7 +1002,10 @@ function WebhookCard({
         confirmLabel="Delete"
         variant="destructive"
         isPending={remove.isPending}
-        onConfirm={() => remove.mutate(webhook.id, { onSettled: () => setConfirmDelete(false) })}
+        onConfirm={() => {
+          if (deleteIntent)
+            remove.mutate(deleteIntent, { onSettled: () => setConfirmDelete(false) });
+        }}
       />
       {/* The edit dialog is hosted by the parent so state resets per webhook. */}
       {update.isPending && <span className="sr-only">Saving…</span>}
@@ -981,7 +1041,7 @@ function WebhooksSection() {
           <>
             {(webhooks ?? []).map((webhook) => (
               <WebhookCard
-                key={webhook.id}
+                key={`${notificationScope()}:${webhook.id}`}
                 webhook={webhook}
                 onSecret={setSecret}
                 onEdit={() => {
@@ -1021,7 +1081,7 @@ function WebhooksSection() {
 
       {formOpen && (
         <WebhookFormDialog
-          key={editing?.id ?? "new"}
+          key={`${notificationScope()}:${editing?.id ?? "new"}`}
           open={formOpen}
           onOpenChange={(open) => {
             setFormOpen(open);
@@ -1052,7 +1112,7 @@ export default function NotificationsSettings() {
 
       <EmailSection />
 
-      <DiscordSection />
+      <DiscordSection key={notificationScope()} />
 
       <WebhooksSection />
     </div>

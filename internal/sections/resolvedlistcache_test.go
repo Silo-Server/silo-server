@@ -3,11 +3,14 @@ package sections
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -48,8 +51,8 @@ func TestResolvedListCacheScopeIsolation(t *testing.T) {
 		SectionType: SectionRecentlyAdded,
 		ItemLimit:   20,
 	}
-	scopeA := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaxContentRating: "PG-13"}
-	scopeB := catalog.AccessFilter{AllowedLibraryIDs: []int{3}, MaxContentRating: "R"}
+	scopeA := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
+	scopeB := catalog.AccessFilter{AllowedLibraryIDs: []int{3}, MaturityLimits: access.MaturityLimits{MaxContentRating: "R"}}
 
 	keyA := resolvedListCacheKey(resolved, nil, nil, scopeA)
 	keyB := resolvedListCacheKey(resolved, nil, nil, scopeB)
@@ -181,7 +184,7 @@ func TestResolvedListCacheInvalidationReleasesSupersededEntries(t *testing.T) {
 
 	// The new generation caches normally and is itself released by the next bump.
 	newKey := resolvedListCacheKey(recent, nil, []int{1}, catalog.AccessFilter{})
-	prime(newKey)
+	resolvedListSet(newKey, mediaItems("refreshed"), 1, clock)
 	clock = clock.Add(resolvedListInvalidationInterval)
 	InvalidateResolvedListCache()
 	if _, ok := resolvedListGet(newKey); ok {
@@ -190,11 +193,14 @@ func TestResolvedListCacheInvalidationReleasesSupersededEntries(t *testing.T) {
 	if _, ok := resolvedListGet(genreKey); !ok {
 		t.Fatal("generation-independent entry must survive repeated invalidations")
 	}
+	// Idle scopes retain only their original lifetime across invalidations.
+	clock = clock.Add(resolvedListTTL)
+	InvalidateResolvedListCache()
 	resolvedListCacheMu.RLock()
 	size := len(resolvedListCache)
 	resolvedListCacheMu.RUnlock()
 	if size != 1 {
-		t.Fatalf("cache holds %d entries after two bumps, want 1 (the generation-independent rail)", size)
+		t.Fatalf("cache holds %d entries after three bumps, want 1 (the generation-independent rail)", size)
 	}
 }
 
@@ -336,7 +342,7 @@ func TestResolvedListCacheInvalidationIsolatesInflightRefresh(t *testing.T) {
 // jellyfin-compat /Items/Latest collapse to one shared cache entry.
 func TestResolvedListCacheKeyIgnoresSectionID(t *testing.T) {
 	cfg := json.RawMessage(`{"filter_type":"movie"}`)
-	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaxContentRating: "PG-13"}
+	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
 	libraryID := 7
 
 	native := ResolvedSection{ID: "home-rail-42", SectionType: SectionRecentlyAdded, ItemLimit: 24, Config: cfg}
@@ -356,7 +362,7 @@ func TestResolvedListCacheKeyIgnoresSectionID(t *testing.T) {
 	if resolvedListCacheKey(ResolvedSection{ID: "x", SectionType: SectionRecentlyAdded, ItemLimit: 12, Config: cfg}, &libraryID, nil, scope) == keyNative {
 		t.Fatalf("different item limit must change the key")
 	}
-	if resolvedListCacheKey(native, &libraryID, nil, catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaxContentRating: "R"}) == keyNative {
+	if resolvedListCacheKey(native, &libraryID, nil, catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaturityLimits: access.MaturityLimits{MaxContentRating: "R"}}) == keyNative {
 		t.Fatalf("different max content rating must change the key")
 	}
 	otherLibrary := 8
@@ -388,7 +394,7 @@ func TestResolvedListCacheSharedAcrossEquivalentSections(t *testing.T) {
 	defer resetResolvedListCacheForTest()
 
 	cfg := json.RawMessage(`{"filter_type":"movie"}`)
-	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaxContentRating: "PG-13"}
+	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
 	libraryID := 7
 	now := time.Unix(1_700_000_000, 0)
 
@@ -431,7 +437,7 @@ func TestResolvedListCacheSharedAcrossEquivalentSections(t *testing.T) {
 func TestResolvedListCacheKeyScopeStillIsolatesWithoutID(t *testing.T) {
 	// Deliberately identical section identity to prove scope alone splits the key.
 	resolved := ResolvedSection{ID: "same-id", SectionType: SectionRecentlyAdded, ItemLimit: 24, Config: json.RawMessage(`{"filter_type":"movie"}`)}
-	base := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaxContentRating: "PG-13"}
+	base := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
 	lib1, lib2 := 7, 8
 
 	baseline := resolvedListCacheKey(resolved, &lib1, nil, base)
@@ -506,7 +512,7 @@ func TestResolvedListCacheEvictsExpiredEntries(t *testing.T) {
 // profile can never be served an unrestricted profile's membership.
 func TestResolvedListCacheKeyContentBoundaries(t *testing.T) {
 	resolved := ResolvedSection{ID: "sec-1", SectionType: SectionGenre, ItemLimit: 20}
-	base := catalog.AccessFilter{AllowedLibraryIDs: []int{1}, MaxContentRating: "PG-13"}
+	base := catalog.AccessFilter{AllowedLibraryIDs: []int{1}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
 
 	// nil (unrestricted) vs empty (restrict-to-nothing) vs a concrete allow-list
 	// must all differ, and two different allow-lists must differ.
@@ -930,5 +936,121 @@ func TestBlockingRebuildDetachedFromLeaderCancellation(t *testing.T) {
 	// The successful detached build must have been cached for later requests.
 	if _, ok := resolvedListGet("detach-key"); !ok {
 		t.Fatal("detached rebuild did not cache its result")
+	}
+}
+
+// A scan must not make every waiting client pay for the same expensive rebuild.
+func TestResolvedListCacheScanRefreshServesBoundedMembership(t *testing.T) {
+	resetResolvedListCacheForTest()
+	defer resetResolvedListCacheForTest()
+	now := time.Now()
+	resolvedListNow = func() time.Time { return now }
+	sec := ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}
+	oldKey := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
+	resolvedListSet(oldKey, mediaItems("old"), 1, now)
+	InvalidateResolvedListCache()
+	// No readers during this interval: a scan must not make an idle scope cold.
+	now = now.Add(2 * time.Minute)
+	key := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
+	entered, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	loader := func(context.Context) ([]*models.MediaItem, int, error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+		}
+		<-release
+		return mediaItems("new"), 1, nil
+	}
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	for range 100 {
+		items, _, err := getOrRefresh(t.Context(), key, now, loader)
+		if err != nil || !slices.Equal(itemIDs(items), []string{"old"}) {
+			t.Fatalf("during refresh: %v, %v", itemIDs(items), err)
+		}
+	}
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("refresh did not start")
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("loaders = %d", calls.Load())
+	}
+	entry, _ := resolvedListGet(key)
+	if !entry.expiresAt.Equal(now.Add(resolvedListInvalidationGrace)) {
+		t.Fatalf("expiry = %s", entry.expiresAt)
+	}
+	otherKey := resolvedListCacheKey(sec, nil, []int{8}, catalog.AccessFilter{})
+	if _, ok := resolvedListGet(otherKey); ok {
+		t.Fatal("fallback crossed a library scope")
+	}
+	close(release)
+	if !waitFor(2*time.Second, func() bool {
+		e, ok := resolvedListGet(key)
+		return ok && len(e.items) > 0 && e.items[0].ContentID == "new"
+	}) {
+		t.Fatal("fresh membership did not replace fallback")
+	}
+}
+
+func TestResolvedListCacheScanGraceExpiresAfterFailedRefresh(t *testing.T) {
+	resetResolvedListCacheForTest()
+	defer resetResolvedListCacheForTest()
+	now := time.Now()
+	resolvedListNow = func() time.Time { return now }
+	sec := ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}
+	key := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
+	resolvedListSet(key, mediaItems("old"), 1, now)
+	InvalidateResolvedListCache()
+	key = resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
+	_, _, err := getOrRefresh(t.Context(), key, now, func(context.Context) ([]*models.MediaItem, int, error) {
+		return nil, 0, errors.New("test refresh failure")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(2*time.Second, func() bool {
+		resolvedListRefreshMu.Lock()
+		defer resolvedListRefreshMu.Unlock()
+		_, running := resolvedListRefreshing[key]
+		return !running
+	}) {
+		t.Fatal("failed refresh did not finish")
+	}
+	// Even when refreshes have produced no replacement, the grace deadline is
+	// a hard boundary. A blocking load must supply the result after it.
+	items, _, err := getOrRefresh(t.Context(), key, now.Add(resolvedListInvalidationGrace), staticLoader(mediaItems("fresh"), nil))
+	if err != nil || !slices.Equal(itemIDs(items), []string{"fresh"}) {
+		t.Fatalf("after deadline: %v, %v", itemIDs(items), err)
+	}
+}
+
+func TestResolvedListCacheScanPreservesConcurrentNewGenerationLoad(t *testing.T) {
+	resetResolvedListCacheForTest()
+	defer resetResolvedListCacheForTest()
+	now := time.Now()
+	sec := ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}
+	oldKey := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
+	resolvedListSet(oldKey, mediaItems("old"), 1, now)
+	// Reproduce a reader finishing after namespace publication but before the
+	// invalidator has acquired the cache lock to carry fallback entries.
+	generation := resolvedListGeneration.Add(1)
+	current := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
+	resolvedListSet(current, mediaItems("fresh"), 1, now)
+	resolvedListInvalidationMu.Lock()
+	dropSupersededResolvedListEntries(generation)
+	resolvedListInvalidationMu.Unlock()
+	entry, ok := resolvedListGet(current)
+	if !ok || !slices.Equal(itemIDs(entry.items), []string{"fresh"}) {
+		t.Fatal("invalidation replaced the completed current-generation load")
+	}
+	if !entry.expiresAt.Equal(now.Add(resolvedListTTL)) {
+		t.Fatal("invalidation shortened a fresh entry's lifetime")
 	}
 }

@@ -1,0 +1,25 @@
+{
+  "items": [
+    {
+      "content_id": "series:heat",
+      "type": "series",
+      "title": "Heat: The Series",
+      "genres": [
+        "Crime"
+      ],
+      "keywords": [],
+      "status": "matched",
+      "watch": {
+        "media_item_id": "episode:heat-s01e02",
+        "watched_at": "2026-01-03T00:00:00.000Z",
+        "duration_seconds": 2600,
+        "completed": true,
+        "source": "playback"
+      }
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7InciOiIyMDI2LTAxLTAzVDAwOjAwOjAwWiIsImkiOiJoMyJ9fQ.DkjRwM5lnF9eIN-pDulMV6B7_mxlAslTVMl2mAI-0KU",
+    "has_more": true
+  }
+}

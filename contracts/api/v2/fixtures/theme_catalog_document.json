@@ -1,0 +1,19 @@
+{
+  "document": {
+    "version": 1,
+    "themes": [
+      {
+        "id": "fixture",
+        "name": "Fixture",
+        "description": "",
+        "author": "",
+        "previewAccent": "",
+        "previewBg": "",
+        "tags": [],
+        "downloadUrl": "https://themes.example/theme.json",
+        "version": ""
+      }
+    ]
+  },
+  "stale": false
+}

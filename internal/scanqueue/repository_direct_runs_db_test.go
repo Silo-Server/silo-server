@@ -184,3 +184,89 @@ func TestStaleJanitorLeavesHeartbeatingDirectRunRunning(t *testing.T) {
 		t.Fatalf("queued run status = %q, want %q", queued.Status, StatusAccepted)
 	}
 }
+
+func TestCreateOnRunningScopeOwesFollowUpEnqueuedOnComplete(t *testing.T) {
+	ctx, _, repo, folderID := openDirectRunTestRepository(t)
+	runID := createDirectRunTestRow(t, ctx, repo, folderID, "/show/s01", "autoscan")
+
+	// Accepted: the run has not started, so a second request simply reuses it.
+	reused, created, err := repo.Create(ctx, CreateInput{LibraryID: folderID, Mode: ModeSubtree, Path: "/show/s01", Trigger: "manual"})
+	if err != nil {
+		t.Fatalf("create on accepted scope: %v", err)
+	}
+	if created || reused.ID != runID || reused.FollowupTrigger != "" {
+		t.Fatalf("accepted scope: created=%v run=%#v", created, reused)
+	}
+
+	if _, err := repo.Start(ctx, runID); err != nil {
+		t.Fatalf("start scan run: %v", err)
+	}
+
+	// Running: the run may already have walked the scope, so the request is
+	// owed a follow-up. Only the first trigger is kept.
+	for i, trigger := range []string{"autoscan", "manual"} {
+		reused, created, err := repo.Create(ctx, CreateInput{LibraryID: folderID, Mode: ModeSubtree, Path: "/show/s01", Trigger: trigger})
+		if err != nil {
+			t.Fatalf("create %d on running scope: %v", i, err)
+		}
+		if created || reused.ID != runID || reused.FollowupTrigger != "autoscan" {
+			t.Fatalf("running scope request %d: created=%v run=%#v", i, created, reused)
+		}
+	}
+
+	finished, followUp, err := repo.CompleteWithFollowUp(ctx, runID, nil)
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if finished.Status != StatusCompleted {
+		t.Fatalf("finished status = %q", finished.Status)
+	}
+	if followUp == nil {
+		t.Fatalf("expected a follow-up run")
+	}
+	if followUp.ID == runID || followUp.Status != StatusAccepted || followUp.Mode != ModeSubtree ||
+		followUp.Path != "/show/s01" || followUp.Trigger != "autoscan" || followUp.FollowupTrigger != "" {
+		t.Fatalf("unexpected follow-up: %#v", followUp)
+	}
+	t.Cleanup(func() { _, _, _ = repo.MarkCancelled(context.Background(), followUp.ID) })
+
+	// The follow-up is a normal queued run: it does not owe another follow-up
+	// on its own, and finishing it enqueues nothing.
+	if _, err := repo.Start(ctx, followUp.ID); err != nil {
+		t.Fatalf("start follow-up: %v", err)
+	}
+	_, second, err := repo.CompleteWithFollowUp(ctx, followUp.ID, nil)
+	if err != nil {
+		t.Fatalf("complete follow-up: %v", err)
+	}
+	if second != nil {
+		t.Fatalf("follow-up must not chain another follow-up, got %#v", second)
+	}
+}
+
+func TestCreateOnRunningScopeIgnoresDirectAdminTriggers(t *testing.T) {
+	ctx, _, repo, folderID := openDirectRunTestRepository(t)
+	runID := createDirectRunTestRow(t, ctx, repo, folderID, "/show/s01", "autoscan")
+	if _, err := repo.Start(ctx, runID); err != nil {
+		t.Fatalf("start scan run: %v", err)
+	}
+
+	// A direct admin refresh that finds the scope busy ingests inline instead
+	// (see adminjob); a queued follow-up carrying its trigger would never be
+	// claimed by a worker.
+	reused, created, err := repo.Create(ctx, CreateInput{LibraryID: folderID, Mode: ModeSubtree, Path: "/show/s01", Trigger: TriggerAdminItemRefresh})
+	if err != nil {
+		t.Fatalf("create on running scope: %v", err)
+	}
+	if created || reused.FollowupTrigger != "" {
+		t.Fatalf("direct trigger must not owe a follow-up: created=%v run=%#v", created, reused)
+	}
+
+	_, followUp, err := repo.FailWithFollowUp(ctx, runID, "boom")
+	if err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+	if followUp != nil {
+		t.Fatalf("expected no follow-up, got %#v", followUp)
+	}
+}

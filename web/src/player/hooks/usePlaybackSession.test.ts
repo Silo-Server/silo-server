@@ -14,8 +14,37 @@ import {
   routeEventPlanIdentityV3,
   VIDEO_CLIENT_FEATURES_V3,
 } from "../playback-session-wire-v3";
+import { markPlaybackIntent } from "../first-frame";
 import { usePlaybackSession } from "./usePlaybackSession";
 import { resetCodecDetectionForTests } from "./useCodecDetection";
+import { resetSessionMutations } from "../session-mutations";
+
+// These hook tests exercise plan adoption and replacement against a transport
+// boundary. The v2 start/replan helpers are covered by their own tests; here
+// they forward to the same fetch stubs under the v2 base.
+vi.mock("../start-v2", () => ({
+  startPlaybackV2: async (config: PlayerConfig, body: unknown) => {
+    const { playerFetch } = await import("../player-fetch");
+    const { registerSessionMutations } = await import("../session-mutations");
+    const decision = await playerFetch<import("../protocol-v3").DecisionResponseV3>(
+      { ...config, apiBaseUrl: "/api/v2" },
+      "/playback/start",
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    const sessionId = decision.playback_plan?.session_id ?? decision.session_id;
+    if (decision.playback_plan && sessionId) registerSessionMutations(sessionId, "installation");
+    return decision;
+  },
+}));
+vi.mock("../lifecycle-v2", () => ({
+  replanV2: async (config: PlayerConfig, sessionId: string, body: unknown) => {
+    const { playerFetch } = await import("../player-fetch");
+    return playerFetch({ ...config, apiBaseUrl: "/api/v2" }, `/playback/${sessionId}/replan`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+}));
 
 const playerConfig: PlayerConfig = {
   apiBaseUrl: "/api/v1",
@@ -39,6 +68,7 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
 
 afterEach(() => {
   resetCodecDetectionForTests();
+  resetSessionMutations();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -70,6 +100,17 @@ const replanBase = {
 };
 
 describe("buildStartRequestV3", () => {
+  it("pins the room source without changing the requested streaming quality", () => {
+    expect(
+      buildStartRequestV3({
+        ...startBase,
+        allowAlternateVersions: false,
+        qualityPreference: "720p",
+      }),
+    ).toMatchObject({ allow_alternate_versions: false, quality_preference: "720p" });
+    expect(buildStartRequestV3(startBase)).not.toHaveProperty("allow_alternate_versions");
+  });
+
   // Feature tokens are promises the server enforces, so a surface advertises
   // only what it implements: the base set alone unless the caller names more.
   it("advertises only the surface's own features", () => {
@@ -351,7 +392,7 @@ describe("usePlaybackSession quality changes", () => {
         return new Response(null, { status: 202 });
       }
       if (init?.method === "DELETE") {
-        return new Response(null, { status: 204 });
+        return jsonResponse({ outcome: "stopped" });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -411,7 +452,7 @@ describe("usePlaybackSession initial bitmap subtitles", () => {
         );
       }
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -489,7 +530,7 @@ describe("usePlaybackSession initial bitmap subtitles", () => {
         });
       }
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -588,7 +629,7 @@ describe("usePlaybackSession output capability changes", () => {
         );
       }
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -643,7 +684,7 @@ describe("usePlaybackSession output capability changes", () => {
         });
       }
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -662,6 +703,65 @@ describe("usePlaybackSession output capability changes", () => {
     expect(startBodies[1]).not.toHaveProperty("start_position");
     expect(startBodies[0]?.client_capabilities.hdr_details?.dolby_vision_profiles).toEqual([]);
     expect(startBodies[1]?.client_capabilities.hdr_details?.dolby_vision_profiles).toEqual([8]);
+    unmount();
+  });
+
+  it("keeps the Play tap's clock when an output change retries a start that never played", async () => {
+    const setHDR = outputProbe(false);
+    let starts = 0;
+    const routeEvents: Array<{ event: string; diagnostics: Record<string, string> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        starts += 1;
+        if (starts === 1) {
+          return jsonResponse({
+            protocol_version: 3,
+            server_features: ["playback_plan_v3", "output_change_v1"],
+            outcome: "terminal",
+            terminal: { reason: "hdr_transcode_unsupported", message: "HDR unsupported" },
+          });
+        }
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3", "output_change_v1"],
+          outcome: "playable",
+          session_id: "session-hdr",
+          playback_plan: fixturePlanV3({ session_id: "session-hdr" }),
+        });
+      }
+      if (url.endsWith("/playback/route-events")) {
+        routeEvents.push(JSON.parse(String(init?.body)) as (typeof routeEvents)[number]);
+        return new Response(null, { status: 202 });
+      }
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const tap = performance.now();
+    markPlaybackIntent("request-1", tap);
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+
+    act(() => setHDR(true));
+    await waitFor(() => expect(result.current.sessionId).toBe("session-hdr"));
+    const clock = vi.spyOn(performance, "now").mockReturnValue(tap + 3_000);
+    try {
+      act(() => result.current.reportFirstFrame());
+    } finally {
+      clock.mockRestore();
+    }
+
+    await waitFor(() =>
+      expect(routeEvents.filter((event) => event.event === "first_frame")).toHaveLength(1),
+    );
+    expect(routeEvents.find((event) => event.event === "first_frame")?.diagnostics).toEqual({
+      first_frame_ms: "3000",
+    });
     unmount();
   });
 
@@ -708,7 +808,7 @@ describe("usePlaybackSession output capability changes", () => {
         });
       }
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -775,7 +875,7 @@ describe("usePlaybackSession output capability changes", () => {
         });
       }
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -819,7 +919,7 @@ describe("usePlaybackSession output capability changes", () => {
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
       if (init?.method === "DELETE") {
         stoppedSessions.push(url);
-        return new Response(null, { status: 204 });
+        return jsonResponse({ outcome: "stopped" });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -836,7 +936,7 @@ describe("usePlaybackSession output capability changes", () => {
     await waitFor(() => expect(result.current.plan).toBeNull());
     expect(result.current.sessionId).toBeNull();
     expect(result.current.error).not.toBeNull();
-    await waitFor(() => expect(stoppedSessions).toContain("/api/v1/playback/session-hdr"));
+    await waitFor(() => expect(stoppedSessions).toContain("/api/v2/playback/session-hdr"));
     unmount();
   });
 
@@ -878,7 +978,7 @@ describe("usePlaybackSession output capability changes", () => {
         });
       }
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -892,7 +992,9 @@ describe("usePlaybackSession output capability changes", () => {
     act(() => result.current.refreshSubtitles(120));
     await waitFor(() => expect(replanBodies).toHaveLength(1));
     act(() => setHDR(false));
-    act(() => result.current.reanchorSeek(555));
+    act(() => {
+      void result.current.reanchorSeek(555);
+    });
     expect(replanBodies).toHaveLength(1);
 
     await act(async () => {
@@ -960,7 +1062,7 @@ describe("usePlaybackSession output capability changes", () => {
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
       if (init?.method === "DELETE") {
         stoppedSessions.push(url);
-        return new Response(null, { status: 204 });
+        return jsonResponse({ outcome: "stopped" });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -1027,7 +1129,7 @@ describe("usePlaybackSession output capability changes", () => {
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
       if (init?.method === "DELETE") {
         stoppedSessions.push(url);
-        return new Response(null, { status: 204 });
+        return jsonResponse({ outcome: "stopped" });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -1058,7 +1160,7 @@ describe("usePlaybackSession output capability changes", () => {
 
     await waitFor(() => expect(replanOperations).toEqual(["output_change", "quality_change"]));
     await waitFor(() => expect(result.current.plan).toBeNull());
-    expect(stoppedSessions).toContain("/api/v1/playback/session-hdr");
+    expect(stoppedSessions).toContain("/api/v2/playback/session-hdr");
     unmount();
   });
 
@@ -1082,7 +1184,7 @@ describe("usePlaybackSession output capability changes", () => {
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
       if (init?.method === "DELETE") {
         stoppedSessions.push(url);
-        return new Response(null, { status: 204 });
+        return jsonResponse({ outcome: "stopped" });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -1143,7 +1245,7 @@ describe("usePlaybackSession output capability changes", () => {
         });
       }
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1205,7 +1307,7 @@ describe("usePlaybackSession output capability changes", () => {
         return outputReplanResponse;
       }
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1261,7 +1363,7 @@ describe("usePlaybackSession output capability changes", () => {
         return jsonResponse({ error: "unsupported operation" }, { status: 400 });
       }
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1320,7 +1422,7 @@ describe("usePlaybackSession version switches", () => {
       }
       if (init?.method === "DELETE") {
         stoppedSessions.push(url);
-        return new Response(null, { status: 204 });
+        return jsonResponse({ outcome: "stopped" });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -1338,10 +1440,11 @@ describe("usePlaybackSession version switches", () => {
     await waitFor(() => {
       expect(result.current.plan).toBeNull();
       expect(result.current.error).toBe("The next item has no playable route.");
+      expect(result.current.errorReason).toBe("no_playable_route");
     });
     expect(result.current.streamUrl).toBeNull();
     expect(result.current.sessionId).toBeNull();
-    expect(stoppedSessions).toEqual(["/api/v1/playback/session-1"]);
+    expect(stoppedSessions).toEqual(["/api/v2/playback/session-1"]);
 
     unmount();
   });
@@ -1377,7 +1480,7 @@ describe("usePlaybackSession version switches", () => {
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
       if (init?.method === "DELETE") {
         stoppedSessions.push(url);
-        return new Response(null, { status: 204 });
+        return jsonResponse({ outcome: "stopped" });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -1401,7 +1504,7 @@ describe("usePlaybackSession version switches", () => {
     expect(result.current.streamUrl).toBeNull();
     expect(result.current.sessionId).toBeNull();
     expect(result.current.error).toContain("could not start playback");
-    expect(stoppedSessions).toEqual(["/api/v1/playback/session-1"]);
+    expect(stoppedSessions).toEqual(["/api/v2/playback/session-1"]);
 
     unmount();
   });
@@ -1439,7 +1542,7 @@ describe("usePlaybackSession replans", () => {
         return new Response(null, { status: 202 });
       }
       if (init?.method === "DELETE") {
-        return new Response(null, { status: 204 });
+        return jsonResponse({ outcome: "stopped" });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -1455,9 +1558,9 @@ describe("usePlaybackSession replans", () => {
     await waitFor(() => expect(replanBodies).toHaveLength(1));
 
     act(() => {
-      result.current.reanchorSeek(300);
+      void result.current.reanchorSeek(300);
       result.current.recoverFromFailure({ classification: "decoder_error" }, 450);
-      result.current.reanchorSeek(600);
+      void result.current.reanchorSeek(600);
     });
     expect(replanBodies).toHaveLength(1);
 
@@ -1530,7 +1633,7 @@ describe("usePlaybackSession replans", () => {
         return new Response(null, { status: 202 });
       }
       if (init?.method === "DELETE") {
-        return new Response(null, { status: 204 });
+        return jsonResponse({ outcome: "stopped" });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -1546,8 +1649,8 @@ describe("usePlaybackSession replans", () => {
     await waitFor(() => expect(replanBodies).toHaveLength(1));
 
     act(() => {
-      result.current.reanchorSeek(300);
-      result.current.reanchorSeek(450);
+      void result.current.reanchorSeek(300);
+      void result.current.reanchorSeek(450);
     });
     expect(replanBodies).toHaveLength(1);
 
@@ -1605,7 +1708,7 @@ describe("usePlaybackSession replans", () => {
         return new Response(null, { status: 202 });
       }
       if (init?.method === "DELETE") {
-        return new Response(null, { status: 204 });
+        return jsonResponse({ outcome: "stopped" });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -1661,7 +1764,7 @@ describe("usePlaybackSession server-invalidated plans", () => {
         return new Response(null, { status: 202 });
       }
       if (init?.method === "DELETE") {
-        return new Response(null, { status: 204 });
+        return jsonResponse({ outcome: "stopped" });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -1788,7 +1891,7 @@ describe("usePlaybackSession server-invalidated plans", () => {
         return new Response(null, { status: 202 });
       }
       if (init?.method === "DELETE") {
-        return new Response(null, { status: 204 });
+        return jsonResponse({ outcome: "stopped" });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -2020,7 +2123,7 @@ describe("usePlaybackSession server-invalidated plans", () => {
         });
       }
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -2086,7 +2189,7 @@ describe("usePlaybackSession server-invalidated plans", () => {
         });
       }
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -2127,6 +2230,154 @@ describe("usePlaybackSession server-invalidated plans", () => {
       await expect(invalidation).resolves.toBe(true);
     });
     expect(replanBodies.map(({ operation }) => operation)).toEqual(["failure_recovery"]);
+
+    unmount();
+  });
+});
+
+describe("usePlaybackSession first frame", () => {
+  it("reports first_frame once per playback attempt, timed from the play tap", async () => {
+    const startBodies: Array<{ playback_attempt_id: string }> = [];
+    const routeEvents: Array<{
+      event: string;
+      playback_attempt_id: string;
+      diagnostics: Record<string, string>;
+    }> = [];
+    let releaseSwitchStart: (() => void) | undefined;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        startBodies.push(JSON.parse(String(init?.body)) as { playback_attempt_id: string });
+        const sessionId = `session-${startBodies.length}`;
+        if (startBodies.length === 2) {
+          await new Promise<void>((resolve) => {
+            releaseSwitchStart = resolve;
+          });
+        }
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "playable",
+            session_id: sessionId,
+            playback_plan: fixturePlanV3({ session_id: sessionId }),
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: fixturePlanV3({
+            session_id: "session-1",
+            plan_id: "plan:fedcba9876543210",
+            plan_attempt_key: "v3:fedcba9876543210",
+          }),
+        });
+      }
+      if (url.endsWith("/playback/route-events")) {
+        routeEvents.push(JSON.parse(String(init?.body)) as (typeof routeEvents)[number]);
+        return new Response(null, { status: 202 });
+      }
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const firstFrames = () => routeEvents.filter((event) => event.event === "first_frame");
+    // The clock is pinned only around the synchronous calls that read it, so
+    // React's scheduler keeps a real clock everywhere else.
+    const at = (now: number, run: () => void) => {
+      const clock = vi.spyOn(performance, "now").mockReturnValue(now);
+      try {
+        act(run);
+      } finally {
+        clock.mockRestore();
+      }
+    };
+
+    const tap = performance.now();
+    markPlaybackIntent("request-1", tap);
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    at(tap + 2_450, () => {
+      result.current.reportFirstFrame();
+      result.current.reportFirstFrame();
+    });
+    await waitFor(() => expect(firstFrames()).toHaveLength(1));
+    expect(firstFrames()[0]).toMatchObject({
+      playback_attempt_id: startBodies[0]?.playback_attempt_id,
+      diagnostics: { first_frame_ms: "2450" },
+    });
+
+    // A replan keeps the attempt, so its first frame is not the attempt's.
+    act(() => result.current.changeQuality("720p", 30));
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:fedcba9876543210"));
+    at(tap + 9_000, () => result.current.reportFirstFrame());
+
+    // A version switch starts a new attempt, timed from the switch. Until its
+    // plan is adopted, the frame on screen belongs to the previous attempt.
+    at(tap + 10_000, () => result.current.switchVersion(99, 30));
+    await waitFor(() => expect(startBodies).toHaveLength(2));
+    at(tap + 10_100, () => result.current.reportFirstFrame());
+    act(() => releaseSwitchStart?.());
+    await waitFor(() => expect(result.current.sessionId).toBe("session-2"));
+    at(tap + 10_800, () => result.current.reportFirstFrame());
+
+    await waitFor(() => expect(firstFrames()).toHaveLength(2));
+    expect(firstFrames()[1]).toMatchObject({
+      playback_attempt_id: startBodies[1]?.playback_attempt_id,
+      diagnostics: { first_frame_ms: "800" },
+    });
+
+    unmount();
+  });
+
+  it("reports first_frame without a duration when no play tap started the attempt", async () => {
+    const routeEvents: Array<{ event: string; diagnostics: Record<string, string> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "playable",
+            session_id: "session-1",
+            playback_plan: fixturePlanV3({ session_id: "session-1" }),
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/route-events")) {
+        routeEvents.push(JSON.parse(String(init?.body)) as (typeof routeEvents)[number]);
+        return new Response(null, { status: 202 });
+      }
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // A tap for another request, then a deep link to this one: the stale mark
+    // must not time this attempt.
+    markPlaybackIntent("request-other");
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-deep-link", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+    act(() => result.current.reportFirstFrame());
+
+    await waitFor(() =>
+      expect(routeEvents.filter((event) => event.event === "first_frame")).toHaveLength(1),
+    );
+    expect(routeEvents.find((event) => event.event === "first_frame")?.diagnostics).toEqual({});
 
     unmount();
   });

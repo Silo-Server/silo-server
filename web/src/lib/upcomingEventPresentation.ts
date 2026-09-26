@@ -1,7 +1,8 @@
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
 
 interface UpcomingPresentationEvent {
-  type: "movie" | "episode" | "season_premiere";
+  /** "movie", "episode", or "season_premiere"; the v2 contract leaves this open. */
+  type: string;
   air_date: string;
   air_time?: string | null;
   air_at?: string | null;

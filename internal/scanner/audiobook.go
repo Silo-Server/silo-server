@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // narratorSuffixRE matches a trailing "read by X" / "(Read by X)" /
@@ -101,6 +102,11 @@ type parsedAudiobookFile struct {
 	CodecAudio    string // aac, mp3, opus, flac
 	Container     string // m4b, mp3, mka, ...
 	AudioChannels int
+	// Size and ModifiedAt are captured before probing so the persisted row
+	// can be checked against them after the probe: a file replaced mid-scan
+	// must not store old probe facts under the new file's identity.
+	Size       int64
+	ModifiedAt time.Time
 }
 
 // parseAudiobookFolder reads a single audiobook folder and returns its
@@ -114,7 +120,9 @@ type parsedAudiobookFile struct {
 // audio files, so the caller can skip it. Every other error (including an
 // ffprobe binary that cannot be executed) is a real failure and must be
 // reported by the caller.
-func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath string) (*parsedAudiobook, error) {
+// allowedPaths is the inventory accepted by discovery, including ignore rules.
+// A nil inventory allows every audio file in the folder.
+func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath string, allowedPaths map[string]bool) (*parsedAudiobook, error) {
 	entries, err := os.ReadDir(folderPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -132,17 +140,29 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 			continue
 		}
 		if SupportsAudioFile(entry.Name()) {
-			audioFiles = append(audioFiles, filepath.Join(folderPath, entry.Name()))
+			path := filepath.Join(folderPath, entry.Name())
+			if allowedPaths == nil || allowedPaths[path] {
+				audioFiles = append(audioFiles, path)
+			}
 		}
 	}
 	if len(audioFiles) == 0 {
 		return nil, fmt.Errorf("audiobook folder %s: %w", folderPath, errFolderHasNoMedia)
 	}
-	sort.Strings(audioFiles)
+	// Audio parts are commonly named with unpadded numbers (part2, part10).
+	// Use the same natural ordering as ebook archive pages so playback follows
+	// human order instead of byte/lexical order.
+	sort.SliceStable(audioFiles, func(i, j int) bool {
+		return naturalPathLess(audioFiles[i], audioFiles[j])
+	})
 
 	book := &parsedAudiobook{}
 
 	if len(audioFiles) == 1 {
+		info, err := os.Stat(audioFiles[0])
+		if err != nil {
+			return nil, fmt.Errorf("stat audiobook file %s: %w", audioFiles[0], err)
+		}
 		probed, err := ProbeFile(ctx, ffprobePath, audioFiles[0])
 		if err != nil {
 			return nil, fmt.Errorf("probe audiobook file %s: %w", audioFiles[0], err)
@@ -157,26 +177,29 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 			CodecAudio:    probed.CodecAudio,
 			Container:     probed.Container,
 			AudioChannels: probed.AudioChannels,
+			Size:          info.Size(),
+			ModifiedAt:    normalizeFileModifiedAt(info.ModTime()),
 		}}
 		return book, nil
 	}
 
-	// Multi-file case: read header from the first file, synthesize one
-	// chapter per file with title = filename stem. A 0..0 range means the
-	// chapter duration is unknown; consumers should treat it as non-seekable.
-	probedFirst, err := ProbeFile(ctx, ffprobePath, audioFiles[0])
-	if err != nil {
-		return nil, fmt.Errorf("probe first audiobook file %s: %w", audioFiles[0], err)
-	}
-	book.populateFromTags(probedFirst.FormatTags)
-	book.applyFilesystemFallbacks(folderPath, audioFiles)
-
+	// Multi-file case: synthesize one chapter per file with title = filename
+	// stem. The first file's probe also supplies the book-level tags; keep that
+	// result and use it for the first part instead of probing the file twice.
 	book.Files = make([]parsedAudiobookFile, 0, len(audioFiles))
 	for i, path := range audioFiles {
 		stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("stat audiobook file %s: %w", path, err)
+		}
 		probed, err := ProbeFile(ctx, ffprobePath, path)
 		if err != nil {
 			return nil, fmt.Errorf("probe audiobook file %s: %w", path, err)
+		}
+		if i == 0 {
+			book.populateFromTags(probed.FormatTags)
+			book.applyFilesystemFallbacks(folderPath, audioFiles)
 		}
 		book.Files = append(book.Files, parsedAudiobookFile{
 			Path: path,
@@ -191,6 +214,8 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 			CodecAudio:    probed.CodecAudio,
 			Container:     probed.Container,
 			AudioChannels: probed.AudioChannels,
+			Size:          info.Size(),
+			ModifiedAt:    normalizeFileModifiedAt(info.ModTime()),
 		})
 	}
 	return book, nil

@@ -17,6 +17,8 @@ import (
 
 var ErrLibraryCollectionGroupNotFound = errors.New("library collection group not found")
 
+const libraryCollectionUngrouped = "ungrouped"
+
 type LibraryCollectionGroupRepository struct {
 	pool *pgxpool.Pool
 }
@@ -34,9 +36,10 @@ type CreateLibraryCollectionGroupInput struct {
 }
 
 type UpdateLibraryCollectionGroupInput struct {
-	Name            *string
-	Slug            *string
-	DefaultSortMode *models.GroupSortMode
+	ExpectedRevision *int64
+	Name             *string
+	Slug             *string
+	DefaultSortMode  *models.GroupSortMode
 }
 
 const libraryCollectionGroupColumns = `id, library_id, name, slug, kind, default_sort_mode, sort_order, created_at, updated_at`
@@ -157,40 +160,71 @@ func (r *LibraryCollectionGroupRepository) Update(ctx context.Context, id string
 		args = append(args, *in.DefaultSortMode)
 		pos++
 	}
-	if len(sets) == 0 {
+	if len(sets) == 0 && in.ExpectedRevision == nil {
 		return r.GetByID(ctx, id)
 	}
 	sets = append(sets, fmt.Sprintf("updated_at = $%d", pos))
 	args = append(args, time.Now())
 
-	q := fmt.Sprintf(`UPDATE library_collection_groups SET %s WHERE id = $1 RETURNING `+libraryCollectionGroupColumns, strings.Join(sets, ", "))
-	row := r.pool.QueryRow(ctx, q, args...)
-	g, err := scanLibraryCollectionGroup(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrLibraryCollectionGroupNotFound
-	}
-	return g, err
+	var result *models.LibraryCollectionGroup
+	err := (libraryCollectionMutation{pool: r.pool, groupID: id}).run(ctx, in.ExpectedRevision, func(tx pgx.Tx) error {
+		q := fmt.Sprintf(`UPDATE library_collection_groups SET %s WHERE id = $1 RETURNING `+libraryCollectionGroupColumns, strings.Join(sets, ", "))
+		row := tx.QueryRow(ctx, q, args...)
+		g, err := scanLibraryCollectionGroup(row)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrLibraryCollectionGroupNotFound
+		}
+		result = g
+		return err
+	})
+	return result, err
 }
 
 func (r *LibraryCollectionGroupRepository) Delete(ctx context.Context, id string) error {
-	g, err := r.GetByID(ctx, id)
-	if err != nil {
+	return r.delete(ctx, id, nil)
+}
+func (r *LibraryCollectionGroupRepository) DeleteIfRevision(ctx context.Context, id string, expected int64) error {
+	return r.delete(ctx, id, &expected)
+}
+func (r *LibraryCollectionGroupRepository) delete(ctx context.Context, id string, expected *int64) error {
+	return (libraryCollectionMutation{pool: r.pool, groupID: id}).run(ctx, expected, func(tx pgx.Tx) error {
+		var libraryID int
+		if err := tx.QueryRow(ctx, `SELECT library_id FROM library_collection_groups WHERE id=$1`, id).Scan(&libraryID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrLibraryCollectionGroupNotFound
+			}
+			return err
+		}
+		if err := lockLibraryCollectionParents(ctx, tx, libraryID); err != nil {
+			return err
+		}
+
+		// Lock the group before cascades touch membership rows and their counters.
+		// NO KEY UPDATE remains compatible with membership foreign-key checks.
+		var kind models.LibraryCollectionGroupKind
+		err := tx.QueryRow(ctx, `SELECT kind FROM library_collection_groups WHERE id=$1 FOR NO KEY UPDATE`, id).Scan(&kind)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrLibraryCollectionGroupNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if kind == models.GroupKindUserCollections {
+			return fmt.Errorf("user-collections group cannot be deleted")
+		}
+		_, err = tx.Exec(ctx, `DELETE FROM library_collection_groups WHERE id=$1`, id)
 		return err
-	}
-	if g.Kind == models.GroupKindUserCollections {
-		return fmt.Errorf("user-collections group cannot be deleted")
-	}
-	tag, err := r.pool.Exec(ctx, `DELETE FROM library_collection_groups WHERE id = $1`, id)
-	if err != nil {
-		return fmt.Errorf("deleting library collection group: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrLibraryCollectionGroupNotFound
-	}
-	return nil
+	})
 }
 
 func (r *LibraryCollectionGroupRepository) Reorder(ctx context.Context, libraryID int, orderedIDs []string) error {
+	return r.reorder(ctx, libraryID, orderedIDs, nil)
+}
+func (r *LibraryCollectionGroupRepository) ReorderIfRevision(ctx context.Context, libraryID int, orderedIDs []string, expected int64) error {
+	return r.reorder(ctx, libraryID, orderedIDs, &expected)
+}
+func (r *LibraryCollectionGroupRepository) reorder(ctx context.Context, libraryID int, orderedIDs []string, expected *int64) error {
+
 	if len(orderedIDs) == 0 {
 		return collectionutil.ErrOrderedIDsMismatch
 	}
@@ -198,38 +232,34 @@ func (r *LibraryCollectionGroupRepository) Reorder(ctx context.Context, libraryI
 		return fmt.Errorf("ordered_ids contains duplicates")
 	}
 
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("beginning group reorder: %w", err)
-	}
-	defer tx.Rollback(ctx)
+	return (libraryCollectionMutation{pool: r.pool, libraryID: libraryID}).run(ctx, expected, func(tx pgx.Tx) error {
 
-	realIDs := make([]string, 0, len(orderedIDs))
-	realPositions := make([]int, 0, len(orderedIDs))
-	ungroupedIdx := -1
-	for idx, id := range orderedIDs {
-		if id == "ungrouped" {
-			if ungroupedIdx >= 0 {
-				return fmt.Errorf("ordered_ids contains duplicate ungrouped sentinel")
+		realIDs := make([]string, 0, len(orderedIDs))
+		realPositions := make([]int, 0, len(orderedIDs))
+		ungroupedIdx := -1
+		for idx, id := range orderedIDs {
+			if id == libraryCollectionUngrouped {
+				if ungroupedIdx >= 0 {
+					return fmt.Errorf("ordered_ids contains duplicate ungrouped sentinel")
+				}
+				ungroupedIdx = idx
+				continue
 			}
-			ungroupedIdx = idx
-			continue
+			realIDs = append(realIDs, id)
+			realPositions = append(realPositions, idx)
 		}
-		realIDs = append(realIDs, id)
-		realPositions = append(realPositions, idx)
-	}
 
-	var total int
-	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM library_collection_groups WHERE library_id = $1`, libraryID).Scan(&total); err != nil {
-		return fmt.Errorf("counting library collection groups: %w", err)
-	}
-	if total != len(realIDs) {
-		return collectionutil.ErrOrderedIDsMismatch
-	}
+		var total int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM library_collection_groups WHERE library_id = $1`, libraryID).Scan(&total); err != nil {
+			return fmt.Errorf("counting library collection groups: %w", err)
+		}
+		if total != len(realIDs) {
+			return collectionutil.ErrOrderedIDsMismatch
+		}
 
-	if len(realIDs) > 0 {
-		var found int
-		if err := tx.QueryRow(ctx, `
+		if len(realIDs) > 0 {
+			var found int
+			if err := tx.QueryRow(ctx, `
 			WITH supplied AS (
 			  SELECT *
 			  FROM unnest($1::text[], $2::integer[]) AS u(id, pos)
@@ -243,22 +273,23 @@ func (r *LibraryCollectionGroupRepository) Reorder(ctx context.Context, libraryI
 			)
 			SELECT COUNT(*) FROM upd
 		`, realIDs, realPositions, libraryID).Scan(&found); err != nil {
-			return fmt.Errorf("reordering library collection groups: %w", err)
+				return fmt.Errorf("reordering library collection groups: %w", err)
+			}
+			if found != len(realIDs) {
+				return collectionutil.ErrOrderedIDsMismatch
+			}
 		}
-		if found != len(realIDs) {
-			return collectionutil.ErrOrderedIDsMismatch
-		}
-	}
 
-	if ungroupedIdx >= 0 {
-		if _, err := tx.Exec(ctx, `
+		if ungroupedIdx >= 0 {
+			if _, err := tx.Exec(ctx, `
 			UPDATE media_folders
 			SET collection_ungrouped_sort_order = $1
 			WHERE id = $2
 		`, ungroupedIdx, libraryID); err != nil {
-			return fmt.Errorf("updating ungrouped collection position: %w", err)
+				return fmt.Errorf("updating ungrouped collection position: %w", err)
+			}
 		}
-	}
 
-	return tx.Commit(ctx)
+		return nil
+	})
 }

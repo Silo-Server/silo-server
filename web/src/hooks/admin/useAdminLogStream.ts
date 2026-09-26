@@ -1,5 +1,11 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
-import { getAccessToken } from "@/api/client";
+import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
+import {
+  adminLogsSocketProtocols,
+  buildAdminLogsSocketQuery,
+  buildAdminLogsSocketUrl,
+  mintAdminLogsSocketTicket,
+} from "@/api/v2/adminLogsSocket";
 import type {
   AdminLogAppendMessage,
   AdminLogErrorMessage,
@@ -31,38 +37,6 @@ export interface AdminLogStreamResult<TEntry> {
   reconnect: () => void;
 }
 
-export function buildAdminLogStreamQuery(params: AdminLogQuery) {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === null || value === "") continue;
-    search.set(key, String(value));
-  }
-  return search.toString();
-}
-
-export function buildAdminLogStreamUrl(
-  stream: AdminLogStream,
-  params: AdminLogQuery,
-  token: string | null,
-  location: Pick<Location, "protocol" | "host">,
-) {
-  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const search = new URLSearchParams();
-  search.set("stream", stream);
-
-  const query = buildAdminLogStreamQuery(params);
-  if (query) {
-    for (const [key, value] of new URLSearchParams(query).entries()) {
-      search.set(key, value);
-    }
-  }
-  if (token) {
-    search.set("token", token);
-  }
-
-  return `${protocol}//${location.host}/api/v1/admin/logs/ws?${search.toString()}`;
-}
-
 export function applyAdminLogAppend<T extends { id: number }>(rows: T[], entry: T, limit: number) {
   const next = [entry, ...rows.filter((row) => row.id !== entry.id)];
   return next.slice(0, limit);
@@ -88,7 +62,7 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
   const [reconnectNonce, setReconnectNonce] = useState(0);
 
   const deferredParams = useDeferredValue(params);
-  const queryString = useMemo(() => buildAdminLogStreamQuery(deferredParams), [deferredParams]);
+  const queryString = useMemo(() => buildAdminLogsSocketQuery(deferredParams), [deferredParams]);
   const limit = deferredParams.limit ?? 100;
 
   useEffect(() => {
@@ -130,61 +104,81 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
     };
 
     // Debounce the initial attempt; an explicit reconnect() retries immediately.
+    // Authority is captured once per connection attempt: the credential is
+    // minted under it, and frames arriving after it changed are discarded.
+    let closedByEffect = false;
     const connectDelay = reconnectNonce === 0 ? 250 : 0;
     const connectTimer = window.setTimeout(() => {
-      const url = buildAdminLogStreamUrl(stream, deferredParams, getAccessToken(), window.location);
-      try {
-        ws = new WebSocket(url);
-      } catch {
+      const authority = captureProfileRequestContext();
+      if (!authority) {
         setConnectionState("disconnected");
-        setError("Unable to open log stream.");
+        setError("Select an administrator profile to stream logs.");
         return;
       }
-
+      const authorityActive = () => isCapturedProfileAuthorityActive(authority);
       setConnectionState("connecting");
       setError(undefined);
-
-      ws.onopen = () => {
-        setConnectionState("live");
-      };
-
-      ws.onmessage = (event) => {
-        const message = parseAdminLogStreamMessage(event.data);
-        if (!message) {
-          return;
-        }
-
-        if (message.type === "snapshot") {
-          appendQueue = [];
-          clearFlushTimer();
-          startTransition(() => {
-            setRows(message.entries as StreamEntryMap[TStream][]);
-            setNextCursor(message.next_cursor);
-            setError(undefined);
-          });
-          return;
-        }
-
-        if (message.type === "append") {
-          appendQueue.push(message.entry as StreamEntryMap[TStream]);
-          scheduleFlush();
-          return;
-        }
-
-        setError(message.message);
-      };
-
-      ws.onerror = () => {
-        setConnectionState("disconnected");
-        setError("Log stream disconnected.");
-      };
-
-      ws.onclose = () => {
-        setConnectionState("disconnected");
-      };
+      void mintAdminLogsSocketTicket(authority)
+        .then((ticket) => {
+          if (closedByEffect || !authorityActive()) return;
+          const url = buildAdminLogsSocketUrl(stream, deferredParams, window.location);
+          try {
+            ws = new WebSocket(url, adminLogsSocketProtocols(ticket.ticket));
+          } catch {
+            setConnectionState("disconnected");
+            setError("Unable to open log stream.");
+            return;
+          }
+          const socket = ws;
+          socket.onopen = () => {
+            if (closedByEffect || !authorityActive()) {
+              socket.close();
+              return;
+            }
+            setConnectionState("live");
+          };
+          socket.onmessage = (event) => {
+            if (closedByEffect || !authorityActive()) return;
+            const message = parseAdminLogStreamMessage(event.data);
+            if (!message) {
+              return;
+            }
+            if (message.type === "snapshot") {
+              appendQueue = [];
+              clearFlushTimer();
+              startTransition(() => {
+                setRows(message.entries as StreamEntryMap[TStream][]);
+                setNextCursor(message.next_cursor);
+                setError(undefined);
+              });
+              return;
+            }
+            if (message.type === "append") {
+              appendQueue.push(message.entry as StreamEntryMap[TStream]);
+              scheduleFlush();
+              return;
+            }
+            setError(message.message);
+          };
+          socket.onerror = () => {
+            if (closedByEffect) return;
+            setConnectionState("disconnected");
+            setError("Log stream disconnected.");
+          };
+          socket.onclose = () => {
+            if (closedByEffect) return;
+            setConnectionState("disconnected");
+          };
+        })
+        .catch(() => {
+          if (closedByEffect || !authorityActive()) return;
+          setConnectionState("disconnected");
+          setError("Unable to open log stream.");
+        });
     }, connectDelay);
 
     return () => {
+      closedByEffect = true;
       window.clearTimeout(connectTimer);
       clearFlushTimer();
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {

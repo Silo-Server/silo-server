@@ -42,8 +42,10 @@ type SubtitleCache struct {
 	// maxBytes is the total-size eviction budget for committed entries.
 	maxBytes int64
 
-	mu       sync.Mutex
-	inflight map[string]struct{}
+	mu sync.Mutex
+	// inflight maps a fill's cache key to a channel closed when that fill
+	// commits or is discarded, so another request can wait for it.
+	inflight map[string]chan struct{}
 
 	// warmSem bounds concurrent background warms server-wide (each warm
 	// demuxes an entire source file — heavy sequential IO). Acquisition is
@@ -92,7 +94,7 @@ func NewSubtitleCache(transcodeDir func() string) *SubtitleCache {
 	return &SubtitleCache{
 		transcodeDir: transcodeDir,
 		maxBytes:     defaultSubtitleCacheMaxBytes,
-		inflight:     make(map[string]struct{}),
+		inflight:     make(map[string]chan struct{}),
 		warmSem:      make(chan struct{}, subtitleCacheWarmSlots),
 	}
 }
@@ -491,7 +493,7 @@ func (c *SubtitleCache) beginFill(inputPath string, trackIndex int, format strin
 		c.mu.Unlock()
 		return nil
 	}
-	c.inflight[key] = struct{}{}
+	c.inflight[key] = make(chan struct{})
 	c.mu.Unlock()
 
 	tmp, err := os.CreateTemp(dir, key+".part-*")
@@ -513,7 +515,10 @@ func (c *SubtitleCache) beginFill(inputPath string, trackIndex int, format strin
 
 func (c *SubtitleCache) release(key string) {
 	c.mu.Lock()
-	delete(c.inflight, key)
+	if done, ok := c.inflight[key]; ok {
+		close(done)
+		delete(c.inflight, key)
+	}
 	c.mu.Unlock()
 }
 

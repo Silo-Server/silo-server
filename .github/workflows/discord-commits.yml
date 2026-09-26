@@ -7,61 +7,10 @@ on:
 
 jobs:
   notify:
-    runs-on: ubuntu-latest
     permissions:
       contents: read
-
-    steps:
-      - name: Send commit summary to Discord
-        uses: actions/github-script@v7
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        with:
-          script: |
-            const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
-            if (!webhookUrl) {
-              core.setFailed("DISCORD_WEBHOOK_URL is not configured.");
-              return;
-            }
-
-            const commits = context.payload.commits || [];
-            const displayedCommits = commits.slice(0, 10);
-            const repo = `${context.repo.owner}/${context.repo.repo}`;
-            const branch = context.ref.replace("refs/heads/", "");
-
-            const lines = displayedCommits.map((commit) => {
-              const sha = commit.id.slice(0, 7);
-              const title = commit.message.split("\n")[0].slice(0, 120);
-              const author = commit.author?.name || "unknown";
-              return `- \`${sha}\` ${title} - **${author}**`;
-            });
-
-            if (commits.length > displayedCommits.length) {
-              lines.push(`...and ${commits.length - displayedCommits.length} more commit(s)`);
-            }
-
-            let content =
-              `**${repo}**\n` +
-              `${commits.length} commit(s) pushed to \`${branch}\` by **${context.actor}**\n\n` +
-              `${lines.join("\n")}`;
-
-            if (context.payload.compare) {
-              content += `\n\n<${context.payload.compare}>`;
-            }
-
-            if (content.length > 1900) {
-              content = `${content.slice(0, 1897)}...`;
-            }
-
-            const response = await fetch(webhookUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ content }),
-            });
-
-            if (!response.ok) {
-              const body = await response.text();
-              core.setFailed(`Discord webhook failed with ${response.status}: ${body}`);
-            }
+    uses: ./.github/workflows/reusable-discord-commits.yml
+    with:
+      thread_id: ${{ vars.DISCORD_COMMITS_THREAD_ID }}
+    secrets:
+      webhook_url: ${{ secrets.DISCORD_COMMITS_WEBHOOK_URL }}

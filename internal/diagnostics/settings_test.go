@@ -232,3 +232,18 @@ func (s *racingSettingsStore) SetIfAbsent(_ context.Context, key, value string) 
 	s.values[key] = value
 	return true, nil
 }
+
+func TestServerInstanceIDRequiresAtomicPersistence(t *testing.T) {
+	if _, err := ServerInstanceID(t.Context(), newMemorySettingsStore(nil)); err == nil {
+		t.Fatal("accepted store without atomic initialization")
+	}
+	store := &racingSettingsStore{memorySettingsStore: memorySettingsStore{values: map[string]string{}}, concurrentWinner: "winner-instance"}
+	first, err := ServerInstanceID(t.Context(), store)
+	if err != nil || first != "winner-instance" {
+		t.Fatalf("id=%q error=%v", first, err)
+	}
+	again, err := ServerInstanceID(t.Context(), store)
+	if err != nil || again != first || store.setIfAbsentCalls != 1 {
+		t.Fatalf("repeated id=%q calls=%d error=%v", again, store.setIfAbsentCalls, err)
+	}
+}

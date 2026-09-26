@@ -12,6 +12,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -41,13 +43,7 @@ var supportedDiceBearAvatarStyles = map[string]struct{}{
 	"pixel-art-neutral": {},
 }
 
-type profileAvatarStore interface {
-	PutObject(ctx context.Context, bucket, key string, data []byte) error
-	DeleteObject(ctx context.Context, bucket, key string) error
-	ListObjects(ctx context.Context, bucket, prefix string) ([]string, error)
-	PresignGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error)
-	Bucket() string
-}
+type profileAvatarStore interface{ blobstore.Store }
 
 func normalizePresetAvatarReference(raw string) (string, error) {
 	value := strings.TrimSpace(raw)
@@ -86,7 +82,7 @@ func avatarRefReplacesUpload(currentRef, nextRef string) bool {
 	return isUploadedAvatarRef(currentRef) && strings.TrimSpace(currentRef) != strings.TrimSpace(nextRef)
 }
 
-func resolveProfileAvatar(ctx context.Context, store profileAvatarStore, ttl time.Duration, ref string) (source string, url string) {
+func resolveProfileAvatar(ctx context.Context, store profileAvatarStore, ttl time.Duration, ref string, resolvers ...artworkurl.Resolver) (source string, url string) {
 	trimmed := strings.TrimSpace(ref)
 	if trimmed == "" {
 		return "none", ""
@@ -107,11 +103,18 @@ func resolveProfileAvatar(ctx context.Context, store profileAvatarStore, ttl tim
 		if presignTTL <= 0 {
 			presignTTL = 15 * time.Minute
 		}
-		presignedURL, err := store.PresignGetURL(ctx, store.Bucket(), displayKey, presignTTL)
-		if err != nil {
+		if direct, ok := store.(blobstore.DirectURLer); ok {
+			if resolved, _, err := direct.DirectURL(ctx, displayKey, presignTTL, 0); err == nil && resolved != "" {
+				return "upload", resolved
+			}
 			return "upload", ""
 		}
-		return "upload", presignedURL
+		if len(resolvers) > 0 && resolvers[0] != nil {
+			if resolved, ok := artworkurl.ResolveURLFor(ctx, resolvers[0], displayKey, presignTTL); ok {
+				return "upload", resolved.URL
+			}
+		}
+		return "upload", ""
 	}
 	if isKnownPresetAvatarID(trimmed) {
 		return "preset", bundledProfileAvatarURL(trimmed)
@@ -187,16 +190,8 @@ func deleteUploadedAvatarObjects(ctx context.Context, store profileAvatarStore, 
 	if store == nil {
 		return nil
 	}
-	keys, err := store.ListObjects(ctx, store.Bucket(), profileAvatarPrefix(userID, profileID)+"/")
-	if err != nil {
-		return err
-	}
-	for _, key := range keys {
-		if err := store.DeleteObject(ctx, store.Bucket(), key); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := store.DeletePrefix(ctx, profileAvatarPrefix(userID, profileID)+"/")
+	return err
 }
 
 func (h *ProfileHandler) HandleUploadAvatar(w http.ResponseWriter, r *http.Request) {
@@ -239,52 +234,86 @@ func (h *ProfileHandler) HandleUploadAvatar(w http.ResponseWriter, r *http.Reque
 	}
 	defer file.Close()
 
-	if posterExtension(header.Header.Get("Content-Type")) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Unsupported image type; use JPEG, PNG, or WebP")
+	view, err := h.UploadAvatar(r.Context(), ProfileAvatarUpload{
+		UserID: userID, ProfileID: profileID, ContentType: header.Header.Get("Content-Type"), File: file,
+	})
+	if err != nil {
+		writeAPIError(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// ProfileAvatarUpload is an avatar upload with its multipart part already
+// extracted and its caller already reduced to an identity.
+type ProfileAvatarUpload struct {
+	UserID    int
+	ProfileID string
+	// ContentType is the part's declared media type; JPEG, PNG and WebP are
+	// accepted.
+	ContentType string
+	File        io.Reader
+}
+
+// UploadAvatar stores a profile's uploaded avatar: the store guard, the
+// profile lookup, the media-type and size checks, the resized variants, the
+// object writes and the profile reference. v1 PUT /profiles/{id}/avatar and
+// v2 uploadProfileAvatar both call it; a failure is an *APIError carrying
+// the v1 status, code and message. The caller must have checked that the
+// upload store is configured (AvatarUploadEnabled) so a missing store is a
+// 503 rather than a bug.
+func (h *ProfileHandler) UploadAvatar(ctx context.Context, up ProfileAvatarUpload) (ProfileView, error) {
+	var none ProfileView
+	if h.AvatarStore == nil {
+		return none, apiError(http.StatusServiceUnavailable, "unavailable", "Avatar upload storage is not configured")
+	}
+	userID, profileID := up.UserID, up.ProfileID
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	profile, err := store.GetProfile(ctx, profileID)
+	if err != nil || profile == nil {
+		return none, apiError(http.StatusNotFound, "not_found", "Profile not found")
 	}
 
-	data, err := io.ReadAll(io.LimitReader(file, profileAvatarMaxFileSize+1))
+	if posterExtension(up.ContentType) == "" {
+		return none, apiError(http.StatusBadRequest, "bad_request", "Unsupported image type; use JPEG, PNG, or WebP")
+	}
+
+	data, err := io.ReadAll(io.LimitReader(up.File, profileAvatarMaxFileSize+1))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read upload")
-		return
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to read upload")
 	}
 	if len(data) > profileAvatarMaxFileSize {
-		writeError(w, http.StatusRequestEntityTooLarge, "too_large", "Avatar must be under 10 MB")
-		return
+		return none, apiError(http.StatusRequestEntityTooLarge, "too_large", "Avatar must be under 10 MB")
 	}
 
 	result, err := imageutil.GenerateSquareVariants(data, []int{256})
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid image file")
-		return
+		return none, apiError(http.StatusBadRequest, "bad_request", "Invalid image file")
 	}
 
-	bucket := h.AvatarStore.Bucket()
 	originalKey := uploadedAvatarOriginalKey(userID, profileID)
 	for _, variant := range result.Variants {
 		key := profileAvatarPrefix(userID, profileID) + "/" + variant.Key + result.Ext
-		if err := h.AvatarStore.PutObject(r.Context(), bucket, key, variant.Data); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store avatar")
-			return
+		if err := h.AvatarStore.Put(ctx, key, variant.Data); err != nil {
+			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store avatar")
 		}
 	}
 
 	avatarRef := profileAvatarUploadPrefix + originalKey
-	if err := store.UpdateProfile(r.Context(), profileID, userstore.UpdateProfileInput{Avatar: &avatarRef}); err != nil {
+	if err := store.UpdateProfile(ctx, profileID, userstore.UpdateProfileInput{Avatar: &avatarRef}); err != nil {
 		// Uploaded avatar keys are stable per profile, so rolling back by deleting the
 		// prefix here can remove the avatar the profile still references after a DB failure.
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save avatar")
-		return
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to save avatar")
 	}
 
-	updatedProfile, err := store.GetProfile(r.Context(), profileID)
+	updatedProfile, err := store.GetProfile(ctx, profileID)
 	if err != nil || updatedProfile == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retrieve updated profile")
-		return
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve updated profile")
 	}
-
-	writeJSON(w, http.StatusOK, h.toProfileResponse(r.Context(), store, *updatedProfile))
+	return h.toProfileResponse(ctx, store, *updatedProfile), nil
 }
 
 func (h *ProfileHandler) HandleDeleteAvatar(w http.ResponseWriter, r *http.Request) {
@@ -300,31 +329,40 @@ func (h *ProfileHandler) HandleDeleteAvatar(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	view, err := h.DeleteAvatar(r.Context(), userID, profileID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+		writeAPIError(w, err)
 		return
 	}
-	profile, err := store.GetProfile(r.Context(), profileID)
+	writeJSON(w, http.StatusOK, view)
+}
+
+// DeleteAvatar clears a profile's uploaded avatar (a preset reference is
+// left alone) and removes its objects. v1 DELETE /profiles/{id}/avatar and
+// v2 deleteProfileAvatar both call it; a failure is an *APIError carrying
+// the v1 status, code and message.
+func (h *ProfileHandler) DeleteAvatar(ctx context.Context, userID int, profileID string) (ProfileView, error) {
+	var none ProfileView
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	profile, err := store.GetProfile(ctx, profileID)
 	if err != nil || profile == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Profile not found")
-		return
+		return none, apiError(http.StatusNotFound, "not_found", "Profile not found")
 	}
 
 	if isUploadedAvatarRef(profile.Avatar) {
 		emptyRef := ""
-		if err := store.UpdateProfile(r.Context(), profileID, userstore.UpdateProfileInput{Avatar: &emptyRef}); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear avatar")
-			return
+		if err := store.UpdateProfile(ctx, profileID, userstore.UpdateProfileInput{Avatar: &emptyRef}); err != nil {
+			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to clear avatar")
 		}
-		_ = deleteUploadedAvatarObjects(r.Context(), h.AvatarStore, userID, profileID)
+		_ = deleteUploadedAvatarObjects(ctx, h.AvatarStore, userID, profileID)
 	}
 
-	updatedProfile, err := store.GetProfile(r.Context(), profileID)
+	updatedProfile, err := store.GetProfile(ctx, profileID)
 	if err != nil || updatedProfile == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retrieve updated profile")
-		return
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve updated profile")
 	}
-
-	writeJSON(w, http.StatusOK, h.toProfileResponse(r.Context(), store, *updatedProfile))
+	return h.toProfileResponse(ctx, store, *updatedProfile), nil
 }

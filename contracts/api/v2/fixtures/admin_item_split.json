@@ -1,0 +1,28 @@
+{
+  "dry_run": true,
+  "source_content_id": "source",
+  "target_content_id": "target",
+  "target_created": false,
+  "files_moved": 1,
+  "root_overrides": [],
+  "file_overrides": [],
+  "episode_pairs": 0,
+  "reattribution": {
+    "playback_session_log": 0,
+    "downloads": 0,
+    "progress_moved": 0,
+    "progress_conflicts": 0,
+    "history_moved": 0,
+    "history_stayed": 0,
+    "history_ambiguous": 0,
+    "intent_moved": 0,
+    "episode_pairs_moved": 0,
+    "ambiguous_history": [
+      {
+        "user_id": "7",
+        "profile_id": "p",
+        "watched_at": "2026-01-02T03:04:05.000Z"
+      }
+    ]
+  }
+}

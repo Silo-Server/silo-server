@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -581,5 +582,40 @@ func TestHandleGetCalendar_MarksWatchedItems(t *testing.T) {
 	}
 	if !watched["ep-1"] || watched["ep-2"] {
 		t.Fatalf("watched flags = %v, want ep-1 true / ep-2 false", watched)
+	}
+}
+
+func TestHandleGetCalendar_EmptyRestrictionAnswersBeforeLibraryIDValidation(t *testing.T) {
+	repo := &stubCalendarRepo{}
+	handler := &CalendarHandler{repo: repo, personal: &stubCalendarPersonal{watchlist: nil}}
+	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-01-05&end=2026-01-11&filter=watchlist&library_id=abc", nil)
+	rec := httptest.NewRecorder()
+
+	handler.HandleGetCalendar(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != `{"events":[]}` {
+		t.Fatalf("body = %s, want {\"events\":[]}", got)
+	}
+	if repo.calls != 0 {
+		t.Fatalf("expected ListEvents skipped for empty watchlist, got %d calls", repo.calls)
+	}
+}
+
+func TestHandleGetCalendar_RejectsBadLibraryIDAfterRestriction(t *testing.T) {
+	repo := &stubCalendarRepo{}
+	handler := &CalendarHandler{repo: repo, personal: &stubCalendarPersonal{watchlist: []string{"movie:a"}}}
+	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-01-05&end=2026-01-11&filter=watchlist&library_id=abc", nil)
+	rec := httptest.NewRecorder()
+
+	handler.HandleGetCalendar(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if repo.calls != 0 {
+		t.Fatalf("expected ListEvents skipped after library_id rejection, got %d calls", repo.calls)
 	}
 }

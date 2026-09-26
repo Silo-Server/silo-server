@@ -41,11 +41,11 @@ func TestSameTMDBIDAcceptsTheSlugURLForm(t *testing.T) {
 }
 
 func TestNormalizeTMDBIDLeavesNonIdentifiersAlone(t *testing.T) {
-	if got := normalizeTMDBID("tt0111161"); got != "tt0111161" {
-		t.Errorf("normalizeTMDBID mangled a non-numeric id: %q", got)
+	if got := NormalizeTMDBID("tt0111161"); got != "tt0111161" {
+		t.Errorf("NormalizeTMDBID mangled a non-numeric id: %q", got)
 	}
-	if got := normalizeTMDBID(""); got != "" {
-		t.Errorf("normalizeTMDBID(%q) = %q", "", got)
+	if got := NormalizeTMDBID(""); got != "" {
+		t.Errorf("NormalizeTMDBID(%q) = %q", "", got)
 	}
 }
 

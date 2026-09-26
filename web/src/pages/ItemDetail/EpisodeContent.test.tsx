@@ -62,6 +62,9 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+vi.mock("@/pages/watchtogether/DetailWatchTogether", () => ({
+  useDetailWatchTogether: () => ({ menu: undefined, sheet: null }),
+}));
 vi.mock("@/hooks/queries/episodes", () => ({
   useSeasonDetail: mocks.useSeasonDetail,
   useSeasonEpisodes: mocks.useSeasonEpisodes,
@@ -478,6 +481,7 @@ describe("EpisodeContent", () => {
     );
 
     expect(markup).not.toContain("More Episodes");
+    expect(markup).not.toContain("episode-detail-navigation");
     expect(markup).not.toContain("episode-carousel");
   });
 

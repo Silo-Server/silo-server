@@ -5,6 +5,7 @@ package storetest
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -261,6 +262,7 @@ func testProfiles(t *testing.T, newStore func(t *testing.T) userstore.UserStore)
 		Avatar:                     "avatar1.png",
 		IsChild:                    false,
 		MaxContentRating:           "R",
+		MaxAdvisoryAge:             12,
 		QualityPreference:          "1080p",
 		Language:                   "en",
 		SubtitleLanguage:           "es",
@@ -300,6 +302,9 @@ func testProfiles(t *testing.T, newStore func(t *testing.T) userstore.UserStore)
 	if got.MaxPlaybackQuality != "1080p" {
 		t.Errorf("MaxPlaybackQuality = %q, want %q", got.MaxPlaybackQuality, "1080p")
 	}
+	if got.MaxAdvisoryAge != 12 {
+		t.Errorf("MaxAdvisoryAge = %d, want 12", got.MaxAdvisoryAge)
+	}
 
 	// Get non-existent
 	missing, err := store.GetProfile(ctx, "nonexistent")
@@ -326,6 +331,9 @@ func testProfiles(t *testing.T, newStore func(t *testing.T) userstore.UserStore)
 	}
 	if profiles[0].MaxPlaybackQuality != "1080p" {
 		t.Errorf("ListProfiles()[0].MaxPlaybackQuality = %q, want %q", profiles[0].MaxPlaybackQuality, "1080p")
+	}
+	if profiles[0].MaxAdvisoryAge != 12 {
+		t.Errorf("ListProfiles()[0].MaxAdvisoryAge = %d, want 12", profiles[0].MaxAdvisoryAge)
 	}
 
 	// Update
@@ -358,6 +366,25 @@ func testProfiles(t *testing.T, newStore func(t *testing.T) userstore.UserStore)
 	}
 	if updated.MaxPlaybackQuality != "720p" {
 		t.Errorf("Updated MaxPlaybackQuality = %q, want %q", updated.MaxPlaybackQuality, "720p")
+	}
+	// An update that does not mention the advisory-age limit leaves it alone.
+	if updated.MaxAdvisoryAge != 12 {
+		t.Errorf("Untouched MaxAdvisoryAge = %d, want 12", updated.MaxAdvisoryAge)
+	}
+
+	// Advisory-age limit: a value sets it and 0 clears it.
+	for _, want := range []int{9, 0} {
+		age := want
+		if err := store.UpdateProfile(ctx, "prof-1", userstore.UpdateProfileInput{MaxAdvisoryAge: &age}); err != nil {
+			t.Fatalf("UpdateProfile(MaxAdvisoryAge=%d): %v", want, err)
+		}
+		got, err := store.GetProfile(ctx, "prof-1")
+		if err != nil {
+			t.Fatalf("GetProfile after MaxAdvisoryAge=%d: %v", want, err)
+		}
+		if got.MaxAdvisoryAge != want {
+			t.Errorf("MaxAdvisoryAge after update to %d = %d", want, got.MaxAdvisoryAge)
+		}
 	}
 
 	// PIN set and verify
@@ -1249,6 +1276,17 @@ func testMarkWatchedBatch(t *testing.T, newStore func(t *testing.T) userstore.Us
 	}
 	if counts["ep-1"] != 1 || counts["ep-2"] != 1 {
 		t.Fatalf("history counts = %v, want exactly one row per target", counts)
+	}
+
+	// A retry reaches the store directly: it must not produce a second play
+	// or return another entry for outbound provider synchronization.
+	replay, err := userstore.MarkWatchedBatch(ctx, store, "p1", targets, entries)
+	if err != nil || len(replay) != 0 {
+		t.Fatalf("completed retry: %+v %v", replay, err)
+	}
+	history, err = store.ListHistory(ctx, "p1", 50, 0)
+	if err != nil || len(history) != 2 {
+		t.Fatalf("history after retry: %+v %v", history, err)
 	}
 
 	// A zero duration must not erase a duration the store already knows.
@@ -2390,5 +2428,226 @@ func testSectionOverridesUserAddedFields(t *testing.T, newStore func(t *testing.
 	}
 	if o.UserTitle != "Hidden Gems" {
 		t.Errorf("UserTitle = %q, want %q", o.UserTitle, "Hidden Gems")
+	}
+}
+
+// RunProgressPage runs the keyset progress paging conformance test. It is
+// exposed separately so each backend pins the (updated_at DESC, media_item_id
+// DESC) order, the strict resume after a key, and the equal-timestamp
+// tiebreak without the full suite.
+// RunPersonalListPage checks ListFavoritesPage and ListWatchlistPage: the
+// (added_at DESC, media_item_id DESC) order, the tie on added_at broken by
+// the id, resumption strictly after a key, and that a synced watchlist
+// sort_index does not reorder the keyset page.
+// The ids of the personal-list conformance rows.
+const (
+	listA = "l-a"
+	listB = "l-b"
+	listC = "l-c"
+	listD = "l-d"
+	listE = "l-e"
+)
+
+func RunPersonalListPage(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	t.Run("Favorites", func(t *testing.T) {
+		store := newStore(t)
+		testPersonalListPage(t, store, store.AddFavoriteAt, func(ctx context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.ListKey, error) {
+			rows, err := store.ListFavoritesPage(ctx, profileID, after, limit)
+			keys := make([]userstore.ListKey, 0, len(rows))
+			for _, r := range rows {
+				keys = append(keys, userstore.ListKey{AddedAt: r.AddedAt, MediaItemID: r.MediaItemID})
+			}
+			return keys, err
+		})
+	})
+	t.Run("Watchlist", func(t *testing.T) {
+		store := newStore(t)
+		testPersonalListPage(t, store, store.AddToWatchlistAt, func(ctx context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.ListKey, error) {
+			rows, err := store.ListWatchlistPage(ctx, profileID, after, limit)
+			keys := make([]userstore.ListKey, 0, len(rows))
+			for _, r := range rows {
+				keys = append(keys, userstore.ListKey{AddedAt: r.AddedAt, MediaItemID: r.MediaItemID})
+			}
+			return keys, err
+		})
+		// A synced order changes ListWatchlist but not the keyset page.
+		ctx := context.Background()
+		if err := store.ReplaceWatchlistOrder(ctx, "p1", []string{listA, listE}); err != nil {
+			t.Fatalf("ReplaceWatchlistOrder: %v", err)
+		}
+		rows, err := store.ListWatchlistPage(ctx, "p1", nil, 10)
+		if err != nil {
+			t.Fatalf("ListWatchlistPage: %v", err)
+		}
+		got := make([]string, 0, len(rows))
+		for _, r := range rows {
+			got = append(got, r.MediaItemID)
+		}
+		if strings.Join(got, ",") != "m-new,"+listD+","+listC+","+listB+","+listA+","+listE+",m-old" {
+			t.Fatalf("synced order leaked into the keyset page: %v", got)
+		}
+	})
+}
+
+func testPersonalListPage(t *testing.T, store userstore.UserStore,
+	add func(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error),
+	page func(ctx context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.ListKey, error),
+) {
+	ctx := context.Background()
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p2", Name: "Other"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	// m-b and m-c share added_at: the id breaks the tie, greater first.
+	writes := []struct {
+		profile, id string
+		at          time.Time
+	}{
+		{"p1", listA, base.Add(time.Minute)},
+		{"p1", listB, base.Add(2 * time.Minute)},
+		{"p1", listC, base.Add(2 * time.Minute)},
+		{"p1", listD, base.Add(3 * time.Minute)},
+		{"p1", listE, base},
+		{"p2", "m-z", base.Add(4 * time.Minute)},
+	}
+	for _, w := range writes {
+		if _, err := add(ctx, w.profile, w.id, w.at); err != nil {
+			t.Fatalf("add %s: %v", w.id, err)
+		}
+	}
+	want := []string{listD, listC, listB, listA, listE}
+
+	var got []string
+	var after *userstore.ListKey
+	for pages := 0; ; pages++ {
+		if pages > 10 {
+			t.Fatal("paging did not terminate")
+		}
+		keys, err := page(ctx, "p1", after, 2)
+		if err != nil {
+			t.Fatalf("page: %v", err)
+		}
+		for _, k := range keys {
+			got = append(got, k.MediaItemID)
+		}
+		if len(keys) < 2 {
+			break
+		}
+		last := keys[len(keys)-1]
+		after = &last
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("keyset walk = %v, want %v", got, want)
+	}
+	// A key resumes strictly after itself, including in the middle of a tie.
+	all, err := page(ctx, "p1", nil, 10)
+	if err != nil {
+		t.Fatalf("page(all): %v", err)
+	}
+	rest, err := page(ctx, "p1", &all[1], 10)
+	if err != nil {
+		t.Fatalf("page(after m-c): %v", err)
+	}
+	if len(rest) != 3 || rest[0].MediaItemID != listB {
+		t.Fatalf("rest = %+v", rest)
+	}
+	// An entry added after the key was minted, newer than the key, does not
+	// appear in the resumed page; one older than the key does.
+	if _, err := add(ctx, "p1", "m-new", base.Add(5*time.Minute)); err != nil {
+		t.Fatalf("add m-new: %v", err)
+	}
+	if _, err := add(ctx, "p1", "m-old", base.Add(-time.Minute)); err != nil {
+		t.Fatalf("add m-old: %v", err)
+	}
+	rest, err = page(ctx, "p1", &all[1], 10)
+	if err != nil {
+		t.Fatalf("page(after m-c, changed): %v", err)
+	}
+	if len(rest) != 4 || rest[0].MediaItemID != listB || rest[3].MediaItemID != "m-old" {
+		t.Fatalf("rest after change = %+v", rest)
+	}
+}
+
+func RunProgressPage(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	t.Run("KeysetPage", func(t *testing.T) {
+		testProgressPage(t, newStore)
+	})
+}
+
+func testProgressPage(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	// m-b and m-d share a timestamp; m-done is completed with position 0 and
+	// must not appear in the in_progress listing.
+	writes := []struct {
+		id        string
+		position  float64
+		completed bool
+		at        time.Time
+	}{
+		{"m-a", 10, false, base.Add(3 * time.Minute)},
+		{"m-b", 10, false, base.Add(2 * time.Minute)},
+		{"m-d", 10, false, base.Add(2 * time.Minute)},
+		{"m-c", 10, false, base.Add(time.Minute)},
+		{"m-done", 0, true, base.Add(4 * time.Minute)},
+		{"m-e", 10, false, base},
+	}
+	for _, w := range writes {
+		if err := store.SetProgressAt(ctx, "p1", w.id, w.position, 1000, w.completed, w.at); err != nil {
+			t.Fatalf("write %s: %v", w.id, err)
+		}
+	}
+
+	var got []string
+	var after *userstore.ProgressKey
+	for pages := 0; ; pages++ {
+		if pages > 10 {
+			t.Fatal("paging did not terminate")
+		}
+		rows, err := store.ListProgressPage(ctx, "p1", "in_progress", after, 2)
+		if err != nil {
+			t.Fatalf("ListProgressPage: %v", err)
+		}
+		for _, r := range rows {
+			got = append(got, r.MediaItemID)
+		}
+		if len(rows) < 2 {
+			break
+		}
+		last := rows[len(rows)-1]
+		after = &userstore.ProgressKey{UpdatedAt: last.UpdatedAt, MediaItemID: last.MediaItemID}
+	}
+	want := []string{"m-a", "m-d", "m-b", "m-c", "m-e"}
+	if len(got) != len(want) {
+		t.Fatalf("paged ids = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("paged ids = %v, want %v", got, want)
+		}
+	}
+
+	// The full listing includes the completed row, newest first.
+	all, err := store.ListProgressPage(ctx, "p1", "", nil, 10)
+	if err != nil {
+		t.Fatalf("ListProgressPage(all): %v", err)
+	}
+	if len(all) != 6 || all[0].MediaItemID != "m-done" {
+		t.Fatalf("all = %d rows, first %q", len(all), all[0].MediaItemID)
+	}
+	// A key resumes strictly after itself even when it is the newest row.
+	rest, err := store.ListProgressPage(ctx, "p1", "", &userstore.ProgressKey{UpdatedAt: all[0].UpdatedAt, MediaItemID: all[0].MediaItemID}, 10)
+	if err != nil {
+		t.Fatalf("ListProgressPage(after newest): %v", err)
+	}
+	if len(rest) != 5 || rest[0].MediaItemID != want[0] {
+		t.Fatalf("rest = %d rows, first %q", len(rest), rest[0].MediaItemID)
 	}
 }

@@ -1,0 +1,20 @@
+{
+  "id": "3",
+  "timestamp": "2026-01-02T03:04:05.678Z",
+  "decision_name": "silo.permission.decision",
+  "policy_generation": 7,
+  "user_id": null,
+  "profile_id": null,
+  "session_id": null,
+  "request_id": null,
+  "node_id": null,
+  "allowed": true,
+  "eval_time_ns": 0,
+  "input_digest": "",
+  "input_sample": {
+    "resource": "fixture"
+  },
+  "result_sample": {
+    "allow": true
+  }
+}

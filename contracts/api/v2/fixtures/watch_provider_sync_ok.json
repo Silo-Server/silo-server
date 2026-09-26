@@ -1,0 +1,32 @@
+{
+  "run": {
+    "id": "run-1",
+    "connection_id": "connection-1",
+    "trigger": "manual",
+    "status": "running",
+    "provider": "trakt",
+    "inbound_watched_found": 0,
+    "inbound_watched_imported": 0,
+    "inbound_progress_found": 0,
+    "inbound_progress_imported": 0,
+    "outbound_found": 0,
+    "outbound_sent": 0,
+    "inbound_favorites_found": 0,
+    "inbound_favorites_imported": 0,
+    "outbound_favorites_found": 0,
+    "outbound_favorites_sent": 0,
+    "favorite_removals_sent": 0,
+    "inbound_watchlist_found": 0,
+    "inbound_watchlist_imported": 0,
+    "outbound_watchlist_found": 0,
+    "outbound_watchlist_sent": 0,
+    "watchlist_removals_sent": 0,
+    "inbound_ratings_found": 0,
+    "inbound_ratings_imported": 0,
+    "outbound_ratings_found": 0,
+    "outbound_ratings_sent": 0,
+    "started_at": "2026-01-02T03:04:05.678Z",
+    "created_at": "2026-01-02T03:04:05.678Z"
+  },
+  "retry_after_seconds": 0
+}

@@ -172,7 +172,7 @@ func parseSuffix(suffix string, info *ExternalSubtitleInfo) {
 		if lower == "forced" {
 			info.Forced = true
 		} else if info.Language == "" {
-			info.Language = lang.Canonical(p)
+			info.Language = lang.CompatibleTag(p)
 		}
 	}
 }

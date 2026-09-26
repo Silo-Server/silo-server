@@ -285,6 +285,11 @@ func (w *Watcher) fetchSettings(ctx context.Context) (map[string]string, error) 
 		if err := rows.Scan(&k, &v); err != nil {
 			return nil, fmt.Errorf("scan server_settings row: %w", err)
 		}
+		// The staged transition belongs to storage recovery, not Config. Keep
+		// an unreadable receipt for that owner to report as blocked recovery.
+		if k == config.StorageTransitionTargetKey {
+			continue
+		}
 		// Decrypt sensitive keys (read-path contract: legacy plaintext passes
 		// through, enc:v1: values decrypt, corrupt ciphertext errors) so
 		// LoadFromDB always sees plaintext.

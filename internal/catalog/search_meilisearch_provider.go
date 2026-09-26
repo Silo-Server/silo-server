@@ -69,6 +69,7 @@ type MeilisearchProviderConfig struct {
 }
 
 type MeilisearchSearchProvider struct {
+	sessions  *searchSessionStore
 	itemRepo  *ItemRepository
 	stateRepo meilisearchIndexStateStore
 	fallback  *PostgresSearchProvider
@@ -158,6 +159,9 @@ func NewMeilisearchSearchProvider(
 }
 
 func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearchRequest) (*CatalogSearchResult, error) {
+	if req.CursorPaging {
+		return p.searchCursorPage(ctx, req)
+	}
 	if req.Access.AllowedLibraryIDs != nil && len(req.Access.AllowedLibraryIDs) == 0 {
 		return &CatalogSearchResult{
 			Items:      []*models.MediaItem{},

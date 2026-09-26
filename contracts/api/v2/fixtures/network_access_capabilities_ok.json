@@ -1,0 +1,17 @@
+{
+  "revision": "e7f28bde2cff62b41a60d6310d700206095c3c0a08d3db51bf0e0a543f47e906",
+  "state": "available",
+  "allowed": true,
+  "providers": [
+    {
+      "provider": "stub",
+      "display_name": "Stub Overlay",
+      "installation_id": "7"
+    },
+    {
+      "provider": "down",
+      "display_name": "Down Overlay",
+      "installation_id": "9"
+    }
+  ]
+}

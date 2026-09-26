@@ -1,14 +1,19 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 func (h *AdminHandler) HandleGetCatalogSearchStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.GetCatalogSearchStatus(r.Context()))
+}
+
+func (h *AdminHandler) GetCatalogSearchStatus(ctx context.Context) catalog.CatalogSearchRuntimeStatus {
 	if h == nil || h.CatalogSearchStatus == nil {
-		writeJSON(w, http.StatusOK, catalog.CatalogSearchRuntimeStatus{
+		return catalog.CatalogSearchRuntimeStatus{
 			ConfiguredProvider: catalog.SearchProviderPostgres,
 			ActiveProvider:     catalog.SearchProviderPostgres,
 			Meilisearch: catalog.CatalogSearchMeiliStatus{
@@ -23,8 +28,7 @@ func (h *AdminHandler) HandleGetCatalogSearchStatus(w http.ResponseWriter, r *ht
 				{Key: "sync_catalog_search_index", Name: "Sync Catalog Search Index", Href: "/admin/tasks/sync_catalog_search_index"},
 				{Key: "rebuild_catalog_search_index", Name: "Rebuild Catalog Search Index", Href: "/admin/tasks/rebuild_catalog_search_index"},
 			},
-		})
-		return
+		}
 	}
-	writeJSON(w, http.StatusOK, h.CatalogSearchStatus.Status(r.Context()))
+	return h.CatalogSearchStatus.Status(ctx)
 }

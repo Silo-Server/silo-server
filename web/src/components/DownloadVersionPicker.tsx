@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Download, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import type { FileVersion } from "@/api/types";
@@ -10,7 +10,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatFileSize } from "@/lib/mediaFormat";
-import { buildDirectDownloadUrl } from "@/hooks/queries/downloads";
+import { StaleApiRequestContextError } from "@/api/client";
+import { launchDirectDownload } from "@/api/v2/directDownloads";
 import { buildQualitySummary, sortByResolution } from "@/pages/ItemDetail/components/VersionFlyout";
 
 interface DownloadVersionPickerProps {
@@ -31,28 +32,32 @@ export default function DownloadVersionPicker({
   const sorted = sortByResolution(versions);
   const [downloading, setDownloading] = useState<number | null>(null);
 
+  const active = useRef<symbol | null>(null);
+  useLayoutEffect(() => {
+    active.current = null;
+    setDownloading(null);
+    return () => {
+      active.current = null;
+    };
+  }, [open, versions]);
+
   const handleDownload = async (version: FileVersion) => {
-    const url = buildDirectDownloadUrl(version.file_id);
+    if (active.current || !open) return;
+    const attempt = Symbol();
+    active.current = attempt;
+    const isCurrent = () => active.current === attempt;
     setDownloading(version.file_id);
     try {
-      const res = await fetch(url, { method: "HEAD" });
-      if (!res.ok) {
-        if (res.status === 403) toast.error("You are not allowed to download this file");
-        else if (res.status === 429) toast.error("Download limit reached. Try again later");
-        else toast.error("Download failed. Try again later");
-        return;
-      }
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      onOpenChange(false);
-    } catch {
-      toast.error("Network error. Check your connection and try again");
+      await launchDirectDownload(version.file_id, isCurrent);
+      if (isCurrent()) onOpenChange(false);
+    } catch (error) {
+      if (isCurrent() && !(error instanceof StaleApiRequestContextError))
+        toast.error("Download could not be started. Check access and try again.");
     } finally {
-      setDownloading(null);
+      if (isCurrent()) {
+        active.current = null;
+        setDownloading(null);
+      }
     }
   };
 

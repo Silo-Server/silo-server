@@ -138,6 +138,9 @@ type meilisearchStatsResponse struct {
 // the semantic capability check inspects. Only the embedders block is decoded;
 // all other settings fields are ignored.
 type meilisearchIndexSettings struct {
+	Pagination struct {
+		MaxTotalHits int `json:"maxTotalHits"`
+	} `json:"pagination"`
 	Embedders map[string]meilisearchEmbedderSettings `json:"embedders"`
 }
 

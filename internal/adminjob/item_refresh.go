@@ -222,8 +222,18 @@ func (r *ItemRefreshResolver) resolveSeries(ctx context.Context, item *models.Me
 	if mode == ItemRefreshModeComplete {
 		return r.buildCompleteRequest(ctx, file, req)
 	}
+	folder, err := r.folderRepo.GetByID(ctx, file.MediaFolderID)
+	if err != nil {
+		return nil, err
+	}
+	var libraryRoots []string
+	if folder != nil {
+		libraryRoots = folder.Paths
+	}
 	scanPath := filepath.Dir(file.FilePath)
-	if root, ok := naming.DetectSeriesRoot(file.FilePath, "series"); ok && root != nil && root.RootPath != "" {
+	// Library roots keep mount directories such as /mnt/s3 from being read as
+	// season folders and widening the refresh scan above the library.
+	if root, ok := naming.DetectSeriesRoot(file.FilePath, "series", libraryRoots...); ok && root != nil && root.RootPath != "" {
 		scanPath = filepath.Clean(root.RootPath)
 	}
 	return r.buildRequest(ctx, file.MediaFolderID, scanPath, req)

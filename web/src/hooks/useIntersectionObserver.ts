@@ -25,7 +25,9 @@ export function useIntersectionObserver({
         observerRef.current = null;
       }
 
-      if (!node || !enabled) return;
+      // Environments without the API (server rendering, jsdom) get no
+      // observer; callers keep an explicit control for that case.
+      if (!node || !enabled || typeof IntersectionObserver === "undefined") return;
 
       observerRef.current = new IntersectionObserver(
         (entries) => {

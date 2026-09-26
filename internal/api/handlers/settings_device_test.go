@@ -34,6 +34,10 @@ func (r testAdminUserRepo) List(context.Context) ([]*models.User, error) {
 	return out, nil
 }
 
+func (r testAdminUserRepo) ListPage(context.Context, int, int, string) ([]*models.User, error) {
+	return nil, nil
+}
+
 func (r testAdminUserRepo) Create(context.Context, models.CreateUserInput) (*models.User, error) {
 	panic("unexpected Create call")
 }
@@ -52,7 +56,7 @@ func (r testAdminUserRepo) GetByID(_ context.Context, id int) (*models.User, err
 
 func TestRegisterRequestDeviceNilStore(t *testing.T) {
 	h := NewSettingsHandler(nil)
-	h.registerRequestDevice(context.Background(), nil, "profile-1", requestDeviceMetadata{
+	h.registerRequestDevice(context.Background(), nil, "profile-1", DeviceMetadata{
 		DeviceID:       "device-1",
 		DeviceName:     "Living Room",
 		DevicePlatform: "web",
@@ -140,7 +144,7 @@ func TestEffectiveSubtitleAppearancePrefersDeviceOverride(t *testing.T) {
 		DeviceID:       "device-1",
 		DeviceName:     "Living Room",
 		DevicePlatform: "tvOS",
-		Key:            subtitleAppearanceSettingKey,
+		Key:            SubtitleAppearanceSettingKey,
 		Value:          `{"fontSize":"small"}`,
 	}); err != nil {
 		t.Fatalf("SetDeviceSetting: %v", err)
@@ -157,7 +161,7 @@ func TestEffectiveSubtitleAppearancePrefersDeviceOverride(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	var resp effectiveSubtitleAppearanceResponse
+	var resp EffectiveSubtitleAppearanceView
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -182,7 +186,7 @@ func TestSubtitleAppearanceDeviceOverrideRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("set status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	entry, err := store.GetDeviceSetting(context.Background(), "profile-1", "iphone", subtitleAppearanceSettingKey)
+	entry, err := store.GetDeviceSetting(context.Background(), "profile-1", "iphone", SubtitleAppearanceSettingKey)
 	if err != nil {
 		t.Fatalf("GetDeviceSetting: %v", err)
 	}
@@ -198,7 +202,7 @@ func TestSubtitleAppearanceDeviceOverrideRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	entry, err = store.GetDeviceSetting(context.Background(), "profile-1", "iphone", subtitleAppearanceSettingKey)
+	entry, err = store.GetDeviceSetting(context.Background(), "profile-1", "iphone", SubtitleAppearanceSettingKey)
 	if err != nil {
 		t.Fatalf("GetDeviceSetting after delete: %v", err)
 	}
@@ -308,7 +312,7 @@ func TestAndroidNextUpSettingAliasUsesCanonicalStoredValue(t *testing.T) {
 		context.Background(),
 		store,
 		"profile-1",
-		requestDeviceMetadata{DeviceID: "android-tv"},
+		DeviceMetadata{DeviceID: "android-tv"},
 		legacyAndroidNextUpPromptSettingKey,
 	)
 	if err != nil {
@@ -428,7 +432,7 @@ func TestAndroidNextUpSettingAliasPrefersCanonicalDeviceRow(t *testing.T) {
 		context.Background(),
 		store,
 		"profile-1",
-		requestDeviceMetadata{DeviceID: "android-tv"},
+		DeviceMetadata{DeviceID: "android-tv"},
 		legacyAndroidNextUpPromptSettingKey,
 	)
 	if err != nil {
@@ -492,7 +496,7 @@ func TestAndroidNextUpSettingAliasDoesNotUseOrDeleteUserRow(t *testing.T) {
 		context.Background(),
 		store,
 		"profile-1",
-		requestDeviceMetadata{DeviceID: "android-tv"},
+		DeviceMetadata{DeviceID: "android-tv"},
 		legacyAndroidNextUpPromptSettingKey,
 	)
 	if err != nil {
@@ -673,7 +677,7 @@ func TestLegacyDeviceSettingsMirrorCanonicalRows(t *testing.T) {
 
 	appearance := `{"fontSize":"large"}`
 	body, _ := json.Marshal(setSettingRequest{Value: appearance})
-	if rec := send(http.MethodPut, subtitleAppearanceSettingKey, body); rec.Code != http.StatusNoContent {
+	if rec := send(http.MethodPut, SubtitleAppearanceSettingKey, body); rec.Code != http.StatusNoContent {
 		t.Fatalf("appearance PUT = %d: %s", rec.Code, rec.Body.String())
 	}
 	if value := canonical("playback.subtitle_appearance"); value == nil || string(value.Value) != appearance {
@@ -1039,7 +1043,7 @@ func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
 
 func TestAdminDeviceSummaryDeduplicatesMirroredLegacyAlias(t *testing.T) {
 	for name, keys := range map[string][2]string{
-		"subtitle appearance": {subtitleAppearanceSettingKey, settingskeys.PlaybackSubtitleAppearance},
+		"subtitle appearance": {SubtitleAppearanceSettingKey, settingskeys.PlaybackSubtitleAppearance},
 		"theme":               {"ui_theme", "ui.theme"},
 	} {
 		t.Run(name, func(t *testing.T) {

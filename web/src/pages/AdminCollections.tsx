@@ -1,3 +1,10 @@
+import { toast } from "sonner";
+import {
+  fetchAdminCollectionSnapshot,
+  fetchAdminGroupSnapshot,
+  prepareAdminCollectionDeletes,
+  adminMutationMessage,
+} from "@/api/adminCollections";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { useNavigate, useSearchParams } from "react-router";
@@ -11,6 +18,7 @@ import {
   useDeleteCollectionGroup,
 } from "@/hooks/queries/admin/collectionGroups";
 import {
+  useAdminCollectionCapabilities,
   useAdminCollections,
   useDeleteAdminCollection,
   useDeleteAdminCollections,
@@ -62,14 +70,16 @@ export default function AdminCollections() {
   const [editingGroup, setEditingGroup] = useState<{
     mode: "create" | "edit";
     id?: string;
+    snapshot?: Awaited<ReturnType<typeof fetchAdminGroupSnapshot>>;
   } | null>(null);
-  const [confirmDeleteCollection, setConfirmDeleteCollection] = useState<LibraryCollection | null>(
-    null,
-  );
+  const [confirmDeleteCollection, setConfirmDeleteCollection] = useState<
+    (LibraryCollection & { etag: string }) | null
+  >(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false);
   const [selectedCollectionIds, setSelectedCollectionIds] = useState<Set<string>>(new Set());
 
+  const { data: capabilities } = useAdminCollectionCapabilities();
   const allCollections = useAdminCollections();
   const libraryCounts = useMemo(
     () => countCollectionsByLibrary(libraries, allCollections.data ?? []),
@@ -139,6 +149,40 @@ export default function AdminCollections() {
     return () => window.removeEventListener("keydown", clearSelection);
   }, [confirmDeleteAll, confirmDeleteCollection, confirmDeleteSelected]);
 
+  const [deleteSnapshots, setDeleteSnapshots] = useState<{ id: string; etag: string }[]>([]);
+  const [preparingDelete, setPreparingDelete] = useState(false);
+  async function prepareDelete(collection: LibraryCollection) {
+    try {
+      const snapshot = await fetchAdminCollectionSnapshot(collection.id);
+      setConfirmDeleteCollection({ ...snapshot.collection, etag: snapshot.etag });
+    } catch (error) {
+      toast.error(adminMutationMessage(error, "Could not load collection"));
+    }
+  }
+  async function prepareBulkDelete(selected: boolean) {
+    setPreparingDelete(true);
+    try {
+      setDeleteSnapshots(
+        await prepareAdminCollectionDeletes(
+          (selected ? selectedCollections : collectionsInScope).map((entry) => entry.id),
+        ),
+      );
+      if (selected) setConfirmDeleteSelected(true);
+      else setConfirmDeleteAll(true);
+    } catch (error) {
+      toast.error(adminMutationMessage(error, "Could not prepare deletion"));
+    } finally {
+      setPreparingDelete(false);
+    }
+  }
+  async function prepareGroupEdit(id: string) {
+    try {
+      setEditingGroup({ mode: "edit", id, snapshot: await fetchAdminGroupSnapshot(id) });
+    } catch (error) {
+      toast.error(adminMutationMessage(error, "Could not load group"));
+    }
+  }
+
   if (allCollections.isLoading && libraries.length === 0) {
     return (
       <div className="space-y-3">
@@ -150,10 +194,7 @@ export default function AdminCollections() {
     );
   }
 
-  const editingTarget: LibraryCollectionGroup | null =
-    editingGroup?.mode === "edit" && editingGroup.id
-      ? (board.data?.groups.find((g) => g.id === editingGroup.id) ?? null)
-      : null;
+  const editingTarget: LibraryCollectionGroup | null = editingGroup?.snapshot?.group ?? null;
 
   const boardCollectionCount =
     (board.data?.ungrouped.length ?? 0) +
@@ -170,30 +211,27 @@ export default function AdminCollections() {
   const collectionDeletionNotice =
     "Silo will keep collections that are still used by home or library sections. This action cannot be undone.";
   const deleteAllDescription = selectedLibrary
-    ? `Delete all ${collectionsInScope.length} collections shown for ${selectedLibrary.name}? Shared collections will also be removed from their other libraries. ${collectionDeletionNotice}`
-    : `Delete all ${collectionsInScope.length} server collections? ${collectionDeletionNotice}`;
-  const deleteSelectedDescription = `Delete ${selectedCollections.length} selected collection${selectedCollections.length === 1 ? "" : "s"}? ${collectionDeletionNotice}`;
+    ? `Delete all ${deleteSnapshots.length} collections shown for ${selectedLibrary.name}? Shared collections will also be removed from their other libraries. ${collectionDeletionNotice}`
+    : `Delete all ${deleteSnapshots.length} server collections? ${collectionDeletionNotice}`;
+  const deleteSelectedDescription = `Delete ${deleteSnapshots.length} selected collection${deleteSnapshots.length === 1 ? "" : "s"}? ${collectionDeletionNotice}`;
   const deleteProgressLabel = `Deleting ${deleteCollections.progress?.completed ?? 0} of ${deleteCollections.progress?.total ?? collectionsInScope.length} collections`;
 
   function handleDeleteSelected() {
-    if (!activeApplyJob && selectedCollections.length > 0) {
-      deleteCollections.mutate(selectedCollections.map((collection) => collection.id));
-    }
-    setConfirmDeleteSelected(false);
+    if (!activeApplyJob)
+      deleteCollections.mutate(deleteSnapshots, {
+        onSuccess: () => setConfirmDeleteSelected(false),
+      });
   }
-
   function handleDeleteAll() {
-    if (!activeApplyJob && collectionsInScope.length > 0) {
-      deleteCollections.mutate(collectionsInScope.map((collection) => collection.id));
-    }
-    setConfirmDeleteAll(false);
+    if (!activeApplyJob)
+      deleteCollections.mutate(deleteSnapshots, { onSuccess: () => setConfirmDeleteAll(false) });
   }
 
   return (
     <div
       className="space-y-6"
-      aria-busy={deleteCollections.isPending}
-      inert={deleteCollections.isPending ? true : undefined}
+      aria-busy={deleteCollections.isPending || preparingDelete}
+      inert={deleteCollections.isPending || preparingDelete ? true : undefined}
     >
       <ConfirmDialog
         open={confirmDeleteCollection !== null}
@@ -206,12 +244,15 @@ export default function AdminCollections() {
         variant="destructive"
         onConfirm={() => {
           if (confirmDeleteCollection) {
-            deleteCollection.mutate({
-              id: confirmDeleteCollection.id,
-              libraryId: selectedLibraryId ?? confirmDeleteCollection.library_id,
-            });
+            deleteCollection.mutate(
+              {
+                id: confirmDeleteCollection.id,
+                etag: confirmDeleteCollection.etag,
+                libraryId: selectedLibraryId ?? confirmDeleteCollection.library_id,
+              },
+              { onSuccess: () => setConfirmDeleteCollection(null) },
+            );
           }
-          setConfirmDeleteCollection(null);
         }}
       />
 
@@ -251,12 +292,17 @@ export default function AdminCollections() {
             totalCount={allCollections.data?.length ?? 0}
             onChange={setSelectedLibraryId}
           />
-          {!isAllLibraries ? (
+          {!isAllLibraries && capabilities?.groups ? (
             <Button size="sm" variant="outline" onClick={() => setEditingGroup({ mode: "create" })}>
               <Plus className="mr-1 h-4 w-4" /> New Group
             </Button>
           ) : null}
-          <Button size="sm" variant="outline" onClick={() => setGalleryOpen(true)}>
+          <Button
+            disabled={!capabilities?.imports}
+            size="sm"
+            variant="outline"
+            onClick={() => setGalleryOpen(true)}
+          >
             <Sparkles className="mr-1 h-4 w-4" /> Browse Templates
           </Button>
           {selectedCollections.length > 0 ? (
@@ -268,8 +314,8 @@ export default function AdminCollections() {
               <Button
                 size="sm"
                 variant="destructive"
-                disabled={deleteCollections.isPending || activeApplyJob}
-                onClick={() => setConfirmDeleteSelected(true)}
+                disabled={preparingDelete || deleteCollections.isPending || activeApplyJob}
+                onClick={() => void prepareBulkDelete(true)}
               >
                 <Trash2 data-icon="inline-start" /> Delete Selected
               </Button>
@@ -279,8 +325,8 @@ export default function AdminCollections() {
             <Button
               size="sm"
               variant="destructive"
-              disabled={deleteCollections.isPending || activeApplyJob}
-              onClick={() => setConfirmDeleteAll(true)}
+              disabled={preparingDelete || deleteCollections.isPending || activeApplyJob}
+              onClick={() => void prepareBulkDelete(false)}
             >
               {deleteCollections.isPending ? (
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />
@@ -319,7 +365,7 @@ export default function AdminCollections() {
           onEdit={(collection, libraryId) =>
             navigate(buildAdminCollectionEditorPath(collection.id, libraryId))
           }
-          onDelete={setConfirmDeleteCollection}
+          onDelete={(collection) => void prepareDelete(collection)}
           onSync={(collection, libraryId) =>
             syncCollection.mutate({
               id: collection.id,
@@ -327,7 +373,7 @@ export default function AdminCollections() {
             })
           }
           onCreate={() => navigate(buildAdminCollectionEditorPath("new", null))}
-          onOpenTemplates={() => setGalleryOpen(true)}
+          onOpenTemplates={capabilities?.imports ? () => setGalleryOpen(true) : undefined}
         />
       ) : null}
 
@@ -345,11 +391,11 @@ export default function AdminCollections() {
           groups={board.data.groups}
           ungrouped={board.data.ungrouped}
           ungroupedSortOrder={board.data.ungroupedSortOrder}
-          onEditGroup={(id) => setEditingGroup({ mode: "edit", id })}
+          onEditGroup={(id) => void prepareGroupEdit(id)}
           onEditCollection={(collection) =>
             navigate(buildAdminCollectionEditorPath(collection.id, selectedLibraryId))
           }
-          onDeleteCollection={(collection) => setConfirmDeleteCollection(collection)}
+          onDeleteCollection={(collection) => void prepareDelete(collection)}
           onSyncCollection={(collection) =>
             syncCollection.mutate({
               id: collection.id,
@@ -371,7 +417,12 @@ export default function AdminCollections() {
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setGalleryOpen(true)}>
+            <Button
+              disabled={!capabilities?.imports}
+              variant="outline"
+              size="sm"
+              onClick={() => setGalleryOpen(true)}
+            >
               <Sparkles className="mr-1 h-4 w-4" /> Start from a template
             </Button>
             <Button
@@ -395,7 +446,11 @@ export default function AdminCollections() {
               if (editingGroup.mode === "create") {
                 await createGroup.mutateAsync(input);
               } else if (editingGroup.id) {
-                await updateGroup.mutateAsync({ id: editingGroup.id, ...input });
+                await updateGroup.mutateAsync({
+                  id: editingGroup.id,
+                  etag: editingGroup.snapshot!.etag,
+                  ...input,
+                });
               }
               setEditingGroup(null);
             } catch {
@@ -407,7 +462,10 @@ export default function AdminCollections() {
               ? async () => {
                   if (!editingGroup.id) return;
                   try {
-                    await deleteGroup.mutateAsync(editingGroup.id);
+                    await deleteGroup.mutateAsync({
+                      id: editingGroup.id,
+                      etag: editingGroup.snapshot!.etag,
+                    });
                     setEditingGroup(null);
                   } catch {
                     // toast already shown by mutation onError
@@ -569,7 +627,7 @@ function AllLibraryCollectionsOverview({
   onDelete: (collection: LibraryCollection) => void;
   onSync: (collection: LibraryCollection, libraryId: number) => void;
   onCreate: () => void;
-  onOpenTemplates: () => void;
+  onOpenTemplates?: () => void;
 }) {
   const sections = useMemo(
     () => buildAllLibrarySections(libraries, collections),
@@ -632,7 +690,7 @@ function AllLibraryCollectionsOverview({
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-center gap-2">
-          <Button variant="outline" size="sm" onClick={onOpenTemplates}>
+          <Button disabled={!onOpenTemplates} variant="outline" size="sm" onClick={onOpenTemplates}>
             <Sparkles className="mr-1 h-4 w-4" /> Start from a template
           </Button>
           <Button variant="ghost" size="sm" onClick={onCreate}>

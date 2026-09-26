@@ -3,8 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -14,7 +12,6 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
@@ -22,6 +19,7 @@ import (
 type peopleRepository interface {
 	Get(ctx context.Context, id int64) (*models.Person, error)
 	Search(ctx context.Context, query string, limit int) ([]models.Person, error)
+	SearchScoped(ctx context.Context, query string, limit int, mediaScope string, filter catalog.AccessFilter) ([]models.Person, error)
 	Update(ctx context.Context, p models.Person) error
 }
 
@@ -78,7 +76,7 @@ func (h *PeopleHandler) SetRefreshService(refresher PersonRefresher) {
 	h.refresher = refresher
 }
 
-type personResponse struct {
+type PersonView struct {
 	ID             int64   `json:"id"`
 	Name           string  `json:"name"`
 	Bio            string  `json:"bio,omitempty"`
@@ -96,44 +94,27 @@ type personResponse struct {
 
 // HandleSearch serves GET /api/people?q=&limit=
 func (h *PeopleHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query().Get("q")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 {
-		limit = 20
-	}
-
-	people, err := h.personRepo.Search(r.Context(), query, limit)
+	resp, err := h.SearchPeople(r.Context(), r.URL.Query().Get("q"), limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "search_failed", err.Error())
+		writeAPIError(w, err)
 		return
-	}
-
-	resp := make([]personResponse, len(people))
-	for i, p := range people {
-		resp[i] = h.toResponse(r.Context(), p)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 // HandleGetPerson serves GET /api/people/:id
 func (h *PeopleHandler) HandleGetPerson(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_id", "invalid person ID")
+	id, ok := parsePersonID(w, r)
+	if !ok {
 		return
 	}
-
-	person, err := h.personRepo.Get(r.Context(), id)
+	resp, err := h.Person(r.Context(), id, true)
 	if err != nil {
-		slog.WarnContext(r.Context(), "people: get person failed", "component", "api", "id", id, "id_str", idStr, "error", err)
-		writeError(w, http.StatusNotFound, "not_found", "person not found")
+		writeAPIError(w, err)
 		return
 	}
-
-	h.enqueuePersonRefreshIfDue(*person)
-
-	writeJSON(w, http.StatusOK, h.toResponse(r.Context(), *person))
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // HandleRefreshPerson serves POST /api/v1/people/:id/refresh.
@@ -142,34 +123,14 @@ func (h *PeopleHandler) HandleRefreshPerson(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Person refresh is not configured")
 		return
 	}
-
 	id, ok := parsePersonID(w, r)
 	if !ok {
 		return
 	}
-
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+	if err := h.RefreshPerson(r.Context(), apimw.GetUserID(r.Context()), id); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-
-	result := h.refreshLimiter.Allow(r.Context(), strconv.Itoa(userID), personRefreshRate)
-	if !result.Allowed {
-		if result.RetryAfter > 0 {
-			w.Header().Set("Retry-After", strconv.Itoa(max(1, int(result.RetryAfter.Seconds()))))
-		}
-		writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many person refresh requests")
-		return
-	}
-
-	person, err := h.personRepo.Get(r.Context(), id)
-	if err != nil || person == nil {
-		writeError(w, http.StatusNotFound, "not_found", "person not found")
-		return
-	}
-
-	h.refreshQueue.Enqueue(id)
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":    "queued",
 		"person_id": id,
@@ -188,24 +149,12 @@ func (h *PeopleHandler) HandleAdminRefreshPerson(w http.ResponseWriter, r *http.
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
-	defer cancel()
-
-	person, err := h.refresher.RefreshPerson(ctx, id)
+	person, err := h.RefreshAdminPerson(r.Context(), id)
 	if err != nil {
-		switch {
-		case errors.Is(err, metadata.ErrPersonNotFound):
-			writeError(w, http.StatusNotFound, "not_found", "person not found")
-		case errors.Is(err, metadata.ErrPersonMetadataNotFound):
-			writeError(w, http.StatusBadGateway, "provider_error", "No person metadata found")
-		default:
-			slog.WarnContext(r.Context(), "people: admin refresh failed", "component", "api", "id", id, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to refresh person")
-		}
+		writeAPIError(w, err)
 		return
 	}
-
-	writeJSON(w, http.StatusOK, h.toResponse(r.Context(), *person))
+	writeJSON(w, http.StatusOK, person)
 }
 
 type UpdatePersonRequest struct {
@@ -233,58 +182,12 @@ func (h *PeopleHandler) HandleAdminUpdatePerson(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	person, err := h.personRepo.Get(r.Context(), id)
-	if err != nil || person == nil {
-		writeError(w, http.StatusNotFound, "not_found", "person not found")
+	person, err := h.UpdateAdminPerson(r.Context(), id, req)
+	if err != nil {
+		writeAPIError(w, err)
 		return
 	}
-
-	if req.Name != nil {
-		person.Name = *req.Name
-		person.SortName = *req.Name
-	}
-	if req.Bio != nil {
-		person.Bio = *req.Bio
-	}
-	if req.BirthDate != nil {
-		parsed, err := parseOptionalPersonDate(*req.BirthDate)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid birth_date")
-			return
-		}
-		person.BirthDate = parsed
-	}
-	if req.DeathDate != nil {
-		parsed, err := parseOptionalPersonDate(*req.DeathDate)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid death_date")
-			return
-		}
-		person.DeathDate = parsed
-	}
-	if req.Birthplace != nil {
-		person.Birthplace = *req.Birthplace
-	}
-	if req.Homepage != nil {
-		person.Homepage = *req.Homepage
-	}
-	if req.TmdbID != nil {
-		person.TmdbID = *req.TmdbID
-	}
-	if req.ImdbID != nil {
-		person.ImdbID = *req.ImdbID
-	}
-	if req.TvdbID != nil {
-		person.TvdbID = *req.TvdbID
-	}
-
-	if err := h.personRepo.Update(r.Context(), *person); err != nil {
-		slog.ErrorContext(r.Context(), "people: admin update failed", "component", "api", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update person")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, h.toResponse(r.Context(), *person))
+	writeJSON(w, http.StatusOK, person)
 }
 
 // HandleGetPersonItems serves GET /api/people/:id/items?type=&limit=&offset=
@@ -327,7 +230,7 @@ func (h *PeopleHandler) HandleGetPersonItems(w http.ResponseWriter, r *http.Requ
 
 	items := make([]itemListResponse, 0, len(result.Items))
 	for _, item := range result.Items {
-		items = append(items, h.itemsHandler.toItemListResponse(r, item, filter.ImageSize))
+		items = append(items, h.itemsHandler.toItemListResponse(r.Context(), viewerFromRequest(r, filter), item, filter.ImageSize))
 	}
 
 	writeJSON(w, http.StatusOK, browseResponse{
@@ -337,8 +240,8 @@ func (h *PeopleHandler) HandleGetPersonItems(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-func (h *PeopleHandler) toResponse(ctx context.Context, p models.Person) personResponse {
-	resp := personResponse{
+func (h *PeopleHandler) toResponse(ctx context.Context, p models.Person) PersonView {
+	resp := PersonView{
 		ID:         p.ID,
 		Name:       p.Name,
 		Bio:        p.Bio,

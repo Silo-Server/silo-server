@@ -122,6 +122,12 @@ type HWAccelInventory struct {
 // flat fields come from the first that responds, preserving the historical
 // shape); with none it probes the local host.
 func (h *SystemHandler) HandleHWAccel(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.ReadHardwareAcceleration(w, r))
+}
+
+// ReadHardwareAcceleration preserves the bridge inventory and deadline behavior
+// for typed transports without serializing through the legacy handler.
+func (h *SystemHandler) ReadHardwareAcceleration(w http.ResponseWriter, r *http.Request) HWAccelInventory {
 	var healthy []*nodepool.Node
 	if h.transcodePool != nil {
 		for _, node := range h.transcodePool.Nodes() {
@@ -131,8 +137,7 @@ func (h *SystemHandler) HandleHWAccel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(healthy) == 0 {
-		writeJSON(w, http.StatusOK, HWAccelInventory{HWAccelInfo: h.localHWAccel(w, r)})
-		return
+		return HWAccelInventory{HWAccelInfo: h.localHWAccel(w, r)}
 	}
 
 	// The fan-out waits for its slowest node, whose budget can pass the API
@@ -152,11 +157,9 @@ func (h *SystemHandler) HandleHWAccel(w http.ResponseWriter, r *http.Request) {
 	errs := make([]error, len(healthy))
 	var wg sync.WaitGroup
 	for i, node := range healthy {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			infos[i], errs[i] = h.fetchRemoteHWAccel(r.Context(), node)
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -187,7 +190,7 @@ func (h *SystemHandler) HandleHWAccel(w http.ResponseWriter, r *http.Request) {
 	if !primaried {
 		inventory.HWAccelInfo = h.localHWAccel(w, r)
 	}
-	writeJSON(w, http.StatusOK, inventory)
+	return inventory
 }
 
 // localHWAccel probes this host against its current playback settings.

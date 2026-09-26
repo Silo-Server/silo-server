@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   canonicalLanguageTag,
+  canonicalLanguageWireValue,
   englishLanguageName,
   getLanguageName,
   normalizeLanguageCode,
@@ -24,6 +25,9 @@ describe("languageNames", () => {
     expect(canonicalLanguageTag("eng")).toBe("en");
     expect(canonicalLanguageTag("pt_BR")).toBe("pt-BR");
     expect(normalizeLanguageCode("fre-CA")).toBe("fr");
+    expect(canonicalLanguageWireValue("Arabic")).toBe("ar");
+    expect(canonicalLanguageWireValue("zh-Hant")).toBe("zh-Hant");
+    expect(canonicalLanguageWireValue("unknown")).toBeNull();
   });
 
   it("distinguishes an unassigned tag from a translated language name", () => {

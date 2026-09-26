@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -18,7 +20,9 @@ import (
 
 const jellyfinCompatWebOperationUpdatedEvent = "jellyfin_compat.web_operation.updated"
 
-type jellyfinCompatSettingsRequest struct {
+type jellyfinCompatSettingsRequest = AdminJellyfinCompatSettingsPatch
+
+type AdminJellyfinCompatSettingsPatch struct {
 	Enabled               *bool   `json:"enabled,omitempty"`
 	PublicURL             *string `json:"public_url,omitempty"`
 	ServerName            *string `json:"server_name,omitempty"`
@@ -36,11 +40,24 @@ type jellyfinCompatWebInstallRequest struct {
 
 // HandleGetJellyfinCompatStatus handles GET /admin/jellyfin-compat/status.
 func (h *AdminHandler) HandleGetJellyfinCompatStatus(w http.ResponseWriter, r *http.Request) {
-	settings, ok := h.jellyfinCompatSettings(w, r)
-	if !ok {
+	status, err := h.ReadAdminJellyfinCompatStatus(r.Context())
+	if err != nil {
+		writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, jellycompat.WebComponentStatusForConfig(h.Config, settings))
+	writeJSON(w, http.StatusOK, status)
+}
+
+// ReadAdminJellyfinCompatStatus observes the existing local installation state.
+func (h *AdminHandler) ReadAdminJellyfinCompatStatus(ctx context.Context) (jellycompat.WebComponentStatus, error) {
+	if h.SettingsRepo == nil {
+		return jellycompat.WebComponentStatus{}, apiError(500, "internal_error", "Settings store not configured")
+	}
+	settings, err := h.SettingsRepo.GetAll(ctx)
+	if err != nil {
+		return jellycompat.WebComponentStatus{}, apiError(500, "internal_error", "Failed to load settings")
+	}
+	return jellycompat.WebComponentStatusForConfig(h.Config, settings), nil
 }
 
 // HandleUpdateJellyfinCompatSettings handles PATCH /admin/jellyfin-compat/settings.
@@ -54,6 +71,37 @@ func (h *AdminHandler) HandleUpdateJellyfinCompatSettings(w http.ResponseWriter,
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	var stored map[string]string
+	if req.WebDir != nil && (req.WebInstallDir == nil || strings.TrimSpace(*req.WebInstallDir) == "") {
+		var ok bool
+		stored, ok = h.jellyfinCompatSettings(w, r)
+		if !ok {
+			return
+		}
+	}
+	updates, err := jellyfinCompatSettingUpdates(req, stored)
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	for key, value := range updates {
+		if err := h.SettingsRepo.Set(r.Context(), key, value); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update setting")
+			return
+		}
+		h.publishSettingChanged(r, key, value)
+	}
+	if jellyfinCompatSettingsRequireRestart(updates) {
+		h.markServerRestartRequired("jellyfin_compat")
+	}
+	settings, ok := h.jellyfinCompatSettings(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, jellycompat.WebComponentStatusForConfig(h.Config, settings))
+}
+
+func jellyfinCompatSettingUpdates(req AdminJellyfinCompatSettingsPatch, settings map[string]string) (map[string]string, error) {
 	updates := map[string]string{}
 	if req.Enabled != nil {
 		if *req.Enabled {
@@ -76,10 +124,6 @@ func (h *AdminHandler) HandleUpdateJellyfinCompatSettings(w http.ResponseWriter,
 	if req.WebDir != nil {
 		root := strings.TrimSpace(updates["jellyfin_compat.web_install_dir"])
 		if root == "" {
-			settings, ok := h.jellyfinCompatSettings(w, r)
-			if !ok {
-				return
-			}
 			root = strings.TrimSpace(settings["jellyfin_compat.web_install_dir"])
 		}
 		if root == "" {
@@ -87,30 +131,52 @@ func (h *AdminHandler) HandleUpdateJellyfinCompatSettings(w http.ResponseWriter,
 		}
 		managedPath := jellycompat.ManagedWebInstallPath(root)
 		if raw := strings.TrimSpace(*req.WebDir); raw != "" && filepath.Clean(raw) != filepath.Clean(managedPath) {
-			writeError(w, http.StatusBadRequest, "bad_request", "Jellyfin Web active directory is managed by Silo and cannot point at an arbitrary path")
-			return
+			return nil, apiError(400, "bad_request", "Jellyfin Web active directory is managed by Silo and cannot point at an arbitrary path")
 		}
 		updates["jellyfin_compat.web_dir"] = managedPath
 	}
 	if len(updates) == 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "At least one setting is required")
-		return
+		return nil, apiError(400, "bad_request", "At least one setting is required")
 	}
-	for key, value := range updates {
-		if err := h.SettingsRepo.Set(r.Context(), key, value); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update setting")
-			return
+	return updates, nil
+}
+
+// UpdateAdminJellyfinCompatSettings guards and applies the complete v2 patch.
+// The frozen bridge retains its historical per-key write boundary.
+func (h *AdminHandler) UpdateAdminJellyfinCompatSettings(ctx context.Context, req AdminJellyfinCompatSettingsPatch, guard func(AdminSettingsSnapshot) error) (jellycompat.WebComponentStatus, error) {
+	if h.SettingsRepo == nil {
+		return jellycompat.WebComponentStatus{}, ErrAdminSettingsUnavailable
+	}
+	var updates, committed map[string]string
+	var refusal error
+	err := updateServerSettingsAtomically(ctx, h.SettingsRepo, func(stored map[string]string) (map[string]string, error) {
+		if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
+			refusal = err
+			return nil, err
 		}
-		h.publishSettingChanged(r, key, value)
+		var err error
+		updates, err = jellyfinCompatSettingUpdates(req, stored)
+		if err != nil {
+			refusal = err
+			return nil, err
+		}
+		committed = maps.Clone(stored)
+		maps.Copy(committed, updates)
+		return updates, nil
+	})
+	if refusal != nil {
+		return jellycompat.WebComponentStatus{}, refusal
+	}
+	if err != nil {
+		return jellycompat.WebComponentStatus{}, err
+	}
+	for _, key := range slices.Sorted(maps.Keys(updates)) {
+		h.publishSettingChangedContext(ctx, key, updates[key])
 	}
 	if jellyfinCompatSettingsRequireRestart(updates) {
 		h.markServerRestartRequired("jellyfin_compat")
 	}
-	settings, ok := h.jellyfinCompatSettings(w, r)
-	if !ok {
-		return
-	}
-	writeJSON(w, http.StatusOK, jellycompat.WebComponentStatusForConfig(h.Config, settings))
+	return jellycompat.WebComponentStatusForConfig(h.Config, committed), nil
 }
 
 func jellyfinCompatSettingsRequireRestart(updates map[string]string) bool {
@@ -134,44 +200,57 @@ func (h *AdminHandler) HandleUpdateJellyfinCompatWeb(w http.ResponseWriter, r *h
 
 // HandleRemoveJellyfinCompatWeb handles POST /admin/jellyfin-compat/web/remove.
 func (h *AdminHandler) HandleRemoveJellyfinCompatWeb(w http.ResponseWriter, r *http.Request) {
-	settings, ok := h.jellyfinCompatSettings(w, r)
-	if !ok {
-		return
-	}
-	root := strings.TrimSpace(settings["jellyfin_compat.web_install_dir"])
-	if root == "" {
-		root = config.DefaultJellyfinWebInstallDir
-	}
-	_, err := jellycompat.StartWebComponentRemove(jellycompat.WebComponentRemoveOptions{
-		InstallRoot: root,
-		OnProgress:  h.publishJellyfinCompatWebOperationProgress,
-	})
+	status, err := h.StartAdminJellyfinCompatWebRemove(r.Context())
 	if err != nil {
-		writeJellyfinCompatOperationError(w, err)
+		writeJellyfinCompatWebStartError(w, err)
 		return
 	}
-	if err := h.persistJellyfinCompatWebEnabled(r.Context(), false); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update setting")
-		return
-	}
-	settings, ok = h.jellyfinCompatSettings(w, r)
-	if !ok {
-		return
-	}
-	writeJSON(w, http.StatusAccepted, jellycompat.WebComponentStatusForConfig(h.Config, settings))
+	writeJSON(w, http.StatusAccepted, status)
 }
 
 func (h *AdminHandler) installJellyfinCompatWeb(w http.ResponseWriter, r *http.Request) {
-	settings, ok := h.jellyfinCompatSettings(w, r)
-	if !ok {
-		return
-	}
 	var req jellyfinCompatWebInstallRequest
 	if r.Body != nil {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 			return
 		}
+	}
+	status, err := h.StartAdminJellyfinCompatWebInstall(r.Context(), req)
+	if err != nil {
+		writeJellyfinCompatWebStartError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, status)
+}
+
+// writeJellyfinCompatWebStartError keeps the frozen bridge answers: the seam's
+// own decisions arrive as *APIError, installer refusals as jellycompat errors.
+func writeJellyfinCompatWebStartError(w http.ResponseWriter, err error) {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
+		return
+	}
+	writeJellyfinCompatOperationError(w, err)
+}
+
+// AdminJellyfinWebInstallRequest pins the Jellyfin Web release to install. An
+// empty version resolves the release compatible with the emulated server
+// version; an empty source URL uses the stored one.
+type AdminJellyfinWebInstallRequest = jellyfinCompatWebInstallRequest
+
+// StartAdminJellyfinCompatWebInstall begins the local, in-process install of
+// the Jellyfin Web assets and returns the accepted status. It is the v1 install
+// and update behavior: one operation per install root at a time, progress on
+// the settings event channel, no durable cluster-wide job. When another
+// operation already runs, the returned status carries it alongside
+// jellycompat.ErrWebComponentOperationActive so the caller can tell a repeat of
+// the same command from a real conflict.
+func (h *AdminHandler) StartAdminJellyfinCompatWebInstall(ctx context.Context, req AdminJellyfinWebInstallRequest) (jellycompat.WebComponentStatus, error) {
+	settings, err := h.loadJellyfinCompatSettings(ctx)
+	if err != nil {
+		return jellycompat.WebComponentStatus{}, err
 	}
 	root := strings.TrimSpace(settings["jellyfin_compat.web_install_dir"])
 	if root == "" {
@@ -193,14 +272,13 @@ func (h *AdminHandler) installJellyfinCompatWeb(w http.ResponseWriter, r *http.R
 		if emulatedVersion == "" {
 			emulatedVersion = config.DefaultJellyfinCompatEmulatedServerVersion
 		}
-		resolvedVersion, err := jellycompat.ResolveCompatibleWebVersion(r.Context(), sourceURL, emulatedVersion)
+		resolvedVersion, err := jellycompat.ResolveCompatibleWebVersion(ctx, sourceURL, emulatedVersion)
 		if err != nil {
-			writeError(w, http.StatusServiceUnavailable, "web_version_unavailable", err.Error())
-			return
+			return jellycompat.WebComponentStatus{}, apiError(http.StatusServiceUnavailable, "web_version_unavailable", err.Error())
 		}
 		version = resolvedVersion
 	}
-	status, err := jellycompat.StartWebComponentInstall(jellycompat.WebComponentInstallOptions{
+	return jellycompat.StartWebComponentInstall(jellycompat.WebComponentInstallOptions{
 		InstallRoot: root,
 		SourceURL:   sourceURL,
 		Version:     version,
@@ -208,11 +286,46 @@ func (h *AdminHandler) installJellyfinCompatWeb(w http.ResponseWriter, r *http.R
 	}, func(ctx context.Context, status jellycompat.WebComponentStatus) error {
 		return h.persistJellyfinCompatWebInstallSettings(ctx, status)
 	})
+}
+
+// StartAdminJellyfinCompatWebRemove begins the local removal of the managed
+// Jellyfin Web assets, records web_enabled=false and returns the accepted
+// status. Same operation-per-root and conflict semantics as install.
+func (h *AdminHandler) StartAdminJellyfinCompatWebRemove(ctx context.Context) (jellycompat.WebComponentStatus, error) {
+	settings, err := h.loadJellyfinCompatSettings(ctx)
 	if err != nil {
-		writeJellyfinCompatOperationError(w, err)
-		return
+		return jellycompat.WebComponentStatus{}, err
 	}
-	writeJSON(w, http.StatusAccepted, status)
+	root := strings.TrimSpace(settings["jellyfin_compat.web_install_dir"])
+	if root == "" {
+		root = config.DefaultJellyfinWebInstallDir
+	}
+	status, err := jellycompat.StartWebComponentRemove(jellycompat.WebComponentRemoveOptions{
+		InstallRoot: root,
+		OnProgress:  h.publishJellyfinCompatWebOperationProgress,
+	})
+	if err != nil {
+		return status, err
+	}
+	if err := h.persistJellyfinCompatWebEnabled(ctx, false); err != nil {
+		return jellycompat.WebComponentStatus{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update setting")
+	}
+	settings, err = h.loadJellyfinCompatSettings(ctx)
+	if err != nil {
+		return jellycompat.WebComponentStatus{}, err
+	}
+	return jellycompat.WebComponentStatusForConfig(h.Config, settings), nil
+}
+
+func (h *AdminHandler) loadJellyfinCompatSettings(ctx context.Context) (map[string]string, error) {
+	if h.SettingsRepo == nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Settings store not configured")
+	}
+	settings, err := h.SettingsRepo.GetAll(ctx)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load settings")
+	}
+	return settings, nil
 }
 
 func (h *AdminHandler) persistJellyfinCompatWebInstallSettings(ctx context.Context, status jellycompat.WebComponentStatus) error {

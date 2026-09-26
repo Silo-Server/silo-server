@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef } from "react";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
-import { playerFetch } from "../player-fetch";
+import {
+  sendSessionProgress,
+  observeSessionProgress,
+  captureSessionProgress,
+} from "../session-mutations";
 import { toMediaTime } from "../utils/mediaTimeline";
 
 /**
@@ -34,6 +38,24 @@ export function useWatchProgress(
     };
   }, [streamOriginRef, videoRef]);
 
+  useEffect(() => {
+    if (!sessionId) return;
+    const read = () => {
+      const sample = getProgressSnapshot();
+      return sample ? { position: sample.position, is_paused: sample.isPaused } : null;
+    };
+    const forget = observeSessionProgress(sessionId, read);
+    const capture = () => captureSessionProgress(sessionId, read());
+    const video = videoRef.current;
+    const events = ["timeupdate", "pause", "seeked", "ended"];
+    capture();
+    events.forEach((event) => video?.addEventListener(event, capture));
+    return () => {
+      events.forEach((event) => video?.removeEventListener(event, capture));
+      forget();
+    };
+  }, [getProgressSnapshot, sessionId, videoRef]);
+
   const reportProgress = useCallback(
     async (options?: { keepalive?: boolean; isPaused?: boolean }) => {
       if (!sessionId) return;
@@ -41,36 +63,15 @@ export function useWatchProgress(
       const snapshot = getProgressSnapshot();
       if (!snapshot) return;
 
-      const body = JSON.stringify({
-        position: snapshot.position,
-        is_paused: options?.isPaused ?? snapshot.isPaused,
-      });
-
-      if (options?.keepalive) {
-        const cfg = configRef.current;
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-        };
-        const token = cfg.getAccessToken();
-        if (token) headers["Authorization"] = `Bearer ${token}`;
-        const profileId = cfg.getProfileId();
-        if (profileId) headers["X-Profile-Id"] = profileId;
-        const profileToken = cfg.getProfileToken?.();
-        if (profileToken) headers["X-Profile-Token"] = profileToken;
-
-        await fetch(`${cfg.apiBaseUrl}/playback/${sessionId}/progress`, {
-          method: "POST",
-          headers,
-          body,
-          keepalive: true,
-        });
-        return;
-      }
-
-      await playerFetch(configRef.current, `/playback/${sessionId}/progress`, {
-        method: "POST",
-        body,
-      });
+      await sendSessionProgress(
+        configRef.current,
+        sessionId,
+        {
+          position: snapshot.position,
+          is_paused: options?.isPaused ?? snapshot.isPaused,
+        },
+        options?.keepalive,
+      );
     },
     [getProgressSnapshot, sessionId],
   );

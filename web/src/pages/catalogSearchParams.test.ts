@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { QueryDefinition } from "@/api/types";
 
 import {
   buildCatalogApiSearchParams,
@@ -331,5 +332,43 @@ describe("buildCatalogHref", () => {
 
   it("builds canonical person catalog URLs from raw route ids", () => {
     expect(buildPersonCatalogHref("117290402172239876")).toBe("/person/117290402172239876");
+  });
+});
+
+describe("query-source default sort", () => {
+  const addedAt: QueryDefinition = {
+    library_ids: [],
+    match: "all",
+    groups: [],
+    sort: { field: "added_at", order: "desc" },
+  };
+
+  it("sends the smart collection preview ordering even without a library filter", () => {
+    const built = buildCatalogApiSearchParams({
+      source: "query",
+      query_definition: addedAt,
+      explicit_sort: true,
+    });
+    expect(built.get("sort")).toBe("added_at");
+    expect(built.get("order")).toBe("desc");
+  });
+
+  it("leaves text search ordering to the server when no sort was chosen", () => {
+    const state = parseCatalogSearchParams(params("source=query&q=heat"));
+    expect(state.explicit_sort).toBe(false);
+    expect(buildCatalogApiSearchParams(state).toString()).toBe("source=query&q=heat");
+    expect(
+      buildCatalogApiSearchParams({ source: "query", q: "heat", query_definition: addedAt }).has(
+        "sort",
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps a sort read from the URL", () => {
+    const state = parseCatalogSearchParams(params("source=query&q=heat&sort=added_at&order=desc"));
+    expect(state.explicit_sort).toBe(true);
+    expect(buildCatalogApiSearchParams(state).toString()).toBe(
+      "source=query&q=heat&sort=added_at&order=desc",
+    );
   });
 });

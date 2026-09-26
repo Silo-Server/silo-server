@@ -1,3 +1,8 @@
+import { useAdminCollectionCapabilities } from "@/hooks/queries/admin/collections";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { fetchAdminBoardOrderSnapshot } from "@/api/adminCollections";
+import { invalidateAdminCollectionQueries } from "@/hooks/queries/collectionSurfaceRefresh";
 import { createContext, useContext, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
@@ -198,7 +203,66 @@ export function GroupsBoard({
     item.kind === "ungrouped" ? "ungrouped" : `group:${item.group.id}`,
   );
 
+  const queryClient = useQueryClient();
+  const { data: capabilities } = useAdminCollectionCapabilities();
+  const orderReads = useQuery({
+    queryKey: [
+      "admin",
+      "collections",
+      "order-snapshots",
+      libraryID,
+      groups.map((group) => [group.id, group.collections.map((item) => item.id)]),
+      ungrouped.map((item) => item.id),
+      sortableIds,
+    ],
+    enabled: capabilities?.groups === true,
+    queryFn: () =>
+      fetchAdminBoardOrderSnapshot(
+        libraryID,
+        groups.map((group) => group.id),
+      ),
+  });
+  const dragSnapshot = useRef<{
+    reads: NonNullable<typeof orderReads.data>;
+    groups: BoardGroup[];
+    ungrouped: LibraryCollection[];
+    sortableIds: string[];
+  } | null>(null);
+
   const onDragStart = (e: DragStartEvent) => {
+    if (!capabilities?.groups) return;
+    const reads = orderReads.data;
+    const matches = (actual: string[], expected: string[]) =>
+      actual.length === expected.length && actual.every((id, index) => id === expected[index]);
+    const currentGroups = sortableIds.map((id) =>
+      id === "ungrouped" ? id : id.replace(/^group:/, ""),
+    );
+    if (
+      !reads ||
+      reads.groupOrder.has_more ||
+      !matches(reads.groupOrder.ordered_ids, currentGroups) ||
+      [
+        ...groups.map((group) => ({ id: group.id, items: group.collections })),
+        { id: "ungrouped", items: ungrouped },
+      ].some((group) => {
+        const order = reads.collectionOrders.get(group.id);
+        return (
+          !order ||
+          order.has_more ||
+          !matches(
+            order.ordered_ids,
+            group.items.map((item) => item.id),
+          )
+        );
+      })
+    ) {
+      dragSnapshot.current = null;
+      toast.error("Collection order is not ready or changed. Reload before reordering.");
+      void invalidateAdminCollectionQueries(queryClient);
+      void orderReads.refetch();
+      return;
+    }
+    dragSnapshot.current = { reads, groups, ungrouped, sortableIds };
     const id = String(e.active.id);
     setActiveId(id);
 
@@ -218,6 +282,7 @@ export function GroupsBoard({
   };
 
   const onDragCancel = () => {
+    dragSnapshot.current = null;
     setActiveId(null);
     setDraggedIds([]);
   };
@@ -231,6 +296,13 @@ export function GroupsBoard({
 
   const onDragEnd = (e: DragEndEvent) => {
     setActiveId(null);
+    const captured = dragSnapshot.current;
+    dragSnapshot.current = null;
+    if (!captured) {
+      setDraggedIds([]);
+      return;
+    }
+    const { groups, ungrouped, sortableIds, reads } = captured;
     const { active, over } = e;
     if (!over || active.id === over.id) {
       setDraggedIds([]);
@@ -266,7 +338,10 @@ export function GroupsBoard({
       const oldIdx = currentIds.indexOf(activeItemId);
       const newIdx = currentIds.indexOf(overSectionId);
       if (oldIdx !== -1 && newIdx !== -1 && oldIdx !== newIdx) {
-        reorderGroups.mutate(arrayMove(currentIds, oldIdx, newIdx));
+        reorderGroups.mutate({
+          orderedIDs: arrayMove(currentIds, oldIdx, newIdx),
+          etag: reads.groupOrder.etag,
+        });
       }
       setDraggedIds([]);
       return;
@@ -303,14 +378,15 @@ export function GroupsBoard({
         effectiveDraggedIds,
         oData,
       );
-      reorderCollections.mutate({
-        groupID: targetGroupId,
-        orderedIDs: newOrder,
-        ...(targetGroupId === "ungrouped" ? { libraryId: libraryID } : {}),
-      });
-
-      // Clear selection after successful drop
-      clearSelection();
+      reorderCollections.mutate(
+        {
+          groupID: targetGroupId,
+          etag: reads.collectionOrders.get(targetGroupId)!.etag,
+          orderedIDs: newOrder,
+          ...(targetGroupId === "ungrouped" ? { libraryId: libraryID } : {}),
+        },
+        { onSuccess: clearSelection },
+      );
     }
 
     setDraggedIds([]);
@@ -332,6 +408,13 @@ export function GroupsBoard({
                 <UngroupedSection
                   key="ungrouped"
                   collections={ungrouped}
+                  dragDisabled={
+                    !capabilities?.groups ||
+                    !orderReads.data ||
+                    orderReads.isError ||
+                    orderReads.data.groupOrder.has_more ||
+                    [...orderReads.data.collectionOrders.values()].some((order) => order.has_more)
+                  }
                   collapsed={isSectionDrag}
                   onEditCollection={onEditCollection}
                   onDeleteCollection={onDeleteCollection}
@@ -342,6 +425,13 @@ export function GroupsBoard({
                 <GroupCard
                   key={item.group.id}
                   group={item.group}
+                  dragDisabled={
+                    !capabilities?.groups ||
+                    !orderReads.data ||
+                    orderReads.isError ||
+                    orderReads.data.groupOrder.has_more ||
+                    [...orderReads.data.collectionOrders.values()].some((order) => order.has_more)
+                  }
                   collections={item.group.collections}
                   onEdit={onEditGroup}
                   onEditCollection={onEditCollection}
@@ -374,8 +464,7 @@ export function GroupsBoard({
 /**
  * Build a unified array of groups + the ungrouped sentinel, ordered by each
  * item's effective sort position. Groups use their sort_order; ungrouped uses
- * ungroupedSortOrder. Ties are broken by name for groups (ungrouped always
- * sorts last within ties since it has no name).
+ * ungroupedSortOrder. Ties use the raw ID, including the ungrouped sentinel, matching the canonical API order.
  */
 function buildUnifiedItems(groups: BoardGroup[], ungroupedSortOrder: number): UnifiedItem[] {
   type Slot = { order: number; item: UnifiedItem };
@@ -386,10 +475,9 @@ function buildUnifiedItems(groups: BoardGroup[], ungroupedSortOrder: number): Un
   slots.push({ order: ungroupedSortOrder, item: { kind: "ungrouped" as const } });
   slots.sort((a, b) => {
     if (a.order !== b.order) return a.order - b.order;
-    // Equal sort_order: put named groups before ungrouped; stable between groups by name
-    const aName = a.item.kind === "group" ? a.item.group.name : "￿";
-    const bName = b.item.kind === "group" ? b.item.group.name : "￿";
-    return aName.localeCompare(bName);
+    const aID = a.item.kind === "group" ? a.item.group.id : "ungrouped";
+    const bID = b.item.kind === "group" ? b.item.group.id : "ungrouped";
+    return aID < bID ? -1 : aID > bID ? 1 : 0;
   });
   return slots.map((s) => s.item);
 }

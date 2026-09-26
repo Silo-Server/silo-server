@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/workmetrics"
+
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	aitranslate "github.com/Silo-Server/silo-server/internal/ai/translate"
@@ -303,6 +305,16 @@ func (f field) segmentID() string {
 }
 
 func (s *Service) run(ctx context.Context, job *Job) {
+	// Read the committed outcome; publication and cancellation can race and a
+	// failed commit response alone cannot establish the durable state.
+	defer func() {
+		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		if finished, err := s.repo.GetJob(finishCtx, job.ID); err == nil && finished != nil {
+			workmetrics.FinishContext(ctx, string(finished.Status))
+		}
+	}()
+
 	if err := s.repo.UpdateProgress(ctx, job.ID, jobrunner.StatusRunning, 0, "Loading content", 0, 0); err != nil {
 		s.logger.WarnContext(ctx, "failed to mark metadata translation job running", "job", job.ID, "error", err)
 	}

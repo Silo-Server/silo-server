@@ -317,3 +317,21 @@ func (r *WebPushRepository) DeleteOldAttempts(ctx context.Context, now time.Time
 	}
 	return tag.RowsAffected(), nil
 }
+
+// ListPage returns at most limit records in stable creation order. Callers may
+// request one lookahead row; this read does not alter delivery state.
+func (r *WebPushRepository) ListPage(ctx context.Context, profile string, limit int, after *Cursor) ([]WebPushSubscription, error) {
+	query := `SELECT ` + webPushColumns + ` FROM web_push_subscriptions WHERE profile_id = $1`
+	args := []any{profile}
+	if after != nil {
+		query += ` AND (created_at, id) > ($2, $3)`
+		args = append(args, after.CreatedAt, after.ID)
+	}
+	query += fmt.Sprintf(" ORDER BY created_at, id LIMIT $%d", len(args)+1)
+	args = append(args, limit)
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list notification destinations: %w", err)
+	}
+	return scanWebPushSubscriptions(rows)
+}

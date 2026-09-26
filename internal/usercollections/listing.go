@@ -63,7 +63,7 @@ func ListServerVisibleByLibrary(ctx context.Context, pool *pgxpool.Pool, userID 
 		   AND (
 		     NOT (scope_config ? 'library_ids')
 		     OR jsonb_array_length(COALESCE(scope_config->'library_ids', '[]'::jsonb)) = 0
-		     OR scope_config->'library_ids' @> to_jsonb($3::int)
+		     OR scope_config->'library_ids' @> to_jsonb($3::bigint)
 		   )
 		 ORDER BY name ASC
 		 LIMIT $4`,

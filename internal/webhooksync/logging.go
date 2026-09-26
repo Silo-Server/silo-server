@@ -285,5 +285,5 @@ func getWebhookPathPattern(r *http.Request) string {
 			return pattern
 		}
 	}
-	return "/api/v1/webhook-sync/webhooks/{secret}"
+	return "/api/v2/webhook-sync/webhooks/{secret}"
 }

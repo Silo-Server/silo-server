@@ -115,11 +115,11 @@ func TestCacheMetadataImagesTaskReportsStats(t *testing.T) {
 	if err := task.Execute(context.Background(), progress); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if runner.claimLimit != cacheMetadataImagesClaimLimit {
-		t.Fatalf("claimLimit = %d, want the shared page size %d", runner.claimLimit, cacheMetadataImagesClaimLimit)
+	if want := cacheMetadataImagesWorkers(); runner.concurrency != want {
+		t.Fatalf("concurrency = %d, want the shared worker count %d", runner.concurrency, want)
 	}
-	if runner.concurrency != cacheMetadataImagesWorkers {
-		t.Fatalf("concurrency = %d, want the shared worker count %d", runner.concurrency, cacheMetadataImagesWorkers)
+	if want := cacheMetadataImagesClaimLimit(runner.concurrency); runner.claimLimit != want {
+		t.Fatalf("claimLimit = %d, want the shared page size %d", runner.claimLimit, want)
 	}
 	if runner.maxRuntime != 10*time.Minute {
 		t.Fatalf("maxRuntime = %s, want 10m", runner.maxRuntime)
@@ -161,8 +161,8 @@ func TestBackfillMetadataImagesTaskReportsDiscovery(t *testing.T) {
 	if runner.maxRuntime != 0 {
 		t.Fatalf("maxRuntime = %s, want no deadline for manual backfill", runner.maxRuntime)
 	}
-	if runner.claimLimit != cacheMetadataImagesClaimLimit {
-		t.Fatalf("claimLimit = %d, want the shared page size %d", runner.claimLimit, cacheMetadataImagesClaimLimit)
+	if want := cacheMetadataImagesClaimLimit(runner.concurrency); runner.claimLimit != want {
+		t.Fatalf("claimLimit = %d, want the shared page size %d", runner.claimLimit, want)
 	}
 	if len(runner.workerIDs) != 1 || !strings.Contains(runner.workerIDs[0], ":backfill:") {
 		t.Fatalf("backfill worker IDs = %#v, want one execution-scoped backfill owner", runner.workerIDs)
@@ -333,16 +333,17 @@ func TestBackfillMetadataImagesTaskProgressDoesNotFallWhenDiscoveryWidensTheRun(
 func TestImageCacheWorkerCount(t *testing.T) {
 	const gib = int64(1) << 30
 	cases := []struct {
-		numCPU int
-		memory int64
-		want   int
+		configured int
+		numCPU     int
+		memory     int64
+		want       int
 	}{
-		{numCPU: 0, memory: 0, want: 4}, // defensive floor; GOMAXPROCS never reports < 1
-		{numCPU: 1, memory: 0, want: 4}, // small household box: modest but no longer crippled
-		{numCPU: 4, memory: 0, want: 16},
-		{numCPU: 12, memory: 0, want: 48},
-		{numCPU: 16, memory: 0, want: 48}, // cap: more cores must not monopolize providers
-		{numCPU: 64, memory: 0, want: 48},
+		{numCPU: 0, memory: 0, want: 1}, // defensive floor; GOMAXPROCS never reports < 1
+		{numCPU: 1, memory: 0, want: 1},
+		{numCPU: 4, memory: 0, want: 4}, // one encode per core: vips runs single-threaded
+		{numCPU: 12, memory: 0, want: 12},
+		{numCPU: 48, memory: 0, want: 48},
+		{numCPU: 64, memory: 0, want: 48}, // cap: more cores must not monopolize providers
 		// A many-core container with a small memory limit is bounded by
 		// memory, never below the original pool of 2 — a sub-1GiB deployment
 		// already ran 2 workers before this change, so 2 is the floor, not 1.
@@ -351,13 +352,20 @@ func TestImageCacheWorkerCount(t *testing.T) {
 		{numCPU: 16, memory: 1 * gib, want: 2},
 		{numCPU: 16, memory: 2 * gib, want: 4},
 		{numCPU: 16, memory: 8 * gib, want: 16},
-		{numCPU: 16, memory: 64 * gib, want: 48},
+		{numCPU: 16, memory: 64 * gib, want: 16},
 		// Plenty of memory but few cores: CPU stays the binding cap.
-		{numCPU: 2, memory: 64 * gib, want: 8},
+		{numCPU: 2, memory: 64 * gib, want: 2},
+		// An explicit setting replaces the CPU sizing, above or below it, and
+		// may go all the way down to 1; the memory cap still applies.
+		{configured: 3, numCPU: 16, memory: 0, want: 3},
+		{configured: 64, numCPU: 4, memory: 0, want: 64},
+		{configured: 1, numCPU: 16, memory: 0, want: 1},
+		{configured: 1, numCPU: 16, memory: 256 << 20, want: 1},
+		{configured: 32, numCPU: 16, memory: 2 * gib, want: 4},
 	}
 	for _, tc := range cases {
-		if got := imageCacheWorkerCount(tc.numCPU, tc.memory); got != tc.want {
-			t.Errorf("imageCacheWorkerCount(%d, %d) = %d, want %d", tc.numCPU, tc.memory, got, tc.want)
+		if got := imageCacheWorkerCount(tc.configured, tc.numCPU, tc.memory); got != tc.want {
+			t.Errorf("imageCacheWorkerCount(%d, %d, %d) = %d, want %d", tc.configured, tc.numCPU, tc.memory, got, tc.want)
 		}
 	}
 	// A claimed page is stamped with one lease up front, so it must fully
@@ -370,8 +378,14 @@ func TestImageCacheWorkerCount(t *testing.T) {
 	if drain+overshootBudget > metadata.ImageCacheLeaseDuration {
 		t.Errorf("page drain %s plus overshoot budget %s must stay within the %s claim lease", drain, overshootBudget, metadata.ImageCacheLeaseDuration)
 	}
-	if cacheMetadataImagesClaimLimit != cacheMetadataImagesClaimPerWorker*cacheMetadataImagesWorkers {
-		t.Errorf("claim limit = %d, want %d per worker (%d)", cacheMetadataImagesClaimLimit, cacheMetadataImagesClaimPerWorker, cacheMetadataImagesClaimPerWorker*cacheMetadataImagesWorkers)
+	if got := cacheMetadataImagesClaimLimit(7); got != cacheMetadataImagesClaimPerWorker*7 {
+		t.Errorf("claim limit = %d, want %d per worker (%d)", got, cacheMetadataImagesClaimPerWorker, cacheMetadataImagesClaimPerWorker*7)
+	}
+	// The admin setting flows through to the next run.
+	SetImageWorkers(3)
+	defer SetImageWorkers(0)
+	if got := cacheMetadataImagesWorkers(); got != 3 && detectImageCacheMemoryBytes() >= 3*imageCacheWorkerMemoryBudget {
+		t.Errorf("configured workers = %d, want 3", got)
 	}
 }
 

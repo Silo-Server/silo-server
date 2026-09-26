@@ -27,7 +27,7 @@ func (t *VerifyArtworkDeliveryTask) Description() string {
 func (t *VerifyArtworkDeliveryTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryMetadata
 }
-func (t *VerifyArtworkDeliveryTask) IsHidden() bool { return false }
+func (t *VerifyArtworkDeliveryTask) IsHidden() bool { return true }
 
 func (t *VerifyArtworkDeliveryTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{

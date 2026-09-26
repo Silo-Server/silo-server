@@ -27,16 +27,18 @@ type RecipeCard struct {
 	TranscodeNodeURL     string    `json:"transcode_node_url,omitempty"`
 	TranscodeTransportID string    `json:"transcode_transport_id,omitempty"`
 	OriginalStartedAt    time.Time `json:"original_started_at,omitempty"`
+	StreamLocation       string    `json:"stream_location,omitempty"`
 	// Routing fields freeze the committed media-serving boundary so a token or
 	// stored card cannot lose a proxy-only assignment when it reconstructs a
 	// session on another process. Stable execution and egress identities bind
 	// the artifact to the nodes whose capacity the planner reserved; internal
 	// URLs stay out of the portable recipe.
-	RoutingWorkload        string `json:"routing_workload,omitempty"`
-	RoutingExecution       string `json:"routing_execution,omitempty"`
-	RoutingExecutionNodeID int    `json:"routing_execution_node_id,omitzero"`
-	RoutingEgress          string `json:"routing_egress,omitempty"`
-	RoutingEgressNodeID    int    `json:"routing_egress_node_id,omitempty"`
+	RoutingNetworkProvider *string `json:"routing_network_provider,omitempty"`
+	RoutingWorkload        string  `json:"routing_workload,omitempty"`
+	RoutingExecution       string  `json:"routing_execution,omitempty"`
+	RoutingExecutionNodeID int     `json:"routing_execution_node_id,omitzero"`
+	RoutingEgress          string  `json:"routing_egress,omitempty"`
+	RoutingEgressNodeID    int     `json:"routing_egress_node_id,omitempty"`
 
 	// PlayMethod discriminates which serve path reconstructs this session
 	// (direct / remux / transcode). Empty decodes as PlayTranscode for
@@ -359,6 +361,8 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		RemuxDVMode:            string(c.RemuxDVMode),
 		TranscodeNode:          c.TranscodeNodeURL,
 		TranscodeTransportID:   c.TranscodeTransportID,
+		RoutingNetworkProvider: c.RoutingNetworkProvider,
+		StreamLocation:         c.StreamLocation,
 		RoutingWorkload:        c.RoutingWorkload,
 		RoutingExecution:       c.RoutingExecution,
 		RoutingExecutionNodeID: c.RoutingExecutionNodeID,
@@ -447,6 +451,8 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		MediaFileID:                c.MediaFileID,
 		TranscodeNodeURL:           c.TranscodeNode,
 		TranscodeTransportID:       c.TranscodeTransportID,
+		RoutingNetworkProvider:     c.RoutingNetworkProvider,
+		StreamLocation:             c.StreamLocation,
 		RoutingWorkload:            c.RoutingWorkload,
 		RoutingExecution:           c.RoutingExecution,
 		RoutingExecutionNodeID:     c.RoutingExecutionNodeID,

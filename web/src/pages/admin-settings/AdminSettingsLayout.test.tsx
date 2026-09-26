@@ -31,6 +31,7 @@ vi.mock("@/hooks/useSettingsForm", async () => {
       return {
         isLoading: true,
         getValue: () => "",
+        getPersistedValue: () => "",
         setValue: () => {},
         resetValue: () => {},
         dirtyCount: mocks.dirtyCount,

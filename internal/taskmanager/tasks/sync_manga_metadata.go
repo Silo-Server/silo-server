@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
@@ -34,6 +35,10 @@ func (t *SyncMangaMetadataTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryMetadata
 }
 func (t *SyncMangaMetadataTask) IsHidden() bool { return false }
+
+func (t *SyncMangaMetadataTask) ServesLibrary(libraryType string) bool {
+	return librarykind.IsManga(libraryType)
+}
 
 func (t *SyncMangaMetadataTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{

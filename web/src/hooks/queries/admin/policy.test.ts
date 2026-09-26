@@ -28,7 +28,7 @@ describe("policy admin hooks", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input, init) => {
-        expect(String(input)).toBe("/api/v1/admin/policy/simulate");
+        expect(String(input)).toBe("/api/v2/admin/policy/simulate");
         expect(JSON.parse(String(init?.body))).toMatchObject({
           domain: "scope",
           input: { schema_version: 1 },

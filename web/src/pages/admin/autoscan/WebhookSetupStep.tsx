@@ -65,7 +65,8 @@ export function WebhookInstructions({
         </p>
         <p className="text-muted-foreground text-xs">
           Paste the URL into <span className="font-medium">Webhook URL</span> and leave the method
-          as <span className="font-medium">POST</span>. No username or password is needed.
+          as <span className="font-medium">POST</span>. No username or password is needed. For an
+          existing connection, replace its saved URL with this one.
         </p>
       </div>
 

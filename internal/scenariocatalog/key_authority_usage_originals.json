@@ -1,0 +1,453 @@
+{
+  "keys_list.api_key_forbidden": {
+    "method": "GET",
+    "path": "/api/v1/api-keys/",
+    "scenario": {
+      "id": "keys_list.api_key_forbidden",
+      "category": "authorization",
+      "description": "An API key may not manage API keys: 403.",
+      "principal": {
+        "class": "api_key"
+      },
+      "request": {
+        "path": "/api/v1/api-keys/"
+      },
+      "expect": {
+        "status": 403,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "forbidden"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "pointer": "/error",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "equals",
+            "value": "API key management is not accessible via API key authentication"
+          }
+        ]
+      },
+      "v2_expectation": null
+    }
+  },
+  "keys_list.error_shape": {
+    "method": "GET",
+    "path": "/api/v1/api-keys/",
+    "scenario": {
+      "id": "keys_list.error_shape",
+      "category": "error",
+      "description": "Refusal envelope shape.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/api-keys/"
+      },
+      "expect": {
+        "status": 401,
+        "body": [
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "pointer": "/error",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "type",
+            "value": "string"
+          }
+        ]
+      },
+      "v2_expectation": null
+    }
+  },
+  "keys_create.api_key_forbidden": {
+    "method": "POST",
+    "path": "/api/v1/api-keys/",
+    "scenario": {
+      "id": "keys_create.api_key_forbidden",
+      "category": "authorization",
+      "description": "An API key cannot mint keys: 403.",
+      "principal": {
+        "class": "api_key"
+      },
+      "request": {
+        "path": "/api/v1/api-keys/",
+        "body": {
+          "label": "x"
+        }
+      },
+      "expect": {
+        "status": 403,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "forbidden"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "pointer": "/error",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "type",
+            "value": "string"
+          }
+        ]
+      },
+      "v2_expectation": null
+    }
+  },
+  "scopes.api_key_allowed": {
+    "method": "GET",
+    "path": "/api/v1/api-keys/scopes",
+    "scenario": {
+      "id": "scopes.api_key_allowed",
+      "category": "authorization",
+      "description": "Unlike the management routes, an API key may read the catalog.",
+      "principal": {
+        "class": "api_key"
+      },
+      "request": {
+        "path": "/api/v1/api-keys/scopes"
+      },
+      "expect": {
+        "status": 200
+      },
+      "v2_expectation": null
+    }
+  },
+  "keys_delete.api_key_forbidden": {
+    "method": "DELETE",
+    "path": "/api/v1/api-keys/{id}",
+    "scenario": {
+      "id": "keys_delete.api_key_forbidden",
+      "category": "authorization",
+      "description": "An API key cannot delete keys: 403.",
+      "principal": {
+        "class": "api_key"
+      },
+      "request": {
+        "path": "/api/v1/api-keys/1"
+      },
+      "expect": {
+        "status": 403,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "forbidden"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "pointer": "/error",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "type",
+            "value": "string"
+          }
+        ]
+      },
+      "v2_expectation": null
+    }
+  },
+  "adm_inv_list.scoped_key": {
+    "method": "GET",
+    "path": "/api/v1/admin/invitations/",
+    "scenario": {
+      "id": "adm_inv_list.scoped_key",
+      "category": "authorization",
+      "description": "A scoped API key (admin:users) is refused: the scope does not cover invitations.",
+      "principal": {
+        "class": "api_key",
+        "scopes": [
+          "admin:users"
+        ]
+      },
+      "request": {
+        "path": "/api/v1/admin/invitations/"
+      },
+      "expect": {
+        "status": 403,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "forbidden"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "pointer": "/error",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "equals",
+            "value": "API key scopes do not permit this route"
+          }
+        ]
+      },
+      "v2_expectation": null
+    }
+  },
+  "me.api_key": {
+    "method": "GET",
+    "path": "/api/v1/auth/me",
+    "scenario": {
+      "id": "me.api_key",
+      "category": "authorization",
+      "description": "An unscoped API key passes the auth middleware but the handler re-parses the Authorization header as a JWT and refuses it with 401.",
+      "principal": {
+        "class": "api_key"
+      },
+      "request": {
+        "path": "/api/v1/auth/me"
+      },
+      "expect": {
+        "status": 401,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "unauthorized"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "pointer": "/error",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "equals",
+            "value": "Invalid or missing authentication token"
+          }
+        ]
+      },
+      "notes": "Accidental: /auth/me, /auth/logout, /auth/sessions, and /auth/impersonation/end call extractClaims on the raw header instead of reading the middleware's claims, so API keys are rejected after authenticating. Flagged for the section PR.",
+      "v2_expectation": null
+    }
+  },
+  "me.scoped_api_key": {
+    "method": "GET",
+    "path": "/api/v1/auth/me",
+    "scenario": {
+      "id": "me.scoped_api_key",
+      "category": "authorization",
+      "description": "A scoped API key is refused on routes outside its scopes.",
+      "principal": {
+        "class": "api_key",
+        "scopes": [
+          "admin:users"
+        ]
+      },
+      "request": {
+        "path": "/api/v1/auth/me"
+      },
+      "expect": {
+        "status": 403,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "forbidden"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "pointer": "/error",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "equals",
+            "value": "API key scopes do not permit this route"
+          }
+        ]
+      },
+      "v2_expectation": null
+    }
+  },
+  "logout.api_key": {
+    "method": "POST",
+    "path": "/api/v1/auth/logout",
+    "scenario": {
+      "id": "logout.api_key",
+      "category": "authorization",
+      "description": "An API key is refused by the handler's JWT re-parse with 401 even though the middleware admitted it.",
+      "principal": {
+        "class": "api_key"
+      },
+      "request": {
+        "path": "/api/v1/auth/logout"
+      },
+      "expect": {
+        "status": 401,
+        "headers": [
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "unauthorized"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message"
+            ]
+          },
+          {
+            "pointer": "/error",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "type",
+            "value": "string"
+          },
+          {
+            "pointer": "/message",
+            "op": "equals",
+            "value": "Invalid or missing authentication token"
+          }
+        ]
+      },
+      "notes": "Same extractClaims re-parse as /auth/me; flagged for the section PR.",
+      "v2_expectation": null
+    }
+  }
+}

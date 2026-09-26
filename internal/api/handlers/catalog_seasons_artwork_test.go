@@ -13,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -25,19 +26,13 @@ type seasonsNoProbeStore struct {
 	signs int
 }
 
-func (s *seasonsNoProbeStore) Bucket() string             { return "test" }
-func (s *seasonsNoProbeStore) UsesExternalDelivery() bool { return true }
-func (s *seasonsNoProbeStore) PresignGetURL(_ context.Context, _, key string, _ time.Duration) (string, error) {
-	s.signs++
-	return "https://images.example/" + key, nil
-}
-func (s *seasonsNoProbeStore) ObjectExists(context.Context, string, string) (bool, error) {
-	s.t.Fatal("metadata probed storage")
-	return false, nil
-}
-func (s *seasonsNoProbeStore) ObjectAvailable(context.Context, string, string) (bool, error) {
-	s.t.Fatal("metadata probed delivery")
-	return false, nil
+func (s *seasonsNoProbeStore) ResolveURLs(_ context.Context, keys []string) map[string]catalog.ResolvedImageURL {
+	out := make(map[string]catalog.ResolvedImageURL, len(keys))
+	for _, key := range keys {
+		s.signs++
+		out[key] = catalog.ResolvedImageURL{URL: "https://images.example/" + key}
+	}
+	return out
 }
 
 func TestSeasonListArtworkHTTP(t *testing.T) {
@@ -90,7 +85,7 @@ func TestSeasonListArtworkHTTP(t *testing.T) {
 				resolver := metadata.NewPluginImageResolver()
 				t.Cleanup(resolver.Close)
 				storage := &seasonsNoProbeStore{t: t}
-				resolver.SetS3Presigner(storage, time.Hour)
+				resolver.SetArtworkResolver(storage)
 				resolver.SetArtworkAvailabilityReader(metadata.NewArtworkDeliveryStore(pool, "test", true))
 				svc := catalog.NewDetailService(itemsRepo, episodes, seasons, catalog.NewPersonRepository(pool), scanner.NewFileRepository(pool))
 				svc.SetImageResolver(resolver)
@@ -124,6 +119,36 @@ func TestSeasonListArtworkHTTP(t *testing.T) {
 					}
 					result.Seasons[i].PosterURL = ""
 					result.Seasons[i].PosterThumbhash = ""
+				}
+				// The typed v2 seam must use the same artwork switch as the HTTP handler.
+				storage.signs = 0
+				// Use a fresh resolver so the HTTP request's signature cache cannot mask work.
+				typedResolver := metadata.NewPluginImageResolver()
+				t.Cleanup(typedResolver.Close)
+				typedResolver.SetArtworkResolver(storage)
+				typedResolver.SetArtworkAvailabilityReader(metadata.NewArtworkDeliveryStore(pool, "test", true))
+				svc.SetImageResolver(typedResolver)
+				viewer := ItemViewer{Access: catalog.AccessFilter{ImageSize: imagesize.Size(size)}}
+				typed, err := NewCatalogResourceHandler(items).SeriesSeasons(ctx, viewer, prefix, include == "true")
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantSigns := 0
+				if include == "true" {
+					wantSigns = 37
+				}
+				if storage.signs != wantSigns {
+					t.Fatalf("typed seam signed %d posters, want %d", storage.signs, wantSigns)
+				}
+				for i := range typed {
+					if include == "false" && (typed[i].PosterURL != "" || typed[i].PosterThumbhash != "") {
+						t.Fatal("typed seam retained artwork")
+					}
+					typed[i].PosterURL = ""
+					typed[i].PosterThumbhash = ""
+				}
+				if !reflect.DeepEqual(result.Seasons, typed) {
+					t.Fatal("typed seam changed non-artwork metadata")
 				}
 				if baseline == nil {
 					baseline = result.Seasons

@@ -1,3 +1,4 @@
+import { JobPageControls } from "@/components/admin/JobPageControls";
 import type { AdminJob } from "@/api/types";
 import { useAllAdminJobs } from "@/hooks/queries/admin/libraries";
 import { Badge } from "@/components/ui/badge";
@@ -176,6 +177,7 @@ export default function AdminJobHistory() {
           })
         )}
       </div>
+      <JobPageControls query={jobsQuery} />
     </div>
   );
 }

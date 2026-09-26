@@ -9,6 +9,7 @@ import {
   Loader2,
   Package,
   Plus,
+  RotateCw,
   Search,
   Settings2,
   Shield,
@@ -72,6 +73,7 @@ import {
   useDeletePluginRepository,
   useInstallPlugin,
   usePluginUpload,
+  useRestartPluginInstallation,
   useSavePluginAuthBinding,
   useSavePluginConfig,
   useSavePluginTaskBinding,
@@ -83,6 +85,7 @@ import {
 import { useTask } from "@/hooks/queries/admin/tasks";
 import { adminKeys } from "@/hooks/queries/keys";
 import { pluginRouteHref } from "@/lib/pluginRouteHref";
+import { pluginStatusIndicator } from "@/lib/pluginStatusIndicator";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 
 const INSTALLED_PAGE_SIZE = 10;
@@ -283,6 +286,7 @@ function InstalledPluginCard({
   const updateInstallation = useUpdatePluginInstallation();
   const deleteInstallation = useDeletePluginInstallation();
   const applyUpdate = useApplyPluginUpdate();
+  const restartInstallation = useRestartPluginInstallation();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const capabilities = installation.capabilities ?? [];
   const presentation = installation.presentation ?? catalogEntry?.presentation;
@@ -291,6 +295,7 @@ function InstalledPluginCard({
   const adminRoutes = routes.filter(
     (route) => route.navigable && route.navigation_kind === "admin",
   );
+  const status = pluginStatusIndicator(installation);
 
   return (
     <>
@@ -352,12 +357,10 @@ function InstalledPluginCard({
                     )}
                   </Button>
                 )}
-                <span className="flex items-center gap-1.5">
-                  <span
-                    className={`inline-block h-2 w-2 rounded-full ${installation.enabled ? "bg-success" : "bg-muted-foreground"}`}
-                  />
+                <span className="flex items-center gap-1.5" title={status.title}>
+                  <span className={`inline-block h-2 w-2 rounded-full ${status.dotClass}`} />
                   <span className="text-muted-foreground text-[11px] font-medium">
-                    {installation.enabled ? "Active" : "Inactive"}
+                    {status.label}
                   </span>
                 </span>
               </div>
@@ -385,6 +388,24 @@ function InstalledPluginCard({
 
           {/* Right: actions */}
           <div className="flex shrink-0 flex-wrap items-center gap-2 sm:ml-4">
+            {installation.runtime.resident && installation.enabled ? (
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label={`Restart ${pluginDisplayName(installation.plugin_id, presentation)}`}
+                disabled={
+                  restartInstallation.isPending || installation.runtime.state === "starting"
+                }
+                onClick={() => restartInstallation.mutate(installation.id)}
+              >
+                {restartInstallation.isPending ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RotateCw className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Restart
+              </Button>
+            ) : null}
             {adminRoutes.length > 0 ? (
               <>
                 {adminRoutes.map((route) => {
@@ -792,7 +813,11 @@ function CatalogCard({ entry, isInstalled }: { entry: PluginCatalogEntry; isInst
   );
 }
 
-function CommunityCatalogControl({ settings }: { settings: PluginCatalogSettings }) {
+function CommunityCatalogControl({
+  settings,
+}: {
+  settings: PluginCatalogSettings & { etag: string };
+}) {
   const updateSettings = useUpdatePluginCatalogSettings();
   const [confirmDisable, setConfirmDisable] = useState(false);
 
@@ -801,11 +826,11 @@ function CommunityCatalogControl({ settings }: { settings: PluginCatalogSettings
       setConfirmDisable(true);
       return;
     }
-    updateSettings.mutate({ include_approved_community_plugins: include });
+    updateSettings.mutate({ include_approved_community_plugins: include, etag: settings.etag });
   }
 
   function disableCommunityCatalog() {
-    updateSettings.mutate({ include_approved_community_plugins: false });
+    updateSettings.mutate({ include_approved_community_plugins: false, etag: settings.etag });
     setConfirmDisable(false);
   }
 
@@ -870,7 +895,7 @@ function CommunityCatalogControl({ settings }: { settings: PluginCatalogSettings
 /* ─── Repository management ─────────────────────────────────────── */
 
 function RepositorySection() {
-  const { repositories } = useAdminPlugins();
+  const { repositories, repositoriesError } = useAdminPlugins();
   const createRepository = useCreatePluginRepository();
   const updateRepository = useUpdatePluginRepository();
   const deleteRepository = useDeletePluginRepository();
@@ -904,6 +929,12 @@ function RepositorySection() {
           {showForm ? "Cancel" : "Add"}
         </Button>
       </div>
+
+      {repositoriesError && (
+        <p role="alert" className="text-destructive text-sm">
+          Failed to load plugin repositories.
+        </p>
+      )}
 
       {showForm && (
         <form

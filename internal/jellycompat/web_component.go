@@ -28,11 +28,15 @@ import (
 const (
 	DefaultWebSourceURL = "https://github.com/jellyfin/jellyfin-web.git"
 
-	webMetadataFile = "SILO-JELLYFIN-WEB.json"
-	webSourceFile   = "SILO-JELLYFIN-WEB-SOURCE.txt"
-	webInstallLock  = ".installing"
-	webLastError    = ".last-error"
-	webTempMarker   = ".silo-jellyfin-web-temp"
+	webMetadataFile          = "SILO-JELLYFIN-WEB.json"
+	webSourceFile            = "SILO-JELLYFIN-WEB-SOURCE.txt"
+	webInstallLock           = ".installing"
+	webLastError             = ".last-error"
+	webTempMarker            = ".silo-jellyfin-web-temp"
+	webSeekReanchorPatch     = "silo-seek-reanchor-v1"
+	webPlaybackManagerSource = "src/components/playback/playbackmanager.js"
+	webHTMLVideoPlayerSource = "src/plugins/htmlVideoPlayer/plugin.js"
+	webNPMExecutable         = "npm"
 
 	webMalformedLockGrace = 2 * time.Minute
 	webOperationStaleAge  = 90 * time.Minute
@@ -42,7 +46,9 @@ var (
 	ErrWebComponentOperationActive = errors.New("jellyfin web operation already running")
 	ErrWebInstallerUnavailable     = errors.New("jellyfin web installer prerequisites are missing")
 
-	webVersionPattern = regexp.MustCompile(`^[0-9]+[.][0-9]+[.][0-9]+(?:[-.][A-Za-z0-9]+)*$`)
+	// Upstream tags use both three-part (v10.11.6) and two-part (v12.1)
+	// versions; the version is kept as written so it maps back to its tag.
+	webVersionPattern = regexp.MustCompile(`^[0-9]+[.][0-9]+(?:[.][0-9]+)?(?:[-.][A-Za-z0-9]+)*$`)
 	webOperationsMu   sync.Mutex
 	webOperations     = map[string]*WebComponentOperationStatus{}
 )
@@ -87,16 +93,17 @@ const (
 )
 
 type WebComponentMetadata struct {
-	Component    string `json:"component"`
-	SourceURL    string `json:"source_url"`
-	Version      string `json:"version"`
-	Tag          string `json:"tag"`
-	CommitSHA    string `json:"commit_sha"`
-	Checksum     string `json:"checksum"`
-	BuildCommand string `json:"build_command"`
-	InstalledAt  string `json:"installed_at"`
-	Modified     bool   `json:"modified"`
-	License      string `json:"license"`
+	Component    string   `json:"component"`
+	SourceURL    string   `json:"source_url"`
+	Version      string   `json:"version"`
+	Tag          string   `json:"tag"`
+	CommitSHA    string   `json:"commit_sha"`
+	Checksum     string   `json:"checksum"`
+	BuildCommand string   `json:"build_command"`
+	InstalledAt  string   `json:"installed_at"`
+	Modified     bool     `json:"modified"`
+	Patches      []string `json:"patches,omitempty"`
+	License      string   `json:"license"`
 }
 
 type WebInstallerPrerequisite struct {
@@ -224,7 +231,7 @@ func SelectCompatibleWebVersion(apiVersion string, available []string) (string, 
 		if !ok {
 			continue
 		}
-		byVersion[version.String()] = version
+		byVersion[version.text] = version
 	}
 	if len(byVersion) == 0 {
 		return "", errors.New("no stable Jellyfin Web versions found")
@@ -299,35 +306,35 @@ func parseRemoteWebReleaseVersions(r io.Reader) ([]string, error) {
 	return versions, nil
 }
 
+// webStableVersion is a release version without a prerelease suffix. A
+// two-part version such as 12.1 compares as 12.1.0; text keeps the original
+// form because it names the upstream tag.
 type webStableVersion struct {
 	major int
 	minor int
 	patch int
+	text  string
 }
 
 func parseStableWebVersion(raw string) (webStableVersion, bool) {
 	version := normalizeWebVersion(raw)
 	parts := strings.Split(version, ".")
-	if len(parts) != 3 {
+	if len(parts) != 2 && len(parts) != 3 {
 		return webStableVersion{}, false
 	}
-	major, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return webStableVersion{}, false
+	numbers := make([]int, 3)
+	for i, part := range parts {
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			return webStableVersion{}, false
+		}
+		numbers[i] = n
 	}
-	minor, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return webStableVersion{}, false
-	}
-	patch, err := strconv.Atoi(parts[2])
-	if err != nil {
-		return webStableVersion{}, false
-	}
-	return webStableVersion{major: major, minor: minor, patch: patch}, true
+	return webStableVersion{major: numbers[0], minor: numbers[1], patch: numbers[2], text: version}, true
 }
 
 func (v webStableVersion) String() string {
-	return fmt.Sprintf("%d.%d.%d", v.major, v.minor, v.patch)
+	return v.text
 }
 
 func compareStableWebVersionMinor(left, right webStableVersion) int {
@@ -341,7 +348,11 @@ func compareStableWebVersions(left, right webStableVersion) int {
 	if diff := compareStableWebVersionMinor(left, right); diff != 0 {
 		return diff
 	}
-	return left.patch - right.patch
+	if left.patch != right.patch {
+		return left.patch - right.patch
+	}
+	// 12.1 and 12.1.0 are equal releases; order them deterministically.
+	return strings.Compare(left.text, right.text)
 }
 
 func WebComponentStatusForConfig(cfg *config.Config, settings map[string]string) WebComponentStatus {
@@ -551,14 +562,23 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
+	if err := patchManagedWebSources(srcDir); err != nil {
+		writeWebInstallError(root, err)
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
+	}
+	npm, err := webInstallNPMCommand(srcDir)
+	if err != nil {
+		writeWebInstallError(root, err)
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
+	}
 	reportProgress(WebComponentOperationInstalling, 35, "Installing Jellyfin Web dependencies")
-	if err := run(ctx, srcDir, []string{"npm", "ci"}, ""); err != nil {
+	if err := run(ctx, srcDir, npm.args("ci"), ""); err != nil {
 		err = fmt.Errorf("install jellyfin-web dependencies: %w", err)
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	reportProgress(WebComponentOperationBuilding, 60, "Building Jellyfin Web production assets")
-	if err := run(ctx, srcDir, []string{"npm", "run", "build:production"}, ""); err != nil {
+	if err := run(ctx, srcDir, npm.args("run", "build:production"), ""); err != nil {
 		err = fmt.Errorf("build jellyfin-web production bundle: %w", err)
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
@@ -589,9 +609,10 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 		Tag:          tag,
 		CommitSHA:    strings.TrimSpace(commitSHA),
 		Checksum:     "sha256:" + checksum,
-		BuildCommand: "npm ci && npm run build:production",
+		BuildCommand: npm.display("ci") + " && " + npm.display("run", "build:production"),
 		InstalledAt:  now().UTC().Format(time.RFC3339),
-		Modified:     false,
+		Modified:     true,
+		Patches:      []string{webSeekReanchorPatch},
 		License:      "GPL-2.0",
 	}
 	if err := writeWebMetadata(stagedDir, metadata); err != nil {
@@ -866,6 +887,92 @@ func currentLinkTargetsManagedWebRelease(root string) bool {
 	return webComponentDirectoryReady(targetAbs)
 }
 
+var (
+	// webNPMComparatorPattern matches one comparator of an npm semver range,
+	// such as >=9.6.4, <11, ^10.x, or 11.0.0-rc.1.
+	webNPMComparatorPattern = regexp.MustCompile(`^(?:<=|>=|<|>|=|~|\^)?v?(?:[0-9]+|[xX*])(?:\.(?:[0-9]+|[xX*])){0,2}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
+	webNPMOperatorSpacing   = regexp.MustCompile(`(<=|>=|<|>|=|~|\^)\s+`)
+)
+
+// validWebNPMRange reports whether value is shaped like an npm semver range:
+// comparator sets joined by ||, with optional hyphen ranges. It rejects
+// dist-tags and file, Git, or URL specs, so npm exec can only resolve a
+// registry npm release by version. npm still rejects ranges that pass this
+// shape check but are otherwise invalid.
+func validWebNPMRange(value string) bool {
+	for _, set := range strings.Split(webNPMOperatorSpacing.ReplaceAllString(value, "$1"), "||") {
+		// An empty comparator set matches any version, as in npm.
+		fields := strings.Fields(set)
+		for i, field := range fields {
+			if field == "-" && i > 0 && i < len(fields)-1 {
+				continue
+			}
+			if !webNPMComparatorPattern.MatchString(field) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// webNPMCommand is the npm invocation for one Jellyfin Web checkout.
+type webNPMCommand struct {
+	// packageSpec, when set, runs that npm release through npm exec.
+	packageSpec string
+}
+
+// webInstallNPMCommand selects the npm release the checkout declares in
+// engines.npm. Upstream enforces it with engine-strict, and releases disagree:
+// 10.11.x requires npm below 11 while 12.x requires npm 11 or later, so the
+// host npm alone cannot build both. A checkout without the field uses the host
+// npm. Node.js is not switched: npm ci enforces engines.node against the host
+// Node.js and reports the required and actual versions in the install error.
+func webInstallNPMCommand(srcDir string) (webNPMCommand, error) {
+	data, err := os.ReadFile(filepath.Join(srcDir, "package.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return webNPMCommand{}, nil
+	}
+	if err != nil {
+		return webNPMCommand{}, fmt.Errorf("read jellyfin-web package.json: %w", err)
+	}
+	var pkg struct {
+		Engines struct {
+			NPM string `json:"npm"`
+		} `json:"engines"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return webNPMCommand{}, fmt.Errorf("parse jellyfin-web package.json: %w", err)
+	}
+	npmRange := strings.TrimSpace(pkg.Engines.NPM)
+	if npmRange == "" {
+		return webNPMCommand{}, nil
+	}
+	if !validWebNPMRange(npmRange) {
+		return webNPMCommand{}, fmt.Errorf("unsupported jellyfin-web npm engine range %q", npmRange)
+	}
+	return webNPMCommand{packageSpec: "npm@" + npmRange}, nil
+}
+
+func (c webNPMCommand) args(npmArgs ...string) []string {
+	argv := []string{webNPMExecutable}
+	if c.packageSpec != "" {
+		argv = append(argv, "exec", "--yes", "--package="+c.packageSpec, "--", webNPMExecutable)
+	}
+	return append(argv, npmArgs...)
+}
+
+// display renders the command for provenance, quoting the package spec
+// because ranges contain spaces and shell operators.
+func (c webNPMCommand) display(npmArgs ...string) string {
+	argv := c.args(npmArgs...)
+	for i, arg := range argv {
+		if strings.HasPrefix(arg, "--package=") {
+			argv[i] = "'" + arg + "'"
+		}
+	}
+	return strings.Join(argv, " ")
+}
+
 func normalizeRequiredWebVersion(version string) (string, error) {
 	normalized := normalizeWebVersion(version)
 	if normalized == "" {
@@ -897,7 +1004,7 @@ func normalizeWebSourceURL(raw string) (string, error) {
 func CheckWebInstallerPrerequisites() []WebInstallerPrerequisite {
 	prereqs := []WebInstallerPrerequisite{
 		{Name: "Git", Command: "git"},
-		{Name: "npm", Command: "npm"},
+		{Name: "npm", Command: webNPMExecutable},
 	}
 	for i := range prereqs {
 		path, err := exec.LookPath(prereqs[i].Command)
@@ -1478,6 +1585,67 @@ func writeWebMetadata(dir string, metadata WebComponentMetadata) error {
 	return os.WriteFile(filepath.Join(dir, webMetadataFile), data, 0o644)
 }
 
+// patchManagedWebSources changes upstream source before webpack builds it. Exact,
+// unique anchors fail closed on incompatible revisions rather than installing a
+// bundle that advertises the extension without implementing the seek decision.
+func patchManagedWebSources(root string) error {
+	patches := []struct{ path, before, after string }{
+		{
+			webPlaybackManagerSource,
+			"    const query = {\n        UserId: apiClient.getCurrentUserId(),\n        StartTimeTicks: options.startPosition || 0\n    };",
+			"    const query = {\n        SiloSeekReanchor: true,\n        UserId: apiClient.getCurrentUserId(),\n        StartTimeTicks: options.startPosition || 0\n    };",
+		},
+		{
+			webPlaybackManagerSource,
+			"        function changeStream(player, ticks, params) {\n            if (canPlayerSeek(player) && params == null) {",
+			"        function changeStream(player, ticks, params) {\n            if (canPlayerSeek(player) && params == null\n                && (!self.currentMediaSource(player)?.SiloSeekReanchor\n                    || (ticks >= (getPlayerData(player).streamInfo.playerStartPositionTicks || 0)\n                        && typeof player.canSeekTo === 'function' && player.canSeekTo(ticks / 10000)))) {",
+		},
+		{
+			webHTMLVideoPlayerSource,
+			"    seekable() {\n        const mediaElement = this.#mediaElement;",
+			`    canSeekTo(milliseconds) {
+        if (!Number.isFinite(milliseconds) || milliseconds < 0) {
+            return false;
+        }
+        const ranges = this.#mediaElement?.seekable;
+        const seconds = milliseconds / 1000;
+        for (let i = 0; ranges && i < ranges.length; i++) {
+            if (seconds >= ranges.start(i) && seconds <= ranges.end(i)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    seekable() {
+        const mediaElement = this.#mediaElement;`,
+		},
+	}
+	// Validate every replacement before touching either source file.
+	updated := map[string]string{}
+	for _, patch := range patches {
+		path := filepath.Join(root, filepath.FromSlash(patch.path))
+		source, loaded := updated[path]
+		if !loaded {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("apply Jellyfin Web %s to %s: %w", webSeekReanchorPatch, patch.path, err)
+			}
+			source = string(data)
+		}
+		if strings.Count(source, patch.before) != 1 {
+			return fmt.Errorf("apply Jellyfin Web %s: incompatible upstream source %s (expected one matching anchor)", webSeekReanchorPatch, patch.path)
+		}
+		updated[path] = strings.Replace(source, patch.before, patch.after, 1)
+	}
+	for path, source := range updated {
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			return fmt.Errorf("write patched Jellyfin Web source: %w", err)
+		}
+	}
+	return nil
+}
+
 func readWebMetadata(dir string) (WebComponentMetadata, error) {
 	var metadata WebComponentMetadata
 	data, err := os.ReadFile(filepath.Join(dir, webMetadataFile))
@@ -1499,11 +1667,12 @@ Commit: %s
 License: %s
 Build: %s
 Modified: %t
+Patches: %s
 Checksum: %s
 
 This component is separate from Silo's AGPL-licensed server code. It is installed only
 when an administrator explicitly requests Jellyfin-compatible web UI assets.
-`, metadata.SourceURL, metadata.Tag, metadata.CommitSHA, metadata.License, metadata.BuildCommand, metadata.Modified, metadata.Checksum)
+`, metadata.SourceURL, metadata.Tag, metadata.CommitSHA, metadata.License, metadata.BuildCommand, metadata.Modified, strings.Join(metadata.Patches, ", "), metadata.Checksum)
 	return os.WriteFile(filepath.Join(dir, webSourceFile), []byte(body), 0o644)
 }
 

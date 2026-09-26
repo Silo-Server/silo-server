@@ -208,12 +208,15 @@ func (t *WhisperTranscriber) transcribeIncremental(
 		return nil
 	}
 
-	firstPassDone := done
+	firstPassHasAudio := false
 	firstPassOffset := audioOffsetForIncrementalPass(pivot, startOffset)
 	if err := t.runIncrementalPass(ctx, req, dir, ffmpegPath, pivot, chunkSeconds, func(chunk playback.AudioChunk) error {
+		firstPassHasAudio = true
 		return process(chunk, firstPassOffset)
 	}); err != nil {
-		if ctx.Err() != nil || pivot == 0 || done != firstPassDone {
+		// Only retry extraction from the beginning when seeking produced no
+		// audio. A provider failure after extraction will fail at either position.
+		if ctx.Err() != nil || pivot == 0 || firstPassHasAudio {
 			return nil, "", err
 		}
 	}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
-import { playerFetch } from "../player-fetch";
+import { playerV2 } from "../player-v2";
+import { markerUpdateToV2 } from "../marker-wire";
 import type { MarkerDraft, MarkerKind, PlayerTimeRange } from "../types";
 
 /** Edit order shown in the panel: chronological-ish within an episode. */
@@ -196,9 +197,9 @@ export function useMarkerEditor({
     setSaving(true);
     setError(null);
     try {
-      await playerFetch(config, `/markers/files/${fileId}`, {
-        method: "PUT",
-        body: JSON.stringify(body),
+      await playerV2(config, "PUT /api/v2/markers/files/{file_id}", {
+        path: { file_id: String(fileId) },
+        body: markerUpdateToV2(body),
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save markers");

@@ -6,17 +6,25 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var (
 	// ErrSubtitleNotFound indicates the requested subtitle record does not exist.
-	ErrSubtitleNotFound = errors.New("subtitle not found")
-	// ErrSubtitleLanguageConflict indicates another subtitle already uses the target S3 key.
+	ErrSubtitleNotFound  = errors.New("subtitle not found")
+	ErrSubtitleDuplicate = errors.New("subtitle content already stored")
+	// ErrSubtitleLanguageConflict indicates the target language already has identical content.
 	ErrSubtitleLanguageConflict = errors.New("subtitle with this language already exists for this file")
+	// ErrUnknownProvider reports a provider key no registered subtitle provider
+	// answers to. It is a client input problem, not an upstream failure, so the
+	// API layer answers 404 instead of 500.
+	ErrUnknownProvider = errors.New("unknown subtitle provider")
 )
 
 // Manager orchestrates subtitle search and download across providers.
@@ -24,17 +32,15 @@ type Manager struct {
 	mu        sync.RWMutex
 	providers map[string]Provider
 	repo      Repository
-	s3        S3Client
-	s3Bucket  string
+	blobs     BlobStore
 }
 
 // NewManager creates a new subtitle manager.
-func NewManager(repo Repository, s3 S3Client, s3Bucket string) *Manager {
+func NewManager(repo Repository, blobs BlobStore) *Manager {
 	return &Manager{
 		providers: make(map[string]Provider),
 		repo:      repo,
-		s3:        s3,
-		s3Bucket:  s3Bucket,
+		blobs:     blobs,
 	}
 }
 
@@ -72,6 +78,7 @@ func (m *Manager) ProviderNames() []string {
 
 // Search fans out to all registered providers concurrently.
 func (m *Manager) Search(ctx context.Context, req SearchRequest) (*SearchResponse, error) {
+	req.Languages = NormalizeBridgeSearchLanguages(req.Languages)
 	m.mu.RLock()
 	providers := make([]Provider, 0, len(m.providers))
 	for _, p := range m.providers {
@@ -124,7 +131,12 @@ func (m *Manager) Search(ctx context.Context, req SearchRequest) (*SearchRespons
 			continue
 		}
 		for i := range pr.results {
-			pr.results[i].Score = ScoreResult(pr.results[i], req)
+			// Provider adapters own protocol-to-language conversion. Keep the
+			// manager payload untouched so the frozen v1 bridge response remains
+			// compatible with legacy providers; v2 canonicalizes its projection.
+			scored := pr.results[i]
+			scored.Language = NormalizeProviderLanguage(scored.Provider, scored.Language)
+			pr.results[i].Score = ScoreResult(scored, req)
 		}
 		resp.Results = append(resp.Results, pr.results...)
 	}
@@ -133,6 +145,21 @@ func (m *Manager) Search(ctx context.Context, req SearchRequest) (*SearchRespons
 		return resp.Results[i].Score > resp.Results[j].Score
 	})
 
+	return resp, nil
+}
+
+// SearchBridge returns the legacy provider language payload for the frozen v1
+// bridge while sharing the canonical search and scoring path.
+func (m *Manager) SearchBridge(ctx context.Context, req SearchRequest) (*SearchResponse, error) {
+	resp, err := m.Search(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	for i := range resp.Results {
+		if resp.Results[i].rawLanguage != "" {
+			resp.Results[i].Language = resp.Results[i].rawLanguage
+		}
+	}
 	return resp, nil
 }
 
@@ -150,6 +177,8 @@ type DownloadRequest struct {
 
 // StoreSubtitleRequest contains metadata and content for persisting a subtitle.
 type StoreSubtitleRequest struct {
+	// Publication requires atomic AI job fencing; nil is ordinary subtitle storage.
+	Publication     *AIJobPublication
 	MediaFileID     int
 	UserID          *int
 	Provider        string
@@ -173,13 +202,13 @@ type UploadRequest struct {
 	Data               []byte
 }
 
-// Download fetches a subtitle from a provider and stores it in S3.
+// Download fetches a subtitle from a provider and stores its bytes.
 func (m *Manager) Download(ctx context.Context, req DownloadRequest) (*DownloadedSubtitle, error) {
 	m.mu.RLock()
 	prov, ok := m.providers[req.ProviderName]
 	m.mu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("unknown provider: %s", req.ProviderName)
+		return nil, fmt.Errorf("%w: %s", ErrUnknownProvider, req.ProviderName)
 	}
 
 	data, format, err := prov.Download(ctx, req.SubtitleID)
@@ -200,7 +229,7 @@ func (m *Manager) Download(ctx context.Context, req DownloadRequest) (*Downloade
 	})
 }
 
-// Upload stores a user-provided subtitle file in S3.
+// Upload stores a user-provided subtitle file.
 func (m *Manager) Upload(ctx context.Context, req UploadRequest) (*DownloadedSubtitle, error) {
 	if len(req.Data) == 0 {
 		return nil, fmt.Errorf("empty subtitle file")
@@ -249,43 +278,78 @@ type SubtitleMetadataPatch struct {
 	HearingImpaired *bool
 }
 
-// StoreSubtitle uploads subtitle content to S3 and records it in the database.
-func (m *Manager) StoreSubtitle(ctx context.Context, req StoreSubtitleRequest) (*DownloadedSubtitle, error) {
-	s3Key := buildSubtitleS3Key(req.MediaFileID, req.Language, req.Provider, req.Format, req.Data)
+// SubtitleRevisionConflict reports the current row after a guarded write loses a race.
+type SubtitleRevisionConflict struct{ Current *DownloadedSubtitle }
 
-	existing, err := m.repo.GetDownloadedSubtitleByS3Key(ctx, s3Key)
+func (*SubtitleRevisionConflict) Error() string { return "subtitle revision changed" }
+
+func subtitleContentHash(data []byte) string { return fmt.Sprintf("%x", sha256.Sum256(data)) }
+
+// StoreSubtitle deduplicates logical content while every attempted publication
+// owns a fresh physical object key. A failed or concurrent writer must never
+// delete another publication's content.
+func (m *Manager) StoreSubtitle(ctx context.Context, req StoreSubtitleRequest) (*DownloadedSubtitle, error) {
+	req.Language = NormalizeProviderLanguage(req.Provider, req.Language)
+	if req.Publication != nil {
+		return m.storeAISubtitle(ctx, req)
+	}
+	sub := &DownloadedSubtitle{MediaFileID: req.MediaFileID, Provider: req.Provider, Language: req.Language, Format: req.Format,
+		ReleaseName: req.ReleaseName, Score: req.Score, HearingImpaired: req.HearingImpaired, DownloadedBy: req.UserID, ContentSHA256: subtitleContentHash(req.Data)}
+	existing, err := m.repo.GetDownloadedSubtitleByContent(ctx, sub)
 	if err != nil {
 		return nil, fmt.Errorf("check duplicate: %w", err)
 	}
 	if existing != nil {
 		return existing, nil
 	}
-
-	if err := m.s3.PutObject(ctx, m.s3Bucket, s3Key, req.Data); err != nil {
-		return nil, fmt.Errorf("upload to s3: %w", err)
+	// Legacy keys retain their old short digest. Verify actual bytes before
+	// treating one as an identical subtitle; a 32-bit prefix is not identity.
+	legacy, err := m.repo.GetDownloadedSubtitleByS3Key(ctx, buildSubtitleS3Key(req.MediaFileID, req.Language, req.Provider, req.Format, req.Data))
+	if err != nil {
+		return nil, fmt.Errorf("check legacy duplicate: %w", err)
 	}
-
-	sub := &DownloadedSubtitle{
-		MediaFileID:     req.MediaFileID,
-		Provider:        req.Provider,
-		Language:        req.Language,
-		Format:          req.Format,
-		ReleaseName:     req.ReleaseName,
-		S3Key:           s3Key,
-		Score:           req.Score,
-		HearingImpaired: req.HearingImpaired,
-		DownloadedBy:    req.UserID,
+	if legacy != nil && legacy.Language == req.Language {
+		data, err := m.blobs.Get(ctx, legacy.S3Key)
+		if err != nil {
+			return nil, fmt.Errorf("verify legacy subtitle: %w", err)
+		}
+		if subtitleContentHash(data) == sub.ContentSHA256 {
+			return legacy, nil
+		}
+	}
+	sub.S3Key = fmt.Sprintf("subtitles/%d/%s.%s", req.MediaFileID, uuid.NewString(), req.Format)
+	if err := m.blobs.Put(ctx, sub.S3Key, req.Data); err != nil {
+		return nil, fmt.Errorf("store subtitle object: %w", err)
 	}
 	if err := m.repo.InsertDownloadedSubtitle(ctx, sub); err != nil {
-		_ = m.s3.DeleteObject(ctx, m.s3Bucket, s3Key)
+		if errors.Is(err, ErrSubtitleDuplicate) {
+			// DO NOTHING confirms this candidate did not become a stored row.
+			m.cleanupSubtitleObject(ctx, sub.S3Key)
+			existing, lookupErr := m.repo.GetDownloadedSubtitleByContent(ctx, sub)
+			if lookupErr != nil {
+				return nil, lookupErr
+			}
+			if existing == nil {
+				return nil, ErrSubtitleNotFound
+			}
+			return existing, nil
+		}
+		// A lost database reply may conceal a committed row. Keep its unique
+		// object rather than deleting content that may already be published.
+		slog.ErrorContext(ctx, "subtitle publication outcome uncertain; retain object for reconciliation", "component", "subtitles", "object_key", sub.S3Key, "error", err)
 		return nil, fmt.Errorf("insert subtitle record: %w", err)
 	}
-
 	return sub, nil
 }
 
-// UpdateDownloadedSubtitle updates subtitle metadata and migrates S3 keys when language changes.
+// UpdateDownloadedSubtitle changes metadata without moving immutable content.
 func (m *Manager) UpdateDownloadedSubtitle(ctx context.Context, id int, patch SubtitleMetadataPatch) (*DownloadedSubtitle, error) {
+	return m.UpdateDownloadedSubtitleWithRevision(ctx, id, patch, nil)
+}
+
+// UpdateDownloadedSubtitleWithRevision atomically merges only the supplied
+// fields. A nonnil revision requires the same durable row version at the write.
+func (m *Manager) UpdateDownloadedSubtitleWithRevision(ctx context.Context, id int, patch SubtitleMetadataPatch, revision *int64) (*DownloadedSubtitle, error) {
 	sub, err := m.repo.GetDownloadedSubtitle(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("lookup subtitle: %w", err)
@@ -293,73 +357,42 @@ func (m *Manager) UpdateDownloadedSubtitle(ctx context.Context, id int, patch Su
 	if sub == nil {
 		return nil, ErrSubtitleNotFound
 	}
-
-	language := sub.Language
+	update := SubtitleMetadataUpdate{HearingImpaired: patch.HearingImpaired, ExpectedRevision: revision}
 	if patch.Language != nil {
-		normalized, err := NormalizeLanguageCode(*patch.Language)
+		language, err := NormalizeLanguageCode(*patch.Language)
 		if err != nil {
 			return nil, err
 		}
-		language = normalized
-	}
-
-	releaseName := sub.ReleaseName
-	if patch.ReleaseName != nil {
-		releaseName = strings.TrimSpace(*patch.ReleaseName)
-	}
-
-	hearingImpaired := sub.HearingImpaired
-	if patch.HearingImpaired != nil {
-		hearingImpaired = *patch.HearingImpaired
-	}
-
-	newS3Key := sub.S3Key
-	if language != sub.Language {
-		data, err := m.s3.GetObject(ctx, m.s3Bucket, sub.S3Key)
-		if err != nil {
-			return nil, fmt.Errorf("fetch subtitle content: %w", err)
-		}
-		newS3Key = buildSubtitleS3Key(sub.MediaFileID, language, sub.Provider, sub.Format, data)
-
-		existing, err := m.repo.GetDownloadedSubtitleByS3Key(ctx, newS3Key)
-		if err != nil {
-			return nil, fmt.Errorf("check duplicate: %w", err)
-		}
-		if existing != nil && existing.ID != id {
-			return nil, ErrSubtitleLanguageConflict
-		}
-
-		if newS3Key != sub.S3Key {
-			if err := m.s3.PutObject(ctx, m.s3Bucket, newS3Key, data); err != nil {
-				return nil, fmt.Errorf("upload migrated subtitle: %w", err)
+		update.Language = new(language)
+		// Backfill legacy content identity from bytes, never from the short key.
+		if sub.ContentSHA256 == "" {
+			data, err := m.blobs.Get(ctx, sub.S3Key)
+			if err != nil {
+				return nil, fmt.Errorf("fetch subtitle content: %w", err)
 			}
+			update.ContentSHA256 = subtitleContentHash(data)
 		}
 	}
-
-	updated, err := m.repo.UpdateDownloadedSubtitle(ctx, id, SubtitleMetadataUpdate{
-		Language:        language,
-		ReleaseName:     releaseName,
-		HearingImpaired: hearingImpaired,
-		S3Key:           newS3Key,
-	})
+	if patch.ReleaseName != nil {
+		update.ReleaseName = new(strings.TrimSpace(*patch.ReleaseName))
+	}
+	updated, err := m.repo.UpdateDownloadedSubtitle(ctx, id, update)
 	if err != nil {
-		if newS3Key != sub.S3Key {
-			_ = m.s3.DeleteObject(ctx, m.s3Bucket, newS3Key)
-		}
 		return nil, err
 	}
 	if updated == nil {
 		return nil, ErrSubtitleNotFound
 	}
-
-	if newS3Key != sub.S3Key {
-		_ = m.s3.DeleteObject(ctx, m.s3Bucket, sub.S3Key)
-	}
-
 	return updated, nil
 }
 
-// GetSubtitleContent loads a downloaded subtitle record and its S3 bytes.
+func (m *Manager) cleanupSubtitleObject(ctx context.Context, key string) {
+	if err := m.blobs.Delete(ctx, key); err != nil {
+		slog.ErrorContext(ctx, "subtitle metadata removed; object cleanup needs reconciliation", "component", "subtitles", "object_key", key, "error", err)
+	}
+}
+
+// GetSubtitleContent loads a downloaded subtitle record and its bytes.
 func (m *Manager) GetSubtitleContent(ctx context.Context, id int) (*DownloadedSubtitle, []byte, error) {
 	sub, err := m.repo.GetDownloadedSubtitle(ctx, id)
 	if err != nil {
@@ -369,7 +402,7 @@ func (m *Manager) GetSubtitleContent(ctx context.Context, id int) (*DownloadedSu
 		return nil, nil, ErrSubtitleNotFound
 	}
 
-	data, err := m.s3.GetObject(ctx, m.s3Bucket, sub.S3Key)
+	data, err := m.blobs.Get(ctx, sub.S3Key)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetch subtitle content: %w", err)
 	}
@@ -382,7 +415,8 @@ func (m *Manager) ListDownloadedSubtitles(ctx context.Context, mediaFileID int) 
 	return m.repo.ListDownloadedSubtitles(ctx, mediaFileID)
 }
 
-// DeleteSubtitle removes a downloaded subtitle from both DB and S3.
+// DeleteSubtitle removes the database row, then attempts object cleanup.
+// Success means metadata is absent; object cleanup is best effort.
 func (m *Manager) DeleteSubtitle(ctx context.Context, id int) error {
 	sub, err := m.repo.DeleteDownloadedSubtitle(ctx, id)
 	if err != nil {
@@ -391,6 +425,6 @@ func (m *Manager) DeleteSubtitle(ctx context.Context, id int) error {
 	if sub == nil {
 		return nil
 	}
-	_ = m.s3.DeleteObject(ctx, m.s3Bucket, sub.S3Key)
+	m.cleanupSubtitleObject(ctx, sub.S3Key)
 	return nil
 }

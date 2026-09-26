@@ -1,8 +1,11 @@
 import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import dismissHomeItemMissingAnchor from "../../../../contracts/api/v2/fixtures/dismiss_home_item_missing_anchor.json";
+import { V2ProblemError } from "@/api/v2/request";
+
 const mocks = vi.hoisted(() => ({
-  api: vi.fn(),
+  fetchWithSession: vi.fn(),
   invalidateMediaSurfaceQueries: vi.fn(),
   removeItemFromHomeSectionCaches: vi.fn(),
   toastError: vi.fn(),
@@ -23,8 +26,23 @@ vi.mock("@tanstack/react-query", async () => {
 });
 
 vi.mock("@/api/client", () => ({
-  api: (...args: unknown[]) => mocks.api(...args),
+  fetchWithSession: (...args: unknown[]) => mocks.fetchWithSession(...args),
+  reportProfileUnverified: vi.fn(),
 }));
+
+function noContent() {
+  return {
+    res: new Response(null, { status: 204 }),
+    requestProfileId: "p-owner",
+    requestProfileToken: null,
+  };
+}
+
+function lastRequest() {
+  const calls = mocks.fetchWithSession.mock.calls;
+  const call = calls[calls.length - 1] as [string, RequestInit] | undefined;
+  return { url: call?.[0], method: call?.[1]?.method, body: call?.[1]?.body };
+}
 
 vi.mock("./mediaSurfaceRefresh", () => ({
   invalidateMediaSurfaceQueries: (...args: unknown[]) =>
@@ -58,7 +76,8 @@ describe("home dismissal query hooks", () => {
   beforeEach(() => {
     queryClient = new QueryClient();
 
-    mocks.api.mockReset();
+    mocks.fetchWithSession.mockReset();
+    mocks.fetchWithSession.mockImplementation(() => Promise.resolve(noContent()));
     mocks.invalidateMediaSurfaceQueries.mockReset();
     mocks.removeItemFromHomeSectionCaches.mockReset();
     mocks.toastError.mockReset();
@@ -83,11 +102,10 @@ describe("home dismissal query hooks", () => {
       progressUpdatedAt: "2026-03-22T18:10:00Z",
     });
 
-    expect(mocks.api).toHaveBeenCalledWith("/home/dismissals/continue_watching/ep-1", {
+    expect(lastRequest()).toEqual({
+      url: "/api/v2/home/dismissals/continue_watching/ep-1",
       method: "PUT",
-      body: JSON.stringify({
-        progress_updated_at: "2026-03-22T18:10:00Z",
-      }),
+      body: JSON.stringify({ progress_updated_at: "2026-03-22T18:10:00Z" }),
     });
   });
 
@@ -101,14 +119,8 @@ describe("home dismissal query hooks", () => {
       progressUpdatedAt: "2026-03-22T18:10:00Z",
     });
 
-    expect(mocks.api).toHaveBeenCalledWith(
-      "/home/dismissals/continue_watching/ebook%201%2Fisbn%3A978",
-      {
-        method: "PUT",
-        body: JSON.stringify({
-          progress_updated_at: "2026-03-22T18:10:00Z",
-        }),
-      },
+    expect(lastRequest().url).toBe(
+      "/api/v2/home/dismissals/continue_watching/ebook%201%2Fisbn%3A978",
     );
   });
 
@@ -122,12 +134,36 @@ describe("home dismissal query hooks", () => {
       seriesId: "series-1",
     });
 
-    expect(mocks.api).toHaveBeenCalledWith("/home/dismissals/next_up/ep-2", {
+    expect(lastRequest()).toEqual({
+      url: "/api/v2/home/dismissals/next_up/ep-2",
       method: "PUT",
-      body: JSON.stringify({
-        series_id: "series-1",
-      }),
+      body: JSON.stringify({ series_id: "series-1" }),
     });
+  });
+
+  it("surfaces a validation problem as a V2ProblemError and reports it through the toast", async () => {
+    mocks.fetchWithSession.mockImplementation(() =>
+      Promise.resolve({
+        res: new Response(JSON.stringify(dismissHomeItemMissingAnchor), {
+          status: 422,
+          headers: { "Content-Type": "application/problem+json" },
+        }),
+        requestProfileId: "p-owner",
+        requestProfileToken: null,
+      }),
+    );
+    useDismissHomeItem();
+    const mutation = latestMutationOptions();
+
+    const error = await mutation
+      .mutationFn({ itemId: "ep-1", surface: "continue_watching" })
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(V2ProblemError);
+    expect((error as V2ProblemError).status).toBe(422);
+    expect((error as V2ProblemError).problemType).toBe("validation_failed");
+    mutation.onError?.(error);
+    expect(mocks.toastError).toHaveBeenCalledWith(dismissHomeItemMissingAnchor.detail);
   });
 
   it("invalidates media surfaces and shows an undo toast on success", async () => {

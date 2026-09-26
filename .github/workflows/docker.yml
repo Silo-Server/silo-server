@@ -1,13 +1,14 @@
 name: Docker Image
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main, apiv2]
   workflow_dispatch:
 
 concurrency:
-  group: docker-${{ github.ref }}
+  group: docker-${{ github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -30,12 +31,14 @@ jobs:
       build_number: ${{ steps.identity.outputs.build_number }}
       built_at: ${{ steps.identity.outputs.built_at }}
       image_version: ${{ steps.identity.outputs.image_version }}
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && (github.event.workflow_run.head_branch == 'main' || github.event.workflow_run.head_branch == 'apiv2'))
     steps:
       - name: Resolve build identity
         id: identity
         shell: bash
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TARGET_BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
         run: |
           if [[ -z "$DEFAULT_BRANCH" ]]; then
             echo "::error::Repository default branch is unavailable."
@@ -44,7 +47,7 @@ jobs:
 
           build_number=""
           image_version="${GITHUB_SHA::7}"
-          if [[ "$GITHUB_REF" == "refs/heads/${DEFAULT_BRANCH}" ]]; then
+          if [[ "$TARGET_BRANCH" == "$DEFAULT_BRANCH" ]]; then
             build_number=$((GITHUB_RUN_NUMBER + BUILD_NUMBER_OFFSET))
             if (( build_number <= 0 )); then
               echo "::error::Build number must be positive."
@@ -70,11 +73,14 @@ jobs:
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
+      actions: read
       packages: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Prepare platform slug and lowercase image name
         run: |
@@ -83,25 +89,33 @@ jobs:
         env:
           PLATFORM: ${{ matrix.platform }}
 
-      - name: Set up pnpm
+      - name: Download validated frontend bundle
+        uses: actions/download-artifact@v4
+        if: github.event_name == 'workflow_run'
+        with:
+          name: frontend-dist-${{ github.event.workflow_run.head_sha || github.sha }}
+          path: web/dist
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Set up pnpm for manual builds
+        if: github.event_name == 'workflow_dispatch'
         uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - name: Set up Node.js
+      - name: Set up Node.js for manual builds
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/setup-node@v5
         with:
           node-version: "22"
-          cache: "pnpm"
+          cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      - name: Install frontend dependencies
+      - name: Build frontend for manual builds
+        if: github.event_name == 'workflow_dispatch'
         working-directory: web
-        run: pnpm install --frozen-lockfile
-
-      - name: Build frontend assets
-        working-directory: web
-        run: pnpm run build
+        run: pnpm install --frozen-lockfile && pnpm run build
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -146,7 +160,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           labels: |
             org.opencontainers.image.created=${{ needs.prepare.outputs.built_at }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha || github.sha }}
             org.opencontainers.image.version=${{ needs.prepare.outputs.image_version }}
 
       - name: Build and push by digest
@@ -159,7 +173,7 @@ jobs:
           build-contexts: |
             frontend_dist=./web/dist
           build-args: |
-            BUILD_REVISION=${{ github.sha }}
+            BUILD_REVISION=${{ github.event.workflow_run.head_sha || github.sha }}
             BUILD_DIRTY=false
             BUILD_NUMBER=${{ needs.prepare.outputs.build_number }}
             BUILD_DATE=${{ needs.prepare.outputs.built_at }}
@@ -214,9 +228,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_LC }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=build-${{ needs.prepare.outputs.build_number }},enable={{is_default_branch}}
-            type=sha,prefix=,format=short
+            type=raw,value=latest,enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
+            type=raw,value=build-${{ needs.prepare.outputs.build_number }},enable=${{ github.event.workflow_run.head_branch == github.event.repository.default_branch || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
+            type=raw,value=apiv2,enable=${{ github.event.workflow_run.head_branch == 'apiv2' || (github.event_name == 'workflow_dispatch' && github.ref_name == 'apiv2') }}
+            type=raw,value=${{ (github.event.workflow_run.head_sha || github.sha) }}
 
       - name: Create and push manifest list
         working-directory: ${{ runner.temp }}/digests
@@ -231,7 +246,7 @@ jobs:
           BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:${GITHUB_SHA::7}"
-          if [[ "$GITHUB_REF" == "refs/heads/${DEFAULT_BRANCH}" ]]; then
+          docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:${{ github.event.workflow_run.head_sha || github.sha }}"
+          if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" || "${{ github.event.workflow_run.head_branch }}" == "${DEFAULT_BRANCH}" ]]; then
             docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:build-${BUILD_NUMBER}"
           fi

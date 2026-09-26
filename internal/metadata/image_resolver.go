@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 
@@ -65,8 +66,7 @@ type pluginImageResolverSourceEntry struct {
 type PluginImageResolver struct {
 	mu                  sync.RWMutex
 	sources             map[string][]pluginImageResolverSourceEntry
-	s3Presigner         s3ImagePresigner
-	s3PresignTTL        time.Duration
+	artworkResolver     artworkurl.Resolver
 	urlCache            *cache.TTLCache[catalog.ResolvedImageURL]
 	artworkAvailability ArtworkAvailabilityReader
 	group               singleflight.Group
@@ -75,15 +75,9 @@ type PluginImageResolver struct {
 // NewPluginImageResolver creates a new resolver with no registered sources.
 func NewPluginImageResolver() *PluginImageResolver {
 	return &PluginImageResolver{
-		sources:      make(map[string][]pluginImageResolverSourceEntry),
-		s3PresignTTL: 15 * time.Minute,
-		urlCache:     cache.NewTTLCache[catalog.ResolvedImageURL](),
+		sources:  make(map[string][]pluginImageResolverSourceEntry),
+		urlCache: cache.NewTTLCache[catalog.ResolvedImageURL](),
 	}
-}
-
-type s3ImagePresigner interface {
-	PresignGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error)
-	Bucket() string
 }
 
 // RegisterSource registers a plugin provider as a source for resolving images
@@ -138,17 +132,21 @@ func ValidImageResolverScheme(scheme string) bool {
 		!strings.Contains(scheme, "://")
 }
 
-func (r *PluginImageResolver) SetS3Presigner(presigner s3ImagePresigner, ttl time.Duration) {
+// SetArtworkResolver supplies delivery URLs for stored artwork keys: signed
+// server routes for local storage, presigned or public URLs for S3.
+func (r *PluginImageResolver) SetArtworkResolver(resolver artworkurl.Resolver) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.s3Presigner = presigner
-	if ttl > 0 {
-		r.s3PresignTTL = ttl
-	}
+	r.artworkResolver = resolver
+	r.mu.Unlock()
+	r.urlCache.InvalidatePrefix("")
 }
 
-// SetArtworkAvailabilityReader supplies durable publication/delivery metadata.
-// Catalog reads never use the storage client to discover availability.
+// SetArtworkAvailabilityReader supplies durable publication/delivery metadata
+// for external delivery, where a read endpoint can lag behind a storage write.
+// Without a reader the resolver trusts the key it is given: local storage
+// publishes atomically and direct S3 reads see the object as soon as the
+// upload returns. Catalog reads never use the storage client to discover
+// availability.
 func (r *PluginImageResolver) SetArtworkAvailabilityReader(reader ArtworkAvailabilityReader) {
 	r.mu.Lock()
 	r.artworkAvailability = reader
@@ -221,8 +219,7 @@ func (r *PluginImageResolver) ResolveImageURLsWithExpiry(ctx context.Context, pa
 	}
 
 	r.mu.RLock()
-	presigner := r.s3Presigner
-	s3TTL := r.s3PresignTTL
+	artworkResolver := r.artworkResolver
 	sourcesSnapshot := make(map[string][]pluginImageResolverSourceEntry, len(grouped))
 	for pluginID := range grouped {
 		if pluginID == "" {
@@ -239,7 +236,10 @@ func (r *PluginImageResolver) ResolveImageURLsWithExpiry(ctx context.Context, pa
 		flightKey := resolvedImageBatchFlightKey(pluginID, variant, entries)
 		value, err, _ := r.group.Do(flightKey, func() (any, error) {
 			if pluginID == "" {
-				return r.resolveS3Batch(ctx, presigner, s3TTL, entries), nil
+				if artworkResolver == nil {
+					return map[string]catalog.ResolvedImageURL{}, nil
+				}
+				return r.resolveStoredBatch(ctx, artworkResolver, entries), nil
 			}
 			sources := sourcesSnapshot[pluginID]
 			if len(sources) == 0 {
@@ -316,38 +316,32 @@ func (r *PluginImageResolver) resolvePluginBatchWithFallback(
 	return resolved
 }
 
-func (r *PluginImageResolver) resolveS3Batch(
-	ctx context.Context,
-	presigner s3ImagePresigner,
-	ttl time.Duration,
-	entries []resolveEntry,
-) map[string]catalog.ResolvedImageURL {
-	resolved := make(map[string]catalog.ResolvedImageURL, len(entries))
-	if presigner == nil {
-		return resolved
-	}
+func (r *PluginImageResolver) resolveStoredBatch(ctx context.Context, resolver artworkurl.Resolver, entries []resolveEntry) map[string]catalog.ResolvedImageURL {
 	r.mu.RLock()
 	availability := r.artworkAvailability
 	r.mu.RUnlock()
-	now := time.Now()
-	expiresAt := now.Add(ttl)
-	ladderKeys := resolvePublishedLadderKeys(ctx, availability, entries)
-
+	ladder := resolvePublishedLadderKeys(ctx, availability, entries)
+	keys := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		key := ladderKeys[entry.originalPath]
-		if key == "" {
-			continue
+		if key := ladder[entry.originalPath]; key != "" {
+			keys = append(keys, key)
 		}
-		url, err := presigner.PresignGetURL(ctx, presigner.Bucket(), key, ttl)
-		if err != nil {
-			slog.ErrorContext(ctx, "s3 image resolution failed", "component", "metadata", "path", key, "error", err)
-			continue
-		}
-		// Availability may improve or degrade independently of URL signatures.
-		expiry := minURLExpiry(expiresAt, now.Add(5*time.Minute+resolvedURLCacheSafetyMargin))
-		resolved[entry.originalPath] = catalog.ResolvedImageURL{URL: url, ExpiresAt: &expiry}
 	}
-	return resolved
+	resolved := resolver.ResolveURLs(ctx, keys)
+	out := make(map[string]catalog.ResolvedImageURL, len(entries))
+	for _, entry := range entries {
+		if key := ladder[entry.originalPath]; key != "" {
+			if value, ok := resolved[key]; ok {
+				expiry := time.Now().Add(5*time.Minute + resolvedURLCacheSafetyMargin)
+				if value.ExpiresAt != nil {
+					expiry = minURLExpiry(expiry, *value.ExpiresAt)
+				}
+				value.ExpiresAt = &expiry
+				out[entry.originalPath] = value
+			}
+		}
+	}
+	return out
 }
 
 func (r *PluginImageResolver) resolvePluginBatch(

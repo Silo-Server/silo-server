@@ -1,19 +1,18 @@
+import { getAdminItemImages, applyAdminItemImage } from "@/api/v2/adminImages";
+import { getAdminItemFiles, splitAdminItem } from "@/api/v2/adminSplit";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
 import { useRealtimeEvents } from "@/components/realtimeEventsContext";
 import type {
-  AdminJob,
   ApplyItemImageRequest,
-  ApplyItemImageResponse,
   ItemDetail,
-  ItemFilesResponse,
-  ItemImagesResponse,
   ItemMatchSearchRequest,
-  ItemMatchSearchResponse,
   ItemSplitRequest,
-  ItemSplitResponse,
   WatchDetail,
 } from "@/api/types";
+import { v2, type V2Result } from "@/api/v2/request";
+import { adminTaskJobFromV2 } from "@/api/v2/adminTasks";
+import { catalogItemDetailFromV2 } from "@/api/v2/catalog";
+import { watchDetailFromV2 } from "@/api/v2/watch";
 import { adminKeys, catalogKeys, episodeKeys, itemKeys, sectionKeys } from "./keys";
 import { toast } from "sonner";
 import {
@@ -28,21 +27,21 @@ import {
 } from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
-function itemPathID(id: string): string {
-  return encodeURIComponent(id);
-}
-
 export async function fetchWatchDetail(
   id: string,
   fileId?: number,
   libraryId?: number,
   options?: RequestInit,
 ): Promise<WatchDetail> {
-  const searchParams = new URLSearchParams();
-  if (fileId != null) searchParams.set("fileId", String(fileId));
-  if (libraryId != null) searchParams.set("library_id", String(libraryId));
-  const query = searchParams.toString();
-  return api<WatchDetail>(`/watch/${itemPathID(id)}${query ? `?${query}` : ""}`, options);
+  const detail = await v2("GET /api/v2/watch/{id}", {
+    path: { id },
+    query: {
+      file_id: fileId != null ? String(fileId) : undefined,
+      library_id: libraryId != null ? String(libraryId) : undefined,
+    },
+    signal: options?.signal ?? undefined,
+  });
+  return watchDetailFromV2(detail);
 }
 
 export function useWatchDetail(id: string | undefined, fileId?: number, libraryId?: number) {
@@ -85,6 +84,7 @@ export function useRefreshItemMetadata() {
   const queryClient = useQueryClient();
   const { awaitAdminJob } = useRealtimeEvents();
   return useMutation({
+    retry: false,
     onMutate: ({ mode }: RefreshItemMetadataVariables): RefreshItemMetadataContext => ({
       toastID: toast.loading(
         mode === "complete"
@@ -93,12 +93,12 @@ export function useRefreshItemMetadata() {
       ),
     }),
     mutationFn: async ({ item, mode }: RefreshItemMetadataVariables) => {
-      const job = await api<AdminJob>(
-        `/admin/items/${itemPathID(item.content_id)}/refresh-metadata`,
-        {
-          method: "POST",
-          body: JSON.stringify({ mode }),
-        },
+      const job = adminTaskJobFromV2(
+        await v2("POST /api/v2/admin/items/{id}/refresh-metadata", {
+          path: { id: item.content_id },
+          body: { mode },
+          retryAuthentication: false,
+        }),
       );
       const completed = await awaitAdminJob(job.id);
       return { job: completed };
@@ -203,20 +203,19 @@ export function useRefreshItemMetadata() {
   });
 }
 
-export interface RedetectEpisodeIntroResponse {
-  status: string;
-}
-
+export type RedetectEpisodeIntroResponse = V2Result<"POST /api/v2/admin/items/{id}/redetect-intro">;
 export async function redetectEpisodeIntro(
   episodeId: string,
 ): Promise<RedetectEpisodeIntroResponse> {
-  return api<RedetectEpisodeIntroResponse>(`/admin/items/${itemPathID(episodeId)}/redetect-intro`, {
-    method: "POST",
+  return v2("POST /api/v2/admin/items/{id}/redetect-intro", {
+    path: { id: episodeId },
+    retryAuthentication: false,
   });
 }
 
 export function useRedetectEpisodeIntro() {
   return useMutation({
+    retry: false,
     mutationFn: redetectEpisodeIntro,
     onSuccess: (response) => {
       toast.success(
@@ -266,11 +265,15 @@ export interface UpdateItemMetadataRequest {
 export function useUpdateItemMetadata(contentId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: UpdateItemMetadataRequest) =>
-      api<ItemDetail>(`/admin/items/${itemPathID(contentId)}/metadata`, {
-        method: "PATCH",
-        body: JSON.stringify(data),
-      }),
+    retry: false,
+    mutationFn: async (data: UpdateItemMetadataRequest) =>
+      catalogItemDetailFromV2(
+        await v2("PATCH /api/v2/admin/items/{id}/metadata", {
+          path: { id: contentId },
+          body: data,
+          retryAuthentication: false,
+        }),
+      ),
     onSuccess: () => {
       void invalidateMediaSurfaceQueries(queryClient, { itemId: contentId }).then(() => {
         bumpHomeRefreshSignal(queryClient);
@@ -293,15 +296,14 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
 
   return useMutation({
     mutationFn: (nextPlayed: boolean) =>
-      api(`/watched/${itemPathID(item.content_id)}`, {
-        method: nextPlayed ? "POST" : "DELETE",
-        // Marking a series expands to every episode server-side. keepalive
-        // lets the browser finish the request after a navigation or tab close,
-        // so a large series no longer depends on the user staying on the page.
-        // The server applies the mark in one transaction, so a request that
-        // never arrives leaves nothing marked rather than a partial subset.
-        keepalive: true,
-      }),
+      // Marking a series expands to every episode server-side. keepalive
+      // lets the browser finish the request after a navigation or tab close,
+      // so a large series no longer depends on the user staying on the page.
+      // The server applies the mark in one transaction, so a request that
+      // never arrives leaves nothing marked rather than a partial subset.
+      nextPlayed
+        ? v2("POST /api/v2/watched/{id}", { path: { id: item.content_id }, keepalive: true })
+        : v2("DELETE /api/v2/watched/{id}", { path: { id: item.content_id }, keepalive: true }),
     onMutate: async (nextPlayed: boolean) => {
       await cancelItemDetailQueries(queryClient, item.content_id);
       updateCatalogItemDetail(queryClient, item.content_id, (detail) => ({
@@ -349,10 +351,23 @@ export function useSearchItemMatchCandidates(contentId: string) {
 
   return useMutation({
     mutationFn: (params: ItemMatchSearchRequest) =>
-      api<ItemMatchSearchResponse>(`/admin/items/${itemPathID(contentId)}/match/search`, {
-        method: "POST",
-        body: JSON.stringify(params),
-      }),
+      v2("POST /api/v2/admin/items/{id}/match/search", {
+        path: { id: contentId },
+        body: {
+          ...params,
+          library_id: params.library_id == null ? undefined : String(params.library_id),
+          limit: 500,
+        },
+        retryAuthentication: false,
+      }).then((result) => ({
+        ...result,
+        candidates: result.candidates.map((candidate) => ({
+          ...candidate,
+          image_url: candidate.image_url ?? "",
+          overview: candidate.overview ?? "",
+        })),
+      })),
+    retry: false,
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Match search failed");
     },
@@ -376,14 +391,16 @@ export function useApplyItemMatch() {
       item: ApplyMatchItem;
       providerIds: Record<string, string>;
     }) => {
-      return api(`/admin/items/${itemPathID(item.content_id)}/match/apply`, {
-        method: "POST",
-        body: JSON.stringify({
+      return v2("POST /api/v2/admin/items/{id}/match/apply", {
+        path: { id: item.content_id },
+        body: {
           provider_ids: providerIds,
-          library_id: item.library_id,
-        }),
+          library_id: item.library_id == null ? undefined : String(item.library_id),
+        },
+        retryAuthentication: false,
       });
     },
+    retry: false,
     onSuccess: async (_, { item }) => {
       toast.success("Match applied successfully");
 
@@ -444,7 +461,7 @@ export function useApplyItemMatch() {
 export function useItemFiles(contentId: string | undefined) {
   return useQuery({
     queryKey: ["items", "files", contentId],
-    queryFn: () => api<ItemFilesResponse>(`/admin/items/${itemPathID(contentId ?? "")}/files`),
+    queryFn: ({ signal }) => getAdminItemFiles(contentId ?? "", signal),
     enabled: Boolean(contentId),
     staleTime: 30_000,
   });
@@ -454,11 +471,9 @@ export function useSplitItem() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    retry: false,
     mutationFn: ({ contentId, request }: { contentId: string; request: ItemSplitRequest }) =>
-      api<ItemSplitResponse>(`/admin/items/${itemPathID(contentId)}/split`, {
-        method: "POST",
-        body: JSON.stringify(request),
-      }),
+      splitAdminItem(contentId, request),
     onSuccess: async (result, { contentId }) => {
       if (result.dry_run) return;
       toast.success(
@@ -483,7 +498,7 @@ export function useSplitItem() {
 export function useItemImages(contentId: string | undefined, enabled = true) {
   return useQuery({
     queryKey: adminKeys.itemImages(contentId!),
-    queryFn: () => api<ItemImagesResponse>(`/admin/items/${itemPathID(contentId!)}/images`),
+    queryFn: ({ signal }) => getAdminItemImages(contentId!, signal),
     enabled: !!contentId && enabled,
     staleTime: 5 * 60_000,
   });
@@ -501,11 +516,8 @@ export function useApplyItemImage() {
     }: {
       item: ApplyImageItem;
       request: ApplyItemImageRequest;
-    }) =>
-      api<ApplyItemImageResponse>(`/admin/items/${itemPathID(item.content_id)}/images/apply`, {
-        method: "POST",
-        body: JSON.stringify(request),
-      }),
+    }) => applyAdminItemImage(item.content_id, request),
+    retry: false,
     onSuccess: async (_, { item }) => {
       toast.success("Image applied successfully");
 
@@ -544,35 +556,8 @@ export function useApplyItemImage() {
 // Metadata AI translation (descriptions into the localization tables)
 // ---------------------------------------------------------------------------
 
-export interface MetadataTranslationJob {
-  id: number;
-  target_kind: string;
-  content_id: string;
-  include_children: boolean;
-  source_language: string;
-  target_language: string;
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
-  progress: number;
-  progress_message: string;
-  fields_done: number;
-  fields_total: number;
-  force: boolean;
-  error_message?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-/** Whether the server has metadata AI translation configured, and the
- * viewer-facing on-view mode. */
-export function useMetadataAIStatus(enabled = true) {
-  return useQuery({
-    queryKey: ["metadata-ai", "status"],
-    queryFn: () =>
-      api<{ enabled: boolean; on_view?: "off" | "button" | "auto" }>("/metadata/ai/status"),
-    staleTime: 5 * 60 * 1000,
-    enabled,
-  });
-}
+export type MetadataTranslationJob =
+  V2Result<"GET /api/v2/admin/items/{id}/metadata-translation/jobs">["jobs"][number];
 
 export interface TranslateItemMetadataRequest {
   target_language: string;
@@ -583,11 +568,14 @@ export interface TranslateItemMetadataRequest {
 export function useTranslateItemMetadata(contentId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: TranslateItemMetadataRequest) =>
-      api<{ job: MetadataTranslationJob }>(
-        `/admin/items/${itemPathID(contentId)}/metadata-translation`,
-        { method: "POST", body: JSON.stringify(body) },
-      ),
+    retry: false,
+    mutationFn: async (body: TranslateItemMetadataRequest) => ({
+      job: await v2("POST /api/v2/admin/items/{id}/metadata-translation", {
+        path: { id: contentId },
+        body,
+        retryAuthentication: false,
+      }),
+    }),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ["metadata-translation-jobs", contentId],
@@ -607,9 +595,7 @@ export function useMetadataTranslationJobs(contentId: string, enabled: boolean) 
   return useQuery({
     queryKey: ["metadata-translation-jobs", contentId],
     queryFn: () =>
-      api<{ jobs: MetadataTranslationJob[] }>(
-        `/admin/items/${itemPathID(contentId)}/metadata-translation/jobs`,
-      ),
+      v2("GET /api/v2/admin/items/{id}/metadata-translation/jobs", { path: { id: contentId } }),
     enabled,
     refetchInterval: (query) => {
       const jobs = query.state.data?.jobs ?? [];

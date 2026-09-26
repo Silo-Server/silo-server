@@ -1,9 +1,10 @@
 import { useMemo, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, ApiClientError } from "@/api/client";
+import { v2 } from "@/api/v2/request";
 import {
   effectiveSettingsQueryKey,
   isDefinitiveSettingMutationRejection,
+  isSettingValueMissing,
   useClearSettingValue,
   useEffectiveSettings,
   useSetSettingValue,
@@ -29,13 +30,6 @@ const OVERLAY_KEYS = [
   SETTING_KEYS.UI_CARD_QUICK_ACTIONS_ENABLED,
 ] as const;
 
-interface OverlayConfig {
-  enabled: boolean;
-  defaults?: string;
-  quick_actions_enabled?: boolean;
-  quick_actions_default?: string;
-}
-
 // Overlay booleans are inherit-with-override, not a policy gate: the server
 // setting is only the default for profiles that have not chosen, and an
 // explicit profile choice wins in either direction.
@@ -49,7 +43,7 @@ function inheritBoolean(userValue: unknown, serverDefault: boolean): boolean {
 function useOverlayConfig() {
   return useQuery({
     queryKey: settingsKeys.overlayConfig(),
-    queryFn: () => api<OverlayConfig>("/settings/overlay-config"),
+    queryFn: () => v2("GET /api/v2/settings/overlay-config"),
     staleTime: 60_000,
   });
 }
@@ -173,7 +167,7 @@ export function useOverlayPrefs() {
         } catch (error) {
           // A missing scoped value already means this part of the preference
           // is inheriting from the server default.
-          if (!(error instanceof ApiClientError && error.status === 404)) throw error;
+          if (!isSettingValueMissing(error)) throw error;
         }
       }),
     );

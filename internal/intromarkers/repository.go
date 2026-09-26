@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -32,7 +32,11 @@ type EpisodeIntroEligibility struct {
 	IntroDetectionEnabled bool
 }
 
-const baseCandidateSelect = `
+const baseCandidateSelect = baseCandidateSelectFrom + baseCandidateWhere
+
+// baseCandidateSelectFrom and baseCandidateWhere are split so a query can add
+// joins between them.
+const baseCandidateSelectFrom = `
 	SELECT mf.id,
 	       mf.episode_id,
 	       e.season_id,
@@ -52,10 +56,17 @@ const baseCandidateSelect = `
 	       mf.intro_markers_source,
 	       mf.intro_markers_confidence,
 	       mf.intro_markers_algorithm,
-	       mf.markers_source
+	       mf.markers_source,
+	       COALESCE(mf.content_id, ''),
+	       COALESCE(mf.extra_id, ''),
+	       COALESCE(mf.season_number, 0),
+	       COALESCE(mf.episode_number, 0),
+	       mf.file_modified_at
 	FROM media_files mf
 	JOIN media_folders folders ON folders.id = mf.media_folder_id
-	JOIN episodes e ON e.content_id = mf.episode_id
+	JOIN episodes e ON e.content_id = mf.episode_id`
+
+const baseCandidateWhere = `
 	WHERE mf.episode_id IS NOT NULL
 	  AND COALESCE(e.season_id, '') <> ''
 	  AND folders.enabled = true
@@ -107,21 +118,152 @@ func (r *Repository) ListCandidatesForGroup(ctx context.Context, mediaFolderID i
 	return filtered, nil
 }
 
-func (r *Repository) ListChapterSilenceBackfillCandidates(ctx context.Context, limit int) ([]Candidate, error) {
+// ListChapterSilenceBackfillCandidates skips a file while its recorded attempt
+// still matches the file identity, its chapters, the refined marker range, and
+// the silence settings: indefinitely after a clean no-improvement result, and
+// until retry_after after a failure recorded by this server. A failure recorded
+// by another server does not defer this one, since the cause may be local to
+// that server. Files never attempted come first, so retries cannot crowd them
+// out of the per-run budget.
+//
+// The attempt lookup is a LEFT JOIN so it runs as a per-file primary-key probe
+// inside the parallel scan. The planner estimates the candidate filter at a
+// handful of rows; as NOT EXISTS it either chose an anti-join that rescans the
+// attempts table once per candidate or lost the parallel scan.
+func (r *Repository) ListChapterSilenceBackfillCandidates(ctx context.Context, limit int, cfg Config, node string) ([]Candidate, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
-	rows, err := r.pool.Query(ctx, baseCandidateSelect+`
+	rows, err := r.pool.Query(ctx, baseCandidateSelectFrom+`
+		LEFT JOIN intro_silence_refinement_attempts attempts ON attempts.media_file_id = mf.id`+
+		baseCandidateWhere+`
 		  AND mf.intro_start IS NOT NULL
 		  AND mf.intro_end IS NOT NULL
 		  AND mf.intro_markers_source = $1
-		  AND mf.intro_markers_algorithm = $2
-		ORDER BY mf.intro_markers_detected_at NULLS FIRST, mf.id
-		LIMIT $3`, models.MarkerSourceScanner, ChapterAlgorithm, limit)
+		  AND mf.intro_markers_algorithm = ANY($2::text[])
+		  AND NOT COALESCE(
+		      attempts.config_hash = $3
+		      AND attempts.file_hash = COALESCE(mf.file_hash, '')
+		      AND attempts.file_size = COALESCE(mf.file_size, 0)
+		      AND attempts.duration_seconds = COALESCE(mf.duration, 0)
+		      AND attempts.chapters_hash = encode(sha256(convert_to(COALESCE(mf.chapters::text, ''), 'UTF8')), 'hex')
+		      AND attempts.intro_start = mf.intro_start
+		      AND attempts.intro_end = mf.intro_end
+		      AND (attempts.status = $4 OR (attempts.retry_after > NOW() AND attempts.recorded_by = $6)),
+		      false)
+		ORDER BY attempts.attempted_at NULLS FIRST,
+		  mf.intro_markers_detected_at NULLS FIRST,
+		  mf.id
+		LIMIT $5`,
+		models.MarkerSourceScanner,
+		[]string{ChapterAlgorithm, legacyChapterSilenceAlgorithm},
+		cfg.SilenceConfigHash(),
+		silenceAttemptNoImprovement,
+		limit,
+		node,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("listing intro marker silence backfill candidates: %w", err)
 	}
 	return scanCandidates(rows)
+}
+
+func (r *Repository) LoadSilenceRefinementAttempt(ctx context.Context, fileID int) (*SilenceRefinementAttempt, error) {
+	var attempt SilenceRefinementAttempt
+	err := r.pool.QueryRow(ctx, `
+		SELECT media_file_id,
+		       config_hash,
+		       file_hash,
+		       file_size,
+		       duration_seconds,
+		       chapters_hash,
+		       intro_start,
+		       intro_end,
+		       status,
+		       recorded_by,
+		       failure_count,
+		       COALESCE(last_error, ''),
+		       attempted_at,
+		       retry_after
+		FROM intro_silence_refinement_attempts
+		WHERE media_file_id = $1`, fileID).Scan(
+		&attempt.MediaFileID,
+		&attempt.ConfigHash,
+		&attempt.FileHash,
+		&attempt.FileSize,
+		&attempt.DurationSeconds,
+		&attempt.ChaptersHash,
+		&attempt.IntroStart,
+		&attempt.IntroEnd,
+		&attempt.Status,
+		&attempt.RecordedBy,
+		&attempt.FailureCount,
+		&attempt.LastError,
+		&attempt.AttemptedAt,
+		&attempt.RetryAfter,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("loading intro silence refinement attempt: %w", err)
+	}
+	return &attempt, nil
+}
+
+func (r *Repository) UpsertSilenceRefinementAttempt(ctx context.Context, attempt SilenceRefinementAttempt) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO intro_silence_refinement_attempts (
+		    media_file_id,
+		    config_hash,
+		    file_hash,
+		    file_size,
+		    duration_seconds,
+		    chapters_hash,
+		    intro_start,
+		    intro_end,
+		    status,
+		    recorded_by,
+		    failure_count,
+		    last_error,
+		    attempted_at,
+		    retry_after
+		) VALUES (
+		    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULLIF($12, ''), $13, $14
+		)
+		ON CONFLICT (media_file_id) DO UPDATE SET
+		    config_hash = EXCLUDED.config_hash,
+		    file_hash = EXCLUDED.file_hash,
+		    file_size = EXCLUDED.file_size,
+		    duration_seconds = EXCLUDED.duration_seconds,
+		    chapters_hash = EXCLUDED.chapters_hash,
+		    intro_start = EXCLUDED.intro_start,
+		    intro_end = EXCLUDED.intro_end,
+		    status = EXCLUDED.status,
+		    recorded_by = EXCLUDED.recorded_by,
+		    failure_count = EXCLUDED.failure_count,
+		    last_error = EXCLUDED.last_error,
+		    attempted_at = EXCLUDED.attempted_at,
+		    retry_after = EXCLUDED.retry_after`,
+		attempt.MediaFileID,
+		attempt.ConfigHash,
+		attempt.FileHash,
+		attempt.FileSize,
+		attempt.DurationSeconds,
+		attempt.ChaptersHash,
+		attempt.IntroStart,
+		attempt.IntroEnd,
+		attempt.Status,
+		attempt.RecordedBy,
+		attempt.FailureCount,
+		attempt.LastError,
+		attempt.AttemptedAt,
+		attempt.RetryAfter,
+	)
+	if err != nil {
+		return fmt.Errorf("upserting intro silence refinement attempt: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) EpisodeIntroEligibility(ctx context.Context, episodeID string) (*EpisodeIntroEligibility, error) {
@@ -224,9 +366,15 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 			&c.IntroMarkersConfidence,
 			&c.IntroMarkersAlgorithm,
 			&c.MarkersSource,
+			&c.ContentID,
+			&c.ExtraID,
+			&c.SeasonNumber,
+			&c.EpisodeNumber,
+			&c.FileModifiedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning intro marker candidate: %w", err)
 		}
+		c.ChaptersHash = chaptersHash(chaptersJSON)
 		if len(chaptersJSON) > 0 {
 			if err := json.Unmarshal(chaptersJSON, &c.Chapters); err != nil {
 				return nil, fmt.Errorf("unmarshaling chapters for file %d: %w", c.FileID, err)
@@ -257,6 +405,14 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 	return candidates, nil
 }
 
+// chaptersHash is the SHA-256 of the chapters column exactly as Postgres
+// renders it, with a NULL column hashed as empty input, so the backfill query
+// can compute the same value from mf.chapters::text.
+func chaptersHash(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
 func (r *Repository) CountEnabledLibraries(ctx context.Context) (int, error) {
 	var count int
 	err := r.pool.QueryRow(ctx, `
@@ -281,95 +437,15 @@ func (r *Repository) PatchIntroMarker(ctx context.Context, patch IntroMarkerPatc
 	if patch.Start < 0 || patch.End <= patch.Start {
 		return false, fmt.Errorf("invalid intro marker range %.3f-%.3f", patch.Start, patch.End)
 	}
-	if patch.DetectedAt.IsZero() {
-		patch.DetectedAt = time.Now().UTC()
-	}
-
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return false, fmt.Errorf("begin intro marker patch transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	var row markerRow
-	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(duration, 0),
-		       intro_start,
-		       intro_end,
-		       markers_source,
-		       markers_confidence,
-		       intro_markers_source,
-		       intro_markers_confidence,
-		       intro_markers_algorithm
-		FROM media_files
-		WHERE id = $1
-		FOR UPDATE`, patch.FileID).Scan(
-		&row.Duration,
-		&row.IntroStart,
-		&row.IntroEnd,
-		&row.MarkersSource,
-		&row.MarkersConfidence,
-		&row.IntroMarkersSource,
-		&row.IntroMarkersConfidence,
-		&row.IntroMarkersAlgorithm,
-	); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, fmt.Errorf("media file not found")
-		}
-		return false, fmt.Errorf("loading intro marker row: %w", err)
-	}
-	if row.Duration > 0 && patch.End > row.Duration+1 {
-		return false, fmt.Errorf("intro marker end %.3f exceeds duration %.3f", patch.End, row.Duration)
-	}
-	if !shouldApplyIntroPatch(row, patch) {
-		if err := tx.Commit(ctx); err != nil {
-			return false, fmt.Errorf("commit intro marker no-op transaction: %w", err)
-		}
-		return false, nil
-	}
-
-	sharedSource := row.MarkersSource
-	if sharedSource == nil || models.MarkerSourcePriority(patch.Source) > models.MarkerSourcePriority(*sharedSource) {
-		sharedSource = &patch.Source
-	}
-	sharedConfidence := row.MarkersConfidence
-	if sharedSource != row.MarkersSource {
-		sharedConfidence = &patch.Confidence
-	}
-
-	tag, err := tx.Exec(ctx, `
-		UPDATE media_files
-		SET intro_start = $2,
-		    intro_end = $3,
-		    intro_markers_source = $4,
-		    intro_markers_provider = NULL,
-		    intro_markers_confidence = $5,
-		    intro_markers_algorithm = $6,
-		    intro_markers_detected_at = $7,
-		    markers_source = $8,
-		    markers_confidence = $9,
-		    updated_at = NOW()
-		WHERE id = $1`,
-		patch.FileID,
-		patch.Start,
-		patch.End,
-		patch.Source,
-		patch.Confidence,
-		patch.Algorithm,
-		patch.DetectedAt,
-		sharedSource,
-		sharedConfidence,
-	)
-	if err != nil {
-		return false, fmt.Errorf("updating intro marker: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return false, fmt.Errorf("media file not found")
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("commit intro marker patch transaction: %w", err)
-	}
-	return true, nil
+	return scanner.NewFileRepository(r.pool).UpsertMarkers(ctx, patch.FileID, scanner.MarkerUpdate{
+		IntroStart:        &patch.Start,
+		IntroEnd:          &patch.End,
+		MarkersSource:     patch.Source,
+		MarkersConfidence: &patch.Confidence,
+		MarkersAlgorithm:  patch.Algorithm,
+		DetectedAt:        patch.DetectedAt,
+		ExpectedFile:      patch.ExpectedFile,
+	})
 }
 
 func (r *Repository) LoadFingerprint(ctx context.Context, candidate Candidate, cfg Config) (*Fingerprint, error) {
@@ -487,7 +563,8 @@ func (r *Repository) LoadSeasonState(ctx context.Context, state SeasonState, cfg
 		       file_count,
 		       status,
 		       markers_written,
-		       COALESCE(last_error, '')
+		       COALESCE(last_error, ''),
+		       analyzed_at
 		FROM intro_season_analysis_state
 		WHERE season_id = $1
 		  AND media_folder_id = $2
@@ -509,6 +586,7 @@ func (r *Repository) LoadSeasonState(ctx context.Context, state SeasonState, cfg
 		&existing.Status,
 		&existing.MarkersWritten,
 		&existing.LastError,
+		&existing.AnalyzedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -561,98 +639,6 @@ func (r *Repository) UpsertSeasonState(ctx context.Context, state SeasonState, c
 		return fmt.Errorf("upserting intro season state: %w", err)
 	}
 	return nil
-}
-
-type markerRow struct {
-	Duration               float64
-	IntroStart             *float64
-	IntroEnd               *float64
-	MarkersSource          *string
-	MarkersConfidence      *float64
-	IntroMarkersSource     *string
-	IntroMarkersConfidence *float64
-	IntroMarkersAlgorithm  *string
-}
-
-func shouldApplyIntroPatch(row markerRow, patch IntroMarkerPatch) bool {
-	if row.IntroStart == nil || row.IntroEnd == nil {
-		return true
-	}
-	source := ""
-	if row.IntroMarkersSource != nil {
-		source = *row.IntroMarkersSource
-	} else if row.MarkersSource != nil {
-		source = *row.MarkersSource
-	}
-	if models.MarkerSourcePriority(source) > models.MarkerSourcePriority(patch.Source) {
-		return false
-	}
-	if models.MarkerSourcePriority(source) < models.MarkerSourcePriority(patch.Source) {
-		return true
-	}
-	if row.IntroMarkersConfidence == nil {
-		return true
-	}
-
-	existingAlgorithm := ""
-	if row.IntroMarkersAlgorithm != nil {
-		existingAlgorithm = *row.IntroMarkersAlgorithm
-	}
-	if existingAlgorithm == "" {
-		return true
-	}
-	patchPriority := scannerAlgorithmPriority(patch.Algorithm)
-	existingPriority := scannerAlgorithmPriority(existingAlgorithm)
-	if patchPriority > existingPriority {
-		return true
-	}
-	if patchPriority < existingPriority {
-		return false
-	}
-	if patch.Confidence > *row.IntroMarkersConfidence {
-		return true
-	}
-	if patch.Confidence < *row.IntroMarkersConfidence {
-		return false
-	}
-	if existingAlgorithm != patch.Algorithm && patchPriority == 0 {
-		return true
-	}
-	if existingAlgorithm == patch.Algorithm && introRangeDiffers(row, patch, 0.5) {
-		return true
-	}
-	return false
-}
-
-func scannerAlgorithmPriority(algorithm string) int {
-	switch algorithm {
-	case ChapterSilenceAlgorithm:
-		return 40
-	case ChapterAlgorithm:
-		return 30
-	case EpisodeVersionCopyAlgorithm:
-		return 20
-	case ChromaprintDialogueAlgorithm:
-		return 15
-	case ChromaprintAlgorithm:
-		return 10
-	default:
-		return 0
-	}
-}
-
-func introRangeDiffers(row markerRow, patch IntroMarkerPatch, tolerance float64) bool {
-	if row.IntroStart == nil || row.IntroEnd == nil {
-		return true
-	}
-	return absFloat(*row.IntroStart-patch.Start) > tolerance || absFloat(*row.IntroEnd-patch.End) > tolerance
-}
-
-func absFloat(v float64) float64 {
-	if v < 0 {
-		return -v
-	}
-	return v
 }
 
 func effectiveAudioLanguage(tracks []models.AudioTrack) string {

@@ -1,0 +1,136 @@
+#!/usr/bin/env node
+// Capture one process through its local profiling listener. Node ships in the
+// Silo image; no additional runtime package or network dependency is required.
+"use strict";
+
+const fs = require("node:fs");
+const http = require("node:http");
+const net = require("node:net");
+const crypto = require("node:crypto");
+
+function options(argv) {
+  const args = { url: "http://127.0.0.1:6060", profile: "heap", "max-bytes": "134217728" };
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--help") {
+      console.log("Usage: scripts/silo-profile --output FILE [--url http://127.0.0.1:6060] [--profile cpu|heap|allocs|goroutine|threadcreate|block|mutex|trace] [--seconds N] [--gc 1] [--max-bytes N]");
+      process.exit(0);
+    }
+    const key = argv[i].slice(2);
+    if (!argv[i].startsWith("--") || !["url", "profile", "output", "seconds", "gc", "max-bytes"].includes(key) || !argv[i + 1]) throw Error("invalid arguments; use --help");
+    args[key] = argv[++i];
+  }
+  if (!args.output) throw Error("--output is required");
+  const url = new URL(args.url);
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  const local = (net.isIP(hostname) === 4 && hostname.startsWith("127.")) || hostname === "::1";
+  if (url.protocol !== "http:" || !local || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw Error("--url must be an HTTP origin with a literal loopback address");
+  const name = args.profile === "cpu" ? "profile" : args.profile;
+  if (!["profile", "heap", "allocs", "goroutine", "threadcreate", "block", "mutex", "trace"].includes(name)) throw Error("unsupported profile");
+  url.pathname = "/debug/pprof/" + name;
+  if (args.seconds !== undefined) {
+    const seconds = Number(args.seconds);
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > (name === "trace" ? 5 : 60) || (name !== "trace" && !Number.isInteger(seconds))) throw Error("invalid capture duration");
+    url.searchParams.set("seconds", String(seconds));
+  }
+  if (args.gc !== undefined) {
+    if (name !== "heap" || args.gc !== "1" || args.seconds !== undefined) throw Error("--gc 1 requires a heap snapshot without --seconds");
+    url.searchParams.set("gc", "1");
+  }
+  const maxBytes = Number(args["max-bytes"]);
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 4 * 1024 ** 3) throw Error("--max-bytes must be an integer between 1 and 4294967296");
+  return { output: args.output, url, maxBytes };
+}
+
+async function capture(args) {
+  process.umask(0o077);
+  const partial = args.output + ".partial";
+  const metadataPath = args.output + ".json";
+  if (fs.existsSync(args.output)) throw Error("output already exists");
+  const metadataFD = fs.openSync(metadataPath, "wx", 0o600);
+  const metadata = { valid: false, reason: "capture_incomplete", url: args.url.href, started_at: new Date().toISOString(), max_bytes: args.maxBytes, bytes: 0 };
+  let outputFD;
+  const writeMetadata = () => {
+    const data = JSON.stringify(metadata, null, 2) + "\n";
+    fs.writeSync(metadataFD, data, 0, "utf8");
+    fs.ftruncateSync(metadataFD, Buffer.byteLength(data));
+    fs.fsyncSync(metadataFD);
+  };
+  writeMetadata();
+  try {
+    outputFD = fs.openSync(partial, "wx", 0o600);
+    await new Promise((resolve, reject) => {
+      const hash = crypto.createHash("sha256");
+      let finished = false;
+      let request;
+      const stop = (error) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(deadline);
+        process.removeListener("SIGINT", interrupted);
+        process.removeListener("SIGTERM", interrupted);
+        if (error) {
+          metadata.reason = error.message;
+          request?.destroy();
+          reject(error);
+        } else resolve();
+      };
+      const interrupted = () => stop(Error("capture interrupted by signal"));
+      const deadline = setTimeout(() => stop(Error("capture deadline exceeded")), 75000);
+      process.on("SIGINT", interrupted);
+      process.on("SIGTERM", interrupted);
+      request = http.get(args.url, { agent: false, headers: { "Host": args.url.hostname + ":" + (args.url.port || "80") } }, response => {
+        metadata.http_status = response.statusCode;
+        metadata.headers = Object.fromEntries(Object.entries(response.headers).filter(([key]) => key.startsWith("x-silo-")));
+        if (response.statusCode !== 200) { stop(Error("profiling returned HTTP " + response.statusCode)); return; }
+        if (response.headers["content-type"] !== "application/octet-stream") { stop(Error("response is not a binary profile")); return; }
+        response.on("data", chunk => {
+          if (finished) return;
+          try {
+            const admitted = chunk.subarray(0, args.maxBytes - metadata.bytes);
+            let written = 0;
+            while (written < admitted.length) {
+              const count = fs.writeSync(outputFD, admitted, written, admitted.length - written);
+              if (count === 0) throw Error("capture file write made no progress");
+              hash.update(admitted.subarray(written, written + count));
+              written += count;
+              metadata.bytes += count;
+            }
+            if (admitted.length !== chunk.length) stop(Error("capture exceeded output byte limit"));
+          } catch (error) { stop(error); }
+        });
+        response.on("error", stop);
+        response.on("aborted", () => stop(Error("capture response aborted")));
+        response.on("end", () => {
+          if (finished) return;
+          metadata.trailers = response.trailers;
+          if (!response.complete || metadata.bytes === 0 || response.trailers["x-silo-capture-interrupted"] !== "false") { stop(Error("capture missing completion proof or interrupted by server")); return; }
+          metadata.sha256 = hash.digest("hex");
+          stop();
+        });
+      });
+      request.on("error", stop);
+    });
+    fs.fsyncSync(outputFD);
+    // Linking creates the final name exclusively; it cannot replace a file
+    // created while the request was running. Keep incomplete files as .partial.
+    fs.linkSync(partial, args.output);
+    fs.unlinkSync(partial);
+    metadata.valid = true;
+    delete metadata.reason;
+    console.log(args.output);
+  } catch (error) {
+    metadata.reason = error.message;
+    throw error;
+  } finally {
+    metadata.finished_at = new Date().toISOString();
+    try { writeMetadata(); } finally {
+      fs.closeSync(metadataFD);
+      if (outputFD !== undefined) fs.closeSync(outputFD);
+    }
+  }
+}
+
+Promise.resolve().then(() => capture(options(process.argv.slice(2)))).catch(error => {
+  console.error("silo-profile: " + error.message);
+  process.exitCode = 1;
+});

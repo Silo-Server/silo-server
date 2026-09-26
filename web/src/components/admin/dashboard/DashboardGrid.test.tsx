@@ -58,6 +58,8 @@ function layoutWith(
     removeWidget: vi.fn(),
     addWidget: vi.fn(),
     resetLayout: vi.fn(),
+    reloadServerLayout: vi.fn(),
+    serverSaveBlocked: false,
     ...overrides,
   };
 }

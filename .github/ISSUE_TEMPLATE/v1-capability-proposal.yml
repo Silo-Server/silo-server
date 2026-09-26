@@ -9,7 +9,9 @@ body:
         One proposal per **user-facing capability** (e.g. "Manga library type", "Transcoded playback"),
         not per PR or per endpoint. Locked capabilities are what the client teams plan against —
         the **API surface** section is mandatory for a capability to be lockable.
-        Scope state and lock rules: `docs/architecture/v1-scope.md`.
+        Capability scope state and lock rules: `docs/architecture/v1-scope.md`.
+        New API surface targets `/api/v2`, Silo 1.0's stable native contract; `/api/v1` is frozen
+        and takes no new capability work. Contract rules: `docs/architecture/api-contract.md`.
   - type: textarea
     id: summary
     attributes:
@@ -29,12 +31,12 @@ body:
     attributes:
       label: API surface
       description: >
-        Endpoints/payloads clients will call (method + path + notable request/response fields).
-        Plain list now; OpenAPI pointers once the #135 tooling lands. A capability cannot be
-        Locked without this section filled in.
+        Operations clients will call (method + path + operation ID + notable request/response
+        fields), under `/api/v2`. Point at `contracts/api/v2/openapi.json` where the operation
+        already exists. A capability cannot be Locked without this section filled in.
       placeholder: |
-        GET  /api/v1/manga/{seriesId}/chapters — list chapters (id, index, volume, read_state)
-        POST /api/v1/watch-progress — records reading progress (existing endpoint, new item type)
+        GET  /api/v2/manga/{series_id}/chapters (listMangaChapters) — chapters (id, index, volume, read_state)
+        POST /api/v2/sync/progress (syncProgress) — records reading progress (existing operation, new item type)
     validations:
       required: true
   - type: textarea

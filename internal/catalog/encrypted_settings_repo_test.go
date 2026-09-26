@@ -5,8 +5,40 @@ import (
 	"crypto/rand"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
+
+func TestEncryptedSettings_UnreadableTransitionDoesNotBlockConfigLoad(t *testing.T) {
+	raw := newMemSettings()
+	dec := NewEncryptedSettingsRepo(raw, newCipher(t))
+	const corrupt = "enc:v1:invalid-transition-envelope"
+	raw.m[config.StorageTransitionTargetKey] = corrupt
+	if err := dec.Set(t.Context(), "auth.jwt_secret", "active-secret"); err != nil {
+		t.Fatal(err)
+	}
+	all, err := dec.GetAll(t.Context())
+	if err != nil {
+		t.Fatalf("startup settings load failed before blocked recovery can run: %v", err)
+	}
+	if all["auth.jwt_secret"] != "active-secret" {
+		t.Fatal("active configuration was not decrypted")
+	}
+	if _, present := all[config.StorageTransitionTargetKey]; present {
+		t.Fatal("unreadable recovery state appeared in the configuration snapshot")
+	}
+	if _, err := dec.Get(t.Context(), config.StorageTransitionTargetKey); err == nil {
+		t.Fatal("explicit recovery read must still report the decryption error")
+	}
+	if raw.m[config.StorageTransitionTargetKey] != corrupt {
+		t.Fatal("unreadable recovery state was changed")
+	}
+	// Other unreadable credentials must still fail closed.
+	raw.m["s3.public_secret_key"] = corrupt
+	if _, err := dec.GetAll(t.Context()); err == nil {
+		t.Fatal("unreadable active storage credentials were silently ignored")
+	}
+}
 
 // memSettings is an in-memory raw SettingsStore for DB-free decorator tests.
 type memSettings struct{ m map[string]string }

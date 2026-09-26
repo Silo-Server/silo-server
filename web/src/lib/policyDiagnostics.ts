@@ -1,7 +1,7 @@
 import type { Diagnostic } from "@codemirror/lint";
 import { Text } from "@codemirror/state";
 
-import type { PolicyCompileIssue } from "@/api/types";
+import type { PolicyCompileIssue } from "@/api/adminPolicy";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);

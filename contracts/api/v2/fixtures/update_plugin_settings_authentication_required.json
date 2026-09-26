@@ -1,0 +1,7 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/authentication_required",
+  "title": "Authentication required",
+  "status": 401,
+  "detail": "Authentication is required.",
+  "instance": "urn:silo:request:0000000000000000000000bc"
+}

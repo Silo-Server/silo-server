@@ -34,9 +34,15 @@ vi.mock("@/components/PageBack", () => ({
 }));
 
 vi.mock("@/reader/ebookReaderApi", () => ({
+  createEbookAnnotationSession: () => ({ profileContext: null, creates: new Map() }),
   createEbookReaderAnnotation: mocks.createEbookReaderAnnotation,
   deleteEbookReaderAnnotation: mocks.deleteEbookReaderAnnotation,
   fetchEbookReaderAnnotations: mocks.fetchEbookReaderAnnotations,
+  createEbookReaderConfigSession: () => ({
+    etag: "test",
+    profileContext: null,
+    pending: Promise.resolve(),
+  }),
   fetchEbookReaderConfig: mocks.fetchEbookReaderConfig,
   saveEbookReaderConfig: mocks.saveEbookReaderConfig,
   saveEbookReaderConfigKeepalive: mocks.saveEbookReaderConfigKeepalive,
@@ -674,7 +680,7 @@ describe("EbookReader", () => {
       await Promise.resolve();
     });
 
-    expect(mocks.fetchEbookReaderConfig).toHaveBeenCalledWith("ebook-1");
+    expect(mocks.fetchEbookReaderConfig).toHaveBeenCalledWith("ebook-1", expect.any(Object));
     expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
       expect.objectContaining({ theme: "sepia", fontSize: 130 }),
     );
@@ -720,6 +726,7 @@ describe("EbookReader", () => {
       expect.objectContaining({
         settings: expect.objectContaining({ theme: "dark" }),
       }),
+      expect.any(Object),
     );
 
     vi.useRealTimers();
@@ -763,6 +770,7 @@ describe("EbookReader", () => {
       expect.objectContaining({
         settings: expect.objectContaining({ theme: "dark" }),
       }),
+      expect.any(Object),
     );
 
     vi.useRealTimers();
@@ -805,6 +813,7 @@ describe("EbookReader", () => {
       expect.objectContaining({
         settings: expect.objectContaining({ theme: "sepia" }),
       }),
+      expect.any(Object),
     );
 
     // The pending save was consumed: neither the debounce timer firing nor the
@@ -864,6 +873,7 @@ describe("EbookReader", () => {
       expect.objectContaining({
         settings: expect.objectContaining({ theme: "light", fontSize: 112, flow: "paginated" }),
       }),
+      expect.any(Object),
     );
     expect(localStorage.getItem("silo.ebook.reader.settings")).toContain('"theme":"light"');
 
@@ -1033,7 +1043,11 @@ describe("EbookReader", () => {
       deleteButton?.click();
     });
 
-    expect(mocks.deleteEbookReaderAnnotation).toHaveBeenCalledWith("ebook-1", "ann-1");
+    expect(mocks.deleteEbookReaderAnnotation).toHaveBeenCalledWith(
+      "ebook-1",
+      expect.objectContaining({ id: "ann-1" }),
+      expect.any(Object),
+    );
 
     const highlight = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Highlight selection"]',
@@ -1049,6 +1063,7 @@ describe("EbookReader", () => {
         cfi_range: "epubcfi(/6/4,/1:0,/1:12)",
         selected_text: "sample text",
       }),
+      expect.any(Object),
     );
   });
 
@@ -1158,6 +1173,7 @@ describe("EbookReader", () => {
       expect.objectContaining({
         settings: expect.objectContaining({ theme: "dark" }),
       }),
+      expect.any(Object),
     );
   });
 

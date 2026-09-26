@@ -19,7 +19,8 @@ func scanProfile(scanner interface {
 	var p userstore.Profile
 	var createdAt, updatedAt time.Time
 	err := scanner.Scan(
-		&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating,
+		&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating, &p.MaxAdvisoryAge,
+		&p.RequireAdvisoryAge,
 		&p.QualityPreference, &p.Language, &p.PreferredMetadataLanguage, &p.SubtitleLanguage, &p.SubtitleMode,
 		&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview,
 		&p.LibraryRestrictionsEnabled,
@@ -74,13 +75,15 @@ func createProfile(
 
 	_, err := exec.Exec(ctx, `
 		INSERT INTO user_profiles (
-			id, user_id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
+			id, user_id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, max_advisory_age,
+			require_advisory_age,
 			quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 			auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview,
 			library_restrictions_enabled,
 			show_forced_subtitles, max_playback_quality, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
-		p.ID, userID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary, p.MaxContentRating,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9::smallint, 0), $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
+		p.ID, userID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary, p.MaxContentRating, p.MaxAdvisoryAge,
+		p.RequireAdvisoryAge,
 		p.QualityPreference, p.Language, p.PreferredMetadataLanguage, p.SubtitleLanguage, p.SubtitleMode,
 		p.AutoSkipIntro, p.AutoSkipCredits, p.AutoSkipRecap, p.AutoPlayNextPreview,
 		p.LibraryRestrictionsEnabled,
@@ -96,12 +99,21 @@ func createProfile(
 }
 
 func (s *PostgresUserStore) GetProfile(ctx context.Context, id string) (*userstore.Profile, error) {
-	row := s.pool.QueryRow(ctx, `
-		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
+	return getProfile(ctx, s.pool, s.userID, id)
+}
+
+// ProfileInTransaction reuses the owning profile and library membership read.
+func ProfileInTransaction(ctx context.Context, tx pgx.Tx, userID int, id string) (*userstore.Profile, error) {
+	return getProfile(ctx, tx, userID, id)
+}
+func getProfile(ctx context.Context, db preferenceSettingsExecutor, userID int, id string) (*userstore.Profile, error) {
+	row := db.QueryRow(ctx, `
+		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
+		       require_advisory_age,
 		       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
 		       show_forced_subtitles, max_playback_quality, created_at, updated_at
-		FROM user_profiles WHERE user_id = $1 AND id = $2`, s.userID, id)
+		FROM user_profiles WHERE user_id = $1 AND id = $2`, userID, id)
 
 	p, err := scanProfile(row)
 	if err == pgx.ErrNoRows {
@@ -110,7 +122,7 @@ func (s *PostgresUserStore) GetProfile(ctx context.Context, id string) (*usersto
 	if err != nil {
 		return nil, fmt.Errorf("querying profile %s: %w", id, err)
 	}
-	p.AllowedLibraryIDs, err = listProfileAllowedLibraries(ctx, s.pool, s.userID, p.ID)
+	p.AllowedLibraryIDs, err = listProfileAllowedLibraries(ctx, db, userID, p.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +131,8 @@ func (s *PostgresUserStore) GetProfile(ctx context.Context, id string) (*usersto
 
 func (s *PostgresUserStore) ListProfiles(ctx context.Context) ([]userstore.Profile, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
+		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
+		       require_advisory_age,
 		       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
 		       show_forced_subtitles, max_playback_quality, created_at, updated_at
@@ -163,6 +176,8 @@ func updateProfile(
 	accessPolicyChanged := u.PIN != nil ||
 		u.IsChild != nil ||
 		u.MaxContentRating != nil ||
+		u.MaxAdvisoryAge != nil ||
+		u.RequireAdvisoryAge != nil ||
 		u.LibraryRestrictionsEnabled != nil ||
 		u.AllowedLibraryIDs != nil ||
 		u.MaxPlaybackQuality != nil
@@ -196,6 +211,17 @@ func updateProfile(
 	}
 	if u.MaxContentRating != nil {
 		addArg("max_content_rating", *u.MaxContentRating)
+	}
+	if u.MaxAdvisoryAge != nil {
+		// 0 clears the limit; the column stores "no limit" as NULL.
+		var age *int
+		if *u.MaxAdvisoryAge != 0 {
+			age = u.MaxAdvisoryAge
+		}
+		addArg("max_advisory_age", age)
+	}
+	if u.RequireAdvisoryAge != nil {
+		addArg("require_advisory_age", *u.RequireAdvisoryAge)
 	}
 	if u.QualityPreference != nil {
 		addArg("quality_preference", *u.QualityPreference)

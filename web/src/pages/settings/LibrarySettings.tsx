@@ -22,13 +22,13 @@ import {
   useLibraryDisplayPreferences,
 } from "@/hooks/queries/libraries";
 import {
+  isSettingValueMissing,
   useClearSettingValue,
   useEffectiveSettings,
   useSetSettingValue,
 } from "@/hooks/queries/settingValues";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
-import { ApiClientError } from "@/api/client";
 import {
   buildInheritedLanguageLabel,
   buildInheritedShowForcedSubtitlesLabel,
@@ -88,7 +88,7 @@ async function clearIgnoringUnset(clear: ReturnType<typeof useClearSettingValue>
   try {
     await clear.mutateAsync({ key, identity: DEVICE_SCOPE });
   } catch (error) {
-    if (error instanceof ApiClientError && error.status === 404) {
+    if (isSettingValueMissing(error)) {
       return;
     }
     throw error;
@@ -321,7 +321,7 @@ function LibraryCard({
           } catch (error) {
             // Nothing stored at this scope already inherits, which is the
             // state the clear asks for.
-            if (!(error instanceof ApiClientError && error.status === 404)) throw error;
+            if (!isSettingValueMissing(error)) throw error;
           }
           continue;
         }

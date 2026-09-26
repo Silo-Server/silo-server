@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { AlertTriangle, ArrowRight } from "lucide-react";
+import { useState } from "react";
+import { ArrowRight, RotateCcw } from "lucide-react";
 import { Link } from "react-router";
 
 import type { ConnectionCheckResponse } from "@/api/types";
@@ -7,8 +7,8 @@ import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction"
 import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { SecretField } from "@/components/settings/SecretField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useBranding } from "@/hooks/useBranding";
 import {
   useCatalogSearchStatus,
   useCheckAdminSettingsConnection,
@@ -20,12 +20,25 @@ import { MarkerTasksCard } from "./MarkerTasksCard";
 import { SaveBar } from "./SaveBar";
 import { SearchStatusPanel } from "./SearchStatusPanel";
 import { SettingField, SettingFieldStatus } from "./SettingField";
+import { WORKER_SETTING_DEFAULTS, hasWorkerOverrides } from "./settingsWorkerDefaults";
 
 const ARTWORK_KEYS = ["metadata.cache_images"];
 
-const SCANNER_KEYS = ["scanner.workers", "matcher.workers", "matcher.batch_size"];
+const BROWSING_KEYS = ["catalog.scope_versions_to_library", "access.unrated_content"];
 
-const MARKER_KEYS = ["markers.mode", "markers.lazy_playback"];
+const SCANNER_KEYS = [
+  "scanner.workers",
+  "matcher.workers",
+  "matcher.batch_size",
+  "metadata.image_workers",
+];
+
+const MARKER_KEYS = [
+  "markers.mode",
+  "markers.lazy_playback",
+  "markers.online_storage",
+  "markers.detection_workers",
+];
 
 const MEILI_URL_KEY = "catalog.search.meilisearch.url";
 const MEILI_API_KEY = "catalog.search.meilisearch.api_key";
@@ -47,34 +60,28 @@ const SEARCH_KEYS = ["catalog.search.provider", ...MEILI_KEYS];
 // without a control here because the defaults are right for every deployment we
 // support — catalog.search.meilisearch.{rebuild_batch_size,
 // rebuild_task_queue_depth,index_types,embedder,binary_quantized}.
-const KEYS = [...ARTWORK_KEYS, ...SCANNER_KEYS, ...MARKER_KEYS, ...SEARCH_KEYS];
+const KEYS = [...ARTWORK_KEYS, ...BROWSING_KEYS, ...SCANNER_KEYS, ...MARKER_KEYS, ...SEARCH_KEYS];
 
 export default function LibraryMetadataSettings() {
-  const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
-  const branding = useBranding();
+  const form = useSettingsForm({ keys: KEYS });
   const restartKeys = useRestartKeys();
   const checkConnection = useCheckAdminSettingsConnection();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
-
-  // Artwork storage writes provider images into the public bucket, so the
-  // server rejects enabling it when no bucket is configured at all.
-  // `storage_available` is the process-level truth (branding uses the same
-  // flag for asset uploads); s3.public_bucket only says a bucket was saved,
-  // which is enough for the server to accept the save — the two together
-  // separate "restart pending" from "never configured". s3.public_bucket is
-  // not staged here, but getValue falls back to the full settings response.
-  const publicBucketSaved = Boolean(form.getValue("s3.public_bucket"));
-  const artworkStorageOn = form.getValue("metadata.cache_images") === "true";
-  // Never trap an admin with it on: turning it off stays available even when
-  // the bucket went away.
-  const artworkStorageLocked =
-    !branding.storageAvailable && !publicBucketSaved && !artworkStorageOn;
 
   const provider = form.getValue("catalog.search.provider") || "postgres";
   const meiliEnabled = provider === "meilisearch";
   const { data: searchStatus } = useCatalogSearchStatus(meiliEnabled);
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
+  // Restoring stages every worker value at once; the save bar still confirms
+  // it. The button is only offered while something differs from the default,
+  // so an untouched group never shows a control that would do nothing.
+  const workerOverrides = hasWorkerOverrides(form.getValue);
+  function restoreWorkerDefaults() {
+    for (const [key, fallback] of Object.entries(WORKER_SETTING_DEFAULTS)) {
+      if (form.getValue(key) !== fallback) form.setValue(key, fallback);
+    }
+  }
   // Staged Meilisearch edits stay reachable after switching the provider back,
   // so the save bar can never count a change the admin cannot see.
   const showMeili = meiliEnabled || anyDirty(MEILI_KEYS);
@@ -99,7 +106,9 @@ export default function LibraryMetadataSettings() {
     }
   }
 
-  const markerMode = form.getValue("markers.mode") || "local";
+  const markerMode = form.getValue("markers.mode") || "both";
+  const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
+  const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
 
   if (form.isLoading) {
     return (
@@ -120,42 +129,65 @@ export default function LibraryMetadataSettings() {
       <div className="flex-1 space-y-5">
         <FieldGroup
           label="Artwork"
-          description="Posters and backdrops from metadata providers, copied into the public bucket and served from there."
+          description="Posters and backdrops from metadata providers, copied into your artwork storage."
           restartAll={allRestart(ARTWORK_KEYS)}
         >
-          {!branding.storageAvailable && (
-            <div className="mt-3 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-              <p className="text-muted-foreground text-[13px] leading-relaxed">
-                {publicBucketSaved ? (
-                  <>Restart the server for artwork storage to start.</>
-                ) : (
-                  <>
-                    Artwork storage needs a public S3 bucket, set in{" "}
-                    <Link
-                      to="/admin/settings/infrastructure"
-                      className="text-foreground font-medium underline-offset-2 hover:underline"
-                    >
-                      Storage &amp; Database
-                    </Link>{" "}
-                    settings.
-                  </>
-                )}
-              </p>
-            </div>
-          )}
           <SettingField
-            label="Store artwork in your bucket"
+            label="Keep provider artwork"
             type="toggle"
             description="When off, clients load artwork straight from the providers."
             value={form.getValue("metadata.cache_images")}
             onChange={(value) => form.setValue("metadata.cache_images", value)}
-            disabled={artworkStorageLocked}
             restartRequired={restartKeys.has("metadata.cache_images")}
           />
         </FieldGroup>
 
-        <FieldGroup label="Scanning" restartAll={allRestart(SCANNER_KEYS)}>
+        <FieldGroup
+          label="Browsing"
+          description="How an item that lives in more than one library is shown."
+          restartAll={allRestart(BROWSING_KEYS)}
+        >
+          <SettingField
+            label="Show only the browsed library's versions"
+            type="toggle"
+            description="When an item is in several libraries, opening it from one library lists only the files stored there. Off, every version the viewer can access is listed no matter where they opened it. Playback always sees every version."
+            value={form.getValue("catalog.scope_versions_to_library") || "false"}
+            onChange={(value) => form.setValue("catalog.scope_versions_to_library", value)}
+            restartRequired={restartKeys.has("catalog.scope_versions_to_library")}
+          />
+          <SettingField
+            label="Titles with no age rating"
+            type="select"
+            description="Applies to profiles with a maturity ceiling: whether they see titles with no rating, or marked Not Rated. A rating the server cannot read stays hidden from them either way. Profiles without a ceiling always see these titles."
+            value={form.getValue("access.unrated_content") || "hide"}
+            onChange={(value) => form.setValue("access.unrated_content", value)}
+            options={[
+              { value: "hide", label: "Hide from profiles with a ceiling" },
+              { value: "allow", label: "Show to every profile" },
+            ]}
+            restartRequired={restartKeys.has("access.unrated_content")}
+          />
+        </FieldGroup>
+
+        <FieldGroup
+          label="Scanning"
+          restartAll={allRestart(SCANNER_KEYS)}
+          dirty={anyDirty(SCANNER_KEYS)}
+          actions={
+            workerOverrides ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={restoreWorkerDefaults}
+              >
+                <RotateCcw aria-hidden="true" />
+                Restore defaults
+              </Button>
+            ) : undefined
+          }
+        >
           <AdvancedSection
             id="library.scanning"
             count={SCANNER_KEYS.length}
@@ -168,6 +200,14 @@ export default function LibraryMetadataSettings() {
               value={form.getValue("scanner.workers")}
               onChange={(value) => form.setValue("scanner.workers", value)}
               restartRequired={restartKeys.has("scanner.workers")}
+            />
+            <SettingField
+              label="Image encoding workers"
+              type="number"
+              description="How many artwork images Silo encodes at once. 0 uses one per CPU core."
+              value={form.getValue("metadata.image_workers")}
+              onChange={(value) => form.setValue("metadata.image_workers", value)}
+              restartRequired={restartKeys.has("metadata.image_workers")}
             />
             <SettingField
               label="Matcher workers"
@@ -194,7 +234,8 @@ export default function LibraryMetadataSettings() {
           providers.
         */}
         <FieldGroup
-          label="Intro and credits markers"
+          label="Skip markers"
+          description="Markers identify intros, credits, recaps, and previews so players can offer skip controls."
           restartAll={allRestart(MARKER_KEYS)}
           actions={
             <Link
@@ -207,28 +248,70 @@ export default function LibraryMetadataSettings() {
           }
         >
           <SettingField
-            label="Find intros and credits"
+            label="Marker source"
             type="select"
-            description="Detecting on this server utilizes CPU. Looking online uses the marker providers set up on the Subtitles & Metadata page."
+            description="Online markers take priority. Silo skips local intro detection when an online intro is saved in your library. Local detection uses CPU."
+            className="[&_[data-slot=select-trigger]]:h-auto [&_[data-slot=select-trigger]]:min-h-9 [&_[data-slot=select-value]]:line-clamp-none [&_[data-slot=select-value]]:text-left [&_[data-slot=select-value]]:whitespace-normal"
             options={[
               { value: "off", label: "Off" },
               { value: "local", label: "Detect on this server" },
-              { value: "both", label: "Detect on this server, then look online" },
-              { value: "online", label: "Look online only" },
+              { value: "both", label: "Online preferred + server detection" },
+              { value: "online", label: "Online providers only" },
             ]}
             value={markerMode}
             onChange={(value) => form.setValue("markers.mode", value)}
             restartRequired={restartKeys.has("markers.mode")}
           />
 
-          <SettingField
-            label="Fetch markers on playback"
-            type="toggle"
-            description="Uses the enabled marker providers to look up missing markers when playback starts. Can delay the first few seconds."
-            value={form.getValue("markers.lazy_playback") || "false"}
-            onChange={(value) => form.setValue("markers.lazy_playback", value)}
-            restartRequired={restartKeys.has("markers.lazy_playback")}
-          />
+          {onlineMarkersEnabled && (
+            <SettingField
+              label="Save online markers"
+              type="select"
+              description={
+                onlineMarkerStorage === "stored"
+                  ? "Silo saves markers from enabled providers such as TheIntroDB. The Sync online markers task fetches missing markers and refreshes saved markers daily at 03:00 (server time) by default."
+                  : "Fetch markers when needed without saving them to your library. Scheduled online sync is disabled."
+              }
+              options={[
+                { value: "stored", label: "Save to library" },
+                { value: "on_demand", label: "Fetch when needed" },
+              ]}
+              value={onlineMarkerStorage}
+              onChange={(value) => {
+                form.setValue("markers.online_storage", value);
+                if (value === "on_demand") form.setValue("markers.lazy_playback", "true");
+              }}
+              restartRequired={restartKeys.has("markers.online_storage")}
+            />
+          )}
+
+          {markerMode !== "off" && (!onlineMarkersEnabled || onlineMarkerStorage === "stored") && (
+            <SettingField
+              label="Find markers on playback"
+              type="toggle"
+              description={
+                onlineMarkersEnabled
+                  ? markerMode === "both"
+                    ? "Check online first when playback starts. If intro or credits markers are available, skip local detection. Otherwise, detect locally using this server's CPU."
+                    : "Check online for missing or outdated markers when playback starts."
+                  : "Detect missing markers when playback starts. Local analysis uses CPU."
+              }
+              value={form.getValue("markers.lazy_playback") || "true"}
+              onChange={(value) => form.setValue("markers.lazy_playback", value)}
+              restartRequired={restartKeys.has("markers.lazy_playback")}
+            />
+          )}
+
+          {(markerMode === "local" || markerMode === "both") && (
+            <SettingField
+              label="Detection workers"
+              type="number"
+              description="How many seasons Silo analyzes for intros at once, each reading audio with its own ffmpeg process. Defaults to 1. Raise it to finish a large library sooner if your storage and CPU have room."
+              value={form.getValue("markers.detection_workers")}
+              onChange={(value) => form.setValue("markers.detection_workers", value)}
+              restartRequired={restartKeys.has("markers.detection_workers")}
+            />
+          )}
 
           <div className="py-3.5">
             <MarkerTasksCard />

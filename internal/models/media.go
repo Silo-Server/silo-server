@@ -83,6 +83,7 @@ type MediaFile struct {
 	RecapEnd                     *float64
 	PreviewStart                 *float64
 	PreviewEnd                   *float64
+	MarkerSegments               []MarkerSegment // JSONB; legacy bounds expose the first occurrence per kind
 	MarkersSource                *string
 	MarkersConfidence            *float64
 	IntroMarkersSource           *string
@@ -571,17 +572,65 @@ type AudiobookSeriesMembership struct {
 }
 
 // MediaItem represents a row in the media_items table.
+// AdvisoryColumns normalizes an advisory age and its source for storage.
+//
+// The pair is all-or-nothing: an age Silo cannot attribute is an anonymous
+// number shown to a parent, and a source with no age says nothing. Whenever
+// either half is missing, both columns store NULL, so "no advisory" has one
+// spelling in the database rather than a NULL, an empty string, and a zero.
+//
+// Only movies and series store an advisory (see AdvisoryAgeApplies), so a
+// profile's advisory-age limit can never hide an item of any other type, such
+// as a title in the beta book libraries.
+//
+// Every write path funnels through here, including the COPY-based bulk import,
+// which cannot lean on a NULLIF in SQL, and the catalog-bundle imports, which
+// may carry an advisory from any source.
+func AdvisoryColumns(itemType string, age *int, source string) (*int, *string) {
+	if !AdvisoryAgeApplies(itemType) || age == nil || *age <= 0 || source == "" {
+		return nil, nil
+	}
+	return age, &source
+}
+
+// AdvisoryAgeApplies reports whether an item of itemType may carry an advisory
+// age. Only movies and series do: those are the types advisory services rate
+// and the only ones the profile advisory-age limit is meant for.
+func AdvisoryAgeApplies(itemType string) bool {
+	return itemType == advisoryItemTypeMovie || itemType == advisoryItemTypeSeries
+}
+
+// The media_items.type values that may carry an advisory age.
+const (
+	advisoryItemTypeMovie  = "movie"
+	advisoryItemTypeSeries = "series"
+)
+
 type MediaItem struct {
-	ContentID                    string // Sonyflake ID (PK)
-	Type                         string // movie, series
-	Title                        string
-	SortTitle                    string
-	DefaultMetadataLanguage      string
-	OriginalTitle                string
-	Year                         int
-	Genres                       []string
-	ContentRating                string // PG-13, TV-MA
-	Runtime                      int    // minutes
+	ContentID               string // Sonyflake ID (PK)
+	Type                    string // movie, series
+	Title                   string
+	SortTitle               string
+	DefaultMetadataLanguage string
+	OriginalTitle           string
+	Year                    int
+	Genres                  []string
+	ContentRating           string // PG-13, TV-MA
+	// AdvisoryAge is a recommended minimum viewer age from an advisory service
+	// (Common Sense Media), distinct from the certification in ContentRating.
+	// It never feeds ContentRating or content_rating_age; a profile's
+	// separate advisory-age limit (access.MaturityLimits.MaxAdvisoryAge)
+	// compares against it, and a nil age never hides a title from that limit.
+	// Nil means no advisory; the column is nullable and a stored age is always
+	// positive, since providers spell "unknown" as zero.
+	AdvisoryAge *int
+	// AdvisorySource attributes AdvisoryAge so the UI can name who recommended
+	// it. Empty when AdvisoryAge is nil.
+	AdvisorySource string
+	Runtime        int // minutes
+	// AudiobookDurationSeconds is an exact transient duration overlay loaded
+	// from active audiobook file stats for protocol adapters that use seconds.
+	AudiobookDurationSeconds     int
 	Overview                     string
 	Tagline                      string
 	RatingIMDB                   *float64

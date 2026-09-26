@@ -36,12 +36,12 @@ import CollectionAccessEditor from "@/components/collections/CollectionAccessEdi
 import { useCatalogWindow } from "@/hooks/queries/catalog";
 import {
   useCreateCollection,
+  useCollectionCapabilities,
   useDeleteUserCollectionImage,
   useUpdateCollection,
 } from "@/hooks/queries/collections";
 import {
   useCreateAdminCollection,
-  useDeleteCollectionImage,
   useUpdateAdminCollection,
 } from "@/hooks/queries/admin/collections";
 import { useUserLibraries } from "@/hooks/queries/libraries";
@@ -54,19 +54,25 @@ import {
   toUpdateCollectionBody,
   toUserCollectionBuilderValue,
 } from "./userCollectionsShared";
-import { toAdminCollectionBuilderValue, toAdminCollectionRequest } from "./adminCollectionsShared";
+import {
+  AdminCollectionArtworkField,
+  toAdminCollectionBuilderValue,
+  toAdminCollectionRequest,
+} from "./adminCollectionsShared";
 import type { CatalogSearchState } from "./catalogSearchParams";
 
 type WizardStep = 1 | 2;
 
 type UserModeProps = {
   mode: "user";
+  etag?: string;
   collection: Collection | null;
   onClose: () => void;
 };
 
 type AdminModeProps = {
   mode: "admin";
+  etag?: string;
   collection: LibraryCollection | null;
   libraries: Library[];
   initialLibraryId: number | null;
@@ -102,12 +108,14 @@ export default function SmartCollectionWizard(wizard: SmartCollectionWizardProps
   // Admin-only state still lives here so it survives step jumps too.
   const [backdropFile, setBackdropFile] = useState<File | null>(null);
   const [backdropSourceUrl, setBackdropSourceUrl] = useState("");
+  const [removeArtwork, setRemoveArtwork] = useState<("poster" | "backdrop")[]>([]);
   const [step, setStep] = useState<WizardStep>(1);
 
   useEffect(() => {
     setDraft(initialDraft);
     setPosterFile(null);
     setPosterSourceUrl("");
+    setRemoveArtwork([]);
     setBackdropFile(null);
     setBackdropSourceUrl("");
     setStep(1);
@@ -149,6 +157,8 @@ export default function SmartCollectionWizard(wizard: SmartCollectionWizardProps
         />
       ) : (
         <Step2AdminMetadata
+          removeArtwork={removeArtwork}
+          onRemoveArtworkChange={setRemoveArtwork}
           wizard={wizard}
           draft={draft}
           onDraftChange={setDraft}
@@ -290,6 +300,9 @@ function Step1FiltersAndPreview({
     () => ({
       source: "query",
       query_definition: queryDefinition,
+      // The draft sort is the collection's saved order, so the preview sends it
+      // even without a library filter.
+      explicit_sort: true,
     }),
     [queryDefinition],
   );
@@ -392,6 +405,7 @@ function Step2UserMetadata({
 }: Step2BaseProps & { wizard: UserModeProps }) {
   const { profile } = useCurrentProfile();
   const { data: profiles = [] } = useProfiles();
+  const { data: capabilities } = useCollectionCapabilities();
   const createMutation = useCreateCollection();
   const updateMutation = useUpdateCollection();
   const deletePosterMutation = useDeleteUserCollectionImage();
@@ -408,7 +422,7 @@ function Step2UserMetadata({
         poster_source_url: trimmedSource || undefined,
       };
       updateMutation.mutate(
-        { id: collection.id, body, poster: posterFile },
+        { id: collection.id, etag: wizard.etag ?? "", body, poster: posterFile },
         { onSuccess: wizard.onClose },
       );
     } else {
@@ -456,22 +470,24 @@ function Step2UserMetadata({
           />
         </div>
 
-        <div className="space-y-3">
-          <h2 className="text-base font-semibold">Poster</h2>
-          <ImageUploadField
-            label="Poster"
-            currentUrl={collection?.poster_url}
-            file={posterFile}
-            onFileChange={onPosterFileChange}
-            sourceUrl={posterSourceUrl}
-            onSourceUrlChange={onPosterSourceUrlChange}
-            onDelete={
-              collection?.poster_url
-                ? () => deletePosterMutation.mutate({ id: collection.id, type: "poster" })
-                : undefined
-            }
-          />
-        </div>
+        {capabilities?.artwork && !readOnly && (
+          <div className="space-y-3">
+            <h2 className="text-base font-semibold">Poster</h2>
+            <ImageUploadField
+              label="Poster"
+              currentUrl={collection?.poster_url}
+              file={posterFile}
+              onFileChange={onPosterFileChange}
+              sourceUrl={posterSourceUrl}
+              onSourceUrlChange={onPosterSourceUrlChange}
+              onDelete={
+                collection?.poster_url
+                  ? () => deletePosterMutation.mutate({ id: collection.id, type: "poster" })
+                  : undefined
+              }
+            />
+          </div>
+        )}
       </div>
 
       <SaveBar
@@ -485,6 +501,8 @@ function Step2UserMetadata({
 }
 
 interface Step2AdminMetadataProps extends Step2BaseProps {
+  removeArtwork: ("poster" | "backdrop")[];
+  onRemoveArtworkChange: (value: ("poster" | "backdrop")[]) => void;
   wizard: AdminModeProps;
   backdropFile: File | null;
   onBackdropFileChange: (file: File | null) => void;
@@ -494,6 +512,8 @@ interface Step2AdminMetadataProps extends Step2BaseProps {
 
 function Step2AdminMetadata({
   wizard,
+  removeArtwork,
+  onRemoveArtworkChange,
   draft,
   onDraftChange,
   posterFile,
@@ -508,7 +528,6 @@ function Step2AdminMetadata({
 }: Step2AdminMetadataProps) {
   const createMutation = useCreateAdminCollection();
   const updateMutation = useUpdateAdminCollection();
-  const deleteImage = useDeleteCollectionImage();
   const isPending = createMutation.isPending || updateMutation.isPending;
   const collection = wizard.collection;
   const hasLibrary = draft.query_definition.library_ids.length > 0;
@@ -523,7 +542,14 @@ function Step2AdminMetadata({
     };
     if (collection) {
       updateMutation.mutate(
-        { id: collection.id, body, poster: posterFile, backdrop: backdropFile },
+        {
+          id: collection.id,
+          etag: wizard.etag!,
+          body,
+          removeArtwork,
+          poster: posterFile,
+          backdrop: backdropFile,
+        },
         { onSuccess: wizard.onClose },
       );
     } else {
@@ -594,39 +620,59 @@ function Step2AdminMetadata({
         </div>
 
         <div className="space-y-4">
-          <ImageUploadField
+          <AdminCollectionArtworkField
             label="Poster"
-            currentUrl={collection?.poster_url}
+            currentUrl={removeArtwork.includes("poster") ? "" : collection?.poster_url}
             file={posterFile}
-            onFileChange={onPosterFileChange}
+            onFileChange={(file) => {
+              onPosterFileChange(file);
+              if (file) onRemoveArtworkChange(removeArtwork.filter((type) => type !== "poster"));
+            }}
             sourceUrl={posterSourceUrl}
-            onSourceUrlChange={onPosterSourceUrlChange}
+            onSourceUrlChange={(url) => {
+              onPosterSourceUrlChange(url);
+              if (url.trim())
+                onRemoveArtworkChange(removeArtwork.filter((type) => type !== "poster"));
+            }}
             onDelete={
               collection
-                ? () =>
-                    deleteImage.mutate({
-                      id: collection.id,
-                      type: "poster",
-                      libraryId: collection.library_id,
-                    })
+                ? () => {
+                    onRemoveArtworkChange(
+                      removeArtwork.includes("poster")
+                        ? removeArtwork
+                        : [...removeArtwork, "poster"],
+                    );
+                    onPosterFileChange(null);
+                    onPosterSourceUrlChange("");
+                  }
                 : undefined
             }
           />
-          <ImageUploadField
+          <AdminCollectionArtworkField
             label="Backdrop"
-            currentUrl={collection?.backdrop_url}
+            currentUrl={removeArtwork.includes("backdrop") ? "" : collection?.backdrop_url}
             file={backdropFile}
-            onFileChange={onBackdropFileChange}
+            onFileChange={(file) => {
+              onBackdropFileChange(file);
+              if (file) onRemoveArtworkChange(removeArtwork.filter((type) => type !== "backdrop"));
+            }}
             sourceUrl={backdropSourceUrl}
-            onSourceUrlChange={onBackdropSourceUrlChange}
+            onSourceUrlChange={(url) => {
+              onBackdropSourceUrlChange(url);
+              if (url.trim())
+                onRemoveArtworkChange(removeArtwork.filter((type) => type !== "backdrop"));
+            }}
             onDelete={
               collection
-                ? () =>
-                    deleteImage.mutate({
-                      id: collection.id,
-                      type: "backdrop",
-                      libraryId: collection.library_id,
-                    })
+                ? () => {
+                    onRemoveArtworkChange(
+                      removeArtwork.includes("backdrop")
+                        ? removeArtwork
+                        : [...removeArtwork, "backdrop"],
+                    );
+                    onBackdropFileChange(null);
+                    onBackdropSourceUrlChange("");
+                  }
                 : undefined
             }
           />

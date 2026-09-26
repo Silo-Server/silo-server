@@ -1,0 +1,10 @@
+{
+  "outcomes": [
+    {
+      "provider": "p",
+      "segment": "intro",
+      "status": "skipped",
+      "reason": "already_submitted"
+    }
+  ]
+}

@@ -42,10 +42,10 @@ func (r *Repository) GetSettings(ctx context.Context) (Settings, error) {
 	var s Settings
 	err := r.pool.QueryRow(ctx, `
 		SELECT requests_enabled, global_max_requests, global_window_days,
-		       global_auto_approval_enabled, force_dual_quality, updated_at
+		       global_auto_approval_enabled, force_dual_quality, updated_at, revision
 		FROM request_settings
 		WHERE id = true
-	`).Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.ForceDualQuality, &s.UpdatedAt)
+	`).Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.ForceDualQuality, &s.UpdatedAt, &s.Revision)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Settings{
@@ -61,6 +61,10 @@ func (r *Repository) GetSettings(ctx context.Context) (Settings, error) {
 }
 
 func (r *Repository) UpdateSettings(ctx context.Context, settings Settings) (Settings, error) {
+	return r.updateSettings(ctx, r.pool, settings, -1)
+}
+
+func (r *Repository) updateSettings(ctx context.Context, exec requestExecutor, settings Settings, expected int64) (Settings, error) {
 	if settings.GlobalWindowDays <= 0 {
 		settings.GlobalWindowDays = 7
 	}
@@ -69,7 +73,7 @@ func (r *Repository) UpdateSettings(ctx context.Context, settings Settings) (Set
 	}
 
 	var s Settings
-	err := r.pool.QueryRow(ctx, `
+	err := exec.QueryRow(ctx, `
 		INSERT INTO request_settings (
 			id, requests_enabled, global_max_requests, global_window_days,
 			global_auto_approval_enabled, force_dual_quality, updated_at
@@ -82,10 +86,11 @@ func (r *Repository) UpdateSettings(ctx context.Context, settings Settings) (Set
 			global_auto_approval_enabled = EXCLUDED.global_auto_approval_enabled,
 			force_dual_quality = EXCLUDED.force_dual_quality,
 			updated_at = now()
+		WHERE $6::bigint = -1 OR request_settings.revision = $6
 		RETURNING requests_enabled, global_max_requests, global_window_days,
-		          global_auto_approval_enabled, force_dual_quality, updated_at
-	`, settings.RequestsEnabled, settings.GlobalMaxRequests, settings.GlobalWindowDays, settings.GlobalAutoApprovalEnabled, settings.ForceDualQuality).
-		Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.ForceDualQuality, &s.UpdatedAt)
+		          global_auto_approval_enabled, force_dual_quality, updated_at, revision
+	`, settings.RequestsEnabled, settings.GlobalMaxRequests, settings.GlobalWindowDays, settings.GlobalAutoApprovalEnabled, settings.ForceDualQuality, expected).
+		Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.ForceDualQuality, &s.UpdatedAt, &s.Revision)
 	if err != nil {
 		return Settings{}, fmt.Errorf("update request settings: %w", err)
 	}
@@ -96,10 +101,10 @@ func (r *Repository) GetUserLimit(ctx context.Context, userID int) (*UserLimit, 
 	var row UserLimit
 	var max, window sql.NullInt64
 	err := r.pool.QueryRow(ctx, `
-		SELECT user_id, limit_mode, max_requests, window_days, approval_mode, updated_at
+		SELECT user_id, limit_mode, max_requests, window_days, approval_mode, updated_at, revision
 		FROM request_user_limits
 		WHERE user_id = $1
-	`, userID).Scan(&row.UserID, &row.LimitMode, &max, &window, &row.ApprovalMode, &row.UpdatedAt)
+	`, userID).Scan(&row.UserID, &row.LimitMode, &max, &window, &row.ApprovalMode, &row.UpdatedAt, &row.Revision)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -118,6 +123,10 @@ func (r *Repository) GetUserLimit(ctx context.Context, userID int) (*UserLimit, 
 }
 
 func (r *Repository) UpsertUserLimit(ctx context.Context, limit UserLimit) (*UserLimit, error) {
+	return r.upsertUserLimit(ctx, r.pool, limit, -1)
+}
+
+func (r *Repository) upsertUserLimit(ctx context.Context, exec requestExecutor, limit UserLimit, expected int64) (*UserLimit, error) {
 	var max, window any
 	if limit.MaxRequests != nil {
 		max = *limit.MaxRequests
@@ -127,7 +136,7 @@ func (r *Repository) UpsertUserLimit(ctx context.Context, limit UserLimit) (*Use
 	}
 	var row UserLimit
 	var scannedMax, scannedWindow sql.NullInt64
-	err := r.pool.QueryRow(ctx, `
+	err := exec.QueryRow(ctx, `
 		INSERT INTO request_user_limits (
 			user_id, limit_mode, max_requests, window_days, approval_mode, updated_at
 		)
@@ -138,9 +147,10 @@ func (r *Repository) UpsertUserLimit(ctx context.Context, limit UserLimit) (*Use
 			window_days = EXCLUDED.window_days,
 			approval_mode = EXCLUDED.approval_mode,
 			updated_at = now()
-		RETURNING user_id, limit_mode, max_requests, window_days, approval_mode, updated_at
-	`, limit.UserID, limit.LimitMode, max, window, limit.ApprovalMode).
-		Scan(&row.UserID, &row.LimitMode, &scannedMax, &scannedWindow, &row.ApprovalMode, &row.UpdatedAt)
+		WHERE $6::bigint = -1 OR request_user_limits.revision = $6
+		RETURNING user_id, limit_mode, max_requests, window_days, approval_mode, updated_at, revision
+	`, limit.UserID, limit.LimitMode, max, window, limit.ApprovalMode, expected).
+		Scan(&row.UserID, &row.LimitMode, &scannedMax, &scannedWindow, &row.ApprovalMode, &row.UpdatedAt, &row.Revision)
 	if err != nil {
 		return nil, fmt.Errorf("upsert request user limit: %w", err)
 	}
@@ -516,7 +526,7 @@ func (r *Repository) SetOutcome(ctx context.Context, id string, outcome Outcome,
 
 const integrationColumns = `id, name, enabled, base_url, api_key_ref,
 	last_check_at, last_check_status, last_check_error, updated_at,
-	capability_id, installation_id, supported_media_types, plugin_config`
+	capability_id, installation_id, supported_media_types, plugin_config, revision`
 
 func (r *Repository) ListIntegrations(ctx context.Context) ([]Integration, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+integrationColumns+` FROM request_integrations ORDER BY name`)
@@ -676,6 +686,13 @@ func (r *Repository) DeleteIntegration(ctx context.Context, id string) error {
 	}
 	defer tx.Rollback(ctx)
 
+	if err := r.deleteIntegration(ctx, tx, id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (r *Repository) deleteIntegration(ctx context.Context, tx pgx.Tx, id string) error {
 	var lockedID string
 	if err := tx.QueryRow(ctx, `
 		SELECT id FROM request_integrations WHERE id = $1 FOR UPDATE
@@ -701,9 +718,6 @@ func (r *Repository) DeleteIntegration(ctx context.Context, id string) error {
 
 	if _, err := tx.Exec(ctx, `DELETE FROM request_integrations WHERE id = $1`, id); err != nil {
 		return fmt.Errorf("delete request integration: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit delete integration: %w", err)
 	}
 	return nil
 }
@@ -736,6 +750,10 @@ func buildRequestListSQL(baseCondition string, baseArgs []any, filter ListFilter
 		args = append(args, filter.Outcome)
 		conditions = append(conditions, "outcome = $"+strconv.Itoa(len(args)))
 	}
+	if filter.Before != nil {
+		args = append(args, filter.Before.CreatedAt, filter.Before.ID)
+		conditions = append(conditions, "(created_at, id) < ($"+strconv.Itoa(len(args)-1)+", $"+strconv.Itoa(len(args))+")")
+	}
 	limit := filter.Limit
 	if limit <= 0 || limit > 100 {
 		limit = 50
@@ -747,7 +765,7 @@ func buildRequestListSQL(baseCondition string, baseArgs []any, filter ListFilter
 	args = append(args, limit, offset)
 	return requestSelectSQL() + `
 		WHERE ` + strings.Join(conditions, " AND ") + `
-		ORDER BY created_at DESC
+		ORDER BY created_at DESC, id DESC
 		LIMIT $` + strconv.Itoa(len(args)-1) + ` OFFSET $` + strconv.Itoa(len(args)), args
 }
 
@@ -824,7 +842,7 @@ func (r *Repository) scanIntegration(row integrationScanner) (Integration, error
 	if err := row.Scan(
 		&i.ID, &i.Name, &i.Enabled, &i.BaseURL, &i.APIKeyRef,
 		&lastCheckAt, &i.LastCheckStatus, &i.LastCheckError, &i.UpdatedAt,
-		&i.CapabilityID, &installationID, &i.SupportedMediaTypes, &pluginConfigRaw,
+		&i.CapabilityID, &installationID, &i.SupportedMediaTypes, &pluginConfigRaw, &i.Revision,
 	); err != nil {
 		return Integration{}, err
 	}

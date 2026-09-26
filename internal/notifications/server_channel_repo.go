@@ -328,3 +328,76 @@ func (r *ServerChannelRepository) RecordSendSuccess(ctx context.Context, id stri
 func (r *ServerChannelRepository) RecordSendFailure(ctx context.Context, id string, httpStatus *int, message string) error {
 	return serverChannelRecordFailure(ctx, r.pool, id, httpStatus, message)
 }
+
+// ListPage returns at most limit records in stable creation order. Callers may
+// request one lookahead row; this read does not alter delivery state.
+func (r *ServerChannelRepository) ListPage(ctx context.Context, limit int, after *Cursor) ([]ServerChannel, error) {
+	query := `SELECT ` + serverChannelColumns + ` FROM notification_server_channels`
+	args := []any{}
+	if after != nil {
+		query += ` WHERE (created_at, id) > ($1, $2)`
+		args = append(args, after.CreatedAt, after.ID)
+	}
+	query += fmt.Sprintf(" ORDER BY created_at, id LIMIT $%d", len(args)+1)
+	args = append(args, limit)
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list notification destinations: %w", err)
+	}
+	return scanServerChannels(rows)
+}
+
+// ReplaceSigningSecret does not rewrite configuration or delivery bookkeeping.
+func (r *ServerChannelRepository) ReplaceSigningSecret(ctx context.Context, id, ciphertext string) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE notification_server_channels SET signing_secret_ciphertext=$2, updated_at=now() WHERE id=$1 AND type='generic'`, id, ciphertext)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrServerChannelNotFound
+	}
+	return nil
+}
+
+// UpdateConfiguration serializes config edits with writers of this row and resets
+// delivery state atomically when requested. It never rewrites the signing secret.
+func (r *ServerChannelRepository) UpdateConfiguration(ctx context.Context, id string, apply func(*ServerChannel) (bool, error)) (*ServerChannel, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	ch, err := scanServerChannel(tx.QueryRow(ctx, `SELECT `+serverChannelColumns+` FROM notification_server_channels WHERE id=$1 FOR UPDATE`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrServerChannelNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	reset, err := apply(ch)
+	if err != nil {
+		return nil, err
+	}
+	row, err := scanServerChannel(tx.QueryRow(ctx, `UPDATE notification_server_channels SET
+ name=$2,url_ciphertext=$3,url_host=$4,enabled=$5,
+ notify_new_movies=$6,notify_new_episodes=$7,notify_new_audiobooks=$8,notify_new_ebooks=$9,
+ notify_request_submitted=$10,notify_request_approved=$11,notify_request_declined=$12,notify_request_fulfilled=$13,
+ consecutive_failures=CASE WHEN $14 THEN 0 ELSE consecutive_failures END,
+ disabled_reason=CASE WHEN $14 THEN NULL ELSE disabled_reason END,
+ last_attempt_at=CASE WHEN $14 THEN NULL ELSE last_attempt_at END,
+ watermark_created_at=CASE WHEN $14 THEN clock_timestamp() ELSE watermark_created_at END,
+ watermark_id=CASE WHEN $14 THEN '' ELSE watermark_id END,updated_at=now()
+ WHERE id=$1 RETURNING `+serverChannelColumns, id, ch.Name, ch.URLCiphertext, ch.URLHost, ch.Enabled,
+		ch.NotifyNewMovies, ch.NotifyNewEpisodes, ch.NotifyNewAudiobooks, ch.NotifyNewEbooks,
+		ch.NotifyRequestSubmitted, ch.NotifyRequestApproved, ch.NotifyRequestDeclined, ch.NotifyRequestFulfilled, reset))
+	if isServerChannelNameViolation(err) {
+		return nil, ErrServerChannelNameTaken
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return row, nil
+}

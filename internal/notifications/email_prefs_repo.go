@@ -163,6 +163,17 @@ func (r *EmailPrefsRepository) RequestPendingAddress(ctx context.Context, userID
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err = lockEmailVerificationProfile(ctx, tx, userID, profileID); err != nil {
+		return err
+	}
+	var adopted bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM notification_email_verifications WHERE profile_id=$1)`, profileID).Scan(&adopted); err != nil {
+		return err
+	}
+	if adopted {
+		return ErrEmailLegacyWriter
+	}
+
 	var lastSentAt *time.Time
 	var sendsToday int
 	err = tx.QueryRow(ctx, `

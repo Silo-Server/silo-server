@@ -54,15 +54,19 @@ func setAudioPreference(
 }
 
 func (s *PostgresUserStore) GetAudioPreference(ctx context.Context, profileID, seriesID string) (*userstore.AudioPreference, error) {
+	return getAudioPreference(ctx, s.pool, s.userID, profileID, seriesID)
+}
+
+func getAudioPreference(ctx context.Context, exec preferenceSettingsExecutor, userID int, profileID, seriesID string) (*userstore.AudioPreference, error) {
 	var pref userstore.AudioPreference
 	var updatedAt time.Time
 	var signatureJSON []byte
-	err := s.pool.QueryRow(ctx, `
+	err := exec.QueryRow(ctx, `
 		SELECT profile_id, series_id, audio_track_index,
 		       audio_language, audio_track_signature, updated_at
 		FROM user_audio_preferences
 		WHERE user_id = $1 AND profile_id = $2 AND series_id = $3`,
-		s.userID, profileID, seriesID,
+		userID, profileID, seriesID,
 	).Scan(
 		&pref.ProfileID,
 		&pref.SeriesID,

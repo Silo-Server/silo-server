@@ -15,7 +15,7 @@ import {
   Wand2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { OnboardingFlow, OnboardingStep, OnboardingStepLink } from "@/api/types";
+import type { OnboardingFlow, OnboardingStep, OnboardingStepLink } from "@/api/v2/onboarding";
 import { getProfileToken } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
@@ -61,33 +61,42 @@ export function TourHost({ flow, onDone }: TourHostProps) {
   const [index, setIndex] = useState(0);
   const progress = useOnboardingProgress();
   const navigate = useNavigate();
+  const [saveFailed, setSaveFailed] = useState(false);
 
   const step = steps[index];
 
   const finish = useCallback(
-    (opts: { skipped: boolean; route?: string }) => {
-      progress.mutate({
-        tour_id: flow.tour_id,
-        last_step: step?.id ?? "",
-        completed: !opts.skipped,
-        skipped: opts.skipped,
-      });
-      onDone();
-      if (opts.route) {
-        navigate(opts.route);
+    async (opts: { skipped: boolean; route?: string }) => {
+      try {
+        await progress.mutateAsync({
+          tour_id: flow.tour_id,
+          last_step: step?.id ?? "",
+          completed: !opts.skipped,
+          skipped: opts.skipped,
+        });
+        onDone();
+        if (opts.route) {
+          navigate(opts.route);
+        }
+      } catch {
+        setSaveFailed(true);
       }
     },
     [progress, flow.tour_id, step, onDone, navigate],
   );
 
-  const advance = useCallback(() => {
+  const advance = useCallback(async () => {
     const nextStep = steps[index + 1];
     if (!nextStep) {
       finish({ skipped: false });
       return;
     }
-    progress.mutate({ tour_id: flow.tour_id, last_step: nextStep.id });
-    setIndex(index + 1);
+    try {
+      await progress.mutateAsync({ tour_id: flow.tour_id, last_step: nextStep.id });
+      setIndex(index + 1);
+    } catch {
+      setSaveFailed(true);
+    }
   }, [index, steps, finish, progress, flow.tour_id]);
 
   // Server sent nothing we can render — mark done (in an effect, not during
@@ -100,9 +109,14 @@ export function TourHost({ flow, onDone }: TourHostProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
-  if (!step) {
-    return null;
-  }
+  if (saveFailed)
+    return (
+      <div role="alert">
+        Progress could not be saved.{" "}
+        <Button onClick={() => window.location.reload()}>Reload tour</Button>
+      </div>
+    );
+  if (!step) return null;
 
   const isLast = index === steps.length - 1;
 
@@ -122,6 +136,7 @@ export function TourHost({ flow, onDone }: TourHostProps) {
         <div className="mt-7 flex flex-wrap items-center justify-between gap-3">
           <Button
             variant="ghost"
+            disabled={progress.isPending}
             size="sm"
             onClick={() => finish({ skipped: true })}
             className="text-muted-foreground shrink-0"
@@ -143,16 +158,25 @@ export function TourHost({ flow, onDone }: TourHostProps) {
             </div>
             <div className="flex shrink-0 gap-2">
               {index > 0 && (
-                <Button variant="outline" size="sm" onClick={() => setIndex(index - 1)}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={progress.isPending}
+                  onClick={() => setIndex(index - 1)}
+                >
                   Back
                 </Button>
               )}
               {step.kind === "handoff" ? (
-                <Button size="sm" onClick={() => finish({ skipped: false, route: step.route })}>
+                <Button
+                  size="sm"
+                  disabled={progress.isPending}
+                  onClick={() => finish({ skipped: false, route: step.route })}
+                >
                   {step.title ?? "Finish"}
                 </Button>
               ) : (
-                <Button size="sm" onClick={advance}>
+                <Button size="sm" disabled={progress.isPending} onClick={advance}>
                   {isLast ? "Done" : index === 0 ? "Show me" : "Next"}
                 </Button>
               )}

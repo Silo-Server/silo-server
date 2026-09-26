@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -176,18 +177,21 @@ func TestItemRepo_GetByIDsWithAccess_AllowedListSkipsRedundantMembershipCheck(t 
 }
 
 // TestItemRepo_GetByIDsWithAccess_MaxContentRatingProducesINClause pins the
-// rating-ladder branch: a content_rating = ANY(...) clause with the bound
-// rating slice as a single arg.
+// maturity-ceiling branch: a comparison against the stored minimum age, with
+// the ceiling's own age bound as a single arg.
 func TestItemRepo_GetByIDsWithAccess_MaxContentRatingProducesINClause(t *testing.T) {
 	repo := &ItemRepository{}
 	sql, args := repo.buildGetByIDsWithAccessSQL([]string{"a"}, AccessFilter{
-		MaxContentRating: "PG-13",
+		MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"},
 	})
-	if !strings.Contains(sql, "content_rating = ANY($") {
-		t.Fatalf("expected content_rating = ANY clause; got %s", sql)
+	if !strings.Contains(sql, "mi.content_rating_age IS NOT NULL AND mi.content_rating_age <= $") {
+		t.Fatalf("expected stored-age ceiling clause; got %s", sql)
 	}
 	if len(args) != 2 {
-		t.Fatalf("expected 2 args (ids + ratings slice); got %v", args)
+		t.Fatalf("expected 2 args (ids + ceiling age); got %v", args)
+	}
+	if args[1] != 14 {
+		t.Fatalf("expected the PG-13 ceiling to bind age 14, the top of its US tier; got %v", args[1])
 	}
 }
 
@@ -200,21 +204,20 @@ func TestItemRepo_GetByIDsWithAccess_CombinedClausesIndexCorrectly(t *testing.T)
 	sql, args := repo.buildGetByIDsWithAccessSQL([]string{"a"}, AccessFilter{
 		AllowedLibraryIDs:  []int{1, 2},
 		DisabledLibraryIDs: []int{9},
-		MaxContentRating:   "PG-13",
+		MaturityLimits:     access.MaturityLimits{MaxContentRating: "PG-13"},
 	})
-	// Expect: $1 = ids, $2 = allowed libs, $3 = disabled libs, $4 = rating ladder.
+	// Expect: $1 = ids, $2 = allowed libs, $3 = disabled libs, $4 = ceiling age.
 	if !strings.Contains(sql, "media_folder_id = ANY($2)") {
 		t.Fatalf("expected AllowedLibraryIDs at $2; got %s", sql)
 	}
 	if !strings.Contains(sql, "media_folder_id = ANY($3)") {
 		t.Fatalf("expected DisabledLibraryIDs at $3; got %s", sql)
 	}
-	if !strings.Contains(sql, "content_rating = ANY($4)") {
-		t.Fatalf("expected content_rating = ANY at $4; got %s", sql)
+	if !strings.Contains(sql, "mi.content_rating_age <= $4") {
+		t.Fatalf("expected the ceiling age at $4; got %s", sql)
 	}
-	// All four slots are now array-bound: ids, allowed, disabled, ratings.
 	if len(args) != 4 {
-		t.Fatalf("expected 4 args (ids, allowed, disabled, ratings); got %v", args)
+		t.Fatalf("expected 4 args (ids, allowed, disabled, ceiling age); got %v", args)
 	}
 }
 

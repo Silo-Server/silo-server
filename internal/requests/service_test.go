@@ -1311,6 +1311,37 @@ func TestLoadIntegrationOptionsBackfillsStoredKeyForSameBaseURL(t *testing.T) {
 	}
 }
 
+// An integration the host cannot reach is a dependency failure, not an
+// internal one: the service reports it with a sentinel the API layer maps to
+// an upstream-unavailable status.
+func TestLoadIntegrationOptionsClassifiesUnreachableIntegration(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	router := &fakeRouterProvider{optionsErr: errors.New("dial tcp: connect: connection refused")}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+
+	_, err := service.LoadIntegrationOptions(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{ID: "router-1", BaseURL: "http://router-1.local"})
+	if !errors.Is(err, ErrIntegrationUnreachable) {
+		t.Fatalf("err = %v, want ErrIntegrationUnreachable", err)
+	}
+}
+
+// A plugin's validation result stays a client problem.
+func TestLoadIntegrationOptionsKeepsValidationErrors(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	router := &fakeRouterProvider{optionsErr: &ValidationError{FormError: "api key rejected"}}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+
+	_, err := service.LoadIntegrationOptions(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{ID: "router-1", BaseURL: "http://router-1.local"})
+	var validation *ValidationError
+	if !errors.As(err, &validation) || errors.Is(err, ErrIntegrationUnreachable) {
+		t.Fatalf("err = %v, want the plugin validation error", err)
+	}
+}
+
 func TestCancelOwnerCanWithdrawPendingRequest(t *testing.T) {
 	store := newFakeStore()
 	store.requests["req-mine"] = &Request{
@@ -2230,6 +2261,7 @@ type fakeRouterProvider struct {
 
 	// ListConfigOptions behavior.
 	options        map[string][]RouterOption
+	optionsErr     error
 	gotOptionsConn ResolvedRouterConnection
 
 	// Validate behavior (default empty = valid).
@@ -2287,6 +2319,9 @@ func (f *fakeRouterProvider) ListConfigOptions(_ context.Context, _ int, _ strin
 	f.mu.Lock()
 	f.gotOptionsConn = conn
 	f.mu.Unlock()
+	if f.optionsErr != nil {
+		return nil, f.optionsErr
+	}
 	return f.options, nil
 }
 

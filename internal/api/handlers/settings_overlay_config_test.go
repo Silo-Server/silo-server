@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func readOverlayConfig(t *testing.T, handler *SettingsHandler) overlayConfigResponse {
+func readOverlayConfig(t *testing.T, handler *SettingsHandler) OverlayConfigView {
 	t.Helper()
 	recorder := httptest.NewRecorder()
 	handler.HandleGetOverlayConfig(
@@ -17,7 +17,7 @@ func readOverlayConfig(t *testing.T, handler *SettingsHandler) overlayConfigResp
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 	}
-	var response overlayConfigResponse
+	var response OverlayConfigView
 	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}

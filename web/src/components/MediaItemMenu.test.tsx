@@ -1,5 +1,4 @@
 import { act, useRef } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
@@ -345,10 +344,10 @@ describe("MediaItemMenu metadata dialogs", () => {
     year: 2023,
   } as ItemDetail;
 
-  it("loads the exact item detail and passes it to Edit Metadata", () => {
+  it("loads the exact item detail and passes it to Edit Metadata", async () => {
     mocks.useCatalogItemDetail.mockReturnValue({ data: detail });
 
-    const markup = renderToStaticMarkup(
+    render(
       <MetadataActionDialogHost
         action="edit"
         contentId="series-1"
@@ -357,15 +356,15 @@ describe("MediaItemMenu metadata dialogs", () => {
       />,
     );
 
+    expect(await screen.findByText("Edit Silo")).toBeInTheDocument();
     expect(mocks.useCatalogItemDetail).toHaveBeenCalledWith("series-1", 12);
     expect(mocks.editItem).toHaveBeenCalledWith(detail);
-    expect(markup).toContain("Edit Silo");
   });
 
-  it("passes the full item and library context to Match Item", () => {
+  it("passes the full item and library context to Match Item", async () => {
     mocks.useCatalogItemDetail.mockReturnValue({ data: detail });
 
-    const markup = renderToStaticMarkup(
+    render(
       <MetadataActionDialogHost
         action="match"
         contentId="series-1"
@@ -374,9 +373,9 @@ describe("MediaItemMenu metadata dialogs", () => {
       />,
     );
 
+    expect(await screen.findByText("Match Silo")).toBeInTheDocument();
     expect(mocks.useCatalogItemDetail).toHaveBeenCalledWith("series-1", 12);
     expect(mocks.matchItem).toHaveBeenCalledWith({ ...detail, library_id: 12 });
-    expect(markup).toContain("Match Silo");
   });
 });
 
@@ -1126,6 +1125,7 @@ describe("MediaItemMenu long-press action sheet", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    document.documentElement.removeAttribute("data-fine-pointer");
   });
 
   it("opens the sheet with the full action set after a touch hold", () => {
@@ -1205,14 +1205,10 @@ describe("MediaItemMenu long-press action sheet", () => {
   });
 
   it("keeps long press while omitting desktop-only shortcut trees on coarse-pointer devices", () => {
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn(() => ({
-        matches: false,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      })),
-    );
+    // A coarse-pointer device is now declared by the published capability
+    // rather than by the media query: the component follows the pointer that
+    // was actually observed, because the query is unreliable on hybrids.
+    document.documentElement.setAttribute("data-fine-pointer", "false");
 
     render(<LongPressCard />);
 

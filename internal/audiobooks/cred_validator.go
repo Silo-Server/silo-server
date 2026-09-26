@@ -51,7 +51,9 @@ func (v *SiloCredValidator) Validate(
 
 	// Authenticate using just the user portion. DeviceName and IP are
 	// informational for session bookkeeping only.
-	_, user, err := v.Auth.Login(ctx, authName, password, "abs-compat", "")
+	// CompatLogin refuses a temporary password: Audiobookshelf clients cannot
+	// run the password change it requires.
+	_, user, err := v.Auth.CompatLogin(ctx, authName, password, "abs-compat", "")
 	if err != nil {
 		// Propagate auth sentinel errors as-is so callers can distinguish
 		// "bad credentials" (ErrInvalidCredentials) from "service down".
@@ -101,18 +103,18 @@ func (v *SiloCredValidator) ResolveUsername(ctx context.Context, userID, profile
 	if v.Pool == nil {
 		return ""
 	}
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		return ""
+	}
 	if strings.TrimSpace(profileID) != "" {
 		var name string
 		err := v.Pool.QueryRow(ctx,
-			`SELECT name FROM user_profiles WHERE id = $1`, profileID,
+			`SELECT name FROM user_profiles WHERE user_id = $1 AND id = $2`, uid, profileID,
 		).Scan(&name)
 		if err == nil && strings.TrimSpace(name) != "" {
 			return name
 		}
-	}
-	uid, err := strconv.Atoi(userID)
-	if err != nil {
-		return ""
 	}
 	var username string
 	if err := v.Pool.QueryRow(ctx,

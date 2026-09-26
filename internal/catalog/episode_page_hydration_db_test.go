@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 func TestDeferredEpisodeHydrationMatchesOriginalPage(t *testing.T) {
@@ -40,7 +42,7 @@ func TestDeferredEpisodeHydrationMatchesOriginalPage(t *testing.T) {
 		cap      *int
 	}{
 		{name: "unrestricted", access: AccessFilter{AllowedContentIDs: ids}},
-		{name: "rating", access: AccessFilter{AllowedContentIDs: ids, MaxContentRating: "PG"}},
+		{name: "rating", access: AccessFilter{AllowedContentIDs: ids, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}},
 		{name: "library", access: AccessFilter{AllowedContentIDs: ids, AllowedLibraryIDs: []int{folderID}}},
 		{name: "denied-library", access: AccessFilter{AllowedContentIDs: ids, DisabledLibraryIDs: []int{folderID}}},
 		{name: "no-libraries", access: AccessFilter{AllowedContentIDs: ids, AllowedLibraryIDs: []int{}}},

@@ -1,0 +1,29 @@
+{
+  "id": "c1",
+  "library_id": "1",
+  "library_ids": [
+    "1"
+  ],
+  "slug": "",
+  "title": "Original",
+  "description": "",
+  "collection_type": "manual",
+  "visibility": "",
+  "sort_order": 0,
+  "group_id": null,
+  "featured": false,
+  "poster_url": "",
+  "backdrop_url": "",
+  "source_url": "",
+  "query_definition": {},
+  "sort_config": {},
+  "source_config": {},
+  "management_mode": "",
+  "management_source": "",
+  "management_key": "",
+  "last_sync_status": "",
+  "last_sync_message": "",
+  "item_count": 0,
+  "created_at": "2026-01-02T03:04:05.000Z",
+  "updated_at": "2026-01-02T03:04:05.000Z"
+}

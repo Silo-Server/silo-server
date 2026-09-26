@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "index": 0,
+      "media_item_id": "movie-8f2c1a",
+      "status": "success"
+    },
+    {
+      "index": 1,
+      "media_item_id": "episode-42",
+      "status": "success"
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "succeeded": 2,
+    "failed": 0
+  }
+}

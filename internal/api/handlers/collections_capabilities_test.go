@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -21,7 +22,10 @@ func TestCollectionCapabilitiesAdvertiseSortSupport(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	var got collectionCapabilitiesResponse
+	if strings.Contains(rec.Body.String(), "user_collection_sync_schedule") {
+		t.Fatalf("v1 capability response changed: %s", rec.Body.String())
+	}
+	var got CollectionCapabilitiesView
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -49,7 +53,7 @@ func TestCollectionCapabilitiesAdvertiseSortSupport(t *testing.T) {
 	}
 }
 
-func TestCollectionCapabilitiesAdvertiseCallerSyncSchedulePolicy(t *testing.T) {
+func TestCollectionCapabilitiesServiceAdvertisesCallerSyncSchedulePolicy(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -65,19 +69,11 @@ func TestCollectionCapabilitiesAdvertiseCallerSyncSchedulePolicy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodGet, "/collections/capabilities", nil)
-			req = req.WithContext(middleware.SetClaims(req.Context(), &auth.Claims{Role: tt.role}))
-			NewCollectionHandler(nil).HandleCapabilities(rec, req)
-
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			ctx := middleware.SetClaims(t.Context(), &auth.Claims{Role: tt.role})
+			capability := NewCollectionHandler(nil).Capabilities(ctx).UserCollectionSyncSchedule
+			if capability == nil {
+				t.Fatal("user collection sync schedule capability is missing")
 			}
-			var got collectionCapabilitiesResponse
-			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-				t.Fatalf("decode response: %v", err)
-			}
-			capability := got.UserCollectionSyncSchedule
 			if !capability.Editable {
 				t.Fatal("user collection sync schedule is not advertised as editable")
 			}

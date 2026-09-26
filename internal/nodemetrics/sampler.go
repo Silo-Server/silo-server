@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // DefaultInterval is how often the sampler takes a reading. Rate-based fields
@@ -71,9 +73,16 @@ type Options struct {
 // either atomic (the published snapshot) or explicitly guarded (the disk
 // entries, which detached probe goroutines also write).
 type Sampler struct {
-	interval time.Duration
-	now      func() time.Time
-	goos     string
+	interval            time.Duration
+	instanceID          string
+	cpuSource           ResourceSource
+	memorySource        ResourceSource
+	loadSource          ResourceSource
+	networkAvailable    bool
+	cgroupCPUDetails    *CgroupCPUStats
+	cgroupMemoryDetails *CgroupMemoryStats
+	now                 func() time.Time
+	goos                string
 	// scratchDirFn is the live source; scratchDir is what it answered for the
 	// pass in flight, resolved once in diskPaths so the three readers below
 	// cannot disagree about which mount is the scratch one mid-pass. Owned by
@@ -111,6 +120,7 @@ type Sampler struct {
 	// droppedRoots is how many configured media roots the last pass left
 	// unsampled because of the maxSampledDisks cap; see noteDroppedRoots.
 	droppedRoots int
+	diskDetails  []DiskDetails
 
 	// Disk probe state, shared with detached probe goroutines.
 	diskMu    sync.Mutex
@@ -157,6 +167,7 @@ func NewSampler(opts Options) *Sampler {
 	}
 	s := &Sampler{
 		interval:     interval,
+		instanceID:   uuid.NewString(),
 		now:          now,
 		goos:         runtime.GOOS,
 		scratchDirFn: opts.ScratchDir,
@@ -241,12 +252,17 @@ func (s *Sampler) sample(ctx context.Context) {
 		return
 	}
 	now := s.now()
+	started := time.Now()
+	s.cgroupCPUDetails = nil
+	s.cgroupMemoryDetails = nil
 	snapshot := Snapshot{
 		Available: true,
 		SampledAt: now,
 		System:    s.sampleSystem(ctx, now),
 		GPU:       s.sampleGPU(ctx, now),
 	}
+	snapshot.Attribution = s.sampleAttribution()
+	snapshot.Attribution.SampleDurationSeconds = time.Since(started).Seconds()
 	s.snapshot.Store(&snapshot)
 }
 
@@ -254,19 +270,22 @@ func (s *Sampler) sampleSystem(ctx context.Context, now time.Time) *SystemStats 
 	cpuPct, cores := s.cpuStats(now)
 
 	net := readNetCounters(s.procDir, now)
-	rxBps, txBps, _ := netThroughputBps(s.prevNet, net)
+	rxBps, txBps, networkAvailable := netThroughputBps(s.prevNet, net)
+	s.networkAvailable = networkAvailable
 	if net.valid {
 		s.prevNet = net
 	}
 
 	usedBytes, totalBytes := s.memoryStats()
+	load1, loadAvailable := readLoad1Value(s.procDirFor("loadavg"))
+	s.loadSource = s.procSource("loadavg", loadAvailable)
 
 	paths := s.diskPaths(ctx)
 	s.refreshDisks(paths, now)
 
 	return &SystemStats{
 		CPUPct:     cpuPct,
-		Load1:      readLoad1(s.procDirFor("loadavg")),
+		Load1:      load1,
 		Cores:      cores,
 		MemUsedMB:  bytesToMB(usedBytes),
 		MemTotalMB: bytesToMB(totalBytes),
@@ -287,7 +306,9 @@ func (s *Sampler) sampleSystem(ctx context.Context, now time.Time) *SystemStats 
 // because then the machine's load is the load this node competes with.
 func (s *Sampler) cpuStats(now time.Time) (busyPct, cores int) {
 	host, hostCores := readCPUTimes(s.procDirFor("stat"))
-	busyPct, _ = cpuBusyPercent(s.prevCPU, host)
+	var available bool
+	busyPct, available = cpuBusyPercent(s.prevCPU, host)
+	s.cpuSource = s.procSource("stat", available)
 	if host.valid {
 		s.prevCPU = host
 	}
@@ -332,7 +353,8 @@ func (s *Sampler) cpuStats(now time.Time) (busyPct, cores int) {
 	// stands even when this pass cannot derive one (the first sample, or a
 	// counter reset). Falling back to the host figure would silently mix two
 	// different machines' busyness across intervals.
-	cgroupPct, _ := cgroupCPUPercent(s.prevCgroupCPU, sample, quota)
+	cgroupPct, available := cgroupCPUPercent(s.prevCgroupCPU, sample, quota)
+	s.cpuSource = ResourceSource{Scope: scopeCgroup, Source: "cgroup_" + s.cgroupCPUDetails.Version, Available: available}
 	s.prevCgroupCPU = sample
 	return cgroupPct, cores
 }

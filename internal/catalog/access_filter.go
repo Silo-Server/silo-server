@@ -17,7 +17,12 @@ type AccessFilter struct {
 	AllowedContentIDs     []string
 	DisabledLibraryIDs    []int // libraries whose membership globally hides an item
 	PresentationLibraryID *int
-	PresentationLanguage  string
+	// ScopeFilesToLibrary limits file versions to PresentationLibraryID when
+	// both are set. Callers opt in per read from the server setting
+	// catalog.scope_versions_to_library; playback and watch-together reads never
+	// set it, so an item always plays from its full accessible version list.
+	ScopeFilesToLibrary  bool
+	PresentationLanguage string
 	// ProfilePreferredLanguage is the viewer profile's preferred metadata
 	// language. Presentation language resolves: explicit PresentationLanguage
 	// → ProfilePreferredLanguage → the library's metadata_language.
@@ -28,11 +33,16 @@ type AccessFilter struct {
 	// PresentationOriginalLanguage supplies a parent series' original language
 	// while localizing season and episode rows, which do not duplicate it.
 	PresentationOriginalLanguage string
-	MaxContentRating             string
-	MaxPlaybackQuality           string
-	SelectedFileID               int
-	UserID                       int
-	ProfileID                    string
+	// MaturityLimits are the viewer's content-rating ceiling, unrated-title
+	// policy, and advisory-age limit, copied from access.Scope as one value.
+	// Code that narrows a filter to its maturity restrictions copies this
+	// whole field (AccessFilter{MaturityLimits: f.MaturityLimits}) so no limit
+	// can be dropped along the way. ApplyMaturityLimits turns it into SQL.
+	access.MaturityLimits
+	MaxPlaybackQuality string
+	SelectedFileID     int
+	UserID             int
+	ProfileID          string
 	// DeviceID identifies the requesting client for device-scoped setting
 	// resolution. It does not participate in catalog access control.
 	DeviceID string
@@ -79,19 +89,78 @@ func CanAccessLibraryCollection(collection *models.LibraryCollection, filter Acc
 }
 
 func applyAccessFilter(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
-	if filter.MaxContentRating != "" {
-		allowedRatings := access.AllowedRatingsUpTo(filter.MaxContentRating)
-		if len(allowedRatings) == 0 {
-			*conditions = append(*conditions, "1 = 0")
-		} else {
-			*conditions = append(*conditions, fmt.Sprintf("%s.content_rating = ANY($%d)", alias, *argIdx))
-			*args = append(*args, allowedRatings)
-			*argIdx = *argIdx + 1
-		}
-	}
+	ApplyMaturityLimits(alias, filter, conditions, args, argIdx)
 	if len(filter.ExcludedMediaTypes) > 0 {
 		*conditions = append(*conditions, fmt.Sprintf("NOT (%s.type = ANY($%d))", alias, *argIdx))
 		*args = append(*args, filter.ExcludedMediaTypes)
+		*argIdx = *argIdx + 1
+	}
+}
+
+// contentRatingCeilingSQL renders a maturity ceiling as a SQL condition over
+// alias, comparing the stored minimum age against the value bound at
+// placeholder argIdx.
+//
+// The comparison is against the stored minimum age, never the display string:
+// content_rating is free text written verbatim by whichever provider won the
+// merge ("15", "FSK 16", "DE:16", "tv-ma"), and only the age makes those
+// comparable with a "PG-13" ceiling. media_items.content_rating_age and
+// episode_catalog_entries.content_rating_age hold the age that
+// access.Normalize resolved when the rating was written.
+//
+// A title whose rating carries no age is governed by the server setting
+// access.unrated_content, which reaches the filter as AllowUnratedContent.
+func contentRatingCeilingSQL(alias string, allowUnrated bool, argIdx int) string {
+	column := alias + ".content_rating_age"
+	if allowUnrated {
+		return fmt.Sprintf("(%s IS NULL OR %s <= $%d)", column, column, argIdx)
+	}
+	return fmt.Sprintf("(%s IS NOT NULL AND %s <= $%d)", column, column, argIdx)
+}
+
+// advisoryAgeLimitSQL renders an advisory-age limit as a SQL condition over
+// alias. By default a title with no advisory age passes: advisory coverage is
+// partial (the provider that supplies it is rate limited), so a missing
+// advisory means "not looked up yet", and the content-rating ceiling alone
+// decides such a title. A profile that requires an advisory age fails closed
+// instead and sees only titles rated at or under the limit, the same shape
+// contentRatingCeilingSQL gives an unrated title under a ceiling.
+// media_items.advisory_age and its episode_catalog_entries copy hold the age.
+func advisoryAgeLimitSQL(alias string, hideUnadvised bool, argIdx int) string {
+	column := alias + ".advisory_age"
+	if hideUnadvised {
+		return fmt.Sprintf("(%s IS NOT NULL AND %s <= $%d)", column, column, argIdx)
+	}
+	return fmt.Sprintf("(%s IS NULL OR %s <= $%d)", column, column, argIdx)
+}
+
+// ApplyMaturityLimits appends the filter's maturity limits for alias — the
+// content-rating ceiling and the advisory-age limit, ANDed — binding each limit
+// as an argument. It is the single place those limits become SQL, so every
+// catalog read, including query builders outside this package, enforces the
+// same predicates. alias must expose content_rating_age and advisory_age
+// (media_items, or the episode_catalog_entries read model). A filter with no
+// limits appends nothing.
+func ApplyMaturityLimits(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	limits := filter.MaturityLimits
+	// access.HasCeiling, not a trimmed emptiness test: a stored " " is a set
+	// ceiling nothing resolves under, so it falls through to the fail-closed
+	// branch below instead of silently lifting the ceiling.
+	if access.HasCeiling(limits.MaxContentRating) {
+		ceilingAge, ok := access.AgeForCeiling(limits.MaxContentRating)
+		if !ok {
+			// A ceiling that resolves to no age (unrated, or unrecognized) is
+			// unusable, and an unusable parental control fails closed.
+			*conditions = append(*conditions, "1 = 0")
+			return
+		}
+		*conditions = append(*conditions, contentRatingCeilingSQL(alias, limits.AllowUnratedContent, *argIdx))
+		*args = append(*args, *ceilingAge)
+		*argIdx = *argIdx + 1
+	}
+	if limits.MaxAdvisoryAge > 0 {
+		*conditions = append(*conditions, advisoryAgeLimitSQL(alias, limits.HidesUnadvised(), *argIdx))
+		*args = append(*args, limits.MaxAdvisoryAge)
 		*argIdx = *argIdx + 1
 	}
 }
@@ -208,12 +277,15 @@ func intInSlice(value int, values []int) bool {
 	return false
 }
 
-// FilterMediaFilesByAccess drops file versions the viewer cannot access:
-// files in libraries outside their allowed set, in libraries they disabled,
-// or above their effective quality ceiling — the same predicate as
-// FileAllowedByAccess.
+// FilterMediaFilesByAccess drops file versions the viewer cannot access —
+// the FileAllowedByAccess predicate — and, when the read opted in through
+// ScopeFilesToLibrary, versions stored outside the presentation library. The
+// library scope is Go-only: MediaFileAccessSQL does not mirror it because no
+// SQL caller sets a presentation library.
 func FilterMediaFilesByAccess(files []*models.MediaFile, filter AccessFilter) []*models.MediaFile {
+	scopeLibrary := filter.ScopeFilesToLibrary && filter.PresentationLibraryID != nil
 	unrestricted := filter.AllowedLibraryIDs == nil &&
+		!scopeLibrary &&
 		len(filter.DisabledLibraryIDs) == 0 &&
 		strings.TrimSpace(filter.MaxPlaybackQuality) == ""
 	if len(files) == 0 || unrestricted {
@@ -222,9 +294,71 @@ func FilterMediaFilesByAccess(files []*models.MediaFile, filter AccessFilter) []
 
 	filtered := make([]*models.MediaFile, 0, len(files))
 	for _, file := range files {
-		if FileAllowedByAccess(file, filter) {
+		if FileAllowedByAccess(file, filter) &&
+			(!scopeLibrary || file.MediaFolderID == *filter.PresentationLibraryID) {
 			filtered = append(filtered, file)
 		}
 	}
 	return filtered
+}
+
+// SQLTrimSpaceChars is a PostgreSQL E-string holding exactly the runes Go's
+// strings.TrimSpace strips: ASCII whitespace plus every rune with the Unicode
+// White_Space property. Pass it as BTRIM's second argument wherever SQL has to
+// trim a value the way Go would, so a resolution such as "\u00a02160p" ranks
+// the same on both sides instead of falling through to the ELSE branch.
+//
+// Use octal \013 for vertical tab; PostgreSQL treats \v as a literal v. The
+// \uXXXX escapes need a UTF-8 database, which Silo requires anyway.
+const SQLTrimSpaceChars = `E' \t\n\013\f\r\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004` +
+	`\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000'`
+
+// MediaFileQualityCeilingSQL renders the playback-quality ceiling as a SQL
+// condition over the given media_files alias, or "" when the filter sets no
+// ceiling. It mirrors access.QualityAllowed, trimming whitespace the way Go
+// does (see SQLTrimSpaceChars).
+func MediaFileQualityCeilingSQL(alias string, maxPlaybackQuality string) string {
+	quality := access.NormalizePlaybackQuality(maxPlaybackQuality)
+	if quality == "" {
+		return ""
+	}
+	maxRank := 3
+	if quality == access.PlaybackQuality4K {
+		maxRank = 4
+	}
+	return fmt.Sprintf(`CASE UPPER(BTRIM(COALESCE(%s.resolution, ''), %s))
+		WHEN '480P' THEN 1 WHEN '720P' THEN 2 WHEN '1080P' THEN 3
+		WHEN '2160P' THEN 4 WHEN '4320P' THEN 5 ELSE 0 END <= %d`, alias, SQLTrimSpaceChars, maxRank)
+}
+
+// MediaFileAccessSQL renders FileAllowedByAccess as SQL conditions over the
+// given media_files alias, appending any bind values to args and numbering
+// placeholders from the resulting argument positions. Callers must append the
+// returned args in order.
+//
+// This is the SQL mirror of FileAllowedByAccess and must stay in step with it:
+// it exists so queries that would otherwise ship every candidate file to Go can
+// filter and reduce inside PostgreSQL instead.
+func MediaFileAccessSQL(alias string, filter AccessFilter, args []any) ([]string, []any) {
+	conditions := mediaFileAccessConditions(alias, filter, func(value any) int {
+		args = append(args, value)
+		return len(args)
+	})
+	return conditions, args
+}
+
+// mediaFileAccessConditions is MediaFileAccessSQL for callers that number
+// placeholders themselves: bind records a value and returns its position.
+func mediaFileAccessConditions(alias string, filter AccessFilter, bind func(any) int) []string {
+	conditions := make([]string, 0, 3)
+	if filter.AllowedLibraryIDs != nil {
+		conditions = append(conditions, fmt.Sprintf("%s.media_folder_id = ANY($%d)", alias, bind(filter.AllowedLibraryIDs)))
+	}
+	if len(filter.DisabledLibraryIDs) > 0 {
+		conditions = append(conditions, fmt.Sprintf("NOT (%s.media_folder_id = ANY($%d))", alias, bind(filter.DisabledLibraryIDs)))
+	}
+	if ceiling := MediaFileQualityCeilingSQL(alias, filter.MaxPlaybackQuality); ceiling != "" {
+		conditions = append(conditions, ceiling)
+	}
+	return conditions
 }

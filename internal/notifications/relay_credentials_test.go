@@ -196,3 +196,88 @@ func TestNormalizePushRelayURLRequiresAllowlistedOrigin(t *testing.T) {
 		t.Fatal("arbitrary relay origin accepted")
 	}
 }
+
+// atomicRelaySettings is a settings store with UpdateAtomic, so
+// RegisterRelayCredentialIfAbsent takes its compare-and-set path.
+type atomicRelaySettings struct {
+	lockedRelaySettings
+	// beforeWrite runs inside UpdateAtomic before the snapshot is read, to
+	// simulate another writer landing during the relay round trip.
+	beforeWrite func(values map[string]string)
+}
+
+func (s *atomicRelaySettings) UpdateAtomic(_ context.Context, update func(current map[string]string) (map[string]string, error)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.beforeWrite != nil {
+		s.beforeWrite(s.values)
+	}
+	writes, err := update(s.values)
+	if err != nil {
+		return err
+	}
+	for key, value := range writes {
+		s.values[key] = value
+	}
+	return nil
+}
+
+func TestRegisterRelayCredentialIfAbsentYieldsToConcurrentWinner(t *testing.T) {
+	store := &atomicRelaySettings{lockedRelaySettings: lockedRelaySettings{values: map[string]string{}}}
+	store.beforeWrite = func(values map[string]string) {
+		values[SettingPushRelayURL] = "https://other.relay.test"
+		values[SettingPushRelayDeploymentID] = "deployment-winner"
+		values[SettingPushRelayAPIKey] = "winner.capability"
+	}
+	client := &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return relayResponse(http.StatusOK, credentialJSON("deployment-loser", "loser.capability", time.Now().Add(24*time.Hour))), nil
+	})}
+
+	result, registered, err := RegisterRelayCredentialIfAbsent(context.Background(), NewSettings(store), client, DefaultPushRelayURL, false)
+	if err != nil || registered {
+		t.Fatalf("registered = %v, err = %v", registered, err)
+	}
+	if result.Credential.APIKey != "winner.capability" || result.Credential.RelayURL != "https://other.relay.test" {
+		t.Fatalf("returned credential = %+v, want the stored winner", result.Credential)
+	}
+	if got := store.values[SettingPushRelayAPIKey]; got != "winner.capability" {
+		t.Fatalf("stored key = %q, loser overwrote the winner", got)
+	}
+}
+
+func TestRegisterRelayCredentialIfAbsentPersistsWhenEmpty(t *testing.T) {
+	store := &atomicRelaySettings{lockedRelaySettings: lockedRelaySettings{values: map[string]string{}}}
+	client := &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return relayResponse(http.StatusOK, credentialJSON("deployment-first", "first.capability", time.Now().Add(24*time.Hour))), nil
+	})}
+
+	result, registered, err := RegisterRelayCredentialIfAbsent(context.Background(), NewSettings(store), client, DefaultPushRelayURL, false)
+	if err != nil || !registered || result.Credential.APIKey != "first.capability" {
+		t.Fatalf("registered = %v, credential = %+v, err = %v", registered, result.Credential, err)
+	}
+	if got := store.values[SettingPushRelayAPIKey]; got != "first.capability" {
+		t.Fatalf("stored key = %q", got)
+	}
+}
+
+func TestRegisterRelayCredentialIfAbsentYieldsToConcurrentClear(t *testing.T) {
+	store := &atomicRelaySettings{lockedRelaySettings: lockedRelaySettings{values: map[string]string{}}}
+	store.beforeWrite = func(values map[string]string) {
+		values[SettingPushRelayAPIKey] = ""
+		values[SettingPushRelayReregister] = "true"
+	}
+	client := &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return relayResponse(http.StatusOK, credentialJSON("deployment-late", "late.capability", time.Now().Add(24*time.Hour))), nil
+	})}
+
+	result, registered, err := RegisterRelayCredentialIfAbsent(context.Background(), NewSettings(store), client, DefaultPushRelayURL, false)
+	if err != nil || registered {
+		t.Fatalf("registered = %v, err = %v", registered, err)
+	}
+	if !result.Credential.ReregistrationRequired || result.Credential.APIKey != "" {
+		t.Fatalf("returned credential = %+v, want the cleared state", result.Credential)
+	}
+	if got := store.values[SettingPushRelayAPIKey]; got != "" {
+		t.Fatalf("stored key = %q, in-flight registration overwrote the clear", got)
+	}
+}

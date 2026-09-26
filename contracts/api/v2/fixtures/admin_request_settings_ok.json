@@ -1,0 +1,7 @@
+{
+  "requests_enabled": true,
+  "global_max_requests": 5,
+  "global_window_days": 7,
+  "global_auto_approval_enabled": false,
+  "force_dual_quality": false
+}

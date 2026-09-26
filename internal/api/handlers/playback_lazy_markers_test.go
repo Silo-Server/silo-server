@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
@@ -261,6 +262,53 @@ func TestMaybeQueueLazyPlaybackMarkersBothModeFallsBackToLocalWithoutProviders(t
 	}
 	if got := analyzer.callCount(); got != 1 {
 		t.Fatalf("AnalyzeEpisode calls = %d, want 1", got)
+	}
+}
+
+type playbackMarkerPopulationFunc func(context.Context, *models.MediaFile) (*models.MediaFile, bool, error)
+
+func (f playbackMarkerPopulationFunc) Populate(ctx context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
+	return f(ctx, file)
+}
+
+func TestOnDemandPlaybackMarkersHonorsLocalAnalysisSetting(t *testing.T) {
+	for _, lazy := range []string{"false", "true"} {
+		t.Run(lazy, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				file := lazyMarkerTestFile()
+				analyzer := &fakePlaybackIntroAnalyzer{}
+				handler := newLazyMarkerTestHandler(file, analyzer, nil)
+				handler.MarkerLazyContext = t.Context()
+				handler.SettingsRepo = testPlaybackSettingsRepo{values: map[string]string{
+					markers.SettingLazyPlayback:  lazy,
+					markers.SettingMode:          "both",
+					markers.SettingOnlineStorage: "on_demand",
+				}}
+				handler.MarkerRegistry = markers.NewRegistry(slog.Default())
+				if err := handler.MarkerRegistry.Register(fakePlaybackMarkerProvider{}); err != nil {
+					t.Fatal(err)
+				}
+				lookups := 0
+				handler.MarkerPopulation = playbackMarkerPopulationFunc(func(_ context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
+					lookups++
+					return file, false, nil
+				})
+
+				handler.maybeQueueLazyPlaybackMarkers(t.Context(), &playback.Session{ID: "session-1"}, file)
+				synctest.Wait()
+
+				if lookups != 1 {
+					t.Fatalf("online lookups = %d, want 1", lookups)
+				}
+				wantLocal := 0
+				if lazy == "true" {
+					wantLocal = 1
+				}
+				if got := analyzer.callCount(); got != wantLocal {
+					t.Fatalf("local analysis calls = %d, want %d", got, wantLocal)
+				}
+			})
+		})
 	}
 }
 

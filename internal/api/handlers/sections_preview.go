@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
-	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 )
 
 // sectionPreviewFetcher is the minimal interface needed by HandlePreview.
@@ -41,50 +39,10 @@ func (h *SectionHandler) HandlePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rec, ok := recipes.Get(req.SectionType)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "unknown_type", "section_type not registered")
-		return
-	}
-	if err := rec.Validate(req.Config); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_config", err.Error())
-		return
-	}
-
-	limit := req.ItemLimit
-	if limit <= 0 || limit > 50 {
-		limit = 10
-	}
-
-	resolved := sections.ResolvedSection{
-		SectionType: sections.SectionType(req.SectionType),
-		Title:       "preview",
-		ItemLimit:   limit,
-		Config:      req.Config,
-	}
-
-	fetcher := h.previewFetcher
-	if fetcher == nil {
-		fetcher = h.fetcher
-	}
-	if fetcher == nil {
-		writeError(w, http.StatusInternalServerError, "preview_unavailable", "section fetcher not configured")
-		return
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	filter := requestAccessFilter(r)
-
-	result, err := fetcher.FetchOne(r.Context(), resolved, req.LibraryID, req.LibraryIDs, userID, profileID, filter)
+	resp, err := h.previewAdminSection(r.Context(), req, requestAccessFilter(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "preview_failed", err.Error())
+		writeAPIError(w, err)
 		return
 	}
-
-	items := result.Items
-	if items == nil {
-		items = []*models.MediaItem{}
-	}
-	writeJSON(w, http.StatusOK, previewResponse{Items: items, TotalCount: result.TotalCount})
+	writeJSON(w, http.StatusOK, resp)
 }

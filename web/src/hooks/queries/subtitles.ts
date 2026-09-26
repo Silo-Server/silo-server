@@ -1,10 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { api, ApiClientError } from "@/api/client";
+import {
+  captureProfileRequestContext,
+  isCapturedProfileAuthorityActive,
+  StaleApiRequestContextError,
+} from "@/api/client";
+import { v2 } from "@/api/v2/request";
 import {
   SERIES_SUBTITLE_SETTING_KEYS,
-  seriesSubtitleSettingPath,
+  seriesSubtitleSettingIdentity,
 } from "@/lib/seriesSubtitleSettings";
 import type { PrePlaySubtitleSelection } from "@/player/types";
 import { derivePersistedSubtitleMode } from "@/player/utils/subtitleMode";
@@ -18,58 +23,43 @@ import type {
 } from "@/api/types";
 
 import { itemKeys, settingsKeys, subtitleKeys } from "./keys";
+import { isSettingValueMissing } from "./settingValues";
+import { canonicalLanguageWireValue } from "@/lib/languageNames";
 
 interface DownloadSubtitleResponse {
   subtitle: DownloadedSubtitle;
-}
-
-function buildSubtitleUploadFormData(request: SubtitleUploadRequest): FormData {
-  const form = new FormData();
-  form.set("media_file_id", String(request.media_file_id));
-  if (request.language) {
-    form.set("language", request.language);
-  }
-  if (request.language_override) {
-    form.set("language_override", "true");
-  }
-  form.set("file", request.file);
-  if (request.release_name) {
-    form.set("release_name", request.release_name);
-  }
-  if (request.hearing_impaired) {
-    form.set("hearing_impaired", "true");
-  }
-  return form;
-}
-
-function buildSubtitleDetectFormData(file: File, language?: string): FormData {
-  const form = new FormData();
-  form.set("file", file);
-  if (language) {
-    form.set("language", language);
-  }
-  return form;
 }
 
 export async function fetchDownloadedSubtitles(
   mediaFileId: number,
   options?: RequestInit,
 ): Promise<DownloadedSubtitle[]> {
-  const response = await api<{ subtitles: DownloadedSubtitle[] }>(
-    `/subtitles/${mediaFileId}`,
-    options,
-  );
-  return response.subtitles ?? [];
+  const response = await v2("GET /api/v2/subtitles/{media_file_id}", {
+    path: { media_file_id: String(mediaFileId) },
+    signal: options?.signal ?? undefined,
+  });
+  // The existing track selector still consumes numeric database IDs. Reject
+  // unrepresentable IDs until that remaining player model moves to strings.
+  return response.subtitles.map((subtitle) => {
+    const id = Number(subtitle.id);
+    const fileId = Number(subtitle.media_file_id);
+    if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(fileId) || fileId <= 0) {
+      throw new Error("Unsupported subtitle identifier");
+    }
+    return { ...subtitle, id, media_file_id: fileId };
+  });
 }
 
 export async function searchSubtitles(
   request: SubtitleSearchRequest,
   options?: RequestInit,
 ): Promise<SubtitleSearchResponse> {
-  return api<SubtitleSearchResponse>("/subtitles/search", {
-    ...options,
-    method: "POST",
-    body: JSON.stringify(request),
+  const languages = request.languages
+    .map(canonicalLanguageWireValue)
+    .filter((v): v is string => Boolean(v));
+  return v2("POST /api/v2/subtitles/search", {
+    body: { media_file_id: String(request.media_file_id), languages },
+    signal: options?.signal ?? undefined,
   });
 }
 
@@ -77,22 +67,68 @@ export async function downloadSubtitle(
   request: SubtitleDownloadRequest,
   options?: RequestInit,
 ): Promise<DownloadSubtitleResponse> {
-  return api<DownloadSubtitleResponse>("/subtitles/download", {
-    ...options,
-    method: "POST",
-    body: JSON.stringify(request),
+  const snapshot = captureProfileRequestContext();
+  if (!snapshot) throw new StaleApiRequestContextError();
+  const response = await v2("POST /api/v2/subtitles/download", {
+    body: {
+      media_file_id: String(request.media_file_id),
+      provider: request.provider,
+      subtitle_id: request.subtitle_id,
+      language: canonicalLanguageWireValue(request.language) ?? request.language,
+      release_name: request.release_name,
+      score: request.score,
+      hearing_impaired: request.hearing_impaired,
+    },
+    signal: options?.signal ?? undefined,
+    profileContext: snapshot,
+    retryAuthentication: false,
   });
+  if (!isCapturedProfileAuthorityActive(snapshot)) throw new StaleApiRequestContextError();
+  const id = Number(response.subtitle.id);
+  const fileId = Number(response.subtitle.media_file_id);
+  if (
+    !Number.isSafeInteger(id) ||
+    id <= 0 ||
+    String(id) !== response.subtitle.id ||
+    fileId !== request.media_file_id ||
+    String(fileId) !== response.subtitle.media_file_id
+  ) {
+    throw new Error("Unsupported subtitle identifier");
+  }
+  return { subtitle: { ...response.subtitle, id, media_file_id: fileId } };
 }
 
 export async function uploadSubtitle(
   request: SubtitleUploadRequest,
   options?: RequestInit,
 ): Promise<DownloadSubtitleResponse> {
-  return api<DownloadSubtitleResponse>("/subtitles/upload", {
-    ...options,
-    method: "POST",
-    body: buildSubtitleUploadFormData(request),
+  const snapshot = captureProfileRequestContext();
+  if (!snapshot) throw new StaleApiRequestContextError();
+  const response = await v2("POST /api/v2/subtitles/upload", {
+    form: {
+      media_file_id: String(request.media_file_id),
+      file: request.file,
+      language: request.language,
+      language_override: request.language_override ? "true" : "false",
+      release_name: request.release_name,
+      hearing_impaired: request.hearing_impaired ? "true" : "false",
+    },
+    signal: options?.signal ?? undefined,
+    profileContext: snapshot,
+    retryAuthentication: false,
   });
+  if (!isCapturedProfileAuthorityActive(snapshot)) throw new StaleApiRequestContextError();
+  const id = Number(response.subtitle.id),
+    fileId = Number(response.subtitle.media_file_id);
+  if (
+    !Number.isSafeInteger(id) ||
+    id <= 0 ||
+    String(id) !== response.subtitle.id ||
+    fileId !== request.media_file_id ||
+    String(fileId) !== response.subtitle.media_file_id
+  )
+    throw new Error("Unsupported subtitle identifier");
+  return { subtitle: { ...response.subtitle, id, media_file_id: fileId } };
 }
 
 export async function detectSubtitleLanguage(
@@ -100,11 +136,15 @@ export async function detectSubtitleLanguage(
   language?: string,
   options?: RequestInit,
 ): Promise<SubtitleLanguageDetection> {
-  return api<SubtitleLanguageDetection>("/subtitles/detect-language", {
-    ...options,
-    method: "POST",
-    body: buildSubtitleDetectFormData(file, language),
+  const snapshot = captureProfileRequestContext();
+  if (!snapshot) throw new StaleApiRequestContextError();
+  const result = await v2("POST /api/v2/subtitles/detect-language", {
+    form: { file, language },
+    signal: options?.signal ?? undefined,
+    profileContext: snapshot,
   });
+  if (!isCapturedProfileAuthorityActive(snapshot)) throw new StaleApiRequestContextError();
+  return result;
 }
 
 export function useDownloadedSubtitles(mediaFileId: number | undefined) {
@@ -112,6 +152,18 @@ export function useDownloadedSubtitles(mediaFileId: number | undefined) {
     queryKey: mediaFileId != null ? subtitleKeys.downloaded(mediaFileId) : subtitleKeys.all,
     queryFn: () => fetchDownloadedSubtitles(mediaFileId!),
     enabled: mediaFileId != null,
+  });
+}
+
+/**
+ * Whether this server can search online subtitle providers. Callers should hide
+ * online search only when the server explicitly answers `enabled: false`; an
+ * unresolved or failed probe (e.g. an older server) fails open.
+ */
+export function useSubtitleProviderStatus() {
+  return useQuery({
+    queryKey: subtitleKeys.providerStatus(),
+    queryFn: () => v2("GET /api/v2/subtitles/providers/status"),
   });
 }
 
@@ -141,12 +193,15 @@ export function useDeleteSubtitlePreference() {
 
   return useMutation({
     mutationFn: async (prefId: string) => {
-      await api<void>(`/subtitle-prefs/${prefId}`, { method: "DELETE" });
+      await v2("DELETE /api/v2/subtitle-prefs/{series_id}", { path: { series_id: prefId } });
       await Promise.all(
         SERIES_SUBTITLE_SETTING_KEYS.map((key) =>
-          api<void>(seriesSubtitleSettingPath(key, prefId), { method: "DELETE" }).catch((error) => {
+          v2("DELETE /api/v2/settings/values/{key}", {
+            path: { key },
+            query: seriesSubtitleSettingIdentity(prefId),
+          }).catch((error: unknown) => {
             // Nothing stored at this scope is the state a reset asks for.
-            if (error instanceof ApiClientError && error.status === 404) return;
+            if (isSettingValueMissing(error)) return;
             throw error;
           }),
         ),
@@ -184,14 +239,16 @@ export function useSetSubtitlePreference() {
 
   return useMutation({
     mutationFn: ({ prefId, selection, showForcedSubtitles }: SetSubtitlePreferenceInput) =>
-      api<void>(`/subtitle-prefs/${prefId}`, {
-        method: "PUT",
-        body: JSON.stringify({
+      v2("PUT /api/v2/subtitle-prefs/{series_id}", {
+        path: { series_id: prefId },
+        body: {
           subtitle_language: selection?.language ?? "",
+          // -1 is the "no track" sentinel the contract admits for "off".
           subtitle_track_index: selection?.track_index ?? -1,
           subtitle_mode: derivePersistedSubtitleMode(
             selection ? (selection.track_index ?? -1) : null,
           ),
+          // The contract spells "no signature" as an absent member, not null.
           track_signature: selection
             ? {
                 source: selection.source,
@@ -201,9 +258,9 @@ export function useSetSubtitlePreference() {
                 forced: selection.forced,
                 hearing_impaired: selection.hearing_impaired,
               }
-            : null,
+            : undefined,
           show_forced_subtitles: showForcedSubtitles,
-        }),
+        },
       }),
     onSuccess: () => invalidateItemDetails(queryClient),
     onError: (err) => {
@@ -217,6 +274,8 @@ export function useDownloadSubtitle() {
 
   return useMutation({
     mutationFn: (request: SubtitleDownloadRequest) => downloadSubtitle(request),
+    retry: false,
+    networkMode: "always",
     onSuccess: async (_response, request) => {
       toast.success("Subtitle downloaded");
       await queryClient.invalidateQueries({
@@ -224,7 +283,8 @@ export function useDownloadSubtitle() {
       });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to download subtitle");
+      if (!(err instanceof StaleApiRequestContextError))
+        toast.error(err instanceof Error ? err.message : "Failed to download subtitle");
     },
   });
 }
@@ -234,6 +294,8 @@ export function useUploadSubtitle() {
 
   return useMutation({
     mutationFn: (request: SubtitleUploadRequest) => uploadSubtitle(request),
+    retry: false,
+    networkMode: "always",
     onSuccess: async (_response, request) => {
       toast.success("Subtitle uploaded");
       await queryClient.invalidateQueries({
@@ -241,7 +303,8 @@ export function useUploadSubtitle() {
       });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to upload subtitle");
+      if (!(err instanceof StaleApiRequestContextError))
+        toast.error(err instanceof Error ? err.message : "Failed to upload subtitle");
     },
   });
 }

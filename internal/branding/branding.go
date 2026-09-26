@@ -54,7 +54,12 @@ const (
 
 // assetURLBase is the public, stable path prefix for serving branding assets.
 // Assets are addressed by content ref (?v=<hash><ext>) for immutable caching.
-const assetURLBase = "/api/v1/branding/assets/"
+//
+// Minted in the v2 namespace: these URLs are baked into the SPA index.html
+// favicon link and the PWA manifest, which nothing rewrites, so a v1-shaped
+// path would 404 once the /api/v1 tombstone lands. The bridge release serves
+// both namespaces, so the v1 branding JSON carrying this URL keeps working.
+const assetURLBase = "/api/v2/branding/assets/"
 
 // AssetContentSecurityPolicy hardens every served branding asset response.
 //
@@ -70,9 +75,6 @@ const AssetContentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline
 
 // Errors returned by Service. Handlers map these to HTTP status codes.
 var (
-	// ErrStorageUnavailable indicates S3 is not configured; branding image
-	// upload/serving is unavailable but text branding still works.
-	ErrStorageUnavailable = errors.New("branding: asset storage is not configured")
 	// ErrAssetNotConfigured indicates no custom asset of the requested kind is set.
 	ErrAssetNotConfigured = errors.New("branding: asset not configured")
 	// ErrInvalidKind indicates an unknown asset kind.
@@ -86,3 +88,6 @@ func IsValidKind(s string) bool {
 	_, ok := assetSpecs[AssetKind(s)]
 	return ok
 }
+
+// ErrStorageUnavailable indicates that branding asset storage is not configured.
+var ErrStorageUnavailable = errors.New("branding asset storage is not configured")

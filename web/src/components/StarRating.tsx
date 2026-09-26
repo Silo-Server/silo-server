@@ -5,11 +5,13 @@ interface StarRatingProps {
   value: number | null;
   onChange: (rating: number | null) => void;
   size?: number;
+  /** When false, ArrowUp/ArrowDown are left to an enclosing menu's navigation. */
+  verticalArrows?: boolean;
 }
 
 const STAR_COUNT = 5;
 
-function StarRating({ value, onChange, size = 20 }: StarRatingProps) {
+function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarRatingProps) {
   function handleClick(star: number) {
     if (star === value) {
       onChange(null);
@@ -21,10 +23,10 @@ function StarRating({ value, onChange, size = 20 }: StarRatingProps) {
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       let newValue: number | null = null;
-      if (e.key === "ArrowRight" || e.key === "ArrowUp") {
+      if (e.key === "ArrowRight" || (verticalArrows && e.key === "ArrowUp")) {
         e.preventDefault();
         newValue = Math.min((value ?? 0) + 1, STAR_COUNT);
-      } else if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
+      } else if (e.key === "ArrowLeft" || (verticalArrows && e.key === "ArrowDown")) {
         e.preventDefault();
         newValue = Math.max((value ?? 2) - 1, 1);
       }
@@ -35,7 +37,7 @@ function StarRating({ value, onChange, size = 20 }: StarRatingProps) {
           ?.focus({ preventScroll: true });
       }
     },
-    [value, onChange],
+    [value, onChange, verticalArrows],
   );
 
   const tabbableStar = value ?? 1;

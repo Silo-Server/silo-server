@@ -1,0 +1,6 @@
+{
+  "provider_name": "subdl",
+  "enabled": true,
+  "has_api_key": true,
+  "has_credentials": false
+}

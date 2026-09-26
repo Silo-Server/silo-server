@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -61,19 +63,31 @@ func (f *fakeRepo) GetByTokenHash(_ context.Context, hash string) (*models.Invit
 
 func (f *fakeRepo) List(context.Context) ([]*models.Invitation, error) { return nil, nil }
 
-func (f *fakeRepo) Accept(_ context.Context, hash string, userID int) error {
+func (f *fakeRepo) Accept(_ context.Context, hash string, provision func(*models.Invitation, pgx.Tx) (*models.User, error)) (*models.User, error) {
 	row, ok := f.rows[hash]
 	if !ok {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
-	if row.AcceptedAt != nil || row.RevokedAt != nil || time.Now().After(row.ExpiresAt) {
-		return ErrNotClaimable
+	if row.AcceptedAt != nil || row.RevokedAt != nil || !time.Now().Before(row.ExpiresAt) {
+		return nil, ErrNotFound
 	}
-	now := time.Now()
-	uid := int64(userID)
-	row.AcceptedAt = &now
-	row.AcceptedUserID = &uid
-	return nil
+	user, err := provision(row, nil)
+	if err != nil {
+		return nil, err
+	}
+	row.AcceptedAt, row.AcceptedUserID = new(time.Now()), new(int64(user.ID))
+	return user, nil
+}
+
+func (f *fakeRepo) Resend(ctx context.Context, id int64, input models.CreateInvitationInput, hash string) (*models.Invitation, error) {
+	prior, err := f.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if prior.AcceptedAt != nil || prior.RevokedAt != nil {
+		return nil, ErrNotClaimable
+	}
+	return f.Create(ctx, input, hash)
 }
 
 func (f *fakeRepo) Revoke(_ context.Context, id int64) error {
@@ -123,7 +137,7 @@ type fakeAccounts struct {
 	err     error
 }
 
-func (f *fakeAccounts) CreateAccount(_ context.Context, input auth.CreateAccountInput) (*models.User, error) {
+func (f *fakeAccounts) CreateAccountInTransaction(_ context.Context, _ pgx.Tx, input auth.CreateAccountInput) (*models.User, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -131,10 +145,16 @@ func (f *fakeAccounts) CreateAccount(_ context.Context, input auth.CreateAccount
 	return &models.User{ID: 100 + len(f.created), Username: input.User.Username, Email: input.User.Email}, nil
 }
 
-type fakeSessions struct{ logins []string }
+type fakeSessions struct {
+	logins []string
+	err    error
+}
 
 func (f *fakeSessions) Login(_ context.Context, username, _, _, _ string) (*auth.TokenPair, *models.User, error) {
 	f.logins = append(f.logins, username)
+	if f.err != nil {
+		return nil, nil, f.err
+	}
 	return &auth.TokenPair{AccessToken: "at", RefreshToken: "rt", ExpiresIn: 900},
 		&models.User{Username: username}, nil
 }
@@ -142,6 +162,7 @@ func (f *fakeSessions) Login(_ context.Context, username, _, _, _ string) (*auth
 type fakeMail struct {
 	sent       []mail.Message
 	configured bool
+	err        error
 }
 
 func (f *fakeMail) Enabled(context.Context) bool { return f.configured }
@@ -151,7 +172,7 @@ func (f *fakeMail) Send(_ context.Context, msg mail.Message) error {
 		return mail.ErrNotConfigured
 	}
 	f.sent = append(f.sent, msg)
-	return nil
+	return f.err
 }
 
 type fakeSettings map[string]string
@@ -395,14 +416,14 @@ func TestLookupHidesLifecycleDetail(t *testing.T) {
 
 func TestLinkBasePrefersExternalURLSetting(t *testing.T) {
 	svc := newTestService(newFakeRepo(), adminInviter(), &fakeAccounts{}, &fakeSessions{}, &fakeMail{configured: true},
-		fakeSettings{"notifications.email.external_url": "https://media.example.net/"})
+		fakeSettings{"server.public_url": "https://media.example.net/"})
 
 	result, err := svc.Send(context.Background(), SendInput{Email: testInvitee, InvitedBy: 1})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 	if !strings.HasPrefix(result.ClaimURL, "https://media.example.net/invite/") {
-		t.Errorf("claim URL = %q, want external_url base", result.ClaimURL)
+		t.Errorf("claim URL = %q, want server public URL base", result.ClaimURL)
 	}
 }
 
@@ -416,4 +437,75 @@ func TestProfileNameFromEmail(t *testing.T) {
 			t.Errorf("profileNameFromEmail(%q) = %q, want %q", input, got, want)
 		}
 	}
+}
+
+func TestAcceptReportsCommittedAccountWhenLoginFails(t *testing.T) {
+	repo := newFakeRepo()
+	sessions := &fakeSessions{err: errors.New("session store unavailable")}
+	accounts := &fakeAccounts{}
+	svc := newTestService(repo, adminInviter(), accounts, sessions, &fakeMail{}, nil)
+	sent, err := svc.Send(t.Context(), SendInput{Email: testInvitee, InvitedBy: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite/")
+	pair, user, err := svc.Accept(t.Context(), token, "test-password", "device", "")
+	if !errors.Is(err, ErrSessionStart) || user == nil || pair != nil {
+		t.Fatalf("pair=%v user=%v err=%v", pair, user, err)
+	}
+	if repo.rows[HashToken(token)].AcceptedUserID == nil {
+		t.Fatal("successful acceptance was not retained")
+	}
+	if _, _, err := svc.Accept(t.Context(), token, "test-password", "device", ""); err == nil {
+		t.Fatal("accepted token replayed")
+	}
+	if len(accounts.created) != 1 || len(sessions.logins) != 1 {
+		t.Fatal("failed login replayed account creation or session issuance")
+	}
+}
+
+func TestAcceptDoesNotLoginAfterProvisioningFailure(t *testing.T) {
+	repo := newFakeRepo()
+	sessions := &fakeSessions{}
+	accounts := &fakeAccounts{err: auth.ErrTransactionalProfileUnavailable}
+	svc := newTestService(repo, adminInviter(), accounts, sessions, &fakeMail{}, nil)
+	sent, err := svc.Send(t.Context(), SendInput{Email: testInvitee, InvitedBy: 1, CreateProfile: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite/")
+	if _, _, err := svc.Accept(t.Context(), token, "test-password", "device", ""); !errors.Is(err, auth.ErrTransactionalProfileUnavailable) {
+		t.Fatal(err)
+	}
+	if len(sessions.logins) != 0 || repo.rows[HashToken(token)].AcceptedAt != nil {
+		t.Fatal("provisioning failure consumed invitation or issued session")
+	}
+}
+
+func TestResendDeliveryErrorRetainsCommittedReplacement(t *testing.T) {
+	repo := newFakeRepo()
+	sender := &fakeMail{configured: true}
+	svc := newTestService(repo, adminInviter(), &fakeAccounts{}, &fakeSessions{}, sender, nil)
+	prior, err := svc.Send(t.Context(), SendInput{Email: testInvitee, InvitedBy: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender.err = errors.New("SMTP acknowledgement lost")
+	replacement, err := svc.Resend(t.Context(), prior.Invitation.ID, 1)
+	if err == nil || replacement == nil || replacement.EmailSent || replacement.ClaimURL == "" {
+		t.Fatalf("replacement=%v err=%v", replacement, err)
+	}
+	if prior.Invitation.RevokedAt == nil || replacement.Invitation.RevokedAt != nil || len(sender.sent) != 2 {
+		t.Fatal("delivery error lost committed state")
+	}
+	if _, err := svc.Resend(t.Context(), prior.Invitation.ID, 1); !errors.Is(err, ErrNotClaimable) {
+		t.Fatalf("stale resend: %v", err)
+	}
+	if len(sender.sent) != 2 {
+		t.Fatal("rejected resend sent email")
+	}
+}
+
+func (f *fakeRepo) ListPage(context.Context, *PageKey, int) ([]*models.Invitation, bool, error) {
+	return nil, false, nil
 }

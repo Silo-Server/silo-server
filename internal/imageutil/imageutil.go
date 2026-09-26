@@ -22,6 +22,13 @@ const (
 	thumbhashSourceDimension = 100
 )
 
+// libvips threading: bimg's package init pins libvips to a single thread per
+// operation (vips_concurrency_set(1)) unless VIPS_CONCURRENCY is set in the
+// environment. Every caller in Silo runs encodes from its own worker pool, so
+// that pool is the only source of parallelism and the pools are sized per
+// CPU core; see tasks.imageCacheWorkerCount. Do not raise VIPS_CONCURRENCY
+// in deployments without lowering those pools, or the host oversubscribes.
+
 // MaxCachedOriginalDimension caps the longest edge of a cached "original"
 // variant. Provider artwork wider than this is downscaled on ingest, so a
 // client asking for the original size never receives more pixels than this.

@@ -26,6 +26,12 @@ type Capabilities struct {
 	// user-configurable order that Silo can mirror locally.
 	ProvidesWatchlistOrder bool `json:"provides_watchlist_order"`
 	ScrobblePlayback       bool `json:"scrobble_playback"`
+	// ImportRatings and ExportRatings cover movie and series ratings.
+	// ExportRatings means the provider can both set and clear a rating. They
+	// are served only by /api/v2, which projects them explicitly; the frozen
+	// v1 responses keep their original capability fields.
+	ImportRatings bool `json:"-"`
+	ExportRatings bool `json:"-"`
 }
 
 // ListKind identifies which personal list a sync operates on. The favorites and
@@ -175,6 +181,46 @@ type WatchlistRemover interface {
 	RemoveWatchlist(ctx context.Context, cfg ServerConfig, conn Connection, items []LocalFavorite) (ExportResult, error)
 }
 
+// RatingImporter reads the provider's movie and series ratings. Ratings use the
+// provider scale shared by every watch-sync provider: integers from 1 to 10.
+type RatingImporter interface {
+	FetchRatings(ctx context.Context, cfg ServerConfig, conn Connection) (RatingImportBatch, error)
+}
+
+// RatingImportBatch is one rating read. SnapshotKinds names the item kinds
+// (historyimport.KindMovie, historyimport.KindSeries) for which Rows is the
+// provider's complete set of ratings: an item of such a kind that is absent
+// from Rows is unrated remotely. Absent items of any other kind are unknown,
+// which is how a provider reports that it skipped an unchanged kind.
+type RatingImportBatch struct {
+	Rows           []RemoteRating
+	SnapshotKinds  []string
+	UpdatedCursors map[string]string
+	Warnings       []string
+}
+
+// RatingExporter sets and clears ratings on the provider. Both calls are
+// desired-state writes: resending an unchanged rating must succeed.
+type RatingExporter interface {
+	ExportRatings(ctx context.Context, cfg ServerConfig, conn Connection, items []LocalRating) (ExportResult, error)
+	RemoveRatings(ctx context.Context, cfg ServerConfig, conn Connection, items []LocalFavorite) (ExportResult, error)
+}
+
+// RatingKindFilter is implemented by providers that rate only some of the item
+// kinds Silo syncs (historyimport.KindMovie, historyimport.KindSeries). Items
+// of any other kind are left out of the sync: never sent and never read as
+// removed.
+type RatingKindFilter interface {
+	SyncsRatingKind(kind string) bool
+}
+
+// RatingExportWatchGate is implemented by providers where rating a title also
+// records it as watched. Silo then sends a new rating of such a kind only once
+// the profile has a completed play of the title.
+type RatingExportWatchGate interface {
+	RatingExportRequiresWatched(kind string) bool
+}
+
 type Scrobbler interface {
 	Start(ctx context.Context, cfg ServerConfig, conn Connection, event ScrobbleEvent) error
 	Pause(ctx context.Context, cfg ServerConfig, conn Connection, event ScrobbleEvent) error
@@ -219,6 +265,8 @@ type Connection struct {
 	SyncWatchlistRemovalsEnabled bool
 	SyncWatchlistOrderEnabled    bool
 	ScrobbleEnabled              bool
+	ImportRatingsEnabled         bool
+	ExportRatingsEnabled         bool
 	LastInboundSyncAt            *time.Time
 	LastProgressSyncAt           *time.Time
 	LastOutboundSyncAt           *time.Time
@@ -261,6 +309,13 @@ type SyncRun struct {
 	StartedAt                time.Time  `json:"started_at"`
 	CompletedAt              *time.Time `json:"completed_at,omitempty"`
 	CreatedAt                time.Time  `json:"created_at"`
+
+	// The rating counters are served only by /api/v2, which maps them
+	// explicitly; the frozen v1 response keeps its original fields.
+	InboundRatingsFound    int `json:"-"`
+	InboundRatingsImported int `json:"-"`
+	OutboundRatingsFound   int `json:"-"`
+	OutboundRatingsSent    int `json:"-"`
 }
 
 type SyncRunStatus string
@@ -479,6 +534,48 @@ type LocalFavorite struct {
 	FavoritedAt     time.Time
 }
 
+// RemoteRating is one rated movie or series reported by a provider. The
+// embedded RemoteFavorite carries the item identity; its Removed flag is an
+// explicit tombstone resolved through ProviderItemKey. Rating is on the
+// provider scale, an integer from 1 to 10.
+type RemoteRating struct {
+	RemoteFavorite
+	Rating  int
+	RatedAt time.Time
+}
+
+// LocalRating is a Silo rating to send to a provider. The embedded
+// LocalFavorite carries the item identity. Rating is already converted to the
+// provider scale, an integer from 1 to 10.
+type LocalRating struct {
+	LocalFavorite
+	Rating  int
+	RatedAt time.Time
+}
+
+// LocalRatingEvent reports that a profile set or cleared ratings. It carries
+// no values: the handler reads the current rating so that events processed out
+// of order never send a stale value.
+type LocalRatingEvent struct {
+	UserID       int
+	ProfileID    string
+	MediaItemIDs []string
+}
+
+// RatingSyncState is the last rating Silo and a provider agreed on for one item,
+// in Silo stars (1 to 5). No state means the sides agreed the item is unrated.
+// RemoteSeen records that a provider read confirmed the agreed rating.
+// ProviderAccountID scopes the row to the provider account it was agreed with.
+type RatingSyncState struct {
+	ConnectionID      string
+	ProviderAccountID string
+	MediaItemID       string
+	Kind              string
+	ProviderItemKey   string
+	SyncedRating      int
+	RemoteSeen        bool
+}
+
 type LocalWatchEventKind string
 
 const (
@@ -679,7 +776,18 @@ type ProviderSummary struct {
 	ConnectionConfigSchema []plugins.ConfigSchemaView `json:"connection_config_schema,omitempty"`
 }
 
+// ConnectionVersion identifies a precise persisted connection generation.
+type ConnectionVersion struct {
+	ID        string
+	UpdatedAt time.Time
+}
+
+var ErrStaleConnection = errors.New("watch provider connection changed")
+var ErrSettingsCleanupUnavailable = errors.New("watchlist ordering cleanup unavailable")
+
 type ConnectionStatus struct {
+	Version ConnectionVersion `json:"-"`
+
 	Provider                     string                     `json:"provider"`
 	DisplayName                  string                     `json:"display_name"`
 	Capabilities                 Capabilities               `json:"capabilities"`
@@ -707,6 +815,11 @@ type ConnectionStatus struct {
 	LastWatchlistSyncAt          *time.Time                 `json:"last_watchlist_sync_at,omitempty"`
 	LastScrobbleErrorAt          *time.Time                 `json:"last_scrobble_error_at,omitempty"`
 	LastError                    string                     `json:"last_error,omitempty"`
+
+	// The rating toggles are served only by /api/v2, which maps them
+	// explicitly; the frozen v1 response keeps its original fields.
+	ImportRatingsEnabled bool `json:"-"`
+	ExportRatingsEnabled bool `json:"-"`
 }
 
 type ConnectionUpdate struct {
@@ -722,4 +835,56 @@ type ConnectionUpdate struct {
 	SyncWatchlistRemovalsEnabled *bool `json:"sync_watchlist_removals_enabled,omitempty"`
 	SyncWatchlistOrderEnabled    *bool `json:"sync_watchlist_order_enabled,omitempty"`
 	ScrobbleEnabled              *bool `json:"scrobble_enabled,omitempty"`
+	ImportRatingsEnabled         *bool `json:"import_ratings_enabled,omitempty"`
+	ExportRatingsEnabled         *bool `json:"export_ratings_enabled,omitempty"`
 }
+
+// UnknownProviderError reports a provider key the registry does not know.
+// Its message is the one the service has always produced.
+type UnknownProviderError struct {
+	Key string
+}
+
+func (e UnknownProviderError) Error() string { return fmt.Sprintf("unknown provider %q", e.Key) }
+
+// Sentinel errors the service answers for a missing connection and for a
+// device-authorization session that can no longer complete. The messages are
+// unchanged so the v1 responses stay byte-identical; the v2 listener
+// classifies on the values.
+var (
+	ErrConnectionNotFound   = errors.New("watch provider connection not found")
+	ErrAuthSessionMismatch  = errors.New("auth session does not match active profile")
+	ErrAuthSessionCompleted = errors.New("auth session is already completed")
+	ErrAuthSessionExpired   = errors.New("auth session has expired")
+	// ErrInvalidCredential reports a provider's rejection of the credential the
+	// profile supplied. Built-in providers wrap it so the listeners classify an
+	// API-key rejection as a client problem; plugin providers signal the same
+	// condition through the INVALID_CREDENTIAL fault code.
+	ErrInvalidCredential = errors.New("watch provider rejected the supplied credential")
+)
+
+// IsDeviceAuthPending reports whether err is the provider's "not yet
+// authorized" answer to a device-code poll.
+func IsDeviceAuthPending(err error) bool {
+	var pending deviceAuthorizationPendingError
+	return errors.As(err, &pending)
+}
+
+// IsInvalidCredentialError reports whether err is a provider's rejection of
+// the supplied credential.
+func IsInvalidCredentialError(err error) bool { return isWatchSyncInvalidCredentialError(err) }
+
+// IsRetryableProviderError reports whether err is a temporary provider fault.
+func IsRetryableProviderError(err error) bool {
+	var retryable retryableProviderError
+	return errors.As(err, &retryable)
+}
+
+// ProviderCapabilityError reports an authorization method or configuration
+// the named provider does not offer. The message is the service's original.
+type ProviderCapabilityError struct {
+	Key  string
+	What string
+}
+
+func (e ProviderCapabilityError) Error() string { return fmt.Sprintf("provider %q %s", e.Key, e.What) }

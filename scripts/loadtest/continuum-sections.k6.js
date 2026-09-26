@@ -1,15 +1,23 @@
 import http from "k6/http";
 import { check, group, sleep } from "k6";
 
-const BASE_URL = (__ENV.BASE_URL || "http://localhost:8080/api/v1").replace(
+const BASE_URL = (__ENV.BASE_URL || "http://localhost:8080/api/v2").replace(
   /\/$/,
   "",
 );
 const TOKEN = __ENV.TOKEN || "";
+// Every v2 section read is profile-scoped, so the run is meaningless without one.
+const PROFILE_ID = __ENV.PROFILE_ID || "";
+if (!PROFILE_ID) {
+  throw new Error(
+    "PROFILE_ID is required: v2 section endpoints need X-Profile-Id",
+  );
+}
+// v2 identifiers are opaque strings; send them back exactly as the API issued them.
 const LIBRARY_IDS = (__ENV.LIBRARY_IDS || "")
   .split(",")
-  .map((value) => Number(value.trim()))
-  .filter((value) => Number.isFinite(value) && value > 0);
+  .map((value) => value.trim())
+  .filter((value) => value.length > 0);
 
 const HOME_SECTION_CONCURRENCY = Number(__ENV.HOME_SECTION_CONCURRENCY || 5);
 const LIBRARY_SECTION_CONCURRENCY = Number(
@@ -53,9 +61,7 @@ function headers() {
   if (TOKEN) {
     result.Authorization = `Bearer ${TOKEN}`;
   }
-  if (__ENV.PROFILE_ID) {
-    result["X-Profile-ID"] = __ENV.PROFILE_ID;
-  }
+  result["X-Profile-Id"] = PROFILE_ID;
   return result;
 }
 

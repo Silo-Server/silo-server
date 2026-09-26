@@ -1,0 +1,9 @@
+{
+  "cases": [
+    { "input": "eng", "canonical": "en", "primary": "en" },
+    { "input": "ara", "canonical": "ar", "primary": "ar" },
+    { "input": "Arabic", "canonical": "ar", "primary": "ar", "compatibility": true },
+    { "input": "pt-BR", "canonical": "pt-BR", "primary": "pt" },
+    { "input": "zh-Hant", "canonical": "zh-Hant", "primary": "zh" }
+  ]
+}

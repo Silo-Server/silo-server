@@ -4,7 +4,9 @@ import {
   Suspense,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -15,6 +17,7 @@ import {
   getProfileToken,
   refreshAuthentication,
 } from "@/api/client";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player/context/PlayerConfigContext";
 import { storage } from "@/utils/storage";
@@ -58,9 +61,12 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
   const [activeRequest, setActiveRequest] = useState<ActiveAudiobookPlayback | null>(null);
   const [active, setActive] = useState<AudiobookPlayerStatus | null>(null);
   const [controls, setControls] = useState<AudiobookPlayerControls | null>(null);
+  const { profile } = useCurrentProfile();
+  const profileId = profile?.id ?? null;
+  const playbackProfileRef = useRef<string | null>(null);
   const playerConfig = useMemo<PlayerConfig>(
     () => ({
-      apiBaseUrl: "/api/v1",
+      apiBaseUrl: "/api/v2",
       getAccessToken: () => getAccessToken(),
       getProfileId: () => storage.get(storage.KEYS.PROFILE_ID),
       getProfileToken: () => getProfileToken(),
@@ -88,6 +94,23 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
     setActive(null);
     setActiveRequest(null);
   }, []);
+
+  // The book belongs to the profile that started it: a profile switch must
+  // not keep it playing or report its progress under the new profile.
+  useEffect(() => {
+    if (!activeRequest) {
+      playbackProfileRef.current = null;
+      return;
+    }
+    if (playbackProfileRef.current === null) {
+      playbackProfileRef.current = profileId;
+      return;
+    }
+    if (playbackProfileRef.current !== profileId) {
+      playbackProfileRef.current = null;
+      stopPlayback();
+    }
+  }, [activeRequest, profileId, stopPlayback]);
 
   const toggleActivePlayback = useCallback(() => {
     controls?.togglePlay();

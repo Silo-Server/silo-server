@@ -42,13 +42,32 @@ func canManageHousehold(
 	users userLookup,
 	tokens *access.ProfileTokenService,
 ) (bool, error) {
-	ctx := r.Context()
+	return canManageHouseholdAs(r.Context(), store, activeProfileIDOf(r), func(profileID string) error {
+		return verifyProfileToken(r, users, tokens, profileID)
+	})
+}
+
+// activeProfileIDOf is the profile the request acts as: the one the profile
+// gate resolved, else the declared header.
+func activeProfileIDOf(r *http.Request) string {
+	if id := apimw.GetProfileID(r.Context()); id != "" {
+		return id
+	}
+	return r.Header.Get("X-Profile-Id")
+}
+
+// canManageHouseholdAs is canManageHousehold with the request already reduced
+// to the acting profile and a verifier for a PIN-locked primary profile: the
+// v1 verifier checks X-Profile-Token, the v2 one the viewer scope the gate
+// resolved.
+func canManageHouseholdAs(
+	ctx context.Context,
+	store userstore.UserStore,
+	activeProfileID string,
+	verify func(profileID string) error,
+) (bool, error) {
 	if apimw.IsAdmin(ctx) {
 		return true, nil
-	}
-	activeProfileID := apimw.GetProfileID(ctx)
-	if activeProfileID == "" {
-		activeProfileID = r.Header.Get("X-Profile-Id")
 	}
 	if activeProfileID == "" {
 		return false, nil
@@ -66,7 +85,7 @@ func canManageHousehold(
 	if active.PINHash == "" {
 		return true, nil
 	}
-	if err := verifyProfileToken(r, users, tokens, active.ID); err != nil {
+	if err := verify(active.ID); err != nil {
 		return false, err
 	}
 	return true, nil

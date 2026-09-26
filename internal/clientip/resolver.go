@@ -1,6 +1,7 @@
 package clientip
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strings"
@@ -10,8 +11,9 @@ import (
 // Resolver resolves the real client IP from an HTTP request, accounting for
 // trusted reverse proxies that set forwarding headers.
 type Resolver struct {
-	mu      sync.RWMutex
-	trusted []*net.IPNet
+	reloadMu sync.Mutex
+	mu       sync.RWMutex
+	trusted  []*net.IPNet
 }
 
 // NewResolver creates a Resolver with the given trusted proxy CIDRs.
@@ -106,4 +108,86 @@ func (r *Resolver) UpdateTrustedCIDRs(cidrs []*net.IPNet) {
 	r.mu.Lock()
 	r.trusted = cidrs
 	r.mu.Unlock()
+}
+
+// ReloadTrustedCIDRs serializes the authoritative store read and publication.
+// Holding only the publication lock would let an older delayed read overwrite
+// a newer configuration. A failed read retains the last valid trust boundary.
+func (r *Resolver) ReloadTrustedCIDRs(ctx context.Context, store SettingsStore) error {
+	r.reloadMu.Lock()
+	defer r.reloadMu.Unlock()
+	cidrs, err := LoadTrustedCIDRs(ctx, store)
+	if err != nil {
+		return err
+	}
+	r.UpdateTrustedCIDRs(cidrs)
+	return nil
+}
+
+// Forwarded protocols Traefik sends on a WebSocket upgrade in place of
+// http and https.
+const (
+	forwardedProtoWS  = "ws"
+	forwardedProtoWSS = "wss"
+)
+
+// requestScheme must run before Middleware replaces the transport peer address.
+// Proxies must preserve Host and overwrite X-Forwarded-Proto, never append it.
+// On a WebSocket upgrade, Traefik sends "wss" or "ws" instead of "https" or
+// "http"; those name the same transport security and are accepted there only.
+func (r *Resolver) requestScheme(req *http.Request) string {
+	scheme := "http"
+	if req.TLS != nil {
+		scheme = "https"
+	}
+	host, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		host = req.RemoteAddr
+	}
+	peer := net.ParseIP(host)
+	if peer == nil || r == nil {
+		return scheme
+	}
+	r.mu.RLock()
+	trusted := r.isTrusted(peer)
+	r.mu.RUnlock()
+	if !trusted {
+		return scheme
+	}
+	values := req.Header.Values("X-Forwarded-Proto")
+	if len(values) == 0 {
+		return scheme
+	}
+	if len(values) != 1 {
+		return ""
+	}
+	switch values[0] {
+	case "http", "https":
+		return values[0]
+	case forwardedProtoWS:
+		if isWebSocketUpgrade(req) {
+			return "http"
+		}
+	case forwardedProtoWSS:
+		if isWebSocketUpgrade(req) {
+			return "https"
+		}
+	}
+	return ""
+}
+
+// isWebSocketUpgrade reports whether req asks to upgrade to WebSocket: a
+// Connection header carrying the "upgrade" token and Upgrade: websocket.
+func isWebSocketUpgrade(req *http.Request) bool {
+	if !strings.EqualFold(strings.TrimSpace(req.Header.Get("Upgrade")), "websocket") {
+		return false
+	}
+	for _, value := range req.Header.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+				return true
+			}
+		}
+	}
+	return false
 }

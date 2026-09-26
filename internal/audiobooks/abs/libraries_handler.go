@@ -738,10 +738,10 @@ func siloItemToLibraryItem(item *models.MediaItem, lib AudiobookLibrary, baseURL
 	meta := siloItemToMetadata(item)
 	libID := audiobookLibraryID(lib)
 
-	// Duration: Runtime field on MediaItem is in minutes for video; for
-	// audiobooks it stores the total seconds (set by the scanner Stage 2
-	// extension). Convert from the int field.
-	duration := float64(item.Runtime) // seconds
+	// MediaItem.Runtime is measured in minutes across the native catalog. ABS
+	// uses seconds, so convert at this wire boundary. The media store overlays
+	// the more accurate active-file-stat total before this mapper is called.
+	duration := audiobookDurationSeconds(item)
 
 	// Always point coverPath at our /api/items/{id}/cover endpoint rather
 	// than the raw silo PosterPath. Storage paths like
@@ -869,9 +869,32 @@ func siloItemToMetadata(item *models.MediaItem) Metadata {
 		PublishedYear:     publishedYear,
 		Publisher:         publisher,
 		Genres:            genres,
-		Language:          "en",
+		Language:          audiobookLanguage(item),
 		Tags:              tags,
 	}
+}
+
+// audiobookLanguage preserves the source language when it is known. Older
+// audiobook rows may not have a language tag; an empty value is preferable to
+// claiming every book is English.
+func audiobookLanguage(item *models.MediaItem) string {
+	if item == nil {
+		return ""
+	}
+	if language := strings.TrimSpace(item.OriginalLanguage); language != "" {
+		return language
+	}
+	return strings.TrimSpace(item.DefaultMetadataLanguage)
+}
+
+func audiobookDurationSeconds(item *models.MediaItem) float64 {
+	if item == nil {
+		return 0
+	}
+	if item.AudiobookDurationSeconds > 0 {
+		return float64(item.AudiobookDurationSeconds)
+	}
+	return float64(item.Runtime) * 60
 }
 
 // siloItemToLibraryItemDetail converts a silo MediaItem + its media files into
@@ -894,21 +917,7 @@ func siloItemToLibraryItemDetail(item *models.MediaItem, files []*models.MediaFi
 		totalDuration = base.Media.Duration
 	}
 
-	// Chapters from the first file that has them.
-	chapters := make([]ChapterABS, 0)
-	for _, f := range files {
-		if len(f.Chapters) > 0 {
-			for i, c := range f.Chapters {
-				chapters = append(chapters, ChapterABS{
-					ID:    i,
-					Start: c.StartSeconds,
-					End:   c.EndSeconds,
-					Title: c.Title,
-				})
-			}
-			break
-		}
-	}
+	chapters := buildSiloChapters(files)
 
 	// libraryFiles + summed size mirror real ABS toOldJSONExpanded. Each entry
 	// is the real-ABS library file shape (ino + file metadata + fileType).

@@ -2,6 +2,7 @@ package tonemap
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -62,6 +63,42 @@ func TestDecodeProbeFixtureCoversPascalNVDECMinimum(t *testing.T) {
 	if stream.PixFmt != "yuv420p10le" {
 		t.Fatalf("fixture pixel format = %q, want yuv420p10le", stream.PixFmt)
 	}
+}
+
+// TestDecodeProbeFixtureIsMain10 pins the fixture's HEVC profile by reading
+// the SPS profile_tier_level directly, so it holds without ffprobe. Intel
+// VAAPI/QSV decoders accept general_profile_idc 2 (Main 10) and refuse 4
+// (Rext); a Rext fixture makes every hardware tone-map smoke fail while the
+// software smoke, which decodes Rext, still passes.
+func TestDecodeProbeFixtureIsMain10(t *testing.T) {
+	data, err := base64.StdEncoding.DecodeString(decodeProbeFixtureBase64)
+	if err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+	const (
+		nalSPS         = 33
+		hevcMain10IDC  = 2
+		nalHeaderBytes = 2
+		spsPrefixBytes = 1 // sps_video_parameter_set_id, max_sub_layers_minus1, temporal_id_nesting
+	)
+	for i := 0; i+3 < len(data); i++ {
+		if data[i] != 0 || data[i+1] != 0 || data[i+2] != 1 {
+			continue
+		}
+		header := i + 3
+		if (data[header]>>1)&0x3f != nalSPS {
+			continue
+		}
+		ptl := header + nalHeaderBytes + spsPrefixBytes
+		if ptl >= len(data) {
+			t.Fatal("fixture SPS is truncated")
+		}
+		if got := data[ptl] & 0x1f; got != hevcMain10IDC {
+			t.Fatalf("fixture general_profile_idc = %d, want %d (Main 10)", got, hevcMain10IDC)
+		}
+		return
+	}
+	t.Fatal("fixture has no SPS NAL unit")
 }
 
 // TestHardwareSmokeFilterNVENCPreservesSourceBitDepth verifies that the CUDA

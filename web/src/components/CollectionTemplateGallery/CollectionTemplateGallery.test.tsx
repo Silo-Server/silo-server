@@ -45,6 +45,17 @@ vi.mock("@/api/client", () => ({
   api: (path: string, options?: unknown) => fetchMock(path, options),
 }));
 
+vi.mock("@/api/v2/request", async () => {
+  const actual = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
+  return {
+    ...actual,
+    v2: (operation: string, options?: unknown) =>
+      operation === "GET /api/v2/admin/collections/capabilities"
+        ? Promise.resolve({ artwork: true, imports: true, groups: true, item_reorder: true })
+        : fetchMock(operation, options),
+  };
+});
+
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
@@ -129,8 +140,10 @@ describe("CollectionTemplateGallery", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     fetchMock.mockImplementation((path: string) => {
-      if (path === "/admin/collections/templates") return Promise.resolve(catalogResponse);
-      if (path === "/admin/collections/template-bundles") return Promise.resolve(bundlesResponse);
+      if (path === "GET /api/v2/admin/collections/templates")
+        return Promise.resolve(catalogResponse);
+      if (path === "GET /api/v2/admin/collections/template-bundles")
+        return Promise.resolve(bundlesResponse);
       throw new Error(`unexpected path: ${path}`);
     });
   });
@@ -201,10 +214,14 @@ describe("CollectionTemplateGallery", () => {
     });
 
     fetchMock.mockImplementation((path: string) => {
-      if (path === "/admin/collections/templates") return Promise.resolve(catalogResponse);
-      if (path === "/admin/collections/template-bundles") return Promise.resolve(bundlesResponse);
-      if (path === "/admin/collections/import/tmdb") {
-        return Promise.resolve({ collection: { id: "x" } });
+      if (path === "GET /api/v2/admin/collections/templates")
+        return Promise.resolve(catalogResponse);
+      if (path === "GET /api/v2/admin/collections/template-bundles")
+        return Promise.resolve(bundlesResponse);
+      if (path === "POST /api/v2/admin/collections/import/tmdb") {
+        return Promise.resolve({
+          collection: { id: "x", library_id: "1", library_ids: ["1"], query_definition: {} },
+        });
       }
       throw new Error(`unexpected path: ${path}`);
     });
@@ -213,7 +230,10 @@ describe("CollectionTemplateGallery", () => {
     await user.click(screen.getByRole("button", { name: /Create Collection/i }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/admin/collections/import/tmdb", expect.any(Object));
+      expect(fetchMock).toHaveBeenCalledWith(
+        "POST /api/v2/admin/collections/import/tmdb",
+        expect.any(Object),
+      );
     });
   });
 
@@ -226,9 +246,11 @@ describe("CollectionTemplateGallery", () => {
     });
 
     fetchMock.mockImplementation((path: string) => {
-      if (path === "/admin/collections/templates") return Promise.resolve(catalogResponse);
-      if (path === "/admin/collections/template-bundles") return Promise.resolve(bundlesResponse);
-      if (path === "/admin/collections/import/trakt") {
+      if (path === "GET /api/v2/admin/collections/templates")
+        return Promise.resolve(catalogResponse);
+      if (path === "GET /api/v2/admin/collections/template-bundles")
+        return Promise.resolve(bundlesResponse);
+      if (path === "POST /api/v2/admin/collections/import/trakt") {
         return Promise.resolve({ collection: { id: "y" } });
       }
       throw new Error(`unexpected path: ${path}`);
@@ -238,7 +260,10 @@ describe("CollectionTemplateGallery", () => {
     await user.click(screen.getByRole("button", { name: /Create Collection/i }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/admin/collections/import/trakt", expect.any(Object));
+      expect(fetchMock).toHaveBeenCalledWith(
+        "POST /api/v2/admin/collections/import/trakt",
+        expect.any(Object),
+      );
     });
   });
 
@@ -251,9 +276,11 @@ describe("CollectionTemplateGallery", () => {
     });
 
     fetchMock.mockImplementation((path: string) => {
-      if (path === "/admin/collections/templates") return Promise.resolve(catalogResponse);
-      if (path === "/admin/collections/template-bundles") return Promise.resolve(bundlesResponse);
-      if (path === "/admin/collections/template-bundles/core_defaults/apply") {
+      if (path === "GET /api/v2/admin/collections/templates")
+        return Promise.resolve(catalogResponse);
+      if (path === "GET /api/v2/admin/collections/template-bundles")
+        return Promise.resolve(bundlesResponse);
+      if (path === "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply") {
         return Promise.resolve({
           bundle_id: "core_defaults",
           dry_run: true,
@@ -261,13 +288,19 @@ describe("CollectionTemplateGallery", () => {
             {
               template_id: "tmdb_trending_movies_week",
               template_title: "Trending Movies This Week",
-              library_id: 1,
+              library_id: "1",
               library_name: "Movies",
               reason: "would_create",
             },
           ],
           skipped: [],
           failed: [],
+          deleted: [],
+          delete_skipped: [],
+          delete_failed: [],
+          sync_queued: [],
+          featured: [],
+          featured_failed: [],
         });
       }
       throw new Error(`unexpected path: ${path}`);
@@ -281,11 +314,11 @@ describe("CollectionTemplateGallery", () => {
       expect(screen.getByText(/Would create 1; skipped 0; failed 0/i)).toBeInTheDocument();
     });
     const applyCall = fetchMock.mock.calls.find(
-      ([path]) => path === "/admin/collections/template-bundles/core_defaults/apply",
+      ([path]) => path === "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply",
     );
-    expect(JSON.parse(String(applyCall?.[1]?.body))).toMatchObject({
+    expect(applyCall?.[1]?.body).toMatchObject({
       featured: {
-        home: { library_id: 1, template_id: "tmdb_trending_movies_week" },
+        home: { library_id: "1", template_id: "tmdb_trending_movies_week" },
         libraries: { "1": "tmdb_trending_movies_week" },
       },
     });
@@ -300,16 +333,18 @@ describe("CollectionTemplateGallery", () => {
     });
 
     fetchMock.mockImplementation((path: string) => {
-      if (path === "/admin/collections/templates") return Promise.resolve(catalogResponse);
-      if (path === "/admin/collections/template-bundles") return Promise.resolve(bundlesResponse);
-      if (path === "/admin/collections/template-bundles/core_defaults/apply") {
+      if (path === "GET /api/v2/admin/collections/templates")
+        return Promise.resolve(catalogResponse);
+      if (path === "GET /api/v2/admin/collections/template-bundles")
+        return Promise.resolve(bundlesResponse);
+      if (path === "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply") {
         return Promise.resolve({
           bundle_id: "core_defaults",
           dry_run: true,
           delete_existing: true,
           deleted: [
             {
-              library_id: 1,
+              library_id: "1",
               library_name: "Movies",
               collection_id: "lc_old",
               collection_title: "Old Movies",
@@ -321,6 +356,9 @@ describe("CollectionTemplateGallery", () => {
           created: [],
           skipped: [],
           failed: [],
+          sync_queued: [],
+          featured: [],
+          featured_failed: [],
         });
       }
       throw new Error(`unexpected path: ${path}`);
@@ -336,12 +374,12 @@ describe("CollectionTemplateGallery", () => {
       ).toBeInTheDocument();
     });
     const applyCall = fetchMock.mock.calls.find(
-      ([path]) => path === "/admin/collections/template-bundles/core_defaults/apply",
+      ([path]) => path === "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply",
     );
-    expect(JSON.parse(String(applyCall?.[1]?.body))).toMatchObject({
+    expect(applyCall?.[1]?.body).toMatchObject({
       dry_run: true,
       delete_existing: true,
-      library_ids: [1],
+      library_ids: ["1"],
     });
   });
 
@@ -354,13 +392,18 @@ describe("CollectionTemplateGallery", () => {
     });
 
     fetchMock.mockImplementation((path: string) => {
-      if (path === "/admin/collections/templates") return Promise.resolve(catalogResponse);
-      if (path === "/admin/collections/template-bundles") return Promise.resolve(bundlesResponse);
-      if (path === "/admin/collections/template-bundles/core_defaults/apply-job") {
+      if (path === "GET /api/v2/admin/collections/templates")
+        return Promise.resolve(catalogResponse);
+      if (path === "GET /api/v2/admin/collections/template-bundles")
+        return Promise.resolve(bundlesResponse);
+      if (path === "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply-job") {
         return Promise.resolve({
           id: "job-1",
-          job_type: "template_bundle_apply",
-          status: "queued",
+          kind: "template_bundle_apply",
+          state: "queued",
+          terminal: false,
+          cancelable: false,
+          created_at: "2026-09-05T00:00:00Z",
         });
       }
       throw new Error(`unexpected path: ${path}`);
@@ -371,10 +414,10 @@ describe("CollectionTemplateGallery", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/admin/collections/template-bundles/core_defaults/apply-job",
+        "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply-job",
         expect.objectContaining({
-          method: "POST",
-          body: expect.stringContaining('"library_ids":[1]'),
+          path: { bundle_id: "core_defaults" },
+          body: expect.objectContaining({ library_ids: ["1"] }),
         }),
       );
     });

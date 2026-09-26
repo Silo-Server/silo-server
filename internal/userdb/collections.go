@@ -165,12 +165,8 @@ func attachCollectionProfiles(db *sql.DB, profileID string, collections []Collec
 
 // UpdateCollection renames a collection and updates its updated_at timestamp.
 func UpdateCollection(db *sql.DB, input userstore.UpdateCollectionInput) error {
-	var creatorProfileID string
-	if err := db.QueryRow(`SELECT creator_profile_id FROM personal_collections WHERE id = ?`, input.ID).Scan(&creatorProfileID); err != nil {
-		return err
-	}
-	if creatorProfileID != input.RequestProfileID {
-		return fmt.Errorf("only the creator can update this collection")
+	if input.SourceConfigPatch != nil {
+		return fmt.Errorf("user collection imports are not supported on the SQLite user store")
 	}
 
 	tx, err := db.Begin()
@@ -178,6 +174,17 @@ func UpdateCollection(db *sql.DB, input userstore.UpdateCollectionInput) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := checkSQLiteCollectionRevision(tx, input.ID, input.ExpectedRevision); err != nil {
+		return err
+	}
+
+	var creatorProfileID string
+	if err := tx.QueryRow(`SELECT creator_profile_id FROM personal_collections WHERE id = ?`, input.ID).Scan(&creatorProfileID); err != nil {
+		return err
+	}
+	if creatorProfileID != input.RequestProfileID {
+		return fmt.Errorf("only the creator can update this collection")
+	}
 
 	now := nowUTC()
 	if input.Name != nil {
@@ -233,12 +240,16 @@ func UpdateCollection(db *sql.DB, input userstore.UpdateCollectionInput) error {
 }
 
 // DeleteCollection removes a collection and all of its items.
-func DeleteCollection(db *sql.DB, id string) error {
+func DeleteCollection(db *sql.DB, id string) error { return deleteCollection(db, id, nil) }
+func deleteCollection(db *sql.DB, id string, expected *int64) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err := checkSQLiteCollectionRevision(tx, id, expected); err != nil {
+		return err
+	}
 
 	if _, err := tx.Exec(`DELETE FROM personal_collection_items WHERE collection_id = ?`, id); err != nil {
 		return err

@@ -15,9 +15,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/go-chi/chi/v5"
@@ -31,7 +34,7 @@ type NodeRepository interface {
 	Create(ctx context.Context, input nodepool.CreateNodeInput) (*nodepool.Node, error)
 	Update(ctx context.Context, id int, input nodepool.UpdateNodeInput) (*nodepool.Node, error)
 	Delete(ctx context.Context, id int) error
-	UpdateHealth(ctx context.Context, id int, checkedURL string, healthy bool, activeJobs, egressKbps int, lastStats []byte) error
+	UpdateHealth(ctx context.Context, id int, checkedURL string, healthy bool, activeJobs, egressKbps int, lastStats []byte, networkAccess netaccess.NodeNetworkAccess) error
 }
 
 // NodeListEnabled queries enabled nodes by type for pool reload.
@@ -52,13 +55,15 @@ type NodeCapabilityRefresher interface {
 
 // NodeHandler handles CRUD operations and health checks for stream nodes.
 type NodeHandler struct {
-	repo          NodeRepository
-	proxyPool     *nodepool.ProxyPool
-	transcodePool *nodepool.TranscodePool
-	lister        NodeListEnabled
-	eventBus      cache.EventBus
-	redisClient   *redis.Client // for reading session keys
-	jwtSecret     string        // for bearer auth when calling force-reload on nodes
+	configuration     AdminNodeConfigurationStore
+	configurationWake chan struct{}
+	repo              NodeRepository
+	proxyPool         *nodepool.ProxyPool
+	transcodePool     *nodepool.TranscodePool
+	lister            NodeListEnabled
+	eventBus          cache.EventBus
+	redisClient       *redis.Client // for reading session keys
+	jwtSecret         string        // for bearer auth when calling force-reload on nodes
 	// capabilities refreshes a node's stored inventory on demand; nil in a
 	// deployment with no health checker, where a re-probe still runs on the node
 	// and the stored row catches up on the next sweep.
@@ -159,16 +164,12 @@ type checkNodeResult struct {
 // advertised on its last health check, which lives only in the pools — see
 // overlayAdvertisedHashes.
 func (h *NodeHandler) HandleListNodes(w http.ResponseWriter, r *http.Request) {
-	nodes, err := h.repo.List(r.Context())
+	nodes, err := h.ReadAdminNodes(r.Context())
 	if err != nil {
 		slog.ErrorContext(r.Context(), "listing nodes", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list nodes")
 		return
 	}
-	if nodes == nil {
-		nodes = []*nodepool.Node{}
-	}
-	h.overlayAdvertisedHashes(nodes)
 	writeJSON(w, http.StatusOK, nodes)
 }
 
@@ -397,7 +398,7 @@ func (h *NodeHandler) reloadNodeConfig(ctx context.Context, node *nodepool.Node)
 		return false
 	}
 	req.Header.Set("Authorization", "Bearer "+h.jwtSecret)
-	resp, err := (&http.Client{Timeout: nodeConfigReloadTimeout}).Do(req)
+	resp, err := telemetry.DoTrustedNode(&http.Client{Timeout: nodeConfigReloadTimeout}, req, "reload")
 	if err != nil {
 		slog.WarnContext(ctx, "node did not reload after an acceleration override change; it will pick it up on its next config poll",
 			"component", "api", "node_id", node.ID, "name", node.Name, "error", logredact.SanitizeURLError(err))
@@ -463,25 +464,8 @@ func (h *NodeHandler) HandleCheckNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	healthy, activeJobs, egressKbps, capabilitiesHash, lastStats := nodepool.CheckNode(r.Context(), node)
-
-	if err := h.repo.UpdateHealth(r.Context(), id, node.URL, healthy, activeJobs, egressKbps, lastStats); err != nil {
-		slog.ErrorContext(r.Context(), "persisting health check result", "component", "api", "node_id", id, "error", err)
-	}
-	// The pools get it too, exactly as the background sweep would. A manual
-	// check that only wrote the row would leave the planner admitting work to a
-	// node whose scratch volume this check just found full, and would pair a
-	// fresh last_health_check in the database with the pool's older advertised
-	// hash — which is the combination the Nodes page reads as "this inventory
-	// was reconfirmed", for up to the next 30 seconds.
-	h.applyHealthToPools(node, healthy, activeJobs, egressKbps, capabilitiesHash, lastStats)
-
-	writeJSON(w, http.StatusOK, checkNodeResult{
-		Healthy:          healthy,
-		ActiveJobs:       activeJobs,
-		EgressKbps:       egressKbps,
-		CapabilitiesHash: capabilitiesHash,
-	})
+	result := h.checkNodeView(r.Context(), node)
+	writeJSON(w, http.StatusOK, checkNodeResult{Healthy: result.Healthy, ActiveJobs: result.ActiveJobs, EgressKbps: result.EgressKbps, CapabilitiesHash: result.CapabilitiesHash})
 }
 
 // applyHealthToPools publishes one check's result to whichever pool holds the
@@ -490,17 +474,17 @@ func (h *NodeHandler) HandleCheckNode(w http.ResponseWriter, r *http.Request) {
 // Fenced on the node's URL by the pools themselves, like every other health
 // write: the row can be repointed while a check is in flight.
 func (h *NodeHandler) applyHealthToPools(
-	node *nodepool.Node, healthy bool, activeJobs, egressKbps int, capabilitiesHash string, lastStats []byte,
+	node *nodepool.Node, healthy bool, activeJobs, egressKbps int, capabilitiesHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess,
 ) {
 	checkedAt := time.Now()
 	switch node.Type {
 	case nodepool.NodeTypeProxy:
 		if h.proxyPool != nil {
-			h.proxyPool.ApplyHealth(node.ID, node.URL, healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, checkedAt)
+			h.proxyPool.ApplyHealth(node.ID, node.URL, healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess, checkedAt)
 		}
 	case nodepool.NodeTypeTranscode:
 		if h.transcodePool != nil {
-			h.transcodePool.ApplyHealth(node.ID, node.URL, healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, checkedAt)
+			h.transcodePool.ApplyHealth(node.ID, node.URL, healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess, checkedAt)
 		}
 	}
 }
@@ -529,15 +513,14 @@ func (h *NodeHandler) HandleForceReloadNodes(w http.ResponseWriter, r *http.Requ
 			defer wg.Done()
 			result := ForceReloadResult{NodeID: node.ID, NodeName: node.Name}
 			client := &http.Client{Timeout: 10 * time.Second}
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, nodepool.NodeEndpoint(node.URL, "/admin/force-reload"), nil)
+			req, err := h.forceReloadRequest(ctx, node)
 			if err != nil {
 				result.Status = "error"
 				result.Error = err.Error()
 				results[idx] = result
 				return
 			}
-			req.Header.Set("Authorization", "Bearer "+h.jwtSecret)
-			resp, err := client.Do(req)
+			resp, err := telemetry.DoTrustedNode(client, req, "reload")
 			if err != nil {
 				result.Status = "error"
 				result.Error = err.Error()
@@ -578,14 +561,13 @@ func (h *NodeHandler) HandleForceReloadNode(w http.ResponseWriter, r *http.Reque
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, nodepool.NodeEndpoint(node.URL, "/admin/force-reload"), nil)
+	req, err := h.forceReloadRequest(r.Context(), node)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+h.jwtSecret)
 
-	resp, err := client.Do(req)
+	resp, err := telemetry.DoTrustedNode(client, req, "reload")
 	if err != nil {
 		type forceReloadResponse struct {
 			Results []ForceReloadResult `json:"results"`
@@ -760,34 +742,7 @@ func (h *NodeHandler) HandleReprobeNode(w http.ResponseWriter, r *http.Request) 
 
 	h.extendReprobeWriteDeadline(w, r, node, h.nodeReprobeTimeout(node))
 
-	result := ReprobeNodeResult{NodeID: node.ID, NodeName: node.Name, Status: "ok"}
-	reprobed, err := h.reprobeNode(r.Context(), node)
-	if err != nil {
-		slog.WarnContext(r.Context(), "node capability re-probe failed", "component", "api",
-			"node_id", node.ID, "name", node.Name, "error", err)
-		result.Status = "error"
-		result.Error = err.Error()
-		writeJSON(w, http.StatusOK, result)
-		return
-	}
-	result.Resolved = reprobed.Resolved
-	result.CapabilityHash = reprobed.CapabilityHash
-
-	// The node has already recomputed at this point, so a refresh failure is
-	// reported alongside a successful re-probe rather than turning it into one:
-	// the next sweep will store the report, and saying the re-probe failed
-	// would invite an operator to run it again for nothing.
-	if h.capabilities == nil {
-		writeJSON(w, http.StatusOK, result)
-		return
-	}
-	if err := h.capabilities.RefreshNodeCapabilities(r.Context(), node); err != nil {
-		slog.WarnContext(r.Context(), "storing re-probed node capabilities failed", "component", "api",
-			"node_id", node.ID, "name", node.Name, "error", err)
-	} else {
-		result.CapabilitiesRefreshed = true
-	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, h.reprobeNodeView(r.Context(), node))
 }
 
 // nodeReprobeResponse is the node's own answer to /admin/reprobe-capabilities.
@@ -810,7 +765,7 @@ func (h *NodeHandler) reprobeNode(ctx context.Context, node *nodepool.Node) (nod
 	}
 	req.Header.Set("Authorization", "Bearer "+h.jwtSecret)
 
-	resp, err := client.Do(req)
+	resp, err := telemetry.DoTrustedNode(client, req, "reprobe")
 	if err != nil {
 		return nodeReprobeResponse{}, logredact.SanitizeURLError(err)
 	}

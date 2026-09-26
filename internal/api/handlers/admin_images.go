@@ -190,25 +190,33 @@ func (h *AdminImageHandler) HandleGetItemImages(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	resolved, err := h.resolveContentID(r.Context(), contentID)
+	out, err := h.GetAdminItemImages(r.Context(), contentID)
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type AdminItemImagesView = getItemImagesResponse
+
+func (h *AdminImageHandler) GetAdminItemImages(ctx context.Context, contentID string) (AdminItemImagesView, error) {
+	resolved, err := h.resolveContentID(ctx, contentID)
 	if err != nil {
 		if errors.Is(err, catalog.ErrItemNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
+			return AdminItemImagesView{}, apiError(http.StatusNotFound, "not_found", "Item not found")
 		}
-		slog.ErrorContext(r.Context(), "admin images: resolve content ID failed", "component", "api", "content_id", contentID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve item")
-		return
+		slog.ErrorContext(ctx, "admin images: resolve content ID failed", "component", "api", "content_id", contentID, "error", err)
+		return AdminItemImagesView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve item")
 	}
 
 	// Determine the folder ID for chain resolution.
 	// For seasons/episodes, use the parent series content ID.
 	lookupContentID := resolved.parentItem.ContentID
-	folderID, err := h.resolveImageFolderID(r.Context(), lookupContentID)
+	folderID, err := h.resolveImageFolderID(ctx, lookupContentID)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "admin images: resolve folder failed", "component", "api", "content_id", contentID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Could not determine library for item")
-		return
+		slog.ErrorContext(ctx, "admin images: resolve folder failed", "component", "api", "content_id", contentID, "error", err)
+		return AdminItemImagesView{}, apiError(http.StatusInternalServerError, "internal_error", "Could not determine library for item")
 	}
 
 	// Build provider IDs map from the parent item.
@@ -223,12 +231,11 @@ func (h *AdminImageHandler) HandleGetItemImages(w http.ResponseWriter, r *http.R
 
 	// Use the parent item's type for the plugin call (always "movie" or "series").
 	images, providerErrors, err := h.imageSvc.FetchItemImages(
-		r.Context(), providerIDs, resolved.parentItem.Type, language, folderID,
+		ctx, providerIDs, resolved.parentItem.Type, language, folderID,
 	)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "admin images: fetch failed", "component", "api", "content_id", contentID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch images")
-		return
+		slog.ErrorContext(ctx, "admin images: fetch failed", "component", "api", "content_id", contentID, "error", err)
+		return AdminItemImagesView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to fetch images")
 	}
 
 	// Batch-resolve plugin-prefixed URLs for display.
@@ -238,7 +245,7 @@ func (h *AdminImageHandler) HandleGetItemImages(w http.ResponseWriter, r *http.R
 	}
 	var resolvedURLs map[string]string
 	if h.imageResolver != nil && len(rawPaths) > 0 {
-		resolvedURLs = h.imageResolver.ResolveImageURLs(r.Context(), rawPaths, "card")
+		resolvedURLs = h.imageResolver.ResolveImageURLs(ctx, rawPaths, "card")
 	}
 
 	// Build the response entries.
@@ -271,11 +278,11 @@ func (h *AdminImageHandler) HandleGetItemImages(w http.ResponseWriter, r *http.R
 		current.PosterURL = resolved.season.PosterPath
 	}
 
-	writeJSON(w, http.StatusOK, getItemImagesResponse{
+	return AdminItemImagesView{
 		Images:         entries,
 		Current:        current,
 		ProviderErrors: providerErrors,
-	})
+	}, nil
 }
 
 // HandleApplyItemImage handles POST /admin/items/{id}/images/apply.
@@ -292,20 +299,29 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if req.OriginalURL == "" || req.Type == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "original_url and type are required")
+	out, err := h.ApplyAdminItemImage(r.Context(), contentID, req)
+	if err != nil {
+		writeAPIError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, out)
+}
 
-	resolved, err := h.resolveContentID(r.Context(), contentID)
+type AdminItemImageResult = applyItemImageResponse
+type AdminItemImageRequest = applyItemImageRequest
+
+func (h *AdminImageHandler) ApplyAdminItemImage(ctx context.Context, contentID string, req AdminItemImageRequest) (AdminItemImageResult, error) {
+	if req.OriginalURL == "" || req.Type == "" {
+		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "bad_request", "original_url and type are required")
+	}
+
+	resolved, err := h.resolveContentID(ctx, contentID)
 	if err != nil {
 		if errors.Is(err, catalog.ErrItemNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
-			return
+			return AdminItemImageResult{}, apiError(http.StatusNotFound, "not_found", "Item not found")
 		}
-		slog.ErrorContext(r.Context(), "admin images: resolve content ID failed", "component", "api", "content_id", contentID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve item")
-		return
+		slog.ErrorContext(ctx, "admin images: resolve content ID failed", "component", "api", "content_id", contentID, "error", err)
+		return AdminItemImageResult{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve item")
 	}
 
 	imageType := metadata.ImageTypeFromString(req.Type)
@@ -317,9 +333,8 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 	// Reject unsupported target/image combinations before spending a download
 	// and an S3 upload on an image that can never be published.
 	if err := catalog.ValidateArtworkSelectionTarget(resolved.contentType, metadata.ImageTypeToString(imageType)); err != nil {
-		writeError(w, http.StatusBadRequest, "unsupported_image_type",
+		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "unsupported_image_type",
 			fmt.Sprintf("%s items do not accept %s images", resolved.contentType, metadata.ImageTypeToString(imageType)))
-		return
 	}
 	providerID := req.ProviderID
 	if providerID == "" {
@@ -334,19 +349,16 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 	switch resolved.contentType {
 	case "season":
 		if resolved.season != nil {
-			n := resolved.season.SeasonNumber
-			seasonNumber = &n
+			seasonNumber = new(resolved.season.SeasonNumber)
 		}
 	case "episode":
 		if resolved.episode != nil {
-			s := resolved.episode.SeasonNumber
-			e := resolved.episode.EpisodeNumber
-			seasonNumber = &s
-			episodeNumber = &e
+			seasonNumber = new(resolved.episode.SeasonNumber)
+			episodeNumber = new(resolved.episode.EpisodeNumber)
 		}
 	}
 
-	result, err := h.imageSvc.ApplyItemImage(r.Context(), metadata.ApplyItemImageRequest{
+	result, err := h.imageSvc.ApplyItemImage(ctx, metadata.ApplyItemImageRequest{
 		OriginalURL:   req.OriginalURL,
 		ProviderID:    providerID,
 		ContentType:   resolved.parentItem.Type,
@@ -356,12 +368,11 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 		EpisodeNumber: episodeNumber,
 	})
 	if err != nil {
-		slog.ErrorContext(r.Context(), "admin images: apply failed", "component", "api", "content_id", contentID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to apply image")
-		return
+		slog.ErrorContext(ctx, "admin images: apply failed", "component", "api", "content_id", contentID, "error", err)
+		return AdminItemImageResult{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply image")
 	}
 
-	err = h.detailSvc.PublishArtworkSelection(r.Context(), catalog.ArtworkSelection{
+	err = h.detailSvc.PublishArtworkSelection(ctx, catalog.ArtworkSelection{
 		TargetType:      resolved.contentType,
 		TargetContentID: contentID,
 		ParentContentID: resolved.parentItem.ContentID,
@@ -372,41 +383,40 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 		LockField:       int(metadata.FieldImages),
 	})
 	if err != nil {
-		slog.ErrorContext(r.Context(), "admin images: persist failed", "component", "api", "content_id", contentID, "error", err)
+		slog.ErrorContext(ctx, "admin images: persist failed", "component", "api", "content_id", contentID, "error", err)
 		if cleanupErr := h.detailSvc.QueueArtworkRevisionGC(
-			r.Context(), result.StoredPath, metadata.ImageTypeToString(imageType), time.Now().Add(time.Hour),
+			ctx, result.StoredPath, metadata.ImageTypeToString(imageType), time.Now().Add(time.Hour),
 		); cleanupErr != nil {
-			slog.ErrorContext(r.Context(), "admin images: failed to queue unpublished artwork cleanup", "component", "api",
+			slog.ErrorContext(ctx, "admin images: failed to queue unpublished artwork cleanup", "component", "api",
 				"content_id", contentID, "stored_path", result.StoredPath, "error", cleanupErr)
 		}
 		switch {
 		case errors.Is(err, catalog.ErrItemNotFound),
 			errors.Is(err, catalog.ErrSeasonNotFound),
 			errors.Is(err, catalog.ErrEpisodeNotFound):
-			writeError(w, http.StatusNotFound, "not_found", "Item not found")
+			return AdminItemImageResult{}, apiError(http.StatusNotFound, "not_found", "Item not found")
 		default:
-			writeError(w, http.StatusInternalServerError, "internal_error", "Image cached but failed to update item")
+			return AdminItemImageResult{}, apiError(http.StatusInternalServerError, "internal_error", "Image cached but failed to update item")
 		}
-		return
 	}
 
-	publishEventMetadataUpdate(r.Context(), h.EventsHub, 0, contentID)
+	publishEventMetadataUpdate(ctx, h.EventsHub, 0, contentID)
 	if resolved.parentItem.ContentID != contentID {
-		publishEventMetadataUpdate(r.Context(), h.EventsHub, 0, resolved.parentItem.ContentID)
+		publishEventMetadataUpdate(ctx, h.EventsHub, 0, resolved.parentItem.ContentID)
 	}
 
 	imageURL := ""
 	if h.imageResolver != nil {
-		imageURL = h.imageResolver.ResolveImageURL(r.Context(), result.StoredPath, "original")
+		imageURL = h.imageResolver.ResolveImageURL(ctx, result.StoredPath, "original")
 	}
 
-	writeJSON(w, http.StatusOK, applyItemImageResponse{
+	return AdminItemImageResult{
 		ContentID:  contentID,
 		StoredPath: result.StoredPath,
 		Thumbhash:  result.Thumbhash,
 		ImageURL:   imageURL,
 		Revision:   result.Revision,
-	})
+	}, nil
 }
 
 // resolveImageFolderID finds the primary library folder for a content ID.
@@ -467,3 +477,6 @@ func findBestContentID(item *models.MediaItem, providerID string) string {
 	}
 	return item.ContentID
 }
+
+type AdminImageEntryView = itemImageEntry
+type AdminCurrentImagesView = currentImages

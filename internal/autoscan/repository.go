@@ -143,6 +143,9 @@ func (r *Repository) CreateConnection(ctx context.Context, c Connection) (Connec
 }
 
 func (r *Repository) UpdateConnection(ctx context.Context, c Connection) (Connection, error) {
+	if err := missingID("connection", c.ID); err != nil {
+		return Connection{}, err
+	}
 	// A blank incoming api_key_ref KEEPS the existing stored value: the UI
 	// deliberately omits the key on a metadata-only edit ("leave blank to keep
 	// existing"), so unconditionally writing it would NULL the key and break the
@@ -173,6 +176,9 @@ func (r *Repository) UpdateConnection(ctx context.Context, c Connection) (Connec
 }
 
 func (r *Repository) DeleteConnection(ctx context.Context, id string) error {
+	if err := missingID("connection", id); err != nil {
+		return err
+	}
 	tag, err := r.pool.Exec(ctx, `DELETE FROM autoscan_connections WHERE id = $1`, id)
 	if err != nil {
 		// A source still references this connection (ON DELETE RESTRICT, 23503).
@@ -207,6 +213,9 @@ func (r *Repository) ListConnections(ctx context.Context) ([]Connection, error) 
 }
 
 func (r *Repository) GetConnection(ctx context.Context, id string) (Connection, error) {
+	if err := missingID("connection", id); err != nil {
+		return Connection{}, err
+	}
 	row := r.pool.QueryRow(ctx, `SELECT `+connectionColumns+`
 		FROM autoscan_connections WHERE id = $1`, id)
 	c, err := r.scanConnection(row)
@@ -328,6 +337,9 @@ func deliveryModeArg(mode string) string {
 // fresh uuid rather than an upsert. A non-existent connection trips the FK
 // constraint and maps to ErrNotFound.
 func (r *Repository) CreateSource(ctx context.Context, s Source) (Source, error) {
+	if err := missingConnectionID(s.ConnectionID); err != nil {
+		return Source{}, err
+	}
 	rewrites, err := marshalPathRewrites(s.PathRewrites)
 	if err != nil {
 		return Source{}, err
@@ -358,6 +370,12 @@ func (r *Repository) CreateSource(ctx context.Context, s Source) (Source, error)
 // last_error) are left untouched. An unknown id maps to ErrNotFound; a
 // non-existent connection trips the FK constraint and also maps to ErrNotFound.
 func (r *Repository) UpdateSource(ctx context.Context, s Source) (Source, error) {
+	if err := missingID("source", s.ID); err != nil {
+		return Source{}, err
+	}
+	if err := missingConnectionID(s.ConnectionID); err != nil {
+		return Source{}, err
+	}
 	rewrites, err := marshalPathRewrites(s.PathRewrites)
 	if err != nil {
 		return Source{}, err
@@ -441,6 +459,9 @@ func collectSources(rows pgx.Rows) ([]Source, error) {
 }
 
 func (r *Repository) GetSource(ctx context.Context, id string) (Source, error) {
+	if err := missingID("source", id); err != nil {
+		return Source{}, err
+	}
 	row := r.pool.QueryRow(ctx, `SELECT `+sourceColumns+`
 		FROM autoscan_sources WHERE id = $1`, id)
 	s, err := scanSource(row)
@@ -457,6 +478,9 @@ func (r *Repository) GetSource(ctx context.Context, id string) (Source, error) {
 // source (one whose scan_source plugin was uninstalled/disabled). An unknown id
 // maps to ErrNotFound.
 func (r *Repository) DeleteSource(ctx context.Context, id string) error {
+	if err := missingID("source", id); err != nil {
+		return err
+	}
 	tag, err := r.pool.Exec(ctx, `DELETE FROM autoscan_sources WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("delete autoscan source: %w", err)
@@ -1017,4 +1041,30 @@ func (r *Repository) LatestEventAt(ctx context.Context) (*time.Time, error) {
 		return nil, fmt.Errorf("get latest autoscan event time: %w", err)
 	}
 	return latest, nil
+}
+
+// missingID maps a caller-supplied row id that cannot address a row to
+// ErrNotFound without running a query. Every autoscan id column
+// (autoscan_sources.id, autoscan_connections.id,
+// autoscan_webhook_endpoints.source_id) is a `uuid`, so a malformed id can only
+// ever miss; handing it to Postgres raises SQLSTATE 22P02 and surfaces to the
+// client as a 500 instead of a 404. kind names the row for the error message,
+// e.g. "source" or "connection".
+func missingID(kind, id string) error {
+	// Validate the exact value the query will bind; a padded UUID is still
+	// rejected by the uuid column, so trimming here would recreate the 500.
+	if uuid.Validate(id) == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %s %s", ErrNotFound, kind, id)
+}
+
+// missingConnectionID maps a bound connection id that cannot address a row to
+// ErrNotFound, matching how the FK violation (23503) for a non-existent
+// connection is reported. A nil or blank id means "unbound" and is allowed.
+func missingConnectionID(connectionID *string) error {
+	if connectionID == nil || strings.TrimSpace(*connectionID) == "" {
+		return nil
+	}
+	return missingID("connection", *connectionID)
 }

@@ -1,0 +1,21 @@
+{
+  "terminal": false,
+  "cancelable": true,
+  "id": "run-1",
+  "user_id": "3",
+  "profile_id": "profile",
+  "source_type": "emby",
+  "connection_mode": "admin_token",
+  "status": "queued",
+  "fetched": 0,
+  "matched": 0,
+  "unmatched": 0,
+  "progress_updated": 0,
+  "history_created": 0,
+  "watchlist_added": 0,
+  "favorites_imported": 0,
+  "skipped": 0,
+  "warnings": [],
+  "unmatched_samples": [],
+  "created_at": "2026-01-02T03:04:05.678Z"
+}

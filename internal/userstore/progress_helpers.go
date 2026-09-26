@@ -2,6 +2,7 @@ package userstore
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -31,11 +32,31 @@ func AddVisibleHistory(ctx context.Context, store UserStore, entry WatchHistoryE
 	return entry, nil
 }
 
+// UpdateProgressReportingCompletion writes one playback sample through
+// UpdateProgress and reports whether that write marked the item watched.
+// Only a sample past the watched threshold can, so the prior row is read for
+// those samples alone. A failed read does not block the write; it reports
+// completion, so the caller errs toward treating the sample as a change.
+func UpdateProgressReportingCompletion(ctx context.Context, store UserStore, profileID, mediaItemID string, position, duration float64, thresholds ProgressThresholds) (completed bool, err error) {
+	if _, pastThreshold, skip := ResolveProgressState(position, duration, thresholds); skip || !pastThreshold {
+		return false, store.UpdateProgress(ctx, profileID, mediaItemID, position, duration, thresholds)
+	}
+	prior, priorErr := store.GetProgress(ctx, profileID, mediaItemID)
+	wasCompleted := priorErr == nil && prior != nil && prior.Completed
+	if err := store.UpdateProgress(ctx, profileID, mediaItemID, position, duration, thresholds); err != nil {
+		return false, err
+	}
+	return !wasCompleted, nil
+}
+
 // MarkWatchedTarget is one leaf item to mark watched, carrying the duration
 // that belongs on its progress row.
 type MarkWatchedTarget struct {
 	MediaItemID     string
 	DurationSeconds float64
+	// EventAt preserves an explicitly supplied progress date while the write
+	// timestamp advances independently. Nil retains normal manual-mark timing.
+	EventAt *time.Time
 }
 
 // WatchedBatchWriter is an optional store capability: mark every target
@@ -45,8 +66,9 @@ type MarkWatchedTarget struct {
 // episode independently, so losing the request mid-loop strands the series
 // half-watched.
 //
-// Semantics must match the fallback: per-target duration lands on the progress
-// row, each entry gets exactly one history row, and both respect the
+// Implementations preserve per-target duration on the progress
+// row; already-completed visible targets produce no history or returned entry.
+// The completed-state check and writes are atomic. Both respect the
 // hidden-history watermark the single-row MarkWatched/AddVisibleHistory paths
 // apply. The returned entries carry the resolved (possibly watermark-adjusted)
 // WatchedAt, in the order given.
@@ -63,6 +85,11 @@ func MarkWatchedBatch(ctx context.Context, store UserStore, profileID string, ta
 	}
 	if writer, ok := store.(WatchedBatchWriter); ok {
 		return writer.MarkWatchedBatch(ctx, profileID, targets, entries)
+	}
+	for _, target := range targets {
+		if target.EventAt != nil {
+			return nil, fmt.Errorf("explicit dated marks require transactional batch support")
+		}
 	}
 	written := make([]WatchHistoryEntry, 0, len(entries))
 	for i, target := range targets {
@@ -111,8 +138,8 @@ func parseHistoryTimestamp(value string) time.Time {
 	return parsed
 }
 
-// SeriesWatchCounts is the aggregate episode watch state for one series, as
-// computed by SeriesEpisodeRollupStore.
+// SeriesWatchCounts is the aggregate episode watch state for one series or
+// season, as computed by SeriesEpisodeRollupStore.
 type SeriesWatchCounts struct {
 	TotalEpisodes   int
 	WatchedCount    int
@@ -120,18 +147,24 @@ type SeriesWatchCounts struct {
 }
 
 // SeriesEpisodeRollupStore is an optional store capability: compute the
-// per-series episode watch-state rollup (total / watched / in-progress
-// episode counts) in SQL instead of materializing every episode of every
-// series and batching per-episode progress lookups through
+// per-series or per-season episode watch-state rollup (total / watched /
+// in-progress episode counts) in SQL instead of materializing every episode
+// and batching per-episode progress lookups through
 // ListProgressWithCompletedHistory. Implemented by the Postgres store, where
 // episodes and progress live in the same database; SQLite-backed stores fall
 // back to the chunked in-memory path. Semantics must match
 // ListProgressWithCompletedHistory + catalog.EpisodeRollupUserData: an episode
-// is watched when its visible progress row is completed or a visible completed
-// history row exists, and in-progress when it is not watched and its visible
-// progress row has position_seconds > 0.
+// counts when it is available (has library membership), is watched when its
+// visible progress row is completed or a visible completed history row
+// exists, and is in-progress when it is not watched and its visible progress
+// row has position_seconds > 0. Parents without available episodes are
+// absent from the result.
 type SeriesEpisodeRollupStore interface {
 	SeriesEpisodeWatchCounts(ctx context.Context, profileID string, seriesIDs []string) (map[string]SeriesWatchCounts, error)
+	// SeriesSeasonWatchCounts groups one series' episodes by season number.
+	SeriesSeasonWatchCounts(ctx context.Context, profileID, seriesID string) (map[int]SeriesWatchCounts, error)
+	// SeasonEpisodeWatchCounts groups episodes by their season row ID.
+	SeasonEpisodeWatchCounts(ctx context.Context, profileID string, seasonIDs []string) (map[string]SeriesWatchCounts, error)
 }
 
 // EpisodeParentCompletionStore determines whether every available episode of a

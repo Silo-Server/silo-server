@@ -5,9 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 )
 
 var ErrCollectionGroupNotFound = errors.New("collection group not found")
+
+// PreferenceSettingsReader reads track identity and canonical overrides from
+// one committed snapshot so an atomic preference update cannot be torn apart.
+type PreferenceSettingsReader interface {
+	GetAudioPreference(context.Context, string, string) (*AudioPreference, error)
+	GetSubtitlePreference(context.Context, string, string) (*SubtitlePreference, error)
+	GetSettingValue(context.Context, SettingIdentity) (*SettingValue, error)
+}
+
+type PreferenceSettingsSnapshotter interface {
+	WithPreferenceSettingsSnapshot(context.Context, func(PreferenceSettingsReader) error) error
+}
 
 // PreferenceSettingsWriter is the subset of the user store that participates
 // in legacy-preference/canonical-setting synchronization. Implementations pass
@@ -37,10 +51,16 @@ type PreferenceSettingsWriter interface {
 	UpsertSettingValue(ctx context.Context, id SettingIdentity, value json.RawMessage) (*SettingValue, error)
 	// DeleteSettingValue removes one explicit value and reports whether it existed.
 	DeleteSettingValue(ctx context.Context, id SettingIdentity) (bool, error)
+	// GetSettingValue reads one explicit value inside the transaction, so a
+	// partial legacy update can merge onto the canonical rows it is about to
+	// rewrite without a window for another writer between read and write.
+	GetSettingValue(ctx context.Context, id SettingIdentity) (*SettingValue, error)
 }
 
 // PreferenceSettingsTransactioner is implemented by stores that can atomically
 // synchronize a shipped legacy preference row with its canonical values.
+// The callback runs after serialization with other preference plans and
+// canonical SettingMutationTransactioner writes for this account.
 type PreferenceSettingsTransactioner interface {
 	WithPreferenceSettingsTransaction(ctx context.Context, fn func(PreferenceSettingsWriter) error) error
 }
@@ -68,6 +88,13 @@ type UserStore interface {
 	ClearProgress(ctx context.Context, profileID, mediaItemID string) error
 	GetProgress(ctx context.Context, profileID, mediaItemID string) (*WatchProgress, error)
 	ListProgress(ctx context.Context, profileID, status string, limit, offset int) ([]WatchProgress, error)
+	// ListProgressPage is the keyset form of ListProgress: the same status
+	// predicate and hidden-item exclusion, ordered by (updated_at DESC,
+	// media_item_id DESC), returning at most limit rows strictly after the key
+	// in that order (nil = from the newest row). Rows whose updated_at moves
+	// past the key between calls are neither repeated nor cause gaps, which the
+	// offset form cannot promise while playback keeps reordering the set.
+	ListProgressPage(ctx context.Context, profileID, status string, after *ProgressKey, limit int) ([]WatchProgress, error)
 	// ListProgressFiltered is ListProgress with an additional SQL pre-filter on
 	// the backing catalog item's type and/or library, so the watched-items path
 	// no longer scans the whole status set before discarding non-matching rows.
@@ -85,6 +112,16 @@ type UserStore interface {
 	AddHistory(ctx context.Context, entry WatchHistoryEntry) error
 	AddHistoryIfMissing(ctx context.Context, entry WatchHistoryEntry) (bool, error)
 	ListHistory(ctx context.Context, profileID string, limit, offset int) ([]WatchHistoryEntry, error)
+	// ListHistoryPage is the keyset form of ListHistory: the same visible
+	// rows ordered by (watched_at DESC, id DESC), returning at most limit rows
+	// strictly after the key in that order (nil = from the newest row). A
+	// watch recorded or hidden between two calls neither repeats nor skips a
+	// row, and equal timestamps are ordered by the unique row id, which the
+	// offset form cannot promise.
+	ListHistoryPage(ctx context.Context, profileID string, after *HistoryKey, limit int) ([]WatchHistoryEntry, error)
+	// LatestHistoryIDs returns the newest visible watch ID for each bounded
+	// display group, using the same timestamp/id ordering as ListHistoryPage.
+	LatestHistoryIDs(ctx context.Context, profileID string, groups map[string][]string) (map[string]string, error)
 	ListCompletedHistory(ctx context.Context, query CompletedHistoryQuery) ([]WatchHistoryEntry, error)
 	ListCompletedHistoryItems(ctx context.Context, query CompletedHistoryItemQuery) ([]CompletedHistoryItem, error)
 	RemoveHistoryItems(ctx context.Context, profileID string, mediaItemIDs []string, removedAt time.Time) error
@@ -98,8 +135,15 @@ type UserStore interface {
 	AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error)
 	RemoveFavorite(ctx context.Context, profileID, mediaItemID string) error
 	ListFavorites(ctx context.Context, profileID string, limit, offset int) ([]Favorite, error)
+	// ListFavoritesPage is the keyset form of ListFavorites: ordered by
+	// (added_at DESC, media_item_id DESC), returning at most limit rows
+	// strictly after the key in that order (nil = from the newest row).
+	ListFavoritesPage(ctx context.Context, profileID string, after *ListKey, limit int) ([]Favorite, error)
 	ListFavoritesByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)
 	IsFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	// GetFavorite answers the profile's favorite entry for the item, nil when
+	// the item is not a favorite.
+	GetFavorite(ctx context.Context, profileID, mediaItemID string) (*Favorite, error)
 	AddToWatchlist(ctx context.Context, profileID, mediaItemID string) error
 	AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error)
 	RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error
@@ -107,8 +151,16 @@ type UserStore interface {
 	// get sort_index 0..N-1 in order; all other rows reset to added_at ordering.
 	ReplaceWatchlistOrder(ctx context.Context, profileID string, orderedMediaItemIDs []string) error
 	ListWatchlist(ctx context.Context, profileID string, limit, offset int) ([]WatchlistEntry, error)
+	// ListWatchlistPage is the keyset form of ListWatchlist ordered by
+	// (added_at DESC, media_item_id DESC) only: a synced sort_index does not
+	// take part, so the page is newest entry first, returning at most limit
+	// rows strictly after the key in that order (nil = from the newest row).
+	ListWatchlistPage(ctx context.Context, profileID string, after *ListKey, limit int) ([]WatchlistEntry, error)
 	ListWatchlistByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)
 	InWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	// GetWatchlistEntry answers the profile's watchlist entry for the item,
+	// nil when the item is not on the watchlist.
+	GetWatchlistEntry(ctx context.Context, profileID, mediaItemID string) (*WatchlistEntry, error)
 	// RemoveWatchedFromWatchlist reports the profile's preference for pruning
 	// fully-watched entries from the watchlist (defaults true): movies are
 	// removed outright on completion, while fully-watched series are only
@@ -204,6 +256,16 @@ type UserStore interface {
 	// the admin inspection surface; resolution reads keep going through
 	// ListSettingValuesForResolution.
 	ListAllSettingValues(ctx context.Context) ([]SettingValue, error)
+	// ListSettingValuesByScope returns every explicit value one profile has
+	// stored at one profile-anchored scope for the given keys, in the same
+	// stable (key, scope, identity) order as ListAllSettingValues. It is the
+	// read for a listing assembled from a fixed key set across every entity
+	// at that scope (every library, every series) without a list of the
+	// entities up front; the cost is bounded by the matching rows, not by
+	// everything the account has stored. An empty key set returns nothing;
+	// the account scope, which no profile anchors, is an
+	// ErrInvalidSettingIdentity.
+	ListSettingValuesByScope(ctx context.Context, profileID string, scope settingscontract.Scope, keys []string) ([]SettingValue, error)
 	// UpsertSettingValue writes the explicit value at one scope and increments
 	// that row's revision. Concurrent writes to one identity are
 	// last-write-wins in server receipt order; there is no compare-and-set

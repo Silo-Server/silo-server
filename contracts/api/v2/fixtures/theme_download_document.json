@@ -1,0 +1,11 @@
+{
+  "document": {
+    "version": 1,
+    "name": "Fixture",
+    "baseTheme": "midnight-cinema",
+    "vars": {
+      "--primary": "red"
+    },
+    "customCss": "body { color: red; }"
+  }
+}

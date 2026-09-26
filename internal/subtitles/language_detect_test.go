@@ -1,6 +1,9 @@
 package subtitles
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestDetectSubtitleLanguageFromReleaseFilename(t *testing.T) {
 	cases := []struct {
@@ -18,6 +21,18 @@ func TestDetectSubtitleLanguageFromReleaseFilename(t *testing.T) {
 		{
 			filename: "some.movie.chs.srt",
 			want:     "zh",
+		},
+		{
+			filename: "some.movie.pt-BR.srt",
+			want:     "pt-BR",
+		},
+		{
+			filename: "some.movie.pob.srt",
+			want:     "pt-BR",
+		},
+		{
+			filename: "some.movie.pt.srt",
+			want:     "pt",
 		},
 	}
 	for _, tc := range cases {
@@ -101,8 +116,8 @@ func TestResolveUploadLanguagePrefersFilename(t *testing.T) {
 
 func TestManagerUploadDetectsLanguageFromFilename(t *testing.T) {
 	repo := newMockSubtitleRepo()
-	s3 := newMockS3Client()
-	manager := NewManager(repo, s3, "test-bucket")
+	s3 := newMockBlobStore()
+	manager := NewManager(repo, s3)
 
 	data := []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n")
 	sub, err := manager.Upload(t.Context(), UploadRequest{
@@ -115,5 +130,24 @@ func TestManagerUploadDetectsLanguageFromFilename(t *testing.T) {
 	}
 	if sub.Language != "fr" {
 		t.Fatalf("language = %q, want fr", sub.Language)
+	}
+}
+
+func TestNormalizeSearchLanguages(t *testing.T) {
+	got, err := NormalizeSearchLanguages([]string{"ar", "ara", "Arabic", "pt-BR", "pt_br", "zh-Hant"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ar", "pt-BR", "zh-Hant"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("NormalizeSearchLanguages() = %#v, want %#v", got, want)
+	}
+}
+
+func TestNormalizeSearchLanguagesRejectsInvalidFilter(t *testing.T) {
+	for _, value := range []string{"", "unknown", "und"} {
+		if _, err := NormalizeSearchLanguages([]string{value}); err == nil {
+			t.Errorf("accepted invalid filter %q", value)
+		}
 	}
 }

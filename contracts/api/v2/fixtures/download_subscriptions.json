@@ -1,0 +1,22 @@
+{
+  "items": [
+    {
+      "id": "monitor",
+      "series_id": "series",
+      "mode": "specific_seasons",
+      "season_numbers": [
+        0,
+        2
+      ],
+      "delete_watched": true,
+      "max_storage_bytes": 1024,
+      "active": false,
+      "created_at": "2026-01-02T03:04:05.123Z",
+      "updated_at": "2026-01-02T03:04:05.123Z",
+      "etag": "\"5c9ccf00919cd0d69b57d9600d87615c24ab8945ae94956412d8ba3ca0631e84\""
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}
