@@ -47,6 +47,8 @@ import type { DragStartEvent, DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { toast } from "sonner";
+import { v2, V2ProblemError } from "@/api/v2/request";
+import { useOptionalAuth } from "@/hooks/useAuth";
 
 interface RemovedSystemOverride {
   id: string;
@@ -179,6 +181,30 @@ export function buildProfileGallerySection(
   };
 }
 
+/**
+ * Mirrors the save gate: the server refuses admin-only recipes from a
+ * non-admin account unless profiles may build custom sections. An unloaded
+ * flag counts as not allowed.
+ */
+export function canAddAdminOnlyRecipes(
+  role: string | undefined,
+  allowProfileCustomSections: boolean | undefined,
+): boolean {
+  return role === "admin" || allowProfileCustomSections === true;
+}
+
+/**
+ * A permission denial carries its cause in the detail: the custom-sections
+ * refusal and the demo-mode gate both answer 403 permission_denied.
+ */
+export function sectionSaveErrorMessage(error: unknown): string {
+  const detail =
+    error instanceof V2ProblemError && error.problemType === "permission_denied"
+      ? error.problem.detail?.trim()
+      : undefined;
+  return detail ? `Failed to save section changes: ${detail}` : "Failed to save section changes";
+}
+
 export default function HomeScreenSettings() {
   const { data: libraries } = useUserLibraries();
   const { data: recipeCatalog } = useQuery({
@@ -186,6 +212,16 @@ export default function HomeScreenSettings() {
     queryFn: fetchRecipeCatalog,
     staleTime: 5 * 60 * 1000,
   });
+  const role = useOptionalAuth()?.user?.role;
+  const { data: sectionFlags } = useQuery({
+    queryKey: ["profile-section-flags"],
+    queryFn: () => v2("GET /api/v2/profile/sections/flags"),
+    staleTime: 5 * 60 * 1000,
+  });
+  const allowAdminOnlyRecipes = canAddAdminOnlyRecipes(
+    role,
+    sectionFlags?.allow_profile_custom_sections,
+  );
 
   // Scope state
   const [scopeValue, setScopeValue] = useState("home");
@@ -267,8 +303,8 @@ export default function HomeScreenSettings() {
         overrides,
       },
       {
-        onError: () => {
-          toast.error("Failed to save section changes");
+        onError: (error) => {
+          toast.error(sectionSaveErrorMessage(error));
           if (
             !shouldRestoreLatestSaveFailure(
               activeSelectionRef.current,
@@ -572,6 +608,7 @@ export default function HomeScreenSettings() {
         section={drawerSection}
         libraries={libraries ?? []}
         recipeCatalog={recipeCatalog}
+        allowAdminOnlyRecipes={allowAdminOnlyRecipes}
         onSave={handleDrawerSave}
       />
 
