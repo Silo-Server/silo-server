@@ -229,6 +229,8 @@ The lobby ready check is advisory. The server never gates start on it; the web c
 
 Stop locks the authoritative row and returns a playing room to the lobby: lobby phase, idle playback state, resume-on-ready cleared, anchor reset to zero and paused, selection revision and generation advanced. The selection columns are left alone, so the item that was playing is the lobby's staged item and the host can start it again or stage something else. Advancing the revision is what ends the playback epoch: every member's attached session, buffering readiness, ignore-wait and lobby ready state is dropped and the waiting deadline is disarmed, exactly as a start does. Members in the player see the room leave the playing phase and return to the room page. A room that is not playing answers with its current snapshot unchanged, so the call is naturally idempotent and a duplicate press cannot disturb the lobby it produced.
 
+The server performs the same stop on the host's behalf when the item finishes: once the room's position is within two seconds of the playing file's duration, whether the host paused there at the end or the room's clock ran past it. The file is the room's selected file, or the host's attached file when the selection does not pin one; a file without a known duration never finishes this way. Clients need no new message: they see the same lobby snapshot a host's stop produces.
+
 Ending the room (`DELETE .../rooms/{room_id}`) remains the way to dismiss everyone. Frozen v1 has no stop: v1 rooms either play or end.
 
 ### Switch a lobby's selection mode

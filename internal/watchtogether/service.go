@@ -282,6 +282,8 @@ type liveRoom struct {
 	waitingEpoch int64
 	// bufferingWaitAt is when buffering last paused the room.
 	bufferingWaitAt time.Time
+	// itemEnd caches the playing file's duration for the reconciler.
+	itemEnd itemEnd
 }
 
 type snapshotDispatch struct {
