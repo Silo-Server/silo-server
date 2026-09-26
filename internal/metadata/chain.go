@@ -336,6 +336,10 @@ type CapabilityInfo struct {
 	// capability declares it can look an item up by, from its manifest's
 	// lookup_provider_ids. See extractLookupProviderIDs.
 	LookupProviderIDs []string
+	// BulkLookupLimit is how many concurrent lookups the capability can combine
+	// into one upstream request (bulk_lookup_limit), or 0 when it did not opt
+	// into the bulk enrichment pass. See extractBulkLookupLimit.
+	BulkLookupLimit int
 }
 
 // resolveEnabledProviders returns all enabled providers in installation ID order.
@@ -541,6 +545,32 @@ func extractLookupProviderIDs(metadataJSON []byte) []string {
 	return out
 }
 
+// maxBulkLookupLimit caps a declared bulk_lookup_limit, so a plugin cannot ask
+// the host for unbounded concurrency.
+const maxBulkLookupLimit = 200
+
+// extractBulkLookupLimit parses a capability's bulk_lookup_limit: the number of
+// concurrent GetMetadata calls the provider combines into one upstream request.
+// Declaring it opts an enrichment-only provider (one with lookup_provider_ids)
+// into the bulk enrichment pass, which keeps that many lookups in flight. It
+// also promises that the provider reports a spent quota, an outage or a
+// missing credential as an error status rather than an empty item, because the
+// pass records an empty item as "nothing to find".
+//
+// Anything other than a positive JSON integer yields 0 (not opted in); larger
+// values are capped at maxBulkLookupLimit.
+func extractBulkLookupLimit(metadataJSON []byte) int {
+	raw, ok := capabilityMetadataField(metadataJSON, "bulk_lookup_limit")
+	if !ok {
+		return 0
+	}
+	var limit int
+	if err := json.Unmarshal(raw, &limit); err != nil || limit <= 0 {
+		return 0
+	}
+	return min(limit, maxBulkLookupLimit)
+}
+
 // capabilityMetadataField reads one plugin-declared field from capability
 // metadata JSON. The field may sit at the top level or inside the "metadata"
 // envelope the SDK wraps plugin-declared fields in; the top level wins.
@@ -629,6 +659,7 @@ func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([
 			return nil, fmt.Errorf("scanning capability: %w", err)
 		}
 		c.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
+		c.BulkLookupLimit = extractBulkLookupLimit(metadataJSON)
 		caps = append(caps, c)
 	}
 	return caps, rows.Err()
@@ -757,5 +788,6 @@ func lookupCapabilityInfo(ctx context.Context, pool *pgxpool.Pool, installationI
 		return info
 	}
 	info.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
+	info.BulkLookupLimit = extractBulkLookupLimit(metadataJSON)
 	return info
 }

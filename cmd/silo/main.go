@@ -2811,6 +2811,9 @@ func main() {
 		if refreshWorker != nil && metadataService != nil {
 			taskMgr.Register(tasks.NewRefreshMetadataTask(refreshWorker, metadataService))
 		}
+		if metadataService != nil {
+			taskMgr.Register(tasks.NewBulkMetadataEnrichmentTask(metadataService, pool))
+		}
 		if libraryRefreshExecutor != nil {
 			taskMgr.Register(tasks.NewRefreshAllLibraryMetadataTask(
 				deps.DB, deps.FolderRepo, adminjob.NewRepository(deps.DB), libraryRefreshExecutor,

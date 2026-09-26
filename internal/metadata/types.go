@@ -72,6 +72,10 @@ type ProcessRequest struct {
 	// metadata language actually re-fetches titles/overviews.
 	AdoptLanguage            bool
 	recordedStaleProviderIDs providerIDValueSet
+	// enrichmentOnly marks a bulk enrichment write: one enrichment provider's
+	// fields merged into an item that is already matched. See
+	// persistEnrichment for how it differs from a scheduled refresh.
+	enrichmentOnly bool
 }
 
 // ProcessResult is the output of MetadataService.Process().

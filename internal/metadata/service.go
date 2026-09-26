@@ -242,6 +242,7 @@ type metadataServiceHooks struct {
 	updateItemStatus          func(ctx context.Context, contentID, status string) error
 	linkSeriesFilesToEpisodes func(ctx context.Context, seriesID string)
 	ensureSeriesEpisodeLinks  func(ctx context.Context, seriesID string) error
+	bulkEnrichmentTargets     func(ctx context.Context) ([]bulkEnrichmentTarget, error)
 }
 
 var trustedSearchIDKeys = []string{"tmdb", "tvdb", "imdb"}
@@ -426,6 +427,7 @@ type MetadataService struct {
 	autoTranslator          AutoTranslator // optional; set via SetAutoTranslator
 	personRepo              *catalog.PersonRepository
 	videoRepo               metadataVideoRepo
+	enrichmentState         enrichmentStateStore
 	fileRepo                FileContentUpdater
 	skippedRootRepo         metadataSkippedRootRepo
 	staleIDRepo             metadataStaleIDRepo
@@ -520,11 +522,13 @@ func NewMetadataService(
 	var groupOverrideRepo metadataGroupOverrideRepo
 	var observedLocationRepo metadataObservedLocationRepo
 	var videoRepo metadataVideoRepo
+	var enrichmentState enrichmentStateStore
 	var dbPool *pgxpool.Pool
 	if folderRepo != nil {
 		pool := folderRepo.Pool()
 		dbPool = pool
 		videoRepo = catalog.NewVideoRepository(pool)
+		enrichmentState = newEnrichmentStateRepository(pool)
 		itemLocalizationRepo = catalog.NewMediaItemLocalizationRepository(pool)
 		itemAliasRepo = catalog.NewItemAliasRepository(pool)
 		seasonLocalizationRepo = catalog.NewSeasonLocalizationRepository(pool)
@@ -561,6 +565,7 @@ func NewMetadataService(
 		scannedGroupRepo:        scannedGroupRepo,
 		groupOverrideRepo:       groupOverrideRepo,
 		observedLocationRepo:    observedLocationRepo,
+		enrichmentState:         enrichmentState,
 		dbPool:                  dbPool,
 		chainCache:              make(map[string]chainCacheEntry),
 		chainCacheTTL:           60 * time.Second,
@@ -1667,6 +1672,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		primarySidecarSearchPaths = localCtx.primarySidecarSearchPaths
 	}
 
+	// enrichedBy lists the enrichment-only providers that answered, so the bulk
+	// enrichment pass does not look the item up with them again.
+	var enrichedBy []string
 	for _, p := range itemChain {
 		mp, ok := p.(MetadataProvider)
 		if !ok {
@@ -1700,8 +1708,13 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				}
 				continue
 			}
-			slog.WarnContext(ctx, "metadata: provider error", "component", "metadata",
-				"provider", p.Slug(), "error", err)
+			if isRoutineEnrichmentError(p, err) {
+				slog.DebugContext(ctx, "metadata: enrichment provider cannot answer now", "component", "metadata",
+					"provider", p.Slug(), "error", err)
+			} else {
+				slog.WarnContext(ctx, "metadata: provider error", "component", "metadata",
+					"provider", p.Slug(), "error", err)
+			}
 			if req.Mode == ModeInitialMatch {
 				providerMatchErrors = append(providerMatchErrors, err)
 			}
@@ -1710,23 +1723,12 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if result == nil || !result.HasMetadata {
 			continue
 		}
-		result.ProviderIDs = sanitizeCandidateProviderIDs(result.ProviderIDs)
-		// Identity-hint providers contribute IDs exclusively through the
-		// trusted-hint phase: their Phase-2 results merge metadata fields but
-		// never inject provider-id keys that conflict with or extend the
-		// established identity (kills chimeric ID sets).
-		if isIdentityHinter {
-			result.ProviderIDs = nil
+		if isEnrichmentProvider(p) {
+			enrichedBy = append(enrichedBy, p.Slug())
 		}
-		for key := range quarantinedProviderIDKeys {
-			delete(result.ProviderIDs, key)
-		}
-		mergePreferredTitleMetadata(accumulator, result, req.Language, p.Slug(), !isIdentityHinter)
+		foldProviderResult(accumulator, result, req.Language, p.Slug(), isIdentityHinter, quarantinedProviderIDKeys)
 		// Bootstrap: feed new IDs to subsequent providers.
-		mergeProviderIDs(accumulator, result)
 		accumulatedIDs = accumulator.ProviderIDs
-		// Merge fields into accumulator (FillEmpty — first provider wins).
-		MergeMetadata(result, accumulator, nil, MergeFillEmpty)
 	}
 	if len(quarantinedProviderIDKeys) > 0 {
 		accumulator.quarantinedProviderIDKeys = maps.Clone(quarantinedProviderIDKeys)
@@ -1915,6 +1917,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if err := s.persistItemAliases(ctx, result.ContentID, req.Language, accumulator); err != nil {
 			return nil, err
 		}
+		s.recordEnrichedBy(ctx, result.ContentID, enrichedBy)
 	}
 
 	// Refresh stale ID records on successful refresh: clear anything explicitly
@@ -2036,6 +2039,25 @@ func hasTransientMatchError(errs []error) bool {
 		}
 	}
 	return false
+}
+
+// foldProviderResult merges one provider's GetMetadata result into the
+// accumulator of a pipeline run, fill-empty, so the first provider in the chain
+// wins each field. Identity-hint providers contribute IDs exclusively through
+// the trusted-hint phase: their results merge metadata fields but never inject
+// provider-id keys that conflict with or extend the established identity
+// (kills chimeric ID sets).
+func foldProviderResult(accumulator, result *MetadataResult, language, providerSlug string, isIdentityHinter bool, quarantined map[string]struct{}) {
+	result.ProviderIDs = sanitizeCandidateProviderIDs(result.ProviderIDs)
+	if isIdentityHinter {
+		result.ProviderIDs = nil
+	}
+	for key := range quarantined {
+		delete(result.ProviderIDs, key)
+	}
+	mergePreferredTitleMetadata(accumulator, result, language, providerSlug, !isIdentityHinter)
+	mergeProviderIDs(accumulator, result)
+	MergeMetadata(result, accumulator, nil, MergeFillEmpty)
 }
 
 func mergePreferredTitleMetadata(accumulator, result *MetadataResult, language, provider string, attributeAliases bool) {
@@ -2238,7 +2260,14 @@ func (s *MetadataService) mergeAndPersist(
 			return nil, err
 		}
 	}
-	if !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
+	// An enrichment write only merges into an item that exists. It must not
+	// recreate one deleted since the pass selected it.
+	if req.enrichmentOnly && existingItem == nil {
+		return nil, fmt.Errorf("enrichment target %q no longer exists", contentID)
+	}
+	// Identity repairs (rebinding, local-ID promotion) belong to matching and
+	// refreshes, never to an enrichment write.
+	if !req.enrichmentOnly && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
 		reboundTo, err := s.rebindItemByProviderIDsLocked(ctx, contentID, accumulator.ProviderIDs, contentType, len(durableIDs) == 0)
 		if err != nil {
 			return nil, err
@@ -2263,7 +2292,7 @@ func (s *MetadataService) mergeAndPersist(
 	// be claimed underneath us; movies and first-match series move a handful of
 	// rows. Placed before the durableIDs merge below so the canonical row's
 	// provider IDs are folded into the accumulator. See canonicalizeLocalContentID.
-	if !isNew && contentid.IsLocal(contentID) {
+	if !req.enrichmentOnly && !isNew && contentid.IsLocal(contentID) {
 		canonical, err := s.canonicalizeLocalContentID(
 			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType)
 		if err != nil {
@@ -2384,14 +2413,36 @@ func (s *MetadataService) mergeAndPersist(
 	item.LastRefreshed = &now
 	item.RefreshFailures = 0
 	item.Status = "matched"
+	if req.enrichmentOnly {
+		// An enrichment write is not a refresh: the refresh bookkeeping stays as
+		// the last match or refresh left it. So does what no metadata result
+		// carries: the series episode state, which only a refresh that
+		// rewrites episodes recomputes, and the stored metadata object.
+		item.MatchedAt = existingItem.MatchedAt
+		item.LastRefreshed = existingItem.LastRefreshed
+		item.RefreshFailures = existingItem.RefreshFailures
+		item.Status = existingItem.Status
+		item.EpisodeMetadataIncomplete = existingItem.EpisodeMetadataIncomplete
+		item.EpisodeMetadataLastCheckedAt = existingItem.EpisodeMetadataLastCheckedAt
+		item.MetadataS3Path = existingItem.MetadataS3Path
+		item.MetadataEtag = existingItem.MetadataEtag
+	}
 	// The stored locks decide whether artwork below, and the season and
 	// episode artwork of a series, may be replaced.
 	if existingItem != nil {
 		item.LockedFields = existingItem.LockedFields
 	}
 
+	// An enrichment write carries no artwork, and the image handling below
+	// would read the missing images as "no artwork": it would drop artwork
+	// still waiting to be cached. The item keeps exactly what is stored.
+	handleArtwork := isCanonicalWrite && !req.enrichmentOnly
+	if req.enrichmentOnly {
+		keepStoredArtwork(item, existingItem)
+	}
+
 	// Apply best images.
-	if isCanonicalWrite {
+	if handleArtwork {
 		applyBestImages(item, images, mergeMode, req.Language)
 		item.PosterThumbhash = mergedImageThumbhash(
 			existingImagePath(existingItem, ImagePoster),
@@ -2407,7 +2458,7 @@ func (s *MetadataService) mergeAndPersist(
 		)
 	}
 
-	if isCanonicalWrite {
+	if handleArtwork {
 		prepareItemImagesForQueue(item, existingItem)
 	}
 
@@ -2442,7 +2493,7 @@ func (s *MetadataService) mergeAndPersist(
 	item.ContentID = contentID
 	unlockProviderDedup()
 	providerDedupReleased = true
-	if isCanonicalWrite {
+	if handleArtwork {
 		s.enqueueItemImages(ctx, item, accumulator.ProviderIDs, images)
 	}
 
@@ -2461,8 +2512,10 @@ func (s *MetadataService) mergeAndPersist(
 		s.enqueueItemLocalizationImages(ctx, item, loc, accumulator.ProviderIDs, images)
 	}
 
-	// Persist people to the unified people table.
-	if len(item.People) > 0 && s.personRepo != nil {
+	// Persist people to the unified people table. The set is replaced
+	// wholesale from providers' people, and the stored cast is not merged in,
+	// so an enrichment write, which hears from one provider, leaves it alone.
+	if !req.enrichmentOnly && len(item.People) > 0 && s.personRepo != nil {
 		persons := make([]models.Person, len(item.People))
 		for i := range item.People {
 			persons[i] = item.People[i].Person
@@ -2492,7 +2545,8 @@ func (s *MetadataService) mergeAndPersist(
 	// set — including clearing it — so narrowing the allow-list converges on
 	// the next refresh; fill-empty refreshes only write when providers
 	// returned something, so a transient provider failure cannot wipe data.
-	if isCanonicalWrite && s.videoRepo != nil && !isFieldLocked(locked, FieldVideos) {
+	// An enrichment write skips them for the same reason as people.
+	if !req.enrichmentOnly && isCanonicalWrite && s.videoRepo != nil && !isFieldLocked(locked, FieldVideos) {
 		allowed := s.resolveAllowedVideoKinds(ctx, contentID, parseProcessFolderID(req.FolderID))
 		filtered := filterVideosByKinds(accumulator.Videos, allowed)
 		if len(filtered) > 0 || mergeMode == MergeReplaceUnlocked {
@@ -2522,8 +2576,9 @@ func (s *MetadataService) mergeAndPersist(
 	// local episode NFOs without a season.nfo) persist too — the persist
 	// path creates their implicit "Season N" rows. Fallback synthesis then
 	// covers any files the providers left unlinked (episodes with no NFO
-	// and no remote row); it is a no-op when every file is linked.
-	if contentType == "series" {
+	// and no remote row); it is a no-op when every file is linked. An
+	// enrichment write carries no seasons or episodes and leaves them alone.
+	if contentType == "series" && !req.enrichmentOnly {
 		if len(seasons) > 0 || len(episodes) > 0 {
 			s.persistSeasonsAndEpisodes(ctx, item, accumulator.ProviderIDs, canonicalLanguage, req.Language, seasons, episodes, mergeMode)
 		}
@@ -7619,6 +7674,19 @@ func itemArtworkFields(item *models.MediaItem) []itemArtworkField {
 		{imageType: ImagePoster, path: &item.PosterPath, source: &item.PosterSourcePath, thumbhash: &item.PosterThumbhash},
 		{imageType: ImageBackdrop, path: &item.BackdropPath, source: &item.BackdropSourcePath, thumbhash: &item.BackdropThumbhash},
 		{imageType: ImageLogo, path: &item.LogoPath, source: &item.LogoSourcePath},
+	}
+}
+
+// keepStoredArtwork copies every artwork path, source path and thumbhash from
+// the stored item, so a write that fetched no artwork leaves it untouched.
+func keepStoredArtwork(item, existing *models.MediaItem) {
+	stored := itemArtworkFields(existing)
+	for i, field := range itemArtworkFields(item) {
+		*field.path = *stored[i].path
+		*field.source = *stored[i].source
+		if field.thumbhash != nil {
+			*field.thumbhash = *stored[i].thumbhash
+		}
 	}
 }
 

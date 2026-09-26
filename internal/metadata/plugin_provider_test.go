@@ -19,6 +19,7 @@ const (
 type fakePluginMetadataClient struct {
 	searchResponse *pluginv1.SearchMetadataResponse
 	response       *pluginv1.GetMetadataResponse
+	getMetadataErr error
 	imagesResponse *pluginv1.GetImagesResponse
 	seasonsResp    *pluginv1.GetSeasonsResponse
 	episodesResp   *pluginv1.GetEpisodesResponse
@@ -37,7 +38,7 @@ func (f *fakePluginMetadataClient) Search(_ context.Context, req *pluginv1.Searc
 
 func (f *fakePluginMetadataClient) GetMetadata(_ context.Context, req *pluginv1.GetMetadataRequest) (*pluginv1.GetMetadataResponse, error) {
 	f.getMetadataReq = req
-	return f.response, nil
+	return f.response, f.getMetadataErr
 }
 
 func (f *fakePluginMetadataClient) GetSeasons(_ context.Context, req *pluginv1.GetSeasonsRequest) (*pluginv1.GetSeasonsResponse, error) {
