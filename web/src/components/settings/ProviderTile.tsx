@@ -97,16 +97,6 @@ export function ProviderTileGrid({
   return <div className={cn("grid gap-3 sm:grid-cols-2", className)}>{children}</div>;
 }
 
-/** Two letters for a provider whose logo square is just its name, e.g. "AniList" → "AN". */
-export function providerMonogram(name: string): string {
-  return (
-    name
-      .replace(/[^\p{L}\p{N}]/gu, "")
-      .slice(0, 2)
-      .toUpperCase() || "??"
-  );
-}
-
 /** Result of the last Test on a tile, kept in memory for the tile itself. */
 export interface ProviderTestState {
   ok: boolean;

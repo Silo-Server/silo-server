@@ -10,7 +10,7 @@ export function pluginStatusIndicator(installation: PluginInstallation): {
   title?: string;
 } {
   if (!installation.enabled) {
-    return { dotClass: "bg-muted-foreground", label: "Inactive" };
+    return { dotClass: "bg-muted-foreground", label: "Off" };
   }
   const runtime = installation.runtime;
   if (!runtime.resident) {

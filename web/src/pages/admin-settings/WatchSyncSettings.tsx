@@ -3,11 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 
 import type { PluginInstallation } from "@/api/types";
-import {
-  ProviderTile,
-  ProviderTileGrid,
-  providerMonogram,
-} from "@/components/settings/ProviderTile";
+import { ProviderTile, ProviderTileGrid } from "@/components/settings/ProviderTile";
 import { RestartBadge } from "@/components/settings/RestartBadge";
 import { SecretField } from "@/components/settings/SecretField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
@@ -32,6 +28,8 @@ import { useRestartKeys, type RestartKeyMatcher } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 
 import { FieldGroup } from "./FieldGroup";
+import { providerMonogram } from "@/lib/monogram";
+import { pluginPagePath } from "@/lib/pluginPresentation";
 
 /**
  * App credentials only. A viewer's own Trakt or Simkl account is linked from
@@ -318,10 +316,7 @@ export default function WatchSyncSettings() {
                 }
                 primaryAction={{
                   label: "Configure",
-                  onClick: () =>
-                    navigate(
-                      `/admin/plugins?installed_q=${encodeURIComponent(provider.pluginId)}&configure=${encodeURIComponent(provider.pluginId)}`,
-                    ),
+                  onClick: () => navigate(pluginPagePath(provider.pluginId)),
                 }}
               />
             ))}

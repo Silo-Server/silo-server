@@ -15,6 +15,7 @@ import {
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { cn } from "@/lib/utils";
 import type { TaskCategory, TaskInfo, TriggerConfig } from "@/api/types";
+import { describeTrigger } from "@/lib/taskTrigger";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
@@ -66,31 +67,9 @@ function formatDuration(ms: number): string {
   return `${hours}h ${remainMinutes}m`;
 }
 
-function describeTrigger(t: TriggerConfig): string {
-  switch (t.type) {
-    case "interval": {
-      const ms = t.interval_ms ?? 0;
-      if (ms >= 86_400_000) return `Every ${Math.round(ms / 86_400_000)}d`;
-      if (ms >= 3_600_000) return `Every ${Math.round(ms / 3_600_000)}h`;
-      if (ms >= 60_000) return `Every ${Math.round(ms / 60_000)}m`;
-      return `Every ${Math.round(ms / 1000)}s`;
-    }
-    case "daily":
-      return `Daily at ${t.time_of_day ?? "00:00"}`;
-    case "weekly": {
-      const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-      return `${days[t.day_of_week ?? 0]} at ${t.time_of_day ?? "00:00"}`;
-    }
-    case "startup":
-      return "On startup";
-    default:
-      return t.type;
-  }
-}
-
 function describeSchedule(triggers: TriggerConfig[]): string | null {
   if (triggers.length === 0) return null;
-  return triggers.map(describeTrigger).join(", ");
+  return triggers.map((trigger) => describeTrigger(trigger, "short")).join(", ");
 }
 
 function isOverdue(dateStr: string, now: number): boolean {

@@ -557,7 +557,7 @@ describe("ProvidersSettings", () => {
     // Credentials are the plugin's, not Silo's: the panel links out for them.
     expect(within(tile).getByRole("link", { name: "plugin page" })).toHaveAttribute(
       "href",
-      "/admin/plugins?installed_q=silo.theintrodb&configure=silo.theintrodb",
+      "/admin/plugins/silo.theintrodb",
     );
 
     await user.clear(within(tile).getByLabelText("Provider priority"));

@@ -7,7 +7,6 @@ import {
   ProviderPanelActions,
   ProviderTile,
   ProviderTileGrid,
-  providerMonogram,
   resolveProviderTileState,
   type ProviderTestState,
 } from "@/components/settings/ProviderTile";
@@ -23,6 +22,8 @@ import {
   useValidateMarkerProvider,
 } from "@/hooks/queries/admin/markers";
 import { SETTINGS_NUMBER_WIDTH, SettingField, SettingFieldRow } from "./SettingField";
+import { providerMonogram } from "@/lib/monogram";
+import { pluginPagePath } from "@/lib/pluginPresentation";
 
 const INTEGER_INPUT_PATTERN = /^[+-]?\d+$/;
 const CONFIDENCE_PERCENT_FORMAT = new Intl.NumberFormat("en-US", {
@@ -274,11 +275,8 @@ function MarkerProviderTile({
         : "Connected · off";
   // Only a failure earns the extra line: the state word already says the rest.
   const meta = !expanded && test && !test.ok ? test.message : undefined;
-  // installed_q keeps the list behind the dialog filtered to this plugin;
-  // configure opens its config dialog (API key and account) directly.
-  const pluginPage = provider.plugin_id
-    ? `/admin/plugins?installed_q=${encodeURIComponent(provider.plugin_id)}&configure=${encodeURIComponent(provider.plugin_id)}`
-    : "/admin/plugins";
+  // The plugin's own page holds its API key and account settings.
+  const pluginPage = provider.plugin_id ? pluginPagePath(provider.plugin_id) : "/admin/plugins";
 
   return (
     <ProviderTile

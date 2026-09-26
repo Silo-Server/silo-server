@@ -28,6 +28,7 @@ import {
   type TaskSchedule,
 } from "@/hooks/queries/admin/tasks";
 import type { ExecutionResult, TriggerConfig, TriggerType } from "@/api/types";
+import { describeTrigger } from "@/lib/taskTrigger";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
 
@@ -38,29 +39,6 @@ const REFRESH_REASON_LABELS: Record<string, string> = {
   core_metadata_incomplete: "Core metadata incomplete",
   trailers_requested: "Trailers requested",
 };
-
-// --- Trigger display helpers ---
-
-function describeTrigger(t: TriggerConfig): string {
-  switch (t.type) {
-    case "interval": {
-      const ms = t.interval_ms ?? 0;
-      if (ms >= 3_600_000) return `Every ${Math.round(ms / 3_600_000)} hour(s)`;
-      if (ms >= 60_000) return `Every ${Math.round(ms / 60_000)} minute(s)`;
-      return `Every ${Math.round(ms / 1000)} second(s)`;
-    }
-    case "daily":
-      return `Daily at ${t.time_of_day ?? "00:00"}`;
-    case "weekly": {
-      const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-      return `${days[t.day_of_week ?? 0]} at ${t.time_of_day ?? "00:00"}`;
-    }
-    case "startup":
-      return "On server startup";
-    default:
-      return t.type;
-  }
-}
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;

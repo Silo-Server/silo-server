@@ -119,6 +119,7 @@ const AdminUserDetail = lazy(() => import("@/pages/AdminUserDetail"));
 const AdminTasks = lazy(() => import("@/pages/AdminTasks"));
 const AdminTaskDetail = lazy(() => import("@/pages/AdminTaskDetail"));
 const AdminPlugins = lazy(() => import("@/pages/AdminPlugins"));
+const AdminPluginDetail = lazy(() => import("@/pages/AdminPluginDetail"));
 const AdminHistoryImport = lazy(() => import("@/pages/AdminHistoryImport"));
 const AdminRecommendations = lazy(() => import("@/pages/AdminRecommendations"));
 const AdminPolicyLayout = lazy(() => import("@/pages/admin-policy/AdminPolicyLayout"));
@@ -526,6 +527,7 @@ function AppRoutes() {
                   <Route path="nodes" element={<AdminNodes />} />
                   <Route path="sections" element={<AdminSections />} />
                   <Route path="plugins" element={<AdminPlugins />} />
+                  <Route path="plugins/:pluginId" element={<AdminPluginDetail />} />
                   <Route path="settings/*" element={<AdminSettingsLayout />} />
                   <Route path="policy" element={<AdminPolicyLayout />} />
                   <Route path="recommendations" element={<AdminRecommendations />} />
