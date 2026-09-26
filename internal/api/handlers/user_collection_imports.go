@@ -38,6 +38,8 @@ type UserCollectionImportHandler struct {
 	frontendFS      fs.FS
 }
 
+const userCollectionSyncStatusFailed = "failed"
+
 func NewUserCollectionImportHandler(
 	provider userstore.UserStoreProvider,
 	sync *usercollections.Service,
@@ -73,6 +75,7 @@ type UserImportSharedFields struct {
 	LibraryIDs             []int           `json:"library_ids,omitempty"`
 	DisplayQueryDefinition json.RawMessage `json:"display_query_definition,omitempty"`
 	SortConfig             json.RawMessage `json:"sort_config,omitempty"`
+	AllowAdminSyncSchedule bool            `json:"-"`
 }
 
 type UserImportMDBListRequest struct {
@@ -236,7 +239,7 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		return UserImportView{}, err
 	}
 
-	schedule, err := usercollections.ResolveSyncSchedule(shared.SyncSchedule)
+	schedule, err := usercollections.ResolveSyncSchedule(shared.SyncSchedule, shared.AllowAdminSyncSchedule && apimw.IsAdmin(ctx))
 	if err != nil {
 		return none, fieldError("sync_schedule", err.Error())
 	}
@@ -285,14 +288,15 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		// Persist failure state inline so the UI shows the error and the user
 		// can retry; the row is intentionally kept around for that retry path.
 		_ = store.UpdateCollectionSyncState(ctx, userstore.UpdateCollectionSyncStateInput{
-			ID:         collection.ID,
-			Status:     "failed",
-			Message:    syncErr.Error(),
-			LastSyncAt: time.Now().UTC(),
-			NextSyncAt: usercollections.InitialNextSyncAt(schedule),
+			ID:                   collection.ID,
+			Status:               userCollectionSyncStatusFailed,
+			Message:              syncErr.Error(),
+			LastSyncAt:           time.Now().UTC(),
+			ExpectedSyncSchedule: schedule,
+			NextSyncAt:           usercollections.InitialNextSyncAt(schedule),
 		})
 		updated = collection
-		updated.LastSyncStatus = "failed"
+		updated.LastSyncStatus = userCollectionSyncStatusFailed
 		updated.LastSyncMessage = syncErr.Error()
 	}
 

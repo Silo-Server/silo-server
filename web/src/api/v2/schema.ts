@@ -17188,6 +17188,7 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      user_collection_sync_schedule: components["schemas"]["CollectionSyncScheduleCapabilities"];
     };
     CollectionDisplayFilterPresets: {
       /**
@@ -17398,6 +17399,20 @@ export interface components {
        * @example success
        */
       status: string;
+    };
+    CollectionSyncScheduleCapabilities: {
+      /** @description Whether five-field cron expressions are accepted */
+      custom_cron: boolean;
+      editable: boolean;
+      /**
+       * @description Preset values accepted from this account
+       * @example [
+       *       "daily",
+       *       "weekly",
+       *       "monthly"
+       *     ]
+       */
+      presets: string[];
     };
     CollectionTemplate: {
       category: string;
@@ -21839,6 +21854,8 @@ export interface components {
       query_definition?: unknown;
       sort_config?: unknown;
       source_url?: string;
+      /** @description Sync cadence accepted by the acting account; an empty string disables automatic sync */
+      sync_schedule?: string;
     };
     PersonCollection: {
       /** @description The page's items; empty, never null */

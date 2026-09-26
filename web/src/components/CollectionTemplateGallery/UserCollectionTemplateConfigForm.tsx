@@ -6,7 +6,6 @@ import type {
   ImportUserTMDBCollectionRequest,
   ImportUserTraktCollectionRequest,
   UserCollectionMediaFilter,
-  UserCollectionSyncSchedule,
   UserCollectionWatchFilter,
 } from "@/api/types";
 import {
@@ -22,12 +21,15 @@ import {
 } from "@/lib/collectionDisplayFilters";
 import { COLLECTION_SOURCE_ORDER, selectValueToSortConfig } from "@/lib/collectionSortConfig";
 import { CollectionDefaultSortField } from "@/components/collections/CollectionDefaultSortField";
+import { UserCollectionSyncScheduleField } from "@/components/collections/UserCollectionSyncScheduleField";
+import { useCollectionCapabilities } from "@/hooks/queries/collections";
 import {
   COLLECTION_MAX_ITEMS,
   libraryEligibilityForMediaKind,
   mediaKindLabel,
 } from "@/lib/collectionTemplates";
 import type { CollectionTemplate } from "@/lib/collectionTemplates";
+import { userCollectionScheduleRequestValue } from "@/lib/userCollectionSyncSchedule";
 import {
   CollectionLibraryPicker,
   parseOptionalPositiveInteger,
@@ -55,51 +57,25 @@ interface Props {
   onCreated: () => void;
 }
 
-// MANUAL_SCHEDULE is the in-form sentinel for "no automatic refresh". Radix
-// Select disallows empty-string SelectItem values, so we map this to "" only
-// at submit time when populating the request body.
-const MANUAL_SCHEDULE = "none" as const;
-type ScheduleChoice = typeof MANUAL_SCHEDULE | Exclude<UserCollectionSyncSchedule, "">;
-
-// SCHEDULE_OPTIONS is the user-allowed cadence set. It mirrors the
-// usercollections.AllowedSyncSchedules map on the backend, which caps user
-// schedules to >= 24h to keep TMDB/Trakt API quota usage bounded.
-const SCHEDULE_OPTIONS: Array<{ value: ScheduleChoice; label: string }> = [
-  { value: MANUAL_SCHEDULE, label: "Manual only" },
-  { value: "daily", label: "Daily" },
-  { value: "weekly", label: "Weekly" },
-  { value: "monthly", label: "Monthly" },
-];
-
-function scheduleChoiceToRequest(choice: ScheduleChoice): UserCollectionSyncSchedule {
-  return choice === MANUAL_SCHEDULE ? "" : choice;
-}
-
-// templateDefaultSchedule maps the template's built-in cron into the closest
-// user-allowed cadence. Templates that prescribe a sub-daily cadence get
-// downgraded to "daily" — users cannot opt into shorter intervals here.
-function templateDefaultSchedule(cron: string | undefined): ScheduleChoice {
-  if (!cron) return MANUAL_SCHEDULE;
-  const fields = cron.trim().split(/\s+/);
-  if (fields.length !== 5) return "daily";
-  const [, , dom, month, dow] = fields;
-  if (dom === "1" && month === "*") return "monthly";
-  if (dom === "*" && month === "*" && dow !== "*") return "weekly";
-  return "daily";
-}
-
 export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated }: Props) {
   const tmdbMutation = useImportUserTMDBCollection();
   const traktMutation = useImportUserTraktCollection();
   const mdblistMutation = useImportUserMDBListCollection();
   const { data: libraries = [] } = useUserLibraries();
+  const {
+    data: collectionCapabilities,
+    isError: capabilitiesError,
+    isFetching: capabilitiesFetching,
+    refetch: refetchCapabilities,
+  } = useCollectionCapabilities();
+  const capabilitiesUnavailable = collectionCapabilities === undefined;
+  const allowCustomCron =
+    collectionCapabilities?.user_collection_sync_schedule?.custom_cron === true;
 
   const [title, setTitle] = useState(template.title);
   const [description, setDescription] = useState(template.description);
   const [limit, setLimit] = useState(template.default_limit ? String(template.default_limit) : "");
-  const [schedule, setSchedule] = useState<ScheduleChoice>(
-    templateDefaultSchedule(template.default_sync_schedule),
-  );
+  const [schedule, setSchedule] = useState(template.default_sync_schedule ?? "");
   const [isShared, setIsShared] = useState(false);
   const [mdblistUrl, setMdblistUrl] = useState(template.mdblist?.url ?? "");
   const [libraryIds, setLibraryIds] = useState<number[]>([]);
@@ -122,7 +98,7 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
   const limitInvalid = limit.trim().length > 0 && parsedLimit === undefined;
   const isPending = tmdbMutation.isPending || traktMutation.isPending || mdblistMutation.isPending;
   const missingMDBListURL = template.source === "mdblist" && mdblistUrl.trim().length === 0;
-  const submitDisabled = isPending || limitInvalid || missingMDBListURL;
+  const submitDisabled = capabilitiesUnavailable || isPending || limitInvalid || missingMDBListURL;
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -131,7 +107,7 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
     const sharedFields = {
       title: title.trim() || template.title,
       description: description.trim() || undefined,
-      sync_schedule: scheduleChoiceToRequest(schedule),
+      sync_schedule: userCollectionScheduleRequestValue(schedule, allowCustomCron),
       limit: parsedLimit,
       is_shared: isShared,
       poster_url:
@@ -329,22 +305,36 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
             placeholder={template.default_limit ? String(template.default_limit) : "No limit"}
           />
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="user-template-schedule">Auto Refresh</Label>
-          <Select value={schedule} onValueChange={(next) => setSchedule(next as ScheduleChoice)}>
-            <SelectTrigger id="user-template-schedule">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {SCHEDULE_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <UserCollectionSyncScheduleField
+          value={schedule}
+          onChange={setSchedule}
+          allowCustomCron={allowCustomCron}
+          disabled={capabilitiesUnavailable}
+          inputId="user-template-schedule"
+        />
       </div>
+
+      {capabilitiesUnavailable && capabilitiesError ? (
+        <div
+          role="alert"
+          className="border-border bg-muted/40 space-y-2 rounded-md border p-3 text-sm"
+        >
+          <p className="font-medium">Couldn&apos;t load sync schedule options</p>
+          <p className="text-muted-foreground text-xs">
+            Collection creation stays unavailable until Silo confirms which sync schedules this
+            account can use.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={capabilitiesFetching}
+            onClick={() => void refetchCapabilities()}
+          >
+            {capabilitiesFetching ? "Checking…" : "Retry schedule check"}
+          </Button>
+        </div>
+      ) : null}
 
       <CollectionDefaultSortField
         value={defaultSort}

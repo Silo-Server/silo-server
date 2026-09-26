@@ -19126,6 +19126,9 @@
               "unsupported"
             ],
             "type": "string"
+          },
+          "user_collection_sync_schedule": {
+            "$ref": "#/components/schemas/CollectionSyncScheduleCapabilities"
           }
         },
         "required": [
@@ -19139,6 +19142,7 @@
           "collection_sort_preferences",
           "effective_collection_sort",
           "sort_preference_kinds",
+          "user_collection_sync_schedule",
           "revision",
           "state",
           "allowed"
@@ -19701,6 +19705,38 @@
           "items_unmatched",
           "started_at",
           "completed_at"
+        ],
+        "type": "object"
+      },
+      "CollectionSyncScheduleCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "custom_cron": {
+            "description": "Whether five-field cron expressions are accepted",
+            "type": "boolean"
+          },
+          "editable": {
+            "type": "boolean"
+          },
+          "presets": {
+            "description": "Preset values accepted from this account",
+            "examples": [
+              [
+                "daily",
+                "weekly",
+                "monthly"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "editable",
+          "presets",
+          "custom_cron"
         ],
         "type": "object"
       },
@@ -30952,6 +30988,10 @@
           "query_definition": {},
           "sort_config": {},
           "source_url": {
+            "type": "string"
+          },
+          "sync_schedule": {
+            "description": "Sync cadence accepted by the acting account; an empty string disables automatic sync",
             "type": "string"
           }
         },

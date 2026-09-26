@@ -23,9 +23,11 @@ type collectionGuardHTTPStore struct {
 	userstore.CollectionMutationStore
 	userstore.CollectionFeatureProvider
 	beforeUpdate func()
+	lastUpdate   userstore.UpdateCollectionInput
 }
 
 func (s *collectionGuardHTTPStore) UpdateCollection(ctx context.Context, input userstore.UpdateCollectionInput) error {
+	s.lastUpdate = input
 	if s.beforeUpdate != nil {
 		s.beforeUpdate()
 	}
@@ -208,5 +210,41 @@ func TestSQLiteCollectionHTTPProfileAccessAndCapabilities(t *testing.T) {
 	unsupported := do(t, h, http.MethodPost, "/api/v2/collections/groups", `{"name":"Unavailable"}`, viewerHeaders())
 	if unsupported.Code != 501 {
 		t.Fatalf("unsupported groups: %d %s", unsupported.Code, unsupported.Body.String())
+	}
+}
+
+func TestSQLiteCollectionHTTPSyncScheduleUpdate(t *testing.T) {
+	h, store := newCollectionGuardHTTP(t)
+	daily := "0 3 * * *"
+	collection, err := store.CreateCollection(t.Context(), userstore.CreateCollectionInput{
+		CreatorProfileID:  "p-owner",
+		Name:              "Imported",
+		CollectionType:    "mdblist",
+		AllowedProfileIDs: []string{"p-owner"},
+		QueryDefinition:   "{}",
+		SortConfig:        "{}",
+		SourceConfig:      `{"mode":"mdblist","url":"https://mdblist.com/lists/user/list"}`,
+		SyncSchedule:      &daily,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v2/collections/" + collection.ID
+	current := guardHTTPGet(t, h, path, viewerHeaders())
+
+	updated := do(t, h, http.MethodPatch, path, `{"sync_schedule":"weekly"}`, with(viewerHeaders(), "If-Match", current.Header().Get("ETag")))
+	if updated.Code != http.StatusOK {
+		t.Fatalf("weekly update: %d %s", updated.Code, updated.Body.String())
+	}
+	if store.lastUpdate.SyncSchedule == nil || *store.lastUpdate.SyncSchedule != "0 3 * * 0" || store.lastUpdate.NextSyncAt == nil {
+		t.Fatalf("weekly update input: %+v", store.lastUpdate)
+	}
+
+	rejected := do(t, h, http.MethodPatch, path, `{"sync_schedule":"0 * * * *"}`, with(viewerHeaders(), "If-Match", updated.Header().Get("ETag")))
+	if rejected.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("custom cron for regular account: %d %s", rejected.Code, rejected.Body.String())
+	}
+	if store.lastUpdate.SyncSchedule == nil || *store.lastUpdate.SyncSchedule != "0 3 * * 0" {
+		t.Fatalf("rejected update reached storage: %+v", store.lastUpdate)
 	}
 }

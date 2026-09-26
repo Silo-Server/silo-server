@@ -5,8 +5,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -17,6 +21,9 @@ func TestCollectionCapabilitiesAdvertiseSortSupport(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "user_collection_sync_schedule") {
+		t.Fatalf("v1 capability response changed: %s", rec.Body.String())
 	}
 	var got CollectionCapabilitiesView
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
@@ -43,5 +50,39 @@ func TestCollectionCapabilitiesAdvertiseSortSupport(t *testing.T) {
 		if !slices.Contains(got.SortPreferenceKinds, want) {
 			t.Fatalf("sort_preference_kinds = %v, missing %q", got.SortPreferenceKinds, want)
 		}
+	}
+}
+
+func TestCollectionCapabilitiesServiceAdvertisesCallerSyncSchedulePolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		role        string
+		wantCustom  bool
+		wantPresets []string
+	}{
+		{name: "regular account", role: "user", wantPresets: []string{"daily", "weekly", "monthly"}},
+		{name: "server admin", role: "admin", wantCustom: true, wantPresets: usercollections.AdminSyncSchedulePresets},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := middleware.SetClaims(t.Context(), &auth.Claims{Role: tt.role})
+			capability := NewCollectionHandler(nil).Capabilities(ctx).UserCollectionSyncSchedule
+			if capability == nil {
+				t.Fatal("user collection sync schedule capability is missing")
+			}
+			if !capability.Editable {
+				t.Fatal("user collection sync schedule is not advertised as editable")
+			}
+			if capability.CustomCron != tt.wantCustom {
+				t.Fatalf("custom_cron = %v, want %v", capability.CustomCron, tt.wantCustom)
+			}
+			if !slices.Equal(capability.Presets, tt.wantPresets) {
+				t.Fatalf("presets = %v, want %v", capability.Presets, tt.wantPresets)
+			}
+		})
 	}
 }

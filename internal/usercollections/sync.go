@@ -2,6 +2,7 @@ package usercollections
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
+
+var errSyncNoLongerEligible = errors.New("collection is no longer eligible for scheduled sync")
 
 // Service performs sync runs for user-owned imported collections. The result
 // of each sync is written into user_personal_collection_items via the
@@ -60,9 +63,9 @@ type SyncResult struct {
 	CompletedAt    time.Time `json:"completed_at"`
 }
 
-// SyncCollection loads the collection by id and dispatches to the right
-// per-source sync implementation.
-func (s *Service) SyncCollection(ctx context.Context, userID int, collectionID string) (*SyncResult, error) {
+// SyncCollection loads a collection selected by the scheduler and dispatches
+// only if its persisted schedule still matches the due-row snapshot.
+func (s *Service) SyncCollection(ctx context.Context, userID int, collectionID, expectedSchedule string, allowAdminSchedule bool) (*SyncResult, error) {
 	store, err := s.storeProvider.ForUser(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("opening user store: %w", err)
@@ -71,8 +74,18 @@ func (s *Service) SyncCollection(ctx context.Context, userID int, collectionID s
 	if err != nil {
 		return nil, err
 	}
+	if !scheduledCollectionEligible(collection, expectedSchedule, allowAdminSchedule) {
+		return nil, errSyncNoLongerEligible
+	}
 	result, _, err := s.RunSync(ctx, store, collection)
 	return result, err
+}
+
+func scheduledCollectionEligible(collection *userstore.Collection, expectedSchedule string, allowAdminSchedule bool) bool {
+	return collection != nil &&
+		collection.SyncSchedule != nil &&
+		*collection.SyncSchedule == expectedSchedule &&
+		!requiresScheduleDowngrade(*collection.SyncSchedule, allowAdminSchedule)
 }
 
 // RunSync syncs an already-loaded collection. Handlers that have validated
@@ -483,12 +496,13 @@ func (s *Service) applyResult(
 	}
 
 	if err := store.UpdateCollectionSyncState(ctx, userstore.UpdateCollectionSyncStateInput{
-		ID:         collection.ID,
-		Status:     status,
-		Message:    message,
-		ItemCount:  len(matched),
-		LastSyncAt: completedAt,
-		NextSyncAt: nextSyncAt,
+		ID:                   collection.ID,
+		Status:               status,
+		Message:              message,
+		ItemCount:            len(matched),
+		LastSyncAt:           completedAt,
+		ExpectedSyncSchedule: collection.SyncSchedule,
+		NextSyncAt:           nextSyncAt,
 	}); err != nil {
 		return nil, nil, err
 	}

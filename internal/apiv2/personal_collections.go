@@ -117,16 +117,25 @@ type CollectionOrderInput struct {
 // detect before using a member.
 type CollectionCapabilities struct {
 	Capability
-	Groups                    bool                           `json:"groups" doc:"The acting account supports collection groups"`
-	Imports                   bool                           `json:"imports" doc:"The acting account supports imported collections"`
-	Artwork                   bool                           `json:"artwork" doc:"The acting account supports collection artwork"`
-	ItemReorder               bool                           `json:"item_reorder" doc:"The acting account supports reordering collection items"`
-	DisplayFilterFields       []string                       `json:"display_filter_fields" doc:"Catalog query fields a display filter may use" example:"[\"type\",\"watched\"]"`
-	DisplayFilterPresets      CollectionDisplayFilterPresets `json:"display_filter_presets"`
-	CollectionDefaultSort     bool                           `json:"collection_default_sort" example:"true"`
-	CollectionSortPreferences bool                           `json:"collection_sort_preferences" example:"true"`
-	EffectiveCollectionSort   bool                           `json:"effective_collection_sort" example:"true"`
-	SortPreferenceKinds       []string                       `json:"sort_preference_kinds" doc:"collection_kind values the sort-preference operations accept" example:"[\"library\",\"user\",\"watchlist\",\"favorites\"]"`
+	Groups                     bool                               `json:"groups" doc:"The acting account supports collection groups"`
+	Imports                    bool                               `json:"imports" doc:"The acting account supports imported collections"`
+	Artwork                    bool                               `json:"artwork" doc:"The acting account supports collection artwork"`
+	ItemReorder                bool                               `json:"item_reorder" doc:"The acting account supports reordering collection items"`
+	DisplayFilterFields        []string                           `json:"display_filter_fields" doc:"Catalog query fields a display filter may use" example:"[\"type\",\"watched\"]"`
+	DisplayFilterPresets       CollectionDisplayFilterPresets     `json:"display_filter_presets"`
+	CollectionDefaultSort      bool                               `json:"collection_default_sort" example:"true"`
+	CollectionSortPreferences  bool                               `json:"collection_sort_preferences" example:"true"`
+	EffectiveCollectionSort    bool                               `json:"effective_collection_sort" example:"true"`
+	SortPreferenceKinds        []string                           `json:"sort_preference_kinds" doc:"collection_kind values the sort-preference operations accept" example:"[\"library\",\"user\",\"watchlist\",\"favorites\"]"`
+	UserCollectionSyncSchedule CollectionSyncScheduleCapabilities `json:"user_collection_sync_schedule"`
+}
+
+// CollectionSyncScheduleCapabilities describes the schedules the acting
+// account may configure for imported personal collections.
+type CollectionSyncScheduleCapabilities struct {
+	Editable   bool     `json:"editable"`
+	Presets    []string `json:"presets" doc:"Preset values accepted from this account" example:"[\"daily\",\"weekly\",\"monthly\"]"`
+	CustomCron bool     `json:"custom_cron" doc:"Whether five-field cron expressions are accepted"`
 }
 
 // CollectionDisplayFilterPresets are the preset values of the display filter.
@@ -311,7 +320,7 @@ type MDBListSearchInput struct {
 // handler writes and an *handlers.APIError on failure.
 type PersonalCollectionService interface {
 	ListPersonalCollections(ctx context.Context, userID int, profileID string) (handlers.PersonalCollectionListView, error)
-	Capabilities() handlers.CollectionCapabilitiesView
+	Capabilities(ctx context.Context) handlers.CollectionCapabilitiesView
 	CreatePersonalCollection(ctx context.Context, cmd handlers.PersonalCollectionCreateCommand) (handlers.PersonalCollectionView, error)
 	ReorderPersonalCollections(ctx context.Context, userID int, profileID string, groupID *string, orderedIDs []string) error
 	CreateCollectionGroup(ctx context.Context, userID int, req handlers.CollectionGroupCreateRequest) (handlers.CollectionGroupView, error)
@@ -533,9 +542,9 @@ func (reg *Registry) listCollections(ctx context.Context, _ *struct{}) (*Persona
 func (reg *Registry) getCollectionCapabilities(ctx context.Context, _ *CapabilityInput) (*CollectionCapabilitiesOutput, error) {
 	svc := reg.deps.PersonalCollections
 	if svc == nil {
-		return &CollectionCapabilitiesOutput{Body: CollectionCapabilities{Capability: Capability{State: StateNotConfigured}, DisplayFilterFields: []string{}, DisplayFilterPresets: CollectionDisplayFilterPresets{Watched: []string{}, Media: []string{}}, SortPreferenceKinds: []string{}}}, nil
+		return &CollectionCapabilitiesOutput{Body: CollectionCapabilities{Capability: Capability{State: StateNotConfigured}, DisplayFilterFields: []string{}, DisplayFilterPresets: CollectionDisplayFilterPresets{Watched: []string{}, Media: []string{}}, SortPreferenceKinds: []string{}, UserCollectionSyncSchedule: CollectionSyncScheduleCapabilities{Presets: []string{}}}}, nil
 	}
-	v := svc.Capabilities()
+	v := svc.Capabilities(ctx)
 	features := userstore.CollectionFeatures{}
 	if provider, ok := svc.(interface {
 		PersonalCollectionFeatures(context.Context, int) (userstore.CollectionFeatures, error)
@@ -556,11 +565,19 @@ func (reg *Registry) getCollectionCapabilities(ctx context.Context, _ *Capabilit
 		DisplayFilterPresets: CollectionDisplayFilterPresets{
 			Watched: NonNil(v.DisplayFilterPresets.Watched), Media: NonNil(v.DisplayFilterPresets.Media),
 		},
-		CollectionDefaultSort:     v.CollectionDefaultSort,
-		CollectionSortPreferences: v.CollectionSortPreferences,
-		EffectiveCollectionSort:   v.EffectiveCollectionSort,
-		SortPreferenceKinds:       NonNil(v.SortPreferenceKinds),
+		CollectionDefaultSort:      v.CollectionDefaultSort,
+		CollectionSortPreferences:  v.CollectionSortPreferences,
+		EffectiveCollectionSort:    v.EffectiveCollectionSort,
+		SortPreferenceKinds:        NonNil(v.SortPreferenceKinds),
+		UserCollectionSyncSchedule: collectionSyncScheduleCapabilitiesOf(v.UserCollectionSyncSchedule),
 	}}, nil
+}
+
+func collectionSyncScheduleCapabilitiesOf(v *handlers.CollectionSyncScheduleCapabilitiesView) CollectionSyncScheduleCapabilities {
+	if v == nil {
+		return CollectionSyncScheduleCapabilities{Presets: []string{}}
+	}
+	return CollectionSyncScheduleCapabilities{Editable: v.Editable, Presets: NonNil(v.Presets), CustomCron: v.CustomCron}
 }
 
 // createCollection is the JSON form of v1 POST /collections. The v1
@@ -695,6 +712,7 @@ func importSharedFields(b CollectionImportBase) (handlers.UserImportSharedFields
 	out := handlers.UserImportSharedFields{
 		Title: b.Title, Limit: b.Limit,
 		DisplayQueryDefinition: b.DisplayQueryDefinition, SortConfig: b.SortConfig,
+		AllowAdminSyncSchedule: true,
 	}
 	if b.Description != nil {
 		out.Description = *b.Description

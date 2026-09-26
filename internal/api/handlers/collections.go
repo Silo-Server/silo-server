@@ -62,6 +62,7 @@ type PersonalCollectionUpdateRequest struct {
 	IncludeInServerCollections *bool                  `json:"include_in_server_collections"`
 	PosterSourceURL            *string                `json:"poster_source_url"`
 	GroupID                    optionalNullableString `json:"group_id"`
+	SyncSchedule               *string                `json:"sync_schedule"`
 }
 
 type collectionItemRequest struct {
@@ -115,7 +116,14 @@ type CollectionCapabilitiesView struct {
 	// the sort-preference endpoints. CollectionSortPreferences alone cannot
 	// distinguish a server that also stores the personal-list kinds
 	// ('watchlist', 'favorites') from one that rejects them.
-	SortPreferenceKinds []string `json:"sort_preference_kinds"`
+	SortPreferenceKinds        []string                                `json:"sort_preference_kinds"`
+	UserCollectionSyncSchedule *CollectionSyncScheduleCapabilitiesView `json:"user_collection_sync_schedule,omitempty"`
+}
+
+type CollectionSyncScheduleCapabilitiesView struct {
+	Editable   bool     `json:"editable"`
+	Presets    []string `json:"presets"`
+	CustomCron bool     `json:"custom_cron"`
 }
 
 type CollectionDisplayFilterPresetsView struct {
@@ -189,7 +197,10 @@ func (h *CollectionHandler) HandleListCollections(w http.ResponseWriter, r *http
 
 // HandleCapabilities exposes additive feature support for collection clients.
 func (h *CollectionHandler) HandleCapabilities(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.Capabilities())
+	capabilities := h.Capabilities(r.Context())
+	// /api/v1 is frozen. The role-aware schedule contract is exposed by v2.
+	capabilities.UserCollectionSyncSchedule = nil
+	writeJSON(w, http.StatusOK, capabilities)
 }
 
 // HandleCreateCollection handles POST /collections.
@@ -219,6 +230,8 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 		writeError(w, 400, "bad_request", "Invalid request body")
 		return
 	}
+	// /api/v1 is frozen. Schedule edits are part of the v2 update contract.
+	req.SyncSchedule = nil
 	resp, err := h.UpdatePersonalCollection(r.Context(), PersonalCollectionUpdateCommand{UserID: apimw.GetUserID(r.Context()), ProfileID: apimw.GetProfileID(r.Context()), CollectionID: chi.URLParam(r, "id"), Request: req, PosterFile: posterFileReader(r)})
 	if err != nil {
 		writeAPIError(w, err)
