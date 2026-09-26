@@ -310,6 +310,15 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		return result, nil
 	}
 
+	// A seasonal section's membership follows the calendar, not just its config.
+	// Pin the instant every clock-dependent step of this fetch reads, then
+	// resolve the theme in season at it once: it scopes the cache entry (see
+	// appendSeasonalThemeKey), selects the items (fetchSeasonalThemed reads the
+	// same pinned instant), and picks the title applied below, so the rail header
+	// and the items under it cannot come from different sides of a boundary.
+	resolved.fetchNow = f.now()
+	seasonalTheme := f.inSeasonTheme(resolved)
+
 	var items []*models.MediaItem
 	var total int
 	if f.isCacheableSectionType(resolved) {
@@ -320,6 +329,9 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		// (see cloneMediaItems). The per-user overlay still runs fresh in
 		// buildSectionsResponse.
 		key := resolvedListCacheKey(resolved, libraryID, libraryIDs, filter)
+		if resolved.SectionType == SectionSeasonalThemed {
+			key = appendSeasonalThemeKey(key, seasonalTheme)
+		}
 		items, total, err = getOrRefresh(ctx, key, f.now(), func(loadCtx context.Context) ([]*models.MediaItem, int, error) {
 			return f.fetchSection(loadCtx, resolved, libraryID, libraryIDs, userID, profileID, filter)
 		})
@@ -330,12 +342,12 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		return SectionWithItems{}, err
 	}
 
-	// Apply seasonal title override when the active theme has a custom name.
+	// Apply the in-season theme's custom or default title.
 	// Done here (rather than inside fetchSeasonalThemed) so the section's
 	// stored Title is preserved as the fallback used by callers that bypass
 	// SectionWithItems construction.
 	if resolved.SectionType == SectionSeasonalThemed && len(items) > 0 {
-		if title := f.seasonalTitleOverride(resolved); title != "" {
+		if title := f.seasonalTitleOverride(resolved, seasonalTheme); title != "" {
 			resolved.Title = title
 		}
 	}
@@ -372,26 +384,51 @@ func (f *Fetcher) logSlowSectionFetch(resolved ResolvedSection, libraryID *int, 
 	slog.Warn("slow section fetch", attrs...)
 }
 
-// seasonalTitleOverride returns the per-theme display name override for a
-// seasonal section, or "" when no override applies.
-func (f *Fetcher) seasonalTitleOverride(resolved ResolvedSection) string {
-	if len(resolved.Config) == 0 {
+// inSeasonTheme returns the seasonal theme whose window contains now, or ""
+// for a non-seasonal or off-season section.
+func (f *Fetcher) inSeasonTheme(resolved ResolvedSection) string {
+	if resolved.SectionType != SectionSeasonalThemed {
 		return ""
 	}
+	p, ok := seasonalParams(resolved)
+	if !ok {
+		return ""
+	}
+	// Same instant and usable filter as fetchSeasonalThemed so the theme tracks
+	// the one that actually resolved.
+	return recipes.InSeasonTheme(p, f.sectionNow(resolved), seasonalThemeHasQuery)
+}
+
+// sectionNow returns the instant this fetch reads the clock at: the one FetchOne
+// pinned, or a fresh read when the helper was reached without going through it.
+func (f *Fetcher) sectionNow(resolved ResolvedSection) time.Time {
+	if !resolved.fetchNow.IsZero() {
+		return resolved.fetchNow
+	}
+	return f.now()
+}
+
+// seasonalTitleOverride returns the display name theme lends the section, or
+// "" when the section keeps its own title.
+func (f *Fetcher) seasonalTitleOverride(resolved ResolvedSection, theme string) string {
+	p, ok := seasonalParams(resolved)
+	if !ok {
+		return ""
+	}
+	return recipes.SeasonalTitleFor(p, theme, resolved.Title)
+}
+
+// seasonalParams decodes a seasonal section's config, reporting false when it
+// is absent or unparseable.
+func seasonalParams(resolved ResolvedSection) (recipes.SeasonalThemedParams, bool) {
 	var p recipes.SeasonalThemedParams
+	if len(resolved.Config) == 0 {
+		return p, false
+	}
 	if err := json.Unmarshal(resolved.Config, &p); err != nil {
-		return ""
+		return p, false
 	}
-	if len(p.ThemeTitles) == 0 {
-		return ""
-	}
-	now := time.Now()
-	if f.Clock != nil {
-		now = f.Clock.Now()
-	}
-	// Same usable filter as fetchSeasonalThemed so the override tracks the
-	// theme that actually resolved.
-	return recipes.SeasonalTitleOverride(p, now, seasonalThemeHasQuery)
+	return p, true
 }
 
 func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) (SectionWithItems, error) {
@@ -3416,10 +3453,9 @@ func (f *Fetcher) fetchSeasonalThemed(ctx context.Context, s ResolvedSection, li
 		_ = json.Unmarshal(s.Config, &p)
 	}
 
-	now := time.Now()
-	if f.Clock != nil {
-		now = f.Clock.Now()
-	}
+	// The instant FetchOne pinned, so the theme selected here is the one its
+	// cache key and title were built from (see ResolvedSection.fetchNow).
+	now := f.sectionNow(s)
 
 	// Resolve which theme to use. Multi-theme mode wins when populated.
 	// Selection skips themes without an executable query so a data-less theme
