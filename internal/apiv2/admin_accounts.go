@@ -307,6 +307,8 @@ func registerAdminAccounts(reg *Registry) {
 	// Only the Owner, from a signed-in session, may make another enabled
 	// admin the Owner; the caller stays an admin.
 	transfer := adminAccountOperation(http.MethodPost, "/{id}/transfer-ownership", "transferAdminUserOwnership", false)
+	transfer.Summary = "Transfer server ownership to another enabled admin account."
+	transfer.Description = "Only the server Owner may call this, from a signed-in session: an API key or an impersonation session is refused with 403, like any caller that is not the Owner. The previous Owner stays an admin."
 	transfer.DefaultStatus = 204
 	// A target that is not another enabled admin is 422.
 	transfer.Errors = append(transfer.Errors, http.StatusUnprocessableEntity)

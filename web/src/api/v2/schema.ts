@@ -4487,7 +4487,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Manage login accounts and their household configuration. */
+    /**
+     * Transfer server ownership to another enabled admin account.
+     * @description Only the server Owner may call this, from a signed-in session: an API key or an impersonation session is refused with 403, like any caller that is not the Owner. The previous Owner stays an admin.
+     */
     post: operations["transferAdminUserOwnership"];
     delete?: never;
     options?: never;

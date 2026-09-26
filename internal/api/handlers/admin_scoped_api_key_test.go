@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -23,6 +24,7 @@ type scopedKeyUserRepo struct {
 	getErr  error
 	created *models.CreateUserInput
 	updated *models.UpdateUserInput
+	deleted bool
 	// updateErr, when set, is what Update returns.
 	updateErr error
 }
@@ -49,6 +51,28 @@ func (r *scopedKeyUserRepo) Update(_ context.Context, _ int, input models.Update
 }
 
 func (r *scopedKeyUserRepo) Delete(context.Context, int) error { return nil }
+
+// MutateAdminAccount runs the handler's checks against the stored account the
+// way the transactional repository does, without a transaction.
+func (r *scopedKeyUserRepo) MutateAdminAccount(ctx context.Context, id int, _ int64, input *models.UpdateUserInput, validate func(*models.User, pgx.Tx) (bool, error)) (auth.AdminUserSnapshot, error) {
+	current, err := r.GetByID(ctx, id)
+	if err != nil {
+		return auth.AdminUserSnapshot{}, err
+	}
+	if _, err := validate(current, nil); err != nil {
+		return auth.AdminUserSnapshot{User: current}, err
+	}
+	if input == nil {
+		r.deleted = true
+		return auth.AdminUserSnapshot{User: current}, nil
+	}
+	return auth.AdminUserSnapshot{User: current}, r.Update(ctx, id, *input)
+}
+
+func (r *scopedKeyUserRepo) GetAdminSnapshot(ctx context.Context, id int) (auth.AdminUserSnapshot, error) {
+	current, err := r.GetByID(ctx, id)
+	return auth.AdminUserSnapshot{User: current}, err
+}
 
 func (r *scopedKeyUserRepo) GetByID(_ context.Context, id int) (*models.User, error) {
 	if r.getErr != nil {

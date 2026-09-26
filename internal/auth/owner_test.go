@@ -142,6 +142,104 @@ func TestSetOwnerPostgres(t *testing.T) {
 	requireOwner(t, r, second.ID)
 }
 
+func TestPromotionRevokesIssuedCredentialsPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	user := testRoleAccount(t, r, models.RoleUser)
+	admin := testRoleAccount(t, r, models.RoleAdmin)
+	for _, u := range []*models.User{user, admin} {
+		issueTestCredentials(t, r, u.ID)
+	}
+
+	// Saving an admin with its role unchanged keeps its credentials.
+	if err := r.Update(t.Context(), admin.ID, models.UpdateUserInput{Role: new(models.RoleAdmin)}); err != nil {
+		t.Fatal(err)
+	}
+	if keys, links := countTestCredentials(t, r, admin.ID); keys != 1 || links != 1 {
+		t.Fatalf("admin saved with its role: keys %d, links %d", keys, links)
+	}
+	// Promotion drops the keys and reset links other admins could hold.
+	if err := r.Update(t.Context(), user.ID, models.UpdateUserInput{Role: new(models.RoleAdmin)}); err != nil {
+		t.Fatal(err)
+	}
+	if keys, links := countTestCredentials(t, r, user.ID); keys != 0 || links != 0 {
+		t.Fatalf("promoted account: keys %d, links %d", keys, links)
+	}
+}
+
+func TestOwnershipMoveEndsViewAsSessionsPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	owner := testRoleAccount(t, r, models.RoleAdmin)
+	if _, err := r.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = $1`, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	admin := testRoleAccount(t, r, models.RoleAdmin)
+	sessions := NewSessionRepository(r.pool)
+	for _, s := range []models.AuthSession{
+		{ID: "own", UserID: admin.ID},
+		{ID: "view-as", UserID: admin.ID, ImpersonatorUserID: &owner.ID},
+	} {
+		s.DeviceName, s.IPAddress, s.ExpiresAt = "test", "127.0.0.1", time.Now().Add(time.Hour)
+		if err := sessions.Create(t.Context(), s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	issueTestCredentials(t, r, admin.ID)
+
+	if err := r.TransferOwnership(t.Context(), owner.ID, admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	for id, wantRevoked := range map[string]bool{"own": false, "view-as": true} {
+		var revoked bool
+		if err := r.pool.QueryRow(t.Context(), `SELECT revoked_at IS NOT NULL FROM auth_sessions WHERE id = $1`, id).Scan(&revoked); err != nil {
+			t.Fatal(err)
+		}
+		if revoked != wantRevoked {
+			t.Errorf("session %s: revoked %v, want %v", id, revoked, wantRevoked)
+		}
+	}
+	if keys, links := countTestCredentials(t, r, admin.ID); keys != 1 || links != 0 {
+		t.Fatalf("new owner: keys %d, links %d; want its own key kept and the link gone", keys, links)
+	}
+	if actor, err := lockedOwnerActor(t, r, admin.ID); err != nil || !actor.IsOwner {
+		t.Fatalf("locked actor read: %+v, %v", actor, err)
+	}
+}
+
+func lockedOwnerActor(t *testing.T, r *UserRepository, id int) (OwnerActor, error) {
+	t.Helper()
+	tx, err := r.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(t.Context()) }()
+	return LockOwnerActorInTransaction(t.Context(), tx, id)
+}
+
+// issueTestCredentials gives account id one API key and one reset link.
+func issueTestCredentials(t *testing.T, r *UserRepository, id int) {
+	t.Helper()
+	if _, err := r.pool.Exec(t.Context(), `
+		INSERT INTO api_keys (id, user_id, label, api_key, revision) VALUES ($1, $2, 'held', $3, 1)`,
+		time.Now().UnixNano(), id, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.pool.Exec(t.Context(), `
+		INSERT INTO password_reset_tokens (user_id, token_hash, password_fingerprint, expires_at)
+		VALUES ($1, $2, 'fingerprint', now() + interval '1 hour')`, id, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func countTestCredentials(t *testing.T, r *UserRepository, id int) (keys, links int) {
+	t.Helper()
+	if err := r.pool.QueryRow(t.Context(), `
+		SELECT (SELECT count(*) FROM api_keys WHERE user_id = $1),
+		       (SELECT count(*) FROM password_reset_tokens WHERE user_id = $1)`, id).Scan(&keys, &links); err != nil {
+		t.Fatal(err)
+	}
+	return keys, links
+}
+
 func testRoleAccount(t *testing.T, r *UserRepository, role string) *models.User {
 	t.Helper()
 	u, err := r.Create(t.Context(), models.CreateUserInput{Username: uuid.NewString(), Email: uuid.NewString() + "@example.test", Password: "original-password", Role: role})

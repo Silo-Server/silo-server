@@ -8,6 +8,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/jackc/pgx/v5"
 )
 
 // ownerTargetChecker applies auth.CheckOwnerTarget to an account the caller
@@ -43,6 +44,17 @@ func requestOwnerActor(ctx context.Context, users interface {
 	}
 	actor.IsOwner = user.IsOwner
 	return actor, nil
+}
+
+// transactionOwnerActor reads the caller's Owner standing inside an account
+// write, share-locking the caller's row so a concurrent ownership transfer
+// cannot commit between the check and the write. Test doubles run the write
+// without a transaction and fall back to the store.
+func (h *AdminHandler) transactionOwnerActor(ctx context.Context, tx pgx.Tx) (auth.OwnerActor, error) {
+	if tx == nil {
+		return requestOwnerActor(ctx, h.userRepo)
+	}
+	return auth.LockOwnerActorInTransaction(ctx, tx, actorUserID(ctx))
 }
 
 // codeOwnerProtected is the error code of a refusal under the Owner rules.

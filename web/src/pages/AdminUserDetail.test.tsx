@@ -907,6 +907,9 @@ describe("AdminUserDetail server owner", () => {
       expect.objectContaining({ id: adminUser.id }),
       expect.anything(),
     );
+    // Confirming closes the dialog, so a stale confirmation cannot send a
+    // second transfer.
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 
   it("offers ownership only for an enabled admin", () => {

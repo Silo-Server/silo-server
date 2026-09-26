@@ -115,19 +115,22 @@ func (r *UserRepository) OwnerActor(ctx context.Context, actorID int) (OwnerActo
 	return ownerActor(ctx, r.pool, actorID)
 }
 
-// OwnerActorInTransaction is OwnerActor read in the caller's transaction.
-func OwnerActorInTransaction(ctx context.Context, tx pgx.Tx, actorID int) (OwnerActor, error) {
-	return ownerActor(ctx, tx, actorID)
+// LockOwnerActorInTransaction is OwnerActor read in the caller's
+// transaction with the actor's row share-locked, so an ownership transfer
+// waits for the caller's write and the write sees a transfer that committed
+// first.
+func LockOwnerActorInTransaction(ctx context.Context, tx pgx.Tx, actorID int) (OwnerActor, error) {
+	return ownerActor(ctx, tx, actorID, " FOR SHARE")
 }
 
 func ownerActor(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
-}, actorID int) (OwnerActor, error) {
+}, actorID int, lock ...string) (OwnerActor, error) {
 	actor := OwnerActor{ID: actorID}
 	if actorID <= 0 {
 		return actor, nil
 	}
-	err := db.QueryRow(ctx, `SELECT is_owner FROM users WHERE id=$1`, actorID).Scan(&actor.IsOwner)
+	err := db.QueryRow(ctx, `SELECT is_owner FROM users WHERE id=$1`+strings.Join(lock, ""), actorID).Scan(&actor.IsOwner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return actor, nil
 	}
@@ -200,15 +203,28 @@ func (r *UserRepository) TransferOwnership(ctx context.Context, fromID, toID int
 }
 
 // moveOwnership clears the current Owner before marking the next: the
-// single-Owner index is checked row by row.
+// single-Owner index is checked row by row. It also ends every session in
+// which someone views the server as the new Owner and deletes the new
+// Owner's reset links: nobody may act as the Owner, and a link issued before
+// the move must not hand over the Owner's account.
 func moveOwnership(ctx context.Context, tx pgx.Tx, fromID, toID int) error {
 	if fromID > 0 {
 		if _, err := tx.Exec(ctx, `UPDATE users SET is_owner = false WHERE id = $1`, fromID); err != nil {
 			return err
 		}
 	}
-	_, err := tx.Exec(ctx, `UPDATE users SET is_owner = true WHERE id = $1`, toID)
-	return err
+	if _, err := tx.Exec(ctx, `UPDATE users SET is_owner = true WHERE id = $1`, toID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE auth_sessions SET revoked_at = NOW()
+		WHERE user_id = $1 AND impersonator_user_id IS NOT NULL AND revoked_at IS NULL`, toID); err != nil {
+		return fmt.Errorf("ending sessions viewing as the owner: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM password_reset_tokens WHERE user_id = $1`, toID); err != nil {
+		return fmt.Errorf("deleting the owner's reset links: %w", err)
+	}
+	return nil
 }
 
 // SetOwner makes the account username the Owner, for recovery from the
@@ -221,22 +237,47 @@ func (r *UserRepository) SetOwner(ctx context.Context, username string) (*models
 		return nil, 0, err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	var id int
-	err = tx.QueryRow(ctx, `SELECT id FROM users WHERE username = $1 FOR UPDATE`, NormalizeUsername(strings.TrimSpace(username))).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, 0, ErrNotFound
-	}
+	// Lock the named account and the current Owner in one statement, in id
+	// order, so concurrent recoveries serialize instead of deadlocking.
+	rows, err := tx.Query(ctx, `
+		SELECT id, username = $1, is_owner, role, enabled FROM users
+		WHERE username = $1 OR is_owner ORDER BY id FOR UPDATE`, NormalizeUsername(strings.TrimSpace(username)))
 	if err != nil {
 		return nil, 0, err
 	}
-	previous := 0
-	err = tx.QueryRow(ctx, `SELECT id FROM users WHERE is_owner FOR UPDATE`).Scan(&previous)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	id, previous := 0, 0
+	var target models.User
+	for rows.Next() {
+		var u models.User
+		var named bool
+		if err := rows.Scan(&u.ID, &named, &u.IsOwner, &u.Role, &u.Enabled); err != nil {
+			rows.Close()
+			return nil, 0, err
+		}
+		if named {
+			id, target = u.ID, u
+		}
+		if u.IsOwner {
+			previous = u.ID
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
+	if id == 0 {
+		return nil, 0, ErrNotFound
+	}
 	if previous != id {
-		if err := updateUser(ctx, tx, id, models.UpdateUserInput{Role: new(models.RoleAdmin), Enabled: new(true)}); err != nil {
-			return nil, 0, fmt.Errorf("promoting account: %w", err)
+		if target.Role != models.RoleAdmin || !target.Enabled {
+			// A role or status change signs the account out, as it does
+			// when an admin makes it.
+			if err := updateUser(ctx, tx, id, models.UpdateUserInput{Role: new(models.RoleAdmin), Enabled: new(true)}); err != nil {
+				return nil, 0, fmt.Errorf("promoting account: %w", err)
+			}
+			if err := RevokeSignInsInTransaction(ctx, tx, id); err != nil {
+				return nil, 0, err
+			}
 		}
 		if err := moveOwnership(ctx, tx, previous, id); err != nil {
 			return nil, 0, err

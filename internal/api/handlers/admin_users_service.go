@@ -117,15 +117,6 @@ func (h *AdminHandler) CreateAdminAccount(ctx context.Context, input auth.Create
 	if actorIsScopedAPIKey(ctx) && input.User.Role == roleAdmin {
 		return 0, apiError(403, "insufficient_scope", "A scoped API key may not create an admin account")
 	}
-	if input.User.Role == roleAdmin {
-		actor, err := requestOwnerActor(ctx, h.userRepo)
-		if err != nil {
-			return 0, err
-		}
-		if err := auth.CheckGrantAdmin(actor, input.User.Role); err != nil {
-			return 0, ownerError(err)
-		}
-	}
 	if input.User.MaxProfiles != nil && *input.User.MaxProfiles < 1 {
 		return 0, fieldError("max_profiles", "Must be at least 1")
 	}
@@ -155,6 +146,15 @@ func (h *AdminHandler) CreateAdminAccount(ctx context.Context, input auth.Create
 	}
 	if err = h.validateAdminGroup(ctx, tx, input.User.AccessGroupID, input.User.Role); err != nil {
 		return 0, err
+	}
+	if input.User.Role == roleAdmin {
+		actor, err := h.transactionOwnerActor(ctx, tx)
+		if err != nil {
+			return 0, err
+		}
+		if err := auth.CheckGrantAdmin(actor, input.User.Role); err != nil {
+			return 0, ownerError(err)
+		}
 	}
 	user, err := h.accountProvisioner.CreateAccountInTransaction(ctx, tx, input)
 	if err != nil {
@@ -212,10 +212,6 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 		}
 		input.MaxPlaybackQuality.Value = new(value)
 	}
-	actor, err := requestOwnerActor(ctx, h.userRepo)
-	if err != nil {
-		return 0, err
-	}
 	revoked := false
 	snapshot, err := repo.MutateAdminAccount(ctx, id, revision, &input, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if revision != -1 {
@@ -226,6 +222,10 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 			if actual != groupRevision {
 				return false, auth.ErrAdminUserRevision
 			}
+		}
+		actor, err := h.transactionOwnerActor(ctx, tx)
+		if err != nil {
+			return false, err
 		}
 		if err := auth.CheckOwnerUpdate(actor, current, input); err != nil {
 			return false, ownerError(err)
@@ -263,11 +263,7 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 	if !ok {
 		return apiError(501, "capability_unsupported", "Guarded account management is unavailable")
 	}
-	actor, err := requestOwnerActor(ctx, h.userRepo)
-	if err != nil {
-		return err
-	}
-	_, err = repo.MutateAdminAccount(ctx, id, revision, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
+	_, err := repo.MutateAdminAccount(ctx, id, revision, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if revision != -1 {
 			_, actual, err := adminAccountTransactionGroup(ctx, tx, current)
 			if err != nil {
@@ -276,6 +272,10 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 			if actual != groupRevision {
 				return false, auth.ErrAdminUserRevision
 			}
+		}
+		actor, err := h.transactionOwnerActor(ctx, tx)
+		if err != nil {
+			return false, err
 		}
 		if err := auth.CheckOwnerDelete(actor, current); err != nil {
 			return false, ownerError(err)

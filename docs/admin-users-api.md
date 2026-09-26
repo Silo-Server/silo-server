@@ -138,13 +138,19 @@ does any caller that is not the Owner. A target that is not another enabled
 administrator returns `422 validation_failed`. The previous Owner stays an
 administrator. The operation has no v1 route and is not retryable; a replay is
 refused because the caller is no longer the Owner. The capability endpoint reports
-`ownership_transfer`.
+`ownership_transfer`. Moving ownership ends every session in which someone views the
+server as the new Owner and deletes the new Owner's reset links.
+
+Making an account an administrator deletes its API keys and its reset link. Any
+administrator may create those for an ordinary account, so after a promotion they
+would carry administrator authority that only the Owner grants.
 
 When the Owner account is lost or locked out, someone with shell access to a node
 and the server's `DATABASE_URL` recovers it with `silo owner set <username>`, for
 example `docker compose exec silo silo owner set alice`. The command makes that
-account the Owner, enables it, and grants it the administrator role if needed. The
-previous Owner stays an administrator.
+account the Owner, enables it, and grants it the administrator role if needed; a
+role or status change signs the account out. The previous Owner stays an
+administrator.
 
 ## Access groups
 

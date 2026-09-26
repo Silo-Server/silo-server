@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
@@ -1002,34 +1003,42 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	actor, err := requestOwnerActor(r.Context(), h.userRepo)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
-		return
-	}
-	if err := auth.CheckOwnerUpdate(actor, currentUser, updateInput); err != nil {
-		writeAPIError(w, ownerError(err))
-		return
-	}
-
-	err = h.userRepo.Update(r.Context(), id, updateInput)
-	if err != nil {
-		if auth.IsNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "User not found")
-			return
-		}
-		if auth.IsDuplicate(err) {
-			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
-			return
-		}
+	// The Owner rules and the write run in one transaction against the locked
+	// account, so a concurrent promotion or ownership transfer cannot slip
+	// between the check and the update.
+	repo, ok := h.userRepo.(adminAccountRepository)
+	if !ok {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
 		return
 	}
-	if updateRequiresSessionRevocation(currentUser, updateInput) {
-		if err := h.revokeUserSessions(r.Context(), id); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to revoke updated user sessions")
-			return
+	revoked := false
+	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, tx pgx.Tx) (bool, error) {
+		actor, err := h.transactionOwnerActor(r.Context(), tx)
+		if err != nil {
+			return false, err
 		}
+		if err := auth.CheckOwnerUpdate(actor, current, updateInput); err != nil {
+			return false, ownerError(err)
+		}
+		revoked = updateRequiresSessionRevocation(current, updateInput)
+		return revoked, nil
+	})
+	if err != nil {
+		var apiErr *APIError
+		switch {
+		case errors.As(err, &apiErr):
+			writeAPIError(w, apiErr)
+		case auth.IsNotFound(err):
+			writeError(w, http.StatusNotFound, "not_found", "User not found")
+		case auth.IsDuplicate(err):
+			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
+		}
+		return
+	}
+	if revoked && h.OnUserSessionsRevoked != nil {
+		h.OnUserSessionsRevoked(r.Context(), id)
 	}
 
 	user, err := h.userRepo.GetByID(r.Context(), id)
@@ -1054,32 +1063,37 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid user ID")
 		return
 	}
-	target, blocked := h.loadTargetUser(w, r, id)
-	if blocked {
-		return
-	}
-	actor, err := requestOwnerActor(r.Context(), h.userRepo)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
-		return
-	}
-	if err := auth.CheckOwnerDelete(actor, target); err != nil {
-		writeAPIError(w, ownerError(err))
-		return
-	}
-
-	err = h.userRepo.Delete(r.Context(), id)
-	if err != nil {
-		if auth.IsNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "User not found")
-			return
-		}
+	repo, ok := h.userRepo.(adminAccountRepository)
+	if !ok {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete user")
 		return
 	}
-	if err := h.revokeUserSessions(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to revoke deleted user sessions")
+	// As for updates, the Owner rules run against the locked account in the
+	// transaction that deletes it and revokes its sign-ins.
+	_, err = repo.MutateAdminAccount(r.Context(), id, -1, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
+		actor, err := h.transactionOwnerActor(r.Context(), tx)
+		if err != nil {
+			return false, err
+		}
+		if err := auth.CheckOwnerDelete(actor, current); err != nil {
+			return false, ownerError(err)
+		}
+		return true, nil
+	})
+	if err != nil {
+		var apiErr *APIError
+		switch {
+		case errors.As(err, &apiErr):
+			writeAPIError(w, apiErr)
+		case auth.IsNotFound(err):
+			writeError(w, http.StatusNotFound, "not_found", "User not found")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete user")
+		}
 		return
+	}
+	if h.OnUserSessionsRevoked != nil {
+		h.OnUserSessionsRevoked(r.Context(), id)
 	}
 	h.invalidateStats(r.Context(), cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
 

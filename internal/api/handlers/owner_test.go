@@ -156,8 +156,8 @@ func TestV1AdminUserHandlersProtectAdmins(t *testing.T) {
 			t.Errorf("%s: status = %d, want %d (body %s)", tc.name, rec.Code, tc.status, rec.Body.String())
 			continue
 		}
-		if tc.status == http.StatusForbidden && (decodeErrorCode(t, rec) != codeOwnerProtected || repo.updated != nil) {
-			t.Errorf("%s: refusal %s, updated %v", tc.name, rec.Body.String(), repo.updated != nil)
+		if tc.status == http.StatusForbidden && (decodeErrorCode(t, rec) != codeOwnerProtected || repo.updated != nil || repo.deleted) {
+			t.Errorf("%s: refusal %s, updated %v, deleted %v", tc.name, rec.Body.String(), repo.updated != nil, repo.deleted)
 		}
 	}
 }

@@ -105052,6 +105052,7 @@
     },
     "/api/v2/admin/users/{id}/transfer-ownership": {
       "post": {
+        "description": "Only the server Owner may call this, from a signed-in session: an API key or an impersonation session is refused with 403, like any caller that is not the Owner. The previous Owner stays an admin.",
         "operationId": "transferAdminUserOwnership",
         "parameters": [
           {
@@ -105191,7 +105192,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Manage login accounts and their household configuration.",
+        "summary": "Transfer server ownership to another enabled admin account.",
         "tags": [
           "admin-users"
         ],
