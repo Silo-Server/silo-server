@@ -1663,6 +1663,11 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	var startupErr *playback.TranscodeStartupError
 	if errors.As(err, &startupErr) {
 		unlock()
+		if r.Context().Err() != nil {
+			// The API server abandoned the start; it stops the remote transcode itself.
+			slog.InfoContext(r.Context(), "transcode start abandoned by caller", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+			return
+		}
 		slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
 		http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
 		return

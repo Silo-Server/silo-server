@@ -405,3 +405,62 @@ func TestStartReconstructTranscodeWithoutFallbackDoesNotWait(t *testing.T) {
 		t.Fatalf("attempts = %d, session = %v; want the single started process", attempts, session)
 	}
 }
+
+func TestStartReadyTranscodeStopsWaitingWhenRequestEnds(t *testing.T) {
+	for _, running := range []bool{true, false} {
+		cache := newAutoTranscodePipelineCache()
+		pipeline := newResolvedAutoTranscodePipeline(startupTestOpts(), cache)
+		first := pipeline.Current()
+		ctx, cancel := context.WithCancel(context.Background())
+		attempts := 0
+		var started *TranscodeSession
+		start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+			attempts++
+			started = fakeStartupSession(t, opts, t.TempDir(), false, running)
+			cancel()
+			return started, nil
+		}
+
+		begin := time.Now()
+		_, err := StartReadyTranscode(ctx, pipeline, TranscodeStartup{Timeout: time.Minute, Start: start})
+		if elapsed := time.Since(begin); elapsed > 10*time.Second {
+			t.Fatalf("running=%v: startup waited %v after the request ended", running, elapsed)
+		}
+		var startupErr *TranscodeStartupError
+		if !errors.As(err, &startupErr) {
+			t.Fatalf("running=%v: error = %v, want TranscodeStartupError", running, err)
+		}
+		if running && !errors.Is(err, context.Canceled) {
+			t.Fatalf("running=%v: error = %v, want context.Canceled cause", running, err)
+		}
+		if attempts != 1 {
+			t.Fatalf("running=%v: attempt count = %d, want 1 (no fallback for a departed request)", running, attempts)
+		}
+		if started.IsRunning() {
+			t.Fatalf("running=%v: abandoned attempt was not closed", running)
+		}
+		if got := pipeline.Current(); got.HWAccel != first.HWAccel || got.SoftwareVideoDecode != first.SoftwareVideoDecode || got.AvoidHWDevice != first.AvoidHWDevice {
+			t.Fatalf("running=%v: pipeline advanced to %+v after a cancellation", running, got)
+		}
+		if len(cache.preferred) != 0 {
+			t.Fatalf("running=%v: a cancellation must never be cached", running)
+		}
+	}
+}
+
+func TestStartReconstructTranscodeOutlivesTriggeringRequest(t *testing.T) {
+	pipeline := newResolvedAutoTranscodePipeline(startupTestOpts(), newAutoTranscodePipelineCache())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		return fakeStartupSession(t, opts, t.TempDir(), false, true), nil
+	}
+
+	session, err := StartReconstructTranscode(ctx, pipeline, TranscodeStartup{Timeout: 50 * time.Millisecond, Start: start})
+	if err != nil {
+		t.Fatalf("StartReconstructTranscode: %v", err)
+	}
+	if !session.IsRunning() {
+		t.Fatal("reconstruct was stopped with its triggering request, want it kept for other waiters")
+	}
+}

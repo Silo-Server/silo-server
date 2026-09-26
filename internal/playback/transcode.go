@@ -2022,7 +2022,13 @@ func sameManifestFile(current, inherited os.FileInfo) bool {
 // expires. It keeps the initial request open long enough for FFmpeg to write
 // the first safe playback window instead of forcing the client to race a 503.
 func (s *TranscodeSession) WaitForManifest(timeout time.Duration) ([]byte, error) {
-	return s.waitForManifest(timeout, false)
+	return s.waitForManifest(context.Background(), timeout, false)
+}
+
+// WaitForManifestContext is WaitForManifest that also returns ctx.Err() as
+// soon as ctx ends. It does not stop FFmpeg.
+func (s *TranscodeSession) WaitForManifestContext(ctx context.Context, timeout time.Duration) ([]byte, error) {
+	return s.waitForManifest(ctx, timeout, false)
 }
 
 // WaitForGenerationManifest is WaitForManifest for startup readiness: it
@@ -2031,10 +2037,16 @@ func (s *TranscodeSession) WaitForManifest(timeout time.Duration) ([]byte, error
 // generation's stream.m3u8 and segments, which would otherwise report a
 // process that exited without output as ready.
 func (s *TranscodeSession) WaitForGenerationManifest(timeout time.Duration) ([]byte, error) {
-	return s.waitForManifest(timeout, true)
+	return s.waitForManifest(context.Background(), timeout, true)
 }
 
-func (s *TranscodeSession) waitForManifest(timeout time.Duration, currentGeneration bool) ([]byte, error) {
+// WaitForGenerationManifestContext is WaitForGenerationManifest that also
+// returns ctx.Err() as soon as ctx ends. It does not stop FFmpeg.
+func (s *TranscodeSession) WaitForGenerationManifestContext(ctx context.Context, timeout time.Duration) ([]byte, error) {
+	return s.waitForManifest(ctx, timeout, true)
+}
+
+func (s *TranscodeSession) waitForManifest(ctx context.Context, timeout time.Duration, currentGeneration bool) ([]byte, error) {
 	deadline := time.After(timeout)
 	for {
 		manifest, err := s.getManifest(currentGeneration)
@@ -2046,6 +2058,8 @@ func (s *TranscodeSession) waitForManifest(timeout time.Duration, currentGenerat
 		}
 
 		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		case <-deadline:
 			return nil, s.manifestTimeoutError(timeout)
 		case <-time.After(100 * time.Millisecond):

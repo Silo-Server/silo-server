@@ -104,6 +104,15 @@ func (startup TranscodeStartup) timeout() time.Duration {
 // runTranscodeStartup starts attempts until one produces a manifest. See
 // StartReconstructTranscode for the reconstruct rules.
 func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, startup TranscodeStartup, reconstruct bool) (*TranscodeSession, error) {
+	// A fresh start stops waiting when its request ends: the caller holds the
+	// session lifecycle lock for the whole wait and discards the transport once
+	// its request is gone, so waiting on only delays the client's retry. A
+	// reconstruct serves every segment request waiting on it, so it outlives
+	// the one that triggered it.
+	waitCtx := ctx
+	if reconstruct {
+		waitCtx = context.WithoutCancel(ctx)
+	}
 	attempt := pipeline.Current()
 	legacyRetryUsed := false
 	for {
@@ -114,10 +123,18 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 			return nil, err
 		}
 
-		_, err = session.WaitForGenerationManifest(startup.timeout())
+		_, err = session.WaitForGenerationManifestContext(waitCtx, startup.timeout())
 		if err == nil {
 			pipeline.RememberSuccess()
 			return session, nil
+		}
+		if waitCtx.Err() != nil {
+			// The requester left; this says nothing about the device, so the
+			// pipeline neither advances nor remembers a result.
+			wasRunning := session.IsRunning()
+			failedDevice := session.Opts().HWDevice
+			_ = session.Close()
+			return nil, &TranscodeStartupError{Err: err, WasRunning: wasRunning, FailedDevice: failedDevice}
 		}
 
 		wasRunning := session.IsRunning()
