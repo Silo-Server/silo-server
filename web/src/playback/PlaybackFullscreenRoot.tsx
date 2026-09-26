@@ -17,9 +17,17 @@ export function PlaybackFullscreenRoot({ children }: { children: ReactNode }) {
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!showsFullPlayer && rootRef.current && document.fullscreenElement === rootRef.current) {
-      document.exitFullscreen().catch(() => {});
-    }
+    if (showsFullPlayer) return;
+    const exitRootFullscreen = () => {
+      if (rootRef.current && document.fullscreenElement === rootRef.current) {
+        document.exitFullscreen().catch(() => {});
+      }
+    };
+    exitRootFullscreen();
+    // A fullscreen request still pending when playback left the full player
+    // completes afterwards.
+    document.addEventListener("fullscreenchange", exitRootFullscreen);
+    return () => document.removeEventListener("fullscreenchange", exitRootFullscreen);
   }, [showsFullPlayer]);
 
   return (

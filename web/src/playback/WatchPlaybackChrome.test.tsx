@@ -310,6 +310,21 @@ describe("PlaybackFullscreenRoot", () => {
     expect(harness.exitFullscreen).toHaveBeenCalledOnce();
   });
 
+  it("leaves fullscreen that a pending request enters after playback stops", () => {
+    let fullscreenElement: Element | null = null;
+    const harness = renderFullscreenHarness(() => fullscreenElement);
+
+    act(() => harness.controller().stopPlayback());
+    expect(harness.exitFullscreen).not.toHaveBeenCalled();
+
+    fullscreenElement = harness.root;
+    act(() => {
+      document.dispatchEvent(new Event("fullscreenchange"));
+    });
+
+    expect(harness.exitFullscreen).toHaveBeenCalledOnce();
+  });
+
   it("leaves another element's fullscreen alone", () => {
     const harness = renderFullscreenHarness(() => document.body);
 
