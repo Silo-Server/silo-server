@@ -95,6 +95,35 @@ func (r *SessionRepository) Create(ctx context.Context, session models.AuthSessi
 	return r.createWithQuerier(ctx, r.pool, session)
 }
 
+// CreateImpersonation stores a view-as session only while the target and
+// the impersonating admin keep the standing the caller checked, with both
+// rows share-locked, so an ownership move that commits in between cannot
+// leave behind a session acting as the new Owner or started by an admin that
+// is no longer the Owner. ErrImpersonationNotAllowed otherwise.
+func (r *SessionRepository) CreateImpersonation(ctx context.Context, session models.AuthSession, standing AccountStanding) error {
+	var ipArg any
+	if session.IPAddress != "" {
+		ipArg = session.IPAddress
+	}
+	tag, err := r.pool.Exec(ctx, `
+		INSERT INTO auth_sessions
+			(id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at)
+		SELECT $1, t.id, $3, $4, $5, a.id, $7 FROM users t JOIN users a ON a.id = $6
+		WHERE t.id = $2 AND t.enabled AND t.role = $8 AND t.is_owner = $9
+			AND a.enabled AND a.role = 'admin' AND a.is_owner = $10
+		FOR SHARE OF t, a`,
+		session.ID, session.UserID, session.DeviceName, ipArg, session.ExpiresAt,
+		session.ImpersonatorUserID, session.ImpersonationStartedAt,
+		standing.Role, standing.IsOwner, standing.IssuerIsOwner)
+	if err != nil {
+		return fmt.Errorf("creating session: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrImpersonationNotAllowed
+	}
+	return nil
+}
+
 // createWithQuerier inserts a new auth session using the provided exec-capable
 // database handle so callers can participate in an existing transaction.
 func (r *SessionRepository) createWithQuerier(

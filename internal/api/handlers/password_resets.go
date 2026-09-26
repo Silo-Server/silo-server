@@ -57,7 +57,7 @@ func (h *PasswordResetHandler) IssuePasswordReset(ctx context.Context, input pas
 	if actorIsScopedAPIKey(ctx) && target.Role == roleAdmin {
 		return nil, apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not reset an admin account's password")
 	}
-	input.Standing = new(auth.StandingOf(target))
+	input.Standing = new(auth.StandingOf(actor, target))
 	result, err := h.service.Issue(ctx, input)
 	return result, ownerError(err)
 }

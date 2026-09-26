@@ -517,7 +517,11 @@ func (s *Service) StartImpersonation(ctx context.Context, adminUserID, targetUse
 		ImpersonationStartedAt: &startedAt,
 	}
 
-	if err := s.sessions.Create(ctx, session); err != nil {
+	standing := StandingOf(OwnerActor{ID: admin.ID, IsOwner: admin.IsOwner}, target)
+	if err := s.sessions.CreateImpersonation(ctx, session, standing); err != nil {
+		if errors.Is(err, ErrImpersonationNotAllowed) {
+			return nil, nil, nil, err
+		}
 		return nil, nil, nil, fmt.Errorf("creating session: %w", err)
 	}
 

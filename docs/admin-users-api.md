@@ -145,9 +145,11 @@ the previous Owner could have created them; the new Owner creates new keys.
 Making an account an administrator deletes its API keys and its reset link. Any
 administrator may create those for an ordinary account, so after a promotion they
 would carry administrator authority that only the Owner grants. An API key or reset
-link an administrator issues on another account is stored only while that account
-keeps the role and Owner flag the request was authorized against; a promotion or
-ownership move that lands in between returns `409 conflict`.
+link an administrator issues on another account, and a View as session, is stored only
+while that account and the issuer keep the role and Owner flags the request was
+authorized against; a promotion or ownership move that lands in between returns
+`409 conflict` (`permission_denied` for View as). Moving ownership also ends the
+previous Owner's sessions viewing as other administrators.
 
 When the Owner account is lost or locked out, someone with shell access to a node
 and the server's `DATABASE_URL` recovers it with `silo owner set <username>`, for

@@ -173,10 +173,14 @@ func TestOwnershipMoveEndsViewAsSessionsAndCredentialsPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin := testRoleAccount(t, r, models.RoleAdmin)
+	other := testRoleAccount(t, r, models.RoleAdmin)
+	user := testRoleAccount(t, r, models.RoleUser)
 	sessions := NewSessionRepository(r.pool)
 	for _, s := range []models.AuthSession{
 		{ID: "own", UserID: admin.ID},
 		{ID: "view-as", UserID: admin.ID, ImpersonatorUserID: &owner.ID},
+		{ID: "old-owner-as-admin", UserID: other.ID, ImpersonatorUserID: &owner.ID},
+		{ID: "old-owner-as-user", UserID: user.ID, ImpersonatorUserID: &owner.ID},
 	} {
 		s.DeviceName, s.IPAddress, s.ExpiresAt = "test", "127.0.0.1", time.Now().Add(time.Hour)
 		if err := sessions.Create(t.Context(), s); err != nil {
@@ -188,7 +192,7 @@ func TestOwnershipMoveEndsViewAsSessionsAndCredentialsPostgres(t *testing.T) {
 	if err := r.TransferOwnership(t.Context(), owner.ID, admin.ID); err != nil {
 		t.Fatal(err)
 	}
-	for id, wantRevoked := range map[string]bool{"own": false, "view-as": true} {
+	for id, wantRevoked := range map[string]bool{"own": false, "view-as": true, "old-owner-as-admin": true, "old-owner-as-user": false} {
 		var revoked bool
 		if err := r.pool.QueryRow(t.Context(), `SELECT revoked_at IS NOT NULL FROM auth_sessions WHERE id = $1`, id).Scan(&revoked); err != nil {
 			t.Fatal(err)
@@ -209,7 +213,7 @@ func TestAdminKeyNeedsTheCheckedStandingPostgres(t *testing.T) {
 	r := adminAccountsDB(t)
 	user := testRoleAccount(t, r, models.RoleUser)
 	keys := NewAPIKeyRepository(r.pool)
-	checked := AccountStanding{Role: models.RoleUser}
+	checked := AccountStanding{Role: models.RoleUser, IssuerID: user.ID}
 	if _, err := keys.CreateForStanding(t.Context(), user.ID, checked, "ok", nil); err != nil {
 		t.Fatalf("key under an unchanged standing: %v", err)
 	}
@@ -221,6 +225,47 @@ func TestAdminKeyNeedsTheCheckedStandingPostgres(t *testing.T) {
 	}
 	if n, _ := countTestCredentials(t, r, user.ID); n != 0 {
 		t.Fatalf("promoted account holds %d keys", n)
+	}
+
+	// An issuer that stopped being the Owner gets no key either.
+	owner := testRoleAccount(t, r, models.RoleAdmin)
+	if _, err := r.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = $1`, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	asOwner := AccountStanding{Role: models.RoleAdmin, IssuerID: owner.ID, IssuerIsOwner: true}
+	if _, err := keys.CreateForStanding(t.Context(), user.ID, asOwner, "owner", nil); err != nil {
+		t.Fatalf("key issued by the owner: %v", err)
+	}
+	if err := r.TransferOwnership(t.Context(), owner.ID, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	other := testRoleAccount(t, r, models.RoleAdmin)
+	if _, err := keys.CreateForStanding(t.Context(), other.ID, AccountStanding{Role: models.RoleAdmin, IssuerID: owner.ID, IssuerIsOwner: true}, "stale issuer", nil); !errors.Is(err, ErrAccountChanged) {
+		t.Fatalf("key issued by a former owner: %v", err)
+	}
+}
+
+func TestImpersonationNeedsTheCheckedStandingPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	owner := testRoleAccount(t, r, models.RoleAdmin)
+	if _, err := r.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = $1`, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	admin := testRoleAccount(t, r, models.RoleAdmin)
+	sessions := NewSessionRepository(r.pool)
+	session := func(id string) models.AuthSession {
+		now := time.Now()
+		return models.AuthSession{ID: id, UserID: admin.ID, DeviceName: "test", IPAddress: "127.0.0.1", ExpiresAt: now.Add(time.Hour), ImpersonatorUserID: &owner.ID, ImpersonationStartedAt: &now}
+	}
+	checked := AccountStanding{Role: models.RoleAdmin, IssuerID: owner.ID, IssuerIsOwner: true}
+	if err := sessions.CreateImpersonation(t.Context(), session("before"), checked); err != nil {
+		t.Fatalf("view-as under an unchanged standing: %v", err)
+	}
+	if err := r.TransferOwnership(t.Context(), owner.ID, admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessions.CreateImpersonation(t.Context(), session("after"), checked); !errors.Is(err, ErrImpersonationNotAllowed) {
+		t.Fatalf("view-as under a stale standing: %v", err)
 	}
 }
 

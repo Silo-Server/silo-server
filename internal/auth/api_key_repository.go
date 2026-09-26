@@ -66,9 +66,10 @@ func generateAPIKey() (string, error) {
 // owning user); callers should validate scopes with NormalizeAPIKeyScopes
 // first.
 // CreateForStanding is Create for an administrator issuing a key on another
-// account: the key is stored only while the account still has standing, with
-// the account's row share-locked, so a promotion or ownership move that
-// commits in between cannot leave it behind. ErrAccountChanged otherwise.
+// account: the key is stored only while the account and the issuer still
+// have standing, with both rows share-locked, so a promotion or ownership
+// move that commits in between cannot leave it behind. ErrAccountChanged
+// otherwise.
 func (r *APIKeyRepository) CreateForStanding(ctx context.Context, userID int, standing AccountStanding, label string, scopes []string) (*models.APIKey, error) {
 	key, err := generateAPIKey()
 	if err != nil {
@@ -79,10 +80,10 @@ func (r *APIKeyRepository) CreateForStanding(ctx context.Context, userID int, st
 	}
 	created, err := scanAPIKey(r.pool.QueryRow(ctx, `
 		INSERT INTO api_keys (user_id, label, api_key, scopes)
-		SELECT u.id, $2, $3, $4 FROM users u
-		WHERE u.id = $1 AND u.role = $5 AND u.is_owner = $6
-		FOR SHARE OF u
-		RETURNING `+apiKeyColumns, userID, label, key, scopes, standing.Role, standing.IsOwner))
+		SELECT u.id, $2, $3, $4 FROM users u JOIN users a ON a.id = $7
+		WHERE u.id = $1 AND u.role = $5 AND u.is_owner = $6 AND a.is_owner = $8
+		FOR SHARE OF u, a
+		RETURNING `+apiKeyColumns, userID, label, key, scopes, standing.Role, standing.IsOwner, standing.IssuerID, standing.IssuerIsOwner))
 	if errors.Is(err, ErrAPIKeyNotFound) {
 		return nil, ErrAccountChanged
 	}

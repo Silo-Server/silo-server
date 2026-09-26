@@ -276,7 +276,8 @@ func (fakeOwners) CheckOwnerTargetByID(_ context.Context, actorID, userID int) (
 		role = models.RoleAdmin
 	}
 	target := &models.User{ID: userID, Role: role, IsOwner: userID == testOwnerID}
-	return auth.StandingOf(target), auth.CheckOwnerTarget(auth.OwnerActor{ID: actorID, IsOwner: actorID == testOwnerID}, target)
+	actor := auth.OwnerActor{ID: actorID, IsOwner: actorID == testOwnerID}
+	return auth.StandingOf(actor, target), auth.CheckOwnerTarget(actor, target)
 }
 
 // ownerKeyStore holds one key, owned by the Owner.
@@ -329,7 +330,7 @@ func TestAdminAPIKeysProtectOwner(t *testing.T) {
 	if _, err := h.CreateAdminAPIKey(claimsCtx(testOwnerID), testAdminID, "delegated", nil); err != nil || !store.created {
 		t.Fatalf("owner minting a key for another admin: %v", err)
 	}
-	if store.standing == nil || *store.standing != (auth.AccountStanding{Role: models.RoleAdmin}) {
+	if store.standing == nil || *store.standing != (auth.AccountStanding{Role: models.RoleAdmin, IssuerID: testOwnerID, IssuerIsOwner: true}) {
 		t.Fatalf("the key was not stored under the checked standing: %+v", store.standing)
 	}
 	// An account promoted between the check and the insert gets no key.

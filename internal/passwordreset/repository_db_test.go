@@ -194,7 +194,7 @@ func TestResetLinkRefusesIneligibleAccounts(t *testing.T) {
 func TestResetLinkNeedsTheCheckedStandingDB(t *testing.T) {
 	d := newResetDB(t)
 	id := d.account(t, "promoted", true, true)
-	checked := &auth.AccountStanding{Role: "user"}
+	checked := &auth.AccountStanding{Role: "user", IssuerID: id}
 	expires := time.Now().Add(time.Hour)
 	if err := d.repo.Issue(t.Context(), id, auth.HashLinkToken("before"), nil, expires, checked); err != nil {
 		t.Fatalf("link under an unchanged standing: %v", err)
@@ -204,6 +204,12 @@ func TestResetLinkNeedsTheCheckedStandingDB(t *testing.T) {
 	}
 	if err := d.repo.Issue(t.Context(), id, auth.HashLinkToken("after"), nil, expires, checked); !errors.Is(err, auth.ErrAccountChanged) {
 		t.Fatalf("link under a stale standing: %v", err)
+	}
+	// An issuer whose Owner flag changed gets no link either.
+	target := d.account(t, "target", true, true)
+	issuer := &auth.AccountStanding{Role: "user", IssuerID: id, IssuerIsOwner: true}
+	if err := d.repo.Issue(t.Context(), target, auth.HashLinkToken("stale-issuer"), nil, expires, issuer); !errors.Is(err, auth.ErrAccountChanged) {
+		t.Fatalf("link from an issuer that is not the owner: %v", err)
 	}
 }
 
