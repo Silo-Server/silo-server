@@ -24,6 +24,7 @@ func TestEmbedBatchStopsOnProviderLimit(t *testing.T) {
 	}{
 		{"daily quota", &embeddings.RateLimitError{DailyQuota: true}},
 		{"temporary retries exhausted", &embeddings.RateLimitError{}},
+		{"excessive retry delay", &embeddings.RateLimitError{RetryDeferred: true}},
 		{"wrapped limit", fmt.Errorf("wrapped: %w", &embeddings.RateLimitError{})},
 		{"OpenAI quota", errors.New("embedding API returned 429: insufficient_quota")},
 	} {

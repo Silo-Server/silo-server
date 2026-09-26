@@ -13,7 +13,7 @@ import (
 )
 
 // isQuotaError identifies provider limits that should stop this backfill run.
-// Gemini's bounded retries are already exhausted for temporary rate limits.
+// Gemini has exhausted its retries or deferred an excessive wait.
 func isQuotaError(err error) bool {
 	var limitErr *embeddings.RateLimitError
 	if errors.As(err, &limitErr) {

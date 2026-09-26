@@ -62,10 +62,10 @@ func TestGeminiDailyQuotaStopsWithoutRetry(t *testing.T) {
 		t.Run(strings.Join(ids, ","), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				calls := 0
-				body := geminiLimitResponse(t, ids, "1s")
+				body := geminiLimitResponse(t, ids, "86400s")
 				c := geminiTestClient(func(*http.Request) (*http.Response, error) {
 					calls++
-					return embeddingHTTPResponse(429, body, "1"), nil
+					return embeddingHTTPResponse(429, body, "86400"), nil
 				})
 				start := time.Now()
 				_, err := c.Embed(context.Background(), []string{"synthetic item"})
@@ -96,6 +96,7 @@ func TestGeminiTemporaryRateLimitRetry(t *testing.T) {
 		{name: "longer header", delay: "1s", header: "3", wait: 3 * time.Second},
 		{name: "longer retry info", delay: "4s", header: "1", wait: 4 * time.Second},
 		{name: "HTTP date", delay: "1s", header: "date", wait: 7 * time.Second},
+		{name: "retry budget boundary", delay: "60s", header: "60", wait: 60 * time.Second},
 		{name: "missing hints", wait: 10 * time.Second},
 		{name: "invalid hints", delay: "invalid", header: "invalid", wait: 10 * time.Second},
 		{name: "invalid header unit", header: "1m", wait: 10 * time.Second},
@@ -132,6 +133,42 @@ func TestGeminiTemporaryRateLimitRetry(t *testing.T) {
 				}
 				if elapsed := time.Since(start); elapsed != tc.wait {
 					t.Fatalf("retry delay = %s, want %s", elapsed, tc.wait)
+				}
+			})
+		})
+	}
+}
+
+func TestGeminiExcessiveRetryDelayStopsWithoutRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name, delay, header string
+	}{
+		{name: "retry info above boundary", delay: "60.000000001s"},
+		{name: "long retry info", delay: "86400s"},
+		{name: "long header", header: "3600"},
+		{name: "longer retry info", delay: "61s", header: "2"},
+		{name: "longer header", delay: "2s", header: "61"},
+		{name: "HTTP date", header: "date"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				header := tc.header
+				if header == "date" {
+					header = time.Now().Add(time.Hour).UTC().Format(http.TimeFormat)
+				}
+				calls := 0
+				c := geminiTestClient(func(*http.Request) (*http.Response, error) {
+					calls++
+					return embeddingHTTPResponse(429, geminiLimitResponse(t, []string{"RequestsPerMinute"}, tc.delay), header), nil
+				})
+				start := time.Now()
+				_, err := c.Embed(context.Background(), []string{"synthetic item"})
+				if calls != 1 || time.Since(start) != 0 {
+					t.Fatalf("excessive retry delay: requests=%d elapsed=%s, want one request and no wait", calls, time.Since(start))
+				}
+				var limitErr *RateLimitError
+				if !errors.As(err, &limitErr) || limitErr.DailyQuota || !strings.Contains(err.Error(), "retry delay is too long") {
+					t.Fatalf("error = %v, want a deferred temporary limit", err)
 				}
 			})
 		})

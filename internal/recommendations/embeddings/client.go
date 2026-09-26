@@ -78,15 +78,21 @@ type geminiEmbedResponse struct {
 	} `json:"embeddings"`
 }
 
+const maxGeminiRetryDelay = 60 * time.Second
+
 // RateLimitError reports a Gemini limit that should stop the current backfill
 // rather than fan out into requests for individual items.
 type RateLimitError struct {
-	DailyQuota bool
+	DailyQuota    bool
+	RetryDeferred bool
 }
 
 func (e *RateLimitError) Error() string {
 	if e.DailyQuota {
 		return "gemini embedding API daily quota exhausted; retry after the quota resets or review limits in Google AI Studio"
+	}
+	if e.RetryDeferred {
+		return "gemini embedding API rate limited; requested retry delay is too long for this run; try again later"
 	}
 	return "gemini embedding API rate limit persisted after retries; try again later"
 }
@@ -237,6 +243,14 @@ func (c *Client) embedGemini(ctx context.Context, texts []string) ([][]float32, 
 			wait := max(retryAfterDelay(resp.Header.Get("Retry-After")), retryDelay)
 			if wait <= 0 {
 				wait = rateLimitBackoff(resp, attempt)
+			}
+			if wait > maxGeminiRetryDelay {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				// End this run rather than retry before the provider's minimum delay.
+				limitErr.RetryDeferred = true
+				return nil, limitErr
 			}
 			slog.WarnContext(ctx, "rate limited by gemini embedding API, waiting", "component", "recommendations", "attempt", attempt+1, "wait", wait)
 			if err := waitForRetry(ctx, wait); err != nil {
