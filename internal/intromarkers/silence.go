@@ -18,15 +18,19 @@ type SilenceBoundaryRefiner struct {
 	config Config
 }
 
+// silenceInterval is one silence reported by silencedetect, in file seconds.
+// End is zero when silencedetect never reported an end for the silence (it was
+// still open when the output ended); Start is still a usable boundary.
 type silenceInterval struct {
 	Start float64
 	End   float64
 }
 
-var (
-	silenceStartPattern = regexp.MustCompile(`silence_start:\s*([0-9]+(?:\.[0-9]+)?)`)
-	silenceEndPattern   = regexp.MustCompile(`silence_end:\s*([0-9]+(?:\.[0-9]+)?)`)
-)
+// silenceEventPattern matches silencedetect's silence_start and silence_end
+// values. ffmpeg prints them with av_ts2timestr ("%.6g"), so a value can be
+// negative (a window that opens in silence reports a start just before 0) or
+// use an exponent.
+var silenceEventPattern = regexp.MustCompile(`silence_(start|end):\s*([-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?)`)
 
 func NewSilenceBoundaryRefiner(config Config) *SilenceBoundaryRefiner {
 	return &SilenceBoundaryRefiner{config: config.normalized()}
@@ -93,34 +97,34 @@ func (r *SilenceBoundaryRefiner) RefineChapterEnd(ctx context.Context, candidate
 	return segment, false, nil
 }
 
+// parseSilenceDetectOutput reads silencedetect events in output order and
+// pairs each silence_end with the most recent unmatched silence_start. Times
+// are relative to the analysis window; a negative start is clamped to the
+// window start before windowStart is added. A silence_end with no unmatched
+// start is ignored. A start that never gets an end is kept with a zero End.
 func parseSilenceDetectOutput(output []byte, windowStart float64) []silenceInterval {
-	matches := silenceStartPattern.FindAllSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	intervals := make([]silenceInterval, 0, len(matches))
-	for _, match := range matches {
-		start, err := strconv.ParseFloat(string(match[1]), 64)
+	var intervals []silenceInterval
+	var open []int
+	for _, match := range silenceEventPattern.FindAllSubmatch(output, -1) {
+		value, err := strconv.ParseFloat(string(match[2]), 64)
 		if err != nil {
 			continue
 		}
-		intervals = append(intervals, silenceInterval{Start: windowStart + start})
-	}
-
-	endMatches := silenceEndPattern.FindAllSubmatch(output, -1)
-	for i, match := range endMatches {
-		if i >= len(intervals) {
-			break
-		}
-		end, err := strconv.ParseFloat(string(match[1]), 64)
-		if err != nil {
+		seconds := windowStart + math.Max(0, value)
+		if string(match[1]) == "start" {
+			open = append(open, len(intervals))
+			intervals = append(intervals, silenceInterval{Start: seconds})
 			continue
 		}
-		intervals[i].End = windowStart + end
+		if len(open) == 0 {
+			continue
+		}
+		last := open[len(open)-1]
+		open = open[:len(open)-1]
+		intervals[last].End = math.Max(seconds, intervals[last].Start)
 	}
 
-	sort.Slice(intervals, func(i, j int) bool {
+	sort.SliceStable(intervals, func(i, j int) bool {
 		return intervals[i].Start < intervals[j].Start
 	})
 	return intervals
