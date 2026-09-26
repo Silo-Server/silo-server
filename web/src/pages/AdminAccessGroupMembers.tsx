@@ -89,6 +89,7 @@ export function AccessGroupMembers({
     setFailures([]);
     const context = captureAdminUserAuthority();
     const failed: string[] = [];
+    const failedIds = new Set<number>();
     let moved = 0;
     for (const user of move.users) {
       try {
@@ -99,6 +100,7 @@ export function AccessGroupMembers({
         await updateUser.mutateAsync({ editor, body: { access_group_id: move.target.id } });
         moved++;
       } catch (err) {
+        failedIds.add(user.id);
         failed.push(
           `${user.username}: ${err instanceof Error ? err.message : "could not be moved"}`,
         );
@@ -106,8 +108,13 @@ export function AccessGroupMembers({
     }
     setSaving(false);
     setPending(null);
-    setSelected(new Set());
-    setMoveTarget("");
+    // After moving members out, keep the ones that failed selected, with the
+    // same target, so the move can be retried as is. Adding users into this
+    // group doesn't use the member selection, so it is left alone.
+    if (String(move.target.id) !== String(group.id)) {
+      setSelected(failedIds);
+      if (failedIds.size === 0) setMoveTarget("");
+    }
     setFailures(failed);
     if (moved > 0) {
       toast.success(`Moved ${moved} ${moved === 1 ? "user" : "users"} to ${move.target.name}`);

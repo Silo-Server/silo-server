@@ -344,6 +344,19 @@ describe("AdminAccessGroups", () => {
     const alert = await within(members).findByRole("alert");
     expect(alert).toHaveTextContent("Some users could not be moved");
     expect(alert).toHaveTextContent("taylor: This user changed.");
+    // The failed member stays selected with the same target, ready to retry.
+    expect(within(members).getByRole("checkbox", { name: "Select taylor" })).toBeChecked();
+    expect(within(members).getByRole("checkbox", { name: "Select sam" })).not.toBeChecked();
+    expect(
+      within(members).getByRole("combobox", { name: "Move selected members to" }),
+    ).toHaveTextContent("Guests");
+    adminUsers.update.mockResolvedValue(undefined);
+    await user.click(within(members).getByRole("button", { name: /Move 1 selected/ }));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Move" }),
+    );
+    await waitFor(() => expect(adminUsers.update).toHaveBeenCalledTimes(3));
+    expect(adminUsers.update.mock.calls[2]![0].editor.user.id).toBe(7);
     adminUsers.data = [];
   });
 
