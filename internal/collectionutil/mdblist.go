@@ -6,7 +6,17 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
+
+// MDBListRequestTimeout bounds one MDBList fetch when the base client sets no
+// timeout of its own. http.DefaultClient never times out, so without it a
+// stalled mdblist.com response would hold a sync worker indefinitely.
+const MDBListRequestTimeout = 30 * time.Second
+
+// SyncTimeout bounds one scheduled collection sync end to end, so a single
+// slow source cannot hold a scheduler worker for the rest of the run.
+const SyncTimeout = 15 * time.Minute
 
 // ErrMDBListURL is returned when a caller-supplied list URL is not an
 // MDBList list page. Sync fetches that URL with the server's HTTP client, so
@@ -80,12 +90,16 @@ func ValidateMDBListURL(raw string) error {
 
 // MDBListHTTPClient returns a clone of base whose redirects are re-checked
 // against ValidateMDBListURL so an mdblist.com 3xx cannot bounce the fetch
-// onto loopback or RFC1918. A nil base uses http.DefaultClient.
+// onto loopback or RFC1918. A nil base uses http.DefaultClient. A base with no
+// timeout gets MDBListRequestTimeout.
 func MDBListHTTPClient(base *http.Client) *http.Client {
 	if base == nil {
 		base = http.DefaultClient
 	}
 	clone := *base
+	if clone.Timeout == 0 {
+		clone.Timeout = MDBListRequestTimeout
+	}
 	parentRedirect := base.CheckRedirect
 	clone.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if req == nil || req.URL == nil {
