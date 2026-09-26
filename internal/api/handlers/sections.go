@@ -1753,6 +1753,8 @@ func (h *SectionHandler) maybeInjectNextUp(ctx context.Context, resolved []secti
 
 // injectNextUpSection inserts a synthetic SectionNextUp entry after the
 // contiguous continue rows that start with the video Continue Watching row.
+// The row has no override of its own, so it shows as many items as that
+// Continue Watching row.
 func injectNextUpSection(resolved []sections.ResolvedSection) []sections.ResolvedSection {
 	nextUp := sections.ResolvedSection{
 		ID:          "system-next-up",
@@ -1763,6 +1765,9 @@ func injectNextUpSection(resolved []sections.ResolvedSection) []sections.Resolve
 
 	for i, s := range resolved {
 		if s.SectionType == sections.SectionContinueWatching && sections.ContinueTypeFromConfig(s.Config) == sections.ContinueTypeWatching {
+			if s.ItemLimit > 0 {
+				nextUp.ItemLimit = s.ItemLimit
+			}
 			insertAt := i + 1
 			for insertAt < len(resolved) && resolved[insertAt].SectionType == sections.SectionContinueWatching {
 				insertAt++
