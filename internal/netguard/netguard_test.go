@@ -26,6 +26,7 @@ func TestClassify(t *testing.T) {
 		{"192.168.1.10", Private},
 		{"100.101.102.103", Private}, // Tailscale
 		{"fd12:3456::1", Private},
+		{"fec0::1", Private}, // site-local
 		{"198.18.0.1", Private},
 		{"64:ff9b::a00:1", Private},
 		{"::ffff:127.0.0.1", Private},

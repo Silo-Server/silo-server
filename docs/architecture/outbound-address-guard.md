@@ -14,7 +14,7 @@ addresses those requests may reach.
 
 - **Public**: reachable by anyone on the internet.
 - **Private**: the server's own network. Loopback, RFC 1918, CGNAT
-  (`100.64.0.0/10`, which includes Tailscale), IPv6 ULA, NAT64, and the
+  (`100.64.0.0/10`, which includes Tailscale), IPv6 ULA and site-local, NAT64, and the
   special-use unicast ranges (TEST-NETs, benchmarking, documentation).
 - **Blocked**: never dialed by anyone. Unspecified (`0.0.0.0` dials loopback on
   Linux), link-local (`169.254.0.0/16`, `fe80::/10`, where cloud metadata

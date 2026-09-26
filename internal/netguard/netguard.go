@@ -68,6 +68,7 @@ var privatePrefixes = mustPrefixes(
 	"203.0.113.0/24",  // TEST-NET-3
 	"::1/128",
 	"fc00::/7",       // ULA
+	"fec0::/10",      // site-local; deprecated (RFC 3879) but still routed in some networks
 	"2001:db8::/32",  // documentation
 	"64:ff9b::/96",   // NAT64
 	"64:ff9b:1::/48", // local-use NAT64 (RFC 8215)
