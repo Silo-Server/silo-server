@@ -70,7 +70,9 @@ const baseCandidateSelectFrom = `
 	       COALESCE(mf.extra_id, ''),
 	       COALESCE(mf.season_number, 0),
 	       COALESCE(mf.episode_number, 0),
-	       mf.file_modified_at
+	       mf.file_modified_at,
+	       COALESCE(mf.codec_video, ''),
+	       COALESCE(mf.codec_audio, '')
 	FROM media_files mf
 	JOIN media_folders folders ON folders.id = mf.media_folder_id
 	JOIN episodes e ON e.content_id = mf.episode_id`
@@ -386,6 +388,8 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 			&c.SeasonNumber,
 			&c.EpisodeNumber,
 			&c.FileModifiedAt,
+			&c.CodecVideo,
+			&c.CodecAudio,
 		); err != nil {
 			return nil, fmt.Errorf("scanning intro marker candidate: %w", err)
 		}

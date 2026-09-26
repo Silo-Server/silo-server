@@ -107,7 +107,7 @@ func TestSilenceBoundaryRefinerArguments(t *testing.T) {
 		Candidate{FileID: 1, FilePath: "/media/Show/S01E01.mkv", DurationSeconds: 1200}, segment); err != nil {
 		t.Fatal(err)
 	}
-	want := strings.Fields("-hide_banner -nostdin -loglevel info -ss 117 -i /media/Show/S01E01.mkv -t 33 " +
+	want := strings.Fields("-hide_banner -nostdin -loglevel repeat+info -ss 117 -i /media/Show/S01E01.mkv -t 33 " +
 		"-vn -sn -dn -af silencedetect=noise=-50dB:duration=0.33 -f null -")
 	if got := args(); strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("args\n got %q\nwant %q", got, want)

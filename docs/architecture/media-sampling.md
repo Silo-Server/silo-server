@@ -1,9 +1,9 @@
 # Media sampling
 
 `internal/mediasample` owns every ffmpeg run that decodes a media file to
-analyze it: audio fingerprints, silence, and later frame statistics and still
-images. Intro detection (`internal/intromarkers`) runs all of its ffmpeg
-processes through it.
+analyze it: audio fingerprints, silence, frame statistics, and later still
+images. Intro and credits detection (`internal/intromarkers`) run all of
+their ffmpeg processes through it.
 
 ## Scope
 
@@ -40,6 +40,13 @@ it. Rules:
   `start`, `exit`, `args`) and a bounded tail of ffmpeg's log. The error
   message quotes only ffmpeg's last log line, cleaned so it can be stored in a
   text column.
+- `Classify` names a failed run's cause from its last attempt: `canceled`,
+  `timeout`, `killed` (a signal ffmpeg did not ask for), `no_stream` (an
+  output's stream is missing), `unsupported` (this ffmpeg lacks a filter,
+  option, muxer, or decoder), `invalid_data` (the input cannot be demuxed or
+  decoded), or `failed`. `Reason.Permanent` is true only for `invalid_data`
+  and `no_stream`, which the file itself causes; a caller may record those as
+  unusable and back off on the rest.
 - Every run is recorded in the subprocess metrics under the runner's
   workload; intro detection uses `analysis`.
 
@@ -47,13 +54,33 @@ Supported today:
 
 | Part | Values |
 |---|---|
-| Sampling mode | `Window` (start and duration; `KeyframesOnly` is reserved for video outputs) |
-| Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals) |
-| Attempts | software only; hardware attempts need a video output |
+| Sampling mode | `Window` (start and duration; `KeyframesOnly` decodes only video keyframes and needs `Stats`) |
+| Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals), `Stats` (per-frame picture statistics) |
+| Attempts | software only |
 
-Planned additions, each landing with its first consumer: frame statistics
-(`Stats`), keyframe sampling at chosen times (`Samples`), an accurate single
-frame (`At`), and still images (`Images`) with hardware decode.
+Audio and `Stats` may share one run: ffmpeg reads the input once and writes
+the audio output first and the statistics of the first video stream
+(`-map 0:V:0`) second, each with its own `-t`.
+
+`Stats` crops each frame to its centered `CropWidth` by `CropHeight` share,
+scales it to `Width` pixels wide, converts it to 8-bit 4:2:0, and measures it
+with one `blackframe` per entry of `BlackThresholds` and with `signalstats`.
+`metadata=print` logs each frame's time and values. The runner joins them by
+frame index: both filters count the frames of one linear chain, and each
+filter instance is told apart by its position in the chain
+(`Parsed_blackframe_3`). A frame reports its absolute time, the share of
+pixels darker than each threshold (`PBlack`), and luma and saturation
+minimum, 10th percentile, average, 90th percentile, and maximum. A frame
+missing any value, such as one cut short when ffmpeg stopped, is dropped.
+
+Outputs read from ffmpeg's log run at `-loglevel repeat+info`: without
+`repeat`, ffmpeg folds identical consecutive lines into "Last message
+repeated N times" and per-frame values would be lost. Fingerprint-only runs
+keep `-loglevel warning`.
+
+Planned additions, each landing with its first consumer: keyframe sampling
+at chosen times (`Samples`), an accurate single frame (`At`), and still
+images (`Images`) with hardware decode.
 
 ## Argument stability
 
@@ -72,7 +99,9 @@ option, in the order intro detection has always used.
 
 `LoadCapabilities` lists an ffmpeg binary's filters and muxers, and checks
 that the chromaprint muxer can write raw fingerprints. `Capabilities.Require`
-reports the first thing a request needs that the binary lacks.
+reports the first thing a request needs that the binary lacks: the
+chromaprint muxer for a fingerprint, `silencedetect` for silence, and
+`blackframe`, `signalstats`, and `metadata` for `Stats`.
 
 - Inventories are cached per binary identity (resolved path, size, and
   modification time, the same identity `tonemap` uses), so replacing ffmpeg in

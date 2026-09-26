@@ -40,12 +40,13 @@ func (c Capabilities) HasMuxer(name string) bool {
 	return ok
 }
 
+// statsFilters are the filters a Stats output needs beyond ffmpeg's
+// built-in crop, scale, and format.
+var statsFilters = []string{filterBlackframe, filterSignalstats, filterMetadata}
+
 // Require reports the first thing req needs that the binary lacks.
 func (c Capabilities) Require(req Request) error {
-	if req.Audio == nil {
-		return nil
-	}
-	if req.Audio.Fingerprint {
+	if req.Audio != nil && req.Audio.Fingerprint {
 		if !c.HasMuxer("chromaprint") {
 			return errors.New("ffmpeg does not list the chromaprint muxer")
 		}
@@ -53,8 +54,15 @@ func (c Capabilities) Require(req Request) error {
 			return errors.New("ffmpeg chromaprint muxer does not advertise raw fingerprint output")
 		}
 	}
-	if req.Audio.Silence != nil && !c.HasFilter("silencedetect") {
+	if req.Audio != nil && req.Audio.Silence != nil && !c.HasFilter("silencedetect") {
 		return errors.New("ffmpeg does not list the silencedetect filter")
+	}
+	if req.Stats != nil {
+		for _, filter := range statsFilters {
+			if !c.HasFilter(filter) {
+				return fmt.Errorf("ffmpeg does not list the %s filter", filter)
+			}
+		}
 	}
 	return nil
 }

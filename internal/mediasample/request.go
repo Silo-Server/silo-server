@@ -12,7 +12,7 @@ import (
 // turns it into ffmpeg arguments.
 //
 // A request names exactly one sampling mode (today only Window) and at least
-// one output (today only Audio).
+// one output (Audio, Stats, or both).
 type Request struct {
 	// Input is the media file to decode.
 	Input string `json:"input"`
@@ -20,6 +20,9 @@ type Request struct {
 	Window *Window `json:"window,omitempty"`
 	// Audio asks for audio features of the sampled span.
 	Audio *AudioOutput `json:"audio,omitempty"`
+	// Stats asks for per-frame picture statistics of the sampled span's first
+	// video stream.
+	Stats *StatsOutput `json:"stats,omitempty"`
 	// Attempts are tried in order until one succeeds. Empty means a single
 	// software attempt bounded only by the caller's context.
 	Attempts []Attempt `json:"attempts,omitempty"`
@@ -35,8 +38,8 @@ type Request struct {
 type Window struct {
 	StartSeconds    float64 `json:"start_seconds"`
 	DurationSeconds float64 `json:"duration_seconds"`
-	// KeyframesOnly decodes only video keyframes. It needs a video output,
-	// which no request type offers yet, so Validate rejects it for now.
+	// KeyframesOnly decodes only video keyframes. It needs a video output
+	// (Stats); audio outputs still read every audio frame.
 	KeyframesOnly bool `json:"keyframes_only,omitempty"`
 }
 
@@ -58,10 +61,27 @@ type SilenceParams struct {
 	MinSeconds float64 `json:"min_seconds"`
 }
 
+// StatsOutput selects per-frame picture statistics. Each frame is cropped to
+// its center, scaled down, and converted to 8-bit 4:2:0 before it is
+// measured, so statistics compare across sources of any size and depth.
+type StatsOutput struct {
+	// CropWidth and CropHeight are the centered share of the picture kept,
+	// in (0, 1]. Cropping drops letterbox bars and corner logos.
+	CropWidth  float64 `json:"crop_width"`
+	CropHeight float64 `json:"crop_height"`
+	// Width is the width, in pixels, the cropped picture is scaled to; the
+	// height keeps the aspect ratio. It must be even.
+	Width int `json:"width"`
+	// BlackThresholds are luma levels. For each one, a frame reports the
+	// percentage of its pixels darker than the level (FrameStats.PBlack, in
+	// this order).
+	BlackThresholds []int `json:"black_thresholds,omitempty"`
+}
+
 // Attempt is one decode attempt.
 type Attempt struct {
-	// Hardware decodes on the Runner's configured hardware. Only video
-	// outputs can use it, and none exist yet, so Validate rejects it for now.
+	// Hardware decodes on the Runner's configured hardware. No output uses
+	// it yet, so Validate rejects it for now.
 	Hardware bool `json:"hardware,omitempty"`
 	// TimeoutSeconds bounds the attempt. Zero means only the caller's context
 	// bounds it.
@@ -75,6 +95,8 @@ const (
 	maxAttemptSeconds = 24 * 60 * 60
 	minSilenceNoiseDB = -200
 	maxSilenceSeconds = 3600
+	maxStatsWidth     = 3840
+	maxBlackLevels    = 8
 )
 
 // Validate reports whether the request can be run.
@@ -91,8 +113,16 @@ func (r Request) Validate() error {
 	if !r.hasOutput() {
 		return errors.New("request has no output")
 	}
+	if r.Window.KeyframesOnly && r.Stats == nil {
+		return errors.New("a keyframes-only window needs a video output")
+	}
 	if r.Audio != nil && r.Audio.Silence != nil {
 		if err := r.Audio.Silence.validate(); err != nil {
+			return err
+		}
+	}
+	if r.Stats != nil {
+		if err := r.Stats.validate(); err != nil {
 			return err
 		}
 	}
@@ -107,13 +137,17 @@ func (r Request) Validate() error {
 			return fmt.Errorf("attempt %d timeout must be between 0 and %d seconds", i+1, maxAttemptSeconds)
 		}
 		if attempt.Hardware {
-			return fmt.Errorf("attempt %d asks for hardware decode, which needs a video output", i+1)
+			return fmt.Errorf("attempt %d asks for hardware decode, which sampling does not offer yet", i+1)
 		}
 	}
 	return nil
 }
 
 func (r Request) hasOutput() bool {
+	return r.hasAudioOutput() || r.Stats != nil
+}
+
+func (r Request) hasAudioOutput() bool {
 	return r.Audio != nil && (r.Audio.Fingerprint || r.Audio.Silence != nil)
 }
 
@@ -128,7 +162,7 @@ func (r Request) attempts() []Attempt {
 // parsesStderr reports whether an output is read from ffmpeg's log, which
 // then has to run at info level.
 func (r Request) parsesStderr() bool {
-	return r.Audio != nil && r.Audio.Silence != nil
+	return (r.Audio != nil && r.Audio.Silence != nil) || r.Stats != nil
 }
 
 func (w Window) validate() error {
@@ -138,8 +172,25 @@ func (w Window) validate() error {
 	if !finite(w.DurationSeconds) || w.DurationSeconds <= 0 {
 		return errors.New("window duration must be a positive number of seconds")
 	}
-	if w.KeyframesOnly {
-		return errors.New("a keyframes-only window needs a video output")
+	return nil
+}
+
+func (s StatsOutput) validate() error {
+	for _, share := range []float64{s.CropWidth, s.CropHeight} {
+		if !finite(share) || share <= 0 || share > 1 {
+			return errors.New("stats crop must keep a share of the picture in (0, 1]")
+		}
+	}
+	if s.Width < 2 || s.Width > maxStatsWidth || s.Width%2 != 0 {
+		return fmt.Errorf("stats width %d must be even and between 2 and %d", s.Width, maxStatsWidth)
+	}
+	if len(s.BlackThresholds) > maxBlackLevels {
+		return fmt.Errorf("stats has %d black thresholds, at most %d are allowed", len(s.BlackThresholds), maxBlackLevels)
+	}
+	for _, threshold := range s.BlackThresholds {
+		if threshold < 0 || threshold > 255 {
+			return fmt.Errorf("black threshold %d is outside 0..255", threshold)
+		}
 	}
 	return nil
 }

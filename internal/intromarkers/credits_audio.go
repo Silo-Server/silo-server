@@ -11,7 +11,8 @@ import (
 // so tail fingerprints are compared across the season like intros. The
 // validation found real credits confirmed by two or more partner episodes;
 // a single confirmation, or a short match most of the season does not share,
-// was often a recurring music cue instead.
+// was often a recurring music cue instead. creditsAudioFor rates a match and
+// combineCredits decides what it places.
 const (
 	creditsAudioConsistentConfidence   = 0.90
 	creditsAudioInconsistentConfidence = 0.65
@@ -47,51 +48,6 @@ func creditsProfile() matchProfile {
 	}
 }
 
-// compareCreditsFingerprints matches the season's tail fingerprints and
-// returns the credits audio alone can place, by file ID.
-func compareCreditsFingerprints(inputs []fingerprintInput) (map[int]Segment, int) {
-	durations := make(map[int]float64, len(inputs))
-	for _, input := range inputs {
-		durations[input.Candidate.FileID] = input.Candidate.DurationSeconds
-	}
-	profile := creditsProfile()
-	segments := map[int]Segment{}
-	rejected := 0
-	for fileID, match := range matchSeason(inputs, profile) {
-		segment, ok := rateCreditsMatch(match, durations[fileID], profile)
-		if !ok {
-			rejected++
-			continue
-		}
-		segments[fileID] = segment
-	}
-	return segments, rejected
-}
-
-// rateCreditsMatch rates a file's credits audio match, or rejects it. Only a
-// strong match counts: confirmed by at least two partner episodes, at least
-// creditsShortSeconds long unless the season agrees on its duration, and
-// running to the end of the file. Without video to corroborate it, a match
-// that stops early is most likely a recurring cue.
-func rateCreditsMatch(match seasonMatch, duration float64, profile matchProfile) (Segment, bool) {
-	segment := match.Segment
-	if match.Confirmations < creditsMinimumConfirmations {
-		return Segment{}, false
-	}
-	if segment.End-segment.Start < profile.ShortSeconds && !match.SeasonConsistent {
-		return Segment{}, false
-	}
-	if !reachesEOF(segment.End, duration) {
-		return Segment{}, false
-	}
-	segment.Confidence = profile.InconsistentConfidence
-	if match.SeasonConsistent {
-		segment.Confidence = profile.ConsistentConfidence
-	}
-	segment.Algorithm = profile.Algorithm
-	return segment, true
-}
-
 // ExtractCredits fingerprints the candidate's tail audio for credits
 // detection.
 func (e *ChromaprintExtractor) ExtractCredits(ctx context.Context, candidate Candidate) (Fingerprint, bool, error) {
@@ -120,9 +76,9 @@ func (e *ChromaprintExtractor) ExtractCredits(ctx context.Context, candidate Can
 // fingerprint.
 const creditsFingerprintDetailNoAudio = "no_audio"
 
-// loadCreditsArtifacts reads the stored credits fingerprints of candidates
-// in one query within the lookup bound.
-func (a *Analyzer) loadCreditsArtifacts(ctx context.Context, candidates []Candidate) (map[int]Artifact, error) {
+// loadCreditsArtifacts reads the stored credits artifacts of candidates
+// under key in one query within the lookup bound.
+func (a *Analyzer) loadCreditsArtifacts(ctx context.Context, candidates []Candidate, key ArtifactKey) (map[int]Artifact, error) {
 	fileIDs := make([]int, 0, len(candidates))
 	for _, candidate := range candidates {
 		fileIDs = append(fileIDs, candidate.FileID)
@@ -130,7 +86,7 @@ func (a *Analyzer) loadCreditsArtifacts(ctx context.Context, candidates []Candid
 	var artifacts map[int]Artifact
 	err := a.withLookupSlot(ctx, func() error {
 		var err error
-		artifacts, err = a.repo.LoadArtifacts(ctx, fileIDs, creditsFingerprintKey())
+		artifacts, err = a.repo.LoadArtifacts(ctx, fileIDs, key)
 		return err
 	})
 	return artifacts, err

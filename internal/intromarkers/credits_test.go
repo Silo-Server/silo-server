@@ -96,9 +96,31 @@ func creditsSeason(episodes int, sharedSeconds, gapSeconds float64) []fingerprin
 	return inputs
 }
 
-func TestCompareCreditsFingerprintsFindsSharedEnding(t *testing.T) {
+// placeAudioCredits compares a season's tail fingerprints and places each
+// file's credits from its audio match alone, as a group without video does.
+func placeAudioCredits(inputs []fingerprintInput) (map[int]Segment, int) {
+	profile := creditsProfile()
+	segments := map[int]Segment{}
+	rejected := 0
+	for _, input := range inputs {
+		match, ok := matchSeason(inputs, profile)[input.Candidate.FileID]
+		if !ok {
+			continue
+		}
+		audio := creditsAudioFor(match, profile)
+		segment, ok := combineCredits(input.Candidate, creditsEvidence{Audio: &audio}, creditsLimitsFor(false))
+		if !ok {
+			rejected++
+			continue
+		}
+		segments[input.Candidate.FileID] = segment
+	}
+	return segments, rejected
+}
+
+func TestAudioCreditsFindSharedEnding(t *testing.T) {
 	inputs := creditsSeason(4, 60, 0)
-	segments, rejected := compareCreditsFingerprints(inputs)
+	segments, rejected := placeAudioCredits(inputs)
 	if len(segments) != 4 || rejected != 0 {
 		t.Fatalf("placed %d files with %d rejected, want 4 and 0", len(segments), rejected)
 	}
@@ -116,29 +138,29 @@ func TestCompareCreditsFingerprintsFindsSharedEnding(t *testing.T) {
 	}
 }
 
-func TestCompareCreditsFingerprintsRequiresEOF(t *testing.T) {
+func TestAudioCreditsWithoutVideoRequireEOF(t *testing.T) {
 	// Shared audio that stops a minute before the end is more likely a
 	// recurring cue than the credits.
-	segments, rejected := compareCreditsFingerprints(creditsSeason(4, 60, 60))
+	segments, rejected := placeAudioCredits(creditsSeason(4, 60, 60))
 	if len(segments) != 0 || rejected != 4 {
 		t.Fatalf("placed %d files with %d rejected, want none placed and 4 rejected", len(segments), rejected)
 	}
 }
 
-func TestCompareCreditsFingerprintsNeedsTwoConfirmations(t *testing.T) {
+func TestAudioCreditsWithoutVideoNeedTwoConfirmations(t *testing.T) {
 	// Two episodes confirm each other once each: weak evidence, not written
 	// without video.
-	segments, rejected := compareCreditsFingerprints(creditsSeason(2, 60, 0))
+	segments, rejected := placeAudioCredits(creditsSeason(2, 60, 0))
 	if len(segments) != 0 || rejected != 2 {
 		t.Fatalf("placed %d files with %d rejected, want none placed and 2 rejected", len(segments), rejected)
 	}
-	segments, _ = compareCreditsFingerprints(creditsSeason(3, 60, 0))
+	segments, _ = placeAudioCredits(creditsSeason(3, 60, 0))
 	if len(segments) != 3 {
 		t.Fatalf("placed %d files of three confirming episodes, want 3", len(segments))
 	}
 }
 
-func TestRateCreditsMatch(t *testing.T) {
+func TestCreditsAudioWithoutVideo(t *testing.T) {
 	profile := creditsProfile()
 	const duration = 1500.0
 	match := func(start, end float64, confirmations int, consistent bool) seasonMatch {
@@ -158,13 +180,14 @@ func TestRateCreditsMatch(t *testing.T) {
 		{"ends within the EOF snap", match(1300, 1486, 4, true), 0.90},
 	}
 	for _, tc := range cases {
-		segment, ok := rateCreditsMatch(tc.match, duration, profile)
+		audio := creditsAudioFor(tc.match, profile)
+		segment, ok := combineCredits(Candidate{DurationSeconds: duration}, creditsEvidence{Audio: &audio}, creditsLimitsFor(false))
 		if ok != (tc.want > 0) {
 			t.Errorf("%s: ok = %v, want %v", tc.name, ok, tc.want > 0)
 			continue
 		}
-		if ok && (segment.Confidence != tc.want || segment.Algorithm != CreditsAudioAlgorithm) {
-			t.Errorf("%s: %+v, want confidence %.2f", tc.name, segment, tc.want)
+		if ok && (segment.Confidence != tc.want || segment.Algorithm != CreditsAudioAlgorithm || segment.End != duration) {
+			t.Errorf("%s: %+v, want confidence %.2f to the end of the file", tc.name, segment, tc.want)
 		}
 	}
 }

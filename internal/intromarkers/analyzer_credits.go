@@ -85,8 +85,11 @@ func copyCreditsToVersion(source chapterSourceMarker, target Candidate) (Segment
 	return applyCreditsGuards(segment, target, creditsLimitsFor(false))
 }
 
-// analyzeCreditsGroup compares the tail fingerprints of a season group and
-// writes the credits audio places on its own.
+// analyzeCreditsGroup places the credits of a season group's files from
+// their tail evidence: the season's tail audio compared across episodes, and
+// each file's tail keyframes and silences when opts.creditsTail is set. A
+// group of one episode has no audio to compare and uses video alone. Files
+// with chapter credits were settled by processCreditsChapters, which wins.
 func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup, opts analyzeGroupOptions) (RunSummary, error) {
 	summary := RunSummary{}
 	state := SeasonState{
@@ -107,10 +110,31 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 		return summary, nil
 	}
 
-	inputs, counts, err := a.ensureFingerprints(ctx, kindCredits, group.Candidates)
-	summary.CreditsFingerprintCacheHits += counts.hits
-	summary.CreditsFingerprintsComputed += counts.computed
-	summary.CreditsFingerprintErrors += counts.failed
+	var targets []Candidate
+	for _, candidate := range group.Candidates {
+		if !shouldPatchGroupFile(candidate.FileID, opts.patchFileIDs) {
+			continue
+		}
+		if _, ok := DetectChapterCredits(candidate.Chapters, candidate.DurationSeconds, false); ok {
+			continue
+		}
+		targets = append(targets, candidate)
+	}
+	inputs, err := a.ensureCreditsInputs(ctx, group.Candidates, creditsInputOptions{
+		fingerprints: state.EpisodeCount >= 2,
+		tails:        opts.creditsTail,
+		tailFileIDs:  candidateFileIDs(targets),
+	})
+	summary.CreditsFingerprintCacheHits += inputs.fingerprintCounts.hits
+	summary.CreditsFingerprintsComputed += inputs.fingerprintCounts.computed
+	summary.CreditsFingerprintErrors += inputs.fingerprintCounts.failed
+	summary.CreditsTailCacheHits += inputs.tailCounts.hits
+	summary.CreditsTailScansComputed += inputs.tailCounts.computed
+	summary.CreditsTailScanErrors += inputs.tailCounts.failed
+	summary.CreditsTailUnusable += inputs.tailCounts.unusable
+	counts := inputs.fingerprintCounts
+	counts.failed += inputs.tailCounts.failed
+	counts.deferred += inputs.tailCounts.deferred
 	persist := func(status string) error {
 		settleSeasonState(&state, status, counts)
 		if !opts.persistState {
@@ -127,42 +151,60 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 		summary.Errors = append(summary.Errors, err.Error())
 		return summary, err
 	}
-	if distinctFingerprintEpisodeCount(inputs) < 2 {
-		state.LastError = "too few fingerprints"
-		summary.CreditsGroupsNotFound++
-		return summary, persist(seasonStatusNotFound)
-	}
 
-	segments, rejected := compareCreditsFingerprints(inputs)
-	summary.CreditsRejected += rejected
-	if len(segments) == 0 {
-		summary.CreditsGroupsNotFound++
-		return summary, persist(seasonStatusNotFound)
+	var matches map[int]seasonMatch
+	if distinctFingerprintEpisodeCount(inputs.fingerprints) >= 2 {
+		matches = matchSeason(inputs.fingerprints, creditsProfile())
 	}
-
-	byFileID := make(map[int]Candidate, len(group.Candidates))
-	for _, candidate := range group.Candidates {
-		byFileID[candidate.FileID] = candidate
-	}
+	profile := creditsProfile()
 	limits := creditsLimitsFor(false)
-	for fileID, segment := range segments {
-		if !shouldPatchGroupFile(fileID, opts.patchFileIDs) {
+	found := 0
+	written := 0
+	for _, candidate := range targets {
+		if err := ctx.Err(); err != nil {
+			return summary, err
+		}
+		evidence := creditsEvidence{}
+		if match, ok := matches[candidate.FileID]; ok {
+			audio := creditsAudioFor(match, profile)
+			evidence.Audio = &audio
+		}
+		if tail := inputs.tails[candidate.FileID]; tail != nil {
+			evidence.Keyframes = classifyKeyframes(tail.Frames)
+			evidence.Silences = tail.Silences
+		}
+		if evidence.Audio == nil && len(evidence.Keyframes) == 0 {
 			continue
 		}
-		candidate := byFileID[fileID]
-		segment, ok := applyCreditsGuards(segment, candidate, limits)
+		segment, ok := combineCredits(candidate, evidence, limits)
 		if !ok {
-			summary.CreditsRejected++
+			if evidence.Audio != nil {
+				summary.CreditsRejected++
+			}
 			continue
 		}
-		if a.patchCredits(ctx, candidate, segment, &summary) {
+		found++
+		if !a.patchCredits(ctx, candidate, segment, &summary) {
+			continue
+		}
+		written++
+		switch segment.Algorithm {
+		case CreditsAudioVideoAlgorithm:
+			summary.CreditsAudioVideoMarkersWritten++
+		case CreditsVideoAlgorithm:
+			summary.CreditsVideoMarkersWritten++
+		default:
 			summary.CreditsAudioMarkersWritten++
 		}
 	}
 	if err := ctx.Err(); err != nil {
 		return summary, err
 	}
-	state.MarkersWritten = summary.CreditsAudioMarkersWritten
+	if found == 0 {
+		summary.CreditsGroupsNotFound++
+		return summary, persist(seasonStatusNotFound)
+	}
+	state.MarkersWritten = written
 	return summary, persist(seasonStatusComplete)
 }
 

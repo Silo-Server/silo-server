@@ -37,7 +37,7 @@ an episode with an online intro can still get local credits.
 
 `markers.detection_workers` sizes local detection: how many seasons the
 **Detect markers on this server** task analyzes at once, which also bounds how
-many ffmpeg processes read audio. It defaults to `1` and accepts 1 to 64.
+many ffmpeg processes read audio and video. It defaults to `1` and accepts 1 to 64.
 Detection mostly waits on reading each file's opening and closing minutes, so
 a higher value finishes a large library sooner on fast storage, at the cost of
 load that competes with playback. Analysis started from playback always has one

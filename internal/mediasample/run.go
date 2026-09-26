@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
@@ -70,71 +69,13 @@ type Result struct {
 	// Silences holds the silences found, ordered by start, when the request
 	// asked for silence detection.
 	Silences []Interval `json:"silences,omitempty"`
+	// Frames holds the statistics of each decoded video frame, in decode
+	// order, when the request asked for Stats. It is empty when the sampled
+	// span had no frame to decode.
+	Frames []FrameStats `json:"frames,omitempty"`
 	// Decoder names the attempt that produced the result: "software", or
 	// "hardware:<accel>".
 	Decoder string `json:"decoder"`
-}
-
-// Reason classifies why an attempt failed.
-type Reason string
-
-const (
-	// ReasonCanceled means the caller's context ended.
-	ReasonCanceled Reason = "canceled"
-	// ReasonTimeout means the attempt's own timeout passed.
-	ReasonTimeout Reason = "timeout"
-	// ReasonStart means ffmpeg could not be started.
-	ReasonStart Reason = "start"
-	// ReasonExit means ffmpeg exited unsuccessfully.
-	ReasonExit Reason = "exit"
-	// ReasonArgs means the attempt could not be turned into arguments.
-	ReasonArgs Reason = "args"
-)
-
-// AttemptError is one failed attempt.
-type AttemptError struct {
-	Decoder string
-	Reason  Reason
-	Err     error
-	// StderrTail is the end of ffmpeg's log, bounded in size.
-	StderrTail string
-}
-
-// Error reports a run in which every attempt failed.
-type Error struct {
-	// Reason is the last attempt's reason.
-	Reason   Reason
-	Attempts []AttemptError
-}
-
-func (e *Error) Error() string {
-	if len(e.Attempts) == 0 {
-		return fmt.Sprintf("ffmpeg sampling failed (%s)", e.Reason)
-	}
-	last := e.Attempts[len(e.Attempts)-1]
-	var b strings.Builder
-	fmt.Fprintf(&b, "ffmpeg sampling failed (%s)", e.Reason)
-	if len(e.Attempts) > 1 {
-		fmt.Fprintf(&b, " after %d attempts", len(e.Attempts))
-	}
-	if last.Err != nil {
-		fmt.Fprintf(&b, ": %v", last.Err)
-	}
-	if line := lastLine(last.StderrTail); line != "" {
-		fmt.Fprintf(&b, ": %s", line)
-	}
-	return b.String()
-}
-
-// Unwrap exposes every attempt's error, so errors.Is sees a context error.
-func (e *Error) Unwrap() []error {
-	errs := make([]error, 0, len(e.Attempts))
-	for _, attempt := range e.Attempts {
-		if attempt.Err != nil {
-			errs = append(errs, attempt.Err)
-		}
-	}
-	return errs
 }
 
 // Run validates req and makes its attempts in order until one succeeds. A
@@ -192,6 +133,11 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt) (R
 		silences = newSilenceParser(req.Window.StartSeconds)
 		handlers = append(handlers, silences.line)
 	}
+	var stats *statsParser
+	if req.Stats != nil {
+		stats = newStatsParser(buildStatsGraph(*req.Stats), req.Window.StartSeconds)
+		handlers = append(handlers, stats.line)
+	}
 	router := newStderrRouter(handlers...)
 	stderr, waitStderr := router.start()
 
@@ -232,6 +178,9 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt) (R
 	}
 	if silences != nil {
 		result.Silences = silences.result()
+	}
+	if stats != nil {
+		result.Frames = stats.result()
 	}
 	return result, nil
 }

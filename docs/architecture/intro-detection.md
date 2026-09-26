@@ -92,20 +92,20 @@ end within 15 seconds of the end of the file becomes the end of the file.
    within three seconds copies the chapter result, keeping its distance from
    the end of the file (`credits-version-copy:v1`, confidence 0.85). Credits
    that ran to the end of the source run to the end of the copy.
-3. **Tail Chromaprint.** Each episode's tail window is fingerprinted once
-   and cached, then compared across the season with the intro matcher's
-   neighbor search and consensus. Only strong matches are written
-   (`credits-audio:v1`): at least two partner episodes must agree, a match
-   under 20 seconds must share the season's usual credits duration (within
-   three seconds), and the match must reach the end of the file. A shorter
-   or earlier shared passage is usually a recurring music cue. A match the
-   season agrees on rates 0.90, others 0.65. Boundaries do not snap to
-   chapters.
+3. **Tail audio and video.** Each episode's tail is read once and cached: a
+   Chromaprint fingerprint of its audio, its silences, and statistics of
+   every video keyframe (see [Tail pass](#tail-pass)). The fingerprints are
+   compared across the season with the intro matcher's neighbor search and
+   consensus; boundaries do not snap to chapters. The audio match and the
+   keyframes are then combined per file (see [Combining](#combining)).
 
 Before any credits marker other than a chapter's is written, it must start
 inside the tail window and after the file's intro ends, last 15 to 450
 seconds, end by the end of the file, and rate at least 0.55. A preview marker
 that starts inside the credits ends them.
+
+An episode alone in its season group has no partner to compare audio with;
+with the tail pass available it still gets credits from chapters and video.
 
 Playback analysis looks only for the kinds the played file lacks, so an
 episode with an intro and no credits runs the credits steps alone. Unlike an
@@ -113,6 +113,73 @@ intro group, a credits season group whose stored analysis still stands is not
 compared again from playback: most episodes have no credits local analysis
 can find, and every start would otherwise repeat the comparison. Admin
 refresh compares both kinds again.
+
+### Tail pass
+
+One ffmpeg run per file (`mediasample` `Window` over the tail, keyframes
+only) produces the fingerprint when it is not cached, silences of at least
+0.5 seconds at -50 dB, and for each video keyframe: the share of pixels
+below luma 20, 26, and 32, and luma and saturation statistics, measured on
+the center 90 by 80 percent of the picture scaled to 480 pixels wide. Audio
+is read in full either way, so the video adds decode time but no reads. The
+pass runs only for files whose credits local analysis may write and that
+have no chapter credits; other files of the season get an audio-only
+fingerprint. A file without audio gets its pass without audio. If ffmpeg
+lacks a filter the pass needs, credits come from chapters and audio alone.
+
+Each keyframe is classified against the tail's black level, the 1st
+percentile of its 10th-percentile luma, capped at 30:
+
+- **Lettered:** a true-black background with text. At least 85 percent of
+  the picture is below luma 32, the background is within 2 of the black
+  level, saturation is near zero, and at least 75 percent is below a strict
+  threshold about four levels above black (20, 26, or 32 by black level),
+  with something at least 60 levels brighter. Dark scenes pass the loose
+  test but not the strict one.
+- **Black:** the same background without text.
+- **Card:** a flat background at least 24 levels above black, with text at
+  least 60 levels from it and moderate saturation.
+- **Mostly black:** passes every lettered test except coverage, with 70 to 85
+  percent below luma 32. Dense columns of names and logos on black look like
+  this.
+- Anything else is story.
+
+A run starts at a text keyframe (lettered or card), continues over text,
+black, and mostly black keyframes no more than 20 seconds apart, and ends at
+its last text keyframe. It counts when it spans at least 15 seconds, holds at
+least three text keyframes, and text is more than half of its keyframes other
+than mostly black ones. Mostly black keyframes only join text: they never
+start or end a run, and a start never moves back over them.
+
+### Combining
+
+1. Chapter credits win (step 1).
+2. A strong audio match (two or more confirming partners, and at least 20
+   seconds or the season's usual duration) grows over runs that overlap it or
+   lie within 20 seconds. If the first such run starts up to 60 seconds after
+   the match and only story or mostly black keyframes lie between, the
+   credits start there: the match often begins on music over the last shot.
+   Credits that video moved rate 0.05 higher, up to 0.95
+   (`credits-audio:video:v1`); otherwise the match keeps its rating
+   (`credits-audio:v1`: 0.90 when the season agrees on its duration, 0.65
+   otherwise).
+3. A run reaching the end of the file that starts more than 20 seconds after
+   an audio match that stops early wins over the match, which is most likely
+   a recurring cue.
+4. A match one partner confirmed counts only with a run near it (0.65). A
+   match no run corroborates must reach the end of the file.
+5. Without usable audio, the last cluster of runs is the credits
+   (`credits-video:v1`, 0.60 when at least half its text is on black, 0.55
+   otherwise). It must end within 120 seconds of the end of the file; an
+   earlier run was a dark scene or a title card inside the story. Its start
+   moves back over the true-black keyframes just before it, then to the end
+   of a silence that lies between the last story keyframe and the credits.
+6. An end within 15 seconds of the end of the file moves to it, then the
+   guards above apply.
+
+These rules were validated on frame-checked episodes and movies from several
+series; every start they placed early was checked against frames and cut no
+story.
 
 Automatic contribution to online providers stays intro-only; detected credits
 are contributed only on request.
@@ -124,9 +191,19 @@ Credits versions and caches:
   parameters, so they never share a key with intro fingerprints. A tail with
   no audio is stored `unusable`, and a failed extraction `failed` with
   backoff.
+- Tail passes are `credits_tail` rows, keyed the same way by the pass
+  parameters. Their payload (`credits-tail:v1`) holds an 18-byte record per
+  keyframe (offset, the three black shares, and the luma and saturation
+  statistics) followed by the silences. A tail is stored `unusable` without
+  decoding it when the file has no video (`no_video`) or an all-intra codec
+  such as ProRes or MJPEG (`unsupported_codec`); after decoding when it has
+  more than 5000 keyframes (`too_many_keyframes`) or fewer than one per 30
+  seconds (`sparse`); and when ffmpeg fails in a way the file itself causes
+  (`invalid_data`, `no_stream`). Other failures are stored `failed` with
+  backoff.
 - `CreditsAnalysisConfigHash` keys credits season state, apart from intro
-  state. Bump `CreditsBehaviorVersion` to re-run every credits comparison over
-  cached fingerprints.
+  state, and covers both artifact keys. Bump `CreditsBehaviorVersion` to
+  re-run every credits comparison over cached fingerprints and tails.
 - Credits algorithms rank in `markers.scannerAlgorithmPriority` as
   `credits-chapter:v1` (30), `credits-version-copy:v1` (24),
   `credits-audio:video:v1` (22), `credits-audio:v1` (21), and

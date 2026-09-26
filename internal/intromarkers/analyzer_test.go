@@ -25,7 +25,7 @@ type fakeIntroRepository struct {
 	patches            []MarkerPatch
 	silenceAttempts    map[int]SilenceRefinementAttempt
 	upsertedAttempts   []SilenceRefinementAttempt
-	artifacts          map[int]Artifact
+	artifacts          map[artifactSlot]Artifact
 	artifactFailures   []ArtifactFailure
 	groupListCalls     int
 }
@@ -128,12 +128,26 @@ func (f *fakeIntroRepository) UpsertFingerprint(context.Context, Fingerprint) er
 	return nil
 }
 
+// artifactSlot is where the fake repository keeps a file's artifact of one
+// kind.
+type artifactSlot struct {
+	fileID int
+	kind   string
+}
+
+// artifact returns the stored artifact of kind for a file.
+func (f *fakeIntroRepository) artifact(fileID int, kind string) Artifact {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.artifacts[artifactSlot{fileID, kind}]
+}
+
 func (f *fakeIntroRepository) LoadArtifacts(_ context.Context, fileIDs []int, key ArtifactKey) (map[int]Artifact, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	artifacts := map[int]Artifact{}
 	for _, fileID := range fileIDs {
-		if artifact, ok := f.artifacts[fileID]; ok && artifact.ArtifactKey == key {
+		if artifact, ok := f.artifacts[artifactSlot{fileID, key.Kind}]; ok && artifact.ArtifactKey == key {
 			artifact.Payload = append([]byte(nil), artifact.Payload...)
 			artifacts[fileID] = artifact
 		}
@@ -145,9 +159,9 @@ func (f *fakeIntroRepository) UpsertArtifact(_ context.Context, artifact Artifac
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.artifacts == nil {
-		f.artifacts = map[int]Artifact{}
+		f.artifacts = map[artifactSlot]Artifact{}
 	}
-	f.artifacts[artifact.MediaFileID] = artifact
+	f.artifacts[artifactSlot{artifact.MediaFileID, artifact.Kind}] = artifact
 	return nil
 }
 
@@ -156,10 +170,15 @@ func (f *fakeIntroRepository) RecordArtifactFailure(_ context.Context, failure A
 	defer f.mu.Unlock()
 	f.artifactFailures = append(f.artifactFailures, failure)
 	if f.artifacts == nil {
-		f.artifacts = map[int]Artifact{}
+		f.artifacts = map[artifactSlot]Artifact{}
 	}
-	count, retryAfter := nextArtifactFailure(nil, failure)
-	f.artifacts[failure.MediaFileID] = Artifact{
+	slot := artifactSlot{failure.MediaFileID, failure.Kind}
+	var previous *Artifact
+	if stored, ok := f.artifacts[slot]; ok {
+		previous = &stored
+	}
+	count, retryAfter := nextArtifactFailure(previous, failure)
+	f.artifacts[slot] = Artifact{
 		MediaFileID:      failure.MediaFileID,
 		ArtifactKey:      failure.ArtifactKey,
 		ArtifactIdentity: failure.ArtifactIdentity,
@@ -177,6 +196,8 @@ type fakeFingerprintExtractor struct {
 	preflightCalls      int
 	extractCalls        int
 	creditsExtractCalls int
+	// creditsErr is returned by every ExtractCredits call.
+	creditsErr error
 }
 
 func (f *fakeFingerprintExtractor) Preflight(context.Context) error {
@@ -197,7 +218,7 @@ func (f *fakeFingerprintExtractor) ExtractCredits(context.Context, Candidate) (F
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.creditsExtractCalls++
-	return Fingerprint{}, false, nil
+	return Fingerprint{}, false, f.creditsErr
 }
 
 type fakeBoundaryRefiner struct {

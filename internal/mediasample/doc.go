@@ -1,5 +1,5 @@
 // Package mediasample owns every ffmpeg run that decodes a media file for
-// analysis: audio fingerprints and silence today, frame statistics and images
+// analysis: audio fingerprints, silence, and frame statistics today, images
 // as later consumers need them. It never runs playback transcodes or remuxes,
 // and it does not build GPU-encode pipelines; those stay in playback and
 // tonemap.

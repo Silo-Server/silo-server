@@ -18,10 +18,15 @@ const (
 	episodeCreditsTailSeconds    = 450.0
 	episodeCreditsTailFraction   = 0.4
 	episodeCreditsMaximumSeconds = 450.0
+	// episodeCreditsVideoEOFSeconds is how far before the end of an episode
+	// credits placed by video alone may end. An earlier text run was a dark
+	// letterboxed scene or a title card inside the story.
+	episodeCreditsVideoEOFSeconds = 120.0
 
-	movieCreditsTailSeconds    = 900.0
-	movieCreditsTailFraction   = 0.25
-	movieCreditsMaximumSeconds = 900.0
+	movieCreditsTailSeconds     = 900.0
+	movieCreditsTailFraction    = 0.25
+	movieCreditsMaximumSeconds  = 900.0
+	movieCreditsVideoEOFSeconds = 180.0
 )
 
 // Credits confidences. Chapter credits are authoritative; a copy to another
@@ -40,22 +45,27 @@ type creditsLimits struct {
 	tailFraction float64
 	minSeconds   float64
 	maxSeconds   float64
+	// videoEOFSeconds bounds how far before the end of the file credits
+	// placed by video alone may end.
+	videoEOFSeconds float64
 }
 
 func creditsLimitsFor(isMovie bool) creditsLimits {
 	if isMovie {
 		return creditsLimits{
-			tailSeconds:  movieCreditsTailSeconds,
-			tailFraction: movieCreditsTailFraction,
-			minSeconds:   creditsMinimumSeconds,
-			maxSeconds:   movieCreditsMaximumSeconds,
+			tailSeconds:     movieCreditsTailSeconds,
+			tailFraction:    movieCreditsTailFraction,
+			minSeconds:      creditsMinimumSeconds,
+			maxSeconds:      movieCreditsMaximumSeconds,
+			videoEOFSeconds: movieCreditsVideoEOFSeconds,
 		}
 	}
 	return creditsLimits{
-		tailSeconds:  episodeCreditsTailSeconds,
-		tailFraction: episodeCreditsTailFraction,
-		minSeconds:   creditsMinimumSeconds,
-		maxSeconds:   episodeCreditsMaximumSeconds,
+		tailSeconds:     episodeCreditsTailSeconds,
+		tailFraction:    episodeCreditsTailFraction,
+		minSeconds:      creditsMinimumSeconds,
+		maxSeconds:      episodeCreditsMaximumSeconds,
+		videoEOFSeconds: episodeCreditsVideoEOFSeconds,
 	}
 }
 
@@ -109,11 +119,12 @@ func creditsFingerprintKey() ArtifactKey {
 }
 
 // CreditsAnalysisConfigHash keys credits season analysis state: the credits
-// fingerprint key plus CreditsBehaviorVersion. It never equals an intro
-// analysis hash, so the two kinds keep separate season state.
+// fingerprint and tail keys plus CreditsBehaviorVersion. It never equals an
+// intro analysis hash, so the two kinds keep separate season state.
 func CreditsAnalysisConfigHash() string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("credits:%s:%d",
+	sum := sha256.Sum256([]byte(fmt.Sprintf("credits:%s:%s:%d",
 		creditsFingerprintKey().ConfigHash,
+		creditsTailKey().ConfigHash,
 		CreditsBehaviorVersion,
 	)))
 	return hex.EncodeToString(sum[:])[:16]

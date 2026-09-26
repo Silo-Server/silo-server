@@ -31,10 +31,12 @@ const (
 	// Credits algorithm identifiers. Credits season comparisons are keyed by
 	// CreditsAnalysisConfigHash; bump CreditsBehaviorVersion to re-run them
 	// over cached credits fingerprints.
-	CreditsBehaviorVersion      = 1
+	CreditsBehaviorVersion      = 2
 	CreditsChapterAlgorithm     = "credits-chapter:v1"
 	CreditsVersionCopyAlgorithm = "credits-version-copy:v1"
 	CreditsAudioAlgorithm       = "credits-audio:v1"
+	CreditsAudioVideoAlgorithm  = "credits-audio:video:v1"
+	CreditsVideoAlgorithm       = "credits-video:v1"
 
 	// chromaprintDialogueAlgorithmPrefix matches every version of the
 	// subtitle-refined Chromaprint identifier.
@@ -232,19 +234,23 @@ func (c Config) SilenceConfigHash() string {
 }
 
 type Candidate struct {
-	ContentID              string
-	ExtraID                string
-	SeasonNumber           int
-	EpisodeNumber          int
-	FileModifiedAt         *time.Time
-	FileID                 int
-	EpisodeID              string
-	SeasonID               string
-	MediaFolderID          int
-	FilePath               string
-	FileHash               string
-	FileSize               int64
-	DurationSeconds        float64
+	ContentID       string
+	ExtraID         string
+	SeasonNumber    int
+	EpisodeNumber   int
+	FileModifiedAt  *time.Time
+	FileID          int
+	EpisodeID       string
+	SeasonID        string
+	MediaFolderID   int
+	FilePath        string
+	FileHash        string
+	FileSize        int64
+	DurationSeconds float64
+	// CodecVideo and CodecAudio are the probed codecs of the file's first
+	// video and audio streams, empty when it has none.
+	CodecVideo             string
+	CodecAudio             string
 	PresentationGroupKey   string
 	EditionKey             string
 	AudioLanguage          string
@@ -444,4 +450,12 @@ type RunSummary struct {
 	CreditsFingerprintErrors      int `json:"credits_fingerprint_errors"`
 	CreditsAudioMarkersWritten    int `json:"credits_audio_markers_written"`
 	CreditsRejected               int `json:"credits_rejected"`
+	// Credits tail pass counters: keyframe statistics and silences of the
+	// files whose credits are placed, and the markers video helped place.
+	CreditsTailScansComputed        int `json:"credits_tail_scans_computed"`
+	CreditsTailCacheHits            int `json:"credits_tail_cache_hits"`
+	CreditsTailScanErrors           int `json:"credits_tail_scan_errors"`
+	CreditsTailUnusable             int `json:"credits_tail_unusable"`
+	CreditsAudioVideoMarkersWritten int `json:"credits_audio_video_markers_written"`
+	CreditsVideoMarkersWritten      int `json:"credits_video_markers_written"`
 }
