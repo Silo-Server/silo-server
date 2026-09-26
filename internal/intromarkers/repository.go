@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -449,107 +451,346 @@ func (r *Repository) PatchIntroMarker(ctx context.Context, patch IntroMarkerPatc
 	})
 }
 
-func (r *Repository) LoadFingerprint(ctx context.Context, candidate Candidate, cfg Config) (*Fingerprint, error) {
-	cfg = cfg.normalized()
-	var fp Fingerprint
-	var points []byte
-	err := r.pool.QueryRow(ctx, `
-		SELECT media_file_id,
-		       file_hash,
-		       COALESCE(file_size, 0),
-		       duration_seconds,
-		       window_start_seconds,
-		       window_end_seconds,
-		       algorithm_version,
-		       config_hash,
-		       fingerprint_format,
-		       sample_duration_seconds,
-		       points
-		FROM media_intro_fingerprints
+// ErrArtifactKindConflict reports an artifact whose primary key is already
+// held by another kind's row, which means two kinds derived the same
+// config_hash. ArtifactConfigHash prevents that.
+var ErrArtifactKindConflict = errors.New("media analysis artifact key belongs to another kind")
+
+const artifactSelect = `
+	SELECT media_file_id,
+	       kind,
+	       algorithm_version,
+	       config_hash,
+	       file_hash,
+	       COALESCE(file_size, 0),
+	       duration_seconds,
+	       window_start_seconds,
+	       window_end_seconds,
+	       status,
+	       COALESCE(detail, ''),
+	       fingerprint_format,
+	       sample_duration_seconds,
+	       point_count,
+	       points,
+	       failure_count,
+	       COALESCE(last_error, ''),
+	       retry_after,
+	       recorded_by,
+	       updated_at
+	FROM media_intro_fingerprints`
+
+func scanArtifact(row pgx.Row) (Artifact, error) {
+	var a Artifact
+	err := row.Scan(
+		&a.MediaFileID,
+		&a.Kind,
+		&a.AlgorithmVersion,
+		&a.ConfigHash,
+		&a.FileHash,
+		&a.FileSize,
+		&a.DurationSeconds,
+		&a.WindowStartSeconds,
+		&a.WindowEndSeconds,
+		&a.Status,
+		&a.Detail,
+		&a.PayloadFormat,
+		&a.SampleDurationSeconds,
+		&a.ItemCount,
+		&a.Payload,
+		&a.FailureCount,
+		&a.LastError,
+		&a.RetryAfter,
+		&a.RecordedBy,
+		&a.UpdatedAt,
+	)
+	return a, err
+}
+
+// LoadArtifact returns a file's stored artifact for key whatever its status,
+// or nil when there is none. Artifact.State says whether it applies.
+func (r *Repository) LoadArtifact(ctx context.Context, fileID int, key ArtifactKey) (*Artifact, error) {
+	return loadArtifact(ctx, r.pool, fileID, key, false)
+}
+
+// artifactDB is a pool or a transaction.
+type artifactDB interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func loadArtifact(ctx context.Context, q artifactDB, fileID int, key ArtifactKey, forUpdate bool) (*Artifact, error) {
+	query := artifactSelect + `
 		WHERE media_file_id = $1
 		  AND algorithm_version = $2
-		  AND config_hash = $3`,
-		candidate.FileID,
-		AlgorithmVersion,
-		cfg.ConfigHash(),
-	).Scan(
-		&fp.MediaFileID,
-		&fp.FileHash,
-		&fp.FileSize,
-		&fp.DurationSeconds,
-		&fp.WindowStartSeconds,
-		&fp.WindowEndSeconds,
-		&fp.AlgorithmVersion,
-		&fp.ConfigHash,
-		&fp.FingerprintFormat,
-		&fp.SampleDurationSeconds,
-		&points,
-	)
+		  AND config_hash = $3
+		  AND kind = $4`
+	if forUpdate {
+		query += `
+		FOR UPDATE`
+	}
+	a, err := scanArtifact(q.QueryRow(ctx, query, fileID, key.AlgorithmVersion, key.ConfigHash, key.Kind))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("loading intro fingerprint: %w", err)
+		return nil, fmt.Errorf("loading %s artifact for file %d: %w", key.Kind, fileID, err)
 	}
-	fp.Points = mediasample.DecodeRawFingerprint(points)
-	if fp.FileHash != candidate.FileHash ||
-		fp.FileSize != candidate.FileSize ||
-		fp.DurationSeconds != candidate.DurationSeconds ||
-		fp.WindowStartSeconds != 0 ||
-		fp.WindowEndSeconds != analysisWindowEnd(candidate.DurationSeconds, cfg) ||
-		fp.FingerprintFormat != ChromaprintFormat ||
-		len(fp.Points) == 0 {
-		return nil, nil
-	}
-	return &fp, nil
+	return &a, nil
 }
 
-func (r *Repository) UpsertFingerprint(ctx context.Context, fp Fingerprint) error {
-	_, err := r.pool.Exec(ctx, `
-		INSERT INTO media_intro_fingerprints (
-		    media_file_id,
-		    file_hash,
-		    file_size,
-		    duration_seconds,
-		    window_start_seconds,
-		    window_end_seconds,
-		    algorithm_version,
-		    config_hash,
-		    fingerprint_format,
-		    sample_duration_seconds,
-		    point_count,
-		    points
-		) VALUES (
-		    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-		)
-		ON CONFLICT (media_file_id, algorithm_version, config_hash) DO UPDATE SET
-		    file_hash = EXCLUDED.file_hash,
-		    file_size = EXCLUDED.file_size,
-		    duration_seconds = EXCLUDED.duration_seconds,
-		    window_start_seconds = EXCLUDED.window_start_seconds,
-		    window_end_seconds = EXCLUDED.window_end_seconds,
-		    fingerprint_format = EXCLUDED.fingerprint_format,
-		    sample_duration_seconds = EXCLUDED.sample_duration_seconds,
-		    point_count = EXCLUDED.point_count,
-		    points = EXCLUDED.points,
-		    updated_at = NOW()`,
-		fp.MediaFileID,
-		fp.FileHash,
-		fp.FileSize,
-		fp.DurationSeconds,
-		fp.WindowStartSeconds,
-		fp.WindowEndSeconds,
-		fp.AlgorithmVersion,
-		fp.ConfigHash,
-		fp.FingerprintFormat,
-		fp.SampleDurationSeconds,
-		len(fp.Points),
-		mediasample.EncodeRawFingerprint(fp.Points),
+// LoadArtifacts returns the stored artifacts for key of the given files,
+// whatever their status, keyed by file ID. Files without one are absent.
+func (r *Repository) LoadArtifacts(ctx context.Context, fileIDs []int, key ArtifactKey) (map[int]Artifact, error) {
+	artifacts := make(map[int]Artifact, len(fileIDs))
+	if len(fileIDs) == 0 {
+		return artifacts, nil
+	}
+	rows, err := r.pool.Query(ctx, artifactSelect+`
+		WHERE media_file_id = ANY($1::bigint[])
+		  AND algorithm_version = $2
+		  AND config_hash = $3
+		  AND kind = $4`, fileIDs, key.AlgorithmVersion, key.ConfigHash, key.Kind)
+	if err != nil {
+		return nil, fmt.Errorf("loading %s artifacts: %w", key.Kind, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		a, err := scanArtifact(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning %s artifact: %w", key.Kind, err)
+		}
+		artifacts[a.MediaFileID] = a
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating %s artifacts: %w", key.Kind, err)
+	}
+	return artifacts, nil
+}
+
+// artifactUpsert writes every column of a row. Its ON CONFLICT target is the
+// primary key older binaries upsert on, and it never takes over another
+// kind's row.
+const artifactUpsert = `
+	INSERT INTO media_intro_fingerprints (
+	    media_file_id,
+	    kind,
+	    algorithm_version,
+	    config_hash,
+	    file_hash,
+	    file_size,
+	    duration_seconds,
+	    window_start_seconds,
+	    window_end_seconds,
+	    status,
+	    detail,
+	    fingerprint_format,
+	    sample_duration_seconds,
+	    point_count,
+	    points,
+	    failure_count,
+	    last_error,
+	    retry_after,
+	    recorded_by
+	) VALUES (
+	    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''), $12, $13, $14, $15, $16, NULLIF($17, ''), $18, $19
+	)
+	ON CONFLICT (media_file_id, algorithm_version, config_hash) DO UPDATE SET
+	    file_hash = EXCLUDED.file_hash,
+	    file_size = EXCLUDED.file_size,
+	    duration_seconds = EXCLUDED.duration_seconds,
+	    window_start_seconds = EXCLUDED.window_start_seconds,
+	    window_end_seconds = EXCLUDED.window_end_seconds,
+	    status = EXCLUDED.status,
+	    detail = EXCLUDED.detail,
+	    fingerprint_format = EXCLUDED.fingerprint_format,
+	    sample_duration_seconds = EXCLUDED.sample_duration_seconds,
+	    point_count = EXCLUDED.point_count,
+	    points = EXCLUDED.points,
+	    failure_count = EXCLUDED.failure_count,
+	    last_error = EXCLUDED.last_error,
+	    retry_after = EXCLUDED.retry_after,
+	    recorded_by = EXCLUDED.recorded_by,
+	    updated_at = NOW()
+	WHERE media_intro_fingerprints.kind = EXCLUDED.kind`
+
+func execArtifactUpsert(ctx context.Context, q artifactDB, a Artifact) error {
+	payload := a.Payload
+	if payload == nil {
+		payload = []byte{}
+	}
+	tag, err := q.Exec(ctx, artifactUpsert,
+		a.MediaFileID,
+		a.Kind,
+		a.AlgorithmVersion,
+		a.ConfigHash,
+		a.FileHash,
+		a.FileSize,
+		a.DurationSeconds,
+		a.WindowStartSeconds,
+		a.WindowEndSeconds,
+		a.Status,
+		a.Detail,
+		a.PayloadFormat,
+		a.SampleDurationSeconds,
+		a.ItemCount,
+		payload,
+		a.FailureCount,
+		a.LastError,
+		a.RetryAfter,
+		a.RecordedBy,
 	)
 	if err != nil {
-		return fmt.Errorf("upserting intro fingerprint: %w", err)
+		return fmt.Errorf("upserting %s artifact for file %d: %w", a.Kind, a.MediaFileID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("upserting %s artifact for file %d: %w", a.Kind, a.MediaFileID, ErrArtifactKindConflict)
 	}
 	return nil
+}
+
+func validateArtifactKey(key ArtifactKey) error {
+	if strings.TrimSpace(key.Kind) == "" || strings.TrimSpace(key.ConfigHash) == "" {
+		return fmt.Errorf("media analysis artifact needs a kind and a config hash")
+	}
+	return nil
+}
+
+// UpsertArtifact stores a complete or unusable artifact, replacing any
+// earlier row for its key and clearing recorded failures. An unusable
+// artifact carries no payload, so binaries that predate artifact statuses
+// read it as a cache miss.
+func (r *Repository) UpsertArtifact(ctx context.Context, a Artifact) error {
+	if err := validateArtifactKey(a.ArtifactKey); err != nil {
+		return err
+	}
+	switch a.Status {
+	case ArtifactComplete:
+	case ArtifactUnusable:
+		if len(a.Payload) > 0 || a.ItemCount != 0 {
+			return fmt.Errorf("unusable %s artifact for file %d carries a payload", a.Kind, a.MediaFileID)
+		}
+	default:
+		return fmt.Errorf("upserting %s artifact for file %d: status %q is not complete or unusable", a.Kind, a.MediaFileID, a.Status)
+	}
+	a.FailureCount = 0
+	a.LastError = ""
+	a.RetryAfter = nil
+	return execArtifactUpsert(ctx, r.pool, a)
+}
+
+// RecordArtifactFailure records a failed analysis with a retry time that
+// backs off over the recording server's consecutive failures. It leaves a
+// complete or unusable row for the same file identity in place: that result
+// still stands, and was most likely written by another server meanwhile.
+// A failed row carries no payload, so binaries that predate artifact statuses
+// read it as a cache miss.
+func (r *Repository) RecordArtifactFailure(ctx context.Context, failure ArtifactFailure) error {
+	if err := validateArtifactKey(failure.ArtifactKey); err != nil {
+		return err
+	}
+	if strings.TrimSpace(failure.RecordedBy) == "" {
+		return errors.New("intromarkers: artifact failure requires the recording server")
+	}
+	if failure.At.IsZero() {
+		failure.At = time.Now().UTC()
+	}
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		previous, err := loadArtifact(ctx, tx, failure.MediaFileID, failure.ArtifactKey, true)
+		if err != nil {
+			return err
+		}
+		if previous != nil && previous.ArtifactIdentity == failure.ArtifactIdentity &&
+			(previous.Status == ArtifactComplete || previous.Status == ArtifactUnusable) {
+			return nil
+		}
+		count, retryAfter := nextArtifactFailure(previous, failure)
+		return execArtifactUpsert(ctx, tx, Artifact{
+			MediaFileID:      failure.MediaFileID,
+			ArtifactKey:      failure.ArtifactKey,
+			ArtifactIdentity: failure.ArtifactIdentity,
+			Status:           ArtifactFailed,
+			FailureCount:     count,
+			LastError:        failure.Error,
+			RetryAfter:       &retryAfter,
+			RecordedBy:       failure.RecordedBy,
+		})
+	})
+}
+
+// introFingerprintKey and introFingerprintIdentity locate a candidate's intro
+// fingerprint: the opening window of the file, keyed by Config.ConfigHash.
+func introFingerprintKey(cfg Config) ArtifactKey {
+	return ArtifactKey{
+		Kind:             ArtifactKindIntroFingerprint,
+		AlgorithmVersion: AlgorithmVersion,
+		ConfigHash:       cfg.ConfigHash(),
+	}
+}
+
+func introFingerprintIdentity(candidate Candidate, cfg Config) ArtifactIdentity {
+	return ArtifactIdentity{
+		FileHash:           candidate.FileHash,
+		FileSize:           candidate.FileSize,
+		DurationSeconds:    candidate.DurationSeconds,
+		WindowStartSeconds: 0,
+		WindowEndSeconds:   analysisWindowEnd(candidate.DurationSeconds, cfg),
+	}
+}
+
+// LoadFingerprint returns the candidate's cached intro fingerprint, or nil
+// when none is stored for its current file and analysis window.
+func (r *Repository) LoadFingerprint(ctx context.Context, candidate Candidate, cfg Config) (*Fingerprint, error) {
+	cfg = cfg.normalized()
+	artifact, err := r.LoadArtifact(ctx, candidate.FileID, introFingerprintKey(cfg))
+	if err != nil {
+		return nil, err
+	}
+	if artifact.State(introFingerprintIdentity(candidate, cfg), "", time.Time{}) != ArtifactReady ||
+		artifact.PayloadFormat != ChromaprintFormat {
+		return nil, nil
+	}
+	points := mediasample.DecodeRawFingerprint(artifact.Payload)
+	if len(points) == 0 {
+		return nil, nil
+	}
+	return &Fingerprint{
+		MediaFileID:           artifact.MediaFileID,
+		FileHash:              artifact.FileHash,
+		FileSize:              artifact.FileSize,
+		DurationSeconds:       artifact.DurationSeconds,
+		WindowStartSeconds:    artifact.WindowStartSeconds,
+		WindowEndSeconds:      artifact.WindowEndSeconds,
+		AlgorithmVersion:      artifact.AlgorithmVersion,
+		ConfigHash:            artifact.ConfigHash,
+		FingerprintFormat:     artifact.PayloadFormat,
+		SampleDurationSeconds: artifact.SampleDurationSeconds,
+		Points:                points,
+	}, nil
+}
+
+// UpsertFingerprint stores a computed intro fingerprint as a complete
+// artifact.
+func (r *Repository) UpsertFingerprint(ctx context.Context, fp Fingerprint) error {
+	return r.UpsertArtifact(ctx, Artifact{
+		MediaFileID: fp.MediaFileID,
+		ArtifactKey: ArtifactKey{
+			Kind:             ArtifactKindIntroFingerprint,
+			AlgorithmVersion: fp.AlgorithmVersion,
+			ConfigHash:       fp.ConfigHash,
+		},
+		ArtifactIdentity: ArtifactIdentity{
+			FileHash:           fp.FileHash,
+			FileSize:           fp.FileSize,
+			DurationSeconds:    fp.DurationSeconds,
+			WindowStartSeconds: fp.WindowStartSeconds,
+			WindowEndSeconds:   fp.WindowEndSeconds,
+		},
+		Status:                ArtifactComplete,
+		PayloadFormat:         fp.FingerprintFormat,
+		SampleDurationSeconds: fp.SampleDurationSeconds,
+		ItemCount:             len(fp.Points),
+		Payload:               mediasample.EncodeRawFingerprint(fp.Points),
+	})
 }
 
 func (r *Repository) LoadSeasonState(ctx context.Context, state SeasonState, cfg Config) (*SeasonState, error) {

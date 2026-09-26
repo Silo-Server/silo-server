@@ -939,7 +939,7 @@ func TestSilenceRefinementCancellationIsNotRecorded(t *testing.T) {
 	}
 }
 
-func TestSilenceRetryDelay(t *testing.T) {
+func TestRetryDelay(t *testing.T) {
 	for failures, want := range map[int]time.Duration{
 		0:  12 * time.Hour,
 		1:  12 * time.Hour,
@@ -949,8 +949,8 @@ func TestSilenceRetryDelay(t *testing.T) {
 		5:  7 * 24 * time.Hour,
 		60: 7 * 24 * time.Hour,
 	} {
-		if got := silenceRetryDelay(failures); got != want {
-			t.Errorf("silenceRetryDelay(%d) = %v, want %v", failures, got, want)
+		if got := retryDelay(failures); got != want {
+			t.Errorf("retryDelay(%d) = %v, want %v", failures, got, want)
 		}
 	}
 }

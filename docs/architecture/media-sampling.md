@@ -119,5 +119,44 @@ that is never idle, switch to the lowest best-effort level (7) instead.
 
 ## Artifact storage
 
-Analysis results are stored by their consumers today; intro detection keeps
-fingerprints in `media_intro_fingerprints`.
+Per-file analysis results are stored in `media_intro_fingerprints`, one row
+per file and artifact. The table name predates generalization; renaming it
+waits for a schema maintenance window. `intromarkers.Repository` reads and
+writes it through `LoadArtifact`, `LoadArtifacts`, `UpsertArtifact`, and
+`RecordArtifactFailure`; it moves to its own package when a second feature
+stores artifacts.
+
+- **Key.** The primary key is `(media_file_id, algorithm_version,
+  config_hash)`. A row also has a `kind`, such as `intro_fingerprint`. Kinds
+  never share a key because each derives its `config_hash` with
+  `intromarkers.ArtifactConfigHash`, a hash of the kind and its parameters.
+  Intro fingerprints keep `Config.ConfigHash`, which predates the namespacing
+  and is pinned by a test. An upsert never takes over another kind's row.
+- **Identity.** Each row records the file hash, size, duration, and analysis
+  window it was computed from. A row applies only while all of them match the
+  file.
+- **Payload.** `points` holds the payload bytes and `point_count` the number
+  of items in it; `fingerprint_format` names the encoding. The consuming kind
+  owns the encoding.
+
+Status rules, applied by `Artifact.State`:
+
+| Status | Meaning | Next analysis |
+|---|---|---|
+| `complete` | The payload is valid. | Use it while the identity matches; otherwise compute again. |
+| `unusable` | The file cannot yield this artifact; `detail` says why (for example `no_video` or `sparse`). | Skip while the identity matches. A changed file or config hash computes again. |
+| `failed` | An error that may be transient, in `last_error`. | The server in `recorded_by` skips the file until `retry_after`. Other servers retry at once, since the cause may be local to that server. |
+
+The retry delay starts at 12 hours and doubles for each consecutive failure on
+the same server and unchanged file, up to 7 days. A failure recorded inside
+the current delay (a forced run) does not extend it. A failure never replaces
+a `complete` or `unusable` row for the same file identity. A later success
+clears the failure.
+
+`unusable` and `failed` rows carry an empty payload and, for intro
+fingerprints, no Chromaprint format. Binaries that predate artifact statuses
+ignore the status column and read such rows as cache misses, so the change
+needs no maintenance window: those binaries keep inserting and upserting on
+the same primary key and get the `intro_fingerprint` and `complete` defaults.
+Their upserts do not reset `status`, so intro detection writes only `complete`
+`intro_fingerprint` rows until no such binary can still be running.

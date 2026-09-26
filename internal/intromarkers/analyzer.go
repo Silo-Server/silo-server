@@ -549,11 +549,6 @@ func (a *Analyzer) refineChapterSegment(ctx context.Context, candidate Candidate
 	return segment, true
 }
 
-const (
-	silenceRetryBaseDelay = 12 * time.Hour
-	silenceRetryMaxDelay  = 7 * 24 * time.Hour
-)
-
 // recordSilenceAttempt persists a refinement that kept the chapter boundary so
 // the backfill stops spending its budget on the same unchanged file every run.
 // A clean no-improvement result stands until the inputs change; a failure is
@@ -582,7 +577,7 @@ func (a *Analyzer) recordSilenceAttempt(ctx context.Context, candidate Candidate
 		attempt.Status = silenceAttemptFailed
 		attempt.LastError = refineErr.Error()
 		attempt.FailureCount = 1
-		retryAfter := attempt.AttemptedAt.Add(silenceRetryDelay(1))
+		retryAfter := attempt.AttemptedAt.Add(retryDelay(1))
 		// Backoff escalates only for this server's own consecutive failures; a
 		// failure recorded elsewhere may come from that server's environment.
 		if previous != nil && previous.Status == silenceAttemptFailed && previous.RecordedBy == attempt.RecordedBy &&
@@ -594,7 +589,7 @@ func (a *Analyzer) recordSilenceAttempt(ctx context.Context, candidate Candidate
 				retryAfter = *previous.RetryAfter
 			} else {
 				attempt.FailureCount = previous.FailureCount + 1
-				retryAfter = attempt.AttemptedAt.Add(silenceRetryDelay(attempt.FailureCount))
+				retryAfter = attempt.AttemptedAt.Add(retryDelay(attempt.FailureCount))
 			}
 		}
 		attempt.RetryAfter = &retryAfter
@@ -603,17 +598,6 @@ func (a *Analyzer) recordSilenceAttempt(ctx context.Context, candidate Candidate
 		summary.Errors = append(summary.Errors, fmt.Sprintf("file %d: %v", candidate.FileID, err))
 		a.logger.WarnContext(ctx, "intro marker silence attempt record failed", "file_id", candidate.FileID, "error", err)
 	}
-}
-
-// silenceRetryDelay doubles from silenceRetryBaseDelay per consecutive failure,
-// capped at silenceRetryMaxDelay. The base sits under the daily schedule so the
-// first retry lands on the next scheduled run.
-func silenceRetryDelay(failures int) time.Duration {
-	delay := silenceRetryBaseDelay
-	for i := 1; i < failures && delay < silenceRetryMaxDelay; i++ {
-		delay *= 2
-	}
-	return min(delay, silenceRetryMaxDelay)
 }
 
 func setBestChapterSource(sources map[string]chapterSourceMarker, candidate Candidate, segment Segment) {

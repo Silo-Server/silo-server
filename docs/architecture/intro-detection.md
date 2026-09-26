@@ -52,6 +52,10 @@ these values with each provider's minimum confidence.
   of a large library takes days. Change them only when the fingerprint itself
   changes. `ConfigHash` covers only the analysis window; the intro duration
   bounds it once included are hashed as fixed legacy values.
+- Fingerprints are `intro_fingerprint` rows in the per-file analysis
+  artifact table, `media_intro_fingerprints`; see
+  [artifact storage](media-sampling.md#artifact-storage) for its keys and
+  statuses. Intro detection writes only `complete` rows.
 - `AnalysisBehaviorVersion` is part of the season state key. Bump it to
   re-run every season comparison over cached fingerprints.
 - Algorithm identifiers are stored with each marker. Between two scanner
