@@ -36,6 +36,8 @@ const mocks = vi.hoisted(() => ({
   beginImpersonation: vi.fn(),
   accessGroups: [] as AccessGroup[],
   accessGroupsLoaded: false,
+  accessGroupsFailed: false,
+  refetchAccessGroups: vi.fn(),
 }));
 
 vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
@@ -56,7 +58,12 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
 }));
 
 vi.mock("@/hooks/queries/admin/accessGroups", () => ({
-  useAccessGroups: () => ({ data: mocks.accessGroups, isSuccess: mocks.accessGroupsLoaded }),
+  useAccessGroups: () => ({
+    data: mocks.accessGroups,
+    isSuccess: mocks.accessGroupsLoaded,
+    isError: mocks.accessGroupsFailed,
+    refetch: mocks.refetchAccessGroups,
+  }),
 }));
 
 vi.mock("./admin-settings/InvitationsTab", () => ({
@@ -600,5 +607,93 @@ describe("AdminUsers user dialog policy hints", () => {
     await chooseRole(user, dialog, "User");
     expect(within(dialog).getByText("Inherited: 5")).toBeInTheDocument();
     expect(within(dialog).queryByText(/Server default/)).not.toBeInTheDocument();
+  });
+});
+
+describe("AdminUsers access group column and filter", () => {
+  beforeEach(() => {
+    setAccessToken("account");
+    setProfileId("owner");
+    setProfileToken(null);
+    mocks.available = true;
+    mocks.useAdminServerSettings.mockReturnValue({ data: {}, isLoading: false });
+    mocks.accessGroups = [
+      { id: 1, name: "Kids" } as AccessGroup,
+      { id: 2, name: "Guests" } as AccessGroup,
+    ];
+    mocks.accessGroupsLoaded = true;
+    mocks.users = [
+      { ...adminUser, id: 7, username: "taylor", role: "user", access_group_id: 1 },
+      { ...adminUser, id: 8, username: "sam", role: "user", access_group_id: 2 },
+      { ...adminUser, id: 9, username: "robin", role: "user", access_group_id: null },
+      { ...adminUser, id: 10, username: "root", role: "admin", access_group_id: null },
+    ];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    Object.defineProperties(Element.prototype, {
+      hasPointerCapture: { configurable: true, value: () => false },
+      setPointerCapture: { configurable: true, value: () => {} },
+      releasePointerCapture: { configurable: true, value: () => {} },
+      scrollIntoView: { configurable: true, value: () => {} },
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  function rowFor(username: string) {
+    return screen.getByRole("link", { name: username }).closest("tr")!;
+  }
+
+  it("shows each user's access group, linking to the group", () => {
+    renderPage();
+    expect(screen.getByRole("columnheader", { name: "Group" })).toBeInTheDocument();
+    expect(within(rowFor("taylor")).getByRole("link", { name: "Kids" })).toHaveAttribute(
+      "href",
+      "/admin/access-groups/1",
+    );
+    expect(within(rowFor("robin")).getByText("No group")).toBeInTheDocument();
+    expect(within(rowFor("root")).getByText("—")).toBeInTheDocument();
+  });
+
+  it("reports a failed access group load and retries it", async () => {
+    mocks.accessGroups = [];
+    mocks.accessGroupsLoaded = false;
+    mocks.accessGroupsFailed = true;
+    mocks.refetchAccessGroups.mockClear();
+    const user = userEvent.setup();
+    renderPage();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Could not load access groups");
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(mocks.refetchAccessGroups).toHaveBeenCalled();
+    mocks.accessGroupsFailed = false;
+  });
+
+  it("filters users by access group", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const filter = screen.getByRole("combobox", { name: "Filter by access group" });
+
+    await user.click(filter);
+    await user.click(await screen.findByRole("option", { name: "Guests" }));
+    expect(screen.getByRole("link", { name: "sam" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "taylor" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "root" })).toBeNull();
+
+    await user.click(filter);
+    await user.click(await screen.findByRole("option", { name: "No group" }));
+    expect(screen.getByRole("link", { name: "robin" })).toBeInTheDocument();
+    // Admin accounts can't join groups, so they aren't listed as "No group".
+    expect(screen.queryByRole("link", { name: "root" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "sam" })).toBeNull();
+
+    await user.click(filter);
+    await user.click(await screen.findByRole("option", { name: "All groups" }));
+    expect(screen.getByRole("link", { name: "root" })).toBeInTheDocument();
   });
 });

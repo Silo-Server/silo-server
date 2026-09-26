@@ -124,18 +124,32 @@ function AdminUsersPage() {
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<AdminUserEditor | null>(null);
   const [impersonatingUser, setImpersonatingUser] = useState<AdminUser | null>(null);
   const [search, setSearch] = useState("");
+  // "all", "none" (regular accounts outside every group), or a group id.
+  const [groupFilter, setGroupFilter] = useState("all");
+  const accessGroupsQuery = useAccessGroups();
+  const accessGroups = useMemo(() => accessGroupsQuery.data ?? [], [accessGroupsQuery.data]);
+  const groupNames = useMemo(
+    () => new Map(accessGroups.map((group) => [String(group.id), group.name])),
+    [accessGroups],
+  );
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
   const [sortField, setSortField] = useState<UserSortField>("username");
   const [sortDir, setSortDir] = useState<SortDirection>("asc");
 
   const filteredUsers = useMemo(() => {
-    if (!search) return users;
     const q = search.toLowerCase();
-    return users.filter(
-      (u) => u.username?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q),
-    );
-  }, [users, search]);
+    return users.filter((u) => {
+      if (q && !(u.username?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q))) {
+        return false;
+      }
+      if (groupFilter === "all") return true;
+      // Admin accounts can't join groups, so they only appear under "All groups".
+      if (u.role === "admin") return false;
+      if (groupFilter === "none") return u.access_group_id == null;
+      return String(u.access_group_id) === groupFilter;
+    });
+  }, [users, search, groupFilter]);
 
   const sortedUsers = useMemo(
     () => sortAdminUsers(filteredUsers, sortField, sortDir),
@@ -295,31 +309,61 @@ function AdminUsersPage() {
           <TabsTrigger value="invite-codes">Invite Codes</TabsTrigger>
         </TabsList>
         <TabsContent value="users" className="pt-4">
-          <div className="relative mb-4">
-            <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
-            <Input
-              placeholder="Search by username or email..."
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(0);
-              }}
-              className="pr-9 pl-9"
-            />
-            {search && (
-              <button
-                type="button"
-                aria-label="Clear search"
-                onClick={() => {
-                  setSearch("");
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row">
+            <div className="relative flex-1">
+              <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+              <Input
+                placeholder="Search by username or email..."
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
                   setPage(0);
                 }}
-                className="text-muted-foreground hover:text-foreground absolute top-1/2 right-3 -translate-y-1/2"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
+                className="pr-9 pl-9"
+              />
+              {search && (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() => {
+                    setSearch("");
+                    setPage(0);
+                  }}
+                  className="text-muted-foreground hover:text-foreground absolute top-1/2 right-3 -translate-y-1/2"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <Select
+              value={groupFilter}
+              onValueChange={(value) => {
+                setGroupFilter(value);
+                setPage(0);
+              }}
+            >
+              <SelectTrigger className="sm:w-56" aria-label="Filter by access group">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All groups</SelectItem>
+                {accessGroups.map((group) => (
+                  <SelectItem key={group.id} value={String(group.id)}>
+                    {group.name}
+                  </SelectItem>
+                ))}
+                <SelectItem value="none">No group</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+          {accessGroupsQuery.isError && (
+            <div role="alert" className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+              Could not load access groups, so group names and group filters are unavailable.
+              <Button variant="outline" size="sm" onClick={() => void accessGroupsQuery.refetch()}>
+                Retry
+              </Button>
+            </div>
+          )}
           <div className="surface-panel overflow-x-auto rounded-2xl border-0">
             <Table>
               <TableHeader>
@@ -348,6 +392,7 @@ function AdminUsersPage() {
                   >
                     Role
                   </SortableUserHead>
+                  <TableHead>Group</TableHead>
                   <SortableUserHead
                     field="enabled"
                     activeField={sortField}
@@ -391,6 +436,20 @@ function AdminUsersPage() {
                         </Badge>
                         {u.is_owner && <Badge variant="outline">Owner</Badge>}
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {u.role === "admin" ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : u.access_group_id == null ? (
+                        <span className="text-muted-foreground">No group</span>
+                      ) : (
+                        <Link
+                          to={`/admin/access-groups/${u.access_group_id}`}
+                          className="hover:underline"
+                        >
+                          {groupNames.get(String(u.access_group_id)) ?? "Unknown group"}
+                        </Link>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge variant={u.enabled ? "outline" : "destructive"}>
