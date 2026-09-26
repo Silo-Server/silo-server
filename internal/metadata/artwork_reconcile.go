@@ -256,10 +256,15 @@ func (s artworkSweepSurface) parseKeys(raw []string) ([]any, error) {
 	return values, nil
 }
 
+// cachedPredicate selects rows whose path is an object-store key. Provider URLs
+// ('%://%') and app-relative paths ('/%') are excluded: the latter are bundled
+// frontend assets such as "/images/collection-templates/x.jpg", which have no
+// object behind them and which artworkstore.ValidateKey rejects outright, so
+// checking them would fail every sweep with "invalid key".
 func (s artworkSweepSurface) cachedPredicate() string {
 	return fmt.Sprintf(
-		`coalesce(%s, '') NOT IN ('', '-') AND %s NOT LIKE '%%://%%'`,
-		s.pathCol, s.pathCol,
+		`coalesce(%s, '') NOT IN ('', '-') AND %s NOT LIKE '%%://%%' AND %s NOT LIKE '/%%'`,
+		s.pathCol, s.pathCol, s.pathCol,
 	)
 }
 

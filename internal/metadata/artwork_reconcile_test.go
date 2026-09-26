@@ -174,8 +174,17 @@ func TestArtworkReconcileVerifySweep(t *testing.T) {
 	`, id("coll"), folderID, key("coll")); err != nil {
 		t.Fatalf("seed collection: %v", err)
 	}
+	// A template poster that was never copied into storage keeps its bundled,
+	// app-relative path. It is not a storage key and must not be checked.
+	bundledPoster := fmt.Sprintf("/images/collection-templates/arc-%d.jpg", suffix)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO library_collections (id, library_id, slug, title, collection_type, poster_url, poster_thumbhash, poster_from_template)
+		VALUES ($1, $2, $1, 'ARC Template Collection', 'manual', $3, 'aGFzaA==', TRUE)
+	`, id("coll-bundled"), folderID, bundledPoster); err != nil {
+		t.Fatalf("seed bundled-poster collection: %v", err)
+	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM library_collections WHERE id = $1`, id("coll"))
+		_, _ = pool.Exec(ctx, `DELETE FROM library_collections WHERE id IN ($1, $2)`, id("coll"), id("coll-bundled"))
 		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE id = $1`, fileID)
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
 		_, _ = pool.Exec(ctx, `DELETE FROM people WHERE id = $1`, personID)
@@ -266,6 +275,21 @@ func TestArtworkReconcileVerifySweep(t *testing.T) {
 	}
 	if collPoster != "" || collHash != "" || fromTemplate {
 		t.Fatalf("collection artwork not fully cleared: url=%q hash=%q from_template=%v", collPoster, collHash, fromTemplate)
+	}
+
+	if checker.checked[bundledPoster] != 0 {
+		t.Fatal("bundled app-relative posters must not be checked against storage")
+	}
+	if stats.SweepErrors != 0 {
+		t.Fatalf("SweepErrors = %d, want 0", stats.SweepErrors)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT poster_url, poster_thumbhash, poster_from_template FROM library_collections WHERE id = $1`, id("coll-bundled"),
+	).Scan(&collPoster, &collHash, &fromTemplate); err != nil {
+		t.Fatalf("read bundled-poster collection: %v", err)
+	}
+	if collPoster != bundledPoster || collHash != "aGFzaA==" || !fromTemplate {
+		t.Fatalf("bundled poster changed: url=%q hash=%q from_template=%v", collPoster, collHash, fromTemplate)
 	}
 
 	var folderPoster string
