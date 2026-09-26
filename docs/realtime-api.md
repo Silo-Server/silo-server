@@ -231,7 +231,7 @@ Stop locks the authoritative row and returns a playing room to the lobby: lobby 
 
 The server performs the same stop on the host's behalf when the item finishes: once the room's position is within two seconds of the playing file's duration, whether the host paused there at the end or the room's clock ran past it. The file is the room's selected file, or the host's attached file when the selection does not pin one; a file without a known duration never finishes this way. Clients need no new message: they see the same lobby snapshot a host's stop produces.
 
-Ending the room (`DELETE .../rooms/{room_id}`) remains the way to dismiss everyone. Frozen v1 has no stop: v1 rooms either play or end.
+Ending the room (`DELETE .../rooms/{room_id}`) remains the way to dismiss everyone. Frozen v1 has no stop route, but a v1 client in a room still sees it return to the lobby when a v2 host stops playback or the item finishes.
 
 ### Switch a lobby's selection mode
 
