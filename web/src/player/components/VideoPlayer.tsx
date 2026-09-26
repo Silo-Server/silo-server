@@ -253,6 +253,10 @@ const ROOM_STALL_WINDOW_MS = 5 * 60_000;
 const LOWER_QUALITY_ACTION_LABEL = "Lower quality";
 const PLAYBACK_NOTICE_VISIBLE_MS = 8_000;
 const ROOM_RECONNECTING_MESSAGE = "Reconnecting to room. Controls are temporarily unavailable.";
+// The server returns a room to the lobby once its position is within two
+// seconds of the end of the file. A viewer this close to its own end when the
+// room leaves playback saw the item finish, allowing for trailing the room.
+const ROOM_ITEM_END_WINDOW_SECONDS = 5;
 // The server ends room sockets on a fixed lifetime and the client reconnects
 // in well under a second, so only a longer gap is worth a warning.
 const ROOM_RECONNECT_NOTICE_DELAY_MS = 2_000;
@@ -1188,9 +1192,10 @@ export function VideoPlayer({
     watchTogetherRoomId,
   ]);
 
-  // The host stopped playback: the room is still open, in the lobby, so
-  // everyone goes back to the room page rather than the hub. A room that was
-  // never playing (a stale lobby snapshot on first connect) is not a stop.
+  // The host stopped playback, or the item finished: the room is still open,
+  // in the lobby, so everyone goes back to the room page rather than the hub.
+  // A room that was never playing (a stale lobby snapshot on first connect)
+  // is not a stop.
   const wasRoomPlayingRef = useRef(false);
   useEffect(() => {
     const phase = watchTogether.room?.phase;
@@ -1209,7 +1214,10 @@ export function VideoPlayer({
     wasRoomPlayingRef.current = false;
     leaveInProgressRef.current = true;
     setIsLeaving(true);
-    showWatchTogetherNotice("The host stopped playback.", "info");
+    const finished =
+      durationRef.current > 0 &&
+      durationRef.current - currentTimeRef.current <= ROOM_ITEM_END_WINDOW_SECONDS;
+    showWatchTogetherNotice(finished ? "Playback finished." : "The host stopped playback.", "info");
     const exitState = buildExitState();
     void (async () => {
       try {

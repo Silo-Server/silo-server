@@ -491,6 +491,26 @@ describe("VideoPlayer room catch-up", () => {
     expect(connection.rejoinRoom).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { at: "at the end of the item", position: 3598, notice: "Playback finished." },
+    { at: "mid-item", position: 1200, notice: "The host stopped playback." },
+  ])("says why the room returned to the lobby $at", async ({ position, notice }) => {
+    const { connection, rerenderPlayer } = setup(position);
+    const onExit = vi.fn();
+    rerenderPlayer({
+      onExit,
+      watchTogetherConnection: {
+        ...connection,
+        room: { ...connection.room!, phase: "lobby", playback_state: "idle" },
+      },
+    });
+    expect(screen.getByText(notice)).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["canplay", "retry", "pending play"])(
     "prevents late autoplay after replacement during %s without reloading the stream",
     async (stage) => {
