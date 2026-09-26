@@ -290,6 +290,9 @@ jobs:
       - name: Run the query-budget pins
         run: make test-db-pins
 
+      - name: Test taste cluster replacement against Postgres
+        run: go test -race -count=1 -run '^TestUpsertTasteClusters.*Postgres$' ./internal/recommendations/
+
   web:
     name: Web
     runs-on: ubuntu-latest
