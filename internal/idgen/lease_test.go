@@ -129,7 +129,7 @@ func TestRenewExtendsTheLease(t *testing.T) {
 	restoreActive(t)
 	lease, g := startLease(t, pool, "replica")
 
-	g.validUntil.Store(1) // lapsed long ago
+	g.validUntil.Store(&instant{}) // lapsed long ago
 	if _, err := NextID(); !errors.Is(err, ErrLeaseExpired) {
 		t.Fatalf("NextID on a lapsed lease: err = %v, want ErrLeaseExpired", err)
 	}
@@ -247,7 +247,7 @@ func TestClaimMeasuresTheLeaseFromAfterTheLockWait(t *testing.T) {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	released := monotonicNow()
+	released := currentInstant()
 	if _, err := holder.Exec(ctx, `SELECT pg_advisory_unlock($1)`, claimLockKey); err != nil {
 		t.Fatal(err)
 	}
@@ -256,8 +256,8 @@ func TestClaimMeasuresTheLeaseFromAfterTheLockWait(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("claim: %v", r.err)
 	}
-	if got, want := r.g.validUntil.Load(), validUntil(released); got < want {
-		t.Fatalf("lease deadline counts from before the lock wait: %d < %d", got, want)
+	if got, want := r.g.validUntil.Load(), validUntil(released); got.mono < want.mono {
+		t.Fatalf("lease deadline counts from before the lock wait: %d < %d", got.mono, want.mono)
 	}
 }
 

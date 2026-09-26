@@ -38,21 +38,34 @@ var ErrLeaseExpired = errors.New("idgen: machine ID lease expired")
 type generator struct {
 	sf        *sonyflake.Sonyflake
 	machineID int
-	// validUntil is the monotonic deadline, in nanoseconds since clockBase,
-	// past which this process may no longer hold machineID. Zero means the
-	// generator does not expire.
-	validUntil atomic.Int64
+	// validUntil is the moment past which this process may no longer hold
+	// machineID. Nil means the generator does not expire.
+	validUntil atomic.Pointer[instant]
 }
 
-// clockBase anchors lease deadlines to the monotonic clock, so a wall-clock
-// jump cannot extend a lease.
+// instant is a moment on two clocks. A lease deadline is checked on both and
+// has passed once either clock reaches it: a wall-clock step cannot extend a
+// lease past its monotonic deadline, and a host suspension, which on Linux
+// stops the monotonic clock, cannot extend it past its wall-clock deadline.
+type instant struct {
+	mono int64 // nanoseconds since clockBase on the monotonic clock
+	wall int64 // Unix nanoseconds on the wall clock
+}
+
 var clockBase = time.Now()
 
-func monotonicNow() int64 { return int64(time.Since(clockBase)) }
+func currentInstant() instant {
+	now := time.Now()
+	return instant{mono: int64(now.Sub(clockBase)), wall: now.UnixNano()}
+}
 
 func (g *generator) expired() bool {
 	until := g.validUntil.Load()
-	return until != 0 && monotonicNow() >= until
+	if until == nil {
+		return false
+	}
+	now := currentInstant()
+	return now.mono >= until.mono || now.wall >= until.wall
 }
 
 // active is the generator NextID uses. [Start] installs it.

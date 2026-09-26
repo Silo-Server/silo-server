@@ -34,7 +34,23 @@ func TestNextIDRefusesAnExpiredLease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g.validUntil.Store(monotonicNow() - 1)
+	g.validUntil.Store(&instant{})
+	active.Store(g)
+	if _, err := NextID(); !errors.Is(err, ErrLeaseExpired) {
+		t.Fatalf("NextID error = %v, want ErrLeaseExpired", err)
+	}
+}
+
+// After a host suspension the monotonic clock has not moved, but the wall
+// clock has, and another process may have taken the machine ID.
+func TestNextIDRefusesALeaseThatLapsedWhileSuspended(t *testing.T) {
+	restoreActive(t)
+	g, err := newGenerator(42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := currentInstant()
+	g.validUntil.Store(&instant{mono: now.mono + int64(time.Hour), wall: now.wall - 1})
 	active.Store(g)
 	if _, err := NextID(); !errors.Is(err, ErrLeaseExpired) {
 		t.Fatalf("NextID error = %v, want ErrLeaseExpired", err)

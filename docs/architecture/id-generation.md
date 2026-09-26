@@ -22,7 +22,10 @@ sharing a database never share one, whatever their network addresses.
   old and new holder from placing their IDs in the same time slot.
 - The lease lasts two minutes and renews every 20 seconds. The process tracks
   its own deadline on the monotonic clock, measured from before each renewal
-  request, so the local deadline always falls before the database expiry.
+  request, so the local deadline always falls before the database expiry. It
+  also checks the same deadline on the wall clock, because on Linux the
+  monotonic clock stops while the host is suspended. Either clock passing the
+  deadline ends the lease, so a wall-clock step can only shorten it.
 - `NextID` returns `ErrLeaseExpired` once the local deadline passes without a
   renewal, and works again after a later renewal succeeds. If another process
   has taken the machine ID in the meantime, the renewal claims a new one.

@@ -88,7 +88,7 @@ func (l *Lease) run(ctx context.Context, g *generator) {
 // A failed renewal leaves g in place; NextID refuses it once its deadline
 // passes and resumes when a later renewal succeeds.
 func (l *Lease) renew(ctx context.Context, g *generator) *generator {
-	started := monotonicNow()
+	started := currentInstant()
 	queryCtx, cancel := context.WithTimeout(ctx, renewInterval)
 	defer cancel()
 	tag, err := l.pool.Exec(queryCtx, `
@@ -125,8 +125,9 @@ func (l *Lease) renew(ctx context.Context, g *generator) *generator {
 // statement cannot start before it was sent, so the local deadline always
 // comes first. Expiries use statement_timestamp() rather than now(), which is
 // the transaction start and would predate a claim's wait for claimLockKey.
-func validUntil(started int64) int64 {
-	return started + int64(leaseTTL-expiryMargin)
+func validUntil(started instant) *instant {
+	valid := int64(leaseTTL - expiryMargin)
+	return &instant{mono: started.mono + valid, wall: started.wall + valid}
 }
 
 // claim leases a machine ID, preferring one no process has ever used, and
@@ -143,7 +144,7 @@ func (l *Lease) claim(ctx context.Context) (*generator, error) {
 	}
 	// Measure the lease from after the lock wait, which can be long when
 	// several processes start at once.
-	started := monotonicNow()
+	started := currentInstant()
 	var machineID int
 	err = tx.QueryRow(ctx, `
 		INSERT INTO idgen_machine_leases (machine_id, token, holder, expires_at)
