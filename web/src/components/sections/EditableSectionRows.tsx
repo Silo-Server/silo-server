@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { sectionTypeLabel } from "@/lib/sectionTypes";
 import { queryDefinitionFromSectionConfig } from "@/api/types";
 import type { Library } from "@/api/types";
-import type { RecipeCatalogResponse } from "@/lib/recipes";
+import { matchRecipePreset, type RecipeCatalogResponse } from "@/lib/recipes";
 import { Eye, EyeOff, GripVertical, Pencil, Star, Trash2 } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -23,11 +23,16 @@ export interface EditableSectionViewModel {
   config?: Record<string, unknown>;
 }
 
-export function recipeLabel(catalog: RecipeCatalogResponse | undefined, type: string): string {
+export function recipeLabel(
+  catalog: RecipeCatalogResponse | undefined,
+  type: string,
+  config?: Record<string, unknown>,
+): string {
   if (catalog) {
     for (const defs of Object.values(catalog.categories)) {
       const found = defs?.find((def) => def.type === type);
-      if (found?.presets[0]?.display_name) return found.presets[0].display_name;
+      const label = found ? matchRecipePreset(found, config)?.display_name : undefined;
+      if (label) return label;
     }
   }
   return sectionTypeLabel(type);
@@ -72,7 +77,7 @@ export function SectionSummaryBadges({
 
   return (
     <div className="flex flex-wrap gap-1">
-      <Badge variant="secondary">{recipeLabel(catalog, section.sectionType)}</Badge>
+      <Badge variant="secondary">{recipeLabel(catalog, section.sectionType, section.config)}</Badge>
       {resumeLabel ? <Badge variant="outline">{resumeLabel}</Badge> : null}
       {queryDefinition.media_scope === "movie" ? <Badge variant="outline">Movies</Badge> : null}
       {queryDefinition.media_scope === "series" ? <Badge variant="outline">Series</Badge> : null}
@@ -119,7 +124,7 @@ export function SectionDragOverlay({
       <GripVertical className="text-muted-foreground h-4 w-4" />
       <span className="font-medium">{section.title}</span>
       <Badge variant="secondary" className="ml-2">
-        {recipeLabel(catalog, section.sectionType)}
+        {recipeLabel(catalog, section.sectionType, section.config)}
       </Badge>
     </div>
   );

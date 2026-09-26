@@ -26,7 +26,12 @@ import LibraryMultiSelect from "@/components/LibraryMultiSelect";
 import { CollectionSearchableSelect } from "@/components/CollectionSearchableSelect";
 import RecipeParamFields from "@/components/RecipeGallery/RecipeParamFields";
 import { SECTION_TYPES, FILTER_SECTION_TYPES, sectionTypeLabel } from "@/lib/sectionTypes";
-import type { Category, RecipeCatalogResponse, RecipeDefinition } from "@/lib/recipes";
+import {
+  matchRecipePreset,
+  type Category,
+  type RecipeCatalogResponse,
+  type RecipeDefinition,
+} from "@/lib/recipes";
 import {
   queryDefinitionFromSectionConfig,
   queryDefinitionToSectionConfig,
@@ -420,8 +425,15 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
                         <SelectGroup key={category}>
                           <SelectLabel>{CATEGORY_LABELS[category] ?? category}</SelectLabel>
                           {(props.recipeCatalog?.categories[category] ?? []).map((definition) => {
-                            const label = definition.presets[0]?.display_name ?? definition.type;
-                            const icon = definition.presets[0]?.icon;
+                            // The selected type is labelled by the preset its
+                            // params match, so a weekly trending section reads
+                            // "TMDB Trending This Week" rather than the first preset.
+                            const preset =
+                              definition.type === sectionType
+                                ? matchRecipePreset(definition, recipeParams)
+                                : definition.presets[0];
+                            const label = preset?.display_name ?? definition.type;
+                            const icon = preset?.icon;
                             return (
                               <SelectItem key={definition.type} value={definition.type}>
                                 {icon ? `${icon} ${label}` : label}
