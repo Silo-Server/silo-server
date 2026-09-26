@@ -2,9 +2,7 @@ package usercollections
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -117,14 +115,12 @@ func (s *Service) syncMDBList(ctx context.Context, store userstore.UserStore, co
 		return nil, nil, fmt.Errorf("mdblist sync: url is required")
 	}
 
+	fetchLimit := collectionutil.SourceFetchLimit(cfg.Limit)
 	entries, err := collectionutil.FetchMDBListWithFallback(urls, func(url string) ([]mdblistEntry, error) {
-		return s.fetchMDBListEntries(ctx, url)
+		return s.fetchMDBListEntries(ctx, url, fetchLimit)
 	})
 	if err != nil {
 		return nil, nil, err
-	}
-	if fetchLimit := collectionutil.SourceFetchLimit(cfg.Limit); fetchLimit > 0 && len(entries) > fetchLimit {
-		entries = entries[:fetchLimit]
 	}
 
 	var movieBatch, seriesBatch catalog.ExternalIDBatch
@@ -300,32 +296,8 @@ func limitCollectionItems(items []userstore.CollectionItemReplacement, limit *in
 	return items
 }
 
-func (s *Service) fetchMDBListEntries(ctx context.Context, url string) ([]mdblistEntry, error) {
-	url, err := collectionutil.CanonicalMDBListURL(url)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating mdblist request: %w", err)
-	}
-	res, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetching mdblist list: %w", err)
-	}
-	defer res.Body.Close()
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("mdblist request failed with status %d", res.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(res.Body, 4<<20))
-	if err != nil {
-		return nil, fmt.Errorf("reading mdblist response: %w", err)
-	}
-	var entries []mdblistEntry
-	if err := json.Unmarshal(body, &entries); err != nil {
-		return nil, fmt.Errorf("parsing mdblist response: %w", err)
-	}
-	return entries, nil
+func (s *Service) fetchMDBListEntries(ctx context.Context, url string, maxEntries int) ([]mdblistEntry, error) {
+	return collectionutil.FetchMDBListJSON[mdblistEntry](ctx, s.httpClient, url, maxEntries)
 }
 
 // ── TMDB presets ─────────────────────────────────────────────────────────────

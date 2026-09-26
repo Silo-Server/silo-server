@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -255,19 +254,16 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 	if len(listURLs) == 0 {
 		return nil, fmt.Errorf("mdblist sync: url is required")
 	}
+	// Read only as far as the same fetch-multiplier bound used for TMDB and
+	// Trakt sources. MDBList lists can hold thousands of entries; without this,
+	// the two GetByExternalIDs IN arrays balloon to the full list size even
+	// when the user's limit is small.
+	fetchLimit := collectionutil.SourceFetchLimit(limit)
 	entries, err := collectionutil.FetchMDBListWithFallback(listURLs, func(listURL string) ([]mdblistEntry, error) {
-		return s.fetchMDBListEntries(ctx, listURL)
+		return s.fetchMDBListEntries(ctx, listURL, fetchLimit)
 	})
 	if err != nil {
 		return nil, err
-	}
-
-	// Trim the entry list to the same fetch-multiplier bound used for TMDB and
-	// Trakt sources before building the external-ID batches. MDBList lists can
-	// return hundreds of entries; without this, the two GetByExternalIDs IN
-	// arrays balloon to the full list size even when the user's limit is small.
-	if fetchLimit := collectionutil.SourceFetchLimit(limit); fetchLimit > 0 && len(entries) > fetchLimit {
-		entries = entries[:fetchLimit]
 	}
 
 	// Pre-fetch all external-ID lookups grouped by item type (movie vs series)
@@ -1264,36 +1260,8 @@ func traktCandidatesByPriority(lookup *ExternalIDLookup, entry TraktCollectionEn
 	return candidates
 }
 
-func (s *LibraryCollectionService) fetchMDBListEntries(ctx context.Context, listURL string) ([]mdblistEntry, error) {
-	listURL, err := collectionutil.CanonicalMDBListURL(listURL)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating mdblist request: %w", err)
-	}
-
-	res, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetching mdblist list: %w", err)
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("mdblist request failed with status %d", res.StatusCode)
-	}
-
-	body, err := io.ReadAll(io.LimitReader(res.Body, 4<<20))
-	if err != nil {
-		return nil, fmt.Errorf("reading mdblist response: %w", err)
-	}
-
-	var entries []mdblistEntry
-	if err := json.Unmarshal(body, &entries); err != nil {
-		return nil, fmt.Errorf("parsing mdblist response: %w", err)
-	}
-	return entries, nil
+func (s *LibraryCollectionService) fetchMDBListEntries(ctx context.Context, listURL string, maxEntries int) ([]mdblistEntry, error) {
+	return collectionutil.FetchMDBListJSON[mdblistEntry](ctx, s.httpClient, listURL, maxEntries)
 }
 
 // mdbListEntryItemType normalizes an MDBList entry's media_type field to the
