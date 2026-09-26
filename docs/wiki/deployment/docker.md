@@ -370,6 +370,10 @@ you already have it.
 
 ### Valkey in place of Redis
 
+> [!WARNING]
+> Silo is currently tested only against Redis. Valkey support is provided
+> as-is, with no support offered for Valkey-specific problems.
+
 [Valkey](https://valkey.io/) supports the Redis protocol and the core commands
 Silo uses. The Go client connects to either server with a `redis://` URL; no
 Valkey-specific setting is needed. To connect to an existing Valkey server,
