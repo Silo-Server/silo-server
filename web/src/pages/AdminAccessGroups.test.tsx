@@ -22,8 +22,8 @@ const adminUsers = vi.hoisted(() => ({
     access_group_id: number | null;
   }>,
 }));
-vi.mock("@/hooks/queries/admin/users", () => ({
-  useUpdateUser: () => ({ mutateAsync: adminUsers.update }),
+vi.mock("@/hooks/queries/admin/users", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/admin/users")>()),
   useAdminUsers: () => ({
     data: adminUsers.data,
     isPending: false,
@@ -34,6 +34,7 @@ vi.mock("@/hooks/queries/admin/users", () => ({
 }));
 vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/v2/adminUsers")>()),
+  updateAdminUser: (...args: unknown[]) => adminUsers.update(...args),
   getAdminUser: async (id: number) => ({
     user: {
       id,
@@ -167,6 +168,7 @@ describe("AdminAccessGroups", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     adminUsers.currentGroups.clear();
   });
 
@@ -278,9 +280,9 @@ describe("AdminAccessGroups", () => {
     await user.click(within(confirm).getByRole("button", { name: "Move" }));
 
     await waitFor(() => expect(adminUsers.update).toHaveBeenCalledTimes(1));
-    const call = adminUsers.update.mock.calls[0]![0];
-    expect(call.editor.user.id).toBe(7);
-    expect(String(call.body.access_group_id)).toBe("2");
+    const call = adminUsers.update.mock.calls[0]!;
+    expect(call[0].user.id).toBe(7);
+    expect(String(call[1].access_group_id)).toBe("2");
     expect(toastSuccess).toHaveBeenCalledWith("Moved 1 user to Guests");
     adminUsers.data = [];
   });
@@ -317,8 +319,8 @@ describe("AdminAccessGroups", () => {
     await user.click(within(confirm).getByRole("button", { name: "Move" }));
 
     await waitFor(() => expect(adminUsers.update).toHaveBeenCalledTimes(1));
-    expect(adminUsers.update.mock.calls[0]![0].editor.user.id).toBe(9);
-    expect(String(adminUsers.update.mock.calls[0]![0].body.access_group_id)).toBe("1");
+    expect(adminUsers.update.mock.calls[0]![0].user.id).toBe(9);
+    expect(String(adminUsers.update.mock.calls[0]![1].access_group_id)).toBe("1");
     adminUsers.data = [];
   });
 
@@ -356,7 +358,7 @@ describe("AdminAccessGroups", () => {
       within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Move" }),
     );
     await waitFor(() => expect(adminUsers.update).toHaveBeenCalledTimes(3));
-    expect(adminUsers.update.mock.calls[2]![0].editor.user.id).toBe(7);
+    expect(adminUsers.update.mock.calls[2]![0].user.id).toBe(7);
     adminUsers.data = [];
   });
 
@@ -380,6 +382,28 @@ describe("AdminAccessGroups", () => {
       "taylor: This user's group changed. Reload and try again.",
     );
     expect(adminUsers.update).not.toHaveBeenCalled();
+    adminUsers.data = [];
+  });
+
+  it("refreshes user and group lists once after moving several members", async () => {
+    withGuestsGroup();
+    adminUsers.data = [member(7, "taylor", "user", 1), member(8, "sam", "user", 1)];
+    adminUsers.update.mockReset().mockResolvedValue(undefined);
+    const invalidations = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+
+    await user.click(within(members).getByRole("checkbox", { name: "Select taylor" }));
+    await user.click(within(members).getByRole("checkbox", { name: "Select sam" }));
+    await pickOption(user, "Move selected members to", "Guests");
+    await user.click(within(members).getByRole("button", { name: /Move 2 selected/ }));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Move" }),
+    );
+
+    await waitFor(() => expect(adminUsers.update).toHaveBeenCalledTimes(2));
+    expect(invalidations).toHaveBeenCalledTimes(2);
     adminUsers.data = [];
   });
 

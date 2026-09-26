@@ -1,9 +1,15 @@
 import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { toast } from "sonner";
 
 import type { AccessGroup, AdminUser } from "@/api/types";
-import { captureAdminUserAuthority, getAdminUser } from "@/api/v2/adminUsers";
+import {
+  adminUserScope,
+  captureAdminUserAuthority,
+  getAdminUser,
+  updateAdminUser,
+} from "@/api/v2/adminUsers";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,7 +37,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useAdminUsers, useUpdateUser } from "@/hooks/queries/admin/users";
+import { accessGroupsKey } from "@/hooks/queries/admin/accessGroups";
+import { adminUsersKey, useAdminUsers } from "@/hooks/queries/admin/users";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { groupPolicyChanges } from "@/lib/accessGroupPolicyChanges";
 
@@ -55,7 +62,7 @@ export function AccessGroupMembers({
 }) {
   const users = useAdminUsers();
   const libraries = useAdminLibraries();
-  const updateUser = useUpdateUser();
+  const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [moveTarget, setMoveTarget] = useState("");
   const [adding, setAdding] = useState(false);
@@ -97,7 +104,7 @@ export function AccessGroupMembers({
         if (editor.user.access_group_id !== user.access_group_id) {
           throw new Error("This user's group changed. Reload and try again.");
         }
-        await updateUser.mutateAsync({ editor, body: { access_group_id: move.target.id } });
+        await updateAdminUser(editor, { access_group_id: move.target.id });
         moved++;
       } catch (err) {
         failedIds.add(user.id);
@@ -106,6 +113,9 @@ export function AccessGroupMembers({
         );
       }
     }
+    const scope = adminUserScope(context);
+    void queryClient.invalidateQueries({ queryKey: adminUsersKey(scope) });
+    void queryClient.invalidateQueries({ queryKey: accessGroupsKey(scope) });
     setSaving(false);
     setPending(null);
     // After moving members out, keep the ones that failed selected, with the
