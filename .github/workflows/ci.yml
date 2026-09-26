@@ -293,6 +293,9 @@ jobs:
       - name: Test taste cluster replacement against Postgres
         run: go test -race -count=1 -run '^TestUpsertTasteClusters.*Postgres$' ./internal/recommendations/
 
+      - name: Test Jellyfin detail preferences against Postgres
+        run: go test -race -count=1 -run '^TestCompatDetailServiceResolvesViewerSubtitleDefaultsPostgres$' ./cmd/silo/
+
   web:
     name: Web
     runs-on: ubuntu-latest

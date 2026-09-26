@@ -17,6 +17,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type versionsQueryCounter struct{ calls atomic.Int64 }
@@ -58,6 +60,7 @@ func (f *versionsFileFetcher) GetByExtraID(ctx context.Context, id string) ([]*m
 }
 
 type versionsFixture struct {
+	pool    *pgxpool.Pool
 	svc     *DetailService
 	queries *versionsQueryCounter
 	images  *versionsImageCounter
@@ -91,7 +94,7 @@ func newVersionsFixture(t testing.TB) *versionsFixture {
 			t.Fatal(err)
 		}
 	}
-	f := &versionsFixture{queries: counter, images: &versionsImageCounter{}, files: &versionsFileFetcher{files: map[string][]*models.MediaFile{}}, ids: map[string]string{}}
+	f := &versionsFixture{pool: pool, queries: counter, images: &versionsImageCounter{}, files: &versionsFileFetcher{files: map[string][]*models.MediaFile{}}, ids: map[string]string{}}
 	prefix := fmt.Sprintf("versions-%d-", time.Now().UnixNano())
 	if err := pool.QueryRow(t.Context(), `INSERT INTO media_folders (type,name) VALUES ('movies',$1) RETURNING id`, prefix).Scan(&f.library); err != nil {
 		t.Fatal(err)
@@ -344,5 +347,67 @@ func BenchmarkGetItemVersions(b *testing.B) {
 				b.ReportMetric(float64(f.images.calls.Load())/float64(b.N), "image-calls/op")
 			})
 		}
+	}
+}
+
+type countingUserStores struct {
+	store userstore.UserStore
+	calls int
+}
+
+func (p *countingUserStores) ForUser(context.Context, int) (userstore.UserStore, error) {
+	p.calls++
+	return p.store, nil
+}
+
+func (*countingUserStores) Close() error { return nil }
+
+// Jellyfin season pages build every episode's detail in one batch; the
+// viewer's preference lookups must not grow with the number of episodes.
+func TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries(t *testing.T) {
+	f := newVersionsFixture(t)
+	store := newDetailTestStore(t)
+	setProfileAudioLanguage(t, store, "fr")
+	encoded, _ := json.Marshal("always")
+	if _, err := store.UpsertSettingValue(t.Context(), userstore.SettingIdentity{Key: settingskeys.PlaybackSubtitleMode, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1"}, encoded); err != nil {
+		t.Fatal(err)
+	}
+	users := &countingUserStores{store: store}
+	f.svc.SetUserStoreProvider(users)
+
+	episodes := []string{f.ids["episode"]}
+	for n := 2; n <= 4; n++ {
+		id := fmt.Sprintf("%s-%d", f.ids["episode"], n)
+		if _, err := f.pool.Exec(t.Context(), `INSERT INTO episodes (content_id,series_id,season_id,season_number,episode_number,title) VALUES ($1,$2,$3,1,$4,'Episode')`, id, f.ids["series"], f.ids["season"], n); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.pool.Exec(t.Context(), `INSERT INTO episode_libraries (episode_id,media_folder_id) VALUES ($1,$2)`, id, f.library); err != nil {
+			t.Fatal(err)
+		}
+		for _, file := range f.files.files[f.ids["episode"]] {
+			clone := *file
+			clone.ContentID = id
+			f.files.files[id] = append(f.files.files[id], &clone)
+		}
+		episodes = append(episodes, id)
+	}
+
+	lookups := func(ids []string) int {
+		t.Helper()
+		users.calls = 0
+		details, err := f.svc.GetEpisodeDetailsForSeries(t.Context(), f.ids["series"], ids, AccessFilter{UserID: 1, ProfileID: "profile-1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range ids {
+			detail := details[id]
+			if detail == nil || detail.EffectiveSubtitleMode != "always" || *detail.Versions[0].EffectiveAudioTrackIndex != 1 {
+				t.Fatalf("episode %s lost the viewer's preferences: %+v", id, detail)
+			}
+		}
+		return users.calls
+	}
+	if one, all := lookups(episodes[:1]), lookups(episodes); all != one {
+		t.Fatalf("user store lookups = %d for %d episodes, %d for one", all, len(episodes), one)
 	}
 }

@@ -1591,6 +1591,11 @@ type seriesDetailContext struct {
 	crewCredits []CrewCredit
 	versionPref versionDefaults
 	backdropURL string
+	// The viewer's audio and subtitle preferences depend only on the series
+	// and the library a file lives in, so a batch resolves them once per
+	// series (and library) instead of once per episode.
+	audio            *audioPrefResolver
+	subtitleDefaults map[int]subtitleDefaults
 }
 
 // buildSeriesDetailContext loads the parent series row, localizes it, fetches
@@ -1609,12 +1614,26 @@ func (s *DetailService) buildSeriesDetailContext(ctx context.Context, seriesID s
 	}
 	castCredits, crewCredits := s.fetchCredits(ctx, seriesID, filter)
 	return &seriesDetailContext{
-		series:      series,
-		castCredits: castCredits,
-		crewCredits: crewCredits,
-		versionPref: s.effectiveVersionDefaults(ctx, filter, seriesID),
-		backdropURL: s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSize)),
+		series:           series,
+		castCredits:      castCredits,
+		crewCredits:      crewCredits,
+		versionPref:      s.effectiveVersionDefaults(ctx, filter, seriesID),
+		backdropURL:      s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSize)),
+		audio:            s.newAudioPrefResolver(ctx, filter, seriesID),
+		subtitleDefaults: map[int]subtitleDefaults{},
 	}, nil
+}
+
+// episodeSubtitleDefaults memoizes effectiveSubtitleDefaults for the series by
+// the library that decides the settings scope.
+func (s *DetailService) episodeSubtitleDefaults(ctx context.Context, seriesCtx *seriesDetailContext, filter AccessFilter, seriesID string, files []*models.MediaFile) subtitleDefaults {
+	libraryID := preferredPlayableLibraryID(files, filter.SelectedFileID)
+	if defaults, ok := seriesCtx.subtitleDefaults[libraryID]; ok {
+		return defaults
+	}
+	defaults := s.effectiveSubtitleDefaults(ctx, filter, seriesID, files)
+	seriesCtx.subtitleDefaults[libraryID] = defaults
+	return defaults
 }
 
 // GetEpisodeDetailsForSeries returns ItemDetails for the requested episodes,
@@ -2980,14 +2999,14 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 	}
 	files = FilterMediaFilesByAccess(files, filter)
 	files = s.prepareBrowseFiles(ctx, files)
-	detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfo(
+	detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfoWith(
 		ctx,
 		files,
 		filter,
-		episode.SeriesID,
+		seriesCtx.audio,
 	)
 	detail.OverlaySummary = overlays.BuildSummary(files)
-	s.effectiveSubtitleDefaults(ctx, filter, episode.SeriesID, files).applyToItemDetail(detail)
+	s.episodeSubtitleDefaults(ctx, seriesCtx, filter, episode.SeriesID, files).applyToItemDetail(detail)
 	if seriesCtx.versionPref.HasAny {
 		if seriesCtx.versionPref.Resolution != "" {
 			detail.EffectiveVersionResolution = stringPtr(seriesCtx.versionPref.Resolution)
@@ -3672,13 +3691,22 @@ func (s *DetailService) buildPlaybackInfo(
 	filter AccessFilter,
 	audioPreferenceContentID string,
 ) ([]FileVersion, []PlaybackVariant, []SubtitleInfo, *Marker, *Marker, *Marker, *Marker) {
+	// Resolve the request-invariant audio preferences once; a multi-track item
+	// would otherwise re-query the profile/preference rows for every file.
+	return s.buildPlaybackInfoWith(ctx, files, filter, s.newAudioPrefResolver(ctx, filter, audioPreferenceContentID))
+}
+
+// buildPlaybackInfoWith is buildPlaybackInfo with a caller-owned audio
+// resolver, so a batch over one series can share it across episodes.
+func (s *DetailService) buildPlaybackInfoWith(
+	ctx context.Context,
+	files []*models.MediaFile,
+	filter AccessFilter,
+	audioResolver *audioPrefResolver,
+) ([]FileVersion, []PlaybackVariant, []SubtitleInfo, *Marker, *Marker, *Marker, *Marker) {
 	versions := make([]FileVersion, 0, len(files))
 	subtitleSet := make(map[string]SubtitleInfo)
 	var firstIntro, firstCredits, firstRecap, firstPreview *Marker
-
-	// Resolve the request-invariant audio preferences once; a multi-track item
-	// would otherwise re-query the profile/preference rows for every file.
-	audioResolver := s.newAudioPrefResolver(ctx, filter, audioPreferenceContentID)
 
 	for _, f := range files {
 		if f == nil {

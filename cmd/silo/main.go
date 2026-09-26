@@ -3351,14 +3351,7 @@ func main() {
 				fileFetcher = deps.FileRepo
 			}
 
-			detailSvc := catalog.NewDetailService(itemRepo, episodeRepo, seasonRepo, personRepo, fileFetcher)
-			detailSvc.SetFolderRepository(folderRepo)
-			detailSvc.SetGroupClaimRepository(catalog.NewGroupClaimRepository(deps.DB))
-			detailSvc.SetProbeEnsurer(deps.ProbeEnsurer)
-			detailSvc.SetChapterThumbnailQueuer(deps.ChapterThumbnailQueuer)
-			if deps.ImageResolver != nil {
-				detailSvc.SetImageResolver(deps.ImageResolver)
-			}
+			detailSvc := newCompatDetailService(&deps, itemRepo, episodeRepo, seasonRepo, personRepo, fileFetcher, userStoreProvider)
 
 			compatDeps.BrowseRepo = browseRepo
 			compatDeps.ItemRepo = itemRepo
