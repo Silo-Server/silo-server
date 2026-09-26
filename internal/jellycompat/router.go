@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"gopkg.in/natefinch/lumberjack.v2"
 
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -41,6 +42,11 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	if deps.IngressTokens != nil {
 		r.Use(netaccess.Middleware(deps.IngressTokens))
+	}
+	// After client IP resolution and ingress-token stripping, before auth, so
+	// failed sign-ins are recorded too. Matches the native base middleware.
+	if deps.ActivityLogWriter != nil {
+		r.Use(activitylog.NewFilteredMiddleware(deps.ActivityLogWriter, deps.NodeID, skipCompatActivityLog))
 	}
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},
@@ -356,6 +362,23 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Head("/", systemHandler.HandlePing)
 
 	return r
+}
+
+// skipCompatActivityLog leaves out routes that a single page view or playback
+// fetches many times over: artwork, the bundled jellyfin-web assets, and HLS
+// variant playlists and segments. The PlaybackInfo and master playlist requests
+// that start playback are still recorded, as native stream starts are.
+func skipCompatActivityLog(pattern string) bool {
+	switch pattern {
+	case "/Items/{id}/Images/{imageType}",
+		"/Items/{id}/Images/{imageType}/{index}",
+		"/Users/{id}/Images/Primary",
+		"/UserImage",
+		"/api/v2/artwork/*",
+		"/web/*":
+		return true
+	}
+	return strings.HasPrefix(pattern, "/Videos/") && strings.Contains(pattern, "/hls/{playlistId}/")
 }
 
 func skipCompatMediaCompression(r *http.Request) bool {
