@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"slices"
 	"strings"
@@ -659,8 +660,13 @@ func (s *Service) attachSessionForConnection(
 
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
 	dispatches := s.prepareSnapshotDispatchesLocked(live)
+	roomID := live.room.ID
 	s.mu.Unlock()
 
+	for _, dispatch := range commandDispatches {
+		slog.DebugContext(ctx, "watch together sync sent",
+			append(memberCommandLogAttrs(roomID, userID, dispatch), "reattaching", reattaching)...)
+	}
 	s.sendDispatches(ctx, dispatches)
 	s.sendCommandDispatches(ctx, commandDispatches)
 	return snapshot, nil
@@ -818,6 +824,7 @@ func (s *Service) handleStateReportForConnection(
 	}
 
 	isHost := userID == live.room.HostUserID && profileID == live.room.HostProfileID
+	memberIsHost := isHost
 	now := s.now()
 	expected := expectedPosition(live.room, now)
 	pauseMismatch := report.IsPaused != live.room.IsPaused
@@ -899,12 +906,19 @@ func (s *Service) handleStateReportForConnection(
 	if caughtUp && dispatches == nil {
 		dispatches = s.prepareSnapshotDispatchesLocked(live)
 	}
+	roomID := live.room.ID
 	s.mu.Unlock()
 	s.sendDispatches(ctx, dispatches)
 	if isHost {
 		return snapshot, nil
 	}
 
+	for _, dispatch := range correctionDispatches {
+		slog.DebugContext(ctx, "watch together correction sent",
+			append(memberCommandLogAttrs(roomID, userID, dispatch),
+				"host", memberIsHost, "reported_position_seconds", report.PositionSeconds,
+				"drift_seconds", drift, "pause_mismatch", pauseMismatch)...)
+	}
 	if len(correctionDispatches) > 0 {
 		s.sendCommandDispatches(ctx, correctionDispatches)
 	}
@@ -2241,6 +2255,18 @@ func (s *Service) clearCorrectionCommandsLocked(live *liveRoom) {
 		if member != nil {
 			member.correctionCommand = nil
 		}
+	}
+}
+
+// memberCommandLogAttrs describes a command sent to one member to move its
+// playback to the room. Clients apply these without telling the viewer, so the
+// log is the only trace of how often the room moved a member.
+func memberCommandLogAttrs(roomID string, userID int, dispatch commandDispatch) []any {
+	command, _ := dispatch.payload[commandPayloadKey].(TransportCommand)
+	return []any{
+		"component", "watchtogether", "room_id", roomID, "user_id", userID,
+		"session_id", command.SessionID, "command_id", command.CommandID, "action", command.Action,
+		"playback_state", command.PlaybackState, "target_position_seconds", command.PositionSeconds,
 	}
 }
 
