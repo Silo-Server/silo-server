@@ -50,12 +50,14 @@ export function pluginDisplayName(pluginID: string, presentation?: PluginPresent
   const displayName = presentation?.display_name.trim();
   if (displayName) return displayName;
 
-  return pluginID
+  const derived = pluginID
     .replace(/^silo[._-]?/, "")
     .split(/[._-]+/)
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+  // An ID like `silo` normalizes to nothing; show the raw ID rather than a blank name.
+  return derived || pluginID;
 }
 
 export function pluginSummary(
@@ -86,7 +88,10 @@ export function pluginResourceLinks(
   repoURL?: string,
 ): { label: string; url: string }[] {
   return [
-    { label: "Source code", url: safeExternalURL(presentation?.source_url || repoURL) },
+    {
+      label: "Source code",
+      url: safeExternalURL(presentation?.source_url) ?? safeExternalURL(repoURL),
+    },
     { label: "Changelog", url: safeExternalURL(presentation?.changelog_url) },
     { label: "Support", url: safeExternalURL(presentation?.support_url) },
   ].filter((link): link is { label: string; url: string } => Boolean(link.url));

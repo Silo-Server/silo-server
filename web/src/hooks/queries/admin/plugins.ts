@@ -382,9 +382,11 @@ export function useCreatePluginRepository() {
   });
   return {
     ...mutation,
-    mutate: (body: CreatePluginRepositoryRequest) => {
+    mutate: (body: CreatePluginRepositoryRequest, options?: { onSuccess?: () => void }) => {
       try {
-        mutation.mutate(captureRepositoryCreation(body));
+        mutation.mutate(captureRepositoryCreation(body), {
+          onSuccess: () => options?.onSuccess?.(),
+        });
       } catch {
         toast.error("Select an administrator profile before adding a repository.");
       }

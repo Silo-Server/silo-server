@@ -1,4 +1,4 @@
-import type { PluginInstallation } from "@/api/types";
+import type { PluginInstallation, PluginPresentation } from "@/api/types";
 import { missingRequiredConfig } from "@/lib/pluginConfigReady";
 import { pluginDisplayName } from "@/lib/pluginPresentation";
 import { pluginStatusIndicator } from "@/lib/pluginStatusIndicator";
@@ -67,12 +67,20 @@ export function matchesInstalledFilter(
   }
 }
 
-/** Sorts by pluginStatus rank, then by name. */
-export function sortInstalledPlugins(installations: PluginInstallation[]): PluginInstallation[] {
+/**
+ * Sorts by pluginStatus rank, then by display name. `presentationFor` lets the
+ * caller supply the same catalog fallback the tiles use for older manifests.
+ */
+export function sortInstalledPlugins(
+  installations: PluginInstallation[],
+  presentationFor: (installation: PluginInstallation) => PluginPresentation | undefined = (
+    installation,
+  ) => installation.presentation,
+): PluginInstallation[] {
   const keyed = installations.map((installation) => ({
     installation,
     rank: pluginStatus(installation).rank,
-    name: pluginDisplayName(installation.plugin_id, installation.presentation),
+    name: pluginDisplayName(installation.plugin_id, presentationFor(installation)),
   }));
   keyed.sort(
     (a, b) => a.rank - b.rank || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),

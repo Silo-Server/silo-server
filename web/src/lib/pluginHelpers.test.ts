@@ -46,6 +46,20 @@ function installation(overrides: Partial<PluginInstallation> = {}): PluginInstal
   };
 }
 
+const PRESENTATION_STUB = {
+  display_name: "",
+  summary: "",
+  description_markdown: "",
+  setup_markdown: "",
+  homepage_url: "",
+  source_url: "",
+  support_url: "",
+  changelog_url: "",
+  publisher_name: "",
+  publisher_url: "",
+  license_spdx: "",
+};
+
 const REQUIRED_ACCOUNT = [{ key: "account", title: "Account", json_schema: "{}", required: true }];
 
 describe("pluginPresentation", () => {
@@ -71,10 +85,31 @@ describe("pluginPresentation", () => {
     expect(
       pluginResourceLinks(undefined, "https://github.com/Silo-Server/x").map((l) => l.label),
     ).toEqual(["Source code"]);
+    // A rejected presentation URL falls back to the repository URL.
+    expect(
+      pluginResourceLinks(
+        {
+          display_name: "",
+          summary: "",
+          description_markdown: "",
+          setup_markdown: "",
+          homepage_url: "",
+          source_url: "javascript:alert(1)",
+          support_url: "",
+          changelog_url: "",
+          publisher_name: "",
+          publisher_url: "",
+          license_spdx: "",
+        },
+        "https://github.com/Silo-Server/x",
+      ),
+    ).toEqual([{ label: "Source code", url: "https://github.com/Silo-Server/x" }]);
   });
 
   it("falls back to a readable name and license", () => {
     expect(pluginDisplayName("silo.requests.seerr")).toBe("Requests Seerr");
+    expect(pluginDisplayName("silo")).toBe("silo");
+    expect(pluginDisplayName("silo_")).toBe("silo_");
     expect(licenseLabel("NOASSERTION")).toBe("Not specified");
     expect(licenseLabel("")).toBe("Not specified");
     expect(licenseLabel("MIT")).toBe("MIT");
@@ -138,6 +173,17 @@ describe("pluginStatus", () => {
     expect(pluginStatus(off)).toMatchObject({ label: "Off", attention: false });
     expect(matchesInstalledFilter(off, "off")).toBe(true);
     expect(matchesInstalledFilter(off, "attention")).toBe(false);
+  });
+
+  it("sorts by the same catalog fallback name the tiles show", () => {
+    const older = installation({ id: 1, plugin_id: "silo.zzz", presentation: undefined });
+    const named = installation({ id: 2, plugin_id: "silo.mmm" });
+    expect(sortInstalledPlugins([named, older]).map((entry) => entry.id)).toEqual([2, 1]);
+    expect(
+      sortInstalledPlugins([named, older], (entry) =>
+        entry.id === 1 ? { ...PRESENTATION_STUB, display_name: "Aardvark" } : entry.presentation,
+      ).map((entry) => entry.id),
+    ).toEqual([1, 2]);
   });
 
   it("sorts problems first and off plugins last", () => {
@@ -216,7 +262,13 @@ describe("taskTrigger", () => {
 
   it("defaults a missing or unreadable plugin trigger to startup, like the server", () => {
     expect(pluginTaskTrigger(undefined)).toEqual({ type: "startup" });
-    expect(pluginTaskTrigger({ type: "sometimes" })).toEqual({ type: "startup" });
+    expect(pluginTaskTrigger({ type: "" })).toEqual({ type: "startup" });
+    // The server builds no live trigger for an unknown type, so don't claim startup.
+    expect(pluginTaskTrigger({ type: "sometimes" })).toEqual({ type: "sometimes" });
+    expect(describeTrigger(pluginTaskTrigger({ type: "sometimes" }))).toBe("sometimes");
+    expect(describeTrigger({ type: "weekly", day_of_week: 7, time_of_day: "02:00" })).toBe(
+      "Day 7 at 02:00",
+    );
     expect(pluginTaskTrigger({ type: "daily", time_of_day: "02:00" })).toEqual({
       type: "daily",
       time_of_day: "02:00",

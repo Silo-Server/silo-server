@@ -264,8 +264,10 @@ function InstalledTab({
     () =>
       sortInstalledPlugins(
         searched.filter((installation) => matchesInstalledFilter(installation, filter)),
+        (installation) =>
+          installation.presentation ?? catalogByPluginID.get(installation.plugin_id)?.presentation,
       ),
-    [filter, searched],
+    [catalogByPluginID, filter, searched],
   );
 
   if (installations.length === 0) {
@@ -353,9 +355,11 @@ function CatalogTab({
       ),
     [catalog, query],
   );
+  // Chips come from the whole catalog so a job filter still applies (and can
+  // show no results) when the search narrows the list.
   const jobs = useMemo(
-    () => catalogJobs(searched.map((entry) => entry.capabilities ?? [])),
-    [searched],
+    () => catalogJobs(catalog.map((entry) => entry.capabilities ?? [])),
+    [catalog],
   );
   const activeJob = jobs.some((kind) => kind.job === job) ? job : "";
   const visible = activeJob

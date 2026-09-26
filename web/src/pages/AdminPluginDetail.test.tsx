@@ -32,6 +32,7 @@ let installationsQuery: QueryState<PluginInstallation[]> = query<PluginInstallat
 let catalogQuery: QueryState<PluginCatalogEntry[]> = query<PluginCatalogEntry[]>([]);
 const catalogOptions: Array<{ enabled?: boolean }> = [];
 const updateInstallationMock = vi.fn();
+let updateInstallationPending = false;
 const applyUpdateMock = vi.fn();
 const restartMock = vi.fn();
 let restartPending = false;
@@ -51,7 +52,10 @@ vi.mock("@/hooks/queries/admin/plugins", () => ({
     catalogOptions.push(options);
     return catalogQuery;
   },
-  useUpdatePluginInstallation: () => ({ mutate: updateInstallationMock, isPending: false }),
+  useUpdatePluginInstallation: () => ({
+    mutate: updateInstallationMock,
+    isPending: updateInstallationPending,
+  }),
   useApplyPluginUpdate: () => ({ mutate: applyUpdateMock, isPending: false }),
   useRestartPluginInstallation: () => ({ mutate: restartMock, isPending: restartPending }),
   useDeletePluginInstallation: () => ({ mutate: deleteMock, isPending: false }),
@@ -229,6 +233,7 @@ describe("AdminPluginDetail", () => {
     capturedSelects.length = 0;
     capturedSwitches.length = 0;
     restartPending = false;
+    updateInstallationPending = false;
     for (const mock of [
       updateInstallationMock,
       applyUpdateMock,
@@ -351,6 +356,12 @@ describe("AdminPluginDetail", () => {
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Update to 0.2.0" }));
     expect(applyUpdateMock).toHaveBeenCalledWith(7);
+  });
+
+  it("locks the update policy while an installation update is saving", () => {
+    updateInstallationPending = true;
+    renderPage();
+    expect(capturedSelects[0]?.disabled).toBe(true);
   });
 
   it("uninstalls after confirmation and returns to the plugin list", () => {

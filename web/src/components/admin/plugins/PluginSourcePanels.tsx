@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Plus, Trash2, Upload, X } from "lucide-react";
 
@@ -20,11 +20,18 @@ const PANEL = "rounded-xl border bg-card px-4 py-4";
 export function PluginUploadPanel() {
   const { upload, progress, isPending } = usePluginUpload();
   const [file, setFile] = useState<File | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!file) return;
-    upload(file, { onSuccess: () => setFile(null) });
+    upload(file, {
+      onSuccess: () => {
+        setFile(null);
+        // Without this, choosing the same file again fires no change event.
+        if (inputRef.current) inputRef.current.value = "";
+      },
+    });
   }
 
   return (
@@ -36,14 +43,16 @@ export function PluginUploadPanel() {
         Upload a plugin file for a plugin that isn&apos;t in a repository.
       </p>
       <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-2.5 sm:flex-row">
-        <label className="border-border hover:border-foreground/20 flex h-9 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-dashed px-3.5 text-sm transition-colors">
+        <label className="border-border hover:border-foreground/20 focus-within:ring-ring flex h-9 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-dashed px-3.5 text-sm transition-colors focus-within:ring-2">
           <Upload className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden />
           <span className="text-muted-foreground truncate">
             {file ? file.name : "Choose plugin file..."}
           </span>
           <input
+            ref={inputRef}
             type="file"
-            className="hidden"
+            aria-label="Plugin file"
+            className="sr-only"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           />
         </label>
@@ -77,10 +86,17 @@ export function PluginRepositoriesPanel({
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!name.trim() || !url.trim()) return;
-    createRepository.mutate({ display_name: name.trim(), url: url.trim(), enabled: true });
-    setName("");
-    setUrl("");
-    setShowForm(false);
+    // Keep what the admin typed until the server accepts it, so a rejected URL can be fixed.
+    createRepository.mutate(
+      { display_name: name.trim(), url: url.trim(), enabled: true },
+      {
+        onSuccess: () => {
+          setName("");
+          setUrl("");
+          setShowForm(false);
+        },
+      },
+    );
   }
 
   return (

@@ -310,6 +310,7 @@ function InstalledPluginPage({
           <>
             <Select
               value={policy}
+              disabled={updateInstallation.isPending}
               onValueChange={(value) =>
                 updateInstallation.mutate({
                   id: installation.id,

@@ -27,7 +27,8 @@ export function describeTrigger(t: TriggerConfig, style: "long" | "short" = "lon
       return `Daily at ${t.time_of_day ?? "00:00"}`;
     case "weekly": {
       const days = short ? SHORT_DAYS : LONG_DAYS;
-      return `${days[t.day_of_week ?? 0]} at ${t.time_of_day ?? "00:00"}`;
+      const day = days[t.day_of_week ?? 0] ?? `Day ${t.day_of_week}`;
+      return `${day} at ${t.time_of_day ?? "00:00"}`;
     }
     case "startup":
       return short ? "On startup" : "On server startup";
@@ -36,15 +37,15 @@ export function describeTrigger(t: TriggerConfig, style: "long" | "short" = "lon
   }
 }
 
-const TRIGGER_TYPES = new Set(["interval", "daily", "weekly", "startup"]);
-
 /**
  * The default trigger a plugin task binding asks for. Mirrors the server's
- * defaultPluginTaskTriggers: a missing or unreadable trigger means the task
- * runs at startup. Once the task exists, its schedule on the Tasks page wins.
+ * defaultPluginTaskTriggers: only a missing or typeless trigger means the task
+ * runs at startup. A type the server doesn't know is kept as-is (the server
+ * builds no live trigger for it), so the page shows it rather than claiming
+ * startup. Once the task exists, its schedule on the Tasks page wins.
  */
 export function pluginTaskTrigger(raw?: Record<string, unknown> | null): TriggerConfig {
-  if (raw && typeof raw.type === "string" && TRIGGER_TYPES.has(raw.type)) {
+  if (raw && typeof raw.type === "string" && raw.type !== "") {
     return raw as unknown as TriggerConfig;
   }
   return { type: "startup" } as TriggerConfig;

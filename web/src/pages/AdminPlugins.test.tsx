@@ -654,6 +654,36 @@ describe("AdminPlugins", () => {
     expect(markup).toContain("1 of 2 plugins");
   });
 
+  it("keeps a job filter when the search leaves nothing for that job", () => {
+    useAdminPluginsMock.mockReturnValue({
+      repositories: [],
+      installations: [],
+      catalogSettings: undefined,
+      isLoading: false,
+      catalog: [
+        {
+          ...makeCatalogEntry(1, { displayName: "Intro Finder" }),
+          capabilities: [{ type: "marker_provider.v1", id: "intro", display_name: "Intro" }],
+        },
+        {
+          ...makeCatalogEntry(2, { displayName: "Ratings Source" }),
+          capabilities: [{ type: "metadata_provider.v1", id: "ratings", display_name: "Ratings" }],
+        },
+      ],
+    });
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter
+        initialEntries={["/admin/plugins?tab=catalog&catalog_job=markers&catalog_q=ratings"]}
+      >
+        <AdminPlugins />
+      </MemoryRouter>,
+    );
+
+    expect(markup).not.toContain("Ratings Source");
+    expect(markup).toContain("No catalog plugins match");
+  });
+
   it.each([["silo.theintrodb"], ["silo.not-installed"]])(
     "forwards the old ?configure=%s link to the plugin page",
     async (pluginID) => {
