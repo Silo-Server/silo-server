@@ -58,7 +58,9 @@ func MigrationContext(ctx context.Context) (context.Context, context.CancelFunc)
 	return context.WithCancel(ctx)
 }
 
-// RunMigrations applies all pending Goose migrations from fsys/dir.
+// RunMigrations applies all pending Goose migrations from fsys/dir, one at a
+// time, logging each migration's start and finish and a heartbeat while a long
+// one runs, so a slow startup is visibly working rather than silent.
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir string) error {
 	provider, err := newMigrationProvider(pool, fsys, dir)
 	if err != nil {
@@ -66,10 +68,7 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir stri
 	}
 	defer provider.Close()
 
-	if _, err := provider.Up(ctx); err != nil {
-		return fmt.Errorf("running goose migrations: %w", err)
-	}
-	return nil
+	return applyMigrationsLogged(ctx, provider, slog.Default(), migrationHeartbeatInterval)
 }
 
 // MigrateDownTo rolls back every migration newer than version, newest first.
@@ -90,9 +89,31 @@ func MigrateDownTo(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir stri
 	}
 	defer func() { _ = provider.Close() }()
 
-	if _, err := provider.DownTo(ctx, version); err != nil {
+	logger := slog.Default()
+	logger.InfoContext(ctx, "rolling back database migrations", "to_version", version)
+	started := time.Now()
+	stop := startMigrationHeartbeat(migrationHeartbeatInterval, func(elapsed string) {
+		logger.InfoContext(ctx, "database migration rollback still running",
+			"to_version", version, "elapsed", elapsed)
+	})
+	results, err := provider.DownTo(ctx, version)
+	stop()
+	for _, result := range results {
+		if result == nil || result.Source == nil || result.Error != nil {
+			continue
+		}
+		logger.InfoContext(ctx, "database migration rolled back",
+			"version", result.Source.Version,
+			"name", migrationName(result.Source),
+			"duration", roundMigrationDuration(result.Duration))
+	}
+	if err != nil {
 		return fmt.Errorf("rolling back goose migrations to %d: %w", version, err)
 	}
+	logger.InfoContext(ctx, "database migration rollback finished",
+		"to_version", version,
+		"rolled_back", len(results),
+		"duration", roundMigrationDuration(time.Since(started)))
 	return nil
 }
 
