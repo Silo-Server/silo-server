@@ -31,6 +31,9 @@ export function librarySettingSupport(type: string) {
   return {
     trailers: video,
     chapterThumbnails: video,
-    introDetection: kind === "series" || kind === "mixed",
+    introDetection: kind === "series" || kind === "mixed" || kind === "movies",
+    // Movies get local credits only, on a best-effort basis, so new movie
+    // libraries leave detection off.
+    creditsOnlyDetection: kind === "movies",
   };
 }

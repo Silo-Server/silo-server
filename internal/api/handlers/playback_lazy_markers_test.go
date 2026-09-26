@@ -10,6 +10,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/markers"
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -31,6 +32,25 @@ type fakePlaybackIntroAnalyzer struct {
 	summary intromarkers.RunSummary
 	err     error
 	kinds   []intromarkers.EpisodeMarkerKinds
+	// movieFiles records AnalyzeMovieFile calls, and interactive whether
+	// each ran with playback priority.
+	movieFiles  []int
+	interactive []bool
+}
+
+func (a *fakePlaybackIntroAnalyzer) AnalyzeMovieFile(ctx context.Context, fileID int) (intromarkers.RunSummary, error) {
+	a.mu.Lock()
+	a.calls++
+	a.movieFiles = append(a.movieFiles, fileID)
+	a.interactive = append(a.interactive, mediasample.Interactive(ctx))
+	a.mu.Unlock()
+	if a.started != nil {
+		select {
+		case a.started <- struct{}{}:
+		default:
+		}
+	}
+	return intromarkers.RunSummary{FilesConsidered: 1}, a.err
 }
 
 func (a *fakePlaybackIntroAnalyzer) AnalyzeEpisodeForPlayback(_ context.Context, _ string, kinds intromarkers.EpisodeMarkerKinds) (intromarkers.RunSummary, error) {
@@ -169,6 +189,18 @@ func TestMaybeQueueLazyPlaybackMarkersGates(t *testing.T) {
 			eligible: true,
 		},
 		{
+			name: "movie with credits",
+			lazy: "true",
+			mode: "local",
+			file: func() *models.MediaFile {
+				file := lazyMarkerMovieFile()
+				start, end := 6500.0, 7000.0
+				file.CreditsStart, file.CreditsEnd = &start, &end
+				return file
+			}(),
+			eligible: true,
+		},
+		{
 			name:     "library ineligible",
 			lazy:     "true",
 			mode:     "local",
@@ -289,12 +321,36 @@ func TestMissingLocalMarkersPerKind(t *testing.T) {
 		{"episode with only an intro", &models.MediaFile{IntroStart: marker(0), IntroEnd: marker(60)}, true, kinds{Credits: true}},
 		{"episode with only credits", &models.MediaFile{CreditsStart: marker(1700), CreditsEnd: marker(1800)}, true, kinds{Intro: true}},
 		{"episode with both", &models.MediaFile{IntroStart: marker(0), IntroEnd: marker(60), CreditsStart: marker(1700), CreditsEnd: marker(1800)}, true, kinds{}},
-		{"movie without markers", &models.MediaFile{}, false, kinds{}},
+		{"movie without markers", &models.MediaFile{}, false, kinds{Credits: true}},
+		{"movie with only an intro", &models.MediaFile{IntroStart: marker(0), IntroEnd: marker(60)}, false, kinds{Credits: true}},
+		{"movie with credits", &models.MediaFile{CreditsStart: marker(6500), CreditsEnd: marker(7000)}, false, kinds{}},
 	}
 	for _, tc := range cases {
 		if got := missingLocalMarkers(tc.file, tc.isEpisode); got != tc.want {
 			t.Errorf("%s: missingLocalMarkers = %+v, want %+v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// A played movie without credits gets local credits analysis of that file,
+// with playback priority; movies never get local intros.
+func TestMaybeQueueLazyPlaybackMarkersRunsMovieCredits(t *testing.T) {
+	file := lazyMarkerMovieFile()
+	analyzer := &fakePlaybackIntroAnalyzer{started: make(chan struct{}, 1)}
+	handler := newLazyMarkerTestHandler(file, analyzer, nil)
+
+	handler.maybeQueueLazyPlaybackMarkers(context.Background(), &playback.Session{ID: "session-1"}, file)
+
+	select {
+	case <-analyzer.started:
+	case <-time.After(time.Second):
+		t.Fatal("movie analysis did not start")
+	}
+	analyzer.mu.Lock()
+	defer analyzer.mu.Unlock()
+	if len(analyzer.movieFiles) != 1 || analyzer.movieFiles[0] != file.ID || !analyzer.interactive[0] || len(analyzer.kinds) != 0 {
+		t.Fatalf("movie files %v (interactive %v), episode analyses %v; want one playback-priority analysis of file %d",
+			analyzer.movieFiles, analyzer.interactive, analyzer.kinds, file.ID)
 	}
 }
 
@@ -443,6 +499,15 @@ func newLazyMarkerTestHandler(
 	handler.MarkerUpdateNotifier = notifier
 	handler.MarkerLazyContext = context.Background()
 	return handler
+}
+
+func lazyMarkerMovieFile() *models.MediaFile {
+	return &models.MediaFile{
+		ID:            43,
+		ContentID:     "movie-1",
+		MediaFolderID: 7,
+		Duration:      7200,
+	}
 }
 
 func lazyMarkerTestFile() *models.MediaFile {

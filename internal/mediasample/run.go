@@ -105,27 +105,60 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt) (R
 	if attempt.Hardware {
 		decoder = "hardware:" + r.HWAccel
 	}
-	args, stdinBytes, err := buildArgs(req, attempt, hardwareDecode{Accel: r.HWAccel, Device: r.HWDevice})
-	if err != nil {
-		return Result{}, &AttemptError{Decoder: decoder, Reason: ReasonArgs, Err: err}
-	}
-
 	attemptCtx := ctx
 	if attempt.TimeoutSeconds > 0 {
 		var cancel context.CancelFunc
 		attemptCtx, cancel = context.WithTimeout(ctx, time.Duration(attempt.TimeoutSeconds*float64(time.Second)))
 		defer cancel()
 	}
-
-	var stdin io.Reader
-	if stdinBytes != nil {
-		stdin = bytes.NewReader(stdinBytes)
+	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, attempt: attempt, decoder: decoder}
+	if req.Samples != nil {
+		return run.samples(req)
 	}
-	var stdout *bytes.Buffer
-	var stdoutWriter io.Writer
-	if req.Audio != nil && req.Audio.Fingerprint {
-		stdout = &bytes.Buffer{}
-		stdoutWriter = stdout
+	return run.decode(req, 0)
+}
+
+// attemptRun is one attempt in progress. ctx is the caller's context and
+// attemptCtx the attempt's, which the attempt's timeout may end first; every
+// ffmpeg process of the attempt shares it.
+type attemptRun struct {
+	runner     Runner
+	ctx        context.Context
+	attemptCtx context.Context
+	attempt    Attempt
+	decoder    string
+}
+
+// samples runs a Samples request. It probes the input first (see probe.go),
+// then reads it through a concat list when its container seeks to keyframes,
+// and otherwise as one keyframes-only window whose keyframes it picks the
+// samples from.
+func (a attemptRun) samples(req Request) (Result, *AttemptError) {
+	header := &inputHeaderParser{}
+	if _, failure := a.exec(req, probeArgs(req.Input), nil, false, header.line); failure != nil {
+		return Result{}, failure
+	}
+	if header.info.seeksToKeyframes() {
+		return a.decode(req, header.info.StartSeconds)
+	}
+	window := sampledWindow(req.Samples.Seconds)
+	windowReq := req
+	windowReq.Samples = nil
+	windowReq.Window = &window
+	result, failure := a.decode(windowReq, 0)
+	if failure != nil {
+		return Result{}, failure
+	}
+	result.Frames = pickSampleFrames(result.Frames, req.Samples.Seconds)
+	return result, nil
+}
+
+// decode runs req's decode and parses its outputs. inputStart offsets the
+// inpoints of a Samples list.
+func (a attemptRun) decode(req Request, inputStart float64) (Result, *AttemptError) {
+	args, stdinBytes, err := buildArgs(req, a.attempt, hardwareDecode{Accel: a.runner.HWAccel, Device: a.runner.HWDevice}, inputStart)
+	if err != nil {
+		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonArgs, Err: err}
 	}
 	var handlers []func(string)
 	var silences *silenceParser
@@ -135,44 +168,19 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt) (R
 	}
 	var stats *statsParser
 	if req.Stats != nil {
-		stats = newStatsParser(buildStatsGraph(*req.Stats), req.Window.StartSeconds)
+		if req.Samples != nil {
+			stats = newSampledStatsParser(buildStatsGraph(*req.Stats))
+		} else {
+			stats = newStatsParser(buildStatsGraph(*req.Stats), req.Window.StartSeconds)
+		}
 		handlers = append(handlers, stats.line)
 	}
-	router := newStderrRouter(handlers...)
-	stderr, waitStderr := router.start()
-
-	run := r.exec
-	if run == nil {
-		run = execFFmpeg(req.Background)
-	}
-	state, err := run(attemptCtx, r.FFmpegPath, args, stdin, stdoutWriter, stderr)
-	_ = stderr.Close()
-	waitStderr()
-	workload := r.Workload
-	if workload == processmetrics.Transcode {
-		workload = processmetrics.Analysis
-	}
-	processmetrics.Record(workload, state, err, attemptCtx.Err())
-
-	if err == nil && state != nil && !state.Success() {
-		err = fmt.Errorf("ffmpeg %s", state)
-	}
-	if err != nil {
-		failure := &AttemptError{Decoder: decoder, Reason: ReasonExit, Err: err, StderrTail: router.Tail()}
-		switch {
-		case ctx.Err() != nil:
-			failure.Reason = ReasonCanceled
-			failure.Err = ctx.Err()
-		case attemptCtx.Err() != nil:
-			failure.Reason = ReasonTimeout
-			failure.Err = attemptCtx.Err()
-		case state == nil:
-			failure.Reason = ReasonStart
-		}
+	stdout, failure := a.exec(req, args, stdinBytes, req.Audio != nil && req.Audio.Fingerprint, handlers...)
+	if failure != nil {
 		return Result{}, failure
 	}
 
-	result := Result{Decoder: decoder}
+	result := Result{Decoder: a.decoder}
 	if stdout != nil {
 		result.Fingerprint = DecodeRawFingerprint(stdout.Bytes())
 	}
@@ -183,4 +191,54 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt) (R
 		result.Frames = stats.result()
 	}
 	return result, nil
+}
+
+// exec runs one ffmpeg process of the attempt with args, feeding it stdin
+// when that is not nil and routing its log to handlers. It returns the
+// process's stdout when captureStdout is set.
+func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, captureStdout bool, handlers ...func(string)) (*bytes.Buffer, *AttemptError) {
+	var stdin io.Reader
+	if stdinBytes != nil {
+		stdin = bytes.NewReader(stdinBytes)
+	}
+	var stdout *bytes.Buffer
+	var stdoutWriter io.Writer
+	if captureStdout {
+		stdout = &bytes.Buffer{}
+		stdoutWriter = stdout
+	}
+	router := newStderrRouter(handlers...)
+	stderr, waitStderr := router.start()
+
+	run := a.runner.exec
+	if run == nil {
+		run = execFFmpeg(req.Background)
+	}
+	state, err := run(a.attemptCtx, a.runner.FFmpegPath, args, stdin, stdoutWriter, stderr)
+	_ = stderr.Close()
+	waitStderr()
+	workload := a.runner.Workload
+	if workload == processmetrics.Transcode {
+		workload = processmetrics.Analysis
+	}
+	processmetrics.Record(workload, state, err, a.attemptCtx.Err())
+
+	if err == nil && state != nil && !state.Success() {
+		err = fmt.Errorf("ffmpeg %s", state)
+	}
+	if err != nil {
+		failure := &AttemptError{Decoder: a.decoder, Reason: ReasonExit, Err: err, StderrTail: router.Tail()}
+		switch {
+		case a.ctx.Err() != nil:
+			failure.Reason = ReasonCanceled
+			failure.Err = a.ctx.Err()
+		case a.attemptCtx.Err() != nil:
+			failure.Reason = ReasonTimeout
+			failure.Err = a.attemptCtx.Err()
+		case state == nil:
+			failure.Reason = ReasonStart
+		}
+		return nil, failure
+	}
+	return stdout, nil
 }

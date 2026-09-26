@@ -20,7 +20,9 @@ type hardwareDecode struct {
 const logLevel = "repeat+info"
 
 // buildArgs turns a validated request into ffmpeg arguments for one attempt.
-// It also returns bytes for ffmpeg's stdin, which no request needs yet.
+// It also returns bytes for ffmpeg's stdin: the ffconcat list of a Samples
+// request, whose inpoints are offset by inputStart (the input's container
+// start time, which the probe learned), and nil otherwise.
 //
 // The layout keeps the argument order the intro pipeline has always used:
 // input seeking (-ss before -i), -t as an output option, and the output
@@ -31,8 +33,8 @@ const logLevel = "repeat+info"
 // Each output reads the same input once: the audio output first, then the
 // stats output of the first video stream. Every output repeats -t, which
 // applies only to the output it precedes.
-func buildArgs(req Request, attempt Attempt, hw hardwareDecode) ([]string, []byte, error) {
-	if req.Window == nil {
+func buildArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float64) ([]string, []byte, error) {
+	if (req.Window == nil) == (req.Samples == nil) {
 		return nil, nil, errors.New("request needs exactly one sampling mode")
 	}
 	if attempt.Hardware {
@@ -45,12 +47,15 @@ func buildArgs(req Request, attempt Attempt, hw hardwareDecode) ([]string, []byt
 	if req.parsesStderr() {
 		level = logLevel
 	}
-	args := []string{"-hide_banner", "-nostdin", "-loglevel", level}
+	args := quietArgs(level)
 	if req.Threads > 0 {
 		args = append(args, "-threads", strconv.Itoa(req.Threads))
 		if req.Stats != nil {
 			args = append(args, "-filter_threads", strconv.Itoa(req.Threads))
 		}
+	}
+	if req.Samples != nil {
+		return buildSamplesArgs(req, args, inputStart)
 	}
 	if req.Window.KeyframesOnly {
 		args = append(args, "-skip_frame:v", "nokey")
@@ -81,6 +86,31 @@ func buildArgs(req Request, attempt Attempt, hw hardwareDecode) ([]string, []byt
 			"-f", "null", "-")
 	}
 	return args, nil, nil
+}
+
+// quietArgs are the global options that open every sampling ffmpeg: no
+// banner, no reading keys from stdin, and the log level.
+func quietArgs(level string) []string {
+	return []string{"-hide_banner", "-nostdin", "-loglevel", level}
+}
+
+// buildSamplesArgs finishes the arguments of a Samples request, whose only
+// output is the statistics of the first video stream, after the global
+// options in args. See concat.go for how the list samples the input.
+func buildSamplesArgs(req Request, args []string, inputStart float64) ([]string, []byte, error) {
+	if req.Audio != nil || req.Stats == nil {
+		return nil, nil, errors.New("samples take only a stats output")
+	}
+	list, err := buildConcatList(req.Input, req.Samples.Seconds, inputStart)
+	if err != nil {
+		return nil, nil, err
+	}
+	args = append(args, concatInputArgs...)
+	args = append(args, "-i", concatListInput,
+		"-map", "0:V:0", "-an", "-sn", "-dn",
+		"-vf", buildStatsGraph(*req.Stats).filter,
+		"-f", "null", "-")
+	return args, list, nil
 }
 
 // formatSeconds prints seconds with at most millisecond precision and no

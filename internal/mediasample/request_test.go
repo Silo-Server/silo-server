@@ -59,6 +59,31 @@ func TestValidate(t *testing.T) {
 		{name: "negative timeout", modify: func(r *Request) { r.Attempts = []Attempt{{TimeoutSeconds: -1}} }},
 		{name: "timeout past a day", modify: func(r *Request) { r.Attempts = []Attempt{{TimeoutSeconds: 1e12}} }},
 		{name: "hardware attempt", modify: func(r *Request) { r.Stats = validStats(); r.Attempts = []Attempt{{Hardware: true}} }},
+		{name: "samples with stats", modify: samplesMode(0, 3, 6.5), ok: true},
+		{name: "window and samples", modify: func(r *Request) { samplesMode(3)(r); r.Window = &Window{DurationSeconds: 1} }},
+		{name: "samples with audio", modify: func(r *Request) { samplesMode(3)(r); r.Audio = &AudioOutput{Fingerprint: true} }},
+		{name: "samples without output", modify: func(r *Request) { samplesMode(3)(r); r.Stats = nil }},
+		{name: "no samples", modify: samplesMode()},
+		{name: "negative sample", modify: samplesMode(-1, 3)},
+		{name: "NaN sample", modify: samplesMode(math.NaN())},
+		{name: "infinite sample", modify: samplesMode(3, math.Inf(1))},
+		{name: "unsorted samples", modify: samplesMode(6, 3)},
+		{name: "repeated sample", modify: samplesMode(3, 3)},
+		{name: "too many samples", modify: func(r *Request) {
+			seconds := make([]float64, maxSamples+1)
+			for i := range seconds {
+				seconds[i] = float64(i)
+			}
+			samplesMode(seconds...)(r)
+		}},
+		{name: "most samples", modify: func(r *Request) {
+			seconds := make([]float64, maxSamples)
+			for i := range seconds {
+				seconds[i] = float64(i)
+			}
+			samplesMode(seconds...)(r)
+		}, ok: true},
+		{name: "samples of a path with a line break", modify: func(r *Request) { samplesMode(3)(r); r.Input = "/media/a\n.mkv" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -72,6 +97,30 @@ func TestValidate(t *testing.T) {
 				t.Fatal("Validate() = nil, want an error")
 			}
 		})
+	}
+}
+
+// samplesMode replaces a request's window and audio with samples at the
+// given times and a stats output.
+func samplesMode(seconds ...float64) func(*Request) {
+	return func(r *Request) {
+		r.Window, r.Audio, r.Stats = nil, nil, validStats()
+		r.Samples = &Samples{Seconds: seconds}
+	}
+}
+
+func TestSamplesRequestRoundTripsThroughJSON(t *testing.T) {
+	req := Request{Input: "/media/a.mkv", Samples: &Samples{Seconds: []float64{0, 3, 6.5}}, Stats: validStats(), Background: true}
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Request
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decoded, req) {
+		t.Fatalf("decoded %+v, want %+v (json %s)", decoded, req, data)
 	}
 }
 

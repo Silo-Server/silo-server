@@ -78,7 +78,7 @@ func TestBuildArgsSnapshots(t *testing.T) {
 			if err := tt.req.Validate(); err != nil {
 				t.Fatalf("Validate: %v", err)
 			}
-			args, stdin, err := buildArgs(tt.req, Attempt{}, hardwareDecode{})
+			args, stdin, err := buildArgs(tt.req, Attempt{}, hardwareDecode{}, 0)
 			if err != nil {
 				t.Fatalf("buildArgs: %v", err)
 			}
@@ -98,7 +98,7 @@ func TestBuildArgsKeepsInputAsOneArgument(t *testing.T) {
 		Window: &Window{DurationSeconds: 10},
 		Audio:  &AudioOutput{Fingerprint: true},
 	}
-	args, _, err := buildArgs(req, Attempt{}, hardwareDecode{})
+	args, _, err := buildArgs(req, Attempt{}, hardwareDecode{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

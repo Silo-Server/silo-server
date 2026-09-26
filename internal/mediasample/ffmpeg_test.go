@@ -115,3 +115,74 @@ func TestRunStatsWithRealFFmpeg(t *testing.T) {
 		t.Fatalf("silences %+v, want one starting at 4 s", result.Silences)
 	}
 }
+
+// TestRunSamplesWithRealFFmpeg samples a generated clip with a keyframe every
+// second, black until 16 s and white after, every three seconds from 0.5 s,
+// in containers the concat demuxer reads (Matroska, MP4, their timestamps
+// shifted to start at 11.4 s) and one it cannot (MPEG-TS). Each frame must
+// carry its sample time and show the picture at that time in media time; the
+// sample at 15.5 s must decode the keyframe at 15 s (black), not the next one.
+func TestRunSamplesWithRealFFmpeg(t *testing.T) {
+	ffmpeg, caps := realFFmpeg(t)
+	var seconds []float64
+	for at := 0.5; at < 30; at += 3 {
+		seconds = append(seconds, at)
+	}
+	req := Request{
+		Samples: &Samples{Seconds: seconds},
+		Stats:   &StatsOutput{CropWidth: 0.9, CropHeight: 0.8, Width: 160, BlackThresholds: []int{32}},
+		Threads: 1,
+	}
+	if err := caps.Require(req); err != nil {
+		t.Skipf("ffmpeg cannot sample frame statistics: %v", err)
+	}
+	dir := t.TempDir()
+	// A path with a quote and a backslash exercises the list's escaping.
+	clip := filepath.Join(dir, `it's a \ clip.mkv`)
+	generate := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "color=c=black:s=320x240:r=24:d=16",
+		"-f", "lavfi", "-i", "color=c=white:s=320x240:r=24:d=14",
+		"-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]",
+		"-g", "24", "-keyint_min", "24", clip)
+	if output, err := generate.CombinedOutput(); err != nil {
+		t.Skipf("cannot generate the clip: %v: %s", err, output)
+	}
+	remux := func(name string, options ...string) string {
+		path := filepath.Join(dir, name)
+		args := append([]string{"-hide_banner", "-loglevel", "error", "-i", clip, "-c", "copy"}, options...)
+		if output, err := exec.Command(ffmpeg, append(args, path)...).CombinedOutput(); err != nil {
+			t.Skipf("cannot remux the clip to %s: %v: %s", name, err, output)
+		}
+		return path
+	}
+	inputs := map[string]string{
+		"matroska":         clip,
+		"matroska shifted": remux("shifted.mkv", "-output_ts_offset", "11.4"),
+		"mp4 shifted":      remux("shifted.mp4", "-output_ts_offset", "11.4"),
+		"mpegts":           remux("clip.ts"),
+	}
+	for name, input := range inputs {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			req := req
+			req.Input = input
+			result, err := Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Analysis}.Run(ctx, req)
+			if err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if len(result.Frames) != len(seconds) {
+				t.Fatalf("got %d frames, want one per sample (%d): %+v", len(result.Frames), len(seconds), result.Frames)
+			}
+			for i, frame := range result.Frames {
+				if frame.Seconds != seconds[i] {
+					t.Fatalf("frame %d at %.3f s, want its sample time %.3f s", i, frame.Seconds, seconds[i])
+				}
+				black := frame.PBlack[0] >= 90
+				if wantBlack := seconds[i] < 16; black != wantBlack {
+					t.Fatalf("frame for %.1f s black=%t (pblack %d), want %t", seconds[i], black, frame.PBlack[0], wantBlack)
+				}
+			}
+		})
+	}
+}

@@ -408,8 +408,16 @@ export function AdvancedFields({
       {form.settingSupport.introDetection && (
         <SettingCard
           htmlFor="intro-detection-switch"
-          title="Detect intro and credits markers"
-          description="Runs background audio analysis for episodes in this library. Embedded intro and credits chapters are used when available."
+          title={
+            form.settingSupport.creditsOnlyDetection
+              ? "Detect credits markers (best effort)"
+              : "Detect intro and credits markers"
+          }
+          description={
+            form.settingSupport.creditsOnlyDetection
+              ? "Looks for end credits in movies in this library, from embedded chapters and the picture near the end. Some movies get no credits marker, or one that starts late."
+              : "Runs background audio analysis for episodes in this library. Embedded intro and credits chapters are used when available."
+          }
         >
           <Switch
             id="intro-detection-switch"

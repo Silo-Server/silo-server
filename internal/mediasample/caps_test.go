@@ -48,6 +48,20 @@ chromaprint muxer AVOptions:
      compressed      1            E.......... binary compressed fingerprint
      base64          2            E.......... Base64 compressed fingerprint
 `
+	// concatCheckFixture is how jellyfin-ffmpeg 7.1.4 fails the concat check
+	// after reading its list.
+	concatCheckFixture = `[concat @ 0xfcc7c9ec0000] Impossible to open 'file:/nonexistent/silo-concat-check.mkv'
+[in#0 @ 0xfcc7ca2e0200] Error opening input: No such file or directory
+Error opening input file pipe:0.
+Error opening input files: No such file or directory
+`
+	// concatUnknownKeywordFixture is how an ffmpeg that lacks a list
+	// directive fails it.
+	concatUnknownKeywordFixture = `[concat @ 0x7a82810000] Line 3: unknown keyword 'file_packet_meta'
+[in#0 @ 0x7a83408000] Error opening input: Invalid data found when processing input
+Error opening input file pipe:0.
+Error opening input files: Invalid data found when processing input
+`
 )
 
 // fakeListings answers listing commands from fixtures and counts them.
@@ -56,12 +70,15 @@ type fakeListings struct {
 	filters string
 	muxers  string
 	help    string
-	err     error
+	concat  string
+	// concatList is the list the concat check wrote to stdin.
+	concatList []byte
+	err        error
 	// block, when set, holds the filter listing until it is closed.
 	block chan struct{}
 }
 
-func (f *fakeListings) list(_ context.Context, _ string, args ...string) ([]byte, error) {
+func (f *fakeListings) list(_ context.Context, _ string, stdin []byte, args ...string) ([]byte, error) {
 	f.calls.Add(1)
 	if f.err != nil {
 		return nil, f.err
@@ -76,12 +93,15 @@ func (f *fakeListings) list(_ context.Context, _ string, args ...string) ([]byte
 		return []byte(f.muxers), nil
 	case "-hide_banner -h muxer=chromaprint":
 		return []byte(f.help), nil
+	case "-hide_banner -nostdin -loglevel error -skip_frame:v nokey -protocol_whitelist file,pipe -f concat -safe 0 -i pipe:0 -f null -":
+		f.concatList = stdin
+		return []byte(f.concat), errors.New("exit status 254")
 	}
 	return nil, errors.New("unexpected listing " + strings.Join(args, " "))
 }
 
 func newFakeListings() *fakeListings {
-	return &fakeListings{filters: filtersFixture, muxers: muxersFixture, help: chromaprintHelpFixture}
+	return &fakeListings{filters: filtersFixture, muxers: muxersFixture, help: chromaprintHelpFixture, concat: concatCheckFixture}
 }
 
 // useListings routes capability loads to f with an empty cache.
@@ -219,8 +239,8 @@ func TestLoadCapabilitiesSkipsChromaprintHelpWithoutTheMuxer(t *testing.T) {
 	if _, err := LoadCapabilities(context.Background(), fakeBinary(t)); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.calls.Load(); got != 2 {
-		t.Fatalf("%d listing commands, want filters and muxers only", got)
+	if got := f.calls.Load(); got != 3 {
+		t.Fatalf("%d listing commands, want filters, muxers, and the concat check only", got)
 	}
 }
 
@@ -238,8 +258,8 @@ func TestLoadCapabilitiesCachesPerBinaryIdentity(t *testing.T) {
 			t.Fatal("cached inventory lost chromaprint")
 		}
 	}
-	if got := f.calls.Load(); got != 3 {
-		t.Fatalf("%d listing commands after three loads, want one inventory (3 commands)", got)
+	if got := f.calls.Load(); got != 4 {
+		t.Fatalf("%d listing commands after three loads, want one inventory (4 commands)", got)
 	}
 
 	// Replacing the binary in place changes its identity.
@@ -249,7 +269,7 @@ func TestLoadCapabilitiesCachesPerBinaryIdentity(t *testing.T) {
 	if _, err := LoadCapabilities(context.Background(), binary); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.calls.Load(); got != 6 {
+	if got := f.calls.Load(); got != 8 {
 		t.Fatalf("%d listing commands after the binary changed, want a fresh inventory", got)
 	}
 
@@ -257,7 +277,7 @@ func TestLoadCapabilitiesCachesPerBinaryIdentity(t *testing.T) {
 	if _, err := LoadCapabilities(context.Background(), binary); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.calls.Load(); got != 9 {
+	if got := f.calls.Load(); got != 12 {
 		t.Fatalf("%d listing commands after InvalidateCapabilities, want a fresh inventory", got)
 	}
 }
@@ -315,7 +335,38 @@ func TestLoadCapabilitiesSharesOneLoadAcrossConcurrentCallers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := f.calls.Load(); got != 3 {
-		t.Fatalf("%d listing commands for concurrent callers, want one inventory (3 commands)", got)
+	if got := f.calls.Load(); got != 4 {
+		t.Fatalf("%d listing commands for concurrent callers, want one inventory (4 commands)", got)
+	}
+}
+
+// TestLoadCapabilitiesChecksConcatSamples offers Samples requests only to an
+// ffmpeg that got through the whole list to opening its input.
+func TestLoadCapabilitiesChecksConcatSamples(t *testing.T) {
+	samples := Request{Samples: &Samples{Seconds: []float64{1}}, Stats: &StatsOutput{CropWidth: 1, CropHeight: 1, Width: 160}}
+	for name, tt := range map[string]struct {
+		output string
+		want   bool
+	}{
+		"reads the list":        {concatCheckFixture, true},
+		"lacks a directive":     {concatUnknownKeywordFixture, false},
+		"lacks the demuxer":     {"Unknown input format: 'concat'\n", false},
+		"blocks file protocols": {"[concat @ 0x1] Protocol 'file' not on whitelist 'pipe'!\n", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeListings()
+			f.concat = tt.output
+			useListings(t, f)
+			caps, err := LoadCapabilities(context.Background(), fakeBinary(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := caps.Require(samples) == nil; got != tt.want {
+				t.Fatalf("Require(samples) passed=%t, want %t", got, tt.want)
+			}
+			if !strings.Contains(string(f.concatList), "file_packet_meta sample 1\ninpoint 1\n") {
+				t.Fatalf("concat check list %q does not use the Samples directives", f.concatList)
+			}
+		})
 	}
 }

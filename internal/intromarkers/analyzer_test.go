@@ -19,6 +19,7 @@ type fakeIntroRepository struct {
 	episodeCandidates  map[string][]Candidate
 	groupCandidates    map[string][]Candidate
 	backfillCandidates []Candidate
+	movieCandidates    []Candidate
 	fingerprints       map[int]*Fingerprint
 	seasonState        *SeasonState
 	upsertedStates     []SeasonState
@@ -60,6 +61,32 @@ func (f *fakeIntroRepository) ListChapterSilenceBackfillCandidates(context.Conte
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]Candidate(nil), f.backfillCandidates...), nil
+}
+
+func (f *fakeIntroRepository) ListMovieCandidates(context.Context, string) ([]Candidate, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]Candidate(nil), f.movieCandidates...), nil
+}
+
+func (f *fakeIntroRepository) ListMovieCandidatesForItem(_ context.Context, contentID string) ([]Candidate, error) {
+	return f.movieCandidatesWhere(func(c Candidate) bool { return c.ContentID == contentID }), nil
+}
+
+func (f *fakeIntroRepository) ListMovieCandidatesForFile(_ context.Context, fileID int) ([]Candidate, error) {
+	return f.movieCandidatesWhere(func(c Candidate) bool { return c.FileID == fileID }), nil
+}
+
+func (f *fakeIntroRepository) movieCandidatesWhere(keep func(Candidate) bool) []Candidate {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []Candidate
+	for _, candidate := range f.movieCandidates {
+		if keep(candidate) {
+			out = append(out, candidate)
+		}
+	}
+	return out
 }
 
 func (f *fakeIntroRepository) LoadSilenceRefinementAttempt(_ context.Context, fileID int) (*SilenceRefinementAttempt, error) {

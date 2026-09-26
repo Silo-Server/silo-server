@@ -12,8 +12,9 @@ New installations include TheIntroDB and default to online markers with local
 detection as a fallback (`markers.mode=both`). Online markers are saved to the
 library by default. The setup wizard offers separate controls for online lookup
 and local detection before automatic lookup begins. New TV and mixed libraries
-created in the web UI enable local detection by default; existing library choices
-are preserved. Local detection only runs in libraries where it is enabled.
+created in the web UI enable local detection by default; new movie libraries
+leave it off, since movie credits are best effort. Existing library choices are
+preserved. Local detection only runs in libraries where it is enabled.
 Existing installations retain their configured marker mode, which accepts `off`,
 `local`, `online`, and `both`.
 
@@ -31,8 +32,10 @@ Existing installations retain their configured marker mode, which accepts `off`,
 
 Both paths honor provider priority, manual edits, and provider quota limits.
 
-Local detection finds episode intros and end credits. It never replaces a
-marker from a higher-priority source, and it judges each kind separately, so
+Local detection finds episode intros and end credits, and movie end credits on
+a best-effort basis: from chapters and the picture near the end, never intros.
+Some movies get no local credits, or credits that start late. It never replaces
+a marker from a higher-priority source, and it judges each kind separately, so
 an episode with an online intro can still get local credits.
 
 `markers.detection_workers` sizes local detection: how many seasons the
@@ -50,9 +53,10 @@ identity cannot overwrite the new one. Successful provider refreshes can correct
 or withdraw that provider's existing ranges.
 
 `POST /api/v2/admin/items/{id}/refresh-markers` explicitly refreshes an episode
-from its configured sources. In `both` mode, eligible local detection fills
-missing intro and credits markers. The existing v1 refresh endpoint retains its
-local-only behavior.
+or a movie from its configured sources. In `both` mode, eligible local detection
+fills missing intro and credits markers of an episode, or missing credits of a
+movie. The existing v1 refresh and re-detect endpoints retain their local-only,
+episode-only behavior.
 
 ## Operations
 

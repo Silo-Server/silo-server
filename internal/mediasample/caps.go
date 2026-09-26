@@ -26,6 +26,9 @@ type Capabilities struct {
 	muxers  map[string]struct{}
 	// chromaprintRaw records that the chromaprint muxer offers fp_format raw.
 	chromaprintRaw bool
+	// concatSamples records that the concat demuxer reads a Samples list
+	// from stdin; see checkConcatSamples.
+	concatSamples bool
 }
 
 // HasFilter reports whether ffmpeg lists the named filter.
@@ -57,6 +60,9 @@ func (c Capabilities) Require(req Request) error {
 	if req.Audio != nil && req.Audio.Silence != nil && !c.HasFilter("silencedetect") {
 		return errors.New("ffmpeg does not list the silencedetect filter")
 	}
+	if req.Samples != nil && !c.concatSamples {
+		return errors.New("ffmpeg cannot read a sampled input list (concat demuxer with file_packet_meta, file and pipe protocols)")
+	}
 	if req.Stats != nil {
 		for _, filter := range statsFilters {
 			if !c.HasFilter(filter) {
@@ -67,11 +73,16 @@ func (c Capabilities) Require(req Request) error {
 	return nil
 }
 
-// listFunc runs one bounded ffmpeg listing and returns its combined output.
-type listFunc func(ctx context.Context, name string, args ...string) ([]byte, error)
+// listFunc runs one bounded ffmpeg listing, with stdin when it is not nil,
+// and returns its combined output.
+type listFunc func(ctx context.Context, name string, stdin []byte, args ...string) ([]byte, error)
 
-func runListing(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+func runListing(ctx context.Context, name string, stdin []byte, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	return cmd.CombinedOutput()
 }
 
 var capsCache = struct {
@@ -152,11 +163,12 @@ func capabilitiesKey(generation uint64, ffmpegPath string) string {
 }
 
 func loadCapabilities(ffmpegPath string, list listFunc) (Capabilities, error) {
-	run := func(args ...string) ([]byte, error) {
+	runWith := func(stdin []byte, args ...string) ([]byte, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), listingTimeout)
 		defer cancel()
-		return list(ctx, ffmpegPath, args...)
+		return list(ctx, ffmpegPath, stdin, args...)
 	}
+	run := func(args ...string) ([]byte, error) { return runWith(nil, args...) }
 	filters, err := run("-hide_banner", "-filters")
 	if err != nil {
 		return Capabilities{}, fmt.Errorf("ffmpeg filter listing failed: %w", err)
@@ -174,7 +186,31 @@ func loadCapabilities(ffmpegPath string, list listFunc) (Capabilities, error) {
 		lower := bytes.ToLower(help)
 		caps.chromaprintRaw = bytes.Contains(lower, []byte("fp_format")) && bytes.Contains(lower, []byte("raw"))
 	}
+	caps.concatSamples = checkConcatSamples(runWith)
 	return caps, nil
+}
+
+// concatCheckInput is the input the concat check names. It must not exist.
+const concatCheckInput = "/nonexistent/silo-concat-check.mkv"
+
+// checkConcatSamples reports whether ffmpeg reads a Samples list: it hands
+// ffmpeg a one-sample list, with every directive a Samples list uses, naming
+// an input that does not exist. An ffmpeg that parses the list goes on to
+// open that input and fails there, which the concat demuxer reports as
+// "Impossible to open"; one that lacks the demuxer, a directive, or a
+// protocol fails before, typically with "Invalid data found when processing
+// input". Without this check that message would read as a broken file and
+// mark every sampled input unusable.
+func checkConcatSamples(run func(stdin []byte, args ...string) ([]byte, error)) bool {
+	list, err := buildConcatList(concatCheckInput, []float64{1}, 0)
+	if err != nil {
+		return false
+	}
+	args := append(quietArgs("error"), concatInputArgs...)
+	args = append(args, "-i", concatListInput, "-f", "null", "-")
+	// The run fails by design, so only its output counts.
+	output, _ := run(list, args...)
+	return bytes.Contains(bytes.ToLower(output), []byte("impossible to open 'file:"+concatCheckInput+"'"))
 }
 
 // parseFilterList reads `ffmpeg -filters`. Filter rows are a flags column,

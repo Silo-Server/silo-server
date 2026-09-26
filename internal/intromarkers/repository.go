@@ -27,10 +27,21 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-var ErrEpisodeNotFound = errors.New("episode not found")
+// ErrMarkerItemNotFound reports an item that is neither an episode nor a
+// movie, the items local marker analysis works on.
+var ErrMarkerItemNotFound = errors.New("item is not an episode or a movie")
 
-type EpisodeIntroEligibility struct {
-	EpisodeID             string
+// Item kinds local marker analysis works on.
+const (
+	MarkerItemEpisode = "episode"
+	MarkerItemMovie   = "movie"
+)
+
+// MarkerItemEligibility is whether an item's files can be analyzed locally.
+type MarkerItemEligibility struct {
+	ItemID string
+	// Kind is MarkerItemEpisode or MarkerItemMovie. Movies get credits only.
+	Kind                  string
 	HasMediaFiles         bool
 	IntroDetectionEnabled bool
 }
@@ -42,7 +53,14 @@ const baseCandidateSelect = baseCandidateSelectFrom + baseCandidateWhere
 const baseCandidateSelectFrom = `
 	SELECT mf.id,
 	       mf.episode_id,
-	       e.season_id,
+	       e.season_id,` + candidateFileColumns + `
+	FROM media_files mf
+	JOIN media_folders folders ON folders.id = mf.media_folder_id
+	JOIN episodes e ON e.content_id = mf.episode_id`
+
+// candidateFileColumns are the candidate columns after the file ID, episode
+// ID, and season ID, in scanCandidates order.
+const candidateFileColumns = `
 	       mf.media_folder_id,
 	       mf.file_path,
 	       COALESCE(mf.file_hash, ''),
@@ -72,10 +90,7 @@ const baseCandidateSelectFrom = `
 	       COALESCE(mf.episode_number, 0),
 	       mf.file_modified_at,
 	       COALESCE(mf.codec_video, ''),
-	       COALESCE(mf.codec_audio, '')
-	FROM media_files mf
-	JOIN media_folders folders ON folders.id = mf.media_folder_id
-	JOIN episodes e ON e.content_id = mf.episode_id`
+	       COALESCE(mf.codec_audio, '')`
 
 const baseCandidateWhere = `
 	WHERE mf.episode_id IS NOT NULL
@@ -277,35 +292,62 @@ func (r *Repository) UpsertSilenceRefinementAttempt(ctx context.Context, attempt
 	return nil
 }
 
-func (r *Repository) EpisodeIntroEligibility(ctx context.Context, episodeID string) (*EpisodeIntroEligibility, error) {
-	var exists bool
-	if err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM episodes WHERE content_id = $1)`, episodeID).Scan(&exists); err != nil {
-		return nil, fmt.Errorf("checking episode existence for intro detection: %w", err)
+// MarkerItemEligibility reports whether local marker analysis may run for an
+// episode or a movie: the item exists, has files, and at least one of them
+// is in an enabled library of a kind the analysis covers with marker
+// detection on.
+func (r *Repository) MarkerItemEligibility(ctx context.Context, itemID string) (*MarkerItemEligibility, error) {
+	var isEpisode bool
+	if err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM episodes WHERE content_id = $1)`, itemID).Scan(&isEpisode); err != nil {
+		return nil, fmt.Errorf("checking episode existence for marker detection: %w", err)
 	}
-	if !exists {
-		return nil, ErrEpisodeNotFound
+	if isEpisode {
+		return r.itemEligibility(ctx, itemID, MarkerItemEpisode, `
+			SELECT COUNT(*),
+			       COUNT(*) FILTER (
+			           WHERE folders.enabled = true
+			             AND folders.intro_detection_enabled = true
+			             AND folders.type IN ('series', 'mixed')
+			       )
+			FROM media_files mf
+			JOIN media_folders folders ON folders.id = mf.media_folder_id
+			WHERE mf.episode_id = $1
+			  AND mf.missing_since IS NULL`)
 	}
-
-	var fileCount, introEnabledCount int
-	err := r.pool.QueryRow(ctx, `
+	var isMovie bool
+	if err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM media_items WHERE content_id = $1 AND type = 'movie')`, itemID).Scan(&isMovie); err != nil {
+		return nil, fmt.Errorf("checking movie existence for marker detection: %w", err)
+	}
+	if !isMovie {
+		return nil, ErrMarkerItemNotFound
+	}
+	return r.itemEligibility(ctx, itemID, MarkerItemMovie, `
 		SELECT COUNT(*),
 		       COUNT(*) FILTER (
 		           WHERE folders.enabled = true
 		             AND folders.intro_detection_enabled = true
-		             AND folders.type IN ('series', 'mixed')
+		             AND folders.type IN ('movies', 'mixed')
 		       )
 		FROM media_files mf
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
-		WHERE mf.episode_id = $1
-		  AND mf.missing_since IS NULL`, episodeID).Scan(&fileCount, &introEnabledCount)
-	if err != nil {
-		return nil, fmt.Errorf("checking episode intro eligibility: %w", err)
-	}
+		WHERE mf.content_id = $1
+		  AND mf.episode_id IS NULL
+		  AND COALESCE(mf.extra_id, '') = ''
+		  AND mf.missing_since IS NULL`)
+}
 
-	return &EpisodeIntroEligibility{
-		EpisodeID:             episodeID,
+// itemEligibility counts an item's files and those in libraries with marker
+// detection on, with query taking the item ID.
+func (r *Repository) itemEligibility(ctx context.Context, itemID, kind, query string) (*MarkerItemEligibility, error) {
+	var fileCount, enabledCount int
+	if err := r.pool.QueryRow(ctx, query, itemID).Scan(&fileCount, &enabledCount); err != nil {
+		return nil, fmt.Errorf("checking %s marker eligibility: %w", kind, err)
+	}
+	return &MarkerItemEligibility{
+		ItemID:                itemID,
+		Kind:                  kind,
 		HasMediaFiles:         fileCount > 0,
-		IntroDetectionEnabled: introEnabledCount > 0,
+		IntroDetectionEnabled: enabledCount > 0,
 	}, nil
 }
 
@@ -432,6 +474,8 @@ func chaptersHash(raw []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// CountEnabledLibraries counts the enabled libraries with marker detection on
+// whose kind local analysis covers: series, mixed, and movies.
 func (r *Repository) CountEnabledLibraries(ctx context.Context) (int, error) {
 	var count int
 	err := r.pool.QueryRow(ctx, `
@@ -439,7 +483,7 @@ func (r *Repository) CountEnabledLibraries(ctx context.Context) (int, error) {
 		FROM media_folders
 		WHERE enabled = true
 		  AND intro_detection_enabled = true
-		  AND type IN ('series', 'mixed')`).Scan(&count)
+		  AND type IN ('series', 'mixed', 'movies')`).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("counting intro-enabled libraries: %w", err)
 	}

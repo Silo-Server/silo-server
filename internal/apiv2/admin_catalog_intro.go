@@ -25,7 +25,7 @@ func registerAdminCatalogIntro(reg *Registry) {
 	for _, action := range []struct{ suffix, id, action string }{
 		{"refresh-markers", refreshAdminEpisodeMarkersOperation, "refresh-v2"}, {"redetect-intro", redetectAdminEpisodeIntroOperation, "redetect"},
 	} {
-		op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/admin/items/{id}/"+action.suffix, action.id, "admin-catalog", "Refresh episode markers using configured sources, or explicitly rerun local intro detection."), Class: ClassActingAdmin, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable}
+		op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/admin/items/{id}/"+action.suffix, action.id, "admin-catalog", "Refresh episode or movie markers using configured sources, or explicitly rerun local marker detection; movies get best-effort credits only."), Class: ClassActingAdmin, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable}
 		op.DefaultStatus = http.StatusAccepted
 		Register(reg, op, func(ctx context.Context, in *AdminEpisodeMarkersInput) (*AdminEpisodeMarkersOutput, error) {
 			if reg.deps.AdminEpisodeMarkers == nil {

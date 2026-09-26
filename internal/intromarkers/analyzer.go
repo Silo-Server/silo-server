@@ -24,6 +24,13 @@ type Analyzer struct {
 	// tailSampler runs credits tail passes. Nil leaves credits to chapters
 	// and audio.
 	tailSampler creditsTailSampler
+	// movieSampler runs movie tail passes. Nil leaves movie credits to
+	// chapters.
+	movieSampler movieTailSampler
+	// movieBudget bounds how long a scheduled run starts new movies; zero
+	// means movieCreditsRunBudget. now, when set, replaces time.Now for it.
+	movieBudget time.Duration
+	now         func() time.Time
 	// node names this server in recorded silence refinement failures, which
 	// only defer retries on the server that recorded them.
 	node string
@@ -44,6 +51,8 @@ type Analyzer struct {
 	lookupSlots chan struct{}
 	// tailWarnOnce logs once that ffmpeg cannot run the credits tail pass.
 	tailWarnOnce sync.Once
+	// movieWarnOnce logs once that ffmpeg cannot run the movie tail pass.
+	movieWarnOnce sync.Once
 }
 
 // maxConcurrentFingerprintLookups caps the database connections fingerprint
@@ -66,6 +75,9 @@ type introRepository interface {
 	ListCandidatesForEpisode(ctx context.Context, episodeID string) ([]Candidate, error)
 	ListCandidatesForGroup(ctx context.Context, mediaFolderID int, seasonID, analysisGroupKey string) ([]Candidate, error)
 	ListChapterSilenceBackfillCandidates(ctx context.Context, limit int, cfg Config, node string) ([]Candidate, error)
+	ListMovieCandidates(ctx context.Context, node string) ([]Candidate, error)
+	ListMovieCandidatesForItem(ctx context.Context, contentID string) ([]Candidate, error)
+	ListMovieCandidatesForFile(ctx context.Context, fileID int) ([]Candidate, error)
 	LoadSilenceRefinementAttempt(ctx context.Context, fileID int) (*SilenceRefinementAttempt, error)
 	UpsertSilenceRefinementAttempt(ctx context.Context, attempt SilenceRefinementAttempt) error
 	PatchMarker(ctx context.Context, patch MarkerPatch) (bool, error)
@@ -100,6 +112,7 @@ func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer
 		repo:               repo,
 		extractor:          extractor,
 		tailSampler:        extractor,
+		movieSampler:       extractor,
 		refiner:            NewSilenceBoundaryRefiner(config),
 		chromaprintRefiner: NewDialogueBoundaryRefiner(config),
 		config:             config,
@@ -235,6 +248,8 @@ func (a *Analyzer) ffmpegAcquirer() func(context.Context) (func(), error) {
 
 type ProgressFunc func(percent float64, message string)
 
+// Run analyzes every library with marker detection enabled: episodes for
+// intros and credits, then movies for credits within the movie budget.
 func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, error) {
 	report := func(percent float64, message string) {
 		if progress != nil {
@@ -249,10 +264,39 @@ func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, 
 	}
 	summary.LibrariesScanned = libraries
 	if libraries == 0 {
-		report(100, "No series libraries with marker detection enabled")
+		report(100, "No libraries with marker detection enabled")
 		return summary, nil
 	}
 
+	// Episodes take the first 85 percent of the progress bar, movies the rest.
+	episodeSummary, err := a.runEpisodes(ctx, func(percent float64, message string) {
+		report(percent*0.85, message)
+	})
+	mergeRunSummary(&summary, episodeSummary)
+	if err != nil {
+		return summary, err
+	}
+
+	report(85, "Checking movies for credits")
+	movieSummary, err := a.runMovies(ctx, func(done, total int) {
+		report(85+float64(done)/float64(total)*15, fmt.Sprintf("Checked %d/%d movies for credits", done, total))
+	})
+	mergeRunSummary(&summary, movieSummary)
+	if err != nil {
+		return summary, err
+	}
+	if summary.MovieBudgetExhausted {
+		report(100, "Marker detection completed; remaining movies wait for the next run")
+		return summary, nil
+	}
+	report(100, "Marker detection completed")
+	return summary, nil
+}
+
+// runEpisodes analyzes the episodes of every enabled library, reporting
+// progress from 0 to 100.
+func (a *Analyzer) runEpisodes(ctx context.Context, report ProgressFunc) (RunSummary, error) {
+	summary := RunSummary{}
 	candidates, err := a.repo.ListEligibleCandidates(ctx)
 	if err != nil {
 		return summary, err
@@ -329,8 +373,7 @@ func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, 
 	if err != nil {
 		return summary, err
 	}
-
-	report(100, "Marker detection completed")
+	report(100, "Episode marker detection completed")
 	return summary, nil
 }
 
@@ -1284,4 +1327,9 @@ func mergeRunSummary(dst *RunSummary, src RunSummary) {
 	dst.CreditsTailUnusable += src.CreditsTailUnusable
 	dst.CreditsAudioVideoMarkersWritten += src.CreditsAudioVideoMarkersWritten
 	dst.CreditsVideoMarkersWritten += src.CreditsVideoMarkersWritten
+	dst.MoviesConsidered += src.MoviesConsidered
+	dst.MovieCreditsMarkersWritten += src.MovieCreditsMarkersWritten
+	if src.MovieBudgetExhausted {
+		dst.MovieBudgetExhausted = true
+	}
 }

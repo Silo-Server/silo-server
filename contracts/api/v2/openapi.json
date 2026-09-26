@@ -68559,7 +68559,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Refresh episode markers using configured sources, or explicitly rerun local intro detection.",
+        "summary": "Refresh episode or movie markers using configured sources, or explicitly rerun local marker detection; movies get best-effort credits only.",
         "tags": [
           "admin-catalog"
         ],
@@ -68713,7 +68713,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Refresh episode markers using configured sources, or explicitly rerun local intro detection.",
+        "summary": "Refresh episode or movie markers using configured sources, or explicitly rerun local marker detection; movies get best-effort credits only.",
         "tags": [
           "admin-catalog"
         ],

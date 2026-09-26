@@ -1709,7 +1709,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Refresh episode markers using configured sources, or explicitly rerun local intro detection. */
+    /** Refresh episode or movie markers using configured sources, or explicitly rerun local marker detection; movies get best-effort credits only. */
     post: operations["redetectAdminEpisodeIntro"];
     delete?: never;
     options?: never;
@@ -1726,7 +1726,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Refresh episode markers using configured sources, or explicitly rerun local intro detection. */
+    /** Refresh episode or movie markers using configured sources, or explicitly rerun local marker detection; movies get best-effort credits only. */
     post: operations["refreshAdminEpisodeMarkers"];
     delete?: never;
     options?: never;

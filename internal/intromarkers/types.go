@@ -458,4 +458,11 @@ type RunSummary struct {
 	CreditsTailUnusable             int `json:"credits_tail_unusable"`
 	CreditsAudioVideoMarkersWritten int `json:"credits_audio_video_markers_written"`
 	CreditsVideoMarkersWritten      int `json:"credits_video_markers_written"`
+	// Movie counters. Movies get credits only, from chapters and video; the
+	// credits tail counters above include their tail passes.
+	MoviesConsidered           int `json:"movies_considered"`
+	MovieCreditsMarkersWritten int `json:"movie_credits_markers_written"`
+	// MovieBudgetExhausted reports that the run stopped starting movies
+	// when the movie budget ran out; the rest wait for the next run.
+	MovieBudgetExhausted bool `json:"movie_budget_exhausted"`
 }

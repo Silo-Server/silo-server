@@ -11,13 +11,15 @@ import (
 // logged, hashed, or sent to another node as JSON; the Runner, not the caller,
 // turns it into ffmpeg arguments.
 //
-// A request names exactly one sampling mode (today only Window) and at least
-// one output (Audio, Stats, or both).
+// A request names exactly one sampling mode (Window or Samples) and at least
+// one output (Audio, Stats, or both; Samples takes only Stats).
 type Request struct {
 	// Input is the media file to decode.
 	Input string `json:"input"`
 	// Window samples a contiguous span of the file.
 	Window *Window `json:"window,omitempty"`
+	// Samples decodes one video keyframe for each of a list of times.
+	Samples *Samples `json:"samples,omitempty"`
 	// Audio asks for audio features of the sampled span.
 	Audio *AudioOutput `json:"audio,omitempty"`
 	// Stats asks for per-frame picture statistics of the sampled span's first
@@ -41,6 +43,19 @@ type Window struct {
 	// KeyframesOnly decodes only video keyframes. It needs a video output
 	// (Stats); audio outputs still read every audio frame.
 	KeyframesOnly bool `json:"keyframes_only,omitempty"`
+}
+
+// Samples decodes, for each time, the video keyframe at or before it, and
+// nothing between. Each frame reports the time it was sampled for rather than
+// its own, which lies up to one keyframe interval earlier. Times count from
+// the start of the file, as window starts do. A keyframe that serves several
+// times is reported once per time. Only Stats may be asked of samples.
+// Containers without a keyframe index, such as MPEG-TS, are read whole over
+// the sampled span, keyframes only (see probe.go).
+type Samples struct {
+	// Seconds are the media times to sample, finite, non-negative, and
+	// strictly increasing.
+	Seconds []float64 `json:"seconds"`
 }
 
 // AudioOutput selects audio features. Fingerprint and Silence may be combined
@@ -97,6 +112,7 @@ const (
 	maxSilenceSeconds = 3600
 	maxStatsWidth     = 3840
 	maxBlackLevels    = 8
+	maxSamples        = 10000
 )
 
 // Validate reports whether the request can be run.
@@ -104,16 +120,29 @@ func (r Request) Validate() error {
 	if strings.TrimSpace(r.Input) == "" {
 		return errors.New("request has no input")
 	}
-	if r.Window == nil {
+	if (r.Window == nil) == (r.Samples == nil) {
 		return errors.New("request needs exactly one sampling mode")
 	}
-	if err := r.Window.validate(); err != nil {
-		return err
+	if r.Window != nil {
+		if err := r.Window.validate(); err != nil {
+			return err
+		}
+	}
+	if r.Samples != nil {
+		if err := r.Samples.validate(); err != nil {
+			return err
+		}
+		if r.Audio != nil {
+			return errors.New("samples take no audio output")
+		}
+		if _, err := concatPath(r.Input); err != nil {
+			return err
+		}
 	}
 	if !r.hasOutput() {
 		return errors.New("request has no output")
 	}
-	if r.Window.KeyframesOnly && r.Stats == nil {
+	if r.Window != nil && r.Window.KeyframesOnly && r.Stats == nil {
 		return errors.New("a keyframes-only window needs a video output")
 	}
 	if r.Audio != nil && r.Audio.Silence != nil {
@@ -171,6 +200,24 @@ func (w Window) validate() error {
 	}
 	if !finite(w.DurationSeconds) || w.DurationSeconds <= 0 {
 		return errors.New("window duration must be a positive number of seconds")
+	}
+	return nil
+}
+
+func (s Samples) validate() error {
+	if len(s.Seconds) == 0 {
+		return errors.New("samples need at least one time")
+	}
+	if len(s.Seconds) > maxSamples {
+		return fmt.Errorf("request has %d samples, at most %d are allowed", len(s.Seconds), maxSamples)
+	}
+	for i, seconds := range s.Seconds {
+		if !finite(seconds) || seconds < 0 {
+			return errors.New("sample times must be non-negative numbers of seconds")
+		}
+		if i > 0 && seconds <= s.Seconds[i-1] {
+			return errors.New("sample times must be strictly increasing")
+		}
 	}
 	return nil
 }

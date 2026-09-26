@@ -36,7 +36,7 @@ func TestRunParsesFingerprintAndSilence(t *testing.T) {
 		Window: &Window{StartSeconds: 100, DurationSeconds: 30},
 		Audio:  &AudioOutput{Fingerprint: true, Silence: &SilenceParams{NoiseDB: -50, MinSeconds: 0.5}},
 	}
-	wantArgs, _, err := buildArgs(req, Attempt{}, hardwareDecode{})
+	wantArgs, _, err := buildArgs(req, Attempt{}, hardwareDecode{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -99,6 +99,9 @@ type statsParser struct {
 	metadata *metadataParser
 	black    *blackframeParser
 	offset   float64
+	// sampled places frames by their sample metadata entry instead of their
+	// time; see newSampledStatsParser.
+	sampled bool
 }
 
 func newStatsParser(graph statsGraph, offset float64) *statsParser {
@@ -107,6 +110,17 @@ func newStatsParser(graph statsGraph, offset float64) *statsParser {
 		black:    newBlackframeParser(graph.blackframes),
 		offset:   offset,
 	}
+}
+
+// newSampledStatsParser parses the stats of a Samples request. A frame's
+// time is the sample time its packet was tagged with, since its own
+// timestamp follows the concat list. A frame without the tag cannot be
+// placed and is dropped, and when one sample decodes a second keyframe, only
+// the first frame for that sample is kept.
+func newSampledStatsParser(graph statsGraph) *statsParser {
+	parser := newStatsParser(graph, 0)
+	parser.sampled = true
+	return parser
 }
 
 func (p *statsParser) line(line string) {
@@ -118,15 +132,23 @@ func (p *statsParser) line(line string) {
 // index. Both filters count the frames passing through one linear chain, so
 // the indexes agree. A frame missing any statistic, such as one cut short
 // when ffmpeg stopped, is dropped. Times are offset (the window start) plus
-// the frame's pts_time.
+// the frame's pts_time, or for samples the frame's sample time.
 func (p *statsParser) result() []FrameStats {
 	frames := make([]FrameStats, 0, len(p.metadata.frames))
+	seen := map[float64]struct{}{}
 	for _, meta := range p.metadata.frames {
+		seconds := p.offset + meta.PTSTime
+		if p.sampled {
+			if _, dup := seen[meta.Sample]; !meta.HasSample || dup {
+				continue
+			}
+			seconds = meta.Sample
+		}
 		pblack, ok := p.black.values(meta.Index)
 		if !ok {
 			continue
 		}
-		frame := FrameStats{Seconds: p.offset + meta.PTSTime, PBlack: pblack}
+		frame := FrameStats{Seconds: seconds, PBlack: pblack}
 		complete := true
 		for _, stat := range statsKeys {
 			value, ok := meta.Values[stat.key]
@@ -138,6 +160,9 @@ func (p *statsParser) result() []FrameStats {
 		}
 		if complete {
 			frames = append(frames, frame)
+			if p.sampled {
+				seen[meta.Sample] = struct{}{}
+			}
 		}
 	}
 	return frames

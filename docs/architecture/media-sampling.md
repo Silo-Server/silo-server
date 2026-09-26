@@ -30,8 +30,8 @@ it. Rules:
   rules.
 - A request names exactly one sampling mode and at least one output.
   `Validate` rejects anything else, and bounds the numbers (non-negative
-  window start, positive duration, silence threshold at most 0 dB, thread and
-  attempt counts).
+  window start, positive duration, sample times, silence threshold at most
+  0 dB, thread and attempt counts).
 - Result times are absolute media seconds. The runner adds the window start;
   callers never do window arithmetic.
 - `Attempts` run in order until one succeeds. An empty list is one software
@@ -54,7 +54,7 @@ Supported today:
 
 | Part | Values |
 |---|---|
-| Sampling mode | `Window` (start and duration; `KeyframesOnly` decodes only video keyframes and needs `Stats`) |
+| Sampling mode | `Window` (start and duration; `KeyframesOnly` decodes only video keyframes and needs `Stats`), `Samples` (the keyframe at or before each of a list of times; `Stats` only) |
 | Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals), `Stats` (per-frame picture statistics) |
 | Attempts | software only |
 
@@ -73,14 +73,56 @@ pixels darker than each threshold (`PBlack`), and luma and saturation
 minimum, 10th percentile, average, 90th percentile, and maximum. A frame
 missing any value, such as one cut short when ffmpeg stopped, is dropped.
 
+`Samples` reads only the stretches of the file it samples. The runner first
+opens the input on its own (`-t 0` stream copy) and reads the container and
+its start time from the input header ffmpeg logs. It then writes an ffconcat
+list to ffmpeg's stdin that names the input once per sample time: an
+`inpoint` at the time plus the container's start time, an `outpoint` 40 ms
+later, and a `file_packet_meta sample <time>` tag. With `-skip_frame:v nokey`
+the concat demuxer seeks to the keyframe at or before each inpoint and ffmpeg
+decodes only that keyframe; `metadata=print` logs the tag with the frame's
+statistics. Rules:
+
+- A frame reports the time it was sampled for, not its own, which is up to
+  one keyframe interval earlier. Frame timestamps follow the list, not the
+  input, so a frame without the tag is dropped. A keyframe that serves
+  several sample times is decoded once for each; when one sample decodes a
+  second keyframe, the first is kept.
+- Sample times are finite, non-negative, strictly increasing, and at most
+  10,000 per request. `Samples` takes no audio output.
+- The list is read from `pipe:0`, so each entry names the input as an
+  explicit `file:` URL, and the input opens with
+  `-protocol_whitelist file,pipe`; the concat demuxer otherwise refuses both.
+  Paths are single-quoted, with a quote written as `'\''`; a path with a
+  line break or NUL is rejected, since the list is read line by line.
+- Inpoints are container timestamps, while sample times count from the
+  start of the file like every other result time, hence the start-time
+  offset. Files remuxed with their original timestamps (`copyts`) often
+  start well above 0.
+- Only Matroska/WebM, MP4/MOV, and AVI, whose indexes let the demuxer seek
+  to a keyframe, are read through the list. Other containers, such as
+  MPEG-TS and M2TS, seek by timestamp to a packet that is rarely a keyframe,
+  so a list would decode nothing. They are read as one `KeyframesOnly`
+  window from 10 s before the first sample to the last, and each sample
+  takes the last keyframe at or before its time: the same frames, at the
+  cost of reading the whole span.
+- The VP9 decoder ignores `-skip_frame nokey`, so a VP9 sample decodes every
+  frame from its keyframe to the outpoint. The first frame is still the one
+  kept, but the cost grows with the keyframe interval.
+- `Capabilities` offers `Samples` only when ffmpeg reads a one-sample list
+  naming a missing file as far as opening that file. An ffmpeg without the
+  concat demuxer, a list directive, or a protocol fails on the list itself
+  with "Invalid data found when processing input", which would otherwise
+  read as a broken file. This works with FFmpeg 7.1 (jellyfin-ffmpeg 7.1.4)
+  and later.
+
 Outputs read from ffmpeg's log run at `-loglevel repeat+info`: without
 `repeat`, ffmpeg folds identical consecutive lines into "Last message
 repeated N times" and per-frame values would be lost. Fingerprint-only runs
 keep `-loglevel warning`.
 
-Planned additions, each landing with its first consumer: keyframe sampling
-at chosen times (`Samples`), an accurate single frame (`At`), and still
-images (`Images`) with hardware decode.
+Planned additions, each landing with its first consumer: an accurate single
+frame (`At`) and still images (`Images`) with hardware decode.
 
 ## Argument stability
 
