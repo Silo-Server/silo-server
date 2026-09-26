@@ -163,7 +163,10 @@ export function CatalogPluginTile({
         name={name}
         // The catalog group heading already names the tier.
         subline={`${publisher ? `by ${publisher}, ` : ""}${entry.version}`}
-        to={pluginPagePath(entry.plugin_id)}
+        to={pluginPagePath(entry.plugin_id, {
+          repositoryId: entry.repository_id,
+          version: entry.version,
+        })}
         dimmed={isInstalled}
       />
       <TileSummary>{pluginSummary(entry.presentation, capabilities)}</TileSummary>

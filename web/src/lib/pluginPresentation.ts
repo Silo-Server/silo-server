@@ -4,8 +4,17 @@ import { capabilityKind } from "@/lib/pluginCapabilities";
 export type PluginSourceKind = PluginInstallation["source_kind"];
 
 /** Admin page for one plugin. Every plugin link goes through here: the SDK allows any non-empty ID. */
-export function pluginPagePath(pluginID: string): string {
-  return `/admin/plugins/${encodeURIComponent(pluginID)}`;
+export function pluginPagePath(
+  pluginID: string,
+  catalogSelection?: { repositoryId: number; version: string },
+): string {
+  const path = `/admin/plugins/${encodeURIComponent(pluginID)}`;
+  if (!catalogSelection) return path;
+  const query = new URLSearchParams({
+    repository: String(catalogSelection.repositoryId),
+    version: catalogSelection.version,
+  });
+  return `${path}?${query}`;
 }
 
 /** The plugin's tier, shown on every plugin (1.0 plugin-management AC4). */

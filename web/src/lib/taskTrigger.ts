@@ -13,15 +13,22 @@ export function describeTrigger(t: TriggerConfig, style: "long" | "short" = "lon
   switch (t.type) {
     case "interval": {
       const ms = t.interval_ms ?? 0;
-      if (short) {
-        if (ms >= 86_400_000) return `Every ${Math.round(ms / 86_400_000)}d`;
-        if (ms >= 3_600_000) return `Every ${Math.round(ms / 3_600_000)}h`;
-        if (ms >= 60_000) return `Every ${Math.round(ms / 60_000)}m`;
-        return `Every ${Math.round(ms / 1000)}s`;
-      }
-      if (ms >= 3_600_000) return `Every ${Math.round(ms / 3_600_000)} hour(s)`;
-      if (ms >= 60_000) return `Every ${Math.round(ms / 60_000)} minute(s)`;
-      return `Every ${Math.round(ms / 1000)} second(s)`;
+      const units = [
+        { size: 86_400_000, shortLabel: "d", longLabel: "day(s)" },
+        { size: 3_600_000, shortLabel: "h", longLabel: "hour(s)" },
+        { size: 60_000, shortLabel: "m", longLabel: "minute(s)" },
+        { size: 1000, shortLabel: "s", longLabel: "second(s)" },
+      ];
+      const unit = units.find(
+        ({ size }) => ms >= size && ms % size === 0 && (short || size < 86_400_000),
+      );
+      if (unit)
+        return `Every ${ms / unit.size}${short ? "" : " "}${short ? unit.shortLabel : unit.longLabel}`;
+      return ms === 0
+        ? short
+          ? "Every 0s"
+          : "Every 0 second(s)"
+        : `Every ${ms}${short ? "ms" : " millisecond(s)"}`;
     }
     case "daily":
       return `Daily at ${t.time_of_day ?? "00:00"}`;
@@ -45,10 +52,16 @@ export function describeTrigger(t: TriggerConfig, style: "long" | "short" = "lon
  * startup. Once the task exists, its schedule on the Tasks page wins.
  */
 export function pluginTaskTrigger(raw?: Record<string, unknown> | null): TriggerConfig {
-  if (raw && typeof raw.type === "string" && raw.type !== "") {
-    return raw as unknown as TriggerConfig;
+  const startup = { type: "startup" } as TriggerConfig;
+  if (!raw || typeof raw.type !== "string" || raw.type === "") return startup;
+  // The server unmarshals this map into TriggerConfig and falls back to startup
+  // if a known field has the wrong JSON type.
+  for (const field of ["interval_ms", "day_of_week", "max_runtime_ms"]) {
+    const value = raw[field];
+    if (value != null && !Number.isSafeInteger(value)) return startup;
   }
-  return { type: "startup" } as TriggerConfig;
+  if (raw.time_of_day != null && typeof raw.time_of_day !== "string") return startup;
+  return raw as unknown as TriggerConfig;
 }
 
 /** Task-page path for a plugin's scheduled task (`plugin:<installation>:<capability>`). */

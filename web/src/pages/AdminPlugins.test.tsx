@@ -327,7 +327,7 @@ describe("AdminPlugins", () => {
 
     expect(markup).toContain("Example Plugin");
     expect(markup).toContain("Explains the example for a homelab administrator.");
-    expect(markup).toContain('href="/admin/plugins/silo.example"');
+    expect(markup).toContain('href="/admin/plugins/silo.example?repository=1&amp;version=1.0.0"');
     expect(markup).toContain("by Silo, 1.0.0");
   });
 

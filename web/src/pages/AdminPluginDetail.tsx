@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { useLocation, useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   AlertTriangle,
   ChevronLeft,
@@ -84,6 +84,9 @@ const UPDATE_POLICY_LABELS: Record<string, string> = {
  */
 export default function AdminPluginDetail() {
   const { pluginId = "" } = useParams<{ pluginId: string }>();
+  const [searchParams] = useSearchParams();
+  const selectedRepository = searchParams.get("repository");
+  const selectedVersion = searchParams.get("version");
   const installationsQuery = useAdminPluginInstallations();
   // The service keeps one installation per plugin ID (install replaces in place).
   const installation = installationsQuery.data?.find((entry) => entry.plugin_id === pluginId);
@@ -92,7 +95,12 @@ export default function AdminPluginDetail() {
   const catalogQuery = useAdminPluginCatalog({
     enabled: installationsQuery.isSuccess && (!installation || !installation.presentation),
   });
-  const catalogEntry = catalogQuery.data?.find((entry) => entry.plugin_id === pluginId);
+  const catalogEntry = catalogQuery.data?.find(
+    (entry) =>
+      entry.plugin_id === pluginId &&
+      (selectedRepository === null || String(entry.repository_id) === selectedRepository) &&
+      (selectedVersion === null || entry.version === selectedVersion),
+  );
 
   if (installationsQuery.isLoading) return <PageLoading />;
 

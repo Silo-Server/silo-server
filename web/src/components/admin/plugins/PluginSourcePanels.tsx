@@ -24,7 +24,7 @@ export function PluginUploadPanel() {
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!file) return;
+    if (!file || isPending) return;
     upload(file, {
       onSuccess: () => {
         setFile(null);
@@ -53,6 +53,7 @@ export function PluginUploadPanel() {
             type="file"
             aria-label="Plugin file"
             className="sr-only"
+            disabled={isPending}
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           />
         </label>
@@ -85,7 +86,7 @@ export function PluginRepositoriesPanel({
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!name.trim() || !url.trim()) return;
+    if (!name.trim() || !url.trim() || createRepository.isPending) return;
     // Keep what the admin typed until the server accepts it, so a rejected URL can be fixed.
     createRepository.mutate(
       { display_name: name.trim(), url: url.trim(), enabled: true },
@@ -136,7 +137,7 @@ export function PluginRepositoriesPanel({
             aria-label="Repository URL"
             className="sm:flex-[2]"
           />
-          <Button type="submit" size="sm">
+          <Button type="submit" size="sm" disabled={createRepository.isPending}>
             Add
           </Button>
         </form>
@@ -184,7 +185,7 @@ export function PluginRepositoriesPanel({
         </ul>
       ) : null}
 
-      {repositories.length === 0 && !showForm ? (
+      {repositories.length === 0 && !showForm && !repositoriesError ? (
         <p className="text-muted-foreground mt-3 text-sm">
           No repositories configured. Add one to browse available plugins.
         </p>

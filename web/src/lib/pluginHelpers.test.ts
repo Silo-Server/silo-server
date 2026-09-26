@@ -66,6 +66,9 @@ describe("pluginPresentation", () => {
   it("encodes plugin IDs into page paths", () => {
     expect(pluginPagePath("silo.mdblist")).toBe("/admin/plugins/silo.mdblist");
     expect(pluginPagePath("a/b?c#d")).toBe("/admin/plugins/a%2Fb%3Fc%23d");
+    expect(pluginPagePath("silo.example", { repositoryId: 7, version: "2.0+beta" })).toBe(
+      "/admin/plugins/silo.example?repository=7&version=2.0%2Bbeta",
+    );
   });
 
   it("labels every tier and gives community and external plugins a notice", () => {
@@ -258,6 +261,10 @@ describe("taskTrigger", () => {
       "Monday at 04:00",
     );
     expect(describeTrigger({ type: "daily", time_of_day: "03:00" })).toBe("Daily at 03:00");
+    expect(describeTrigger({ type: "interval", interval_ms: 5_400_000 })).toBe(
+      "Every 90 minute(s)",
+    );
+    expect(describeTrigger({ type: "interval", interval_ms: 90_000 }, "short")).toBe("Every 90s");
   });
 
   it("defaults a missing or unreadable plugin trigger to startup, like the server", () => {
@@ -265,6 +272,9 @@ describe("taskTrigger", () => {
     expect(pluginTaskTrigger({ type: "" })).toEqual({ type: "startup" });
     // The server builds no live trigger for an unknown type, so don't claim startup.
     expect(pluginTaskTrigger({ type: "sometimes" })).toEqual({ type: "sometimes" });
+    expect(pluginTaskTrigger({ type: "interval", interval_ms: "60000" })).toEqual({
+      type: "startup",
+    });
     expect(describeTrigger(pluginTaskTrigger({ type: "sometimes" }))).toBe("sometimes");
     expect(describeTrigger({ type: "weekly", day_of_week: 7, time_of_day: "02:00" })).toBe(
       "Day 7 at 02:00",

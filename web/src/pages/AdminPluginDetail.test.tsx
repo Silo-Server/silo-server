@@ -213,9 +213,9 @@ function LocationProbe() {
   return <p data-testid="location">{`${location.pathname}${location.search}`}</p>;
 }
 
-function renderPage(pluginID = "silo.mdblist") {
+function renderPage(pluginID = "silo.mdblist", search = "") {
   return render(
-    <MemoryRouter initialEntries={[`/admin/plugins/${encodeURIComponent(pluginID)}`]}>
+    <MemoryRouter initialEntries={[`/admin/plugins/${encodeURIComponent(pluginID)}${search}`]}>
       <Routes>
         <Route path="/admin/plugins/:pluginId" element={<AdminPluginDetail />} />
         <Route path="/admin/plugins" element={<LocationProbe />} />
@@ -513,6 +513,22 @@ describe("AdminPluginDetail", () => {
       repository_id: 1,
       plugin_id: "silo.manga-metadata",
       version: "0.1.1",
+    });
+  });
+
+  it("installs the catalog version selected from its tile", () => {
+    installationsQuery = query<PluginInstallation[]>([]);
+    catalogQuery = query([
+      makeCatalogEntry({ version: "0.1.0" }),
+      makeCatalogEntry({ version: "0.2.0" }),
+    ]);
+    renderPage("silo.manga-metadata", "?repository=1&version=0.2.0");
+    expect(screen.getByText("Version 0.2.0")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+    expect(installMock).toHaveBeenCalledWith({
+      repository_id: 1,
+      plugin_id: "silo.manga-metadata",
+      version: "0.2.0",
     });
   });
 
