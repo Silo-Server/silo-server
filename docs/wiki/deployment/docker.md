@@ -371,9 +371,9 @@ you already have it.
 ### Shared memory for a self-managed PostgreSQL container
 
 The bundled service sets `shm_size` from `POSTGRES_SHM_SIZE` (8gb by default).
-A PostgreSQL container you run yourself does not inherit that: Docker gives
-every container 64 MB of `/dev/shm`, which is too small for PostgreSQL's
-parallel queries. Silo's catalog queries then fail while the server keeps
+A PostgreSQL container you run yourself does not inherit that: Docker's
+default `/dev/shm` size is 64 MB, which can be too small for PostgreSQL's
+parallel queries. Affected Silo catalog queries fail while the server keeps
 running and the disk has plenty of free space:
 
 ```text
@@ -390,13 +390,13 @@ services:
 ```
 
 With `docker run`, or in a container manager's extra-arguments field, pass
-`--shm-size=2g`. The value is a ceiling on a tmpfs rather than a reservation,
-so pages count against the container only while a query holds them, and raising
-it costs nothing at idle. Match the bundled 8gb if you have memory to spare and
-run large parallel queries.
+`--shm-size=2g`. The value sets a tmpfs limit; it does not allocate that
+amount of memory at startup. Choose a size that fits your workload and
+available memory.
 
-PostgreSQL installed directly on a host or VM needs no change, because it uses
-the host's `/dev/shm`.
+PostgreSQL installed directly on a host or VM does not use Docker's
+`shm_size` setting. If shared-memory allocation fails there, check the free
+space in the host's `/dev/shm` and increase its tmpfs size or free capacity.
 
 ## Server roles and distributed deployments
 
