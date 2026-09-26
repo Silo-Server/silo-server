@@ -52,6 +52,7 @@ type AdminUser struct {
 	AccessGroupID              *ID             `json:"access_group_id" nullable:"true" doc:"The access group the account belongs to; null when none" example:"2"`
 	PasswordLogin              bool            `json:"password_login" doc:"Whether the account signs in with a local password. False when an external authentication provider manages its sign-in; password actions do not apply then" example:"true"`
 	PasswordChangeRequired     bool            `json:"password_change_required" doc:"Whether the account holds a temporary password it must replace at its next sign-in" example:"false"`
+	IsOwner                    bool            `json:"is_owner" doc:"Whether the account is the server Owner, the account that set up the server. Other admins cannot edit, reset the password of, impersonate or manage API keys for it, and it cannot be demoted, disabled or deleted" example:"false"`
 	EffectivePolicy            EffectivePolicy `json:"effective_policy" doc:"The resolved policy the server enforces"`
 	CreatedAt                  Instant         `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
 	UpdatedAt                  Instant         `json:"updated_at" example:"2026-01-02T03:04:05.678Z"`
@@ -171,6 +172,7 @@ func adminUserFromView(v handlers.AdminUserView) AdminUser {
 		RequestsAllowed:            v.RequestsAllowed,
 		PasswordLogin:              v.PasswordLogin,
 		PasswordChangeRequired:     v.PasswordChangeRequired,
+		IsOwner:                    v.IsOwner,
 		EffectivePolicy: EffectivePolicy{
 			LibraryIDs:                 idsOfInts(v.EffectivePolicy.LibraryIDs),
 			MaxPlaybackQuality:         v.EffectivePolicy.MaxPlaybackQuality,

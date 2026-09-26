@@ -36,8 +36,11 @@ type User struct {
 	DownloadTranscodeAllowed   *bool // nil = inherit
 	RequestsAllowed            *bool // nil = inherit
 	AccessGroupID              *int64
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
+	// IsOwner marks the server Owner: the account that claimed the server at
+	// first-run setup. Only the Owner may change its own account.
+	IsOwner   bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // CreateUserInput contains the fields required to create a new user.

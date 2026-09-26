@@ -178,6 +178,11 @@ export function useAdminUsers() {
     staleTime: ADMIN_STALE_TIME,
   });
 }
+/** Whether the signed-in account is the server Owner, read from the account list. */
+export function useViewerIsOwner(viewerId: number | undefined): boolean {
+  const { data } = useAdminUsers();
+  return data?.some((u) => u.id === viewerId && u.is_owner) ?? false;
+}
 export function useAdminUser(id: number) {
   const context = captureProfileRequestContext();
   const query = useQuery({

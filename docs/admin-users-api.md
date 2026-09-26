@@ -108,6 +108,23 @@ It creates a login session and has no replay identity. Clients must not retry an
 uncertain response automatically. The web client checks its captured authority
 before installing returned credentials.
 
+## Server Owner
+
+The account created by first-run setup is the server Owner. On a server set up
+before the Owner existed, the earliest-created enabled administrator became the
+Owner; a server with no enabled administrator at that point has none. There is at
+most one Owner, and `is_owner` in the account projection marks it.
+
+Only the Owner may act on the Owner's account. Other administrators receive
+`403 permission_denied` when they update, delete, or issue a password reset for
+it, when they create an API key for it, or when they change or revoke one of its
+keys. The v1 account and API key routes answer the same refusals with
+`403 owner_protected`. The Owner may not demote, disable, or
+delete itself; those writes return the same 403. Ownership cannot be
+transferred yet. Nobody may impersonate the Owner. Administrators may still
+impersonate only non-administrators, but the Owner may also impersonate other
+administrators.
+
 ## Access groups
 
 `/api/v2/admin/access-groups` supports bounded list and create operations; the

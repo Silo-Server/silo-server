@@ -498,7 +498,9 @@ func (s *Service) StartImpersonation(ctx context.Context, adminUserID, targetUse
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("getting target user: %w", err)
 	}
-	if !target.Enabled || target.Role == "admin" {
+	// Admins may not act as another admin; only the server Owner may, and
+	// nobody may act as the Owner.
+	if !target.Enabled || target.IsOwner || (target.Role == "admin" && !admin.IsOwner) {
 		return nil, nil, nil, ErrImpersonationNotAllowed
 	}
 

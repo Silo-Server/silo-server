@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/passwordreset"
 )
@@ -37,18 +38,20 @@ func (h *PasswordResetHandler) PasswordResetCapabilities(ctx context.Context) pa
 	return h.service.Capabilities(ctx)
 }
 
-// IssuePasswordReset issues a reset link for an account. A scoped API key may
-// not reset an admin account: like setting its password, that would let the
-// key's holder sign in with the admin's full authority.
+// IssuePasswordReset issues a reset link for an account. Only the server Owner
+// may reset the Owner's password, and a scoped API key may not reset an admin
+// account: like setting its password, either would let the link's holder sign
+// in with that account's full authority.
 func (h *PasswordResetHandler) IssuePasswordReset(ctx context.Context, input passwordreset.IssueInput) (*passwordreset.IssueResult, error) {
-	if actorIsScopedAPIKey(ctx) {
-		target, err := h.users.GetByID(ctx, input.UserID)
-		if err != nil {
-			return nil, err
-		}
-		if target.Role == roleAdmin {
-			return nil, apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not reset an admin account's password")
-		}
+	target, err := h.users.GetByID(ctx, input.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if err := auth.CheckOwnerTarget(actorUserID(ctx), target); err != nil {
+		return nil, ownerError(err)
+	}
+	if actorIsScopedAPIKey(ctx) && target.Role == roleAdmin {
+		return nil, apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not reset an admin account's password")
 	}
 	return h.service.Issue(ctx, input)
 }

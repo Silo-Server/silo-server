@@ -53,6 +53,7 @@ export function adminUserFromV2(user: AdminUserV2): AdminUser {
     requests_allowed: user.requests_allowed,
     password_login: user.password_login,
     password_change_required: user.password_change_required,
+    is_owner: user.is_owner,
     effective_policy: {
       library_ids:
         user.effective_policy.library_ids === null

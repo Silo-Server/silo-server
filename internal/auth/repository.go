@@ -53,7 +53,7 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 const allColumns = `id, email, username, password_hash, local_password_login_enabled, password_change_required, role, permissions, enabled,
 	library_ids, max_playback_quality, access_policy_revision,
 	max_streams, max_transcodes, max_remote_stream_bitrate_kbps, max_local_stream_bitrate_kbps, transcode_allowed, audio_transcode_allowed, max_profiles, download_allowed,
-	download_transcode_allowed, requests_allowed, access_group_id, created_at, updated_at`
+	download_transcode_allowed, requests_allowed, access_group_id, is_owner, created_at, updated_at`
 
 // scanUser scans a single row into a *models.User.
 func scanUser(row pgx.Row) (*models.User, error) {
@@ -82,6 +82,7 @@ func scanUser(row pgx.Row) (*models.User, error) {
 		&u.DownloadTranscodeAllowed,
 		&u.RequestsAllowed,
 		&u.AccessGroupID,
+		&u.IsOwner,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 	)
@@ -123,6 +124,7 @@ func scanUsers(rows pgx.Rows) ([]*models.User, error) {
 			&u.DownloadTranscodeAllowed,
 			&u.RequestsAllowed,
 			&u.AccessGroupID,
+			&u.IsOwner,
 			&u.CreatedAt,
 			&u.UpdatedAt,
 		)

@@ -38,6 +38,7 @@ it("retains delete confirmation after412 and uses only explicitly reloaded valid
     requests_allowed: null,
     password_login: true,
     password_change_required: false,
+    is_owner: false,
     effective_policy: {
       library_ids: [],
       max_playback_quality: "",

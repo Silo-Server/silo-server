@@ -7,7 +7,9 @@ import {
   useCreateUser,
   useUpdateUser,
   useAdminUserCapabilities,
+  useViewerIsOwner,
 } from "@/hooks/queries/admin/users";
+import { canManageAccount, canViewAsAccount } from "@/lib/accountOwner";
 import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
@@ -105,6 +107,8 @@ export default function AdminUsers() {
 function AdminUsersPage() {
   const usersQuery = useAdminUsers();
   const { data: users = [], isLoading } = usersQuery;
+  const viewerId = useAuth().user?.id;
+  const viewerIsOwner = useViewerIsOwner(viewerId);
   const capabilities = useAdminUserCapabilities();
   const available = capabilities.data?.available === true;
   const [authority] = useState(captureAdminUserAuthority);
@@ -381,7 +385,12 @@ function AdminUsersPage() {
                     </TableCell>
                     <TableCell>{u.email}</TableCell>
                     <TableCell>
-                      <Badge variant={u.role === "admin" ? "default" : "secondary"}>{u.role}</Badge>
+                      <div className="flex flex-wrap gap-1">
+                        <Badge variant={u.role === "admin" ? "default" : "secondary"}>
+                          {u.role}
+                        </Badge>
+                        {u.is_owner && <Badge variant="outline">Owner</Badge>}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <Badge variant={u.enabled ? "outline" : "destructive"}>
@@ -410,7 +419,7 @@ function AdminUsersPage() {
                             </TooltipTrigger>
                             <TooltipContent>View playback history</TooltipContent>
                           </Tooltip>
-                          {available && u.role !== "admin" && u.enabled && (
+                          {available && canViewAsAccount(u, viewerId, viewerIsOwner) && (
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button
@@ -426,36 +435,40 @@ function AdminUsersPage() {
                               <TooltipContent>View as user</TooltipContent>
                             </Tooltip>
                           )}
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                aria-label={`Edit ${u.username}`}
-                                onClick={() => {
-                                  void loadEditor(u);
-                                }}
-                              >
-                                <Pencil className="h-3 w-3" aria-hidden="true" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Edit user</TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                aria-label={`Delete ${u.username}`}
-                                onClick={() => handleDelete(u)}
-                              >
-                                <Trash2 className="h-3 w-3" aria-hidden="true" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Delete user</TooltipContent>
-                          </Tooltip>
+                          {canManageAccount(u, viewerId) && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  aria-label={`Edit ${u.username}`}
+                                  onClick={() => {
+                                    void loadEditor(u);
+                                  }}
+                                >
+                                  <Pencil className="h-3 w-3" aria-hidden="true" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Edit user</TooltipContent>
+                            </Tooltip>
+                          )}
+                          {!u.is_owner && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  aria-label={`Delete ${u.username}`}
+                                  onClick={() => handleDelete(u)}
+                                >
+                                  <Trash2 className="h-3 w-3" aria-hidden="true" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Delete user</TooltipContent>
+                            </Tooltip>
+                          )}
                         </div>
                       </TooltipProvider>
                     </TableCell>
@@ -913,7 +926,7 @@ function UserForm({
               )}
               <div className="space-y-2">
                 <Label htmlFor={roleId}>Role</Label>
-                <Select value={role} onValueChange={setRole}>
+                <Select value={role} onValueChange={setRole} disabled={user?.is_owner}>
                   <SelectTrigger id={roleId}>
                     <SelectValue />
                   </SelectTrigger>
@@ -929,14 +942,21 @@ function UserForm({
                 <div>
                   <div className="text-sm font-medium">Account status</div>
                   <div className="text-muted-foreground text-xs">
-                    Disable access without deleting the user.
+                    {user.is_owner
+                      ? "The server owner stays an enabled admin."
+                      : "Disable access without deleting the user."}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Label htmlFor={enabledId} className="text-xs">
                     Enabled
                   </Label>
-                  <Switch id={enabledId} checked={enabled} onCheckedChange={setEnabled} />
+                  <Switch
+                    id={enabledId}
+                    checked={enabled}
+                    onCheckedChange={setEnabled}
+                    disabled={user.is_owner}
+                  />
                 </div>
               </div>
             )}

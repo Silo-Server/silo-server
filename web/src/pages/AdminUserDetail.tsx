@@ -20,6 +20,7 @@ import {
   useAdminUser,
   useUpdateUser,
   useAdminUserCapabilities,
+  useViewerIsOwner,
   useAdminUserDeviceSettings,
   useAdminUserSettings,
   useDeleteAdminUserDeviceSetting,
@@ -78,6 +79,7 @@ import { useNavigate } from "react-router";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
+import { canManageAccount, canViewAsAccount } from "@/lib/accountOwner";
 import { formatPlaybackQualityPreset } from "@/lib/playback-quality";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
@@ -121,6 +123,8 @@ function AdminUserDetailPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { data: cachedUser, isLoading, isFetching, error, refetch } = useAdminUser(userId);
+  const viewerId = useAuth().user?.id;
+  const viewerIsOwner = useViewerIsOwner(viewerId);
   // A background read that fails leaves the loaded account up, but a 404 means
   // it is gone (another admin deleted it) and outranks the cached copy.
   const user = isNotFoundProblem(error) ? undefined : cachedUser;
@@ -178,7 +182,8 @@ function AdminUserDetailPage() {
     );
   }
 
-  const impersonationDisabled = user.role === "admin" || !user.enabled;
+  const impersonationDisabled = !canViewAsAccount(user, viewerId, viewerIsOwner);
+  const manageable = canManageAccount(user, viewerId);
 
   async function loadEditor(deleting = false) {
     if (busy.current || !available) return;
@@ -225,12 +230,18 @@ function AdminUserDetailPage() {
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">{user.username}</h1>
             <Badge variant={user.role === "admin" ? "default" : "secondary"}>{user.role}</Badge>
+            {user.is_owner && <Badge variant="outline">Owner</Badge>}
             <Badge variant={user.enabled ? "outline" : "destructive"}>
               {user.enabled ? "Active" : "Disabled"}
             </Badge>
             {user.password_change_required && <Badge variant="outline">Temporary password</Badge>}
           </div>
           <p className="page-subtitle text-sm sm:text-base">{user.email}</p>
+          {!manageable && (
+            <p className="text-muted-foreground text-sm">
+              This is the server owner. Only the owner can change this account.
+            </p>
+          )}
         </div>
         <div className="flex w-full flex-wrap gap-2 sm:w-auto">
           <Button
@@ -249,7 +260,7 @@ function AdminUserDetailPage() {
             }}
           >
             <Button
-              disabled={!available}
+              disabled={!available || !manageable}
               onClick={() => void loadEditor()}
               variant="outline"
               size="sm"
@@ -273,7 +284,7 @@ function AdminUserDetailPage() {
             </DialogContent>
           </Dialog>
           {/* An external provider manages this account's sign-in: it has no password to reset. */}
-          {user.password_login && (
+          {user.password_login && manageable && (
             <Button
               variant="outline"
               size="sm"
@@ -284,15 +295,17 @@ function AdminUserDetailPage() {
               <KeyRound className="mr-1 h-3.5 w-3.5" /> Reset password
             </Button>
           )}
-          <Button
-            variant="destructive"
-            size="sm"
-            className="flex-1 sm:flex-none"
-            onClick={handleDelete}
-            disabled={!available}
-          >
-            Delete
-          </Button>
+          {!user.is_owner && (
+            <Button
+              variant="destructive"
+              size="sm"
+              className="flex-1 sm:flex-none"
+              onClick={handleDelete}
+              disabled={!available}
+            >
+              Delete
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1367,7 +1380,7 @@ function EditUserForm({
               )}
               <div className="space-y-2">
                 <Label htmlFor={roleSelectId}>Role</Label>
-                <Select value={role} onValueChange={setRole}>
+                <Select value={role} onValueChange={setRole} disabled={user.is_owner}>
                   <SelectTrigger id={roleSelectId}>
                     <SelectValue />
                   </SelectTrigger>
@@ -1382,12 +1395,14 @@ function EditUserForm({
               <div>
                 <div className="text-sm font-medium">Account status</div>
                 <div className="text-muted-foreground text-xs">
-                  Disable access without deleting the user.
+                  {user.is_owner
+                    ? "The server owner stays an enabled admin."
+                    : "Disable access without deleting the user."}
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <Label className="text-xs">Enabled</Label>
-                <Switch checked={enabled} onCheckedChange={setEnabled} />
+                <Switch checked={enabled} onCheckedChange={setEnabled} disabled={user.is_owner} />
               </div>
             </div>
           </TabsContent>

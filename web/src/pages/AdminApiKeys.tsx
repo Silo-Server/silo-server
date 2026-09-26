@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/select";
 import { Copy, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { canManageAccount } from "@/lib/accountOwner";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDate } from "@/lib/datetime";
 
@@ -61,6 +62,11 @@ export default function AdminApiKeys() {
 }
 function ApiKeyManager() {
   const capability = useAdminApiKeyCapabilities();
+  const viewerId = useAuth().user?.id;
+  // Only the server Owner may change or revoke the Owner's keys.
+  const ownerId = useAdminUsers().data?.find((u) => u.is_owner)?.id;
+  const ownerLocked = (userId: string) =>
+    ownerId !== undefined && ownerId !== viewerId && Number(userId) === ownerId;
   const keys = useAdminApiKeys(capability.data?.available === true);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -173,26 +179,28 @@ function ApiKeyManager() {
                         {key.last_used_at ? formatDate(key.last_used_at) : "Never"}
                       </TableCell>
                       <TableCell>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={opening}
-                            aria-label={`Edit tier for ${key.label}`}
-                            onClick={() => void openEditor(key.id, "tier")}
-                          >
-                            Edit tier<span className="sr-only"> for {key.label}</span>
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            disabled={opening}
-                            aria-label={`Revoke API key ${key.label}`}
-                            onClick={() => void openEditor(key.id, "revoke")}
-                          >
-                            <Trash2 />
-                          </Button>
-                        </div>
+                        {!ownerLocked(key.user_id) && (
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={opening}
+                              aria-label={`Edit tier for ${key.label}`}
+                              onClick={() => void openEditor(key.id, "tier")}
+                            >
+                              Edit tier<span className="sr-only"> for {key.label}</span>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              disabled={opening}
+                              aria-label={`Revoke API key ${key.label}`}
+                              onClick={() => void openEditor(key.id, "revoke")}
+                            >
+                              <Trash2 />
+                            </Button>
+                          </div>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -415,11 +423,13 @@ function CreateApiKeyForm({
           </SelectTrigger>
           <SelectContent>
             <SelectGroup>
-              {users.data?.map((u) => (
-                <SelectItem key={u.id} value={String(u.id)}>
-                  {u.username}
-                </SelectItem>
-              ))}
+              {users.data
+                ?.filter((u) => canManageAccount(u, user?.id))
+                .map((u) => (
+                  <SelectItem key={u.id} value={String(u.id)}>
+                    {u.username}
+                  </SelectItem>
+                ))}
             </SelectGroup>
           </SelectContent>
         </Select>

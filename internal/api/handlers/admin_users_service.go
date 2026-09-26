@@ -214,6 +214,9 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 				return false, auth.ErrAdminUserRevision
 			}
 		}
+		if err := auth.CheckOwnerUpdate(actorUserID(ctx), current, input); err != nil {
+			return false, ownerError(err)
+		}
 		role := current.Role
 		if input.Role != nil {
 			role = *input.Role
@@ -256,6 +259,9 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 			if actual != groupRevision {
 				return false, auth.ErrAdminUserRevision
 			}
+		}
+		if err := auth.CheckOwnerDelete(actorUserID(ctx), current); err != nil {
+			return false, ownerError(err)
 		}
 		return true, nil
 	})

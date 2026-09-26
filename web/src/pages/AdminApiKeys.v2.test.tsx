@@ -4,7 +4,11 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { v2, V2ProblemError } from "@/api/v2/request";
 import AdminApiKeys from "./AdminApiKeys";
-const state = vi.hoisted(() => ({ profile: "owner" }));
+const state = vi.hoisted(() => ({
+  profile: "owner",
+  viewer: 2,
+  users: [{ id: 2, username: "Admin", is_owner: false }],
+}));
 vi.mock("@/api/v2/request", async (original) => ({
   ...(await original<typeof import("@/api/v2/request")>()),
   v2: vi.fn(),
@@ -21,10 +25,10 @@ vi.mock("@/api/client", async (original) => ({
   isCapturedProfileAuthorityActive: (c: { profileId: string }) => c.profileId === state.profile,
 }));
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ user: { id: 2 }, profile: { id: state.profile } }),
+  useAuth: () => ({ user: { id: state.viewer }, profile: { id: state.profile } }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
-  useAdminUsers: () => ({ data: [{ id: 2, username: "Admin" }] }),
+  useAdminUsers: () => ({ data: state.users }),
 }));
 const row = {
   id: "7",
@@ -68,6 +72,8 @@ function mount() {
 beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn();
   state.profile = "owner";
+  state.viewer = 2;
+  state.users = [{ id: 2, username: "Admin", is_owner: false }];
   vi.mocked(v2).mockImplementation(baseline);
 });
 afterEach(() => {
@@ -180,4 +186,23 @@ it("discards the editor on profile change", async () => {
   state.profile = "other";
   view.refresh();
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+it("offers the Owner's keys only to the Owner", async () => {
+  state.users = [
+    { id: 2, username: "Admin", is_owner: true },
+    { id: 3, username: "Other", is_owner: false },
+  ];
+  state.viewer = 3;
+  mount();
+  await screen.findByText("Automation");
+  expect(screen.queryByRole("button", { name: "Edit tier for Automation" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Revoke API key Automation" })).toBeNull();
+  cleanup();
+
+  state.viewer = 2;
+  mount();
+  await screen.findByText("Automation");
+  expect(screen.getByRole("button", { name: "Edit tier for Automation" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Revoke API key Automation" })).toBeEnabled();
 });

@@ -19,6 +19,9 @@ interface UpdateUserMutationArg {
 }
 
 const mocks = vi.hoisted(() => ({
+  /** The signed-in account and whether it is the server owner. */
+  viewer: { id: 1 } as { id: number } | null,
+  viewerIsOwner: false,
   updateUserMutate: vi.fn(),
   getReads: 0,
   impersonate: vi.fn(),
@@ -55,6 +58,7 @@ const adminUser: AdminUser = {
   requests_allowed: null,
   password_login: true,
   password_change_required: false,
+  is_owner: false,
   effective_policy: {
     library_ids: null,
     max_playback_quality: "",
@@ -109,6 +113,7 @@ vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
   }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
+  useViewerIsOwner: () => mocks.viewerIsOwner,
   useAdminUserCapabilities: () => ({ data: { available: true, default_profile: true } }),
   useAdminUser: () => ({
     data: mocks.user ?? undefined,
@@ -191,7 +196,7 @@ vi.mock("@/hooks/queries/admin/ips", () => ({
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ beginImpersonation: mocks.beginImpersonation }),
+  useAuth: () => ({ beginImpersonation: mocks.beginImpersonation, user: mocks.viewer }),
 }));
 
 function renderUserDetail() {
@@ -218,6 +223,8 @@ beforeEach(() => {
   mocks.deleteSettingMutate.mockReset();
   mocks.userSettings = [];
   mocks.user = adminUser;
+  mocks.viewer = { id: 1 };
+  mocks.viewerIsOwner = false;
   mocks.userError = null;
   mocks.refetchUser.mockReset();
 });
@@ -846,4 +853,25 @@ it("lets a 404 from a background read replace a loaded account", () => {
   mocks.userError = userProblem(404);
   renderUserDetail();
   expect(screen.getByRole("heading", { level: 1, name: "User not found" })).toBeInTheDocument();
+});
+
+describe("AdminUserDetail server owner", () => {
+  it("keeps another admin from changing the owner's account", async () => {
+    mocks.user = { ...adminUser, role: "admin", is_owner: true };
+    mocks.viewer = { id: 99 };
+    renderUserDetail();
+    expect(await screen.findByText("Owner")).toBeInTheDocument();
+    expect(screen.getByText(/Only the owner can change this account/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Edit/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "View as user" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Reset password/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  });
+
+  it("lets the owner view as another admin", async () => {
+    mocks.user = { ...adminUser, role: "admin" };
+    mocks.viewerIsOwner = true;
+    renderUserDetail();
+    expect(await screen.findByRole("button", { name: "View as user" })).toBeEnabled();
+  });
 });

@@ -15684,6 +15684,11 @@ export interface components {
        */
       id: string;
       /**
+       * @description Whether the account is the server Owner, the account that set up the server. Other admins cannot edit, reset the password of, impersonate or manage API keys for it, and it cannot be demoted, disabled or deleted
+       * @example false
+       */
+      is_owner: boolean;
+      /**
        * Format: date-time
        * @description Most recent recorded activity; null when the account has none
        * @example 2026-01-02T03:04:05.678Z
