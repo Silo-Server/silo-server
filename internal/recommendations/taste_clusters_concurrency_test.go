@@ -13,7 +13,7 @@ import (
 )
 
 // Pause the first replacement after its INSERT but before commit. Without
-// serialisation the second DELETE misses those uncommitted rows, and its
+// per-profile locking the second DELETE misses those uncommitted rows, and its
 // INSERT fails with 23505 once the first replacement commits.
 func TestUpsertTasteClustersConcurrentPostgres(t *testing.T) {
 	for _, existing := range []bool{false, true} {
@@ -49,24 +49,24 @@ func TestUpsertTasteClustersProfileIsolationAndCancellationPostgres(t *testing.T
 	defer cancel()
 	waitDone := make(chan error, 1)
 	go func() {
-		waitDone <- NewRepo(f.second).UpsertTasteClusters(waitCtx, 1, "owner", tasteClusterSet("cancelled", 1))
+		waitDone <- NewRepo(f.second).UpsertTasteClusters(waitCtx, 1, "owner", tasteClusterSet("waiting", 1))
 	}()
 	f.waitBlocked(t, f.secondPID, waitDone)
 	cancel()
 	select {
 	case err := <-waitDone:
 		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("cancelled replacement = %v, want context.Canceled", err)
+			t.Fatalf("replacement after context cancellation = %v, want context.Canceled", err)
 		}
 	case <-f.ctx.Done():
-		t.Fatal("cancelled replacement did not return")
+		t.Fatal("replacement did not return after context cancellation")
 	}
 	release()
 	f.await(t, firstDone)
 	f.assertClusters(t, 1, "owner", "first", 2)
 	f.assertClusters(t, 1, "other", "other-profile", 1)
 	f.assertClusters(t, 2, "owner", "other-account", 1)
-	// A cancelled waiter must not retain the profile's lock.
+	// A waiter that exits on cancellation must not retain the profile's lock.
 	f.replace(t, f.second, 1, "owner", tasteClusterSet("after-cancel", 1))
 	f.assertClusters(t, 1, "owner", "after-cancel", 1)
 }
