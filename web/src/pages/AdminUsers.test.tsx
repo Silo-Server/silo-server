@@ -532,6 +532,9 @@ describe("AdminUsers user dialog policy hints", () => {
     const group = within(dialog).getByRole("combobox", { name: "Group" });
     expect(group).toHaveTextContent(defaultGroup.name);
     await user.click(group);
+    // The server places a new account in the default group when none is sent,
+    // so creation doesn't offer "No group".
+    expect(screen.queryByRole("option", { name: "No group" })).toBeNull();
     await user.click(await screen.findByRole("option", { name: "Guests" }));
 
     await user.click(within(dialog).getByRole("tab", { name: "Account" }));

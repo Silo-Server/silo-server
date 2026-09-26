@@ -743,6 +743,10 @@ function UserForm({
     awaitingDefaultGroup || role === "admin" || selectedGroupID === null
       ? "none"
       : String(selectedGroupID);
+  // Creating an account can't choose "no group": the server treats a missing or
+  // null group alike and places the account in the default group. Offer it only
+  // when editing, or when there is no default group to show instead.
+  const offerNoGroup = Boolean(user) || awaitingDefaultGroup || defaultGroupID === null;
   const selectedGroupMissing =
     selectedGroupID !== null &&
     accessGroupsLoaded &&
@@ -798,9 +802,7 @@ function UserForm({
           create_default_profile: createDefaultProfile,
           max_profiles: maxProfiles,
           ...policyCreateFields(policy),
-          ...(groupToSend !== undefined && role !== "admin"
-            ? { access_group_id: groupToSend }
-            : {}),
+          ...(typeof groupToSend === "number" ? { access_group_id: groupToSend } : {}),
         };
         await createMutation.mutateAsync({ body, profileContext: authority });
         createMutation.reset();
@@ -954,9 +956,11 @@ function UserForm({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">
-                    {awaitingDefaultGroup ? "Default group" : "No group"}
-                  </SelectItem>
+                  {offerNoGroup && (
+                    <SelectItem value="none">
+                      {awaitingDefaultGroup ? "Default group" : "No group"}
+                    </SelectItem>
+                  )}
                   {selectedGroupMissing && (
                     <SelectItem value={String(selectedGroupID)}>#{selectedGroupID}</SelectItem>
                   )}
