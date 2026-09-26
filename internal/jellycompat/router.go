@@ -84,8 +84,8 @@ func NewRouter(deps Dependencies) chi.Router {
 	if artworkHandler == nil {
 		artworkHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	}
-	r.Method(http.MethodGet, "/api/v2/artwork/*", artworkHandler)
-	r.Method(http.MethodHead, "/api/v2/artwork/*", artworkHandler)
+	r.Method(http.MethodGet, compatArtworkRoute, artworkHandler)
+	r.Method(http.MethodHead, compatArtworkRoute, artworkHandler)
 
 	systemHandler := NewSystemHandler(deps.CurrentConfig)
 	authHandler := NewAuthHandler(deps.CurrentConfig, deps.LoginResolver, deps.Authenticator).WithUserStore(deps.UserStoreProvider)
@@ -199,17 +199,17 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Get("/QuickConnect/Enabled", systemHandler.HandleQuickConnectEnabled)
 	r.Get("/Users/Public", authHandler.HandlePublicUsers)
 	r.Post("/Users/AuthenticateByName", authHandler.HandleAuthenticateByName)
-	r.Get("/Items/{id}/Images/{imageType}", imagesHandler.HandleItemImage)
-	r.Get("/Items/{id}/Images/{imageType}/{index}", imagesHandler.HandleItemImage)
+	r.Get(compatItemImageRoute, imagesHandler.HandleItemImage)
+	r.Get(compatItemImageIndexRoute, imagesHandler.HandleItemImage)
 	// Jellyfin user-avatar images are anonymous: clients fetch them via plain
 	// <img> tags that carry no auth, so the route is registered top-level rather
 	// than inside the session-auth group.
-	r.Get("/Users/{id}/Images/Primary", imagesHandler.HandleUserImage)
-	r.Method(http.MethodHead, "/Users/{id}/Images/Primary", http.HandlerFunc(imagesHandler.HandleUserImage))
+	r.Get(compatUserImageRoute, imagesHandler.HandleUserImage)
+	r.Method(http.MethodHead, compatUserImageRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
 	// Modern Jellyfin clients fetch the current user's avatar via /UserImage?userId=
 	// (the path form above is [Obsolete] upstream). Same anonymous palette handler.
-	r.Get("/UserImage", imagesHandler.HandleUserImage)
-	r.Method(http.MethodHead, "/UserImage", http.HandlerFunc(imagesHandler.HandleUserImage))
+	r.Get(compatUserImageQueryRoute, imagesHandler.HandleUserImage)
+	r.Method(http.MethodHead, compatUserImageQueryRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
 	webHandler := http.StripPrefix("/web", newDynamicCompatWebHandler(deps))
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/web/", http.StatusFound)
@@ -217,7 +217,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Get("/web", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/web/", http.StatusFound)
 	})
-	r.Handle("/web/*", webHandler)
+	r.Handle(compatWebAssetsRoute, webHandler)
 
 	if deps.Authenticator != nil {
 		r.Group(func(r chi.Router) {
@@ -364,18 +364,24 @@ func NewRouter(deps Dependencies) chi.Router {
 	return r
 }
 
+// Route patterns shared by the router and skipCompatActivityLog.
+const (
+	compatArtworkRoute        = "/api/v2/artwork/*"
+	compatItemImageRoute      = "/Items/{id}/Images/{imageType}"
+	compatItemImageIndexRoute = "/Items/{id}/Images/{imageType}/{index}"
+	compatUserImageRoute      = "/Users/{id}/Images/Primary"
+	compatUserImageQueryRoute = "/UserImage"
+	compatWebAssetsRoute      = "/web/*"
+)
+
 // skipCompatActivityLog leaves out routes that a single page view or playback
 // fetches many times over: artwork, the bundled jellyfin-web assets, and HLS
 // variant playlists and segments. The PlaybackInfo and master playlist requests
 // that start playback are still recorded, as native stream starts are.
 func skipCompatActivityLog(pattern string) bool {
 	switch pattern {
-	case "/Items/{id}/Images/{imageType}",
-		"/Items/{id}/Images/{imageType}/{index}",
-		"/Users/{id}/Images/Primary",
-		"/UserImage",
-		"/api/v2/artwork/*",
-		"/web/*":
+	case compatItemImageRoute, compatItemImageIndexRoute, compatUserImageRoute,
+		compatUserImageQueryRoute, compatArtworkRoute, compatWebAssetsRoute:
 		return true
 	}
 	return strings.HasPrefix(pattern, "/Videos/") && strings.Contains(pattern, "/hls/{playlistId}/")
