@@ -55,15 +55,16 @@ func (h *AdminApplePushHandler) RegisterNotificationRelay(ctx context.Context, r
 		}
 		current.RelayURL = currentURL
 		response, err = notifications.RotateRelayCredential(ctx, settings, h.client, current)
+		if relayErr, ok := errors.AsType[notifications.RelayCredentialError](err); ok && relayErr.Status == http.StatusUnauthorized {
+			// The relay no longer accepts this identity (superseded
+			// generation, retired signing key, or disabled deployment). The
+			// administrator asked for a working credential, so register a
+			// fresh deployment instead of asking them to click again.
+			response, err = notifications.RegisterRelayCredential(ctx, settings, h.client, relayURL)
+		}
 	}
 	if err != nil {
 		relayErr, relayFailure := errors.AsType[notifications.RelayCredentialError](err)
-		if current.APIKey != "" && !notifications.IsLegacyPushRelayKey(current.APIKey) && relayFailure && relayErr.Status == http.StatusUnauthorized {
-			if markErr := notifications.MarkRelayReregistrationRequired(ctx, settings, current); markErr != nil {
-				return NotificationRelayView{}, apiError(500, "settings_error", "Failed to save push relay credential status")
-			}
-			return NotificationRelayView{}, apiError(409, "relay_reregistration_required", "The current relay capability was rejected; explicit re-registration is required")
-		}
 		status, code, message := mapRelayRegistrationError(err)
 		failure := apiError(status, code, message)
 		if relayFailure && relayErr.RetryAfter > 0 {
