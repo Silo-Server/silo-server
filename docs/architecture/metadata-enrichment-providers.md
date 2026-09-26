@@ -60,7 +60,8 @@ scheduled refresh. The write is not a refresh, though. It leaves these alone:
 
 - refresh bookkeeping: `last_refreshed`, `refresh_failures`, `matched_at`,
   `status`, and refresh debt;
-- identity: no rebinding and no promotion of a local content ID;
+- identity: the stored provider IDs, with none added from the provider's
+  answer, and no rebinding or promotion of a local content ID;
 - artwork: paths, source paths and thumbhashes stay as stored, including
   artwork still waiting to be cached;
 - people and remote videos. A refresh replaces those wholesale from every

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"sync"
@@ -493,6 +494,40 @@ func TestPersistEnrichmentDoesNotRecreateADeletedItem(t *testing.T) {
 	}
 	if _, ok := h.itemRepo.items[candidate.ContentID]; ok {
 		t.Fatal("persistEnrichment() created the missing item")
+	}
+}
+
+func TestPersistEnrichmentKeepsTheStoredProviderIDs(t *testing.T) {
+	const contentID = "movie:tmdb:42"
+	h := newTestHarness()
+	seedMovieItem(t, h, contentID, "Title", 1999)
+	h.itemRepo.items[contentID].TmdbID = "42"
+	providerRepo := newFakeProviderIDRepo()
+	providerRepo.set(contentID, &models.MediaItemProviderID{
+		ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "42",
+	})
+	h.service.providerIDRepo = providerRepo
+
+	// IDs the item lacks, which could belong to other items.
+	result := &MetadataResult{
+		HasMetadata:   true,
+		ContentRating: "PG",
+		ProviderIDs:   map[string]string{"imdb": "tt0000999", "tvdb": "999", "mdblist": "m-1"},
+	}
+	candidate := enrichmentCandidate{ContentID: contentID, Type: "movie", ProviderIDs: map[string]string{"tmdb": "42"}}
+	if err := h.service.persistEnrichment(context.Background(), candidate, "mdblist", result); err != nil {
+		t.Fatalf("persistEnrichment() error = %v", err)
+	}
+
+	if got := providerRepo.lastReplace[contentID]; !maps.Equal(got, map[string]string{"tmdb": "42"}) {
+		t.Errorf("persisted provider IDs = %v, want only the stored tmdb", got)
+	}
+	got := h.itemRepo.items[contentID]
+	if got.ImdbID != "" || got.TvdbID != "" {
+		t.Errorf("item IDs = (imdb %q, tvdb %q), want none added", got.ImdbID, got.TvdbID)
+	}
+	if got.ContentRating != "PG" {
+		t.Errorf("content rating = %q, want PG filled", got.ContentRating)
 	}
 }
 

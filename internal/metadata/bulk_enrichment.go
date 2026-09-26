@@ -366,7 +366,8 @@ func failedEnrichmentOutcome(contentID string, now time.Time) enrichmentOutcome 
 //
 //   - refresh bookkeeping (last refresh, failure count, match time, status)
 //     and refresh debt, so a pending refresh still happens;
-//   - identity repairs, which belong to matching and refreshes;
+//   - identity: the stored provider IDs, and the identity repairs that belong
+//     to matching and refreshes;
 //   - people and remote videos, which a refresh replaces wholesale from every
 //     provider's answer and one provider's answer would wipe;
 //   - series seasons and episodes.
@@ -378,6 +379,10 @@ func (s *MetadataService) persistEnrichment(ctx context.Context, candidate enric
 	if language == "" {
 		language = "en"
 	}
+	// An enrichment provider never identifies an item, so none of its provider
+	// IDs are kept. One the item lacks could belong to another item, and the
+	// write's provider-ID conflict recovery would then merge the two.
+	result.ProviderIDs = nil
 	accumulator := &MetadataResult{HasMetadata: true, ProviderIDs: copyMap(candidate.ProviderIDs)}
 	foldProviderResult(accumulator, result, language, providerSlug, false, nil)
 	_, err := s.mergeAndPersist(ctx, ProcessRequest{
