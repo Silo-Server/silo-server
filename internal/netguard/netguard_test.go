@@ -40,6 +40,9 @@ func TestClassify(t *testing.T) {
 		{"224.0.0.1", Blocked},
 		{"ff02::1", Blocked},
 		{"255.255.255.255", Blocked},
+		{"::127.0.0.1", Blocked}, // IPv4-compatible form
+		{"::169.254.169.254", Blocked},
+		{"::8.8.8.8", Blocked},
 	}
 	for _, tc := range cases {
 		if got := Classify(netip.MustParseAddr(tc.addr)); got != tc.want {

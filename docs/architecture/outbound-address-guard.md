@@ -19,7 +19,8 @@ addresses those requests may reach.
 - **Blocked**: never dialed by anyone. Unspecified (`0.0.0.0` dials loopback on
   Linux), link-local (`169.254.0.0/16`, `fe80::/10`, where cloud metadata
   services live), known metadata addresses outside link-local
-  (`100.100.100.200`, `fd00:ec2::254`), multicast, and reserved ranges.
+  (`100.100.100.200`, `fd00:ec2::254`), multicast, reserved ranges, and the
+  deprecated IPv4-compatible IPv6 form (`::a.b.c.d`).
 
 IPv4-mapped IPv6 addresses are classified as their IPv4 form, and zones are
 ignored, so `::ffff:127.0.0.1` and `fe80::1%eth0` cannot slip through.

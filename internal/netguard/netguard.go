@@ -73,6 +73,12 @@ var privatePrefixes = mustPrefixes(
 	"64:ff9b:1::/48", // local-use NAT64 (RFC 8215)
 )
 
+// ipv4Compatible holds the deprecated IPv4-compatible IPv6 form (::a.b.c.d,
+// RFC 4291). Nothing legitimate uses it, so it is blocked outright rather than
+// trusted to stay unroutable. It contains :: and ::1, which Classify handles
+// first.
+var ipv4Compatible = netip.MustParsePrefix("::/96")
+
 func mustPrefixes(cidrs ...string) []netip.Prefix {
 	prefixes := make([]netip.Prefix, 0, len(cidrs))
 	for _, cidr := range cidrs {
@@ -99,6 +105,9 @@ func Classify(addr netip.Addr) Class {
 		if prefix.Contains(addr) {
 			return Private
 		}
+	}
+	if ipv4Compatible.Contains(addr) {
+		return Blocked
 	}
 	return Public
 }
