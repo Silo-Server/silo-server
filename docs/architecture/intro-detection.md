@@ -6,6 +6,13 @@ series libraries with marker detection enabled. Code lives in
 limit come from `internal/mediasample` (see [media sampling](media-sampling.md)).
 Credits detection is described [below](#credits).
 
+Every API server runs the task manager, so the task takes a PostgreSQL
+advisory lock before it analyzes anything. While one server holds it, a run on
+another server succeeds without analyzing and records `skipped` in its result
+data. The admin UI does not show that result data yet, so a skipped run
+appears there as a completed run. Analysis started from playback or for a
+single item does not take the lock.
+
 ## Pipeline
 
 1. **Chapters.** A file whose chapters include one titled like an intro or

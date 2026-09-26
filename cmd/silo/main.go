@@ -2735,7 +2735,7 @@ func main() {
 		taskMgr.Register(tasks.NewRebuildCatalogSearchIndexTask(catalogSearchIndexer))
 		maintenanceSteps = append(maintenanceSteps, tasks.NewCatalogSearchEventRetentionTask(catalog.NewSearchIndexEventRepository(deps.DB)))
 		if deps.IntroAnalyzer != nil {
-			taskMgr.Register(tasks.NewDetectIntroMarkersTask(deps.IntroAnalyzer, settingsRepo))
+			taskMgr.Register(tasks.NewDetectIntroMarkersTask(deps.DB, deps.IntroAnalyzer, settingsRepo))
 		}
 		if deps.MarkerPopulation != nil {
 			taskMgr.Register(tasks.NewSyncMarkersTask(deps.MarkerPopulation))
