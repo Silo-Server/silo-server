@@ -1,11 +1,13 @@
 package database
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"path"
+	"slices"
 	"sync"
 	"time"
 
@@ -179,6 +181,27 @@ func startMigrationHeartbeat(interval time.Duration, beat func(elapsed string)) 
 			<-finished
 		})
 	}
+}
+
+// migrationRollbackPlan lists the applied migrations newer than toVersion,
+// newest first: the set a DownTo(toVersion) run rolls back.
+func migrationRollbackPlan(statuses []*goose.MigrationStatus, toVersion int64) []*goose.Source {
+	var plan []*goose.Source
+	for _, status := range statuses {
+		if status != nil && status.State == goose.StateApplied && status.Source != nil && status.Source.Version > toVersion {
+			plan = append(plan, status.Source)
+		}
+	}
+	slices.SortFunc(plan, func(a, b *goose.Source) int { return cmp.Compare(b.Version, a.Version) })
+	return plan
+}
+
+func migrationNames(sources []*goose.Source) []string {
+	names := make([]string, 0, len(sources))
+	for _, source := range sources {
+		names = append(names, migrationName(source))
+	}
+	return names
 }
 
 func migrationName(source *goose.Source) string {

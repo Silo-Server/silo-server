@@ -90,7 +90,20 @@ func MigrateDownTo(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir stri
 	defer func() { _ = provider.Close() }()
 
 	logger := slog.Default()
-	logger.InfoContext(ctx, "rolling back database migrations", "to_version", version)
+	// goose's DownTo rolls every migration back before it returns, so progress
+	// can't name the migration running at the moment. Log the migrations the
+	// rollback will undo instead, so a long rollback shows what it covers.
+	statuses, statusErr := provider.Status(ctx)
+	if statusErr != nil {
+		logger.WarnContext(ctx, "could not list the migrations to roll back", "to_version", version, "error", statusErr)
+		logger.InfoContext(ctx, "rolling back database migrations", "to_version", version)
+	} else {
+		plan := migrationRollbackPlan(statuses, version)
+		logger.InfoContext(ctx, "rolling back database migrations",
+			"to_version", version,
+			"count", len(plan),
+			"migrations", migrationNames(plan))
+	}
 	started := time.Now()
 	stop := startMigrationHeartbeat(migrationHeartbeatInterval, func(elapsed string) {
 		logger.InfoContext(ctx, "database migration rollback still running",

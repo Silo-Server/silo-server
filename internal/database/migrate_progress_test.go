@@ -332,3 +332,21 @@ func TestLogMigrationRollbackResultsReportsPartialFailure(t *testing.T) {
 		t.Fatalf("partial rollback results missing:\n%s", logs)
 	}
 }
+
+func TestMigrationRollbackPlanListsAppliedMigrationsAboveTheTarget(t *testing.T) {
+	statuses := []*goose.MigrationStatus{
+		{Source: source(100, "100_keep.sql"), State: goose.StateApplied},
+		{Source: source(103, "103_newest.sql"), State: goose.StateApplied},
+		{Source: source(101, "101_old.sql"), State: goose.StateApplied},
+		{Source: source(102, "102_pending.sql"), State: goose.StatePending},
+		nil,
+	}
+	plan := migrationRollbackPlan(statuses, 100)
+	names := migrationNames(plan)
+	if len(names) != 2 || names[0] != "103_newest.sql" || names[1] != "101_old.sql" {
+		t.Fatalf("plan = %v, want the applied migrations above 100, newest first", names)
+	}
+	if got := migrationRollbackPlan(statuses, 103); len(got) != 0 {
+		t.Fatalf("plan above the newest applied = %v, want none", migrationNames(got))
+	}
+}
