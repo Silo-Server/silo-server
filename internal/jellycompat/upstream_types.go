@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // upstream types represent the intermediate data model used between
@@ -124,6 +125,9 @@ type upstreamItemDetail struct {
 	SubtitleMode        string `json:"-"`
 	SubtitleModeSet     bool   `json:"-"`
 	ShowForcedSubtitles bool   `json:"-"`
+	// SubtitleTrackSignature is the track the viewer last picked for this
+	// series, or nil.
+	SubtitleTrackSignature *userstore.SubtitleTrackSignature `json:"-"`
 }
 
 type upstreamSeason struct {

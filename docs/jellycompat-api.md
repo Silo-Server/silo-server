@@ -82,6 +82,9 @@ each item's original-language audio, as native clients do.
 
 Movie and episode detail responses select `DefaultSubtitleStreamIndex` from the
 viewer's effective subtitle mode and language, including downloaded subtitles.
+In `Always` mode, a track the viewer picked for the series in a Silo client
+(its source, language, codec, label, forced and hearing-impaired traits) wins
+when the file has one that matches; otherwise the language rules apply.
 The detail-page selection therefore carries into playback instead of sending
 an unintended Off choice. Explicit playback choices, including Off, still win.
 If playback negotiates a different audio language, clients must omit
@@ -95,8 +98,8 @@ file's default track. `DefaultSubtitleStreamIndex` follows Jellyfin 12.1's
 `MediaStreamSelector` for the effective subtitle mode and language, judged
 against the starting audio track: external files (including downloaded
 subtitles) sort first, and an unset subtitle language matches any language.
-Silo's per-series remembered subtitle track is not applied, and an explicit
-`SubtitleStreamIndex` in the request still wins.
+In `Always` mode, Silo's per-series remembered subtitle track is applied first,
+as on item details. An explicit `SubtitleStreamIndex` in the request still wins.
 
 ## Browse and response fields
 
