@@ -94,8 +94,28 @@ background run. Intro detection sizes its limiter from
 
 ## Process priority
 
-`Request.Background` marks work nobody is waiting on. It does not change how
-the process runs yet.
+`Request.Background` marks work nobody is waiting on. On Linux, a background
+run's ffmpeg starts at nice 19 and in the idle I/O class, so it only gets CPU
+and disk time that playback and the API leave free. Other platforms run it
+like any other request. Intro detection sets `Background` for scheduled runs
+and admin refreshes, and leaves it unset for analysis started from playback
+(`intromarkers.WithPlaybackPriority`).
+
+How it works: Linux keeps nice and I/O priority per thread, and a forked child
+inherits them from the thread that forked it. The runner starts a background
+ffmpeg from a goroutine locked to its own OS thread, lowers that thread's
+priority, forks, and exits without unlocking, so the Go runtime discards the
+thread. No other goroutine runs on it, and the runtime never creates new
+threads from a locked one. The main thread is the exception: the runtime
+parks it rather than discarding it, so a start that lands there hands the
+work to another goroutine while it holds the main thread, and leaves the main
+thread's priority unchanged.
+
+Lowering priority needs no privileges. If it fails anyway (for example under
+a seccomp profile that blocks `ioprio_set`), the run continues at normal
+priority and the first failure is logged. Deadlines and the limiter still
+bound background work. If the idle I/O class is seen to starve it on a disk
+that is never idle, switch to the lowest best-effort level (7) instead.
 
 ## Artifact storage
 

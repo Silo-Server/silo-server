@@ -88,6 +88,18 @@ func TestChromaprintExtractorArguments(t *testing.T) {
 	}
 }
 
+// Scheduled and admin analysis runs in the background; analysis started from
+// playback runs at normal priority.
+func TestFingerprintRequestBackground(t *testing.T) {
+	candidate := Candidate{FileID: 1, FilePath: "/media/Show/S01E01.mkv", DurationSeconds: 1500}
+	if req := fingerprintRequest(context.Background(), candidate, 375); !req.Background {
+		t.Fatal("scheduled analysis request is not background")
+	}
+	if req := fingerprintRequest(WithPlaybackPriority(context.Background()), candidate, 375); req.Background {
+		t.Fatal("playback analysis request is background")
+	}
+}
+
 func TestSilenceBoundaryRefinerArguments(t *testing.T) {
 	ffmpeg, args := recordingFFmpeg(t, "")
 	segment := Segment{Start: 60, End: 120, Confidence: 0.95, Algorithm: ChapterAlgorithm}

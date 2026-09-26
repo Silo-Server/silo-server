@@ -45,6 +45,7 @@ func (r *SilenceBoundaryRefiner) RefineChapterEnd(ctx context.Context, candidate
 			NoiseDB:    *cfg.SilenceNoiseThresholdDB,
 			MinSeconds: cfg.SilenceMinimumDurationSeconds,
 		}},
+		Background: backgroundAnalysis(ctx),
 	})
 	if err != nil {
 		return segment, false, fmt.Errorf("detecting intro boundary silence for file %d: %w", candidate.FileID, err)

@@ -36,14 +36,30 @@ type execFunc func(ctx context.Context, name string, args []string, stdin io.Rea
 // waitDelay bounds how long a killed ffmpeg's pipes may stay open.
 const waitDelay = 5 * time.Second
 
-func execFFmpeg(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) (*os.ProcessState, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdin = stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	cmd.WaitDelay = waitDelay
-	err := cmd.Run()
-	return cmd.ProcessState, err
+// execFFmpeg returns the execFunc that runs a real process. Background
+// processes start at lowered priority where the platform supports it (see
+// startBackground).
+func execFFmpeg(background bool) execFunc {
+	return func(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) (*os.ProcessState, error) {
+		cmd := exec.CommandContext(ctx, name, args...)
+		cmd.Stdin = stdin
+		cmd.Stdout = stdout
+		cmd.Stderr = stderr
+		cmd.WaitDelay = waitDelay
+		if err := startCommand(cmd, background); err != nil {
+			return nil, err
+		}
+		err := cmd.Wait()
+		return cmd.ProcessState, err
+	}
+}
+
+// startCommand starts cmd, at background priority when background is set.
+func startCommand(cmd *exec.Cmd, background bool) error {
+	if background {
+		return startBackground(cmd)
+	}
+	return cmd.Start()
 }
 
 // Result is what a run produced. Times are absolute media seconds.
@@ -181,7 +197,7 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt) (R
 
 	run := r.exec
 	if run == nil {
-		run = execFFmpeg
+		run = execFFmpeg(req.Background)
 	}
 	state, err := run(attemptCtx, r.FFmpegPath, args, stdin, stdoutWriter, stderr)
 	_ = stderr.Close()

@@ -48,8 +48,9 @@ type Analyzer struct {
 const maxConcurrentFingerprintLookups = 4
 
 // WithPlaybackPriority marks analysis a viewer is waiting on, letting it use
-// the ffmpeg slot reserved for playback. Background callers, such as admin
-// refreshes, must not use it or they would queue ahead of playback.
+// the ffmpeg slot reserved for playback and run ffmpeg at normal process
+// priority. Background callers, such as admin refreshes, must not use it or
+// they would queue ahead of playback.
 func WithPlaybackPriority(ctx context.Context) context.Context {
 	return mediasample.WithInteractive(ctx)
 }

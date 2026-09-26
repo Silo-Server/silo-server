@@ -25,8 +25,9 @@ type Request struct {
 	Attempts []Attempt `json:"attempts,omitempty"`
 	// Threads caps ffmpeg's decoder threads. Zero leaves ffmpeg's default.
 	Threads int `json:"threads,omitempty"`
-	// Background marks work nobody is waiting on. It does not change the run
-	// yet; process priority for background runs is planned.
+	// Background marks work nobody is waiting on. On Linux its ffmpeg runs at
+	// the lowest CPU priority (nice 19) and in the idle I/O class; elsewhere it
+	// runs like any other request.
 	Background bool `json:"background,omitempty"`
 }
 

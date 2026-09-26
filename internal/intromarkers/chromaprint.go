@@ -20,14 +20,15 @@ func NewChromaprintExtractor(config Config) *ChromaprintExtractor {
 // fingerprintRequest is the sampling request for a candidate's opening audio.
 // Its arguments are part of the fingerprint cache contract: see
 // docs/architecture/media-sampling.md before changing them.
-func fingerprintRequest(candidate Candidate, windowEnd float64) mediasample.Request {
+func fingerprintRequest(ctx context.Context, candidate Candidate, windowEnd float64) mediasample.Request {
 	return mediasample.Request{
 		Input:  candidate.FilePath,
 		Window: &mediasample.Window{StartSeconds: 0, DurationSeconds: windowEnd},
 		Audio:  &mediasample.AudioOutput{Fingerprint: true},
 		// Detection parallelism comes from running several files at once, so
 		// each ffmpeg decodes on one thread.
-		Threads: 1,
+		Threads:    1,
+		Background: backgroundAnalysis(ctx),
 	}
 }
 
@@ -46,7 +47,7 @@ func (e *ChromaprintExtractor) Extract(ctx context.Context, candidate Candidate)
 		return Fingerprint{}, false, nil
 	}
 
-	result, err := analysisRunner(e.config).Run(ctx, fingerprintRequest(candidate, windowEnd))
+	result, err := analysisRunner(e.config).Run(ctx, fingerprintRequest(ctx, candidate, windowEnd))
 	if err != nil {
 		return Fingerprint{}, false, fmt.Errorf("extracting chromaprint for file %d: %w", candidate.FileID, err)
 	}
@@ -67,6 +68,13 @@ func (e *ChromaprintExtractor) Extract(ctx context.Context, candidate Candidate)
 		SampleDurationSeconds: float64(len(points)) * DefaultPointHopSeconds,
 		Points:                points,
 	}, true, nil
+}
+
+// backgroundAnalysis reports whether analysis under ctx is background work,
+// whose ffmpeg runs at lowered process priority. Only analysis a viewer is
+// waiting on (see WithPlaybackPriority) runs at normal priority.
+func backgroundAnalysis(ctx context.Context) bool {
+	return !mediasample.Interactive(ctx)
 }
 
 // analysisRunner runs intro detection's ffmpeg processes.
