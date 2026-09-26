@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   profile: "owner",
   viewer: 2,
   users: [{ id: 2, username: "Admin", is_owner: false }],
+  usersPending: false,
 }));
 vi.mock("@/api/v2/request", async (original) => ({
   ...(await original<typeof import("@/api/v2/request")>()),
@@ -28,7 +29,10 @@ vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ user: { id: state.viewer }, profile: { id: state.profile } }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
-  useAdminUsers: () => ({ data: state.users }),
+  useAdminUsers: () =>
+    state.usersPending
+      ? { data: undefined, isPending: true }
+      : { data: state.users, isPending: false },
 }));
 const row = {
   id: "7",
@@ -74,6 +78,7 @@ beforeEach(() => {
   state.profile = "owner";
   state.viewer = 2;
   state.users = [{ id: 2, username: "Admin", is_owner: false }];
+  state.usersPending = false;
   vi.mocked(v2).mockImplementation(baseline);
 });
 afterEach(() => {
@@ -244,4 +249,12 @@ it("offers the Owner's keys only to the Owner", async () => {
   await screen.findByText("Automation");
   expect(screen.getByRole("button", { name: "Edit rate limit for Automation" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Revoke API key Automation" })).toBeEnabled();
+});
+
+it("offers no key actions until the account list loads", async () => {
+  state.usersPending = true;
+  mount();
+  await screen.findByText("Automation");
+  expect(screen.queryByRole("button", { name: "Edit rate limit for Automation" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Revoke API key Automation" })).toBeNull();
 });

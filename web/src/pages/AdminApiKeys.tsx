@@ -81,10 +81,13 @@ export default function AdminApiKeys() {
 function ApiKeyManager() {
   const capability = useAdminApiKeyCapabilities();
   const viewerId = useAuth().user?.id;
-  // Only the server Owner may change or revoke the Owner's keys.
-  const ownerId = useAdminUsers().data?.find((u) => u.is_owner)?.id;
+  // Only the server Owner may change or revoke the Owner's keys. Until the
+  // account list answers, nobody is offered the actions.
+  const accounts = useAdminUsers();
+  const ownerId = accounts.data?.find((u) => u.is_owner)?.id;
   const ownerLocked = (userId: string) =>
-    ownerId !== undefined && ownerId !== viewerId && Number(userId) === ownerId;
+    accounts.isPending ||
+    (ownerId !== undefined && ownerId !== viewerId && Number(userId) === ownerId);
   const keys = useAdminApiKeys(capability.data?.available === true);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);

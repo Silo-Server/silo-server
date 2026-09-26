@@ -408,6 +408,25 @@ describe("AdminUsers row actions", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("/profiles");
   });
 
+  it("lets the owner view as another admin after confirmation", async () => {
+    const user = userEvent.setup();
+    mocks.users = [
+      { ...adminUser, id: 1, username: "founder", role: "admin", is_owner: true },
+      { ...adminUser, id: 8, username: "admin", role: "admin" },
+    ];
+    mocks.impersonate.mockImplementation(async ({ profileContext }) => ({
+      session: {},
+      profileContext,
+    }));
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "View as user: admin" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText(/run as this admin, with their access/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "View as user" }));
+    await waitFor(() => expect(mocks.beginImpersonation).toHaveBeenCalledWith({}, "/admin/users"));
+    expect(mocks.impersonate.mock.calls[0]![0].id).toBe(8);
+  });
+
   it("preserves the current session when starting View as user fails", async () => {
     const user = userEvent.setup();
     mocks.impersonate.mockRejectedValue(new Error("This user is disabled."));
