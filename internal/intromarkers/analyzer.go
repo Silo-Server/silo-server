@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -30,12 +31,10 @@ type Analyzer struct {
 	// once. Zero falls back to config.MaxParallelFFmpeg.
 	workers int
 	// ffmpegSlots bounds the ffmpeg processes this analyzer runs at once across
-	// the nightly run and its season workers. Nil means no shared bound.
-	ffmpegSlots *slotLimiter
-	// interactiveSlots is reserved for analysis started from playback (see
-	// WithPlaybackPriority), which would otherwise queue behind every nightly
-	// extraction waiting for a slot.
-	interactiveSlots chan struct{}
+	// the nightly run and its season workers, with a slot reserved for
+	// analysis started from playback (see WithPlaybackPriority). Nil means no
+	// shared bound.
+	ffmpegSlots *mediasample.Limiter
 	// lookupSlots bounds concurrent fingerprint cache reads across every group
 	// being analyzed; see fingerprintLookupSlots.
 	lookupOnce  sync.Once
@@ -48,14 +47,11 @@ type Analyzer struct {
 // nightly run could take the whole pool and starve API requests.
 const maxConcurrentFingerprintLookups = 4
 
-// interactiveAnalysisKey marks a context whose analysis a viewer is waiting on.
-type interactiveAnalysisKey struct{}
-
 // WithPlaybackPriority marks analysis a viewer is waiting on, letting it use
 // the ffmpeg slot reserved for playback. Background callers, such as admin
 // refreshes, must not use it or they would queue ahead of playback.
 func WithPlaybackPriority(ctx context.Context) context.Context {
-	return context.WithValue(ctx, interactiveAnalysisKey{}, true)
+	return mediasample.WithInteractive(ctx)
 }
 
 type introRepository interface {
@@ -96,8 +92,7 @@ func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer
 		logger:             logger,
 		node:               node,
 		workers:            config.MaxParallelFFmpeg,
-		ffmpegSlots:        newSlotLimiter(config.MaxParallelFFmpeg),
-		interactiveSlots:   make(chan struct{}, 1),
+		ffmpegSlots:        mediasample.NewLimiter(config.MaxParallelFFmpeg),
 	}
 }
 
@@ -117,10 +112,10 @@ func (a *Analyzer) SetWorkers(n int) {
 	}
 	a.workers = n
 	if a.ffmpegSlots == nil {
-		a.ffmpegSlots = newSlotLimiter(n)
+		a.ffmpegSlots = mediasample.NewLimiter(n)
 		return
 	}
-	a.ffmpegSlots.resize(n)
+	a.ffmpegSlots.Resize(n)
 }
 
 // workerCount is the current number of season workers.
@@ -133,7 +128,7 @@ func (a *Analyzer) workerCount() int {
 	return max(1, a.config.normalized().MaxParallelFFmpeg)
 }
 
-func (a *Analyzer) sharedSlots() *slotLimiter {
+func (a *Analyzer) sharedSlots() *mediasample.Limiter {
 	a.slotsMu.Lock()
 	defer a.slotsMu.Unlock()
 	return a.ffmpegSlots
@@ -147,35 +142,7 @@ func (a *Analyzer) acquireFFmpeg(ctx context.Context) (func(), error) {
 	if slots == nil {
 		return func() {}, ctx.Err()
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	// A nil channel never receives, so non-interactive callers only wait on
-	// the shared limit.
-	var reserved chan struct{}
-	if interactive, _ := ctx.Value(interactiveAnalysisKey{}).(bool); interactive {
-		reserved = a.interactiveSlots
-	}
-	for {
-		if reserved != nil {
-			select {
-			case reserved <- struct{}{}:
-				return func() { <-reserved }, nil
-			default:
-			}
-		}
-		ok, changed := slots.tryAcquire()
-		if ok {
-			return slots.release, nil
-		}
-		select {
-		case reserved <- struct{}{}:
-			return func() { <-reserved }, nil
-		case <-changed:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
+	return slots.Acquire(ctx)
 }
 
 // fingerprintLookupSlots returns the analyzer-wide bound on concurrent
@@ -1028,7 +995,7 @@ func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidat
 	acquire := a.acquireFFmpeg
 	if a.sharedSlots() == nil {
 		// Analyzers built without NewAnalyzer still bound this call.
-		local := &Analyzer{ffmpegSlots: newSlotLimiter(a.workerCount())}
+		local := &Analyzer{ffmpegSlots: mediasample.NewLimiter(a.workerCount())}
 		acquire = local.acquireFFmpeg
 	}
 	var wg sync.WaitGroup

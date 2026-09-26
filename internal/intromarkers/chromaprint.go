@@ -1,14 +1,12 @@
 package intromarkers
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"math"
-	"os/exec"
-	"strconv"
-	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
 
 type ChromaprintExtractor struct {
@@ -19,22 +17,26 @@ func NewChromaprintExtractor(config Config) *ChromaprintExtractor {
 	return &ChromaprintExtractor{config: config.normalized()}
 }
 
+// fingerprintRequest is the sampling request for a candidate's opening audio.
+// Its arguments are part of the fingerprint cache contract: see
+// docs/architecture/media-sampling.md before changing them.
+func fingerprintRequest(candidate Candidate, windowEnd float64) mediasample.Request {
+	return mediasample.Request{
+		Input:  candidate.FilePath,
+		Window: &mediasample.Window{StartSeconds: 0, DurationSeconds: windowEnd},
+		Audio:  &mediasample.AudioOutput{Fingerprint: true},
+		// Detection parallelism comes from running several files at once, so
+		// each ffmpeg decodes on one thread.
+		Threads: 1,
+	}
+}
+
 func (e *ChromaprintExtractor) Preflight(ctx context.Context) error {
-	muxers, err := exec.CommandContext(ctx, e.config.FFmpegPath, "-hide_banner", "-muxers").CombinedOutput()
+	caps, err := mediasample.LoadCapabilities(ctx, e.config.FFmpegPath)
 	if err != nil {
-		return fmt.Errorf("ffmpeg muxer preflight failed: %w", err)
+		return err
 	}
-	if !bytes.Contains(bytes.ToLower(muxers), []byte("chromaprint")) {
-		return fmt.Errorf("ffmpeg does not list the chromaprint muxer")
-	}
-	help, err := exec.CommandContext(ctx, e.config.FFmpegPath, "-hide_banner", "-h", "muxer=chromaprint").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("ffmpeg chromaprint help failed: %w", err)
-	}
-	if !bytes.Contains(bytes.ToLower(help), []byte("fp_format")) || !bytes.Contains(bytes.ToLower(help), []byte("raw")) {
-		return fmt.Errorf("ffmpeg chromaprint muxer does not advertise raw fingerprint output")
-	}
-	return nil
+	return caps.Require(mediasample.Request{Audio: &mediasample.AudioOutput{Fingerprint: true}})
 }
 
 func (e *ChromaprintExtractor) Extract(ctx context.Context, candidate Candidate) (Fingerprint, bool, error) {
@@ -44,23 +46,11 @@ func (e *ChromaprintExtractor) Extract(ctx context.Context, candidate Candidate)
 		return Fingerprint{}, false, nil
 	}
 
-	args := []string{
-		"-hide_banner",
-		"-loglevel", "warning",
-		"-threads", "1",
-		"-ss", formatSeconds(windowStart),
-		"-i", candidate.FilePath,
-		"-t", formatSeconds(windowEnd - windowStart),
-		"-ac", "2",
-		"-f", "chromaprint",
-		"-fp_format", "raw",
-		"-",
-	}
-	output, err := exec.CommandContext(ctx, e.config.FFmpegPath, args...).Output()
+	result, err := analysisRunner(e.config).Run(ctx, fingerprintRequest(candidate, windowEnd))
 	if err != nil {
 		return Fingerprint{}, false, fmt.Errorf("extracting chromaprint for file %d: %w", candidate.FileID, err)
 	}
-	points := decodeRawPoints(output)
+	points := result.Fingerprint
 	if len(points) == 0 {
 		return Fingerprint{}, false, nil
 	}
@@ -79,6 +69,11 @@ func (e *ChromaprintExtractor) Extract(ctx context.Context, candidate Candidate)
 	}, true, nil
 }
 
+// analysisRunner runs intro detection's ffmpeg processes.
+func analysisRunner(cfg Config) mediasample.Runner {
+	return mediasample.Runner{FFmpegPath: cfg.FFmpegPath, Workload: processmetrics.Analysis}
+}
+
 func analysisWindowEnd(duration float64, cfg Config) float64 {
 	if duration <= 0 {
 		return 0
@@ -86,28 +81,4 @@ func analysisWindowEnd(duration float64, cfg Config) float64 {
 	percentEnd := duration * (float64(cfg.AnalysisPercent) / 100)
 	limitEnd := float64(cfg.AnalysisLengthLimitMinutes * 60)
 	return math.Min(duration, math.Min(percentEnd, limitEnd))
-}
-
-func decodeRawPoints(output []byte) []uint32 {
-	if len(output) < 4 {
-		return nil
-	}
-	points := make([]uint32, 0, len(output)/4)
-	for len(output) >= 4 {
-		points = append(points, binary.LittleEndian.Uint32(output[:4]))
-		output = output[4:]
-	}
-	return points
-}
-
-func encodeRawPoints(points []uint32) []byte {
-	buf := make([]byte, len(points)*4)
-	for i, point := range points {
-		binary.LittleEndian.PutUint32(buf[i*4:], point)
-	}
-	return buf
-}
-
-func formatSeconds(seconds float64) string {
-	return strings.TrimRight(strings.TrimRight(strconv.FormatFloat(seconds, 'f', 3, 64), "0"), ".")
 }

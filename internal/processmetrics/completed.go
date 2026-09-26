@@ -18,6 +18,9 @@ const (
 	Remux
 	Probe
 	Plugin
+	// Analysis is an ffmpeg run that decodes media for analysis features,
+	// such as intro fingerprints and silence, through internal/mediasample.
+	Analysis
 )
 
 func (w Workload) label() string {
@@ -30,6 +33,8 @@ func (w Workload) label() string {
 		return "probe"
 	case Plugin:
 		return "plugin"
+	case Analysis:
+		return "analysis"
 	default:
 		return "other"
 	}

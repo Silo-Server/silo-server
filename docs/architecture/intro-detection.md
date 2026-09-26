@@ -1,7 +1,9 @@
 # Intro detection
 
 The daily "Detect markers on this server" task finds intros in series libraries
-with marker detection enabled. Code lives in `internal/intromarkers`.
+with marker detection enabled. Code lives in `internal/intromarkers`; its
+ffmpeg runs, capability check, and concurrency limit come from
+`internal/mediasample` (see [media sampling](media-sampling.md)).
 
 ## Pipeline
 

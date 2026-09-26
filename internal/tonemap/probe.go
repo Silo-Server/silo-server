@@ -179,7 +179,7 @@ func probeWithRunner(
 // the driver facts for every configured hardware device.
 func probeCacheKey(generation uint64, ffmpegPath, hardwareBackend, hardwareDevice string) string {
 	binaryIdentity := strings.TrimSpace(ffmpegPath)
-	if _, cacheKey, cacheable := ffmpegBinaryCacheKey(binaryIdentity); cacheable {
+	if _, cacheKey, cacheable := FFmpegBinaryIdentity(binaryIdentity); cacheable {
 		binaryIdentity = cacheKey
 	}
 	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))

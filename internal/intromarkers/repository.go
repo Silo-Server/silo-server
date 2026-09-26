@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/jackc/pgx/v5"
@@ -490,7 +491,7 @@ func (r *Repository) LoadFingerprint(ctx context.Context, candidate Candidate, c
 		}
 		return nil, fmt.Errorf("loading intro fingerprint: %w", err)
 	}
-	fp.Points = decodeRawPoints(points)
+	fp.Points = mediasample.DecodeRawFingerprint(points)
 	if fp.FileHash != candidate.FileHash ||
 		fp.FileSize != candidate.FileSize ||
 		fp.DurationSeconds != candidate.DurationSeconds ||
@@ -543,7 +544,7 @@ func (r *Repository) UpsertFingerprint(ctx context.Context, fp Fingerprint) erro
 		fp.FingerprintFormat,
 		fp.SampleDurationSeconds,
 		len(fp.Points),
-		encodeRawPoints(fp.Points),
+		mediasample.EncodeRawFingerprint(fp.Points),
 	)
 	if err != nil {
 		return fmt.Errorf("upserting intro fingerprint: %w", err)
