@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"log/slog"
@@ -11,9 +12,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 )
 
-// isQuotaError returns true if the error indicates an API quota/billing issue
-// that won't be resolved by retrying.
+// isQuotaError identifies provider limits that should stop this backfill run.
+// Gemini's bounded retries are already exhausted for temporary rate limits.
 func isQuotaError(err error) bool {
+	var limitErr *embeddings.RateLimitError
+	if errors.As(err, &limitErr) {
+		return true
+	}
 	msg := err.Error()
 	return strings.Contains(msg, "insufficient_quota") ||
 		strings.Contains(msg, "exceeded your current quota") ||
@@ -415,9 +420,9 @@ func (e *Engine) embedBatch(ctx context.Context, items []*models.MediaItem, text
 
 		vectors, err := e.embClient.Embed(ctx, chunkTexts)
 		if err != nil {
-			// Quota/billing errors won't resolve by retrying — stop immediately.
+			// A provider limit will not improve by splitting the batch.
 			if isQuotaError(err) {
-				return total, fmt.Errorf("embedding API quota exceeded, check billing: %w", err)
+				return total, fmt.Errorf("embedding batch stopped: %w", err)
 			}
 
 			// Batch failed — fall back to embedding one at a time so a single
@@ -431,7 +436,7 @@ func (e *Engine) embedBatch(ctx context.Context, items []*models.MediaItem, text
 				vecs, embedErr := e.embClient.Embed(ctx, []string{single})
 				if embedErr != nil {
 					if isQuotaError(embedErr) {
-						return total, fmt.Errorf("embedding API quota exceeded, check billing: %w", embedErr)
+						return total, fmt.Errorf("embedding batch stopped: %w", embedErr)
 					}
 					if ctx.Err() != nil {
 						return total, ctx.Err()

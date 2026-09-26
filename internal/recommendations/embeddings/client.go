@@ -78,9 +78,22 @@ type geminiEmbedResponse struct {
 	} `json:"embeddings"`
 }
 
+// RateLimitError reports a Gemini limit that should stop the current backfill
+// rather than fan out into requests for individual items.
+type RateLimitError struct {
+	DailyQuota bool
+}
+
+func (e *RateLimitError) Error() string {
+	if e.DailyQuota {
+		return "gemini embedding API daily quota exhausted; retry after the quota resets or review limits in Google AI Studio"
+	}
+	return "gemini embedding API rate limit persisted after retries; try again later"
+}
+
 // Embed generates embeddings for the given texts.
 // Returns one []float32 per input text, in the same order.
-// Retries on transient errors (5xx) and rate limits (429) with backoff.
+// Retries on transient errors (5xx) and temporary rate limits with backoff.
 func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if c.isGemini() {
 		return c.embedGemini(ctx, texts)
@@ -201,7 +214,9 @@ func (c *Client) embedGemini(ctx context.Context, texts []string) ([][]float32, 
 		resp, err = c.httpClient.Do(httpReq)
 		if err != nil {
 			if attempt < maxAttempts-1 {
-				time.Sleep(time.Duration(attempt+1) * time.Second)
+				if err := waitForRetry(ctx, time.Duration(attempt+1)*time.Second); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			return nil, fmt.Errorf("gemini embedding request failed: %w", err)
@@ -215,21 +230,25 @@ func (c *Client) embedGemini(ctx context.Context, texts []string) ([][]float32, 
 		resp.Body.Close()
 
 		if resp.StatusCode == http.StatusTooManyRequests {
-			if attempt >= maxAttempts-1 {
-				return nil, fmt.Errorf("gemini embedding API returned %d: %s", resp.StatusCode, string(respBody))
+			limitErr, retryDelay := parseGeminiRateLimit(respBody)
+			if limitErr.DailyQuota || attempt >= maxAttempts-1 {
+				return nil, limitErr
 			}
-			wait := rateLimitBackoff(resp, attempt)
+			wait := max(retryAfterDelay(resp.Header.Get("Retry-After")), retryDelay)
+			if wait <= 0 {
+				wait = rateLimitBackoff(resp, attempt)
+			}
 			slog.WarnContext(ctx, "rate limited by gemini embedding API, waiting", "component", "recommendations", "attempt", attempt+1, "wait", wait)
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(wait):
+			if err := waitForRetry(ctx, wait); err != nil {
+				return nil, err
 			}
 			continue
 		}
 
 		if resp.StatusCode >= 500 && attempt < maxAttempts-1 {
-			time.Sleep(time.Duration(attempt+1) * time.Second)
+			if err := waitForRetry(ctx, time.Duration(attempt+1)*time.Second); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -254,10 +273,8 @@ func (c *Client) embedGemini(ctx context.Context, texts []string) ([][]float32, 
 // rateLimitBackoff returns how long to wait after a 429 response.
 // Uses the Retry-After header if present, otherwise exponential backoff.
 func rateLimitBackoff(resp *http.Response, attempt int) time.Duration {
-	if ra := resp.Header.Get("Retry-After"); ra != "" {
-		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
-			return time.Duration(secs) * time.Second
-		}
+	if wait := retryAfterDelay(resp.Header.Get("Retry-After")); wait > 0 {
+		return wait
 	}
 	// Exponential backoff: 10s, 20s, 40s, 60s, 60s ...
 	wait := 10 * time.Second * (1 << attempt)
@@ -265,4 +282,68 @@ func rateLimitBackoff(resp *http.Response, attempt int) time.Duration {
 		wait = 60 * time.Second
 	}
 	return wait
+}
+
+func retryAfterDelay(value string) time.Duration {
+	seconds, err := strconv.ParseUint(value, 10, 63)
+	if err == nil && seconds > 0 && seconds <= uint64((1<<63-1)/time.Second) {
+		return time.Duration(seconds) * time.Second
+	}
+	if until, err := http.ParseTime(value); err == nil {
+		return max(time.Until(until), 0)
+	}
+	return 0
+}
+
+func waitForRetry(ctx context.Context, wait time.Duration) error {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func parseGeminiRateLimit(body []byte) (*RateLimitError, time.Duration) {
+	limitErr := &RateLimitError{}
+	var payload struct {
+		Error struct {
+			Details []json.RawMessage `json:"details"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return limitErr, 0
+	}
+	var retryDelay time.Duration
+	for _, raw := range payload.Error.Details {
+		var detail struct {
+			Type       string `json:"@type"`
+			RetryDelay string `json:"retryDelay"`
+			Violations []struct {
+				QuotaID string `json:"quotaId"`
+			} `json:"violations"`
+		}
+		if json.Unmarshal(raw, &detail) != nil {
+			continue
+		}
+		switch detail.Type {
+		case "type.googleapis.com/google.rpc.QuotaFailure":
+			for _, violation := range detail.Violations {
+				id := strings.ToLower(violation.QuotaID)
+				id = strings.ReplaceAll(strings.ReplaceAll(id, "_", ""), "-", "")
+				// The same quota metric can have both minute and daily limits.
+				// Only the violated limit ID establishes that this is a daily cap.
+				if strings.Contains(id, "perday") {
+					limitErr.DailyQuota = true
+				}
+			}
+		case "type.googleapis.com/google.rpc.RetryInfo":
+			if wait, err := time.ParseDuration(detail.RetryDelay); err == nil {
+				retryDelay = max(retryDelay, wait)
+			}
+		}
+	}
+	return limitErr, retryDelay
 }
