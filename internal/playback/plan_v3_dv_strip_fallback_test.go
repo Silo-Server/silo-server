@@ -205,3 +205,38 @@ func TestPlanPlaybackV3DV81StripFallbackRespectsDeliveryExecutors(t *testing.T) 
 		t.Fatalf("strip plans = %d, want only the HLS remux", len(strip))
 	}
 }
+
+// HLS cannot carry TrueHD without an AAC conversion. When no HLS executor
+// offers one, that route is skipped rather than ending planning, so the
+// progressive HDR10 strip, which copies TrueHD, is still reached. The
+// conversion terminal is reported only once every remux recipe is exhausted.
+func TestPlanPlaybackV3DV81StripFallbackSurvivesMissingHLSAudioConversion(t *testing.T) {
+	file, req := dv81NativeAndHDR10FixtureV3()
+	file.CodecAudio = "truehd"
+	file.AudioTracks[0] = models.AudioTrack{Codec: "truehd", Channels: 8, Layout: "7.1", Default: true}
+	req.Capabilities.CodecsAudio = []string{"truehd"}
+	withoutAAC := NewTransformationRegistryV3([]TransformationSpecV3{
+		{Name: TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true},
+	})
+	plans, terminal := replanChainV3(t, PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings:         PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+		Registry:         dvStripFallbackRegistryV3(),
+		HLSRemuxRegistry: func() *TransformationRegistryV3 { return withoutAAC },
+	})
+	var strip []PlanV3
+	for _, plan := range plans {
+		if plan.Delivery == DeliveryRemuxHLSV3 {
+			t.Fatalf("HLS remux offered without an AAC executor: %#v", plan.Transformations)
+		}
+		if planStripsDVToHDR10V3(plan) {
+			strip = append(strip, plan)
+		}
+	}
+	if len(strip) != 1 || strip[0].Delivery != DeliveryRemuxProgressiveV3 || strip[0].EffectiveRecipe.AudioCodec != "truehd" {
+		t.Fatalf("strip plans = %d, want one progressive remux copying TrueHD", len(strip))
+	}
+	if terminal == nil || terminal.Reason != TerminalAudioConversionUnsupportedV3 {
+		t.Fatalf("terminal = %#v, want the audio conversion cause once every recipe is exhausted", terminal)
+	}
+}

@@ -580,6 +580,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		if !dvStripModes[0] && dvStripEligible {
 			dvStripModes = append(dvStripModes, true)
 		}
+		hlsAudioConversionUnavailable := ""
 		for _, dvStrip := range dvStripModes {
 			hlsTranscodeAudio := hlsTranscodeAudio
 			remuxBase := cloneRemuxPlanCandidateV3(base)
@@ -631,16 +632,25 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 					return result
 				}
 			}
-			if deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK && (!dvStrip || dvStripEligibleHLS) && (input.ServerBitrateCapKbps <= 0 || (!hlsTranscodeAudio && !hlsAudioQuirkOK)) {
+			hlsRouteOK := deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK && (!dvStrip || dvStripEligibleHLS) && (input.ServerBitrateCapKbps <= 0 || (!hlsTranscodeAudio && !hlsAudioQuirkOK))
+			if hlsRouteOK && (hlsTranscodeAudio || hlsAudioQuirkOK) && !input.hlsRemuxRegistry().Available(TransformationAudioToAACV3) {
+				// HLS needs an AAC conversion that no HLS executor offers. Skip
+				// only this route: a later recipe (the Dolby Vision HDR10 strip)
+				// may still play over progressive. The terminal is reported once
+				// every remux recipe is exhausted.
+				hlsRouteOK = false
+				hlsAudioConversionUnavailable = "The HLS route requires the validated AAC conversion toolchain."
+				if !hlsTranscodeAudio {
+					hlsAudioConversionUnavailable = "The device-specific HLS route requires the validated AAC conversion toolchain."
+				}
+			}
+			if hlsRouteOK {
 				plan := cloneRemuxPlanCandidateV3(remuxBase)
 				plan.Delivery = DeliveryRemuxHLSV3
 				plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
 				plan.EffectiveRecipe.VideoSampleEntry = hlsVideoSampleEntryV3(source, input.Request, dvStrip)
 				hlsAudioChannels := 0
 				if hlsTranscodeAudio {
-					if !input.hlsRemuxRegistry().Available(TransformationAudioToAACV3) {
-						return terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, "The HLS route requires the validated AAC conversion toolchain.", true)
-					}
 					// HLS packaging cannot safely copy non-native codecs such as
 					// DTS, TrueHD, or Opus. Preserve surround when adapting those
 					// codecs; a native codec rejected by the scoped client claim
@@ -657,9 +667,6 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 					appendAppliedQuirkV3(&plan, *firefoxAACTimingQuirk, "")
 				}
 				if hlsAudioQuirkOK && !hlsTranscodeAudio {
-					if !input.hlsRemuxRegistry().Available(TransformationAudioToAACV3) {
-						return terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, "The device-specific HLS route requires the validated AAC conversion toolchain.", true)
-					}
 					hlsTranscodeAudio = true
 					hlsAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, false)
 					plan.EffectiveRecipe.AudioCodec = audioCodecAACV3
@@ -694,6 +701,9 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 					return result
 				}
 			}
+		}
+		if hlsAudioConversionUnavailable != "" {
+			return terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, hlsAudioConversionUnavailable, true)
 		}
 		if input.ServerBitrateCapKbps > 0 && (progressiveTranscodeAudio || hlsTranscodeAudio || hlsAudioQuirkOK) {
 			// Audio re-encoding can raise a copy remux above a source that only
