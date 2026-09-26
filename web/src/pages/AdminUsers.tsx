@@ -494,7 +494,7 @@ function AdminUsersPage() {
                               <TooltipContent>View as user</TooltipContent>
                             </Tooltip>
                           )}
-                          {canManageAccount(u, viewerId) && (
+                          {canManageAccount(u, viewerId, viewerIsOwner) && (
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button
@@ -512,7 +512,7 @@ function AdminUsersPage() {
                               <TooltipContent>Edit user</TooltipContent>
                             </Tooltip>
                           )}
-                          {!u.is_owner && (
+                          {!u.is_owner && canManageAccount(u, viewerId, viewerIsOwner) && (
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button
@@ -738,6 +738,10 @@ function UserForm({
   const [reloading, setReloading] = useState(false);
   const [saved, setSaved] = useState(false);
   const capabilities = useAdminUserCapabilities();
+  // Only the server Owner may grant the admin role; the server refuses anyone else.
+  const viewerId = useAuth().user?.id;
+  const viewerIsOwner = useViewerIsOwner(viewerId);
+  const adminRoleLocked = !viewerIsOwner && user?.role !== "admin";
   const [createDefaultProfile, setCreateDefaultProfile] = useState(true);
   async function reload() {
     if (!editor || busy.current) return;
@@ -991,9 +995,16 @@ function UserForm({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="user">User</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="admin" disabled={adminRoleLocked}>
+                      Admin
+                    </SelectItem>
                   </SelectContent>
                 </Select>
+                {adminRoleLocked && (
+                  <p className="text-muted-foreground text-xs">
+                    Only the server owner can grant the admin role.
+                  </p>
+                )}
               </div>
             </div>
             {user && (

@@ -2,7 +2,7 @@ import { V2ProblemError } from "@/api/v2/request";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
 
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   updateUserMutate: vi.fn(),
   getReads: 0,
   impersonate: vi.fn(),
+  transfer: vi.fn(),
   beginImpersonation: vi.fn(),
   updateSettingMutate: vi.fn(),
   deleteSettingMutate: vi.fn(),
@@ -114,7 +115,10 @@ vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
   useViewerIsOwner: () => mocks.viewerIsOwner,
-  useAdminUserCapabilities: () => ({ data: { available: true, default_profile: true } }),
+  useTransferOwnership: () => ({ mutate: mocks.transfer, isPending: false }),
+  useAdminUserCapabilities: () => ({
+    data: { available: true, default_profile: true, ownership_transfer: true },
+  }),
   useAdminUser: () => ({
     data: mocks.user ?? undefined,
     isLoading: false,
@@ -218,6 +222,7 @@ beforeEach(() => {
   mocks.updateUserMutate.mockReset();
   mocks.getReads = 0;
   mocks.impersonate.mockReset();
+  mocks.transfer.mockReset();
   mocks.beginImpersonation.mockReset();
   mocks.updateSettingMutate.mockReset();
   mocks.deleteSettingMutate.mockReset();
@@ -258,6 +263,8 @@ describe("AdminUserDetail access group picker", () => {
   });
 
   it("clears the group when the account is promoted to admin", async () => {
+    // Only the server Owner may promote an account or edit another admin.
+    mocks.viewerIsOwner = true;
     const user = userEvent.setup();
     mocks.user = { ...adminUser, access_group_id: 5 };
     renderUserDetail();
@@ -274,6 +281,8 @@ describe("AdminUserDetail access group picker", () => {
   });
 
   it("keeps the picked group when the role is toggled to admin and back", async () => {
+    // Only the server Owner may promote an account or edit another admin.
+    mocks.viewerIsOwner = true;
     const user = userEvent.setup();
     renderUserDetail();
 
@@ -538,6 +547,8 @@ describe("AdminUserDetail inherit hints", () => {
   });
 
   it("labels an admin's defaults as admin defaults, never as inherited", async () => {
+    // Only the server Owner may promote an account or edit another admin.
+    mocks.viewerIsOwner = true;
     const user = userEvent.setup();
     mocks.user = { ...adminUser, role: "admin" };
     renderUserDetail();
@@ -556,6 +567,8 @@ describe("AdminUserDetail inherit hints", () => {
   });
 
   it("follows the role and group pickers from admin default to inherited", async () => {
+    // Only the server Owner may promote an account or edit another admin.
+    mocks.viewerIsOwner = true;
     const user = userEvent.setup();
     mocks.user = { ...adminUser, role: "admin" };
     renderUserDetail();
@@ -866,6 +879,58 @@ describe("AdminUserDetail server owner", () => {
     expect(screen.getByRole("button", { name: "View as user" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: /Reset password/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  });
+
+  it("keeps an admin other than the owner from changing another admin", async () => {
+    mocks.user = { ...adminUser, role: "admin" };
+    mocks.viewer = { id: 99 };
+    renderUserDetail();
+    expect(
+      await screen.findByText("Only the server owner can change another admin account."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Edit/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Reset password/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Make owner" })).toBeNull();
+  });
+
+  it("lets the owner make another enabled admin the owner", async () => {
+    const user = userEvent.setup();
+    mocks.user = { ...adminUser, role: "admin" };
+    mocks.viewerIsOwner = true;
+    renderUserDetail();
+    await user.click(await screen.findByRole("button", { name: "Make owner" }));
+    await user.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Make owner" }),
+    );
+    expect(mocks.transfer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: adminUser.id }),
+      expect.anything(),
+    );
+  });
+
+  it("offers ownership only for an enabled admin", () => {
+    mocks.viewerIsOwner = true;
+    mocks.user = { ...adminUser, role: "user" };
+    renderUserDetail();
+    expect(screen.queryByRole("button", { name: "Make owner" })).toBeNull();
+    cleanup();
+    mocks.user = { ...adminUser, role: "admin", enabled: false };
+    renderUserDetail();
+    expect(screen.queryByRole("button", { name: "Make owner" })).toBeNull();
+  });
+
+  it("offers an admin other than the owner no admin role", async () => {
+    const user = userEvent.setup();
+    mocks.user = { ...adminUser, role: "user" };
+    renderUserDetail();
+    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.click(screen.getByRole("combobox", { name: "Role" }));
+    expect(await screen.findByRole("option", { name: "Admin" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByText("Only the server owner can grant the admin role.")).toBeInTheDocument();
   });
 
   it("lets the owner view as another admin", async () => {

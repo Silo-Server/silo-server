@@ -50,12 +50,22 @@ func (r *scopedKeyUserRepo) Update(_ context.Context, _ int, input models.Update
 
 func (r *scopedKeyUserRepo) Delete(context.Context, int) error { return nil }
 
-func (r *scopedKeyUserRepo) GetByID(context.Context, int) (*models.User, error) {
+func (r *scopedKeyUserRepo) GetByID(_ context.Context, id int) (*models.User, error) {
 	if r.getErr != nil {
 		return nil, r.getErr
 	}
-	return r.user, nil
+	if r.user != nil && id == r.user.ID {
+		return r.user, nil
+	}
+	// Caller 1 is the server Owner, so the tests that use it exercise the
+	// scoped-key rules rather than the Owner rules.
+	if id == scopedKeyTestOwnerID {
+		return &models.User{ID: id, Role: models.RoleAdmin, Enabled: true, IsOwner: true}, nil
+	}
+	return nil, auth.ErrNotFound
 }
+
+const scopedKeyTestOwnerID = 1
 
 // newScopedKeyAdminHandler builds an AdminHandler whose target account has the
 // given role, so the "target is already an admin" rule can be exercised.

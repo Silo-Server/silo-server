@@ -801,6 +801,17 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 	if rejectScopedAPIKeyCreate(w, r, req.Role) {
 		return
 	}
+	if req.Role == roleAdmin {
+		actor, err := requestOwnerActor(r.Context(), h.userRepo)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+			return
+		}
+		if err := auth.CheckGrantAdmin(actor, req.Role); err != nil {
+			writeAPIError(w, ownerError(err))
+			return
+		}
+	}
 
 	if req.Username == "" || req.Email == "" || req.Password == "" || req.Role == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Username, email, password, and role are required")
@@ -991,7 +1002,12 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	if err := auth.CheckOwnerUpdate(actorUserID(r.Context()), currentUser, updateInput); err != nil {
+	actor, err := requestOwnerActor(r.Context(), h.userRepo)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+		return
+	}
+	if err := auth.CheckOwnerUpdate(actor, currentUser, updateInput); err != nil {
 		writeAPIError(w, ownerError(err))
 		return
 	}
@@ -1042,7 +1058,12 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 	if blocked {
 		return
 	}
-	if err := auth.CheckOwnerDelete(actorUserID(r.Context()), target); err != nil {
+	actor, err := requestOwnerActor(r.Context(), h.userRepo)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+		return
+	}
+	if err := auth.CheckOwnerDelete(actor, target); err != nil {
 		writeAPIError(w, ownerError(err))
 		return
 	}

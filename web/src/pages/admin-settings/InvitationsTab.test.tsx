@@ -40,6 +40,8 @@ vi.mock("@/hooks/queries/admin/invitations", () => ({
 }));
 vi.mock("@/hooks/queries/admin/accessGroups", () => ({ useAccessGroups: () => ({ data: [] }) }));
 vi.mock("@/hooks/queries/admin/libraries", () => ({ useAdminLibraries: () => ({ data: [] }) }));
+// The viewer is the server Owner, who may invite an admin.
+vi.mock("@/hooks/queries/admin/users", () => ({ useViewerIsOwner: () => true }));
 beforeEach(() => {
   vi.stubGlobal(
     "ResizeObserver",

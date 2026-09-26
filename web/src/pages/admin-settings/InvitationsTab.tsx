@@ -17,6 +17,7 @@ import {
   useRevokeInvitation,
 } from "@/hooks/queries/admin/invitations";
 import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
+import { useViewerIsOwner } from "@/hooks/queries/admin/users";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { effectiveAccessGroupID } from "@/components/UserPolicyFields";
 import { Button } from "@/components/ui/button";
@@ -113,6 +114,8 @@ export default function InvitationsTab() {
   return <InvitationManager key={invitationScope()} />;
 }
 function InvitationManager() {
+  const viewerId = useAuth().user?.id;
+  const viewerIsOwner = useViewerIsOwner(viewerId);
   const capabilities = useInvitationCapabilities();
   const available = capabilities.data?.state === "available";
   const history = useAdminInvitations(available);
@@ -372,6 +375,8 @@ function InvitationManager() {
                   key={inv.id}
                   invitation={inv}
                   onResend={() => void handleResend(inv.id)}
+                  // Resending re-grants the role, so only the Owner resends an admin invitation.
+                  resendAllowed={inv.role !== "admin" || viewerIsOwner}
                   onRevoke={() => {
                     if (busy.current) return;
                     setRevokeError("");
@@ -402,14 +407,17 @@ function InvitationRow({
   onResend,
   onRevoke,
   resending,
+  resendAllowed,
 }: {
   invitation: Invitation;
   onResend: () => void;
   onRevoke: () => void;
   resending: boolean;
+  resendAllowed: boolean;
 }) {
   const badge = STATUS_BADGES[invitation.status];
-  const showResend = invitation.status === "pending" || invitation.status === "expired";
+  const showResend =
+    resendAllowed && (invitation.status === "pending" || invitation.status === "expired");
   const showRevoke = invitation.status === "pending";
 
   return (
@@ -483,6 +491,9 @@ function CreateInvitationForm({
   const [email, setEmail] = useState("");
   const [emailInvalid, setEmailInvalid] = useState(false);
   const [role, setRole] = useState<"user" | "admin">("user");
+  // Only the server Owner may invite an admin; the server refuses anyone else.
+  const viewerId = useAuth().user?.id;
+  const viewerIsOwner = useViewerIsOwner(viewerId);
   const [accessGroupID, setAccessGroupID] = useState<number | null>(null);
   const [libraryIDs, setLibraryIDs] = useState<number[] | null>(null);
   const [note, setNote] = useState("");
@@ -642,9 +653,16 @@ function CreateInvitationForm({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="user">User</SelectItem>
-              <SelectItem value="admin">Admin</SelectItem>
+              <SelectItem value="admin" disabled={!viewerIsOwner}>
+                Admin
+              </SelectItem>
             </SelectContent>
           </Select>
+          {!viewerIsOwner && (
+            <p className="text-muted-foreground text-xs">
+              Only the server owner can invite an admin.
+            </p>
+          )}
         </div>
       </div>
 

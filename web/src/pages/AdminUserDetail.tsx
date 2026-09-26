@@ -21,6 +21,7 @@ import {
   useUpdateUser,
   useAdminUserCapabilities,
   useViewerIsOwner,
+  useTransferOwnership,
   useAdminUserDeviceSettings,
   useAdminUserSettings,
   useDeleteAdminUserDeviceSetting,
@@ -78,8 +79,9 @@ import {
 import { useNavigate } from "react-router";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { canManageAccount, canViewAsAccount } from "@/lib/accountOwner";
+import { canManageAccount, canTransferOwnership, canViewAsAccount } from "@/lib/accountOwner";
 import { formatPlaybackQualityPreset } from "@/lib/playback-quality";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
@@ -139,6 +141,8 @@ function AdminUserDetailPage() {
   const available = capabilities.data?.available === true;
   const [confirmImpersonateOpen, setConfirmImpersonateOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const transferOwnership = useTransferOwnership();
 
   if (isLoading) return <div className="page-shell py-8">Loading user...</div>;
   if (!user) {
@@ -183,7 +187,23 @@ function AdminUserDetailPage() {
   }
 
   const impersonationDisabled = !canViewAsAccount(user, viewerId, viewerIsOwner);
-  const manageable = canManageAccount(user, viewerId);
+  const manageable = canManageAccount(user, viewerId, viewerIsOwner);
+  const transferable =
+    capabilities.data?.ownership_transfer === true &&
+    canTransferOwnership(user, viewerId, viewerIsOwner);
+
+  function handleTransfer() {
+    if (!user) return;
+    setActionError("");
+    transferOwnership.mutate(
+      { id: user.id, profileContext: authority },
+      {
+        onSuccess: () => toast.success(`${user.username} is now the server owner`),
+        onError: (err) =>
+          setActionError(err instanceof Error ? err.message : "Could not transfer ownership."),
+      },
+    );
+  }
 
   async function loadEditor(deleting = false) {
     if (busy.current || !available) return;
@@ -239,7 +259,9 @@ function AdminUserDetailPage() {
           <p className="page-subtitle text-sm sm:text-base">{user.email}</p>
           {!manageable && (
             <p className="text-muted-foreground text-sm">
-              This is the server owner. Only the owner can change this account.
+              {user.is_owner
+                ? "This is the server owner. Only the owner can change this account."
+                : "Only the server owner can change another admin account."}
             </p>
           )}
         </div>
@@ -295,7 +317,18 @@ function AdminUserDetailPage() {
               <KeyRound className="mr-1 h-3.5 w-3.5" /> Reset password
             </Button>
           )}
-          {!user.is_owner && (
+          {transferable && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 sm:flex-none"
+              onClick={() => setTransferOpen(true)}
+              disabled={!available || transferOwnership.isPending}
+            >
+              Make owner
+            </Button>
+          )}
+          {!user.is_owner && manageable && (
             <Button
               variant="destructive"
               size="sm"
@@ -341,6 +374,15 @@ function AdminUserDetailPage() {
           <IPHistoryTab userId={userId} />
         </TabsContent>
       </Tabs>
+      <ConfirmDialog
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        title={`Make ${user.username} the server owner?`}
+        description={`${user.username} becomes the only account that can manage admins, and you stay an admin. Only ${user.username} can transfer ownership back.`}
+        confirmLabel="Make owner"
+        onConfirm={handleTransfer}
+        isPending={transferOwnership.isPending}
+      />
       {confirmImpersonateOpen && (
         <AdminUserImpersonationDialog
           user={user}
@@ -1208,6 +1250,10 @@ function EditUserForm({
 }) {
   const [editor, setEditor] = useState(initialEditor);
   const user = editor.user;
+  // Only the server Owner may grant the admin role; the server refuses anyone else.
+  const viewerId = useAuth().user?.id;
+  const viewerIsOwner = useViewerIsOwner(viewerId);
+  const adminRoleLocked = !viewerIsOwner && user.role !== "admin";
   const busy = useRef(false);
   const [conflict, setConflict] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1386,9 +1432,16 @@ function EditUserForm({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="user">User</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="admin" disabled={adminRoleLocked}>
+                      Admin
+                    </SelectItem>
                   </SelectContent>
                 </Select>
+                {adminRoleLocked && (
+                  <p className="text-muted-foreground text-xs">
+                    Only the server owner can grant the admin role.
+                  </p>
+                )}
               </div>
             </div>
             <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
