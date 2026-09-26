@@ -2,14 +2,20 @@
 // All content IDs (media items, seasons, episodes) are generated locally
 // using Sonyflake — a distributed unique ID generator that produces
 // time-sorted 64-bit integers encoded as decimal strings.
+//
+// Two processes generate the same ID only if they share a Sonyflake machine
+// ID, so each process leases its machine ID from PostgreSQL with [Start]
+// before it generates any.
 package idgen
 
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"math/rand/v2"
 	"strconv"
+	"sync"
+	"sync/atomic"
+	"testing"
 	"time"
 
 	"github.com/sony/sonyflake/v2"
@@ -19,29 +25,60 @@ import (
 // Sonyflake measures elapsed time from this point.
 var epoch = time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
-var sf *sonyflake.Sonyflake
+// ErrNotStarted reports a process that generates IDs without first leasing a
+// machine ID with [Start].
+var ErrNotStarted = errors.New("idgen: no machine ID leased; call idgen.Start at startup")
 
-func init() {
-	var err error
-	sf, err = newSonyflake(sonyflake.Settings{StartTime: epoch})
-	if err != nil {
-		panic(fmt.Sprintf("idgen: failed to initialize sonyflake: %v", err))
-	}
+// ErrLeaseExpired reports a process that could not renew its machine ID lease
+// in time. Another process may claim the machine ID after the lease lapses, so
+// NextID stops issuing IDs until a renewal succeeds.
+var ErrLeaseExpired = errors.New("idgen: machine ID lease expired")
+
+// generator is a Sonyflake instance and the machine ID it was built with.
+type generator struct {
+	sf        *sonyflake.Sonyflake
+	machineID int
+	// validUntil is the monotonic deadline, in nanoseconds since clockBase,
+	// past which this process may no longer hold machineID. Zero means the
+	// generator does not expire.
+	validUntil atomic.Int64
 }
 
-// newSonyflake creates a generator from st. Sonyflake's default machine ID is
-// the lower 16 bits of the host's private IPv4 address. A host or container
-// without one (no IPv4 network, a non-RFC 1918 subnet, or host networking on a
-// public address) gets a random machine ID instead of failing to start.
+// clockBase anchors lease deadlines to the monotonic clock, so a wall-clock
+// jump cannot extend a lease.
+var clockBase = time.Now()
+
+func monotonicNow() int64 { return int64(time.Since(clockBase)) }
+
+func (g *generator) expired() bool {
+	until := g.validUntil.Load()
+	return until != 0 && monotonicNow() >= until
+}
+
+// active is the generator NextID uses. [Start] installs it.
+var active atomic.Pointer[generator]
+
+// testGenerator serves NextID in test binaries that never call Start. Test
+// databases are disposable, so a random machine ID is enough there.
+var testGenerator = sync.OnceValues(func() (*generator, error) {
+	return newGenerator(rand.IntN(1 << 16))
+})
+
+func newGenerator(machineID int) (*generator, error) {
+	sf, err := newSonyflake(sonyflake.Settings{
+		StartTime: epoch,
+		MachineID: func() (int, error) { return machineID, nil },
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &generator{sf: sf, machineID: machineID}, nil
+}
+
+// newSonyflake creates a generator from st and explains a clock set before the
+// ID epoch, which otherwise surfaces as a bare "start time is ahead" error.
 func newSonyflake(st sonyflake.Settings) (*sonyflake.Sonyflake, error) {
 	gen, err := sonyflake.New(st)
-	if errors.Is(err, sonyflake.ErrNoPrivateAddress) {
-		machineID := rand.IntN(1 << 16)
-		slog.Warn("idgen: no private IPv4 address; using a random Sonyflake machine ID",
-			"machine_id", machineID)
-		st.MachineID = func() (int, error) { return machineID, nil }
-		gen, err = sonyflake.New(st)
-	}
 	if errors.Is(err, sonyflake.ErrStartTimeAhead) {
 		return nil, fmt.Errorf("system clock %s is before the ID epoch %s: %w",
 			time.Now().UTC().Format(time.RFC3339), st.StartTime.UTC().Format(time.RFC3339), err)
@@ -51,7 +88,20 @@ func newSonyflake(st sonyflake.Settings) (*sonyflake.Sonyflake, error) {
 
 // NextID returns a new unique Sonyflake ID as a decimal string.
 func NextID() (string, error) {
-	id, err := sf.NextID()
+	g := active.Load()
+	if g == nil {
+		if !testing.Testing() {
+			return "", ErrNotStarted
+		}
+		var err error
+		if g, err = testGenerator(); err != nil {
+			return "", fmt.Errorf("idgen: %w", err)
+		}
+	}
+	if g.expired() {
+		return "", fmt.Errorf("%w (machine ID %d)", ErrLeaseExpired, g.machineID)
+	}
+	id, err := g.sf.NextID()
 	if err != nil {
 		return "", fmt.Errorf("idgen: %w", err)
 	}

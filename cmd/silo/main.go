@@ -63,6 +63,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
@@ -891,6 +892,18 @@ func main() {
 	// site fails silently (unrated titles hidden, no error).
 	unratedContent := config.NewUnratedContentPolicy(settingsRepo)
 	nodeID := resolveNodeIdentity()
+	// Lease a Sonyflake machine ID before anything generates IDs, so replicas
+	// sharing this database never share one. Only primary nodes mint IDs, and
+	// proxy and transcode nodes may start before the primary has migrated the
+	// lease table. Stop runs before the pool closes.
+	var idLease *idgen.Lease
+	if isPrimaryNode {
+		idLease, err = idgen.Start(ctx, pool, nodeID)
+		if err != nil {
+			log.Fatalf("id generator: %v", err)
+		}
+	}
+	defer idLease.Stop()
 	catalogSearchStartupSettings, err := catalog.CatalogSearchSettingsFromMap(settings)
 	if err != nil {
 		slog.Warn("catalog search: failed to load settings for startup wiring; using postgres", "err", err)

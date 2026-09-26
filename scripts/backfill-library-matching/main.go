@@ -69,6 +69,17 @@ func main() {
 	}
 	slog.Info("backfill: connected to database")
 
+	if !*dryRun {
+		// Lease a machine ID like a server replica does, so IDs minted here
+		// cannot collide with the running servers'.
+		idLease, err := idgen.Start(ctx, pool, "backfill-library-matching")
+		if err != nil {
+			slog.Error("backfill: failed to start id generator", "error", err)
+			os.Exit(1)
+		}
+		defer idLease.Stop()
+	}
+
 	skippedRepo := metadata.NewSkippedRootRepository(pool)
 	rootClaimRepo := catalog.NewRootClaimRepository(pool)
 	itemRepo := catalog.NewItemRepository(pool)
