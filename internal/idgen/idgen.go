@@ -111,12 +111,22 @@ func NextID() (string, error) {
 			return "", fmt.Errorf("idgen: %w", err)
 		}
 	}
+	return mintID(g, g.sf.NextID)
+}
+
+func mintID(g *generator, mint func() (int64, error)) (string, error) {
 	if g.expired() {
 		return "", fmt.Errorf("%w (machine ID %d)", ErrLeaseExpired, g.machineID)
 	}
-	id, err := g.sf.NextID()
+	id, err := mint()
 	if err != nil {
 		return "", fmt.Errorf("idgen: %w", err)
+	}
+	// Sonyflake may wait for its next time slot, or this goroutine may be
+	// suspended after the first check. Do not return an ID minted after the
+	// local lease deadline.
+	if g.expired() {
+		return "", fmt.Errorf("%w (machine ID %d)", ErrLeaseExpired, g.machineID)
 	}
 	return strconv.FormatInt(id, 10), nil
 }
