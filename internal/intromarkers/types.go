@@ -28,6 +28,14 @@ const (
 	ChromaprintFormat            = "chromaprint:raw:uint32le"
 	DefaultPointHopSeconds       = 0.123
 
+	// Credits algorithm identifiers. Credits season comparisons are keyed by
+	// CreditsAnalysisConfigHash; bump CreditsBehaviorVersion to re-run them
+	// over cached credits fingerprints.
+	CreditsBehaviorVersion      = 1
+	CreditsChapterAlgorithm     = "credits-chapter:v1"
+	CreditsVersionCopyAlgorithm = "credits-version-copy:v1"
+	CreditsAudioAlgorithm       = "credits-audio:v1"
+
 	// chromaprintDialogueAlgorithmPrefix matches every version of the
 	// subtitle-refined Chromaprint identifier.
 	chromaprintDialogueAlgorithmPrefix = "chromaprint:dialogue:" //nolint:misspell // Persisted algorithm identifier.
@@ -256,7 +264,10 @@ type Candidate struct {
 	CreditsMarkersSource     *string
 	CreditsMarkersConfidence *float64
 	CreditsMarkersAlgorithm  *string
-	MarkersSource            *string
+	// PreviewStart is where the file's preview marker starts, which ends
+	// any credits it starts inside.
+	PreviewStart  *float64
+	MarkersSource *string
 }
 
 // expectedFile preserves the identity loaded with the candidate so a completed
@@ -421,4 +432,16 @@ type RunSummary struct {
 	DialogueRefinementsAttempted int      `json:"dialogue_refinements_attempted"`
 	DialogueRefinementsApplied   int      `json:"dialogue_refinements_applied"`
 	DialogueRefinementErrors     int      `json:"dialogue_refinement_errors"`
+	// Credits counters. Credits season groups and tail fingerprints are
+	// counted apart from the intro groups and fingerprints above.
+	CreditsSeasonGroupsConsidered int `json:"credits_season_groups_considered"`
+	CreditsGroupsNotFound         int `json:"credits_groups_not_found"`
+	CreditsGroupsSkipped          int `json:"credits_groups_skipped"`
+	CreditsChapterMarkersWritten  int `json:"credits_chapter_markers_written"`
+	CreditsVersionMarkersCopied   int `json:"credits_version_markers_copied"`
+	CreditsFingerprintsComputed   int `json:"credits_fingerprints_computed"`
+	CreditsFingerprintCacheHits   int `json:"credits_fingerprint_cache_hits"`
+	CreditsFingerprintErrors      int `json:"credits_fingerprint_errors"`
+	CreditsAudioMarkersWritten    int `json:"credits_audio_markers_written"`
+	CreditsRejected               int `json:"credits_rejected"`
 }

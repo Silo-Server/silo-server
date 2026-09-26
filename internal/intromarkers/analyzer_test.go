@@ -25,6 +25,9 @@ type fakeIntroRepository struct {
 	patches            []MarkerPatch
 	silenceAttempts    map[int]SilenceRefinementAttempt
 	upsertedAttempts   []SilenceRefinementAttempt
+	artifacts          map[int]Artifact
+	artifactFailures   []ArtifactFailure
+	groupListCalls     int
 }
 
 func (f *fakeIntroRepository) CountEnabledLibraries(context.Context) (int, error) {
@@ -48,6 +51,7 @@ func (f *fakeIntroRepository) ListCandidatesForEpisode(_ context.Context, episod
 func (f *fakeIntroRepository) ListCandidatesForGroup(_ context.Context, mediaFolderID int, seasonID, analysisGroupKey string) ([]Candidate, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.groupListCalls++
 	key := groupKey(mediaFolderID, seasonID, analysisGroupKey)
 	return append([]Candidate(nil), f.groupCandidates[key]...), nil
 }
@@ -124,10 +128,55 @@ func (f *fakeIntroRepository) UpsertFingerprint(context.Context, Fingerprint) er
 	return nil
 }
 
+func (f *fakeIntroRepository) LoadArtifacts(_ context.Context, fileIDs []int, key ArtifactKey) (map[int]Artifact, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	artifacts := map[int]Artifact{}
+	for _, fileID := range fileIDs {
+		if artifact, ok := f.artifacts[fileID]; ok && artifact.ArtifactKey == key {
+			artifact.Payload = append([]byte(nil), artifact.Payload...)
+			artifacts[fileID] = artifact
+		}
+	}
+	return artifacts, nil
+}
+
+func (f *fakeIntroRepository) UpsertArtifact(_ context.Context, artifact Artifact) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.artifacts == nil {
+		f.artifacts = map[int]Artifact{}
+	}
+	f.artifacts[artifact.MediaFileID] = artifact
+	return nil
+}
+
+func (f *fakeIntroRepository) RecordArtifactFailure(_ context.Context, failure ArtifactFailure) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.artifactFailures = append(f.artifactFailures, failure)
+	if f.artifacts == nil {
+		f.artifacts = map[int]Artifact{}
+	}
+	count, retryAfter := nextArtifactFailure(nil, failure)
+	f.artifacts[failure.MediaFileID] = Artifact{
+		MediaFileID:      failure.MediaFileID,
+		ArtifactKey:      failure.ArtifactKey,
+		ArtifactIdentity: failure.ArtifactIdentity,
+		Status:           ArtifactFailed,
+		FailureCount:     count,
+		LastError:        failure.Error,
+		RetryAfter:       &retryAfter,
+		RecordedBy:       failure.RecordedBy,
+	}
+	return nil
+}
+
 type fakeFingerprintExtractor struct {
-	mu             sync.Mutex
-	preflightCalls int
-	extractCalls   int
+	mu                  sync.Mutex
+	preflightCalls      int
+	extractCalls        int
+	creditsExtractCalls int
 }
 
 func (f *fakeFingerprintExtractor) Preflight(context.Context) error {
@@ -141,6 +190,13 @@ func (f *fakeFingerprintExtractor) Extract(context.Context, Candidate) (Fingerpr
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.extractCalls++
+	return Fingerprint{}, false, nil
+}
+
+func (f *fakeFingerprintExtractor) ExtractCredits(context.Context, Candidate) (Fingerprint, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.creditsExtractCalls++
 	return Fingerprint{}, false, nil
 }
 

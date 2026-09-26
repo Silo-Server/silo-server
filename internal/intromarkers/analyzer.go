@@ -68,11 +68,17 @@ type introRepository interface {
 	UpsertSeasonState(ctx context.Context, state SeasonState, analysisHash string) error
 	LoadFingerprint(ctx context.Context, candidate Candidate, cfg Config) (*Fingerprint, error)
 	UpsertFingerprint(ctx context.Context, fp Fingerprint) error
+	LoadArtifacts(ctx context.Context, fileIDs []int, key ArtifactKey) (map[int]Artifact, error)
+	UpsertArtifact(ctx context.Context, a Artifact) error
+	RecordArtifactFailure(ctx context.Context, failure ArtifactFailure) error
 }
 
 type fingerprintExtractor interface {
 	Preflight(ctx context.Context) error
+	// Extract fingerprints a candidate's opening audio for intros.
 	Extract(ctx context.Context, candidate Candidate) (Fingerprint, bool, error)
+	// ExtractCredits fingerprints a candidate's tail audio for credits.
+	ExtractCredits(ctx context.Context, candidate Candidate) (Fingerprint, bool, error)
 }
 
 func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer {
@@ -119,6 +125,14 @@ func (a *Analyzer) SetWorkers(n int) {
 	a.ffmpegSlots.Resize(n)
 }
 
+// nodeName names this server in recorded analysis failures.
+func (a *Analyzer) nodeName() string {
+	if a.node != "" {
+		return a.node
+	}
+	return "silo"
+}
+
 // workerCount is the current number of season workers.
 func (a *Analyzer) workerCount() int {
 	a.slotsMu.Lock()
@@ -156,17 +170,64 @@ func (a *Analyzer) fingerprintLookupSlots() chan struct{} {
 	return a.lookupSlots
 }
 
-// loadFingerprint reads a cached fingerprint within the lookup bound. The
+// fingerprintLookup is what the cache holds for a candidate's fingerprint.
+type fingerprintLookup int
+
+const (
+	// fingerprintMissing means the fingerprint has to be extracted.
+	fingerprintMissing fingerprintLookup = iota
+	// fingerprintCached means a cached fingerprint was returned.
+	fingerprintCached
+	// fingerprintUnusable means the file has no audio to fingerprint.
+	fingerprintUnusable
+	// fingerprintDeferred means this server's last extraction failed and is
+	// backing off.
+	fingerprintDeferred
+)
+
+// withLookupSlot runs a fingerprint cache read within the lookup bound. The
 // slot covers only the read, not the wait for ffmpeg that may follow a miss.
-func (a *Analyzer) loadFingerprint(ctx context.Context, candidate Candidate) (*Fingerprint, error) {
+func (a *Analyzer) withLookupSlot(ctx context.Context, read func() error) error {
 	slots := a.fingerprintLookupSlots()
 	select {
 	case slots <- struct{}{}:
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return ctx.Err()
 	}
 	defer func() { <-slots }()
-	return a.repo.LoadFingerprint(ctx, candidate, a.config)
+	return read()
+}
+
+// fingerprintLookupFunc returns how ensureFingerprints reads the cached
+// fingerprints of kind for candidates. Intro fingerprints are read one file
+// at a time; a group's credits fingerprints are read in one query.
+func (a *Analyzer) fingerprintLookupFunc(ctx context.Context, kind markerKind, candidates []Candidate) (func(context.Context, Candidate) (*Fingerprint, fingerprintLookup, error), error) {
+	if kind == kindCredits {
+		artifacts, err := a.loadCreditsArtifacts(ctx, candidates)
+		if err != nil {
+			return nil, err
+		}
+		return func(_ context.Context, candidate Candidate) (*Fingerprint, fingerprintLookup, error) {
+			artifact, ok := artifacts[candidate.FileID]
+			if !ok {
+				return nil, fingerprintMissing, nil
+			}
+			fp, lookup := a.creditsFingerprint(&artifact, candidate)
+			return fp, lookup, nil
+		}, nil
+	}
+	return func(ctx context.Context, candidate Candidate) (*Fingerprint, fingerprintLookup, error) {
+		var fp *Fingerprint
+		err := a.withLookupSlot(ctx, func() error {
+			var err error
+			fp, err = a.repo.LoadFingerprint(ctx, candidate, a.config)
+			return err
+		})
+		if err != nil || fp == nil {
+			return nil, fingerprintMissing, err
+		}
+		return fp, fingerprintCached, nil
+	}, nil
 }
 
 type ProgressFunc func(percent float64, message string)
@@ -185,7 +246,7 @@ func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, 
 	}
 	summary.LibrariesScanned = libraries
 	if libraries == 0 {
-		report(100, "No intro-enabled series libraries")
+		report(100, "No series libraries with marker detection enabled")
 		return summary, nil
 	}
 
@@ -212,21 +273,22 @@ func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, 
 	if err := ctx.Err(); err != nil {
 		return summary, err
 	}
-
-	remaining := ownCandidates(candidates, kindIntro)
-	if len(remaining) == 0 {
-		backfillSummary, err := a.runSilenceBackfill(ctx)
-		mergeRunSummary(&summary, backfillSummary)
-		if err != nil {
-			return summary, err
-		}
-		report(100, "Intro chapter detection complete")
-		return summary, nil
+	mergeRunSummary(&summary, a.processCreditsChapters(ctx, candidates))
+	if err := ctx.Err(); err != nil {
+		return summary, err
 	}
 
-	groups := groupCandidates(remaining)
-	summary.SeasonGroupsConsidered = len(groups)
-	if len(groups) == 0 {
+	// Each kind compares the files whose marker of that kind local analysis
+	// may write, so an online intro does not keep a file out of the credits
+	// comparison.
+	var jobs []groupJob
+	for _, kind := range []markerKind{kindIntro, kindCredits} {
+		for _, group := range groupCandidates(ownCandidates(candidates, kind)) {
+			jobs = append(jobs, groupJob{kind: kind, group: group})
+		}
+	}
+	countGroupJobs(&summary, jobs)
+	if len(jobs) == 0 {
 		backfillSummary, err := a.runSilenceBackfill(ctx)
 		mergeRunSummary(&summary, backfillSummary)
 		if err != nil {
@@ -250,8 +312,8 @@ func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, 
 	}
 	summary.ChromaprintSupported = true
 
-	groupSummary := a.analyzeGroups(ctx, groups, func(done int) {
-		report(40+float64(done)/float64(len(groups))*55, fmt.Sprintf("Analyzed intro group %d/%d", done, len(groups)))
+	groupSummary := a.analyzeGroups(ctx, jobs, func(done int) {
+		report(40+float64(done)/float64(len(jobs))*55, fmt.Sprintf("Analyzed season group %d/%d", done, len(jobs)))
 	})
 	mergeRunSummary(&summary, groupSummary)
 	if err := ctx.Err(); err != nil {
@@ -264,12 +326,40 @@ func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, 
 		return summary, err
 	}
 
-	report(100, "Intro marker detection completed")
+	report(100, "Marker detection completed")
 	return summary, nil
 }
 
+// EpisodeMarkerKinds selects the marker kinds an episode analysis looks for.
+type EpisodeMarkerKinds struct {
+	Intro   bool
+	Credits bool
+}
+
+// Any reports whether k selects at least one kind.
+func (k EpisodeMarkerKinds) Any() bool { return k.Intro || k.Credits }
+
+// AnalyzeEpisode analyzes the season groups of an episode's files for every
+// marker kind, comparing each group again even when its stored analysis
+// still stands. Admin refresh uses it.
 func (a *Analyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (RunSummary, error) {
+	return a.analyzeEpisode(ctx, episodeID, EpisodeMarkerKinds{Intro: true, Credits: true}, true)
+}
+
+// AnalyzeEpisodeForPlayback analyzes only the marker kinds a played file
+// lacks. Intro groups are compared again as in AnalyzeEpisode. A credits
+// group whose stored analysis still stands is skipped: most episodes have no
+// credits local analysis can find, and playback would otherwise repeat the
+// season comparison on every start.
+func (a *Analyzer) AnalyzeEpisodeForPlayback(ctx context.Context, episodeID string, kinds EpisodeMarkerKinds) (RunSummary, error) {
+	return a.analyzeEpisode(ctx, episodeID, kinds, false)
+}
+
+func (a *Analyzer) analyzeEpisode(ctx context.Context, episodeID string, kinds EpisodeMarkerKinds, forceCredits bool) (RunSummary, error) {
 	summary := RunSummary{}
+	if !kinds.Any() {
+		return summary, nil
+	}
 	candidates, err := a.repo.ListCandidatesForEpisode(ctx, episodeID)
 	if err != nil {
 		return summary, err
@@ -279,45 +369,43 @@ func (a *Analyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (RunSum
 		return summary, nil
 	}
 
-	_, chapterSummary := a.processChapterCandidates(ctx, candidates, chapterProcessingOptions{
-		forceExistingScanner: true,
-		allowEpisodeCopy:     true,
-	})
-	mergeRunSummary(&summary, chapterSummary)
-	if err := ctx.Err(); err != nil {
-		return summary, err
+	var jobKinds []markerKind
+	if kinds.Intro {
+		_, chapterSummary := a.processChapterCandidates(ctx, candidates, chapterProcessingOptions{
+			forceExistingScanner: true,
+			allowEpisodeCopy:     true,
+		})
+		mergeRunSummary(&summary, chapterSummary)
+		if err := ctx.Err(); err != nil {
+			return summary, err
+		}
+		jobKinds = append(jobKinds, kindIntro)
 	}
-	remaining := ownCandidates(candidates, kindIntro)
-	if len(remaining) == 0 {
-		return summary, nil
+	if kinds.Credits {
+		mergeRunSummary(&summary, a.processCreditsChapters(ctx, candidates))
+		if err := ctx.Err(); err != nil {
+			return summary, err
+		}
+		jobKinds = append(jobKinds, kindCredits)
 	}
-	targetFileIDs := candidateFileIDs(remaining)
 
-	groupsByKey := map[string]candidateGroup{}
-	for _, candidate := range remaining {
-		key := fmt.Sprintf("%d:%s:%s", candidate.MediaFolderID, candidate.SeasonID, candidate.AnalysisGroupKey())
-		if _, ok := groupsByKey[key]; ok {
+	var jobs []groupJob
+	seasonCandidates := map[string][]Candidate{}
+	for _, kind := range jobKinds {
+		remaining := ownCandidates(candidates, kind)
+		if len(remaining) == 0 {
 			continue
 		}
-		groupCandidates, err := a.repo.ListCandidatesForGroup(ctx, candidate.MediaFolderID, candidate.SeasonID, candidate.AnalysisGroupKey())
+		groups, err := a.episodeGroups(ctx, kind, remaining, seasonCandidates)
 		if err != nil {
 			return summary, err
 		}
-		// Compare the same files the scheduled run would, so a file's result
-		// and confidence do not depend on how its analysis started.
-		groupCandidates = ownCandidates(groupCandidates, kindIntro)
-		if distinctEpisodeCount(groupCandidates) < 2 {
-			continue
-		}
-		groupsByKey[key] = candidateGroup{
-			SeasonID:         candidate.SeasonID,
-			MediaFolderID:    candidate.MediaFolderID,
-			AnalysisGroupKey: candidate.AnalysisGroupKey(),
-			Candidates:       groupCandidates,
+		targetFileIDs := candidateFileIDs(remaining)
+		for _, group := range groups {
+			jobs = append(jobs, groupJob{kind: kind, group: group, patchFileIDs: targetFileIDs})
 		}
 	}
-
-	if len(groupsByKey) == 0 {
+	if len(jobs) == 0 {
 		return summary, nil
 	}
 
@@ -328,50 +416,68 @@ func (a *Analyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (RunSum
 	}
 	summary.ChromaprintSupported = true
 
-	groups := make([]candidateGroup, 0, len(groupsByKey))
-	for _, group := range groupsByKey {
-		groups = append(groups, group)
-	}
-	sort.Slice(groups, func(i, j int) bool {
-		if groups[i].MediaFolderID != groups[j].MediaFolderID {
-			return groups[i].MediaFolderID < groups[j].MediaFolderID
-		}
-		if groups[i].SeasonID != groups[j].SeasonID {
-			return groups[i].SeasonID < groups[j].SeasonID
-		}
-		return groups[i].AnalysisGroupKey < groups[j].AnalysisGroupKey
-	})
-
-	summary.SeasonGroupsConsidered = len(groups)
-	for _, group := range groups {
+	countGroupJobs(&summary, jobs)
+	for _, job := range jobs {
 		if err := ctx.Err(); err != nil {
 			return summary, err
 		}
-		groupSummary, err := a.analyzeGroup(ctx, group, analyzeGroupOptions{
-			force:        true,
-			patchFileIDs: targetFileIDs,
+		groupSummary, err := a.analyzeJob(ctx, job, analyzeGroupOptions{
+			force:        job.kind == kindIntro || forceCredits,
+			patchFileIDs: job.patchFileIDs,
 		})
-		summary.FingerprintsComputed += groupSummary.FingerprintsComputed
-		summary.FingerprintCacheHits += groupSummary.FingerprintCacheHits
-		summary.FingerprintExtractionErrors += groupSummary.FingerprintExtractionErrors
-		summary.ChromaprintMarkersWritten += groupSummary.ChromaprintMarkersWritten
-		summary.DialogueRefinementsAttempted += groupSummary.DialogueRefinementsAttempted
-		summary.DialogueRefinementsApplied += groupSummary.DialogueRefinementsApplied
-		summary.DialogueRefinementErrors += groupSummary.DialogueRefinementErrors
-		summary.GroupsNotFound += groupSummary.GroupsNotFound
-		summary.GroupsSkipped += groupSummary.GroupsSkipped
-		summary.Errors = append(summary.Errors, groupSummary.Errors...)
+		mergeRunSummary(&summary, groupSummary)
 		if err != nil {
-			a.logger.WarnContext(ctx, "intro marker episode group analysis failed",
+			a.logger.WarnContext(ctx, "marker episode group analysis failed",
+				"kind", job.kind.String(),
 				"episode_id", episodeID,
-				"season_id", group.SeasonID,
-				"media_folder_id", group.MediaFolderID,
-				"group_key", group.AnalysisGroupKey,
+				"season_id", job.group.SeasonID,
+				"media_folder_id", job.group.MediaFolderID,
+				"group_key", job.group.AnalysisGroupKey,
 				"error", err)
 		}
 	}
 
 	return summary, nil
+}
+
+// episodeGroups returns the season groups an episode's remaining files of
+// kind belong to, each holding every file of the group whose marker of kind
+// local analysis may write, so a file's result and confidence do not depend
+// on how its analysis started. Groups with fewer than two episodes are left
+// out. seasonCandidates caches each group's files by key across kinds.
+func (a *Analyzer) episodeGroups(ctx context.Context, kind markerKind, remaining []Candidate, seasonCandidates map[string][]Candidate) ([]candidateGroup, error) {
+	groupsByKey := map[string]candidateGroup{}
+	for _, candidate := range remaining {
+		key := fmt.Sprintf("%d:%s:%s", candidate.MediaFolderID, candidate.SeasonID, candidate.AnalysisGroupKey())
+		if _, ok := groupsByKey[key]; ok {
+			continue
+		}
+		groupCandidates, loaded := seasonCandidates[key]
+		if !loaded {
+			var err error
+			groupCandidates, err = a.repo.ListCandidatesForGroup(ctx, candidate.MediaFolderID, candidate.SeasonID, candidate.AnalysisGroupKey())
+			if err != nil {
+				return nil, err
+			}
+			seasonCandidates[key] = groupCandidates
+		}
+		groupCandidates = ownCandidates(groupCandidates, kind)
+		if distinctEpisodeCount(groupCandidates) < 2 {
+			continue
+		}
+		groupsByKey[key] = candidateGroup{
+			SeasonID:         candidate.SeasonID,
+			MediaFolderID:    candidate.MediaFolderID,
+			AnalysisGroupKey: candidate.AnalysisGroupKey(),
+			Candidates:       groupCandidates,
+		}
+	}
+	groups := make([]candidateGroup, 0, len(groupsByKey))
+	for _, group := range groupsByKey {
+		groups = append(groups, group)
+	}
+	sortCandidateGroups(groups)
+	return groups, nil
 }
 
 type chapterProcessingOptions struct {
@@ -673,29 +779,58 @@ func (a *Analyzer) runSilenceBackfill(ctx context.Context) (RunSummary, error) {
 	return summary, nil
 }
 
-// analyzeGroups runs season groups on workerCount workers. Most groups
+// groupJob is one marker kind's analysis of one season group.
+type groupJob struct {
+	kind  markerKind
+	group candidateGroup
+	// patchFileIDs limits which files the analysis may write; nil allows
+	// every file in the group.
+	patchFileIDs map[int]struct{}
+}
+
+// countGroupJobs counts the season groups each marker kind considers.
+func countGroupJobs(summary *RunSummary, jobs []groupJob) {
+	for _, job := range jobs {
+		if job.kind == kindCredits {
+			summary.CreditsSeasonGroupsConsidered++
+		} else {
+			summary.SeasonGroupsConsidered++
+		}
+	}
+}
+
+// analyzeJob analyzes a season group for the job's marker kind.
+func (a *Analyzer) analyzeJob(ctx context.Context, job groupJob, opts analyzeGroupOptions) (RunSummary, error) {
+	if job.kind == kindCredits {
+		return a.analyzeCreditsGroup(ctx, job.group, opts)
+	}
+	return a.analyzeGroup(ctx, job.group, opts)
+}
+
+// analyzeGroups runs season group jobs on workerCount workers. Most jobs
 // are skipped or served from cached fingerprints, so workers keep the ffmpeg
-// slots busy while other groups compare or wait on the database. progress is
-// called with the number of groups finished.
-func (a *Analyzer) analyzeGroups(ctx context.Context, groups []candidateGroup, progress func(done int)) RunSummary {
+// slots busy while other jobs compare or wait on the database. progress is
+// called with the number of jobs finished.
+func (a *Analyzer) analyzeGroups(ctx context.Context, jobs []groupJob, progress func(done int)) RunSummary {
 	var (
 		mu      sync.Mutex
 		summary RunSummary
 		done    int
 		wg      sync.WaitGroup
 	)
-	work := make(chan candidateGroup)
-	for range min(len(groups), a.workerCount()) {
+	work := make(chan groupJob)
+	for range min(len(jobs), a.workerCount()) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for group := range work {
-				groupSummary, err := a.analyzeGroup(ctx, group, analyzeGroupOptions{persistState: true})
+			for job := range work {
+				groupSummary, err := a.analyzeJob(ctx, job, analyzeGroupOptions{persistState: true})
 				if err != nil {
-					a.logger.WarnContext(ctx, "intro marker group analysis failed",
-						"season_id", group.SeasonID,
-						"media_folder_id", group.MediaFolderID,
-						"group_key", group.AnalysisGroupKey,
+					a.logger.WarnContext(ctx, "marker group analysis failed",
+						"kind", job.kind.String(),
+						"season_id", job.group.SeasonID,
+						"media_folder_id", job.group.MediaFolderID,
+						"group_key", job.group.AnalysisGroupKey,
 						"error", err)
 				}
 				mu.Lock()
@@ -709,9 +844,9 @@ func (a *Analyzer) analyzeGroups(ctx context.Context, groups []candidateGroup, p
 		}()
 	}
 feed:
-	for _, group := range groups {
+	for _, job := range jobs {
 		select {
-		case work <- group:
+		case work <- job:
 		case <-ctx.Done():
 			break feed
 		}
@@ -761,6 +896,11 @@ func groupCandidates(candidates []Candidate) []candidateGroup {
 		}
 		groups = append(groups, *group)
 	}
+	sortCandidateGroups(groups)
+	return groups
+}
+
+func sortCandidateGroups(groups []candidateGroup) {
 	sort.Slice(groups, func(i, j int) bool {
 		if groups[i].MediaFolderID != groups[j].MediaFolderID {
 			return groups[i].MediaFolderID < groups[j].MediaFolderID
@@ -770,7 +910,6 @@ func groupCandidates(candidates []Candidate) []candidateGroup {
 		}
 		return groups[i].AnalysisGroupKey < groups[j].AnalysisGroupKey
 	})
-	return groups
 }
 
 func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts analyzeGroupOptions) (RunSummary, error) {
@@ -793,20 +932,11 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		return summary, nil
 	}
 
-	inputs, hits, computed, failed, err := a.ensureFingerprints(ctx, group.Candidates)
-	summary.FingerprintCacheHits += hits
-	summary.FingerprintsComputed += computed
-	summary.FingerprintExtractionErrors += failed
-	// A failed extraction (unlike a file with no audio to fingerprint) may
-	// succeed later, so the group stays partial and is retried even though its
-	// inputs have not changed.
-	settle := func(status string) {
-		state.Status = status
-		if failed > 0 {
-			state.Status = seasonStatusPartial
-			state.LastError = fmt.Sprintf("%d fingerprint extraction(s) failed", failed)
-		}
-	}
+	inputs, counts, err := a.ensureFingerprints(ctx, kindIntro, group.Candidates)
+	summary.FingerprintCacheHits += counts.hits
+	summary.FingerprintsComputed += counts.computed
+	summary.FingerprintExtractionErrors += counts.failed
+	settle := func(status string) { settleSeasonState(&state, status, counts) }
 	if err != nil {
 		state.Status = seasonStatusFailed
 		state.LastError = err.Error()
@@ -948,16 +1078,24 @@ func shouldPatchGroupFile(fileID int, allowed map[int]struct{}) bool {
 	return ok
 }
 
-// ensureFingerprints loads cached fingerprints and extracts missing ones. It
-// returns the inputs with their cache hits, extractions, and failed
-// extractions; a database error or cancellation is returned as err.
-func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidate) ([]fingerprintInput, int, int, int, error) {
+// fingerprintCounts tallies how a group's fingerprints were obtained.
+type fingerprintCounts struct {
+	hits     int
+	computed int
+	// failed counts extractions that failed in this analysis.
+	failed int
+	// deferred counts files skipped while an earlier failure backs off.
+	deferred int
+}
+
+// ensureFingerprints loads cached fingerprints of kind and extracts missing
+// ones. It returns the inputs with how they were obtained; a database error
+// or cancellation is returned as err.
+func (a *Analyzer) ensureFingerprints(ctx context.Context, kind markerKind, candidates []Candidate) ([]fingerprintInput, fingerprintCounts, error) {
 	var (
 		mu       sync.Mutex
 		inputs   []fingerprintInput
-		hits     int
-		computed int
-		failed   int
+		counts   fingerprintCounts
 		firstErr error
 	)
 	setErr := func(err error) {
@@ -966,6 +1104,18 @@ func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidat
 			firstErr = err
 		}
 		mu.Unlock()
+	}
+	count := func(field *int, input *fingerprintInput) {
+		mu.Lock()
+		*field++
+		if input != nil {
+			inputs = append(inputs, *input)
+		}
+		mu.Unlock()
+	}
+	lookupFingerprint, err := a.fingerprintLookupFunc(ctx, kind, candidates)
+	if err != nil {
+		return nil, counts, err
 	}
 	acquire := a.acquireFFmpeg
 	if a.sharedSlots() == nil {
@@ -982,16 +1132,19 @@ func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidat
 				setErr(err)
 				return
 			}
-			cached, err := a.loadFingerprint(ctx, candidate)
+			cached, lookup, err := lookupFingerprint(ctx, candidate)
 			if err != nil {
 				setErr(err)
 				return
 			}
-			if cached != nil {
-				mu.Lock()
-				inputs = append(inputs, fingerprintInput{Candidate: candidate, Points: cached.Points, WindowStart: cached.WindowStartSeconds})
-				hits++
-				mu.Unlock()
+			switch lookup {
+			case fingerprintCached:
+				count(&counts.hits, &fingerprintInput{Candidate: candidate, Points: cached.Points, WindowStart: cached.WindowStartSeconds})
+				return
+			case fingerprintUnusable:
+				return
+			case fingerprintDeferred:
+				count(&counts.deferred, nil)
 				return
 			}
 
@@ -1000,37 +1153,70 @@ func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidat
 				setErr(err)
 				return
 			}
-			fp, ok, err := a.extractor.Extract(ctx, candidate)
+			fp, ok, err := a.extractFingerprint(ctx, kind, candidate)
 			release()
 			if err != nil {
 				if ctx.Err() != nil {
 					setErr(ctx.Err())
 					return
 				}
-				a.logger.WarnContext(ctx, "intro marker fingerprint extraction failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
-				mu.Lock()
-				failed++
-				mu.Unlock()
+				a.logger.WarnContext(ctx, "marker fingerprint extraction failed", "kind", kind.String(), "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
+				if kind == kindCredits {
+					if recordErr := a.recordCreditsFingerprintFailure(ctx, candidate, err); recordErr != nil {
+						a.logger.WarnContext(ctx, "marker fingerprint failure record failed", "kind", kind.String(), "file_id", candidate.FileID, "error", recordErr)
+					}
+				}
+				count(&counts.failed, nil)
 				return
 			}
 			if !ok {
+				if kind == kindCredits {
+					if err := a.storeCreditsNoAudio(ctx, candidate); err != nil {
+						setErr(err)
+					}
+				}
 				return
 			}
-			if err := a.repo.UpsertFingerprint(ctx, fp); err != nil {
+			if err := a.storeFingerprint(ctx, kind, fp); err != nil {
 				setErr(err)
 				return
 			}
-			mu.Lock()
-			inputs = append(inputs, fingerprintInput{Candidate: candidate, Points: fp.Points, WindowStart: fp.WindowStartSeconds})
-			computed++
-			mu.Unlock()
+			count(&counts.computed, &fingerprintInput{Candidate: candidate, Points: fp.Points, WindowStart: fp.WindowStartSeconds})
 		}()
 	}
 	wg.Wait()
 	sort.Slice(inputs, func(i, j int) bool {
 		return inputs[i].Candidate.FileID < inputs[j].Candidate.FileID
 	})
-	return inputs, hits, computed, failed, firstErr
+	return inputs, counts, firstErr
+}
+
+// extractFingerprint runs ffmpeg for a candidate's fingerprint of kind.
+func (a *Analyzer) extractFingerprint(ctx context.Context, kind markerKind, candidate Candidate) (Fingerprint, bool, error) {
+	if kind == kindCredits {
+		return a.extractor.ExtractCredits(ctx, candidate)
+	}
+	return a.extractor.Extract(ctx, candidate)
+}
+
+// storeFingerprint caches a computed fingerprint of kind.
+func (a *Analyzer) storeFingerprint(ctx context.Context, kind markerKind, fp Fingerprint) error {
+	if kind == kindCredits {
+		return a.storeCreditsFingerprint(ctx, fp)
+	}
+	return a.repo.UpsertFingerprint(ctx, fp)
+}
+
+// settleSeasonState records a group's analysis status. A failed extraction
+// (unlike a file with no audio to fingerprint) may succeed later, so the
+// group stays partial and is retried even though its inputs have not
+// changed.
+func settleSeasonState(state *SeasonState, status string, counts fingerprintCounts) {
+	state.Status = status
+	if failed := counts.failed + counts.deferred; failed > 0 {
+		state.Status = seasonStatusPartial
+		state.LastError = fmt.Sprintf("%d fingerprint extraction(s) failed", failed)
+	}
 }
 
 func distinctEpisodeCount(candidates []Candidate) int {
@@ -1075,4 +1261,14 @@ func mergeRunSummary(dst *RunSummary, src RunSummary) {
 	dst.DialogueRefinementsAttempted += src.DialogueRefinementsAttempted
 	dst.DialogueRefinementsApplied += src.DialogueRefinementsApplied
 	dst.DialogueRefinementErrors += src.DialogueRefinementErrors
+	dst.CreditsSeasonGroupsConsidered += src.CreditsSeasonGroupsConsidered
+	dst.CreditsGroupsNotFound += src.CreditsGroupsNotFound
+	dst.CreditsGroupsSkipped += src.CreditsGroupsSkipped
+	dst.CreditsChapterMarkersWritten += src.CreditsChapterMarkersWritten
+	dst.CreditsVersionMarkersCopied += src.CreditsVersionMarkersCopied
+	dst.CreditsFingerprintsComputed += src.CreditsFingerprintsComputed
+	dst.CreditsFingerprintCacheHits += src.CreditsFingerprintCacheHits
+	dst.CreditsFingerprintErrors += src.CreditsFingerprintErrors
+	dst.CreditsAudioMarkersWritten += src.CreditsAudioMarkersWritten
+	dst.CreditsRejected += src.CreditsRejected
 }

@@ -32,7 +32,15 @@ func (e failingExtractor) Extract(_ context.Context, candidate Candidate) (Finge
 	return Fingerprint{}, false, e.errFor[candidate.FileID]
 }
 
+func (e failingExtractor) ExtractCredits(ctx context.Context, candidate Candidate) (Fingerprint, bool, error) {
+	return e.Extract(ctx, candidate)
+}
+
 func (e *concurrencyProbeExtractor) Preflight(context.Context) error { return nil }
+
+func (e *concurrencyProbeExtractor) ExtractCredits(ctx context.Context, candidate Candidate) (Fingerprint, bool, error) {
+	return e.Extract(ctx, candidate)
+}
 
 func (e *concurrencyProbeExtractor) Extract(context.Context, Candidate) (Fingerprint, bool, error) {
 	e.mu.Lock()

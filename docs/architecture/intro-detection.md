@@ -1,9 +1,10 @@
 # Intro detection
 
-The daily "Detect markers on this server" task finds intros in series libraries
-with marker detection enabled. Code lives in `internal/intromarkers`; its
-ffmpeg runs, capability check, and concurrency limit come from
-`internal/mediasample` (see [media sampling](media-sampling.md)).
+The daily "Detect markers on this server" task finds intros and end credits in
+series libraries with marker detection enabled. Code lives in
+`internal/intromarkers`; its ffmpeg runs, capability check, and concurrency
+limit come from `internal/mediasample` (see [media sampling](media-sampling.md)).
+Credits detection is described [below](#credits).
 
 ## Pipeline
 
@@ -65,6 +66,73 @@ these values with each provider's minimum confidence.
   wrote.
 - `SilenceConfigHash` covers the silence settings. Changing them re-queues
   chapter files the backfill already tried.
+
+## Credits
+
+Credits detection runs beside intro detection in the same task, playback
+analysis, and admin refresh. Intro and credits season groups share one work
+list, the ffmpeg limit, and the Chromaprint capability check. Each kind is
+judged on its own: a file whose intro came from an online provider or a
+manual edit can still get local credits, and local analysis never replaces
+credits from a higher-priority source.
+
+Credits start in the file's tail window: the last 450 seconds of an episode,
+or its last 40 percent when that is shorter. They last 15 to 450 seconds. An
+end within 15 seconds of the end of the file becomes the end of the file.
+
+1. **Chapters.** The last chapter titled like credits (`Credits`,
+   `End Credits`, `End Titles`, `Outro`, case-sensitive `ED`, `ED2`, `ED: …`,
+   or `Ending`) is the credits (`credits-chapter:v1`, confidence 0.95).
+   Titles that name an intro, a scene around the credits (`Post-Credits`,
+   `Mid-Credits`, `After Credits`, `Pre-Credits`), the end of the credits
+   (`Credits End`), or a generated `Chapter NN` are not credits, and neither
+   is a match whose neighbor also matches. The end is the next chapter's
+   start. Chapter credits are authoritative.
+2. **Version copy.** Another file of the same episode whose duration is
+   within three seconds copies the chapter result, keeping its distance from
+   the end of the file (`credits-version-copy:v1`, confidence 0.85). Credits
+   that ran to the end of the source run to the end of the copy.
+3. **Tail Chromaprint.** Each episode's tail window is fingerprinted once
+   and cached, then compared across the season with the intro matcher's
+   neighbor search and consensus. Only strong matches are written
+   (`credits-audio:v1`): at least two partner episodes must agree, a match
+   under 20 seconds must share the season's usual credits duration (within
+   three seconds), and the match must reach the end of the file. A shorter
+   or earlier shared passage is usually a recurring music cue. A match the
+   season agrees on rates 0.90, others 0.65. Boundaries do not snap to
+   chapters.
+
+Before any credits marker other than a chapter's is written, it must start
+inside the tail window and after the file's intro ends, last 15 to 450
+seconds, end by the end of the file, and rate at least 0.55. A preview marker
+that starts inside the credits ends them.
+
+Playback analysis looks only for the kinds the played file lacks, so an
+episode with an intro and no credits runs the credits steps alone. Unlike an
+intro group, a credits season group whose stored analysis still stands is not
+compared again from playback: most episodes have no credits local analysis
+can find, and every start would otherwise repeat the comparison. Admin
+refresh compares both kinds again.
+
+Automatic contribution to online providers stays intro-only; detected credits
+are contributed only on request.
+
+Credits versions and caches:
+
+- Tail fingerprints are `credits_fingerprint` rows in the artifact table.
+  Their `config_hash` is `ArtifactConfigHash` of the kind and the tail window
+  parameters, so they never share a key with intro fingerprints. A tail with
+  no audio is stored `unusable`, and a failed extraction `failed` with
+  backoff.
+- `CreditsAnalysisConfigHash` keys credits season state, apart from intro
+  state. Bump `CreditsBehaviorVersion` to re-run every credits comparison over
+  cached fingerprints.
+- Credits algorithms rank in `markers.scannerAlgorithmPriority` as
+  `credits-chapter:v1` (30), `credits-version-copy:v1` (24),
+  `credits-audio:video:v1` (22), `credits-audio:v1` (21), and
+  `credits-video:v1` (12). Like Chromaprint intros, the latest
+  `credits-audio:` result of one version replaces the stored one even at a
+  lower confidence.
 
 ## Measuring accuracy
 

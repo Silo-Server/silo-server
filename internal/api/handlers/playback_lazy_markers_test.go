@@ -30,11 +30,13 @@ type fakePlaybackIntroAnalyzer struct {
 	onCall  func()
 	summary intromarkers.RunSummary
 	err     error
+	kinds   []intromarkers.EpisodeMarkerKinds
 }
 
-func (a *fakePlaybackIntroAnalyzer) AnalyzeEpisode(context.Context, string) (intromarkers.RunSummary, error) {
+func (a *fakePlaybackIntroAnalyzer) AnalyzeEpisodeForPlayback(_ context.Context, _ string, kinds intromarkers.EpisodeMarkerKinds) (intromarkers.RunSummary, error) {
 	a.mu.Lock()
 	a.calls++
+	a.kinds = append(a.kinds, kinds)
 	a.mu.Unlock()
 	if a.onCall != nil {
 		a.onCall()
@@ -59,6 +61,12 @@ func (a *fakePlaybackIntroAnalyzer) callCount() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.calls
+}
+
+func (a *fakePlaybackIntroAnalyzer) requestedKinds() []intromarkers.EpisodeMarkerKinds {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]intromarkers.EpisodeMarkerKinds(nil), a.kinds...)
 }
 
 type fakePlaybackIntroEligibility struct {
@@ -136,15 +144,15 @@ func TestMaybeQueueLazyPlaybackMarkersGates(t *testing.T) {
 			eligible: true,
 		},
 		{
-			name: "intro already present",
+			name: "intro and credits already present",
 			lazy: "true",
 			mode: "local",
 			file: func() *models.MediaFile {
 				file := lazyMarkerTestFile()
-				start := 10.0
-				end := 60.0
-				file.IntroStart = &start
-				file.IntroEnd = &end
+				start, end := 10.0, 60.0
+				creditsStart, creditsEnd := 1700.0, 1800.0
+				file.IntroStart, file.IntroEnd = &start, &end
+				file.CreditsStart, file.CreditsEnd = &creditsStart, &creditsEnd
 				return file
 			}(),
 			eligible: true,
@@ -241,6 +249,52 @@ func TestMaybeQueueLazyPlaybackMarkersLocalModeRunsAnalyzerAndEmitsUpdate(t *tes
 	}
 	if got := analyzer.callCount(); got != 1 {
 		t.Fatalf("AnalyzeEpisode calls = %d, want 1", got)
+	}
+}
+
+// Local analysis also finds credits, so an episode whose intro is known still
+// runs it while its credits are missing, for credits only.
+func TestMaybeQueueLazyPlaybackMarkersRunsLocalForMissingCredits(t *testing.T) {
+	file := lazyMarkerTestFile()
+	start, end := 10.0, 60.0
+	file.IntroStart, file.IntroEnd = &start, &end
+	online := models.MarkerSourceOnline
+	file.IntroMarkersSource = &online
+	analyzer := &fakePlaybackIntroAnalyzer{started: make(chan struct{}, 1)}
+	handler := newLazyMarkerTestHandler(file, analyzer, nil)
+
+	handler.maybeQueueLazyPlaybackMarkers(context.Background(), &playback.Session{ID: "session-1"}, file)
+
+	select {
+	case <-analyzer.started:
+	case <-time.After(time.Second):
+		t.Fatal("AnalyzeEpisode did not start for an episode without credits")
+	}
+	want := intromarkers.EpisodeMarkerKinds{Credits: true}
+	if got := analyzer.requestedKinds(); len(got) != 1 || got[0] != want {
+		t.Fatalf("requested kinds = %+v, want [%+v]", got, want)
+	}
+}
+
+func TestMissingLocalMarkersPerKind(t *testing.T) {
+	marker := func(v float64) *float64 { return &v }
+	type kinds = intromarkers.EpisodeMarkerKinds
+	cases := []struct {
+		name      string
+		file      *models.MediaFile
+		isEpisode bool
+		want      kinds
+	}{
+		{"episode without markers", &models.MediaFile{}, true, kinds{Intro: true, Credits: true}},
+		{"episode with only an intro", &models.MediaFile{IntroStart: marker(0), IntroEnd: marker(60)}, true, kinds{Credits: true}},
+		{"episode with only credits", &models.MediaFile{CreditsStart: marker(1700), CreditsEnd: marker(1800)}, true, kinds{Intro: true}},
+		{"episode with both", &models.MediaFile{IntroStart: marker(0), IntroEnd: marker(60), CreditsStart: marker(1700), CreditsEnd: marker(1800)}, true, kinds{}},
+		{"movie without markers", &models.MediaFile{}, false, kinds{}},
+	}
+	for _, tc := range cases {
+		if got := missingLocalMarkers(tc.file, tc.isEpisode); got != tc.want {
+			t.Errorf("%s: missingLocalMarkers = %+v, want %+v", tc.name, got, tc.want)
+		}
 	}
 }
 

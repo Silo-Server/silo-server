@@ -223,7 +223,8 @@ these curation actions.
 
 `POST /api/v2/admin/items/{id}/refresh-markers` and
 `POST /api/v2/admin/items/{id}/redetect-intro` require acting-administrator
-authorization. Both retain the existing local episode analyzer. The episode
+authorization. Both retain the existing local episode analyzer, which finds
+intros and end credits. The episode
 must exist, have media files, and belong to a library with intro detection
 enabled. Marker settings must allow local analysis; off and online-only modes
 return `409`. Unconfigured dependencies return `503`.

@@ -26,7 +26,7 @@ func NewDetectIntroMarkersTask(analyzer *intromarkers.Analyzer, settings MarkerS
 func (t *DetectIntroMarkersTask) Key() string  { return "detect_intro_markers" }
 func (t *DetectIntroMarkersTask) Name() string { return "Detect markers on this server" }
 func (t *DetectIntroMarkersTask) Description() string {
-	return "Analyzes files for intros in libraries with marker detection enabled."
+	return "Analyzes files for intros and credits in libraries with marker detection enabled."
 }
 func (t *DetectIntroMarkersTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary
@@ -41,7 +41,7 @@ func (t *DetectIntroMarkersTask) DefaultTriggers() []taskmanager.TriggerConfig {
 
 func (t *DetectIntroMarkersTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
 	if t.analyzer == nil {
-		progress.Report(100, "Intro marker analyzer unavailable")
+		progress.Report(100, "Marker analyzer unavailable")
 		return nil
 	}
 	mode := markers.ModeLocal
@@ -63,7 +63,7 @@ func (t *DetectIntroMarkersTask) Execute(ctx context.Context, progress taskmanag
 		progress.SetResultData(data)
 	}
 	if err != nil {
-		return fmt.Errorf("detecting intro markers: %w", err)
+		return fmt.Errorf("detecting markers: %w", err)
 	}
 	return nil
 }

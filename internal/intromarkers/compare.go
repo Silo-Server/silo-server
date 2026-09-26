@@ -93,6 +93,12 @@ type matchProfile struct {
 	// ZeroStartSnapSeconds moves an adjusted start this close to the start of
 	// the file to the start of the file. Zero disables the snap.
 	ZeroStartSnapSeconds float64
+	// EOFSnapSeconds moves an adjusted end this close to the end of the file
+	// to the end of the file. Zero disables the snap.
+	EOFSnapSeconds float64
+	// SnapToChapters moves adjusted boundaries onto nearby chapter
+	// boundaries.
+	SnapToChapters bool
 }
 
 // introProfile is the intro comparison for cfg.
@@ -110,6 +116,7 @@ func introProfile(cfg Config) matchProfile {
 		InconsistentConfidence: chromaprintInconsistentConfidence,
 		ShortConfidence:        chromaprintShortConfidence,
 		ZeroStartSnapSeconds:   zeroStartSnapSeconds,
+		SnapToChapters:         true,
 	}
 }
 
@@ -126,6 +133,40 @@ func CompareFingerprints(inputs []fingerprintInput, cfg Config) map[int]Segment 
 
 // compareFingerprints is CompareFingerprints for any marker kind's profile.
 func compareFingerprints(inputs []fingerprintInput, profile matchProfile) map[int]Segment {
+	matches := matchSeason(inputs, profile)
+	best := make(map[int]Segment, len(matches))
+	for fileID, match := range matches {
+		segment := match.Segment
+		duration := segment.End - segment.Start
+		switch {
+		case duration < profile.ShortSeconds:
+			segment.Confidence = profile.ShortConfidence
+		case match.SeasonConsistent && match.Confirmations >= 2:
+			segment.Confidence = profile.ConsistentConfidence
+		default:
+			segment.Confidence = profile.InconsistentConfidence
+		}
+		segment.Algorithm = profile.Algorithm
+		best[fileID] = segment
+	}
+	return best
+}
+
+// seasonMatch is a file's consensus match before it is rated.
+type seasonMatch struct {
+	// Segment holds the consensus boundaries, without confidence or
+	// algorithm.
+	Segment Segment
+	// Confirmations is how many partner episodes agreed with the consensus.
+	Confirmations int
+	// SeasonConsistent reports that at least half the season's episodes share
+	// a usual match duration and this match is within tolerance of it.
+	SeasonConsistent bool
+}
+
+// matchSeason compares the files of a season and reduces each file's pair
+// results to a consensus; see CompareFingerprints.
+func matchSeason(inputs []fingerprintInput, profile matchProfile) map[int]seasonMatch {
 	ordered := append([]fingerprintInput(nil), inputs...)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		a, b := ordered[i].Candidate, ordered[j].Candidate
@@ -254,23 +295,16 @@ func compareFingerprints(inputs []fingerprintInput, profile matchProfile) map[in
 	episodes := distinctFingerprintEpisodeCount(inputs)
 	seasonConsistent := episodes > 0 && float64(sharing)/float64(episodes) >= minimumSeasonCoverage
 
-	best := make(map[int]Segment, len(scored))
+	matches := make(map[int]seasonMatch, len(scored))
 	for fileID, result := range scored {
-		segment := result.segment
-		duration := segment.End - segment.Start
-		switch {
-		case duration < profile.ShortSeconds:
-			segment.Confidence = profile.ShortConfidence
-		case seasonConsistent && result.confirmations >= 2 &&
-			math.Abs(duration-usualDuration) <= profile.SeasonToleranceSeconds:
-			segment.Confidence = profile.ConsistentConfidence
-		default:
-			segment.Confidence = profile.InconsistentConfidence
+		duration := result.segment.End - result.segment.Start
+		matches[fileID] = seasonMatch{
+			Segment:          result.segment,
+			Confirmations:    result.confirmations,
+			SeasonConsistent: seasonConsistent && math.Abs(duration-usualDuration) <= profile.SeasonToleranceSeconds,
 		}
-		segment.Algorithm = profile.Algorithm
-		best[fileID] = segment
 	}
-	return best
+	return matches
 }
 
 // episodeGroups splits files sorted in episode order into [start, end) index
@@ -542,7 +576,8 @@ func absInt(v int) int {
 
 // adjustSegment moves a pair result from the input's fingerprint points into
 // file time: it adds the window start and the Chromaprint leads, then snaps
-// the boundaries to the start of the file and to nearby chapter boundaries.
+// the boundaries to the start and end of the file and, when the profile asks,
+// to nearby chapter boundaries.
 func adjustSegment(segment Segment, input fingerprintInput, profile matchProfile) Segment {
 	candidate := input.Candidate
 	segment.Start += input.WindowStart + chromaprintStartLeadSeconds
@@ -550,10 +585,16 @@ func adjustSegment(segment Segment, input fingerprintInput, profile matchProfile
 	if segment.Start <= profile.ZeroStartSnapSeconds {
 		segment.Start = 0
 	}
-	for _, chapter := range candidate.Chapters {
-		segment.Start = snapBoundary(segment.Start, chapter.StartSeconds)
-		segment.End = snapBoundary(segment.End, chapter.StartSeconds)
-		segment.End = snapBoundary(segment.End, chapter.EndSeconds)
+	if profile.EOFSnapSeconds > 0 && candidate.DurationSeconds > 0 &&
+		candidate.DurationSeconds-segment.End <= profile.EOFSnapSeconds {
+		segment.End = candidate.DurationSeconds
+	}
+	if profile.SnapToChapters {
+		for _, chapter := range candidate.Chapters {
+			segment.Start = snapBoundary(segment.Start, chapter.StartSeconds)
+			segment.End = snapBoundary(segment.End, chapter.StartSeconds)
+			segment.End = snapBoundary(segment.End, chapter.EndSeconds)
+		}
 	}
 	if segment.Start < 0 {
 		segment.Start = 0

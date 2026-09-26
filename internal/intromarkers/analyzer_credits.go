@@ -1,0 +1,207 @@
+package intromarkers
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/models"
+)
+
+// processCreditsChapters writes credits from authored chapters and copies
+// them to other versions of the same episode. Chapter credits are
+// authoritative. It needs no ffmpeg, so every run checks every file; a file
+// whose stored marker already matches is not written again.
+func (a *Analyzer) processCreditsChapters(ctx context.Context, candidates []Candidate) RunSummary {
+	summary := RunSummary{}
+	sources := map[string]chapterSourceMarker{}
+	var unresolved []Candidate
+
+	for _, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			summary.Errors = append(summary.Errors, err.Error())
+			return summary
+		}
+		owned := candidate.ownsMarker(kindCredits)
+		segment, ok := DetectChapterCredits(candidate.Chapters, candidate.DurationSeconds, false)
+		if !ok {
+			if owned {
+				unresolved = append(unresolved, candidate)
+			}
+			continue
+		}
+		// A file's chapters can place credits on its other versions even
+		// when its own marker came from a higher-priority source.
+		if _, ok := sources[candidate.EpisodeID]; !ok {
+			sources[candidate.EpisodeID] = chapterSourceMarker{candidate: candidate, segment: segment}
+		}
+		if owned && a.patchCredits(ctx, candidate, segment, &summary) {
+			summary.CreditsChapterMarkersWritten++
+		}
+	}
+
+	for _, candidate := range unresolved {
+		if err := ctx.Err(); err != nil {
+			summary.Errors = append(summary.Errors, err.Error())
+			return summary
+		}
+		source, ok := sources[candidate.EpisodeID]
+		if !ok || !compatibleEpisodeVersionDuration(source.candidate, candidate) {
+			continue
+		}
+		segment, ok := copyCreditsToVersion(source, candidate)
+		if !ok {
+			summary.CreditsRejected++
+			continue
+		}
+		if a.patchCredits(ctx, candidate, segment, &summary) {
+			summary.CreditsVersionMarkersCopied++
+		}
+	}
+	return summary
+}
+
+// copyCreditsToVersion places a chapter credits result on another version of
+// the same episode whose duration is within
+// episodeVersionCopyDurationToleranceSeconds. Versions usually differ by what
+// precedes the credits, such as studio logos, so the copy keeps its distance
+// from the end of the file, and credits that ran to the end of the source run
+// to the end of the target.
+func copyCreditsToVersion(source chapterSourceMarker, target Candidate) (Segment, bool) {
+	if !compatibleEpisodeVersionDuration(source.candidate, target) {
+		return Segment{}, false
+	}
+	sourceDuration, duration := source.candidate.DurationSeconds, target.DurationSeconds
+	segment := Segment{
+		Start:      duration - (sourceDuration - source.segment.Start),
+		End:        duration - (sourceDuration - source.segment.End),
+		Confidence: creditsVersionCopyConfidence,
+		Algorithm:  CreditsVersionCopyAlgorithm,
+	}
+	if reachesEOF(source.segment.End, sourceDuration) {
+		segment.End = duration
+	}
+	return applyCreditsGuards(segment, target, creditsLimitsFor(false))
+}
+
+// analyzeCreditsGroup compares the tail fingerprints of a season group and
+// writes the credits audio places on its own.
+func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup, opts analyzeGroupOptions) (RunSummary, error) {
+	summary := RunSummary{}
+	state := SeasonState{
+		SeasonID:         group.SeasonID,
+		MediaFolderID:    group.MediaFolderID,
+		AnalysisGroupKey: group.AnalysisGroupKey,
+		InputSignature:   InputSignature(group.Candidates),
+		EpisodeCount:     distinctEpisodeCount(group.Candidates),
+		FileCount:        len(group.Candidates),
+	}
+	analysisHash := CreditsAnalysisConfigHash()
+	existing, err := a.repo.LoadSeasonState(ctx, state, analysisHash)
+	if err != nil {
+		return summary, err
+	}
+	if !opts.force && existing != nil && existing.InputSignature == state.InputSignature && existing.settled(time.Now()) {
+		summary.CreditsGroupsSkipped++
+		return summary, nil
+	}
+
+	inputs, counts, err := a.ensureFingerprints(ctx, kindCredits, group.Candidates)
+	summary.CreditsFingerprintCacheHits += counts.hits
+	summary.CreditsFingerprintsComputed += counts.computed
+	summary.CreditsFingerprintErrors += counts.failed
+	persist := func(status string) error {
+		settleSeasonState(&state, status, counts)
+		if !opts.persistState {
+			return nil
+		}
+		return a.repo.UpsertSeasonState(ctx, state, analysisHash)
+	}
+	if err != nil {
+		state.Status = seasonStatusFailed
+		state.LastError = err.Error()
+		if opts.persistState {
+			_ = a.repo.UpsertSeasonState(ctx, state, analysisHash)
+		}
+		summary.Errors = append(summary.Errors, err.Error())
+		return summary, err
+	}
+	if distinctFingerprintEpisodeCount(inputs) < 2 {
+		state.LastError = "too few fingerprints"
+		summary.CreditsGroupsNotFound++
+		return summary, persist(seasonStatusNotFound)
+	}
+
+	segments, rejected := compareCreditsFingerprints(inputs)
+	summary.CreditsRejected += rejected
+	if len(segments) == 0 {
+		summary.CreditsGroupsNotFound++
+		return summary, persist(seasonStatusNotFound)
+	}
+
+	byFileID := make(map[int]Candidate, len(group.Candidates))
+	for _, candidate := range group.Candidates {
+		byFileID[candidate.FileID] = candidate
+	}
+	limits := creditsLimitsFor(false)
+	for fileID, segment := range segments {
+		if !shouldPatchGroupFile(fileID, opts.patchFileIDs) {
+			continue
+		}
+		candidate := byFileID[fileID]
+		segment, ok := applyCreditsGuards(segment, candidate, limits)
+		if !ok {
+			summary.CreditsRejected++
+			continue
+		}
+		if a.patchCredits(ctx, candidate, segment, &summary) {
+			summary.CreditsAudioMarkersWritten++
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return summary, err
+	}
+	state.MarkersWritten = summary.CreditsAudioMarkersWritten
+	return summary, persist(seasonStatusComplete)
+}
+
+// patchCredits writes a credits segment onto the candidate's file unless its
+// stored credits already match, and reports whether the write applied.
+// Errors are recorded in summary.
+func (a *Analyzer) patchCredits(ctx context.Context, candidate Candidate, segment Segment, summary *RunSummary) bool {
+	if candidate.marker(kindCredits).matches(segment) {
+		return false
+	}
+	applied, err := a.repo.PatchMarker(ctx, MarkerPatch{
+		Kind:         kindCredits,
+		ExpectedFile: candidate.expectedFile(),
+		FileID:       candidate.FileID,
+		Start:        segment.Start,
+		End:          segment.End,
+		Source:       models.MarkerSourceScanner,
+		Confidence:   segment.Confidence,
+		Algorithm:    segment.Algorithm,
+		DetectedAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		summary.Errors = append(summary.Errors, fmt.Sprintf("file %d: %v", candidate.FileID, err))
+		a.logger.WarnContext(ctx, "credits marker patch failed", "file_id", candidate.FileID, "algorithm", segment.Algorithm, "error", err)
+		return false
+	}
+	return applied
+}
+
+// storedMarkerTolerance is the boundary difference below which a stored
+// marker already holds a result. It matches the marker writer's tolerance.
+const storedMarkerTolerance = 0.5
+
+// matches reports whether the stored marker already holds segment, from the
+// same algorithm with the same confidence, so writing it again would change
+// nothing.
+func (m candidateMarker) matches(segment Segment) bool {
+	return m.present() && m.Algorithm != nil && *m.Algorithm == segment.Algorithm &&
+		m.Confidence != nil && *m.Confidence == segment.Confidence &&
+		math.Abs(*m.Start-segment.Start) <= storedMarkerTolerance &&
+		math.Abs(*m.End-segment.End) <= storedMarkerTolerance
+}

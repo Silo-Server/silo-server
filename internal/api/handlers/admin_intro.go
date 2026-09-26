@@ -157,6 +157,9 @@ func (h *AdminIntroHandler) RefreshEpisodeMarkers(ctx context.Context, episodeID
 			"chromaprint_markers_written", summary.ChromaprintMarkersWritten,
 			"fingerprint_cache_hits", summary.FingerprintCacheHits,
 			"fingerprints_computed", summary.FingerprintsComputed,
+			"credits_chapter_markers_written", summary.CreditsChapterMarkersWritten,
+			"credits_audio_markers_written", summary.CreditsAudioMarkersWritten,
+			"credits_fingerprints_computed", summary.CreditsFingerprintsComputed,
 			"errors", len(summary.Errors))
 		h.notifyEpisodeMarkerUpdates(h.baseContext, episodeID, action)
 	}()

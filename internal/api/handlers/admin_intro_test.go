@@ -123,6 +123,35 @@ func TestAdminMarkerRefreshOnlineDoesNotRequireLocalDetection(t *testing.T) {
 	}
 }
 
+// In both mode, an online intro without online credits still runs local
+// analysis, which now finds credits.
+func TestAdminMarkerRefreshBothRunsLocalForMissingCredits(t *testing.T) {
+	analyzer := &fakeIntroAnalyzer{started: make(chan string, 1)}
+	handler := NewAdminIntroHandler(analyzer, fakeIntroEligibility{result: &intromarkers.EpisodeIntroEligibility{
+		EpisodeID: "ep1", HasMediaFiles: true, IntroDetectionEnabled: true,
+	}}, t.Context(), nil)
+	handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeBoth)}}
+	handler.FileResolver = fakeAdminIntroFileResolver{files: []*models.MediaFile{{ID: 42, EpisodeID: "ep1"}}}
+	handler.OnlineMarkers = markerRefreshFunc(func(_ context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
+		start, end := 0.0, 60.0
+		refreshed := *file
+		refreshed.IntroStart, refreshed.IntroEnd = &start, &end
+		return &refreshed, true, nil
+	})
+	status, err := handler.RefreshEpisodeMarkers(t.Context(), "ep1", "refresh-v2")
+	if err != nil || status != "queued" {
+		t.Fatalf("refresh: status=%q err=%v", status, err)
+	}
+	select {
+	case episodeID := <-analyzer.started:
+		if episodeID != "ep1" {
+			t.Fatalf("analyzed episode %q, want ep1", episodeID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("local analysis did not run for an episode without credits")
+	}
+}
+
 func (n fakeAdminIntroMarkerNotifier) MarkersUpdated(_ context.Context, file *models.MediaFile) {
 	if n.ch == nil {
 		return

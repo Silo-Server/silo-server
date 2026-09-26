@@ -45,13 +45,14 @@ func CanWriteMarkerUpdate(existing, incoming SegmentPayload) bool {
 		if existing.Confidence == nil || existing.Algorithm == "" {
 			return true
 		}
-		// Chromaprint results are scored against the whole season on every
-		// analysis, so the latest result of the same detector version
-		// replaces the stored one even at lower confidence: a season that no
-		// longer agrees must not keep an older, higher score. A plain and a
-		// subtitle-refined result of one version count as the same detector,
-		// so a file that loses its subtitle also loses the refined score.
-		if sameChromaprintVersion(existing.Algorithm, incoming.Algorithm) {
+		// Chromaprint intro and credits audio results are scored against the
+		// whole season on every analysis, so the latest result of the same
+		// detector version replaces the stored one even at lower confidence:
+		// a season that no longer agrees must not keep an older, higher
+		// score. A plain and a refined result of one version count as the
+		// same detector, so a file that loses its subtitle or video evidence
+		// also loses the refined score.
+		if sameSeasonScoredVersion(existing.Algorithm, incoming.Algorithm) {
 			return incoming.Algorithm != existing.Algorithm ||
 				confidenceGreater(incoming.Confidence, existing.Confidence) ||
 				confidenceGreater(existing.Confidence, incoming.Confidence) ||
@@ -140,22 +141,43 @@ func markerRanges(payload SegmentPayload) []models.MarkerSegment {
 	return ranges
 }
 
-// sameChromaprintVersion reports whether two scanner algorithms are the plain
-// or subtitle-refined result of one Chromaprint version, whose confidence is
-// recomputed from the whole season each time it is analyzed.
-func sameChromaprintVersion(a, b string) bool {
-	const family, refined = "chromaprint:", "dialogue:" //nolint:misspell // Persisted algorithm identifier.
-	version := func(algorithm string) (string, bool) {
-		rest, ok := strings.CutPrefix(algorithm, family)
-		if !ok {
-			return "", false
-		}
-		return strings.TrimPrefix(rest, refined), true
-	}
-	va, okA := version(a)
-	vb, okB := version(b)
-	return okA && okB && va == vb
+// seasonScoredFamilies are the scanner detectors whose results are rated
+// against a whole season, each with the infix its refined results carry:
+// Chromaprint intros refined by subtitles, and credits audio refined by video.
+var seasonScoredFamilies = []struct{ family, refined string }{
+	{"chromaprint:", "dialogue:"}, //nolint:misspell // Persisted algorithm identifier.
+	{"credits-audio:", "video:"},
 }
+
+// sameSeasonScoredVersion reports whether two scanner algorithms are the
+// plain or refined result of one version of a season-scored detector, whose
+// confidence is recomputed from the whole season each time it is analyzed.
+func sameSeasonScoredVersion(a, b string) bool {
+	for _, f := range seasonScoredFamilies {
+		version := func(algorithm string) (string, bool) {
+			rest, ok := strings.CutPrefix(algorithm, f.family)
+			if !ok {
+				return "", false
+			}
+			return strings.TrimPrefix(rest, f.refined), true
+		}
+		va, okA := version(a)
+		vb, okB := version(b)
+		if okA || okB {
+			return okA && okB && va == vb
+		}
+	}
+	return false
+}
+
+// Credits detector identifiers, as local analysis persists them.
+const (
+	creditsChapterAlgorithm     = "credits-chapter:v1"
+	creditsVersionCopyAlgorithm = "credits-version-copy:v1"
+	creditsAudioVideoAlgorithm  = "credits-audio:video:v1"
+	creditsAudioAlgorithm       = "credits-audio:v1"
+	creditsVideoAlgorithm       = "credits-video:v1"
+)
 
 // scannerAlgorithmPriority ranks local detector outputs. A superseded version
 // ranks below its replacement so re-analysis can overwrite what it wrote.
@@ -185,6 +207,18 @@ func scannerAlgorithmPriority(algorithm string) int {
 		return 15
 	case "chromaprint:v1":
 		return 10
+	// Credits detectors rank like their intro counterparts: chapters, then
+	// version copies, then season-scored audio, then video alone.
+	case creditsChapterAlgorithm:
+		return 30
+	case creditsVersionCopyAlgorithm:
+		return 24
+	case creditsAudioVideoAlgorithm:
+		return 22
+	case creditsAudioAlgorithm:
+		return 21
+	case creditsVideoAlgorithm:
+		return 12
 	default:
 		return 0
 	}

@@ -408,8 +408,8 @@ export function AdvancedFields({
       {form.settingSupport.introDetection && (
         <SettingCard
           htmlFor="intro-detection-switch"
-          title="Detect intro markers"
-          description="Runs background audio analysis for episodes in this library. Embedded intro chapters are used when available."
+          title="Detect intro and credits markers"
+          description="Runs background audio analysis for episodes in this library. Embedded intro and credits chapters are used when available."
         >
           <Switch
             id="intro-detection-switch"
