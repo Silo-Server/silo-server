@@ -480,7 +480,7 @@ func TestHiddenTierDefaultsAreExposed(t *testing.T) {
 		"recommendations.embedding_provider":     "ollama",
 		"recommendations.embeddings_job_timeout": "24h",
 		"policy.editor_enabled":                  "false",
-		"policy.eval_timeout_ms":                 "25",
+		"policy.eval_timeout_ms":                 "100",
 		"subtitle_ai.live_asr_chunk_seconds":     "30",
 		"scanner.max_concurrent_libraries":       "1",
 		"scanner.max_concurrent_scoped":          "2",

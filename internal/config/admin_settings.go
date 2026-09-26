@@ -210,7 +210,7 @@ var adminSettingDefaults = map[string]string{
 	"download.artifact_max_bytes":            "0",
 
 	"policy.editor_enabled":                 "false",
-	"policy.eval_timeout_ms":                "25",
+	"policy.eval_timeout_ms":                "100",
 	"policy.decision_log_verbosity":         "digest",
 	"policy.decision_log_scope_sample_rate": "50",
 	"policy.decision_log_retention_days":    "14",
