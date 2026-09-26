@@ -14,13 +14,16 @@ addresses those requests may reach.
 
 - **Public**: reachable by anyone on the internet.
 - **Private**: the server's own network. Loopback, RFC 1918, CGNAT
-  (`100.64.0.0/10`, which includes Tailscale), IPv6 ULA and site-local, NAT64, and the
-  special-use unicast ranges (TEST-NETs, benchmarking, documentation).
+  (`100.64.0.0/10`, which includes Tailscale), IPv6 ULA and site-local, and the
+  special-use unicast ranges (TEST-NETs, benchmarking, documentation). A
+  well-known NAT64 address (`64:ff9b::/96`) is private too, or blocked when the
+  IPv4 address it embeds is blocked, since a NAT64 gateway translates to it.
 - **Blocked**: never dialed by anyone. Unspecified (`0.0.0.0` dials loopback on
   Linux), link-local (`169.254.0.0/16`, `fe80::/10`, where cloud metadata
   services live), known metadata addresses outside link-local
-  (`100.100.100.200`, `fd00:ec2::254`), multicast, reserved ranges, and the
-  deprecated IPv4-compatible IPv6 form (`::a.b.c.d`).
+  (`100.100.100.200`, `fd00:ec2::254`), multicast, reserved ranges, the
+  deprecated IPv4-compatible IPv6 form (`::a.b.c.d`), and local-use NAT64
+  (`64:ff9b:1::/48`), whose embedded IPv4 destination cannot be read reliably.
 
 IPv4-mapped IPv6 addresses are classified as their IPv4 form, and zones are
 ignored, so `::ffff:127.0.0.1` and `fe80::1%eth0` cannot slip through.

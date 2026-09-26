@@ -28,7 +28,12 @@ func TestClassify(t *testing.T) {
 		{"fd12:3456::1", Private},
 		{"fec0::1", Private}, // site-local
 		{"198.18.0.1", Private},
-		{"64:ff9b::a00:1", Private},
+		{"64:ff9b::a00:1", Private},     // NAT64 of 10.0.0.1
+		{"64:ff9b::808:808", Private},   // NAT64 is never public, even for 8.8.8.8
+		{"64:ff9b::a9fe:a9fe", Blocked}, // NAT64 of 169.254.169.254
+		{"64:ff9b::7f00:1", Private},    // NAT64 of 127.0.0.1
+		{"64:ff9b:1::a9fe:a9fe", Blocked},
+		{"64:ff9b:1:ffff::1", Blocked},
 		{"::ffff:127.0.0.1", Private},
 		{"::ffff:192.168.1.10", Private},
 		{"169.254.169.254", Blocked},
@@ -70,6 +75,9 @@ func TestCheckAddrPolicy(t *testing.T) {
 		{"169.254.169.254", false, ErrBlockedDestination},
 		{"169.254.169.254", true, ErrBlockedDestination},
 		{"fd00:ec2::254", true, ErrBlockedDestination},
+		{"64:ff9b::a9fe:a9fe", true, ErrBlockedDestination},
+		{"64:ff9b::a00:1", false, ErrPrivateDestination},
+		{"64:ff9b::a00:1", true, nil},
 	}
 	for _, tc := range cases {
 		if err := CheckAddr(netip.MustParseAddr(tc.addr), tc.allowPrivate); !errors.Is(err, tc.want) {

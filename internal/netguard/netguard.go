@@ -52,6 +52,9 @@ var blockedPrefixes = mustPrefixes(
 	"fe80::/10",
 	"ff00::/8",
 	"fd00:ec2::254/128", // AWS IPv6 instance metadata, inside the ULA range
+	// Local-use NAT64 (RFC 8215) translates to an IPv4 destination whose
+	// position in the address varies by network, so it cannot be checked.
+	"64:ff9b:1::/48",
 )
 
 var privatePrefixes = mustPrefixes(
@@ -67,12 +70,14 @@ var privatePrefixes = mustPrefixes(
 	"198.51.100.0/24", // TEST-NET-2
 	"203.0.113.0/24",  // TEST-NET-3
 	"::1/128",
-	"fc00::/7",       // ULA
-	"fec0::/10",      // site-local; deprecated (RFC 3879) but still routed in some networks
-	"2001:db8::/32",  // documentation
-	"64:ff9b::/96",   // NAT64
-	"64:ff9b:1::/48", // local-use NAT64 (RFC 8215)
+	"fc00::/7",      // ULA
+	"fec0::/10",     // site-local; deprecated (RFC 3879) but still routed in some networks
+	"2001:db8::/32", // documentation
 )
+
+// nat64 is the well-known NAT64 prefix (RFC 6052). A NAT64 gateway translates
+// an address in it to the IPv4 destination in its last 32 bits.
+var nat64 = netip.MustParsePrefix("64:ff9b::/96")
 
 // ipv4Compatible holds the deprecated IPv4-compatible IPv6 form (::a.b.c.d,
 // RFC 4291). Nothing legitimate uses it, so it is blocked outright rather than
@@ -101,6 +106,15 @@ func Classify(addr netip.Addr) Class {
 		if prefix.Contains(addr) {
 			return Blocked
 		}
+	}
+	// A NAT64 address is never public: it reaches whatever IPv4 destination it
+	// embeds, and is blocked when that destination is.
+	if nat64.Contains(addr) {
+		b := addr.As16()
+		if Classify(netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]})) == Blocked {
+			return Blocked
+		}
+		return Private
 	}
 	for _, prefix := range privatePrefixes {
 		if prefix.Contains(addr) {
