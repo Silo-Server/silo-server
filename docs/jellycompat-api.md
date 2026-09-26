@@ -82,6 +82,9 @@ each item's original-language audio, as native clients do.
 
 Movie and episode detail responses select `DefaultSubtitleStreamIndex` from the
 viewer's effective subtitle mode and language, including downloaded subtitles.
+In `Always` mode, a track the viewer picked for the series in a Silo client
+(its source, language, codec, label, forced and hearing-impaired traits) wins
+when the file has one that matches; otherwise the language rules apply.
 The detail-page selection therefore carries into playback instead of sending
 an unintended Off choice. Explicit playback choices, including Off, still win.
 If playback negotiates a different audio language, clients must omit

@@ -80,6 +80,11 @@ type compatSubtitleCandidate struct {
 	External bool
 	Default  bool
 	Forced   bool
+	// Traits a remembered series track signature is matched against.
+	Source          string
+	Codec           string
+	Label           string
+	HearingImpaired bool
 }
 
 // compatSubtitleCandidates lists a version's embedded and external subtitle
@@ -88,17 +93,37 @@ type compatSubtitleCandidate struct {
 func compatSubtitleCandidates(version catalog.FileVersion, downloaded []subtitles.DownloadedSubtitle) []compatSubtitleCandidate {
 	candidates := make([]compatSubtitleCandidate, 0, len(version.SubtitleTracks)+len(downloaded))
 	for index, track := range version.SubtitleTracks {
+		source := "embedded"
+		if track.External {
+			source = "external"
+		}
 		candidates = append(candidates, compatSubtitleCandidate{
-			Index:    subtitleTrackIndex(version, track, index),
-			Language: track.Language,
-			External: track.External,
-			Default:  track.Default,
-			Forced:   track.Forced,
+			Index:           subtitleTrackIndex(version, track, index),
+			Language:        track.Language,
+			External:        track.External,
+			Default:         track.Default,
+			Forced:          track.Forced,
+			Source:          source,
+			Codec:           track.Codec,
+			Label:           compatSubtitleTrackLabel(track),
+			HearingImpaired: track.HearingImpaired,
 		})
 	}
 	base := nextDownloadedSubtitleIndex(version)
 	for index, dl := range downloaded {
-		candidates = append(candidates, compatSubtitleCandidate{Index: base + index, Language: dl.Language, External: true})
+		label := dl.Language
+		if dl.ReleaseName != "" || dl.Provider != "" {
+			label = dl.ReleaseName + " (" + dl.Provider + ")"
+		}
+		candidates = append(candidates, compatSubtitleCandidate{
+			Index:           base + index,
+			Language:        dl.Language,
+			External:        true,
+			Source:          "downloaded",
+			Codec:           string(dl.Format),
+			Label:           label,
+			HearingImpaired: dl.HearingImpaired,
+		})
 	}
 	return candidates
 }
@@ -250,10 +275,57 @@ func compatDetailSubtitleStreamIndex(detail *upstreamItemDetail, version catalog
 		preferred = []string{language}
 	}
 	candidates := compatSubtitleCandidates(version, downloaded)
+	// Silo clients remember the exact track picked for a series and start
+	// Always-mode playback on it, e.g. a Forced English track over the full
+	// English one, even when forced tracks are otherwise hidden; Jellyfin
+	// clients get the same track.
+	if mode == compatSubtitleAlways {
+		if index := compatSignatureSubtitleIndex(candidates, detail.SubtitleTrackSignature); index != nil {
+			return index
+		}
+	}
 	if !detail.ShowForcedSubtitles {
 		candidates = compatWithoutForcedSubtitles(candidates)
 	}
 	return compatDefaultSubtitleStreamIndex(candidates, preferred, mode, compatAudioTrack(version, audioIndex).Language)
+}
+
+// compatSignatureSubtitleIndex returns the first candidate matching every
+// trait of the remembered track signature, as the Silo web player does, or
+// nil. An empty signature label matches any label.
+func compatSignatureSubtitleIndex(candidates []compatSubtitleCandidate, sig *userstore.SubtitleTrackSignature) *int {
+	if sig.IsZero() {
+		return nil
+	}
+	same := func(a, b string) bool { return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b)) }
+	for _, c := range candidates {
+		if same(c.Source, sig.Source) &&
+			same(c.Language, sig.Language) &&
+			same(c.Codec, sig.Codec) &&
+			(strings.TrimSpace(sig.Label) == "" || same(c.Label, sig.Label)) &&
+			c.Forced == sig.Forced &&
+			c.HearingImpaired == sig.HearingImpaired {
+			return intPtr(c.Index)
+		}
+	}
+	return nil
+}
+
+// compatSubtitleTrackLabel is the label the playback v3 inventory gives a
+// track, which Silo clients record in its signature: title, then embedded
+// title, the sidecar file name, and language. Catalog fills an untitled
+// sidecar's Title with its file name, so that case falls through here.
+func compatSubtitleTrackLabel(track catalog.VersionSubtitleTrack) string {
+	title := track.Title
+	if track.External && title == track.FileName {
+		title = ""
+	}
+	for _, label := range []string{title, track.EmbeddedTitle, track.FileName, track.Language} {
+		if label = strings.TrimSpace(label); label != "" {
+			return label
+		}
+	}
+	return ""
 }
 
 // savedCompatSubtitleMode returns the SubtitleMode the viewer's Jellyfin
