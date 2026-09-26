@@ -137,12 +137,30 @@ func (r *UserRepository) OwnerActor(ctx context.Context, actorID int) (OwnerActo
 	return ownerActor(ctx, r.pool, actorID)
 }
 
+// ErrNotActingAdmin refuses a write whose caller stopped being an enabled
+// admin, or no longer exists, between authenticating and the write.
+var ErrNotActingAdmin = errors.New("the account making the change is no longer an enabled admin")
+
 // LockOwnerActorInTransaction is OwnerActor read in the caller's
-// transaction with the actor's row share-locked, so an ownership transfer
-// waits for the caller's write and the write sees a transfer that committed
-// first.
+// transaction with the actor's row share-locked, so an ownership transfer,
+// demotion or disable waits for the caller's write and the write sees one
+// that committed first. The actor must still be an enabled admin
+// (ErrNotActingAdmin otherwise).
 func LockOwnerActorInTransaction(ctx context.Context, tx pgx.Tx, actorID int) (OwnerActor, error) {
-	return ownerActor(ctx, tx, actorID, " FOR SHARE")
+	actor := OwnerActor{ID: actorID}
+	var role string
+	var enabled bool
+	err := tx.QueryRow(ctx, `SELECT is_owner, role, enabled FROM users WHERE id=$1 FOR SHARE`, actorID).Scan(&actor.IsOwner, &role, &enabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return actor, ErrNotActingAdmin
+	}
+	if err != nil {
+		return actor, err
+	}
+	if role != models.RoleAdmin || !enabled {
+		return actor, ErrNotActingAdmin
+	}
+	return actor, nil
 }
 
 // CreateByOwner holds the Owner's standing through account and profile creation.
@@ -174,12 +192,12 @@ func (r *UserRepository) CreateByOwner(ctx context.Context, actorID int, input m
 
 func ownerActor(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
-}, actorID int, lock ...string) (OwnerActor, error) {
+}, actorID int) (OwnerActor, error) {
 	actor := OwnerActor{ID: actorID}
 	if actorID <= 0 {
 		return actor, nil
 	}
-	err := db.QueryRow(ctx, `SELECT is_owner FROM users WHERE id=$1`+strings.Join(lock, ""), actorID).Scan(&actor.IsOwner)
+	err := db.QueryRow(ctx, `SELECT is_owner FROM users WHERE id=$1`, actorID).Scan(&actor.IsOwner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return actor, nil
 	}

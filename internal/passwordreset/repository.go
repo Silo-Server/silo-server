@@ -76,7 +76,7 @@ func (r *Repository) Issue(ctx context.Context, userID int, tokenHash string, is
 	from, guard, args := "users u", "", []any{userID, tokenHash, issuedBy, expiresAt}
 	if standing != nil {
 		from = "users u JOIN users a ON a.id = $5"
-		guard = " AND u.role = $6 AND u.is_owner = $7 AND a.is_owner = $8 FOR SHARE OF u, a"
+		guard = " AND u.role = $6 AND u.is_owner = $7 AND a.role = 'admin' AND a.enabled AND a.is_owner = $8 FOR SHARE OF u, a"
 		args = append(args, standing.IssuerID, standing.Role, standing.IsOwner, standing.IssuerIsOwner)
 	}
 	tag, err := r.pool.Exec(ctx, `
@@ -96,10 +96,13 @@ func (r *Repository) Issue(ctx context.Context, userID int, tokenHash string, is
 	}
 	if standing != nil {
 		current := *standing
+		var issuerActs bool
 		err := r.pool.QueryRow(ctx, `
-			SELECT u.role, u.is_owner, COALESCE((SELECT is_owner FROM users WHERE id = $2), false)
-			FROM users u WHERE u.id = $1`, userID, standing.IssuerID).Scan(&current.Role, &current.IsOwner, &current.IssuerIsOwner)
-		if err == nil && current != *standing {
+			SELECT u.role, u.is_owner,
+			       COALESCE((SELECT is_owner FROM users WHERE id = $2), false),
+			       COALESCE((SELECT role = 'admin' AND enabled FROM users WHERE id = $2), false)
+			FROM users u WHERE u.id = $1`, userID, standing.IssuerID).Scan(&current.Role, &current.IsOwner, &current.IssuerIsOwner, &issuerActs)
+		if err == nil && (current != *standing || !issuerActs) {
 			return auth.ErrAccountChanged
 		}
 	}

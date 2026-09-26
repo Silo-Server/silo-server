@@ -54,7 +54,8 @@ func (h *AdminHandler) transactionOwnerActor(ctx context.Context, tx pgx.Tx) (au
 	if tx == nil {
 		return requestOwnerActor(ctx, h.userRepo)
 	}
-	return auth.LockOwnerActorInTransaction(ctx, tx, actorUserID(ctx))
+	actor, err := auth.LockOwnerActorInTransaction(ctx, tx, actorUserID(ctx))
+	return actor, ownerError(err)
 }
 
 // codeOwnerProtected is the error code of a refusal under the Owner rules.
@@ -74,6 +75,8 @@ func ownerError(err error) error {
 		return &APIError{Status: http.StatusForbidden, Code: codeOwnerProtected, Message: "You cannot change your own role, disable your account, or delete it", cause: err}
 	case errors.Is(err, auth.ErrNotOwner):
 		return &APIError{Status: http.StatusForbidden, Code: codeOwnerProtected, Message: "Only the server owner can transfer ownership", cause: err}
+	case errors.Is(err, auth.ErrNotActingAdmin):
+		return &APIError{Status: http.StatusForbidden, Code: settingErrorForbidden, Message: "Admin access required", cause: err}
 	case errors.Is(err, auth.ErrAccountChanged):
 		return &APIError{Status: http.StatusConflict, Code: policyErrorConflict, Message: "The account's role or ownership changed; reload and try again", cause: err}
 	case errors.Is(err, auth.ErrOwnershipTarget):

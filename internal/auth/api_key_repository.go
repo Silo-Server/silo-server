@@ -81,7 +81,8 @@ func (r *APIKeyRepository) CreateForStanding(ctx context.Context, userID int, st
 	created, err := scanAPIKey(r.pool.QueryRow(ctx, `
 		INSERT INTO api_keys (user_id, label, api_key, scopes)
 		SELECT u.id, $2, $3, $4 FROM users u JOIN users a ON a.id = $7
-		WHERE u.id = $1 AND u.role = $5 AND u.is_owner = $6 AND a.is_owner = $8
+		WHERE u.id = $1 AND u.role = $5 AND u.is_owner = $6
+			AND a.role = 'admin' AND a.enabled AND a.is_owner = $8
 		FOR SHARE OF u, a
 		RETURNING `+apiKeyColumns, userID, label, key, scopes, standing.Role, standing.IsOwner, standing.IssuerID, standing.IssuerIsOwner))
 	if errors.Is(err, ErrAPIKeyNotFound) {

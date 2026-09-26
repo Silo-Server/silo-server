@@ -132,6 +132,9 @@ func (r *Repository) Resend(ctx context.Context, id int64, input models.CreateIn
 func createInvitation(ctx context.Context, tx pgx.Tx, input models.CreateInvitationInput, tokenHash string) (*models.Invitation, error) {
 	if input.Role == models.RoleAdmin {
 		actor, err := auth.LockOwnerActorInTransaction(ctx, tx, int(input.InvitedBy))
+		if errors.Is(err, auth.ErrNotActingAdmin) {
+			return nil, ErrRoleNotAllowed
+		}
 		if err != nil {
 			return nil, err
 		}

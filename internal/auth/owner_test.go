@@ -258,7 +258,8 @@ func TestAdminKeyNeedsTheCheckedStandingPostgres(t *testing.T) {
 	r := adminAccountsDB(t)
 	user := testRoleAccount(t, r, models.RoleUser)
 	keys := NewAPIKeyRepository(r.pool)
-	checked := AccountStanding{Role: models.RoleUser, IssuerID: user.ID}
+	issuerAdmin := testRoleAccount(t, r, models.RoleAdmin)
+	checked := AccountStanding{Role: models.RoleUser, IssuerID: issuerAdmin.ID}
 	if _, err := keys.CreateForStanding(t.Context(), user.ID, checked, "ok", nil); err != nil {
 		t.Fatalf("key under an unchanged standing: %v", err)
 	}
@@ -364,6 +365,34 @@ func TestMutateAdminAccountLocksActorFirstPostgres(t *testing.T) {
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLockedActorMustStillBeAnEnabledAdminPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	admin := testRoleAccount(t, r, models.RoleAdmin)
+	user := testRoleAccount(t, r, models.RoleUser)
+	disabled := testRoleAccount(t, r, models.RoleAdmin)
+	if err := r.Update(t.Context(), disabled.ID, models.UpdateUserInput{Enabled: new(false)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockedOwnerActor(t, r, admin.ID); err != nil {
+		t.Fatalf("enabled admin: %v", err)
+	}
+	for name, id := range map[string]int{"demoted": user.ID, "disabled": disabled.ID, "deleted": user.ID + 1000} {
+		if _, err := lockedOwnerActor(t, r, id); !errors.Is(err, ErrNotActingAdmin) {
+			t.Errorf("%s actor: %v", name, err)
+		}
+	}
+	// A key issued by an admin demoted after the check is refused too.
+	keys := NewAPIKeyRepository(r.pool)
+	issuer := testRoleAccount(t, r, models.RoleAdmin)
+	checked := AccountStanding{Role: models.RoleUser, IssuerID: issuer.ID}
+	if err := r.Update(t.Context(), issuer.ID, models.UpdateUserInput{Role: new(models.RoleUser)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keys.CreateForStanding(t.Context(), user.ID, checked, "demoted issuer", nil); !errors.Is(err, ErrAccountChanged) {
+		t.Fatalf("key from a demoted issuer: %v", err)
 	}
 }
 

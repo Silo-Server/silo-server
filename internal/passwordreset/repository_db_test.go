@@ -194,7 +194,11 @@ func TestResetLinkRefusesIneligibleAccounts(t *testing.T) {
 func TestResetLinkNeedsTheCheckedStandingDB(t *testing.T) {
 	d := newResetDB(t)
 	id := d.account(t, "promoted", true, true)
-	checked := &auth.AccountStanding{Role: "user", IssuerID: id}
+	admin := d.account(t, "issuer", true, true)
+	if _, err := d.pool.Exec(t.Context(), `UPDATE users SET role = 'admin' WHERE id = $1`, admin); err != nil {
+		t.Fatal(err)
+	}
+	checked := &auth.AccountStanding{Role: "user", IssuerID: admin}
 	expires := time.Now().Add(time.Hour)
 	if err := d.repo.Issue(t.Context(), id, auth.HashLinkToken("before"), nil, expires, checked); err != nil {
 		t.Fatalf("link under an unchanged standing: %v", err)
@@ -205,9 +209,15 @@ func TestResetLinkNeedsTheCheckedStandingDB(t *testing.T) {
 	if err := d.repo.Issue(t.Context(), id, auth.HashLinkToken("after"), nil, expires, checked); !errors.Is(err, auth.ErrAccountChanged) {
 		t.Fatalf("link under a stale standing: %v", err)
 	}
-	// An issuer whose Owner flag changed gets no link either.
+	// An issuer that is not an enabled admin gets no link (the "promoted"
+	// account here was an ordinary account when it was checked as issuer).
 	target := d.account(t, "target", true, true)
-	issuer := &auth.AccountStanding{Role: "user", IssuerID: id, IssuerIsOwner: true}
+	nonAdmin := d.account(t, "plain", true, true)
+	if err := d.repo.Issue(t.Context(), target, auth.HashLinkToken("plain-issuer"), nil, expires, &auth.AccountStanding{Role: "user", IssuerID: nonAdmin}); !errors.Is(err, auth.ErrAccountChanged) {
+		t.Fatalf("link from an issuer that is not an admin: %v", err)
+	}
+	// An issuer whose Owner flag changed gets no link either.
+	issuer := &auth.AccountStanding{Role: "user", IssuerID: admin, IssuerIsOwner: true}
 	if err := d.repo.Issue(t.Context(), target, auth.HashLinkToken("stale-issuer"), nil, expires, issuer); !errors.Is(err, auth.ErrAccountChanged) {
 		t.Fatalf("link from an issuer that is not the owner: %v", err)
 	}

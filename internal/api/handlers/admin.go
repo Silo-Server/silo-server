@@ -878,7 +878,7 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 		},
 	})
 	if err != nil {
-		if errors.Is(err, auth.ErrAdminProtected) {
+		if errors.Is(err, auth.ErrAdminProtected) || errors.Is(err, auth.ErrNotActingAdmin) {
 			writeAPIError(w, ownerError(err))
 			return
 		}
