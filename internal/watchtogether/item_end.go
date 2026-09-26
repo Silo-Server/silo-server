@@ -14,6 +14,10 @@ const (
 	// itemEndRefreshInterval is how often the host's file is looked up again.
 	// A replan can move the host's session to another file of the same title.
 	itemEndRefreshInterval = 30 * time.Second
+	// itemEndLookupTimeout bounds the lookups, which run outside the room
+	// operation's deadline. A stalled lookup must not hold up the reconciler
+	// that renews every local socket's lease; the next tick tries again.
+	itemEndLookupTimeout = roomReconcileInterval
 )
 
 // itemEnd is the duration of the file a room is playing, for the selection
@@ -61,7 +65,9 @@ func (s *Service) refreshItemEnd(ctx context.Context, roomID string) {
 	}
 	s.mu.Unlock()
 
-	seconds := s.lookupItemEnd(ctx, fileID, hostSession)
+	lookupCtx, cancel := context.WithTimeout(ctx, itemEndLookupTimeout)
+	seconds := s.lookupItemEnd(lookupCtx, fileID, hostSession)
+	cancel()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()

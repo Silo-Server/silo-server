@@ -145,6 +145,66 @@ func TestRoomPausedBeforeTheEndKeepsPlaying(t *testing.T) {
 	}
 }
 
+func TestAnotherServerFinishesTheItemForEveryonePG(t *testing.T) {
+	f := newRoomClusterFixture(t)
+	for _, s := range []*Service{f.host, f.guest} {
+		s.files = &stubFiles{file: &models.MediaFile{ContentID: "movie-1", Duration: 100}}
+	}
+	// The host's report at the end paused the room there.
+	if _, err := f.repo.pool.Exec(t.Context(), `UPDATE watch_together_rooms SET anchor_position_seconds=100,
+ is_paused=true, playback_state='paused', anchor_updated_at=$2 WHERE id=$1`, f.roomID, f.now); err != nil {
+		t.Fatal(err)
+	}
+	// The guest's server finishes the item; the host's repairs from the row.
+	for _, s := range []*Service{f.guest, f.host} {
+		if err := s.reconcileRoom(t.Context(), f.roomID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	room, err := f.repo.GetRoomByID(t.Context(), f.roomID)
+	if err != nil || room.Phase != RoomPhaseLobby || room.SelectedContentID == nil || room.SelectionRevision != 2 || room.Generation != 2 {
+		t.Fatalf("finished room = %+v, %v; want one stop to the staged lobby", room, err)
+	}
+	for name, conn := range map[string]*recordingConn{"host": f.hostConn, "guest": f.guestConn} {
+		var sawLobby bool
+		for _, payload := range conn.payloads {
+			if snapshot, ok := payload["room"].(Snapshot); ok && snapshot.Phase == RoomPhaseLobby {
+				sawLobby = true
+			}
+		}
+		if !sawLobby {
+			t.Fatalf("%s was not sent the lobby", name)
+		}
+	}
+}
+
+// deadlineFiles records whether a lookup could be abandoned.
+type deadlineFiles struct {
+	filesByID
+	hadDeadline *bool
+}
+
+func (f deadlineFiles) GetByID(ctx context.Context, id int) (*models.MediaFile, error) {
+	_, *f.hadDeadline = ctx.Deadline()
+	return f.filesByID.GetByID(ctx, id)
+}
+
+func TestItemEndLookupCannotStallTheReconciler(t *testing.T) {
+	f := newItemEndRoom(t, 100, 99.5, true)
+	var hadDeadline bool
+	f.s.files = deadlineFiles{filesByID: f.files, hadDeadline: &hadDeadline}
+	// The reconciler's own context never expires.
+	if err := f.s.reconcileRoom(context.Background(), f.repo.room.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !hadDeadline {
+		t.Fatal("the duration lookup ran without a deadline")
+	}
+	if f.phase() != RoomPhaseLobby {
+		t.Fatalf("room at its end = %s, want lobby", f.phase())
+	}
+}
+
 func TestRoomWithoutAKnownDurationKeepsPlaying(t *testing.T) {
 	f := newItemEndRoom(t, 0, 5000, false)
 	f.reconcile(t)
