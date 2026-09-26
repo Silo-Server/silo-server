@@ -2647,8 +2647,8 @@ func main() {
 		collectionSyncScheduler = catalog.NewCollectionSyncScheduler(collectionRepo, collectionService, slog.Default())
 
 		// The trending refresher reuses the section repo (to find used source/
-		// window combos), a snapshot repo, an item repo (external-ID matching),
-		// and the TMDB fetcher. The Trakt fetcher needs settingsRepo and is
+		// window combos beyond the calendar's fixed feed), a snapshot repo, an
+		// item repo (external-ID matching), and the TMDB fetcher. The Trakt fetcher needs settingsRepo and is
 		// propagated onto deps.TrendingRefresher later in router.go.
 		trendingRefresher = sections.NewTrendingRefresher(
 			sections.NewTrendingDemandLister(sectionRepo, auth.NewUserRepository(deps.DB), userStoreProvider),
