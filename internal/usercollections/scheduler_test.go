@@ -3,6 +3,8 @@ package usercollections
 import (
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func TestNextSyncAfterFailureUsesConfiguredCron(t *testing.T) {
@@ -48,5 +50,33 @@ func TestBoundedSyncSchedulePolicy(t *testing.T) {
 	}
 	if requiresScheduleDowngrade(AllowedSyncSchedules["daily"], false) {
 		t.Fatal("regular account lost its bounded daily schedule")
+	}
+}
+
+func TestScheduledCollectionEligibility(t *testing.T) {
+	t.Parallel()
+
+	hourly := "0 * * * *"
+	daily := AllowedSyncSchedules["daily"]
+	tests := []struct {
+		name         string
+		collection   *userstore.Collection
+		expected     string
+		allowAdmin   bool
+		wantEligible bool
+	}{
+		{name: "matching admin schedule", collection: &userstore.Collection{SyncSchedule: &hourly}, expected: hourly, allowAdmin: true, wantEligible: true},
+		{name: "automatic sync disabled", collection: &userstore.Collection{}, expected: hourly, allowAdmin: true},
+		{name: "schedule edited", collection: &userstore.Collection{SyncSchedule: &daily}, expected: hourly, allowAdmin: true},
+		{name: "administrator demoted", collection: &userstore.Collection{SyncSchedule: &hourly}, expected: hourly},
+		{name: "bounded schedule after demotion", collection: &userstore.Collection{SyncSchedule: &daily}, expected: daily, wantEligible: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := scheduledCollectionEligible(tt.collection, tt.expected, tt.allowAdmin); got != tt.wantEligible {
+				t.Fatalf("scheduledCollectionEligible() = %v, want %v", got, tt.wantEligible)
+			}
+		})
 	}
 }

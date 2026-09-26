@@ -34,6 +34,14 @@ func TestResolveSyncScheduleAllowsAdminCron(t *testing.T) {
 	if _, err := ResolveSyncSchedule("not a cron", true); err == nil {
 		t.Fatal("admin account accepted an invalid cron schedule")
 	}
+	for _, schedule := range []string{
+		"TZ=Europe/Stockholm 0 3 * * *",
+		"CRON_TZ=Europe/Stockholm 0 3 * * *",
+	} {
+		if _, err := ResolveSyncSchedule(schedule, true); err == nil {
+			t.Errorf("admin account accepted timezone-prefixed schedule %q", schedule)
+		}
+	}
 }
 
 func TestResolveSyncScheduleDisablesAutomaticSync(t *testing.T) {

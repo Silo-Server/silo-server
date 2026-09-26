@@ -3,6 +3,7 @@ package usercollections
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -44,10 +45,9 @@ type SchedulerResult struct {
 }
 
 type dueCollection struct {
-	UserID             int
-	CollectionID       string
-	SyncSchedule       string
-	AllowAdminSchedule bool
+	UserID       int
+	CollectionID string
+	SyncSchedule string
 }
 
 func (s *Scheduler) RunOnce(ctx context.Context) (json.RawMessage, error) {
@@ -86,9 +86,8 @@ func (s *Scheduler) RunOnce(ctx context.Context) (json.RawMessage, error) {
 
 func (s *Scheduler) listDue(ctx context.Context) ([]dueCollection, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT c.user_id, c.id, c.sync_schedule, u.role = 'admin'
+		`SELECT c.user_id, c.id, c.sync_schedule
 		 FROM user_personal_collections c
-		 JOIN users u ON u.id = c.user_id
 		 WHERE c.sync_schedule IS NOT NULL
 		   AND c.next_sync_at IS NOT NULL
 		   AND c.next_sync_at <= NOW()`,
@@ -101,7 +100,7 @@ func (s *Scheduler) listDue(ctx context.Context) ([]dueCollection, error) {
 	var out []dueCollection
 	for rows.Next() {
 		var dc dueCollection
-		if err := rows.Scan(&dc.UserID, &dc.CollectionID, &dc.SyncSchedule, &dc.AllowAdminSchedule); err != nil {
+		if err := rows.Scan(&dc.UserID, &dc.CollectionID, &dc.SyncSchedule); err != nil {
 			return nil, err
 		}
 		out = append(out, dc)
@@ -110,7 +109,27 @@ func (s *Scheduler) listDue(ctx context.Context) ([]dueCollection, error) {
 }
 
 func (s *Scheduler) syncOne(ctx context.Context, dc dueCollection, mu *sync.Mutex, result *SchedulerResult) {
-	if requiresScheduleDowngrade(dc.SyncSchedule, dc.AllowAdminSchedule) {
+	if _, loaded := s.inFlight.LoadOrStore(dc.CollectionID, struct{}{}); loaded {
+		mu.Lock()
+		result.Skipped++
+		mu.Unlock()
+		return
+	}
+	defer s.inFlight.Delete(dc.CollectionID)
+
+	allowAdminSchedule, err := s.allowAdminSchedule(ctx, dc.UserID)
+	if err != nil {
+		mu.Lock()
+		result.Failed++
+		mu.Unlock()
+		s.logger.ErrorContext(ctx, "user collection sync scheduler: failed to recheck account role",
+			"user_id", dc.UserID,
+			"collection_id", dc.CollectionID,
+			"error", err,
+		)
+		return
+	}
+	if requiresScheduleDowngrade(dc.SyncSchedule, allowAdminSchedule) {
 		if err := s.downgradeSchedule(ctx, dc, time.Now()); err != nil {
 			mu.Lock()
 			result.Failed++
@@ -128,22 +147,22 @@ func (s *Scheduler) syncOne(ctx context.Context, dc dueCollection, mu *sync.Mute
 		return
 	}
 
-	if _, loaded := s.inFlight.LoadOrStore(dc.CollectionID, struct{}{}); loaded {
-		mu.Lock()
-		result.Skipped++
-		mu.Unlock()
-		return
-	}
-	defer s.inFlight.Delete(dc.CollectionID)
-
 	startedAt := time.Now()
 	syncCtx, cancel := context.WithTimeout(ctx, collectionutil.SyncTimeout)
-	_, err := s.service.SyncCollection(syncCtx, dc.UserID, dc.CollectionID)
+	_, err = s.service.SyncCollection(syncCtx, dc.UserID, dc.CollectionID, dc.SyncSchedule, allowAdminSchedule)
 	cancel()
 	dur := time.Since(startedAt).Round(time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
+	if errors.Is(err, errSyncNoLongerEligible) {
+		result.Skipped++
+		s.logger.InfoContext(ctx, "user collection sync scheduler: skipped stale due collection",
+			"user_id", dc.UserID,
+			"collection_id", dc.CollectionID,
+		)
+		return
+	}
 	if err != nil {
 		result.Failed++
 		s.logger.ErrorContext(ctx, "user collection sync scheduler: sync failed",
@@ -161,6 +180,12 @@ func (s *Scheduler) syncOne(ctx context.Context, dc dueCollection, mu *sync.Mute
 		"collection_id", dc.CollectionID,
 		"duration", dur,
 	)
+}
+
+func (s *Scheduler) allowAdminSchedule(ctx context.Context, userID int) (bool, error) {
+	var allowed bool
+	err := s.pool.QueryRow(ctx, `SELECT role = 'admin' FROM users WHERE id = $1`, userID).Scan(&allowed)
+	return allowed, err
 }
 
 func requiresScheduleDowngrade(schedule string, allowAdminSchedule bool) bool {

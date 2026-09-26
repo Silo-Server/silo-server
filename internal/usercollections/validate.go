@@ -54,6 +54,9 @@ func ResolveSyncSchedule(value string, allowAdminCron bool) (*string, error) {
 	if !allowAdminCron {
 		return nil, fmt.Errorf("invalid sync_schedule %q: must be one of daily, weekly, monthly", value)
 	}
+	if len(strings.Fields(value)) != 5 {
+		return nil, fmt.Errorf("invalid sync_schedule %q: must contain five cron fields", value)
+	}
 	if err := catalog.ParseCronExpression(value); err != nil {
 		return nil, err
 	}
