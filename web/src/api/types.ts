@@ -2427,6 +2427,8 @@ export interface CreateUserRequest {
   permissions?: string[];
   create_default_profile?: boolean;
   default_profile_name?: string;
+  /** The account's access group; omitted, a regular account joins the default group. */
+  access_group_id?: number | null;
   library_ids?: number[] | null;
   max_playback_quality?: string;
   max_streams?: number;

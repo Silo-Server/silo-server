@@ -709,27 +709,44 @@ function UserForm({
   const markerEditId = useId();
   const metadataCurationId = useId();
   const maxProfilesId = useId();
+  const accessGroupSelectId = useId();
   const createMutation = useCreateUser();
   const updateMutation = useUpdateUser();
   const isPending = createMutation.isPending || updateMutation.isPending;
-  // This form has no group picker and sends no group for a regular account, so
-  // editing keeps the account's group, while a new account or an admin demoted
-  // here lands on the default group. An admin stays ungrouped
-  // (auth.Repository create and update).
-  const joinsDefaultGroup = !user || user.role === "admin";
-  const defaultGroupID = accessGroups.find((group) => group.is_default)?.id ?? null;
-  const inheritGroupID = effectiveAccessGroupID(
-    role,
-    joinsDefaultGroup ? defaultGroupID : user.access_group_id,
+  // The group picker starts on the account's group. A new account, or an admin
+  // being demoted here, starts on the default group (undefined until picked),
+  // which is where the server would place it anyway. An admin stays ungrouped
+  // (auth.Repository create and update), so the picker is disabled for admins.
+  const [pickedGroupID, setPickedGroupID] = useState<number | null | undefined>(
+    user && user.role !== "admin" ? user.access_group_id : undefined,
   );
+  const defaultGroupID = accessGroups.find((group) => group.is_default)?.id ?? null;
+  const selectedGroupID = pickedGroupID === undefined ? defaultGroupID : pickedGroupID;
+  const inheritGroupID = effectiveAccessGroupID(role, selectedGroupID);
   // Until the group list loads, the default group such an account joins is
   // unknown, and so is what it inherits; it is not the no-group defaults.
-  const awaitingDefaultGroup = joinsDefaultGroup && role !== "admin" && !accessGroupsLoaded;
+  const awaitingDefaultGroup =
+    pickedGroupID === undefined && role !== "admin" && !accessGroupsLoaded;
   const hintSource = awaitingDefaultGroup ? "group" : policyDefaultSource(role, inheritGroupID);
   const inheritHints = awaitingDefaultGroup
     ? undefined
     : (policyInheritHints(inheritGroupID, accessGroups) ??
-      (role === "admin" ? undefined : user?.effective_policy));
+      (role !== "admin" && user && selectedGroupID === user.access_group_id
+        ? user.effective_policy
+        : undefined));
+  // The group to send: none while the default group is still unknown, so the
+  // server applies its own default instead of an accidental "no group".
+  const groupToSend = awaitingDefaultGroup
+    ? undefined
+    : effectiveAccessGroupID(role, selectedGroupID);
+  const accessGroupValue =
+    awaitingDefaultGroup || role === "admin" || selectedGroupID === null
+      ? "none"
+      : String(selectedGroupID);
+  const selectedGroupMissing =
+    selectedGroupID !== null &&
+    accessGroupsLoaded &&
+    !accessGroups.some((group) => group.id === selectedGroupID);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -759,8 +776,8 @@ function UserForm({
           max_profiles: maxProfiles,
           ...policyUpdateFields(policy),
         };
-        if (role === "admin") {
-          body.access_group_id = effectiveAccessGroupID(role, user.access_group_id);
+        if (groupToSend !== undefined) {
+          body.access_group_id = groupToSend;
         }
         if (password) {
           body.password = password;
@@ -781,6 +798,9 @@ function UserForm({
           create_default_profile: createDefaultProfile,
           max_profiles: maxProfiles,
           ...policyCreateFields(policy),
+          ...(groupToSend !== undefined && role !== "admin"
+            ? { access_group_id: groupToSend }
+            : {}),
         };
         await createMutation.mutateAsync({ body, profileContext: authority });
         createMutation.reset();
@@ -921,6 +941,38 @@ function UserForm({
           </TabsContent>
 
           <TabsContent value="access" className="mt-0 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor={accessGroupSelectId}>Group</Label>
+              <Select
+                value={accessGroupValue}
+                onValueChange={(value) => {
+                  setPickedGroupID(value === "none" ? null : Number(value));
+                }}
+                disabled={role === "admin" || awaitingDefaultGroup}
+              >
+                <SelectTrigger id={accessGroupSelectId} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    {awaitingDefaultGroup ? "Default group" : "No group"}
+                  </SelectItem>
+                  {selectedGroupMissing && (
+                    <SelectItem value={String(selectedGroupID)}>#{selectedGroupID}</SelectItem>
+                  )}
+                  {accessGroups.map((group) => (
+                    <SelectItem key={group.id} value={String(group.id)}>
+                      {group.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {role === "admin" && (
+                <p className="text-muted-foreground text-xs">
+                  Admin accounts can&apos;t join groups.
+                </p>
+              )}
+            </div>
             <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
               <div>
                 <Label htmlFor={markerEditId}>Marker Editing</Label>

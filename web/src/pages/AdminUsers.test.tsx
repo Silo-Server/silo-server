@@ -17,7 +17,7 @@ vi.mock("@/hooks/queries/admin/users", () => ({
   useAdminUserCapabilities: () => ({ data: { available: mocks.available, default_profile: true } }),
   useImpersonateUser: () => ({ mutateAsync: mocks.impersonate, reset: vi.fn(), isPending: false }),
   useAdminUsers: () => ({ data: mocks.users, isLoading: false }),
-  useCreateUser: () => ({ mutate: vi.fn(), isPending: false }),
+  useCreateUser: () => ({ mutateAsync: mocks.create, reset: vi.fn(), isPending: false }),
   useUpdateUser: () => ({ mutateAsync: mocks.update, isPending: false }),
   useDeleteUser: () => ({ mutate: vi.fn(), isPending: false }),
 }));
@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   useAdminServerSettings: vi.fn(),
   users: [] as AdminUser[],
   update: vi.fn(),
+  create: vi.fn(),
   reads: 0,
   available: true,
   impersonate: vi.fn(),
@@ -490,6 +491,68 @@ describe("AdminUsers user dialog policy hints", () => {
     // The server then creates the account without a group.
     expect(within(dialog).getAllByText("Server default: Unlimited")).toHaveLength(4);
     expect(within(dialog).queryByText(/Inherit/)).not.toBeInTheDocument();
+  });
+
+  async function openAccess(user: ReturnType<typeof userEvent.setup>, button: string | RegExp) {
+    await user.click(screen.getByRole("button", { name: button }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("tab", { name: "Access" }));
+    return dialog;
+  }
+
+  const guests = { ...defaultGroup, id: 3, name: "Guests", is_default: false } as AccessGroup;
+
+  it("lets an admin change a user's group from the list", async () => {
+    mocks.users = [{ ...adminUser, access_group_id: defaultGroup.id }];
+    mocks.accessGroups = [defaultGroup, guests];
+    mocks.accessGroupsLoaded = true;
+    mocks.update.mockReset().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openAccess(user, "Edit taylor");
+
+    const group = within(dialog).getByRole("combobox", { name: "Group" });
+    expect(group).toHaveTextContent(defaultGroup.name);
+    await user.click(group);
+    await user.click(await screen.findByRole("option", { name: "Guests" }));
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
+    expect(mocks.update.mock.calls[0]![0].body.access_group_id).toBe(3);
+  });
+
+  it("creates a user in the chosen group, defaulting to the default group", async () => {
+    mocks.accessGroups = [defaultGroup, guests];
+    mocks.accessGroupsLoaded = true;
+    mocks.create.mockReset().mockResolvedValue({ id: 11 });
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openAccess(user, /Add User/);
+
+    const group = within(dialog).getByRole("combobox", { name: "Group" });
+    expect(group).toHaveTextContent(defaultGroup.name);
+    await user.click(group);
+    await user.click(await screen.findByRole("option", { name: "Guests" }));
+
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.type(within(dialog).getByLabelText("Username"), "newbie");
+    await user.type(within(dialog).getByLabelText("Email"), "newbie@example.test");
+    await user.type(within(dialog).getByLabelText(/^Password/), "a-long-password");
+    await user.click(within(dialog).getByRole("button", { name: /create|save/i }));
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
+    expect(mocks.create.mock.calls[0]![0].body.access_group_id).toBe(3);
+  });
+
+  it("disables the group picker for admins", async () => {
+    mocks.users = [{ ...adminUser, username: "root", role: "admin" }];
+    mocks.accessGroups = [defaultGroup, guests];
+    mocks.accessGroupsLoaded = true;
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openAccess(user, "Edit root");
+    expect(within(dialog).getByRole("combobox", { name: "Group" })).toBeDisabled();
+    expect(within(dialog).getByText("Admin accounts can't join groups.")).toBeInTheDocument();
   });
 
   it("previews the default group for an admin demoted from the list", async () => {
