@@ -228,6 +228,7 @@ type metadataVideoRepo interface {
 // *catalog.RatingSourceRepository satisfies this.
 type metadataRatingSourceRepo interface {
 	Upsert(ctx context.Context, contentID string, sources []models.ItemRatingSource, replace bool) error
+	Replace(ctx context.Context, contentID string, sources []models.ItemRatingSource) error
 }
 
 // AutoTranslator is the seam to the metadata AI translation service: after a
@@ -2598,12 +2599,21 @@ func (s *MetadataService) mergeAndPersist(
 	// merge above saw no stored sources and passed every reported one through
 	// (or none, under a FieldRating lock). The stored rows are merged by the
 	// write instead: fill-empty keeps each source already stored, and
-	// replace-unlocked overwrites the sources this refresh reported. Like the
-	// rating columns, they are provider-invariant and written for every
-	// language.
-	if s.ratingSourceRepo != nil && len(accumulator.RatingSources) > 0 && !isFieldLocked(locked, FieldRating) {
+	// replace-unlocked overwrites the sources this refresh reported. Identify
+	// replaces the whole set, even with an empty one, because it keeps the
+	// content_id while changing the title: a source only the previous match
+	// reported would otherwise stay on the item for good. Like the rating
+	// columns, they are provider-invariant and written for every language.
+	if s.ratingSourceRepo != nil && !isFieldLocked(locked, FieldRating) {
 		sources := itemRatingSourcesFromResult(contentID, accumulator.RatingSources)
-		if err := s.ratingSourceRepo.Upsert(ctx, contentID, sources, mergeMode == MergeReplaceUnlocked); err != nil {
+		var err error
+		switch {
+		case req.Mode == ModeIdentify:
+			err = s.ratingSourceRepo.Replace(ctx, contentID, sources)
+		case len(sources) > 0:
+			err = s.ratingSourceRepo.Upsert(ctx, contentID, sources, mergeMode == MergeReplaceUnlocked)
+		}
+		if err != nil {
 			slog.WarnContext(ctx, "metadata: failed to store rating sources", "component", "metadata", "content_id", contentID, "error", err)
 		}
 	}

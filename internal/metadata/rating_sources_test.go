@@ -203,10 +203,13 @@ func TestMergeRatingSources(t *testing.T) {
 	})
 }
 
+// ratingSourceUpsert records one write: an Upsert with its replace flag, or a
+// Replace of the whole set (wholeSet).
 type ratingSourceUpsert struct {
 	contentID string
 	sources   []models.ItemRatingSource
 	replace   bool
+	wholeSet  bool
 }
 
 type fakeRatingSourceRepo struct {
@@ -218,6 +221,13 @@ func (r *fakeRatingSourceRepo) Upsert(_ context.Context, contentID string, sourc
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.upserts = append(r.upserts, ratingSourceUpsert{contentID: contentID, sources: sources, replace: replace})
+	return nil
+}
+
+func (r *fakeRatingSourceRepo) Replace(_ context.Context, contentID string, sources []models.ItemRatingSource) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.upserts = append(r.upserts, ratingSourceUpsert{contentID: contentID, sources: sources, wholeSet: true})
 	return nil
 }
 
@@ -248,15 +258,18 @@ func TestRefreshPersistsRatingSources(t *testing.T) {
 	}
 
 	cases := []struct {
-		name        string
-		mode        RefreshMode
-		locked      []int
-		wantUpsert  bool
-		wantReplace bool
+		name         string
+		mode         RefreshMode
+		locked       []int
+		wantUpsert   bool
+		wantReplace  bool
+		wantWholeSet bool
 	}{
 		{name: "scheduled refresh fills empty", mode: ModeScheduledRefresh, wantUpsert: true},
 		{name: "manual refresh replaces", mode: ModeManualRefresh, wantUpsert: true, wantReplace: true},
+		{name: "identify replaces the whole set", mode: ModeIdentify, wantUpsert: true, wantWholeSet: true},
 		{name: "rating lock skips the write", mode: ModeManualRefresh, locked: []int{int(FieldRating)}},
+		{name: "rating lock skips identify", mode: ModeIdentify, locked: []int{int(FieldRating)}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -283,8 +296,9 @@ func TestRefreshPersistsRatingSources(t *testing.T) {
 				t.Fatalf("upserts = %d, want 1", len(repo.upserts))
 			}
 			got := repo.upserts[0]
-			if got.contentID != contentID || got.replace != tc.wantReplace {
-				t.Fatalf("upsert = (%q, replace=%v), want (%q, replace=%v)", got.contentID, got.replace, contentID, tc.wantReplace)
+			if got.contentID != contentID || got.replace != tc.wantReplace || got.wholeSet != tc.wantWholeSet {
+				t.Fatalf("upsert = (%q, replace=%v, wholeSet=%v), want (%q, replace=%v, wholeSet=%v)",
+					got.contentID, got.replace, got.wholeSet, contentID, tc.wantReplace, tc.wantWholeSet)
 			}
 			if !reflect.DeepEqual(got.sources, wantSources) {
 				t.Fatalf("sources = %+v, want %+v", got.sources, wantSources)
@@ -315,5 +329,33 @@ func TestRefreshWithoutRatingSourcesWritesNothing(t *testing.T) {
 	}
 	if item := h.itemRepo.items[contentID]; item.RatingTMDB == nil || *item.RatingTMDB != 7.6 {
 		t.Fatalf("rating_tmdb = %v, want 7.6", item.RatingTMDB)
+	}
+}
+
+// Identify changes the title under the same content_id, so a match that
+// reports no sources still replaces the set: the previous match's sources are
+// cleared rather than left describing the item.
+func TestIdentifyWithoutRatingSourcesClearsThem(t *testing.T) {
+	const contentID = "movie:tmdb:100"
+	h := newTestHarness()
+	repo := &fakeRatingSourceRepo{}
+	h.service.ratingSourceRepo = repo
+	seedMovieItem(t, h, contentID, "Title", 2018)
+	h.itemRepo.items[contentID].TmdbID = "100"
+	tmdb := &remoteStubProvider{
+		slug:     "tmdb",
+		metadata: &MetadataResult{HasMetadata: true, Title: "Title", ProviderIDs: map[string]string{"tmdb": "100"}},
+	}
+
+	if _, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
+		ContentID: contentID, Language: "en", Mode: ModeIdentify,
+	}, []Provider{tmdb}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	if len(repo.upserts) != 1 {
+		t.Fatalf("writes = %+v, want one Replace", repo.upserts)
+	}
+	if got := repo.upserts[0]; !got.wholeSet || got.contentID != contentID || len(got.sources) != 0 {
+		t.Fatalf("write = %+v, want an empty Replace of %q", got, contentID)
 	}
 }

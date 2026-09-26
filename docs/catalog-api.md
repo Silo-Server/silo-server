@@ -362,9 +362,12 @@ The four `rating_imdb`, `rating_tmdb`, `rating_rt_critic` and
 the only ratings browse can sort or filter by.
 
 Rating sources follow the same refresh and lock rules as those four members. A
-scheduled refresh only adds sources the item lacks, a manual refresh or identify
-overwrites the sources the providers report, and locking the rating field freezes
-all of them. A refresh never removes a source a provider stopped reporting.
+scheduled refresh only adds sources the item lacks, a manual refresh overwrites
+the sources the providers report, and locking the rating field freezes all of
+them. A refresh never removes a source a provider stopped reporting. Identify
+is the exception: it matches the item to a different title, so the sources the
+new match reports replace the stored set, and a source it does not report is
+removed.
 
 Plugins send them under `ratings.sources` in a metadata item, as
 `{"<source>": {"score": 0-100, "votes": n}}`. The server drops an unknown

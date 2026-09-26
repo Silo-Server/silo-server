@@ -107,3 +107,64 @@ func TestRatingSourceRepositoryUpsertPostgres(t *testing.T) {
 		t.Fatalf("rows left after deleting the item = %d, want 0", remaining)
 	}
 }
+
+func TestRatingSourceRepositoryReplacePostgres(t *testing.T) {
+	pool := newBatchEquivTestPool(t)
+	ctx := context.Background()
+	repo := NewRatingSourceRepository(pool)
+
+	suffix := time.Now().UnixNano()
+	movie := fmt.Sprintf("rating-sources-replace-%d", suffix)
+	other := fmt.Sprintf("rating-sources-replace-other-%d", suffix)
+	t.Cleanup(func() {
+		batchEquivExec(t, pool, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{movie, other})
+	})
+	for _, id := range []string{movie, other} {
+		batchEquivExec(t, pool, `
+			INSERT INTO media_items (content_id, type, title, genres) VALUES ($1, 'movie', 'Rating Sources', '{}'::text[])
+		`, id)
+	}
+
+	votes := func(n int64) *int64 { return &n }
+	row := func(contentID, source string, score float64, v *int64) models.ItemRatingSource {
+		return models.ItemRatingSource{ContentID: contentID, Source: source, Score: score, Votes: v, Provider: "mdblist"}
+	}
+	for _, id := range []string{movie, other} {
+		if err := repo.Upsert(ctx, id, []models.ItemRatingSource{
+			row(id, models.RatingSourceIMDB, 81, votes(1000)),
+			row(id, models.RatingSourceMyAnimeList, 88, votes(50)),
+		}, false); err != nil {
+			t.Fatalf("Upsert(%s) error = %v", id, err)
+		}
+	}
+
+	// The new set overwrites the sources it reports and removes the rest.
+	if err := repo.Replace(ctx, movie, []models.ItemRatingSource{
+		row(movie, models.RatingSourceIMDB, 64, votes(20)),
+		row(movie, models.RatingSourceLetterboxd, 70, nil),
+	}); err != nil {
+		t.Fatalf("Replace() error = %v", err)
+	}
+	got, err := repo.GetByContentID(ctx, movie)
+	if err != nil {
+		t.Fatalf("GetByContentID() error = %v", err)
+	}
+	want := []models.ItemRatingSource{
+		row(movie, models.RatingSourceIMDB, 64, votes(20)),
+		row(movie, models.RatingSourceLetterboxd, 70, nil),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("after Replace = %+v, want %+v", got, want)
+	}
+
+	// An empty set clears the item's sources and no other item's.
+	if err := repo.Replace(ctx, movie, nil); err != nil {
+		t.Fatalf("Replace(empty) error = %v", err)
+	}
+	if got, err := repo.GetByContentID(ctx, movie); err != nil || len(got) != 0 {
+		t.Fatalf("after Replace(empty) = %+v (err %v), want none", got, err)
+	}
+	if got, err := repo.GetByContentID(ctx, other); err != nil || len(got) != 2 {
+		t.Fatalf("other item after Replace = %+v (err %v), want its 2 sources", got, err)
+	}
+}

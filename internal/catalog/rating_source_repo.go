@@ -33,14 +33,56 @@ func (r *RatingSourceRepository) Upsert(ctx context.Context, contentID string, s
 	if contentID == "" {
 		return fmt.Errorf("content_id is required")
 	}
-	if len(sources) == 0 {
-		return nil
-	}
+	return upsertRatingSources(ctx, r.pool, contentID, ratingSourceColumnsOf(sources), replace)
+}
 
-	names := make([]string, 0, len(sources))
-	scores := make([]float64, 0, len(sources))
-	votes := make([]*int64, 0, len(sources))
-	providers := make([]string, 0, len(sources))
+// Replace makes sources the item's complete set of rating sources: it writes
+// each one as Upsert with replace does, and deletes every other source the item
+// has. An empty set deletes them all.
+func (r *RatingSourceRepository) Replace(ctx context.Context, contentID string, sources []models.ItemRatingSource) error {
+	contentID = strings.TrimSpace(contentID)
+	if contentID == "" {
+		return fmt.Errorf("content_id is required")
+	}
+	columns := ratingSourceColumnsOf(sources)
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin replace rating sources transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM media_item_rating_sources
+		WHERE content_id = $1 AND source <> ALL($2::text[])`,
+		contentID, columns.names); err != nil {
+		return fmt.Errorf("delete unreported rating sources: %w", err)
+	}
+	if err := upsertRatingSources(ctx, tx, contentID, columns, true); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// ratingSourceColumns holds rating sources as the parallel arrays the upsert
+// statement unnests, one entry per source.
+type ratingSourceColumns struct {
+	names     []string
+	scores    []float64
+	votes     []*int64
+	providers []string
+}
+
+// ratingSourceColumnsOf splits sources into columns, keeping the first row for
+// a repeated source. names is never nil, so an empty set binds as an empty
+// array rather than NULL.
+func ratingSourceColumnsOf(sources []models.ItemRatingSource) ratingSourceColumns {
+	columns := ratingSourceColumns{
+		names:     make([]string, 0, len(sources)),
+		scores:    make([]float64, 0, len(sources)),
+		votes:     make([]*int64, 0, len(sources)),
+		providers: make([]string, 0, len(sources)),
+	}
 	seen := make(map[string]struct{}, len(sources))
 	for _, source := range sources {
 		// ON CONFLICT cannot touch the same row twice in one statement.
@@ -48,12 +90,18 @@ func (r *RatingSourceRepository) Upsert(ctx context.Context, contentID string, s
 			continue
 		}
 		seen[source.Source] = struct{}{}
-		names = append(names, source.Source)
-		scores = append(scores, source.Score)
-		votes = append(votes, source.Votes)
-		providers = append(providers, source.Provider)
+		columns.names = append(columns.names, source.Source)
+		columns.scores = append(columns.scores, source.Score)
+		columns.votes = append(columns.votes, source.Votes)
+		columns.providers = append(columns.providers, source.Provider)
 	}
+	return columns
+}
 
+func upsertRatingSources(ctx context.Context, db itemExecer, contentID string, columns ratingSourceColumns, replace bool) error {
+	if len(columns.names) == 0 {
+		return nil
+	}
 	conflict := `DO NOTHING`
 	if replace {
 		// Skip unchanged rows so updated_at records when a rating last changed.
@@ -65,12 +113,12 @@ func (r *RatingSourceRepository) Upsert(ctx context.Context, contentID string, s
 		WHERE (media_item_rating_sources.score, media_item_rating_sources.votes, media_item_rating_sources.provider)
 			IS DISTINCT FROM (EXCLUDED.score, EXCLUDED.votes, EXCLUDED.provider)`
 	}
-	_, err := r.pool.Exec(ctx, `
+	_, err := db.Exec(ctx, `
 		INSERT INTO media_item_rating_sources (content_id, source, score, votes, provider)
 		SELECT $1, s.source, s.score, s.votes, s.provider
 		FROM unnest($2::text[], $3::double precision[], $4::bigint[], $5::text[]) AS s(source, score, votes, provider)
 		ON CONFLICT (content_id, source) `+conflict,
-		contentID, names, scores, votes, providers)
+		contentID, columns.names, columns.scores, columns.votes, columns.providers)
 	if err != nil {
 		return fmt.Errorf("upsert rating sources: %w", err)
 	}
