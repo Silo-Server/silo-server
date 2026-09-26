@@ -145,6 +145,33 @@ func LockOwnerActorInTransaction(ctx context.Context, tx pgx.Tx, actorID int) (O
 	return ownerActor(ctx, tx, actorID, " FOR SHARE")
 }
 
+// CreateByOwner holds the Owner's standing through account and profile creation.
+func (r *UserRepository) CreateByOwner(ctx context.Context, actorID int, input models.CreateUserInput, provision func(*models.User, pgx.Tx) error) (*models.User, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	actor, err := LockOwnerActorInTransaction(ctx, tx, actorID)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckGrantAdmin(actor, input.Role); err != nil {
+		return nil, err
+	}
+	user, err := createUser(ctx, tx, input)
+	if err != nil {
+		return nil, err
+	}
+	if err := provision(user, tx); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
 func ownerActor(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, actorID int, lock ...string) (OwnerActor, error) {

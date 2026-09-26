@@ -121,6 +121,19 @@ func TestCreateAdminNeedsOwner(t *testing.T) {
 	}
 }
 
+func TestV1AdminCreationRechecksOwnerBeforeWriting(t *testing.T) {
+	h, repo := newScopedKeyAdminHandler(models.RoleUser)
+	// The initial read sees the Owner, but ownership moves before creation.
+	repo.createByOwnerErr = auth.ErrAdminProtected
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users", strings.NewReader(`{"username":"new","email":"new@example.test","password":"long-enough","role":"admin"}`))
+	req = req.WithContext(apimw.SetClaims(req.Context(), jwtAdminClaims()))
+	rec := httptest.NewRecorder()
+	h.HandleCreateUser(rec, req)
+	if rec.Code != http.StatusForbidden || decodeErrorCode(t, rec) != codeOwnerProtected || repo.created != nil {
+		t.Fatalf("status = %d, body = %s, created = %v", rec.Code, rec.Body.String(), repo.created != nil)
+	}
+}
+
 func TestV1AdminUserHandlersProtectAdmins(t *testing.T) {
 	for _, tc := range []struct {
 		name, method, body string

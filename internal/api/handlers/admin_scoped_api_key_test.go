@@ -26,7 +26,8 @@ type scopedKeyUserRepo struct {
 	updated *models.UpdateUserInput
 	deleted bool
 	// updateErr, when set, is what Update returns.
-	updateErr error
+	updateErr        error
+	createByOwnerErr error
 }
 
 func (r *scopedKeyUserRepo) List(context.Context) ([]*models.User, error) {
@@ -40,6 +41,27 @@ func (r *scopedKeyUserRepo) ListPage(context.Context, int, int, string) ([]*mode
 func (r *scopedKeyUserRepo) Create(_ context.Context, input models.CreateUserInput) (*models.User, error) {
 	r.created = &input
 	return r.user, nil
+}
+
+func (r *scopedKeyUserRepo) CreateByOwner(ctx context.Context, actorID int, input models.CreateUserInput, provision func(*models.User, pgx.Tx) error) (*models.User, error) {
+	if r.createByOwnerErr != nil {
+		return nil, r.createByOwnerErr
+	}
+	actor, err := r.GetByID(ctx, actorID)
+	if auth.IsNotFound(err) {
+		return nil, auth.ErrAdminProtected
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := auth.CheckGrantAdmin(auth.OwnerActor{ID: actor.ID, IsOwner: actor.IsOwner}, input.Role); err != nil {
+		return nil, err
+	}
+	u, err := r.Create(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	return u, provision(u, nil)
 }
 
 func (r *scopedKeyUserRepo) Update(_ context.Context, _ int, input models.UpdateUserInput) error {

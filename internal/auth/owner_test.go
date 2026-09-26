@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"os"
 	"strings"
@@ -8,9 +9,53 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+func TestCreateByOwnerSerializesOwnershipPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	owner := testRoleAccount(t, r, models.RoleAdmin)
+	if _, err := r.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = $1`, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	next := testRoleAccount(t, r, models.RoleAdmin)
+	input := models.CreateUserInput{Username: "created-admin", Email: "created-admin@example.test", Password: "fixture-password", Role: models.RoleAdmin}
+	_, err := r.CreateByOwner(t.Context(), owner.ID, input, func(_ *models.User, _ pgx.Tx) error {
+		other, err := r.pool.Begin(t.Context())
+		if err != nil {
+			return err
+		}
+		defer func() { _ = other.Rollback(context.WithoutCancel(t.Context())) }()
+		if _, err := other.Exec(t.Context(), `SET LOCAL lock_timeout = '100ms'`); err != nil {
+			return err
+		}
+		_, err = other.Exec(t.Context(), `UPDATE users SET is_owner = false WHERE id = $1`, owner.ID)
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); !ok || pgErr.Code != "55P03" {
+			t.Fatalf("ownership write must wait for provisioning, got %v", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.TransferOwnership(t.Context(), owner.ID, next.ID); err != nil {
+		t.Fatal(err)
+	}
+	input.Username, input.Email = "refused-admin", "refused-admin@example.test"
+	_, err = r.CreateByOwner(t.Context(), owner.ID, input, func(_ *models.User, _ pgx.Tx) error {
+		t.Fatal("former Owner reached profile provisioning")
+		return nil
+	})
+	if !errors.Is(err, ErrAdminProtected) {
+		t.Fatalf("former Owner creation: %v", err)
+	}
+	if _, err := r.GetByUsername(t.Context(), input.Username); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("refused account persisted: %v", err)
+	}
+}
 
 func TestOwnerChecks(t *testing.T) {
 	owner := &models.User{ID: 1, Role: models.RoleAdmin, Enabled: true, IsOwner: true}

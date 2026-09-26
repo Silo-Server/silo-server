@@ -802,18 +802,6 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 	if rejectScopedAPIKeyCreate(w, r, req.Role) {
 		return
 	}
-	if req.Role == roleAdmin {
-		actor, err := requestOwnerActor(r.Context(), h.userRepo)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
-			return
-		}
-		if err := auth.CheckGrantAdmin(actor, req.Role); err != nil {
-			writeAPIError(w, ownerError(err))
-			return
-		}
-	}
-
 	if req.Username == "" || req.Email == "" || req.Password == "" || req.Role == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Username, email, password, and role are required")
 		return
@@ -865,7 +853,7 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	user, err := h.accountProvisioner.CreateAccount(r.Context(), auth.CreateAccountInput{
+	user, err := h.accountProvisioner.CreateAccountByAdmin(r.Context(), actorUserID(r.Context()), auth.CreateAccountInput{
 		User: models.CreateUserInput{
 			Username:                 req.Username,
 			Email:                    req.Email,
@@ -890,6 +878,10 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 		},
 	})
 	if err != nil {
+		if errors.Is(err, auth.ErrAdminProtected) {
+			writeAPIError(w, ownerError(err))
+			return
+		}
 		if auth.IsDuplicate(err) {
 			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
 			return
@@ -998,11 +990,6 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		AccessGroupID:            req.AccessGroupID.Optional(),
 	}
 
-	if currentUser == nil {
-		if currentUser, blocked = h.loadTargetUser(w, r, id); blocked {
-			return
-		}
-	}
 	// The Owner rules and the write run in one transaction against the locked
 	// account, so a concurrent promotion or ownership transfer cannot slip
 	// between the check and the update.
