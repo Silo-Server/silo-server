@@ -664,7 +664,7 @@ func (s *Service) attachSessionForConnection(
 	s.mu.Unlock()
 
 	for _, dispatch := range commandDispatches {
-		slog.DebugContext(ctx, "watch together sync sent",
+		slog.DebugContext(ctx, "watch together sync queued",
 			append(memberCommandLogAttrs(roomID, userID, dispatch), "reattaching", reattaching)...)
 	}
 	s.sendDispatches(ctx, dispatches)
@@ -914,7 +914,7 @@ func (s *Service) handleStateReportForConnection(
 	}
 
 	for _, dispatch := range correctionDispatches {
-		slog.DebugContext(ctx, "watch together correction sent",
+		slog.DebugContext(ctx, "watch together correction queued",
 			append(memberCommandLogAttrs(roomID, userID, dispatch),
 				"host", memberIsHost, "reported_position_seconds", report.PositionSeconds,
 				"drift_seconds", drift, "pause_mismatch", pauseMismatch)...)

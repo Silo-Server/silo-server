@@ -65,7 +65,7 @@ func TestDriftCorrectionIsLogged(t *testing.T) {
 	}
 
 	requireLogged(t, logs.String(),
-		`msg="watch together correction sent"`, "room_id=room-1", "user_id=8", "session_id=session-1",
+		`msg="watch together correction queued"`, "room_id=room-1", "user_id=8", "session_id=session-1",
 		"action=play", "target_position_seconds=20", "reported_position_seconds=17", "drift_seconds=3",
 		"host=false", "pause_mismatch=false",
 	)
@@ -89,7 +89,7 @@ func TestReattachSyncIsLogged(t *testing.T) {
 	}
 
 	requireLogged(t, logs.String(),
-		`msg="watch together sync sent"`, "room_id=room-1", "user_id=7", "session_id=host-session",
+		`msg="watch together sync queued"`, "room_id=room-1", "user_id=7", "session_id=host-session",
 		"action=play", "target_position_seconds=20", "reattaching=true",
 	)
 }
