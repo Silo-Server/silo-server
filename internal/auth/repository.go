@@ -339,8 +339,18 @@ func accessGroupSetClause(input models.UpdateUserInput, argIndex int) (setClause
 
 // Update modifies a user's fields. Only non-nil fields in the input are updated.
 // If the input contains a Password, it is bcrypt-hashed before storage.
+// It runs in its own transaction, so a promotion and the credential cleanup
+// it implies commit together.
 func (r *UserRepository) Update(ctx context.Context, id int, input models.UpdateUserInput) error {
-	return updateUser(ctx, r.pool, id, input)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err := updateUser(ctx, tx, id, input); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func updateUser(ctx context.Context, db interface {
@@ -502,9 +512,9 @@ func updatePromotesToAdmin(ctx context.Context, db interface {
 }
 
 // revokeCredentialsIssuedToNonAdmin deletes the API keys and reset links of
-// an account being made an admin. Any admin may mint keys and reset links for
-// an ordinary account and hold on to them; after the promotion they would
-// carry admin authority that only the Owner may grant.
+// an account being made an admin or the Owner. Other admins may have minted
+// them and kept them; afterwards they would carry authority that only the
+// Owner grants.
 func revokeCredentialsIssuedToNonAdmin(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, id int) error {

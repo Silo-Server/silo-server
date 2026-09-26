@@ -139,11 +139,15 @@ administrator returns `422 validation_failed`. The previous Owner stays an
 administrator. The operation has no v1 route and is not retryable; a replay is
 refused because the caller is no longer the Owner. The capability endpoint reports
 `ownership_transfer`. Moving ownership ends every session in which someone views the
-server as the new Owner and deletes the new Owner's reset links.
+server as the new Owner and deletes the new Owner's API keys and reset link, since
+the previous Owner could have created them; the new Owner creates new keys.
 
 Making an account an administrator deletes its API keys and its reset link. Any
 administrator may create those for an ordinary account, so after a promotion they
-would carry administrator authority that only the Owner grants.
+would carry administrator authority that only the Owner grants. An API key or reset
+link an administrator issues on another account is stored only while that account
+keeps the role and Owner flag the request was authorized against; a promotion or
+ownership move that lands in between returns `409 conflict`.
 
 When the Owner account is lost or locked out, someone with shell access to a node
 and the server's `DATABASE_URL` recovers it with `silo owner set <username>`, for

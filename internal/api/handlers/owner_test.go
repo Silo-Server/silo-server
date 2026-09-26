@@ -270,12 +270,13 @@ func TestPasswordResetRefusesOwnerForOtherAdmins(t *testing.T) {
 // testAdminID and 7 are other admins, and every other account is a user.
 type fakeOwners struct{}
 
-func (fakeOwners) CheckOwnerTargetByID(_ context.Context, actorID, userID int) error {
+func (fakeOwners) CheckOwnerTargetByID(_ context.Context, actorID, userID int) (auth.AccountStanding, error) {
 	role := models.RoleUser
 	if userID == testOwnerID || userID == testAdminID || userID == 7 {
 		role = models.RoleAdmin
 	}
-	return auth.CheckOwnerTarget(auth.OwnerActor{ID: actorID, IsOwner: actorID == testOwnerID}, &models.User{ID: userID, Role: role, IsOwner: userID == testOwnerID})
+	target := &models.User{ID: userID, Role: role, IsOwner: userID == testOwnerID}
+	return auth.StandingOf(target), auth.CheckOwnerTarget(auth.OwnerActor{ID: actorID, IsOwner: actorID == testOwnerID}, target)
 }
 
 // ownerKeyStore holds one key, owned by the Owner.
@@ -328,6 +329,17 @@ func TestAdminAPIKeysProtectOwner(t *testing.T) {
 	if _, err := h.CreateAdminAPIKey(claimsCtx(testOwnerID), testAdminID, "delegated", nil); err != nil || !store.created {
 		t.Fatalf("owner minting a key for another admin: %v", err)
 	}
+	if store.standing == nil || *store.standing != (auth.AccountStanding{Role: models.RoleAdmin}) {
+		t.Fatalf("the key was not stored under the checked standing: %+v", store.standing)
+	}
+	// An account promoted between the check and the insert gets no key.
+	store.created, store.accountChanged = false, true
+	_, err = h.CreateAdminAPIKey(claimsCtx(7), 8, "raced", nil)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusConflict || store.created {
+		t.Fatalf("key for an account that changed: %v, created %v", err, store.created)
+	}
+	store.accountChanged = false
 	if _, err := h.CreateAdminAPIKey(claimsCtx(testOwnerID), testOwnerID, "own", nil); err != nil {
 		t.Fatalf("owner minting its own key: %v", err)
 	}

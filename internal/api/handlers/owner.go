@@ -14,7 +14,7 @@ import (
 // ownerTargetChecker applies auth.CheckOwnerTarget to an account the caller
 // holds only the ID of. *auth.UserRepository implements it.
 type ownerTargetChecker interface {
-	CheckOwnerTargetByID(ctx context.Context, actorID, userID int) error
+	CheckOwnerTargetByID(ctx context.Context, actorID, userID int) (auth.AccountStanding, error)
 }
 
 // actorUserID is the login account making the request; zero without claims,
@@ -74,6 +74,8 @@ func ownerError(err error) error {
 		return &APIError{Status: http.StatusForbidden, Code: codeOwnerProtected, Message: "You cannot change your own role, disable your account, or delete it", cause: err}
 	case errors.Is(err, auth.ErrNotOwner):
 		return &APIError{Status: http.StatusForbidden, Code: codeOwnerProtected, Message: "Only the server owner can transfer ownership", cause: err}
+	case errors.Is(err, auth.ErrAccountChanged):
+		return &APIError{Status: http.StatusConflict, Code: policyErrorConflict, Message: "The account's role or ownership changed; reload and try again", cause: err}
 	case errors.Is(err, auth.ErrOwnershipTarget):
 		return &APIError{Status: http.StatusUnprocessableEntity, Code: "validation_failed", Message: "Ownership can only move to another enabled admin account", cause: err}
 	}

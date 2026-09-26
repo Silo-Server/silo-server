@@ -20,6 +20,7 @@ import (
 // so the handlers can be exercised without a database.
 type APIKeyStore interface {
 	Create(ctx context.Context, userID int, label string, scopes []string) (*models.APIKey, error)
+	CreateForStanding(ctx context.Context, userID int, standing auth.AccountStanding, label string, scopes []string) (*models.APIKey, error)
 	ListByUser(ctx context.Context, userID int) ([]*models.APIKeyMetadataWithUsage, error)
 	ListByUserAdmin(ctx context.Context, userID int) ([]*models.APIKeyMetadataWithUsage, error)
 	ListAll(ctx context.Context) ([]*models.APIKeyMetadataWithUser, error)
@@ -40,18 +41,37 @@ type APIKeyHandler struct {
 	Owners ownerTargetChecker
 }
 
-// checkOwnerAccount refuses the admin key operations on the Owner's account
-// unless the caller is the Owner. An unknown account passes, so the operation
+// checkOwnerAccount applies the Owner rules to the admin key operations on
+// account userID and returns the standing it checked, or nil when there is
+// nothing to hold a write to. An unknown account passes, so the operation
 // reports it the way it always has.
-func (h *APIKeyHandler) checkOwnerAccount(ctx context.Context, userID int) error {
+func (h *APIKeyHandler) checkOwnerAccount(ctx context.Context, userID int) (*auth.AccountStanding, error) {
 	if h.Owners == nil {
-		return nil
+		return nil, nil
 	}
-	err := h.Owners.CheckOwnerTargetByID(ctx, actorUserID(ctx), userID)
+	standing, err := h.Owners.CheckOwnerTargetByID(ctx, actorUserID(ctx), userID)
 	if errors.Is(err, auth.ErrNotFound) {
-		return nil
+		return nil, nil
 	}
-	return ownerError(err)
+	if err != nil {
+		return nil, ownerError(err)
+	}
+	return &standing, nil
+}
+
+// createAdminKey stores a key an administrator issues on account userID,
+// only while the account keeps the standing the Owner rules were checked
+// against.
+func (h *APIKeyHandler) createAdminKey(ctx context.Context, userID int, label string, scopes []string) (*models.APIKey, error) {
+	standing, err := h.checkOwnerAccount(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if standing == nil {
+		return h.repo.Create(ctx, userID, label, scopes)
+	}
+	key, err := h.repo.CreateForStanding(ctx, userID, *standing, label, scopes)
+	return key, ownerError(err)
 }
 
 // checkOwnerKey is checkOwnerAccount for the account holding key id.
@@ -66,7 +86,8 @@ func (h *APIKeyHandler) checkOwnerKey(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	return h.checkOwnerAccount(ctx, key.UserID)
+	_, err = h.checkOwnerAccount(ctx, key.UserID)
+	return err
 }
 
 // NewAPIKeyHandler creates a new APIKeyHandler.
@@ -394,13 +415,13 @@ func (h *APIKeyHandler) HandleAdminCreateAPIKey(w http.ResponseWriter, r *http.R
 	if req.UserID != nil {
 		targetUserID = *req.UserID
 	}
-	if err := h.checkOwnerAccount(r.Context(), targetUserID); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	key, err := h.repo.Create(r.Context(), targetUserID, req.Label, scopes)
+	key, err := h.createAdminKey(r.Context(), targetUserID, req.Label, scopes)
 	if err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			writeAPIError(w, apiErr)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create API key")
 		return
 	}
@@ -423,10 +444,7 @@ func (h *APIKeyHandler) CreateAdminAPIKey(ctx context.Context, userID int, label
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAPIKeyCreation, err)
 	}
-	if err := h.checkOwnerAccount(ctx, userID); err != nil {
-		return nil, err
-	}
-	return h.repo.Create(ctx, userID, label, normalized)
+	return h.createAdminKey(ctx, userID, label, normalized)
 }
 
 func (h *APIKeyHandler) GetAdminAPIKey(ctx context.Context, id int64) (*APIKeyConfiguration, error) {

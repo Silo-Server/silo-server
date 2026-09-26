@@ -35,6 +35,25 @@ var (
 	ErrOwnershipTarget = errors.New("ownership can only move to another enabled admin account")
 )
 
+// AccountStanding is the role and Owner flag an authorization check saw on
+// the account a credential is issued for. The issuing write stores the
+// credential only while the account still has that standing, holding its row
+// share-locked, so a promotion or ownership move that commits in between
+// cannot leave behind a credential the check would now refuse.
+type AccountStanding struct {
+	Role    string
+	IsOwner bool
+}
+
+// ErrAccountChanged reports an account whose role or Owner flag changed
+// after the authorization check, so the credential was not issued.
+var ErrAccountChanged = errors.New("the account's role or ownership changed; reload and try again")
+
+// StandingOf is the standing a check sees on a loaded account.
+func StandingOf(u *models.User) AccountStanding {
+	return AccountStanding{Role: u.Role, IsOwner: u.IsOwner}
+}
+
 // OwnerActor is the account making a change, as the Owner rules see it. The
 // zero value is no account and never the Owner.
 type OwnerActor struct {
@@ -138,8 +157,9 @@ func ownerActor(ctx context.Context, db interface {
 }
 
 // CheckOwnerTargetByID loads the actor and the account userID and applies
-// CheckOwnerTarget, for callers that hold only the account ID.
-func (r *UserRepository) CheckOwnerTargetByID(ctx context.Context, actorID, userID int) error {
+// CheckOwnerTarget, for callers that hold only the account ID. It returns the
+// standing it checked, for a write that must not outlive it.
+func (r *UserRepository) CheckOwnerTargetByID(ctx context.Context, actorID, userID int) (AccountStanding, error) {
 	var target models.User
 	var actorIsOwner bool
 	err := r.pool.QueryRow(ctx, `
@@ -148,11 +168,11 @@ func (r *UserRepository) CheckOwnerTargetByID(ctx context.Context, actorID, user
 		FROM users WHERE id = $2`, actorID, userID).Scan(&target.ID, &target.Role, &target.IsOwner, &actorIsOwner)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
+			return AccountStanding{}, ErrNotFound
 		}
-		return err
+		return AccountStanding{}, err
 	}
-	return CheckOwnerTarget(OwnerActor{ID: actorID, IsOwner: actorIsOwner}, &target)
+	return StandingOf(&target), CheckOwnerTarget(OwnerActor{ID: actorID, IsOwner: actorIsOwner}, &target)
 }
 
 // TransferOwnership makes toID the Owner in place of fromID, which must be
@@ -205,8 +225,8 @@ func (r *UserRepository) TransferOwnership(ctx context.Context, fromID, toID int
 // moveOwnership clears the current Owner before marking the next: the
 // single-Owner index is checked row by row. It also ends every session in
 // which someone views the server as the new Owner and deletes the new
-// Owner's reset links: nobody may act as the Owner, and a link issued before
-// the move must not hand over the Owner's account.
+// Owner's API keys and reset link: nobody may act as the Owner, and a
+// credential issued before the move must not carry the Owner's authority.
 func moveOwnership(ctx context.Context, tx pgx.Tx, fromID, toID int) error {
 	if fromID > 0 {
 		if _, err := tx.Exec(ctx, `UPDATE users SET is_owner = false WHERE id = $1`, fromID); err != nil {
@@ -221,10 +241,9 @@ func moveOwnership(ctx context.Context, tx pgx.Tx, fromID, toID int) error {
 		WHERE user_id = $1 AND impersonator_user_id IS NOT NULL AND revoked_at IS NULL`, toID); err != nil {
 		return fmt.Errorf("ending sessions viewing as the owner: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM password_reset_tokens WHERE user_id = $1`, toID); err != nil {
-		return fmt.Errorf("deleting the owner's reset links: %w", err)
-	}
-	return nil
+	// The previous Owner may have created keys and a reset link on the
+	// account before handing it over; none of them may carry Owner authority.
+	return revokeCredentialsIssuedToNonAdmin(ctx, tx, toID)
 }
 
 // SetOwner makes the account username the Owner, for recovery from the

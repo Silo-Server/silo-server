@@ -166,7 +166,7 @@ func TestPromotionRevokesIssuedCredentialsPostgres(t *testing.T) {
 	}
 }
 
-func TestOwnershipMoveEndsViewAsSessionsPostgres(t *testing.T) {
+func TestOwnershipMoveEndsViewAsSessionsAndCredentialsPostgres(t *testing.T) {
 	r := adminAccountsDB(t)
 	owner := testRoleAccount(t, r, models.RoleAdmin)
 	if _, err := r.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = $1`, owner.ID); err != nil {
@@ -197,11 +197,30 @@ func TestOwnershipMoveEndsViewAsSessionsPostgres(t *testing.T) {
 			t.Errorf("session %s: revoked %v, want %v", id, revoked, wantRevoked)
 		}
 	}
-	if keys, links := countTestCredentials(t, r, admin.ID); keys != 1 || links != 0 {
-		t.Fatalf("new owner: keys %d, links %d; want its own key kept and the link gone", keys, links)
+	if keys, links := countTestCredentials(t, r, admin.ID); keys != 0 || links != 0 {
+		t.Fatalf("new owner: keys %d, links %d; want both gone", keys, links)
 	}
 	if actor, err := lockedOwnerActor(t, r, admin.ID); err != nil || !actor.IsOwner {
 		t.Fatalf("locked actor read: %+v, %v", actor, err)
+	}
+}
+
+func TestAdminKeyNeedsTheCheckedStandingPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	user := testRoleAccount(t, r, models.RoleUser)
+	keys := NewAPIKeyRepository(r.pool)
+	checked := AccountStanding{Role: models.RoleUser}
+	if _, err := keys.CreateForStanding(t.Context(), user.ID, checked, "ok", nil); err != nil {
+		t.Fatalf("key under an unchanged standing: %v", err)
+	}
+	if err := r.Update(t.Context(), user.ID, models.UpdateUserInput{Role: new(models.RoleAdmin)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keys.CreateForStanding(t.Context(), user.ID, checked, "stale", nil); !errors.Is(err, ErrAccountChanged) {
+		t.Fatalf("key under a stale standing: %v", err)
+	}
+	if n, _ := countTestCredentials(t, r, user.ID); n != 0 {
+		t.Fatalf("promoted account holds %d keys", n)
 	}
 }
 
@@ -288,23 +307,23 @@ func TestInitialSetupClaimsOwnerPostgres(t *testing.T) {
 	if other.IsOwner {
 		t.Fatal("a later account became the owner")
 	}
-	if err := r.CheckOwnerTargetByID(t.Context(), other.ID, created.ID); !errors.Is(err, ErrOwnerProtected) {
+	if _, err := r.CheckOwnerTargetByID(t.Context(), other.ID, created.ID); !errors.Is(err, ErrOwnerProtected) {
 		t.Fatalf("another account targeting the owner: %v", err)
 	}
-	if err := r.CheckOwnerTargetByID(t.Context(), created.ID, created.ID); err != nil {
+	if _, err := r.CheckOwnerTargetByID(t.Context(), created.ID, created.ID); err != nil {
 		t.Fatalf("owner targeting itself: %v", err)
 	}
-	if err := r.CheckOwnerTargetByID(t.Context(), created.ID, other.ID); err != nil {
+	if _, err := r.CheckOwnerTargetByID(t.Context(), created.ID, other.ID); err != nil {
 		t.Fatalf("owner targeting another account: %v", err)
 	}
 	promoted := testRoleAccount(t, r, models.RoleAdmin)
-	if err := r.CheckOwnerTargetByID(t.Context(), other.ID, promoted.ID); !errors.Is(err, ErrAdminProtected) {
+	if _, err := r.CheckOwnerTargetByID(t.Context(), other.ID, promoted.ID); !errors.Is(err, ErrAdminProtected) {
 		t.Fatalf("an account targeting another admin: %v", err)
 	}
-	if err := r.CheckOwnerTargetByID(t.Context(), created.ID, promoted.ID); err != nil {
+	if _, err := r.CheckOwnerTargetByID(t.Context(), created.ID, promoted.ID); err != nil {
 		t.Fatalf("owner targeting another admin: %v", err)
 	}
-	if err := r.CheckOwnerTargetByID(t.Context(), created.ID, other.ID+1000); !errors.Is(err, ErrNotFound) {
+	if _, err := r.CheckOwnerTargetByID(t.Context(), created.ID, other.ID+1000); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing account: %v", err)
 	}
 }

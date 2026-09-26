@@ -24,6 +24,9 @@ func (s *scopeCatalogStore) Create(_ context.Context, userID int, label string, 
 	s.created, s.scopes = true, scopes
 	return &models.APIKey{ID: 8, UserID: userID, Label: label, Key: "creation-secret", RateTier: adminAPIKeyStandardTier, Scopes: scopes, CreatedAt: fixedTime()}, nil
 }
+func (s *scopeCatalogStore) CreateForStanding(ctx context.Context, userID int, _ auth.AccountStanding, label string, scopes []string) (*models.APIKey, error) {
+	return s.Create(ctx, userID, label, scopes)
+}
 func (s *scopeCatalogStore) ListByUser(context.Context, int) ([]*models.APIKeyMetadataWithUsage, error) {
 	return nil, nil
 }

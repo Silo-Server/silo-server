@@ -67,24 +67,42 @@ type Link struct {
 // Issue stores the digest of a new link for the account, replacing any
 // earlier one: an account has at most one live link. It refuses an account
 // that cannot sign in with a local password.
-func (r *Repository) Issue(ctx context.Context, userID int, tokenHash string, issuedBy *int, expiresAt time.Time) error {
+func (r *Repository) Issue(ctx context.Context, userID int, tokenHash string, issuedBy *int, expiresAt time.Time, standing *auth.AccountStanding) error {
+	// With a standing, the link is stored only while the account still has
+	// the role and Owner flag the issuer was authorized against, with its row
+	// share-locked, so a promotion that commits in between cannot leave behind
+	// a link the issuer may no longer hold.
+	var role *string
+	var isOwner *bool
+	if standing != nil {
+		role, isOwner = &standing.Role, &standing.IsOwner
+	}
 	tag, err := r.pool.Exec(ctx, `
 		INSERT INTO password_reset_tokens (user_id, token_hash, password_fingerprint, issued_by, expires_at)
 		SELECT u.id, $2, `+passwordFingerprint+`, $3, $4 FROM users u WHERE u.id = $1 AND `+eligibleAccount+`
+			AND ($5::text IS NULL OR (u.role = $5 AND u.is_owner = $6))
+		FOR SHARE OF u
 		ON CONFLICT (user_id) DO UPDATE SET
 			token_hash = EXCLUDED.token_hash,
 			password_fingerprint = EXCLUDED.password_fingerprint,
 			issued_by = EXCLUDED.issued_by,
 			expires_at = EXCLUDED.expires_at,
 			created_at = now()`,
-		userID, tokenHash, issuedBy, expiresAt)
+		userID, tokenHash, issuedBy, expiresAt, role, isOwner)
 	if err != nil {
 		return fmt.Errorf("issuing password reset link: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotEligible
+	if tag.RowsAffected() > 0 {
+		return nil
 	}
-	return nil
+	if standing != nil {
+		var current auth.AccountStanding
+		err := r.pool.QueryRow(ctx, `SELECT role, is_owner FROM users WHERE id = $1`, userID).Scan(&current.Role, &current.IsOwner)
+		if err == nil && current != *standing {
+			return auth.ErrAccountChanged
+		}
+	}
+	return ErrNotEligible
 }
 
 // IssueUnlessRecent is Issue for a link the account holder asked for
