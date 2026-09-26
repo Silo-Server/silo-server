@@ -25,6 +25,10 @@ var AllowedSyncSchedules = map[string]string{
 	"monthly": syncScheduleMonthly,
 }
 
+// UserSyncSchedulePresets is the ordered set of bounded cadence labels
+// available to every account.
+var UserSyncSchedulePresets = []string{"daily", "weekly", "monthly"}
+
 // AdminSyncSchedulePresets mirrors the preset cron values offered for admin
 // library collections. Admins may also submit any other valid five-field cron.
 var AdminSyncSchedulePresets = []string{
