@@ -742,6 +742,9 @@ function UserForm({
   const viewerId = useAuth().user?.id;
   const viewerIsOwner = useViewerIsOwner(viewerId);
   const adminRoleLocked = !viewerIsOwner && user?.role !== "admin";
+  // No account changes its own role; the server refuses it. The Owner's
+  // role is also fixed by its standing.
+  const ownRole = user?.id !== undefined && user?.id === viewerId;
   const [createDefaultProfile, setCreateDefaultProfile] = useState(true);
   async function reload() {
     if (!editor || busy.current) return;
@@ -989,7 +992,7 @@ function UserForm({
               )}
               <div className="space-y-2">
                 <Label htmlFor={roleId}>Role</Label>
-                <Select value={role} onValueChange={setRole} disabled={user?.is_owner}>
+                <Select value={role} onValueChange={setRole} disabled={user?.is_owner || ownRole}>
                   <SelectTrigger id={roleId}>
                     <SelectValue />
                   </SelectTrigger>
@@ -1000,10 +1003,14 @@ function UserForm({
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                {adminRoleLocked && (
-                  <p className="text-muted-foreground text-xs">
-                    Only the server owner can grant the admin role.
-                  </p>
+                {ownRole ? (
+                  <p className="text-muted-foreground text-xs">You can't change your own role.</p>
+                ) : (
+                  adminRoleLocked && (
+                    <p className="text-muted-foreground text-xs">
+                      Only the server owner can grant the admin role.
+                    </p>
+                  )
                 )}
               </div>
             </div>

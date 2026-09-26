@@ -24,6 +24,10 @@ var (
 	// ErrAdminProtected refuses a caller other than the Owner granting the
 	// admin role or changing another admin's account.
 	ErrAdminProtected = errors.New("only the server owner can grant the admin role or change another admin account")
+	// ErrSelfRole refuses an account changing its own role: an admin that
+	// demotes itself locks itself out of administration, and only the Owner
+	// may change an admin's role.
+	ErrSelfRole = errors.New("an account cannot change its own role")
 	// ErrNotOwner refuses a caller other than the Owner transferring ownership.
 	ErrNotOwner = errors.New("only the server owner can transfer ownership")
 	// ErrOwnershipTarget refuses transferring ownership to an account that
@@ -63,9 +67,10 @@ func CheckGrantAdmin(actor OwnerActor, role string) error {
 	return nil
 }
 
-// CheckOwnerUpdate is CheckOwnerTarget plus promotion and the Owner's own
-// standing: only the Owner may make an account an admin, and the update may
-// not remove the Owner's admin role or disable it.
+// CheckOwnerUpdate is CheckOwnerTarget plus promotion, the Owner's own
+// standing, and self role changes: only the Owner may make an account an
+// admin, the update may not remove the Owner's admin role or disable it, and
+// no account may change its own role.
 func CheckOwnerUpdate(actor OwnerActor, target *models.User, input models.UpdateUserInput) error {
 	if err := CheckOwnerTarget(actor, target); err != nil {
 		return err
@@ -81,6 +86,9 @@ func CheckOwnerUpdate(actor OwnerActor, target *models.User, input models.Update
 	if target.IsOwner &&
 		((input.Role != nil && *input.Role != models.RoleAdmin) || (input.Enabled != nil && !*input.Enabled)) {
 		return ErrOwnerStanding
+	}
+	if target.ID == actor.ID && input.Role != nil && *input.Role != target.Role {
+		return ErrSelfRole
 	}
 	return nil
 }

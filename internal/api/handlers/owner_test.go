@@ -74,6 +74,7 @@ func TestAdminAccountServiceProtectsOwner(t *testing.T) {
 		{"admin edits user", userAccount(), other, update(models.UpdateUserInput{Username: &rename}), true},
 		{"admin deletes user", userAccount(), other, remove, true},
 		{"admin edits self", adminAccount(), testAdminID, update(models.UpdateUserInput{Username: &rename}), true},
+		{"admin demotes self", adminAccount(), testAdminID, update(models.UpdateUserInput{Role: &demote}), false},
 		{"owner edits admin", adminAccount(), testOwnerID, update(models.UpdateUserInput{Username: &rename}), true},
 		{"owner demotes admin", adminAccount(), testOwnerID, update(models.UpdateUserInput{Role: &demote}), true},
 		{"owner deletes admin", adminAccount(), testOwnerID, remove, true},
@@ -130,6 +131,8 @@ func TestV1AdminUserHandlersProtectAdmins(t *testing.T) {
 		{"admin promotes user", http.MethodPut, `{"role":"admin"}`, userAccount(), 7, http.StatusForbidden},
 		{"admin edits user", http.MethodPut, `{"email":"new@example.test"}`, userAccount(), 7, http.StatusOK},
 		{"admin edits self", http.MethodPut, `{"email":"new@example.test"}`, adminAccount(), testAdminID, http.StatusOK},
+		{"admin demotes self", http.MethodPut, `{"role":"user"}`, adminAccount(), testAdminID, http.StatusForbidden},
+		{"admin saves self with its role unchanged", http.MethodPut, `{"role":"admin","email":"new@example.test"}`, adminAccount(), testAdminID, http.StatusOK},
 		{"owner demotes admin", http.MethodPut, `{"role":"user"}`, adminAccount(), scopedKeyTestOwnerID, http.StatusOK},
 		{"owner deletes admin", http.MethodDelete, "", adminAccount(), scopedKeyTestOwnerID, http.StatusNoContent},
 	} {

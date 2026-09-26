@@ -46,6 +46,8 @@ func TestOwnerChecks(t *testing.T) {
 		{"admin deletes admin", CheckOwnerDelete(asAdmin, admin), ErrAdminProtected},
 		{"admin targets admin", CheckOwnerTarget(asAdmin, admin), ErrAdminProtected},
 		{"admin edits self", CheckOwnerUpdate(OwnerActor{ID: admin.ID}, admin, rename), nil},
+		{"admin demotes self", CheckOwnerUpdate(OwnerActor{ID: admin.ID}, admin, demote), ErrSelfRole},
+		{"admin resends own role", CheckOwnerUpdate(OwnerActor{ID: admin.ID}, admin, promote), nil},
 		{"admin promotes user", CheckOwnerUpdate(asAdmin, user, promote), ErrAdminProtected},
 		{"admin edits user", CheckOwnerUpdate(asAdmin, user, disable), nil},
 		{"admin deletes user", CheckOwnerDelete(asAdmin, user), nil},
