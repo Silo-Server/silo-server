@@ -53,12 +53,14 @@ func (t *RefreshTrendingDiscoverTask) Execute(ctx context.Context, progress task
 		return errors.New("trending discover refresh: refresher not configured")
 	}
 
+	// RunOnce can return a summary alongside an error: a failed section
+	// listing still refreshes the calendar feed.
 	resultData, err := t.refresher.RunOnce(ctx)
-	if err != nil {
-		return fmt.Errorf("trending discover refresh: %w", err)
-	}
 	if resultData != nil {
 		progress.SetResultData(resultData)
+	}
+	if err != nil {
+		return fmt.Errorf("trending discover refresh: %w", err)
 	}
 
 	progress.Report(100, "Trending discover refresh complete")
