@@ -151,10 +151,7 @@ open source program.
 
 <p>
   <a href="https://macroscope.com">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="assets/macroscope-logotype-white.svg">
-      <img alt="Macroscope" src="assets/macroscope-logotype-black.svg" width="240">
-    </picture>
+    <img alt="Sponsored by Macroscope" src="assets/macroscope-banner.png" width="400">
   </a>
 </p>
 
