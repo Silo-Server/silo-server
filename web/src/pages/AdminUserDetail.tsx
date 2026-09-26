@@ -328,7 +328,7 @@ function AdminUserDetailPage() {
               Make owner
             </Button>
           )}
-          {!user.is_owner && manageable && (
+          {!user.is_owner && user.id !== viewerId && manageable && (
             <Button
               variant="destructive"
               size="sm"
@@ -1254,9 +1254,9 @@ function EditUserForm({
   const viewerId = useAuth().user?.id;
   const viewerIsOwner = useViewerIsOwner(viewerId);
   const adminRoleLocked = !viewerIsOwner && user.role !== "admin";
-  // No account changes its own role; the server refuses it. The Owner's
-  // role is also fixed by its standing.
-  const ownRole = user.id === viewerId;
+  // No account changes its own role or disables itself; the server refuses
+  // both. The Owner's standing fixes the same fields.
+  const ownAccount = user.id === viewerId;
   const busy = useRef(false);
   const [conflict, setConflict] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1295,6 +1295,7 @@ function EditUserForm({
   const [maxProfiles, setMaxProfiles] = useState(user.max_profiles);
   const accessGroupSelectId = useId();
   const roleSelectId = useId();
+  const enabledSwitchId = useId();
   const passwordInputId = useId();
   const requireChangeId = useId();
   const markerEditId = useId();
@@ -1429,7 +1430,7 @@ function EditUserForm({
               )}
               <div className="space-y-2">
                 <Label htmlFor={roleSelectId}>Role</Label>
-                <Select value={role} onValueChange={setRole} disabled={user.is_owner || ownRole}>
+                <Select value={role} onValueChange={setRole} disabled={user.is_owner || ownAccount}>
                   <SelectTrigger id={roleSelectId}>
                     <SelectValue />
                   </SelectTrigger>
@@ -1440,7 +1441,7 @@ function EditUserForm({
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                {ownRole ? (
+                {ownAccount ? (
                   <p className="text-muted-foreground text-xs">You can't change your own role.</p>
                 ) : (
                   adminRoleLocked && (
@@ -1457,12 +1458,21 @@ function EditUserForm({
                 <div className="text-muted-foreground text-xs">
                   {user.is_owner
                     ? "The server owner stays an enabled admin."
-                    : "Disable access without deleting the user."}
+                    : ownAccount
+                      ? "You can't disable your own account."
+                      : "Disable access without deleting the user."}
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Label className="text-xs">Enabled</Label>
-                <Switch checked={enabled} onCheckedChange={setEnabled} disabled={user.is_owner} />
+                <Label htmlFor={enabledSwitchId} className="text-xs">
+                  Enabled
+                </Label>
+                <Switch
+                  id={enabledSwitchId}
+                  checked={enabled}
+                  onCheckedChange={setEnabled}
+                  disabled={user.is_owner || ownAccount}
+                />
               </div>
             </div>
           </TabsContent>

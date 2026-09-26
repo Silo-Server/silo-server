@@ -347,6 +347,7 @@ describe("AdminUsers row actions", () => {
     expect(screen.queryByRole("button", { name: "Edit other" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete other" })).toBeNull();
     expect(screen.getByRole("button", { name: "Edit self" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete self" })).toBeNull();
     expect(screen.getByRole("button", { name: "Edit taylor" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete taylor" })).toBeInTheDocument();
   });

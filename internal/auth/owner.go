@@ -24,10 +24,10 @@ var (
 	// ErrAdminProtected refuses a caller other than the Owner granting the
 	// admin role or changing another admin's account.
 	ErrAdminProtected = errors.New("only the server owner can grant the admin role or change another admin account")
-	// ErrSelfRole refuses an account changing its own role: an admin that
-	// demotes itself locks itself out of administration, and only the Owner
-	// may change an admin's role.
-	ErrSelfRole = errors.New("an account cannot change its own role")
+	// ErrSelfStanding refuses an account changing its own role, disabling
+	// itself, or deleting itself: an admin that does any of these locks
+	// itself out, and only the Owner changes or removes admins.
+	ErrSelfStanding = errors.New("an account cannot change its own role, disable itself, or delete itself")
 	// ErrNotOwner refuses a caller other than the Owner transferring ownership.
 	ErrNotOwner = errors.New("only the server owner can transfer ownership")
 	// ErrOwnershipTarget refuses transferring ownership to an account that
@@ -67,10 +67,10 @@ func CheckGrantAdmin(actor OwnerActor, role string) error {
 	return nil
 }
 
-// CheckOwnerUpdate is CheckOwnerTarget plus promotion, the Owner's own
-// standing, and self role changes: only the Owner may make an account an
-// admin, the update may not remove the Owner's admin role or disable it, and
-// no account may change its own role.
+// CheckOwnerUpdate is CheckOwnerTarget plus promotion and standing: only the
+// Owner may make an account an admin, the update may not remove the Owner's
+// admin role or disable it, and no account may change its own role or
+// disable itself.
 func CheckOwnerUpdate(actor OwnerActor, target *models.User, input models.UpdateUserInput) error {
 	if err := CheckOwnerTarget(actor, target); err != nil {
 		return err
@@ -87,19 +87,24 @@ func CheckOwnerUpdate(actor OwnerActor, target *models.User, input models.Update
 		((input.Role != nil && *input.Role != models.RoleAdmin) || (input.Enabled != nil && !*input.Enabled)) {
 		return ErrOwnerStanding
 	}
-	if target.ID == actor.ID && input.Role != nil && *input.Role != target.Role {
-		return ErrSelfRole
+	if target.ID == actor.ID &&
+		((input.Role != nil && *input.Role != target.Role) || (input.Enabled != nil && !*input.Enabled)) {
+		return ErrSelfStanding
 	}
 	return nil
 }
 
-// CheckOwnerDelete is CheckOwnerTarget, and refuses deleting the Owner by anyone.
+// CheckOwnerDelete is CheckOwnerTarget, and refuses deleting the Owner by
+// anyone and any account deleting itself.
 func CheckOwnerDelete(actor OwnerActor, target *models.User) error {
 	if err := CheckOwnerTarget(actor, target); err != nil {
 		return err
 	}
 	if target != nil && target.IsOwner {
 		return ErrOwnerStanding
+	}
+	if target != nil && target.ID == actor.ID {
+		return ErrSelfStanding
 	}
 	return nil
 }

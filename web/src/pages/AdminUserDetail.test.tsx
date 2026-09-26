@@ -933,7 +933,7 @@ describe("AdminUserDetail server owner", () => {
     expect(screen.getByText("Only the server owner can grant the admin role.")).toBeInTheDocument();
   });
 
-  it("keeps an admin from changing its own role", async () => {
+  it("keeps an admin from changing its own role or disabling itself", async () => {
     const user = userEvent.setup();
     mocks.user = { ...adminUser, role: "admin" };
     mocks.viewer = { id: adminUser.id };
@@ -941,6 +941,16 @@ describe("AdminUserDetail server owner", () => {
     await user.click(screen.getByRole("button", { name: /edit/i }));
     expect(screen.getByRole("combobox", { name: "Role" })).toBeDisabled();
     expect(screen.getByText("You can't change your own role.")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Enabled" })).toBeDisabled();
+    expect(screen.getByText("You can't disable your own account.")).toBeInTheDocument();
+  });
+
+  it("offers no Delete on the viewer's own account", async () => {
+    mocks.user = { ...adminUser, role: "admin" };
+    mocks.viewer = { id: adminUser.id };
+    renderUserDetail();
+    expect(await screen.findByRole("button", { name: /Edit/ })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
   });
 
   it("lets the owner view as another admin", async () => {

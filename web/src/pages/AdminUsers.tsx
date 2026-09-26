@@ -512,22 +512,24 @@ function AdminUsersPage() {
                               <TooltipContent>Edit user</TooltipContent>
                             </Tooltip>
                           )}
-                          {!u.is_owner && canManageAccount(u, viewerId, viewerIsOwner) && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7"
-                                  aria-label={`Delete ${u.username}`}
-                                  onClick={() => handleDelete(u)}
-                                >
-                                  <Trash2 className="h-3 w-3" aria-hidden="true" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Delete user</TooltipContent>
-                            </Tooltip>
-                          )}
+                          {!u.is_owner &&
+                            u.id !== viewerId &&
+                            canManageAccount(u, viewerId, viewerIsOwner) && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    aria-label={`Delete ${u.username}`}
+                                    onClick={() => handleDelete(u)}
+                                  >
+                                    <Trash2 className="h-3 w-3" aria-hidden="true" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Delete user</TooltipContent>
+                              </Tooltip>
+                            )}
                         </div>
                       </TooltipProvider>
                     </TableCell>
@@ -742,9 +744,9 @@ function UserForm({
   const viewerId = useAuth().user?.id;
   const viewerIsOwner = useViewerIsOwner(viewerId);
   const adminRoleLocked = !viewerIsOwner && user?.role !== "admin";
-  // No account changes its own role; the server refuses it. The Owner's
-  // role is also fixed by its standing.
-  const ownRole = user?.id !== undefined && user?.id === viewerId;
+  // No account changes its own role or disables itself; the server refuses
+  // both. The Owner's standing fixes the same fields.
+  const ownAccount = user?.id !== undefined && user?.id === viewerId;
   const [createDefaultProfile, setCreateDefaultProfile] = useState(true);
   async function reload() {
     if (!editor || busy.current) return;
@@ -992,7 +994,11 @@ function UserForm({
               )}
               <div className="space-y-2">
                 <Label htmlFor={roleId}>Role</Label>
-                <Select value={role} onValueChange={setRole} disabled={user?.is_owner || ownRole}>
+                <Select
+                  value={role}
+                  onValueChange={setRole}
+                  disabled={user?.is_owner || ownAccount}
+                >
                   <SelectTrigger id={roleId}>
                     <SelectValue />
                   </SelectTrigger>
@@ -1003,7 +1009,7 @@ function UserForm({
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                {ownRole ? (
+                {ownAccount ? (
                   <p className="text-muted-foreground text-xs">You can't change your own role.</p>
                 ) : (
                   adminRoleLocked && (
@@ -1021,7 +1027,9 @@ function UserForm({
                   <div className="text-muted-foreground text-xs">
                     {user.is_owner
                       ? "The server owner stays an enabled admin."
-                      : "Disable access without deleting the user."}
+                      : ownAccount
+                        ? "You can't disable your own account."
+                        : "Disable access without deleting the user."}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1032,7 +1040,7 @@ function UserForm({
                     id={enabledId}
                     checked={enabled}
                     onCheckedChange={setEnabled}
-                    disabled={user.is_owner}
+                    disabled={user.is_owner || ownAccount}
                   />
                 </div>
               </div>

@@ -127,8 +127,8 @@ they:
 
 The v1 account and API key routes answer the same refusals with
 `403 owner_protected`, and the v1 invitation routes with `403 role_not_allowed`.
-The Owner may not demote, disable, or delete itself, and no account may change its
-own role; those writes return the same 403. Nobody may impersonate the Owner. Administrators may still impersonate only
+No account may change its own role, disable itself, or delete itself through these
+routes, and that includes the Owner; those writes return the same 403. Nobody may impersonate the Owner. Administrators may still impersonate only
 non-administrators, but the Owner may also impersonate other administrators.
 
 `POST /api/v2/admin/users/{id}/transfer-ownership` makes another enabled
