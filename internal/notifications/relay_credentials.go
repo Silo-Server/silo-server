@@ -346,10 +346,25 @@ func replaceRejectedRelayCredential(ctx context.Context, settings *Settings, cli
 
 // parkRelayCredential discards a credential the relay disabled and waits for
 // an explicit administrator registration, in the same stored shape as an
-// administrator's clear.
-func parkRelayCredential(ctx context.Context, settings *Settings, current PushRelayCredential) error {
-	return settings.UpdatePushRelayCredential(ctx, PushRelayCredential{
-		RelayURL:               current.RelayURL,
-		ReregistrationRequired: true,
-	})
+// administrator's clear. It parks only while the disabled key is still
+// stored, so a credential registered meanwhile (by an administrator or
+// another replica) is kept and returned with parked=false.
+func parkRelayCredential(ctx context.Context, settings *Settings, disabled PushRelayCredential) (PushRelayCredential, bool, error) {
+	cleared := PushRelayCredential{RelayURL: disabled.RelayURL, ReregistrationRequired: true}
+	yield := func(stored PushRelayCredential) bool {
+		return stored.APIKey != disabled.APIKey
+	}
+	updater, ok := settings.reader.(settingsAtomicUpdater)
+	if !ok {
+		current := LoadPushRelayCredential(ctx, settings)
+		if yield(current) {
+			return current, false, nil
+		}
+		if err := settings.UpdatePushRelayCredential(ctx, cleared); err != nil {
+			return PushRelayCredential{}, false, err
+		}
+		return cleared, true, nil
+	}
+	result, parked, err := storeRelayCredentialUnless(ctx, updater, settings, RelayCredentialResult{Credential: cleared}, yield)
+	return result.Credential, parked, err
 }

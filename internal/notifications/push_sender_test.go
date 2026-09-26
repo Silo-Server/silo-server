@@ -759,3 +759,25 @@ func TestPushSenderRateLimitsCapabilityReplacement(t *testing.T) {
 		t.Fatalf("registrations after cooldown = %d, want 2", relay.registrations)
 	}
 }
+
+func TestPushSenderKeepsCredentialRegisteredWhileParking(t *testing.T) {
+	// An administrator registers while the relay's disabled response is in
+	// flight; parking must not discard the new credential.
+	relay := &rejectingRelay{t: t, accepted: "admin.capability", rejectCode: relayCodeDeploymentDisabled}
+	sender, store := newRejectedCredentialSender(t, relay)
+	store.beforeWrite = func(values map[string]string) {
+		values[SettingPushRelayDeploymentID] = "deployment-admin"
+		values[SettingPushRelayAPIKey] = "admin.capability"
+	}
+
+	result := sendTestPush(sender, "attempt-disabled-race")
+	if !result.OK {
+		t.Fatalf("result = %+v, want delivery with the administrator's credential", result)
+	}
+	if relay.registrations != 0 {
+		t.Fatalf("registrations = %d", relay.registrations)
+	}
+	if store.values[SettingPushRelayAPIKey] != "admin.capability" || store.values[SettingPushRelayReregister] == "true" {
+		t.Fatalf("stored state = %#v, want the administrator's credential kept", store.values)
+	}
+}

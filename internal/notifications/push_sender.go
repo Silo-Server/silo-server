@@ -386,14 +386,33 @@ func (s *pushSender) recoverRelayCredential(ctx context.Context, failed PushRela
 // replaces any other rejected capability. Callers hold renewMu.
 func (s *pushSender) handleRelayRejectionLocked(ctx context.Context, current PushRelayCredential, code string) (PushRelayCredential, error) {
 	if code == relayCodeDeploymentDisabled {
-		s.logger.ErrorContext(ctx, "push relay disabled this deployment; register again from the admin settings to resume push delivery",
-			"deployment_id", current.DeploymentID)
-		if err := parkRelayCredential(ctx, s.settings, current); err != nil {
+		stored, parked, err := parkRelayCredential(ctx, s.settings, current)
+		if err != nil {
 			return PushRelayCredential{}, err
 		}
+		if !parked {
+			return s.adoptStoredRelayCredential(stored)
+		}
+		s.logger.ErrorContext(ctx, "push relay disabled this deployment; register again from the admin settings to resume push delivery",
+			"deployment_id", current.DeploymentID)
 		return PushRelayCredential{}, ErrRelayReregistrationRequired
 	}
 	return s.replaceRejectedRelayCredentialLocked(ctx, current, code)
+}
+
+// adoptStoredRelayCredential returns the credential another writer stored
+// while this one was deciding, keeping its own relay origin: a capability only
+// works against the relay that issued it. A clear wins.
+func (s *pushSender) adoptStoredRelayCredential(stored PushRelayCredential) (PushRelayCredential, error) {
+	if stored.Parked() || stored.APIKey == "" {
+		return PushRelayCredential{}, ErrRelayReregistrationRequired
+	}
+	storedURL, err := NormalizePushRelayURL(stored.RelayURL, s.developmentRelayURL)
+	if err != nil {
+		return PushRelayCredential{}, err
+	}
+	stored.RelayURL = storedURL
+	return stored, nil
 }
 
 // replaceRejectedRelayCredentialLocked registers a new deployment in place of
@@ -413,15 +432,7 @@ func (s *pushSender) replaceRejectedRelayCredentialLocked(ctx context.Context, c
 	}
 	credential := result.Credential
 	if !replaced {
-		if credential.Parked() || credential.APIKey == "" {
-			return PushRelayCredential{}, ErrRelayReregistrationRequired
-		}
-		storedURL, err := NormalizePushRelayURL(credential.RelayURL, s.developmentRelayURL)
-		if err != nil {
-			return PushRelayCredential{}, err
-		}
-		credential.RelayURL = storedURL
-		return credential, nil
+		return s.adoptStoredRelayCredential(credential)
 	}
 	s.logger.WarnContext(ctx, "push relay rejected the stored capability; registered a new deployment",
 		"previous_deployment_id", current.DeploymentID, "deployment_id", credential.DeploymentID, "relay_code", code)
