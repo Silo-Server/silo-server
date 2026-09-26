@@ -279,6 +279,13 @@ neutral placeholders where context is needed. Never publish credentials, tokens,
 personal data, or private media details. Check text and attachments before posting;
 authorization to open a PR does not authorize publishing private evidence.
 
+The one private link allowed is a maintainer's evidence page on
+`evidence.siloserver.org`, which only Silo-Server organization members can open
+after GitHub sign-in. Put it on one line at the end of a PR body's Validation
+section or a validation hand-off comment:
+`Evidence: https://evidence.siloserver.org/r/<repo>/<topic>/`. Link the page;
+never attach or embed its media.
+
 - Keep one concern per pull request. Split changes that solve independent
   problems or can be reviewed and shipped separately.
 - Do not capture screenshots or record videos just to prepare a PR. Attach media

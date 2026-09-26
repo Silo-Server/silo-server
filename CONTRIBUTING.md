@@ -159,7 +159,8 @@ in the pull request template. Link an issue or scope item when one covers the
 work; write `Related issue: N/A` when none does. Either way, the Problem section
 has to stand on its own. Keep the commit history intentional and the diff
 limited to the stated problem. Keep the description proportional to the change;
-omit session history, full logs, and private report links. Follow the
+omit session history, full logs, and private report links other than a
+maintainer's `Evidence:` line. Follow the
 [public-content and media rules](AGENTS.md#pull-requests). Screenshots and recordings
 are not routine PR requirements; attach them only when explicitly requested.
 

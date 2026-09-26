@@ -27,7 +27,9 @@ checks that were not run or did not pass. Include a short output excerpt only wh
 explains a failure.
 <!-- Do not include private domains, hostnames, IPs, Tailscale or Report Shelf URLs,
 local paths, credentials, personal data, or private media details. Attach screenshots
-or recordings only when the user explicitly requests them. -->
+or recordings only when the user explicitly requests them. A maintainer may end this
+section with `Evidence: https://evidence.siloserver.org/r/<repo>/<topic>/`; that page
+requires Silo-Server organization sign-in. -->
 
 ## Risks
 
