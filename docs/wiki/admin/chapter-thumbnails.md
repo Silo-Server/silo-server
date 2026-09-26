@@ -1,7 +1,7 @@
 ---
 title: Chapter Thumbnails
 description: How to enable chapter preview images, what generates them, and why a library produces none.
-summary: The public-storage prerequisite, the per-library switch, what queues extraction, the playback settings that shape it, and how to read the log lines when nothing appears.
+summary: Artwork storage, the per-library switch, extraction triggers, playback settings, and log lines to check when nothing appears.
 tags:
   - silo
   - docs
@@ -23,14 +23,14 @@ Chapter thumbnails are the preview images shown at chapter positions in the web
 player's seek bar. They are off for every library until you turn them on, and a
 library with them off produces none silently.
 
-## Before you start: public asset storage
+## Before you start: artwork storage
 
-Thumbnails are stored in the public asset S3 bucket, so that bucket must be
-configured first. Until it is, the per-library switch stays disabled and the
-form shows *"Public asset S3 storage is required before this can be enabled."*
-See [S3 storage setup](../../s3-storage-setup.md) to configure it, and
-[Artwork storage](artwork-storage.md) for how the same bucket serves posters
-and backdrops.
+Silo stores chapter thumbnails with artwork: on local disk by default, or in
+the configured public asset S3 bucket. Keep the local artwork directory
+persistent in Docker. For a deployment that uses S3, configure the public
+bucket before enabling thumbnails. See [Artwork storage](artwork-storage.md)
+for the backend choices and [S3 storage setup](../../s3-storage-setup.md)
+if you use S3.
 
 ## Turn it on per library
 
@@ -41,16 +41,16 @@ Movies and a Shows library needs it set on each one you want covered.
 Chapter markers and chapter menus work without thumbnails. The switch only
 controls the preview images.
 
-## What queues extraction
+## What starts extraction
 
-Three things queue work, so thumbnails usually appear before the periodic sweep
-reaches a file:
+Opening a watch page and starting playback queue extraction. A scheduled task
+also processes files with missing thumbnails:
 
 | Trigger | What it covers |
 | --- | --- |
 | Opening a title's watch page | Queues that title's files at normal priority |
 | Starting playback | Queues the playing file at the current position, ahead of the rest of the queue |
-| **Chapter Thumbnail Backfill** task | Every 6 hours, works through files that are still missing thumbnails in opted-in libraries |
+| **Chapter Thumbnail Backfill** task | Scheduled every 6 hours; checks up to 25 eligible files in opted-in libraries per run |
 
 The backfill task is hidden on the Tasks page because it runs on its own
 schedule and needs no operator input.
@@ -59,7 +59,7 @@ schedule and needs no operator input.
 
 Extraction reads the chapters already in the file's metadata; Silo does not
 detect scene changes. A file with no chapter markers is skipped with
-`no_eligible_chapters`, and that is not a failure. Remux such a file with
+`no_chapters`, and that is not a failure. Remux such a file with
 chapters, or accept that it has no previews.
 
 ## Playback settings
@@ -68,16 +68,16 @@ chapters, or accept that it has no previews.
 
 | Setting | Effect |
 | --- | --- |
-| **Chapter thumbnail workers** | Parallel extraction jobs per library scan. Requires a restart. |
-| **Generate chapter thumbnails on** | Run extraction locally or on a connected transcode node. The field warns when no transcode nodes are connected. |
-| **HDR handling** | Generate HDR thumbnails when possible, or skip HDR and Dolby Vision sources. |
+| **Chapter thumbnail workers** | Parallel background extraction jobs per server process. Requires a restart. |
+| **Generate chapter thumbnails on** | Run extraction locally or on a usable transcode node. The field warns when no usable transcode node is available. |
+| **HDR handling** | Generate thumbnails from HDR sources when possible, or skip HDR and Dolby Vision sources. |
 | **Software HDR tone mapping** | Tone map on the CPU when the GPU cannot. Slow, and unavailable when HDR handling is set to skip. |
 
 HDR frames need color conversion before a thumbnail looks right, and that
 normally runs on the GPU. On a host without suitable hardware, either enable
 software tone mapping and accept slower extraction, or set HDR handling to skip
-those sources. With neither, HDR files are marked `tonemap_unsupported` and
-skipped after their retries run out.
+those sources. With neither, extraction can fail with `tonemap_unsupported`
+and retry after the configured delay.
 
 ## When nothing appears
 
@@ -87,15 +87,19 @@ failed request tells you which case you are in:
 | Log line | Meaning |
 | --- | --- |
 | `request skipped … reason=folder_disabled` | The library switch is off, or the folder itself is disabled |
-| `request skipped … reason=no_eligible_chapters` | The file has no chapter markers, or every chapter already has an image |
+| `request skipped … reason=no_chapters` | The file has no chapter markers |
+| `request skipped … reason=no_eligible_chapters` | Every chapter has an image or is waiting for a retry |
 | `request skipped … reason=hdr_policy_disabled` | HDR handling is set to skip, and this source needs tone mapping |
 | `extract failed … reason=tonemap_unsupported` | HDR source that could not be tone mapped with the current settings |
-| `extract failed … reason=probe_failed` | FFmpeg could not read the file |
-| `upload failed` | Extraction worked, but the image could not be stored. Check the public bucket's credentials, endpoint, and that any proxy in front of it leaves signed requests untouched |
+| `probe failed … reason=probe_failed` | Silo could not probe the file's chapter metadata |
+| `extract failed … reason=ffmpeg_probe_failed` | FFmpeg's filter probe failed during frame extraction |
+| `upload failed` | Extraction worked, but the image could not be stored. Check local artwork storage permissions and free space, or the public bucket's credentials and endpoint if using S3 |
 
-A failed chapter is retried on a widening schedule — after 15 minutes, then 1
-hour, 6 hours, and 24 hours — so a file that failed while storage was
-misconfigured recovers on its own within a day of the fix, without a rescan.
+A failed chapter becomes eligible for another attempt after 15 minutes, then
+1 hour, 6 hours, and 24 hours after successive failures. Later failures keep
+the 24-hour delay. Opening the watch page, starting playback, or the scheduled
+backfill can trigger an eligible retry without a rescan; a backfill backlog can
+delay it.
 
 ## Source References
 
