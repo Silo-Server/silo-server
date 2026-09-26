@@ -164,6 +164,10 @@ func (l *Lease) claim(ctx context.Context) (*generator, error) {
 				WHERE expires_at < statement_timestamp() - make_interval(secs => $4)
 				ORDER BY expires_at
 				LIMIT 1
+				-- Lock the candidate so its expiry is rechecked against the
+				-- latest row: a lease renewed after this statement started is
+				-- skipped instead of taken over while its holder still mints.
+				FOR UPDATE SKIP LOCKED
 			)
 			RETURNING machine_id`,
 			l.token, l.holder, leaseTTL.Seconds(), reuseAfter.Seconds()).Scan(&machineID)

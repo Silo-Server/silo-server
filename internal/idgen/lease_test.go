@@ -260,3 +260,81 @@ func TestClaimMeasuresTheLeaseFromAfterTheLockWait(t *testing.T) {
 		t.Fatalf("lease deadline counts from before the lock wait: %d < %d", got, want)
 	}
 }
+
+func TestClaimDoesNotTakeOverALeaseBeingRenewed(t *testing.T) {
+	pool := leaseTestPool(t)
+	ctx := t.Context()
+
+	// Every machine ID is used. 7 expired longest ago but its holder is
+	// renewing it right now; 8 is the next reusable one.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO idgen_machine_leases (machine_id, token, holder, expires_at)
+		SELECT n, gen_random_uuid(), 'old', CASE n
+			WHEN 7 THEN now() - interval '3 hours'
+			WHEN 8 THEN now() - interval '2 hours'
+			ELSE now() + interval '1 hour' END
+		FROM generate_series(0, 65535) AS n`); err != nil {
+		t.Fatal(err)
+	}
+	var renewingToken uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT token FROM idgen_machine_leases WHERE machine_id = 7`).Scan(&renewingToken); err != nil {
+		t.Fatal(err)
+	}
+	renewal, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = renewal.Rollback(context.Background()) }()
+	if _, err := renewal.Exec(ctx, `
+		UPDATE idgen_machine_leases SET expires_at = now() + interval '2 minutes'
+		WHERE machine_id = 7`); err != nil {
+		t.Fatal(err)
+	}
+
+	type result struct {
+		g   *generator
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		l := &Lease{pool: pool, token: uuid.New(), holder: "new"}
+		g, err := l.claim(ctx)
+		done <- result{g, err}
+	}()
+
+	// A claim that queues behind the renewal would take the row over once the
+	// renewal commits, so commit it as soon as the claim finishes or blocks.
+	var r result
+	for waiting := false; !waiting; {
+		select {
+		case r = <-done:
+			waiting = true
+			continue
+		case <-time.After(10 * time.Millisecond):
+		}
+		if err := pool.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'transactionid' AND NOT granted)`).
+			Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := renewal.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r.g == nil && r.err == nil {
+		r = <-done
+	}
+	if r.err != nil {
+		t.Fatalf("claim: %v", r.err)
+	}
+	if r.g.machineID != 8 {
+		t.Fatalf("claimed machine ID %d, want 8 while 7 is being renewed", r.g.machineID)
+	}
+	var token uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT token FROM idgen_machine_leases WHERE machine_id = 7`).Scan(&token); err != nil {
+		t.Fatal(err)
+	}
+	if token != renewingToken {
+		t.Fatal("claim took over the lease its holder was renewing")
+	}
+}
