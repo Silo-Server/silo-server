@@ -6,6 +6,7 @@ import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
 import { playerV2 } from "../player-v2";
 import { PlayerFetchError } from "../player-fetch";
 import { LANGUAGES, getLanguageName, normalizeLanguageCode } from "../utils/languageNames";
+import { isSubtitleFormatLabel } from "../utils/subtitleCodecs";
 import {
   buildSubtitleTranslateRequest,
   isTranslatableSource,
@@ -28,10 +29,58 @@ interface SubtitleTranslateModalProps {
   onClose: () => void;
 }
 
-function sourceLabel(track: PlayerSubtitleInfo): string {
+// titleNames reports whether a track title already states a flag, so the flag
+// is not repeated. A negated mention ("Non-forced", "Not SDH") does not count.
+function titleNames(title: string, words: string): boolean {
+  return (
+    new RegExp(`\\b(?:${words})\\b`, "i").test(title) &&
+    !new RegExp(`\\b(?:non|not)[\\s-]*(?:${words})\\b`, "i").test(title)
+  );
+}
+
+// sourceLabel names a translation source so full, SDH and forced tracks in one
+// language can be told apart: the track title when it says more than the
+// language or format (as the subtitle menu shows it), then Forced and SDH when
+// the title does not already say so, then where the track comes from.
+export function sourceLabel(track: PlayerSubtitleInfo): string {
   const lang = getLanguageName(track.language) || track.language || "Unknown";
-  const origin = track.source ? ` · ${track.source}` : "";
-  return `${lang}${origin}`;
+  const title = track.label?.trim() ?? "";
+  const hasDetail =
+    title !== "" &&
+    title !== track.language &&
+    title !== lang &&
+    !isSubtitleFormatLabel(title, track.codec);
+  const parts = [lang];
+  if (hasDetail) parts.push(title);
+  if (track.forced && !titleNames(title, "forced")) parts.push("Forced");
+  if (track.hearing_impaired && !titleNames(title, "sdh|cc|hearing")) parts.push("SDH");
+  if (track.source) parts.push(track.source);
+  return parts.join(" · ");
+}
+
+// sourceLabels labels every source track so each option in the picker is
+// distinct. Tracks whose labels would read the same get their track number,
+// and a numbered label that still matches another option gets a counter.
+export function sourceLabels(tracks: PlayerSubtitleInfo[]): Map<number, string> {
+  const base = tracks.map((track) => ({ index: track.index, label: sourceLabel(track) }));
+  const counts = new Map<string, number>();
+  for (const { label } of base) counts.set(label, (counts.get(label) ?? 0) + 1);
+  const used = new Set(
+    base.filter(({ label }) => counts.get(label) === 1).map(({ label }) => label),
+  );
+  const labels = new Map<number, string>();
+  for (const { index, label } of base) {
+    if (counts.get(label) === 1) {
+      labels.set(index, label);
+      continue;
+    }
+    const numbered = `${label} · track ${index + 1}`;
+    let candidate = numbered;
+    for (let n = 2; used.has(candidate); n++) candidate = `${numbered} (${n})`;
+    used.add(candidate);
+    labels.set(index, candidate);
+  }
+  return labels;
 }
 
 function audioLabel(track: PlayerAudioTrack, i: number): string {
@@ -67,6 +116,7 @@ export function SubtitleTranslateModal({
   // Only offer sources the server can actually translate (excludes live tracks,
   // bitmap embedded tracks, and ASS/non-text external/downloaded tracks).
   const sourceTracks = useMemo(() => tracks.filter(isTranslatableSource), [tracks]);
+  const sourceOptionLabels = useMemo(() => sourceLabels(sourceTracks), [sourceTracks]);
   const canTranslate = translateEnabled && sourceTracks.length > 0;
   const canTranscribe = transcribeEnabled && (audioTracks?.length ?? 0) > 0;
   // Subtitle translation is the default; generating from audio takes over when
@@ -299,7 +349,7 @@ export function SubtitleTranslateModal({
                   >
                     {sourceTracks.map((track) => (
                       <option key={track.index} value={track.index}>
-                        {sourceLabel(track)}
+                        {sourceOptionLabels.get(track.index)}
                       </option>
                     ))}
                   </select>
