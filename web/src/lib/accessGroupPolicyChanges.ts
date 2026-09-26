@@ -20,9 +20,10 @@ function allowed(value: boolean) {
   return value ? "Allowed" : "Not allowed";
 }
 
-function libraries(ids: number[] | null) {
+function libraries(ids: number[] | null, names: ReadonlyMap<number, string>) {
   if (ids === null) return "All libraries";
-  return ids.length === 1 ? "1 library" : `${ids.length} libraries`;
+  if (ids.length === 0) return "No libraries";
+  return ids.map((id) => names.get(id) ?? `#${id}`).join(", ");
 }
 
 function permissions(values: string[] | null) {
@@ -43,7 +44,11 @@ function sameIds(a: number[] | null, b: number[] | null) {
 }
 
 /** The group policies that differ between two groups, as members inheriting them see it. */
-export function groupPolicyChanges(from: AccessGroup, to: AccessGroup): PolicyChange[] {
+export function groupPolicyChanges(
+  from: AccessGroup,
+  to: AccessGroup,
+  libraryNames: ReadonlyMap<number, string> = new Map(),
+): PolicyChange[] {
   const changes: PolicyChange[] = [];
   const add = (label: string, a: string, b: string) => {
     if (a !== b) changes.push({ label, from: a, to: b });
@@ -51,8 +56,8 @@ export function groupPolicyChanges(from: AccessGroup, to: AccessGroup): PolicyCh
   if (!sameIds(from.library_ids, to.library_ids)) {
     changes.push({
       label: "Libraries",
-      from: libraries(from.library_ids),
-      to: libraries(to.library_ids),
+      from: libraries(from.library_ids, libraryNames),
+      to: libraries(to.library_ids, libraryNames),
     });
   }
   add("Playback quality", quality(from.max_playback_quality), quality(to.max_playback_quality));

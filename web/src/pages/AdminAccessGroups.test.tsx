@@ -13,6 +13,7 @@ import AdminAccessGroups from "./AdminAccessGroups";
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({}) }));
 const adminUsers = vi.hoisted(() => ({
   update: vi.fn(),
+  currentGroups: new Map<number, number | null>(),
   data: [] as Array<{
     id: number;
     username: string;
@@ -34,7 +35,12 @@ vi.mock("@/hooks/queries/admin/users", () => ({
 vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/v2/adminUsers")>()),
   getAdminUser: async (id: number) => ({
-    user: { id },
+    user: {
+      id,
+      access_group_id: adminUsers.currentGroups.has(id)
+        ? adminUsers.currentGroups.get(id)
+        : adminUsers.data.find((candidate) => candidate.id === id)?.access_group_id,
+    },
     etag: `"user-${id}"`,
     profileContext: null,
   }),
@@ -139,6 +145,14 @@ describe("AdminAccessGroups", () => {
             { id: 3, name: "Anime", type: "series", enabled: true },
           ]);
         }
+        if (url === "/api/v2/libraries") {
+          return jsonResponse({
+            items: [
+              { id: "2", name: "Movies", type: "movie", enabled: true },
+              { id: "3", name: "Anime", type: "series", enabled: true },
+            ],
+          });
+        }
         if (url === "/api/v2/admin/access-groups/1" && method === "PUT") {
           putBody = JSON.parse(String(init?.body));
           return new Response(JSON.stringify({ ...GROUP, download_allowed: true }), {
@@ -153,6 +167,7 @@ describe("AdminAccessGroups", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    adminUsers.currentGroups.clear();
   });
 
   it("summarizes a group and saves edited restrictions", async () => {
@@ -215,7 +230,14 @@ describe("AdminAccessGroups", () => {
 
   function withGuestsGroup() {
     const serve = globalThis.fetch;
-    const guests = { ...GROUP, id: "2", name: "Guests", is_default: false, download_allowed: true };
+    const guests = {
+      ...GROUP,
+      id: "2",
+      name: "Guests",
+      library_ids: ["3"],
+      is_default: false,
+      download_allowed: true,
+    };
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input, init) =>
@@ -251,6 +273,7 @@ describe("AdminAccessGroups", () => {
     const confirm = await screen.findByRole("alertdialog");
     expect(within(confirm).getByText("Move 1 user to Guests?")).toBeInTheDocument();
     expect(within(confirm).getByText("1 from Kids")).toBeInTheDocument();
+    expect(within(confirm).getByText("Libraries: Movies → Anime")).toBeInTheDocument();
     expect(within(confirm).getByText("Downloads: Not allowed → Allowed")).toBeInTheDocument();
     await user.click(within(confirm).getByRole("button", { name: "Move" }));
 
@@ -321,6 +344,29 @@ describe("AdminAccessGroups", () => {
     const alert = await within(members).findByRole("alert");
     expect(alert).toHaveTextContent("Some users could not be moved");
     expect(alert).toHaveTextContent("taylor: This user changed.");
+    adminUsers.data = [];
+  });
+
+  it("does not move a member whose group changed after confirmation", async () => {
+    withGuestsGroup();
+    adminUsers.data = [member(7, "taylor", "user", 1)];
+    adminUsers.update.mockReset().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+
+    await user.click(within(members).getByRole("checkbox", { name: "Select taylor" }));
+    await pickOption(user, "Move selected members to", "Guests");
+    await user.click(within(members).getByRole("button", { name: /Move 1 selected/ }));
+    adminUsers.currentGroups.set(7, 2);
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Move" }),
+    );
+
+    expect(await within(members).findByRole("alert")).toHaveTextContent(
+      "taylor: This user's group changed. Reload and try again.",
+    );
+    expect(adminUsers.update).not.toHaveBeenCalled();
     adminUsers.data = [];
   });
 

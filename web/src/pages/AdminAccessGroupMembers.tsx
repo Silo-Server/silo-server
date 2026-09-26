@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAdminUsers, useUpdateUser } from "@/hooks/queries/admin/users";
+import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { groupPolicyChanges } from "@/lib/accessGroupPolicyChanges";
 
 /** A pending group change awaiting the admin's confirmation. */
@@ -53,6 +54,7 @@ export function AccessGroupMembers({
   groups: AccessGroup[];
 }) {
   const users = useAdminUsers();
+  const libraries = useAdminLibraries();
   const updateUser = useUpdateUser();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [moveTarget, setMoveTarget] = useState("");
@@ -91,6 +93,9 @@ export function AccessGroupMembers({
     for (const user of move.users) {
       try {
         const editor = await getAdminUser(user.id, context);
+        if (editor.user.access_group_id !== user.access_group_id) {
+          throw new Error("This user's group changed. Reload and try again.");
+        }
         await updateUser.mutateAsync({ editor, body: { access_group_id: move.target.id } });
         moved++;
       } catch (err) {
@@ -219,6 +224,9 @@ export function AccessGroupMembers({
         <ConfirmMoveDialog
           move={pending}
           groups={groups}
+          libraryNames={
+            new Map((libraries.data ?? []).map((library) => [library.id, library.name]))
+          }
           saving={saving}
           onCancel={() => setPending(null)}
           onConfirm={() => void applyMove(pending)}
@@ -322,12 +330,14 @@ function AddUsersDialog({
 function ConfirmMoveDialog({
   move,
   groups,
+  libraryNames,
   saving,
   onCancel,
   onConfirm,
 }: {
   move: GroupMove;
   groups: AccessGroup[];
+  libraryNames: ReadonlyMap<number, string>;
   saving: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -354,7 +364,7 @@ function ConfirmMoveDialog({
         <div className="max-h-72 space-y-3 overflow-y-auto text-sm">
           {[...bySource.entries()].map(([key, sourceUsers]) => {
             const source = groups.find((candidate) => String(candidate.id) === key);
-            const changes = source ? groupPolicyChanges(source, move.target) : null;
+            const changes = source ? groupPolicyChanges(source, move.target, libraryNames) : null;
             const who = `${sourceUsers.length} from ${source?.name ?? "no group"}`;
             return (
               <div key={key}>

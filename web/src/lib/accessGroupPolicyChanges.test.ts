@@ -37,8 +37,17 @@ it("reports only the policies that differ, in member-facing terms", () => {
     max_local_stream_bitrate_kbps: 4500,
     allowed_permissions: null,
   };
-  expect(groupPolicyChanges(base, target)).toEqual([
-    { label: "Libraries", from: "2 libraries", to: "All libraries" },
+  expect(
+    groupPolicyChanges(
+      base,
+      target,
+      new Map([
+        [2, "Movies"],
+        [3, "Series"],
+      ]),
+    ),
+  ).toEqual([
+    { label: "Libraries", from: "Movies, Series", to: "All libraries" },
     { label: "Downloads", from: "Not allowed", to: "Allowed" },
     { label: "Concurrent streams", from: "1", to: "Unlimited" },
     { label: "Remote stream bitrate", from: "8 Mbps", to: "Unlimited" },
@@ -49,4 +58,17 @@ it("reports only the policies that differ, in member-facing terms", () => {
 
 it("treats the same libraries in another order as unchanged", () => {
   expect(groupPolicyChanges(base, { ...base, library_ids: [3, 2] })).toEqual([]);
+});
+
+it("identifies the libraries when equal-sized groups grant different access", () => {
+  const changes = groupPolicyChanges(
+    base,
+    { ...base, library_ids: [3, 4] },
+    new Map([
+      [2, "Movies"],
+      [3, "Series"],
+      [4, "Anime"],
+    ]),
+  );
+  expect(changes).toEqual([{ label: "Libraries", from: "Movies, Series", to: "Series, Anime" }]);
 });
