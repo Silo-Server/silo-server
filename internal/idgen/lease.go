@@ -93,7 +93,7 @@ func (l *Lease) renew(ctx context.Context, g *generator) *generator {
 	defer cancel()
 	tag, err := l.pool.Exec(queryCtx, `
 		UPDATE idgen_machine_leases
-		SET expires_at = now() + make_interval(secs => $3)
+		SET expires_at = statement_timestamp() + make_interval(secs => $3)
 		WHERE machine_id = $1 AND token = $2`,
 		g.machineID, l.token, leaseTTL.Seconds())
 	if err != nil {
@@ -121,8 +121,10 @@ func (l *Lease) renew(ctx context.Context, g *generator) *generator {
 }
 
 // validUntil is the local deadline for a lease the database extended to
-// now() + leaseTTL during a request sent at started. The database set its
-// expiry no earlier than started, so the local deadline always comes first.
+// statement_timestamp() + leaseTTL by a statement sent at started. The
+// statement cannot start before it was sent, so the local deadline always
+// comes first. Expiries use statement_timestamp() rather than now(), which is
+// the transaction start and would predate a claim's wait for claimLockKey.
 func validUntil(started int64) int64 {
 	return started + int64(leaseTTL-expiryMargin)
 }
@@ -130,7 +132,6 @@ func validUntil(started int64) int64 {
 // claim leases a machine ID, preferring one no process has ever used, and
 // otherwise the one whose lease expired longest ago, at least reuseAfter ago.
 func (l *Lease) claim(ctx context.Context) (*generator, error) {
-	started := monotonicNow()
 	tx, err := l.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("idgen: claiming machine ID: %w", err)
@@ -140,10 +141,13 @@ func (l *Lease) claim(ctx context.Context) (*generator, error) {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, claimLockKey); err != nil {
 		return nil, fmt.Errorf("idgen: claiming machine ID: %w", err)
 	}
+	// Measure the lease from after the lock wait, which can be long when
+	// several processes start at once.
+	started := monotonicNow()
 	var machineID int
 	err = tx.QueryRow(ctx, `
 		INSERT INTO idgen_machine_leases (machine_id, token, holder, expires_at)
-		SELECT n, $1, $2, now() + make_interval(secs => $3)
+		SELECT n, $1, $2, statement_timestamp() + make_interval(secs => $3)
 		FROM generate_series(0, 65535) AS n
 		WHERE NOT EXISTS (SELECT 1 FROM idgen_machine_leases l WHERE l.machine_id = n)
 		ORDER BY random()
@@ -153,11 +157,11 @@ func (l *Lease) claim(ctx context.Context) (*generator, error) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = tx.QueryRow(ctx, `
 			UPDATE idgen_machine_leases
-			SET token = $1, holder = $2, acquired_at = now(),
-			    expires_at = now() + make_interval(secs => $3)
+			SET token = $1, holder = $2, acquired_at = statement_timestamp(),
+			    expires_at = statement_timestamp() + make_interval(secs => $3)
 			WHERE machine_id = (
 				SELECT machine_id FROM idgen_machine_leases
-				WHERE expires_at < now() - make_interval(secs => $4)
+				WHERE expires_at < statement_timestamp() - make_interval(secs => $4)
 				ORDER BY expires_at
 				LIMIT 1
 			)

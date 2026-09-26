@@ -202,3 +202,61 @@ func TestConcurrentClaimsGetDistinctMachineIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestClaimMeasuresTheLeaseFromAfterTheLockWait(t *testing.T) {
+	pool := leaseTestPool(t)
+	ctx := t.Context()
+
+	holder, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Release()
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_lock($1)`, claimLockKey); err != nil {
+		t.Fatal(err)
+	}
+
+	type result struct {
+		g   *generator
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		l := &Lease{pool: pool, token: uuid.New(), holder: "waiting"}
+		g, err := l.claim(ctx)
+		done <- result{g, err}
+	}()
+
+	// Release only once the claim is queued behind the lock.
+	for {
+		var waiting bool
+		if err := pool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_locks
+				WHERE locktype = 'advisory' AND NOT granted
+					AND ((classid::bigint << 32) | objid::bigint) = $1
+			)`, claimLockKey).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case r := <-done:
+			t.Fatalf("claim finished while the lock was held: %+v", r)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	released := monotonicNow()
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_unlock($1)`, claimLockKey); err != nil {
+		t.Fatal(err)
+	}
+
+	r := <-done
+	if r.err != nil {
+		t.Fatalf("claim: %v", r.err)
+	}
+	if got, want := r.g.validUntil.Load(), validUntil(released); got < want {
+		t.Fatalf("lease deadline counts from before the lock wait: %d < %d", got, want)
+	}
+}
