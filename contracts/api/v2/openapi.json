@@ -17388,6 +17388,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "rating_sources": {
+            "description": "Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any",
+            "items": {
+              "$ref": "#/components/schemas/CatalogRatingSource"
+            },
+            "type": "array"
+          },
           "rating_tmdb": {
             "format": "double",
             "type": "number"
@@ -17894,6 +17901,33 @@
           "field",
           "op",
           "value"
+        ],
+        "type": "object"
+      },
+      "CatalogRatingSource": {
+        "additionalProperties": false,
+        "properties": {
+          "score": {
+            "description": "Score on a 0-100 scale",
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
+          "source": {
+            "description": "Rating source: imdb, tmdb, rt_critic, rt_audience, metacritic, metacritic_user, letterboxd, trakt, rogerebert, myanimelist, or mdblist. Clients should ignore names they do not recognize.",
+            "type": "string"
+          },
+          "votes": {
+            "description": "Number of votes behind the score, when the source reports it",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source",
+          "score"
         ],
         "type": "object"
       },

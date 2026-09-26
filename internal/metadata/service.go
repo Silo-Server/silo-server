@@ -224,6 +224,12 @@ type metadataVideoRepo interface {
 	ReplaceByContentID(ctx context.Context, contentID string, videos []models.ItemVideo) error
 }
 
+// metadataRatingSourceRepo persists per-source ratings. The concrete
+// *catalog.RatingSourceRepository satisfies this.
+type metadataRatingSourceRepo interface {
+	Upsert(ctx context.Context, contentID string, sources []models.ItemRatingSource, replace bool) error
+}
+
 // AutoTranslator is the seam to the metadata AI translation service: after a
 // refresh, libraries that opted in get missing localizations filled by AI.
 // Implemented by *translation.Service; AutoEnqueue must be cheap and must
@@ -428,6 +434,7 @@ type MetadataService struct {
 	personRepo              *catalog.PersonRepository
 	videoRepo               metadataVideoRepo
 	enrichmentState         enrichmentStateStore
+	ratingSourceRepo        metadataRatingSourceRepo
 	fileRepo                FileContentUpdater
 	skippedRootRepo         metadataSkippedRootRepo
 	staleIDRepo             metadataStaleIDRepo
@@ -523,12 +530,14 @@ func NewMetadataService(
 	var observedLocationRepo metadataObservedLocationRepo
 	var videoRepo metadataVideoRepo
 	var enrichmentState enrichmentStateStore
+	var ratingSourceRepo metadataRatingSourceRepo
 	var dbPool *pgxpool.Pool
 	if folderRepo != nil {
 		pool := folderRepo.Pool()
 		dbPool = pool
 		videoRepo = catalog.NewVideoRepository(pool)
 		enrichmentState = newEnrichmentStateRepository(pool)
+		ratingSourceRepo = catalog.NewRatingSourceRepository(pool)
 		itemLocalizationRepo = catalog.NewMediaItemLocalizationRepository(pool)
 		itemAliasRepo = catalog.NewItemAliasRepository(pool)
 		seasonLocalizationRepo = catalog.NewSeasonLocalizationRepository(pool)
@@ -555,6 +564,7 @@ func NewMetadataService(
 		episodeLocalizationRepo: episodeLocalizationRepo,
 		personRepo:              personRepo,
 		videoRepo:               videoRepo,
+		ratingSourceRepo:        ratingSourceRepo,
 		fileRepo:                fileRepo,
 		skippedRootRepo:         skippedRootRepo,
 		staleIDRepo:             staleIDRepo,
@@ -948,6 +958,29 @@ func itemVideosFromRemote(contentID string, videos []RemoteVideo) []models.ItemV
 			SortOrder:   i,
 		})
 	}
+	return rows
+}
+
+// itemRatingSourcesFromResult converts pipeline rating sources into
+// media_item_rating_sources rows, in display order.
+func itemRatingSourcesFromResult(contentID string, sources map[string]RatingSource) []models.ItemRatingSource {
+	rows := make([]models.ItemRatingSource, 0, len(sources))
+	for name, source := range sources {
+		row := models.ItemRatingSource{
+			ContentID: contentID,
+			Source:    name,
+			Score:     source.Score,
+			Provider:  source.Provider,
+		}
+		if source.Votes > 0 {
+			votes := source.Votes
+			row.Votes = &votes
+		}
+		rows = append(rows, row)
+	}
+	slices.SortFunc(rows, func(a, b models.ItemRatingSource) int {
+		return models.RatingSourceRank(a.Source) - models.RatingSourceRank(b.Source)
+	})
 	return rows
 }
 
@@ -2558,6 +2591,20 @@ func (s *MetadataService) mergeAndPersist(
 				// not charge a cooldown for trailers it did not store.
 				reportVideoPersistFailure(ctx, err)
 			}
+		}
+	}
+
+	// Persist per-source ratings. The item row does not carry them, so the
+	// merge above saw no stored sources and passed every reported one through
+	// (or none, under a FieldRating lock). The stored rows are merged by the
+	// write instead: fill-empty keeps each source already stored, and
+	// replace-unlocked overwrites the sources this refresh reported. Like the
+	// rating columns, they are provider-invariant and written for every
+	// language.
+	if s.ratingSourceRepo != nil && len(accumulator.RatingSources) > 0 && !isFieldLocked(locked, FieldRating) {
+		sources := itemRatingSourcesFromResult(contentID, accumulator.RatingSources)
+		if err := s.ratingSourceRepo.Upsert(ctx, contentID, sources, mergeMode == MergeReplaceUnlocked); err != nil {
+			slog.WarnContext(ctx, "metadata: failed to store rating sources", "component", "metadata", "content_id", contentID, "error", err)
 		}
 	}
 

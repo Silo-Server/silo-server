@@ -66,5 +66,16 @@
       "added_at": "2026-01-02T03:04:05.678Z"
     }
   ],
+  "rating_sources": [
+    {
+      "source": "imdb",
+      "score": 83,
+      "votes": 673852
+    },
+    {
+      "source": "mdblist",
+      "score": 86
+    }
+  ],
   "subtitles": []
 }

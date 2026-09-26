@@ -250,6 +250,11 @@ type ItemDetail struct {
 	// movies/series, ordered for display (trailers first, official first).
 	Videos []ItemVideoInfo `json:"videos,omitempty"`
 
+	// Per-source ratings (IMDb, Metacritic, Letterboxd, ...) for movies and
+	// series, in display order. Kept out of this JSON contract because
+	// /api/v1 is frozen; apiv2 emits them as rating_sources.
+	RatingSources []ItemRatingSourceInfo `json:"-"`
+
 	// Local extras (scanner-discovered trailers, featurettes, deleted
 	// scenes, ...) playable via their own content_id through /watch.
 	Extras []ItemExtraInfo `json:"extras,omitempty"`
@@ -306,6 +311,14 @@ type ItemVideoInfo struct {
 	Name       string `json:"name,omitempty"`
 	Language   string `json:"language,omitempty"`
 	IsOfficial bool   `json:"is_official"`
+}
+
+// ItemRatingSourceInfo is one source's rating of an item on a 0-100 scale.
+// Votes is nil when the source did not report a count.
+type ItemRatingSourceInfo struct {
+	Source string
+	Score  float64
+	Votes  *int64
 }
 
 // ItemExtraInfo is the API shape of a local extra. ContentID is a playable
@@ -724,6 +737,7 @@ type DetailService struct {
 	}
 	fileFetcher       FileVersionFetcher
 	videoRepo         *VideoRepository
+	ratingSourceRepo  *RatingSourceRepository
 	extraRepo         *ExtraRepository
 	rootClaimRepo     *RootClaimRepository
 	groupClaimRepo    *GroupClaimRepository
@@ -750,16 +764,17 @@ func NewDetailService(
 	fileFetcher FileVersionFetcher,
 ) *DetailService {
 	return &DetailService{
-		itemRepo:       itemRepo,
-		episodeRepo:    episodeRepo,
-		seasonRepo:     seasonRepo,
-		personRepo:     personRepo,
-		itemLocRepo:    NewMediaItemLocalizationRepository(itemRepo.pool),
-		seasonLocRepo:  NewSeasonLocalizationRepository(itemRepo.pool),
-		episodeLocRepo: NewEpisodeLocalizationRepository(itemRepo.pool),
-		videoRepo:      NewVideoRepository(itemRepo.pool),
-		extraRepo:      NewExtraRepository(itemRepo.pool),
-		fileFetcher:    fileFetcher,
+		itemRepo:         itemRepo,
+		episodeRepo:      episodeRepo,
+		seasonRepo:       seasonRepo,
+		personRepo:       personRepo,
+		itemLocRepo:      NewMediaItemLocalizationRepository(itemRepo.pool),
+		seasonLocRepo:    NewSeasonLocalizationRepository(itemRepo.pool),
+		episodeLocRepo:   NewEpisodeLocalizationRepository(itemRepo.pool),
+		videoRepo:        NewVideoRepository(itemRepo.pool),
+		ratingSourceRepo: NewRatingSourceRepository(itemRepo.pool),
+		extraRepo:        NewExtraRepository(itemRepo.pool),
+		fileFetcher:      fileFetcher,
 	}
 }
 
@@ -1761,10 +1776,17 @@ func (s *DetailService) GetItemDetailsByIDs(ctx context.Context, contentIDs []st
 		}
 	}
 	var videosByID map[string][]models.ItemVideo
+	var ratingSourcesByID map[string][]models.ItemRatingSource
 	var extrasByID map[string][]ExtraWithFile
 	if len(movieSeriesIDs) > 0 {
 		if s.videoRepo != nil {
 			videosByID, err = s.videoRepo.ListByContentIDs(ctx, movieSeriesIDs)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if s.ratingSourceRepo != nil {
+			ratingSourcesByID, err = s.ratingSourceRepo.ListByContentIDs(ctx, movieSeriesIDs)
 			if err != nil {
 				return nil, err
 			}
@@ -1819,6 +1841,10 @@ func (s *DetailService) GetItemDetailsByIDs(ctx context.Context, contentIDs []st
 				pf.haveVideos = true
 				pf.videos = videosByID[id]
 			}
+			if s.ratingSourceRepo != nil {
+				pf.haveRatingSources = true
+				pf.ratingSources = ratingSourcesByID[id]
+			}
 			if s.extraRepo != nil {
 				pf.haveExtras = true
 				pf.extras = extrasByID[id]
@@ -1862,6 +1888,35 @@ func (s *DetailService) fetchItemVideos(ctx context.Context, contentID string, p
 			Name:       v.Name,
 			Language:   v.Language,
 			IsOfficial: v.IsOfficial,
+		})
+	}
+	return infos
+}
+
+// fetchItemRatingSources returns the item's per-source ratings in API shape,
+// honoring a batch prefetch when present. Lookup failures degrade to no
+// sources.
+func (s *DetailService) fetchItemRatingSources(ctx context.Context, contentID string, pf *itemDetailPrefetch) []ItemRatingSourceInfo {
+	var sources []models.ItemRatingSource
+	if pf != nil && pf.haveRatingSources {
+		sources = pf.ratingSources
+	} else if s.ratingSourceRepo != nil {
+		fetched, err := s.ratingSourceRepo.GetByContentID(ctx, contentID)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to fetch item rating sources", "content_id", contentID, "error", err)
+			return nil
+		}
+		sources = fetched
+	}
+	if len(sources) == 0 {
+		return nil
+	}
+	infos := make([]ItemRatingSourceInfo, 0, len(sources))
+	for _, source := range sources {
+		infos = append(infos, ItemRatingSourceInfo{
+			Source: source.Source,
+			Score:  source.Score,
+			Votes:  source.Votes,
 		})
 	}
 	return infos
@@ -1929,6 +1984,8 @@ type itemDetailPrefetch struct {
 	workSummary        *WorkSummary
 	haveVideos         bool
 	videos             []models.ItemVideo
+	haveRatingSources  bool
+	ratingSources      []models.ItemRatingSource
 	haveExtras         bool
 	extras             []ExtraWithFile
 }
@@ -2053,9 +2110,10 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		}
 	}
 
-	// Trailers/extras apply to movies and series only.
+	// Trailers, extras and per-source ratings apply to movies and series only.
 	if item.Type == "movie" || item.Type == "series" {
 		detail.Videos = s.fetchItemVideos(ctx, contentID, pf)
+		detail.RatingSources = s.fetchItemRatingSources(ctx, contentID, pf)
 		detail.Extras = s.fetchItemExtras(ctx, contentID, pf)
 	}
 

@@ -16574,6 +16574,8 @@ export interface components {
       rating_rt_audience?: number;
       /** Format: int64 */
       rating_rt_critic?: number;
+      /** @description Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any */
+      rating_sources?: components["schemas"]["CatalogRatingSource"][];
       /** Format: double */
       rating_tmdb?: number;
       recap?: components["schemas"]["Marker"];
@@ -16780,6 +16782,20 @@ export interface components {
       op: string;
       /** @description Scalar or array, as the operator requires */
       value: unknown;
+    };
+    CatalogRatingSource: {
+      /**
+       * Format: double
+       * @description Score on a 0-100 scale
+       */
+      score: number;
+      /** @description Rating source: imdb, tmdb, rt_critic, rt_audience, metacritic, metacritic_user, letterboxd, trakt, rogerebert, myanimelist, or mdblist. Clients should ignore names they do not recognize. */
+      source: string;
+      /**
+       * Format: int64
+       * @description Number of votes behind the score, when the source reports it
+       */
+      votes?: number;
     };
     CatalogSearchCapabilities: {
       /** @description Whether the current principal may use the capability */

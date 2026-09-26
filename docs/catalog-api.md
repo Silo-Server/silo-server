@@ -339,6 +339,40 @@ book libraries, never carry an advisory age, so the limit never hides them.
 
 Frozen v1 responses do not expose these fields.
 
+## Rating sources
+
+The v2 item detail of a movie or series may carry `rating_sources`, a list of
+per-source ratings a metadata provider reported, such as the MDBList plugin's
+IMDb, Metacritic, Letterboxd and Roger Ebert scores. Each entry has:
+
+- `source`: one of `imdb`, `tmdb`, `rt_critic`, `rt_audience`, `metacritic`,
+  `metacritic_user`, `letterboxd`, `trakt`, `rogerebert`, `myanimelist` or
+  `mdblist` (MDBList's own aggregate). The list of sources can grow; ignore a
+  name you do not recognize.
+- `score`: the rating on a 0-100 scale, whatever scale the source uses itself.
+- `votes`: how many votes produced the score, omitted when the source does not
+  report it.
+
+Entries come in that fixed source order, at most one per source. The member is
+absent when no provider reported a source. It is detail-only: list and section
+cards do not carry it.
+
+The four `rating_imdb`, `rating_tmdb`, `rating_rt_critic` and
+`rating_rt_audience` members are unchanged, keep their own scales, and remain
+the only ratings browse can sort or filter by.
+
+Rating sources follow the same refresh and lock rules as those four members. A
+scheduled refresh only adds sources the item lacks, a manual refresh or identify
+overwrites the sources the providers report, and locking the rating field freezes
+all of them. A refresh never removes a source a provider stopped reporting.
+
+Plugins send them under `ratings.sources` in a metadata item, as
+`{"<source>": {"score": 0-100, "votes": n}}`. The server drops an unknown
+source name or a score outside 0-100, and drops a vote count that is not a
+whole, non-negative number while keeping its score.
+
+Frozen v1 responses do not expose this member.
+
 ## Local theme songs, V2
 
 Movies, series, and seasons can own local theme audio. Place `theme.mp3`

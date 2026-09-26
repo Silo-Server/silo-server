@@ -39,6 +39,7 @@ func MergeMetadata(source, target *MetadataResult, locked []MetadataField, mode 
 		mergeFloat(&target.Ratings.TMDB, source.Ratings.TMDB, mode)
 		mergeFloat(&target.Ratings.RTCritic, source.Ratings.RTCritic, mode)
 		mergeFloat(&target.Ratings.RTAudience, source.Ratings.RTAudience, mode)
+		mergeRatingSources(&target.RatingSources, source.RatingSources, mode)
 	}
 
 	// Year and release/air dates lock together under FieldReleaseDates.
@@ -119,6 +120,7 @@ func MergeGlobalMetadata(source, target *MetadataResult, locked []MetadataField,
 		mergeFloat(&target.Ratings.TMDB, source.Ratings.TMDB, mode)
 		mergeFloat(&target.Ratings.RTCritic, source.Ratings.RTCritic, mode)
 		mergeFloat(&target.Ratings.RTAudience, source.Ratings.RTAudience, mode)
+		mergeRatingSources(&target.RatingSources, source.RatingSources, mode)
 	}
 
 	if !isLocked(FieldReleaseDates) {
@@ -274,6 +276,25 @@ func mergeProviderIDMap(target *map[string]string, source map[string]string) {
 		if (*target)[key] == "" {
 			(*target)[key] = value
 		}
+	}
+}
+
+// mergeRatingSources merges per-source ratings one source at a time, with the
+// scalar rating rules: fill-empty keeps a source the target already has, and
+// replace-unlocked takes the incoming score for every source the source
+// reports. Neither mode removes a source the incoming result lacks.
+func mergeRatingSources(target *map[string]RatingSource, source map[string]RatingSource, mode MergeMode) {
+	if len(source) == 0 {
+		return
+	}
+	if *target == nil {
+		*target = make(map[string]RatingSource, len(source))
+	}
+	for name, rating := range source {
+		if _, exists := (*target)[name]; exists && mode != MergeReplaceUnlocked {
+			continue
+		}
+		(*target)[name] = rating
 	}
 }
 

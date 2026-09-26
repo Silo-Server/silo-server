@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -289,6 +290,7 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		AdvisoryAge:          advisoryAge,
 		AdvisorySource:       advisorySource,
 		Ratings:              ratingsFromStruct(response.GetItem().GetRatings()),
+		RatingSources:        ratingSourcesFromStruct(response.GetItem().GetRatings(), p.Slug()),
 		People:               peopleFromRecords(response.GetItem().GetPeople()),
 		Videos:               videosFromRecords(p.Slug(), response.GetItem().GetVideos()),
 		PosterPath:           response.GetItem().GetPosterPath(),
@@ -594,6 +596,64 @@ func ratingsFromStruct(value *structpb.Struct) Ratings {
 		}
 	}
 	return ratings
+}
+
+// maxExactVotes is the largest vote count a structpb number (a float64) holds
+// exactly. Anything above it cannot be a count a provider really measured.
+const maxExactVotes = 1 << 53
+
+// ratingSourcesFromStruct reads the per-source ratings a plugin sends under
+// ratings.sources: {"imdb": {"score": 81, "votes": 673852}, ...}, with score on
+// a 0-100 scale and votes omitted when unknown.
+//
+// The Struct is the plugin's word, so each entry is validated on its own and a
+// bad one is dropped without affecting the rest: an unknown source name, a
+// score that is missing, non-finite or outside 0-100 drops the source, and a
+// negative, fractional or non-numeric vote count drops only the count.
+func ratingSourcesFromStruct(value *structpb.Struct, provider string) map[string]RatingSource {
+	sources := value.GetFields()["sources"].GetStructValue()
+	if sources == nil {
+		return nil
+	}
+	result := make(map[string]RatingSource, len(sources.GetFields()))
+	for rawName, rawEntry := range sources.GetFields() {
+		name := models.NormalizeRatingSource(rawName)
+		entry := rawEntry.GetStructValue()
+		if name == "" || entry == nil {
+			continue
+		}
+		scoreValue, ok := entry.GetFields()["score"].GetKind().(*structpb.Value_NumberValue)
+		if !ok {
+			continue
+		}
+		score := scoreValue.NumberValue
+		if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 100 {
+			continue
+		}
+		result[name] = RatingSource{
+			Score:    score,
+			Votes:    ratingSourceVotes(entry.GetFields()["votes"]),
+			Provider: provider,
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// ratingSourceVotes returns a reported vote count, or 0 (unknown) when the
+// value is absent or is not a whole, non-negative number.
+func ratingSourceVotes(value *structpb.Value) int64 {
+	number, ok := value.GetKind().(*structpb.Value_NumberValue)
+	if !ok {
+		return 0
+	}
+	votes := number.NumberValue
+	if math.IsNaN(votes) || votes < 0 || votes > maxExactVotes || votes != math.Trunc(votes) {
+		return 0
+	}
+	return int64(votes)
 }
 
 // Advisory sources Silo stores, mirroring the names the MDBList plugin emits.
