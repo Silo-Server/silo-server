@@ -98,8 +98,8 @@ file's default track. `DefaultSubtitleStreamIndex` follows Jellyfin 12.1's
 `MediaStreamSelector` for the effective subtitle mode and language, judged
 against the starting audio track: external files (including downloaded
 subtitles) sort first, and an unset subtitle language matches any language.
-Silo's per-series remembered subtitle track is not applied, and an explicit
-`SubtitleStreamIndex` in the request still wins.
+In `Always` mode, Silo's per-series remembered subtitle track is applied first,
+as on item details. An explicit `SubtitleStreamIndex` in the request still wins.
 
 ## Browse and response fields
 
