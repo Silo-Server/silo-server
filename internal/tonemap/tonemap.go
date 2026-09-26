@@ -93,13 +93,23 @@ func (p Policy) Allows(mode Mode) bool {
 	}
 }
 
-// NVENCSoftwareFallbackPixelFormat preserves the decoded source depth when
-// CUDA frames must be downloaded for a software color conversion.
-func NVENCSoftwareFallbackPixelFormat(sourceVideoBitDepth int) string {
+// SurfaceDownloadPixelFormat is the only pixel format an hwdownload can write
+// for a CUDA, VAAPI or QSV surface decoded at the given depth. hwdownload does
+// not convert — it copies the surface out in the software format the frames
+// context was created with — so naming any other format there makes the whole
+// filter graph fail to configure. Callers that need something else append a
+// second, separate format= conversion.
+func SurfaceDownloadPixelFormat(sourceVideoBitDepth int) string {
 	if sourceVideoBitDepth > 8 {
 		return "p010le"
 	}
 	return "nv12"
+}
+
+// NVENCSoftwareFallbackPixelFormat preserves the decoded source depth when
+// CUDA frames must be downloaded for a software color conversion.
+func NVENCSoftwareFallbackPixelFormat(sourceVideoBitDepth int) string {
+	return SurfaceDownloadPixelFormat(sourceVideoBitDepth)
 }
 
 // SourceKind describes the transfer function and color primaries of the base
