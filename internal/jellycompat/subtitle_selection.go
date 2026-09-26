@@ -8,6 +8,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/lang"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -93,9 +94,9 @@ type compatSubtitleCandidate struct {
 func compatSubtitleCandidates(version catalog.FileVersion, downloaded []subtitles.DownloadedSubtitle) []compatSubtitleCandidate {
 	candidates := make([]compatSubtitleCandidate, 0, len(version.SubtitleTracks)+len(downloaded))
 	for index, track := range version.SubtitleTracks {
-		source := "embedded"
+		source := playback.SubtitleSourceEmbeddedV3
 		if track.External {
-			source = "external"
+			source = playback.SubtitleSourceExternalV3
 		}
 		candidates = append(candidates, compatSubtitleCandidate{
 			Index:           subtitleTrackIndex(version, track, index),
@@ -119,7 +120,7 @@ func compatSubtitleCandidates(version catalog.FileVersion, downloaded []subtitle
 			Index:           base + index,
 			Language:        dl.Language,
 			External:        true,
-			Source:          "downloaded",
+			Source:          playback.SubtitleSourceDownloadedV3,
 			Codec:           string(dl.Format),
 			Label:           label,
 			HearingImpaired: dl.HearingImpaired,
