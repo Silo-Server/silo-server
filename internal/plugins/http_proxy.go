@@ -27,13 +27,11 @@ type httpProxyService interface {
 	HTTPRoutesClient(ctx context.Context, installationID int, capabilityID string) (httpRouteClient, error)
 }
 
-// UserThemeLookup resolves the active UI theme for a silo user. The
-// proxy uses it to inject X-Silo-Theme on every plugin request so
-// plugin SPAs can paint in the user's theme on first byte without relying
-// on the URL ?theme= parameter (which is fragile under refresh, direct
-// links, and cross-tab sharing). Theme is a profile-scoped setting under the
-// settings contract, so the lookup takes the active profile; an empty
-// profileID falls back to whatever account-level value exists.
+// UserThemeLookup resolves the UI theme for a silo user. The proxy uses it
+// to inject X-Silo-Theme on every plugin request so plugin SPAs can paint in
+// the host's theme on first byte without relying on the URL ?theme= parameter
+// (which is fragile under refresh, direct links, and cross-tab sharing). The
+// production lookup is FixedUserThemeLookup: the web client has one theme.
 type UserThemeLookup interface {
 	LookupUITheme(ctx context.Context, userID int, profileID string) (string, error)
 }

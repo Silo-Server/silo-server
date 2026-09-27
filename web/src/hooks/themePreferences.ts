@@ -1,7 +1,4 @@
-import { appearanceCache, storage } from "@/utils/storage";
 import { useOptionalAuth } from "@/hooks/useAuth";
-import type { ThemeId } from "@/lib/themes";
-import { DEFAULT_THEME, THEME_IDS } from "@/lib/themes";
 
 export type TextScale = "default" | "large" | "x-large";
 export type TextWeight = "default" | "strong";
@@ -17,7 +14,7 @@ export interface AppearanceAuth {
  * auth is bootstrapping, nobody is signed in, or no profile has been selected
  * yet.
  *
- * Appearance settings are profile-scoped in the settings contract (`ui.theme`
+ * Appearance settings are profile-scoped in the settings contract (`ui.text_scale`
  * lives at `profile`, with an optional `profile_device` override), and several
  * profiles on one account share a user id — so the owner token is the user id
  * plus the active profile id. Every cache read and write in the app resolves
@@ -50,10 +47,6 @@ export function useAppearanceCacheOwner(): string | null {
   });
 }
 
-export function isValidTheme(value: string | null | undefined): value is ThemeId {
-  return typeof value === "string" && (THEME_IDS as readonly string[]).includes(value);
-}
-
 export function parseTextScale(value: string | null | undefined): TextScale {
   return value === "large" || value === "x-large" ? value : "default";
 }
@@ -64,9 +57,4 @@ export function parseTextWeight(value: string | null | undefined): TextWeight {
 
 export function parseHighContrast(value: string | null | undefined): boolean {
   return value === "true";
-}
-
-export function getInitialTheme(owner: string | null): ThemeId {
-  const stored = appearanceCache.get(storage.KEYS.THEME, owner);
-  return isValidTheme(stored) ? stored : DEFAULT_THEME;
 }

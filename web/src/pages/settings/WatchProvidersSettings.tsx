@@ -824,6 +824,16 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
                 onChange={(checked) => updateConnection.mutate({ export_ratings_enabled: checked })}
               />
             ) : null}
+            {connection.capabilities.sync_dropped ? (
+              <ToggleRow
+                id={`watch-provider-${providerKey}-sync-dropped`}
+                label="Sync dropped shows"
+                description={`Hide shows you dropped on ${displayName} from Next Up and Continue Watching, and drop shows on ${displayName} when you remove their episodes from Home. Watching a show again undrops it.`}
+                checked={connection.sync_dropped_enabled}
+                disabled={isBusy}
+                onChange={(checked) => updateConnection.mutate({ sync_dropped_enabled: checked })}
+              />
+            ) : null}
             <ToggleRow
               id={`watch-provider-${providerKey}-scrobble`}
               label="Scrobble playback"

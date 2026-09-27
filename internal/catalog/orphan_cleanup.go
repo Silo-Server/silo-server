@@ -75,6 +75,10 @@ const orphanedMediaItemSafetyConditions = `NOT EXISTS (
 	WHERE uhid_series.series_id = mi.content_id
   )
   AND NOT EXISTS (
+	SELECT 1 FROM public.user_dropped_series uds
+	WHERE uds.series_id = mi.content_id
+  )
+  AND NOT EXISTS (
 	SELECT 1 FROM public.user_audio_preferences uap
 	WHERE uap.series_id = mi.content_id
   )
@@ -113,6 +117,10 @@ const orphanedMediaItemSafetyConditions = `NOT EXISTS (
   AND NOT EXISTS (
 	SELECT 1 FROM public.watch_provider_rating_items wpri
 	WHERE wpri.media_item_id = mi.content_id
+  )
+  AND NOT EXISTS (
+	SELECT 1 FROM public.watch_provider_dropped_items wpdi
+	WHERE wpdi.series_id = mi.content_id
   )
   AND NOT EXISTS (
 	SELECT 1 FROM public.watch_provider_history_exports wphe

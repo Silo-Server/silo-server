@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 28
+const schemaVersion = 29
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -279,7 +279,28 @@ func runMigrations(db *sql.DB) error {
 			return err
 		}
 	}
+	if version < 29 {
+		if err := retireProfileThemes(tx); err != nil {
+			return fmt.Errorf("migration v29 failed: %w", err)
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 29"); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
+}
+
+// retireProfileThemes deletes every stored ui.theme, ui.custom_theme_vars and
+// ui.custom_css value at every scope. The web client has one theme and applies
+// only the admin's overrides, so these choices are dead; the keys stay in the
+// manifest, deprecated, so a stale client's write still succeeds. The Postgres
+// store deletes the same rows in 20260926233851_retire_profile_themes.sql.
+func retireProfileThemes(tx *sql.Tx) error {
+	_, err := tx.Exec(`DELETE FROM user_setting_values WHERE key IN ('ui.theme', 'ui.custom_theme_vars', 'ui.custom_css')`)
+	if err != nil {
+		return fmt.Errorf("deleting retired profile theme settings: %w", err)
+	}
+	return nil
 }
 
 // migrateToV20 widens collection sort preferences to include the two personal

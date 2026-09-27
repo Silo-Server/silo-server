@@ -12202,67 +12202,6 @@
       "body_file": "sync_progress_validation_failed.json"
     },
     {
-      "name": "theme_catalog_document",
-      "operation_id": "getThemeCatalog",
-      "scenario": "An account-authenticated read returns a typed portable catalog with explicit freshness and non-null tags.",
-      "request": {
-        "method": "GET",
-        "path": "/api/v2/theme/catalog",
-        "headers": {
-          "Authorization": "Bearer tok-member"
-        }
-      },
-      "expected_status": 200,
-      "response_headers": {
-        "Cache-Control": "no-store",
-        "Content-Type": "application/json"
-      },
-      "response_media_type": "application/json",
-      "schema": "#/components/schemas/ThemeCatalogResponse",
-      "body_file": "theme_catalog_document.json"
-    },
-    {
-      "name": "theme_catalog_refreshed",
-      "operation_id": "refreshThemeCatalog",
-      "scenario": "Acting-admin refresh completes synchronously and returns the portable catalog; it is not a job acknowledgment.",
-      "request": {
-        "method": "POST",
-        "path": "/api/v2/theme/catalog/refresh",
-        "headers": {
-          "Authorization": "Bearer tok-admin",
-          "X-Profile-Id": "p-primary"
-        }
-      },
-      "expected_status": 200,
-      "response_headers": {
-        "Cache-Control": "no-store",
-        "Content-Type": "application/json"
-      },
-      "response_media_type": "application/json",
-      "schema": "#/components/schemas/ThemeCatalogResponse",
-      "body_file": "theme_catalog_refreshed.json"
-    },
-    {
-      "name": "theme_download_document",
-      "operation_id": "downloadThemeFile",
-      "scenario": "A downloaded portable theme preserves baseTheme, vars and customCss inside the native document envelope.",
-      "request": {
-        "method": "GET",
-        "path": "/api/v2/theme/download?url=https%3A%2F%2Fthemes.example%2Ftheme.json",
-        "headers": {
-          "Authorization": "Bearer tok-member"
-        }
-      },
-      "expected_status": 200,
-      "response_headers": {
-        "Cache-Control": "no-store",
-        "Content-Type": "application/json"
-      },
-      "response_media_type": "application/json",
-      "schema": "#/components/schemas/ThemeDownloadResponse",
-      "body_file": "theme_download_document.json"
-    },
-    {
       "name": "theme_songs_capability",
       "operation_id": "getThemeSongsCapability",
       "scenario": "A profile can discover routed theme audio, conversion and cluster delivery.",

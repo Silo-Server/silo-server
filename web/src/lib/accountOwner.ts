@@ -46,3 +46,8 @@ export function canViewAsAccount(
     (target.role !== "admin" || viewerIsOwner)
   );
 }
+
+/** The role shown for an account: the Owner is labeled "owner" rather than "admin". */
+export function accountRoleLabel(account: AdminUser): string {
+  return account.is_owner ? "owner" : account.role;
+}

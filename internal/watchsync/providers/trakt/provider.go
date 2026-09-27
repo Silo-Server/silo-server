@@ -103,6 +103,7 @@ func (p *Provider) Capabilities() watchsync.Capabilities {
 		ScrobblePlayback: true,
 		ImportRatings:    true,
 		ExportRatings:    true,
+		SyncDropped:      true,
 	}
 }
 
@@ -672,7 +673,7 @@ func (p *Provider) ExportWatchlist(
 	conn watchsync.Connection,
 	items []watchsync.LocalFavorite,
 ) (watchsync.ExportResult, error) {
-	return p.sendWatchlist(ctx, "/sync/watchlist", cfg, conn, items)
+	return p.sendIDList(ctx, "/sync/watchlist", "watchlist", cfg, conn, items)
 }
 
 func (p *Provider) RemoveWatchlist(
@@ -681,12 +682,15 @@ func (p *Provider) RemoveWatchlist(
 	conn watchsync.Connection,
 	items []watchsync.LocalFavorite,
 ) (watchsync.ExportResult, error) {
-	return p.sendWatchlist(ctx, "/sync/watchlist/remove", cfg, conn, items)
+	return p.sendIDList(ctx, "/sync/watchlist/remove", "watchlist", cfg, conn, items)
 }
 
-func (p *Provider) sendWatchlist(
+// sendIDList posts a {movies, shows} id payload to a Trakt list endpoint that
+// answers with a not_found echo, such as the watchlist and dropped shows.
+func (p *Provider) sendIDList(
 	ctx context.Context,
 	path string,
+	label string,
 	cfg watchsync.ServerConfig,
 	conn watchsync.Connection,
 	items []watchsync.LocalFavorite,
@@ -697,7 +701,7 @@ func (p *Provider) sendWatchlist(
 	}
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(payload); err != nil {
-		return watchsync.ExportResult{}, fmt.Errorf("encode trakt watchlist payload: %w", err)
+		return watchsync.ExportResult{}, fmt.Errorf("encode trakt %s payload: %w", label, err)
 	}
 	var response traktFavoritesResponse
 	if err := p.do(ctx, http.MethodPost, path, cfg, conn.AccessToken, &body, &response); err != nil {
