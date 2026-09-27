@@ -15,7 +15,7 @@ import (
 // whose stored marker already matches is not written again.
 func (a *Analyzer) processCreditsChapters(ctx context.Context, candidates []Candidate) RunSummary {
 	summary := RunSummary{}
-	sources := map[string]chapterSourceMarker{}
+	sources := map[string][]chapterSourceMarker{}
 	var unresolved []Candidate
 
 	for _, candidate := range candidates {
@@ -33,9 +33,7 @@ func (a *Analyzer) processCreditsChapters(ctx context.Context, candidates []Cand
 		}
 		// A file's chapters can place credits on its other versions even
 		// when its own marker came from a higher-priority source.
-		if _, ok := sources[candidate.EpisodeID]; !ok {
-			sources[candidate.EpisodeID] = chapterSourceMarker{candidate: candidate, segment: segment}
-		}
+		sources[candidate.EpisodeID] = append(sources[candidate.EpisodeID], chapterSourceMarker{candidate: candidate, segment: segment})
 		if owned && a.patchCredits(ctx, candidate, segment, &summary) {
 			summary.CreditsChapterMarkersWritten++
 		}
@@ -46,8 +44,8 @@ func (a *Analyzer) processCreditsChapters(ctx context.Context, candidates []Cand
 			summary.Errors = append(summary.Errors, err.Error())
 			return summary
 		}
-		source, ok := sources[candidate.EpisodeID]
-		if !ok || !compatibleEpisodeVersionDuration(source.candidate, candidate) {
+		source, ok := closestCreditsSource(sources[candidate.EpisodeID], candidate)
+		if !ok {
 			continue
 		}
 		segment, ok := copyCreditsToVersion(source, candidate)
@@ -60,6 +58,24 @@ func (a *Analyzer) processCreditsChapters(ctx context.Context, candidates []Cand
 		}
 	}
 	return summary
+}
+
+// closestCreditsSource returns the chapter source whose duration is closest
+// to target's among the sources a copy may come from, so each version of an
+// episode is placed from the version it matches.
+func closestCreditsSource(sources []chapterSourceMarker, target Candidate) (chapterSourceMarker, bool) {
+	var best chapterSourceMarker
+	found := false
+	for _, source := range sources {
+		if !compatibleEpisodeVersionDuration(source.candidate, target) {
+			continue
+		}
+		if !found || math.Abs(source.candidate.DurationSeconds-target.DurationSeconds) <
+			math.Abs(best.candidate.DurationSeconds-target.DurationSeconds) {
+			best, found = source, true
+		}
+	}
+	return best, found
 }
 
 // copyCreditsToVersion places a chapter credits result on another version of

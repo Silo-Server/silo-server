@@ -70,6 +70,28 @@ func TestAnalyzeEpisodeWritesChapterCreditsAndVersionCopies(t *testing.T) {
 	}
 }
 
+// With several chapter-bearing versions, a version without chapters copies
+// from the one its duration matches, not the first one found.
+func TestCreditsVersionCopyUsesTheCompatibleSource(t *testing.T) {
+	short := Candidate{FileID: 10, EpisodeID: "ep1", DurationSeconds: 1500,
+		Chapters: []models.MediaChapter{chapter("Story", 0, 1410), chapter("End Credits", 1410, 1500)}}
+	long := Candidate{FileID: 11, EpisodeID: "ep1", DurationSeconds: 1560,
+		Chapters: []models.MediaChapter{chapter("Story", 0, 1470), chapter("End Credits", 1470, 1560)}}
+	target := Candidate{FileID: 12, EpisodeID: "ep1", DurationSeconds: 1558}
+	repo := &fakeIntroRepository{}
+	analyzer := &Analyzer{repo: repo, config: DefaultConfig("ffmpeg")}
+
+	summary := analyzer.processCreditsChapters(context.Background(), []Candidate{short, long, target})
+	if summary.CreditsVersionMarkersCopied != 1 {
+		t.Fatalf("summary %+v, want the version copied from the long source", summary)
+	}
+	patches := patchesOfKind(repo.patches, kindCredits)
+	copied := patches[len(patches)-1]
+	if copied.FileID != 12 || copied.Algorithm != CreditsVersionCopyAlgorithm || copied.Start != 1468 || copied.End != 1558 {
+		t.Fatalf("copy patch = %+v, want 1468-1558 from the 1560-second source", copied)
+	}
+}
+
 func TestCreditsChaptersKeepHigherPriorityAndMatchingMarkers(t *testing.T) {
 	credits := []models.MediaChapter{chapter("Story", 0, 1410), chapter("Credits", 1410, 1500)}
 	manual := Candidate{

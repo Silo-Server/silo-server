@@ -85,6 +85,18 @@ func TestDetectChapterCredits(t *testing.T) {
 			duration: 1420, wantOK: true, wantStart: 1300, wantEnd: 1390,
 		},
 		{
+			name: "a post-credits scene near the end keeps its chapter",
+			chapters: []models.MediaChapter{
+				chapter("Story", 0, 1300), chapter("Credits", 1300, 1390), chapter("Post-Credits Scene", 1390, 1400),
+			},
+			duration: 1400, wantOK: true, wantStart: 1300, wantEnd: 1390,
+		},
+		{
+			name:     "an untitled trailing chapter near the end bounds the credits too",
+			chapters: []models.MediaChapter{chapter("Story", 0, 1300), chapter("ED", 1300, 1392), chapter("", 1392, 1400)},
+			duration: 1400, wantOK: true, wantStart: 1300, wantEnd: 1392,
+		},
+		{
 			name: "reverse scan takes the last credits chapter",
 			chapters: []models.MediaChapter{
 				chapter("Previously", 0, 60), chapter("Credits", 60, 100), chapter("Story", 100, 1300),
