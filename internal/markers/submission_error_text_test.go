@@ -38,6 +38,7 @@ func TestSubmissionErrorTextMasksSecretsOutsideHTTPURLs(t *testing.T) {
 		// Short or unpadded credentials after a scheme word are still masked.
 		{"Authorization: Basic FAKEfixture", "FAKEfixture", "Basic [REDACTED]"},
 		{"Authorization: Bearer fake-fixture", "fake-fixture", "Bearer [REDACTED]"},
+		{"Authorization: Bearer fakefixture", "fakefixture", "Bearer [REDACTED]"},
 		// Harmless numeric pairs keep their values.
 		{"GET /v1/markers?page=1; retry=3 failed", "", "page=1; retry=3 failed"},
 		// An auth scheme word followed by prose is not a credential.

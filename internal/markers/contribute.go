@@ -174,13 +174,17 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 // fails closed.
 var urlInText = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://\S+`)
 
-// authSchemeInText matches the word after an HTTP auth scheme word. It is
-// masked unless it is a plain lowercase word (proseWord), so short or
-// unpadded credentials ("Basic dXNlcjpwYXNz") fail closed while prose such as
-// "basic authentication required" keeps its noun.
+// authSchemeInText matches the word after an HTTP auth scheme word. That word
+// is always masked unless it is one of authSchemeProse, a fixed list of words
+// that cannot be credentials, so "basic authentication required" keeps its
+// noun while any token, however short or plain, fails closed.
 var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)(\s+)([^\s"',;]+)`)
 
-var proseWord = regexp.MustCompile(`^[a-z]+$`)
+var authSchemeProse = map[string]bool{
+	"auth": true, "authentication": true, "authorization": true,
+	"credential": true, "credentials": true, "header": true,
+	"realm": true, "scheme": true, "token": true,
+}
 
 // keyValueInText matches a key followed by ":" or "=" and its value, as in
 // "api_key=abc" or `"x-api-key": "abc"`. Whether the key names a secret is
@@ -193,8 +197,7 @@ var keyValueInText = regexp.MustCompile(`([\w.-]+)("?\s*[:=]\s*"?)([^\s"',;&]+)`
 // userinfo, and auth-scheme or key=value secrets are masked. It is best
 // effort over free text, not a guarantee: a bare secret with no key and no
 // auth scheme ("invalid token sk-abc") is left as is, since masking every
-// word after "token" would also eat ordinary diagnostics. Also unmasked: an
-// all-lowercase-letters credential after "Bearer"/"Basic" (read as prose), a
+// word after "token" would also eat ordinary diagnostics. Also unmasked: a
 // scheme-relative URL ("//user:pass@host"), and the tail of a quoted query
 // value containing a space, which \S+ splits off the URL.
 func submissionErrorText(err error) string {
@@ -202,7 +205,7 @@ func submissionErrorText(err error) string {
 	msg = urlInText.ReplaceAllStringFunc(msg, logredact.SanitizeURL)
 	msg = authSchemeInText.ReplaceAllStringFunc(msg, func(match string) string {
 		m := authSchemeInText.FindStringSubmatch(match)
-		if proseWord.MatchString(m[3]) {
+		if m[3] == logredact.Placeholder || authSchemeProse[strings.ToLower(m[3])] {
 			return match
 		}
 		return m[1] + m[2] + logredact.Placeholder
