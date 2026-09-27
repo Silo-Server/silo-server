@@ -30,7 +30,11 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
-import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
+import {
+  type DismissHomeItemVariables,
+  dismissalDropsShow,
+  useDismissHomeItem,
+} from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
@@ -822,15 +826,17 @@ export default function MediaItemMenu({
   const refreshMetadataMutation = useRefreshItemMetadata();
   const dismissHomeItemMutation = useDismissHomeItem();
   const dismissLabel =
-    dismissAction?.surface === "continue_watching"
-      ? mediaType === "audiobook"
-        ? "Remove from Continue Listening"
-        : mediaType === "ebook"
-          ? "Remove from Continue Reading"
-          : "Remove from Continue Watching"
-      : dismissAction?.surface === "next_up"
-        ? "Remove from Next Up"
-        : undefined;
+    dismissAction && dismissalDropsShow(dismissAction.mediaType ?? mediaType)
+      ? "Drop show"
+      : dismissAction?.surface === "continue_watching"
+        ? mediaType === "audiobook"
+          ? "Remove from Continue Listening"
+          : mediaType === "ebook"
+            ? "Remove from Continue Reading"
+            : "Remove from Continue Watching"
+        : dismissAction?.surface === "next_up"
+          ? "Remove from Next Up"
+          : undefined;
   const currentHref = useMemo(
     () => `${location.pathname}${location.search}`,
     [location.pathname, location.search],

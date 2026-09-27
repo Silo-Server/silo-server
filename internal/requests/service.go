@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,6 +24,12 @@ type TMDBClient interface {
 
 type TMDBExternalIDClient interface {
 	GetExternalIDs(ctx context.Context, mediaType string, id int) (*tmdb.ExternalIDs, error)
+}
+
+// TMDBExternalIDRefresher bypasses the client's external-ID cache. Detected by
+// type assertion, like TMDBExternalIDClient.
+type TMDBExternalIDRefresher interface {
+	RefreshExternalIDs(ctx context.Context, mediaType string, id int) (*tmdb.ExternalIDs, error)
 }
 
 // TMDBCertificationClient resolves a title's content rating. Detected by type
@@ -57,6 +64,13 @@ type RequesterIdentityResolver interface {
 	ResolveRequester(ctx context.Context, userID int) (email, username string, err error)
 }
 
+// TVDBIDResolver finds a series' TVDB ID from its other IDs when TMDB has no
+// TVDB cross-reference, by asking the configured metadata providers (TVDB's own
+// remote-ID search). It returns 0 when no provider knows the series.
+type TVDBIDResolver interface {
+	ResolveSeriesTVDBID(ctx context.Context, tmdbID int, imdbID string) (int, error)
+}
+
 type Service struct {
 	store             Store
 	tmdb              TMDBClient
@@ -66,6 +80,7 @@ type Service struct {
 	groupProvider     access.GroupPolicyProvider
 	users             access.UserRepository
 	requesterIdentity RequesterIdentityResolver
+	tvdbResolver      TVDBIDResolver
 	notifier          FulfillmentNotifier
 	lifecycle         LifecycleNotifier
 	Now               func() time.Time
@@ -108,6 +123,10 @@ func (s *Service) SetUserRepository(users access.UserRepository) { s.users = use
 func (s *Service) SetRequesterIdentityResolver(r RequesterIdentityResolver) {
 	s.requesterIdentity = r
 }
+
+// SetTVDBIDResolver wires the metadata-provider fallback used when TMDB has no
+// TVDB ID for a requested series.
+func (s *Service) SetTVDBIDResolver(r TVDBIDResolver) { s.tvdbResolver = r }
 
 // populateRequesterIdentity fills req.RequesterEmail/Username from the resolver.
 // Nil resolver or any error leaves them empty (the plugin then behaves as admin).
@@ -683,7 +702,7 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 	if err := s.ensureCreateAllowedByCeiling(ctx, viewer, normalized); err != nil {
 		return nil, err
 	}
-	s.enrichExternalIDs(ctx, &normalized)
+	tvdbLookupFailed := s.enrichExternalIDs(ctx, &normalized)
 	isAnime := s.detectRequestAnime(ctx, normalized.MediaType, normalized.TMDBID)
 
 	matches, err := s.lookupPresence(ctx, normalized.MediaType, []PresenceCandidate{createPresenceCandidate(normalized)})
@@ -762,6 +781,8 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 		// Auto-approval is a real approval transition; channels subscribed to
 		// approvals see it alongside the submission.
 		s.notifyApproval(ctx, *req, ApprovalOriginPolicy)
+		req.externalIDsResolved = true
+		req.tvdbLookupFailed = tvdbLookupFailed
 		return s.submitApprovedRequest(ctx, *req, viewer, nil)
 	}
 	return req, nil
@@ -1634,25 +1655,113 @@ func (s *Service) lookupAvailable(ctx context.Context, mediaType MediaType, ids 
 	return matches, nil
 }
 
-func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInput) {
+// enrichExternalIDs fills missing IMDb and TVDB IDs from TMDB and, for a
+// series still without a TVDB ID, from the metadata providers. It reports
+// whether a series is left without a TVDB ID because a lookup (TMDB or a
+// metadata provider) failed, rather than because none exists.
+func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInput) (tvdbLookupFailed bool) {
 	if input == nil {
-		return
+		return false
 	}
-	client, ok := s.tmdb.(TMDBExternalIDClient)
-	if !ok {
-		return
+	tmdbFailed := false
+	// Only TMDB's own IMDb ID is trusted for the provider lookup. A
+	// caller-supplied one may be stale or belong to another series, and a TVDB
+	// match found by it can't always be checked against the TMDB ID.
+	lookupIMDbID := ""
+	if client, ok := s.tmdb.(TMDBExternalIDClient); ok {
+		externalIDs, err := client.GetExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID)
+		tmdbFailed = err != nil
+		// A cached answer without a TVDB ID may predate the admin adding one
+		// on TMDB (the failure message asks them to), so ask TMDB again. If
+		// that fails, keep the cached IDs and record the failure.
+		if refresher, ok := s.tmdb.(TMDBExternalIDRefresher); ok && input.MediaType == MediaTypeSeries &&
+			input.TVDBID == nil && err == nil && (externalIDs == nil || externalIDs.TVDBID <= 0) {
+			if fresh, refreshErr := refresher.RefreshExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID); refreshErr == nil {
+				externalIDs = fresh
+			} else {
+				tmdbFailed = true
+			}
+		}
+		if err == nil && externalIDs != nil {
+			lookupIMDbID = strings.TrimSpace(externalIDs.IMDbID)
+			if input.IMDbID == "" {
+				input.IMDbID = strings.TrimSpace(externalIDs.IMDbID)
+			}
+			if input.TVDBID == nil && externalIDs.TVDBID > 0 {
+				tvdbID := externalIDs.TVDBID
+				input.TVDBID = &tvdbID
+			}
+		}
 	}
-	externalIDs, err := client.GetExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID)
-	if err != nil || externalIDs == nil {
-		return
+	// Sonarr adds series by TVDB ID only, and TMDB often lacks the
+	// cross-reference for new or regional series. Ask the metadata providers
+	// (TVDB's remote-ID search) before giving up.
+	if input.MediaType == MediaTypeSeries && input.TVDBID == nil && s.tvdbResolver != nil {
+		tvdbID, err := s.tvdbResolver.ResolveSeriesTVDBID(ctx, input.TMDBID, lookupIMDbID)
+		if tvdbID > 0 {
+			input.TVDBID = &tvdbID
+		} else if err != nil {
+			slog.WarnContext(ctx, "requests: resolve series tvdb id via metadata providers failed", "component", "requests",
+				"tmdb_id", input.TMDBID, "err", err)
+			return true
+		}
 	}
-	if input.IMDbID == "" {
-		input.IMDbID = strings.TrimSpace(externalIDs.IMDbID)
+	return tmdbFailed && input.MediaType == MediaTypeSeries && input.TVDBID == nil
+}
+
+// ensureSeriesTVDBID looks up a series request's missing TVDB ID again right
+// before submission (approve, Retry, reconcile), so an ID added on TMDB or TVDB
+// since the request was created is used, and records it on the request.
+func (s *Service) ensureSeriesTVDBID(ctx context.Context, req *Request) error {
+	if req.MediaType != MediaTypeSeries || (req.TVDBID != nil && *req.TVDBID > 0) || req.externalIDsResolved {
+		return nil
 	}
-	if input.TVDBID == nil && externalIDs.TVDBID > 0 {
-		tvdbID := externalIDs.TVDBID
-		input.TVDBID = &tvdbID
+	input := CreateRequestInput{MediaType: req.MediaType, TMDBID: req.TMDBID, IMDbID: strings.TrimSpace(req.IMDbID)}
+	req.tvdbLookupFailed = s.enrichExternalIDs(ctx, &input)
+	if input.TVDBID == nil {
+		return nil
 	}
+	// Save before submitting: a backend that accepted the series under an ID
+	// the request row doesn't carry would leave the two out of step.
+	// Submit the ID the row holds: a concurrent submission may have saved a
+	// different one first, and SetExternalIDs keeps it.
+	saved, err := s.store.SetExternalIDs(ctx, req.ID, *input.TVDBID, input.IMDbID)
+	if err != nil {
+		return err
+	}
+	req.TVDBID = &saved
+	if req.IMDbID == "" {
+		req.IMDbID = input.IMDbID
+	}
+	return nil
+}
+
+// missingTVDBIDMessage replaces a backend's "TVDB ID required" error (for
+// example "sonarr: tvdb_id is required") once every lookup has come up empty.
+const missingTVDBIDMessage = "No TVDB ID found for this series. TMDB has none, and the metadata providers found no match on TVDB, " +
+	"so the request backend can't add it. Add the TVDB ID on TMDB (or the TMDB or IMDb ID on TVDB), then retry."
+
+// tvdbLookupFailedMessage replaces the same error when TMDB or a metadata
+// provider failed during the lookup, so the admin isn't sent to fix IDs that
+// may exist.
+const tvdbLookupFailedMessage = "Couldn't look up a TVDB ID for this series because TMDB or a metadata provider failed during the lookup, " +
+	"so the request backend can't add it yet. Check TMDB and the metadata providers, then retry."
+
+// missingTVDBIDError matches backend errors about a missing TVDB ID, such as
+// "sonarr: tvdb_id is required", and not other TVDB failures such as a
+// missing API key.
+var missingTVDBIDError = regexp.MustCompile(`(?i)tvdb[ _-]?id\b.*\b(required|missing)\b|\b(missing|no)\b.*\btvdb[ _-]?id`)
+
+// explainSubmissionFailure turns a backend failure caused by a missing TVDB ID
+// into an explanation the admin can act on. Other failures pass through.
+func explainSubmissionFailure(req Request, msg string) string {
+	if req.MediaType != MediaTypeSeries || (req.TVDBID != nil && *req.TVDBID > 0) || !missingTVDBIDError.MatchString(msg) {
+		return msg
+	}
+	if req.tvdbLookupFailed {
+		return tvdbLookupFailedMessage
+	}
+	return missingTVDBIDMessage
 }
 
 func (s *Service) detectRequestAnime(ctx context.Context, mediaType MediaType, tmdbID int) bool {
@@ -1751,6 +1860,11 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 	if len(want) == 0 {
 		return &req, nil
 	}
+	// Resolve before dropping the failed targets below, so a failed save
+	// leaves their error records in place.
+	if err := s.ensureSeriesTVDBID(ctx, &req); err != nil {
+		return nil, err
+	}
 	for _, t := range existing { // drop stale failed targets for the qualities we re-submit
 		if t.Status == StatusFailed {
 			for _, q := range want {
@@ -1771,7 +1885,7 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 		if msg == "" {
 			msg = "fulfillment backend created no targets"
 		}
-		return s.markSubmissionFailed(ctx, req.ID, actor, errors.New(msg))
+		return s.markSubmissionFailed(ctx, req.ID, actor, errors.New(explainSubmissionFailure(req, msg)))
 	}
 	connKind := connectionKindByID(conns)
 	latest := &req
@@ -1809,7 +1923,11 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 		if status == "" || !validStatus[status] {
 			status = StatusQueued // coerce unknown/empty status to the DB-valid default
 		}
-		updated, err := s.store.UpdateTargetStatus(ctx, created.ID, status, rt.ExternalID, rt.ExternalStatus, rt.Message, actor)
+		message := rt.Message
+		if status == StatusFailed {
+			message = explainSubmissionFailure(req, message)
+		}
+		updated, err := s.store.UpdateTargetStatus(ctx, created.ID, status, rt.ExternalID, rt.ExternalStatus, message, actor)
 		if err != nil {
 			return nil, err
 		}
@@ -2183,6 +2301,9 @@ func normalizeCreateInput(input CreateRequestInput) (CreateRequestInput, error) 
 	input.Overview = strings.TrimSpace(input.Overview)
 	input.PosterPath = strings.TrimSpace(input.PosterPath)
 	input.BackdropPath = strings.TrimSpace(input.BackdropPath)
+	if input.TVDBID != nil && *input.TVDBID <= 0 {
+		input.TVDBID = nil
+	}
 	if input.TMDBID <= 0 {
 		return CreateRequestInput{}, fmt.Errorf("%w: tmdb_id is required", ErrInvalidInput)
 	}

@@ -438,7 +438,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	// watch-progress store, so reading sections pull from that table and skip
 	// the next-up handling below.
 	if continueType == ContinueTypeReading {
-		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
+		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, catalog.DroppedSeriesSet{}, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
 			func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 				entries, err := f.listEbookContinueWatchingProgress(ctx, userID, profileID, pageLimit, offset)
 				if err != nil {
@@ -465,7 +465,8 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 		}, nil
 	}
 
-	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
+	dropped := f.activeDroppedSeries(ctx, userID, profileID)
+	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, dropped, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
 		func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 			entries, err := store.ListProgress(ctx, profileID, "in_progress", pageLimit, offset)
 			if err != nil {
@@ -516,7 +517,8 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 }
 
 // collectContinueProgressItems pages through in-progress entries from
-// listPage, drops dismissed entries, resolves the remainder to media items,
+// listPage, drops dismissed entries and episodes of dropped series, resolves
+// the remainder to media items,
 // and appends them to orderedItems until limit is reached, the source is
 // exhausted, or continueProgressMaxScanned entries have been scanned. Paging
 // past the requested limit matters because dismissal filtering and
@@ -527,6 +529,7 @@ func (f *Fetcher) collectContinueProgressItems(
 	store userstore.UserStore,
 	profileID string,
 	dismissals catalog.HomeDismissalIndex,
+	dropped catalog.DroppedSeriesSet,
 	continueType ContinueType,
 	libraryID *int,
 	libraryIDs []int,
@@ -559,6 +562,11 @@ func (f *Fetcher) collectContinueProgressItems(
 		}
 		rawProgressCount := len(progressEntries)
 		progressEntries = dismissals.FilterProgress(progressEntries)
+		if filtered, err := dropped.FilterProgress(ctx, progressEntries); err != nil {
+			slog.ErrorContext(ctx, "filtering dropped series from continue watching", "component", "sections", "profile_id", profileID, "error", err)
+		} else {
+			progressEntries = filtered
+		}
 
 		pageItems, pageMeta, err := f.fetchContinueProgressItems(ctx, store, profileID, progressEntries, continueType, libraryID, libraryIDs, filter, completedCache)
 		if err != nil {
@@ -993,6 +1001,23 @@ func (f *Fetcher) listContinueWatchingDismissals(ctx context.Context, store user
 		return catalog.HomeDismissalIndex{}
 	}
 	return catalog.NewHomeDismissalIndex(dismissals)
+}
+
+// activeDroppedSeries loads the profile's dropped series for filtering
+// Continue Watching. A failure leaves the section unfiltered, like dismissals.
+func (f *Fetcher) activeDroppedSeries(ctx context.Context, userID int, profileID string) catalog.DroppedSeriesSet {
+	dropped, err := f.progressFilter.ActiveDroppedSeries(ctx, userID, profileID)
+	if err != nil {
+		slog.ErrorContext(ctx, "listing dropped series", "component", "sections", "profile_id", profileID, "error", err)
+		return catalog.DroppedSeriesSet{}
+	}
+	return dropped
+}
+
+// FilterDroppedProgress removes in-progress entries whose series the profile
+// dropped, for surfaces that list progress outside the sections fetcher.
+func (f *Fetcher) FilterDroppedProgress(ctx context.Context, userID int, profileID string, entries []userstore.WatchProgress) ([]userstore.WatchProgress, error) {
+	return f.progressFilter.FilterDroppedProgress(ctx, userID, profileID, entries)
 }
 
 func (f *Fetcher) filterNextUpDismissals(ctx context.Context, userID int, profileID string, results []catalog.NextUpResult) []catalog.NextUpResult {

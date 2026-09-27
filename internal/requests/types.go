@@ -163,6 +163,14 @@ type Request struct {
 	UpdatedAt        time.Time  `json:"updated_at"`
 	ApprovedAt       *time.Time `json:"approved_at,omitempty"`
 	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+
+	// externalIDsResolved marks a request whose external IDs were just looked
+	// up in this call (CreateRequest), so an immediate submission does not
+	// repeat the provider searches. tvdbLookupFailed records that the latest
+	// TVDB lookup hit a provider error rather than a confirmed miss. Neither is
+	// persisted or serialized.
+	externalIDsResolved bool
+	tvdbLookupFailed    bool
 }
 
 type RequestEvent struct {
