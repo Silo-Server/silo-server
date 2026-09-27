@@ -137,3 +137,51 @@ func TestSampleCreditsTailWithRealFFmpeg(t *testing.T) {
 		t.Fatalf("credits %+v (placed %t), want video credits from 70 s to the end", segment, ok)
 	}
 }
+
+// TestSampleCreditsTailWithoutTheProbedAudio runs the tail pass on a file
+// with no audio stream whose probe metadata names one. ffmpeg fails a run
+// whose audio output finds no stream, so the video is sampled alone.
+func TestSampleCreditsTailWithoutTheProbedAudio(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	caps, err := mediasample.LoadCapabilities(ctx, ffmpeg)
+	if err != nil {
+		t.Skipf("ffmpeg capabilities unavailable: %v", err)
+	}
+	candidate := Candidate{FileID: 1, DurationSeconds: 100, CodecVideo: "h264", CodecAudio: "aac"}
+	if err := caps.Require(creditsTailRequest(ctx, candidate, tailWindow(candidate), false)); err != nil {
+		t.Skipf("ffmpeg cannot run the tail pass: %v", err)
+	}
+	candidate.FilePath = filepath.Join(t.TempDir(), "episode.mkv")
+	generate := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "color=c=black:s=320x180:r=10:d=100", "-g", "10", candidate.FilePath)
+	if output, err := generate.CombinedOutput(); err != nil {
+		t.Skipf("cannot generate the clip: %v: %s", err, output)
+	}
+
+	extractor := NewChromaprintExtractor(DefaultConfig(ffmpeg))
+	for _, fingerprint := range []bool{false, true} {
+		if fingerprint && caps.Require(creditsTailRequest(ctx, candidate, tailWindow(candidate), true)) != nil {
+			continue
+		}
+		sample, err := extractor.SampleCreditsTail(ctx, candidate, fingerprint)
+		if err != nil {
+			t.Fatalf("SampleCreditsTail(fingerprint=%t): %v", fingerprint, err)
+		}
+		if n := len(sample.Tail.Frames); n < 35 || n > 45 {
+			t.Fatalf("fingerprint=%t: %d keyframes in the 40 s tail, want about one a second", fingerprint, n)
+		}
+		if len(sample.Tail.Silences) != 0 {
+			t.Fatalf("fingerprint=%t: silences %+v from a file without audio", fingerprint, sample.Tail.Silences)
+		}
+		// An asked-for fingerprint comes back empty, which stores the file
+		// as having no audio to fingerprint.
+		if fingerprint != (sample.Fingerprint != nil) || (sample.Fingerprint != nil && len(sample.Fingerprint.Points) != 0) {
+			t.Fatalf("fingerprint=%t: fingerprint %+v", fingerprint, sample.Fingerprint)
+		}
+	}
+}

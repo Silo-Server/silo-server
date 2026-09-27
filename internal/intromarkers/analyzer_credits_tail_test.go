@@ -391,6 +391,45 @@ func TestCreditsTailPassWithoutAudio(t *testing.T) {
 	}
 }
 
+// Probe metadata can name streams a file does not have. A tail pass that
+// finds no audio samples the video alone and returns an empty fingerprint;
+// one that finds no video leaves the fingerprint to the audio-only run.
+func TestCreditsTailPassWithoutTheProbedStreams(t *testing.T) {
+	candidates := []Candidate{tailCandidate(1, "e1", 1500), tailCandidate(2, "e2", 1500)}
+	repo := &fakeIntroRepository{}
+	sampler := &fakeTailSampler{frames: endCreditsFrames, errs: map[int]error{2: &mediasample.Error{Reason: mediasample.ReasonExit, Attempts: []mediasample.AttemptError{{
+		Reason: mediasample.ReasonExit, Err: errors.New("exit status 234"),
+		StderrTail: "Stream map '0:V:0' matches no streams.",
+	}}}}}
+	analyzer, extractor := tailAnalyzer(repo, sampler, "node-a")
+	summary, err := analyzer.analyzeCreditsGroup(context.Background(), soloGroup(candidates...), analyzeGroupOptions{creditsTail: true})
+	if err != nil {
+		t.Fatalf("analyzeCreditsGroup: %v", err)
+	}
+	if len(sampler.calls) != 2 || !sampler.calls[0].fingerprint || !sampler.calls[1].fingerprint {
+		t.Fatalf("tail calls %+v, want both files fingerprinted in their tail pass", sampler.calls)
+	}
+	// File 1's audio was missing: its tail is kept and its fingerprint is
+	// stored as having no audio, like an audio-only run that finds none.
+	if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status != ArtifactComplete {
+		t.Fatalf("file 1 tail artifact %+v, want the video tail stored", artifact)
+	}
+	if artifact := repo.artifact(1, ArtifactKindCreditsFingerprint); artifact.Status != ArtifactUnusable || artifact.Detail != creditsFingerprintDetailNoAudio {
+		t.Fatalf("file 1 fingerprint artifact %+v, want unusable with no_audio", artifact)
+	}
+	// File 2's video was missing: its tail is unusable, and its audio is
+	// fingerprinted on its own rather than assumed missing.
+	if artifact := repo.artifact(2, ArtifactKindCreditsTail); artifact.Status != ArtifactUnusable || artifact.Detail != string(mediasample.ReasonNoStream) {
+		t.Fatalf("file 2 tail artifact %+v, want unusable with no_stream", artifact)
+	}
+	if extractor.creditsExtractCalls != 1 {
+		t.Fatalf("%d audio-only extractions, want one for the file without video", extractor.creditsExtractCalls)
+	}
+	if summary.CreditsFingerprintErrors != 0 || summary.CreditsTailScanErrors != 0 || len(repo.artifactFailures) != 0 {
+		t.Fatalf("summary %+v with %d recorded failures, want no failure", summary, len(repo.artifactFailures))
+	}
+}
+
 func TestCreditsTailPassWithoutFramesIsRetried(t *testing.T) {
 	candidate := tailCandidate(1, "e1", 1500)
 	repo := &fakeIntroRepository{}

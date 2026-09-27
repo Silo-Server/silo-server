@@ -13,7 +13,10 @@ import (
 // comes from stored, so an edit or clear made after view was read is not
 // undone. A provider marker replaces a stored one by the same precedence
 // ApplyResult used to build view, so a manual marker keeps its place while an
-// online marker left over from stored mode yields to the fresh lookup.
+// online marker left over from stored mode yields to the fresh lookup. A
+// provider marker left over from stored mode that view lacks was withdrawn by
+// its refreshed provider, so it is dropped here too; on_demand mode saves no
+// provider markers, so none can have been stored since view was read.
 //
 // It returns stored unchanged when view is nil or describes another file, and
 // nil when stored is nil.
@@ -24,17 +27,22 @@ func OverlayOnline(stored, view *models.MediaFile) *models.MediaFile {
 	merged := *stored
 	storedByKind, viewByKind := segmentsByKind(stored), segmentsByKind(view)
 	viewFields := fileSegmentFields(view)
-	overlaid := false
+	changed := false
 	for i, target := range fileSegmentFields(&merged) {
 		from := viewFields[i]
+		online := from.payload(view, viewByKind[from.kind])
+		if !online.Present() {
+			if existing := target.payload(stored, storedByKind[target.kind]); isProviderMarker(existing) && existing.Provider != nil {
+				target.clear()
+				delete(storedByKind, target.kind)
+				changed = true
+			}
+			continue
+		}
 		// ApplyResult pins the source on every provider marker it lays
 		// over. A kind without its own source came from storage, and
 		// view's recomputed file-level source says nothing about it.
-		if *from.source == nil {
-			continue
-		}
-		online := from.payload(view, viewByKind[from.kind])
-		if !online.Present() || (online.Source != models.MarkerSourceOnline && online.Source != models.MarkerSourcePlugin) {
+		if *from.source == nil || !isProviderMarker(online) {
 			continue
 		}
 		if !CanWriteMarkerUpdate(target.payload(stored, storedByKind[target.kind]), online) {
@@ -42,14 +50,19 @@ func OverlayOnline(stored, view *models.MediaFile) *models.MediaFile {
 		}
 		target.copyFrom(from)
 		storedByKind[target.kind] = viewByKind[from.kind]
-		overlaid = true
+		changed = true
 	}
-	if !overlaid {
+	if !changed {
 		return &merged
 	}
 	setSegments(&merged, storedByKind)
 	summarizeSources(&merged, stored.MarkersSource, stored.MarkersConfidence)
 	return &merged
+}
+
+// isProviderMarker reports whether p came from an online or plugin provider.
+func isProviderMarker(p SegmentPayload) bool {
+	return p.Present() && (p.Source == models.MarkerSourceOnline || p.Source == models.MarkerSourcePlugin)
 }
 
 // segmentFields addresses one marker kind's columns on a file.
