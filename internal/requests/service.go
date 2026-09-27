@@ -1658,10 +1658,15 @@ func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInp
 		return false
 	}
 	tmdbFailed := false
+	// Only TMDB's own IMDb ID is trusted for the provider lookup. A
+	// caller-supplied one may be stale or belong to another series, and a TVDB
+	// match found by it can't always be checked against the TMDB ID.
+	lookupIMDbID := ""
 	if client, ok := s.tmdb.(TMDBExternalIDClient); ok {
 		externalIDs, err := client.GetExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID)
 		tmdbFailed = err != nil
 		if err == nil && externalIDs != nil {
+			lookupIMDbID = strings.TrimSpace(externalIDs.IMDbID)
 			if input.IMDbID == "" {
 				input.IMDbID = strings.TrimSpace(externalIDs.IMDbID)
 			}
@@ -1675,7 +1680,7 @@ func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInp
 	// cross-reference for new or regional series. Ask the metadata providers
 	// (TVDB's remote-ID search) before giving up.
 	if input.MediaType == MediaTypeSeries && input.TVDBID == nil && s.tvdbResolver != nil {
-		tvdbID, err := s.tvdbResolver.ResolveSeriesTVDBID(ctx, input.TMDBID, input.IMDbID)
+		tvdbID, err := s.tvdbResolver.ResolveSeriesTVDBID(ctx, input.TMDBID, lookupIMDbID)
 		if tvdbID > 0 {
 			input.TVDBID = &tvdbID
 		} else if err != nil {

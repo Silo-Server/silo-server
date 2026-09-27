@@ -433,6 +433,26 @@ func TestAutoApprovedCreateLooksUpTVDBIDOnce(t *testing.T) {
 	}
 }
 
+func TestCreateRequestDoesNotTrustCallerIMDbIDForTVDBLookup(t *testing.T) {
+	store := newFakeStore()
+	// TMDB reports no IMDb ID, so the caller's cannot be corroborated.
+	service := newTestServiceWithTMDB(store, &fakeTMDBClient{externalIDs: &tmdb.ExternalIDs{}})
+	resolver := &fakeTVDBResolver{tvdbID: 456789}
+	service.SetTVDBIDResolver(resolver)
+
+	if _, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeSeries, TMDBID: 240001, IMDbID: "tt0000001", Title: "Regional Series",
+	}); err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if resolver.gotIMDbID != "" || resolver.gotTMDBID != 240001 {
+		t.Fatalf("resolver got tmdb=%d imdb=%q, want the TMDB id only", resolver.gotTMDBID, resolver.gotIMDbID)
+	}
+	if store.created[0].Input.IMDbID != "tt0000001" {
+		t.Fatalf("stored imdb_id = %q, want the caller's value kept", store.created[0].Input.IMDbID)
+	}
+}
+
 func TestCreateRequestSkipsTVDBResolverWhenTMDBHasTVDBID(t *testing.T) {
 	store := newFakeStore()
 	service := newTestServiceWithTMDB(store, &fakeTMDBClient{externalIDs: &tmdb.ExternalIDs{TVDBID: 12345}})
