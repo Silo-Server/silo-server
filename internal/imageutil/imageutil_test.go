@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"image/png"
 	"runtime"
 	"testing"
 )
@@ -95,5 +96,46 @@ func TestGenerateVariantsWrapsErrInvalidImage(t *testing.T) {
 	_, err := GenerateVariants([]byte("not an image"), []int{300})
 	if !errors.Is(err, ErrInvalidImage) {
 		t.Fatalf("err = %v, want ErrInvalidImage", err)
+	}
+}
+
+func testPNG(t *testing.T, width, height int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: 99, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func TestUndecodableSource(t *testing.T) {
+	full := testPNG(t, 600, 900)
+	for name, tc := range map[string]struct {
+		data []byte
+		want bool
+	}{
+		"valid png":     {full, false},
+		"truncated png": {full[:len(full)/2], true},
+		"unknown":       {[]byte("not an image"), false},
+	} {
+		if got := undecodableSource(tc.data); got != tc.want {
+			t.Errorf("%s: undecodableSource = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+// Linux libvips reads a truncated PNG's header in Size and fails only in
+// Process; other builds may tolerate the damage and return variants.
+func TestGenerateVariantsTruncatedPNGIsInvalidWhenRejected(t *testing.T) {
+	full := testPNG(t, 600, 900)
+	_, err := GenerateVariants(full[:len(full)/2], []int{300})
+	if err != nil && !errors.Is(err, ErrInvalidImage) {
+		t.Fatalf("err = %v, want nil or ErrInvalidImage", err)
 	}
 }

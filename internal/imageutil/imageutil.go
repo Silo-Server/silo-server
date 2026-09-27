@@ -30,9 +30,23 @@ const (
 // CPU core; see tasks.imageCacheWorkerCount. Do not raise VIPS_CONCURRENCY
 // in deployments without lowering those pools, or the host oversubscribes.
 
-// ErrInvalidImage reports source bytes that libvips cannot read as an image.
-// Failures after the image was read, such as encoding a variant, do not wrap it.
+// ErrInvalidImage reports source bytes that cannot be read as an image,
+// including pixel data libvips only rejects while processing. Encoder
+// failures on a readable image do not wrap it.
 var ErrInvalidImage = errors.New("imageutil: invalid image")
+
+// undecodableSource reports whether data is in a format the standard library
+// recognizes but its pixel data does not decode. libvips reads only the header
+// in Size, so a truncated PNG first fails inside Process, where the error is
+// otherwise indistinguishable from an encoder failure. Formats the standard
+// library does not know report false, keeping those failures server errors.
+func undecodableSource(data []byte) bool {
+	if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil {
+		return false
+	}
+	_, _, err := image.Decode(bytes.NewReader(data))
+	return err != nil
+}
 
 // MaxCachedOriginalDimension caps the longest edge of a cached "original"
 // variant. Provider artwork wider than this is downscaled on ingest, so a
@@ -77,6 +91,9 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 	fitWithin(&originalOptions, size, MaxCachedOriginalDimension)
 	original, err := bimg.NewImage(data).Process(originalOptions)
 	if err != nil {
+		if undecodableSource(data) {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidImage, err)
+		}
 		return nil, fmt.Errorf("imageutil: encode original: %w", err)
 	}
 	variants = append(variants, Variant{Key: "original", Data: original})
