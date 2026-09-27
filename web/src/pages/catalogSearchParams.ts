@@ -257,7 +257,7 @@ export function buildPersonalCatalogHref(source: "favorites" | "watchlist" | "hi
 }
 
 export function buildPersonCatalogHref(personId: string): string {
-  return `/person/${personId}`;
+  return `/person/${encodeURIComponent(personId)}`;
 }
 
 export function buildSectionCatalogHref(destination: SectionCatalogDestination): string {

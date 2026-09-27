@@ -274,9 +274,16 @@ analyzed.
 All three return `202` with `status: "queued"` or `status: "already_running"`.
 These statuses acknowledge process-local background work. There is no persisted
 job, job Location, cluster-wide exclusion, or restart recovery promise. Active
-work is coalesced by item ID within the process: while any local analysis of
-an item runs, another request for that item reports `already_running`, whatever
-kinds it asks for. Successful analysis retains the existing marker-update
+work is coalesced by item ID within the process, and one analysis of an item
+runs at a time. While local analysis of an item runs, a request for kinds that
+analysis, together with any work queued behind it, already covers reports
+`already_running`. A request for further kinds, such as `credits` while an
+intro-only analysis runs, reports `queued` and runs just those kinds once the
+running analysis finishes. While an online `refresh-markers` runs, every other
+request for the item reports `already_running`, and a `refresh-markers` that
+would run online reports `already_running` while local analysis runs. The
+frozen v1 routes also report `already_running` while any analysis of the item
+runs and never queue. Successful analysis retains the existing marker-update
 notifications.
 
 The operations are non-retryable. The web re-detection actions disable mutation

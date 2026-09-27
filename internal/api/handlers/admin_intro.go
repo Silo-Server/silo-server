@@ -53,8 +53,64 @@ type AdminIntroHandler struct {
 	MarkerUpdateNotifier PlaybackMarkerUpdateNotifier
 	OnlineMarkers        MarkerRefreshService
 	baseContext          context.Context
-	inFlight             sync.Map
 	logger               *slog.Logger
+
+	// runsMu guards runs, the marker work running for each item ID.
+	runsMu sync.Mutex
+	runs   map[string]*itemMarkerRun
+}
+
+// itemMarkerRun is the marker work running for one item: the kinds it
+// analyzes, and the kinds requested while it runs that it does not cover,
+// which run once it finishes.
+type itemMarkerRun struct {
+	running, pending intromarkers.EpisodeMarkerKinds
+}
+
+// claimItemRun reserves itemID for work on kinds and reports whether the
+// caller must start that work. While other work on the item runs, it returns
+// the status to report instead: already_running when the running and queued
+// work covers kinds, or, when queue is set, queued after adding the kinds not
+// yet running to the work that runs next. Without queue, any running work
+// reports already_running.
+func (h *AdminIntroHandler) claimItemRun(itemID string, kinds intromarkers.EpisodeMarkerKinds, queue bool) (bool, string) {
+	h.runsMu.Lock()
+	defer h.runsMu.Unlock()
+	run := h.runs[itemID]
+	if run == nil {
+		if h.runs == nil {
+			h.runs = map[string]*itemMarkerRun{}
+		}
+		h.runs[itemID] = &itemMarkerRun{running: kinds}
+		return true, markerRefreshQueued
+	}
+	if !queue || !kinds.Without(run.running.Or(run.pending)).Any() {
+		return false, markerRefreshAlreadyRunning
+	}
+	run.pending = run.pending.Or(kinds.Without(run.running))
+	return false, markerRefreshQueued
+}
+
+// nextItemRun ends the running work on itemID. It returns the kinds queued
+// behind that work, which the caller runs next, or reports false after
+// releasing the item.
+func (h *AdminIntroHandler) nextItemRun(itemID string) (intromarkers.EpisodeMarkerKinds, bool) {
+	h.runsMu.Lock()
+	defer h.runsMu.Unlock()
+	run := h.runs[itemID]
+	if run == nil || !run.pending.Any() {
+		delete(h.runs, itemID)
+		return intromarkers.EpisodeMarkerKinds{}, false
+	}
+	run.running, run.pending = run.pending, intromarkers.EpisodeMarkerKinds{}
+	return run.running, true
+}
+
+// itemRunning reports whether marker work on itemID is running.
+func (h *AdminIntroHandler) itemRunning(itemID string) bool {
+	h.runsMu.Lock()
+	defer h.runsMu.Unlock()
+	return h.runs[itemID] != nil
 }
 
 func NewAdminIntroHandler(
@@ -90,9 +146,10 @@ func (h *AdminIntroHandler) HandleRedetectEpisodeIntro(w http.ResponseWriter, r 
 }
 
 // handleEpisodeMarkers serves the frozen /api/v1 endpoints, which analyze
-// episode intros only and keep their original messages.
+// episode intros only, keep their original messages, and report
+// already_running while any analysis of the episode runs.
 func (h *AdminIntroHandler) handleEpisodeMarkers(w http.ResponseWriter, r *http.Request, action string) {
-	status, err := h.refreshItemMarkers(r.Context(), chi.URLParam(r, "id"), action, introMarkerKinds, false)
+	status, err := h.refreshItemMarkers(r.Context(), chi.URLParam(r, "id"), action, introMarkerKinds, localRefreshOptions{})
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -108,7 +165,7 @@ func (h *AdminIntroHandler) RefreshEpisodeMarkers(ctx context.Context, itemID, a
 	if action == "refresh-v2" {
 		return h.refreshEpisodeMarkersV2(ctx, itemID)
 	}
-	return h.refreshItemMarkers(ctx, itemID, action, introMarkerKinds, false)
+	return h.refreshItemMarkers(ctx, itemID, action, introMarkerKinds, localRefreshOptions{queue: true})
 }
 
 // The marker kinds RedetectItemMarkers accepts.
@@ -135,17 +192,29 @@ func (h *AdminIntroHandler) RedetectItemMarkers(ctx context.Context, itemID, kin
 	default:
 		return "", fieldError("kind", "Kind must be intro, credits, or all")
 	}
-	return h.refreshItemMarkers(ctx, itemID, "redetect-markers", kinds, true)
+	return h.refreshItemMarkers(ctx, itemID, "redetect-markers", kinds, localRefreshOptions{followSettings: true, queue: true})
+}
+
+// localRefreshOptions sets how refreshItemMarkers treats a request.
+type localRefreshOptions struct {
+	// followSettings narrows the requested kinds to the kinds
+	// markers.detect_intros and markers.detect_credits leave on, and rejects
+	// the request when none remain. The endpoints that predate those
+	// settings leave it unset.
+	followSettings bool
+	// queue runs the requested kinds that the item's running analysis does
+	// not cover once it finishes, instead of reporting already_running. The
+	// frozen /api/v1 routes leave it unset.
+	queue bool
 }
 
 // refreshItemMarkers queues local marker analysis of an item for kinds. A
 // movie gets credits only, so a request without credits takes episodes
 // only, rejects a movie like any other item that is not an episode, and
-// keeps the messages of the endpoints that predate movies. followSettings
-// narrows kinds to the kinds markers.detect_intros and
-// markers.detect_credits leave on, and rejects the request when none
-// remain; the endpoints that predate those settings leave it unset.
-func (h *AdminIntroHandler) refreshItemMarkers(ctx context.Context, itemID, action string, kinds intromarkers.EpisodeMarkerKinds, followSettings bool) (string, error) {
+// keeps the messages of the endpoints that predate movies. One analysis of
+// an item runs at a time; opts decides how a request for kinds it does not
+// cover is treated, and whether the detection settings narrow kinds.
+func (h *AdminIntroHandler) refreshItemMarkers(ctx context.Context, itemID, action string, kinds intromarkers.EpisodeMarkerKinds, opts localRefreshOptions) (string, error) {
 	episodesOnly := !kinds.Credits
 	if h == nil || h.analyzer == nil || h.eligibility == nil {
 		return "", apiError(http.StatusServiceUnavailable, "unavailable", "Intro detection is not configured")
@@ -195,59 +264,71 @@ func (h *AdminIntroHandler) refreshItemMarkers(ctx context.Context, itemID, acti
 		}
 		return "", apiError(http.StatusConflict, "conflict", message)
 	}
-	if followSettings {
+	if opts.followSettings {
 		if kinds, err = h.enabledItemMarkerKinds(ctx, itemID, eligibility.Kind, kinds); err != nil {
 			return "", err
 		}
 	}
 
-	if _, loaded := h.inFlight.LoadOrStore(itemID, struct{}{}); loaded {
-		return markerRefreshAlreadyRunning, nil
+	start, status := h.claimItemRun(itemID, kinds, opts.queue)
+	if !start {
+		return status, nil
 	}
 
 	kind := eligibility.Kind
 	go func() {
-		defer h.inFlight.Delete(itemID)
-		start := time.Now()
-		h.logger.InfoContext(ctx, "admin markers: item refresh started",
-			"item_id", itemID,
-			"kind", kind,
-			"action", action,
-			"intro", kinds.Intro,
-			"credits", kinds.Credits)
-		summary, err := h.analyzeItem(h.baseContext, itemID, kind, kinds)
-		if err != nil {
-			h.logger.ErrorContext(ctx, "admin markers: item refresh failed",
-				"item_id", itemID,
-				"kind", kind,
-				"action", action,
-				"duration", time.Since(start),
-				"error", err)
-			return
+		for {
+			h.runLocalItemAnalysis(ctx, itemID, kind, action, kinds)
+			var more bool
+			if kinds, more = h.nextItemRun(itemID); !more {
+				return
+			}
 		}
-		h.logger.InfoContext(ctx, "admin markers: item refresh finished",
+	}()
+
+	return markerRefreshQueued, nil
+}
+
+// runLocalItemAnalysis runs local analysis of an item of kind for kinds, logs
+// the result, and tells active playback the markers it stored.
+func (h *AdminIntroHandler) runLocalItemAnalysis(ctx context.Context, itemID, kind, action string, kinds intromarkers.EpisodeMarkerKinds) {
+	start := time.Now()
+	h.logger.InfoContext(ctx, "admin markers: item refresh started",
+		"item_id", itemID,
+		"kind", kind,
+		"action", action,
+		"intro", kinds.Intro,
+		"credits", kinds.Credits)
+	summary, err := h.analyzeItem(h.baseContext, itemID, kind, kinds)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "admin markers: item refresh failed",
 			"item_id", itemID,
 			"kind", kind,
 			"action", action,
 			"duration", time.Since(start),
-			"files_considered", summary.FilesConsidered,
-			"season_groups_considered", summary.SeasonGroupsConsidered,
-			"chapter_markers_written", summary.ChapterMarkersWritten,
-			"chromaprint_markers_written", summary.ChromaprintMarkersWritten,
-			"fingerprint_cache_hits", summary.FingerprintCacheHits,
-			"fingerprints_computed", summary.FingerprintsComputed,
-			"credits_chapter_markers_written", summary.CreditsChapterMarkersWritten,
-			"credits_audio_markers_written", summary.CreditsAudioMarkersWritten,
-			"credits_audio_video_markers_written", summary.CreditsAudioVideoMarkersWritten,
-			"credits_video_markers_written", summary.CreditsVideoMarkersWritten,
-			"movie_credits_markers_written", summary.MovieCreditsMarkersWritten,
-			"credits_fingerprints_computed", summary.CreditsFingerprintsComputed,
-			"credits_tail_scans_computed", summary.CreditsTailScansComputed,
-			"errors", len(summary.Errors))
-		h.notifyItemMarkerUpdates(h.baseContext, itemID, kind, action, nil)
-	}()
-
-	return markerRefreshQueued, nil
+			"error", err)
+		return
+	}
+	h.logger.InfoContext(ctx, "admin markers: item refresh finished",
+		"item_id", itemID,
+		"kind", kind,
+		"action", action,
+		"duration", time.Since(start),
+		"files_considered", summary.FilesConsidered,
+		"season_groups_considered", summary.SeasonGroupsConsidered,
+		"chapter_markers_written", summary.ChapterMarkersWritten,
+		"chromaprint_markers_written", summary.ChromaprintMarkersWritten,
+		"fingerprint_cache_hits", summary.FingerprintCacheHits,
+		"fingerprints_computed", summary.FingerprintsComputed,
+		"credits_chapter_markers_written", summary.CreditsChapterMarkersWritten,
+		"credits_audio_markers_written", summary.CreditsAudioMarkersWritten,
+		"credits_audio_video_markers_written", summary.CreditsAudioVideoMarkersWritten,
+		"credits_video_markers_written", summary.CreditsVideoMarkersWritten,
+		"movie_credits_markers_written", summary.MovieCreditsMarkersWritten,
+		"credits_fingerprints_computed", summary.CreditsFingerprintsComputed,
+		"credits_tail_scans_computed", summary.CreditsTailScansComputed,
+		"errors", len(summary.Errors))
+	h.notifyItemMarkerUpdates(h.baseContext, itemID, kind, action, nil)
 }
 
 // enabledItemMarkerKinds narrows requested, the kinds asked of an item of

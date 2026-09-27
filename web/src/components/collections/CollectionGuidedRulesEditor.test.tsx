@@ -18,7 +18,7 @@ vi.mock("@/hooks/queries/catalog", () => ({
   }),
 }));
 
-vi.mock("@/hooks/queries/people", () => ({
+vi.mock("@/hooks/queries/personSearch", () => ({
   usePersonSearch: () => ({
     data: [],
     isLoading: false,

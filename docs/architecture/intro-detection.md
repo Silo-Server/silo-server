@@ -116,7 +116,9 @@ end within 15 seconds of the end of the file becomes the end of the file.
    segment. Titles that name an intro, a scene around the credits
    (`Post-Credits`, `Mid-Credits`, `After Credits`, `Pre-Credits`), the end
    of the credits (`Credits End`), or a generated `Chapter NN` are not
-   credits. The whole run must fit the tail window and length limits. The
+   credits. Neither is a credits or `Ending` title that names a scene
+   (`Credits Scene`, `Stinger`, `Tag`, `Bonus`), though an `ED: …` song
+   title may hold those words. The whole run must fit the tail window and length limits. The
    end is the next chapter's start, even within 15 seconds of the end of the
    file, so a short scene after the credits keeps its own chapter; only a
    run that ends with the last chapter snaps to the end of the file. Chapter

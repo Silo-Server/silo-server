@@ -475,6 +475,16 @@ func (k EpisodeMarkerKinds) And(other EpisodeMarkerKinds) EpisodeMarkerKinds {
 	return EpisodeMarkerKinds{Intro: k.Intro && other.Intro, Credits: k.Credits && other.Credits}
 }
 
+// Or returns the kinds either k or other selects.
+func (k EpisodeMarkerKinds) Or(other EpisodeMarkerKinds) EpisodeMarkerKinds {
+	return EpisodeMarkerKinds{Intro: k.Intro || other.Intro, Credits: k.Credits || other.Credits}
+}
+
+// Without returns the kinds k selects that other does not.
+func (k EpisodeMarkerKinds) Without(other EpisodeMarkerKinds) EpisodeMarkerKinds {
+	return EpisodeMarkerKinds{Intro: k.Intro && !other.Intro, Credits: k.Credits && !other.Credits}
+}
+
 // markerKinds lists the kinds k selects, intro first.
 func (k EpisodeMarkerKinds) markerKinds() []markerKind {
 	var out []markerKind

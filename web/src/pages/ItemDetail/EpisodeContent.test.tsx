@@ -99,6 +99,7 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
 
 vi.mock("@/hooks/queries/admin/markers", () => ({
   useAdminMarkerCapabilities: mocks.useAdminMarkerCapabilities,
+  useMarkerDetectionKinds: () => undefined,
 }));
 
 vi.mock("@/hooks/queries/items", () => ({
