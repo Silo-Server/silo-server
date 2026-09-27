@@ -153,7 +153,7 @@ authorized against; a promotion or ownership move that lands in between returns
 previous Owner's sessions viewing as other administrators.
 
 When the Owner account is lost or locked out, someone with shell access to a node
-and the server's `DATABASE_URL` recovers it with `silo owner set <username>`, for
+and the server's `DATABASE_URL` (no other server secret) recovers it with `silo owner set <username>`, for
 example `docker compose exec silo silo owner set alice`. The command makes that
 account the Owner, enables it, and grants it the administrator role if needed; a
 role or status change signs the account out. The previous Owner stays an

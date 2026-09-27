@@ -28,11 +28,13 @@ func runOwnerCommand(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	bc, err := config.LoadBootstrap(envFile)
+	// Recovery needs only the database; it must work from a maintenance shell
+	// that does not carry the server's SECRET_KEY.
+	dbURL, err := config.LoadDatabaseURL(envFile)
 	if err != nil {
-		return fmt.Errorf("bootstrap: %w", err)
+		return err
 	}
-	pool, err := database.NewPoolForRole(ctx, config.DatabaseConfig{URL: bc.DatabaseURL, MaxConnections: 2}, "application")
+	pool, err := database.NewPoolForRole(ctx, config.DatabaseConfig{URL: dbURL, MaxConnections: 2}, "application")
 	if err != nil {
 		return fmt.Errorf("database pool: %w", err)
 	}
