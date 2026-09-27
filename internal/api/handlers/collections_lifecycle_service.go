@@ -413,7 +413,7 @@ func (h *CollectionHandler) UploadPersonalCollectionPoster(ctx context.Context, 
 		return PersonalCollectionView{}, fieldError("body", "Poster image is required")
 	}
 	if _, err := h.processCollectionPoster(ctx, store, collectionID, profileID, func() ([]byte, error) { return data, nil }, ""); err != nil {
-		return PersonalCollectionView{}, apiError(http.StatusInternalServerError, "internal_error", err.Error())
+		return PersonalCollectionView{}, collectionArtworkError(err, "Failed to store collection artwork")
 	}
 	return h.GetPersonalCollection(ctx, userID, profileID, collectionID)
 }
@@ -431,7 +431,7 @@ func (h *CollectionHandler) SetPersonalCollectionPosterSource(ctx context.Contex
 		return PersonalCollectionView{}, fieldError("source_url", "An image URL is required")
 	}
 	if _, err := h.processCollectionPoster(ctx, store, id, profileID, nil, source); err != nil {
-		return PersonalCollectionView{}, apiError(500, "internal_error", "Failed to store collection artwork")
+		return PersonalCollectionView{}, collectionArtworkError(err, "Failed to store collection artwork")
 	}
 	return h.GetPersonalCollection(ctx, userID, profileID, id)
 }

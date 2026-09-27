@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -173,4 +174,84 @@ func testCollectionPosterJPEG(t *testing.T) []byte {
 		t.Fatalf("encode jpeg: %v", err)
 	}
 	return buf.Bytes()
+}
+
+func TestUploadCollectionImageVariants_RejectsNonImage(t *testing.T) {
+	recorder := newCollectionArtworkS3Recorder(t)
+
+	_, _, err := uploadCollectionImageVariants(
+		context.Background(),
+		blobstore.NewS3(recorder.client()),
+		adminCollectionImagePrefix,
+		"collection-1",
+		"poster",
+		[]byte(`<?xml version="1.0"?><root/>`),
+	)
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("err = %v, want a 400 APIError", err)
+	}
+	if puts := recorder.putPaths(); len(puts) != 0 {
+		t.Fatalf("PUT paths = %#v, want none", puts)
+	}
+}
+
+func TestDownloadCollectionImageURL_ClientErrorsAre400(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	for name, rawURL := range map[string]string{
+		"missing source": server.URL + "/poster.jpg",
+		"non-http":       "ftp://example.invalid/poster.jpg",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := downloadCollectionImageURL(context.Background(), server.Client(), rawURL)
+			apiErr, ok := errors.AsType[*APIError](err)
+			if !ok || apiErr.Status != http.StatusBadRequest {
+				t.Fatalf("err = %v, want a 400 APIError", err)
+			}
+		})
+	}
+}
+
+func TestProcessCollectionPoster_InvalidImageKeepsExistingPoster(t *testing.T) {
+	store, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFilesystem: %v", err)
+	}
+	existing := userCollectionImagePrefix + "/collection-1/poster/original.webp"
+	if err := store.Put(context.Background(), existing, []byte("current poster")); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	h := &CollectionHandler{ArtworkStore: store}
+	_, err = h.processCollectionPoster(
+		context.Background(),
+		nil,
+		"collection-1",
+		"profile-1",
+		func() ([]byte, error) { return []byte("not an image"), nil },
+		"",
+	)
+	mapped, ok := errors.AsType[*APIError](collectionArtworkError(err, "Failed to store collection artwork"))
+	if !ok || mapped.Status != http.StatusBadRequest {
+		t.Fatalf("err = %v, want a 400 APIError", err)
+	}
+	items, _, err := store.List(context.Background(), userCollectionImagePrefix+"/collection-1/poster/", "", 0)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(items) != 1 || items[0].Key != existing {
+		t.Fatalf("stored poster objects = %#v, want only %q", items, existing)
+	}
+}
+
+func TestCollectionArtworkError_HidesServerFailures(t *testing.T) {
+	err := collectionArtworkError(errors.New("uploading original: connection reset"), "Failed to store collection artwork")
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Status != http.StatusInternalServerError || apiErr.Message != "Failed to store collection artwork" {
+		t.Fatalf("err = %#v, want the 500 fallback", err)
+	}
 }

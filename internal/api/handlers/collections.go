@@ -533,10 +533,15 @@ func (h *CollectionHandler) processCollectionPoster(
 	if artwork == nil {
 		return true, fmt.Errorf("poster upload requires configured artwork storage")
 	}
+	// Decode before clearing so an unusable file keeps the current poster.
+	variants, err := generateCollectionImageVariants("poster", fileData)
+	if err != nil {
+		return true, fmt.Errorf("poster: %w", err)
+	}
 	if err := removeCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, "poster"); err != nil {
 		return true, fmt.Errorf("clearing previous poster: %w", err)
 	}
-	s3Path, thumbhash, err := uploadCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, "poster", fileData)
+	s3Path, thumbhash, err := storeCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, "poster", variants)
 	if err != nil {
 		return true, fmt.Errorf("poster: %w", err)
 	}

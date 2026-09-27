@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -79,15 +80,31 @@ func readCollectionImageMultipart(r *http.Request, fieldName string) ([]byte, er
 	return data, nil
 }
 
+// invalidCollectionImage reports artwork the caller supplied that Silo cannot
+// use. It is a 400 so both listeners answer with a validation error rather
+// than a 500.
+func invalidCollectionImage(message string, cause error) *APIError {
+	return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: message, cause: cause}
+}
+
+// collectionArtworkError keeps a client-facing artwork error and hides any
+// other failure behind a 500 with the given message.
+func collectionArtworkError(err error, message string) error {
+	if apiErr, ok := errors.AsType[*APIError](err); ok && apiErr.Status < http.StatusInternalServerError {
+		return apiErr
+	}
+	return apiError(http.StatusInternalServerError, "internal_error", message)
+}
+
 // downloadCollectionImageURL fetches an image from an http(s) URL with size
 // limits.
 func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
-		return nil, fmt.Errorf("invalid URL: %w", err)
+		return nil, invalidCollectionImage("The image source URL is not valid.", err)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, fmt.Errorf("image source URL must use http or https")
+		return nil, invalidCollectionImage("The image source URL must use http or https.", nil)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
@@ -103,17 +120,17 @@ func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("image source returned status %d", resp.StatusCode)
+		return nil, invalidCollectionImage(fmt.Sprintf("The image source returned status %d.", resp.StatusCode), nil)
 	}
 	if resp.ContentLength > collectionImageMaxBytes {
-		return nil, fmt.Errorf("image exceeds 10 MB limit")
+		return nil, invalidCollectionImage("The image exceeds the 10 MB limit.", nil)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, collectionImageMaxBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("reading image response: %w", err)
 	}
 	if len(data) > collectionImageMaxBytes {
-		return nil, fmt.Errorf("image exceeds 10 MB limit")
+		return nil, invalidCollectionImage("The image exceeds the 10 MB limit.", nil)
 	}
 	return data, nil
 }
@@ -131,6 +148,17 @@ func uploadCollectionImageVariants(
 	if store == nil {
 		return "", "", fmt.Errorf("image upload requires configured S3 storage")
 	}
+	result, err := generateCollectionImageVariants(imageType, fileData)
+	if err != nil {
+		return "", "", err
+	}
+	return storeCollectionImageVariants(ctx, store, prefix, collectionID, imageType, result)
+}
+
+// generateCollectionImageVariants decodes the image and renders its resized
+// variants without touching storage. Bytes that are not a supported image
+// fail with invalidCollectionImage.
+func generateCollectionImageVariants(imageType string, fileData []byte) (*imageutil.VariantResult, error) {
 	var widths []int
 	switch imageType {
 	case "poster":
@@ -138,14 +166,25 @@ func uploadCollectionImageVariants(
 	case "backdrop":
 		widths = []int{1280, 300}
 	default:
-		return "", "", fmt.Errorf("invalid image type: %s", imageType)
+		return nil, fmt.Errorf("invalid image type: %s", imageType)
 	}
 
 	result, err := imageutil.GenerateVariants(fileData, widths)
 	if err != nil {
-		return "", "", fmt.Errorf("generating image variants: %w", err)
+		return nil, invalidCollectionImage("The file is not a supported image.", err)
 	}
+	return result, nil
+}
 
+// storeCollectionImageVariants uploads generated variants under
+// "{prefix}/{collectionID}/{imageType}/" and returns the path of the original
+// variant plus a thumbhash computed from the w300 variant.
+func storeCollectionImageVariants(
+	ctx context.Context,
+	store blobstore.Store,
+	prefix, collectionID, imageType string,
+	result *imageutil.VariantResult,
+) (s3Path, thumbhashStr string, err error) {
 	var w300Data []byte
 	for _, v := range result.Variants {
 		key := fmt.Sprintf("%s/%s/%s/%s%s", prefix, collectionID, imageType, v.Key, result.Ext)
