@@ -643,7 +643,7 @@ function sortAdminUsers(users: AdminUser[], field: UserSortField, dir: SortDirec
         result = compareText(a.email, b.email);
         break;
       case "role":
-        result = compareText(a.role, b.role);
+        result = compareText(accountRoleLabel(a), accountRoleLabel(b));
         break;
       case "enabled":
         result = compareText(a.enabled ? "active" : "disabled", b.enabled ? "active" : "disabled");
