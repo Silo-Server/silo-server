@@ -33,7 +33,8 @@ Both paths honor provider priority, manual edits, and provider quota limits.
 
 Local detection finds episode intros and end credits. It never replaces a
 marker from a higher-priority source, and it judges each kind separately, so
-an episode with an online intro can still get local credits.
+an episode with an online intro can still get local credits. With `on_demand`
+storage, players keep the online intro while playback detects the credits.
 
 `markers.detection_workers` sizes local detection: how many seasons the
 **Detect markers on this server** task analyzes at once, which also bounds how

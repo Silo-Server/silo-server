@@ -108,11 +108,15 @@ seconds, end by the end of the file, and rate at least 0.55. A preview marker
 that starts inside the credits ends them.
 
 Playback analysis looks only for the kinds the played file lacks, so an
-episode with an intro and no credits runs the credits steps alone. Unlike an
-intro group, a credits season group whose stored analysis still stands is not
-compared again from playback: most episodes have no credits local analysis
-can find, and every start would otherwise repeat the comparison. Admin
-refresh compares both kinds again.
+episode with an intro and no credits runs the credits steps alone. With
+`markers.online_storage` set to `on_demand`, the played file includes the
+online markers looked up for this playback, which are never saved; every
+marker update sent to players during the analysis lays them back over the
+stored row, where a manual marker still wins. Unlike an intro group, a
+credits season group whose stored analysis still stands is not compared again
+from playback: most episodes have no credits local analysis can find, and
+every start would otherwise repeat the comparison. Admin refresh compares both
+kinds again.
 
 Automatic contribution to online providers stays intro-only; detected credits
 are contributed only on request.

@@ -171,13 +171,24 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 		"episode_id", file.EpisodeID,
 		"mode", mode)
 
+	// overlay is the on-demand online lookup players were sent. Its provider
+	// markers are never saved, so each reload of the stored row below gets
+	// them laid back over; otherwise the next update would clear a marker the
+	// player already shows, and local analysis would be asked for it.
+	var overlay *models.MediaFile
 	if runOnline {
-		effective, _, err := h.MarkerPopulation.Populate(ctx, file)
+		onDemand := h.onlineMarkersOnDemand(ctx)
+		effective, overlaid, err := h.MarkerPopulation.Populate(ctx, file)
 		if err != nil {
 			slog.WarnContext(ctx, "playback marker lookup failed", "file_id", file.ID, "error", err)
 		}
 		if effective != nil {
 			file = effective
+			// In on-demand mode Populate reports an overlay it applied; in
+			// stored mode it saved its result, which the reloads read back.
+			if onDemand && overlaid {
+				overlay = effective
+			}
 			if hasAnyMarker(file) {
 				h.notifyPlaybackMarkers(ctx, sessionID, file, mode)
 				if !runLocal || !missingLocalMarkers(file, isEpisode).Any() {
@@ -189,7 +200,7 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 
 	// A concurrent session may have populated markers since we queued; check
 	// before falling through to the (expensive) local analyzer.
-	if refreshed := h.reloadPlaybackMarkerFile(ctx, file.ID); refreshed != nil {
+	if refreshed := markers.OverlayOnline(h.reloadPlaybackMarkerFile(ctx, file.ID), overlay); refreshed != nil {
 		file = refreshed
 		if hasAnyMarker(refreshed) {
 			h.notifyPlaybackMarkers(ctx, sessionID, refreshed, mode)
@@ -235,7 +246,7 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 			"credits_fingerprints_computed", summary.CreditsFingerprintsComputed,
 			"errors", len(summary.Errors))
 
-		if refreshed := h.reloadPlaybackMarkerFile(ctx, file.ID); hasAnyMarker(refreshed) {
+		if refreshed := markers.OverlayOnline(h.reloadPlaybackMarkerFile(ctx, file.ID), overlay); hasAnyMarker(refreshed) {
 			h.notifyPlaybackMarkers(ctx, sessionID, refreshed, mode)
 		}
 	}
@@ -243,6 +254,17 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 
 func (h *PlaybackHandler) hasOnlineMarkerProviders() bool {
 	return h != nil && h.MarkerPopulation != nil && h.MarkerRegistry != nil && len(h.MarkerRegistry.Providers()) > 0
+}
+
+// onlineMarkersOnDemand reports whether online markers are looked up for each
+// playback and never saved. A setting that cannot be read counts as stored,
+// which leaves the stored row as the whole answer.
+func (h *PlaybackHandler) onlineMarkersOnDemand(ctx context.Context) bool {
+	if h == nil || h.SettingsRepo == nil {
+		return false
+	}
+	raw, err := h.SettingsRepo.Get(ctx, markers.SettingOnlineStorage)
+	return err == nil && markers.OnlineStorage(strings.TrimSpace(raw)) == markers.OnlineStorageOnDemand
 }
 
 func (h *PlaybackHandler) reloadPlaybackMarkerFile(ctx context.Context, fileID int) *models.MediaFile {
