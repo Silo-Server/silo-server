@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -76,5 +77,22 @@ func TestAttrValueError(t *testing.T) {
 				t.Fatalf("attrValue(%v) = %#v, want %q", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAttrValueErrorMasksURLCredentials(t *testing.T) {
+	presigned := "https://bucket.s3.example.test/chapter-images/1/0/original.webp?X-Amz-Credential=AKIDEXAMPLE&X-Amz-Signature=deadbeef"
+	err := fmt.Errorf("upload chapter image: PUT %s: AccessDenied", presigned)
+	got, ok := attrValue(slog.AnyValue(err)).(string)
+	if !ok {
+		t.Fatalf("attrValue(error) = %#v, want a string", got)
+	}
+	for _, secret := range []string{"X-Amz-Credential", "AKIDEXAMPLE", "X-Amz-Signature", "deadbeef"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("attrValue kept %q: %s", secret, got)
+		}
+	}
+	if !strings.Contains(got, "https://bucket.s3.example.test/chapter-images/1/0/original.webp") || !strings.Contains(got, "AccessDenied") {
+		t.Fatalf("attrValue dropped the useful part of the error: %s", got)
 	}
 }

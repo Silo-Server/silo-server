@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -174,9 +175,9 @@ func attrValue(v slog.Value) any {
 		return v.Time().UTC().Format(time.RFC3339Nano)
 	case slog.KindAny:
 		// An error's fields are usually unexported, so snapshot would encode
-		// it as {}; keep its message instead.
+		// it as {}; keep its message instead, with URL credentials masked.
 		if err, ok := v.Any().(error); ok {
-			return err.Error()
+			return errorText(err)
 		}
 		return snapshot(v.Any())
 	default:
@@ -195,6 +196,17 @@ func snapshot(v any) any {
 		return fmt.Sprint(v)
 	}
 	return json.RawMessage(raw)
+}
+
+// urlInText matches an http(s) URL inside free text.
+var urlInText = regexp.MustCompile(`https?://[^\s"'<>]+`)
+
+// errorText is an error's message safe to persist: URL errors are sanitized
+// structurally, and any other URL quoted in the text (a presigned S3 URL in an
+// SDK error, say) loses its query, fragment and userinfo.
+func errorText(err error) string {
+	msg := logredact.SanitizeURLError(err).Error()
+	return urlInText.ReplaceAllStringFunc(msg, logredact.SanitizeURL)
 }
 
 func inferComponent(message string) string {
