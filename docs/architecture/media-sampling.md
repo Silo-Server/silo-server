@@ -1,15 +1,16 @@
 # Media sampling
 
 `internal/mediasample` owns every ffmpeg run that decodes a media file to
-analyze it: audio fingerprints, silence, frame statistics, and later still
-images. Intro and credits detection (`internal/intromarkers`) run all of
-their ffmpeg processes through it.
+analyze it or take a still image from it: audio fingerprints, silence, frame
+statistics, and single-frame images. Intro and credits detection
+(`internal/intromarkers`) run all of their ffmpeg processes through it, and
+chapter thumbnails (`internal/chapterthumbs`) extract their frames with it.
 
 ## Scope
 
-In scope: decodes whose output is data about the file, not a stream a client
-plays. A new analysis feature adds an output type here instead of building its
-own ffmpeg arguments, runner, or stderr parser.
+In scope: decodes whose output is data about the file or a still image, not a
+stream a client plays. A new analysis feature adds an output type here
+instead of building its own ffmpeg arguments, runner, or stderr parser.
 
 Out of scope:
 
@@ -35,28 +36,37 @@ it. Rules:
 - Result times are absolute media seconds. The runner adds the window start;
   callers never do window arithmetic.
 - `Attempts` run in order until one succeeds. An empty list is one software
-  attempt bounded only by the caller's context. A failed run returns an
-  `*mediasample.Error` with a reason for each attempt (`canceled`, `timeout`,
-  `start`, `exit`, `args`) and a bounded tail of ffmpeg's log. The error
-  message quotes only ffmpeg's last log line, cleaned so it can be stored in a
-  text column.
-- `Classify` names a failed run's cause from its last attempt: `canceled`,
-  `timeout`, `killed` (a signal ffmpeg did not ask for), `no_stream` (an
-  output's stream is missing), `unsupported` (this ffmpeg lacks a filter,
-  option, muxer, or decoder), `invalid_data` (the input cannot be demuxed or
-  decoded), or `failed`. `Reason.Permanent` is true only for `invalid_data`
-  and `no_stream`, which the file itself causes; a caller may record those as
-  unusable and back off on the rest.
+  attempt bounded only by the caller's context. The run stops early when the
+  caller's context ends or when `Runner.Fallback`, given the failed attempt,
+  declines to move on; without a `Fallback` every attempt runs. A failed run
+  returns an `*mediasample.Error` with a reason for each attempt (`canceled`,
+  `timeout`, `start`, `exit`, `args`; for images also `empty`, `unsupported`,
+  and `capabilities`, see [Images](#images)) and a bounded tail of ffmpeg's
+  log.
+  The error message quotes only ffmpeg's last log line, cleaned so it can be
+  stored in a text column.
+- `Classify` names a failed run's cause from its last attempt
+  (`AttemptError.Cause` does so for any one attempt): `canceled`, `timeout`,
+  `killed` (a signal ffmpeg did not ask for), `no_stream` (an output's stream
+  is missing), `unsupported` (this ffmpeg or host lacks a filter, option,
+  muxer, decoder, or render device),
+  `capabilities` (the capability listing a request needs failed),
+  `invalid_data` (the input cannot be demuxed or decoded), or `failed`.
+  `Reason.Permanent` is true only for `invalid_data` and `no_stream`, which
+  the file itself causes; a caller may record those as unusable and back off
+  on the rest.
 - Every run is recorded in the subprocess metrics under the runner's
-  workload; intro detection uses `analysis`.
+  workload; intro detection uses `analysis` and chapter thumbnails
+  `thumbnail`. A `Runner.Exec` replacement, which tests set, starts no
+  process and records nothing.
 
 Supported today:
 
 | Part | Values |
 |---|---|
-| Sampling mode | `Window` (start and duration; `KeyframesOnly` decodes only video keyframes and needs `Stats`), `Samples` (the keyframe at or before each of a list of times; `Stats` only) |
-| Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals), `Stats` (per-frame picture statistics) |
-| Attempts | software only |
+| Sampling mode | `Window` (start and duration; `KeyframesOnly` decodes only video keyframes and needs `Stats`), `Samples` (the keyframe at or before each of a list of times; `Stats` only), `At` (the frame at a time; `Images` only) |
+| Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals), `Stats` (per-frame picture statistics), `Images` (JPEG images) |
+| Attempts | software; hardware (QSV, VAAPI, VideoToolbox) for `Images` only |
 
 Audio and `Stats` may share one run: ffmpeg reads the input once and writes
 the audio output first and the statistics of the first video stream
@@ -121,8 +131,58 @@ Outputs read from ffmpeg's log run at `-loglevel repeat+info`: without
 repeated N times" and per-frame values would be lost. Fingerprint-only runs
 keep `-loglevel warning`.
 
-Planned additions, each landing with its first consumer: an accurate single
-frame (`At`) and still images (`Images`) with hardware decode.
+## Images
+
+`At` with an `Images` output decodes one frame and returns it as a JPEG
+(`Result.Images`, one `Image` with the requested time). The arguments keep
+the layout chapter thumbnails have always used: `-loglevel error`, the
+hardware decode options, an accurate input seek (`-ss` with three decimals
+before `-i`, so ffmpeg decodes from the previous keyframe up to the time),
+one frame (`-frames:v 1`), and the MJPEG encoder writing to stdout. ffmpeg's
+whole stdout is the image; a run that succeeds without writing one, such as
+a time past the end of the video, fails the attempt as `empty`.
+`ImageOutput.Width` scales the image to an even width, keeping the aspect
+ratio; zero keeps the source size.
+
+Hardware attempts (`hwdecode.go`):
+
+- QSV and VAAPI decode into VAAPI surfaces on a render device and download
+  them to system memory as NV12 (`hwdownload,format=nv12`). QSV initializes
+  its VAAPI parent device the way playback does (`tonemap.QSVInitDeviceArgs`).
+- VideoToolbox decodes into system-memory frames, so software filters apply
+  to them directly.
+- Each hardware attempt reserves one render device through
+  `playback.AcquireHWDevice`, falling back to `playback.PickRenderDevice`,
+  before its timeout starts, and releases it when the attempt ends, before
+  the next attempt. A multi-device `Runner.HWDevice` list therefore resolves
+  to one device per attempt. A hardware attempt that cannot be built, such as
+  VAAPI without a render device, fails as `unsupported` without starting
+  ffmpeg.
+
+`ImageOutput.ToneMap` converts an HDR source to SDR with the tone-map chains
+chapter thumbnails have always used, kept byte for byte; they differ from the
+playback chains in `tonemap`. VAAPI and QSV tone map on the GPU
+(`procamp_vaapi` and `tonemap_vaapi` before the download). Software attempts
+and VideoToolbox attempts tone map in software, which only happens with
+`ToneMap.AllowSoftware`; otherwise the attempt fails as `unsupported` before
+ffmpeg starts. The software chain is `tonemapx` (BT.2390) when the binary
+lists it and the standard `tonemap` filter's Hable curve otherwise, and both
+need `zscale`. The runner loads the capabilities for that choice once per
+run, when the first attempt that needs them starts, so a hardware attempt
+that succeeds never loads them. A failed load fails the attempt as
+`capabilities`, a missing filter as `unsupported`.
+
+Chapter thumbnails keep their own attempt plan and failure reasons on top of
+this: a hardware-capable backend tries hardware and then software (unless
+software tone mapping is needed but not allowed), another configured backend
+such as NVENC tries an SDR frame twice in software, and no backend tries once
+in software. `chapterthumbs` maps each failed attempt to the reasons it
+persists (`decode_invalid_data`, `tonemap_unsupported`, `ffmpeg_probe_failed`,
+`hw_killed`, `hw_timeout`, `cpu_timeout`, `chapter_extract_failed`) with its
+own log rules rather than `Classify`, because those reasons decide per-file
+backoff. Its `Runner.Fallback` ends the run only after a hardware attempt
+that found invalid data or whose VideoToolbox software tone mapping was
+refused; every other failure moves on to the next planned attempt.
 
 ## Argument stability
 
@@ -137,13 +197,20 @@ both packages.
 The runner uses input seeking (`-ss` before `-i`) and keeps `-t` as an output
 option, in the order intro detection has always used.
 
+Chapter thumbnail arguments, attempt timeouts, and reasons are pinned by a
+golden test in `internal/chapterthumbs` (`testdata/extract_argv_golden.json`)
+recorded from the extractor they replaced; changing them changes the pixels
+of new thumbnails.
+
 ## Capabilities
 
 `LoadCapabilities` lists an ffmpeg binary's filters and muxers, and checks
 that the chromaprint muxer can write raw fingerprints. `Capabilities.Require`
 reports the first thing a request needs that the binary lacks: the
 chromaprint muxer for a fingerprint, `silencedetect` for silence, and
-`blackframe`, `signalstats`, and `metadata` for `Stats`.
+`blackframe`, `signalstats`, and `metadata` for `Stats`. Images need no
+check up front; the runner reads the tone-map filters itself (see
+[Images](#images)).
 
 - Inventories are cached per binary identity (resolved path, size, and
   modification time, the same identity `tonemap` uses), so replacing ffmpeg in

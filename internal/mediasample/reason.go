@@ -8,9 +8,10 @@ import (
 )
 
 // Reason classifies why sampling failed. Each failed attempt records how it
-// ended (canceled, timeout, start, exit, args); Classify reads a failed run
-// and names its cause (canceled, timeout, invalid_data, killed, unsupported,
-// no_stream, failed), which tells a caller whether trying again can help.
+// ended (canceled, timeout, start, exit, args, empty, unsupported,
+// capabilities); Classify reads a failed run and names its cause (canceled,
+// timeout, invalid_data, killed, unsupported, capabilities, no_stream,
+// failed), which tells a caller whether trying again can help.
 type Reason string
 
 // Attempt reasons.
@@ -25,6 +26,9 @@ const (
 	ReasonExit Reason = "exit"
 	// ReasonArgs means the attempt could not be turned into arguments.
 	ReasonArgs Reason = "args"
+	// ReasonEmpty means ffmpeg succeeded without writing the image asked for,
+	// as when the frame time lies past the end of the video.
+	ReasonEmpty Reason = "empty"
 )
 
 // Run causes, from Classify. ReasonCanceled and ReasonTimeout are causes too.
@@ -34,9 +38,15 @@ const (
 	// ReasonKilled means ffmpeg was killed by a signal it did not ask for,
 	// such as the out-of-memory killer's.
 	ReasonKilled Reason = "killed"
-	// ReasonUnsupported means this ffmpeg lacks something the request needs,
-	// such as a filter, an option, or a decoder.
+	// ReasonUnsupported means this ffmpeg or host lacks something the request
+	// needs, such as a filter, an option, a decoder, or a render device, or
+	// that the request forbids what the attempt would need (software tone
+	// mapping). An attempt refused before ffmpeg starts records it as its own
+	// reason.
 	ReasonUnsupported Reason = "unsupported"
+	// ReasonCapabilities means the capability listing a request needs (see
+	// LoadCapabilities) could not be run. It is also an attempt reason.
+	ReasonCapabilities Reason = "capabilities"
 	// ReasonNoStream means the input has no stream an output needs.
 	ReasonNoStream Reason = "no_stream"
 	// ReasonFailed is any other failure.
@@ -140,20 +150,25 @@ func Classify(err error) Reason {
 		}
 		return ReasonFailed
 	}
-	last := runErr.Attempts[len(runErr.Attempts)-1]
-	switch last.Reason {
-	case ReasonCanceled, ReasonTimeout:
-		return last.Reason
+	return runErr.Attempts[len(runErr.Attempts)-1].Cause()
+}
+
+// Cause names the cause of one failed attempt, as Classify does for a run's
+// last attempt.
+func (a AttemptError) Cause() Reason {
+	switch a.Reason {
+	case ReasonCanceled, ReasonTimeout, ReasonUnsupported, ReasonCapabilities:
+		return a.Reason
 	case ReasonExit:
 	default:
 		return ReasonFailed
 	}
 	// A process killed from outside may have logged recoverable decode
 	// errors first, so the kill decides.
-	if last.Err != nil && strings.Contains(last.Err.Error(), "signal: killed") {
+	if a.Err != nil && strings.Contains(a.Err.Error(), "signal: killed") {
 		return ReasonKilled
 	}
-	log := strings.ToLower(last.StderrTail)
+	log := strings.ToLower(a.StderrTail)
 	switch {
 	case containsAny(log, noStreamMessages):
 		return ReasonNoStream

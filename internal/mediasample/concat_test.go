@@ -3,7 +3,6 @@ package mediasample
 import (
 	"context"
 	"io"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -144,20 +143,20 @@ type fakeSamplesExec struct {
 	stdin          []byte
 }
 
-func (f *fakeSamplesExec) exec(_ context.Context, _ string, args []string, in io.Reader, _, stderr io.Writer) (*os.ProcessState, error) {
+func (f *fakeSamplesExec) exec(_ context.Context, _ string, args []string, in io.Reader, _, stderr io.Writer) error {
 	f.calls = append(f.calls, args)
 	if len(f.calls) == 1 {
 		_, err := io.WriteString(stderr, f.header)
-		return nil, err
+		return err
 	}
 	if in != nil {
 		var err error
 		if f.stdin, err = io.ReadAll(in); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	_, err := io.WriteString(stderr, f.decode)
-	return nil, err
+	return err
 }
 
 // TestRunSamplesPlacesFramesAtSampleTimes feeds the runner a log of three
@@ -172,7 +171,7 @@ func TestRunSamplesPlacesFramesAtSampleTimes(t *testing.T) {
 		decode: statsFrameLog("0", "100", "") + statsFrameLog("1", "100", "") + statsFrameLog("2", "", "") +
 			statsFrameLog("3", "103", "") + statsFrameLog("4", "106", ""),
 	}
-	runner := Runner{Workload: processmetrics.Analysis, exec: fake.exec}
+	runner := Runner{Workload: processmetrics.Analysis, Exec: fake.exec}
 	result, err := runner.Run(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -206,7 +205,7 @@ func TestRunSamplesReadsOtherContainersAsAWindow(t *testing.T) {
 		decode: statsFrameLog("0", "", "2.0") + statsFrameLog("1", "", "11.0") + statsFrameLog("2", "", "13.0") +
 			statsFrameLog("3", "", "14.5"),
 	}
-	runner := Runner{Workload: processmetrics.Analysis, exec: fake.exec}
+	runner := Runner{Workload: processmetrics.Analysis, Exec: fake.exec}
 	result, err := runner.Run(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Run: %v", err)

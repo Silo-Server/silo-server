@@ -59,6 +59,21 @@ func TestValidate(t *testing.T) {
 		{name: "negative timeout", modify: func(r *Request) { r.Attempts = []Attempt{{TimeoutSeconds: -1}} }},
 		{name: "timeout past a day", modify: func(r *Request) { r.Attempts = []Attempt{{TimeoutSeconds: 1e12}} }},
 		{name: "hardware attempt", modify: func(r *Request) { r.Stats = validStats(); r.Attempts = []Attempt{{Hardware: true}} }},
+		{name: "frame image", modify: atMode(42.5, &ImageOutput{}), ok: true},
+		{name: "frame image at zero", modify: atMode(0, &ImageOutput{Width: 320, ToneMap: &ToneMap{}}), ok: true},
+		{name: "frame image on hardware", modify: func(r *Request) {
+			atMode(1, &ImageOutput{})(r)
+			r.Attempts = []Attempt{{Hardware: true, TimeoutSeconds: 8}, {TimeoutSeconds: 10}}
+		}, ok: true},
+		{name: "frame without output", modify: atMode(1, nil)},
+		{name: "negative frame time", modify: atMode(-1, &ImageOutput{})},
+		{name: "NaN frame time", modify: atMode(math.NaN(), &ImageOutput{})},
+		{name: "frame with stats", modify: func(r *Request) { atMode(1, &ImageOutput{})(r); r.Stats = validStats() }},
+		{name: "frame with audio", modify: func(r *Request) { atMode(1, &ImageOutput{})(r); r.Audio = &AudioOutput{Fingerprint: true} }},
+		{name: "frame and window", modify: func(r *Request) { atMode(1, &ImageOutput{})(r); r.Window = &Window{DurationSeconds: 1} }},
+		{name: "images of a window", modify: func(r *Request) { r.Audio, r.Images = nil, &ImageOutput{} }},
+		{name: "odd image width", modify: atMode(1, &ImageOutput{Width: 321})},
+		{name: "negative image width", modify: atMode(1, &ImageOutput{Width: -2})},
 		{name: "samples with stats", modify: samplesMode(0, 3, 6.5), ok: true},
 		{name: "window and samples", modify: func(r *Request) { samplesMode(3)(r); r.Window = &Window{DurationSeconds: 1} }},
 		{name: "samples with audio", modify: func(r *Request) { samplesMode(3)(r); r.Audio = &AudioOutput{Fingerprint: true} }},
@@ -144,5 +159,15 @@ func TestRequestRoundTripsThroughJSON(t *testing.T) {
 	}
 	if !reflect.DeepEqual(decoded, req) {
 		t.Fatalf("decoded %+v, want %+v (json %s)", decoded, req, data)
+	}
+}
+
+// atMode replaces the request's sampling mode and outputs with a single
+// frame at seconds and images.
+func atMode(seconds float64, images *ImageOutput) func(*Request) {
+	return func(r *Request) {
+		r.Window, r.Audio, r.Stats = nil, nil, nil
+		r.At = &At{Seconds: seconds}
+		r.Images = images
 	}
 }

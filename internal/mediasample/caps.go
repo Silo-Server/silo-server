@@ -19,6 +19,11 @@ import (
 // listingTimeout bounds each ffmpeg listing command.
 const listingTimeout = 3 * time.Second
 
+// CapabilitiesTimeout bounds an uncached LoadCapabilities, which runs up to
+// four listings (filters, muxers, Chromaprint's options, the concat check),
+// each on listingTimeout.
+const CapabilitiesTimeout = 4 * listingTimeout
+
 // Capabilities is what an ffmpeg binary offers sampling runs. The zero value
 // offers nothing.
 type Capabilities struct {
@@ -169,17 +174,17 @@ func loadCapabilities(ffmpegPath string, list listFunc) (Capabilities, error) {
 		return list(ctx, ffmpegPath, stdin, args...)
 	}
 	run := func(args ...string) ([]byte, error) { return runWith(nil, args...) }
-	filters, err := run("-hide_banner", "-filters")
+	filters, err := run(hideBanner, "-filters")
 	if err != nil {
 		return Capabilities{}, fmt.Errorf("ffmpeg filter listing failed: %w", err)
 	}
-	muxers, err := run("-hide_banner", "-muxers")
+	muxers, err := run(hideBanner, "-muxers")
 	if err != nil {
 		return Capabilities{}, fmt.Errorf("ffmpeg muxer preflight failed: %w", err)
 	}
 	caps := Capabilities{filters: parseFilterList(filters), muxers: parseMuxerList(muxers)}
 	if caps.HasMuxer("chromaprint") {
-		help, err := run("-hide_banner", "-h", "muxer=chromaprint")
+		help, err := run(hideBanner, "-h", "muxer=chromaprint")
 		if err != nil {
 			return Capabilities{}, fmt.Errorf("ffmpeg chromaprint help failed: %w", err)
 		}
@@ -206,11 +211,18 @@ func checkConcatSamples(run func(stdin []byte, args ...string) ([]byte, error)) 
 	if err != nil {
 		return false
 	}
-	args := append(quietArgs("error"), concatInputArgs...)
+	args := append(quietArgs(errorLogLevel), concatInputArgs...)
 	args = append(args, "-i", concatListInput, "-f", "null", "-")
 	// The run fails by design, so only its output counts.
 	output, _ := run(list, args...)
 	return bytes.Contains(bytes.ToLower(output), []byte("impossible to open 'file:"+concatCheckInput+"'"))
+}
+
+// FilterCapabilities returns the capabilities an `ffmpeg -filters` listing
+// shows: its filters, and no muxers or sampled inputs. It serves tests of
+// packages that give a Runner its capabilities.
+func FilterCapabilities(listing []byte) Capabilities {
+	return Capabilities{filters: parseFilterList(listing)}
 }
 
 // parseFilterList reads `ffmpeg -filters`. Filter rows are a flags column,

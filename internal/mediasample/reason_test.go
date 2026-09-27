@@ -45,6 +45,9 @@ func TestClassify(t *testing.T) {
 			want: ReasonKilled,
 		},
 		{name: "other exit", err: exit(exitStatus, "Conversion failed!"), want: ReasonFailed},
+		{name: "refused attempt", err: &Error{Attempts: []AttemptError{{Reason: ReasonUnsupported, Err: errors.New("software HDR tone mapping is disabled")}}}, want: ReasonUnsupported},
+		{name: "capability listing failed", err: &Error{Attempts: []AttemptError{{Reason: ReasonCapabilities, Err: errors.New("ffmpeg filter listing failed")}}}, want: ReasonCapabilities},
+		{name: "no image", err: &Error{Attempts: []AttemptError{{Reason: ReasonEmpty, Err: errors.New("ffmpeg wrote no image")}}}, want: ReasonFailed},
 		{
 			name: "last attempt decides",
 			err: &Error{Attempts: []AttemptError{

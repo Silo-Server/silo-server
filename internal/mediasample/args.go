@@ -19,6 +19,9 @@ type hardwareDecode struct {
 // "Last message repeated N times", which would drop per-frame values.
 const logLevel = "repeat+info"
 
+// errorLogLevel logs only errors, for runs that read nothing from the log.
+const errorLogLevel = "error"
+
 // buildArgs turns a validated request into ffmpeg arguments for one attempt.
 // It also returns bytes for ffmpeg's stdin: the ffconcat list of a Samples
 // request, whose inpoints are offset by inputStart (the input's container
@@ -88,10 +91,17 @@ func buildArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float
 	return args, nil, nil
 }
 
+// hideBanner keeps ffmpeg from printing its build banner; logLevelOption
+// sets its log level.
+const (
+	hideBanner     = "-hide_banner"
+	logLevelOption = "-loglevel"
+)
+
 // quietArgs are the global options that open every sampling ffmpeg: no
 // banner, no reading keys from stdin, and the log level.
 func quietArgs(level string) []string {
-	return []string{"-hide_banner", "-nostdin", "-loglevel", level}
+	return []string{hideBanner, "-nostdin", logLevelOption, level}
 }
 
 // buildSamplesArgs finishes the arguments of a Samples request, whose only

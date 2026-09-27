@@ -3,6 +3,7 @@ package mediasample
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,8 +16,10 @@ import (
 // Runner runs sampling requests with one ffmpeg binary.
 type Runner struct {
 	FFmpegPath string
-	// HWAccel and HWDevice configure hardware decode for hardware attempts.
-	// No output uses them yet.
+	// HWAccel and HWDevice configure hardware attempts. HWAccel is a resolved
+	// backend (see SupportsHardwareDecode), never "auto". HWDevice is the
+	// configured device value, which may list several render devices; each
+	// hardware attempt reserves one of them while it runs.
 	HWAccel  string
 	HWDevice string
 	// Workload labels the runs' process metrics. Sampling never transcodes, so
@@ -24,33 +27,43 @@ type Runner struct {
 	// processmetrics.Analysis.
 	Workload processmetrics.Workload
 
-	// exec runs ffmpeg; tests replace it. Nil means execFFmpeg.
-	exec execFunc
+	// Exec runs ffmpeg in place of starting a process; tests set it. Nil
+	// starts ffmpeg.
+	Exec ExecFunc
+	// Capabilities returns the binary's inventory when a run needs it, which
+	// only software tone mapping of images does so far. Nil means
+	// LoadCapabilities; tests replace it.
+	Capabilities func(ctx context.Context, ffmpegPath string) (Capabilities, error)
+	// Fallback reports whether a run moves on to its next attempt after
+	// attempt failed with failure. Nil always moves on. A run never moves on
+	// once the caller's context has ended.
+	Fallback func(attempt Attempt, failure AttemptError) bool
 }
 
-// execFunc runs name with args, wiring the given stdin, stdout, and stderr,
-// and returns the exited process state (nil when it never started).
-type execFunc func(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) (*os.ProcessState, error)
+// ExecFunc stands in for one ffmpeg process: it runs name with args, reading
+// stdin and writing ffmpeg's output and log to stdout and stderr. A non-nil
+// error counts as ffmpeg exiting unsuccessfully, or as the attempt timing out
+// when it wraps context.DeadlineExceeded. No process metrics are recorded for
+// it.
+type ExecFunc func(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error
 
 // waitDelay bounds how long a killed ffmpeg's pipes may stay open.
 const waitDelay = 5 * time.Second
 
-// execFFmpeg returns the execFunc that runs a real process. Background
-// processes start at lowered priority where the platform supports it (see
-// startBackground).
-func execFFmpeg(background bool) execFunc {
-	return func(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) (*os.ProcessState, error) {
-		cmd := exec.CommandContext(ctx, name, args...)
-		cmd.Stdin = stdin
-		cmd.Stdout = stdout
-		cmd.Stderr = stderr
-		cmd.WaitDelay = waitDelay
-		if err := startCommand(cmd, background); err != nil {
-			return nil, err
-		}
-		err := cmd.Wait()
-		return cmd.ProcessState, err
+// execFFmpeg runs a real process and returns its exited state (nil when it
+// never started). Background processes start at lowered priority where the
+// platform supports it (see startBackground).
+func execFFmpeg(ctx context.Context, background bool, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) (*os.ProcessState, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.WaitDelay = waitDelay
+	if err := startCommand(cmd, background); err != nil {
+		return nil, err
 	}
+	err := cmd.Wait()
+	return cmd.ProcessState, err
 }
 
 // startCommand starts cmd, at background priority when background is set.
@@ -60,6 +73,9 @@ func startCommand(cmd *exec.Cmd, background bool) error {
 	}
 	return cmd.Start()
 }
+
+// softwareDecoder names a software attempt in Result.Decoder.
+const softwareDecoder = "software"
 
 // Result is what a run produced. Times are absolute media seconds.
 type Result struct {
@@ -73,37 +89,53 @@ type Result struct {
 	// order, when the request asked for Stats. It is empty when the sampled
 	// span had no frame to decode.
 	Frames []FrameStats `json:"frames,omitempty"`
+	// Images holds the decoded images when the request asked for Images.
+	Images []Image `json:"images,omitempty"`
 	// Decoder names the attempt that produced the result: "software", or
 	// "hardware:<accel>".
 	Decoder string `json:"decoder"`
 }
 
 // Run validates req and makes its attempts in order until one succeeds. A
-// failed attempt moves on to the next one unless ctx has ended. When every
-// attempt fails the error is an *Error.
+// failed attempt moves on to the next one unless ctx has ended or the
+// runner's Fallback declines. When every attempt made fails the error is an
+// *Error.
 func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
 	if err := req.Validate(); err != nil {
 		return Result{}, fmt.Errorf("invalid sampling request: %w", err)
 	}
 	failure := &Error{}
+	toneMap := &toneMapResolver{}
 	for _, attempt := range req.attempts() {
-		result, attemptErr := r.runAttempt(ctx, req, attempt)
+		result, attemptErr := r.runAttempt(ctx, req, attempt, toneMap)
 		if attemptErr == nil {
 			return result, nil
 		}
 		failure.Attempts = append(failure.Attempts, *attemptErr)
 		failure.Reason = attemptErr.Reason
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || (r.Fallback != nil && !r.Fallback(attempt, *attemptErr)) {
 			break
 		}
 	}
 	return Result{}, failure
 }
 
-func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt) (Result, *AttemptError) {
-	decoder := "software"
+func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, toneMap *toneMapResolver) (Result, *AttemptError) {
+	decoder := softwareDecoder
 	if attempt.Hardware {
 		decoder = "hardware:" + r.HWAccel
+	}
+	// An image attempt reserves its device and settles its filters before
+	// its timeout starts, so neither eats into the decode's time.
+	var imageArgs []string
+	if req.At != nil {
+		args, release, failure := r.prepareImage(ctx, req, attempt, toneMap)
+		if failure != nil {
+			failure.Decoder = decoder
+			return Result{}, failure
+		}
+		defer release()
+		imageArgs = args
 	}
 	attemptCtx := ctx
 	if attempt.TimeoutSeconds > 0 {
@@ -112,7 +144,10 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt) (R
 		defer cancel()
 	}
 	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, attempt: attempt, decoder: decoder}
-	if req.Samples != nil {
+	switch {
+	case req.At != nil:
+		return run.image(req, imageArgs)
+	case req.Samples != nil:
 		return run.samples(req)
 	}
 	return run.decode(req, 0)
@@ -210,21 +245,25 @@ func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, captureS
 	router := newStderrRouter(handlers...)
 	stderr, waitStderr := router.start()
 
-	run := a.runner.exec
-	if run == nil {
-		run = execFFmpeg(req.Background)
+	var state *os.ProcessState
+	var err error
+	replaced := a.runner.Exec != nil
+	if replaced {
+		err = a.runner.Exec(a.attemptCtx, a.runner.FFmpegPath, args, stdin, stdoutWriter, stderr)
+	} else {
+		state, err = execFFmpeg(a.attemptCtx, req.Background, a.runner.FFmpegPath, args, stdin, stdoutWriter, stderr)
 	}
-	state, err := run(a.attemptCtx, a.runner.FFmpegPath, args, stdin, stdoutWriter, stderr)
 	_ = stderr.Close()
 	waitStderr()
-	workload := a.runner.Workload
-	if workload == processmetrics.Transcode {
-		workload = processmetrics.Analysis
-	}
-	processmetrics.Record(workload, state, err, a.attemptCtx.Err())
-
-	if err == nil && state != nil && !state.Success() {
-		err = fmt.Errorf("ffmpeg %s", state)
+	if !replaced {
+		workload := a.runner.Workload
+		if workload == processmetrics.Transcode {
+			workload = processmetrics.Analysis
+		}
+		processmetrics.Record(workload, state, err, a.attemptCtx.Err())
+		if err == nil && state != nil && !state.Success() {
+			err = fmt.Errorf("ffmpeg %s", state)
+		}
 	}
 	if err != nil {
 		failure := &AttemptError{Decoder: a.decoder, Reason: ReasonExit, Err: err, StderrTail: router.Tail()}
@@ -235,7 +274,9 @@ func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, captureS
 		case a.attemptCtx.Err() != nil:
 			failure.Reason = ReasonTimeout
 			failure.Err = a.attemptCtx.Err()
-		case state == nil:
+		case replaced && errors.Is(err, context.DeadlineExceeded):
+			failure.Reason = ReasonTimeout
+		case !replaced && state == nil:
 			failure.Reason = ReasonStart
 		}
 		return nil, failure

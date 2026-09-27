@@ -11,8 +11,9 @@ import (
 // logged, hashed, or sent to another node as JSON; the Runner, not the caller,
 // turns it into ffmpeg arguments.
 //
-// A request names exactly one sampling mode (Window or Samples) and at least
-// one output (Audio, Stats, or both; Samples takes only Stats).
+// A request names exactly one sampling mode (Window, Samples, or At) and at
+// least one output (Audio, Stats, or both; Samples takes only Stats, and At
+// only Images).
 type Request struct {
 	// Input is the media file to decode.
 	Input string `json:"input"`
@@ -20,11 +21,15 @@ type Request struct {
 	Window *Window `json:"window,omitempty"`
 	// Samples decodes one video keyframe for each of a list of times.
 	Samples *Samples `json:"samples,omitempty"`
+	// At decodes the single video frame at a time.
+	At *At `json:"at,omitempty"`
 	// Audio asks for audio features of the sampled span.
 	Audio *AudioOutput `json:"audio,omitempty"`
 	// Stats asks for per-frame picture statistics of the sampled span's first
 	// video stream.
 	Stats *StatsOutput `json:"stats,omitempty"`
+	// Images asks for the sampled frames as JPEG images.
+	Images *ImageOutput `json:"images,omitempty"`
 	// Attempts are tried in order until one succeeds. Empty means a single
 	// software attempt bounded only by the caller's context.
 	Attempts []Attempt `json:"attempts,omitempty"`
@@ -56,6 +61,14 @@ type Samples struct {
 	// Seconds are the media times to sample, finite, non-negative, and
 	// strictly increasing.
 	Seconds []float64 `json:"seconds"`
+}
+
+// At decodes the first video frame at or after a media time, decoding from
+// the keyframe before it (ffmpeg's accurate input seek). Only Images may be
+// asked of it.
+type At struct {
+	// Seconds is the media time, finite and non-negative.
+	Seconds float64 `json:"seconds"`
 }
 
 // AudioOutput selects audio features. Fingerprint and Silence may be combined
@@ -95,8 +108,8 @@ type StatsOutput struct {
 
 // Attempt is one decode attempt.
 type Attempt struct {
-	// Hardware decodes on the Runner's configured hardware. No output uses
-	// it yet, so Validate rejects it for now.
+	// Hardware decodes on the Runner's configured hardware (see hwdecode.go).
+	// Only Images offer it so far; Validate rejects it for other outputs.
 	Hardware bool `json:"hardware,omitempty"`
 	// TimeoutSeconds bounds the attempt. Zero means only the caller's context
 	// bounds it.
@@ -120,7 +133,7 @@ func (r Request) Validate() error {
 	if strings.TrimSpace(r.Input) == "" {
 		return errors.New("request has no input")
 	}
-	if (r.Window == nil) == (r.Samples == nil) {
+	if modes := countSet(r.Window != nil, r.Samples != nil, r.At != nil); modes != 1 {
 		return errors.New("request needs exactly one sampling mode")
 	}
 	if r.Window != nil {
@@ -136,6 +149,22 @@ func (r Request) Validate() error {
 			return errors.New("samples take no audio output")
 		}
 		if _, err := concatPath(r.Input); err != nil {
+			return err
+		}
+	}
+	if r.At != nil {
+		if err := r.At.validate(); err != nil {
+			return err
+		}
+		if r.Images == nil || r.Audio != nil || r.Stats != nil {
+			return errors.New("a single frame takes only an images output")
+		}
+	}
+	if r.Images != nil {
+		if r.At == nil {
+			return errors.New("images need a single-frame sampling mode")
+		}
+		if err := r.Images.validate(); err != nil {
 			return err
 		}
 	}
@@ -165,15 +194,15 @@ func (r Request) Validate() error {
 		if !finite(attempt.TimeoutSeconds) || attempt.TimeoutSeconds < 0 || attempt.TimeoutSeconds > maxAttemptSeconds {
 			return fmt.Errorf("attempt %d timeout must be between 0 and %d seconds", i+1, maxAttemptSeconds)
 		}
-		if attempt.Hardware {
-			return fmt.Errorf("attempt %d asks for hardware decode, which sampling does not offer yet", i+1)
+		if attempt.Hardware && r.Images == nil {
+			return fmt.Errorf("attempt %d asks for hardware decode, which only images offer yet", i+1)
 		}
 	}
 	return nil
 }
 
 func (r Request) hasOutput() bool {
-	return r.hasAudioOutput() || r.Stats != nil
+	return r.hasAudioOutput() || r.Stats != nil || r.Images != nil
 }
 
 func (r Request) hasAudioOutput() bool {
@@ -200,6 +229,13 @@ func (w Window) validate() error {
 	}
 	if !finite(w.DurationSeconds) || w.DurationSeconds <= 0 {
 		return errors.New("window duration must be a positive number of seconds")
+	}
+	return nil
+}
+
+func (a At) validate() error {
+	if !finite(a.Seconds) || a.Seconds < 0 {
+		return errors.New("frame time must be a non-negative number of seconds")
 	}
 	return nil
 }
@@ -250,6 +286,17 @@ func (s SilenceParams) validate() error {
 		return fmt.Errorf("silence minimum must be between 0 and %d seconds", maxSilenceSeconds)
 	}
 	return nil
+}
+
+// countSet counts the true values.
+func countSet(values ...bool) int {
+	n := 0
+	for _, v := range values {
+		if v {
+			n++
+		}
+	}
+	return n
 }
 
 func finite(v float64) bool {

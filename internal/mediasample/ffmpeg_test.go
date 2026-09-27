@@ -1,7 +1,10 @@
 package mediasample
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"image/jpeg"
 	"math"
 	"os/exec"
 	"path/filepath"
@@ -184,5 +187,55 @@ func TestRunSamplesWithRealFFmpeg(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRunImageWithRealFFmpeg extracts single frames of a generated clip,
+// black until 2 s and white after: the frame at 3 s must be white, at its
+// source size and scaled, and a time past the end must fail.
+func TestRunImageWithRealFFmpeg(t *testing.T) {
+	ffmpeg, _ := realFFmpeg(t)
+	clip := filepath.Join(t.TempDir(), "clip.mkv")
+	generate := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "color=c=black:s=320x240:r=24:d=2",
+		"-f", "lavfi", "-i", "color=c=white:s=320x240:r=24:d=2",
+		"-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]", "-g", "24", clip)
+	if output, err := generate.CombinedOutput(); err != nil {
+		t.Skipf("cannot generate the clip: %v: %s", err, output)
+	}
+	runner := Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Thumbnail}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	for _, width := range []int{0, 160} {
+		req := Request{Input: clip, At: &At{Seconds: 3}, Images: &ImageOutput{Width: width}}
+		result, err := runner.Run(ctx, req)
+		if err != nil {
+			t.Fatalf("width %d: %v", width, err)
+		}
+		if len(result.Images) != 1 || result.Images[0].Seconds != 3 {
+			t.Fatalf("width %d: images %+v, want one at 3 s", width, result.Images)
+		}
+		picture, err := jpeg.Decode(bytes.NewReader(result.Images[0].JPEG))
+		if err != nil {
+			t.Fatalf("width %d: decode image: %v", width, err)
+		}
+		bounds := picture.Bounds()
+		wantWidth := 320
+		if width > 0 {
+			wantWidth = width
+		}
+		if bounds.Dx() != wantWidth {
+			t.Fatalf("image is %d px wide, want %d", bounds.Dx(), wantWidth)
+		}
+		if luma, _, _, _ := picture.At(bounds.Dx()/2, bounds.Dy()/2).RGBA(); luma < 0xe000 {
+			t.Fatalf("width %d: frame at 3 s is not white (red %#x)", width, luma)
+		}
+	}
+	// Depending on the version, ffmpeg writes nothing and succeeds (empty) or
+	// fails because nothing was written (exit).
+	_, err := runner.Run(ctx, Request{Input: clip, At: &At{Seconds: 60}, Images: &ImageOutput{}})
+	var runErr *Error
+	if !errors.As(err, &runErr) || (runErr.Reason != ReasonEmpty && runErr.Reason != ReasonExit) {
+		t.Fatalf("frame past the end: error %v, want no image", err)
 	}
 }

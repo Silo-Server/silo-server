@@ -44,7 +44,7 @@ func TestRunParsesStatsFromJellyfinFFmpegLog(t *testing.T) {
 		Audio:  &AudioOutput{Silence: &SilenceParams{NoiseDB: -50, MinSeconds: 0.5}},
 		Stats:  func() *StatsOutput { s := tailStats(); return &s }(),
 	}
-	runner := Runner{Workload: processmetrics.Analysis, exec: fakeExec(func(_ context.Context, _ []string, _, stderr io.Writer) error {
+	runner := Runner{Workload: processmetrics.Analysis, Exec: fakeExec(func(_ context.Context, _ []string, _, stderr io.Writer) error {
 		_, err := stderr.Write(log)
 		return err
 	})}

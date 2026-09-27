@@ -15,9 +15,9 @@ import (
 )
 
 // fakeExec answers a run without starting a process.
-func fakeExec(fn func(ctx context.Context, args []string, stdout, stderr io.Writer) error) execFunc {
-	return func(ctx context.Context, _ string, args []string, _ io.Reader, stdout, stderr io.Writer) (*os.ProcessState, error) {
-		return nil, fn(ctx, args, stdout, stderr)
+func fakeExec(fn func(ctx context.Context, args []string, stdout, stderr io.Writer) error) ExecFunc {
+	return func(ctx context.Context, _ string, args []string, _ io.Reader, stdout, stderr io.Writer) error {
+		return fn(ctx, args, stdout, stderr)
 	}
 }
 
@@ -41,7 +41,7 @@ func TestRunParsesFingerprintAndSilence(t *testing.T) {
 		t.Fatal(err)
 	}
 	var gotArgs []string
-	runner := Runner{FFmpegPath: "ffmpeg", Workload: processmetrics.Analysis, exec: fakeExec(func(_ context.Context, args []string, stdout, stderr io.Writer) error {
+	runner := Runner{FFmpegPath: "ffmpeg", Workload: processmetrics.Analysis, Exec: fakeExec(func(_ context.Context, args []string, stdout, stderr io.Writer) error {
 		gotArgs = args
 		_, _ = stdout.Write(EncodeRawFingerprint([]uint32{7, 8, 9}))
 		_, _ = io.WriteString(stderr, "size=N/A time=00:00:01.00\r[silencedetect @ 0x1] silence_start: -0.01\n"+
@@ -109,7 +109,7 @@ func blockUntilDone(ctx context.Context, _ []string, _, _ io.Writer) error {
 
 func TestRunMovesToTheNextAttemptAfterATimeout(t *testing.T) {
 	var calls atomic.Int32
-	runner := Runner{Workload: processmetrics.Analysis, exec: fakeExec(func(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	runner := Runner{Workload: processmetrics.Analysis, Exec: fakeExec(func(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if calls.Add(1) == 1 {
 			return blockUntilDone(ctx, args, stdout, stderr)
 		}
@@ -129,7 +129,7 @@ func TestRunMovesToTheNextAttemptAfterATimeout(t *testing.T) {
 }
 
 func TestRunReportsTimeoutWhenEveryAttemptTimesOut(t *testing.T) {
-	runner := Runner{Workload: processmetrics.Analysis, exec: fakeExec(blockUntilDone)}
+	runner := Runner{Workload: processmetrics.Analysis, Exec: fakeExec(blockUntilDone)}
 	req := validRequest()
 	req.Attempts = []Attempt{{TimeoutSeconds: 0.01}, {TimeoutSeconds: 0.01}}
 
@@ -146,7 +146,7 @@ func TestRunReportsTimeoutWhenEveryAttemptTimesOut(t *testing.T) {
 func TestRunStopsWhenTheCallerCancels(t *testing.T) {
 	var calls atomic.Int32
 	ctx, cancel := context.WithCancel(context.Background())
-	runner := Runner{Workload: processmetrics.Analysis, exec: fakeExec(func(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	runner := Runner{Workload: processmetrics.Analysis, Exec: fakeExec(func(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		calls.Add(1)
 		cancel()
 		return blockUntilDone(ctx, args, stdout, stderr)
@@ -165,7 +165,7 @@ func TestRunStopsWhenTheCallerCancels(t *testing.T) {
 }
 
 func TestRunRejectsInvalidRequestsWithoutStartingFFmpeg(t *testing.T) {
-	runner := Runner{exec: fakeExec(func(context.Context, []string, io.Writer, io.Writer) error {
+	runner := Runner{Exec: fakeExec(func(context.Context, []string, io.Writer, io.Writer) error {
 		t.Fatal("ffmpeg started for an invalid request")
 		return nil
 	})}
