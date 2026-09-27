@@ -495,3 +495,32 @@ func TestCreditsSeasonStateIsKeyedByTailMode(t *testing.T) {
 		t.Fatalf("summary %+v with %d tail passes, want the group analyzed with tail passes", summary, sampler.callCount())
 	}
 }
+
+// A server that cannot run tail passes keeps off a group a tail-capable
+// server settled, so its audio-only result cannot replace the audio and
+// video markers written there.
+func TestAudioOnlyCreditsRunKeepsTailSettledGroup(t *testing.T) {
+	repo := &fakeIntroRepository{}
+	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
+	season := cachedCreditsSeason(t, analyzer, repo, 3)
+	group := candidateGroup{SeasonID: "season1", MediaFolderID: 7, AnalysisGroupKey: season[0].AnalysisGroupKey(), Candidates: season}
+	repo.seasonState = &SeasonState{InputSignature: creditsInputSignature(season), Status: seasonStatusComplete}
+	repo.seasonStateHash = CreditsAnalysisConfigHash(true)
+
+	summary, err := analyzer.analyzeCreditsGroup(context.Background(), group, analyzeGroupOptions{persistState: true})
+	if err != nil {
+		t.Fatalf("analyzeCreditsGroup: %v", err)
+	}
+	if summary.CreditsGroupsSkipped != 1 || len(repo.patches) != 0 || len(repo.upsertedStates) != 0 {
+		t.Fatalf("summary %+v with patches %+v and states %+v, want the tail-settled group skipped", summary, repo.patches, repo.upsertedStates)
+	}
+
+	// Without that state the same run places the season's credits.
+	repo.seasonState = nil
+	if _, err := analyzer.analyzeCreditsGroup(context.Background(), group, analyzeGroupOptions{persistState: true}); err != nil {
+		t.Fatalf("analyzeCreditsGroup: %v", err)
+	}
+	if len(patchesOfKind(repo.patches, kindCredits)) == 0 {
+		t.Fatal("audio-only run wrote no credits, so the skip above proves nothing")
+	}
+}

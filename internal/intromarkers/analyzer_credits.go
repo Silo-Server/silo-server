@@ -101,13 +101,24 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 		FileCount:        len(group.Candidates),
 	}
 	analysisHash := CreditsAnalysisConfigHash(opts.creditsTail)
-	existing, err := a.repo.LoadSeasonState(ctx, state, analysisHash)
-	if err != nil {
-		return summary, err
-	}
-	if !opts.force && existing != nil && existing.InputSignature == state.InputSignature && existing.settled(time.Now()) {
-		summary.CreditsGroupsSkipped++
-		return summary, nil
+	if !opts.force {
+		// A run without tail passes also keeps off a group a tail-capable
+		// run settled: its audio-only result could replace the audio and
+		// video credits written there, and that run would not come back.
+		hashes := []string{analysisHash}
+		if !opts.creditsTail {
+			hashes = append(hashes, CreditsAnalysisConfigHash(true))
+		}
+		for _, hash := range hashes {
+			existing, err := a.repo.LoadSeasonState(ctx, state, hash)
+			if err != nil {
+				return summary, err
+			}
+			if existing != nil && existing.InputSignature == state.InputSignature && existing.settled(time.Now()) {
+				summary.CreditsGroupsSkipped++
+				return summary, nil
+			}
+		}
 	}
 
 	var targets []Candidate
