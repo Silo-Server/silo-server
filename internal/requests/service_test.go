@@ -458,12 +458,42 @@ func TestCreateRequestDoesNotTrustCallerIMDbIDForTVDBLookup(t *testing.T) {
 type refreshingTMDBClient struct {
 	*fakeTMDBClient
 	fresh        *tmdb.ExternalIDs
+	refreshErr   error
 	refreshCalls int
 }
 
 func (c *refreshingTMDBClient) RefreshExternalIDs(context.Context, string, int) (*tmdb.ExternalIDs, error) {
 	c.refreshCalls++
+	if c.refreshErr != nil {
+		return nil, c.refreshErr
+	}
 	return c.fresh, nil
+}
+
+func TestFailedTMDBRefreshKeepsCachedIMDbID(t *testing.T) {
+	client := &refreshingTMDBClient{
+		fakeTMDBClient: &fakeTMDBClient{externalIDs: &tmdb.ExternalIDs{IMDbID: "tt31000000"}},
+		refreshErr:     errors.New("tmdb: HTTP 429"),
+	}
+	service := NewService(newFakeStore(), client, &fakePresence{})
+	resolver := &fakeTVDBResolver{tvdbID: 456789}
+	service.SetTVDBIDResolver(resolver)
+
+	input := CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 240001}
+	service.enrichExternalIDs(context.Background(), &input)
+	if resolver.gotIMDbID != "tt31000000" || input.IMDbID != "tt31000000" {
+		t.Fatalf("resolver imdb = %q, stored imdb = %q; want the cached TMDB IMDb id kept", resolver.gotIMDbID, input.IMDbID)
+	}
+	if input.TVDBID == nil || *input.TVDBID != 456789 {
+		t.Fatalf("tvdb_id = %v, want 456789 resolved through the cached IMDb id", input.TVDBID)
+	}
+
+	unresolved := &fakeTVDBResolver{}
+	service.SetTVDBIDResolver(unresolved)
+	input = CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 240001}
+	if !service.enrichExternalIDs(context.Background(), &input) {
+		t.Fatalf("enrichExternalIDs reported a confirmed miss after the TMDB refresh failed")
+	}
 }
 
 func TestRetryRefreshesTMDBExternalIDs(t *testing.T) {

@@ -1670,13 +1670,18 @@ func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInp
 	lookupIMDbID := ""
 	if client, ok := s.tmdb.(TMDBExternalIDClient); ok {
 		externalIDs, err := client.GetExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID)
+		tmdbFailed = err != nil
 		// A cached answer without a TVDB ID may predate the admin adding one
-		// on TMDB (the failure message asks them to), so ask TMDB again.
+		// on TMDB (the failure message asks them to), so ask TMDB again. If
+		// that fails, keep the cached IDs and record the failure.
 		if refresher, ok := s.tmdb.(TMDBExternalIDRefresher); ok && input.MediaType == MediaTypeSeries &&
 			input.TVDBID == nil && err == nil && (externalIDs == nil || externalIDs.TVDBID <= 0) {
-			externalIDs, err = refresher.RefreshExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID)
+			if fresh, refreshErr := refresher.RefreshExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID); refreshErr == nil {
+				externalIDs = fresh
+			} else {
+				tmdbFailed = true
+			}
 		}
-		tmdbFailed = err != nil
 		if err == nil && externalIDs != nil {
 			lookupIMDbID = strings.TrimSpace(externalIDs.IMDbID)
 			if input.IMDbID == "" {
