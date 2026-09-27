@@ -313,6 +313,16 @@ export function parseTMDBCollectionSourceConfig(
   };
 }
 
+// parseTmdbCollectionId reads a TMDB collection ID from its number input.
+// The input accepts exponent notation, so the whole value is parsed: parseInt
+// would read "1e3" as 1 rather than 1000. Anything but a safe positive
+// integer is undefined, so validation and saving agree.
+export function parseTmdbCollectionId(value: string): number | undefined {
+  const trimmed = value.trim();
+  const parsed = Number(trimmed);
+  return trimmed !== "" && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 export function buildTMDBCollectionSourceInput({
   collectionId,
   limit,
@@ -323,12 +333,7 @@ export function buildTMDBCollectionSourceInput({
   source_url: string;
   source_config: Record<string, unknown>;
 } {
-  // A number input accepts exponent notation, so parse the whole value:
-  // parseInt would read "1e3" as 1 rather than 1000.
-  const trimmedId = collectionId.trim();
-  const numericId = Number(trimmedId);
-  const parsedId =
-    trimmedId !== "" && Number.isSafeInteger(numericId) && numericId > 0 ? numericId : 0;
+  const parsedId = parseTmdbCollectionId(collectionId) ?? 0;
   const parsedLimit = parseOptionalPositiveInteger(limit);
   const source_config: Record<string, unknown> = {
     mode: "tmdb_collection",
@@ -1530,10 +1535,8 @@ export function CollectionEditForm({
   const parsedSourceLimit = parseOptionalPositiveInteger(sourceLimit);
   const hasInvalidSourceLimit = sourceLimit.trim().length > 0 && parsedSourceLimit === undefined;
   const missingSourceURL = isMDBListCollection && sourceUrl.trim().length === 0;
-  const parsedTmdbCollectionId = parseOptionalPositiveInteger(tmdbCollectionId);
   const hasInvalidTmdbCollectionId =
-    isTMDBFranchise &&
-    (tmdbCollectionId.trim().length === 0 || parsedTmdbCollectionId === undefined);
+    isTMDBFranchise && parseTmdbCollectionId(tmdbCollectionId) === undefined;
   const parsedTmdbLimit = parseOptionalPositiveInteger(tmdbLimit);
   const hasInvalidTmdbLimit = tmdbLimit.trim().length > 0 && parsedTmdbLimit === undefined;
   const parsedTraktLimit = parseOptionalPositiveInteger(traktLimit);

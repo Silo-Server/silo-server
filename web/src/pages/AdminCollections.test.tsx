@@ -8,6 +8,7 @@ import {
   collectionsInAdminScope,
   parseTMDBCollectionSourceConfig,
   parseTMDBPresetSourceConfig,
+  parseTmdbCollectionId,
   toAdminCollectionBuilderValue,
   toAdminCollectionRequest,
 } from "./adminCollectionsShared";
@@ -249,6 +250,9 @@ describe("AdminCollections helpers", () => {
     for (const invalid of ["1.5", "12abc", "-4"]) {
       const input = buildTMDBCollectionSourceInput({ collectionId: invalid, limit: "" });
       expect(input.source_config.collection_id).toBe(0);
+      // The Save check uses the same parser, so it rejects what would save as 0.
+      expect(parseTmdbCollectionId(invalid)).toBeUndefined();
     }
+    expect(parseTmdbCollectionId(" 1e3 ")).toBe(1000);
   });
 });
