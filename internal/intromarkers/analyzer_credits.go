@@ -212,10 +212,27 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 // stored credits already match, and reports whether the write applied.
 // Errors are recorded in summary.
 func (a *Analyzer) patchCredits(ctx context.Context, candidate Candidate, segment Segment, summary *RunSummary) bool {
-	if candidate.marker(kindCredits).matches(segment) {
+	applied, err := a.writeCredits(ctx, candidate, segment)
+	if err != nil {
+		a.creditsPatchFailed(ctx, candidate, segment, err, summary)
 		return false
 	}
-	applied, err := a.repo.PatchMarker(ctx, MarkerPatch{
+	return applied
+}
+
+// creditsPatchFailed records a failed credits write in summary.
+func (a *Analyzer) creditsPatchFailed(ctx context.Context, candidate Candidate, segment Segment, err error, summary *RunSummary) {
+	summary.Errors = append(summary.Errors, fmt.Sprintf("file %d: %v", candidate.FileID, err))
+	a.logger.WarnContext(ctx, "credits marker patch failed", "file_id", candidate.FileID, "algorithm", segment.Algorithm, "error", err)
+}
+
+// writeCredits writes a credits segment onto the candidate's file unless its
+// stored credits already match, and reports whether the write applied.
+func (a *Analyzer) writeCredits(ctx context.Context, candidate Candidate, segment Segment) (bool, error) {
+	if candidate.marker(kindCredits).matches(segment) {
+		return false, nil
+	}
+	return a.repo.PatchMarker(ctx, MarkerPatch{
 		Kind:         kindCredits,
 		ExpectedFile: candidate.expectedFile(),
 		FileID:       candidate.FileID,
@@ -226,12 +243,6 @@ func (a *Analyzer) patchCredits(ctx context.Context, candidate Candidate, segmen
 		Algorithm:    segment.Algorithm,
 		DetectedAt:   time.Now().UTC(),
 	})
-	if err != nil {
-		summary.Errors = append(summary.Errors, fmt.Sprintf("file %d: %v", candidate.FileID, err))
-		a.logger.WarnContext(ctx, "credits marker patch failed", "file_id", candidate.FileID, "algorithm", segment.Algorithm, "error", err)
-		return false
-	}
-	return applied
 }
 
 // storedMarkerTolerance is the boundary difference below which a stored

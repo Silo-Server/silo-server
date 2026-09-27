@@ -249,7 +249,10 @@ online provider or a manual edit, are left alone.
   other containers, such as MPEG-TS, read the whole tail for its keyframes
   (see [media sampling](media-sampling.md)). The result is stored
   as a `credits_tail` artifact with its own `config_hash`, so it never shares
-  a key with an episode tail, under the same statuses and backoff.
+  a key with an episode tail, under the same statuses and backoff. A usable
+  tail is stored only after the credits placed from it are written, or none
+  are found, so a movie whose analysis is canceled or fails before then
+  keeps no complete tail and stays eligible for the next scheduled run.
 - **Placing.** Keyframes are classified and grouped into runs as for
   episodes, and the last cluster of runs is the credits (`credits-video:v1`).
   It must end within 180 seconds of the end of the file and last 15 to 900

@@ -24,6 +24,7 @@ type fakeIntroRepository struct {
 	seasonState        *SeasonState
 	upsertedStates     []SeasonState
 	patches            []MarkerPatch
+	patchErr           error
 	silenceAttempts    map[int]SilenceRefinementAttempt
 	upsertedAttempts   []SilenceRefinementAttempt
 	artifacts          map[artifactSlot]Artifact
@@ -116,6 +117,9 @@ func (f *fakeIntroRepository) PatchMarker(_ context.Context, patch MarkerPatch) 
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.patchErr != nil {
+		return false, f.patchErr
+	}
 	f.patches = append(f.patches, patch)
 	return true, nil
 }

@@ -178,8 +178,8 @@ func (a *Analyzer) analyzeMovie(ctx context.Context, candidate Candidate, tailRe
 	if !tailReady {
 		return summary
 	}
-	tail, ok := a.movieTail(ctx, candidate, deadline, &summary)
-	if !ok {
+	tail, sampled := a.movieTail(ctx, candidate, deadline, &summary)
+	if tail == nil {
 		return summary
 	}
 	acquire := a.ffmpegAcquirer()
@@ -198,20 +198,36 @@ func (a *Analyzer) analyzeMovie(ctx context.Context, candidate Candidate, tailRe
 	if silenceErr != nil {
 		a.logger.WarnContext(ctx, "movie credits silence detection failed; keeping the video start", "file_id", candidate.FileID, "path", candidate.FilePath, "error", silenceErr)
 	}
-	if !ok || ctx.Err() != nil {
+	// A freshly sampled tail is stored only once its placement is settled:
+	// the scheduled run skips a movie with a complete tail, so a movie
+	// canceled or failed before then must stay eligible.
+	if ctx.Err() != nil {
 		return summary
 	}
-	if a.patchCredits(ctx, candidate, segment, &summary) {
-		summary.MovieCreditsMarkersWritten++
+	if ok {
+		applied, err := a.writeCredits(ctx, candidate, segment)
+		if err != nil {
+			a.creditsPatchFailed(ctx, candidate, segment, err, &summary)
+			return summary
+		}
+		if applied {
+			summary.MovieCreditsMarkersWritten++
+		}
+	}
+	if sampled {
+		if err := a.storeCreditsTail(ctx, candidate, movieTailSpec(candidate), *tail); err != nil {
+			summary.Errors = append(summary.Errors, err.Error())
+		}
 	}
 	return summary
 }
 
 // movieTail returns the candidate's movie tail pass, from the cache or by
-// sampling it, and records how it was obtained in summary. It returns false
-// when the tail is unusable, backing off after a failure, fails now, or
-// deadline passed while it waited for ffmpeg.
-func (a *Analyzer) movieTail(ctx context.Context, candidate Candidate, deadline time.Time, summary *RunSummary) (*creditsTail, bool) {
+// sampling it, and records how it was obtained in summary. sampled reports
+// a tail sampled now, which the caller stores once it has placed the
+// credits. It returns no tail when the tail is unusable, backing off after
+// a failure, fails now, or deadline passed while it waited for ffmpeg.
+func (a *Analyzer) movieTail(ctx context.Context, candidate Candidate, deadline time.Time, summary *RunSummary) (tail *creditsTail, sampled bool) {
 	spec := movieTailSpec(candidate)
 	artifacts, err := a.loadCreditsArtifacts(ctx, []Candidate{candidate}, spec.key)
 	if err != nil {
@@ -226,7 +242,7 @@ func (a *Analyzer) movieTail(ctx context.Context, candidate Candidate, deadline 
 	switch {
 	case tail != nil:
 		summary.CreditsTailCacheHits++
-		return tail, true
+		return tail, false
 	case state == ArtifactSkipped && stored.Status != ArtifactFailed:
 		summary.CreditsTailUnusable++
 		return nil, false
@@ -250,17 +266,17 @@ func (a *Analyzer) movieTail(ctx context.Context, candidate Candidate, deadline 
 		summary.MovieBudgetExhausted = true
 		return nil, false
 	}
-	sampled, sampleErr := a.movieSampler.SampleMovieTail(ctx, candidate)
+	sampledTail, sampleErr := a.movieSampler.SampleMovieTail(ctx, candidate)
 	release()
 	if ctx.Err() != nil {
 		return nil, false
 	}
 	// As with episodes, a clean run without keyframes points at the log
 	// format rather than the file, so it is retried later.
-	if sampleErr == nil && len(sampled.Frames) == 0 {
+	if sampleErr == nil && len(sampledTail.Frames) == 0 {
 		sampleErr = errNoTailFrames
 	}
-	tail, err = a.settleCreditsTail(ctx, candidate, spec, sampled, sampleErr)
+	usable, err := a.settleUnusableCreditsTail(ctx, candidate, spec, sampledTail, sampleErr)
 	switch {
 	case err != nil:
 		summary.Errors = append(summary.Errors, err.Error())
@@ -268,10 +284,10 @@ func (a *Analyzer) movieTail(ctx context.Context, candidate Candidate, deadline 
 	case sampleErr != nil && !mediasample.Classify(sampleErr).Permanent():
 		summary.CreditsTailScanErrors++
 		return nil, false
-	case tail == nil:
+	case !usable:
 		summary.CreditsTailUnusable++
 		return nil, false
 	}
 	summary.CreditsTailScansComputed++
-	return tail, true
+	return &sampledTail, true
 }

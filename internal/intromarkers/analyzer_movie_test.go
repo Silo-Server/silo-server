@@ -23,6 +23,8 @@ type fakeMovieSampler struct {
 	windows   []fingerprintWindow
 	// onSample runs on every tail pass.
 	onSample func()
+	// onSilences runs on every silence read.
+	onSilences func()
 }
 
 func (f *fakeMovieSampler) PreflightMovieTail(context.Context) error { return f.preflight }
@@ -53,9 +55,13 @@ func (f *fakeMovieSampler) SampleMovieTail(_ context.Context, candidate Candidat
 
 func (f *fakeMovieSampler) SampleMovieSilences(_ context.Context, _ Candidate, window fingerprintWindow) ([]mediasample.Interval, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.windows = append(f.windows, window)
-	return f.silences, nil
+	onSilences, silences := f.onSilences, f.silences
+	f.mu.Unlock()
+	if onSilences != nil {
+		onSilences()
+	}
+	return silences, nil
 }
 
 func (f *fakeMovieSampler) tailCount() int {
@@ -126,6 +132,45 @@ func TestRunPlacesMovieCreditsFromVideo(t *testing.T) {
 	}
 	if sampler.tailCount() != 1 || summary.CreditsTailCacheHits != 1 || summary.MovieCreditsMarkersWritten != 1 {
 		t.Fatalf("%d tail passes, summary %+v; want the cached tail", sampler.tailCount(), summary)
+	}
+}
+
+// A sampled tail is stored only once the movie's credits are settled. A
+// movie canceled while its credits are refined, or whose credits write
+// fails, keeps no complete tail, so the scheduled run, which skips movies
+// with one, takes it up again.
+func TestAnalyzeMovieStoresTheTailOnlyOnceCreditsAreSettled(t *testing.T) {
+	movie := movieCandidate(10, 7200)
+	repo := &fakeIntroRepository{movieCandidates: []Candidate{movie}}
+	ctx, cancel := context.WithCancel(context.Background())
+	sampler := &fakeMovieSampler{onSilences: cancel}
+	analyzer := movieAnalyzer(repo, sampler)
+
+	if _, err := analyzer.AnalyzeMovie(ctx, "movie"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("AnalyzeMovie: %v, want canceled", err)
+	}
+	if artifact := repo.artifact(10, ArtifactKindCreditsTail); artifact.Status != "" || len(creditsPatches(repo)) != 0 {
+		t.Fatalf("canceled during refinement: artifact status %q, patches %+v; want neither", artifact.Status, creditsPatches(repo))
+	}
+
+	sampler.onSilences = nil
+	repo.patchErr = errors.New("database went away")
+	summary, err := analyzer.AnalyzeMovie(context.Background(), "movie")
+	if err != nil {
+		t.Fatalf("AnalyzeMovie: %v", err)
+	}
+	if artifact := repo.artifact(10, ArtifactKindCreditsTail); artifact.Status != "" || len(summary.Errors) != 1 {
+		t.Fatalf("failed write: artifact status %q, summary %+v; want no artifact and the error", artifact.Status, summary)
+	}
+
+	repo.patchErr = nil
+	summary, err = analyzer.AnalyzeMovie(context.Background(), "movie")
+	if err != nil {
+		t.Fatalf("AnalyzeMovie: %v", err)
+	}
+	if artifact := repo.artifact(10, ArtifactKindCreditsTail); artifact.Status != ArtifactComplete ||
+		summary.MovieCreditsMarkersWritten != 1 || sampler.tailCount() != 3 {
+		t.Fatalf("artifact status %q, summary %+v, %d tail passes; want the third pass stored with its credits", artifact.Status, summary, sampler.tailCount())
 	}
 }
 

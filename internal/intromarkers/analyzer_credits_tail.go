@@ -280,20 +280,34 @@ func (a *Analyzer) creditsTailArtifact(artifact *Artifact, candidate Candidate, 
 	return &tail, ArtifactReady
 }
 
-// settleCreditsTail stores the outcome of a tail pass and returns the tail
-// when it can be classified. A permanent failure, or a tail with too many or
-// too few keyframes, is stored as unusable; any other failure is recorded so
-// this server backs off.
 // errNoTailFrames fails a tail pass that exited cleanly without any parsed
 // keyframe statistics.
 var errNoTailFrames = errors.New("credits tail pass parsed no keyframes")
 
+// settleCreditsTail stores the outcome of a tail pass and returns the tail
+// when it can be classified.
 func (a *Analyzer) settleCreditsTail(ctx context.Context, candidate Candidate, spec creditsTailSpec, tail creditsTail, sampleErr error) (*creditsTail, error) {
+	usable, err := a.settleUnusableCreditsTail(ctx, candidate, spec, tail, sampleErr)
+	if err != nil || !usable {
+		return nil, err
+	}
+	if err := a.storeCreditsTail(ctx, candidate, spec, tail); err != nil {
+		return nil, err
+	}
+	return &tail, nil
+}
+
+// settleUnusableCreditsTail stores the outcome of a tail pass that cannot be
+// classified and reports whether the tail can be. A permanent failure, or a
+// tail with too many or too few keyframes, is stored as unusable; any other
+// failure is recorded so this server backs off. A usable tail is left for
+// the caller to store.
+func (a *Analyzer) settleUnusableCreditsTail(ctx context.Context, candidate Candidate, spec creditsTailSpec, tail creditsTail, sampleErr error) (bool, error) {
 	if sampleErr != nil {
 		reason := mediasample.Classify(sampleErr)
 		a.logger.WarnContext(ctx, "credits tail pass failed", "file_id", candidate.FileID, "path", candidate.FilePath, "reason", reason, "error", sampleErr)
 		if reason.Permanent() {
-			return nil, a.storeCreditsTailUnusable(ctx, candidate, spec, string(reason))
+			return false, a.storeCreditsTailUnusable(ctx, candidate, spec, string(reason))
 		}
 		if err := a.repo.RecordArtifactFailure(ctx, ArtifactFailure{
 			MediaFileID:      candidate.FileID,
@@ -305,17 +319,23 @@ func (a *Analyzer) settleCreditsTail(ctx context.Context, candidate Candidate, s
 		}); err != nil {
 			a.logger.WarnContext(ctx, "credits tail failure record failed", "file_id", candidate.FileID, "error", err)
 		}
-		return nil, nil
+		return false, nil
 	}
+	if detail := tailUnusableAfterSampling(len(tail.Frames), spec.window); detail != "" {
+		return false, a.storeCreditsTailUnusable(ctx, candidate, spec, detail)
+	}
+	return true, nil
+}
+
+// storeCreditsTail stores a usable tail pass as the candidate's complete
+// tail artifact.
+func (a *Analyzer) storeCreditsTail(ctx context.Context, candidate Candidate, spec creditsTailSpec, tail creditsTail) error {
 	window := spec.window
-	if detail := tailUnusableAfterSampling(len(tail.Frames), window); detail != "" {
-		return nil, a.storeCreditsTailUnusable(ctx, candidate, spec, detail)
-	}
 	payload, err := encodeCreditsTail(tail, window.Start, len(creditsBlackThresholds))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := a.repo.UpsertArtifact(ctx, Artifact{
+	return a.repo.UpsertArtifact(ctx, Artifact{
 		MediaFileID:           candidate.FileID,
 		ArtifactKey:           spec.key,
 		ArtifactIdentity:      window.identity(candidate),
@@ -324,10 +344,7 @@ func (a *Analyzer) settleCreditsTail(ctx context.Context, candidate Candidate, s
 		SampleDurationSeconds: window.duration(),
 		ItemCount:             len(tail.Frames),
 		Payload:               payload,
-	}); err != nil {
-		return nil, err
-	}
-	return &tail, nil
+	})
 }
 
 // storeCreditsTailUnusable records why the candidate's tail cannot be

@@ -36,9 +36,10 @@ const movieCandidateWhere = `
 //
 // A file whose credits came from a higher-priority source is left out, as
 // is one whose movie tail pass is stored for the file as it is now: complete
-// or unusable, or failed on this server and still backing off. Its credits
-// were placed from that tail already, and admin refresh or playback analyze
-// it again on request. The tail's window follows from the file's duration
+// or unusable, or failed on this server and still backing off. A sampled
+// tail is stored only once the credits placed from it are written, so a
+// complete tail means its credits were settled; admin refresh or playback
+// analyze it again on request. The tail's window follows from the file's duration
 // and the key's parameters, so matching the file hash, size, and duration
 // matches the whole identity. Failed files retried after their backoff come
 // last.
