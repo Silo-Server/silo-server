@@ -35,16 +35,23 @@ const (
 // failures on a readable image do not wrap it.
 var ErrInvalidImage = errors.New("imageutil: invalid image")
 
+// maxFallbackDecodePixels bounds the raster undecodableSource lets the
+// standard library allocate. A small upload can declare huge dimensions, and
+// image.Decode allocates the whole raster before it reads the pixel data.
+const maxFallbackDecodePixels = 25_000_000
+
 // undecodableSource reports whether data is in a format the standard library
 // recognizes but its pixel data does not decode. libvips reads only the header
 // in Size, so a truncated PNG first fails inside Process, where the error is
 // otherwise indistinguishable from an encoder failure. Formats the standard
-// library does not know report false, keeping those failures server errors.
+// library does not know, and sources above maxFallbackDecodePixels, report
+// false, keeping those failures server errors.
 func undecodableSource(data []byte) bool {
-	if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || int64(cfg.Width)*int64(cfg.Height) > maxFallbackDecodePixels {
 		return false
 	}
-	_, _, err := image.Decode(bytes.NewReader(data))
+	_, _, err = image.Decode(bytes.NewReader(data))
 	return err != nil
 }
 

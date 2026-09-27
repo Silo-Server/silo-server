@@ -2,7 +2,9 @@ package imageutil
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -123,6 +125,9 @@ func TestUndecodableSource(t *testing.T) {
 		"valid png":     {full, false},
 		"truncated png": {full[:len(full)/2], true},
 		"unknown":       {[]byte("not an image"), false},
+		"huge header":   {withPNGDimensions(t, full[:len(full)/2], 100_000, 100_000), false},
+		"just over cap": {withPNGDimensions(t, full[:len(full)/2], 5_001, 5_000), false},
+		"one tall row":  {withPNGDimensions(t, full[:len(full)/2], 1, maxFallbackDecodePixels+1), false},
 	} {
 		if got := undecodableSource(tc.data); got != tc.want {
 			t.Errorf("%s: undecodableSource = %v, want %v", name, got, tc.want)
@@ -138,4 +143,20 @@ func TestGenerateVariantsTruncatedPNGIsInvalidWhenRejected(t *testing.T) {
 	if err != nil && !errors.Is(err, ErrInvalidImage) {
 		t.Fatalf("err = %v, want nil or ErrInvalidImage", err)
 	}
+}
+
+// withPNGDimensions rewrites the IHDR width and height of a PNG, keeping the
+// chunk CRC valid, so a small file declares an arbitrarily large raster.
+func withPNGDimensions(t *testing.T, data []byte, width, height uint32) []byte {
+	t.Helper()
+	out := bytes.Clone(data)
+	// Signature (8) + length (4) + "IHDR" (4), then width, height.
+	const ihdr = 8 + 4
+	if string(out[ihdr:ihdr+4]) != "IHDR" {
+		t.Fatal("IHDR is not the first chunk")
+	}
+	binary.BigEndian.PutUint32(out[ihdr+4:], width)
+	binary.BigEndian.PutUint32(out[ihdr+8:], height)
+	binary.BigEndian.PutUint32(out[ihdr+4+13:], crc32.ChecksumIEEE(out[ihdr:ihdr+4+13]))
+	return out
 }
