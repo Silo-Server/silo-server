@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -74,8 +75,10 @@ type RollingDeadlineWriter struct {
 	rc       *http.ResponseController
 	window   time.Duration
 	step     time.Duration
+	deadline sync.Mutex
 	lastBump time.Time
 	disabled bool
+	aborted  bool
 
 	statusCode    int
 	bytesWritten  int64
@@ -99,13 +102,15 @@ func newRollingDeadlineWriter(w http.ResponseWriter, window, step time.Duration)
 }
 
 func (s *RollingDeadlineWriter) bump() {
-	if s.disabled {
+	s.deadline.Lock()
+	defer s.deadline.Unlock()
+	if s.disabled || s.aborted {
 		return
 	}
 	if !s.lastBump.IsZero() && time.Since(s.lastBump) < s.step {
 		return
 	}
-	s.forceBump()
+	s.forceBumpLocked()
 }
 
 // forceBump sets the deadline unconditionally, ignoring the step throttle.
@@ -118,7 +123,13 @@ func (s *RollingDeadlineWriter) bump() {
 // reaps healthy slow clients. Every slice therefore gets a full window, which is
 // what the pre-CopyChunked loop did.
 func (s *RollingDeadlineWriter) forceBump() {
-	if s.disabled {
+	s.deadline.Lock()
+	defer s.deadline.Unlock()
+	s.forceBumpLocked()
+}
+
+func (s *RollingDeadlineWriter) forceBumpLocked() {
+	if s.disabled || s.aborted {
 		return
 	}
 	now := time.Now()
@@ -127,6 +138,16 @@ func (s *RollingDeadlineWriter) forceBump() {
 		return
 	}
 	s.lastBump = now
+}
+
+// Abort interrupts an in-flight response write and prevents a later rolling
+// deadline bump from reviving it. Session stops use this to withdraw a
+// progressive response even when its client has stopped reading.
+func (s *RollingDeadlineWriter) Abort() error {
+	s.deadline.Lock()
+	defer s.deadline.Unlock()
+	s.aborted = true
+	return s.rc.SetWriteDeadline(time.Now())
 }
 
 func (s *RollingDeadlineWriter) Header() http.Header { return s.w.Header() }

@@ -1,6 +1,37 @@
 package lang
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
+
+func TestCanonicalTag(t *testing.T) {
+	cases := map[string]string{
+		"": "", "  ": "", "en": "en", "EN": "en", "eng": "en", "ara": "ar", "AR": "ar",
+		"Arabic": "", "en_US": "en-US", "pt-BR": "pt-BR", "pt_br": "pt-BR",
+		"zh-Hant": "zh-Hant", "ZH-hant-TW": "zh-Hant-TW", "iw": "he", "not a language": "",
+		"Klingon": "", "x-private": "x-private",
+		"qaa": "qaa", "en-abcde-abcde": "", "en-a-foo-a-bar": "",
+		"x-abcde-abcde": "x-abcde-abcde", "en-x-abcde-abcde": "en-x-abcde-abcde",
+		"en-a-abcde-abcde": "en-a-abcde-abcde",
+		// Grandfathered forms resolve to their registered replacements.
+		"i-klingon": "tlh", "en-GB-oed": "en-GB-oxendict", "sgn-BE-FR": "sfb",
+		"i-navajo": "nv", "i-notreal": "", "Klingon (TNG)": "",
+	}
+	for in, want := range cases {
+		if got := CanonicalTag(in); got != want {
+			t.Errorf("CanonicalTag(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestPrimaryLanguage(t *testing.T) {
+	for in, want := range map[string]string{"pt-BR": "pt", "zh-Hant": "zh", "eng": "en", "Arabic": "ar", "": "", "unknown": ""} {
+		if got := PrimaryLanguage(in); got != want {
+			t.Errorf("PrimaryLanguage(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
 
 func TestCanonical(t *testing.T) {
 	cases := []struct {
@@ -95,6 +126,23 @@ func TestCanonicalCountries(t *testing.T) {
 			if got[i] != tc.want[i] {
 				t.Errorf("CanonicalCountries(%v)[%d] = %q, want %q", tc.in, i, got[i], tc.want[i])
 			}
+		}
+	}
+}
+
+func TestCodeAliases(t *testing.T) {
+	for input, want := range map[string][]string{
+		"es":    {"es", "spa"},
+		"spa":   {"es", "spa"},
+		"de":    {"de", "deu", "ger"},
+		"zh":    {"zh", "zho", "chi"},
+		"eng":   {"en", "eng"},
+		"fil":   {"fil"},
+		"pt-BR": {"pt-BR"},
+		"":      nil,
+	} {
+		if got := CodeAliases(input); !slices.Equal(got, want) {
+			t.Errorf("CodeAliases(%q) = %v, want %v", input, got, want)
 		}
 	}
 }

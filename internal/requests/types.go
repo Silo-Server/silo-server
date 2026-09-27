@@ -90,6 +90,7 @@ type Viewer struct {
 }
 
 type Settings struct {
+	Revision                  int64     `json:"-"`
 	RequestsEnabled           bool      `json:"requests_enabled"`
 	GlobalMaxRequests         int       `json:"global_max_requests"`
 	GlobalWindowDays          int       `json:"global_window_days"`
@@ -108,6 +109,7 @@ type FeatureStatus struct {
 }
 
 type UserLimit struct {
+	Revision     int64        `json:"-"`
 	UserID       int          `json:"user_id"`
 	LimitMode    LimitMode    `json:"limit_mode"`
 	MaxRequests  *int         `json:"max_requests,omitempty"`
@@ -161,6 +163,14 @@ type Request struct {
 	UpdatedAt        time.Time  `json:"updated_at"`
 	ApprovedAt       *time.Time `json:"approved_at,omitempty"`
 	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+
+	// externalIDsResolved marks a request whose external IDs were just looked
+	// up in this call (CreateRequest), so an immediate submission does not
+	// repeat the provider searches. tvdbLookupFailed records that the latest
+	// TVDB lookup hit a provider error rather than a confirmed miss. Neither is
+	// persisted or serialized.
+	externalIDsResolved bool
+	tvdbLookupFailed    bool
 }
 
 type RequestEvent struct {
@@ -257,7 +267,14 @@ type CreateRequestInput struct {
 	BackdropPath string    `json:"backdrop_path,omitempty"`
 }
 
+// RequestPageKey identifies the last emitted request in descending creation order.
+type RequestPageKey struct {
+	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+}
+
 type ListFilter struct {
+	Before  *RequestPageKey
 	Status  Status
 	Outcome Outcome
 	Limit   int
@@ -265,6 +282,7 @@ type ListFilter struct {
 }
 
 type Integration struct {
+	Revision            int64          `json:"-"`
 	ID                  string         `json:"id"`
 	Name                string         `json:"name"`
 	Enabled             bool           `json:"enabled"`

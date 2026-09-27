@@ -239,6 +239,16 @@ func (r testPlaybackSettingsRepo) Get(_ context.Context, key string) (string, er
 	return r.values[key], nil
 }
 
+func (r testPlaybackSettingsRepo) GetMany(_ context.Context, keys ...string) (map[string]string, error) {
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := r.values[key]; ok {
+			out[key] = value
+		}
+	}
+	return out, nil
+}
+
 type allowAllPlaybackItemAccess struct{}
 
 func (allowAllPlaybackItemAccess) EnsureAccessible(

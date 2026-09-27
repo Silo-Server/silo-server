@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 // TestDualLibraryItemDeniedByDisabledLibraryDB is the behavioral regression
@@ -110,7 +112,7 @@ func TestDualLibraryItemDeniedByDisabledLibraryDB(t *testing.T) {
 			if len(batch) != 0 {
 				t.Error("GetByIDsWithAccess returned the dual-library item")
 			}
-			filtered, err := libraryRepo.FilterAccessibleContentIDs(ctx, []string{item}, scope.filter.AllowedLibraryIDs, scope.filter.DisabledLibraryIDs, "")
+			filtered, err := libraryRepo.FilterAccessibleContentIDs(ctx, []string{item}, scope.filter.AllowedLibraryIDs, scope.filter.DisabledLibraryIDs, access.MaturityLimits{})
 			if err != nil {
 				t.Fatalf("FilterAccessibleContentIDs error: %v", err)
 			}

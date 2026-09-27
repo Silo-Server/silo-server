@@ -25,12 +25,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -42,9 +43,9 @@ type LibraryCollectionHandler struct {
 	itemRepo              *catalog.ItemRepository
 	Executor              *catalog.QueryExecutor
 	detailSvc             *catalog.DetailService
-	presignTTL            time.Duration
 	httpClient            *http.Client
-	s3GP                  *s3client.Client
+	ArtworkStore          blobstore.Store
+	ArtworkResolver       artworkurl.Resolver
 	FrontendFS            fs.FS
 	SectionRepo           *sections.Repository
 	UserCollectionPool    *pgxpool.Pool
@@ -57,7 +58,7 @@ type LibraryCollectionHandler struct {
 	SortPreferenceCleaner *userstore.CollectionSortPreferenceCleaner
 }
 
-var errLibraryCollectionInUse = errors.New("collection is used by one or more sections")
+var errLibraryCollectionInUse = catalog.ErrLibraryCollectionInUse
 
 const (
 	templateBundleSyncConcurrency    = 4
@@ -83,9 +84,7 @@ func NewLibraryCollectionHandler(
 	repo *catalog.LibraryCollectionRepository,
 	service *catalog.LibraryCollectionService,
 	itemRepo *catalog.ItemRepository,
-	presignTTL time.Duration,
 	httpClient *http.Client,
-	s3GP *s3client.Client,
 ) *LibraryCollectionHandler {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -95,9 +94,7 @@ func NewLibraryCollectionHandler(
 		repo:             repo,
 		service:          service,
 		itemRepo:         itemRepo,
-		presignTTL:       presignTTL,
 		httpClient:       httpClient,
-		s3GP:             s3GP,
 		TemplateRegistry: templates.Default,
 	}
 }
@@ -110,8 +107,8 @@ func (h *LibraryCollectionHandler) SetDetailService(svc *catalog.DetailService) 
 // SetupCollage enables automatic poster collage generation for collections.
 // Must be called after SetDetailService.
 func (h *LibraryCollectionHandler) SetupCollage() {
-	if h.s3GP == nil || h.detailSvc == nil {
-		slog.Info("collage: auto-generation disabled", "s3_configured", h.s3GP != nil, "detail_svc_configured", h.detailSvc != nil)
+	if h.ArtworkStore == nil || h.detailSvc == nil {
+		slog.Info("collage: auto-generation disabled", "artwork_configured", h.ArtworkStore != nil, "detail_svc_configured", h.detailSvc != nil)
 		return
 	}
 	h.service.CollageGen = h
@@ -125,7 +122,7 @@ func (h *LibraryCollectionHandler) storeBundledTemplatePoster(
 ) (bool, string, string, error) {
 	storedPath, thumbhash, stored, err := storeBundledCollectionPosterIfS3Configured(
 		ctx,
-		h.s3GP,
+		h.ArtworkStore,
 		h.FrontendFS,
 		collectionID,
 		adminCollectionImagePrefix,
@@ -793,28 +790,10 @@ func (h *LibraryCollectionHandler) HandleListLibraryUserCollections(w http.Respo
 	if !ok {
 		return
 	}
-	if !requestCanAccessLibrary(r, libraryID) {
-		writeError(w, http.StatusNotFound, "not_found", "Library not found")
-		return
-	}
-	if h.UserCollectionPool == nil {
-		writeJSON(w, http.StatusOK, serverUserCollectionsListResponse{Collections: []usercollections.ServerVisibleCollection{}})
-		return
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	collections, err := usercollections.ListServerVisibleByLibrary(r.Context(), h.UserCollectionPool, userID, profileID, libraryID)
+	collections, err := h.LibraryUserCollections(r.Context(), libraryID, apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load user collections")
+		writeAPIError(w, err)
 		return
-	}
-
-	if collections == nil {
-		collections = []usercollections.ServerVisibleCollection{}
-	}
-	for i := range collections {
-		collections[i].PosterURL = h.presignGPURL(r, collections[i].PosterPath)
 	}
 	writeJSON(w, http.StatusOK, serverUserCollectionsListResponse{Collections: collections})
 }
@@ -824,117 +803,15 @@ func (h *LibraryCollectionHandler) HandleListLibraryCollections(w http.ResponseW
 	if !ok {
 		return
 	}
-	if !requestCanAccessLibrary(r, libraryID) {
-		writeError(w, http.StatusNotFound, "not_found", "Library not found")
-		return
-	}
-
-	adminCollections, err := h.repo.ListByLibrary(r.Context(), libraryID, catalog.ListLibraryCollectionsOptions{})
+	resp, err := h.LibraryCollectionsTab(r.Context(), libraryID, apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load collections")
+		writeAPIError(w, err)
 		return
 	}
 	if h.GroupRepo == nil {
-		writeJSON(w, http.StatusOK, libraryCollectionsListResponse{
-			Collections: h.toLibraryCollectionResponses(r, adminCollections),
-		})
+		writeJSON(w, http.StatusOK, libraryCollectionsListResponse{Collections: resp.Collections})
 		return
 	}
-
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	groups, err := h.GroupRepo.ListByLibrary(r.Context(), libraryID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load groups")
-		return
-	}
-	adminCollectionsByGroup := groupLibraryTabCollections(adminCollections)
-
-	resp := libraryTabResponse{
-		LibraryID:   libraryID,
-		Collections: h.toLibraryCollectionResponses(r, adminCollections),
-		Groups:      []libraryTabGroup{},
-	}
-	var userCollections []usercollections.ServerVisibleCollection
-	userCollectionsLoaded := false
-	for _, g := range groups {
-		var colls []libraryTabCollection
-		switch g.Kind {
-		case models.GroupKindUserCollections:
-			if h.UserCollectionPool == nil || userID == 0 {
-				continue
-			}
-			if !userCollectionsLoaded {
-				loadedUserCollections, loadErr := usercollections.ListServerVisibleByLibrary(r.Context(), h.UserCollectionPool, userID, profileID, libraryID)
-				if loadErr != nil {
-					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load user collections")
-					return
-				}
-				userCollections = loadedUserCollections
-				userCollectionsLoaded = true
-			}
-			sorted := applyUserCollectionSort(userCollections, g.DefaultSortMode)
-			for i := range sorted {
-				posterURL := h.presignGPURL(r, sorted[i].PosterPath)
-				creatorProfileID := sorted[i].CreatorProfileID
-				colls = append(colls, libraryTabCollection{
-					ID:               sorted[i].ID,
-					Title:            sorted[i].Name,
-					PosterURL:        posterURL,
-					PosterThumbhash:  sorted[i].PosterThumbhash,
-					ItemCount:        sorted[i].ItemCount,
-					CreatorProfileID: &creatorProfileID,
-				})
-			}
-		default:
-			collections := adminCollectionsByGroup[g.ID]
-			collections = applyCollectionSort(collections, g.DefaultSortMode)
-			for _, c := range collections {
-				colls = append(colls, libraryTabCollection{
-					ID:              c.ID,
-					Title:           c.Title,
-					PosterURL:       h.presignGPURL(r, c.PosterURL),
-					PosterThumbhash: c.PosterThumbhash,
-					ItemCount:       c.ItemCount,
-					Featured:        c.Featured,
-				})
-			}
-		}
-		if len(colls) == 0 {
-			continue
-		}
-		resp.Groups = append(resp.Groups, libraryTabGroup{
-			ID:          g.ID,
-			Name:        g.Name,
-			Kind:        g.Kind,
-			SortMode:    g.DefaultSortMode,
-			SortOrder:   g.SortOrder,
-			Collections: colls,
-		})
-	}
-
-	ungrouped := adminCollectionsByGroup[groupKeyPtr(nil)]
-	if len(ungrouped) > 0 {
-		uColls := make([]libraryTabCollection, 0, len(ungrouped))
-		for _, c := range ungrouped {
-			uColls = append(uColls, libraryTabCollection{
-				ID:              c.ID,
-				Title:           c.Title,
-				PosterURL:       h.presignGPURL(r, c.PosterURL),
-				PosterThumbhash: c.PosterThumbhash,
-				ItemCount:       c.ItemCount,
-				Featured:        c.Featured,
-			})
-		}
-		sortOrder := 9999
-		if h.GroupRepo != nil {
-			if sortOrder, err = h.GroupRepo.GetUngroupedSortOrder(r.Context(), libraryID); err != nil {
-				sortOrder = 9999
-			}
-		}
-		resp.Ungrouped = &libraryTabUngrouped{SortOrder: sortOrder, Collections: uColls}
-	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1022,34 +899,11 @@ func (h *LibraryCollectionHandler) HandleGetLibraryCollectionItems(w http.Respon
 	if !ok {
 		return
 	}
-	if !requestCanAccessLibrary(r, libraryID) {
-		writeError(w, http.StatusNotFound, "not_found", "Library not found")
-		return
-	}
-
-	collectionID := chi.URLParam(r, "collection_id")
-	collection, err := h.repo.GetByID(r.Context(), collectionID)
-	if err != nil || collection.LibraryID != libraryID || collection.Visibility != "visible" {
-		writeError(w, http.StatusNotFound, "not_found", "Collection not found")
-		return
-	}
-
-	var items []itemListResponse
-	if catalog.IsLiveQueryType(collection.CollectionType) {
-		items, err = h.loadLiveCollectionItems(r, collection)
-	} else {
-		items, err = h.loadOrderedCollectionItems(r, collectionID)
-	}
+	items, _, err := h.LibraryCollectionItems(r.Context(), libraryID, chi.URLParam(r, "collection_id"), requestAccessFilter(r), CollectionItemPage{})
 	if err != nil {
-		var queryErr smartCollectionQueryError
-		if errors.As(err, &queryErr) {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load collection items")
+		writeAPIError(w, err)
 		return
 	}
-
 	writeJSON(w, http.StatusOK, browseResponse{Items: items, Total: len(items), HasMore: false})
 }
 
@@ -1064,47 +918,10 @@ func (h *LibraryCollectionHandler) HandleListAdminCollections(w http.ResponseWri
 		libraryID = &parsed
 	}
 
-	collectionsCh := make(chan []*models.LibraryCollection, 1)
-	eg, egCtx := errgroup.WithContext(r.Context())
-	eg.Go(func() error {
-		collections, err := h.repo.ListAll(egCtx, libraryID, catalog.ListLibraryCollectionsOptions{IncludeHidden: true})
-		if err != nil {
-			return err
-		}
-		collectionsCh <- collections
-		return nil
-	})
-	var groupsCh chan []models.LibraryCollectionGroup
-	if libraryID != nil && h.GroupRepo != nil {
-		scopedID := *libraryID
-		groupsCh = make(chan []models.LibraryCollectionGroup, 1)
-		eg.Go(func() error {
-			groups, err := h.GroupRepo.ListByLibrary(egCtx, scopedID)
-			if err != nil {
-				return err
-			}
-			groupsCh <- groups
-			return nil
-		})
-	}
-	if err := eg.Wait(); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load collections")
+	resp, err := h.ListAdminCollections(r.Context(), libraryID)
+	if err != nil {
+		writeAPIError(w, err)
 		return
-	}
-	collections := <-collectionsCh
-	var groups []models.LibraryCollectionGroup
-	if groupsCh != nil {
-		groups = <-groupsCh
-	}
-
-	resp := libraryCollectionsListResponse{
-		Collections: make([]libraryCollectionResponse, 0, len(collections)),
-	}
-	for _, collection := range collections {
-		resp.Collections = append(resp.Collections, h.toLibraryCollectionResponse(r, collection))
-	}
-	if libraryID != nil {
-		resp.Groups = toLibraryCollectionGroupResponses(groups)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1115,101 +932,12 @@ func (h *LibraryCollectionHandler) HandleCreateAdminCollection(w http.ResponseWr
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if !hasLibrarySelection(req.LibraryID, req.LibraryIDs) || strings.TrimSpace(req.Title) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "library_id/library_ids and title are required")
-		return
-	}
-	if req.Slug == "" {
-		req.Slug = slugifyCollectionName(req.Title)
-	}
-	if req.CollectionType == "" {
-		req.CollectionType = "manual"
-	}
-	queryDefinition := defaultJSON(req.QueryDefinition)
-	if req.CollectionType == "smart" {
-		var err error
-		queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinition, false, false)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid query_definition")
-			return
-		}
-	} else if len(req.QueryDefinition) > 0 {
-		var err error
-		queryDefinition, err = normalizeQueryDefinitionJSON(queryDefinition, false, false)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid query_definition")
-			return
-		}
-	}
-
-	// Library collections resolve with user scope stripped, so per-profile sort
-	// fields are rejected here rather than failing at browse time.
-	sortConfig, err := NormalizeCollectionSortConfig(req.SortConfig, false)
+	resp, err := h.createAdminCollection(r.Context(), req, func(id, p, b string) error { return h.processArtworkInputs(r, id, p, b) })
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		writeAPIError(w, err)
 		return
 	}
-
-	var syncSchedule *string
-	if s := strings.TrimSpace(req.SyncSchedule); s != "" {
-		if err := catalog.ParseCronExpression(s); err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		syncSchedule = &s
-	}
-	managementMode, managementSource, managementKey, err := normalizeCollectionManagementFields(req.ManagementMode, req.ManagementSource, req.ManagementKey)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	collection, err := h.repo.Create(r.Context(), catalog.CreateLibraryCollectionInput{
-		LibraryID:        req.LibraryID,
-		LibraryIDs:       req.LibraryIDs,
-		Slug:             req.Slug,
-		Title:            req.Title,
-		Description:      req.Description,
-		CollectionType:   req.CollectionType,
-		Visibility:       defaultCollectionVisibility(req.Visibility),
-		SortOrder:        req.SortOrder,
-		GroupID:          req.GroupID,
-		Featured:         req.Featured,
-		PosterURL:        req.PosterURL,
-		BackdropURL:      req.BackdropURL,
-		SourceURL:        req.SourceURL,
-		QueryDefinition:  queryDefinition,
-		SortConfig:       json.RawMessage(sortConfig),
-		SourceConfig:     defaultCollectionSourceConfig(req.SourceConfig),
-		ManagementMode:   managementMode,
-		ManagementSource: managementSource,
-		ManagementKey:    managementKey,
-		SyncSchedule:     syncSchedule,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create collection")
-		return
-	}
-
-	posterStored, _, _, err := h.storeBundledTemplatePoster(r.Context(), collection.ID, req.PosterURL, false)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to process template poster")
-		return
-	}
-	if err := h.processArtworkInputs(r, collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
-		return
-	}
-	if posterStored || r.MultipartForm != nil || strings.TrimSpace(req.PosterSourceURL) != "" || strings.TrimSpace(req.BackdropSourceURL) != "" {
-		collection, err = h.repo.GetByID(r.Context(), collection.ID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load collection")
-			return
-		}
-	}
-	h.refreshSmartCountAsync(collection.ID)
-
-	writeJSON(w, http.StatusCreated, h.toLibraryCollectionResponse(r, collection))
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (h *LibraryCollectionHandler) HandleUpdateAdminCollection(w http.ResponseWriter, r *http.Request) {
@@ -1224,95 +952,12 @@ func (h *LibraryCollectionHandler) HandleUpdateAdminCollection(w http.ResponseWr
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	queryDefinition := req.QueryDefinition
-	if len(req.QueryDefinition) > 0 {
-		var err error
-		if req.CollectionType == nil || *req.CollectionType == "smart" {
-			queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, false, false)
-		} else {
-			queryDefinition, err = normalizeQueryDefinitionJSON(req.QueryDefinition, false, false)
-		}
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid query_definition")
-			return
-		}
-	}
-
-	sortConfig := req.SortConfig
-	if len(req.SortConfig) > 0 {
-		normalized, err := NormalizeCollectionSortConfig(req.SortConfig, false)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		sortConfig = json.RawMessage(normalized)
-	}
-
-	// Validate sync_schedule if provided.
-	if req.SyncSchedule != nil && *req.SyncSchedule != "" {
-		if err := catalog.ParseCronExpression(*req.SyncSchedule); err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-	}
-
-	var setGroupID **string
-	if req.GroupID.Set() {
-		groupID := req.GroupID.Value()
-		if groupID != nil && strings.TrimSpace(*groupID) == "" {
-			groupID = nil
-		}
-		setGroupID = &groupID
-	}
-
-	if err := h.repo.Update(r.Context(), catalog.UpdateLibraryCollectionInput{
-		ID:               collectionID,
-		LibraryIDs:       req.LibraryIDs,
-		Slug:             req.Slug,
-		Title:            req.Title,
-		Description:      req.Description,
-		CollectionType:   req.CollectionType,
-		Visibility:       req.Visibility,
-		SortOrder:        req.SortOrder,
-		SetGroupID:       setGroupID,
-		Featured:         req.Featured,
-		PosterURL:        req.PosterURL,
-		BackdropURL:      req.BackdropURL,
-		SourceURL:        req.SourceURL,
-		QueryDefinition:  queryDefinition,
-		SortConfig:       sortConfig,
-		SourceConfig:     req.SourceConfig,
-		ManagementMode:   normalizeOptionalCollectionManagementMode(req.ManagementMode),
-		ManagementSource: req.ManagementSource,
-		ManagementKey:    req.ManagementKey,
-		SyncSchedule:     req.SyncSchedule,
-	}); err != nil {
-		if err == catalog.ErrLibraryCollectionNotFound {
-			writeError(w, http.StatusNotFound, "not_found", "Collection not found")
-			return
-		}
-		if errors.Is(err, catalog.ErrLibraryCollectionGroupNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Collection group not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update collection")
-		return
-	}
-
-	if err := h.processArtworkInputs(r, collectionID, pointerStringValue(req.PosterSourceURL), pointerStringValue(req.BackdropSourceURL)); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
-		return
-	}
-
-	updated, err := h.repo.GetByID(r.Context(), collectionID)
+	resp, err := h.updateAdminCollection(r.Context(), collectionID, req, func(id, p, b string) error { return h.processArtworkInputs(r, id, p, b) })
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load collection")
+		writeAPIError(w, err)
 		return
 	}
-	if len(queryDefinition) > 0 || req.CollectionType != nil {
-		h.refreshSmartCountAsync(collectionID)
-	}
-	writeJSON(w, http.StatusOK, h.toLibraryCollectionResponse(r, updated))
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *LibraryCollectionHandler) HandlePreviewAdminCollection(w http.ResponseWriter, r *http.Request) {
@@ -1327,81 +972,19 @@ func (h *LibraryCollectionHandler) HandlePreviewAdminCollection(w http.ResponseW
 		return
 	}
 
-	var def catalog.QueryDefinition
-	if len(req.QueryDefinition) > 0 {
-		normalized, err := normalizeQueryDefinitionJSON(req.QueryDefinition, false, false)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid query_definition")
-			return
-		}
-		if err := json.Unmarshal(normalized, &def); err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid query_definition")
-			return
-		}
-	}
-
-	items, total, err := h.Executor.Preview(r.Context(), def, catalog.AccessFilter{}, req.Limit)
+	resp, err := h.PreviewAdminCollection(r.Context(), req)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		writeAPIError(w, err)
 		return
-	}
-
-	resp := previewLibraryCollectionResponse{Items: make([]itemListResponse, 0, len(items)), Total: total}
-	for _, item := range items {
-		resp.Items = append(resp.Items, h.toItemListResponse(r, item))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *LibraryCollectionHandler) HandleDeleteCollectionImage(w http.ResponseWriter, r *http.Request) {
-	collectionID := chi.URLParam(r, "id")
-	if collectionID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Collection ID is required")
+	if err := h.DeleteAdminCollectionArtwork(r.Context(), chi.URLParam(r, "id"), r.URL.Query().Get("type")); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-
-	imageType := r.URL.Query().Get("type")
-	switch imageType {
-	case "poster", "backdrop":
-	default:
-		writeError(w, http.StatusBadRequest, "bad_request", "type must be \"poster\" or \"backdrop\"")
-		return
-	}
-
-	if err := h.deleteCollectionImages(r.Context(), collectionID, imageType); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete images")
-		return
-	}
-
-	empty := ""
-	notAutoGen := false
-	notFromTemplate := false
-	input := catalog.UpdateLibraryCollectionInput{ID: collectionID}
-	if imageType == "poster" {
-		input.PosterURL = &empty
-		input.PosterThumbhash = &empty
-		input.PosterAutoGenerated = &notAutoGen
-		input.PosterFromTemplate = &notFromTemplate
-	} else {
-		input.BackdropURL = &empty
-		input.BackdropThumbhash = &empty
-	}
-	if err := h.repo.Update(r.Context(), input); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update collection")
-		return
-	}
-
-	// After clearing, attempt to auto-generate a poster collage.
-	if imageType == "poster" && h.service.CollageGen != nil {
-		if err := h.GenerateCollectionPoster(r.Context(), collectionID); err != nil {
-			if errors.Is(err, collage.ErrNotEnoughImages) {
-				slog.DebugContext(r.Context(), "collage: not enough images to regenerate after delete", "component", "api", "collection_id", collectionID)
-			} else {
-				slog.WarnContext(r.Context(), "collage: failed to regenerate poster after delete", "component", "api", "collection_id", collectionID, "error", err)
-			}
-		}
-	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1426,41 +1009,26 @@ func (h *LibraryCollectionHandler) HandleDeleteAdminCollection(w http.ResponseWr
 }
 
 func (h *LibraryCollectionHandler) deleteServerCollection(ctx context.Context, collectionID string) error {
-	if h.SectionRepo != nil {
-		refs, err := h.SectionRepo.CountLibraryCollectionReferences(ctx, collectionID, "")
-		if err != nil {
-			return fmt.Errorf("checking collection usage: %w", err)
-		}
-		if refs > 0 {
-			return errLibraryCollectionInUse
-		}
-	}
-
-	// Clean up S3 images before deleting the collection row. Failures here
-	// only leak storage; the collection row delete must still proceed so the
-	// admin's request succeeds.
-	if h.s3GP != nil {
-		prefix := fmt.Sprintf("collection-images/%s/", collectionID)
-		keys, err := h.s3GP.ListObjects(ctx, h.s3GP.Bucket(), prefix)
-		if err != nil {
-			slog.WarnContext(ctx, "collection delete: listing S3 images failed; image keys may leak", "component", "api",
-				"collection_id", collectionID, "prefix", prefix, "error", err)
-		}
-		for _, key := range keys {
-			if err := h.s3GP.DeleteObject(ctx, h.s3GP.Bucket(), key); err != nil {
-				slog.WarnContext(ctx, "collection delete: removing S3 image failed; key leaks", "component", "api",
-					"collection_id", collectionID, "key", key, "error", err)
-			}
-		}
-	}
-
 	if err := h.repo.Delete(ctx, collectionID); err != nil {
 		return err
 	}
+	h.cleanupDeletedCollection(ctx, collectionID)
+	return nil
+}
+
+// cleanupDeletedCollection runs only after the SQL deletion has committed.
+func (h *LibraryCollectionHandler) cleanupDeletedCollection(ctx context.Context, collectionID string) {
 	if h.SortPreferenceCleaner != nil {
 		h.SortPreferenceCleaner.DeleteForCollection(ctx, userstore.CollectionKindLibrary, collectionID)
 	}
-	return nil
+	store := h.ArtworkStore
+	if store == nil {
+		return
+	}
+	prefix := fmt.Sprintf("collection-images/%s/", collectionID)
+	if _, err := store.DeletePrefix(ctx, prefix); err != nil {
+		slog.WarnContext(ctx, "collection delete: removing artwork failed", "component", "api", "collection_id", collectionID, "error", err)
+	}
 }
 
 type adminReorderCollectionsRequest struct {
@@ -1592,7 +1160,7 @@ func (h *LibraryCollectionHandler) HandleRemoveAdminCollectionItem(w http.Respon
 
 func (h *LibraryCollectionHandler) HandleSyncAdminCollection(w http.ResponseWriter, r *http.Request) {
 	collectionID := chi.URLParam(r, "id")
-	run, err := h.service.SyncCollection(r.Context(), collectionID)
+	run, err := h.SyncAdminCollection(r.Context(), collectionID)
 	if err != nil {
 		if errors.Is(err, catalog.ErrLibraryCollectionSyncUnsupported) {
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -1649,9 +1217,9 @@ func (h *LibraryCollectionHandler) HandleApplyTemplateBundle(w http.ResponseWrit
 	if !req.DryRun {
 		workCtx = context.WithoutCancel(r.Context())
 	}
-	resp, err := h.applyTemplateBundle(workCtx, bundleID, req, nil)
+	resp, err := h.ApplyAdminCollectionTemplate(workCtx, bundleID, req)
 	if err != nil {
-		writeTemplateBundleApplyError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 
@@ -1659,64 +1227,22 @@ func (h *LibraryCollectionHandler) HandleApplyTemplateBundle(w http.ResponseWrit
 }
 
 func (h *LibraryCollectionHandler) HandleApplyTemplateBundleJob(w http.ResponseWriter, r *http.Request) {
-	if h.JobRepo == nil {
-		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "Admin job queue is not configured")
-		return
-	}
-
 	bundleID := chi.URLParam(r, "bundleID")
 	var req applyTemplateBundleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		writeError(w, 400, "bad_request", "Invalid request body")
 		return
 	}
-	if req.DryRun {
-		writeError(w, http.StatusBadRequest, "bad_request", "dry_run is not supported for background apply jobs")
-		return
-	}
-	if _, ok := h.templateRegistry().GetBundle(bundleID); !ok {
-		writeError(w, http.StatusNotFound, "not_found", "Template bundle not found")
-		return
-	}
-
-	libraryIDs := uniquePositiveInts(req.LibraryIDs)
-	if len(libraryIDs) == 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "library_ids is required")
-		return
-	}
-
-	job, err := h.JobRepo.Create(r.Context(), adminjob.CreateJobInput{
-		JobType:         adminjob.JobTypeTemplateBundleApply,
-		CreatedByUserID: currentAdminUserID(r),
-		RequestPayload: adminjob.TemplateBundleApplyRequest{
-			BundleID:       bundleID,
-			LibraryIDs:     libraryIDs,
-			DeleteExisting: req.DeleteExisting,
-			Featured:       toAdminJobTemplateBundleFeatured(req.Featured),
-		},
-		Message: "Queued collection defaults apply",
-	})
+	job, err := h.QueueAdminCollectionTemplate(r.Context(), bundleID, req, currentAdminUserID(r))
 	if err != nil {
-		var conflict *adminjob.ActiveJobConflictError
-		if errors.As(err, &conflict) {
+		if conflict, ok := errors.AsType[*adminjob.ActiveJobConflictError](err); ok {
 			writeAdminJobConflict(w, "A collection defaults apply is already queued or running", conflict.Job, NewAdminJobsHandler(h.JobRepo, nil), r)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to queue collection defaults apply")
+		writeAPIError(w, err)
 		return
 	}
-
-	publishEventJob(r.Context(), h.EventsHub, "job.created", job)
 	writeJSON(w, http.StatusAccepted, adminJobToResponse(r, job, nil))
-}
-
-func writeTemplateBundleApplyError(w http.ResponseWriter, err error) {
-	var applyErr templateBundleApplyError
-	if errors.As(err, &applyErr) {
-		writeError(w, applyErr.status, applyErr.code, applyErr.message)
-		return
-	}
-	writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 }
 
 func toAdminJobTemplateBundleFeatured(req *templateBundleFeaturedRequest) *adminjob.TemplateBundleApplyFeaturedRequest {
@@ -2931,49 +2457,12 @@ func (h *LibraryCollectionHandler) HandleImportMDBList(w http.ResponseWriter, r 
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if !hasLibrarySelection(req.LibraryID, req.LibraryIDs) || strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.URL) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "library_id/library_ids, title, and url are required")
-		return
-	}
-	if req.Limit != nil && *req.Limit <= 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "limit must be greater than 0")
-		return
-	}
-
-	collection, err := h.createMDBListCollection(r.Context(), req)
+	resp, err := h.importAdminMDBList(r.Context(), req, func(id, p, b string) error { return h.processArtworkInputs(r, id, p, b) })
 	if err != nil {
-		var validationErr requestValidationError
-		if errors.As(err, &validationErr) {
-			writeError(w, http.StatusBadRequest, "bad_request", validationErr.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create collection")
+		writeAPIError(w, err)
 		return
 	}
-
-	// Process admin artwork before sync so maybeGenerateCollage sees the
-	// uploaded poster and skips collage generation.
-	if err := h.processArtworkInputs(r, collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
-		return
-	}
-
-	run, err := h.service.SyncCollection(r.Context(), collection.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to import MDBList collection")
-		return
-	}
-
-	refreshed, err := h.repo.GetByID(r.Context(), collection.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load collection")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, importCollectionResponse{
-		Collection: h.toLibraryCollectionResponse(r, refreshed),
-		SyncRun:    run,
-	})
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (h *LibraryCollectionHandler) HandleImportTMDBCollection(w http.ResponseWriter, r *http.Request) {
@@ -2982,53 +2471,12 @@ func (h *LibraryCollectionHandler) HandleImportTMDBCollection(w http.ResponseWri
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if !hasLibrarySelection(req.LibraryID, req.LibraryIDs) || strings.TrimSpace(req.Title) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "library_id/library_ids and title are required")
-		return
-	}
-	if _, _, _, err := normalizeTMDBPresetRequest(req.Preset, req.MediaType, req.TimeWindow); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	if req.Limit != nil && *req.Limit <= 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "limit must be greater than 0")
-		return
-	}
-
-	collection, err := h.createTMDBCollection(r.Context(), req)
+	resp, err := h.importAdminTMDB(r.Context(), req, func(id, p, b string) error { return h.processArtworkInputs(r, id, p, b) })
 	if err != nil {
-		var validationErr requestValidationError
-		if errors.As(err, &validationErr) {
-			writeError(w, http.StatusBadRequest, "bad_request", validationErr.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create collection")
+		writeAPIError(w, err)
 		return
 	}
-
-	// Process admin artwork before sync so maybeGenerateCollage sees the
-	// uploaded poster and skips collage generation.
-	if err := h.processArtworkInputs(r, collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
-		return
-	}
-
-	run, err := h.service.SyncCollection(r.Context(), collection.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to sync TMDB collection")
-		return
-	}
-
-	refreshed, err := h.repo.GetByID(r.Context(), collection.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load collection")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, importCollectionResponse{
-		Collection: h.toLibraryCollectionResponse(r, refreshed),
-		SyncRun:    run,
-	})
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (h *LibraryCollectionHandler) HandleImportTraktCollection(w http.ResponseWriter, r *http.Request) {
@@ -3037,137 +2485,49 @@ func (h *LibraryCollectionHandler) HandleImportTraktCollection(w http.ResponseWr
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if !hasLibrarySelection(req.LibraryID, req.LibraryIDs) || strings.TrimSpace(req.Title) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "library_id/library_ids and title are required")
-		return
-	}
-	listURL := strings.TrimSpace(req.ListURL)
-	var preset, mediaType, profileID string
-	if listURL != "" {
-		if _, _, err := catalog.ParseTraktListURL(listURL); err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-	} else {
-		var err error
-		preset, mediaType, profileID, err = normalizeTraktPresetRequest(req.Preset, req.MediaType, req.ProfileID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-	}
-	if req.Limit != nil && *req.Limit <= 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "limit must be greater than 0")
-		return
-	}
-
-	var syncSchedule *string
-	if s := strings.TrimSpace(req.SyncSchedule); s != "" {
-		if err := catalog.ParseCronExpression(s); err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		syncSchedule = &s
-	}
-
-	var sourceConfig json.RawMessage
-	var sourceURL string
-	var err error
-	if listURL != "" {
-		sourceConfig, err = buildTraktListSourceConfig(listURL, req.Limit)
-		sourceURL = listURL
-	} else {
-		sourceConfig, err = buildTraktSourceConfig(preset, mediaType, profileID, req.Limit)
-		sourceURL = buildTraktSourceURL(preset, mediaType, profileID)
-	}
+	resp, err := h.importAdminTrakt(r.Context(), req, func(id, p, b string) error { return h.processArtworkInputs(r, id, p, b) })
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to build source config")
+		writeAPIError(w, err)
 		return
 	}
-	managementMode, managementSource, managementKey, err := normalizeCollectionManagementFields(req.ManagementMode, req.ManagementSource, req.ManagementKey)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	traktSortConfig, err := NormalizeCollectionSortConfig(req.SortConfig, false)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	collection, err := h.repo.Create(r.Context(), catalog.CreateLibraryCollectionInput{
-		LibraryID:        req.LibraryID,
-		LibraryIDs:       req.LibraryIDs,
-		Slug:             slugifyCollectionName(req.Title),
-		Title:            req.Title,
-		Description:      req.Description,
-		CollectionType:   "trakt",
-		SortConfig:       json.RawMessage(traktSortConfig),
-		Visibility:       "visible",
-		Featured:         req.Featured,
-		PosterURL:        req.PosterURL,
-		SourceURL:        sourceURL,
-		SourceConfig:     sourceConfig,
-		ManagementMode:   managementMode,
-		ManagementSource: managementSource,
-		ManagementKey:    managementKey,
-		SyncSchedule:     syncSchedule,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create collection")
-		return
-	}
-
-	if _, _, _, err := h.storeBundledTemplatePoster(r.Context(), collection.ID, req.PosterURL, false); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to process template poster")
-		return
-	}
-	if err := h.processArtworkInputs(r, collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
-		return
-	}
-
-	run, err := h.service.SyncCollection(r.Context(), collection.ID)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "failed to sync imported Trakt collection", "component", "api",
-			"collection_id", collection.ID,
-			"library_id", req.LibraryID,
-			"title", req.Title,
-			"preset", preset,
-			"media_type", mediaType,
-			"error", err,
-		)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to sync Trakt collection")
-		return
-	}
-
-	refreshed, err := h.repo.GetByID(r.Context(), collection.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load collection")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, importCollectionResponse{
-		Collection: h.toLibraryCollectionResponse(r, refreshed),
-		SyncRun:    run,
-	})
+	writeJSON(w, http.StatusCreated, resp)
 }
 
-func (h *LibraryCollectionHandler) loadOrderedCollectionItems(r *http.Request, collectionID string) ([]itemListResponse, error) {
-	collectionItems, err := h.repo.ListItems(r.Context(), collectionID)
-	if err != nil {
-		return nil, err
+// loadOrderedCollectionItems answers a manual collection's stored items in
+// curated order, keeping only those the viewer's access filter admits
+// (library allow/deny lists, content-rating ceiling); inaccessible items are
+// dropped and the order of the survivors is preserved. A page is a window
+// of the stored order, read from the database as that window only so a
+// large collection never loads every membership per request; hasMore
+// reports whether stored positions follow the window. A page may therefore
+// hold fewer than Limit items when the filter drops some, while still
+// pointing at the next window. The zero page loads the whole stored order,
+// as v1 always has.
+func (h *LibraryCollectionHandler) loadOrderedCollectionItems(ctx context.Context, collectionID string, access catalog.AccessFilter, page CollectionItemPage) ([]itemListResponse, bool, error) {
+	var (
+		contentIDs []string
+		hasMore    bool
+	)
+	if page.paged() {
+		var err error
+		contentIDs, hasMore, err = h.repo.ListItemIDsPage(ctx, collectionID, page.Limit, page.Offset)
+		if err != nil {
+			return nil, false, err
+		}
+	} else {
+		collectionItems, err := h.repo.ListItems(ctx, collectionID)
+		if err != nil {
+			return nil, false, err
+		}
+		contentIDs = make([]string, 0, len(collectionItems))
+		for _, item := range collectionItems {
+			contentIDs = append(contentIDs, item.MediaItemID)
+		}
 	}
 
-	contentIDs := make([]string, 0, len(collectionItems))
-	for _, item := range collectionItems {
-		contentIDs = append(contentIDs, item.MediaItemID)
-	}
-
-	items, err := h.itemRepo.GetByIDs(r.Context(), contentIDs)
+	items, err := h.itemRepo.GetByIDsWithAccess(ctx, contentIDs, access)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	itemByID := make(map[string]*models.MediaItem, len(items))
@@ -3175,31 +2535,35 @@ func (h *LibraryCollectionHandler) loadOrderedCollectionItems(r *http.Request, c
 		itemByID[item.ContentID] = item
 	}
 
-	resp := make([]itemListResponse, 0, len(collectionItems))
-	for _, collectionItem := range collectionItems {
-		item, ok := itemByID[collectionItem.MediaItemID]
+	resp := make([]itemListResponse, 0, len(contentIDs))
+	for _, contentID := range contentIDs {
+		item, ok := itemByID[contentID]
 		if !ok {
 			continue
 		}
-		resp = append(resp, h.toItemListResponse(r, item))
+		resp = append(resp, h.itemListResponseOf(ctx, item))
 	}
-	return resp, nil
+	return resp, hasMore, nil
 }
 
-func (h *LibraryCollectionHandler) loadLiveCollectionItems(r *http.Request, collection *models.LibraryCollection) ([]itemListResponse, error) {
+// loadLiveCollectionItems runs a smart collection's stored query. With a
+// page it asks the executor for that window only (the query's own item
+// limit still caps the whole result); without one it loads the entire
+// result, up to the query's limit, as v1 always has.
+func (h *LibraryCollectionHandler) loadLiveCollectionItems(ctx context.Context, collection *models.LibraryCollection, access catalog.AccessFilter, page CollectionItemPage) ([]itemListResponse, bool, error) {
 	if h.Executor == nil {
-		return nil, fmt.Errorf("query executor is not configured")
+		return nil, false, fmt.Errorf("query executor is not configured")
 	}
 
 	var def catalog.QueryDefinition
 	if len(collection.QueryDefinition) > 0 {
 		if err := json.Unmarshal(collection.QueryDefinition, &def); err != nil {
-			return nil, smartCollectionQueryError{fmt.Errorf("parsing smart collection query definition: %w", err)}
+			return nil, false, smartCollectionQueryError{fmt.Errorf("parsing smart collection query definition: %w", err)}
 		}
 	}
 	def = def.Normalize()
 	if err := def.ValidateWithOptions(false, false); err != nil {
-		return nil, smartCollectionQueryError{fmt.Errorf("validating smart collection query definition: %w", err)}
+		return nil, false, smartCollectionQueryError{fmt.Errorf("validating smart collection query definition: %w", err)}
 	}
 	def = catalog.ApplySmartCollectionItemLimit(def)
 
@@ -3207,34 +2571,47 @@ func (h *LibraryCollectionHandler) loadLiveCollectionItems(r *http.Request, coll
 	case len(collection.LibraryIDs) > 0:
 		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, collection.LibraryIDs)
 		if len(def.LibraryIDs) == 0 {
-			return []itemListResponse{}, nil
+			return []itemListResponse{}, false, nil
 		}
 	case collection.LibraryID > 0:
 		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, []int{collection.LibraryID})
 		if len(def.LibraryIDs) == 0 {
-			return []itemListResponse{}, nil
+			return []itemListResponse{}, false, nil
 		}
 	}
 
-	items, total, err := h.Executor.Preview(r.Context(), def, requestAccessFilter(r), 1)
-	if err != nil {
-		return nil, err
-	}
-	if total == 0 {
-		return []itemListResponse{}, nil
-	}
-	if total > len(items) {
-		items, _, err = h.Executor.Preview(r.Context(), def, requestAccessFilter(r), total)
+	var (
+		items   []*models.MediaItem
+		hasMore bool
+		err     error
+	)
+	if page.paged() {
+		items, _, hasMore, err = h.Executor.PreviewPage(ctx, def, access, page.Limit, max(page.Offset, 0), false)
 		if err != nil {
-			return nil, err
+			return nil, false, err
+		}
+	} else {
+		var total int
+		items, total, err = h.Executor.Preview(ctx, def, access, 1)
+		if err != nil {
+			return nil, false, err
+		}
+		if total == 0 {
+			return []itemListResponse{}, false, nil
+		}
+		if total > len(items) {
+			items, _, err = h.Executor.Preview(ctx, def, access, total)
+			if err != nil {
+				return nil, false, err
+			}
 		}
 	}
 
 	resp := make([]itemListResponse, 0, len(items))
 	for _, item := range items {
-		resp = append(resp, h.toItemListResponse(r, item))
+		resp = append(resp, h.itemListResponseOf(ctx, item))
 	}
-	return resp, nil
+	return resp, hasMore, nil
 }
 
 type smartCollectionQueryError struct {
@@ -3253,6 +2630,10 @@ func (e smartCollectionQueryError) Unwrap() error {
 // so the web API and the Jellyfin-compat resolver share one implementation.
 
 func (h *LibraryCollectionHandler) toItemListResponse(r *http.Request, item *models.MediaItem) itemListResponse {
+	return h.itemListResponseOf(r.Context(), item)
+}
+
+func (h *LibraryCollectionHandler) itemListResponseOf(ctx context.Context, item *models.MediaItem) itemListResponse {
 	resp := itemListResponse{
 		ContentID:         item.ContentID,
 		Type:              item.Type,
@@ -3260,25 +2641,35 @@ func (h *LibraryCollectionHandler) toItemListResponse(r *http.Request, item *mod
 		Year:              item.Year,
 		Genres:            item.Genres,
 		ContentRating:     item.ContentRating,
+		AdvisoryAge:       item.AdvisoryAge,
+		AdvisorySource:    item.AdvisorySource,
 		Status:            item.Status,
 		RatingIMDB:        item.RatingIMDB,
 		Overview:          item.Overview,
 		PosterThumbhash:   item.PosterThumbhash,
 		BackdropThumbhash: item.BackdropThumbhash,
 	}
-	resp.PosterURL = h.presignURL(r, cardThumbnailPath(item.PosterPath), "card")
-	resp.BackdropURL = h.presignURL(r, cardThumbnailPath(item.BackdropPath), "card")
+	resp.PosterURL = h.presignURLCtx(ctx, cardThumbnailPath(item.PosterPath), "card")
+	resp.BackdropURL = h.presignURLCtx(ctx, cardThumbnailPath(item.BackdropPath), "card")
 	return resp
 }
 
 func (h *LibraryCollectionHandler) presignURL(r *http.Request, path string, variant string) string {
+	return h.presignURLCtx(r.Context(), path, variant)
+}
+
+func (h *LibraryCollectionHandler) presignURLCtx(ctx context.Context, path string, variant string) string {
 	if h.detailSvc != nil {
-		return h.detailSvc.PresignURL(r.Context(), path, variant)
+		return h.detailSvc.PresignURL(ctx, path, variant)
 	}
 	return ""
 }
 
 func (h *LibraryCollectionHandler) presignGPURL(r *http.Request, path string) string {
+	return h.presignGPURLCtx(r.Context(), path)
+}
+
+func (h *LibraryCollectionHandler) presignGPURLCtx(ctx context.Context, path string) string {
 	if path == "" {
 		return ""
 	}
@@ -3288,17 +2679,18 @@ func (h *LibraryCollectionHandler) presignGPURL(r *http.Request, path string) st
 	if strings.HasPrefix(path, "/") {
 		return path
 	}
-	if h.s3GP == nil {
+	if h.ArtworkResolver == nil {
 		return ""
 	}
-	url, err := h.s3GP.PresignGetURL(r.Context(), h.s3GP.Bucket(), cardThumbnailPath(path), h.presignTTL)
-	if err != nil {
-		return ""
-	}
-	return url
+	key := cardThumbnailPath(path)
+	return h.ArtworkResolver.ResolveURLs(ctx, []string{key})[key].URL
 }
 
 func (h *LibraryCollectionHandler) toLibraryCollectionResponse(r *http.Request, collection *models.LibraryCollection) libraryCollectionResponse {
+	return h.libraryCollectionResponseOf(r.Context(), collection)
+}
+
+func (h *LibraryCollectionHandler) libraryCollectionResponseOf(ctx context.Context, collection *models.LibraryCollection) libraryCollectionResponse {
 	resp := libraryCollectionResponse{
 		ID:                collection.ID,
 		LibraryID:         collection.LibraryID,
@@ -3311,8 +2703,8 @@ func (h *LibraryCollectionHandler) toLibraryCollectionResponse(r *http.Request, 
 		SortOrder:         collection.SortOrder,
 		GroupID:           collection.GroupID,
 		Featured:          collection.Featured,
-		PosterURL:         h.presignGPURL(r, collection.PosterURL),
-		BackdropURL:       h.presignGPURL(r, collection.BackdropURL),
+		PosterURL:         h.presignGPURLCtx(ctx, collection.PosterURL),
+		BackdropURL:       h.presignGPURLCtx(ctx, collection.BackdropURL),
 		PosterThumbhash:   collection.PosterThumbhash,
 		BackdropThumbhash: collection.BackdropThumbhash,
 		SourceURL:         collection.SourceURL,
@@ -3358,9 +2750,25 @@ func parsePathLibraryID(w http.ResponseWriter, r *http.Request) (int, bool) {
 }
 
 func requestCanAccessLibrary(r *http.Request, libraryID int) bool {
-	scope, ok := access.GetScope(r.Context())
-	if !ok || scope.AllowedLibraryIDs == nil {
+	return viewerCanAccessLibrary(r.Context(), libraryID)
+}
+
+// viewerCanAccessLibrary reports whether the viewer scope on the context
+// admits the library; a context without a scope or allowlist admits every
+// library.
+// viewerCanAccessLibrary reports whether the viewer scope on the context
+// admits the library. A restricted profile carries an allowlist (the
+// resolver has already subtracted its hidden libraries from it); an
+// unrestricted profile carries no allowlist and its hidden libraries in
+// DisabledLibraryIDs instead, so a nil allowlist alone must not admit
+// everything.
+func viewerCanAccessLibrary(ctx context.Context, libraryID int) bool {
+	scope, ok := access.GetScope(ctx)
+	if !ok {
 		return true
+	}
+	if scope.AllowedLibraryIDs == nil {
+		return !slices.Contains(scope.DisabledLibraryIDs, libraryID)
 	}
 	return slices.Contains(scope.AllowedLibraryIDs, libraryID)
 }
@@ -3689,11 +3097,11 @@ func (h *LibraryCollectionHandler) processCollectionImage(
 	imageType string,
 	fileData []byte,
 ) (s3Path string, thumbhashStr string, err error) {
-	return uploadCollectionImageVariants(ctx, h.s3GP, adminCollectionImagePrefix, collectionID, imageType, fileData)
+	return uploadCollectionImageVariants(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID, imageType, fileData)
 }
 
 func (h *LibraryCollectionHandler) deleteCollectionImages(ctx context.Context, collectionID, imageType string) error {
-	return removeCollectionImageVariants(ctx, h.s3GP, adminCollectionImagePrefix, collectionID, imageType)
+	return removeCollectionImageVariants(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID, imageType)
 }
 
 func (h *LibraryCollectionHandler) processArtworkInputs(r *http.Request, collectionID, posterSourceURL, backdropSourceURL string) error {

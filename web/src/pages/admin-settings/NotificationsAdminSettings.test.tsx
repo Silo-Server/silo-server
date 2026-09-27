@@ -44,6 +44,8 @@ vi.mock("@/hooks/queries/admin/serverNotificationChannels", () => ({
 function makeForm(overrides: Record<string, string> = {}) {
   return {
     isLoading: false,
+    loadError: false,
+    loaded: true,
     getValue: (key: string) => {
       if (key in overrides) return overrides[key];
       switch (key) {

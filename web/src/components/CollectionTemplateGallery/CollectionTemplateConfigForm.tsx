@@ -1,3 +1,4 @@
+import { useAdminCollectionCapabilities } from "@/hooks/queries/admin/collections";
 import { useState } from "react";
 import type { FormEvent } from "react";
 
@@ -83,6 +84,7 @@ export function CollectionTemplateConfigForm({
   onCancel,
   onCreated,
 }: Props) {
+  const { data: capabilities } = useAdminCollectionCapabilities();
   const tmdbMutation = useImportTMDBCollection();
   const traktMutation = useImportTraktCollection();
   const mdblistMutation = useImportMDBListCollection();
@@ -148,9 +150,11 @@ export function CollectionTemplateConfigForm({
       sync_schedule: syncSchedule.trim() || undefined,
       limit: parsedLimit,
       sort_config: selectValueToSortConfig(defaultSort),
-      ...(posterMode === "custom"
-        ? { poster_source_url: customPosterUrl.trim() || undefined }
-        : { poster_url: template.poster_path || undefined }),
+      ...(!capabilities?.artwork
+        ? {}
+        : posterMode === "custom"
+          ? { poster_source_url: customPosterUrl.trim() || undefined }
+          : { poster_url: template.poster_path || undefined }),
     };
 
     if (template.source === "tmdb" && template.tmdb) {
@@ -300,14 +304,16 @@ export function CollectionTemplateConfigForm({
         </div>
       ) : null}
 
-      <TemplatePosterField
-        template={template}
-        mode={posterMode}
-        onModeChange={setPosterMode}
-        customUrl={customPosterUrl}
-        onCustomUrlChange={setCustomPosterUrl}
-        inputId="template-poster-url"
-      />
+      {capabilities?.artwork && (
+        <TemplatePosterField
+          template={template}
+          mode={posterMode}
+          onModeChange={setPosterMode}
+          customUrl={customPosterUrl}
+          onCustomUrlChange={setCustomPosterUrl}
+          inputId="template-poster-url"
+        />
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">

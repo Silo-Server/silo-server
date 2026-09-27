@@ -107,6 +107,13 @@ func (s *Server) authorizeGrant(w http.ResponseWriter, r *http.Request) (*playba
 		writeGrantError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
 		return nil, false
 	}
+	// The grant outlives the session it describes, so the deny marker is what
+	// stops a stopped, expired, or terminated session from serving here. Keep
+	// the JSON error shape the rest of this route family answers with.
+	if grantClaims := card.ToClaims(); s.sessionDenied(r.Context(), &grantClaims) {
+		writeGrantError(w, http.StatusGone, "playback_session_ended", "Playback session ended")
+		return nil, false
+	}
 	nodeID, nodeIDKnown := s.currentNodeRowID()
 	if status := proxyEgressStatusV3(
 		card.RoutingWorkload, card.RoutingExecution, card.RoutingEgress,
@@ -153,7 +160,14 @@ func (s *Server) handleGrantIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case card.PlayMethod == playback.PlayRemux:
-		s.serveRemuxClaims(w, r, &claims)
+		if remuxRunsOnTranscodeNodeV3(&claims) {
+			info := sessionInfo(s.tracker, &claims, "remux")
+			s.tracker.Track(r.Context(), info)
+			defer s.tracker.Remove(r.Context(), claims.SessionID)
+			s.relayGrantToTranscodeNode(w, r, &claims, "/remux/"+transcodeTransportIDFromClaims(&claims))
+		} else {
+			s.serveRemuxClaims(w, r, &claims)
+		}
 	case card.IsTranscodeRecipe():
 		writeGrantError(w, http.StatusBadRequest, "bad_request", "Transcode streams use manifest/segment endpoints")
 	default:

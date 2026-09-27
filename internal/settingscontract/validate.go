@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	serverlang "github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -859,84 +860,12 @@ func strictUnmarshal(raw []byte, target any) error {
 	return nil
 }
 
-// languageTagPattern accepts the well-formed BCP 47 shapes real clients
-// produce: language (with optional extlang), script, region, variants,
-// extension singletons and private use — including a purely private-use tag.
-// The narrower language[-script][-region] form this started as rejected tags
-// Android and iOS emit unprompted — `Locale.toLanguageTag()` appends extension
-// subtags for a non-Gregorian calendar or non-Latin numbering system
-// (`ar-EG-u-nu-latn`), registered variants like `ca-ES-valencia` are ordinary
-// user choices, and the legacy endpoint accepted `zh-cmn` (extlang) and
-// `x-private` (private use only), so rejecting them here would turn an
-// existing 204 into a 400.
-var languageTagPattern = regexp.MustCompile(
-	`^([a-zA-Z]{2,3}(-[a-zA-Z]{3}){0,3}(-[a-zA-Z]{4})?(-([a-zA-Z]{2}|[0-9]{3}))?` +
-		`(-([0-9a-zA-Z]{5,8}|[0-9][0-9a-zA-Z]{3}))*` +
-		`(-[0-9a-wy-zA-WY-Z](-[0-9a-zA-Z]{2,8})+)*` +
-		`(-[xX](-[0-9a-zA-Z]{1,8})+)?` +
-		`|[xX](-[0-9a-zA-Z]{1,8})+)$`)
-
-// NormalizeLanguageTag returns the canonical BCP 47 form of a tag, or false if
-// it is not well-formed.
-//
-// Normalization is the half that keeps the contract's promise of one stored
-// value per language. Without it `en-US`, `en-us` and `EN-us` are three
-// distinct rows for one preference, and audio-track matching misses on two of
-// them. Underscores are accepted on input because both mobile platforms have a
-// locale accessor that produces them (`Locale.identifier` on iOS,
-// `Locale.toString()` on Android) and sending one is a mistake worth absorbing
-// rather than a value worth rejecting.
-//
-// The empty string is not a language tag. "No preference" is null, which the
-// nullable flag on each language setting already expresses.
+// NormalizeLanguageTag uses the shared strict BCP 47 canonicalizer. Display
+// names and empty strings are invalid settings writes; null is handled by the
+// setting's nullable schema before reaching this function.
 func NormalizeLanguageTag(tag string) (string, bool) {
-	tag = strings.ReplaceAll(strings.TrimSpace(tag), "_", "-")
-	if !languageTagPattern.MatchString(tag) {
-		return "", false
-	}
-
-	parts := strings.Split(tag, "-")
-	// Case is not significant in BCP 47, but the conventional casing is what
-	// every client library produces: lowercase language, Titlecase script,
-	// UPPERCASE region, lowercase everything else.
-	parts[0] = strings.ToLower(parts[0])
-	// A tag that is entirely private use ("x-whatever") has no script or
-	// region positions — everything after the leading singleton is private-use
-	// content and stays lowercase.
-	inExtension := parts[0] == "x"
-	for i := 1; i < len(parts); i++ {
-		part := parts[i]
-		switch {
-		case len(part) == 1:
-			// A singleton opens an extension ("u", "t") or private use ("x").
-			// Everything after it is extension content, so the two-letter
-			// region rule must stop applying — "nu" in "ar-EG-u-nu-latn" is an
-			// extension key, not a region.
-			inExtension = true
-			parts[i] = strings.ToLower(part)
-		case inExtension:
-			parts[i] = strings.ToLower(part)
-		case len(part) == 4 && isAlpha(part):
-			// A script. Not necessarily at index 1: an extlang can precede it
-			// (`zh-cmn-Hans-CN`). No collision with variants — a four-character
-			// variant must begin with a digit.
-			parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
-		case len(part) == 2 && isAlpha(part):
-			parts[i] = strings.ToUpper(part)
-		default:
-			parts[i] = strings.ToLower(part)
-		}
-	}
-	return strings.Join(parts, "-"), true
-}
-
-func isAlpha(value string) bool {
-	for _, r := range value {
-		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
-			return false
-		}
-	}
-	return true
+	canonical := serverlang.CanonicalTag(tag)
+	return canonical, canonical != ""
 }
 
 // CompareValues orders two values of this schema's type: negative when a sorts

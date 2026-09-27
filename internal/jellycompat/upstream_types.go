@@ -23,6 +23,7 @@ type upstreamListItem struct {
 	Type              string                  `json:"type"`
 	Title             string                  `json:"title"`
 	SortTitle         string                  `json:"sort_title,omitempty"`
+	OriginalLanguage  string                  `json:"original_language,omitempty"`
 	Year              int                     `json:"year"`
 	Genres            []string                `json:"genres"`
 	ContentRating     string                  `json:"content_rating"`
@@ -54,6 +55,9 @@ type upstreamListItem struct {
 	Countries         []string                `json:"countries,omitempty"`
 	Tagline           string                  `json:"tagline,omitempty"`
 	RatingTMDB        *float64                `json:"rating_tmdb,omitempty"`
+	ImdbID            string                  `json:"imdb_id,omitempty"`
+	TmdbID            string                  `json:"tmdb_id,omitempty"`
+	TvdbID            string                  `json:"tvdb_id,omitempty"`
 	UserData          *catalog.SeasonUserData `json:"user_data,omitempty"`
 	// DurationSeconds is the probed duration of the backing media file, 0 when
 	// unknown. Read-time only -- never persisted onto the item row, because one
@@ -76,6 +80,7 @@ type upstreamItemDetail struct {
 	Type              string                  `json:"type"`
 	Title             string                  `json:"title"`
 	SortTitle         string                  `json:"sort_title,omitempty"`
+	OriginalLanguage  string                  `json:"original_language,omitempty"`
 	OriginalTitle     string                  `json:"original_title"`
 	Year              int                     `json:"year"`
 	Overview          string                  `json:"overview"`
@@ -85,6 +90,9 @@ type upstreamItemDetail struct {
 	Genres            []string                `json:"genres"`
 	RatingIMDB        *float64                `json:"rating_imdb"`
 	RatingTMDB        *float64                `json:"rating_tmdb"`
+	ImdbID            string                  `json:"imdb_id,omitempty"`
+	TmdbID            string                  `json:"tmdb_id,omitempty"`
+	TvdbID            string                  `json:"tvdb_id,omitempty"`
 	PosterURL         string                  `json:"poster_url"`
 	BackdropURL       string                  `json:"backdrop_url"`
 	LogoURL           string                  `json:"logo_url"`
@@ -110,6 +118,12 @@ type upstreamItemDetail struct {
 	Crew              []catalog.CrewCredit    `json:"crew,omitempty"`
 	Videos            []catalog.ItemVideoInfo `json:"videos,omitempty"`
 	Extras            []catalog.ItemExtraInfo `json:"extras,omitempty"`
+	// Effective subtitle defaults for this viewer (profile, library and series
+	// scopes). ModeSet is false when no scope stores a subtitle mode.
+	SubtitleLanguage    string `json:"-"`
+	SubtitleMode        string `json:"-"`
+	SubtitleModeSet     bool   `json:"-"`
+	ShowForcedSubtitles bool   `json:"-"`
 }
 
 type upstreamSeason struct {
@@ -148,6 +162,9 @@ type upstreamEpisode struct {
 	StillURL       string                  `json:"still_url,omitempty"`
 	StillPath      string                  `json:"-"`
 	StillThumbhash string                  `json:"-"`
+	ImdbID         string                  `json:"imdb_id,omitempty"`
+	TmdbID         string                  `json:"tmdb_id,omitempty"`
+	TvdbID         string                  `json:"tvdb_id,omitempty"`
 	UpdatedAt      time.Time               `json:"-"`
 	UserData       *catalog.SeasonUserData `json:"user_data,omitempty"`
 	Files          []upstreamEpisodeFile   `json:"files,omitempty"`
@@ -173,7 +190,12 @@ type upstreamProgress struct {
 }
 
 type upstreamItemFiltersResponse struct {
-	Genres []string `json:"genres"`
+	Genres            []string `json:"genres"`
+	Studios           []string `json:"studios"`
+	OfficialRatings   []string `json:"official_ratings"`
+	Years             []int    `json:"years"`
+	AudioLanguages    []string `json:"audio_languages"`
+	SubtitleLanguages []string `json:"subtitle_languages"`
 }
 
 // upstreamProfile represents a user profile from the store.

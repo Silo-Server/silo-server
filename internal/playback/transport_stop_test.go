@@ -19,6 +19,38 @@ type countingResponseWriter struct {
 	written int64
 }
 
+type stalledResponseWriter struct {
+	header          http.Header
+	writeStarted    chan struct{}
+	deadlineExpired chan struct{}
+	startOnce       sync.Once
+	expireOnce      sync.Once
+}
+
+func newStalledResponseWriter() *stalledResponseWriter {
+	return &stalledResponseWriter{
+		header:          make(http.Header),
+		writeStarted:    make(chan struct{}),
+		deadlineExpired: make(chan struct{}),
+	}
+}
+
+func (w *stalledResponseWriter) Header() http.Header { return w.header }
+func (*stalledResponseWriter) WriteHeader(int)       {}
+
+func (w *stalledResponseWriter) Write([]byte) (int, error) {
+	w.startOnce.Do(func() { close(w.writeStarted) })
+	<-w.deadlineExpired
+	return 0, os.ErrDeadlineExceeded
+}
+
+func (w *stalledResponseWriter) SetWriteDeadline(deadline time.Time) error {
+	if !deadline.After(time.Now()) {
+		w.expireOnce.Do(func() { close(w.deadlineExpired) })
+	}
+	return nil
+}
+
 func (w *countingResponseWriter) Header() http.Header {
 	if w.header == nil {
 		w.header = http.Header{}
@@ -107,6 +139,40 @@ func TestServeRemuxAbortEndsTheResponse(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the remux response outlived the stop that withdrew its session")
+	}
+}
+
+func TestServeRemuxAbortInterruptsBlockedClientWrite(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(source, []byte("not really a movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	abort := make(chan struct{})
+	writer := newStalledResponseWriter()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/stream/session-1", nil)
+	ffmpegPath := streamingFakeFFmpegScript(t)
+	served := make(chan error, 1)
+	go func() {
+		served <- ServeRemuxWithOptions(writer, request, source, "mp4", 0, false, 0, 0, RemuxServeOptions{
+			FFmpegPath: ffmpegPath,
+			Abort:      abort,
+		})
+	}()
+
+	select {
+	case <-writer.writeStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("remux never reached the blocked client write")
+	}
+	close(abort)
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Fatalf("ServeRemuxWithOptions after abort = %v, want nil", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("remux outlived an abort while its client write was blocked")
 	}
 }
 

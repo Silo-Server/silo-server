@@ -1,3 +1,4 @@
+import type { PersonalizedSorts } from "@/lib/querySortOptions";
 import { useMemo } from "react";
 
 import {
@@ -380,7 +381,7 @@ interface CollectionGuidedRulesEditorProps {
   allowLibrarySelection?: boolean;
   showMediaScopeSelector?: boolean;
   allowPersonalizedFilters?: boolean;
-  allowPersonalizedSorts?: boolean;
+  allowPersonalizedSorts?: PersonalizedSorts;
   sortRelevanceScope?: QuerySortRelevanceScope;
   readOnly?: boolean;
   showSortControls?: boolean;
@@ -393,7 +394,7 @@ interface CollectionGuidedRulesEditorProps {
   libraryType?: string;
   // When set, the book-native facet sections (Author / Series, and
   // audiobook-only Narrator) switch to typeahead-backed FacetSearchSelect, querying
-  // /api/v1/catalog/filters/search scoped to this state. Without it
+  // /api/v2/catalog/filters/search scoped to this state. Without it
   // they fall back to the bulk filters payload (top 1000 alphabetical).
   catalogState?: CatalogSearchState;
 }

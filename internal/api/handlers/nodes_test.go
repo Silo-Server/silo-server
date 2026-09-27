@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/go-chi/chi/v5"
 )
@@ -54,7 +55,7 @@ func (s *stubNodeRepository) Update(_ context.Context, _ int, input nodepool.Upd
 
 func (s *stubNodeRepository) Delete(context.Context, int) error { return nil }
 
-func (s *stubNodeRepository) UpdateHealth(context.Context, int, string, bool, int, int, []byte) error {
+func (s *stubNodeRepository) UpdateHealth(context.Context, int, string, bool, int, int, []byte, netaccess.NodeNetworkAccess) error {
 	return nil
 }
 
@@ -663,8 +664,8 @@ func TestHandleListNodesCarriesTheAdvertisedHashFromThePools(t *testing.T) {
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{{ID: 2, URL: "http://proxy-1", Enabled: true}})
 	// The sweep learns each node's advertised hash on its health check.
-	transcodes.ApplyHealth(1, "http://gpu-1", true, 0, 0, "sha256:newer", nil, time.Now())
-	proxies.ApplyHealth(2, "http://proxy-1", true, 0, 0, "sha256:proxy", nil, time.Now())
+	transcodes.ApplyHealth(1, "http://gpu-1", true, 0, 0, "sha256:newer", nil, nil, time.Now())
+	proxies.ApplyHealth(2, "http://proxy-1", true, 0, 0, "sha256:proxy", nil, nil, time.Now())
 
 	handler := NewNodeHandler(repo, proxies, transcodes, nil, nil, nil, "secret")
 	recorder := httptest.NewRecorder()
@@ -791,5 +792,17 @@ func TestHandleListNodesDistinguishesUncheckedFromUnreportedHashes(t *testing.T)
 	// Absent: nothing has asked, so the field must not claim the node said so.
 	if _, ok := items[1]["advertised_capabilities_hash"]; ok {
 		t.Errorf("unchecked node carried an advertised hash: %v", items[1])
+	}
+}
+
+func TestReadAdminNodesDoesNotMutateRepositoryRows(t *testing.T) {
+	stored := &nodepool.Node{ID: 1, URL: "http://worker.example.test", Type: nodepool.NodeTypeProxy, Enabled: true}
+	repo := &stubNodeRepository{nodes: []*nodepool.Node{stored}}
+	pool := nodepool.NewProxyPool()
+	pool.SetNodes([]*nodepool.Node{stored})
+	pool.ApplyHealth(1, stored.URL, true, 0, 0, "advertised", nil, nil, time.Now())
+	rows, err := NewNodeHandler(repo, pool, nil, nil, nil, nil, "").ReadAdminNodes(t.Context())
+	if err != nil || len(rows) != 1 || rows[0] == stored || stored.AdvertisedCapabilitiesHash != nil || rows[0].AdvertisedCapabilitiesHash == nil || *rows[0].AdvertisedCapabilitiesHash != "advertised" {
+		t.Fatal(rows, stored, err)
 	}
 }

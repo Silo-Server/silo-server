@@ -1,0 +1,29 @@
+{
+  "items": [
+    {
+      "id": "7",
+      "name": "Group",
+      "description": "",
+      "library_ids": null,
+      "max_playback_quality": "original",
+      "download_allowed": false,
+      "download_transcode_allowed": false,
+      "transcode_allowed": false,
+      "audio_transcode_allowed": false,
+      "max_streams": 0,
+      "max_transcodes": 0,
+      "max_remote_stream_bitrate_kbps": 0,
+      "max_local_stream_bitrate_kbps": 0,
+      "allowed_permissions": null,
+      "requests_allowed": false,
+      "is_default": false,
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "updated_at": "2026-01-02T03:04:05.678Z",
+      "member_count": 3
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7IklEIjo3fX0.g8axG0ljte9c-vQBBFJU7sbFw4BPhpC-nQGSKreB21o",
+    "has_more": true
+  }
+}

@@ -11,15 +11,12 @@ const STORAGE_KEYS = {
   AUDIOBOOK_SKIP_FORWARD: "audiobook-skip-forward",
   AUDIOBOOK_SMART_REWIND: "audiobook-smart-rewind",
   AUDIOBOOK_RATES: "audiobook-rates",
-  THEME: "silo-theme",
   UI_TEXT_SCALE: "silo-ui-text-scale",
   UI_TEXT_WEIGHT: "silo-ui-text-weight",
   UI_HIGH_CONTRAST: "silo-ui-high-contrast",
-  UI_CUSTOM_THEME_VARS: "silo-custom-theme-vars",
   UI_DATE_FORMAT: "silo-ui-date-format",
   UI_TIME_FORMAT: "silo-ui-time-format",
   UI_CACHE_OWNER: "silo-ui-cache-owner",
-  UI_CUSTOM_CSS: "silo-custom-css",
   CALENDAR_PRESET: "calendar:preset",
 } as const;
 
@@ -89,11 +86,11 @@ function namespaceFor(owner: string | null): string {
 
 /**
  * Device-local mirrors of server-side, per-account settings, so the UI can
- * paint before the settings request resolves. Covers theme, text scale, text
- * weight, high contrast, custom theme tokens, custom CSS, and date/time format.
+ * paint before the settings request resolves. Covers text scale, text weight,
+ * high contrast, and date/time format.
  *
  * Values are namespaced by the identity that owns them — user id plus active
- * profile id (`silo-theme:7:p1`) — so a second account or a sibling profile
+ * profile id (`silo-ui-text-scale:7:p1`) — so a second account or a sibling profile
  * signing in on a shared browser simply finds nothing where the first one's
  * values would have been. A miss is just a miss: every caller
  * already parses a missing value into the correct default, and the settings

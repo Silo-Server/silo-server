@@ -2,7 +2,8 @@ import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import type { FileVersion, ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
-import { useRefreshItemMetadata } from "@/hooks/queries/items";
+import { useRedetectItemMarkers, useRefreshItemMetadata } from "@/hooks/queries/items";
+import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
 import { useAuth } from "@/hooks/useAuth";
@@ -40,8 +41,15 @@ import {
 } from "@/lib/permissions";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
+import { useDetailWatchTogether } from "@/pages/watchtogether/DetailWatchTogether";
 
-export default function MovieContent({ item }: { item: ItemDetail & { type: "movie" } }) {
+export default function MovieContent({
+  item,
+  showAdvisoryAge,
+}: {
+  item: ItemDetail & { type: "movie" };
+  showAdvisoryAge?: boolean;
+}) {
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(item);
   const navigate = useNavigate();
@@ -57,6 +65,13 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
 
   const refreshMetadataMutation = useRefreshItemMetadata();
+  const redetectMarkersMutation = useRedetectItemMarkers();
+  // Movies have no re-detect action on an API node without redetect-markers
+  // or movie credits.
+  const markerCapabilities = useAdminMarkerCapabilities(isAdmin);
+  const canRedetectMovieCredits =
+    markerCapabilities.data?.redetect_markers === true &&
+    markerCapabilities.data?.movie_credits === true;
   const deleteSubtitlePreference = useDeleteSubtitlePreference();
   const setSubtitlePreference = useSetSubtitlePreference();
   const [editOpen, setEditOpen] = useState(false);
@@ -174,6 +189,19 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
   };
 
   const primaryAction = resolveLeafPrimaryAction(item, "Play");
+  const watchTogether = useDetailWatchTogether({
+    item,
+    target:
+      item.versions.length > 0
+        ? {
+            content_id: item.content_id,
+            title: item.title,
+            subtitle: item.year ? String(item.year) : undefined,
+            poster_url: item.poster_url,
+            poster_thumbhash: item.poster_thumbhash,
+          }
+        : null,
+  });
   const restartHref =
     primaryAction.label === "Resume" && item.versions.length > 0
       ? `/watch/${item.content_id}?restart=1`
@@ -221,6 +249,8 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
             <MetadataBadges
               year={year || undefined}
               contentRating={item.content_rating || undefined}
+              advisoryAge={showAdvisoryAge ? (item.advisory_age ?? undefined) : undefined}
+              advisorySource={item.advisory_source || undefined}
               duration={formatRuntimeMinutes(selectedMediaSummary.durationMinutes) || undefined}
             />
             <QualityBadges summary={selectedMediaSummary} />
@@ -241,6 +271,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
           <MediaUserActionBar
             item={item}
             contentId={item.content_id}
+            watchTogether={watchTogether.menu}
             playHref={item.versions.length > 0 ? `/watch/${item.content_id}` : undefined}
             playLabel={primaryAction.label}
             playProgress={primaryAction.progress}
@@ -274,6 +305,13 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
                 : undefined
             }
             isRefreshing={refreshMetadataMutation.isPending}
+            onRedetectMarkers={
+              isAdmin && canRedetectMovieCredits
+                ? (kind) => redetectMarkersMutation.mutate({ itemId: item.content_id, kind })
+                : undefined
+            }
+            redetectKind="credits"
+            isRedetectingMarkers={redetectMarkersMutation.isPending}
             isAdmin={isAdmin}
             canCurateMetadata={canCurateMetadata}
             canEditMarkers={canEditMarkers}
@@ -332,7 +370,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
         {item.cast && item.cast.length > 0 && (
           <div>
             <h2 className="mb-5 text-xl font-semibold tracking-tight">Cast</h2>
-            <CastCarousel cast={item.cast} />
+            <CastCarousel cast={item.cast} prefetchPeople />
           </div>
         )}
 
@@ -386,6 +424,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
           initialFileId={mediaInfoFileId}
         />
       )}
+      {watchTogether.sheet}
     </div>
   );
 }

@@ -9,7 +9,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -43,7 +46,7 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Authorization", "Bearer "+h.JWTSecret)
-	response, err := http.DefaultClient.Do(httpRequest)
+	response, err := telemetry.DoTrustedNode(http.DefaultClient, httpRequest, "transcode_start")
 	if err != nil {
 		return transcodenode.TranscodeStartResponse{}, 0, logredact.SanitizeURLError(err)
 	}
@@ -78,7 +81,12 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 
 func (h *PlaybackHandler) remotePlaybackTransportTimeout(nodeURL string, request transcodenode.TranscodeStartRequest) time.Duration {
 	if request.ToneMapMode == "" {
-		return 20 * time.Second
+		if request.RequireReady && remoteAutoFallbackPossibleV3(request) {
+			// The node answers only after its first manifest, which under
+			// hw_accel=auto can follow an early exit on each safer path.
+			return transcodenode.TranscodeStartReadyMaxDuration + 5*time.Second
+		}
+		return playback.ManifestStartupTimeout + 5*time.Second
 	}
 	timeout := h.remoteToneMapProbeTimeoutV3(nodeURL) + playback.ManifestStartupTimeout
 	if request.ToneMapPreflightRequired {
@@ -88,6 +96,15 @@ func (h *PlaybackHandler) remotePlaybackTransportTimeout(nodeURL string, request
 		timeout += transcodenode.TranscodeStartReadinessTimeout
 	}
 	return timeout
+}
+
+// remoteAutoFallbackPossibleV3 reports whether a node may walk the hw_accel=auto
+// fallback for this start: a video transcode dispatched as auto. The node
+// resolves auto against its live hardware, so the budget follows the request
+// rather than a stored capability report that may be missing or stale.
+func remoteAutoFallbackPossibleV3(request transcodenode.TranscodeStartRequest) bool {
+	return strings.EqualFold(strings.TrimSpace(request.HWAccel), "auto") &&
+		!strings.EqualFold(strings.TrimSpace(request.TargetCodecVideo), "copy")
 }
 
 func fetchRemoteTranscodeCapabilities(ctx context.Context, nodeURL, jwtSecret string) (playback.HWAccelInfo, error) {

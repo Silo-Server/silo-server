@@ -772,6 +772,19 @@ func (r *ImageCacheJobRepository) DeleteSucceededBefore(ctx context.Context, bef
 }
 
 func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Context, limit int) (int, error) {
+	return r.enqueueProviderArtwork(ctx, limit, []string{})
+}
+
+// EnqueueArtworkRepair regenerates confirmed missing cached revisions without
+// replacing catalog pointers. Surviving variants keep serving during repair.
+func (r *ImageCacheJobRepository) EnqueueArtworkRepair(ctx context.Context, paths []string, limit int) (int, error) {
+	if len(paths) == 0 {
+		return 0, nil
+	}
+	return r.enqueueProviderArtwork(ctx, limit, paths)
+}
+
+func (r *ImageCacheJobRepository) enqueueProviderArtwork(ctx context.Context, limit int, repairPaths []string) (int, error) {
 	if r == nil || r.pool == nil || limit <= 0 {
 		return 0, nil
 	}
@@ -802,7 +815,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			FROM media_items mi
 			WHERE mi.poster_source_path LIKE '%://%'
 			  AND lower(mi.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND (mi.poster_path LIKE '%://%' OR coalesce(mi.poster_path, '') = '')
+			  AND ((cardinality($2::text[]) = 0 AND (mi.poster_path LIKE '%://%' OR coalesce(mi.poster_path, '') = '')) OR mi.poster_path = ANY($2))
 			UNION ALL
 			SELECT
 				'backdrop'::text,
@@ -820,7 +833,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			FROM media_items mi
 			WHERE mi.backdrop_source_path LIKE '%://%'
 			  AND lower(mi.backdrop_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND (mi.backdrop_path LIKE '%://%' OR coalesce(mi.backdrop_path, '') = '')
+			  AND ((cardinality($2::text[]) = 0 AND (mi.backdrop_path LIKE '%://%' OR coalesce(mi.backdrop_path, '') = '')) OR mi.backdrop_path = ANY($2))
 			UNION ALL
 			SELECT
 				'logo'::text,
@@ -838,7 +851,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			FROM media_items mi
 			WHERE mi.logo_source_path LIKE '%://%'
 			  AND lower(mi.logo_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND (mi.logo_path LIKE '%://%' OR coalesce(mi.logo_path, '') = '')
+			  AND ((cardinality($2::text[]) = 0 AND (mi.logo_path LIKE '%://%' OR coalesce(mi.logo_path, '') = '')) OR mi.logo_path = ANY($2))
 			UNION ALL
 			SELECT
 				'poster'::text,
@@ -857,7 +870,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			JOIN media_items mi ON mi.content_id = loc.content_id
 			WHERE loc.poster_source_path LIKE '%://%'
 			  AND lower(loc.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND (loc.poster_path LIKE '%://%' OR coalesce(loc.poster_path, '') = '')
+			  AND ((cardinality($2::text[]) = 0 AND (loc.poster_path LIKE '%://%' OR coalesce(loc.poster_path, '') = '')) OR loc.poster_path = ANY($2))
 			UNION ALL
 			SELECT
 				'backdrop'::text,
@@ -876,7 +889,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			JOIN media_items mi ON mi.content_id = loc.content_id
 			WHERE loc.backdrop_source_path LIKE '%://%'
 			  AND lower(loc.backdrop_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND (loc.backdrop_path LIKE '%://%' OR coalesce(loc.backdrop_path, '') = '')
+			  AND ((cardinality($2::text[]) = 0 AND (loc.backdrop_path LIKE '%://%' OR coalesce(loc.backdrop_path, '') = '')) OR loc.backdrop_path = ANY($2))
 			UNION ALL
 			SELECT
 				'logo'::text,
@@ -895,7 +908,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			JOIN media_items mi ON mi.content_id = loc.content_id
 			WHERE loc.logo_source_path LIKE '%://%'
 			  AND lower(loc.logo_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND (loc.logo_path LIKE '%://%' OR coalesce(loc.logo_path, '') = '')
+			  AND ((cardinality($2::text[]) = 0 AND (loc.logo_path LIKE '%://%' OR coalesce(loc.logo_path, '') = '')) OR loc.logo_path = ANY($2))
 			UNION ALL
 			SELECT
 				'poster'::text,
@@ -914,7 +927,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			JOIN media_items mi ON mi.content_id = s.series_id
 			WHERE s.poster_source_path LIKE '%://%'
 			  AND lower(s.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND (s.poster_path LIKE '%://%' OR coalesce(s.poster_path, '') = '')
+			  AND ((cardinality($2::text[]) = 0 AND (s.poster_path LIKE '%://%' OR coalesce(s.poster_path, '') = '')) OR s.poster_path = ANY($2))
 			UNION ALL
 			SELECT
 				'poster'::text,
@@ -934,7 +947,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			JOIN media_items mi ON mi.content_id = s.series_id
 			WHERE loc.poster_source_path LIKE '%://%'
 			  AND lower(loc.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND (loc.poster_path LIKE '%://%' OR coalesce(loc.poster_path, '') = '')
+			  AND ((cardinality($2::text[]) = 0 AND (loc.poster_path LIKE '%://%' OR coalesce(loc.poster_path, '') = '')) OR loc.poster_path = ANY($2))
 			UNION ALL
 			SELECT
 				'still'::text,
@@ -953,7 +966,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			JOIN media_items mi ON mi.content_id = e.series_id
 			WHERE e.still_source_path LIKE '%://%'
 			  AND lower(e.still_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND (e.still_path LIKE '%://%' OR coalesce(e.still_path, '') = '')
+			  AND ((cardinality($2::text[]) = 0 AND (e.still_path LIKE '%://%' OR coalesce(e.still_path, '') = '')) OR e.still_path = ANY($2))
 			UNION ALL
 			SELECT
 				'profile'::text,
@@ -971,7 +984,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			FROM people p
 			WHERE p.photo_source_path LIKE '%://%'
 			  AND lower(p.photo_source_path) NOT LIKE ALL (@nonProviderSchemes)
-			  AND (p.photo_path LIKE '%://%' OR coalesce(p.photo_path, '') = '')
+			  AND ((cardinality($2::text[]) = 0 AND (p.photo_path LIKE '%://%' OR coalesce(p.photo_path, '') = '')) OR p.photo_path = ANY($2))
 		),
 		candidates AS (
 			SELECT ac.*
@@ -998,7 +1011,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 		       COALESCE(imdb_id, '') AS imdb_id
 		FROM candidates
 	`, "@nonProviderSchemes", nonProviderImageSchemesSQL)
-	rows, err := r.pool.Query(ctx, query, limit)
+	rows, err := r.pool.Query(ctx, query, limit, repairPaths)
 	if err != nil {
 		return 0, fmt.Errorf("enqueueing existing provider artwork: %w", err)
 	}

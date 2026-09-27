@@ -139,70 +139,120 @@ func (s *Service) AutoLinkContent(ctx context.Context, contentID string) (string
 	if s == nil || s.repo == nil {
 		return "", false, ErrWorkNotFound
 	}
-	// Cheap guard first: an item already linked to a work needs no candidate
-	// scan. Rescans re-visit every unchanged book, so skipping the expensive
-	// GetMatchItem + ListMatchCandidates path here is what keeps Postgres idle
-	// on steady-state rescans instead of rebuilding lateral aggregates per book.
-	if workID, err := s.repo.GetFirstWorkIDForContentIDs(ctx, []string{contentID}); err != nil {
-		return "", false, err
-	} else if strings.TrimSpace(workID) != "" {
-		return workID, false, nil
-	}
+	// Only ingestion and metadata events call this method. An already-linked
+	// source keeps its work, but may now match additional unlinked editions.
 	source, err := s.repo.GetMatchItem(ctx, contentID)
 	if err != nil {
 		return "", false, err
 	}
-	if strings.TrimSpace(source.WorkID) != "" {
-		return source.WorkID, false, nil
-	}
-	targets, err := s.repo.ListMatchCandidates(ctx, source.MatchItem, 100)
-	if err != nil {
-		return "", false, err
-	}
+	// Select the strongest match across bounded pages before linking anything.
+	// A later page may identify an existing work more reliably than page one.
+	const pageSize = 100
 	var best Candidate
 	var bestTarget MatchItemWithWork
-	for _, target := range targets {
-		candidate := ScoreCandidate(source.MatchItem, target.MatchItem)
-		if candidate.Score > best.Score {
-			best = candidate
-			bestTarget = target
+	var after *matchCandidateCursor
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", false, err
 		}
+		targets, next, err := s.repo.listMatchCandidatesPage(ctx, source.MatchItem, pageSize, after, &source.WorkID)
+		if err != nil {
+			return "", false, err
+		}
+		for _, target := range targets {
+			if source.WorkID != "" && target.WorkID != "" && target.WorkID != source.WorkID {
+				continue
+			}
+			candidate := ScoreCandidate(source.MatchItem, target.MatchItem)
+			// On equal evidence, reuse an eligible existing work instead of
+			// splitting its editions merely because an unlinked item sorted first.
+			preferExistingWork := candidate.Score == best.Score && bestTarget.WorkID == "" && target.WorkID != ""
+			if candidate.Score > best.Score || preferExistingWork {
+				best = candidate
+				bestTarget = target
+			}
+		}
+		if next == nil {
+			break
+		}
+		after = next
 	}
 	if best.Score < AutoLinkThreshold || best.TargetContentID == "" {
-		return "", false, nil
+		return source.WorkID, false, nil
 	}
-	workID := strings.TrimSpace(bestTarget.WorkID)
+	workID := strings.TrimSpace(source.WorkID)
+	if workID == "" {
+		workID = strings.TrimSpace(bestTarget.WorkID)
+	}
 	if workID == "" {
 		workID = generatedWorkID(source.MatchItem)
-		if _, err := s.repo.CreateWork(ctx, CreateWorkParams{
+		workID, err = s.repo.createAutomaticWork(ctx, CreateWorkParams{
 			WorkID:           workID,
 			CanonicalTitle:   source.Title,
 			SortTitle:        source.Title,
 			NormalizedTitle:  normalizeKey(source.Title),
 			PrimaryAuthorKey: personKey(source.Authors),
 			Publisher:        source.Publisher,
-		}); err != nil {
+		}, []string{source.ContentID, bestTarget.ContentID})
+		if err != nil {
 			return "", false, err
 		}
 	}
-	items := []LinkItemParams{{
+	anchors := []LinkItemParams{{
 		ContentID:  source.ContentID,
 		FormatType: source.Type,
 		LinkSource: best.LinkSource,
 		Confidence: best.Score,
+	}, {
+		ContentID:  bestTarget.ContentID,
+		FormatType: bestTarget.Type,
+		LinkSource: best.LinkSource,
+		Confidence: best.Score,
 	}}
-	if bestTarget.WorkID == "" {
-		items = append(items, LinkItemParams{
-			ContentID:  bestTarget.ContentID,
-			FormatType: bestTarget.Type,
-			LinkSource: best.LinkSource,
-			Confidence: best.Score,
-		})
+	// Revisit candidates a page at a time so every eligible edition joins at
+	// this event without retaining an arbitrarily large candidate set in memory.
+	linked := false
+	after = nil
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", false, err
+		}
+		targets, next, err := s.repo.listMatchCandidatesPage(ctx, source.MatchItem, pageSize, after, &source.WorkID)
+		if err != nil {
+			return "", false, err
+		}
+		items := append(make([]LinkItemParams, 0, len(targets)+len(anchors)), anchors...)
+		for _, target := range targets {
+			if target.ContentID == bestTarget.ContentID || target.WorkID != "" {
+				continue
+			}
+			candidate := ScoreCandidate(source.MatchItem, target.MatchItem)
+			// Matching the source through a different identifier alone must not
+			// merge a candidate incompatible with the selected work's anchor.
+			if candidate.Score < AutoLinkThreshold || ScoreCandidate(bestTarget.MatchItem, target.MatchItem).Score < AutoLinkThreshold {
+				continue
+			}
+			items = append(items, LinkItemParams{
+				ContentID:  target.ContentID,
+				FormatType: target.Type,
+				LinkSource: candidate.LinkSource,
+				Confidence: candidate.Score,
+			})
+		}
+		added, err := s.repo.autoLinkItems(ctx, workID, items)
+		if err != nil {
+			return "", false, err
+		}
+		linked = linked || added
+		if next == nil {
+			break
+		}
+		after = next
 	}
-	if err := s.repo.LinkItems(ctx, workID, items); err != nil {
-		return "", false, err
+	if !linked {
+		return source.WorkID, false, nil
 	}
-	return workID, true, nil
+	return workID, linked, nil
 }
 
 func (s *Service) UnlinkItem(ctx context.Context, workID, contentID string) error {

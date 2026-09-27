@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import type { VideoFitMode } from "@/player/types";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -269,7 +270,7 @@ function computePositionStyle(position: SubtitleAppearance["position"]): CSSProp
 
 /**
  * Height (px) of a 16:9 reference frame centered on the actually-rendered
- * video area (object-fit: contain), or null before measurements are known.
+ * video area, or null before measurements are known.
  * The frame matches the shorter dimension of the video so it never contracts
  * inside it; for wider-than-16:9 content it extends into the letterbox.
  */
@@ -277,10 +278,16 @@ function resolveSubtitleReferenceHeight(
   playerWidth: number,
   playerHeight: number,
   videoAspect: number,
+  videoFit: VideoFitMode,
 ): number | null {
   if (!Number.isFinite(videoAspect) || videoAspect <= 0 || playerWidth <= 0 || playerHeight <= 0) {
     return null;
   }
+
+  // Cover mode crops the rendered video to the player bounds, so subtitle
+  // sizing and placement should follow the visible viewport rather than the
+  // larger off-screen video frame.
+  if (videoFit === "cover") return playerHeight;
 
   // Rendered video dimensions inside the player (object-fit: contain).
   const playerAspect = playerWidth / playerHeight;
@@ -299,8 +306,14 @@ export function computeSubtitleFontScale(
   playerWidth: number,
   playerHeight: number,
   videoAspect: number,
+  videoFit: VideoFitMode = "contain",
 ): number {
-  const refHeight = resolveSubtitleReferenceHeight(playerWidth, playerHeight, videoAspect);
+  const refHeight = resolveSubtitleReferenceHeight(
+    playerWidth,
+    playerHeight,
+    videoAspect,
+    videoFit,
+  );
   return refHeight === null ? 1 : refHeight / SUBTITLE_REFERENCE_HEIGHT;
 }
 
@@ -308,21 +321,28 @@ export function computeSubtitleFontScale(
  * Aspect-aware positioning. "Bottom" is anchored to the player window so it
  * can use the available letterbox space. "Lower Third" and "Top" are anchored
  * to a 16:9 reference frame centered on the actually-rendered video area
- * (object-fit: contain), keeping those positions attached to the video frame
- * regardless of whether content is 16:9, 4:3, or 2.35:1.
+ * while Fit is active, keeping those positions attached to the video frame
+ * regardless of whether content is 16:9, 4:3, or 2.35:1. Fill mode anchors
+ * them to the visible player viewport because the video extends beyond it.
  */
 export function computeSubtitlePositionStyle(
   position: SubtitleAppearance["position"],
   playerWidth: number,
   playerHeight: number,
   videoAspect: number,
+  videoFit: VideoFitMode = "contain",
 ): CSSProperties {
   if (position === "bottom") {
     if (playerHeight <= 0) return computePositionStyle(position);
     return { bottom: `${POSITION_OFFSETS.bottom * playerHeight}px` };
   }
 
-  const refHeight = resolveSubtitleReferenceHeight(playerWidth, playerHeight, videoAspect);
+  const refHeight = resolveSubtitleReferenceHeight(
+    playerWidth,
+    playerHeight,
+    videoAspect,
+    videoFit,
+  );
   if (refHeight === null) {
     return computePositionStyle(position);
   }

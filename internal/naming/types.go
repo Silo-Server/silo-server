@@ -2,12 +2,13 @@ package naming
 
 // FilenameHints contains information parsed from file/folder names.
 type FilenameHints struct {
-	Title      string
-	Year       int
-	Type       string // movie, series
-	SeasonNum  int
-	EpisodeNum int
-	AirDate    string // ISO date for daily/by-date episodes, e.g. 2026-04-24
+	Title       string
+	Year        int
+	Type        string // movie, series
+	SeasonNum   int
+	SeasonKnown bool // Distinguishes explicit specials (season 0) from an unspecified season.
+	EpisodeNum  int
+	AirDate     string // ISO date for daily/by-date episodes, e.g. 2026-04-24
 }
 
 // PathContext captures the classification and parsed hints for a media path
@@ -15,9 +16,11 @@ type FilenameHints struct {
 type PathContext struct {
 	Type                   string // movie, series
 	RootPath               string
+	LibraryRootPath        string // Deepest configured library path containing this file.
 	Title                  string
 	Year                   int
 	SeasonNum              int
+	SeasonKnown            bool
 	EpisodeNum             int
 	AirDate                string // ISO date for daily/by-date episodes, e.g. 2026-04-24
 	HasEpisodePattern      bool

@@ -1061,7 +1061,11 @@ func episodeCatalogEntryOrderBy(sortConfig QuerySort) (string, bool) {
 	case "year":
 		return fmt.Sprintf("ORDER BY ece.year %s, ece.sort_key ASC, ece.episode_id ASC", dir), true
 	case "content_rating":
-		return fmt.Sprintf("ORDER BY ece.content_rating_rank %s, ece.content_rating_label %s, ece.sort_key ASC, ece.episode_id ASC", dir, dir), true
+		// The stored age, with SQL's default NULL ordering: last ascending,
+		// first descending — the same order the dropped content_rating_rank
+		// column produced with 2147483647 for an unknown rating, and the order
+		// idx_episode_catalog_entries_content_rating is built for.
+		return fmt.Sprintf("ORDER BY ece.content_rating_age %s, ece.content_rating_label %s, ece.sort_key ASC, ece.episode_id ASC", dir, dir), true
 	case "runtime":
 		return fmt.Sprintf("ORDER BY ece.runtime %s NULLS LAST, ece.sort_key ASC, ece.episode_id ASC", dir), true
 	case "rating_imdb":

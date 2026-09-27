@@ -103,6 +103,10 @@ curl -fsS http://localhost:8090/api/v1/ready
 docker compose logs --tail=200 silo
 ```
 
+`/api/v1/health` and `/api/v1/ready` are retained operational probes. They keep
+their paths after the `/api/v1` contract is retired, so existing probe
+configuration keeps working.
+
 In the admin UI, verify:
 
 - admin login works

@@ -15,6 +15,7 @@ export interface GroupCardProps {
   onSyncCollection: (collection: LibraryCollection) => void;
   syncingCollectionID?: string | null;
   collapsed?: boolean;
+  dragDisabled?: boolean;
 }
 
 export function GroupCard({
@@ -26,14 +27,16 @@ export function GroupCard({
   onSyncCollection,
   syncingCollectionID = null,
   collapsed = false,
+  dragDisabled: boardDragDisabled = false,
 }: GroupCardProps) {
   const [viewMode, setViewMode] = useState<GroupSortMode>(group.default_sort_mode);
-  const dragDisabled = viewMode !== "manual";
+  const dragDisabled = boardDragDisabled || viewMode !== "manual";
   const isUserCollections = group.kind === "user_collections";
 
   const sortableId = `group:${group.id}`;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: sortableId,
+    disabled: boardDragDisabled,
     data: { kind: "group", id: group.id },
   });
   const style = {
@@ -57,6 +60,7 @@ export function GroupCard({
           {...attributes}
           {...listeners}
           className="text-muted-foreground hover:text-foreground cursor-grab"
+          disabled={boardDragDisabled}
           aria-label="Drag group"
           type="button"
         >

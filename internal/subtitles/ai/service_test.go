@@ -441,8 +441,11 @@ func TestRunTranscribeTranslateStreamingInterleavesTranslationPerChunk(t *testin
 		strings.Join(translated[1].Lines, " ") != "es:second" {
 		t.Fatalf("stored translation not sorted/complete: %#v", translated)
 	}
-	if got := fmt.Sprint(repo.completed); got != "[2]" {
-		t.Fatalf("completed subtitle IDs = %s, want [2]", got)
+	if store.stored[0].Publication == nil || store.stored[0].Publication.Complete || store.stored[1].Publication == nil || !store.stored[1].Publication.Complete {
+		t.Fatal("transcript must be fenced as intermediate output and translation as final output")
+	}
+	if len(repo.completed) != 0 {
+		t.Fatal("job completion must occur inside storage publication")
 	}
 }
 

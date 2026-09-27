@@ -3,68 +3,21 @@ package notifications
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
-// webhookDeniedNetworks are the private/special ranges webhook destinations
-// must never resolve to (docs/architecture/notifications.md, "Trust model
-// and SSRF guard"). IPv4-mapped IPv6 addresses are unwrapped before
-// checking, so the IPv4 entries also cover ::ffff:0:0/96 bypass attempts.
-var webhookDeniedNetworks = func() []*net.IPNet {
-	cidrs := []string{
-		// IPv4 private/special.
-		"0.0.0.0/8",
-		"10.0.0.0/8",
-		"100.64.0.0/10",  // CGNAT (RFC 6598)
-		"127.0.0.0/8",    // loopback
-		"169.254.0.0/16", // link-local
-		"172.16.0.0/12",
-		"192.0.0.0/24",    // IETF protocol assignments
-		"192.0.2.0/24",    // TEST-NET-1
-		"198.51.100.0/24", // TEST-NET-2
-		"203.0.113.0/24",  // TEST-NET-3
-		"192.88.99.0/24",  // deprecated 6to4 anycast
-		"192.168.0.0/16",
-		"198.18.0.0/15", // benchmarking (RFC 2544)
-		"224.0.0.0/4",   // multicast
-		"240.0.0.0/4",   // reserved future use (incl. broadcast)
-		// IPv6 private/special.
-		"::/128",        // unspecified
-		"::1/128",       // loopback
-		"fc00::/7",      // ULA
-		"fe80::/10",     // link-local
-		"2001:db8::/32", // documentation
-		"64:ff9b::/96",  // NAT64
-	}
-	networks := make([]*net.IPNet, 0, len(cidrs))
-	for _, cidr := range cidrs {
-		_, network, err := net.ParseCIDR(cidr)
-		if err != nil {
-			panic(fmt.Sprintf("invalid webhook deny CIDR %q: %v", cidr, err))
-		}
-		networks = append(networks, network)
-	}
-	return networks
-}()
-
-// webhookIPAllowed reports whether a resolved destination IP is outside every
-// denied range. v4-mapped IPv6 addresses are unwrapped and re-checked against
-// the IPv4 deny set — a literal ::ffff:127.0.0.1 reaches loopback while
-// bypassing naive IPv4-only checks.
+// webhookIPAllowed reports whether a resolved destination IP is public
+// (docs/architecture/notifications.md, "Trust model and SSRF guard"). The
+// address classes are shared with every other user-supplied destination in
+// netguard; IPv4-mapped IPv6 addresses are classified as their IPv4 form, so
+// ::ffff:127.0.0.1 cannot bypass the IPv4 ranges.
 func webhookIPAllowed(ip net.IP) bool {
-	if ip == nil {
-		return false
-	}
-	if v4 := ip.To4(); v4 != nil {
-		ip = v4
-	}
-	for _, network := range webhookDeniedNetworks {
-		if network.Contains(ip) {
-			return false
-		}
-	}
-	return true
+	addr, ok := netip.AddrFromSlice(ip)
+	return ok && netguard.Classify(addr) == netguard.Public
 }
 
 // ValidateWebhookURL enforces the destination guardrails the profile cannot

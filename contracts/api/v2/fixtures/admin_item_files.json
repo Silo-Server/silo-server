@@ -1,0 +1,13 @@
+{
+  "items": [
+    {
+      "id": "42",
+      "library_id": "7",
+      "file_path": "/fixture/a.mkv",
+      "observed_root_path": "/fixture"
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

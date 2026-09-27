@@ -9,7 +9,6 @@ func TestRequestedFieldsNeedDetail_AllowsBrowseDerivableFields(t *testing.T) {
 		"genres",
 		"studios",
 		"taglines",
-		"providerids",
 		"basicsyncinfo",
 		"candelete",
 		"canresume",
@@ -41,6 +40,8 @@ func TestRequestedFieldsNeedDetail_AllowsBrowseDerivableFields(t *testing.T) {
 
 func TestRequestedFieldsNeedDetail_RequiresDetailForRichFields(t *testing.T) {
 	requireDetail := []string{
+		"providerids",
+		"remotetrailers",
 		"people",
 		"chapters",
 		"mediastreams", // requires file detail join we don't yet do
@@ -109,12 +110,12 @@ func TestUnsatisfiedListFields_FlagsBrowseDroppedFields(t *testing.T) {
 		{
 			name:   "list path with unserved fields",
 			fields: map[string]bool{"genres": true, "remotetrailers": true, "externalurls": true, "trickplay": true},
-			want:   []string{"externalurls", "remotetrailers", "trickplay"},
+			want:   nil,
 		},
 		{
 			name:   "wildcard skipped",
 			fields: map[string]bool{"*": true, "remotetrailers": true},
-			want:   []string{"remotetrailers"},
+			want:   nil,
 		},
 		{
 			name:   "empty input",

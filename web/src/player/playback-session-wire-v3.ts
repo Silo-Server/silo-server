@@ -66,6 +66,7 @@ export interface StartRequestInput {
   profileId: string;
   playbackAttemptId: string;
   qualityPreference: string;
+  allowAlternateVersions?: boolean;
   position: number;
   /** Forces `start_position: 0` to be sent, which means "start over". */
   forceStartPosition: boolean;
@@ -97,6 +98,7 @@ export function buildStartRequestV3(input: StartRequestInput): StartRequestV3 {
     profile_id: input.profileId,
     playback_attempt_id: input.playbackAttemptId,
     quality_preference: input.qualityPreference,
+    ...(input.allowAlternateVersions === false ? { allow_alternate_versions: false } : {}),
     // The web player renders ASS with its own typesetting engine, so it asks
     // the server to keep authored fidelity rather than flatten it.
     subtitle_fidelity_preference: "preserve",

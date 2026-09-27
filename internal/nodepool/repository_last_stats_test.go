@@ -53,7 +53,7 @@ func TestRepositoryUpdateHealthPersistsLastStats(t *testing.T) {
 	}
 
 	stats := []byte(`{"system":{"cpu_pct":41,"mem_used_mb":9011},"gpu":[{"device":"/dev/dri/renderD128","source":"fdinfo"}]}`)
-	if err := repo.UpdateHealth(ctx, node.ID, node.URL, true, 3, 17, stats); err != nil {
+	if err := repo.UpdateHealth(ctx, node.ID, node.URL, true, 3, 17, stats, nil); err != nil {
 		t.Fatalf("update health: %v", err)
 	}
 
@@ -91,10 +91,10 @@ func TestRepositoryUpdateHealthWritesNullForNodesWithoutStats(t *testing.T) {
 	ctx := context.Background()
 	node := createLastStatsNode(t, repo)
 
-	if err := repo.UpdateHealth(ctx, node.ID, node.URL, true, 1, 0, []byte(`{"system":{"cpu_pct":41}}`)); err != nil {
+	if err := repo.UpdateHealth(ctx, node.ID, node.URL, true, 1, 0, []byte(`{"system":{"cpu_pct":41}}`), nil); err != nil {
 		t.Fatalf("update health: %v", err)
 	}
-	if err := repo.UpdateHealth(ctx, node.ID, node.URL, false, 0, 0, nil); err != nil {
+	if err := repo.UpdateHealth(ctx, node.ID, node.URL, false, 0, 0, nil, nil); err != nil {
 		t.Fatalf("update health without stats: %v", err)
 	}
 
@@ -142,7 +142,7 @@ func TestRepositoryUpdateHealthRefusesAfterAURLEdit(t *testing.T) {
 		t.Fatalf("repoint node: %v", err)
 	}
 
-	err = repo.UpdateHealth(ctx, node.ID, node.URL, true, 3, 17, []byte(`{"system":{"cpu_pct":41}}`))
+	err = repo.UpdateHealth(ctx, node.ID, node.URL, true, 3, 17, []byte(`{"system":{"cpu_pct":41}}`), nil)
 	if !errors.Is(err, ErrNodeMoved) {
 		t.Fatalf("err = %v, want ErrNodeMoved after the row was repointed", err)
 	}

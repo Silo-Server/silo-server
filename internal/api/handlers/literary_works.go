@@ -44,17 +44,9 @@ func (h *LiteraryWorkHandler) HandleGetWork(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "bad_request", "work_id is required")
 		return
 	}
-	if h == nil || h.Service == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Literary works are not configured")
-		return
-	}
-	resp, err := h.Service.GetWork(r.Context(), workID, requestAccessFilter(r))
+	resp, err := h.Work(r.Context(), workID, requestAccessFilter(r))
 	if err != nil {
-		if errors.Is(err, literaryworks.ErrWorkNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Work not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load work")
+		writeAPIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)

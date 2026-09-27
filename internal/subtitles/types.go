@@ -48,7 +48,12 @@ type SubtitleResult struct {
 	Downloads       int            `json:"downloads"`
 	HearingImpaired bool           `json:"hearing_impaired"`
 	UploadDate      time.Time      `json:"upload_date,omitempty"`
+	rawLanguage     string
 }
+
+// SetRawLanguageForBridge records the provider spelling for the frozen v1
+// bridge. It is intentionally excluded from JSON and unavailable to clients.
+func (r *SubtitleResult) SetRawLanguageForBridge(value string) { r.rawLanguage = value }
 
 // DownloadedSubtitle represents a subtitle that has been downloaded and stored.
 type DownloadedSubtitle struct {
@@ -58,6 +63,8 @@ type DownloadedSubtitle struct {
 	Language        string         `json:"language"`
 	Format          SubtitleFormat `json:"format"`
 	ReleaseName     string         `json:"release_name"`
+	ContentSHA256   string         `json:"-"`
+	Revision        int64          `json:"-"`
 	S3Key           string         `json:"-"` // internal, not exposed to frontend
 	Score           float64        `json:"score"`
 	HearingImpaired bool           `json:"hearing_impaired"`

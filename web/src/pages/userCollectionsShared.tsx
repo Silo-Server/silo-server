@@ -5,6 +5,7 @@ import { useUserLibraries } from "@/hooks/queries/libraries";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import {
   useCreateCollection,
+  useCollectionCapabilities,
   useDeleteUserCollectionImage,
   useUpdateCollection,
 } from "@/hooks/queries/collections";
@@ -159,14 +160,17 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 
 export function UserCollectionForm({
   collection,
+  etag,
   onClose,
 }: {
   collection: Collection | null;
+  etag?: string;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState(() => toUserCollectionBuilderValue(collection));
   const [posterFile, setPosterFile] = useState<File | null>(null);
   const [posterSourceUrl, setPosterSourceUrl] = useState("");
+  const { data: capabilities } = useCollectionCapabilities();
   const createMutation = useCreateCollection();
   const updateMutation = useUpdateCollection();
   const deletePosterMutation = useDeleteUserCollectionImage();
@@ -190,7 +194,7 @@ export function UserCollectionForm({
         poster_source_url: trimmedSource || undefined,
       };
       updateMutation.mutate(
-        { id: collection.id, body, poster: posterFile },
+        { id: collection.id, etag: etag ?? "", body, poster: posterFile },
         { onSuccess: onClose },
       );
     } else {
@@ -224,6 +228,7 @@ export function UserCollectionForm({
       allowLibrarySelection
       isPending={isPending}
       readOnly={readOnly}
+      lockCollectionType={Boolean(collection)}
       creatorProfileId={collection?.creator_profile_id ?? null}
       previewLayout="sidebar"
       sidebarContent={
@@ -247,7 +252,7 @@ export function UserCollectionForm({
         </section>
       ) : null}
 
-      {!readOnly ? (
+      {!readOnly && capabilities?.artwork ? (
         <section className="space-y-4">
           <div>
             <h2 className="text-lg font-semibold">Poster</h2>
