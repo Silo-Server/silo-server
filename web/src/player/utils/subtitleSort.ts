@@ -1,8 +1,15 @@
 import type { PlayerSubtitleInfo, PlayerSubtitleTrackSignature, SubtitleMode } from "../types";
-import { normalizeLanguageCode } from "./languageNames";
+import { canonicalLanguageTag, normalizeLanguageCode } from "@/lib/languageTags";
 import { isBitmapCodec } from "./subtitleCodecs";
 
 const ORIGINAL_LANGUAGE_SENTINEL = "original";
+// playback.audio_language stores the original-language choice as this
+// private-use tag (the settings contract only holds language tags).
+const ORIGINAL_LANGUAGE_TAG = "x-silo-original";
+
+function isOriginalLanguagePreference(normalized: string): boolean {
+  return normalized === ORIGINAL_LANGUAGE_SENTINEL || normalized === ORIGINAL_LANGUAGE_TAG;
+}
 
 const SOURCE_PRIORITY: Record<string, number> = {
   external: 0,
@@ -11,7 +18,7 @@ const SOURCE_PRIORITY: Record<string, number> = {
 };
 
 /**
- * Auto-select priority for a track: lower is better. Within the same source
+ * Auto-select priority within the same language rank: lower is better. Within the same source
  * tier, text tracks beat bitmap (PGS) tracks — bitmap is heavier to render
  * and can't be styled — while a bitmap track still wins when it's the only
  * match for the language.
@@ -27,7 +34,7 @@ function normalize(value: string | undefined | null): string {
 
 function normalizeConcreteLanguage(value: string | undefined | null): string | null {
   const normalized = normalize(value);
-  if (!normalized || normalized === ORIGINAL_LANGUAGE_SENTINEL) {
+  if (!normalized || isOriginalLanguagePreference(normalized)) {
     return null;
   }
   return normalized;
@@ -40,8 +47,13 @@ function sameLanguageCode(a: string | undefined | null, b: string | undefined | 
   return normalizeLanguageCode(left) === normalizeLanguageCode(right);
 }
 
-function sameLanguage(track: PlayerSubtitleInfo, language: string): boolean {
-  return sameLanguageCode(track.language, language);
+function languageMatchRank(candidate: string | undefined | null, preferred: string): number {
+  const candidateTag = canonicalLanguageTag(candidate ?? "");
+  const preferredTag = canonicalLanguageTag(preferred);
+  if (!candidateTag || !preferredTag) return -1;
+  if (candidateTag === preferredTag) return 0;
+  if (normalizeLanguageCode(candidateTag) !== normalizeLanguageCode(preferredTag)) return -1;
+  return candidateTag.includes("-") ? 2 : 1;
 }
 
 function subtitleTrackMatchesSignature(
@@ -92,18 +104,26 @@ export function sortSubtitlesBySource(tracks: PlayerSubtitleInfo[]): PlayerSubti
 }
 
 /**
- * Find the best subtitle track index for a given language,
- * preferring external > downloaded > embedded.
+ * Find the best subtitle track index for a given language: exact tag, then
+ * bare language, then another variant of the same language. Within a language
+ * rank, prefer external > downloaded > embedded, then text over bitmap.
  * Returns the track's backend index (track.index) or -1 if no match.
  */
 export function findPreferredSubtitleIndex(tracks: PlayerSubtitleInfo[], language: string): number {
   let bestIdx = -1;
+  let bestLanguageRank = 3;
   let bestPriority = Infinity;
 
   for (const track of tracks) {
-    if (!track || !sameLanguage(track, language)) continue;
+    if (!track) continue;
+    const languageRank = languageMatchRank(track.language, language);
+    if (languageRank < 0) continue;
     const priority = trackPriority(track);
-    if (priority < bestPriority) {
+    if (
+      languageRank < bestLanguageRank ||
+      (languageRank === bestLanguageRank && priority < bestPriority)
+    ) {
+      bestLanguageRank = languageRank;
       bestPriority = priority;
       bestIdx = track.index;
     }
@@ -119,19 +139,24 @@ function findPreferredSubtitleIndexWithSignature(
 ): number {
   let bestTrack: PlayerSubtitleInfo | null = null;
   let bestScore = -1;
+  let bestLanguageRank = 3;
   let bestPriority = Infinity;
 
   for (const track of tracks) {
-    if (!track || !sameLanguage(track, language)) continue;
+    if (!track) continue;
+    const languageRank = languageMatchRank(track.language, language);
+    if (languageRank < 0) continue;
     const priority = trackPriority(track);
     const score = scoreSignatureFallback(track, signature);
     if (
       bestTrack === null ||
-      score > bestScore ||
-      (score === bestScore && priority < bestPriority)
+      languageRank < bestLanguageRank ||
+      (languageRank === bestLanguageRank &&
+        (score > bestScore || (score === bestScore && priority < bestPriority)))
     ) {
       bestTrack = track;
       bestScore = score;
+      bestLanguageRank = languageRank;
       bestPriority = priority;
     }
   }
@@ -182,7 +207,7 @@ export function resolveSubtitleAutoSelect(options: SubtitleAutoSelectOptions): n
   const normalizedProfileLanguage = normalize(profileLanguage);
   const effectiveProfileLang =
     normalizeConcreteLanguage(profileLanguage) ??
-    (normalizedProfileLanguage === ORIGINAL_LANGUAGE_SENTINEL
+    (isOriginalLanguagePreference(normalizedProfileLanguage)
       ? preferredSubtitleLang
       : normalizedProfileLanguage === ""
         ? "en"

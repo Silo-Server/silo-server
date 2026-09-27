@@ -3,7 +3,6 @@ package jellycompat
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,62 +11,71 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
-type loggingResponseWriter struct {
+// statusResponseWriter records the response status for the request log and
+// the request metrics. It forwards the optional writer interfaces so media
+// keeps sendfile, progressive bodies keep flushing, and the session socket can
+// hijack the connection.
+type statusResponseWriter struct {
 	http.ResponseWriter
-	status int
+	status   int
+	hijacked bool
 }
 
-func (w *loggingResponseWriter) WriteHeader(status int) {
+func (w *statusResponseWriter) WriteHeader(status int) {
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
 }
 
-func (w *loggingResponseWriter) Write(b []byte) (int, error) {
+func (w *statusResponseWriter) Write(b []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
 	}
 	return w.ResponseWriter.Write(b)
 }
 
-func (w *loggingResponseWriter) ReadFrom(src io.Reader) (int64, error) {
+func (w *statusResponseWriter) ReadFrom(src io.Reader) (int64, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
 	}
 	return httpstream.ForwardReadFrom(w.ResponseWriter, w, src, 0, nil)
 }
 
-func (w *loggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return hj.Hijack()
+// Hijack reaches the connection through any Unwrap-only writers beneath. A
+// hijack alone does not prove which status the handler sent on the raw
+// connection, so it is recorded as a flag rather than a fabricated status.
+func (w *statusResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, rw, err := http.NewResponseController(w.ResponseWriter).Hijack()
+	if err == nil {
+		w.hijacked = true
 	}
-	return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
+	return conn, rw, err
 }
 
 // Flush implements http.Flusher so progressive responses (subtitle extracts,
-// streamed media) keep flushing through the logging wrapper.
-func (w *loggingResponseWriter) Flush() {
+// streamed media) keep flushing through the wrapper.
+func (w *statusResponseWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
 }
 
 // Unwrap returns the underlying ResponseWriter for http.ResponseController.
-func (w *loggingResponseWriter) Unwrap() http.ResponseWriter {
+func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
 func requestLoggerMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		ww := &loggingResponseWriter{ResponseWriter: w}
+		ww := &statusResponseWriter{ResponseWriter: w}
 
 		next.ServeHTTP(ww, r)
 
@@ -81,7 +89,7 @@ func requestLoggerMiddleware(next http.Handler) http.Handler {
 			"method", r.Method,
 			"path", r.URL.Path,
 			"original_path", firstNonEmpty(originalPathFromContext(r.Context()), r.URL.Path),
-			"query", r.URL.RawQuery,
+			"query", logredact.SanitizeQuery(r.URL.RawQuery),
 			"route", routePattern,
 			"status", statusOrDefault(ww.status),
 			"duration_ms", time.Since(start).Milliseconds(),
@@ -191,8 +199,8 @@ func (w *debugResponseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
-// newDebugLogMiddleware creates a middleware that logs full request/response
-// pairs to the given file. Enable by setting JELLYCOMPAT_DEBUG_LOG=/path/to/file.
+// newDebugLogMiddleware logs request/response diagnostics with credentials
+// redacted. Non-JSON bodies are omitted. Enable with JELLYCOMPAT_DEBUG_LOG.
 // When userAgentFilter is non-empty, only requests whose User-Agent contains
 // the filter string (case-insensitive) are logged.
 func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.Handler) http.Handler {
@@ -205,10 +213,10 @@ func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.
 			}
 
 			// Capture request body for POST/PUT/PATCH.
-			var reqBody []byte
+			var requestCapture *debugRequestBody
 			if r.Body != nil && (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch) {
-				reqBody, _ = io.ReadAll(io.LimitReader(r.Body, debugMaxBodyCapture))
-				r.Body = io.NopCloser(bytes.NewReader(reqBody))
+				requestCapture = &debugRequestBody{ReadCloser: r.Body}
+				r.Body = requestCapture
 			}
 
 			start := time.Now()
@@ -225,16 +233,19 @@ func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.
 			fmt.Fprintf(logFile, "=== %s %s %s [%s] %dms ===\n",
 				start.Format("2006/01/02 15:04:05"),
 				r.Method,
-				r.URL.String(),
+				logredact.SanitizeRequestURL(r.URL.String()),
 				reqID,
 				elapsed.Milliseconds(),
 			)
 			fmt.Fprintf(logFile, "Remote: %s  User-Agent: %s\n", r.RemoteAddr, r.UserAgent())
 			fmt.Fprintf(logFile, "Status: %d\n", status)
 
-			if len(reqBody) > 0 {
-				fmt.Fprintf(logFile, "Request Body (%d bytes):\n", len(reqBody))
-				writeIndentedJSON(logFile, reqBody)
+			if requestCapture != nil && requestCapture.body.Len() > 0 {
+				_, _ = fmt.Fprintf(logFile, "Request Body (%d bytes captured):\n", requestCapture.body.Len())
+				if requestCapture.truncated {
+					_, _ = fmt.Fprintf(logFile, "[truncated at %d bytes]\n", debugMaxBodyCapture)
+				}
+				writeIndentedJSON(logFile, requestCapture.body.Bytes())
 			}
 
 			switch {
@@ -254,22 +265,31 @@ func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.
 	}
 }
 
-// writeIndentedJSON pretty-prints b if it's valid JSON, otherwise writes it as
-// UTF-8 text. If b is not valid UTF-8 (e.g. a handler lied about Content-Type),
-// it is omitted so the log file stays readable.
+// debugRequestBody observes reads without consuming ahead of the handler or
+// changing the request's length, read errors or Close result.
+type debugRequestBody struct {
+	io.ReadCloser
+	body      bytes.Buffer
+	truncated bool
+}
+
+func (b *debugRequestBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	remaining := debugMaxBodyCapture - b.body.Len()
+	if n > remaining {
+		b.truncated = true
+	}
+	if remaining > 0 {
+		_, _ = b.body.Write(p[:min(n, remaining)])
+	}
+	return n, err
+}
+
+// writeIndentedJSON writes only redacted structured bodies, never a raw-text
+// fallback that could contain passwords, form credentials or stream URLs.
 func writeIndentedJSON(w io.Writer, b []byte) {
-	var buf bytes.Buffer
-	if json.Indent(&buf, b, "", "  ") == nil {
-		buf.WriteByte('\n')
-		w.Write(buf.Bytes())
-		return
-	}
-	if utf8.Valid(b) {
-		w.Write(b)
-		fmt.Fprintln(w)
-		return
-	}
-	fmt.Fprintf(w, "[non-UTF-8 payload, %d bytes omitted]\n", len(b))
+	_, _ = w.Write(logredact.SanitizeJSON(b))
+	_, _ = fmt.Fprintln(w)
 }
 
 // isTextualContentType reports whether a captured body with Content-Type ct is

@@ -1,14 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
-import { playerFetch } from "../player-fetch";
-import type {
-  SubtitleLanguageDetection,
-  SubtitleSearchResponse,
-  SubtitleResult,
-} from "@/api/types";
+import { playerV2 } from "../player-v2";
+import type { SubtitleLanguageDetection, SubtitleResult } from "@/api/types";
 import { SubtitleUploadForm } from "@/components/subtitles/SubtitleUploadForm";
 import { LANGUAGES } from "../utils/languageNames";
+import { canonicalLanguageWireValue } from "@/lib/languageNames";
 
 interface SubtitleSearchModalProps {
   mediaFileId: number;
@@ -16,6 +13,8 @@ interface SubtitleSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubtitleDownloaded: () => void;
+  /** False hides the online-search section; manual upload stays available. */
+  onlineSearchEnabled?: boolean;
 }
 
 interface ProviderInfo {
@@ -42,6 +41,7 @@ export function SubtitleSearchModal({
   isOpen,
   onClose,
   onSubtitleDownloaded,
+  onlineSearchEnabled = true,
 }: SubtitleSearchModalProps) {
   const [selectedLang, setSelectedLang] = useState("en");
   const [results, setResults] = useState<SubtitleResult[]>([]);
@@ -52,6 +52,14 @@ export function SubtitleSearchModal({
   const modalRef = useRef<HTMLDivElement>(null);
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
   const searchInputRef = useRef<HTMLSelectElement>(null);
+  const downloadGeneration = useRef(0);
+  useEffect(() => {
+    downloadGeneration.current++;
+    setDownloading(null);
+    return () => {
+      downloadGeneration.current++;
+    };
+  }, [playerConfig, mediaFileId, isOpen]);
 
   const handleClose = useCallback(() => {
     previousActiveElementRef.current?.focus();
@@ -64,10 +72,21 @@ export function SubtitleSearchModal({
     previousActiveElementRef.current = document.activeElement as HTMLElement;
     // Delay to allow the modal to render before focusing.
     const timer = setTimeout(() => {
-      searchInputRef.current?.focus();
+      // Without online search there is no search input; keep focus in the modal.
+      (searchInputRef.current ?? modalRef.current?.querySelector<HTMLElement>("button"))?.focus();
     }, 0);
     return () => clearTimeout(timer);
   }, [isOpen]);
+
+  // The provider probe can resolve after the modal opened. If it hides online
+  // search, the focused language select unmounts; keep focus inside the modal.
+  useEffect(() => {
+    if (!isOpen || onlineSearchEnabled) return;
+    const modal = modalRef.current;
+    if (modal && !modal.contains(document.activeElement)) {
+      modal.querySelector<HTMLElement>("button")?.focus();
+    }
+  }, [isOpen, onlineSearchEnabled]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -118,17 +137,12 @@ export function SubtitleSearchModal({
     setWarnings([]);
 
     try {
-      const response = await playerFetch<SubtitleSearchResponse>(
-        playerConfig,
-        "/subtitles/search",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            media_file_id: mediaFileId,
-            languages: [selectedLang],
-          }),
+      const response = await playerV2(playerConfig, "POST /api/v2/subtitles/search", {
+        body: {
+          media_file_id: String(mediaFileId),
+          languages: [canonicalLanguageWireValue(selectedLang) ?? selectedLang],
         },
-      );
+      });
       setResults(response.results ?? []);
       setWarnings(response.warnings ?? []);
     } catch (err) {
@@ -146,39 +160,47 @@ export function SubtitleSearchModal({
       languageOverride?: boolean;
       hearingImpaired: boolean;
     }) => {
-      const form = new FormData();
-      form.set("media_file_id", String(input.mediaFileId));
-      if (input.language) {
-        form.set("language", input.language);
-      }
-      if (input.languageOverride) {
-        form.set("language_override", "true");
-      }
-      form.set("file", input.file);
-      if (input.hearingImpaired) {
-        form.set("hearing_impaired", "true");
-      }
-
-      await playerFetch(playerConfig, "/subtitles/upload", {
-        method: "POST",
-        body: form,
+      const token = playerConfig.getAccessToken(),
+        profile = playerConfig.getProfileId(),
+        pin = playerConfig.getProfileToken?.();
+      const generation = downloadGeneration.current;
+      await playerV2(playerConfig, "POST /api/v2/subtitles/upload", {
+        form: {
+          media_file_id: String(input.mediaFileId),
+          file: input.file,
+          language: input.language,
+          language_override: input.languageOverride ? "true" : "false",
+          hearing_impaired: input.hearingImpaired ? "true" : "false",
+        },
       });
+      if (
+        generation !== downloadGeneration.current ||
+        token !== playerConfig.getAccessToken() ||
+        profile !== playerConfig.getProfileId() ||
+        pin !== playerConfig.getProfileToken?.()
+      )
+        throw new DOMException("Subtitle upload context changed", "AbortError");
     },
     [playerConfig],
   );
 
   const handleDetectLanguage = useCallback(
     async (file: File, fallbackLanguage?: string): Promise<SubtitleLanguageDetection> => {
-      const form = new FormData();
-      form.set("file", file);
-      if (fallbackLanguage) {
-        form.set("language", fallbackLanguage);
-      }
-
-      return playerFetch<SubtitleLanguageDetection>(playerConfig, "/subtitles/detect-language", {
-        method: "POST",
-        body: form,
+      const token = playerConfig.getAccessToken(),
+        profile = playerConfig.getProfileId(),
+        pin = playerConfig.getProfileToken?.();
+      const generation = downloadGeneration.current;
+      const result = await playerV2(playerConfig, "POST /api/v2/subtitles/detect-language", {
+        form: { file, language: fallbackLanguage },
       });
+      if (
+        generation !== downloadGeneration.current ||
+        token !== playerConfig.getAccessToken() ||
+        profile !== playerConfig.getProfileId() ||
+        pin !== playerConfig.getProfileToken?.()
+      )
+        throw new DOMException("Subtitle detection context changed", "AbortError");
+      return result;
     },
     [playerConfig],
   );
@@ -190,30 +212,38 @@ export function SubtitleSearchModal({
 
   const handleDownload = useCallback(
     async (result: SubtitleResult) => {
+      const generation = downloadGeneration.current;
+      const token = playerConfig.getAccessToken();
+      const profile = playerConfig.getProfileId();
+      const pin = playerConfig.getProfileToken?.();
+      const current = () =>
+        generation === downloadGeneration.current &&
+        token === playerConfig.getAccessToken() &&
+        profile === playerConfig.getProfileId() &&
+        pin === playerConfig.getProfileToken?.();
       const key = `${result.provider}:${result.id}`;
       setDownloading(key);
       setError(null);
 
       try {
-        await playerFetch<unknown>(playerConfig, "/subtitles/download", {
-          method: "POST",
-          body: JSON.stringify({
-            media_file_id: mediaFileId,
+        await playerV2(playerConfig, "POST /api/v2/subtitles/download", {
+          body: {
+            media_file_id: String(mediaFileId),
             provider: result.provider,
             subtitle_id: result.id,
             language: result.language,
             release_name: result.release_name,
-            format: result.format,
             score: result.score,
             hearing_impaired: result.hearing_impaired,
-          }),
+          },
         });
+        if (!current()) return;
         onSubtitleDownloaded();
         handleClose();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Download failed");
+        if (current()) setError(err instanceof Error ? err.message : "Download failed");
       } finally {
-        setDownloading(null);
+        if (current()) setDownloading(null);
       }
     },
     [playerConfig, mediaFileId, onSubtitleDownloaded, handleClose],
@@ -258,34 +288,38 @@ export function SubtitleSearchModal({
           defaultLanguage={selectedLang}
         />
 
-        <div className="border-b border-white/10 px-4 py-2">
-          <p className="text-xs font-medium text-white/60">Search online</p>
-        </div>
+        {onlineSearchEnabled && (
+          <div className="border-b border-white/10 px-4 py-2">
+            <p className="text-xs font-medium text-white/60">Search online</p>
+          </div>
+        )}
 
         {/* Search controls */}
-        <div className="flex gap-2 px-4 py-3">
-          <select
-            ref={searchInputRef}
-            aria-label="Language"
-            className="flex-1 rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
-            value={selectedLang}
-            onChange={(e) => setSelectedLang(e.target.value)}
-          >
-            {LANGUAGES.map((lang) => (
-              <option key={lang.code} value={lang.code}>
-                {lang.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="rounded bg-white/10 px-3 py-1.5 text-sm font-medium hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
-            onClick={handleSearch}
-            disabled={searching}
-          >
-            {searching ? "Searching\u2026" : "Search"}
-          </button>
-        </div>
+        {onlineSearchEnabled && (
+          <div className="flex gap-2 px-4 py-3">
+            <select
+              ref={searchInputRef}
+              aria-label="Language"
+              className="flex-1 rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+              value={selectedLang}
+              onChange={(e) => setSelectedLang(e.target.value)}
+            >
+              {LANGUAGES.map((lang) => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="rounded bg-white/10 px-3 py-1.5 text-sm font-medium hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
+              onClick={handleSearch}
+              disabled={searching}
+            >
+              {searching ? "Searching\u2026" : "Search"}
+            </button>
+          </div>
+        )}
 
         {/* Error */}
         {error && (
@@ -309,75 +343,77 @@ export function SubtitleSearchModal({
         )}
 
         {/* Results */}
-        <div className="max-h-[60vh] overflow-y-auto px-4 pb-4">
-          {results.length === 0 && !searching && !error && (
-            <p className="py-6 text-center text-xs text-white/40">
-              Select a language and press Search.
-            </p>
-          )}
+        {onlineSearchEnabled && (
+          <div className="max-h-[60vh] overflow-y-auto px-4 pb-4">
+            {results.length === 0 && !searching && !error && (
+              <p className="py-6 text-center text-xs text-white/40">
+                Select a language and press Search.
+              </p>
+            )}
 
-          {results.map((result) => {
-            const key = `${result.provider}:${result.id}`;
-            const isDownloading = downloading === key;
-            const info = providerInfo[result.provider];
+            {results.map((result) => {
+              const key = `${result.provider}:${result.id}`;
+              const isDownloading = downloading === key;
+              const info = providerInfo[result.provider];
 
-            return (
-              <button
-                key={key}
-                type="button"
-                className="mb-1.5 flex w-full items-center gap-2 rounded bg-white/5 px-3 py-2 text-left hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
-                onClick={() => handleDownload(result)}
-                disabled={downloading !== null}
-              >
-                {/* Score badge */}
-                <span
-                  className="shrink-0 rounded px-1.5 py-0.5 text-xs font-bold tabular-nums"
-                  style={{
-                    backgroundColor: `${scoreColor(result.score)}22`,
-                    color: scoreColor(result.score),
-                    border: `1px solid ${scoreColor(result.score)}55`,
-                  }}
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className="mb-1.5 flex w-full items-center gap-2 rounded bg-white/5 px-3 py-2 text-left hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
+                  onClick={() => handleDownload(result)}
+                  disabled={downloading !== null}
                 >
-                  {result.score}
-                </span>
-
-                {/* Release name */}
-                <span className="min-w-0 flex-1 truncate text-xs">{result.release_name}</span>
-
-                {/* HI badge */}
-                {result.hearing_impaired && (
-                  <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-[10px] text-white/60">
-                    HI
+                  {/* Score badge */}
+                  <span
+                    className="shrink-0 rounded px-1.5 py-0.5 text-xs font-bold tabular-nums"
+                    style={{
+                      backgroundColor: `${scoreColor(result.score)}22`,
+                      color: scoreColor(result.score),
+                      border: `1px solid ${scoreColor(result.score)}55`,
+                    }}
+                  >
+                    {result.score}
                   </span>
-                )}
 
-                {/* Download count */}
-                <span className="shrink-0 text-[10px] text-white/40">
-                  ↓{result.downloads.toLocaleString()}
-                </span>
+                  {/* Release name */}
+                  <span className="min-w-0 flex-1 truncate text-xs">{result.release_name}</span>
 
-                {/* Provider badge */}
-                <span
-                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
-                  style={{
-                    backgroundColor: `${info?.color ?? "#6b7280"}22`,
-                    color: info?.color ?? "#9ca3af",
-                    border: `1px solid ${info?.color ?? "#6b7280"}55`,
-                  }}
-                >
-                  {info?.abbr ?? result.provider}
-                </span>
+                  {/* HI badge */}
+                  {result.hearing_impaired && (
+                    <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-[10px] text-white/60">
+                      HI
+                    </span>
+                  )}
 
-                {/* Download spinner */}
-                {isDownloading && (
-                  <span className="shrink-0 text-xs text-white/60" aria-label="Downloading">
-                    ⟳
+                  {/* Download count */}
+                  <span className="shrink-0 text-[10px] text-white/40">
+                    ↓{result.downloads.toLocaleString()}
                   </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+
+                  {/* Provider badge */}
+                  <span
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                    style={{
+                      backgroundColor: `${info?.color ?? "#6b7280"}22`,
+                      color: info?.color ?? "#9ca3af",
+                      border: `1px solid ${info?.color ?? "#6b7280"}55`,
+                    }}
+                  >
+                    {info?.abbr ?? result.provider}
+                  </span>
+
+                  {/* Download spinner */}
+                  {isDownloading && (
+                    <span className="shrink-0 text-xs text-white/60" aria-label="Downloading">
+                      ⟳
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -11,6 +11,29 @@ import (
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
+func TestActivityOutputContainerMatchesFFmpeg(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts TranscodeOpts
+		want string
+	}{
+		{"hevc-copy", TranscodeOpts{TargetCodecVideo: "copy", SourceVideoCodec: "hevc"}, "fmp4"},
+		{"forced-ts", TranscodeOpts{TargetCodecVideo: "copy", SourceVideoCodec: "hevc", CopyVideoMPEGTS: true}, "mpegts"},
+		{"mpeg2-copy", TranscodeOpts{TargetCodecVideo: "copy", SourceVideoCodec: "mpeg2video"}, "mpegts"},
+		{"video-encode", TranscodeOpts{TargetCodecVideo: "h264", SourceVideoCodec: "hevc"}, "mpegts"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := HLSOutputContainer(tc.opts); got != tc.want {
+				t.Fatalf("output container = %q, want %q", got, tc.want)
+			}
+			args := strings.Join(buildFFmpegArgs(tc.opts), " ")
+			if !strings.Contains(args, "-hls_segment_type "+tc.want) {
+				t.Fatal("activity format does not match the FFmpeg muxer")
+			}
+		})
+	}
+}
+
 // TestToneMapFFmpegGraphsCoverSupportedExecutors verifies each executor emits its required graph.
 func TestToneMapFFmpegGraphsCoverSupportedExecutors(t *testing.T) {
 	tests := []struct {
@@ -1298,8 +1321,18 @@ func TestResolveEffectiveTranscodeHWAccel(t *testing.T) {
 			want: "qsv",
 		},
 		{
-			name: "unvalidated nvenc upload falls back to software encode",
+			name: "explicit nvenc with software decode falls back to software encode",
 			opts: TranscodeOpts{HWAccel: "nvenc", SourceVideoCodec: "h264", SoftwareVideoDecode: true, TargetCodecVideo: "h264"},
+			want: "none",
+		},
+		{
+			name: "automatic mixed stage keeps nvenc with software decode",
+			opts: TranscodeOpts{HWAccel: "nvenc", SourceVideoCodec: "h264", SoftwareVideoDecode: true, TargetCodecVideo: "h264", nvencSoftwareDecode: true},
+			want: "nvenc",
+		},
+		{
+			name: "mixed permission never splices into a tone-map recipe",
+			opts: TranscodeOpts{HWAccel: "nvenc", SourceVideoCodec: "hevc", SoftwareVideoDecode: true, TargetCodecVideo: "h264", nvencSoftwareDecode: true, ToneMapMode: tonemap.ModeHardware},
 			want: "none",
 		},
 	}
@@ -1743,5 +1776,166 @@ func TestBuildFFmpegArgs_VideoToolboxTextBurnInStaysOnCPUFilters(t *testing.T) {
 	}
 	if strings.Contains(joined, "hwdownload") || strings.Contains(joined, "hwupload") {
 		t.Fatalf("videotoolbox burn-in runs on software frames, no hw round-trip: %s", joined)
+	}
+}
+
+// nvencMixedStageOpts returns the automatic pipeline's CPU-decode + NVENC stage.
+func nvencMixedStageOpts(t *testing.T, opts TranscodeOpts) TranscodeOpts {
+	t.Helper()
+	pipeline := newResolvedAutoTranscodePipeline(opts, newAutoTranscodePipelineCache())
+	if !pipeline.AdvanceAfterFailure("") {
+		t.Fatal("expected mixed stage")
+	}
+	mixed := pipeline.Current()
+	if mixed.HWAccel != transcodeHWNVENC || !mixed.SoftwareVideoDecode {
+		t.Fatalf("mixed stage = hw_accel %q, software_decode %v", mixed.HWAccel, mixed.SoftwareVideoDecode)
+	}
+	return mixed
+}
+
+func nvencMixedBaseOpts() TranscodeOpts {
+	return TranscodeOpts{
+		InputPath:         "/media/movie.mkv",
+		OutputDir:         "/tmp/out",
+		SessionID:         "session-nvenc-mixed",
+		SourceVideoCodec:  "hevc",
+		TargetCodecVideo:  "h264",
+		TargetCodecAudio:  "aac",
+		SegmentDuration:   2,
+		HWAccel:           transcodeHWNVENC,
+		TargetResolution:  "720p",
+		TargetBitrateKbps: 2000,
+	}
+}
+
+func TestBuildFFmpegArgs_NVENCMixedStageUploadsToConfiguredDevice(t *testing.T) {
+	tests := []struct {
+		name       string
+		hwDevice   string
+		wantDevice string
+	}{
+		{name: "default device", hwDevice: "", wantDevice: "-init_hw_device cuda=cu -filter_hw_device cu"},
+		{name: "configured device", hwDevice: "1", wantDevice: "-init_hw_device cuda=cu:1 -filter_hw_device cu"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := nvencMixedBaseOpts()
+			opts.HWDevice = tt.hwDevice
+			joined := strings.Join(buildFFmpegArgs(nvencMixedStageOpts(t, opts)), " ")
+
+			if !strings.Contains(joined, tt.wantDevice) {
+				t.Fatalf("mixed args should bind the upload device %q: %s", tt.wantDevice, joined)
+			}
+			if strings.Contains(joined, "-hwaccel cuda") || strings.Contains(joined, "-hwaccel_device") {
+				t.Fatalf("mixed args must decode on the CPU: %s", joined)
+			}
+			if !strings.Contains(joined, "-vf format=nv12,hwupload,scale_cuda=w=-2:h=720:format=nv12") {
+				t.Fatalf("mixed args should upload NV12 and scale on CUDA: %s", joined)
+			}
+			if strings.Contains(joined, "hwupload_cuda") {
+				t.Fatalf("hwupload_cuda ignores -filter_hw_device and must not be used: %s", joined)
+			}
+			if !strings.Contains(joined, "-c:v h264_nvenc") {
+				t.Fatalf("mixed args should keep the NVENC encoder: %s", joined)
+			}
+			// CPU-decoded frames autorotate before the upload, like libx264.
+			if strings.Contains(joined, "-noautorotate") {
+				t.Fatalf("mixed args must let FFmpeg autorotate CPU-decoded frames: %s", joined)
+			}
+			full := strings.Join(buildFFmpegArgs(opts), " ")
+			if !strings.Contains(full, "-hwaccel cuda -hwaccel_output_format cuda -noautorotate") {
+				t.Fatalf("full-hardware NVENC args changed: %s", full)
+			}
+		})
+	}
+}
+
+func TestBuildFFmpegArgs_NVENCMixedStageTextBurnInUploadsWithoutDownload(t *testing.T) {
+	opts := nvencMixedBaseOpts()
+	opts.HWDevice = "1"
+	opts.SubtitleTrackIndex = 1
+	opts.SubtitleBurnIn = true
+	opts.SubtitleCodec = "subrip"
+	joined := strings.Join(buildFFmpegArgs(nvencMixedStageOpts(t, opts)), " ")
+
+	want := "-vf format=yuv420p,scale=-2:720,subtitles=filename='/media/movie.mkv':si=1,format=nv12,hwupload "
+	if !strings.Contains(joined, want) {
+		t.Fatalf("mixed text burn-in should render on CPU and upload %q: %s", want, joined)
+	}
+	if strings.Contains(joined, "hwdownload") || strings.Contains(joined, "hwupload_cuda") {
+		t.Fatalf("mixed text burn-in must neither download nor use hwupload_cuda: %s", joined)
+	}
+	if !strings.Contains(joined, "-init_hw_device cuda=cu:1 -filter_hw_device cu") || !strings.Contains(joined, "-c:v h264_nvenc") {
+		t.Fatalf("mixed text burn-in should bind the CUDA device and encode on NVENC: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_NVENCMixedStageBitmapBurnInUploadsWithoutDownload(t *testing.T) {
+	opts := nvencMixedBaseOpts()
+	opts.HWDevice = "1"
+	opts.SubtitleTrackIndex = 1
+	opts.SubtitleBurnIn = true
+	opts.SubtitleCodec = "hdmv_pgs_subtitle"
+	joined := strings.Join(buildFFmpegArgs(nvencMixedStageOpts(t, opts)), " ")
+
+	want := "-filter_complex [0:v:0]format=yuv420p[vmain];[vmain][0:s:1]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload[vout]"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("mixed bitmap burn-in should overlay on CPU and upload %q: %s", want, joined)
+	}
+	if strings.Contains(joined, "hwdownload") || strings.Contains(joined, "hwupload_cuda") {
+		t.Fatalf("mixed bitmap burn-in must neither download nor use hwupload_cuda: %s", joined)
+	}
+	if !strings.Contains(joined, "-init_hw_device cuda=cu:1 -filter_hw_device cu") || !strings.Contains(joined, "-c:v h264_nvenc") {
+		t.Fatalf("mixed bitmap burn-in should bind the CUDA device and encode on NVENC: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_ExplicitNVENCSoftwareDecodeStillUsesLibx264(t *testing.T) {
+	variants := map[string]func(*TranscodeOpts){
+		"plain": func(*TranscodeOpts) {},
+		"text burn-in": func(opts *TranscodeOpts) {
+			opts.SubtitleTrackIndex, opts.SubtitleBurnIn, opts.SubtitleCodec = 1, true, "subrip"
+		},
+		"bitmap burn-in": func(opts *TranscodeOpts) {
+			opts.SubtitleTrackIndex, opts.SubtitleBurnIn, opts.SubtitleCodec = 1, true, "hdmv_pgs_subtitle"
+		},
+	}
+	for name, mutate := range variants {
+		t.Run(name, func(t *testing.T) {
+			opts := nvencMixedBaseOpts()
+			opts.HWDevice = "1"
+			opts.SoftwareVideoDecode = true
+			mutate(&opts)
+			joined := strings.Join(buildFFmpegArgs(opts), " ")
+
+			if !strings.Contains(joined, "-c:v libx264") {
+				t.Fatalf("explicit NVENC with software decode should encode with libx264: %s", joined)
+			}
+			for _, forbidden := range []string{"cuda", "nvenc", "hwupload"} {
+				if strings.Contains(joined, forbidden) {
+					t.Fatalf("explicit NVENC with software decode must not emit %q: %s", forbidden, joined)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildFFmpegArgs_NVENCFullHardwareArgsUnchanged(t *testing.T) {
+	opts := nvencMixedBaseOpts()
+	opts.HWDevice = "1"
+	pipeline := newResolvedAutoTranscodePipeline(opts, newAutoTranscodePipelineCache())
+	for name, candidate := range map[string]TranscodeOpts{"explicit": opts, "automatic full-hardware stage": pipeline.Current()} {
+		t.Run(name, func(t *testing.T) {
+			joined := strings.Join(buildFFmpegArgs(candidate), " ")
+			if !strings.Contains(joined, "-hwaccel cuda -hwaccel_output_format cuda -noautorotate -hwaccel_device 1 ") {
+				t.Fatalf("full-hardware NVENC should decode on CUDA device 1: %s", joined)
+			}
+			if strings.Contains(joined, "-init_hw_device") || strings.Contains(joined, "-filter_hw_device") {
+				t.Fatalf("full-hardware NVENC must not declare a filter device: %s", joined)
+			}
+			if !strings.Contains(joined, "-vf scale_cuda=w=-2:h=720:format=nv12") {
+				t.Fatalf("full-hardware NVENC should scale CUDA frames directly: %s", joined)
+			}
+		})
 	}
 }

@@ -1,0 +1,18 @@
+{
+  "persisted": true,
+  "document": {
+    "id": "1",
+    "domain": "scope",
+    "name": "Fixture scope",
+    "enabled": true,
+    "active_version_id": null,
+    "created_at": "2026-01-02T03:04:05.678Z",
+    "updated_at": "2026-01-02T03:04:05.678Z"
+  },
+  "persisted_generation": 7,
+  "application": {
+    "local_applied": false,
+    "loaded_generation": 6,
+    "publication_failed": true
+  }
+}

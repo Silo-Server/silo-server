@@ -153,6 +153,36 @@ func (r *SessionRepository) ListByUser(ctx context.Context, userID int) ([]*mode
 	return scanSessions(rows)
 }
 
+// SessionKey is the keyset position of one session in the
+// (created_at DESC, id DESC) order ListByUserPage serves.
+type SessionKey struct {
+	CreatedAt time.Time
+	ID        string
+}
+
+// ListByUserPage returns up to limit of the user's live sessions (not
+// expired, not revoked), newest first by (created_at DESC, id DESC), and
+// strictly after the key when one is given. v2 listSessions pages with it;
+// v1's ListByUser is unchanged. Callers that need has_more ask for limit+1.
+func (r *SessionRepository) ListByUserPage(ctx context.Context, userID int, after *SessionKey, limit int) ([]*models.AuthSession, error) {
+	args := []any{userID}
+	query := `SELECT ` + sessionColumns + ` FROM auth_sessions
+		WHERE user_id = $1 AND expires_at > NOW() AND revoked_at IS NULL`
+	if after != nil {
+		args = append(args, after.CreatedAt, after.ID)
+		query += fmt.Sprintf(` AND (created_at, id) < ($%d::timestamptz, $%d)`, len(args)-1, len(args))
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(` ORDER BY created_at DESC, id DESC LIMIT $%d`, len(args))
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing session page for user %d: %w", userID, err)
+	}
+	defer rows.Close()
+
+	return scanSessions(rows)
+}
+
 // Revoke sets revoked_at to NOW() for the given session.
 func (r *SessionRepository) Revoke(ctx context.Context, id string) error {
 	query := `UPDATE auth_sessions SET revoked_at = NOW() WHERE id = $1`

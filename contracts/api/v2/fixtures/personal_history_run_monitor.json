@@ -1,0 +1,22 @@
+{
+  "terminal": false,
+  "cancelable": false,
+  "id": "run-3",
+  "user_id": "1",
+  "profile_id": "p-owner",
+  "source_type": "plex",
+  "connection_mode": "plex_oauth",
+  "status": "running",
+  "fetched": 0,
+  "matched": 0,
+  "unmatched": 0,
+  "progress_updated": 0,
+  "history_created": 0,
+  "watchlist_added": 0,
+  "favorites_imported": 0,
+  "skipped": 0,
+  "warnings": [],
+  "unmatched_samples": [],
+  "created_at": "2026-01-02T05:04:05.678Z",
+  "started_at": "2026-01-02T03:04:06.678Z"
+}

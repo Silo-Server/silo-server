@@ -1,7 +1,10 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 
-import { api, apiWithProfileRequestContext, captureProfileRequestContext } from "@/api/client";
-import type { AccountPasswordCapability } from "@/api/types";
+import { captureProfileRequestContext } from "@/api/client";
+import { v2, type V2Body, type V2Result } from "@/api/v2/request";
+
+/** Whether and within which limits the caller may replace the account password. */
+export type AccountPasswordCapability = V2Result<"GET /api/v2/account/password/capability">;
 
 export const accountKeys = {
   passwordCapability: () => ["account", "password-capability"] as const,
@@ -10,21 +13,19 @@ export const accountKeys = {
 export function useAccountPasswordCapability() {
   return useQuery({
     queryKey: accountKeys.passwordCapability(),
-    queryFn: () => api<AccountPasswordCapability>("/auth/account/capability"),
+    queryFn: () => v2("GET /api/v2/account/password/capability"),
   });
 }
 
 export function useChangeAccountPassword() {
   return useMutation({
-    mutationFn: (body: { current_password: string; new_password: string }) => {
-      const requestContext = captureProfileRequestContext();
-      const options = {
-        method: "POST",
-        body: JSON.stringify(body),
-      };
-      return requestContext
-        ? apiWithProfileRequestContext<void>("/auth/account/password", requestContext, options)
-        : api<void>("/auth/account/password", options);
+    mutationFn: (body: V2Body<"POST /api/v2/account/password">) => {
+      // Bind the write to the profile that was active when the user submitted:
+      // a household profile switch while it is in flight must not re-author it.
+      const profileContext = captureProfileRequestContext();
+      return profileContext
+        ? v2("POST /api/v2/account/password", { body, profileContext })
+        : v2("POST /api/v2/account/password", { body });
     },
   });
 }

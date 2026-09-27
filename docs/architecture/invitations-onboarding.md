@@ -38,9 +38,11 @@ dump yields no usable links.
 - **Enumeration resistance.** The public lookup returns the same not-found
   result for unknown, expired, revoked, and accepted tokens; the public
   endpoints sit behind the auth-endpoint rate limiter.
-- **Privilege ceiling.** An invitation granting `admin` requires the inviter
-  to be an admin, enforced in the service against the inviter's row in the
-  database, not the request.
+- **Privilege ceiling.** Creating or resending an invitation granting `admin`
+  requires the server Owner, enforced in the service against the inviter's row
+  in the database, not the request. Moving ownership revokes pending `admin`
+  invitations, so a former Owner cannot keep a link that grants the role; the
+  new Owner resends any it still wants.
 - **Invitation binding unchanged.** Pre-bound `library_ids` and
   `access_group_id` are applied verbatim at accept and then feed the existing
   inherit/override policy resolver: the group supplies every field the
@@ -57,21 +59,40 @@ dump yields no usable links.
   revoked) enforces it; `Repository.Create` revokes any live invitation for
   the address in the same transaction. Re-invite and resend therefore
   *supersede*: a forwarded copy of the old link stops working.
-- **Accept is race-safe.** `Repository.Accept` claims the row with a single
-  `UPDATE ... WHERE accepted_at IS NULL AND revoked_at IS NULL AND
-  expires_at > now()`; of two concurrent accepts exactly one matches. The
-  loser's account creation is independently blocked by the `users` unique
-  constraints. Account-plus-default-profile creation goes through
-  `auth.AccountProvisioner.CreateAccount` (rollback on profile failure), and
-  a successful accept ends with a normal login, returning the same token pair
-  shape as signup.
-- **Revoke is idempotent**; deletion is a separate admin-only history-clearing
-  operation.
+- **Accept commits account and claim together.** The invitation repository
+  locks the token row and provisions the account and requested PostgreSQL
+  profile through the same transaction. The final claim checks wall-clock
+  expiry; expiry or any provisioning/claim failure rolls all three back.
+  Revoke and replacement serialize on that row: if they win first, acceptance
+  creates nothing; if acceptance wins first, later revocation does not delete
+  the account. Resend accepts only the requested pending or expired source;
+  it cannot revive revoked or accepted history or supersede a newer link from
+  a stale request.
+- **Profile storage must support the transaction.** Required default profiles
+  use the PostgreSQL provider's transaction capability, preserved through the
+  notification wrapper. A SQLite profile store cannot join that transaction:
+  acceptance with `create_profile=true` fails before either store changes.
+  `create_profile=false` remains supported. This restriction applies to emailed
+  invitations; ordinary signup invite-code behavior is unchanged.
+- **Login follows acceptance.** A session-issuance failure leaves the committed
+  account and accepted invitation intact. The domain returns that account with
+  `ErrSessionStart`; the invitee can use ordinary sign-in with the chosen
+  password. A lost commit response is uncertain, not proof of rollback. Neither
+  failure authorizes automatic replay or compensating account deletion.
+- **Revoke is idempotent.** The administrator DELETE route revokes the link;
+  physical history deletion is a separate repository operation.
 - **Mail degrades loudly, not silently.** Claim links resolve their base from
-  `notifications.email.external_url`, falling back to the server public URL;
+  the server public URL;
   with neither set, creation fails. With no mail sender configured, the row is
   still created and the claim URL returned with `EmailSent` false so the admin
   copies the link instead of believing an email went out.
+  SMTP runs after storage commits. A delivery error retains the new invitation
+  and invalidates the old link; the domain returns the committed `SendResult`
+  alongside the error. `EmailSent=false` with an error means failed or uncertain
+  delivery, not proof that no message arrived. Repeating send/resend creates a
+  new token and may send another email; there is no durable replay receipt or
+  exactly-once delivery guarantee. The current legacy HTTP error response does
+  not expose this partial result; a later transport must represent it explicitly.
 
 ## Accounts vs household profiles
 

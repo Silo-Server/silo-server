@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "@/api/client";
+import { fetchAdminLibraries } from "@/hooks/queries/admin/libraries";
 
 interface Library {
   id: number;
@@ -19,9 +19,8 @@ export default function BulkApplyDialog({ open, onClose, onConfirm }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    api<Library[]>("/libraries")
-      .then((j) => {
-        const libs = Array.isArray(j) ? j : [];
+    fetchAdminLibraries()
+      .then((libs) => {
         setLibraries(libs);
         setSelected(new Set(libs.map((l) => l.id)));
       })

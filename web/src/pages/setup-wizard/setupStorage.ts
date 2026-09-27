@@ -1,19 +1,23 @@
 export const SKIPPABLE_STEPS = [
-  "library",
   "server",
-  "integrations",
-  "downloads",
-  "recommendations",
+  "playback",
+  "storage",
+  "library",
+  "subtitles",
+  "connect",
+  "features",
 ] as const;
 
 export type SkippableStep = (typeof SKIPPABLE_STEPS)[number];
 
 export const SETUP_WIZARD_STORAGE_KEYS: Record<SkippableStep, string> = {
-  library: "setup_wizard_skip_library",
   server: "setup_wizard_server_done",
-  integrations: "setup_wizard_integrations_done",
-  downloads: "setup_wizard_downloads_done",
-  recommendations: "setup_wizard_recommendations_done",
+  playback: "setup_wizard_playback_done",
+  storage: "setup_wizard_storage_done",
+  library: "setup_wizard_skip_library",
+  subtitles: "setup_wizard_subtitles_done",
+  connect: "setup_wizard_connect_done",
+  features: "setup_wizard_features_done",
 };
 
 function withLocalStorage<T>(callback: (storage: Storage) => T, fallback: T): T {
@@ -61,8 +65,9 @@ export function writeSetupWizardFlag(step: SkippableStep, value: boolean) {
 
 export function clearSetupWizardStorage() {
   withLocalStorage((storage) => {
-    for (const key of Object.values(SETUP_WIZARD_STORAGE_KEYS)) {
-      storage.removeItem(key);
+    // Sweep by prefix so flags from an older step layout go too.
+    for (const key of Object.keys(storage)) {
+      if (key.startsWith("setup_wizard_")) storage.removeItem(key);
     }
   }, undefined);
 }

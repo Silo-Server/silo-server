@@ -15,8 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
@@ -265,20 +263,18 @@ func TestMountedProxyRouterResolvesViewerIPOverSocket(t *testing.T) {
 
 	var seen string
 	srv := newSocketProxyServer(t, secret, resolver)
-	mounted := srv.Handler()
 	// No proxy route consumes the resolved address yet — that arrives with the
 	// telemetry phase — so observe it from a NotFound handler, which chi still
 	// runs through the full mounted middleware chain. That keeps this a test of
-	// the real chain rather than of clientip.Middleware in isolation.
-	router, ok := mounted.(chi.Router)
-	if !ok {
-		t.Fatalf("proxy Handler() is %T, want chi.Router", mounted)
-	}
+	// the real chain rather than of clientip.Middleware in isolation. Handler()
+	// seals the router, so the test builds it through the unexported
+	// constructor, which is the same router with the same chain.
+	router := srv.router()
 	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		seen = clientip.FromContext(r.Context())
 		w.WriteHeader(http.StatusNoContent)
 	})
-	server := httptest.NewServer(mounted)
+	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 	path := writeSocketProxyMedia(t)
 	mediaURL := server.URL + "/stream/direct/" + socketProxyMediaToken(t, secret, path)

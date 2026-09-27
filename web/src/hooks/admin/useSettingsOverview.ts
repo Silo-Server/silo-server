@@ -29,6 +29,7 @@ export const ADMIN_SETTINGS_PAGE_IDS = [
   "ai",
   "notifications",
   "compatibility",
+  "network-access",
 ] as const;
 
 export type AdminSettingsPageID = (typeof ADMIN_SETTINGS_PAGE_IDS)[number];

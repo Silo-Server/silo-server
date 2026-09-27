@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/idgen"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // ErrSectionNotFound is returned when a section cannot be found.
@@ -66,7 +67,7 @@ func scanSections(rows pgx.Rows) ([]*PageSection, error) {
 }
 
 // Create inserts a new section and returns it.
-func (r *Repository) Create(ctx context.Context, s *PageSection) (*PageSection, error) {
+func (r *Repository) create(ctx context.Context, s *PageSection) (*PageSection, error) {
 	id, err := idgen.NextID()
 	if err != nil {
 		return nil, fmt.Errorf("generate section id: %w", err)
@@ -79,7 +80,7 @@ func (r *Repository) Create(ctx context.Context, s *PageSection) (*PageSection, 
 	query := fmt.Sprintf(`INSERT INTO page_sections (%s) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),NOW())
 		RETURNING %s`, sectionColumns, sectionColumns)
 
-	return scanSection(r.pool.QueryRow(ctx, query,
+	return scanSection(r.query(ctx).QueryRow(ctx, query,
 		s.ID, s.Scope, s.LibraryID, s.Position, s.SectionType, s.Title,
 		s.Featured, s.ItemLimit, s.Config, s.Enabled,
 	))
@@ -88,7 +89,7 @@ func (r *Repository) Create(ctx context.Context, s *PageSection) (*PageSection, 
 // GetByID returns a single section by ID.
 func (r *Repository) GetByID(ctx context.Context, id string) (*PageSection, error) {
 	query := fmt.Sprintf("SELECT %s FROM page_sections WHERE id = $1", sectionColumns)
-	return scanSection(r.pool.QueryRow(ctx, query, id))
+	return scanSection(r.query(ctx).QueryRow(ctx, query, id))
 }
 
 // ListByScope returns all enabled sections for a scope, ordered by position.
@@ -97,14 +98,14 @@ func (r *Repository) ListByScope(ctx context.Context, scope string, libraryID *i
 	var args []any
 
 	if scope == "library" && libraryID != nil {
-		query = fmt.Sprintf("SELECT %s FROM page_sections WHERE scope = $1 AND library_id = $2 AND enabled = true ORDER BY position ASC", sectionColumns)
+		query = fmt.Sprintf("SELECT %s FROM page_sections WHERE scope = $1 AND library_id = $2 AND enabled = true ORDER BY position ASC, id ASC", sectionColumns)
 		args = []any{scope, *libraryID}
 	} else {
-		query = fmt.Sprintf("SELECT %s FROM page_sections WHERE scope = $1 AND library_id IS NULL AND enabled = true ORDER BY position ASC", sectionColumns)
+		query = fmt.Sprintf("SELECT %s FROM page_sections WHERE scope = $1 AND library_id IS NULL AND enabled = true ORDER BY position ASC, id ASC", sectionColumns)
 		args = []any{scope}
 	}
 
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := r.query(ctx).Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing sections: %w", err)
 	}
@@ -119,14 +120,14 @@ func (r *Repository) ListByScopeAll(ctx context.Context, scope string, libraryID
 	var args []any
 
 	if scope == "library" && libraryID != nil {
-		query = fmt.Sprintf("SELECT %s FROM page_sections WHERE scope = $1 AND library_id = $2 ORDER BY position ASC", sectionColumns)
+		query = fmt.Sprintf("SELECT %s FROM page_sections WHERE scope = $1 AND library_id = $2 ORDER BY position ASC, id ASC", sectionColumns)
 		args = []any{scope, *libraryID}
 	} else {
-		query = fmt.Sprintf("SELECT %s FROM page_sections WHERE scope = $1 AND library_id IS NULL ORDER BY position ASC", sectionColumns)
+		query = fmt.Sprintf("SELECT %s FROM page_sections WHERE scope = $1 AND library_id IS NULL ORDER BY position ASC, id ASC", sectionColumns)
 		args = []any{scope}
 	}
 
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := r.query(ctx).Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing all sections: %w", err)
 	}
@@ -140,7 +141,7 @@ func (r *Repository) ListByScopeAll(ctx context.Context, scope string, libraryID
 // refresh task uses this to discover which (source, window) combinations need a
 // snapshot, so dormant configs (no enabled sections) trigger zero upstream work.
 func (r *Repository) ListTrendingDiscoverConfigs(ctx context.Context) ([]json.RawMessage, error) {
-	rows, err := r.pool.Query(ctx, `
+	rows, err := r.query(ctx).Query(ctx, `
 		SELECT config FROM page_sections
 		WHERE section_type = $1 AND enabled = true`, string(SectionTrendingDiscover))
 	if err != nil {
@@ -159,14 +160,27 @@ func (r *Repository) ListTrendingDiscoverConfigs(ctx context.Context) ([]json.Ra
 	return out, rows.Err()
 }
 
+// ListTrendingDiscoverSections returns enabled trending sections with their
+// identities so profile overrides can contribute their effective configs.
+func (r *Repository) ListTrendingDiscoverSections(ctx context.Context) ([]*PageSection, error) {
+	rows, err := r.query(ctx).Query(ctx, fmt.Sprintf(`
+		SELECT %s FROM page_sections
+		WHERE section_type = 'trending_discover' AND enabled = true`, sectionColumns))
+	if err != nil {
+		return nil, fmt.Errorf("listing trending_discover sections: %w", err)
+	}
+	defer rows.Close()
+	return scanSections(rows)
+}
+
 // Update modifies an existing section.
-func (r *Repository) Update(ctx context.Context, s *PageSection) error {
+func (r *Repository) update(ctx context.Context, s *PageSection) error {
 	query := `UPDATE page_sections SET
 		position = $2, section_type = $3, title = $4, featured = $5,
 		item_limit = $6, config = $7, enabled = $8, updated_at = NOW()
 		WHERE id = $1`
 
-	tag, err := r.pool.Exec(ctx, query,
+	tag, err := r.query(ctx).Exec(ctx, query,
 		s.ID, s.Position, s.SectionType, s.Title, s.Featured,
 		s.ItemLimit, s.Config, s.Enabled,
 	)
@@ -181,12 +195,12 @@ func (r *Repository) Update(ctx context.Context, s *PageSection) error {
 
 // ClearFeaturedForSurface unsets featured on every other section in the same
 // home or library surface. This keeps the hero invariant owned by the backend.
-func (r *Repository) ClearFeaturedForSurface(ctx context.Context, scope string, libraryID *int, exceptID string) error {
+func (r *Repository) clearFeaturedForSurface(ctx context.Context, scope string, libraryID *int, exceptID string) error {
 	var libraryArg any
 	if libraryID != nil {
 		libraryArg = *libraryID
 	}
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.query(ctx).Exec(ctx, `
 		UPDATE page_sections
 		SET featured = false, updated_at = NOW()
 		WHERE scope = $1
@@ -218,7 +232,7 @@ func (r *Repository) GetGeneratedTemplateBundleFeaturedSection(ctx context.Conte
 		ORDER BY created_at ASC
 		LIMIT 1
 	`, sectionColumns)
-	return scanSection(r.pool.QueryRow(ctx, query, scope, libraryArg, SectionCollection, bundleID))
+	return scanSection(r.query(ctx).QueryRow(ctx, query, scope, libraryArg, SectionCollection, bundleID))
 }
 
 // DeleteGeneratedTemplateBundleFeaturedSections removes generated featured
@@ -226,21 +240,21 @@ func (r *Repository) GetGeneratedTemplateBundleFeaturedSection(ctx context.Conte
 // blocked by stale generated section references. Scoped to a specific
 // bundleID — featured sections produced by sibling bundles in the same
 // libraries are left intact so multi-bundle setups coexist cleanly.
-func (r *Repository) DeleteGeneratedTemplateBundleFeaturedSections(ctx context.Context, bundleID string, libraryIDs []int) error {
+func (r *Repository) deleteGeneratedTemplateBundleFeaturedSections(ctx context.Context, bundleID string, libraryIDs []int) error {
 	if len(libraryIDs) == 0 {
 		return nil
 	}
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.query(ctx).Exec(ctx, `
 		DELETE FROM page_sections
 		WHERE section_type = $1
 		  AND config->>'generated_source' = 'template_bundle_featured'
 		  AND config->>'template_bundle' = $2
 		  AND (
-		    (scope = 'library' AND library_id = ANY($3::int[]))
+		    (scope = 'library' AND library_id = ANY($3::bigint[]))
 		    OR (
 		      scope = 'home'
 		      AND config->>'library_id' ~ '^[0-9]+$'
-		      AND (config->>'library_id')::int = ANY($3::int[])
+		      AND (config->>'library_id')::bigint = ANY($3::bigint[])
 		    )
 		  )
 	`, SectionCollection, bundleID, libraryIDs)
@@ -251,8 +265,8 @@ func (r *Repository) DeleteGeneratedTemplateBundleFeaturedSections(ctx context.C
 }
 
 // Delete removes a section by ID.
-func (r *Repository) Delete(ctx context.Context, id string) error {
-	tag, err := r.pool.Exec(ctx, "DELETE FROM page_sections WHERE id = $1", id)
+func (r *Repository) delete(ctx context.Context, id string) error {
+	tag, err := r.query(ctx).Exec(ctx, "DELETE FROM page_sections WHERE id = $1", id)
 	if err != nil {
 		return fmt.Errorf("deleting section: %w", err)
 	}
@@ -276,19 +290,15 @@ func (r *Repository) CountLibraryCollectionReferences(ctx context.Context, colle
 		args = append(args, excludeSectionID)
 	}
 	var count int
-	if err := r.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+	if err := r.query(ctx).QueryRow(ctx, query, args...).Scan(&count); err != nil {
 		return 0, fmt.Errorf("counting library collection section references: %w", err)
 	}
 	return count, nil
 }
 
 // Reorder updates positions for multiple sections in a transaction.
-func (r *Repository) Reorder(ctx context.Context, entries []ReorderEntry) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("beginning reorder transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
+func (r *Repository) reorder(ctx context.Context, entries []ReorderEntry) error {
+	tx := sectionTransaction(ctx)
 
 	for _, e := range entries {
 		if _, err := tx.Exec(ctx, "UPDATE page_sections SET position = $1, updated_at = NOW() WHERE id = $2", e.Position, e.ID); err != nil {
@@ -296,12 +306,12 @@ func (r *Repository) Reorder(ctx context.Context, entries []ReorderEntry) error 
 		}
 	}
 
-	return tx.Commit(ctx)
+	return nil
 }
 
 // SeedDefaults inserts default sections for a scope if none exist yet.
 // It is idempotent — if any sections already exist for the scope+library, it is a no-op.
-func (r *Repository) SeedDefaults(ctx context.Context, scope string, libraryID *int, defaults []*PageSection) error {
+func (r *Repository) seedDefaults(ctx context.Context, scope string, libraryID *int, defaults []*PageSection) error {
 	existing, err := r.ListByScopeAll(ctx, scope, libraryID)
 	if err != nil {
 		return fmt.Errorf("checking existing sections: %w", err)
@@ -320,12 +330,9 @@ func (r *Repository) SeedDefaults(ctx context.Context, scope string, libraryID *
 
 // RestoreDefaults replaces all sections for a scope+library with the given defaults.
 // It deletes existing sections and inserts the defaults in a single transaction.
-func (r *Repository) RestoreDefaults(ctx context.Context, scope string, libraryID *int, defaults []*PageSection) ([]*PageSection, error) {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("beginning restore transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
+func (r *Repository) restoreDefaults(ctx context.Context, scope string, libraryID *int, defaults []*PageSection) ([]*PageSection, error) {
+	tx := sectionTransaction(ctx)
+	var err error
 
 	// Delete existing sections for this scope+library.
 	if libraryID != nil {
@@ -360,9 +367,6 @@ func (r *Repository) RestoreDefaults(ctx context.Context, scope string, libraryI
 		created = append(created, s)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("committing restore transaction: %w", err)
-	}
 	return created, nil
 }
 
@@ -370,7 +374,7 @@ func (r *Repository) RestoreDefaults(ctx context.Context, scope string, libraryI
 // This is an admin-level operation used when restoring default sections.
 func (r *Repository) ClearAllProfileOverrides(ctx context.Context, scope, libraryID string) error {
 	key := fmt.Sprintf("section_overrides:%s:%s", scope, libraryID)
-	_, err := r.pool.Exec(ctx, "DELETE FROM user_settings WHERE key = $1", key)
+	_, err := r.query(ctx).Exec(ctx, "DELETE FROM user_settings WHERE key = $1", key)
 	if err != nil {
 		return fmt.Errorf("clearing profile overrides: %w", err)
 	}
@@ -407,7 +411,7 @@ func (r *Repository) nextHomePosition(ctx context.Context) (int, error) {
 	return maxPosition + 1, nil
 }
 
-func (r *Repository) CreateGeneratedHomeLibraryRecentSections(ctx context.Context, libraryID int, libraryName, libraryType string) ([]*PageSection, error) {
+func (r *Repository) createGeneratedHomeLibraryRecentSections(ctx context.Context, libraryID int, libraryName, libraryType string) ([]*PageSection, error) {
 	existing, err := r.listGeneratedHomeLibraryRecentSections(ctx, libraryID)
 	if err != nil {
 		return nil, fmt.Errorf("listing generated home sections: %w", err)
@@ -448,12 +452,9 @@ func (r *Repository) CreateGeneratedHomeLibraryRecentSections(ctx context.Contex
 	return created, nil
 }
 
-func (r *Repository) EnsureHomeContinueListeningSection(ctx context.Context) (*PageSection, error) {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("beginning continue listening transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
+func (r *Repository) ensureHomeContinueListeningSection(ctx context.Context) (*PageSection, error) {
+	tx := sectionTransaction(ctx)
+	var err error
 
 	var existingID string
 	err = tx.QueryRow(ctx, `
@@ -467,11 +468,11 @@ func (r *Repository) EnsureHomeContinueListeningSection(ctx context.Context) (*P
 		    OR config->>'filter_type' = 'audiobook'
 		    OR config->>'media_scope' = 'audiobook'
 		  )
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 		LIMIT 1
 	`, SectionContinueWatching, ContinueTypeListening).Scan(&existingID)
 	if err == nil {
-		return nil, tx.Commit(ctx)
+		return nil, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("checking home continue listening section: %w", err)
@@ -508,9 +509,6 @@ func (r *Repository) EnsureHomeContinueListeningSection(ctx context.Context) (*P
 		return nil, fmt.Errorf("creating home continue listening section: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("committing continue listening transaction: %w", err)
-	}
 	return created, nil
 }
 
@@ -530,7 +528,7 @@ func continueListeningInsertPosition(ctx context.Context, q queryer) (int, error
 		FROM page_sections
 		WHERE scope = 'home'
 		  AND library_id IS NULL
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`)
 	if err != nil {
 		return 0, fmt.Errorf("listing home section positions: %w", err)
@@ -562,7 +560,7 @@ func continueListeningInsertPosition(ctx context.Context, q queryer) (int, error
 	return insertPosition, nil
 }
 
-func (r *Repository) SyncGeneratedHomeLibraryRecentTitles(ctx context.Context, libraryID int, oldLibraryName, newLibraryName string) error {
+func (r *Repository) syncGeneratedHomeLibraryRecentTitles(ctx context.Context, libraryID int, oldLibraryName, newLibraryName string) error {
 	sections, err := r.listGeneratedHomeLibraryRecentSections(ctx, libraryID)
 	if err != nil {
 		return fmt.Errorf("listing generated home sections: %w", err)
@@ -581,7 +579,7 @@ func (r *Repository) SyncGeneratedHomeLibraryRecentTitles(ctx context.Context, l
 	return nil
 }
 
-func (r *Repository) DeleteGeneratedHomeLibraryRecentSections(ctx context.Context, libraryID int) error {
+func (r *Repository) deleteGeneratedHomeLibraryRecentSections(ctx context.Context, libraryID int) error {
 	sections, err := r.listGeneratedHomeLibraryRecentSections(ctx, libraryID)
 	if err != nil {
 		return fmt.Errorf("listing generated home sections: %w", err)
@@ -599,15 +597,11 @@ func (r *Repository) DeleteGeneratedHomeLibraryRecentSections(ctx context.Contex
 // CreateMany inserts multiple sections in a single transaction. If any insert
 // fails the entire batch is rolled back. Each row gets a fresh ID, and
 // position is computed as MAX(position)+1 within the same scope/library_id.
-func (r *Repository) CreateMany(ctx context.Context, rows []*PageSection) error {
+func (r *Repository) createMany(ctx context.Context, rows []*PageSection) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
+	tx := sectionTransaction(ctx)
 
 	for _, row := range rows {
 		id, err := idgen.NextID()
@@ -629,5 +623,12 @@ func (r *Repository) CreateMany(ctx context.Context, rows []*PageSection) error 
 			return fmt.Errorf("inserting section: %w", err)
 		}
 	}
-	return tx.Commit(ctx)
+	return nil
+}
+
+// CanResetAllProfileOverrides checks the whole-provider guarantee against the
+// pool used by the atomic definition and override reset.
+func (r *Repository) CanResetAllProfileOverrides(provider userstore.UserStoreProvider) bool {
+	capability, ok := provider.(userstore.SectionProfileResetProvider)
+	return r != nil && ok && capability.SupportsAtomicSectionProfileReset(r.pool)
 }

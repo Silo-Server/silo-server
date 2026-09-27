@@ -13,7 +13,7 @@ import { WidgetRangePicker } from "../WidgetRangePicker";
  *
  * Deliberately four counts and one rate: time-to-first-frame and failed-start
  * counts would belong here, but nothing records playback *start* events yet
- * (playback_history_admin only gains a row when a session finalizes). Adding
+ * (admin_playback_history only gains a row when a session finalizes). Adding
  * them means capturing start telemetry in internal/playback first — until then
  * this widget shows what the server actually knows rather than an estimate
  * reverse-engineered from logs. See docs/admin-api.md.

@@ -17,13 +17,15 @@ type AssetKind string
 const (
 	// KindWordmark is the wide logo shown in the expanded sidebar.
 	KindWordmark AssetKind = "wordmark"
-	// KindWordmarkLight is the wide logo shown in the expanded sidebar for light
-	// themes.
+	// KindWordmarkLight was the wide logo for light themes. The web client has
+	// one dark theme and no longer shows it, and /api/v2 does not accept it; it
+	// stays a valid kind only so the frozen /api/v1 upload, delete and serve
+	// routes keep their behavior until v1 retires.
 	KindWordmarkLight AssetKind = "wordmark_light"
 	// KindMark is the square icon shown in the collapsed sidebar and PWA install.
 	KindMark AssetKind = "mark"
-	// KindMarkLight is the square icon shown in the collapsed sidebar for light
-	// themes.
+	// KindMarkLight was the square icon for light themes; kept for /api/v1 only,
+	// like KindWordmarkLight.
 	KindMarkLight AssetKind = "mark_light"
 	// KindFavicon is the browser tab icon. Served as-is (no WebP re-encode) so
 	// Safari and mobile browsers keep working.
@@ -38,7 +40,10 @@ const (
 	KeyServerName    = "branding.server_name"
 	KeyLoginSubtitle = "branding.login_subtitle"
 	KeyAccentColor   = "branding.accent_color"
-	KeyDefaultTheme  = "branding.default_theme"
+	// KeyDefaultTheme is the retired admin default theme. The web client has
+	// one theme and ignores it; only the frozen /api/v1 branding response still
+	// reports it, until v1 retires.
+	KeyDefaultTheme = "branding.default_theme"
 )
 
 // Defaults applied when a branding setting is unset. ServerName/LoginSubtitle
@@ -54,7 +59,12 @@ const (
 
 // assetURLBase is the public, stable path prefix for serving branding assets.
 // Assets are addressed by content ref (?v=<hash><ext>) for immutable caching.
-const assetURLBase = "/api/v1/branding/assets/"
+//
+// Minted in the v2 namespace: these URLs are baked into the SPA index.html
+// favicon link and the PWA manifest, which nothing rewrites, so a v1-shaped
+// path would 404 once the /api/v1 tombstone lands. The bridge release serves
+// both namespaces, so the v1 branding JSON carrying this URL keeps working.
+const assetURLBase = "/api/v2/branding/assets/"
 
 // AssetContentSecurityPolicy hardens every served branding asset response.
 //
@@ -70,9 +80,6 @@ const AssetContentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline
 
 // Errors returned by Service. Handlers map these to HTTP status codes.
 var (
-	// ErrStorageUnavailable indicates S3 is not configured; branding image
-	// upload/serving is unavailable but text branding still works.
-	ErrStorageUnavailable = errors.New("branding: asset storage is not configured")
 	// ErrAssetNotConfigured indicates no custom asset of the requested kind is set.
 	ErrAssetNotConfigured = errors.New("branding: asset not configured")
 	// ErrInvalidKind indicates an unknown asset kind.
@@ -86,3 +93,6 @@ func IsValidKind(s string) bool {
 	_, ok := assetSpecs[AssetKind(s)]
 	return ok
 }
+
+// ErrStorageUnavailable indicates that branding asset storage is not configured.
+var ErrStorageUnavailable = errors.New("branding asset storage is not configured")

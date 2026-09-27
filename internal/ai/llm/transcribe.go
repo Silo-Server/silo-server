@@ -72,8 +72,8 @@ type transcriptionResponse struct {
 	// from "endpoint ignored verbose_json" (field absent) — the latter cannot
 	// produce timed cues and must fail rather than silently emit nothing.
 	Segments *[]struct {
-		Start float64                 `json:"start"`
-		End   float64                 `json:"end"`
+		Start *float64                `json:"start"`
+		End   *float64                `json:"end"`
 		Text  string                  `json:"text"`
 		Words []transcriptionWordJSON `json:"words"`
 	} `json:"segments"`
@@ -83,14 +83,6 @@ type transcriptionResponse struct {
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
-}
-
-// chatOnlyGatewayHosts lists OpenAI-compatible gateways that cannot serve
-// Silo's transcription needs: they either lack /v1/audio/transcriptions
-// entirely or (OpenRouter) return plain text with no segment timestamps,
-// which subtitle cues require. Matched by host suffix.
-var chatOnlyGatewayHosts = []string{
-	"openrouter.ai",
 }
 
 // strictHostedASRHosts lists hosted transcription providers that reject
@@ -104,14 +96,7 @@ var strictHostedASRHosts = []string{
 	"openai.azure.com",
 	"api.groq.com",
 	"api.mistral.ai",
-}
-
-// IsChatOnlyGateway reports whether baseURL points at a known chat-only
-// gateway that cannot produce timestamped transcriptions. Used to validate
-// the transcription settings and to disable ASR rather than fail jobs at
-// runtime.
-func IsChatOnlyGateway(baseURL string) bool {
-	return hostMatchesAny(baseURL, chatOnlyGatewayHosts)
+	"openrouter.ai",
 }
 
 // hostMatchesAny reports whether baseURL's hostname equals or is a subdomain
@@ -145,10 +130,6 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 	cfg := c.Config()
 	if !cfg.ASRConfigured() {
 		return nil, fmt.Errorf("transcription endpoint is not configured")
-	}
-	if IsChatOnlyGateway(cfg.asrBaseURL()) {
-		return nil, fmt.Errorf("the configured transcription endpoint (%s) cannot produce timestamped transcriptions; "+
-			"set a Whisper-compatible Transcription base URL under Admin Settings → AI Services", cfg.asrBaseURL())
 	}
 	if len(req.Audio) == 0 {
 		return nil, fmt.Errorf("no audio data to transcribe")
@@ -224,9 +205,20 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 			}
 			out := &Transcription{Language: parsed.Language}
 			for _, s := range *parsed.Segments {
+				// Whisper may emit empty, zero-duration entries at chunk boundaries.
+				// They contain no cue text and need no timestamps.
+				if strings.TrimSpace(s.Text) == "" {
+					continue
+				}
+				if s.Start == nil || s.End == nil || *s.Start < 0 || *s.End <= *s.Start {
+					return &permanentError{err: fmt.Errorf("transcription endpoint returned missing or invalid segment timestamps (model %q)", cfg.ASRModel)}
+				}
 				out.Segments = append(out.Segments, TranscriptionSegment{
-					Start: s.Start, End: s.End, Text: s.Text, Words: wordsFromJSON(s.Words),
+					Start: *s.Start, End: *s.End, Text: s.Text, Words: wordsFromJSON(s.Words),
 				})
+			}
+			if len(out.Segments) == 0 && strings.TrimSpace(parsed.Text) != "" {
+				return &permanentError{err: fmt.Errorf("transcription endpoint returned text without timed segments (model %q)", cfg.ASRModel)}
 			}
 			attachTopLevelWords(out.Segments, wordsFromJSON(parsed.Words))
 			result = out

@@ -312,6 +312,8 @@ func newPushDeviceTestRepo(t *testing.T) (*PushDeviceRepository, *pgxpool.Pool) 
 			apns_topic text,
 			apns_token_ciphertext text,
 			apns_token_hash text,
+			fcm_token_ciphertext text,
+			fcm_token_hash text,
 			server_device_id text NOT NULL,
 			push_mode text NOT NULL DEFAULT 'private_push',
 			enabled boolean NOT NULL DEFAULT true,
@@ -326,6 +328,18 @@ func newPushDeviceTestRepo(t *testing.T) (*PushDeviceRepository, *pgxpool.Pool) 
 		) ON COMMIT PRESERVE ROWS`); err != nil {
 		t.Fatalf("create temp push_devices table: %v", err)
 	}
+	for _, name := range []string{"20260906054410_ordered_android_push_registrations.sql", "20260906184134_ordered_apple_push_registrations.sql"} {
+		migration, err := os.ReadFile("../../migrations/sql/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ddl := strings.Split(strings.Split(string(migration), "-- +goose StatementBegin")[1], "-- +goose StatementEnd")[0]
+		ddl = strings.ReplaceAll(ddl, "CREATE TABLE public.", "CREATE TEMP TABLE ")
+		if _, err = pool.Exec(ctx, ddl); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	return NewPushDeviceRepository(pool), pool
 }
 

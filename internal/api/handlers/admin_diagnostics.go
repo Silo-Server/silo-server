@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
 const diagnosticsDownloadExpiry = 15 * time.Minute
@@ -117,13 +118,16 @@ func (h *DiagnosticsHandler) HandleAdminDownloadReport(w http.ResponseWriter, r 
 	defer body.Close()
 
 	h.auditDownload(r, report.ID)
-	w.Header().Set("Content-Type", diagnostics.ReportDownloadContentType)
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", diagnosticsReportFilename(report)))
+	// Without presigning this is the only delivery path, and a bundle can
+	// outlast the API server's absolute WriteTimeout on a slow link.
+	sw := httpstream.NewRollingDeadlineWriter(w)
+	sw.Header().Set("Content-Type", diagnostics.ReportDownloadContentType)
+	sw.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", diagnosticsReportFilename(report)))
 	if report.BlobBytes != nil && *report.BlobBytes >= 0 {
-		w.Header().Set("Content-Length", strconv.FormatInt(*report.BlobBytes, 10))
+		sw.Header().Set("Content-Length", strconv.FormatInt(*report.BlobBytes, 10))
 	}
-	w.WriteHeader(http.StatusOK)
-	if _, err := io.Copy(w, body); err != nil {
+	sw.WriteHeader(http.StatusOK)
+	if _, err := io.Copy(sw, body); err != nil {
 		h.diagnosticsLogger().WarnContext(r.Context(), "diagnostic report download stream failed",
 			"component", "diagnostics",
 			"admin_user_id", currentAdminUserID(r),

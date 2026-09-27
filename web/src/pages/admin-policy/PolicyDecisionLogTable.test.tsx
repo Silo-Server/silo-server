@@ -21,16 +21,16 @@ describe("PolicyDecisionLogTable", () => {
       vi.fn<typeof fetch>(async (input) => {
         const url = String(input);
         requests.push(url);
-        if (url.includes("/api/v1/admin/policy/decisions?")) {
+        if (url.includes("/api/v2/admin/policy/decisions?")) {
           if (url.includes("cursor=cursor-1")) {
             return jsonResponse({
-              entries: [
+              items: [
                 {
-                  id: 2,
+                  id: "2",
                   timestamp: "2026-07-02T13:00:00Z",
                   decision_name: "silo.scope.decision",
                   policy_generation: 4,
-                  user_id: 42,
+                  user_id: "42",
                   allowed: false,
                   eval_time_ns: 9100,
                   input_digest: "digest-page-2",
@@ -39,19 +39,19 @@ describe("PolicyDecisionLogTable", () => {
             });
           }
           return jsonResponse({
-            entries: [
+            items: [
               {
-                id: 1,
+                id: "1",
                 timestamp: "2026-07-02T12:00:00Z",
                 decision_name: "silo.scope.decision",
                 policy_generation: 3,
-                user_id: 7,
+                user_id: "7",
                 allowed: true,
                 eval_time_ns: 12000,
                 input_digest: "digest-page-1",
               },
             ],
-            next_cursor: "cursor-1",
+            page: { next_cursor: "cursor-1", has_more: true },
           });
         }
         return jsonResponse({ error: "not_found", message: url }, 404);

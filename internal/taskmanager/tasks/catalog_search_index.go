@@ -78,7 +78,7 @@ func (t *RebuildCatalogSearchIndexTask) Description() string {
 func (t *RebuildCatalogSearchIndexTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary
 }
-func (t *RebuildCatalogSearchIndexTask) IsHidden() bool { return false }
+func (t *RebuildCatalogSearchIndexTask) IsHidden() bool { return true }
 func (t *RebuildCatalogSearchIndexTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return nil
 }

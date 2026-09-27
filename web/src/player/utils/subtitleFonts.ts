@@ -128,9 +128,9 @@ export function loadSubtitleFontBundle(url: string, signal?: AbortSignal): Promi
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
-      return (await response.json()) as SubtitleFontBundleItem[];
+      return (await response.json()) as { items: SubtitleFontBundleItem[] };
     })
-    .then((items) => items.map((item) => base64ToBytes(item.data)))
+    .then(({ items }) => items.map((item) => base64ToBytes(item.data)))
     .then((fonts) => {
       entry.bytes = totalByteLength(fonts);
       if (entry.bytes > MAX_FONT_BUNDLE_CACHE_BYTES) {

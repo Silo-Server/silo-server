@@ -7,6 +7,8 @@ import (
 
 // AdminJob represents a reusable background job row for admin workflows.
 type AdminJob struct {
+	ClaimGeneration   int64           `json:"-"`
+	CancelRequested   bool            `json:"-"`
 	ID                string          `json:"id"`
 	JobType           string          `json:"job_type"`
 	Status            string          `json:"status"`

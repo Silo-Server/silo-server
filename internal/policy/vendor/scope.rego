@@ -2,7 +2,6 @@ package silo.scope
 
 import rego.v1
 import data.silo.lib.quality
-import data.silo.lib.ratings
 
 decision := tightened if {
 	override := data.silo_custom.scope.override(base_decision, input)
@@ -18,6 +17,8 @@ base_decision := decision if {
 		"disabled_library_ids": libraries.disabled_library_ids,
 		"libraries_restricted": libraries.libraries_restricted,
 		"max_content_rating": max_content_rating(input),
+		"max_content_rating_override": "",
+		"max_advisory_age": max_advisory_age(input),
 		"max_playback_quality": max_playback_quality(input),
 		"preferred_metadata_language": preferred_metadata_language(input),
 		"policy_revision": input.access_policy_revision,
@@ -83,6 +84,14 @@ max_content_rating(i) := rating if {
 	rating := i.profile_max_content_rating
 } else := ""
 
+# max_advisory_age is the profile's advisory-age limit; 0 means no limit.
+max_advisory_age(i) := age if {
+	i.profile_present
+	age := object.get(i, "profile_max_advisory_age", 0)
+	is_number(age)
+	age > 0
+} else := 0
+
 max_playback_quality(i) := quality.min(i.account_max_playback_quality, profile_quality(i))
 
 profile_quality(i) := quality if {
@@ -126,12 +135,18 @@ has_value(values, value) if {
 	values[i] == value
 }
 
+# tighten combines the base decision with a custom override. The advisory-age
+# limit is reduced to the lower of the two (see stricter_advisory_age). Every
+# other dimension is reduced here too except the content rating: comparing "PG" with "15" or "FSK 16"
+# needs the maturity ladder, which lives in Go only (internal/access). The
+# override's ceiling is reported alongside the base one and the caller resolves
+# the stricter of the two with access.StricterCeiling, so an override that names
+# a rating this policy cannot rank can only tighten, never widen.
 tighten(base, override) := result if {
 	unrestricted := merged_unrestricted(base, override)
 	disabled := merged_disabled(base, override)
 	allowed := merged_allowed(base, override, unrestricted, disabled)
 	libraries_restricted := restricted(unrestricted)
-	max_rating := ratings.min(base["max_content_rating"], object.get(override, "max_content_rating", ""))
 	max_quality := quality.min(base["max_playback_quality"], object.get(override, "max_playback_quality", ""))
 	profile_verified := merged_profile_verified(base, override)
 	output_disabled := disabled_if_unrestricted(disabled, unrestricted)
@@ -141,13 +156,38 @@ tighten(base, override) := result if {
 		"allowed_library_ids": allowed,
 		"disabled_library_ids": output_disabled,
 		"libraries_restricted": libraries_restricted,
-		"max_content_rating": max_rating,
+		"max_content_rating": base["max_content_rating"],
+		"max_content_rating_override": object.get(override, "max_content_rating", ""),
+		"max_advisory_age": stricter_advisory_age(base["max_advisory_age"], override_advisory_age(override)),
 		"max_playback_quality": max_quality,
 		"preferred_metadata_language": base["preferred_metadata_language"],
 		"policy_revision": base["policy_revision"],
 		"profile_verified": profile_verified,
 	}
 }
+
+# override_advisory_age reads the advisory-age limit an override asks for. An
+# absent, null or zero value asks for none. A positive number is floored to a
+# whole age. Anything else (a negative number, a string, a boolean) is an
+# unusable limit and, like an unusable parental control anywhere else, fails
+# closed to the strictest limit there is.
+override_advisory_age(o) := 0 if {
+	object.get(o, "max_advisory_age", null) == null
+} else := 0 if {
+	o.max_advisory_age == 0
+} else := age if {
+	is_number(o.max_advisory_age)
+	o.max_advisory_age >= 1
+	age := floor(o.max_advisory_age)
+} else := 1
+
+# stricter_advisory_age keeps the lower of two advisory-age limits, where 0
+# means "no limit" and so always loses to a real one.
+stricter_advisory_age(a, b) := b if {
+	a == 0
+} else := a if {
+	b == 0
+} else := min([a, b])
 
 restricted(unrestricted) := false if {
 	unrestricted

@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiClientError } from "@/api/client";
+import { V2ProblemError } from "@/api/v2/request";
 import { sectionKeys } from "./keys";
 import { useDeleteSections } from "./sections";
 
@@ -13,10 +13,10 @@ const toastSuccessMock = vi.hoisted(() => vi.fn());
 const toastWarningMock = vi.hoisted(() => vi.fn());
 const toastErrorMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/api/client", async () => {
-  const actual = await vi.importActual<typeof import("@/api/client")>("@/api/client");
-  return { ...actual, api: apiMock };
-});
+vi.mock("@/api/v2/request", async () => ({
+  ...(await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request")),
+  v2: apiMock,
+}));
 
 vi.mock("./collectionSurfaceRefresh", () => ({
   invalidateAdminCollectionQueries: invalidateAdminCollectionQueriesMock,
@@ -67,15 +67,17 @@ describe("useDeleteSections", () => {
 
     let mutation!: Promise<unknown>;
     act(() => {
-      mutation = result.current.mutateAsync([
-        "section-1",
-        "section-2",
-        "section-3",
-        "section-4",
-        "section-5",
-        "section-6",
-        "section-1",
-      ]);
+      mutation = result.current.mutateAsync(
+        [
+          "section-1",
+          "section-2",
+          "section-3",
+          "section-4",
+          "section-5",
+          "section-6",
+          "section-1",
+        ].map((id) => ({ id, etag: `"${id}"` })),
+      );
     });
 
     await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(4));
@@ -85,14 +87,15 @@ describe("useDeleteSections", () => {
       await mutation;
     });
 
-    expect(apiMock.mock.calls).toEqual([
-      ["/admin/sections/section-1", { method: "DELETE" }],
-      ["/admin/sections/section-2", { method: "DELETE" }],
-      ["/admin/sections/section-3", { method: "DELETE" }],
-      ["/admin/sections/section-4", { method: "DELETE" }],
-      ["/admin/sections/section-5", { method: "DELETE" }],
-      ["/admin/sections/section-6", { method: "DELETE" }],
-    ]);
+    expect(apiMock.mock.calls).toEqual(
+      Array.from({ length: 6 }, (_, index) => {
+        const id = `section-${index + 1}`;
+        return [
+          "DELETE /api/v2/admin/sections/{id}",
+          { path: { id }, headers: { "If-Match": `"${id}"` } },
+        ];
+      }),
+    );
     expect(result.current.progress).toBeNull();
     expect(toastSuccessMock).toHaveBeenCalledWith("Deleted 6 sections");
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: sectionKeys.all });
@@ -102,14 +105,32 @@ describe("useDeleteSections", () => {
   it("treats missing sections as deleted and reports unexpected failures", async () => {
     apiMock
       .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new ApiClientError(404, "not_found", "Section not found"))
-      .mockRejectedValueOnce(new ApiClientError(500, "internal_error", "Database unavailable"));
+      .mockRejectedValueOnce(
+        new V2ProblemError("deleteAdminSection", {
+          type: "not_found",
+          instance: "/api/v2/admin/sections/s1",
+          title: "Not found",
+          status: 404,
+          detail: "Section not found",
+        }),
+      )
+      .mockRejectedValueOnce(
+        new V2ProblemError("deleteAdminSection", {
+          type: "internal_error",
+          instance: "/api/v2/admin/sections/s1",
+          title: "Error",
+          status: 500,
+          detail: "Database unavailable",
+        }),
+      );
     invalidateAdminCollectionQueriesMock.mockResolvedValue(undefined);
     const { result } = renderDeleteSectionsHook();
 
     let response: unknown;
     await act(async () => {
-      response = await result.current.mutateAsync(["section-1", "section/2", "section-3"]);
+      response = await result.current.mutateAsync(
+        ["section-1", "section/2", "section-3"].map((id) => ({ id, etag: `"${id}"` })),
+      );
     });
 
     expect(response).toEqual({
@@ -118,9 +139,12 @@ describe("useDeleteSections", () => {
       kept: 0,
       failed: 1,
       firstError: "Database unavailable",
+      deletedIds: ["section-1", "section/2"],
+      failedIds: ["section-3"],
     });
-    expect(apiMock).toHaveBeenNthCalledWith(2, "/admin/sections/section%2F2", {
-      method: "DELETE",
+    expect(apiMock).toHaveBeenNthCalledWith(2, "DELETE /api/v2/admin/sections/{id}", {
+      path: { id: "section/2" },
+      headers: { "If-Match": '"section/2"' },
     });
     expect(toastWarningMock).toHaveBeenCalledWith("Deleted 2 of 3 sections", {
       description: "Database unavailable",

@@ -715,7 +715,6 @@ type stubPlaybackSessionsLoader struct {
 
 func (s *stubPlaybackSessionsLoader) Load(
 	_ context.Context,
-	_ *http.Request,
 	query PlaybackSessionsQuery,
 ) ([]playbackSessionRow, error) {
 	if s.err != nil {

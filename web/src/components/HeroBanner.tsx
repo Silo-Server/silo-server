@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 import type { SectionItem } from "@/api/types";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
+import { parseWatchHref } from "@/pages/watchRouteHelpers";
+import { markPlaybackIntent } from "@/player/first-frame";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { formatHeroMetadata } from "./heroMetadata";
 
@@ -59,13 +61,18 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
   index,
   isActive,
   keepsMotion,
+  shouldLoad,
 }: {
   slide: SectionItem;
   index: number;
   isActive: boolean;
   keepsMotion: boolean;
+  shouldLoad: boolean;
 }) {
-  const [loaded, setLoaded] = useState(false);
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  // Keep the browser's loaded image visible while a refreshed URL is pending.
+  // Distant slides retain their loaded source until they become a neighbor.
+  const imageUrl = shouldLoad ? slide.backdrop_url : loadedUrl;
   const thumbhash = slide.backdrop_thumbhash ? decodeThumbhash(slide.backdrop_thumbhash) : "";
 
   return (
@@ -82,14 +89,15 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
           : undefined
       }
     >
-      {slide.backdrop_url && (
+      {slide.backdrop_url && imageUrl && (
         <img
-          src={slide.backdrop_url}
+          src={imageUrl}
           alt=""
+          fetchPriority={isActive ? "high" : "low"}
           className={cn(
             "h-full w-full object-cover object-[center_20%] transition-opacity duration-(--duration-slow)",
             isActive && "will-change-transform",
-            loaded ? "opacity-100" : "opacity-0",
+            loadedUrl ? "opacity-100" : "opacity-0",
           )}
           style={{
             animation: keepsMotion
@@ -98,7 +106,7 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
             filter:
               "brightness(var(--hero-backdrop-brightness, 0.78)) saturate(var(--hero-backdrop-saturate, 0.95))",
           }}
-          onLoad={() => setLoaded(true)}
+          onLoad={() => setLoadedUrl(imageUrl)}
         />
       )}
     </div>
@@ -226,6 +234,13 @@ export default function HeroBanner({
 
   const handlePlayClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (activeAudiobookPlaying == null) {
+      // This Play link navigates without the playback controller, so it
+      // starts the first-frame clock itself. A modified or non-primary click
+      // opens another tab, which this tab's clock cannot time.
+      const opensHere =
+        event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+      const request = opensHere ? parseWatchHref(playHref) : null;
+      if (request) markPlaybackIntent(request.requestKey);
       return;
     }
     event.preventDefault();
@@ -248,7 +263,7 @@ export default function HeroBanner({
         if (!e.currentTarget.contains(e.relatedTarget)) resume();
       }}
     >
-      {/* Backdrop layers – all stacked, crossfade via opacity */}
+      {/* Preload neighbors in both directions; retain loaded backdrops for crossfades. */}
       {slides.map((slide, i) => (
         <HeroBackdropSlide
           key={slide.content_id ?? i}
@@ -256,6 +271,12 @@ export default function HeroBanner({
           index={i}
           isActive={i === activeIndex}
           keepsMotion={i === activeIndex || i === outgoingIndex}
+          shouldLoad={
+            i === activeIndex ||
+            i === outgoingIndex ||
+            i === (activeIndex + 1) % slideCount ||
+            i === (activeIndex - 1 + slideCount) % slideCount
+          }
         />
       ))}
 

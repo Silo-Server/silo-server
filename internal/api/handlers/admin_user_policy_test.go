@@ -93,7 +93,7 @@ func TestToAdminUserResponseReportsOverridesAndEffectivePolicy(t *testing.T) {
 	}
 
 	// Effective policy: overrides win, everything else comes from the group.
-	want := effectivePolicyResp{
+	want := EffectivePolicyView{
 		LibraryIDs:               []int{1, 2},
 		MaxPlaybackQuality:       access.PlaybackQualityStandard,
 		MaxStreams:               6,

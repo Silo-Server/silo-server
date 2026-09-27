@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ComponentProps, FormEvent, ReactNode } from "react";
 import type { CreateLibraryCollectionRequest, Library, LibraryCollection } from "@/api/types";
 import { normalizeQueryDefinition } from "@/api/types";
 import {
@@ -8,8 +8,8 @@ import {
   type LibraryEligibility,
 } from "@/lib/collectionTemplates";
 import {
+  useAdminCollectionCapabilities,
   useCreateAdminCollection,
-  useDeleteCollectionImage,
   useImportMDBListCollection,
   useImportTMDBCollection,
   useImportTraktCollection,
@@ -121,7 +121,7 @@ export function toAdminCollectionBuilderValue(
   return createCollectionBuilderValue({
     title: collection?.title ?? "",
     description: collection?.description ?? "",
-    collection_type: collection?.collection_type === "manual" ? "manual" : "smart",
+    collection_type: !collection || collection.collection_type === "manual" ? "manual" : "smart",
     visibility: collection?.visibility ?? "visible",
     featured: collection?.featured ?? false,
     query_definition: normalizeQueryDefinition({
@@ -459,11 +459,13 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 }
 
 export function CollectionForm({
+  etag,
   libraries,
   collection,
   initialLibraryId,
   onClose,
 }: {
+  etag?: string;
   libraries: Library[];
   collection: LibraryCollection | null;
   initialLibraryId: number | null;
@@ -478,10 +480,11 @@ export function CollectionForm({
   const [backdropFile, setBackdropFile] = useState<File | null>(null);
   const [posterSourceUrl, setPosterSourceUrl] = useState("");
   const [backdropSourceUrl, setBackdropSourceUrl] = useState("");
-  const deleteImage = useDeleteCollectionImage();
+  const [removeArtwork, setRemoveArtwork] = useState<("poster" | "backdrop")[]>([]);
 
   useEffect(() => {
     setDraft(toAdminCollectionBuilderValue(collection, initialLibraryId));
+    setRemoveArtwork([]);
     setPosterFile(null);
     setBackdropFile(null);
     setPosterSourceUrl("");
@@ -512,7 +515,14 @@ export function CollectionForm({
         };
         if (collection) {
           updateMutation.mutate(
-            { id: collection.id, body, poster: posterFile, backdrop: backdropFile },
+            {
+              id: collection.id,
+              etag: etag!,
+              body,
+              removeArtwork,
+              poster: posterFile,
+              backdrop: backdropFile,
+            },
             { onSuccess: onClose },
           );
           return;
@@ -559,39 +569,56 @@ export function CollectionForm({
           </p>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
-          <ImageUploadField
+          <AdminCollectionArtworkField
             label="Poster"
-            currentUrl={collection?.poster_url}
+            currentUrl={removeArtwork.includes("poster") ? "" : collection?.poster_url}
             file={posterFile}
-            onFileChange={setPosterFile}
+            onFileChange={(file) => {
+              setPosterFile(file);
+              if (file) setRemoveArtwork((current) => current.filter((type) => type !== "poster"));
+            }}
             sourceUrl={posterSourceUrl}
-            onSourceUrlChange={setPosterSourceUrl}
+            onSourceUrlChange={(url) => {
+              setPosterSourceUrl(url);
+              if (url.trim())
+                setRemoveArtwork((current) => current.filter((type) => type !== "poster"));
+            }}
             onDelete={
               collection
-                ? () =>
-                    deleteImage.mutate({
-                      id: collection.id,
-                      type: "poster",
-                      libraryId: collection.library_id,
-                    })
+                ? () => {
+                    setRemoveArtwork((current) =>
+                      current.includes("poster") ? current : [...current, "poster"],
+                    );
+                    setPosterFile(null);
+                    setPosterSourceUrl("");
+                  }
                 : undefined
             }
           />
-          <ImageUploadField
+          <AdminCollectionArtworkField
             label="Backdrop"
-            currentUrl={collection?.backdrop_url}
+            currentUrl={removeArtwork.includes("backdrop") ? "" : collection?.backdrop_url}
             file={backdropFile}
-            onFileChange={setBackdropFile}
+            onFileChange={(file) => {
+              setBackdropFile(file);
+              if (file)
+                setRemoveArtwork((current) => current.filter((type) => type !== "backdrop"));
+            }}
             sourceUrl={backdropSourceUrl}
-            onSourceUrlChange={setBackdropSourceUrl}
+            onSourceUrlChange={(url) => {
+              setBackdropSourceUrl(url);
+              if (url.trim())
+                setRemoveArtwork((current) => current.filter((type) => type !== "backdrop"));
+            }}
             onDelete={
               collection
-                ? () =>
-                    deleteImage.mutate({
-                      id: collection.id,
-                      type: "backdrop",
-                      libraryId: collection.library_id,
-                    })
+                ? () => {
+                    setRemoveArtwork((current) =>
+                      current.includes("backdrop") ? current : [...current, "backdrop"],
+                    );
+                    setBackdropFile(null);
+                    setBackdropSourceUrl("");
+                  }
                 : undefined
             }
           />
@@ -603,6 +630,11 @@ export function CollectionForm({
 
 export type CollectionSourcePick = CollectionSourceType | "templates";
 
+export function AdminCollectionArtworkField(props: ComponentProps<typeof ImageUploadField>) {
+  const { data: capabilities } = useAdminCollectionCapabilities();
+  return capabilities?.artwork ? <ImageUploadField {...props} /> : null;
+}
+
 export function SourceTypeSelector({
   onSelect,
   showTemplates = false,
@@ -610,6 +642,7 @@ export function SourceTypeSelector({
   onSelect: (type: CollectionSourcePick) => void;
   showTemplates?: boolean;
 }) {
+  const { data: capabilities } = useAdminCollectionCapabilities();
   const options: {
     type: CollectionSourcePick;
     icon: typeof ListPlus;
@@ -623,7 +656,7 @@ export function SourceTypeSelector({
       type: "templates",
       icon: Sparkles,
       label: "Browse Templates",
-      subtitle: "Start from a curated TMDB, Trakt, or MDBList preset",
+      subtitle: "Start from a curated TMDB or MDBList preset",
       highlight: true,
     });
   }
@@ -632,37 +665,33 @@ export function SourceTypeSelector({
     { type: "manual", icon: ListPlus, label: "Manual", subtitle: "Curate items by hand" },
     { type: "mdblist", icon: Download, label: "MDBList", subtitle: "Sync from an MDBList URL" },
     { type: "tmdb", icon: TrendingUp, label: "TMDB", subtitle: "Auto-populate from TMDB presets" },
-    {
-      type: "trakt",
-      icon: TrendingUp,
-      label: "Trakt",
-      subtitle: "Sync trending, popular, and profile recommendations",
-    },
   );
 
   return (
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-      {options.map((opt) => (
-        <button
-          key={opt.type}
-          type="button"
-          onClick={() => onSelect(opt.type)}
-          className={
-            "flex flex-col items-start gap-3 rounded-2xl border p-5 text-left transition-colors " +
-            (opt.highlight
-              ? "border-primary/60 bg-primary/5 hover:border-primary hover:bg-primary/10"
-              : "border-border hover:border-primary hover:bg-accent")
-          }
-        >
-          <opt.icon
-            className={opt.highlight ? "text-primary h-8 w-8" : "text-muted-foreground h-8 w-8"}
-          />
-          <div>
-            <p className="text-sm font-medium">{opt.label}</p>
-            <p className="text-muted-foreground mt-1 text-xs">{opt.subtitle}</p>
-          </div>
-        </button>
-      ))}
+      {options
+        .filter((opt) => opt.type === "manual" || capabilities?.imports)
+        .map((opt) => (
+          <button
+            key={opt.type}
+            type="button"
+            onClick={() => onSelect(opt.type)}
+            className={
+              "flex flex-col items-start gap-3 rounded-2xl border p-5 text-left transition-colors " +
+              (opt.highlight
+                ? "border-primary/60 bg-primary/5 hover:border-primary hover:bg-primary/10"
+                : "border-border hover:border-primary hover:bg-accent")
+            }
+          >
+            <opt.icon
+              className={opt.highlight ? "text-primary h-8 w-8" : "text-muted-foreground h-8 w-8"}
+            />
+            <div>
+              <p className="text-sm font-medium">{opt.label}</p>
+              <p className="text-muted-foreground mt-1 text-xs">{opt.subtitle}</p>
+            </div>
+          </button>
+        ))}
     </div>
   );
 }
@@ -893,14 +922,14 @@ export function TMDBPresetForm({
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <ImageUploadField
+          <AdminCollectionArtworkField
             label="Poster"
             file={posterFile}
             onFileChange={setPosterFile}
             sourceUrl={posterSourceUrl}
             onSourceUrlChange={setPosterSourceUrl}
           />
-          <ImageUploadField
+          <AdminCollectionArtworkField
             label="Backdrop"
             file={backdropFile}
             onFileChange={setBackdropFile}
@@ -1172,14 +1201,14 @@ export function TraktPresetForm({
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <ImageUploadField
+          <AdminCollectionArtworkField
             label="Poster"
             file={posterFile}
             onFileChange={setPosterFile}
             sourceUrl={posterSourceUrl}
             onSourceUrlChange={setPosterSourceUrl}
           />
-          <ImageUploadField
+          <AdminCollectionArtworkField
             label="Backdrop"
             file={backdropFile}
             onFileChange={setBackdropFile}
@@ -1352,14 +1381,14 @@ export function MDBListImportForm({
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <ImageUploadField
+          <AdminCollectionArtworkField
             label="Poster"
             file={posterFile}
             onFileChange={setPosterFile}
             sourceUrl={posterSourceUrl}
             onSourceUrlChange={setPosterSourceUrl}
           />
-          <ImageUploadField
+          <AdminCollectionArtworkField
             label="Backdrop"
             file={backdropFile}
             onFileChange={setBackdropFile}
@@ -1399,11 +1428,13 @@ export function MDBListImportForm({
 }
 
 export function CollectionEditForm({
+  etag,
   libraries,
   collection,
   initialLibraryId,
   onClose,
 }: {
+  etag?: string;
   libraries: Library[];
   collection: LibraryCollection;
   initialLibraryId: number | null;
@@ -1426,7 +1457,7 @@ export function CollectionEditForm({
   const [backdropFile, setBackdropFile] = useState<File | null>(null);
   const [posterSourceUrl, setPosterSourceUrl] = useState("");
   const [backdropSourceUrl, setBackdropSourceUrl] = useState("");
-  const deleteImage = useDeleteCollectionImage();
+  const [removeArtwork, setRemoveArtwork] = useState<("poster" | "backdrop")[]>([]);
   const updateMutation = useUpdateAdminCollection();
   const { data: profiles = [] } = useProfiles();
   const [sourceUrl, setSourceUrl] = useState(collection.source_url ?? "");
@@ -1543,7 +1574,14 @@ export function CollectionEditForm({
     };
 
     updateMutation.mutate(
-      { id: collection.id, body, poster: posterFile, backdrop: backdropFile },
+      {
+        id: collection.id,
+        etag: etag!,
+        body,
+        removeArtwork,
+        poster: posterFile,
+        backdrop: backdropFile,
+      },
       { onSuccess: onClose },
     );
   }
@@ -1551,6 +1589,7 @@ export function CollectionEditForm({
   if (!isMDBListCollection && !isTMDBCollection && !isTraktCollection) {
     return (
       <CollectionForm
+        etag={etag}
         libraries={libraries}
         collection={collection}
         initialLibraryId={initialLibraryId}
@@ -1618,35 +1657,50 @@ export function CollectionEditForm({
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <ImageUploadField
+          <AdminCollectionArtworkField
             label="Poster"
-            currentUrl={collection.poster_url}
+            currentUrl={removeArtwork.includes("poster") ? "" : collection.poster_url}
             file={posterFile}
-            onFileChange={setPosterFile}
+            onFileChange={(file) => {
+              setPosterFile(file);
+              if (file) setRemoveArtwork((current) => current.filter((type) => type !== "poster"));
+            }}
             sourceUrl={posterSourceUrl}
-            onSourceUrlChange={setPosterSourceUrl}
-            onDelete={() =>
-              deleteImage.mutate({
-                id: collection.id,
-                type: "poster",
-                libraryId: collection.library_id,
-              })
-            }
+            onSourceUrlChange={(url) => {
+              setPosterSourceUrl(url);
+              if (url.trim())
+                setRemoveArtwork((current) => current.filter((type) => type !== "poster"));
+            }}
+            onDelete={() => {
+              setRemoveArtwork((current) =>
+                current.includes("poster") ? current : [...current, "poster"],
+              );
+              setPosterFile(null);
+              setPosterSourceUrl("");
+            }}
           />
-          <ImageUploadField
+          <AdminCollectionArtworkField
             label="Backdrop"
-            currentUrl={collection.backdrop_url}
+            currentUrl={removeArtwork.includes("backdrop") ? "" : collection.backdrop_url}
             file={backdropFile}
-            onFileChange={setBackdropFile}
+            onFileChange={(file) => {
+              setBackdropFile(file);
+              if (file)
+                setRemoveArtwork((current) => current.filter((type) => type !== "backdrop"));
+            }}
             sourceUrl={backdropSourceUrl}
-            onSourceUrlChange={setBackdropSourceUrl}
-            onDelete={() =>
-              deleteImage.mutate({
-                id: collection.id,
-                type: "backdrop",
-                libraryId: collection.library_id,
-              })
-            }
+            onSourceUrlChange={(url) => {
+              setBackdropSourceUrl(url);
+              if (url.trim())
+                setRemoveArtwork((current) => current.filter((type) => type !== "backdrop"));
+            }}
+            onDelete={() => {
+              setRemoveArtwork((current) =>
+                current.includes("backdrop") ? current : [...current, "backdrop"],
+              );
+              setBackdropFile(null);
+              setBackdropSourceUrl("");
+            }}
           />
         </div>
 

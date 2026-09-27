@@ -11,11 +11,21 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 const (
 	jellyfinPageSize    = 200
 	jellyfinIDChunkSize = 100
+	// jellyfinItemFields requests only the optional field the importer reads;
+	// episode numbers, series IDs, runtime, and user data are default DTO
+	// members. MediaSources and Path would make every page much heavier.
+	jellyfinItemFields = "ProviderIds"
+	// Jellyfin favorites cover more kinds than Silo can store: seasons have no
+	// favorite in Silo, so only movies, shows, and episodes are requested.
+	jellyfinPlayableItemTypes = "Movie,Episode"
+	jellyfinFavoriteItemTypes = "Movie,Series,Episode"
 )
 
 type JellyfinClient struct {
@@ -24,7 +34,7 @@ type JellyfinClient struct {
 }
 
 func NewJellyfinClient() *JellyfinClient {
-	return &JellyfinClient{httpClient: &http.Client{Timeout: 30 * time.Second}, limiter: sharedHistoryImportUpstreamLimiter}
+	return &JellyfinClient{httpClient: netguard.NewClient(30 * time.Second), limiter: sharedHistoryImportUpstreamLimiter}
 }
 
 type jellyfinServerAuthResponse struct {
@@ -50,54 +60,65 @@ type jellyfinItem struct {
 	ProviderIDs       map[string]string `json:"ProviderIds"`
 	IndexNumber       int               `json:"IndexNumber"`
 	ParentIndexNumber int               `json:"ParentIndexNumber"`
-	UserData          struct {
-		PlaybackPositionTicks int64      `json:"PlaybackPositionTicks"`
-		PlayCount             int        `json:"PlayCount"`
-		LastPlayedDate        *time.Time `json:"LastPlayedDate"`
-		Played                bool       `json:"Played"`
-	} `json:"UserData"`
+	UserData          jellyfinUserData  `json:"UserData"`
+}
+
+type jellyfinUserData struct {
+	PlaybackPositionTicks int64      `json:"PlaybackPositionTicks"`
+	PlayCount             int        `json:"PlayCount"`
+	LastPlayedDate        *time.Time `json:"LastPlayedDate"`
+	Played                bool       `json:"Played"`
+	IsFavorite            bool       `json:"IsFavorite"`
 }
 
 type jellyfinLocalAuth struct{ BaseURL, UserID, AccessToken string }
 
-func (c *JellyfinClient) AuthenticateServerUser(ctx context.Context, baseURL, username, password string) (*jellyfinLocalAuth, error) {
-	body, _ := json.Marshal(map[string]string{"Username": username, "Pw": password})
-	var lastErr error
-	for _, candidate := range baseCandidates(baseURL) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, candidate+"/Users/AuthenticateByName", bytes.NewReader(body))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		setJellyfinAuthorizationHeader(req, jellyfinAuthorizationHeader())
-		var resp jellyfinServerAuthResponse
-		err = c.doJSON(req, &resp)
-		if err == nil {
-			if strings.TrimSpace(resp.User.ID) == "" || strings.TrimSpace(resp.AccessToken) == "" {
-				return nil, fmt.Errorf("authenticating against Jellyfin server: incomplete auth response")
-			}
-			return &jellyfinLocalAuth{BaseURL: candidate, UserID: resp.User.ID, AccessToken: resp.AccessToken}, nil
-		}
-		if !shouldTryAnotherBase(err) {
-			return nil, fmt.Errorf("authenticating against Jellyfin server: %w", err)
-		}
-		lastErr = err
-	}
-	if lastErr != nil {
-		return nil, fmt.Errorf("authenticating against Jellyfin server: %w", lastErr)
-	}
-	return nil, fmt.Errorf("authenticating against Jellyfin server: no reachable server URL")
+// jellyfinBaseURL normalizes a configured server address. Jellyfin answers
+// "//Users/..." with 404, so a trailing slash must not reach request paths.
+func jellyfinBaseURL(raw string) string {
+	return strings.TrimRight(strings.TrimSpace(raw), "/")
 }
 
-func (c *JellyfinClient) FetchItems(ctx context.Context, auth jellyfinLocalAuth, filter string) ([]jellyfinItem, error) {
+func (a jellyfinLocalAuth) endpoint(path string) string {
+	return jellyfinBaseURL(a.BaseURL) + path
+}
+
+// AuthenticateServerUser signs in once at the given address. Unlike Emby,
+// Jellyfin gets no "/emby" retry: Jellyfin 12 removed that route prefix, and
+// on older servers the retry repeats a rejected password as a second failed
+// login.
+func (c *JellyfinClient) AuthenticateServerUser(ctx context.Context, baseURL, username, password string) (*jellyfinLocalAuth, error) {
+	base := jellyfinBaseURL(baseURL)
+	body, _ := json.Marshal(map[string]string{"Username": username, "Pw": password})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/Users/AuthenticateByName", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("authenticating against Jellyfin server: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	setJellyfinAuthorizationHeader(req, jellyfinAuthorizationHeader())
+	var resp jellyfinServerAuthResponse
+	if err := c.doJSON(req, &resp); err != nil {
+		return nil, fmt.Errorf("authenticating against Jellyfin server: %w", err)
+	}
+	if strings.TrimSpace(resp.User.ID) == "" || strings.TrimSpace(resp.AccessToken) == "" {
+		return nil, fmt.Errorf("authenticating against Jellyfin server: incomplete auth response")
+	}
+	return &jellyfinLocalAuth{BaseURL: base, UserID: resp.User.ID, AccessToken: resp.AccessToken}, nil
+}
+
+// FetchItems pages through the user's items of the given types that match a
+// Jellyfin filter such as IsPlayed or IsFavorite. It uses /Items?userId=
+// because Jellyfin 12 dropped /Users/{userId}/Items from its API contract.
+func (c *JellyfinClient) FetchItems(ctx context.Context, auth jellyfinLocalAuth, filter, includeItemTypes string) ([]jellyfinItem, error) {
 	query := url.Values{}
+	query.Set("UserId", auth.UserID)
 	query.Set("Filters", filter)
-	query.Set("IncludeItemTypes", "Movie,Episode")
+	query.Set("IncludeItemTypes", includeItemTypes)
 	query.Set("Recursive", "true")
 	query.Set("EnableUserData", "true")
-	query.Set("Fields", "ProviderIds,ParentId,DateCreated,Path,MediaSources,SeriesId,SeasonId,IndexNumber,ParentIndexNumber")
+	query.Set("Fields", jellyfinItemFields)
 
-	items, err := c.fetchPagedItems(ctx, auth, fmt.Sprintf("%s/Users/%s/Items", auth.BaseURL, url.PathEscape(auth.UserID)), query)
+	items, err := c.fetchPagedItems(ctx, auth, auth.endpoint("/Items"), query)
 	if err != nil {
 		return nil, fmt.Errorf("fetching Jellyfin items with filter %s: %w", filter, err)
 	}
@@ -110,21 +131,19 @@ func (c *JellyfinClient) FetchItemsByIDs(ctx context.Context, auth jellyfinLocal
 	}
 	var allItems []jellyfinItem
 	for start := 0; start < len(ids); start += jellyfinIDChunkSize {
-		end := start + jellyfinIDChunkSize
-		if end > len(ids) {
-			end = len(ids)
-		}
+		end := min(start+jellyfinIDChunkSize, len(ids))
 
 		query := url.Values{}
+		query.Set("UserId", auth.UserID)
 		query.Set("Recursive", "true")
 		query.Set("EnableUserData", "true")
-		query.Set("Fields", "ProviderIds,ParentId,DateCreated,Path,MediaSources,SeriesId,SeasonId,IndexNumber,ParentIndexNumber")
+		query.Set("Fields", jellyfinItemFields)
 		query.Set("Ids", strings.Join(ids[start:end], ","))
 		if strings.TrimSpace(includeItemTypes) != "" {
 			query.Set("IncludeItemTypes", includeItemTypes)
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/Users/%s/Items?%s", auth.BaseURL, url.PathEscape(auth.UserID), query.Encode()), nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, auth.endpoint("/Items")+"?"+query.Encode(), nil)
 		if err != nil {
 			return nil, err
 		}
@@ -140,37 +159,17 @@ func (c *JellyfinClient) FetchItemsByIDs(ctx context.Context, auth jellyfinLocal
 }
 
 func (c *JellyfinClient) FetchResumableItems(ctx context.Context, auth jellyfinLocalAuth) ([]jellyfinItem, error) {
-	var allItems []jellyfinItem
-	startIndex := 0
+	query := url.Values{}
+	query.Set("UserId", auth.UserID)
+	query.Set("EnableUserData", "true")
+	query.Set("IncludeItemTypes", jellyfinPlayableItemTypes)
+	query.Set("Fields", jellyfinItemFields)
 
-	for {
-		query := url.Values{}
-		query.Set("UserId", auth.UserID)
-		query.Set("EnableUserData", "true")
-		query.Set("IncludeItemTypes", "Movie,Episode")
-		query.Set("Fields", "ProviderIds,ParentId,DateCreated,Path,MediaSources,SeriesId,SeasonId,IndexNumber,ParentIndexNumber")
-		query.Set("Limit", strconv.Itoa(jellyfinPageSize))
-		query.Set("StartIndex", strconv.Itoa(startIndex))
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/UserItems/Resume?%s", auth.BaseURL, query.Encode()), nil)
-		if err != nil {
-			return nil, err
-		}
-		setJellyfinAuthorizationHeader(req, jellyfinAuthorizationHeaderWithToken(auth.AccessToken))
-
-		var payload jellyfinItemsResponse
-		if err := c.doJSON(req, &payload); err != nil {
-			return nil, fmt.Errorf("fetching Jellyfin resumable items: %w", err)
-		}
-
-		allItems = append(allItems, payload.Items...)
-		startIndex += len(payload.Items)
-		if len(payload.Items) == 0 || (payload.TotalRecordCount > 0 && startIndex >= payload.TotalRecordCount) || len(payload.Items) < jellyfinPageSize {
-			break
-		}
+	items, err := c.fetchPagedItems(ctx, auth, auth.endpoint("/UserItems/Resume"), query)
+	if err != nil {
+		return nil, fmt.Errorf("fetching Jellyfin resumable items: %w", err)
 	}
-
-	return allItems, nil
+	return items, nil
 }
 
 func (c *JellyfinClient) fetchPagedItems(ctx context.Context, auth jellyfinLocalAuth, endpoint string, query url.Values) ([]jellyfinItem, error) {
@@ -250,7 +249,7 @@ func setJellyfinAuthorizationHeader(req *http.Request, value string) {
 
 // ListUsers returns all user accounts on the Jellyfin server using an admin API token.
 func (c *JellyfinClient) ListUsers(ctx context.Context, baseURL, adminToken string) ([]ExternalUser, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/Users", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jellyfinBaseURL(baseURL)+"/Users", nil)
 	if err != nil {
 		return nil, err
 	}

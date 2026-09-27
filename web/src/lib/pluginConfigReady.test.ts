@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PluginInstallation } from "@/api/types";
 
-import { installationConfigReady } from "./pluginConfigReady";
+import { installationConfigReady, missingRequiredConfig } from "./pluginConfigReady";
 
 function installation(overrides: Partial<PluginInstallation>): PluginInstallation {
   return {
@@ -80,5 +80,40 @@ describe("installationConfigReady", () => {
         }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("missingRequiredConfig", () => {
+  it("names required entries with nothing saved", () => {
+    const missing = missingRequiredConfig(
+      installation({ global_config_schema: [schema("account", true), schema("region", false)] }),
+    );
+    expect(missing.map((entry) => entry.key)).toEqual(["account"]);
+  });
+
+  it("does not flag a plugin whose settings are all optional", () => {
+    expect(
+      missingRequiredConfig(installation({ global_config_schema: [schema("sources", false)] })),
+    ).toEqual([]);
+  });
+
+  it("counts a saved secret and a saved value as filled, but not a blank string", () => {
+    const base = { global_config_schema: [schema("account", true), schema("url", true)] };
+    expect(
+      missingRequiredConfig(
+        installation({
+          ...base,
+          global_configs: [
+            { key: "account", value: {}, configured_secrets: ["api_key"] },
+            { key: "url", value: { base_url: "https://sportarr.net" } },
+          ],
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      missingRequiredConfig(
+        installation({ ...base, global_configs: [{ key: "url", value: { base_url: "  " } }] }),
+      ).map((entry) => entry.key),
+    ).toEqual(["account", "url"]);
   });
 });

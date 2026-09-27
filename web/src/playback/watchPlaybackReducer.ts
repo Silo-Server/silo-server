@@ -6,18 +6,7 @@ export type WatchPlaybackMode =
   | "picture-in-picture"
   | "post-roll";
 
-export interface WatchPlaybackSnapshot {
-  currentTime: number;
-  duration: number;
-  playing: boolean;
-}
-
-export interface WatchPlaybackTransportControls {
-  playPause: () => void | Promise<void>;
-  seekBy: (secondsDelta: number) => void;
-  seekTo: (seconds: number) => void;
-  togglePictureInPicture: () => void | Promise<void>;
-}
+export type WatchPlaybackTransportControls = import("@/player/types").PlayerPlaybackTransport;
 
 export interface WatchPlaybackHostState {
   request: WatchRouteRequest | null;
@@ -26,7 +15,6 @@ export interface WatchPlaybackHostState {
   pendingReturnNavigation: string | null;
   shouldReturnToWatchPage: boolean;
   autoEnterPictureInPicture: boolean;
-  snapshot: WatchPlaybackSnapshot | null;
   transport: WatchPlaybackTransportControls | null;
   routeExitBypassRequestKey: string | null;
 }
@@ -54,11 +42,6 @@ export type WatchPlaybackAction =
   | { type: "STOP_PLAYBACK" }
   | { type: "CLEAR_PENDING_RETURN_NAVIGATION"; requestKey: string }
   | {
-      type: "UPDATE_SNAPSHOT";
-      requestKey: string;
-      snapshot: WatchPlaybackSnapshot;
-    }
-  | {
       type: "SET_TRANSPORT";
       requestKey: string;
       transport: WatchPlaybackTransportControls | null;
@@ -72,7 +55,6 @@ export function createEmptyPlaybackState(): WatchPlaybackHostState {
     pendingReturnNavigation: null,
     shouldReturnToWatchPage: false,
     autoEnterPictureInPicture: false,
-    snapshot: null,
     transport: null,
     routeExitBypassRequestKey: null,
   };
@@ -89,7 +71,6 @@ function createPlaybackState(
     pendingReturnNavigation: null,
     shouldReturnToWatchPage: false,
     autoEnterPictureInPicture: false,
-    snapshot: null,
     transport: null,
     routeExitBypassRequestKey: null,
   };
@@ -274,25 +255,6 @@ export function watchPlaybackReducer(
       return {
         ...state,
         pendingReturnNavigation: null,
-      };
-
-    case "UPDATE_SNAPSHOT":
-      if (state.request?.requestKey !== action.requestKey) {
-        return state;
-      }
-
-      if (
-        state.snapshot &&
-        state.snapshot.currentTime === action.snapshot.currentTime &&
-        state.snapshot.duration === action.snapshot.duration &&
-        state.snapshot.playing === action.snapshot.playing
-      ) {
-        return state;
-      }
-
-      return {
-        ...state,
-        snapshot: action.snapshot,
       };
 
     case "SET_TRANSPORT":

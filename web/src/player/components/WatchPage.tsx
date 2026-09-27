@@ -1,3 +1,6 @@
+import { isSourceFallbackReason } from "@/api/v2/watchTogetherSourceFallback";
+import { playbackCapabilitiesV2 } from "../start-v2";
+import { playerV2Origin } from "../player-v2";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PlayerFileVersion, PlayerPlaybackStateChange, WatchPageProps } from "../types";
@@ -5,10 +8,12 @@ import type { PlaybackRealtimeEventEnvelope } from "../realtime-protocol";
 import type { SubtitleInventoryItemV3 } from "../protocol-v3";
 import { usePlaybackSession } from "../hooks/usePlaybackSession";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
-import { playerFetch } from "../player-fetch";
 import { resolvePlayableSubtitles } from "../utils/playableSubtitles";
 import { patchVersionMarkers, resolveActiveVersionMarkers } from "../utils/watchPageMarkers";
-import { buildSubtitleChoiceRequests } from "../utils/subtitleChoicePersistence";
+import {
+  buildSubtitleChoiceRequests,
+  sendSubtitleChoiceRequest,
+} from "../utils/subtitleChoicePersistence";
 import { VideoPlayer } from "./VideoPlayer";
 import { fetchWatchDetail } from "@/hooks/queries/items";
 import { itemKeys } from "@/hooks/queries/keys";
@@ -59,7 +64,86 @@ function patchChapterThumbnail(
  * WatchPage is the top-level player component.
  * Starts a playback session, then renders the VideoPlayer once the stream is ready.
  */
-export function WatchPage({
+export function WatchPage(props: WatchPageProps) {
+  const config = usePlayerConfig();
+  return props.watchTogetherRoomId ? (
+    <WatchPartyPlaybackGate
+      key={`${playerV2Origin(config)}:${props.watchTogetherRoomId}`}
+      {...props}
+    />
+  ) : (
+    <WatchPagePlayer {...props} />
+  );
+}
+
+function WatchPartyPlaybackGate(props: WatchPageProps) {
+  const config = usePlayerConfig();
+  const [status, setStatus] = useState<"checking" | "supported" | "unsupported" | "failed">(
+    "checking",
+  );
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    void playbackCapabilitiesV2(config)
+      .then(({ features }) => {
+        if (!cancelled) {
+          setStatus(
+            features.includes("watch_party_coordinator_v1") &&
+              features.includes("fixed_media_file_v1")
+              ? "supported"
+              : "unsupported",
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setStatus("failed");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config, attempt]);
+
+  if (status === "supported") return <WatchPagePlayer {...props} />;
+  return (
+    <div className="bg-background fixed inset-0 z-50 flex items-center justify-center px-6">
+      <div className="surface-panel-subtle flex max-w-md flex-col items-center gap-4 rounded-[1.8rem] px-8 py-8 text-center">
+        <p className="text-base font-semibold text-white">
+          {status === "checking" ? "Checking Watch Party support..." : "Watch Party unavailable"}
+        </p>
+        {status !== "checking" && (
+          <p className="text-sm text-white/60">
+            {status === "unsupported"
+              ? "This server needs an update to support Watch Party."
+              : "Unable to check Watch Party support. Please try again."}
+          </p>
+        )}
+        {status === "failed" && (
+          <button
+            type="button"
+            className="rounded-[0.95rem] bg-white/10 px-4 py-2 text-sm font-medium text-white"
+            onClick={() => {
+              setStatus("checking");
+              setAttempt((value) => value + 1);
+            }}
+          >
+            Try Again
+          </button>
+        )}
+        <button
+          type="button"
+          className="rounded-[0.95rem] bg-white/10 px-4 py-2 text-sm font-medium text-white"
+          onClick={() => {
+            void props.onExit();
+          }}
+        >
+          Go Back
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function WatchPagePlayer({
   contentId,
   title,
   year,
@@ -96,6 +180,7 @@ export function WatchPage({
   autoEnterPictureInPicture,
   onPlaybackStateChange,
   onPlaybackTransportReady,
+  seekIntervals,
   onReturnFromPostRoll,
   watchTogetherRoomId,
   watchTogetherRoomToken,
@@ -105,7 +190,6 @@ export function WatchPage({
   const playbackController = useWatchPlaybackController();
   const chapterRefreshAttemptsRef = useRef<Set<number>>(new Set());
   const handledSelectionRevisionRef = useRef<number | null>(null);
-  const markerRealtimeReconcileKeyRef = useRef<string | null>(null);
   const [playbackVersions, setPlaybackVersions] = useState(versions);
   const [realtimeConnectionState, setRealtimeConnectionState] = useState<
     "disconnected" | "connecting" | "connected"
@@ -133,7 +217,62 @@ export function WatchPage({
     explicitAudioTrackIndex,
     initialSubtitleTrackIndexByFileId,
     initialBitmapSubtitleTrackIndexByFileId,
+    !watchTogetherRoomId,
   );
+
+  const fallbackHandledRef = useRef<string | null>(null);
+  const [pendingFallbackKey, setPendingFallbackKey] = useState<string | null>(null);
+  const fallbackRoom = watchTogetherConnection.room;
+  const fallbackSource = watchTogetherConnection.fallbackSource;
+  const fallbackReason = session.errorReason;
+  const fallbackKey =
+    watchTogetherRoomId &&
+    watchTogetherRoomToken &&
+    fallbackRoom &&
+    fileId === fallbackRoom.selected_file_id &&
+    isSourceFallbackReason(fallbackReason)
+      ? `${watchTogetherRoomId}:${watchTogetherRoomToken}:${fallbackRoom.selection_revision}:${fileId}:${session.playbackAttemptId}:${fallbackReason}`
+      : null;
+  const fallingBack = fallbackKey !== null && pendingFallbackKey === fallbackKey;
+
+  useEffect(() => {
+    if (
+      !fallbackKey ||
+      fallbackHandledRef.current === fallbackKey ||
+      !fallbackRoom ||
+      !fileId ||
+      !isSourceFallbackReason(fallbackReason) ||
+      !fallbackRoom.members?.some((member) => member.is_self && member.connected) ||
+      watchTogetherConnection.connectionState !== "connected"
+    )
+      return;
+    fallbackHandledRef.current = fallbackKey;
+    setPendingFallbackKey(fallbackKey);
+    void playbackCapabilitiesV2(config)
+      .then((capabilities) => {
+        if (!capabilities.features.includes("watch_party_source_fallback_v1")) return null;
+        return fallbackSource({
+          selectionRevision: fallbackRoom.selection_revision,
+          failedFileId: fileId,
+          reason: fallbackReason,
+        });
+      })
+      .catch(() => {
+        // Keep the original playback refusal if there is no common fallback or
+        // the request fails. A fresh playback attempt can try again.
+      })
+      .finally(() => {
+        setPendingFallbackKey((current) => (current === fallbackKey ? null : current));
+      });
+  }, [
+    config,
+    fallbackKey,
+    fallbackRoom,
+    fallbackReason,
+    fallbackSource,
+    fileId,
+    watchTogetherConnection.connectionState,
+  ]);
 
   const initialSubtitleErrorKeyRef = useRef<string | null>(null);
   useEffect(() => {
@@ -214,10 +353,7 @@ export function WatchPage({
         showForcedSubtitles,
       });
       for (const request of requests) {
-        void playerFetch(config, request.path, {
-          method: "PUT",
-          body: JSON.stringify(request.body),
-        }).catch(() => {
+        void sendSubtitleChoiceRequest(config, request).catch(() => {
           // Best effort.
         });
       }
@@ -227,10 +363,10 @@ export function WatchPage({
 
   useEffect(() => {
     chapterRefreshAttemptsRef.current.clear();
-    markerRealtimeReconcileKeyRef.current = null;
   }, [contentId, playbackRequestKey]);
 
   useEffect(() => {
+    if (watchTogetherConnection.replacementReason) return;
     const room = watchTogetherConnection.room;
     if (!watchTogetherRoomId || !watchTogetherRoomToken || !room) {
       handledSelectionRevisionRef.current = null;
@@ -253,20 +389,25 @@ export function WatchPage({
     }
 
     handledSelectionRevisionRef.current = room.selection_revision;
-    playbackController.startPlayback({
-      contentId: room.selected_content_id,
-      fileId: room.selected_file_id,
-      libraryId: room.selected_library_id,
-      roomId: watchTogetherRoomId,
-      roomToken: watchTogetherRoomToken,
-      restart: true,
-    });
+    // The room changed its selection; this viewer did not press Play.
+    playbackController.startPlayback(
+      {
+        contentId: room.selected_content_id,
+        fileId: room.selected_file_id,
+        libraryId: room.selected_library_id,
+        roomId: watchTogetherRoomId,
+        roomToken: watchTogetherRoomToken,
+        restart: true,
+      },
+      "automatic",
+    );
   }, [
     contentId,
     fileId,
     libraryId,
     playbackController,
     watchTogetherConnection.room,
+    watchTogetherConnection.replacementReason,
     watchTogetherRoomId,
     watchTogetherRoomToken,
   ]);
@@ -317,12 +458,6 @@ export function WatchPage({
     }
 
     const activeFileId = session.mediaFileId;
-    const reconcileKey = `${session.sessionId}:${activeFileId}`;
-    if (markerRealtimeReconcileKeyRef.current === reconcileKey) {
-      return;
-    }
-    markerRealtimeReconcileKeyRef.current = reconcileKey;
-
     let cancelled = false;
     void queryClient
       .fetchQuery({
@@ -334,6 +469,9 @@ export function WatchPage({
         if (!cancelled) {
           setPlaybackVersions(detail.versions);
         }
+      })
+      .catch(() => {
+        // Reconcile again on the next connection; keep the current markers meanwhile.
       });
 
     return () => {
@@ -380,13 +518,22 @@ export function WatchPage({
         credits: nextCredits,
         recap: nextRecap,
         preview: nextPreview,
+        marker_segments: nextSegments,
       } = event.payload;
       if (file_id !== session.mediaFileId) {
         return;
       }
 
       setPlaybackVersions((current) =>
-        patchVersionMarkers(current, file_id, nextIntro, nextCredits, nextRecap, nextPreview),
+        patchVersionMarkers(
+          current,
+          file_id,
+          nextIntro,
+          nextCredits,
+          nextRecap,
+          nextPreview,
+          nextSegments,
+        ),
       );
     },
     [session.mediaFileId],
@@ -395,12 +542,14 @@ export function WatchPage({
   // The plan is the player's contract: without one there is no transport, no
   // timeline and no track inventory to render against.
   if (!session.plan || !session.streamUrl || !session.sessionId) {
-    if (session.loading) {
+    if (session.loading || fallingBack) {
       return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
           <div className="flex flex-col items-center gap-3">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-            <span className="text-sm text-white/60">Loading player...</span>
+            <span className="text-sm text-white/60">
+              {fallingBack ? "Finding a compatible version for everyone..." : "Loading player..."}
+            </span>
           </div>
         </div>
       );
@@ -453,14 +602,14 @@ export function WatchPage({
       planRevision={session.planRevision}
       shouldAutoPlay={session.shouldAutoPlay}
       replanning={session.replanning}
-      replanError={session.error}
+      replanError={fallingBack ? null : session.error}
       replanErrorTitle={session.errorTitle}
       sessionId={session.sessionId}
       selectedVersion={selectedVersion}
       versions={playbackVersions}
       activeFileId={session.mediaFileId}
       chapters={activeChapters}
-      onSwitchVersion={handleSwitchVersion}
+      onSwitchVersion={watchTogetherRoomId ? undefined : handleSwitchVersion}
       subtitleUrls={playableSubtitles}
       initialPosition={session.initialPosition}
       onQualitySelect={session.changeQuality}
@@ -480,6 +629,7 @@ export function WatchPage({
       recap={activeMarkers.recap}
       autoSkipRecap={autoSkipRecap}
       preview={activeMarkers.preview}
+      markerSegments={selectedVersion?.marker_segments}
       autoPlayNextPreview={autoPlayNextPreview}
       canEditMarkers={canEditMarkers}
       onMarkersEdited={(fileId, markers) =>
@@ -505,6 +655,8 @@ export function WatchPage({
       autoEnterPictureInPicture={autoEnterPictureInPicture}
       onPlaybackStateChange={handlePlaybackStateChange}
       onPlaybackTransportReady={onPlaybackTransportReady}
+      seekIntervals={seekIntervals}
+      onFirstFrame={session.reportFirstFrame}
       onRealtimeEvent={handleRealtimeEvent}
       onRealtimeConnectionStateChange={setRealtimeConnectionState}
       onExit={onExit}

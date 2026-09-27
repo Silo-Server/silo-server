@@ -42,13 +42,17 @@ describe("HistoryImportSettings helpers", () => {
     } as EmbyConnectLoginResponse;
     const savedSource = { id: 7, name: "Quickflix" } as HistoryImportSource;
 
-    expect(canStartEmbyImport("connect", "profile-1", connectSession, "server-1", undefined)).toBe(
-      true,
+    expect(
+      canStartEmbyImport("connect", "profile-1", connectSession, "server-1", undefined, ""),
+    ).toBe(true);
+    expect(canStartEmbyImport("connect", "profile-1", null, "server-1", undefined, "")).toBe(false);
+    expect(canStartEmbyImport("connect", "", connectSession, "server-1", undefined, "")).toBe(
+      false,
     );
-    expect(canStartEmbyImport("connect", "profile-1", null, "server-1", undefined)).toBe(false);
-    expect(canStartEmbyImport("connect", "", connectSession, "server-1", undefined)).toBe(false);
-    expect(canStartEmbyImport("saved", "profile-1", null, "", savedSource)).toBe(true);
-    expect(canStartEmbyImport("saved", "profile-1", null, "", undefined)).toBe(false);
+    // Emby accounts may have no password; the username is still required.
+    expect(canStartEmbyImport("saved", "profile-1", null, "", savedSource, "kid")).toBe(true);
+    expect(canStartEmbyImport("saved", "profile-1", null, "", savedSource, "  ")).toBe(false);
+    expect(canStartEmbyImport("saved", "profile-1", null, "", undefined, "kid")).toBe(false);
   });
 
   it("requires Jellyfin manual imports to have a profile, server URL, username, and password", () => {

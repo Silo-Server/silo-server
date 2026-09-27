@@ -8,7 +8,7 @@ import CardPlayOverlay from "@/components/CardPlayOverlay";
 const MAX_MORE_LIKE_THIS_ITEMS = 12;
 
 interface RecommendationGridProps {
-  items: Array<{ media_item_id: string }>;
+  items: Array<{ content_id: string }>;
   maxItems?: number;
 }
 
@@ -70,9 +70,9 @@ export default function RecommendationGrid({ items, maxItems = 12 }: Recommendat
   return (
     <MediaCarousel title="More Like This" edgePadding={false}>
       {items.slice(0, itemLimit).map((si) => (
-        <div key={si.media_item_id} className={posterWidthClasses}>
+        <div key={si.content_id} className={posterWidthClasses}>
           <RecommendationItemCard
-            itemId={si.media_item_id}
+            itemId={si.content_id}
             showCaption={cardPresentation.caption !== "artwork"}
           />
         </div>
