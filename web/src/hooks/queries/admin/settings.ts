@@ -215,6 +215,16 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
           queryClient.invalidateQueries({ queryKey: compatKeys.all }),
         );
       }
+      if (keys.includes("server.public_url")) {
+        // Invitation and reset links are built on the public URL, so the
+        // capability answers that gate them change with it.
+        invalidations.push(
+          queryClient.invalidateQueries({
+            queryKey: adminKeys.users(),
+            predicate: (query) => query.queryKey.at(-1) === "capabilities",
+          }),
+        );
+      }
       if (keys.some((key) => key.startsWith("catalog.search."))) {
         invalidations.push(
           queryClient.invalidateQueries({ queryKey: adminKeys.catalogSearchStatus() }),
