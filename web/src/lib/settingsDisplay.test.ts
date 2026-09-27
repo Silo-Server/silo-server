@@ -30,7 +30,8 @@ describe("settingsDisplay", () => {
         SETTING_DEFINITIONS[key].scopes.includes("profile_device") &&
         !ALL_DEVICE_SETTING_KEYS.includes(key),
     );
-    expect(missed).toEqual([]);
+    // The single-theme web client retired ui.theme; an override on it does nothing.
+    expect(missed).toEqual(["ui.theme"]);
   });
 
   it("offers a device override for the skip preferences the player now resolves", () => {

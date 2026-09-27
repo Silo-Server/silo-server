@@ -1,7 +1,6 @@
 package silo.action
 
 import data.silo.lib.quality
-import data.silo.lib.ratings
 import rego.v1
 
 decision := tightened if {
@@ -72,8 +71,21 @@ quality_allowed(i) if {
 	quality.allowed(file_quality(i), max_playback_quality(i))
 }
 
+# content_rating_within_ceiling is resolved in Go before evaluation, by both
+# entry points that produce an action decision (PDP.CheckAction and
+# policy.Simulate), because the maturity ladder lives there: ranking "15",
+# "FSK 16" or "DE:16" against a "PG-13" ceiling is not something this policy
+# can do.
+#
+# No ceiling asserted means allowed. A ceiling WITH no derived result is not
+# treated as "no ceiling": that combination can only mean an evaluator forgot
+# to derive the flag, and defaulting it to true would let a parental control
+# pass silently. It denies instead, so a future third caller fails loudly on
+# its first over-ceiling request rather than quietly serving one.
 rating_allowed(i) if {
-	ratings.allowed(content_rating(i), max_content_rating(i))
+	object.get(i, "max_content_rating", "") == ""
+} else if {
+	object.get(i, "content_rating_within_ceiling", false) == true
 }
 
 stream_limit_allows(i) if {
@@ -125,10 +137,6 @@ artifacts_available(i) if {
 file_quality(i) := object.get(i, "file_quality", "")
 
 max_playback_quality(i) := object.get(i, "max_playback_quality", "")
-
-content_rating(i) := object.get(i, "content_rating", "")
-
-max_content_rating(i) := object.get(i, "max_content_rating", "")
 
 current_active_streams(i) := object.get(i, "current_active_streams", 0)
 

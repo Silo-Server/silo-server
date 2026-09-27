@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PlayerControls } from "./PlayerControls";
 
-function renderControls(markerEditAvailable: boolean) {
+function renderControls(
+  markerEditAvailable: boolean,
+  overrides: Partial<ComponentProps<typeof PlayerControls>> = {},
+) {
   return render(
     <PlayerControls
       visible
@@ -17,6 +21,8 @@ function renderControls(markerEditAvailable: boolean) {
       volume={1}
       muted={false}
       isFullscreen={false}
+      videoFit="contain"
+      onVideoFitToggle={vi.fn()}
       subtitleTracks={[]}
       activeSubtitleIndex={null}
       onSubtitleSelect={vi.fn()}
@@ -42,15 +48,96 @@ function renderControls(markerEditAvailable: boolean) {
       onTogglePlaybackInfo={vi.fn()}
       onPlayPause={vi.fn()}
       onSeek={vi.fn()}
+      onSkip={{ back: vi.fn(), forward: vi.fn() }}
+      skipSeconds={{ back: 10, forward: 30 }}
       onVolumeChange={vi.fn()}
       onMutedChange={vi.fn()}
       onFullscreenToggle={vi.fn()}
+      {...overrides}
     />,
   );
 }
 
 describe("PlayerControls", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("moves desktop secondary controls into overflow as the player narrows", () => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1024);
+    let resize = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resize = () => callback([], {} as ResizeObserver);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+
+    renderControls(true);
+    expect(screen.queryByRole("button", { name: "Edit markers" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "More player options" }));
+    expect(screen.getByRole("menuitem", { name: "Edit markers" })).toBeInTheDocument();
+    expect(screen.getByRole("slider", { name: "Volume" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    width.mockReturnValue(1920);
+    act(resize);
+    expect(screen.queryByRole("button", { name: "More player options" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit markers" })).toBeInTheDocument();
+    expect(screen.getByRole("slider", { name: "Volume" })).toBeInTheDocument();
+  });
+
+  it.each(["overflow", "Audio tracks", "Chapters"])(
+    "does not reopen %s after widening and narrowing the player",
+    (menu) => {
+      const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1024);
+      let resize = () => {};
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(callback: ResizeObserverCallback) {
+            resize = () => callback([], {} as ResizeObserver);
+          }
+          observe() {}
+          disconnect() {}
+        },
+      );
+      renderControls(true, {
+        audioTracks: [{ language: "en" }, { language: "fr" }],
+        activeAudioIndex: 0,
+        onAudioSelect: vi.fn(),
+        chapters: [
+          { index: 0, title: "Opening", start_seconds: 0, end_seconds: 120, source: "embedded" },
+        ],
+      });
+      const openMenu = () => {
+        fireEvent.click(screen.getByRole("button", { name: "More player options" }));
+        if (menu !== "overflow") {
+          fireEvent.click(screen.getByRole("menuitem", { name: menu }));
+        }
+        expect(screen.getByRole("menu")).toBeInTheDocument();
+      };
+      openMenu();
+
+      width.mockReturnValue(1920);
+      act(resize);
+      expect(screen.queryByRole("menu")).toBeNull();
+      width.mockReturnValue(1024);
+      act(resize);
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(screen.getByRole("button", { name: "More player options" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+      openMenu();
+    },
+  );
 
   it("hides marker editing when unavailable", () => {
     renderControls(false);
@@ -62,6 +149,45 @@ describe("PlayerControls", () => {
     renderControls(true);
 
     expect(screen.getByRole("button", { name: "Edit markers" })).toBeInTheDocument();
+  });
+
+  it("toggles between Fit and Fill from the desktop utility rail", () => {
+    const onVideoFitToggle = vi.fn();
+    const { unmount } = renderControls(false, { onVideoFitToggle });
+
+    const fill = screen.getByRole("button", { name: "Fill screen" });
+    expect(fill).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(fill);
+    expect(onVideoFitToggle).toHaveBeenCalledOnce();
+
+    unmount();
+    renderControls(false, { videoFit: "cover" });
+    expect(screen.getByRole("button", { name: "Fill screen" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("toggles video fit from the compact overflow menu", () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1024);
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          callback([], {} as ResizeObserver);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const onVideoFitToggle = vi.fn();
+    renderControls(false, { videoFit: "cover", onVideoFitToggle });
+
+    fireEvent.click(screen.getByRole("button", { name: "More player options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Fill screen" }));
+
+    expect(onVideoFitToggle).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("uses the mobile transport and hides hardware-volume controls on coarse pointers", () => {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,9 +16,68 @@ import (
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 )
+
+func TestStorageTransitionAdminJobResponsesAndSnapshotOmitPrivateDetails(t *testing.T) {
+	job := &models.AdminJob{
+		ID: "transition", JobType: adminjob.JobTypeStorageTransition, Status: adminjob.StatusFailed,
+		RequestedAt:    time.Now().UTC(),
+		RequestPayload: json.RawMessage(`{"target":"private request"}`),
+		ResultPayload:  json.RawMessage(`{"phase":"failed","verified_objects":7,"failure_category":"copy_failed","source_identity":"private source","skipped_keys":["private key"]}`),
+		Message:        "private object", ErrorMessage: "private endpoint", PublicURL: "private URL",
+	}
+	handler := NewAdminJobsHandler(&fakeAdminJobRepository{job: job}, nil)
+	response := httptest.NewRecorder()
+	handler.HandleList(response, httptest.NewRequest(http.MethodGet, "/admin/jobs", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", response.Code, response.Body)
+	}
+	assertSafeStorageJobPayload(t, response.Body.String(), false)
+
+	snapshot, err := (&EventsHandler{jobs: handler}).snapshotForChannel(
+		httptest.NewRequest(http.MethodGet, "/api/v2/events/ws", nil), nil, "", evt.ChannelJobs,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSafeStorageJobPayload(t, string(snapshot), true)
+	if job.ErrorMessage != "private endpoint" {
+		t.Fatal("outbound projection mutated the diagnostic job row")
+	}
+}
+
+func assertSafeStorageJobPayload(t *testing.T, payload string, snapshot bool) {
+	t.Helper()
+	for _, private := range []string{"private request", "private source", "private key", "private object", "private endpoint", "private URL"} {
+		if strings.Contains(payload, private) {
+			t.Fatalf("storage job response leaked %q: %s", private, payload)
+		}
+	}
+	var jobs []adminJobResponse
+	var err error
+	if snapshot {
+		err = json.Unmarshal([]byte(payload), &jobs)
+	} else {
+		var page listAdminJobsResponse
+		err = json.Unmarshal([]byte(payload), &page)
+		jobs = page.Jobs
+	}
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("storage job response=%s err=%v", payload, err)
+	}
+	job := jobs[0]
+	var result struct {
+		Phase           string `json:"phase"`
+		VerifiedObjects int    `json:"verified_objects"`
+		FailureCategory string `json:"failure_category"`
+	}
+	if err := json.Unmarshal(job.ResultPayload, &result); err != nil || result.Phase != "failed" || result.VerifiedObjects != 7 || result.FailureCategory != "copy_failed" || string(job.RequestPayload) != `{}` || job.Message != "" || job.ErrorMessage != "" {
+		t.Fatalf("storage job projection=%+v result=%+v err=%v", job, result, err)
+	}
+}
 
 func TestCanReadAdminJob_AdminCanReadAnyJob(t *testing.T) {
 	claims := &auth.Claims{UserID: 1, Role: "admin"}

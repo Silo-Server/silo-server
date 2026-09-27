@@ -375,6 +375,8 @@ wait_for_silo() {
 	local port
 	port="$(env_value PORT 8090)"
 
+	# /api/v1/health and /api/v1/ready are retained operational probes; they keep
+	# these paths after the /api/v1 contract is retired.
 	log "Waiting for Silo readiness on localhost:${port}"
 	for _ in $(seq 1 60); do
 		if curl -fsS "http://localhost:${port}/api/v1/ready" >/dev/null 2>&1; then

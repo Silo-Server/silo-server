@@ -559,7 +559,7 @@ func TestBandwidthReservationsCountDuringBridge(t *testing.T) {
 	// Unlike job reservations, bandwidth bridges ignore health freshness —
 	// a report right after admission would not reflect the streams yet.
 	newer := f.now.Add(5 * time.Second)
-	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 0, "", nil, newer)
+	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 0, "", nil, nil, newer)
 	f.now = f.now.Add(10 * time.Second)
 	if got := f.planner.PlanSession("s4", "", false, 4_000).ProxyNode; got != nil {
 		t.Fatalf("stream should still be rejected during bridge window, got %+v", got)
@@ -569,7 +569,7 @@ func TestBandwidthReservationsCountDuringBridge(t *testing.T) {
 	// meter now reports 8 Mbps, so one more 4 Mbps stream still won't fit,
 	// but a 2 Mbps one will.
 	f.now = f.now.Add(bandwidthBridgeAge)
-	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 8_000, "", nil, f.now)
+	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 8_000, "", nil, nil, f.now)
 	if got := f.planner.PlanSession("s5", "", false, 4_000).ProxyNode; got != nil {
 		t.Fatalf("4 Mbps stream should not fit at 8/10 Mbps, got %+v", got)
 	}
@@ -621,7 +621,7 @@ func TestUnknownBitrateAdmittedBelowCap(t *testing.T) {
 		t.Fatal("unknown-bitrate stream should be admitted below cap")
 	}
 
-	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 10_000, "", nil, f.now)
+	f.proxies.ApplyHealth(1, f.proxies.Nodes()[0].URL, true, 0, 10_000, "", nil, nil, f.now)
 	if got := f.planner.PlanSession("s2", "", false, 0).ProxyNode; got != nil {
 		t.Fatalf("unknown-bitrate stream should be rejected at cap, got %+v", got)
 	}

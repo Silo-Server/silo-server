@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +13,20 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+// ParseSyntheticSeasonID recognizes the season IDs derived from episode groups
+// when a series has no stored season metadata. Callers must verify existence.
+func ParseSyntheticSeasonID(contentID string) (string, int, bool) {
+	seriesID, seasonPart, ok := strings.Cut(contentID, "-S")
+	if !ok || seriesID == "" || seasonPart == "" {
+		return "", 0, false
+	}
+	seasonNum, err := strconv.Atoi(seasonPart)
+	if err != nil || !FitsPostgresInteger(seasonNum) {
+		return "", 0, false
+	}
+	return seriesID, seasonNum, true
+}
 
 // Sentinel errors for season repository operations.
 var (

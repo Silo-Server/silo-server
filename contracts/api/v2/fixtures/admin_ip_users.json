@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "user_id": "7",
+      "username": "sample",
+      "first_seen": "2026-01-02T03:04:05.678Z",
+      "last_seen": "2026-01-02T03:04:05.678Z",
+      "request_count": 3
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

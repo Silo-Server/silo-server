@@ -25,10 +25,11 @@ esac
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
+# R keeps an edited rename in the check.
 if [[ "$cached" -eq 1 ]]; then
-	mapfile -t go_files < <(git diff --cached --name-only --diff-filter=ACM -- '*.go')
+	mapfile -t go_files < <(git diff --cached --name-only --diff-filter=ACMR -- '*.go')
 else
-	mapfile -t go_files < <(git diff --name-only --diff-filter=ACM -- '*.go')
+	mapfile -t go_files < <(git diff --name-only --diff-filter=ACMR -- '*.go')
 fi
 
 if [[ ${#go_files[@]} -eq 0 ]]; then
@@ -37,35 +38,37 @@ fi
 
 failed=0
 
-unformatted=$(gofmt -l "${go_files[@]}" 2>&1) || true
+if [[ "$cached" -eq 1 ]]; then
+	# The commit contains the staged blobs, so format-check those rather than
+	# the working tree, which may hold unstaged edits.
+	unformatted=""
+	for file in "${go_files[@]}"; do
+		if [[ -n "$(git show ":$file" | gofmt -l 2>&1)" ]]; then
+			unformatted+="$file"$'\n'
+		fi
+	done
+else
+	unformatted=$(gofmt -l "${go_files[@]}" 2>&1) || true
+fi
 if [[ -n "$unformatted" ]]; then
 	printf '%s\n' "gofmt is required on:" >&2
-	printf '%s\n\n' "$unformatted" >&2
+	printf '%s\n' "$unformatted" >&2
 	printf '%s\n' "Fix with: gofmt -w <file>" >&2
 	failed=1
 fi
 
 if command -v golangci-lint >/dev/null 2>&1; then
-	base_ref=$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null || true)
-	if [[ -n "$base_ref" ]]; then
-		lint_output=$(golangci-lint run --new-from-rev="$base_ref" ./... 2>&1) || lint_failed=1
-		if [[ "${lint_failed:-0}" -eq 1 ]]; then
-			# A run whose ONLY reported category is "typecheck" means golangci-lint
-			# couldn't fully resolve the package graph (e.g. a source file briefly
-			# unreadable due to local sync/indexing) rather than a genuine lint
-			# finding. Warn instead of blocking the commit in that case; CI runs
-			# in a clean checkout and will still catch a real compile error.
-			categories=$(printf '%s\n' "$lint_output" | grep -E '^\* [A-Za-z0-9_-]+:' || true)
-			non_typecheck=$(printf '%s\n' "$categories" | grep -v '^\* typecheck:' || true)
-			printf '%s\n' "$lint_output" >&2
-			if [[ -n "$categories" && -z "$non_typecheck" ]]; then
-				printf '\n%s\n' "warning: golangci-lint could not fully type-check the project (see above); skipping the local lint gate. CI still verifies this." >&2
-			else
-				failed=1
-			fi
-		fi
-	else
-		printf '%s\n' "skipping golangci-lint: could not resolve merge base with main" >&2
+	if [[ "$cached" -eq 1 ]] && ! git diff --quiet -- "${go_files[@]}"; then
+		# golangci-lint reads the working tree. With unstaged edits to a staged
+		# file it would lint something other than the commit, passing a broken
+		# commit or blocking a good one, so refuse rather than guess.
+		printf '%s\n' "Staged Go files also have unstaged changes; the lint gate cannot check the commit as staged." >&2
+		printf '%s\n' "Stage or stash them (git stash --keep-index) and commit again." >&2
+		failed=1
+	elif ! "$repo_root/scripts/lint-changed.sh"; then
+		# lint-changed.sh reports CI's changed-line findings for the touched
+		# packages. A type-check failure is a real finding and fails too.
+		failed=1
 	fi
 else
 	printf '%s\n' "skipping golangci-lint: not installed. Install with:" >&2

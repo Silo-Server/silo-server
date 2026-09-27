@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Link } from "react-router";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
-import { useHWAccelDetection, type HWAccelInfo } from "@/hooks/queries/admin/system";
+import { useHWAccelDetection } from "@/hooks/queries/admin/system";
 import { useAdminNodes } from "@/hooks/queries/admin/nodes";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -16,8 +16,10 @@ import { FieldGroup } from "./FieldGroup";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {
   CHAPTER_THUMBNAIL_EXECUTION_DEFAULT,
+  HW_ACCEL_OPTIONS,
   buildHWDeviceRows,
   chapterThumbnailExecutionOptions,
+  describeDetection,
   hasUsableTranscodeNode,
   nodeInventoriesDiverge,
   parseHWDeviceList,
@@ -48,8 +50,9 @@ const TRANSCODING_ADVANCED_KEYS = [
 ];
 
 const executionOptions = [
-  { value: "prefer_worker", label: "Prefer worker" },
-  { value: "worker_only", label: "Worker only" },
+  { value: "prefer_worker", label: "Prefer any worker" },
+  { value: "prefer_transcode", label: "Prefer transcode node" },
+  { value: "worker_only", label: "Any worker only" },
   { value: "prefer_api", label: "Prefer API server" },
   { value: "api_only", label: "API server only" },
 ];
@@ -61,16 +64,21 @@ const egressOptions = [
   { value: "api_only", label: "API server only" },
 ];
 
-function executionPreview(value: string) {
+type ExecutionWorkload = "remux" | "video_transcode";
+
+function executionPreview(value: string, workload: ExecutionWorkload) {
+  const worker = workload === "remux" ? "Any worker" : "Transcode node";
   switch (value) {
+    case "prefer_transcode":
+      return workload === "remux" ? "Transcode node → any worker → API" : "Transcode node → API";
     case "worker_only":
-      return "Worker only";
+      return `${worker} only`;
     case "prefer_api":
-      return "API → worker";
+      return `API → ${worker.toLowerCase()}`;
     case "api_only":
       return "API only";
     default:
-      return "Worker → API";
+      return `${worker} → API`;
   }
 }
 
@@ -88,8 +96,8 @@ function egressPreview(value: string) {
 }
 
 /** The whole path for a workload that needs an executor, e.g. "Worker → API · Proxy → API". */
-function routePreview(execution: string, egress: string) {
-  return `${executionPreview(execution)} · ${egressPreview(egress)}`;
+function routePreview(execution: string, egress: string, workload: ExecutionWorkload) {
+  return `${executionPreview(execution, workload)} · ${egressPreview(egress)}`;
 }
 
 // A routing policy either picks who runs the work (execution) or who serves the
@@ -131,13 +139,15 @@ const ROUTING_FIELDS: readonly RoutingField[] = [
     key: "playback.routing.remux_execution",
     label: "Remux execution",
     kind: "execution",
-    description: "Includes container changes, audio adaptation, and copied-video HLS.",
+    description:
+      "A worker can be a proxy or transcode node. Prefer transcode node runs HLS or progressive remux there when supported; progressive output is relayed through the selected proxy.",
   },
   { key: "playback.routing.remux_egress", label: "Remux egress", kind: "egress" },
   {
     key: "playback.routing.video_transcode_execution",
     label: "Video transcode execution",
     kind: "execution",
+    description: "Video transcode workers are transcode nodes; proxy nodes only provide egress.",
   },
   {
     key: "playback.routing.video_transcode_egress",
@@ -148,12 +158,12 @@ const ROUTING_FIELDS: readonly RoutingField[] = [
 
 const ROUTING_PRESETS = {
   standard: {
-    label: "Standard cluster",
+    label: "Silo Defaults",
     values: {
       "playback.routing.direct_play_egress": "prefer_proxy",
-      "playback.routing.remux_execution": "prefer_worker",
+      "playback.routing.remux_execution": "prefer_transcode",
       "playback.routing.remux_egress": "prefer_proxy",
-      "playback.routing.video_transcode_execution": "prefer_worker",
+      "playback.routing.video_transcode_execution": "prefer_transcode",
       "playback.routing.video_transcode_egress": "prefer_proxy",
     },
   },
@@ -314,15 +324,8 @@ export default function PlaybackSettings() {
           <SettingField
             label="Hardware acceleration"
             type="select"
-            options={[
-              { value: "auto", label: "Auto" },
-              { value: "qsv", label: "Intel Quick Sync (QSV)" },
-              { value: "vaapi", label: "VA-API" },
-              { value: "nvenc", label: "NVIDIA NVENC" },
-              { value: "videotoolbox", label: "VideoToolbox (macOS)" },
-              { value: "none", label: "Software" },
-            ]}
-            description="Auto picks the best device this server can see."
+            options={HW_ACCEL_OPTIONS}
+            description="Auto picks the best device. If startup fails, it keeps GPU encoding with CPU decoding before falling back to software."
             status={hwAccelStatus}
             value={hwAccel}
             onChange={(v) => form.setValue("playback.hw_accel", v)}
@@ -570,6 +573,7 @@ export default function PlaybackSettings() {
                 route={routePreview(
                   routingValues["playback.routing.remux_execution"],
                   routingValues["playback.routing.remux_egress"],
+                  "remux",
                 )}
               />
               <PreferredPathRow
@@ -577,6 +581,7 @@ export default function PlaybackSettings() {
                 route={routePreview(
                   routingValues["playback.routing.video_transcode_execution"],
                   routingValues["playback.routing.video_transcode_egress"],
+                  "video_transcode",
                 )}
               />
             </div>
@@ -625,34 +630,4 @@ export default function PlaybackSettings() {
       />
     </div>
   );
-}
-
-function formatResolved(resolved: string): string {
-  switch (resolved) {
-    case "qsv":
-      return "Intel Quick Sync (QSV)";
-    case "vaapi":
-      return "VA-API";
-    case "nvenc":
-      return "NVIDIA NVENC";
-    case "videotoolbox":
-      return "VideoToolbox (macOS)";
-    case "none":
-      return "Software";
-    default:
-      return resolved;
-  }
-}
-
-/**
- * One-line detection result, e.g. "Detected VA-API on renderD128". Returns
- * undefined while nothing has been probed yet so the caller can show its own
- * "detecting" state instead of an empty phrase.
- */
-function describeDetection(detection: HWAccelInfo | undefined): string | undefined {
-  if (!detection) return undefined;
-  if (detection.resolved === "none") return "No supported graphics hardware found";
-  const device = detection.render_devices?.[0];
-  const onNode = detection.source === "transcode_node" ? " (transcode node)" : "";
-  return `Detected ${formatResolved(detection.resolved)}${device ? ` on ${device}` : ""}${onNode}`;
 }

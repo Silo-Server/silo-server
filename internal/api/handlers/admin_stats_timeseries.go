@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -201,16 +202,8 @@ func (h *AdminHandler) HandleGetTimeseries(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	var series *AdminTimeseries
-	switch {
-	case h.TimeseriesSource != nil:
-		if isTruthyQuery(r.URL.Query().Get("refresh")) {
-			h.TimeseriesSource.Invalidate()
-		}
-		series, err = h.TimeseriesSource.Get(r.Context(), hours)
-	case h.pool != nil:
-		series, err = queryAdminTimeseries(r.Context(), h.pool, hours)
-	default:
+	series, err := h.ReadAdminTimeseries(r.Context(), hours, isTruthyQuery(r.URL.Query().Get("refresh")))
+	if errors.Is(err, ErrAdminDashboardUnavailable) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Database not configured")
 		return
 	}

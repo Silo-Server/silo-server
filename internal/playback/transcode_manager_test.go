@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -111,6 +113,62 @@ func TestCloseTranscodeSession_DropsLiveSession(t *testing.T) {
 	m.CloseTranscodeSession("s1", "")
 	if got := m.GetTranscodeSession("s1"); got != nil {
 		t.Fatal("session must be removed from the live map on close")
+	}
+}
+
+func TestStartShutdownCleanup_ClosesEveryLocalTranscode(t *testing.T) {
+	m := NewTranscodeManager()
+	m.RegisterTranscodeSession("s1", &TranscodeSession{})
+	m.RegisterTranscodeSession("s2", &TranscodeSession{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := m.StartShutdownCleanup(ctx)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown cleanup did not finish")
+	}
+	for _, id := range []string{"s1", "s2"} {
+		if got := m.GetTranscodeSession(id); got != nil {
+			t.Fatalf("transcode %q survived shutdown cleanup", id)
+		}
+	}
+}
+
+func TestStartShutdownCleanup_RejectsLaterRegistrationAndSwap(t *testing.T) {
+	m := NewTranscodeManager()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := m.StartShutdownCleanup(ctx)
+	cancel()
+	<-done
+
+	for _, test := range []struct {
+		name    string
+		publish func(*TranscodeSession) bool
+	}{
+		{name: "register", publish: func(session *TranscodeSession) bool {
+			return m.RegisterTranscodeSession("late-register", session)
+		}},
+		{name: "swap", publish: func(session *TranscodeSession) bool {
+			_, accepted := m.SwapTranscodeSession("late-swap", session)
+			return accepted
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "session")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			session := NewTranscodeSessionForTest(dir)
+			if test.publish(session) {
+				t.Fatal("session was published after shutdown")
+			}
+			if _, err := os.Stat(dir); !os.IsNotExist(err) {
+				t.Fatalf("rejected session cache still exists: %v", err)
+			}
+		})
 	}
 }
 
@@ -671,5 +729,75 @@ func TestLockSessionLifecycle_MutualExclusionAndCleanup(t *testing.T) {
 	m.lifecycleMu.Unlock()
 	if n != 0 {
 		t.Fatalf("expected lifecycle lock map to drain to 0, got %d", n)
+	}
+}
+
+func TestReconstructTranscodeWalksAutoPipelineInSameOutputDir(t *testing.T) {
+	transcodeDir := t.TempDir()
+	m := NewTranscodeManager()
+	m.Config = func() TranscodeRuntimeConfig {
+		return TranscodeRuntimeConfig{TranscodeDir: transcodeDir, HWAccel: hwAccelAuto}
+	}
+	m.autoTranscodePipeline = func(_ context.Context, opts TranscodeOpts) *AutoTranscodePipeline {
+		if opts.HWAccel != hwAccelAuto {
+			t.Errorf("pipeline built from HWAccel %q, want live auto config", opts.HWAccel)
+		}
+		opts.HWAccel = transcodeHWNVENC
+		return newResolvedAutoTranscodePipeline(opts, newAutoTranscodePipelineCache())
+	}
+	var attempts []TranscodeOpts
+	m.startTranscode = func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		attempts = append(attempts, opts)
+		if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// The full-hardware attempt exits before its manifest; the mixed one
+		// writes into the same directory, which must still exist.
+		return fakeStartupSession(t, opts, opts.OutputDir, len(attempts) == 2, false), nil
+	}
+	card := NewRecipeCard(5, "p", 77, "", TranscodeOpts{
+		SessionID: "s", InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "720p", SegmentDuration: 2,
+	})
+
+	got, err := m.ReconstructTranscodeWithError(context.Background(), "s", -1, card)
+	if err != nil || got == nil {
+		t.Fatalf("reconstruct = %v, %v; want the mixed-stage session", got, err)
+	}
+	if len(attempts) != 2 {
+		t.Fatalf("attempts = %d, want full hardware then mixed", len(attempts))
+	}
+	if attempts[0].SoftwareVideoDecode || !attempts[1].SoftwareVideoDecode || attempts[1].HWAccel != transcodeHWNVENC {
+		t.Fatalf("attempt paths = %+v / %+v, want GPU decode then CPU decode with NVENC", attempts[0], attempts[1])
+	}
+	if live := m.GetTranscodeSession("s"); live != got {
+		t.Fatalf("registered session = %p, want %p", live, got)
+	}
+	if _, statErr := os.Stat(attempts[1].OutputDir); statErr != nil {
+		t.Fatalf("reconstruct output dir removed: %v", statErr)
+	}
+}
+
+func TestReconstructTranscodeWithoutAutoStartsOnceWithoutWaiting(t *testing.T) {
+	m := NewTranscodeManager()
+	m.Config = func() TranscodeRuntimeConfig {
+		return TranscodeRuntimeConfig{TranscodeDir: t.TempDir(), HWAccel: transcodeHWQSV}
+	}
+	starts := 0
+	m.startTranscode = func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		starts++
+		// Never ready and already exited: a waiting caller would fail.
+		return &TranscodeSession{opts: opts, stderr: newBoundedTailBuffer(stderrTailMaxBytes)}, nil
+	}
+	card := NewRecipeCard(5, "p", 77, "", TranscodeOpts{
+		SessionID: "s", InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+	})
+	got, err := m.ReconstructTranscodeWithError(context.Background(), "s", -1, card)
+	if err != nil || got == nil {
+		t.Fatalf("reconstruct = %v, %v; want the single unwaited session", got, err)
+	}
+	if starts != 1 {
+		t.Fatalf("starts = %d, want 1", starts)
 	}
 }

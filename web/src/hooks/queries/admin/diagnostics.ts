@@ -1,9 +1,17 @@
+import { useUpdateServerSetting } from "./settings";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { api, apiResponse } from "@/api/client";
+import {
+  captureProfileRequestContext,
+  isCapturedProfileAuthorityActive,
+  StaleApiRequestContextError,
+  type ProfileRequestContextSnapshot,
+} from "@/api/client";
+import { v2, type V2Result } from "@/api/v2/request";
+import { fetchAdminDiagnosticReportBundle } from "@/api/v2/adminDiagnosticDownload";
 import type {
-  AdminSettingUpdateResponse,
+  ClientDiagnosticManifest,
   DiagnosticReport,
   DiagnosticReportListResponse,
   DiagnosticReportSummary,
@@ -22,54 +30,90 @@ export interface AdminDiagnosticsQuery {
   cursor?: string;
 }
 
-function toQueryString(params: AdminDiagnosticsQuery) {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === null || value === "") continue;
-    search.set(key, String(value));
-  }
-  return search.toString();
-}
-
 export function useDiagnosticsStatus() {
+  const profileContext = captureProfileRequestContext();
   return useQuery({
-    queryKey: adminKeys.diagnosticStatus(),
-    queryFn: () => api<DiagnosticStatus>("/diagnostics/status"),
+    queryKey: [
+      ...adminKeys.diagnosticStatus(),
+      profileContext?.serverOrigin,
+      profileContext?.authContextVersion,
+      profileContext?.profileId,
+    ],
+    enabled: profileContext !== null,
+    queryFn: async (): Promise<
+      DiagnosticStatus & V2Result<"GET /api/v2/diagnostics/capabilities">
+    > => {
+      if (!profileContext || !isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      const result = await v2("GET /api/v2/diagnostics/capabilities", { profileContext });
+      if (!isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      const status = result.status;
+      if (status !== "available" && status !== "disabled" && status !== "storage_unavailable")
+        throw new Error(
+          "Unrecognized diagnostics availability. Reload before changing upload settings.",
+        );
+      return { ...result, status };
+    },
     staleTime: 30_000,
   });
 }
 
 export function useUpdateDiagnosticsUploadsEnabled() {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (enabled: boolean) =>
-      api<AdminSettingUpdateResponse>("/admin/settings/diagnostics.uploads_enabled", {
-        method: "PUT",
-        body: JSON.stringify({ value: enabled ? "true" : "false" }),
-      }),
-    onSuccess: async (_result, enabled) => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: adminKeys.diagnosticStatus() }),
-        queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
-      ]);
-      toast.success(
-        enabled ? "Client diagnostic uploads enabled" : "Client diagnostic uploads disabled",
-      );
-    },
-    onError: (error) => {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to update client diagnostic uploads",
-      );
-    },
+  const update = useUpdateServerSetting();
+  const saved = (enabled: boolean) => {
+    void queryClient.invalidateQueries({ queryKey: adminKeys.diagnosticStatus() });
+    toast.success(
+      enabled ? "Client diagnostic uploads enabled" : "Client diagnostic uploads disabled",
+    );
+  };
+  const values = (enabled: boolean) => ({
+    key: "diagnostics.uploads_enabled",
+    value: String(enabled),
   });
+  return {
+    ...update,
+    variables: update.variables ? update.variables.value === "true" : undefined,
+    mutate: (enabled: boolean) =>
+      update.mutate(values(enabled), { onSuccess: () => saved(enabled) }),
+    mutateAsync: async (enabled: boolean) => {
+      const context = captureProfileRequestContext();
+      const result = await update.mutateAsync(values(enabled));
+      if (!context || !isCapturedProfileAuthorityActive(context))
+        throw new StaleApiRequestContextError();
+      saved(enabled);
+      return result;
+    },
+  };
+}
+
+function diagnosticSummary(
+  row: V2Result<"GET /api/v2/admin/diagnostics/reports/{id}">,
+): DiagnosticReport {
+  return { ...row, manifest: row.manifest as unknown as ClientDiagnosticManifest };
 }
 
 export function useDiagnosticReports(params: AdminDiagnosticsQuery) {
-  const query = toQueryString(params);
   return useQuery({
     queryKey: adminKeys.diagnosticReports({ ...params }),
-    queryFn: () =>
-      api<DiagnosticReportListResponse>(`/admin/diagnostics/reports${query ? `?${query}` : ""}`),
+    queryFn: async (): Promise<DiagnosticReportListResponse> => {
+      const profileContext = captureProfileRequestContext();
+      if (!profileContext) throw new StaleApiRequestContextError();
+      const page = await v2("GET /api/v2/admin/diagnostics/reports", {
+        profileContext,
+        query: {
+          ...params,
+          user_id:
+            params.user_id === undefined || params.user_id === ""
+              ? undefined
+              : String(params.user_id),
+        },
+      });
+      if (!isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      return { reports: page.items, next_cursor: page.page?.next_cursor };
+    },
     staleTime: 5_000,
   });
 }
@@ -77,29 +121,66 @@ export function useDiagnosticReports(params: AdminDiagnosticsQuery) {
 export function useDiagnosticReport(id?: string) {
   return useQuery({
     queryKey: adminKeys.diagnosticReport(id),
-    queryFn: () => api<DiagnosticReport>(`/admin/diagnostics/reports/${encodeURIComponent(id!)}`),
+    queryFn: async (): Promise<DiagnosticReport> => {
+      const profileContext = captureProfileRequestContext();
+      if (!profileContext) throw new StaleApiRequestContextError();
+      const report = await v2("GET /api/v2/admin/diagnostics/reports/{id}", {
+        path: { id: id! },
+        profileContext,
+      });
+      if (!isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      return diagnosticSummary(report);
+    },
     enabled: Boolean(id),
   });
 }
 
 export function useDeleteDiagnosticReport() {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) =>
-      api<void>(`/admin/diagnostics/reports/${encodeURIComponent(id)}`, {
-        method: "DELETE",
+  const mutation = useMutation({
+    mutationFn: ({
+      id,
+      profileContext,
+    }: {
+      id: string;
+      profileContext: ProfileRequestContextSnapshot;
+    }) =>
+      v2("DELETE /api/v2/admin/diagnostics/reports/{id}", {
+        path: { id },
+        profileContext,
+        retryAuthentication: false,
       }),
-    onSuccess: (_result, id) => {
-      queryClient.removeQueries({ queryKey: adminKeys.diagnosticReport(id) });
-      void queryClient.invalidateQueries({
-        queryKey: ["admin", "diagnostics", "reports"],
-      });
+    retry: false,
+    onSuccess: (_result, intent) => {
+      if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
+      queryClient.removeQueries({ queryKey: adminKeys.diagnosticReport(intent.id) });
+      void queryClient.invalidateQueries({ queryKey: ["admin", "diagnostics", "reports"] });
       toast.success("Diagnostic report deleted");
     },
-    onError: (error) => {
+    onError: (error, intent) => {
+      if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
       toast.error(error instanceof Error ? error.message : "Failed to delete diagnostic report");
     },
   });
+  return {
+    ...mutation,
+    mutate: (id: string, options?: { onSuccess?: () => void }) => {
+      const profileContext = captureProfileRequestContext();
+      if (!profileContext) {
+        toast.error("Select an administrator profile before deleting.");
+        return;
+      }
+      mutation.mutate(
+        { id, profileContext },
+        {
+          onSuccess: () => {
+            if (isCapturedProfileAuthorityActive(profileContext)) options?.onSuccess?.();
+          },
+        },
+      );
+    },
+  };
 }
 
 export async function downloadDiagnosticReport(report: DiagnosticReportSummary) {
@@ -110,10 +191,7 @@ export async function downloadDiagnosticReport(report: DiagnosticReportSummary) 
   // separate window the UI can neither detect the failure nor fall back. Admin
   // downloads are bounded and rare, so proxying through the server is reliable
   // and lets errors surface here for the caller to report.
-  const response = await apiResponse(
-    `/admin/diagnostics/reports/${encodeURIComponent(report.id)}/download?proxy=1`,
-  );
-  const blob = await response.blob();
+  const blob = await fetchAdminDiagnosticReportBundle(report.id);
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

@@ -1,0 +1,12 @@
+{
+  "id": "2",
+  "document_id": "1",
+  "version_number": 1,
+  "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "compiled_ok": true,
+  "compile_error": null,
+  "created_by_user_id": null,
+  "comment": null,
+  "created_at": "2026-01-02T03:04:05.678Z",
+  "source": "package silo_custom.scope\nimport rego.v1\noverride(base, _) := base"
+}

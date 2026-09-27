@@ -577,3 +577,38 @@ func setScopedAudioLanguageForDevice(
 		t.Fatalf("seeding %s: %v", settingskeys.PlaybackAudioLanguage, err)
 	}
 }
+
+// The settings contract stores the original-language audio choice as the
+// private-use tag playback.OriginalLanguageTag; it selects the item's original
+// language like the legacy sentinel.
+func TestBuildPlaybackInfo_OriginalLanguageTagSelectsOriginalAudio(t *testing.T) {
+	store := newDetailTestStore(t)
+	setProfileAudioLanguage(t, store, playback.OriginalLanguageTag)
+
+	service := &DetailService{
+		originalLangFn: func(context.Context, string) string {
+			return "ja"
+		},
+	}
+	service.SetUserStoreProvider(testDetailUserStoreProvider{store: store})
+
+	versions, _, _, _, _, _, _ := service.buildPlaybackInfo(context.Background(), []*models.MediaFile{
+		{
+			ID:            7,
+			ContentID:     "movie-1",
+			FilePath:      "/media/movie.mkv",
+			MediaFolderID: 12,
+			AudioTracks: []models.AudioTrack{
+				{Language: "en", Default: true},
+				{Language: "ja"},
+			},
+		},
+	}, AccessFilter{UserID: 1, ProfileID: "profile-1"}, "movie-1")
+
+	if len(versions) != 1 || versions[0].EffectiveAudioTrackIndex == nil || *versions[0].EffectiveAudioTrackIndex != 1 {
+		t.Fatalf("EffectiveAudioTrackIndex = %v, want the Japanese track", versions[0].EffectiveAudioTrackIndex)
+	}
+	if versions[0].EffectiveAudioLanguage != "ja" {
+		t.Fatalf("EffectiveAudioLanguage = %q, want ja", versions[0].EffectiveAudioLanguage)
+	}
+}

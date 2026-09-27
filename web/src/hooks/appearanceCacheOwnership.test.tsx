@@ -1,14 +1,12 @@
 import { act, render } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { appearanceCache, storage } from "@/utils/storage";
-import { DEFAULT_THEME } from "@/lib/themes";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 
 const mocks = vi.hoisted(() => ({
   useOptionalAuth: vi.fn(),
   useEffectiveSettings: vi.fn(),
-  useBranding: vi.fn(),
   mutate: vi.fn(),
   clearMutate: vi.fn(),
 }));
@@ -28,29 +26,19 @@ vi.mock("@/hooks/queries/settingValues", () => ({
   }),
 }));
 
-vi.mock("@/hooks/useBranding", () => ({
-  useBranding: () => mocks.useBranding(),
-}));
-
 import { ThemeProvider, useTheme } from "./useTheme";
-import { useCustomTheme } from "./useCustomTheme";
 
 const KEYS = storage.KEYS;
 
-interface Captured {
-  theme: ReturnType<typeof useTheme>;
-  custom: ReturnType<typeof useCustomTheme>;
-}
+type Captured = ReturnType<typeof useTheme>;
 
 function Probe({ onRender }: { onRender: (captured: Captured) => void }) {
-  const theme = useTheme();
-  const custom = useCustomTheme();
-  onRender({ theme, custom });
+  onRender(useTheme());
   return null;
 }
 
 /**
- * Renders the appearance providers and keeps returning the latest captured
+ * Renders the appearance provider and keeps returning the latest captured
  * values, so a test can change the signed-in identity and re-render the same
  * tree — the account or profile switch a running SPA actually performs.
  */
@@ -80,12 +68,9 @@ function renderAppearance() {
 
 /** Everything the given identity (`user:profile`) left behind on this browser. */
 function seedAppearance(owner: string): void {
-  appearanceCache.set(KEYS.THEME, "cobalt-studio", owner);
   appearanceCache.set(KEYS.UI_TEXT_SCALE, "large", owner);
   appearanceCache.set(KEYS.UI_TEXT_WEIGHT, "strong", owner);
   appearanceCache.set(KEYS.UI_HIGH_CONTRAST, "true", owner);
-  appearanceCache.set(KEYS.UI_CUSTOM_THEME_VARS, JSON.stringify({ "color-bg": "#ff0000" }), owner);
-  appearanceCache.set(KEYS.UI_CUSTOM_CSS, "body { filter: invert(1); }", owner);
 }
 
 /** Everything account 1's first profile left behind on this browser. */
@@ -115,40 +100,37 @@ function effectiveAnswer(values: Record<string, { value: unknown; source?: strin
   return { data };
 }
 
+function expectDefaults(captured: Captured): void {
+  expect(captured.textScale).toBe("default");
+  expect(captured.textWeight).toBe("default");
+  expect(captured.highContrast).toBe(false);
+}
+
+function expectSeeded(captured: Captured): void {
+  expect(captured.textScale).toBe("large");
+  expect(captured.textWeight).toBe("strong");
+  expect(captured.highContrast).toBe(true);
+}
+
 describe("appearance cache ownership", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
     mocks.useEffectiveSettings.mockReturnValue({ data: {} });
-    mocks.useBranding.mockReturnValue({ defaultTheme: null });
   });
 
   it("does not apply another account's cached appearance", () => {
     seedAccountOneAppearance();
     signedInAs(2);
 
-    const { captured } = renderAppearance();
-
-    expect(captured.theme.theme).toBe(DEFAULT_THEME);
-    expect(captured.theme.textScale).toBe("default");
-    expect(captured.theme.textWeight).toBe("default");
-    expect(captured.theme.highContrast).toBe(false);
-    expect(captured.custom.vars).toEqual({});
-    expect(captured.custom.customCss).toBe("");
+    expectDefaults(renderAppearance().captured);
   });
 
   it("does not apply a sibling profile's cached appearance", () => {
     seedAccountOneAppearance();
     signedInAs(1, "p2");
 
-    const { captured } = renderAppearance();
-
-    expect(captured.theme.theme).toBe(DEFAULT_THEME);
-    expect(captured.theme.textScale).toBe("default");
-    expect(captured.theme.textWeight).toBe("default");
-    expect(captured.theme.highContrast).toBe(false);
-    expect(captured.custom.vars).toEqual({});
-    expect(captured.custom.customCss).toBe("");
+    expectDefaults(renderAppearance().captured);
   });
 
   it("leaves the other identity's values intact instead of deleting them", () => {
@@ -158,70 +140,39 @@ describe("appearance cache ownership", () => {
     renderAppearance();
 
     // Profile 1:p1 signing back in must still get their warm start; the
-    // previous design cleared these keys, which cost them a default-theme
+    // previous design cleared these keys, which cost them a default-look
     // flash on every cold start from then on.
-    expect(appearanceCache.get(KEYS.THEME, "1:p1")).toBe("cobalt-studio");
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe("large");
-    expect(appearanceCache.get(KEYS.UI_CUSTOM_CSS, "1:p1")).toBe("body { filter: invert(1); }");
-  });
-
-  it("still applies the admin default theme to an identity with no cached appearance", () => {
-    seedAccountOneAppearance();
-    signedInAs(2);
-    mocks.useBranding.mockReturnValue({ defaultTheme: "evergreen-studio" });
-
-    const { captured } = renderAppearance();
-
-    expect(captured.theme.theme).toBe("evergreen-studio");
+    expect(appearanceCache.get(KEYS.UI_HIGH_CONTRAST, "1:p1")).toBe("true");
   });
 
   it("keeps the warm start for the profile that stored it", () => {
     seedAccountOneAppearance();
     signedInAs(1);
 
-    const { captured } = renderAppearance();
-
-    expect(captured.theme.theme).toBe("cobalt-studio");
-    expect(captured.theme.textScale).toBe("large");
-    expect(captured.theme.textWeight).toBe("strong");
-    expect(captured.theme.highContrast).toBe(true);
-    expect(captured.custom.vars).toEqual({ "color-bg": "#ff0000" });
-    expect(captured.custom.customCss).toBe("body { filter: invert(1); }");
+    expectSeeded(renderAppearance().captured);
   });
 
   it("keeps the warm start while auth is still bootstrapping", () => {
     seedAccountOneAppearance();
     mocks.useOptionalAuth.mockReturnValue({ loading: true, user: null, profile: null });
 
-    const { captured } = renderAppearance();
-
-    expect(captured.theme.theme).toBe("cobalt-studio");
-    expect(captured.theme.textScale).toBe("large");
-    expect(captured.custom.customCss).toBe("body { filter: invert(1); }");
+    expectSeeded(renderAppearance().captured);
   });
 
   it("keeps the warm start on the profile picker, before a profile is chosen", () => {
     seedAccountOneAppearance();
     mocks.useOptionalAuth.mockReturnValue({ loading: false, user: { id: 1 }, profile: null });
 
-    const { captured } = renderAppearance();
-
-    expect(captured.theme.theme).toBe("cobalt-studio");
-    expect(captured.theme.textScale).toBe("large");
-    expect(captured.custom.customCss).toBe("body { filter: invert(1); }");
+    expectSeeded(renderAppearance().captured);
   });
 
   it("ignores a legacy cache written before namespacing existed", () => {
-    storage.set(KEYS.THEME, "cobalt-studio");
     storage.set(KEYS.UI_TEXT_SCALE, "large");
-    storage.set(KEYS.UI_CUSTOM_CSS, "body { filter: invert(1); }");
+    storage.set(KEYS.UI_HIGH_CONTRAST, "true");
     signedInAs(2);
 
-    const { captured } = renderAppearance();
-
-    expect(captured.theme.theme).toBe(DEFAULT_THEME);
-    expect(captured.theme.textScale).toBe("default");
-    expect(captured.custom.customCss).toBe("");
+    expectDefaults(renderAppearance().captured);
   });
 
   it("lets the signed-in profile's own server values win over an empty local cache", () => {
@@ -229,32 +180,27 @@ describe("appearance cache ownership", () => {
     signedInAs(2);
     mocks.useEffectiveSettings.mockReturnValue(
       effectiveAnswer({
-        [SETTING_KEYS.UI_THEME]: { value: "oxblood-noir" },
         [SETTING_KEYS.UI_TEXT_SCALE]: { value: "x-large" },
-        [SETTING_KEYS.UI_CUSTOM_CSS]: { value: "body { color: blue; }" },
+        [SETTING_KEYS.UI_HIGH_CONTRAST]: { value: true },
       }),
     );
 
     const { captured } = renderAppearance();
 
-    expect(captured.theme.theme).toBe("oxblood-noir");
-    expect(captured.theme.textScale).toBe("x-large");
-    expect(captured.custom.customCss).toBe("body { color: blue; }");
+    expect(captured.textScale).toBe("x-large");
+    expect(captured.highContrast).toBe(true);
   });
 
-  it("keeps applying the server's theme once the mirror has written it back", () => {
+  it("keeps applying the server's value once the mirror has written it back", () => {
     signedInAs(2);
     mocks.useEffectiveSettings.mockReturnValue(
-      effectiveAnswer({
-        [SETTING_KEYS.UI_THEME]: { value: "oxblood-noir" },
-        [SETTING_KEYS.UI_TEXT_SCALE]: { value: "x-large" },
-      }),
+      effectiveAnswer({ [SETTING_KEYS.UI_TEXT_SCALE]: { value: "x-large" } }),
     );
 
     const view = renderAppearance();
-    expect(view.captured.theme.theme).toBe("oxblood-noir");
+    expect(view.captured.textScale).toBe("x-large");
 
-    // The mirror effect writes the server's theme into the same namespace the
+    // The mirror effect writes the server's value into the same namespace the
     // resolver reads. A resolver that compared the two would see them agree
     // here and fall back to the default from the second render on, so this
     // re-renders rather than trusting the first paint.
@@ -265,16 +211,14 @@ describe("appearance cache ownership", () => {
       view.rerender();
     });
 
-    expect(view.captured.theme.theme).toBe("oxblood-noir");
-    expect(view.captured.theme.textScale).toBe("x-large");
-    expect(document.documentElement.getAttribute("data-theme")).toBe("oxblood-noir");
+    expect(view.captured.textScale).toBe("x-large");
+    expect(document.documentElement.getAttribute("data-text-scale")).toBe("x-large");
   });
 
   it("mirrors the server's appearance so the next cold start paints it", () => {
     signedInAs(2);
     mocks.useEffectiveSettings.mockReturnValue(
       effectiveAnswer({
-        [SETTING_KEYS.UI_THEME]: { value: "oxblood-noir" },
         [SETTING_KEYS.UI_TEXT_SCALE]: { value: "x-large" },
         [SETTING_KEYS.UI_TEXT_WEIGHT]: { value: "strong" },
         [SETTING_KEYS.UI_HIGH_CONTRAST]: { value: true },
@@ -284,42 +228,29 @@ describe("appearance cache ownership", () => {
     renderAppearance();
 
     // Without this the cache only ever held choices made on this device, so a
-    // user who picked their theme elsewhere flashed the default on every load.
-    expect(appearanceCache.get(KEYS.THEME, "2:p1")).toBe("oxblood-noir");
+    // user who chose elsewhere flashed the default on every load.
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "2:p1")).toBe("x-large");
     expect(appearanceCache.get(KEYS.UI_TEXT_WEIGHT, "2:p1")).toBe("strong");
     expect(appearanceCache.get(KEYS.UI_HIGH_CONTRAST, "2:p1")).toBe("true");
   });
 
-  it("does not mirror a theme the user never chose, so the admin default still moves", () => {
-    signedInAs(2);
-    mocks.useBranding.mockReturnValue({ defaultTheme: "evergreen-studio" });
-
-    renderAppearance();
-
-    expect(appearanceCache.get(KEYS.THEME, "2:p1")).toBeNull();
-  });
-
   it("does not treat a resolved contract default as the profile's own choice", () => {
     signedInAs(2);
-    mocks.useBranding.mockReturnValue({ defaultTheme: "evergreen-studio" });
     // The canonical effective endpoint always answers, resolving unset keys to
-    // the contract default. That answer must not shadow the admin default nor
-    // be mirrored as if the profile had chosen it.
+    // the contract default. That answer must not be mirrored as if the profile
+    // had chosen it.
     mocks.useEffectiveSettings.mockReturnValue(
       effectiveAnswer({
-        [SETTING_KEYS.UI_THEME]: { value: "midnight-cinema", source: "default" },
         [SETTING_KEYS.UI_TEXT_SCALE]: { value: "default", source: "default" },
         [SETTING_KEYS.UI_TEXT_WEIGHT]: { value: "default", source: "default" },
         [SETTING_KEYS.UI_HIGH_CONTRAST]: { value: false, source: "default" },
       }),
     );
 
-    const { captured } = renderAppearance();
+    renderAppearance();
 
-    expect(captured.theme.theme).toBe("evergreen-studio");
-    expect(appearanceCache.get(KEYS.THEME, "2:p1")).toBeNull();
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "2:p1")).toBeNull();
+    expect(appearanceCache.get(KEYS.UI_HIGH_CONTRAST, "2:p1")).toBeNull();
   });
 
   it("stops painting the previous account when the signed-in account changes", () => {
@@ -327,18 +258,14 @@ describe("appearance cache ownership", () => {
     signedInAs(1);
 
     const view = renderAppearance();
-    expect(view.captured.theme.theme).toBe("cobalt-studio");
+    expectSeeded(view.captured);
 
     act(() => {
       signedInAs(2);
       view.rerender();
     });
 
-    expect(view.captured.theme.theme).toBe(DEFAULT_THEME);
-    expect(view.captured.theme.textScale).toBe("default");
-    expect(view.captured.theme.highContrast).toBe(false);
-    expect(view.captured.custom.vars).toEqual({});
-    expect(view.captured.custom.customCss).toBe("");
+    expectDefaults(view.captured);
   });
 
   it("stops painting the previous profile when switching profiles on one account", () => {
@@ -346,23 +273,18 @@ describe("appearance cache ownership", () => {
     signedInAs(1, "p1");
 
     const view = renderAppearance();
-    expect(view.captured.theme.theme).toBe("cobalt-studio");
+    expectSeeded(view.captured);
 
     act(() => {
       signedInAs(1, "p2");
       view.rerender();
     });
 
-    expect(view.captured.theme.theme).toBe(DEFAULT_THEME);
-    expect(view.captured.theme.textScale).toBe("default");
-    expect(view.captured.theme.textWeight).toBe("default");
-    expect(view.captured.theme.highContrast).toBe(false);
-    expect(view.captured.custom.vars).toEqual({});
-    expect(view.captured.custom.customCss).toBe("");
+    expectDefaults(view.captured);
     // The sibling's warm start is untouched, and nothing leaked into p2's.
-    expect(appearanceCache.get(KEYS.THEME, "1:p1")).toBe("cobalt-studio");
-    expect(appearanceCache.get(KEYS.THEME, "1:p2")).toBeNull();
-    expect(appearanceCache.get(KEYS.UI_CUSTOM_CSS, "1:p2")).toBeNull();
+    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe("large");
+    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p2")).toBeNull();
+    expect(appearanceCache.get(KEYS.UI_HIGH_CONTRAST, "1:p2")).toBeNull();
   });
 
   it("restores the first account's look when they sign back in", () => {
@@ -370,16 +292,14 @@ describe("appearance cache ownership", () => {
     signedInAs(2);
 
     const view = renderAppearance();
-    expect(view.captured.theme.theme).toBe(DEFAULT_THEME);
+    expectDefaults(view.captured);
 
     act(() => {
       signedInAs(1);
       view.rerender();
     });
 
-    expect(view.captured.theme.theme).toBe("cobalt-studio");
-    expect(view.captured.theme.textScale).toBe("large");
-    expect(view.captured.custom.customCss).toBe("body { filter: invert(1); }");
+    expectSeeded(view.captured);
   });
 
   it("restores a profile's look when switching back to it", () => {
@@ -387,18 +307,14 @@ describe("appearance cache ownership", () => {
     signedInAs(1, "p2");
 
     const view = renderAppearance();
-    expect(view.captured.theme.theme).toBe(DEFAULT_THEME);
+    expectDefaults(view.captured);
 
     act(() => {
       signedInAs(1, "p1");
       view.rerender();
     });
 
-    expect(view.captured.theme.theme).toBe("cobalt-studio");
-    expect(view.captured.theme.textScale).toBe("large");
-    expect(view.captured.theme.highContrast).toBe(true);
-    expect(view.captured.custom.vars).toEqual({ "color-bg": "#ff0000" });
-    expect(view.captured.custom.customCss).toBe("body { filter: invert(1); }");
+    expectSeeded(view.captured);
   });
 
   it("clears the warm start when the server says the setting is unset", () => {
@@ -410,7 +326,6 @@ describe("appearance cache ownership", () => {
     signedInAs(1, "p1");
     mocks.useEffectiveSettings.mockReturnValue(
       effectiveAnswer({
-        [SETTING_KEYS.UI_THEME]: { value: DEFAULT_THEME, source: "default" },
         [SETTING_KEYS.UI_TEXT_SCALE]: { value: "default", source: "default" },
         [SETTING_KEYS.UI_TEXT_WEIGHT]: { value: "default", source: "default" },
         [SETTING_KEYS.UI_HIGH_CONTRAST]: { value: false, source: "default" },
@@ -419,16 +334,8 @@ describe("appearance cache ownership", () => {
 
     const view = renderAppearance();
 
-    expect(view.captured.theme.theme).toBe(DEFAULT_THEME);
-    expect(view.captured.theme.textScale).toBe("default");
-    expect(view.captured.theme.textWeight).toBe("default");
-    expect(view.captured.theme.highContrast).toBe(false);
-    for (const key of [
-      KEYS.THEME,
-      KEYS.UI_TEXT_SCALE,
-      KEYS.UI_TEXT_WEIGHT,
-      KEYS.UI_HIGH_CONTRAST,
-    ]) {
+    expectDefaults(view.captured);
+    for (const key of [KEYS.UI_TEXT_SCALE, KEYS.UI_TEXT_WEIGHT, KEYS.UI_HIGH_CONTRAST]) {
       expect(appearanceCache.get(key, "1:p1")).toBeNull();
     }
   });
@@ -442,24 +349,24 @@ describe("appearance cache ownership", () => {
     signedInAs(1, "p1");
     mocks.useEffectiveSettings.mockReturnValue(
       effectiveAnswer({
-        [SETTING_KEYS.UI_THEME]: { value: DEFAULT_THEME, source: "default" },
+        [SETTING_KEYS.UI_TEXT_SCALE]: { value: "default", source: "default" },
       }),
     );
 
     renderAppearance();
 
-    expect(appearanceCache.get(KEYS.THEME, "1:p1")).toBeNull();
-    expect(appearanceCache.get(KEYS.THEME, "2:p9")).toBe("cobalt-studio");
+    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBeNull();
+    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "2:p9")).toBe("large");
   });
 
   it("does not leak one profile's mirrored server values to a sibling profile", () => {
     signedInAs(1, "p1");
     mocks.useEffectiveSettings.mockReturnValue(
-      effectiveAnswer({ [SETTING_KEYS.UI_THEME]: { value: "oxblood-noir" } }),
+      effectiveAnswer({ [SETTING_KEYS.UI_TEXT_SCALE]: { value: "x-large" } }),
     );
 
     const view = renderAppearance();
-    expect(view.captured.theme.theme).toBe("oxblood-noir");
+    expect(view.captured.textScale).toBe("x-large");
 
     // p2 has no stored settings of their own; the server resolves defaults.
     act(() => {
@@ -468,89 +375,8 @@ describe("appearance cache ownership", () => {
       view.rerender();
     });
 
-    expect(view.captured.theme.theme).toBe(DEFAULT_THEME);
-    expect(appearanceCache.get(KEYS.THEME, "1:p1")).toBe("oxblood-noir");
-    expect(appearanceCache.get(KEYS.THEME, "1:p2")).toBeNull();
-  });
-});
-
-describe("custom theme debounced writes", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    localStorage.clear();
-    mocks.useEffectiveSettings.mockReturnValue({ data: {} });
-    mocks.useBranding.mockReturnValue({ defaultTheme: null });
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("drops a pending write when the account changes mid-debounce", () => {
-    signedInAs(1);
-    const view = renderAppearance();
-
-    act(() => {
-      view.captured.custom.setCustomCss("body { filter: invert(1); }");
-    });
-
-    // Account 1 signs out and account 2 signs in inside the 1s debounce.
-    act(() => {
-      signedInAs(2);
-      view.rerender();
-    });
-    act(() => {
-      vi.advanceTimersByTime(2000);
-    });
-
-    // The timer captured account 1's owner and account 2's live session. It
-    // must not store account 1's CSS against account 2.
-    expect(mocks.mutate).not.toHaveBeenCalled();
-    expect(appearanceCache.get(KEYS.UI_CUSTOM_CSS, "2:p1")).toBeNull();
-    expect(view.captured.custom.customCss).toBe("");
-  });
-
-  it("drops a pending write when the profile changes mid-debounce", () => {
-    signedInAs(1, "p1");
-    const view = renderAppearance();
-
-    act(() => {
-      view.captured.custom.setCustomCss("body { filter: invert(1); }");
-    });
-
-    // The household switches from p1 to p2 inside the 1s debounce. The timer
-    // captured p1's draft; firing now would store p1's CSS as p2's preference
-    // at profile scope.
-    act(() => {
-      signedInAs(1, "p2");
-      view.rerender();
-    });
-    act(() => {
-      vi.advanceTimersByTime(2000);
-    });
-
-    expect(mocks.mutate).not.toHaveBeenCalled();
-    expect(appearanceCache.get(KEYS.UI_CUSTOM_CSS, "1:p2")).toBeNull();
-    expect(view.captured.custom.customCss).toBe("");
-  });
-
-  it("still persists a write that is not interrupted", () => {
-    signedInAs(1);
-    const view = renderAppearance();
-
-    act(() => {
-      view.captured.custom.setCustomCss("body { color: red; }");
-    });
-    act(() => {
-      vi.advanceTimersByTime(2000);
-    });
-
-    expect(mocks.mutate).toHaveBeenCalledWith({
-      key: SETTING_KEYS.UI_CUSTOM_CSS,
-      value: "body { color: red; }",
-      identity: { scope: "profile" },
-    });
-    expect(appearanceCache.get(KEYS.UI_CUSTOM_CSS, "1:p1")).toBe("body { color: red; }");
+    expect(view.captured.textScale).toBe("default");
+    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe("x-large");
+    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p2")).toBeNull();
   });
 });

@@ -1,0 +1,2216 @@
+{
+  "source": "https://github.com/jellyfin/jellyfin/tree/ee91c75e777da41a9c4f4855e70adc604fbf2ef8/tests/Jellyfin.Naming.Tests/TV",
+  "attribution": "Filename and expected-result examples adapted from Jellyfin.Naming.Tests by Jellyfin contributors. This fixture contains test data, not Jellyfin's parsing implementation.",
+  "source_license": "GNU General Public License v2.0 (upstream repository)",
+  "source_license_url": "https://github.com/jellyfin/jellyfin/blob/ee91c75e777da41a9c4f4855e70adc604fbf2ef8/LICENSE",
+  "notes": "Factual filename expectations from SimpleEpisodeTests, EpisodeNumberTests, EpisodeNumberWithoutSeasonTests, AbsoluteEpisodeNumberTests and MultiEpisodeTests. Relative paths use a synthetic show directory. Null season and ending episode become zero; these cases exercise declared series libraries. EpisodePathParserTest directory inputs use an equivalent .mkv file; Windows separators become forward slashes because scanning uses host-native paths. Null ends and an end equal to the start both mean a single episode. Series title comparisons normalize release separators while retaining abbreviation and acronym dots.",
+  "cases": [
+    {
+      "path": "/server/anything_s01e02.mp4",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:13",
+      "want": {
+        "episode": 2,
+        "season": 1,
+        "end": 0
+      },
+      "series_title": "anything"
+    },
+    {
+      "path": "/server/anything_s1e2.mp4",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:14",
+      "want": {
+        "episode": 2,
+        "season": 1,
+        "end": 0
+      },
+      "series_title": "anything"
+    },
+    {
+      "path": "/server/anything_s01.e02.mp4",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:15",
+      "want": {
+        "episode": 2,
+        "season": 1,
+        "end": 0
+      },
+      "series_title": "anything"
+    },
+    {
+      "path": "/server/anything_102.mp4",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:16",
+      "want": {
+        "episode": 2,
+        "season": 1,
+        "end": 0
+      },
+      "series_title": "anything"
+    },
+    {
+      "path": "/server/anything_1x02.mp4",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:17",
+      "want": {
+        "episode": 2,
+        "season": 1,
+        "end": 0
+      },
+      "series_title": "anything"
+    },
+    {
+      "path": "/server/The Walking Dead 4x01.mp4",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:18",
+      "want": {
+        "episode": 1,
+        "season": 4,
+        "end": 0
+      },
+      "series_title": "The Walking Dead"
+    },
+    {
+      "path": "/server/the_simpsons-s02e01_18536.mp4",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:19",
+      "want": {
+        "episode": 1,
+        "season": 2,
+        "end": 0
+      },
+      "series_title": "the simpsons"
+    },
+    {
+      "path": "/server/Temp/S01E02 foo.mp4",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:20",
+      "want": {
+        "episode": 2,
+        "season": 1,
+        "end": 0
+      },
+      "series_title": ""
+    },
+    {
+      "path": "/tv/Example Show/Series/4x12 - The Woman.mp4",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:21",
+      "want": {
+        "episode": 12,
+        "season": 4,
+        "end": 0
+      },
+      "series_title": ""
+    },
+    {
+      "path": "/tv/Example Show/Series/LA X, Pt. 1_s06e32.mp4",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:22",
+      "want": {
+        "episode": 32,
+        "season": 6,
+        "end": 0
+      },
+      "series_title": "LA X, Pt. 1"
+    },
+    {
+      "path": "/tv/Example Show/[Baz-Bar]Foo - [1080p][Multiple Subtitle]/[Baz-Bar] Foo - 05 [1080p][Multiple Subtitle].mkv",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:23",
+      "want": {
+        "episode": 5,
+        "season": 0,
+        "end": 0
+      },
+      "series_title": "Foo"
+    },
+    {
+      "path": "/Foo/The.Series.Name.S01E04.WEBRip.x264-Baz[Bar]/the.series.name.s01e04.webrip.x264-Baz[Bar].mkv",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:24",
+      "want": {
+        "episode": 4,
+        "season": 1,
+        "end": 0
+      },
+      "series_title": "The Series Name"
+    },
+    {
+      "path": "/tv/Example Show/Love.Death.and.Robots.S01.1080p.NF.WEB-DL.DDP5.1.x264-NTG/Love.Death.and.Robots.S01E01.Sonnies.Edge.1080p.NF.WEB-DL.DDP5.1.x264-NTG.mkv",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:25",
+      "want": {
+        "episode": 1,
+        "season": 1,
+        "end": 0
+      },
+      "series_title": "Love Death and Robots"
+    },
+    {
+      "path": "/tv/Example Show/[YuiSubs] Tensura Nikki - Tensei Shitara Slime Datta Ken/[YuiSubs] Tensura Nikki - Tensei Shitara Slime Datta Ken - 12 (NVENC H.265 1080p).mkv",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:26",
+      "want": {
+        "episode": 12,
+        "season": 0,
+        "end": 0
+      },
+      "series_title": "Tensura Nikki - Tensei Shitara Slime Datta Ken"
+    },
+    {
+      "path": "/tv/Example Show/[Baz-Bar]Foo - 01 - 12[1080p][Multiple Subtitle]/[Baz-Bar] Foo - 05 [1080p][Multiple Subtitle].mkv",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:27",
+      "want": {
+        "episode": 5,
+        "season": 0,
+        "end": 0
+      },
+      "series_title": "Foo"
+    },
+    {
+      "path": "/tv/Example Show/Series/4-12 - The Woman.mp4",
+      "library": "series",
+      "category": "simple",
+      "source": "TV/SimpleEpisodeTests.cs:28",
+      "want": {
+        "episode": 12,
+        "season": 4,
+        "end": 0
+      },
+      "series_title": ""
+    },
+    {
+      "path": "/tv/Example Show/Season 21/One Piece 1001",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:12",
+      "want": {
+        "episode": 1001
+      }
+    },
+    {
+      "path": "/tv/Example Show/Watchmen (2019)/Watchmen 1x03 [WEBDL-720p][EAC3 5.1][h264][-TBS] - She Was Killed by Space Junk.mkv",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:13",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Daily Show/The Daily Show 25x22 - [WEBDL-720p][AAC 2.0][x264] Noah Baumbach-TBS.mkv",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:14",
+      "want": {
+        "episode": 22
+      }
+    },
+    {
+      "path": "/tv/Example Show/Castle Rock 2x01 Que el rio siga su curso [WEB-DL HULU 1080p h264 Dual DD5.1 Subs].mkv",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:15",
+      "want": {
+        "episode": 1
+      }
+    },
+    {
+      "path": "/tv/Example Show/After Life 1x06 Episodio 6 [WEB-DL NF 1080p h264 Dual DD 5.1 Sub].mkv",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:16",
+      "want": {
+        "episode": 6
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/S02E03 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:17",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/02x03 - 02x04 - 02x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:18",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/02x03 - x04 - x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:19",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/01x02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:20",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/S01x02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:21",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/S01E02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:22",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/Elementary - 02x03-04-15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:23",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/S01xE02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:24",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/seriesname S01E02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:25",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/Episode - 16.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:26",
+      "want": {
+        "episode": 16
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/Episode 16.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:27",
+      "want": {
+        "episode": 16
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/Episode 16 - Some Title.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:28",
+      "want": {
+        "episode": 16
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/16 Some Title.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:29",
+      "want": {
+        "episode": 16
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/16 - 12 Some Title.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:30",
+      "want": {
+        "episode": 16
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/7 - 12 Angry Men.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:31",
+      "want": {
+        "episode": 7
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/seriesname 01x02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:32",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 25/The Simpsons.S25E09.Steal this episode.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:33",
+      "want": {
+        "episode": 9
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/seriesname S01x02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:34",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/Elementary - 02x03 - 02x04 - 02x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:35",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/seriesname S01xE02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:36",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/Elementary - 02x03 - x04 - x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:37",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/Elementary - 02x03x04x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:38",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/02x03-04-15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:39",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/02x03-E15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:40",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/Elementary - 02x03-E15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:41",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/Elementary - S01E23-E24-E26 - The Woman.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:42",
+      "want": {
+        "episode": 23
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/S2009E23-E24-E26 - The Woman.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:43",
+      "want": {
+        "episode": 23
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:44",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/S2009x02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:45",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/S2009E02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:46",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/seriesname 2009x02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:47",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - 2009x03x04x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:48",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x03x04x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:49",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - 2009x03-E15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:50",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/S2009xE02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:51",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - S2009E23-E24-E26 - The Woman.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:52",
+      "want": {
+        "episode": 23
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/seriesname S2009xE02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:53",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x03-E15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:54",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/seriesname S2009E02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:55",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x03 - 2009x04 - 2009x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:56",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x03 - x04 - x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:57",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/seriesname S2009x02 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:58",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - 2009x03 - 2009x04 - 2009x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:59",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - 2009x03-04-15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:60",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x03-04-15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:61",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - 2009x03 - x04 - x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:62",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/02 - blah-02 a.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:63",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/02 - blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:64",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/02 - blah 14 blah.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:65",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/02.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:66",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/2. Infestation.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:67",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Wonder Years/The.Wonder.Years.S04.PDTV.x264-JCH/The Wonder Years s04e07 Christmas Party NTSC PDTV.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:68",
+      "want": {
+        "episode": 7
+      }
+    },
+    {
+      "path": "/tv/Example Show/Running Man/Running Man S2017E368.mkv",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:69",
+      "want": {
+        "episode": 368
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/[HorribleSubs] Hunter X Hunter - 136 [720p].mkv",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:70",
+      "want": {
+        "episode": 136
+      }
+    },
+    {
+      "path": "/tv/Example Show/Log Horizon 2/[HorribleSubs] Log Horizon 2 - 03 [720p].mkv",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:71",
+      "want": {
+        "episode": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/seriesname 05.mkv",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:72",
+      "want": {
+        "episode": 5
+      }
+    },
+    {
+      "path": "/tv/Example Show/[BBT-RMX] Ranma ½ - 154 [50AC421A].mkv",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:73",
+      "want": {
+        "episode": 154
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/Episode 21 - 94 Meetings.mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:74",
+      "want": {
+        "episode": 21
+      }
+    },
+    {
+      "path": "/The.Legend.of.Condor.Heroes.2017.V2.web-dl.1080p.h264.aac-hdctv/The.Legend.of.Condor.Heroes.2017.E07.V2.web-dl.1080p.h264.aac-hdctv.mkv",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:75",
+      "want": {
+        "episode": 7
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 3/The Series Season 3 Episode 9 - The title.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:76",
+      "want": {
+        "episode": 9
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 3/The Series S3 E9 - The title.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:77",
+      "want": {
+        "episode": 9
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 3/S003 E009.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:78",
+      "want": {
+        "episode": 9
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 3/Season 3 Episode 9.avi",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:79",
+      "want": {
+        "episode": 9
+      }
+    },
+    {
+      "path": "/tv/Example Show/[VCB-Studio] Re Zero kara Hajimeru Isekai Seikatsu [21][Ma10p_1080p][x265_flac].mkv",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:80",
+      "want": {
+        "episode": 21
+      }
+    },
+    {
+      "path": "/tv/Example Show/[CASO&Sumisora][Oda_Nobuna_no_Yabou][04][BDRIP][1920x1080][x264_AAC][7620E503].mp4",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:81",
+      "want": {
+        "episode": 4
+      }
+    },
+    {
+      "path": "/tv/Example Show/Case Closed (1996-2007)/Case Closed - 317.mkv",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:83",
+      "want": {
+        "episode": 317
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/Hunter X Hunter - 101.mkv",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:84",
+      "want": {
+        "episode": 101
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/Show Name - 1234 [720p].mkv",
+      "library": "series",
+      "category": "episode",
+      "source": "TV/EpisodeNumberTests.cs:85",
+      "want": {
+        "episode": 1234
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/The Simpsons.S25E08.Steal this episode.mp4",
+      "library": "series",
+      "category": "without_season",
+      "source": "TV/EpisodeNumberWithoutSeasonTests.cs:12",
+      "want": {
+        "episode": 8
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/The Simpsons - 02 - Ep Name.avi",
+      "library": "series",
+      "category": "without_season",
+      "source": "TV/EpisodeNumberWithoutSeasonTests.cs:13",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/02.avi",
+      "library": "series",
+      "category": "without_season",
+      "source": "TV/EpisodeNumberWithoutSeasonTests.cs:14",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/02 - Ep Name.avi",
+      "library": "series",
+      "category": "without_season",
+      "source": "TV/EpisodeNumberWithoutSeasonTests.cs:15",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/02-Ep Name.avi",
+      "library": "series",
+      "category": "without_season",
+      "source": "TV/EpisodeNumberWithoutSeasonTests.cs:16",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/02.EpName.avi",
+      "library": "series",
+      "category": "without_season",
+      "source": "TV/EpisodeNumberWithoutSeasonTests.cs:17",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/The Simpsons - 02.avi",
+      "library": "series",
+      "category": "without_season",
+      "source": "TV/EpisodeNumberWithoutSeasonTests.cs:18",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/The Simpsons - 02 Ep Name.avi",
+      "library": "series",
+      "category": "without_season",
+      "source": "TV/EpisodeNumberWithoutSeasonTests.cs:19",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/GJ Club (2013)/GJ Club - 07.mkv",
+      "library": "series",
+      "category": "without_season",
+      "source": "TV/EpisodeNumberWithoutSeasonTests.cs:20",
+      "want": {
+        "episode": 7
+      }
+    },
+    {
+      "path": "/tv/Example Show/Case Closed (1996-2007)/Case Closed - 317.mkv",
+      "library": "series",
+      "category": "without_season",
+      "source": "TV/EpisodeNumberWithoutSeasonTests.cs:21",
+      "want": {
+        "episode": 317
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/12.avi",
+      "library": "series",
+      "category": "absolute",
+      "source": "TV/AbsoluteEpisodeNumberTests.cs:12",
+      "want": {
+        "episode": 12
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/The Simpsons 12.avi",
+      "library": "series",
+      "category": "absolute",
+      "source": "TV/AbsoluteEpisodeNumberTests.cs:13",
+      "want": {
+        "episode": 12
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/The Simpsons 82.avi",
+      "library": "series",
+      "category": "absolute",
+      "source": "TV/AbsoluteEpisodeNumberTests.cs:14",
+      "want": {
+        "episode": 82
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/The Simpsons 112.avi",
+      "library": "series",
+      "category": "absolute",
+      "source": "TV/AbsoluteEpisodeNumberTests.cs:15",
+      "want": {
+        "episode": 112
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/Foo_ep_02.avi",
+      "library": "series",
+      "category": "absolute",
+      "source": "TV/AbsoluteEpisodeNumberTests.cs:16",
+      "want": {
+        "episode": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/The Simpsons 889.avi",
+      "library": "series",
+      "category": "absolute",
+      "source": "TV/AbsoluteEpisodeNumberTests.cs:17",
+      "want": {
+        "episode": 889
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/The Simpsons 101.avi",
+      "library": "series",
+      "category": "absolute",
+      "source": "TV/AbsoluteEpisodeNumberTests.cs:18",
+      "want": {
+        "episode": 101
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/4x01 – 20 Hours in America (1).mkv",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:12",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/01x02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:13",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/S01x02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:14",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/S01E02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:15",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/S01xE02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:16",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/seriesname 01x02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:17",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/seriesname S01x02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:18",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/seriesname S01E02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:19",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/seriesname S01xE02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:20",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/02x03 - 04 Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:21",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/My show name 02x03 - 04 Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:22",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/Elementary - 02x03 - 02x04 - 02x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:23",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/02x03 - 02x04 - 02x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:24",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/02x03-04-15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:25",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/Elementary - 02x03-04-15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:26",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/02x03-E15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:27",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/Elementary - 02x03-E15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:28",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/02x03 - x04 - x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:29",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/Elementary - 02x03 - x04 - x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:30",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/02x03x04x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:31",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/Elementary - 02x03x04x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:32",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/Elementary - S01E23-E24-E26 - The Woman.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:33",
+      "want": {
+        "end": 26
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/S01E23-E24-E26 - The Woman.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:34",
+      "want": {
+        "end": 26
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:36",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/S2009x02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:37",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/S2009E02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:38",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/S2009xE02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:39",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/seriesname 2009x02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:40",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/seriesname S2009x02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:41",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/seriesname S2009E02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:42",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/seriesname S2009xE02 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:43",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - 2009x03 - 2009x04 - 2009x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:44",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x03 - 2009x04 - 2009x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:45",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x03-04-15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:46",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - 2009x03-04-15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:47",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x03-E15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:48",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - 2009x03-E15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:49",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x03 - x04 - x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:50",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - 2009x03 - x04 - x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:51",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x03x04x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:52",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - 2009x03x04x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:53",
+      "want": {
+        "end": 15
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - S2009E23-E24-E26 - The Woman.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:54",
+      "want": {
+        "end": 26
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/S2009E23-E24-E26 - The Woman.mp4",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:55",
+      "want": {
+        "end": 26
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/02 - blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:57",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/02 - blah 14 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:58",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/02 - blah-02 a.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:59",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/02.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:60",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/02-03 - blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:61",
+      "want": {
+        "end": 3
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/02-04 - blah 14 blah.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:62",
+      "want": {
+        "end": 4
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/02-05 - blah-02 a.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:63",
+      "want": {
+        "end": 5
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/02-04.avi",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:64",
+      "want": {
+        "end": 4
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2 /[HorribleSubs] Hunter X Hunter - 136[720p].mkv",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:65",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/series-s09e14-1080p.mkv",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:67",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/series-s09e14-720p.mkv",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:68",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/series-s09e14-720i.mkv",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:69",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/MOONLIGHTING_s01e01-e04.mkv",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:70",
+      "want": {
+        "end": 4
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/MOONLIGHTING_s01e01-e04",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:71",
+      "want": {
+        "end": 4
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/S01E01 The 6-10 to Lubbock [WEBRip-1080p][AV1 Opus].mkv",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:73",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 5/S05E23 11-59 [HDTV-1080p][x265 AC3].mkv",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:74",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 5/S05E23 11-59 [HDTV-1080p][HEVC AC3].mkv",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:75",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/S01E01 1-23-45 [Bluray-1080p][AV1 Opus].mkv",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:76",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 03/Star Trek Enterprise (2001) - S03E21 - E2 (1080p BluRay x265).mkv",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:78",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/Series Name (2001) - S02E10 - E5 [WEBRip-1080p].mkv",
+      "library": "series",
+      "category": "multi",
+      "source": "TV/MultiEpisodeTests.cs:79",
+      "want": {
+        "end": 0
+      }
+    },
+    {
+      "path": "/media/Foo/Foo-S01E01.mkv",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:12",
+      "want": {
+        "season": 1,
+        "episode": 1
+      },
+      "series_title": "Foo"
+    },
+    {
+      "path": "/media/Foo - S04E011.mkv",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:13",
+      "want": {
+        "season": 4,
+        "episode": 11
+      },
+      "series_title": "Foo"
+    },
+    {
+      "path": "/media/Foo/Foo s01x01.mkv",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:14",
+      "want": {
+        "season": 1,
+        "episode": 1
+      },
+      "series_title": "Foo"
+    },
+    {
+      "path": "/media/Foo (2019)/Season 4/Foo (2019).S04E03.mkv",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:15",
+      "want": {
+        "season": 4,
+        "episode": 3
+      },
+      "series_title": "Foo (2019)"
+    },
+    {
+      "path": "/tv/Example Show/D:/media/Foo/Foo-S01E01.mkv",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:16",
+      "want": {
+        "season": 1,
+        "episode": 1
+      },
+      "series_title": "Foo"
+    },
+    {
+      "path": "/tv/Example Show/D:/media/Foo - S04E011.mkv",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:17",
+      "want": {
+        "season": 4,
+        "episode": 11
+      },
+      "series_title": "Foo"
+    },
+    {
+      "path": "/tv/Example Show/D:/media/Foo/Foo s01x01.mkv",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:18",
+      "want": {
+        "season": 1,
+        "episode": 1
+      },
+      "series_title": "Foo"
+    },
+    {
+      "path": "/tv/Example Show/D:/media/Foo (2019)/Season 4/Foo (2019).S04E03.mkv",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:19",
+      "want": {
+        "season": 4,
+        "episode": 3
+      },
+      "series_title": "Foo (2019)"
+    },
+    {
+      "path": "/Season 2/Elementary - 02x03-04-15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:20",
+      "want": {
+        "season": 2,
+        "episode": 3
+      },
+      "series_title": "Elementary"
+    },
+    {
+      "path": "/Season 1/seriesname S01E02 blah.avi",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:21",
+      "want": {
+        "season": 1,
+        "episode": 2
+      },
+      "series_title": "seriesname"
+    },
+    {
+      "path": "/Running Man/Running Man S2017E368.mkv",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:22",
+      "want": {
+        "season": 2017,
+        "episode": 368
+      },
+      "series_title": "Running Man"
+    },
+    {
+      "path": "/Season 1/seriesname 01x02 blah.avi",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:23",
+      "want": {
+        "season": 1,
+        "episode": 2
+      },
+      "series_title": "seriesname"
+    },
+    {
+      "path": "/Season 25/The Simpsons.S25E09.Steal this episode.mp4",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:24",
+      "want": {
+        "season": 25,
+        "episode": 9
+      },
+      "series_title": "The Simpsons"
+    },
+    {
+      "path": "/Season 1/seriesname S01x02 blah.avi",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:25",
+      "want": {
+        "season": 1,
+        "episode": 2
+      },
+      "series_title": "seriesname"
+    },
+    {
+      "path": "/Season 2/Elementary - 02x03 - 02x04 - 02x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:26",
+      "want": {
+        "season": 2,
+        "episode": 3
+      },
+      "series_title": "Elementary"
+    },
+    {
+      "path": "/Season 1/seriesname S01xE02 blah.avi",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:27",
+      "want": {
+        "season": 1,
+        "episode": 2
+      },
+      "series_title": "seriesname"
+    },
+    {
+      "path": "/Season 02/Elementary - 02x03 - x04 - x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:28",
+      "want": {
+        "season": 2,
+        "episode": 3
+      },
+      "series_title": "Elementary"
+    },
+    {
+      "path": "/Season 02/Elementary - 02x03x04x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:29",
+      "want": {
+        "season": 2,
+        "episode": 3
+      },
+      "series_title": "Elementary"
+    },
+    {
+      "path": "/Season 02/Elementary - 02x03-E15 - Ep Name.mp4",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:30",
+      "want": {
+        "season": 2,
+        "episode": 3
+      },
+      "series_title": "Elementary"
+    },
+    {
+      "path": "/Season 1/Elementary - S01E23-E24-E26 - The Woman.mp4",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:31",
+      "want": {
+        "season": 1,
+        "episode": 23
+      },
+      "series_title": "Elementary"
+    },
+    {
+      "path": "/The Wonder Years/The.Wonder.Years.S04.PDTV.x264-JCH/The Wonder Years s04e07 Christmas Party NTSC PDTV.avi",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:32",
+      "want": {
+        "season": 4,
+        "episode": 7
+      },
+      "series_title": "The Wonder Years"
+    },
+    {
+      "path": "/The.Sopranos/Season 3/The Sopranos Season 3 Episode 09 - The Telltale Moozadell.avi",
+      "library": "series",
+      "category": "episode_path",
+      "source": "TV/EpisodePathParserTest.cs:33",
+      "want": {
+        "season": 3,
+        "episode": 9
+      },
+      "series_title": "The Sopranos"
+    },
+    {
+      "path": "/tv/Example Show/The Daily Show/The Daily Show 25x22 - [WEBDL-720p][AAC 2.0][x264] Noah Baumbach-TBS.mkv",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:12",
+      "want": {
+        "season": 25
+      }
+    },
+    {
+      "path": "/Show/Season 02/S02E03 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:13",
+      "want": {
+        "season": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/seriesname S01x02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:14",
+      "want": {
+        "season": 1
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/S01x02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:15",
+      "want": {
+        "season": 1
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/seriesname S01xE02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:16",
+      "want": {
+        "season": 1
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/01x02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:17",
+      "want": {
+        "season": 1
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/S01E02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:18",
+      "want": {
+        "season": 1
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/S01xE02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:19",
+      "want": {
+        "season": 1
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/seriesname 01x02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:20",
+      "want": {
+        "season": 1
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/seriesname S01E02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:21",
+      "want": {
+        "season": 1
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/Elementary - 02x03 - 02x04 - 02x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:22",
+      "want": {
+        "season": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/02x03 - 02x04 - 02x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:23",
+      "want": {
+        "season": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/02x03-04-15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:24",
+      "want": {
+        "season": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2/Elementary - 02x03-04-15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:25",
+      "want": {
+        "season": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/02x03-E15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:26",
+      "want": {
+        "season": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/Elementary - 02x03-E15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:27",
+      "want": {
+        "season": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/02x03 - x04 - x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:28",
+      "want": {
+        "season": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/Elementary - 02x03 - x04 - x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:29",
+      "want": {
+        "season": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/02x03x04x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:30",
+      "want": {
+        "season": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 02/Elementary - 02x03x04x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:31",
+      "want": {
+        "season": 2
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/Elementary - S01E23-E24-E26 - The Woman.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:32",
+      "want": {
+        "season": 1
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 1/S01E23-E24-E26 - The Woman.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:33",
+      "want": {
+        "season": 1
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 25/The Simpsons.S25E09.Steal this episode.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:34",
+      "want": {
+        "season": 25
+      }
+    },
+    {
+      "path": "/tv/Example Show/The Simpsons/The Simpsons.S25E09.Steal this episode.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:35",
+      "want": {
+        "season": 25
+      }
+    },
+    {
+      "path": "/tv/Example Show/2016/Season s2016e1.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:36",
+      "want": {
+        "season": 2016
+      }
+    },
+    {
+      "path": "/tv/Example Show/2016/Season 2016x1.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:37",
+      "want": {
+        "season": 2016
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:38",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/S2009x02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:39",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/S2009E02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:40",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/S2009xE02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:41",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/seriesname 2009x02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:42",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/seriesname S2009x02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:43",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/seriesname S2009E02 blah.avi",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:44",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - 2009x03 - 2009x04 - 2009x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:45",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x03 - 2009x04 - 2009x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:46",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x03-04-15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:47",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - 2009x03 - x04 - x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:48",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/2009x03x04x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:49",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - 2009x03x04x15 - Ep Name.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:50",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/Elementary - S2009E23-E24-E26 - The Woman.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:51",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Season 2009/S2009E23-E24-E26 - The Woman.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:52",
+      "want": {
+        "season": 2009
+      }
+    },
+    {
+      "path": "/tv/Example Show/Series/1-12 - The Woman.mp4",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:53",
+      "want": {
+        "season": 1
+      }
+    },
+    {
+      "path": "/tv/Example Show/Running Man/Running Man S2017E368.mkv",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:54",
+      "want": {
+        "season": 2017
+      }
+    },
+    {
+      "path": "/tv/Example Show/Case Closed (1996-2007)/Case Closed - 317.mkv",
+      "library": "series",
+      "category": "season_number",
+      "source": "TV/SeasonNumberTests.cs:55",
+      "want": {
+        "season": 0
+      }
+    }
+  ]
+}

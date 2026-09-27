@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -105,6 +106,13 @@ func scanDeliveryRows(rows pgx.Rows) ([]DeliveryRow, error) {
 // returns only the rows actually inserted. Realtime publish and channel
 // dispatch must operate on the returned set, never the candidate set.
 func (r *DeliveryRepository) BulkInsert(ctx context.Context, tx pgx.Tx, deliveries []Delivery) ([]InsertedDelivery, error) {
+	profiles := make([]string, 0, len(deliveries))
+	for _, delivery := range deliveries {
+		profiles = append(profiles, delivery.ProfileID)
+	}
+	if err := r.LockInboxProfiles(ctx, tx, profiles); err != nil {
+		return nil, err
+	}
 	const chunkSize = 500
 	inserted := make([]InsertedDelivery, 0, len(deliveries))
 	for start := 0; start < len(deliveries); start += chunkSize {
@@ -155,6 +163,24 @@ func (r *DeliveryRepository) BulkInsert(ctx context.Context, tx pgx.Tx, deliveri
 		}
 	}
 	return inserted, nil
+}
+
+// LockInboxProfiles orders the per-profile writer locks held until commit.
+// Callers issuing multiple BulkInsert calls in one transaction must lock their
+// complete recipient union first. The insert trigger then assigns timestamps
+// strictly above the preceding committed delivery for each profile.
+func (r *DeliveryRepository) LockInboxProfiles(ctx context.Context, tx pgx.Tx, profileIDs []string) error {
+	profiles := slices.Clone(profileIDs)
+	slices.Sort(profiles)
+	for _, profile := range slices.Compact(profiles) {
+		if _, err := tx.Exec(ctx, `INSERT INTO notification_inbox_clocks(profile_id) VALUES($1) ON CONFLICT DO NOTHING`, profile); err != nil {
+			return fmt.Errorf("create inbox clock: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `SELECT profile_id FROM notification_inbox_clocks WHERE profile_id=$1 FOR UPDATE`, profile); err != nil {
+			return fmt.Errorf("lock inbox clock: %w", err)
+		}
+	}
+	return nil
 }
 
 // ListInbox returns inbox rows newest-first for the profile.

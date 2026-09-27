@@ -3,6 +3,7 @@ package httpstream
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,9 +12,42 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+type deadlineBlockingResponseWriter struct {
+	header          http.Header
+	writeStarted    chan struct{}
+	deadlineExpired chan struct{}
+	startOnce       sync.Once
+	expireOnce      sync.Once
+}
+
+func newDeadlineBlockingResponseWriter() *deadlineBlockingResponseWriter {
+	return &deadlineBlockingResponseWriter{
+		header:          make(http.Header),
+		writeStarted:    make(chan struct{}),
+		deadlineExpired: make(chan struct{}),
+	}
+}
+
+func (w *deadlineBlockingResponseWriter) Header() http.Header { return w.header }
+func (*deadlineBlockingResponseWriter) WriteHeader(int)       {}
+
+func (w *deadlineBlockingResponseWriter) Write([]byte) (int, error) {
+	w.startOnce.Do(func() { close(w.writeStarted) })
+	<-w.deadlineExpired
+	return 0, os.ErrDeadlineExceeded
+}
+
+func (w *deadlineBlockingResponseWriter) SetWriteDeadline(deadline time.Time) error {
+	if !deadline.After(time.Now()) {
+		w.expireOnce.Do(func() { close(w.deadlineExpired) })
+	}
+	return nil
+}
 
 func TestClassifyOutcome(t *testing.T) {
 	tests := []struct {
@@ -33,6 +67,33 @@ func TestClassifyOutcome(t *testing.T) {
 				t.Fatalf("ClassifyOutcome() = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestRollingDeadlineWriterAbortInterruptsBlockedWrite(t *testing.T) {
+	w := newDeadlineBlockingResponseWriter()
+	stream := newRollingDeadlineWriter(w, time.Hour, 0)
+	writeResult := make(chan error, 1)
+	go func() {
+		_, err := stream.Write([]byte("blocked"))
+		writeResult <- err
+	}()
+
+	select {
+	case <-w.writeStarted:
+	case <-t.Context().Done():
+		t.Fatal("stream write did not start")
+	}
+	if err := stream.Abort(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-writeResult:
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("write error = %v, want deadline exceeded", err)
+		}
+	case <-t.Context().Done():
+		t.Fatal("aborted stream write remained blocked")
 	}
 }
 

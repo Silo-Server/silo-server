@@ -55,3 +55,36 @@ describe("buildPlayerStreamUrl", () => {
     expect(url).toBe("https://api.example.com/api/v1/playback/proxy/sometoken/abc.m3u8");
   });
 });
+
+it.each([
+  [
+    "/api/v1",
+    "/api/v2/stream/session?st=opaque%2Bsignature",
+    "/api/v2/stream/session?st=opaque%2Bsignature&token=access",
+  ],
+  ["/api/v1", "/api/v1/stream/session?st=opaque", "/api/v2/stream/session?st=opaque&token=access"],
+  [
+    "https://silo.example.test/base/api/v1",
+    "/api/v2/playback/transcode/session/master.m3u8?st=opaque",
+    "https://silo.example.test/base/api/v2/playback/transcode/session/master.m3u8?st=opaque&token=access",
+  ],
+  ["/api/v1", "/stream/session", "/api/v2/stream/session?token=access"],
+])("resolves server media paths from configured API base %s", (base, path, expected) => {
+  expect(buildPlayerStreamUrl(base, path, "access")).toBe(expected);
+});
+
+it.each(["/api/v1", "/api/v2", "https://silo.example.test/base/api/v1"])(
+  "projects realtime subtitle paths without changing signed query bytes from %s",
+  (base) => {
+    const root = base.replace(/\/api\/v[12]$/, "");
+    expect(
+      buildPlayerStreamUrl(base, "/stream/session/subtitles/4.vtt?st=a%2Bb&file_id=7", "access"),
+    ).toBe(`${root}/api/v2/stream/session/subtitles/4.vtt?st=a%2Bb&file_id=7&token=access`);
+    expect(buildPlayerStreamUrl(base, "/stream/session/subtitles/4/fonts?st=a%2Bb", null)).toBe(
+      `${root}/api/v2/stream/session/subtitles/4/fonts?st=a%2Bb`,
+    );
+    expect(
+      buildPlayerStreamUrl(base, "https://proxy.example.test/stream/opaque?st=a%2Bb", null),
+    ).toBe("https://proxy.example.test/stream/opaque?st=a%2Bb");
+  },
+);

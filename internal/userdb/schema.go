@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     is_child BOOLEAN DEFAULT false,
     is_primary BOOLEAN NOT NULL DEFAULT false,
     max_content_rating TEXT,
+    max_advisory_age INTEGER CHECK (max_advisory_age BETWEEN 1 AND 21),
+    require_advisory_age BOOLEAN NOT NULL DEFAULT false,
     quality_preference TEXT DEFAULT '1080p',
     language TEXT DEFAULT 'en',
     subtitle_language TEXT,
@@ -66,6 +68,9 @@ CREATE TABLE IF NOT EXISTS watch_history (
     source TEXT NOT NULL DEFAULT 'legacy',
     watch_identity TEXT NOT NULL DEFAULT '{}'
 );
+
+CREATE INDEX IF NOT EXISTS idx_watch_history_item_witness
+    ON watch_history (profile_id, media_item_id, watched_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS hidden_history_items (
     profile_id TEXT NOT NULL,
@@ -197,6 +202,7 @@ CREATE TABLE IF NOT EXISTS library_playback_preferences (
 CREATE TABLE IF NOT EXISTS profile_onboarding (
     profile_id TEXT NOT NULL,
     tour_id TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
     last_step TEXT NOT NULL DEFAULT '',
     completed_at TEXT,
     skipped_at TEXT,
@@ -228,6 +234,9 @@ CREATE TABLE IF NOT EXISTS user_devices (
     last_seen_at TEXT NOT NULL,
     PRIMARY KEY (profile_id, device_id)
 );
+
+CREATE INDEX IF NOT EXISTS user_devices_profile_recency_idx ON user_devices (profile_id, last_seen_at DESC, device_id);
+CREATE INDEX IF NOT EXISTS user_devices_household_recency_idx ON user_devices (last_seen_at DESC, profile_id, device_id);
 
 CREATE TABLE IF NOT EXISTS downloads (
     id TEXT PRIMARY KEY,
@@ -277,7 +286,25 @@ CREATE INDEX IF NOT EXISTS idx_home_item_dismissals_lookup
 
 CREATE INDEX IF NOT EXISTS idx_hidden_history_items_lookup
     ON hidden_history_items(profile_id, hidden_before);
-` + settingContractSchema + jellycompatDisplayPrefsSchema
+` + settingContractSchema + jellycompatDisplayPrefsSchema + playbackSinkSchema + playbackSourceSchema + onboardingRevisionSchema
+
+// The selected account database supplies account scope. Receipts deliberately
+// do not reference watch_history: deleting history must not reopen a stop.
+const playbackSinkSchema = `
+CREATE TABLE IF NOT EXISTS playback_progress_sinks (
+    profile_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    media_item_id TEXT NOT NULL,
+    attempt_id TEXT NOT NULL,
+    incarnation TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL CHECK (epoch > 0),
+    state TEXT NOT NULL CHECK (state IN ('active', 'stopped')),
+    last_sequence INTEGER NOT NULL CHECK (last_sequence >= 0),
+    document TEXT NOT NULL,
+    PRIMARY KEY (profile_id, session_id)
+);
+`
 
 // jellycompatDisplayPrefsSchema is the dedicated home for Jellyfin
 // DisplayPreferences blobs, which used to ride user_settings under synthetic
@@ -374,6 +401,106 @@ CREATE TABLE IF NOT EXISTS user_setting_migration_rejects (
 
 CREATE INDEX IF NOT EXISTS user_setting_migration_rejects_source_idx
     ON user_setting_migration_rejects (source_table);
+-- Persist collection membership witnesses independently from wall-clock timestamps.
+CREATE TABLE IF NOT EXISTS personal_collection_revisions (
+    collection_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL DEFAULT 1
+);
+INSERT OR IGNORE INTO personal_collection_revisions SELECT id, 1 FROM personal_collections;
+CREATE INDEX IF NOT EXISTS personal_collection_items_continuation_idx
+    ON personal_collection_items (collection_id, position, media_item_id);
+CREATE TRIGGER IF NOT EXISTS personal_collection_items_position_insert AFTER INSERT ON personal_collection_items
+WHEN NEW.position IS NULL
+BEGIN
+    UPDATE personal_collection_items SET position = 0 WHERE collection_id = NEW.collection_id AND media_item_id = NEW.media_item_id;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collection_items_position_update AFTER UPDATE OF position ON personal_collection_items
+WHEN NEW.position IS NULL
+BEGIN
+    UPDATE personal_collection_items SET position = 0 WHERE collection_id = NEW.collection_id AND media_item_id = NEW.media_item_id;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collections_revision_insert AFTER INSERT ON personal_collections
+BEGIN
+    INSERT INTO personal_collection_revisions (collection_id, revision) VALUES (NEW.id, 1)
+    ON CONFLICT (collection_id) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collections_revision_update AFTER UPDATE ON personal_collections
+BEGIN
+    INSERT INTO personal_collection_revisions (collection_id, revision) VALUES (OLD.id, 1)
+    ON CONFLICT (collection_id) DO UPDATE SET revision = revision + 1;
+    INSERT INTO personal_collection_revisions (collection_id, revision) VALUES (NEW.id, 1)
+    ON CONFLICT (collection_id) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collections_revision_delete AFTER DELETE ON personal_collections
+BEGIN
+    INSERT INTO personal_collection_revisions (collection_id, revision) VALUES (OLD.id, 1)
+    ON CONFLICT (collection_id) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collection_items_revision_insert AFTER INSERT ON personal_collection_items
+BEGIN
+    INSERT INTO personal_collection_revisions (collection_id, revision) VALUES (NEW.collection_id, 1)
+    ON CONFLICT (collection_id) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collection_items_revision_update AFTER UPDATE ON personal_collection_items
+BEGIN
+    INSERT INTO personal_collection_revisions (collection_id, revision) VALUES (OLD.collection_id, 1)
+    ON CONFLICT (collection_id) DO UPDATE SET revision = revision + 1;
+    INSERT INTO personal_collection_revisions (collection_id, revision) VALUES (NEW.collection_id, 1)
+    ON CONFLICT (collection_id) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collection_items_revision_delete AFTER DELETE ON personal_collection_items
+BEGIN
+    INSERT INTO personal_collection_revisions (collection_id, revision) VALUES (OLD.collection_id, 1)
+    ON CONFLICT (collection_id) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collection_profiles_revision_insert AFTER INSERT ON personal_collection_profiles
+BEGIN
+    INSERT INTO personal_collection_revisions (collection_id, revision) VALUES (NEW.collection_id, 1)
+    ON CONFLICT (collection_id) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collection_profiles_revision_update AFTER UPDATE ON personal_collection_profiles
+BEGIN
+    INSERT INTO personal_collection_revisions (collection_id, revision) VALUES (OLD.collection_id, 1)
+    ON CONFLICT (collection_id) DO UPDATE SET revision = revision + 1;
+    INSERT INTO personal_collection_revisions (collection_id, revision) VALUES (NEW.collection_id, 1)
+    ON CONFLICT (collection_id) DO UPDATE SET revision = revision + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collection_profiles_revision_delete AFTER DELETE ON personal_collection_profiles
+BEGIN
+    INSERT INTO personal_collection_revisions (collection_id, revision) VALUES (OLD.collection_id, 1)
+    ON CONFLICT (collection_id) DO UPDATE SET revision = revision + 1;
+END;
+
+CREATE TABLE IF NOT EXISTS personal_collection_order_revision (
+ singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+ revision INTEGER NOT NULL DEFAULT 1
+);
+INSERT OR IGNORE INTO personal_collection_order_revision VALUES(1,1);
+CREATE TRIGGER IF NOT EXISTS personal_collections_order_revision_insert AFTER INSERT ON personal_collections
+BEGIN
+ UPDATE personal_collection_order_revision SET revision=revision+1 WHERE singleton=1;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collections_order_revision_update AFTER UPDATE ON personal_collections
+BEGIN
+ UPDATE personal_collection_order_revision SET revision=revision+1 WHERE singleton=1;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collections_order_revision_delete AFTER DELETE ON personal_collections
+BEGIN
+ UPDATE personal_collection_order_revision SET revision=revision+1 WHERE singleton=1;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collection_profiles_order_revision_insert AFTER INSERT ON personal_collection_profiles
+BEGIN
+ UPDATE personal_collection_order_revision SET revision=revision+1 WHERE singleton=1;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collection_profiles_order_revision_update AFTER UPDATE ON personal_collection_profiles
+BEGIN
+ UPDATE personal_collection_order_revision SET revision=revision+1 WHERE singleton=1;
+END;
+CREATE TRIGGER IF NOT EXISTS personal_collection_profiles_order_revision_delete AFTER DELETE ON personal_collection_profiles
+BEGIN
+ UPDATE personal_collection_order_revision SET revision=revision+1 WHERE singleton=1;
+END;
+
 `
 
 // InitSchema creates all tables in the given SQLite database.
@@ -993,3 +1120,13 @@ func migratePlaybackSettingsToDeviceScope(db *sql.DB) error {
 
 	return tx.Commit()
 }
+
+// No source is automatically provisioned or writable by migration.
+const playbackSourceSchema = `
+CREATE TABLE IF NOT EXISTS playback_source_markers (
+ user_id INTEGER PRIMARY KEY,
+ source_id TEXT NOT NULL,
+ selection_generation INTEGER NOT NULL CHECK(selection_generation > 0),
+ gate TEXT NOT NULL DEFAULT 'quarantined' CHECK(gate IN ('writable','quarantined','sealed'))
+);
+`

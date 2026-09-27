@@ -1,0 +1,28 @@
+{
+  "id": "r-1",
+  "provider": "tmdb",
+  "media_type": "movie",
+  "tmdb_id": 949,
+  "title": "Heat",
+  "year": 1995,
+  "status": "approved",
+  "outcome": "active",
+  "requested_by_user_id": "1",
+  "requested_by_profile_id": "p-owner",
+  "integration_kind": "radarr",
+  "is_anime": false,
+  "targets": [
+    {
+      "id": "42",
+      "request_id": "r-1",
+      "quality": "1080p",
+      "is_anime": false,
+      "status": "queued",
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "updated_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "created_at": "2026-01-02T03:04:05.678Z",
+  "updated_at": "2026-01-02T03:04:05.678Z",
+  "approved_at": "2026-01-02T03:04:05.678Z"
+}

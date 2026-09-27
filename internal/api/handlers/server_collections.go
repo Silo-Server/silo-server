@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -14,18 +15,18 @@ import (
 // Capping keeps the payload and the per-library presign cost bounded.
 const serverCollectionsPerLibraryCap = 20
 
-// serverCollectionsLibrary is one library's bucket of visible server (admin)
+// ServerCollectionsLibraryView is one library's bucket of visible server (admin)
 // collections. Collections is a capped teaser slice; TotalCount is the full
 // visible count, used to drive the "See all (N)" affordance.
-type serverCollectionsLibrary struct {
+type ServerCollectionsLibraryView struct {
 	LibraryID   int                    `json:"library_id"`
 	LibraryName string                 `json:"library_name"`
 	TotalCount  int                    `json:"total_count"`
 	Collections []libraryTabCollection `json:"collections"`
 }
 
-type serverCollectionsResponse struct {
-	Libraries []serverCollectionsLibrary `json:"libraries"`
+type ServerCollectionsView struct {
+	Libraries []ServerCollectionsLibraryView `json:"libraries"`
 }
 
 // capServerCollections trims a library's collections to the per-library teaser
@@ -50,16 +51,23 @@ func capServerCollections(collections []*models.LibraryCollection) ([]*models.Li
 // access semantics and cache/refetch lifecycles, and overloading the personal
 // response with read-only server collections would be a client-facing trap.
 func (h *LibraryCollectionHandler) HandleListServerCollections(w http.ResponseWriter, r *http.Request) {
-	resp := serverCollectionsResponse{Libraries: []serverCollectionsLibrary{}}
-	if h.FolderRepo == nil {
-		writeJSON(w, http.StatusOK, resp)
+	view, err := h.ListServerCollections(r.Context(), requestAccessFilter(r))
+	if err != nil {
+		writeAPIError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, view)
+}
 
-	folders, err := h.FolderRepo.List(r.Context())
+func (h *LibraryCollectionHandler) ListServerCollections(ctx context.Context, access catalog.AccessFilter) (ServerCollectionsView, error) {
+	resp := ServerCollectionsView{Libraries: []ServerCollectionsLibraryView{}}
+	if h.FolderRepo == nil {
+		return resp, nil
+	}
+
+	folders, err := h.FolderRepo.List(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load libraries")
-		return
+		return ServerCollectionsView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load libraries")
 	}
 
 	// Folders are already ordered by sort_order; iterate in that order so the
@@ -70,16 +78,15 @@ func (h *LibraryCollectionHandler) HandleListServerCollections(w http.ResponseWr
 		}
 		// Honor the requester's library access scope; never reveal collections
 		// from libraries outside AllowedLibraryIDs.
-		if !requestCanAccessLibrary(r, f.ID) {
+		if !viewerCanAccessLibrary(ctx, f.ID) {
 			continue
 		}
 
 		// ListByLibrary returns only visible collections, ordered
 		// featured-first, so the capped slice surfaces the best ones.
-		collections, err := h.repo.ListByLibrary(r.Context(), f.ID, catalog.ListLibraryCollectionsOptions{})
+		collections, err := h.repo.ListByLibrary(ctx, f.ID, catalog.ListLibraryCollectionsOptions{})
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load collections")
-			return
+			return ServerCollectionsView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collections")
 		}
 		if len(collections) == 0 {
 			continue
@@ -92,14 +99,14 @@ func (h *LibraryCollectionHandler) HandleListServerCollections(w http.ResponseWr
 			colls = append(colls, libraryTabCollection{
 				ID:              c.ID,
 				Title:           c.Title,
-				PosterURL:       h.presignGPURL(r, c.PosterURL),
+				PosterURL:       h.presignGPURLCtx(ctx, c.PosterURL),
 				PosterThumbhash: c.PosterThumbhash,
 				ItemCount:       c.ItemCount,
 				Featured:        c.Featured,
 			})
 		}
 
-		resp.Libraries = append(resp.Libraries, serverCollectionsLibrary{
+		resp.Libraries = append(resp.Libraries, ServerCollectionsLibraryView{
 			LibraryID:   f.ID,
 			LibraryName: f.Name,
 			TotalCount:  total,
@@ -107,5 +114,5 @@ func (h *LibraryCollectionHandler) HandleListServerCollections(w http.ResponseWr
 		})
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	return resp, nil
 }

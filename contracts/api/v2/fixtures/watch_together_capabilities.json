@@ -1,0 +1,15 @@
+{
+  "revision": "efa2c8c12c9ace1fbcf4c6e3e159a3f97ee59741f73d3ca9e303b0b1e0179cf2",
+  "state": "available",
+  "allowed": false,
+  "staged_selection": true,
+  "lobby_ready": true,
+  "connection_replaced": true,
+  "selection_mode_switch": true,
+  "member_state": true,
+  "picker": true,
+  "vote_host_override": true,
+  "stop_playback": true,
+  "max_member_state_ids": 200,
+  "socket_protocol": "silo.room.v2"
+}

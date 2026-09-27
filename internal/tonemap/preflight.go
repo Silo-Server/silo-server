@@ -239,7 +239,7 @@ func sourcePreflightKey(ctx context.Context, request SourcePreflightRequest, run
 // ffmpegVersionForPreflight coalesces version lookups and invalidates cached
 // output when the resolved binary's identity changes.
 func ffmpegVersionForPreflight(ctx context.Context, ffmpegPath string, run CommandRunner) ([]byte, error) {
-	resolved, cacheKey, cacheable := ffmpegBinaryCacheKey(ffmpegPath)
+	resolved, cacheKey, cacheable := FFmpegBinaryIdentity(ffmpegPath)
 	if !cacheable {
 		return runBounded(ctx, run, ffmpegPath, "-version")
 	}
@@ -286,9 +286,13 @@ func ffmpegVersionForPreflight(ctx context.Context, ffmpegPath string, run Comma
 	}
 }
 
-// ffmpegBinaryCacheKey resolves a regular FFmpeg binary and derives an identity
-// that changes when the executable is replaced in place.
-func ffmpegBinaryCacheKey(ffmpegPath string) (string, string, bool) {
+// FFmpegBinaryIdentity resolves a regular FFmpeg binary and derives an identity
+// that changes when the executable is replaced in place. It returns the
+// resolved path, the identity, and whether the binary resolved to a regular
+// file; when it did not, the path is returned unchanged and the identity is
+// empty. Other per-binary caches, such as mediasample's capability inventory,
+// key on the same identity.
+func FFmpegBinaryIdentity(ffmpegPath string) (resolved, identity string, ok bool) {
 	resolved, err := exec.LookPath(strings.TrimSpace(ffmpegPath))
 	if err != nil {
 		return ffmpegPath, "", false

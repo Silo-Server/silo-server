@@ -26,7 +26,7 @@ export function setAppDocumentTitle(name: string) {
 }
 
 const SETTINGS_TITLES: Record<string, string> = {
-  appearance: "Appearance Settings",
+  account: "Account Settings",
   interface: "Navigation & Card Settings",
   accessibility: "Accessibility Settings",
   playback: "Playback Settings",
@@ -106,6 +106,10 @@ export function resolveAdminDocumentTitle(pathname: string): string {
 
   if (adminSegment === "users" && nestedSegment) {
     return "Admin User";
+  }
+
+  if (adminSegment === "plugins" && nestedSegment) {
+    return "Admin Plugin";
   }
 
   return ADMIN_TITLES[adminSegment] ?? "Admin";

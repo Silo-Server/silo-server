@@ -113,10 +113,10 @@ func TestManifestBuilderAssembles(t *testing.T) {
 	if m.PosterThumbhash != "PHASH" || m.BackdropThumbhash != "BHASH" {
 		t.Fatalf("thumbhashes not inlined: %+v", m)
 	}
-	if m.ArtworkURLs.Poster != "/api/v1/downloads/dl1/artwork/poster" {
+	if m.ArtworkURLs.Poster != "/api/v2/downloads/dl1/artwork/poster" {
 		t.Fatalf("poster url = %q, want proxy path", m.ArtworkURLs.Poster)
 	}
-	if m.ArtworkURLs.Backdrop != "/api/v1/downloads/dl1/artwork/backdrop" {
+	if m.ArtworkURLs.Backdrop != "/api/v2/downloads/dl1/artwork/backdrop" {
 		t.Fatalf("backdrop url = %q, want proxy path", m.ArtworkURLs.Backdrop)
 	}
 	if m.ArtworkURLs.Logo != "" {
@@ -134,10 +134,10 @@ func TestManifestBuilderAssembles(t *testing.T) {
 	if len(m.Subtitles) != 2 {
 		t.Fatalf("subtitles = %+v, want 2", m.Subtitles)
 	}
-	if m.Subtitles[0].FetchURL != "/api/v1/downloads/dl1/subtitles/external:0" || !m.Subtitles[0].External {
+	if m.Subtitles[0].FetchURL != "/api/v2/downloads/dl1/subtitles/external:0" || !m.Subtitles[0].External {
 		t.Fatalf("external subtitle = %+v", m.Subtitles[0])
 	}
-	if m.Subtitles[1].FetchURL != "/api/v1/downloads/dl1/subtitles/downloaded:7" || m.Subtitles[1].External {
+	if m.Subtitles[1].FetchURL != "/api/v2/downloads/dl1/subtitles/downloaded:7" || m.Subtitles[1].External {
 		t.Fatalf("downloaded subtitle = %+v", m.Subtitles[1])
 	}
 	if m.StableIdentity.ProviderIDs["imdb"] != "tt123" || m.StableIdentity.ProviderIDs["tmdb"] != "456" {

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -204,10 +206,13 @@ func (r *PgJobRepository) FailJob(ctx context.Context, id int64, status JobStatu
 }
 
 func (r *PgJobRepository) Heartbeat(ctx context.Context, id int64) error {
-	_, err := r.pool.Exec(ctx,
-		`UPDATE subtitle_ai_jobs SET heartbeat_at = now() WHERE id = $1`, id)
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE subtitle_ai_jobs SET heartbeat_at = now() WHERE id = $1 AND status IN ('pending', 'running')`, id)
 	if err != nil {
 		return fmt.Errorf("heartbeat subtitle ai job: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return jobrunner.ErrJobTerminal
 	}
 	return nil
 }

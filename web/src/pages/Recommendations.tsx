@@ -1,5 +1,5 @@
 import { useDiscover, useTasteProfile } from "@/hooks/queries/recommendations";
-import type { DiscoverRow } from "@/api/types";
+import type { DiscoverRow } from "@/api/v2/recommendations";
 import MediaCarousel from "@/components/MediaCarousel";
 import SectionItemCard from "@/components/SectionItemCard";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";

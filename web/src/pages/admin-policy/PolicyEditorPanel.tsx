@@ -1,18 +1,22 @@
+import {
+  policyApplyMessage,
+  policyMutationMessage,
+  type PolicySnapshot,
+  type PolicyApplyResult,
+} from "@/api/adminPolicy";
+import { PolicyRevisionReview } from "./PolicyRevisionReview";
 import { Check, CheckCircle2, Play, Save, ShieldCheck } from "lucide-react";
 import { memo, useEffect, useState } from "react";
-import { toast } from "sonner";
 
 import type {
   PolicyCompileIssue,
-  PolicyDocument,
   PolicyValidateResult,
   PolicyVersion,
   PolicyVersionSummary,
-} from "@/api/types";
+} from "@/api/adminPolicy";
 import { RegoEditor } from "@/components/policy/RegoEditor";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -38,12 +42,12 @@ import { compileIssuesFromError, defaultPolicySource, messageFromError } from ".
 import { PolicyStatusPill, policyDocumentStatus, policyDomainMeta } from "./policyPresentation";
 
 interface PolicyEditorPanelProps {
-  documentId?: number;
+  documentId?: string;
   domains: readonly string[];
 }
 
 interface PolicyEditorStateProps {
-  document: PolicyDocument;
+  document: PolicySnapshot;
   domains: readonly string[];
   initialSource: string;
   seedIsActive: boolean;
@@ -64,7 +68,8 @@ interface NewerSeedInfo {
 }
 
 interface PinnedSeed {
-  documentId: number;
+  document: PolicySnapshot;
+  documentId: string;
   key: string;
   initialSource: string;
   seedIsActive: boolean;
@@ -77,13 +82,13 @@ interface ValidationState {
 }
 
 interface ActivationTarget {
-  id: number;
+  id: string;
   version_number: number;
 }
 
 type LifecycleStep = "validate" | "save" | "activate" | "live";
 
-const LIFECYCLE_LABELS = ["Draft", "Validated", "Saved", "Live"] as const;
+const LIFECYCLE_LABELS = ["Draft", "Validated", "Saved", "Active"] as const;
 
 function lifecycleProgress(step: LifecycleStep) {
   // Index of the first label that is NOT yet reached.
@@ -123,8 +128,8 @@ function LifecycleRail({ step, liveVersion }: { step: LifecycleStep; liveVersion
               )}
             >
               {done && <Check aria-hidden className="size-3" />}
-              {label === "Live" && liveVersion !== undefined && step === "live"
-                ? `Live · v${liveVersion}`
+              {label === "Active" && liveVersion !== undefined && step === "live"
+                ? `Active · v${liveVersion}`
                 : label}
             </span>
           </li>
@@ -143,8 +148,8 @@ function issueKey(issue: PolicyCompileIssue, index: number) {
   return `${issue.row}-${issue.col}-${issue.message}-${index}`;
 }
 
-function seedKey(document: PolicyDocument, seedVersion: PolicyVersion | undefined) {
-  return `${document.id}:${seedVersion?.id ?? "template"}:${
+function seedKey(document: PolicySnapshot, seedVersion: PolicyVersion | undefined) {
+  return `${document.etag}:${document.id}:${seedVersion?.id ?? "template"}:${
     seedVersion?.source_sha256 ?? document.domain
   }`;
 }
@@ -196,6 +201,7 @@ export function PolicyEditorPanel({ documentId, domains }: PolicyEditorPanelProp
   }
 
   const fresh: PinnedSeed = {
+    document: document,
     documentId: document.id,
     key: seedKey(document, seedVersion),
     initialSource: seedVersion?.source ?? defaultPolicySource(document.domain),
@@ -216,8 +222,7 @@ export function PolicyEditorPanel({ documentId, domains }: PolicyEditorPanelProp
     pinned !== null &&
     editorState !== null &&
     (editorState.draft !== pinned.initialSource || editorState.pending);
-  const safeToAdopt =
-    !editorDirty || (editorState !== null && editorState.draft === fresh.initialSource);
+  const safeToAdopt = !editorDirty;
   const shouldAdopt = pinned === null || !sameDocument || (pinned.key !== fresh.key && safeToAdopt);
   const effective = shouldAdopt ? fresh : pinned;
   const keepingPinned = !shouldAdopt && pinned.key !== fresh.key;
@@ -234,7 +239,7 @@ export function PolicyEditorPanel({ documentId, domains }: PolicyEditorPanelProp
   return (
     <PolicyEditorState
       key={effective.key}
-      document={document}
+      document={effective.document}
       domains={domains}
       initialSource={effective.initialSource}
       seedIsActive={effective.seedIsActive}
@@ -261,11 +266,18 @@ const PolicyEditorState = memo(function PolicyEditorState({
   newerSeed,
 }: PolicyEditorStateProps) {
   const [draft, setDraft] = useState(initialSource);
+  const [captured, setCaptured] = useState(document);
+  const [reviewRequired, setReviewRequired] = useState(false);
+  const [applied, setApplied] = useState<PolicyApplyResult>();
   const [comment, setComment] = useState("");
   const [issues, setIssues] = useState<PolicyCompileIssue[]>([]);
+  const [issueSource, setIssueSource] = useState(initialSource);
+  const visibleIssues = issueSource === draft ? issues : [];
   const [validation, setValidation] = useState<ValidationState | null>(null);
   const [message, setMessage] = useState("");
-  const [saved, setSaved] = useState<{ source: string; target: ActivationTarget } | undefined>();
+  const [saved, setSaved] = useState<
+    { source: string; target: ActivationTarget; compiled: boolean } | undefined
+  >();
   const [confirmActivate, setConfirmActivate] = useState(false);
   const validatePolicy = useValidatePolicy();
   const createVersion = useCreatePolicyVersion();
@@ -274,7 +286,12 @@ const PolicyEditorState = memo(function PolicyEditorState({
   // Report the draft plus whether there is uncommitted work (a saved-but-not-yet
   // activated version, or a typed comment) so the panel can decide whether an
   // incoming seed may safely replace this editor.
-  const pending = Boolean(saved) || comment.trim().length > 0;
+  const pending =
+    Boolean(saved) ||
+    comment.trim().length > 0 ||
+    validatePolicy.isPending ||
+    createVersion.isPending ||
+    activateVersion.isPending;
   useEffect(() => {
     onStateChange({ draft, pending });
   }, [draft, pending, onStateChange]);
@@ -286,13 +303,23 @@ const PolicyEditorState = memo(function PolicyEditorState({
   // the remaining step is activation (e.g. after a page reload mid-flow).
   const seedSummary = versions.find((version) => version.id === seedVersion?.id);
   const savedTarget =
-    saved?.source === draft
+    saved?.source === draft && saved.compiled
       ? saved.target
       : !seedIsActive && draft === initialSource
         ? activationTargetFromVersion(seedSummary)
         : undefined;
 
-  const liveInSync = seedIsActive && draft === initialSource && !saved;
+  const liveInSync =
+    (seedIsActive && draft === initialSource && !saved) ||
+    Boolean(
+      applied && saved?.source === draft && applied.document.active_version_id === saved.target.id,
+    );
+  const busy = validatePolicy.isPending || createVersion.isPending || activateVersion.isPending;
+  const displayedDocument = applied ? { ...document, ...applied.document } : document;
+  const activeVersionNumber =
+    applied && saved && applied.document.active_version_id === saved.target.id
+      ? saved.target.version_number
+      : document.active_version?.version_number;
   const step: LifecycleStep = liveInSync
     ? "live"
     : savedTarget
@@ -304,19 +331,21 @@ const PolicyEditorState = memo(function PolicyEditorState({
   async function validateDraft() {
     setMessage("");
     setIssues([]);
+    const source = draft;
+    setIssueSource(source);
     try {
       const result = await validatePolicy.mutateAsync({
         domain: document.domain,
-        source: draft,
+        source,
       });
-      setValidation({ source: draft, result });
+      setValidation({ source, result });
       setIssues(result.errors);
-      setMessage(result.compiled_ok ? "Validation passed — the draft compiles." : "");
+      setMessage(result.compiled_ok ? "Validation passed for the submitted source." : "");
     } catch (error) {
       const nextIssues = compileIssuesFromError(error);
       setIssues(nextIssues);
       setValidation({
-        source: draft,
+        source,
         result: { compiled_ok: false, errors: nextIssues },
       });
       setMessage(nextIssues.length > 0 ? "" : messageFromError(error, "Validation failed."));
@@ -325,40 +354,70 @@ const PolicyEditorState = memo(function PolicyEditorState({
 
   async function saveVersion() {
     setMessage("");
+    const source = draft;
+    setIssueSource(source);
+    const savedComment = comment;
     try {
       const result = await createVersion.mutateAsync({
         documentId: document.id,
-        source: draft,
-        comment,
+        source,
+        comment: savedComment,
       });
-      if (result.compiled_ok) {
-        setSaved({
-          source: draft,
-          target: { id: result.id, version_number: result.version_number },
+      setSaved({
+        source,
+        target: { id: result.id, version_number: result.version_number },
+        compiled: result.compiled_ok,
+      });
+      setReviewRequired(true);
+      if (!result.compiled_ok)
+        setValidation({
+          source,
+          result: {
+            compiled_ok: false,
+            errors: [
+              { row: 0, col: 0, message: result.compile_error ?? "Saved draft did not compile." },
+            ],
+          },
         });
-      }
-      setComment("");
-      toast.success(`Saved v${result.version_number}`);
-    } catch (error) {
-      const nextIssues = compileIssuesFromError(error);
-      setIssues(nextIssues);
-      setMessage(
-        nextIssues.length > 0
-          ? "The server rejected this draft — fix the issues below."
-          : messageFromError(error, "Failed to save policy version."),
+      setApplied(undefined);
+      setComment((current) => (current === savedComment ? "" : current));
+      setIssues(
+        result.compiled_ok
+          ? []
+          : [
+              {
+                row: 0,
+                col: 0,
+                message: result.compile_error ?? "This saved draft did not compile.",
+              },
+            ],
       );
+      setMessage(
+        result.compiled_ok
+          ? `Saved v${result.version_number}. Review the current policy before activation.`
+          : `Saved v${result.version_number}, but it did not compile. Its source is preserved in history; fix the diagnostics before saving another version.`,
+      );
+    } catch (error) {
+      setIssues(compileIssuesFromError(error));
+      setMessage(policyMutationMessage(error, "Unable to save policy version."));
     }
   }
 
   async function activateSavedVersion() {
-    if (!savedTarget) return;
+    if (!savedTarget || reviewRequired) return;
     try {
-      await activateVersion.mutateAsync({ documentId: document.id, version: savedTarget.id });
+      const result = await activateVersion.mutateAsync({
+        documentId: document.id,
+        version: savedTarget.id,
+        etag: captured.etag,
+      });
       setConfirmActivate(false);
-      setSaved(undefined);
-      toast.success(`v${savedTarget.version_number} is now live`);
+      setApplied(result);
+      setMessage(policyApplyMessage(result));
     } catch (error) {
-      toast.error(messageFromError(error, "Failed to activate policy version"));
+      setReviewRequired(true);
+      setConfirmActivate(false);
+      setMessage(policyMutationMessage(error, "Unable to activate policy version."));
     }
   }
 
@@ -366,21 +425,25 @@ const PolicyEditorState = memo(function PolicyEditorState({
     switch (step) {
       case "validate":
         return (
-          <Button type="button" onClick={validateDraft} disabled={validatePolicy.isPending}>
+          <Button type="button" onClick={validateDraft} disabled={busy}>
             <CheckCircle2 className="size-4" />
             {validatePolicy.isPending ? "Validating..." : "Validate draft"}
           </Button>
         );
       case "save":
         return (
-          <Button type="button" onClick={saveVersion} disabled={createVersion.isPending}>
+          <Button type="button" onClick={saveVersion} disabled={busy}>
             <Save className="size-4" />
             {createVersion.isPending ? "Saving..." : "Save as version"}
           </Button>
         );
       case "activate":
         return (
-          <Button type="button" onClick={() => setConfirmActivate(true)}>
+          <Button
+            type="button"
+            onClick={() => setConfirmActivate(true)}
+            disabled={busy || reviewRequired}
+          >
             <ShieldCheck className="size-4" />
             Activate v{savedTarget?.version_number}
           </Button>
@@ -399,21 +462,16 @@ const PolicyEditorState = memo(function PolicyEditorState({
               <h2 className="text-xl font-semibold tracking-tight">{document.name}</h2>
               <span className="text-muted-foreground text-sm">{meta.title}</span>
               <PolicyStatusPill
-                status={policyDocumentStatus(document)}
-                versionNumber={document.active_version?.version_number}
+                status={policyDocumentStatus(displayedDocument)}
+                versionNumber={activeVersionNumber}
               />
             </div>
-            <LifecycleRail step={step} liveVersion={document.active_version?.version_number} />
+            <LifecycleRail step={step} liveVersion={activeVersionNumber} />
           </div>
 
           <div className="flex shrink-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center">
             {step !== "validate" && step !== "live" && (
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={validateDraft}
-                disabled={validatePolicy.isPending}
-              >
+              <Button type="button" variant="ghost" onClick={validateDraft} disabled={busy}>
                 Re-validate
               </Button>
             )}
@@ -423,8 +481,8 @@ const PolicyEditorState = memo(function PolicyEditorState({
 
         {step === "live" && (
           <p className="text-muted-foreground mt-3 text-sm">
-            This source is what the live policy runs today. Edit it to start a new draft — nothing
-            changes until you activate the result.
+            This source is selected as the active version in the saved document. Each server applies
+            saved policy changes independently. Edit it to start a new draft.
           </p>
         )}
         {!document.enabled && (
@@ -438,9 +496,9 @@ const PolicyEditorState = memo(function PolicyEditorState({
           <div className="border-warning/40 bg-warning/10 mt-4 flex flex-col gap-2 rounded-lg border px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
             <span className="text-warning">
               {newerSeed.versionNumber !== undefined
-                ? `Version ${newerSeed.versionNumber} is now live elsewhere.`
-                : "A newer policy is now live elsewhere."}{" "}
-              Loading it will discard your unsaved draft.
+                ? `The saved policy changed (active version ${newerSeed.versionNumber}).`
+                : "The saved policy revision changed."}{" "}
+              Loading saved source replaces the text in this editor.
             </span>
             <Button
               type="button"
@@ -449,10 +507,20 @@ const PolicyEditorState = memo(function PolicyEditorState({
               className="shrink-0"
               onClick={newerSeed.onAdopt}
             >
-              Load live version
+              Load saved source
             </Button>
           </div>
         )}
+
+        <PolicyRevisionReview
+          documentId={document.id}
+          disabled={busy}
+          onAdopt={(snapshot) => {
+            setCaptured(snapshot);
+            setReviewRequired(false);
+            setMessage("Current revision adopted. Your draft and saved version are unchanged.");
+          }}
+        />
 
         {step === "save" && (
           <div className="mt-4 max-w-lg">
@@ -466,16 +534,36 @@ const PolicyEditorState = memo(function PolicyEditorState({
         )}
 
         {message && (
-          <div className="mt-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
+          <div
+            role="status"
+            className={cn(
+              "mt-4 rounded-lg border px-3 py-2 text-sm",
+              applied &&
+                (!applied.application.local_applied || applied.application.publication_failed)
+                ? "border-warning/40 bg-warning/10 text-warning"
+                : "border-border bg-secondary text-foreground",
+            )}
+          >
             {message}
           </div>
         )}
 
-        {issues.length > 0 && (
+        {saved && saved.source !== draft && (
+          <p className="text-muted-foreground text-sm">
+            Current edits are not saved in v{saved.target.version_number}.
+          </p>
+        )}
+        {validation && validation.source !== draft && (
+          <p className="text-muted-foreground text-sm">
+            The validation result applies to earlier source. Validate the current draft before
+            saving.
+          </p>
+        )}
+        {visibleIssues.length > 0 && (
           <div className="border-destructive/40 bg-destructive/10 text-destructive mt-4 rounded-lg border px-3 py-2">
             <h3 className="text-sm font-semibold">Compile issues</h3>
             <ul className="mt-2 space-y-1 text-xs">
-              {issues.map((issue, index) => (
+              {visibleIssues.map((issue, index) => (
                 <li key={issueKey(issue, index)}>
                   {issue.row > 0 ? `${issue.row}:${issue.col} ` : ""}
                   {issue.message}
@@ -486,33 +574,33 @@ const PolicyEditorState = memo(function PolicyEditorState({
         )}
       </div>
 
-      <RegoEditor value={draft} onChange={setDraft} issues={issues} height="520px" />
+      <RegoEditor value={draft} onChange={setDraft} issues={visibleIssues} height="520px" />
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.7fr)]">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.7fr)]">
         <PolicySimulatePanel domains={domains} domain={document.domain} source={draft} />
         <PolicyVersionHistory
           documentId={document.id}
-          activeVersionId={document.active_version_id}
+          activeVersionId={document.active_version_id ?? undefined}
         />
       </div>
 
       <AlertDialog open={confirmActivate} onOpenChange={setConfirmActivate}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              Make v{savedTarget?.version_number} the live policy?
-            </AlertDialogTitle>
+            <AlertDialogTitle>Activate saved v{savedTarget?.version_number}?</AlertDialogTitle>
             <AlertDialogDescription>
-              New requests start using it immediately, on every server node. You can roll back to
-              any earlier version from the history below.
+              The reviewed policy is {captured.enabled ? "enabled" : "disabled"}, with active
+              version {captured.active_version?.version_number ?? "none"}. This saves a new
+              active-version selection. Servers reload independently; the result will report local
+              application.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={activateSavedVersion} disabled={activateVersion.isPending}>
+            <Button onClick={() => void activateSavedVersion()} disabled={busy || reviewRequired}>
               <Play className="size-4" />
-              Go live
-            </AlertDialogAction>
+              Confirm activation
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

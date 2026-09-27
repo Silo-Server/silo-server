@@ -1,29 +1,42 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api, ApiClientError } from "@/api/client";
+import { V2ProblemError } from "@/api/v2/request";
+import {
+  getAdminRequestSettingsV2,
+  putAdminRequestSettingsV2,
+  getAdminRequestUserLimitV2,
+  putAdminRequestUserLimitV2,
+  listAdminRequestIntegrationsV2,
+  saveAdminRequestIntegrationV2,
+  deleteAdminRequestIntegrationV2,
+  listAdminMediaRequestsV2,
+  approveAdminRequestV2,
+  declineAdminRequestV2,
+  retryAdminRequestV2,
+  loadAdminRequestIntegrationOptionsV2,
+} from "@/api/v2/adminRequests";
+import { v2 } from "@/api/v2/request";
+import {
+  browseDiscoverV2,
+  createMediaRequestV2,
+  getDiscoverSectionV2,
+  getRequestMediaDetailV2,
+  listDiscoverGenresV2,
+  listDiscoverNetworksV2,
+  listDiscoverSectionsV2,
+  listDiscoverStudiosV2,
+  listMyMediaRequestsV2,
+  searchRequestMediaV2,
+} from "@/api/v2/requests";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import type {
   CreateMediaRequestInput,
   DiscoverBrowseKind,
-  DiscoverBrowseResponse,
-  DiscoverGenresResponse,
-  DiscoverNetworksResponse,
-  DiscoverStudiosResponse,
   LoadRequestIntegrationOptionsRequest,
-  MediaRequest,
-  MediaRequestsListResponse,
-  RequestDiscoveryResponse,
-  RequestDiscoverySection,
-  RequestFeatureStatus,
   RequestIntegration,
-  RequestIntegrationOptions,
-  RequestIntegrationsResponse,
   RequestListParams,
-  RequestMediaDetail,
-  RequestMediaPage,
   RequestSearchMediaType,
   RequestMediaType,
-  RequestSettings,
   RequestUserLimit,
 } from "@/api/types";
 import { adminKeys, requestKeys } from "./keys";
@@ -41,24 +54,8 @@ function listParamsKey(params: RequestListParams) {
   };
 }
 
-function buildListQuery(params: RequestListParams = {}) {
-  const query = new URLSearchParams();
-  if (params.status && params.status !== "all") query.set("status", params.status);
-  if (params.outcome && params.outcome !== "all") query.set("outcome", params.outcome);
-  if (params.limit != null && params.limit > 0) query.set("limit", String(params.limit));
-  if (params.offset != null && params.offset > 0) query.set("offset", String(params.offset));
-  const encoded = query.toString();
-  return encoded ? `?${encoded}` : "";
-}
-
-// A plugin connection save can fail with a structured validation_failed 400 that
-// the editor surfaces inline (per-field / form errors). In that case the generic
-// mutation toast is redundant noise, so callers skip it.
 function isValidationFailure(err: unknown): boolean {
-  return (
-    err instanceof ApiClientError &&
-    (err.body as { error?: string } | undefined)?.error === "validation_failed"
-  );
+  return err instanceof V2ProblemError && err.problemType === "validation_failed";
 }
 
 function invalidateRequestSurfaces(queryClient: ReturnType<typeof useQueryClient>) {
@@ -72,8 +69,7 @@ function invalidateRequestSurfaces(queryClient: ReturnType<typeof useQueryClient
 export function useRequestDiscovery() {
   return useQuery({
     queryKey: requestKeys.discovery(),
-    queryFn: () =>
-      api<RequestDiscoveryResponse>("/requests/discover").then((data) => data.sections ?? []),
+    queryFn: listDiscoverSectionsV2,
     staleTime: REQUESTS_STALE_TIME,
   });
 }
@@ -81,7 +77,7 @@ export function useRequestDiscovery() {
 export function useRequestFeatureStatus() {
   return useQuery({
     queryKey: requestKeys.status(),
-    queryFn: () => api<RequestFeatureStatus>("/requests/status"),
+    queryFn: () => v2("GET /api/v2/requests/status"),
     staleTime: REQUESTS_STALE_TIME,
   });
 }
@@ -89,10 +85,7 @@ export function useRequestFeatureStatus() {
 export function useRequestDiscoverySection(section: string, page = 1) {
   return useQuery({
     queryKey: requestKeys.discoverySection(section, page),
-    queryFn: () =>
-      api<RequestDiscoverySection>(
-        `/requests/discover/${encodeURIComponent(section)}?page=${page}`,
-      ),
+    queryFn: () => getDiscoverSectionV2(section, page),
     enabled: section.trim().length > 0,
     staleTime: REQUESTS_STALE_TIME,
   });
@@ -101,8 +94,7 @@ export function useRequestDiscoverySection(section: string, page = 1) {
 export function useDiscoverStudios() {
   return useQuery({
     queryKey: requestKeys.discoverStudios(),
-    queryFn: () =>
-      api<DiscoverStudiosResponse>("/requests/discover/studios").then((data) => data.studios ?? []),
+    queryFn: listDiscoverStudiosV2,
     staleTime: DISCOVER_BRAND_STALE_TIME,
   });
 }
@@ -110,10 +102,7 @@ export function useDiscoverStudios() {
 export function useDiscoverNetworks() {
   return useQuery({
     queryKey: requestKeys.discoverNetworks(),
-    queryFn: () =>
-      api<DiscoverNetworksResponse>("/requests/discover/networks").then(
-        (data) => data.networks ?? [],
-      ),
+    queryFn: listDiscoverNetworksV2,
     staleTime: DISCOVER_BRAND_STALE_TIME,
   });
 }
@@ -121,8 +110,7 @@ export function useDiscoverNetworks() {
 export function useDiscoverGenres() {
   return useQuery({
     queryKey: requestKeys.discoverGenres(),
-    queryFn: () =>
-      api<DiscoverGenresResponse>("/requests/discover/genres").then((data) => data.genres ?? []),
+    queryFn: listDiscoverGenresV2,
     staleTime: DISCOVER_BRAND_STALE_TIME,
   });
 }
@@ -138,13 +126,7 @@ export interface UseRequestBrowseArgs {
 export function useRequestBrowse({ kind, slug, mediaType, sort, page }: UseRequestBrowseArgs) {
   return useQuery({
     queryKey: requestKeys.discoverBrowse(kind, slug, mediaType, sort, page),
-    queryFn: () => {
-      const params = new URLSearchParams({ sort, page: String(page) });
-      if (mediaType) params.set("media_type", mediaType);
-      return api<DiscoverBrowseResponse>(
-        `/requests/discover/browse/${kind}/${encodeURIComponent(slug)}?${params}`,
-      );
-    },
+    queryFn: () => browseDiscoverV2({ kind, slug, mediaType, sort, page }),
     enabled: slug.trim().length > 0 && (kind !== "genre" || Boolean(mediaType)),
     staleTime: BROWSE_STALE_TIME,
   });
@@ -153,10 +135,7 @@ export function useRequestBrowse({ kind, slug, mediaType, sort, page }: UseReque
 export function useRequestMediaDetail(mediaType: RequestMediaType, tmdbID: number) {
   return useQuery({
     queryKey: requestKeys.detail(mediaType, tmdbID),
-    queryFn: () =>
-      api<RequestMediaDetail>(
-        `/requests/detail/${encodeURIComponent(mediaType)}/${encodeURIComponent(String(tmdbID))}`,
-      ),
+    queryFn: () => getRequestMediaDetailV2(mediaType, tmdbID),
     enabled: tmdbID > 0,
     staleTime: REQUESTS_STALE_TIME,
   });
@@ -193,14 +172,7 @@ export function useRequestSearch(
 
   return useQuery({
     queryKey: requestKeys.search(mediaType, normalizedQuery, page, viewerKey),
-    queryFn: ({ signal }) => {
-      const params = new URLSearchParams({
-        q: normalizedQuery,
-        media_type: mediaType,
-        page: String(page),
-      });
-      return api<RequestMediaPage>(`/requests/search?${params}`, { signal });
-    },
+    queryFn: ({ signal }) => searchRequestMediaV2(mediaType, normalizedQuery, page, signal),
     enabled:
       enabledOverride && normalizedQuery.length > 1 && (!requireProfile || Boolean(profile?.id)),
     staleTime: options.staleTime ?? REQUESTS_STALE_TIME,
@@ -212,11 +184,8 @@ export function useRequestSearch(
 export function useCreateMediaRequest() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateMediaRequestInput) =>
-      api<MediaRequest>("/requests/", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    retry: false,
+    mutationFn: (body: CreateMediaRequestInput) => createMediaRequestV2(body),
     onSuccess: () => {
       toast.success("Request submitted");
       invalidateRequestSurfaces(queryClient);
@@ -231,10 +200,7 @@ export function useMyMediaRequests(params: RequestListParams = {}) {
   const key = listParamsKey(params);
   return useQuery({
     queryKey: requestKeys.mine(key),
-    queryFn: () =>
-      api<MediaRequestsListResponse>(`/requests/mine${buildListQuery(params)}`).then(
-        (data) => data.requests ?? [],
-      ),
+    queryFn: () => listMyMediaRequestsV2(params),
     staleTime: REQUESTS_STALE_TIME,
   });
 }
@@ -243,10 +209,7 @@ export function useAdminMediaRequests(params: RequestListParams = {}) {
   const key = listParamsKey(params);
   return useQuery({
     queryKey: adminKeys.requests(key),
-    queryFn: () =>
-      api<MediaRequestsListResponse>(`/admin/requests${buildListQuery(params)}`).then(
-        (data) => data.requests ?? [],
-      ),
+    queryFn: () => listAdminMediaRequestsV2(params),
     staleTime: 10_000,
   });
 }
@@ -254,10 +217,8 @@ export function useAdminMediaRequests(params: RequestListParams = {}) {
 export function useApproveMediaRequest() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      api<MediaRequest>(`/admin/requests/${encodeURIComponent(id)}/approve`, {
-        method: "POST",
-      }),
+    retry: false,
+    mutationFn: (id: string) => approveAdminRequestV2(id),
     onSuccess: () => {
       toast.success("Request approved");
       invalidateRequestSurfaces(queryClient);
@@ -271,11 +232,9 @@ export function useApproveMediaRequest() {
 export function useDeclineMediaRequest() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
-      api<MediaRequest>(`/admin/requests/${encodeURIComponent(id)}/decline`, {
-        method: "POST",
-        body: JSON.stringify({ reason }),
-      }),
+      declineAdminRequestV2(id, reason),
     onSuccess: () => {
       toast.success("Request declined");
       invalidateRequestSurfaces(queryClient);
@@ -289,10 +248,8 @@ export function useDeclineMediaRequest() {
 export function useRetryMediaRequest() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      api<MediaRequest>(`/admin/requests/${encodeURIComponent(id)}/retry`, {
-        method: "POST",
-      }),
+    retry: false,
+    mutationFn: (id: string) => retryAdminRequestV2(id),
     onSuccess: () => {
       toast.success("Request queued for retry");
       invalidateRequestSurfaces(queryClient);
@@ -306,7 +263,7 @@ export function useRetryMediaRequest() {
 export function useRequestSettings() {
   return useQuery({
     queryKey: adminKeys.requestSettings(),
-    queryFn: () => api<RequestSettings>("/admin/request-settings"),
+    queryFn: getAdminRequestSettingsV2,
     staleTime: REQUESTS_STALE_TIME,
   });
 }
@@ -314,11 +271,8 @@ export function useRequestSettings() {
 export function useUpdateRequestSettings() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: RequestSettings) =>
-      api<RequestSettings>("/admin/request-settings", {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
+    retry: false,
+    mutationFn: putAdminRequestSettingsV2,
     onSuccess: () => {
       toast.success("Request settings saved");
       queryClient.invalidateQueries({ queryKey: adminKeys.requestSettings() });
@@ -334,10 +288,7 @@ export function useUpdateRequestSettings() {
 export function useRequestIntegrations() {
   return useQuery({
     queryKey: adminKeys.requestIntegrations(),
-    queryFn: () =>
-      api<RequestIntegrationsResponse>("/admin/request-integrations").then(
-        (data) => data.integrations ?? [],
-      ),
+    queryFn: listAdminRequestIntegrationsV2,
     staleTime: REQUESTS_STALE_TIME,
   });
 }
@@ -345,11 +296,9 @@ export function useRequestIntegrations() {
 export function useCreateRequestIntegration() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: (integration: RequestIntegration) =>
-      api<RequestIntegration>("/admin/request-integrations", {
-        method: "POST",
-        body: JSON.stringify(integration),
-      }),
+      saveAdminRequestIntegrationV2(integration, true),
     onSuccess: () => {
       toast.success("Integration created");
       queryClient.invalidateQueries({ queryKey: adminKeys.requestIntegrations() });
@@ -365,11 +314,8 @@ export function useCreateRequestIntegration() {
 export function useUpdateRequestIntegration() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...integration }: RequestIntegration) =>
-      api<RequestIntegration>(`/admin/request-integrations/${encodeURIComponent(id)}`, {
-        method: "PUT",
-        body: JSON.stringify({ id, ...integration }),
-      }),
+    retry: false,
+    mutationFn: (integration: RequestIntegration) => saveAdminRequestIntegrationV2(integration),
     onSuccess: () => {
       toast.success("Integration saved");
       queryClient.invalidateQueries({ queryKey: adminKeys.requestIntegrations() });
@@ -385,10 +331,8 @@ export function useUpdateRequestIntegration() {
 export function useDeleteRequestIntegration() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      api<void>(`/admin/request-integrations/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-      }),
+    retry: false,
+    mutationFn: deleteAdminRequestIntegrationV2,
     onSuccess: () => {
       toast.success("Integration deleted");
       queryClient.invalidateQueries({ queryKey: adminKeys.requestIntegrations() });
@@ -402,14 +346,9 @@ export function useDeleteRequestIntegration() {
 
 export function useLoadRequestIntegrationOptions() {
   return useMutation({
+    retry: false,
     mutationFn: ({ id, body }: { id: string; body: LoadRequestIntegrationOptionsRequest }) =>
-      api<RequestIntegrationOptions>(
-        `/admin/request-integrations/${encodeURIComponent(id)}/options`,
-        {
-          method: "POST",
-          body: JSON.stringify(body),
-        },
-      ),
+      loadAdminRequestIntegrationOptionsV2(id, body),
     // Silent background probe: callers surface load failures inline (no toast).
   });
 }
@@ -417,7 +356,7 @@ export function useLoadRequestIntegrationOptions() {
 export function useRequestUserLimit(userId?: number) {
   return useQuery({
     queryKey: adminKeys.requestUserLimit(userId ?? 0),
-    queryFn: () => api<RequestUserLimit>(`/admin/request-users/${userId}/limit`),
+    queryFn: () => getAdminRequestUserLimitV2(userId!),
     enabled: Boolean(userId && userId > 0),
     staleTime: REQUESTS_STALE_TIME,
   });
@@ -426,11 +365,9 @@ export function useRequestUserLimit(userId?: number) {
 export function useUpdateRequestUserLimit() {
   const queryClient = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: ({ userId, body }: { userId: number; body: RequestUserLimit }) =>
-      api<RequestUserLimit>(`/admin/request-users/${userId}/limit`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
+      putAdminRequestUserLimitV2(userId, body),
     onSuccess: (_data, variables) => {
       toast.success("User request limit saved");
       queryClient.invalidateQueries({ queryKey: adminKeys.requestUserLimit(variables.userId) });
@@ -439,5 +376,13 @@ export function useUpdateRequestUserLimit() {
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to save user limit");
     },
+  });
+}
+
+export function useAdminRequestCapabilities() {
+  return useQuery({
+    queryKey: [...adminKeys.requestsRoot(), "capabilities"],
+    queryFn: () => v2("GET /api/v2/admin/requests/capabilities"),
+    staleTime: REQUESTS_STALE_TIME,
   });
 }

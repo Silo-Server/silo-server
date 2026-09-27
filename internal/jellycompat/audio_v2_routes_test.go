@@ -61,6 +61,44 @@ func TestMasterManifestKeepsRemuxV1AndLegacySessionsIsolated(t *testing.T) {
 			requestURL: "/Videos/item-1/audio-v2/master.m3u8?PlaySessionId=play-1&MediaSourceId=source-1",
 		},
 		{
+			name: "remux-v1 route rejects Dolby Vision strip",
+			source: PlaybackMediaSource{
+				ID: "source-1", FileID: 42, HLSRemux: true, DVStripToHDR10: true,
+				HLSRemuxAudioStreamIndexes: []int{1},
+				Version:                    testCompatVersion(),
+			},
+			serve:      (*PlaybackHandler).HandleRemuxV1MasterManifest,
+			requestURL: "/Videos/item-1/remux-v1/master.m3u8?PlaySessionId=play-1&MediaSourceId=source-1",
+		},
+		{
+			name: "audio-v2 route rejects Dolby Vision strip",
+			source: PlaybackMediaSource{
+				ID: "source-1", FileID: 42, HLSRemux: true, TranscodeAudio: true, DVStripToHDR10: true,
+				Version: testCompatVersion(),
+			},
+			serve:      (*PlaybackHandler).HandleAudioV2MasterManifest,
+			requestURL: "/Videos/item-1/audio-v2/master.m3u8?PlaySessionId=play-1&MediaSourceId=source-1",
+		},
+		{
+			name:       "remux-dv-v1 route rejects remux without the strip",
+			source:     PlaybackMediaSource{ID: "source-1", FileID: 42, HLSRemux: true, Version: testCompatVersion()},
+			serve:      (*PlaybackHandler).HandleRemuxDVV1MasterManifest,
+			requestURL: "/Videos/item-1/remux-dv-v1/master.m3u8?PlaySessionId=play-1&MediaSourceId=source-1",
+		},
+		{
+			name: "remux-dv-v1 route rejects a legacy transcode",
+			source: func() PlaybackMediaSource {
+				source := testCompatSource(NewResourceIDCodec(), testCompatVersion())
+				source.ID = "source-1"
+				for index := range source.Version.AudioTracks {
+					source.Version.AudioTracks[index].Channels = 2
+				}
+				return source
+			}(),
+			serve:      (*PlaybackHandler).HandleRemuxDVV1MasterManifest,
+			requestURL: "/Videos/item-1/remux-dv-v1/master.m3u8?PlaySessionId=play-1&MediaSourceId=source-1",
+		},
+		{
 			name:       "remux-ts-v1 route rejects fMP4 remux",
 			source:     PlaybackMediaSource{ID: "source-1", FileID: 42, HLSRemux: true, Version: testCompatVersion()},
 			serve:      (*PlaybackHandler).HandleRemuxTSV1MasterManifest,
@@ -133,6 +171,20 @@ func TestMediaSourceDTOEmitsDedicatedMPEGTSRemuxRoute(t *testing.T) {
 		dto := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", "token-1", source)
 		if !strings.HasPrefix(dto.TranscodingURL, "/Videos/item-1/remux-ts-v1/master.m3u8?") {
 			t.Fatalf("TranscodeAudio=%v MPEG-TS URL = %q, want dedicated remux-ts-v1 route", transcodeAudio, dto.TranscodingURL)
+		}
+	}
+}
+
+func TestMediaSourceDTOEmitsDedicatedDolbyVisionStripRoute(t *testing.T) {
+	for _, transcodeAudio := range []bool{false, true} {
+		source := testCompatSource(NewResourceIDCodec(), testCompatVersion())
+		source.HLSRemux = true
+		source.TranscodeAudio = transcodeAudio
+		source.DVStripToHDR10 = true
+
+		dto := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", "token-1", source)
+		if !strings.HasPrefix(dto.TranscodingURL, "/Videos/item-1/remux-dv-v1/master.m3u8?") {
+			t.Fatalf("TranscodeAudio=%v strip URL = %q, want dedicated remux-dv-v1 route", transcodeAudio, dto.TranscodingURL)
 		}
 	}
 }

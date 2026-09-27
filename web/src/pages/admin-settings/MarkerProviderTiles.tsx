@@ -7,7 +7,6 @@ import {
   ProviderPanelActions,
   ProviderTile,
   ProviderTileGrid,
-  providerMonogram,
   resolveProviderTileState,
   type ProviderTestState,
 } from "@/components/settings/ProviderTile";
@@ -23,8 +22,15 @@ import {
   useValidateMarkerProvider,
 } from "@/hooks/queries/admin/markers";
 import { SETTINGS_NUMBER_WIDTH, SettingField, SettingFieldRow } from "./SettingField";
+import { providerMonogram } from "@/lib/monogram";
+import { pluginPagePath } from "@/lib/pluginPresentation";
 
 const INTEGER_INPUT_PATTERN = /^[+-]?\d+$/;
+const CONFIDENCE_PERCENT_FORMAT = new Intl.NumberFormat("en-US", {
+  style: "percent",
+  useGrouping: false,
+  maximumSignificantDigits: 21,
+});
 
 /** Tile id namespace, so a marker provider can never collide with a subtitle one. */
 function markerTileID(provider: string): string {
@@ -35,7 +41,7 @@ function formatRate(value: number) {
   return `${Math.round(value * 100)}%`;
 }
 
-/** What the last Validate said, kept per provider while the page is open. */
+/** What the last connection test said, kept per provider while the page is open. */
 interface MarkerValidation {
   test: ProviderTestState;
   stats?: MarkerUserStats;
@@ -56,7 +62,7 @@ function markerCredentialsReady(
 ): boolean | undefined {
   if (!installations) return undefined;
   const installation = installations.find(
-    (candidate) => candidate.id === provider.plugin_installation_id,
+    (candidate) => String(candidate.id) === provider.plugin_installation_id,
   );
   if (!installation) return undefined;
   return installationConfigReady(installation);
@@ -96,7 +102,7 @@ export function MarkerProviderTiles({
   if (providerList.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">
-        No marker provider plugins are installed. More install from the{" "}
+        No marker provider plugins are installed. Install one from the{" "}
         <Link
           to="/admin/plugins?tab=catalog"
           className="hover:text-foreground font-medium underline underline-offset-2 transition-colors"
@@ -166,13 +172,26 @@ function MarkerProviderTile({
   const [fetchPriority, setFetchPriority] = useState(String(provider.fetch_priority));
   const [contributeEnabled, setContributeEnabled] = useState(provider.contribute_enabled);
   const [autoLocal, setAutoLocal] = useState(provider.contribute_auto_local);
-  const [minConfidence, setMinConfidence] = useState(
-    String(provider.contribute_min_confidence ?? 0.95),
+  const savedMinConfidence = provider.contribute_min_confidence ?? 0.95;
+  const savedConfidencePercent = CONFIDENCE_PERCENT_FORMAT.format(savedMinConfidence).replace(
+    "%",
+    "",
   );
+  const [minConfidence, setMinConfidence] = useState(savedConfidencePercent);
 
-  const parsedMinConfidence = Number.parseFloat(minConfidence);
+  const confidenceInput = minConfidence.trim();
+  const confidencePercent = Number(confidenceInput);
   const confidenceValid =
-    Number.isFinite(parsedMinConfidence) && parsedMinConfidence >= 0 && parsedMinConfidence <= 1;
+    confidenceInput !== "" &&
+    Number.isFinite(confidencePercent) &&
+    confidencePercent >= 0 &&
+    confidencePercent <= 100;
+  // Keep the saved value exact when the percentage is unchanged. Multiplying
+  // and dividing a custom confidence can otherwise introduce floating-point drift.
+  const parsedMinConfidence =
+    confidencePercent === Number(savedConfidencePercent)
+      ? savedMinConfidence
+      : confidencePercent / 100;
   const fetchPriorityInput = fetchPriority.trim();
   const parsedFetchPriority = Number(fetchPriorityInput);
   const priorityValid =
@@ -182,18 +201,19 @@ function MarkerProviderTile({
     provider.fetch_priority !== parsedFetchPriority ||
     provider.contribute_enabled !== contributeEnabled ||
     provider.contribute_auto_local !== autoLocal ||
-    provider.contribute_min_confidence !== parsedMinConfidence;
+    !confidenceValid ||
+    savedMinConfidence !== parsedMinConfidence;
   // The tile's draft lives outside useSettingsForm, so the navigation guard
   // and the reload prompt only see it if the tile reports it itself.
   useReportUnsavedChanges(dirty);
 
   function save() {
     if (!priorityValid) {
-      toast.error("Lookup order must be a whole number.");
+      toast.error("Provider priority must be a whole number.");
       return;
     }
     if (!confidenceValid) {
-      toast.error("Minimum confidence must be between 0 and 1.");
+      toast.error("Minimum confidence must be between 0% and 100%.");
       return;
     }
 
@@ -220,8 +240,8 @@ function MarkerProviderTile({
             test: {
               ok: response.valid,
               message: response.valid
-                ? "Provider validated."
-                : (response.error ?? "Validation failed."),
+                ? "Connection successful."
+                : (response.error ?? "Connection test failed."),
               at: Date.now(),
               durationMs: Date.now() - started,
             },
@@ -231,7 +251,7 @@ function MarkerProviderTile({
           onValidated({
             test: {
               ok: false,
-              message: error instanceof Error ? error.message : "Validation failed.",
+              message: error instanceof Error ? error.message : "Connection test failed.",
               at: Date.now(),
               durationMs: Date.now() - started,
             },
@@ -255,16 +275,13 @@ function MarkerProviderTile({
         : "Connected · off";
   // Only a failure earns the extra line: the state word already says the rest.
   const meta = !expanded && test && !test.ok ? test.message : undefined;
-  // installed_q keeps the list behind the dialog filtered to this plugin;
-  // configure opens its config dialog (API key and account) directly.
-  const pluginPage = provider.plugin_id
-    ? `/admin/plugins?installed_q=${encodeURIComponent(provider.plugin_id)}&configure=${encodeURIComponent(provider.plugin_id)}`
-    : "/admin/plugins";
+  // The plugin's own page holds its API key and account settings.
+  const pluginPage = provider.plugin_id ? pluginPagePath(provider.plugin_id) : "/admin/plugins";
 
   return (
     <ProviderTile
       name={displayName}
-      tagline="Intro and credits markers"
+      tagline="Skip markers"
       monogram={providerMonogram(displayName)}
       monogramClass="bg-teal-500/20 text-teal-700 dark:text-teal-300"
       state={state}
@@ -280,7 +297,7 @@ function MarkerProviderTile({
       <p className="text-muted-foreground mb-1 text-xs">
         {provider.source_type === "plugin" && provider.plugin_id ? (
           <>
-            Account and API keys for this provider live on its{" "}
+            Manage this provider's account and API settings on its{" "}
             <Link to={pluginPage} className="underline underline-offset-2">
               plugin page
             </Link>
@@ -292,15 +309,15 @@ function MarkerProviderTile({
       </p>
 
       <SettingField
-        label="Use for online marker lookup"
+        label="Get markers from this provider"
         type="toggle"
         value={fetchEnabled ? "true" : "false"}
         onChange={(value) => setFetchEnabled(value === "true")}
       />
       <SettingFieldRow
-        label="Lookup order"
+        label="Provider priority"
         htmlFor={priorityID}
-        description="Lower numbers win when providers overlap."
+        description="If providers return markers for the same section, prefer the provider with the lower number."
       >
         <Input
           id={priorityID}
@@ -313,7 +330,7 @@ function MarkerProviderTile({
         />
       </SettingFieldRow>
       <SettingField
-        label="Allow contributions"
+        label="Allow sharing with this provider"
         type="toggle"
         value={contributeEnabled ? "true" : "false"}
         onChange={(value) => {
@@ -322,33 +339,41 @@ function MarkerProviderTile({
           if (!next) setAutoLocal(false);
         }}
         disabled={!provider.is_submitter}
+        description={
+          !provider.is_submitter ? "This provider does not accept shared markers." : undefined
+        }
       />
-      <SettingField
-        label="Send this server's markers automatically"
-        type="toggle"
-        value={autoLocal ? "true" : "false"}
-        onChange={(value) => setAutoLocal(value === "true")}
-        disabled={!provider.is_submitter || !contributeEnabled}
-        hint="Only markers this server detected, and only those above the confidence floor below, are sent."
-      />
-      <SettingFieldRow
-        label="Minimum confidence"
-        htmlFor={minConfidenceID}
-        description="Use a decimal from 0 to 1. The default recommendation is 0.95."
-      >
-        <Input
-          id={minConfidenceID}
-          type="number"
-          value={minConfidence}
-          min={0}
-          max={1}
-          step={0.01}
-          onChange={(event) => setMinConfidence(event.target.value)}
-          className={SETTINGS_NUMBER_WIDTH}
-          aria-invalid={!confidenceValid}
-          disabled={!provider.is_submitter}
+      <div className="border-border ml-3 border-l pl-4">
+        <SettingField
+          label="Automatically share detected intros"
+          type="toggle"
+          value={autoLocal ? "true" : "false"}
+          onChange={(value) => setAutoLocal(value === "true")}
+          disabled={!provider.is_submitter || !contributeEnabled}
+          description="Share intros detected on this server that meet the minimum confidence below."
         />
-      </SettingFieldRow>
+        <div className="border-border ml-3 border-l pl-4">
+          <SettingFieldRow
+            label="Minimum confidence for automatic sharing"
+            htmlFor={minConfidenceID}
+            description="Choose a value from 0% to 100%. Recommended: 95%."
+            unit="%"
+          >
+            <Input
+              id={minConfidenceID}
+              type="number"
+              value={minConfidence}
+              min={0}
+              max={100}
+              step="any"
+              onChange={(event) => setMinConfidence(event.target.value)}
+              className={SETTINGS_NUMBER_WIDTH}
+              aria-invalid={!confidenceValid}
+              disabled={!provider.is_submitter}
+            />
+          </SettingFieldRow>
+        </div>
+      </div>
 
       {stats && (
         <div className="border-border bg-muted/20 mt-3.5 rounded-md border px-3 py-3">
@@ -398,7 +423,7 @@ function MarkerProviderTile({
             onClick={validate}
             disabled={validateProvider.isPending}
           >
-            {validateProvider.isPending ? "Validating..." : "Validate"}
+            {validateProvider.isPending ? "Testing..." : "Test connection"}
           </Button>
         )}
         <Button type="button" size="sm" variant="outline" onClick={onCollapse}>

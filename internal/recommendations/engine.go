@@ -5,6 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
@@ -30,6 +31,18 @@ type Engine struct {
 	embClient     embedder
 	cfg           config.RecommendationsConfig
 	pool          *pgxpool.Pool
+	unrated       access.UnratedContentPolicy
+}
+
+// WithUnratedContentPolicy installs the reader for access.unrated_content and
+// returns the engine. Without it every ceiling query hides titles whose rating
+// carries no minimum age, which is the default but not necessarily the
+// administrator's choice.
+func (e *Engine) WithUnratedContentPolicy(policy access.UnratedContentPolicy) *Engine {
+	if e != nil {
+		e.unrated = policy
+	}
+	return e
 }
 
 // NewEngine creates a new recommendation Engine.
@@ -112,6 +125,14 @@ func (e *Engine) profileAccessFilter(ctx context.Context, userID int, profileID 
 	}
 
 	filter.MaxContentRating = profile.MaxContentRating
+	filter.MaxAdvisoryAge = profile.MaxAdvisoryAge
+	filter.RequireAdvisoryAge = profile.RequireAdvisoryAge && profile.MaxAdvisoryAge > 0
+	if e.unrated != nil {
+		// The ceiling is the pair: without this, every recommendations query
+		// emits the hide-unrated predicate while the catalog rails beside it
+		// show those titles.
+		filter.AllowUnratedContent = e.unrated.AllowUnratedContent(ctx)
+	}
 	if profile.LibraryRestrictionsEnabled {
 		filter.AllowedLibraryIDs = append([]int(nil), profile.AllowedLibraryIDs...)
 	}

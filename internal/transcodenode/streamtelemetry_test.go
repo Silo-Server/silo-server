@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -103,6 +104,47 @@ func TestMountedTranscodeNodeSegmentTelemetry(t *testing.T) {
 				t.Fatalf("routes = %+v", session.Routes)
 			}
 		})
+	}
+}
+
+func TestMountedTranscodeNodeProgressiveRemuxTelemetry(t *testing.T) {
+	srv, registry, server := telemetryNodeServer(t)
+	srv.nodeRowID = func() (int, bool) { return 11, true }
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf node-remux-bytes\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srv.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	claims := streamtoken.Claims{
+		SessionID: "viewer-session", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-session",
+		RoutingWorkload:        string(noderouting.WorkloadRemux),
+		RoutingExecution:       string(noderouting.ExecutionTranscode),
+		RoutingExecutionNodeID: 11,
+		RoutingEgress:          string(noderouting.EgressProxy),
+	}
+	card := playback.RecipeCardFromClaims(&claims)
+	srv.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
+	token, err := streamtoken.Sign(claims, testSecret, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, body := nodeMediaRequest(t, server, "/remux/transport-session", token)
+	if status != http.StatusOK || string(body) != "node-remux-bytes" {
+		t.Fatalf("remux = %d %q", status, body)
+	}
+	snapshot := registry.Sweep()
+	if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].SessionID != "viewer-session" {
+		t.Fatalf("sessions = %+v", snapshot.Sessions)
+	}
+	routes := snapshot.Sessions[0].Routes
+	if len(routes) != 1 || routes[0].Role != streamtelemetry.RoleInternalRelay || routes[0].BytesAccepted != int64(len(body)) {
+		t.Fatalf("routes = %+v", routes)
 	}
 }
 

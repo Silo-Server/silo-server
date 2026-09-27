@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { api } from "@/api/client";
+import { v2 } from "@/api/v2/request";
 import type { ItemDetail } from "@/api/types";
-import { useMetadataAIStatus } from "@/hooks/queries/items";
+import { useMetadataAIStatus } from "@/hooks/queries/metadataAI";
 
 // Give up shimmering after this long; the original text stays and the
 // server-side cooldown keeps a failing endpoint from being re-hit per view.
@@ -43,9 +43,9 @@ export function useOnViewTranslation(item: ItemDetail | undefined) {
     if (firedForRef.current === key) return;
     firedForRef.current = key;
     setTranslating(true);
-    api(`/items/${encodeURIComponent(contentId)}/translate-description`, {
-      method: "POST",
-      body: JSON.stringify({ target_language: pendingLanguage }),
+    v2("POST /api/v2/catalog/items/{id}/translate-description", {
+      path: { id: contentId },
+      body: { target_language: pendingLanguage },
     }).catch(() => {
       setTranslating(false);
     });

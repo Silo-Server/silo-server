@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,7 +22,8 @@ import (
 
 // Sentinel errors for file repository operations.
 var (
-	ErrFileNotFound = errors.New("media file not found")
+	ErrFileNotFound      = errors.New("media file not found")
+	ErrStaleMarkerUpdate = errors.New("marker result superseded by a newer file identity")
 	// ErrStaleCopySafetyScan reports that a multi-PPS verdict was computed from
 	// a generation of the file the row no longer holds — it was rewritten (or
 	// removed) while the scan ran. The verdict is not wrong, it just describes
@@ -32,6 +35,10 @@ var (
 // FileRepository provides CRUD operations for the media_files table.
 type FileRepository struct {
 	pool *pgxpool.Pool
+}
+
+type fileQueryer interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 type RawMatchBacklogMode string
@@ -58,7 +65,7 @@ const fileColumns = `id, content_id, episode_id, extra_id, season_number, episod
 	codec_video, codec_audio, resolution, audio_channels, hdr, container,
 	duration, bitrate, video_tracks, audio_tracks, subtitle_tracks, external_subtitles, chapters,
 	chapter_thumbnail_retry_after, chapter_thumbnail_failure_count, chapter_thumbnail_last_error,
-	intro_start, intro_end, credits_start, credits_end, recap_start, recap_end, preview_start, preview_end, markers_source, markers_confidence,
+	intro_start, intro_end, credits_start, credits_end, recap_start, recap_end, preview_start, preview_end, marker_segments, markers_source, markers_confidence,
 	intro_markers_source, intro_markers_provider, intro_markers_confidence, intro_markers_algorithm, intro_markers_detected_at,
 	credits_markers_source, credits_markers_provider, credits_markers_confidence, credits_markers_algorithm, credits_markers_detected_at,
 	recap_markers_source, recap_markers_provider, recap_markers_confidence, recap_markers_algorithm, recap_markers_detected_at,
@@ -83,7 +90,7 @@ const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.extra_id, mf.seas
 	mf.codec_video, mf.codec_audio, mf.resolution, mf.audio_channels, mf.hdr, mf.container,
 	mf.duration, mf.bitrate, mf.video_tracks, mf.audio_tracks, mf.subtitle_tracks, mf.external_subtitles, mf.chapters,
 	mf.chapter_thumbnail_retry_after, mf.chapter_thumbnail_failure_count, mf.chapter_thumbnail_last_error,
-	mf.intro_start, mf.intro_end, mf.credits_start, mf.credits_end, mf.recap_start, mf.recap_end, mf.preview_start, mf.preview_end, mf.markers_source, mf.markers_confidence,
+	mf.intro_start, mf.intro_end, mf.credits_start, mf.credits_end, mf.recap_start, mf.recap_end, mf.preview_start, mf.preview_end, mf.marker_segments, mf.markers_source, mf.markers_confidence,
 	mf.intro_markers_source, mf.intro_markers_provider, mf.intro_markers_confidence, mf.intro_markers_algorithm, mf.intro_markers_detected_at,
 	mf.credits_markers_source, mf.credits_markers_provider, mf.credits_markers_confidence, mf.credits_markers_algorithm, mf.credits_markers_detected_at,
 	mf.recap_markers_source, mf.recap_markers_provider, mf.recap_markers_confidence, mf.recap_markers_algorithm, mf.recap_markers_detected_at,
@@ -176,6 +183,7 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 		&f.RecapEnd,
 		&f.PreviewStart,
 		&f.PreviewEnd,
+		&f.MarkerSegments,
 		&markersSource,
 		&markersConfidence,
 		&introMarkersSource,
@@ -494,6 +502,7 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 			&f.RecapEnd,
 			&f.PreviewStart,
 			&f.PreviewEnd,
+			&f.MarkerSegments,
 			&markersSource,
 			&markersConfidence,
 			&introMarkersSource,
@@ -826,6 +835,70 @@ func serializeJSONB(v any) ([]byte, error) {
 // Upsert inserts or updates a media file by file_path (ON CONFLICT DO UPDATE).
 // Returns the resulting row.
 func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*models.MediaFile, error) {
+	return r.upsertWithQueryer(ctx, r.pool, mf)
+}
+
+// UpsertTx inserts or updates a media file inside the caller's transaction.
+// Audiobook folder scans use this to commit the item and all of its parts as
+// one unit instead of leaving half-indexed books when one file write fails.
+func (r *FileRepository) UpsertTx(ctx context.Context, tx pgx.Tx, mf models.MediaFile) (*models.MediaFile, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("media file upsert: nil transaction")
+	}
+	return r.upsertWithQueryer(ctx, tx, mf)
+}
+
+// UpsertBatchTx queues media-file upserts on one transaction and sends them as
+// a single PostgreSQL batch. This keeps multipart audiobook reconciliation
+// atomic while reducing one client/server round trip per part.
+func (r *FileRepository) UpsertBatchTx(ctx context.Context, tx pgx.Tx, files []models.MediaFile) error {
+	if tx == nil {
+		return fmt.Errorf("media file batch upsert: nil transaction")
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	for i := range files {
+		capture := &fileUpsertCapture{}
+		if _, err := r.upsertWithQueryer(ctx, capture, files[i]); err != nil {
+			return err
+		}
+		query := capture.query
+		if idx := strings.Index(query, "RETURNING "); idx >= 0 {
+			query = query[:idx]
+		}
+		batch.Queue(query, capture.args...)
+	}
+	results := tx.SendBatch(ctx, batch)
+	defer results.Close()
+	for range files {
+		if _, err := results.Exec(); err != nil {
+			return fmt.Errorf("media file batch upsert: %w", err)
+		}
+	}
+	return nil
+}
+
+// fileUpsertCapture lets UpsertBatchTx reuse the canonical upsert SQL and
+// argument normalization without duplicating its large column list.
+type fileUpsertCapture struct {
+	query string
+	args  []any
+}
+
+func (c *fileUpsertCapture) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
+	c.query = query
+	c.args = append([]any(nil), args...)
+	return c
+}
+
+func (c *fileUpsertCapture) Scan(...any) error { return nil }
+
+func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQueryer, mf models.MediaFile) (*models.MediaFile, error) {
+	if queryer == nil {
+		return nil, fmt.Errorf("media file upsert: nil queryer")
+	}
 	subtitleTracksJSON, err := serializeJSONB(mf.SubtitleTracks)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling subtitle_tracks: %w", err)
@@ -957,7 +1030,7 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		updated_at = NOW()
 	RETURNING ` + fileColumns
 
-	row := r.pool.QueryRow(ctx, query,
+	row := queryer.QueryRow(ctx, query,
 		contentID,
 		episodeID,
 		extraID,
@@ -1011,6 +1084,9 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		mf.MissingSince,
 		nilIfEmpty(scanbatch.RunID(ctx)),
 	)
+	if _, ok := queryer.(*fileUpsertCapture); ok {
+		return nil, nil
+	}
 
 	return scanMediaFile(row)
 }
@@ -1275,6 +1351,7 @@ func (r *FileRepository) UpdateMultiplePPS(ctx context.Context, fileID int, mult
 // Each segment kind (intro, credits, recap, preview) has an independent state
 // that the apply step mutates if the priority check allows the write.
 type segmentState struct {
+	ranges     []models.MarkerSegment
 	start      *float64
 	end        *float64
 	source     *string
@@ -1300,57 +1377,68 @@ func applySegmentPatch(
 	segmentName string,
 	mutationAt time.Time,
 ) (bool, error) {
-	if patchStart == nil && patchEnd == nil {
-		return false, nil
-	}
+	return applySegmentRanges(state, legacySharedSource, source, provider, confidence, algorithm,
+		patchStart, patchEnd, nil, duration, segmentName, mutationAt)
+}
 
-	nextStart := state.start
-	nextEnd := state.end
-	if patchStart != nil {
-		nextStart = patchStart
+func applySegmentRanges(
+	state *segmentState, legacySharedSource *string, source string, provider *string,
+	confidence *float64, algorithm string, patchStart, patchEnd *float64,
+	ranges []models.MarkerSegment, duration float64, segmentName string, mutationAt time.Time,
+) (bool, error) {
+	if len(ranges) == 0 {
+		if patchStart == nil && patchEnd == nil {
+			return false, nil
+		}
+		start, end := state.start, state.end
+		if patchStart != nil {
+			start = patchStart
+		}
+		if patchEnd != nil {
+			end = patchEnd
+		}
+		if start == nil || end == nil {
+			return false, nil
+		}
+		ranges = []models.MarkerSegment{{Kind: segmentName, StartSeconds: *start, EndSeconds: *end}}
+	} else {
+		ranges = slices.Clone(ranges)
 	}
-	if patchEnd != nil {
-		nextEnd = patchEnd
+	for _, segment := range ranges {
+		if !segment.Valid() || segment.Kind != segmentName {
+			return false, fmt.Errorf("invalid %s marker range %.3f-%.3f", segmentName, segment.StartSeconds, segment.EndSeconds)
+		}
+		if duration > 0 && segment.EndSeconds > duration+1 {
+			return false, fmt.Errorf("%s marker end %.3f exceeds duration %.3f", segmentName, segment.EndSeconds, duration)
+		}
 	}
-	if nextStart == nil || nextEnd == nil {
-		return false, nil
-	}
-	if *nextStart < 0 || *nextEnd <= *nextStart {
-		return false, fmt.Errorf("invalid %s marker range %.3f-%.3f", segmentName, *nextStart, *nextEnd)
-	}
-	if duration > 0 && *nextEnd > duration+1 {
-		return false, fmt.Errorf("%s marker end %.3f exceeds duration %.3f", segmentName, *nextEnd, duration)
-	}
-
+	sort.SliceStable(ranges, func(i, j int) bool { return ranges[i].StartSeconds < ranges[j].StartSeconds })
 	effectiveSource := state.source
 	if effectiveSource == nil && state.start != nil && state.end != nil {
 		effectiveSource = legacySharedSource
 	}
-	if !markers.CanWriteMarker(effectiveSource, state.confidence, source, confidence) {
+	existing := markers.SegmentPayload{Start: state.start, End: state.end, Ranges: state.ranges, Provider: state.provider, Confidence: state.confidence}
+	if effectiveSource != nil {
+		existing.Source = *effectiveSource
+	}
+	if state.algorithm != nil {
+		existing.Algorithm = *state.algorithm
+	}
+	incoming := markers.SegmentPayload{Start: &ranges[0].StartSeconds, End: &ranges[0].EndSeconds, Ranges: ranges,
+		Source: source, Provider: provider, Confidence: confidence, Algorithm: algorithm}
+	if !markers.CanWriteMarkerUpdate(existing, incoming) {
 		return false, nil
 	}
-
-	src := source
-	algo := algorithm
-	nextState := segmentState{
-		start:      nextStart,
-		end:        nextEnd,
-		source:     &src,
-		provider:   provider,
-		confidence: confidence,
-		algorithm:  &algo,
-		detectedAt: &mutationAt,
+	next := segmentState{start: incoming.Start, end: incoming.End, ranges: ranges, source: &source,
+		provider: provider, confidence: confidence, algorithm: &algorithm, detectedAt: &mutationAt}
+	current := *state
+	if len(current.ranges) == 0 && current.start != nil && current.end != nil {
+		current.ranges = []models.MarkerSegment{{Kind: segmentName, StartSeconds: *current.start, EndSeconds: *current.end}}
 	}
-	if segmentEqual(*state, nextState) {
+	if segmentEqual(current, next) {
 		return false, nil
 	}
-	state.start = nextStart
-	state.end = nextEnd
-	state.source = &src
-	state.provider = provider
-	state.confidence = confidence
-	state.algorithm = &algo
-	state.detectedAt = &mutationAt
+	*state = next
 	return true, nil
 }
 
@@ -1383,7 +1471,7 @@ func resolveSegmentProvenance(update MarkerUpdate, override *SegmentProvenance) 
 // detected_at is intentionally ignored so writing the same marker value does
 // not refresh provenance timestamps or create audit noise.
 func segmentEqual(a, b segmentState) bool {
-	return ptrFloatEqual(a.start, b.start) &&
+	return slices.Equal(a.ranges, b.ranges) && ptrFloatEqual(a.start, b.start) &&
 		ptrFloatEqual(a.end, b.end) &&
 		ptrStringEqual(a.source, b.source) &&
 		ptrStringEqual(a.provider, b.provider) &&
@@ -1393,7 +1481,7 @@ func segmentEqual(a, b segmentState) bool {
 
 // UpsertMarkers updates only marker fields while enforcing source priority.
 func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update MarkerUpdate) (bool, error) {
-	if update.MarkersSource == "" {
+	if update.MarkersSource == "" && len(update.RefreshedProviders) == 0 {
 		return false, fmt.Errorf("marker source is required")
 	}
 	return r.UpsertAndClearMarkers(ctx, fileID, update, nil)
@@ -1530,6 +1618,7 @@ func (f markerSegmentFlags) any() bool {
 }
 
 type markerMutationState struct {
+	file               models.MediaFile
 	duration           float64
 	existingSource     *string
 	existingConfidence *float64
@@ -1541,7 +1630,7 @@ type markerMutationState struct {
 
 func (r *FileRepository) upsertAndClearMarkers(ctx context.Context, fileID int, update *MarkerUpdate, clearSegments []string) (bool, error) {
 	hasUpdate := update != nil && update.HasAnySegment()
-	if hasUpdate && update.MarkersSource == "" {
+	if hasUpdate && update.MarkersSource == "" && len(update.RefreshedProviders) == 0 {
 		return false, fmt.Errorf("marker source is required")
 	}
 	clearFlags, err := markerClearFlags(clearSegments)
@@ -1562,8 +1651,14 @@ func (r *FileRepository) upsertAndClearMarkers(ctx context.Context, fileID int, 
 	if err != nil {
 		return false, err
 	}
+	if update != nil && update.ExpectedFile != nil && models.MarkerFileIdentity(update.ExpectedFile) != models.MarkerFileIdentity(&state.file) {
+		return false, ErrStaleMarkerUpdate
+	}
 	before := state
 	mutationAt := time.Now().UTC()
+	if update != nil && !update.DetectedAt.IsZero() {
+		mutationAt = update.DetectedAt.UTC()
+	}
 	changed := markerSegmentFlags{}
 
 	if hasUpdate {
@@ -1633,6 +1728,7 @@ func markerClearFlags(segments []string) (markerSegmentFlags, error) {
 
 func loadMarkerMutationState(ctx context.Context, tx pgx.Tx, fileID int) (markerMutationState, error) {
 	var state markerMutationState
+	var ranges []models.MarkerSegment
 	if err := tx.QueryRow(ctx,
 		`SELECT COALESCE(duration, 0),
 		        markers_source,
@@ -1664,8 +1760,11 @@ func loadMarkerMutationState(ctx context.Context, tx pgx.Tx, fileID int) (marker
 		        preview_markers_provider,
 		        preview_markers_confidence,
 		        preview_markers_algorithm,
-		        preview_markers_detected_at
-		 FROM media_files WHERE id = $1 FOR UPDATE`,
+		        preview_markers_detected_at,
+                marker_segments, id, COALESCE(file_hash, ''), COALESCE(file_size, 0), file_modified_at,
+                COALESCE(content_id, ''), COALESCE(episode_id, ''), COALESCE(extra_id, ''),
+                COALESCE(season_number, 0), COALESCE(episode_number, 0)
+         FROM media_files WHERE id = $1 FOR UPDATE`,
 		fileID,
 	).Scan(
 		&state.duration,
@@ -1675,37 +1774,72 @@ func loadMarkerMutationState(ctx context.Context, tx pgx.Tx, fileID int) (marker
 		&state.credits.start, &state.credits.end, &state.credits.source, &state.credits.provider, &state.credits.confidence, &state.credits.algorithm, &state.credits.detectedAt,
 		&state.recap.start, &state.recap.end, &state.recap.source, &state.recap.provider, &state.recap.confidence, &state.recap.algorithm, &state.recap.detectedAt,
 		&state.preview.start, &state.preview.end, &state.preview.source, &state.preview.provider, &state.preview.confidence, &state.preview.algorithm, &state.preview.detectedAt,
+		&ranges, &state.file.ID, &state.file.FileHash, &state.file.FileSize, &state.file.FileModifiedAt,
+		&state.file.ContentID, &state.file.EpisodeID, &state.file.ExtraID, &state.file.SeasonNumber, &state.file.EpisodeNumber,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return markerMutationState{}, ErrFileNotFound
 		}
 		return markerMutationState{}, fmt.Errorf("load existing marker source: %w", err)
 	}
+	state.file.Duration = int(state.duration)
+	for _, segment := range models.EffectiveMarkerSegments(&models.MediaFile{
+		MarkerSegments: ranges, IntroStart: state.intro.start, IntroEnd: state.intro.end,
+		CreditsStart: state.credits.start, CreditsEnd: state.credits.end,
+		RecapStart: state.recap.start, RecapEnd: state.recap.end,
+		PreviewStart: state.preview.start, PreviewEnd: state.preview.end,
+	}) {
+		switch segment.Kind {
+		case "intro":
+			state.intro.ranges = append(state.intro.ranges, segment)
+		case "credits":
+			state.credits.ranges = append(state.credits.ranges, segment)
+		case "recap":
+			state.recap.ranges = append(state.recap.ranges, segment)
+		case "preview":
+			state.preview.ranges = append(state.preview.ranges, segment)
+		}
+	}
 	return state, nil
 }
 
 func applyMarkerUpdateToMutationState(update *MarkerUpdate, state *markerMutationState, mutationAt time.Time) (markerSegmentFlags, error) {
 	var applied markerSegmentFlags
-	introSrc, introProv, introConf, introAlgo := resolveSegmentProvenance(*update, update.IntroProvenance)
-	var err error
-	applied.intro, err = applySegmentPatch(&state.intro, state.existingSource, introSrc, introProv, introConf, introAlgo, update.IntroStart, update.IntroEnd, state.duration, "intro", mutationAt)
-	if err != nil {
-		return markerSegmentFlags{}, err
+	ranges := make(map[string][]models.MarkerSegment, 4)
+	for _, segment := range update.Segments {
+		if !segment.Valid() {
+			return applied, fmt.Errorf("invalid marker segment %q", segment.Kind)
+		}
+		ranges[segment.Kind] = append(ranges[segment.Kind], segment)
 	}
-	creditsSrc, creditsProv, creditsConf, creditsAlgo := resolveSegmentProvenance(*update, update.CreditsProvenance)
-	applied.credits, err = applySegmentPatch(&state.credits, state.existingSource, creditsSrc, creditsProv, creditsConf, creditsAlgo, update.CreditsStart, update.CreditsEnd, state.duration, "credits", mutationAt)
-	if err != nil {
-		return markerSegmentFlags{}, err
-	}
-	recapSrc, recapProv, recapConf, recapAlgo := resolveSegmentProvenance(*update, update.RecapProvenance)
-	applied.recap, err = applySegmentPatch(&state.recap, state.existingSource, recapSrc, recapProv, recapConf, recapAlgo, update.RecapStart, update.RecapEnd, state.duration, "recap", mutationAt)
-	if err != nil {
-		return markerSegmentFlags{}, err
-	}
-	previewSrc, previewProv, previewConf, previewAlgo := resolveSegmentProvenance(*update, update.PreviewProvenance)
-	applied.preview, err = applySegmentPatch(&state.preview, state.existingSource, previewSrc, previewProv, previewConf, previewAlgo, update.PreviewStart, update.PreviewEnd, state.duration, "preview", mutationAt)
-	if err != nil {
-		return markerSegmentFlags{}, err
+	for _, patch := range []struct {
+		kind       string
+		state      *segmentState
+		start, end *float64
+		provenance *SegmentProvenance
+		changed    *bool
+	}{
+		{"intro", &state.intro, update.IntroStart, update.IntroEnd, update.IntroProvenance, &applied.intro},
+		{"credits", &state.credits, update.CreditsStart, update.CreditsEnd, update.CreditsProvenance, &applied.credits},
+		{"recap", &state.recap, update.RecapStart, update.RecapEnd, update.RecapProvenance, &applied.recap},
+		{"preview", &state.preview, update.PreviewStart, update.PreviewEnd, update.PreviewProvenance, &applied.preview},
+	} {
+		source, provider, confidence, algorithm := resolveSegmentProvenance(*update, patch.provenance)
+		changed, err := applySegmentRanges(patch.state, state.existingSource, source, provider, confidence, algorithm,
+			patch.start, patch.end, ranges[patch.kind], state.duration, patch.kind, mutationAt)
+		if err != nil {
+			return markerSegmentFlags{}, err
+		}
+		*patch.changed = changed
+		existingSource := patch.state.source
+		if existingSource == nil {
+			existingSource = state.existingSource
+		}
+		if patch.start == nil && patch.end == nil && len(ranges[patch.kind]) == 0 && patch.state.provider != nil &&
+			(existingSource == nil || *existingSource != models.MarkerSourceManual) &&
+			slices.Contains(update.RefreshedProviders, *patch.state.provider) {
+			*patch.changed = clearSegmentState(patch.state)
+		}
 	}
 	return applied, nil
 }
@@ -1756,6 +1890,7 @@ func writeMarkerMutationState(
 			preview_markers_confidence = $29::double precision,
 			preview_markers_algorithm = $30::text,
 			preview_markers_detected_at = $31::timestamptz,
+			marker_segments = $32::jsonb,
 			updated_at = NOW()
 		WHERE id = $1
 	`,
@@ -1769,6 +1904,7 @@ func writeMarkerMutationState(
 		state.credits.source, state.credits.provider, state.credits.confidence, state.credits.algorithm, state.credits.detectedAt,
 		state.recap.source, state.recap.provider, state.recap.confidence, state.recap.algorithm, state.recap.detectedAt,
 		state.preview.source, state.preview.provider, state.preview.confidence, state.preview.algorithm, state.preview.detectedAt,
+		mutationMarkerSegments(state),
 	)
 	if err != nil {
 		return false, fmt.Errorf("updating media markers: %w", err)
@@ -1779,10 +1915,20 @@ func writeMarkerMutationState(
 	return true, nil
 }
 
+func mutationMarkerSegments(state markerMutationState) []models.MarkerSegment {
+	segments := make([]models.MarkerSegment, 0)
+	for _, segment := range []segmentState{state.intro, state.credits, state.recap, state.preview} {
+		segments = append(segments, segment.ranges...)
+	}
+	sort.SliceStable(segments, func(i, j int) bool { return segments[i].StartSeconds < segments[j].StartSeconds })
+	return segments
+}
+
 func clearSegmentState(state *segmentState) bool {
 	if segmentEqual(*state, segmentState{}) {
 		return false
 	}
+	state.ranges = nil
 	state.start = nil
 	state.end = nil
 	state.source = nil
@@ -2017,6 +2163,25 @@ func (r *FileRepository) GetByID(ctx context.Context, id int) (*models.MediaFile
 	return scanMediaFile(r.pool.QueryRow(ctx, query, id))
 }
 
+// PlayableContentID returns the catalog item a media file plays as: its
+// episode, otherwise its content item, otherwise its local extra. It returns
+// ErrFileNotFound when no file has the id, and "" for an unlinked file.
+func (r *FileRepository) PlayableContentID(ctx context.Context, id int) (string, error) {
+	var contentID string
+	err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(NULLIF(episode_id, ''), NULLIF(content_id, ''), NULLIF(extra_id, ''), '')
+		FROM media_files
+		WHERE id = $1
+	`, id).Scan(&contentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrFileNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("querying playable content id for media file %d: %w", id, err)
+	}
+	return contentID, nil
+}
+
 // GetByIDs retrieves media files by primary key.
 func (r *FileRepository) GetByIDs(ctx context.Context, ids []int) ([]*models.MediaFile, error) {
 	if len(ids) == 0 {
@@ -2026,7 +2191,7 @@ func (r *FileRepository) GetByIDs(ctx context.Context, ids []int) ([]*models.Med
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+fileColumns+`
 		FROM media_files
-		WHERE id = ANY($1::int[])
+		WHERE id = ANY($1::bigint[])
 	`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("querying media files by ids: %w", err)
@@ -3031,7 +3196,8 @@ func (r *FileRepository) ListByObservedRootPath(ctx context.Context, folderID in
 }
 
 // GetByContentID returns all media files linked to the given content ID,
-// ordered by resolution (highest first), excluding files that are missing.
+// excluding files that are missing. This preserves the long-standing id order
+// used by the general catalog and playback paths.
 func (r *FileRepository) GetByContentID(ctx context.Context, contentID string) ([]*models.MediaFile, error) {
 	query := `SELECT ` + fileColumns + ` FROM media_files
 		WHERE content_id = $1 AND missing_since IS NULL
@@ -3043,6 +3209,54 @@ func (r *FileRepository) GetByContentID(ctx context.Context, contentID string) (
 	defer rows.Close()
 
 	return scanMediaFiles(rows)
+}
+
+// GetByContentIDPresentation is the audiobook presentation ordering variant.
+// Multipart books use the scanner-assigned part index. Rows that predate the
+// column have no index and SQL cannot apply naturalPathLess to them, so those
+// legacy rows are re-sorted in Go after the query; part10.m4b must follow
+// part2.m4b for them too. Keeping this separate avoids changing ordering
+// assumptions in movie and series playback.
+func (r *FileRepository) GetByContentIDPresentation(ctx context.Context, contentID string) ([]*models.MediaFile, error) {
+	query := `SELECT ` + fileColumns + ` FROM media_files
+		WHERE content_id = $1 AND missing_since IS NULL
+		ORDER BY COALESCE(presentation_part_index, 2147483647), file_path ASC, id ASC`
+	rows, err := r.pool.Query(ctx, query, contentID)
+	if err != nil {
+		return nil, fmt.Errorf("querying presentation files by content_id: %w", err)
+	}
+	defer rows.Close()
+	files, err := scanMediaFiles(rows)
+	if err != nil {
+		return nil, err
+	}
+	sortPresentationFiles(files)
+	return files, nil
+}
+
+// sortPresentationFiles orders multipart rows for one content ID: indexed rows
+// by part index, then legacy rows without one by natural file path. The SQL
+// ordering already places the null-index group last, so this only fixes the
+// intra-group lexical order (part10 before part2) that SQL cannot express.
+func sortPresentationFiles(files []*models.MediaFile) {
+	sort.SliceStable(files, func(i, j int) bool {
+		a, b := files[i], files[j]
+		if a == nil || b == nil {
+			return b == nil && a != nil
+		}
+		aIndexed := a.PresentationPartIndex > 0
+		bIndexed := b.PresentationPartIndex > 0
+		switch {
+		case aIndexed && bIndexed:
+			return a.PresentationPartIndex < b.PresentationPartIndex
+		case aIndexed != bIndexed:
+			return aIndexed
+		}
+		if a.FilePath != b.FilePath {
+			return naturalPathLess(a.FilePath, b.FilePath)
+		}
+		return a.ID < b.ID
+	})
 }
 
 // FirstDurationsByContentIDs returns the probed duration (seconds) of the

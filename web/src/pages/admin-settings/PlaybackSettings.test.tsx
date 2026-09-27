@@ -171,16 +171,16 @@ describe("PlaybackSettings layout", () => {
 });
 
 describe("PlaybackSettings node routing", () => {
-  const standardRouting = {
+  const defaultRouting = {
     "playback.routing.direct_play_egress": "prefer_proxy",
-    "playback.routing.remux_execution": "prefer_worker",
+    "playback.routing.remux_execution": "prefer_transcode",
     "playback.routing.remux_egress": "prefer_proxy",
-    "playback.routing.video_transcode_execution": "prefer_worker",
+    "playback.routing.video_transcode_execution": "prefer_transcode",
     "playback.routing.video_transcode_egress": "prefer_proxy",
   };
 
   it("stages every primitive setting when a preset is selected", async () => {
-    const form = makeForm({ "playback.hw_accel": "none", ...standardRouting });
+    const form = makeForm({ "playback.hw_accel": "none", ...defaultRouting });
     useSettingsFormMock.mockReturnValue(form);
 
     render(<PlaybackSettings />);
@@ -196,6 +196,38 @@ describe("PlaybackSettings node routing", () => {
     expect(form.save).not.toHaveBeenCalled();
   });
 
+  it("labels the built-in routing policy as Silo Defaults", () => {
+    useSettingsFormMock.mockReturnValue(
+      makeForm({ "playback.hw_accel": "none", ...defaultRouting }),
+    );
+
+    render(<PlaybackSettings />);
+
+    expect(screen.getByRole("button", { name: "Silo Defaults" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Standard cluster" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Custom")).not.toBeInTheDocument();
+  });
+
+  it("offers a transcode-node preference and explains what a worker is", async () => {
+    useSettingsFormMock.mockReturnValue(
+      makeForm({
+        "playback.hw_accel": "none",
+        ...defaultRouting,
+      }),
+    );
+
+    render(<PlaybackSettings />);
+
+    const remuxExecution = screen.getByRole("combobox", { name: "Remux execution" });
+    expect(remuxExecution).toHaveTextContent("Prefer transcode node");
+    await userEvent.click(remuxExecution);
+    expect(await screen.findByRole("option", { name: "Prefer any worker" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Prefer transcode node" })).toBeVisible();
+    expect(screen.getByText(/A worker can be a proxy/)).toBeVisible();
+    expect(screen.getByText(/Transcode node → any worker → API/)).toBeVisible();
+    expect(screen.getByText(/Video transcode workers are transcode nodes/)).toBeVisible();
+  });
+
   it("warns when hard routes lack nodes or universal client-origin support", () => {
     useAdminNodesMock.mockReturnValue({
       data: [transcodeNode({ healthy: false })],
@@ -204,7 +236,7 @@ describe("PlaybackSettings node routing", () => {
     useSettingsFormMock.mockReturnValue(
       makeForm({
         "playback.hw_accel": "none",
-        ...standardRouting,
+        ...defaultRouting,
         "playback.routing.direct_play_egress": "proxy_only",
         "playback.routing.remux_execution": "worker_only",
       }),

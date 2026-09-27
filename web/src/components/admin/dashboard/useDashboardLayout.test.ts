@@ -3,6 +3,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import type { AdminDashboardLayoutResponse } from "@/api/types";
 import { DASHBOARD_WIDGETS, DEFAULT_LAYOUT } from "./registry";
 import {
@@ -16,17 +17,27 @@ import type { DashboardLayoutEntry } from "./types";
 const ADMIN_USER_ID = 1;
 
 const mocks = vi.hoisted(() => ({
-  query: { data: undefined as AdminDashboardLayoutResponse | undefined, isSuccess: false },
+  query: {
+    data: undefined as (AdminDashboardLayoutResponse & { etag: string }) | undefined,
+    isSuccess: false,
+  },
   save: vi.fn(),
   reset: vi.fn(),
   userId: 1,
 }));
 
-vi.mock("@/hooks/queries/admin/dashboardLayout", () => ({
-  useAdminDashboardLayout: () => mocks.query,
-  useSaveAdminDashboardLayout: () => ({ mutate: mocks.save }),
-  useResetAdminDashboardLayout: () => ({ mutate: mocks.reset }),
-}));
+vi.mock("@/hooks/queries/admin/dashboardLayout", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/queries/admin/dashboardLayout")>();
+  const mutateCaptured = (
+    intent: import("@/hooks/queries/admin/dashboardLayout").DashboardLayoutSaveIntent,
+  ) => mocks.save(intent.layout);
+  return {
+    ...actual,
+    useAdminDashboardLayout: () => mocks.query,
+    useSaveAdminDashboardLayout: () => ({ mutate: mocks.save, mutateCaptured }),
+    useResetAdminDashboardLayout: () => ({ mutate: mocks.reset }),
+  };
+});
 
 // The layout cache is keyed by the signed-in account, so every test needs an
 // authenticated user; `mocks.userId` is the account the hook sees.
@@ -40,13 +51,13 @@ function storageKey(userId: number = mocks.userId): string {
 
 function serverLayout(entries: unknown, updatedAt = "2026-08-26T10:00:00Z") {
   mocks.query = {
-    data: { layout: { version: 1, entries }, updated_at: updatedAt },
+    data: { etag: '"layout-1"', layout: { version: 1, entries }, updated_at: updatedAt },
     isSuccess: true,
   };
 }
 
 function serverNoLayout() {
-  mocks.query = { data: { layout: null, updated_at: null }, isSuccess: true };
+  mocks.query = { data: { etag: '"layout-1"', layout: null, updated_at: null }, isSuccess: true };
 }
 
 function readStored(userId?: number): { version: number; entries: DashboardLayoutEntry[] } {
@@ -74,6 +85,9 @@ function hiddenWidgetIds(...alsoRemoved: string[]): string[] {
 describe("useDashboardLayout", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    setAccessToken("synthetic-admin");
+    setProfileId("profile-a");
+    setProfileToken("pin-a");
     mocks.userId = ADMIN_USER_ID;
     mocks.query = { data: undefined, isSuccess: false };
     mocks.save.mockReset();
@@ -559,6 +573,9 @@ describe("useDashboardLayout", () => {
   });
 
   it("resetLayout restores the defaults and clears storage", () => {
+    setAccessToken("synthetic-admin");
+    setProfileId("profile-a");
+    setProfileToken("pin-a");
     const { result } = renderHook(() => useDashboardLayout());
 
     act(() => {
@@ -602,6 +619,9 @@ describe("useDashboardLayout", () => {
 describe("useDashboardLayout server persistence", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    setAccessToken("synthetic-admin");
+    setProfileId("profile-a");
+    setProfileToken("pin-a");
     mocks.userId = ADMIN_USER_ID;
     mocks.query = { data: undefined, isSuccess: false };
     mocks.save.mockReset();
@@ -661,7 +681,11 @@ describe("useDashboardLayout server persistence", () => {
   it("keeps the local layout when the server document is not a v1 layout", () => {
     writeStored([{ id: "users", span: 5, rows: 4 }]);
     mocks.query = {
-      data: { layout: { version: 99, entries: [] }, updated_at: "2026-08-26T10:00:00Z" },
+      data: {
+        etag: '"layout-1"',
+        layout: { version: 99, entries: [] },
+        updated_at: "2026-08-26T10:00:00Z",
+      },
       isSuccess: true,
     };
 
@@ -716,6 +740,7 @@ describe("useDashboardLayout server persistence", () => {
       { id: "libraries", span: 7, rows: 4 },
       { id: "users", span: 5, rows: 4 },
     ]);
+    serverLayout(readStored().entries);
     const { result } = renderHook(() => useDashboardLayout());
 
     act(() => {
@@ -741,6 +766,7 @@ describe("useDashboardLayout server persistence", () => {
   it("flushes a queued save when the dashboard unmounts", () => {
     vi.useFakeTimers();
     writeStored([{ id: "users", span: 5, rows: 4 }]);
+    serverLayout(readStored().entries);
     const { result, unmount } = renderHook(() => useDashboardLayout());
 
     act(() => {
@@ -757,7 +783,25 @@ describe("useDashboardLayout server persistence", () => {
     });
   });
 
+  it("resetLayout refuses an obsolete authority callback before local reset", () => {
+    setAccessToken("synthetic-admin");
+    setProfileId("profile-a");
+    setProfileToken("pin-a");
+    writeStored([{ id: "users", span: 5, rows: 4 }]);
+    const { result } = renderHook(() => useDashboardLayout());
+    const prior = result.current.entries;
+    const reset = result.current.resetLayout;
+    act(() => setProfileToken("pin-b"));
+    act(() => reset());
+    expect(mocks.reset).not.toHaveBeenCalled();
+    expect(result.current.entries).toEqual(prior);
+    expect(window.localStorage.getItem(storageKey())).not.toBeNull();
+  });
+
   it("resetLayout deletes the server layout and drops the queued save", () => {
+    setAccessToken("synthetic-admin");
+    setProfileId("profile-a");
+    setProfileToken("pin-a");
     vi.useFakeTimers();
     writeStored([{ id: "users", span: 5, rows: 4 }]);
     const { result } = renderHook(() => useDashboardLayout());
@@ -783,6 +827,9 @@ describe("useDashboardLayout account scoping", () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    setAccessToken("synthetic-admin");
+    setProfileId("profile-a");
+    setProfileToken("pin-a");
     mocks.userId = ADMIN_USER_ID;
     mocks.query = { data: undefined, isSuccess: false };
     mocks.save.mockReset();

@@ -18,17 +18,36 @@ type FulfillmentNotifier interface {
 // service. Optional; without it completed requests are never notified.
 func (s *Service) SetFulfillmentNotifier(n FulfillmentNotifier) { s.notifier = n }
 
+// ApprovalOrigin says who approved a request. Distinct from the ApprovalMode
+// policy setting, which decides whether approval happens at all. Destinations
+// treat anything other than ApprovalOriginAdmin as not worth telling the
+// requester about, so the zero value is safe by default.
+type ApprovalOrigin string
+
+const (
+	// ApprovalOriginUnspecified is the zero value; no approval path passes it
+	// deliberately.
+	ApprovalOriginUnspecified ApprovalOrigin = ""
+	// ApprovalOriginAdmin is an administrator acting on a pending request.
+	ApprovalOriginAdmin ApprovalOrigin = "admin"
+	// ApprovalOriginPolicy is auto-approval answering a submission.
+	ApprovalOriginPolicy ApprovalOrigin = "policy"
+)
+
 // LifecycleNotifier observes request lifecycle transitions (submitted,
 // approved, declined) for broadcast destinations such as admin server
 // channels. Implementations must be fast and non-blocking (dispatch async)
 // and must never fail the transition: methods return nothing.
+//
+// RequestApproved carries an ApprovalOrigin because destinations treat the
+// two kinds of approval differently.
 //
 // Fulfillment is deliberately not part of this interface — it stays on
 // FulfillmentNotifier, whose presence-checked, idempotent flow runs on the
 // reconcile service rather than the API service.
 type LifecycleNotifier interface {
 	RequestSubmitted(ctx context.Context, req Request)
-	RequestApproved(ctx context.Context, req Request)
+	RequestApproved(ctx context.Context, req Request, origin ApprovalOrigin)
 	RequestDeclined(ctx context.Context, req Request)
 }
 
@@ -45,6 +64,12 @@ func (s *Service) notifyLifecycle(ctx context.Context, req Request, notify func(
 	}
 	s.populateRequesterIdentity(ctx, &req)
 	notify(s.lifecycle, ctx, req)
+}
+
+func (s *Service) notifyApproval(ctx context.Context, req Request, origin ApprovalOrigin) {
+	s.notifyLifecycle(ctx, req, func(notifier LifecycleNotifier, ctx context.Context, req Request) {
+		notifier.RequestApproved(ctx, req, origin)
+	})
 }
 
 // notifyFulfilledLimit bounds one notification pass; the remainder lands on
