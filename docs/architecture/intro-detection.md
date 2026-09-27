@@ -158,7 +158,10 @@ Video decoding dominates the pass's cost. On a host whose `playback.hw_accel`
 resolves to VAAPI, QSV, or VideoToolbox (as chapter thumbnails resolve it,
 on the `playback.hw_device` devices), the episode and movie tail passes
 decode keyframes on the GPU first and in software if that fails (see
-[media sampling](media-sampling.md#hardware-decode)). Settings changes apply
+[media sampling](media-sampling.md#hardware-decode)). A GPU attempt that
+fails because an output finds no stream is not a GPU failure: it logs no
+hardware warning and skips software, which would fail the same way, so the
+retry on the video alone runs on the GPU. Settings changes apply
 to the next pass without a restart. A resolved backend is kept until the
 playback probe cache is invalidated; when `auto` finds no hardware, as a
 smoke probe that fails under GPU contention reports, it is asked again after

@@ -112,7 +112,7 @@ func (h *hardwareDecoder) backend(ctx context.Context, ffmpegPath string) (strin
 }
 
 // hardwareAttempts is the attempt plan of a tail pass on accel: hardware
-// first and software after any hardware failure when accel decodes in
+// first and software after a hardware failure when accel decodes in
 // hardware, and one software attempt otherwise. Like every analysis run,
 // neither has a timeout of its own.
 func hardwareAttempts(accel string) []mediasample.Attempt {
@@ -124,7 +124,9 @@ func hardwareAttempts(accel string) []mediasample.Attempt {
 
 // tailRunner returns the runner of a tail pass and sets req's attempts:
 // a request with a video output decodes it on the configured hardware when
-// the host has any the runner supports (VAAPI, QSV, or VideoToolbox).
+// the host has any the runner supports (VAAPI, QSV, or VideoToolbox). A
+// hardware attempt that fails because an output finds no stream ends the
+// run without falling back or counting as a hardware failure.
 func (e *ChromaprintExtractor) tailRunner(ctx context.Context, req *mediasample.Request) mediasample.Runner {
 	runner := analysisRunner(e.config)
 	if req.Stats == nil || e.hardware == nil {
@@ -134,9 +136,16 @@ func (e *ChromaprintExtractor) tailRunner(ctx context.Context, req *mediasample.
 	if req.Attempts = hardwareAttempts(accel); req.Attempts != nil {
 		runner.HWAccel, runner.HWDevice = accel, device
 		runner.Fallback = func(attempt mediasample.Attempt, failure mediasample.AttemptError) bool {
-			if attempt.Hardware {
-				e.logHardwareFailure(ctx, accel, failure)
+			if !attempt.Hardware {
+				return true
 			}
+			// An output that finds no stream is the input's fault, not the
+			// GPU's: software would fail the same way, and the caller's
+			// retry without audio runs on hardware again.
+			if failure.Cause() == mediasample.ReasonNoStream {
+				return false
+			}
+			e.logHardwareFailure(ctx, accel, failure)
 			return true
 		}
 	}

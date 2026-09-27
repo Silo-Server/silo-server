@@ -365,3 +365,90 @@ func TestHardwareDecoderReportsEachBackendsFirstFailure(t *testing.T) {
 		t.Fatal("want one first failure per accelerator")
 	}
 }
+
+// TestTailRunnerTreatsAMissingStreamAsNoHardwareFailure fails a hardware
+// attempt because an output found no stream, which is the input's fault: the
+// run must end there without a hardware warning, so the caller's video-only
+// retry runs on hardware, and a later genuine failure still warns.
+func TestTailRunnerTreatsAMissingStreamAsNoHardwareFailure(t *testing.T) {
+	cfg := DefaultConfig("/test/ffmpeg")
+	cfg.HWAccel = "vaapi"
+	extractor := NewChromaprintExtractor(cfg)
+	var calls int
+	extractor.hardware.resolve = fakeResolve("vaapi", &calls)
+	var log bytes.Buffer
+	extractor.logger = slog.New(slog.NewTextHandler(&log, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	candidate := Candidate{FileID: 7, FilePath: "/media/show/e1.mkv", DurationSeconds: 1500, CodecVideo: "h264", CodecAudio: "aac"}
+	req := creditsTailRequest(context.Background(), candidate, tailWindow(candidate), false)
+	runner := extractor.tailRunner(context.Background(), &req)
+	hardware := mediasample.Attempt{Hardware: true}
+
+	noStream := mediasample.AttemptError{Decoder: "hardware:vaapi", Reason: mediasample.ReasonExit,
+		StderrTail: "[out#0/null @ 0x1] Output file does not contain any stream\nError opening output file -."}
+	if runner.Fallback(hardware, noStream) {
+		t.Fatal("a hardware attempt that found no stream moved on to software")
+	}
+	if log.Len() != 0 {
+		t.Fatalf("log %q, want no hardware failure for a missing stream", log.String())
+	}
+
+	failed := mediasample.AttemptError{Decoder: "hardware:vaapi", Reason: mediasample.ReasonExit,
+		StderrTail: "Device creation failed: -5.\nFailed to set value 'vaapi=hw:/dev/dri/renderD128' for option 'init_hw_device': I/O error"}
+	if !runner.Fallback(hardware, failed) {
+		t.Fatal("a failed hardware attempt did not move on to software")
+	}
+	if !strings.Contains(log.String(), `level=WARN msg="credits tail hardware decode failed; using software" decoder=hardware:vaapi`) {
+		t.Fatalf("log %q, want the genuine hardware failure at warn level", log.String())
+	}
+}
+
+// TestSampleCreditsTailRetriesMissingAudioOnHardware runs the tail pass on
+// VideoToolbox over a video-only clip whose probe metadata names audio: the
+// combined run finds no audio stream, and the video-only retry must decode on
+// hardware without reporting a hardware failure.
+func TestSampleCreditsTailRetriesMissingAudioOnHardware(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("VideoToolbox is macOS only")
+	}
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	caps, err := mediasample.LoadCapabilities(ctx, ffmpeg)
+	if err != nil {
+		t.Skipf("ffmpeg capabilities unavailable: %v", err)
+	}
+	candidate := Candidate{FileID: 1, DurationSeconds: 120, CodecVideo: "h264", CodecAudio: "aac"}
+	if err := caps.Require(creditsTailRequest(ctx, candidate, tailWindow(candidate), false)); err != nil {
+		t.Skipf("ffmpeg cannot run the tail pass: %v", err)
+	}
+	candidate.FilePath = filepath.Join(t.TempDir(), "episode.mkv")
+	synthesizeCreditsClip(ctx, t, ffmpeg, candidate.FilePath)
+	if !videoToolboxDecodes(ctx, ffmpeg, candidate.FilePath, "nv12") {
+		t.Skip("VideoToolbox cannot decode the clip on this host")
+	}
+
+	cfg := DefaultConfig(ffmpeg)
+	cfg.HWAccel = "videotoolbox"
+	extractor := NewChromaprintExtractor(cfg)
+	var log bytes.Buffer
+	extractor.logger = slog.New(slog.NewTextHandler(&log, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	sample, err := extractor.SampleCreditsTail(ctx, candidate, false)
+	if err != nil {
+		t.Fatalf("SampleCreditsTail: %v", err)
+	}
+	if len(sample.Tail.Frames) < 90 || len(sample.Tail.Silences) != 0 {
+		t.Fatalf("%d keyframes and %d silences, want the video alone", len(sample.Tail.Frames), len(sample.Tail.Silences))
+	}
+	if strings.Contains(log.String(), "hardware decode failed") {
+		t.Fatalf("log %q, want no hardware failure for missing audio", log.String())
+	}
+	if !strings.Contains(log.String(), "decoder=hardware:videotoolbox hardware_fallback=false") {
+		t.Fatalf("log %q, want the video-only retry decoded on VideoToolbox", log.String())
+	}
+	if !extractor.hardware.reportFailure("videotoolbox") {
+		t.Fatal("missing audio consumed the VideoToolbox hardware warning")
+	}
+}
