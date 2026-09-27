@@ -373,6 +373,152 @@ func TestCreateRequestEnrichesSeriesTVDBID(t *testing.T) {
 	}
 }
 
+type fakeTVDBResolver struct {
+	tvdbID    int
+	err       error
+	gotTMDBID int
+	gotIMDbID string
+	calls     int
+}
+
+func (f *fakeTVDBResolver) ResolveSeriesTVDBID(_ context.Context, tmdbID int, imdbID string) (int, error) {
+	f.calls++
+	f.gotTMDBID = tmdbID
+	f.gotIMDbID = imdbID
+	return f.tvdbID, f.err
+}
+
+func TestCreateRequestResolvesSeriesTVDBIDThroughMetadataWhenTMDBHasNone(t *testing.T) {
+	store := newFakeStore()
+	tmdbClient := &fakeTMDBClient{externalIDs: &tmdb.ExternalIDs{IMDbID: "tt31000000"}}
+	service := newTestServiceWithTMDB(store, tmdbClient)
+	resolver := &fakeTVDBResolver{tvdbID: 456789}
+	service.SetTVDBIDResolver(resolver)
+
+	if _, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeSeries,
+		TMDBID:    240001,
+		Title:     "Regional Series",
+	}); err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if resolver.gotTMDBID != 240001 || resolver.gotIMDbID != "tt31000000" {
+		t.Fatalf("resolver got tmdb=%d imdb=%q, want 240001 and the TMDB-provided IMDb id", resolver.gotTMDBID, resolver.gotIMDbID)
+	}
+	if got := store.created[0].Input.TVDBID; got == nil || *got != 456789 {
+		t.Fatalf("tvdb_id = %v, want 456789", got)
+	}
+}
+
+func TestAutoApprovedCreateLooksUpTVDBIDOnce(t *testing.T) {
+	store := newFakeStore()
+	store.settings.GlobalAutoApprovalEnabled = true
+	store.integrations = []Integration{routerInst("router-1")}
+	service := newTestService(store)
+	service.SetRouterProvider(&fakeRouterProvider{})
+	resolver := &fakeTVDBResolver{}
+	service.SetTVDBIDResolver(resolver)
+
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeSeries, TMDBID: 4436, Title: "Unlinked Series",
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if req.Status == StatusPending {
+		t.Fatalf("request stayed pending; the test needs the auto-approve submit path")
+	}
+	if resolver.calls != 1 {
+		t.Fatalf("resolver calls = %d, want 1 across create and the immediate submission", resolver.calls)
+	}
+}
+
+func TestCreateRequestSkipsTVDBResolverWhenTMDBHasTVDBID(t *testing.T) {
+	store := newFakeStore()
+	service := newTestServiceWithTMDB(store, &fakeTMDBClient{externalIDs: &tmdb.ExternalIDs{TVDBID: 12345}})
+	resolver := &fakeTVDBResolver{tvdbID: 99}
+	service.SetTVDBIDResolver(resolver)
+
+	if _, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeSeries, TMDBID: 1399, Title: "Game of Thrones",
+	}); err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if resolver.calls != 0 {
+		t.Fatalf("resolver calls = %d, want 0 when TMDB already has the TVDB id", resolver.calls)
+	}
+}
+
+func TestRetryResolvesMissingSeriesTVDBIDBeforeSubmitting(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	store.requests["req-1"] = &Request{
+		ID: "req-1", MediaType: MediaTypeSeries, TMDBID: 240001,
+		Status: StatusQueued, Outcome: OutcomeFailed,
+	}
+	router := &fakeRouterProvider{}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+	service.SetTVDBIDResolver(&fakeTVDBResolver{tvdbID: 456789})
+
+	if _, err := service.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "req-1"); err != nil {
+		t.Fatalf("Retry returned error: %v", err)
+	}
+	if router.gotTVDBID == nil || *router.gotTVDBID != 456789 {
+		t.Fatalf("router got tvdb_id %v, want 456789", router.gotTVDBID)
+	}
+	if got := store.requests["req-1"].TVDBID; got == nil || *got != 456789 {
+		t.Fatalf("stored tvdb_id = %v, want the resolved id recorded on the request", got)
+	}
+}
+
+func TestSubmitExplainsSeriesWithoutTVDBID(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	store.requests["req-1"] = &Request{
+		ID: "req-1", MediaType: MediaTypeSeries, TMDBID: 240001,
+		Status: StatusQueued, Outcome: OutcomeFailed,
+	}
+	router := &fakeRouterProvider{targetsOverride: []RouterTarget{{
+		Quality: Quality1080p, ConnectionID: "router-1", Status: StatusFailed,
+		Message: "sonarr: tvdb_id is required",
+	}}}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+	service.SetTVDBIDResolver(&fakeTVDBResolver{})
+
+	req, err := service.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "req-1")
+	if err != nil {
+		t.Fatalf("Retry returned error: %v", err)
+	}
+	if req.Outcome != OutcomeFailed {
+		t.Fatalf("outcome = %q, want failed", req.Outcome)
+	}
+	var explained bool
+	for _, target := range store.targets["req-1"] {
+		if target.Quality == Quality1080p {
+			explained = target.LastError == missingTVDBIDMessage
+		}
+	}
+	if !explained {
+		t.Fatalf("targets = %+v, want the 1080p target to carry the missing-TVDB explanation", store.targets["req-1"])
+	}
+}
+
+func TestSubmitKeepsUnrelatedSeriesFailureMessage(t *testing.T) {
+	req := Request{MediaType: MediaTypeSeries}
+	for _, msg := range []string{"sonarr: quality profile is required", "tvdb: HTTP 503 service unavailable"} {
+		if got := explainSubmissionFailure(req, msg); got != msg {
+			t.Fatalf("message = %q, want the backend message %q unchanged", got, msg)
+		}
+	}
+	tvdbID := 1
+	req.TVDBID = &tvdbID
+	if got := explainSubmissionFailure(req, "sonarr: tvdb lookup failed"); got != "sonarr: tvdb lookup failed" {
+		t.Fatalf("message = %q, want unchanged when the request has a TVDB id", got)
+	}
+}
+
 func TestListMineAttachesTargets(t *testing.T) {
 	store := newFakeStore()
 	store.mine = []*Request{{
@@ -1705,6 +1851,23 @@ func (f *fakeStore) ListFulfilledUnnotified(context.Context, int) ([]*Request, e
 	return out, nil
 }
 
+func (f *fakeStore) SetExternalIDs(_ context.Context, id string, tvdbID int, imdbID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	req := f.requests[id]
+	if req == nil {
+		return ErrNotFound
+	}
+	if req.TVDBID == nil {
+		v := tvdbID
+		req.TVDBID = &v
+	}
+	if req.IMDbID == "" {
+		req.IMDbID = imdbID
+	}
+	return nil
+}
+
 func (f *fakeStore) MarkFulfilledNotified(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -2253,6 +2416,7 @@ type fakeRouterProvider struct {
 
 	gotRequesterEmail    string
 	gotRequesterUsername string
+	gotTVDBID            *int
 
 	// CheckStatus behavior.
 	statuses    []RouterTargetStatus
@@ -2278,6 +2442,7 @@ func (f *fakeRouterProvider) Fulfill(_ context.Context, installationID int, _ st
 	defer f.mu.Unlock()
 	f.gotRequesterEmail = req.RequesterEmail
 	f.gotRequesterUsername = req.RequesterUsername
+	f.gotTVDBID = req.TVDBID
 	f.fulfillCalls++
 	f.gotQualities = append(f.gotQualities, qualities...)
 	f.gotConns = conns

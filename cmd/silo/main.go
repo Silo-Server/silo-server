@@ -2913,6 +2913,9 @@ func main() {
 			),
 		)
 		requestReconcileSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
+		if metadataService != nil {
+			requestReconcileSvc.SetTVDBIDResolver(metadataService)
+		}
 		api.AttachRequestRouter(requestReconcileSvc, pluginService)
 		requestReconcileSvc.SetGroupPolicyProvider(accessGroupStore)
 		if userStoreProvider != nil {

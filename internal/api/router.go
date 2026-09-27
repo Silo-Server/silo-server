@@ -880,6 +880,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			requestSvc.SetUserRepository(userRepo)
 		}
 		requestSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
+		if tvdbResolver, ok := deps.MetadataService.(mediarequests.TVDBIDResolver); ok {
+			requestSvc.SetTVDBIDResolver(tvdbResolver)
+		}
 		if viewerResolver != nil {
 			requestSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: viewerResolver})
 		}

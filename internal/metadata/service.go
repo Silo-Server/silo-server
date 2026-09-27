@@ -4535,6 +4535,47 @@ func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery
 	return allResults, nil
 }
 
+// ResolveSeriesTVDBID asks the enabled series providers for the TVDB ID of a
+// series known by its IMDb or TMDB ID (the TVDB provider resolves these through
+// TVDB's remote-ID search). IMDb goes first because its IDs are unambiguous. A
+// result counts only when it echoes the ID it was looked up by, so a bare TMDB
+// number that matches some other source's ID on TVDB can't resolve to the wrong
+// series. Returns 0 when no provider knows a match.
+func (s *MetadataService) ResolveSeriesTVDBID(ctx context.Context, tmdbID int, imdbID string) (int, error) {
+	var lookups []map[string]string
+	if imdb := strings.TrimSpace(imdbID); imdb != "" {
+		lookups = append(lookups, map[string]string{"imdb": imdb})
+	}
+	if tmdbID > 0 {
+		lookups = append(lookups, map[string]string{"tmdb": strconv.Itoa(tmdbID)})
+	}
+	for _, ids := range lookups {
+		results, err := s.SearchProviders(ctx, SearchQuery{ContentType: "series", ProviderIDs: ids}, 0)
+		if err != nil {
+			return 0, err
+		}
+		for _, result := range results {
+			if !providerIDsConfirm(result.ProviderIDs, ids) {
+				continue
+			}
+			if tvdbID, err := strconv.Atoi(strings.TrimSpace(result.ProviderIDs["tvdb"])); err == nil && tvdbID > 0 {
+				return tvdbID, nil
+			}
+		}
+	}
+	return 0, nil
+}
+
+// providerIDsConfirm reports whether got carries every ID in want.
+func providerIDsConfirm(got, want map[string]string) bool {
+	for key, value := range want {
+		if !strings.EqualFold(strings.TrimSpace(got[key]), value) {
+			return false
+		}
+	}
+	return true
+}
+
 func providerChainContentLevel(contentType string) string {
 	switch normalized := strings.ToLower(strings.TrimSpace(contentType)); normalized {
 	case "movie", "movies":

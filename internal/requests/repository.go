@@ -431,6 +431,19 @@ func (r *Repository) MarkFulfilledNotified(ctx context.Context, id string) error
 	return nil
 }
 
+func (r *Repository) SetExternalIDs(ctx context.Context, id string, tvdbID int, imdbID string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE media_requests
+		SET tvdb_id = COALESCE(tvdb_id, $2),
+		    imdb_id = CASE WHEN imdb_id = '' THEN $3 ELSE imdb_id END,
+		    updated_at = now()
+		WHERE id = $1`, id, tvdbID, strings.TrimSpace(imdbID))
+	if err != nil {
+		return fmt.Errorf("set request external ids: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) ListMine(ctx context.Context, userID int, filter ListFilter) ([]*Request, error) {
 	sqlText, args := buildRequestListSQL("requested_by_user_id = $1", []any{userID}, filter)
 	return r.listRequests(ctx, sqlText, args)
