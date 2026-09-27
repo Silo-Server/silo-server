@@ -9,7 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
-import { useRedetectEpisodeIntro, useRefreshItemMetadata } from "@/hooks/queries/items";
+import { useRedetectItemMarkers, useRefreshItemMetadata } from "@/hooks/queries/items";
 import CastCarousel from "@/components/CastCarousel";
 import CrewList from "@/components/CrewList";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
@@ -65,7 +65,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const [mediaInfoOpen, setMediaInfoOpen] = useState(false);
   const [mediaInfoFileId, setMediaInfoFileId] = useState<number | null>(null);
   const refreshMetadataMutation = useRefreshItemMetadata();
-  const redetectIntroMutation = useRedetectEpisodeIntro();
+  const redetectMarkersMutation = useRedetectItemMarkers();
   const deleteSubtitlePreference = useDeleteSubtitlePreference();
   const setSubtitlePreference = useSetSubtitlePreference();
 
@@ -367,10 +367,12 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
                   : undefined
               }
               isRefreshing={refreshMetadataMutation.isPending}
-              onRedetectIntro={
-                isAdmin ? () => redetectIntroMutation.mutate(item.content_id) : undefined
+              onRedetectMarkers={
+                isAdmin
+                  ? (kind) => redetectMarkersMutation.mutate({ itemId: item.content_id, kind })
+                  : undefined
               }
-              isRedetectingIntro={redetectIntroMutation.isPending}
+              isRedetectingMarkers={redetectMarkersMutation.isPending}
               isAdmin={isAdmin}
               canCurateMetadata={canCurateMetadata}
               canEditMarkers={canEditMarkers}

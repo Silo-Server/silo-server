@@ -1,6 +1,7 @@
 {
-  "revision": "17286ac90d042c276a3bd819b7dcbe5526463cd86195a0e0e470c960522d439b",
+  "revision": "205fa1fd4922a16f3404ac857ec5cc811b23d7ed7eadd137cd1e672ae75d8678",
   "state": "available",
   "allowed": true,
-  "movie_credits": true
+  "movie_credits": true,
+  "redetect_markers": true
 }

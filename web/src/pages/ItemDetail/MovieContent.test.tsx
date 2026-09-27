@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => {
     useIsInWatchlist: vi.fn(),
     useToggleWatchlist: vi.fn(),
     useRefreshItemMetadata: vi.fn(),
+    useRedetectItemMarkers: vi.fn(),
     useWatchedStateMutation: vi.fn(),
     useRating: vi.fn(),
     useSetRating: vi.fn(),
@@ -71,6 +72,7 @@ vi.mock("@/hooks/queries/watchlist", () => ({
 
 vi.mock("@/hooks/queries/items", () => ({
   useRefreshItemMetadata: mocks.useRefreshItemMetadata,
+  useRedetectItemMarkers: mocks.useRedetectItemMarkers,
   useWatchedStateMutation: mocks.useWatchedStateMutation,
 }));
 
@@ -127,6 +129,10 @@ vi.mock("@/components/EditMetadataDialog", () => ({
 }));
 
 vi.mock("@/components/MatchItemDialog", () => ({
+  default: () => <div />,
+}));
+
+vi.mock("@/components/SplitItemDialog", () => ({
   default: () => <div />,
 }));
 
@@ -249,6 +255,7 @@ describe("MovieContent", () => {
     mocks.useIsInWatchlist.mockReturnValue({ data: false });
     mocks.useToggleWatchlist.mockReturnValue({ mutate: vi.fn() });
     mocks.useRefreshItemMetadata.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    mocks.useRedetectItemMarkers.mockReturnValue({ mutate: vi.fn(), isPending: false });
     mocks.useWatchedStateMutation.mockReturnValue({ mutate: vi.fn(), isPending: false });
     mocks.useRating.mockReturnValue({ data: { rating: 4, rated_at: "2026-03-22T00:00:00Z" } });
     mocks.useSetRating.mockReturnValue({ mutate: vi.fn() });
@@ -393,5 +400,35 @@ describe("MovieContent", () => {
       canCurateMetadata: false,
       canEditMarkers: true,
     });
+  });
+
+  it("passes credits re-detection only for admins", () => {
+    const redetect = vi.fn();
+    mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
+    mocks.useRedetectItemMarkers.mockReturnValue({ mutate: redetect, isPending: false });
+
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent item={makeMovieItem()} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      isAdmin: true,
+      redetectCreditsOnly: true,
+      isRedetectingMarkers: false,
+    });
+    const onRedetectMarkers = mocks.capturedActionBarProps.value?.onRedetectMarkers;
+    expect(typeof onRedetectMarkers).toBe("function");
+    (onRedetectMarkers as (kind: string) => void)("credits");
+    expect(redetect).toHaveBeenCalledWith({ itemId: "movie-1", kind: "credits" });
+
+    mocks.useAuth.mockReturnValue({ user: null });
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent item={makeMovieItem()} />
+      </MemoryRouter>,
+    );
+    expect(mocks.capturedActionBarProps.value?.onRedetectMarkers).toBeUndefined();
   });
 });

@@ -3,12 +3,12 @@
   "title": "Validation failed",
   "status": 422,
   "detail": "The request did not pass validation; see errors.",
-  "instance": "urn:silo:request:000000000000000000000282",
+  "instance": "urn:silo:request:000000000000000000000241",
   "errors": [
     {
-      "location": "body.provider",
-      "code": "invalid_type",
-      "detail": "null is not a value for this member; omit it to leave it unchanged"
+      "location": "body.kind",
+      "code": "invalid_enum",
+      "detail": "expected value to be one of \"intro, credits, all\""
     }
   ]
 }

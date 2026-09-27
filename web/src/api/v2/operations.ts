@@ -528,6 +528,7 @@ export const v2Operations = {
   "POST /api/v2/admin/items/{id}/metadata-translation/jobs/{job_id}/cancel":
     "cancelAdminMetadataTranslation",
   "POST /api/v2/admin/items/{id}/redetect-intro": "redetectAdminEpisodeIntro",
+  "POST /api/v2/admin/items/{id}/redetect-markers": "redetectAdminItemMarkers",
   "POST /api/v2/admin/items/{id}/refresh-markers": "refreshAdminEpisodeMarkers",
   "POST /api/v2/admin/items/{id}/refresh-metadata": "refreshAdminItemMetadata",
   "POST /api/v2/admin/items/{id}/split": "splitAdminItem",

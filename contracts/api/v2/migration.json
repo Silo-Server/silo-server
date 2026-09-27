@@ -8022,17 +8022,9 @@
       "upgrades_websocket": false,
       "capability_endpoint": null,
       "consumers": [
-        "web"
+        "unused"
       ],
-      "consumer_call_sites": [
-        {
-          "repo": "web",
-          "file": "src/hooks/queries/items.ts",
-          "line": 210,
-          "types": [],
-          "match": "mechanical"
-        }
-      ],
+      "consumer_call_sites": [],
       "section": "admin-catalog",
       "release_flow": "other_admin",
       "tier": 2,
@@ -8046,7 +8038,7 @@
         "path": "/api/v2/admin/items/{id}/redetect-intro",
         "operation_id": "redetectAdminEpisodeIntro"
       },
-      "notes": "Shared frozen-v1 marker analysis service with unchanged mode/eligibility checks and local background lifecycle; independently reviewed and ratified. Typed202 queued/already_running is not persisted job acceptance. Existing web re-detection adopted; no native administrator callers or Jellyfin equivalent found.",
+      "notes": "Shared frozen-v1 marker analysis service with unchanged mode/eligibility checks and local background lifecycle; independently reviewed and ratified. Episodes and intros only, as in v1. Typed202 queued/already_running is not persisted job acceptance. Web re-detection moved to the v2-only redetectAdminItemMarkers, which also offers credits and movies; no native administrator callers or Jellyfin equivalent found.",
       "retry_safety": "non_retryable",
       "retry_safety_note": "An in-process in-flight map coalesces active work only; no durable receipt, cluster-wide lease, or persisted job. Web disables mutation and authentication retries."
     },

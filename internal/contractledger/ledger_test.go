@@ -1207,6 +1207,7 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"redetectAdminItemMarkers":             "V2-only choice of marker kinds to re-detect: v1 re-detected episode intros only, which redetectAdminEpisodeIntro keeps porting. Work is coalesced per item within the process, so a replay while it runs reports already_running; a later replay analyzes again, so it is non-retryable like the intro action.",
 	"transferAdminUserOwnership":           "V2-only server ownership transfer (issue #1382): v1 had no Owner. Replaying a completed transfer is refused because the caller is no longer the Owner, so it cannot move ownership twice.",
 	"createAdminUserPasswordReset":         "V2-only password reset link issue (issue #1442): v1 had no reset links. Each call replaces the account's single live link, so a replay only supersedes the previous link; it is non-retryable because an emailed link may already have been delivered.",
 	"completePasswordReset":                "V2-only public password reset completion (issue #1442): v1 had no reset links. Deleting the single-use link commits in the same transaction as the new password, so a replay finds no link and changes nothing.",

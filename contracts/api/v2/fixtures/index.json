@@ -1338,6 +1338,46 @@
       "body_file": "admin_item_images.json"
     },
     {
+      "name": "admin_item_markers_redetect",
+      "operation_id": "redetectAdminItemMarkers",
+      "scenario": "Marker re-detection reruns local detection of the requested kinds.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/items/episode-1/redetect-markers",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"kind\":\"credits\"}"
+      },
+      "expected_status": 202,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminEpisodeMarkersStatus",
+      "body_file": "admin_item_markers_redetect.json"
+    },
+    {
+      "name": "admin_item_markers_redetect_unknown_kind",
+      "operation_id": "redetectAdminItemMarkers",
+      "scenario": "A kind other than intro, credits, or all is rejected before analysis is queued.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/items/episode-1/redetect-markers",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"kind\":\"outro\"}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "admin_item_markers_redetect_unknown_kind.json"
+    },
+    {
       "name": "admin_item_merge",
       "operation_id": "mergeAdminItem",
       "scenario": "Administrator file grouping preserves synchronous repair and dry-run projection.",
@@ -1556,7 +1596,7 @@
     {
       "name": "admin_marker_capabilities",
       "operation_id": "getAdminMarkerCapabilities",
-      "scenario": "Marker capabilities report local movie credits support.",
+      "scenario": "Marker capabilities report local movie credits and marker re-detection support.",
       "request": {
         "method": "GET",
         "path": "/api/v2/admin/markers/capabilities",

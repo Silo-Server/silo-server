@@ -215,6 +215,7 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 
 		"refreshAdminEpisodeMarkers": true,
 		"redetectAdminEpisodeIntro":  true,
+		"redetectAdminItemMarkers":   true,
 		"getAdminMarkerCapabilities": true,
 		"createDownloads":            true,
 		"createDownloadSubscription": true,

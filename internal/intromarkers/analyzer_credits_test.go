@@ -221,6 +221,40 @@ func TestAnalyzeEpisodeForPlaybackKeepsSettledCreditsSeason(t *testing.T) {
 	}
 }
 
+// Admin re-detection of one kind forces that kind's settled season again and
+// leaves the other kind alone.
+func TestAnalyzeEpisodeKindsForcesOnlyTheSelectedKinds(t *testing.T) {
+	repo := &fakeIntroRepository{}
+	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
+	season := cachedCreditsSeason(t, analyzer, repo, 4)
+	target := season[1]
+	withChapters := target
+	withChapters.Chapters = []models.MediaChapter{chapter("Story", 0, 1410), chapter("End Credits", 1410, 1500)}
+	repo.episodeCandidates = map[string][]Candidate{target.EpisodeID: {withChapters}}
+	repo.seasonState = &SeasonState{InputSignature: InputSignature(season), Status: seasonStatusNotFound}
+
+	summary, err := analyzer.AnalyzeEpisodeKinds(context.Background(), target.EpisodeID, EpisodeMarkerKinds{Intro: true})
+	if err != nil {
+		t.Fatalf("AnalyzeEpisodeKinds intro: %v", err)
+	}
+	if summary.CreditsSeasonGroupsConsidered != 0 || summary.CreditsChapterMarkersWritten != 0 || len(patchesOfKind(repo.patches, kindCredits)) != 0 {
+		t.Fatalf("summary %+v with patches %+v, want no credits analysis for an intro re-detection", summary, repo.patches)
+	}
+
+	repo.patches = nil
+	repo.episodeCandidates = map[string][]Candidate{target.EpisodeID: {target}}
+	summary, err = analyzer.AnalyzeEpisodeKinds(context.Background(), target.EpisodeID, EpisodeMarkerKinds{Credits: true})
+	if err != nil {
+		t.Fatalf("AnalyzeEpisodeKinds credits: %v", err)
+	}
+	if summary.SeasonGroupsConsidered != 0 || summary.CreditsGroupsSkipped != 0 || summary.CreditsAudioMarkersWritten != 1 {
+		t.Fatalf("summary %+v, want only the credits kind, with the settled season compared again", summary)
+	}
+	if len(patchesOfKind(repo.patches, kindIntro)) != 0 {
+		t.Fatalf("patches %+v, want no intro patches for a credits re-detection", repo.patches)
+	}
+}
+
 func TestRunWritesAudioCreditsAndSeasonState(t *testing.T) {
 	repo := &fakeIntroRepository{enabledLibraries: 1}
 	extractor := &fakeFingerprintExtractor{}

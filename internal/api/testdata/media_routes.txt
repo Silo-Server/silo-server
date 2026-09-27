@@ -144,6 +144,7 @@ POST /api/v2/admin/items/{id}/metadata-translation	non-media
 GET /api/v2/admin/items/{id}/metadata-translation/jobs	non-media
 POST /api/v2/admin/items/{id}/metadata-translation/jobs/{job_id}/cancel	non-media
 POST /api/v2/admin/items/{id}/redetect-intro	non-media
+POST /api/v2/admin/items/{id}/redetect-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-metadata	non-media
 POST /api/v2/admin/items/{id}/split	non-media
@@ -1305,6 +1306,7 @@ POST /api/v2/admin/items/{id}/metadata-translation	non-media
 GET /api/v2/admin/items/{id}/metadata-translation/jobs	non-media
 POST /api/v2/admin/items/{id}/metadata-translation/jobs/{job_id}/cancel	non-media
 POST /api/v2/admin/items/{id}/redetect-intro	non-media
+POST /api/v2/admin/items/{id}/redetect-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-metadata	non-media
 POST /api/v2/admin/items/{id}/split	non-media

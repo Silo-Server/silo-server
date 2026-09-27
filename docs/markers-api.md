@@ -57,9 +57,13 @@ or withdraw that provider's existing ranges.
 or a movie from its configured sources; `movie_credits` on
 `GET /api/v2/admin/markers/capabilities` reports that movies are accepted. In
 `both` mode, eligible local detection fills missing intro and credits markers
-of an episode, or missing credits of a movie. The v1 refresh endpoint retains
-its local-only behavior, and it and both re-detect endpoints analyze episode
-intros only.
+of an episode, or missing credits of a movie.
+`POST /api/v2/admin/items/{id}/redetect-markers`, which `redetect_markers` on
+the same capabilities document reports, reruns local detection of an episode's
+intro, credits, or both, or of a movie's credits; see
+[admin-catalog-api.md](admin-catalog-api.md#episode-and-movie-marker-analysis).
+The v1 refresh endpoint retains its local-only behavior, and it, the v1
+re-detect endpoint, and v2 `redetect-intro` analyze episode intros only.
 
 ## Operations
 

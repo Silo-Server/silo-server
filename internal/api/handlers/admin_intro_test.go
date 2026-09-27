@@ -892,3 +892,158 @@ func TestAdminIntroEndpointsKeepTheirAnalysisScope(t *testing.T) {
 		}
 	}
 }
+
+// redetectHandler returns a handler in local mode whose eligibility reports
+// item as an eligible item of kind.
+func redetectHandler(analyzer *fakeIntroAnalyzer, item, kind string) *AdminIntroHandler {
+	handler := NewAdminIntroHandler(analyzer, fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
+		ItemID: item, Kind: kind, HasMediaFiles: true, IntroDetectionEnabled: true,
+	}}, context.Background(), nil)
+	handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeLocal)}}
+	return handler
+}
+
+func requireAPIError(t *testing.T, err error, status int, field string) {
+	t.Helper()
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != status || apiErr.Field != field {
+		t.Fatalf("err = %v, want %d with field %q", err, status, field)
+	}
+}
+
+// Re-detection of an episode runs only the kinds requested; all, the
+// default, runs both.
+func TestAdminRedetectItemMarkersRunsTheRequestedEpisodeKinds(t *testing.T) {
+	for _, tc := range []struct {
+		kind string
+		want intromarkers.EpisodeMarkerKinds
+	}{
+		{RedetectMarkersIntro, intromarkers.EpisodeMarkerKinds{Intro: true}},
+		{RedetectMarkersCredits, intromarkers.EpisodeMarkerKinds{Credits: true}},
+		{RedetectMarkersAll, intromarkers.EpisodeMarkerKinds{Intro: true, Credits: true}},
+		{"", intromarkers.EpisodeMarkerKinds{Intro: true, Credits: true}},
+	} {
+		analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1), movies: make(chan string, 1)}
+		handler := redetectHandler(analyzer, "ep1", intromarkers.MarkerItemEpisode)
+		status, err := handler.RedetectItemMarkers(t.Context(), "ep1", tc.kind)
+		if err != nil || status != "queued" {
+			t.Fatalf("kind %q: status=%q err=%v", tc.kind, status, err)
+		}
+		select {
+		case got := <-analyzer.kinds:
+			if got != tc.want {
+				t.Fatalf("kind %q analyzed %+v, want %+v", tc.kind, got, tc.want)
+			}
+		case id := <-analyzer.movies:
+			t.Fatalf("kind %q ran movie analysis for %q", tc.kind, id)
+		case <-time.After(time.Second):
+			t.Fatalf("kind %q: episode analysis did not run", tc.kind)
+		}
+	}
+}
+
+// A movie has credits only: credits and all run the movie analysis, and
+// intro takes episodes only, so a movie is rejected as not an episode
+// without analyzing anything.
+func TestAdminRedetectItemMarkersMovieCreditsOnly(t *testing.T) {
+	for _, kind := range []string{RedetectMarkersCredits, RedetectMarkersAll} {
+		analyzer := &fakeIntroAnalyzer{movies: make(chan string, 1), kinds: make(chan intromarkers.EpisodeMarkerKinds, 1)}
+		handler := redetectHandler(analyzer, "movie1", intromarkers.MarkerItemMovie)
+		status, err := handler.RedetectItemMarkers(t.Context(), "movie1", kind)
+		if err != nil || status != "queued" {
+			t.Fatalf("kind %q: status=%q err=%v", kind, status, err)
+		}
+		select {
+		case id := <-analyzer.movies:
+			if id != "movie1" {
+				t.Fatalf("kind %q analyzed movie %q", kind, id)
+			}
+		case kinds := <-analyzer.kinds:
+			t.Fatalf("kind %q ran episode analysis for %+v", kind, kinds)
+		case <-time.After(time.Second):
+			t.Fatalf("kind %q: movie analysis did not run", kind)
+		}
+	}
+
+	analyzer := &fakeIntroAnalyzer{movies: make(chan string, 1), kinds: make(chan intromarkers.EpisodeMarkerKinds, 1)}
+	handler := redetectHandler(analyzer, "movie1", intromarkers.MarkerItemMovie)
+	_, err := handler.RedetectItemMarkers(t.Context(), "movie1", RedetectMarkersIntro)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest || apiErr.Message != episodeMarkerMessages.wrongKind {
+		t.Fatalf("err = %v, want 400 %q", err, episodeMarkerMessages.wrongKind)
+	}
+	select {
+	case id := <-analyzer.movies:
+		t.Fatalf("intro re-detection analyzed movie %q", id)
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
+func TestAdminRedetectItemMarkersRejectsUnknownKind(t *testing.T) {
+	analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1)}
+	handler := redetectHandler(analyzer, "ep1", intromarkers.MarkerItemEpisode)
+	_, err := handler.RedetectItemMarkers(t.Context(), "ep1", "outro")
+	requireAPIError(t, err, http.StatusBadRequest, "kind")
+	select {
+	case kinds := <-analyzer.kinds:
+		t.Fatalf("unknown kind analyzed %+v", kinds)
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
+// Re-detection keeps the eligibility and mode checks of the other local
+// analysis endpoints.
+func TestAdminRedetectItemMarkersRejectsIneligibleItemsAndModes(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		eligibility fakeIntroEligibility
+		mode        markers.Mode
+		status      int
+	}{
+		{"disabled library", fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{ItemID: "ep1", HasMediaFiles: true}}, markers.ModeLocal, http.StatusConflict},
+		{"no files", fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{ItemID: "ep1", IntroDetectionEnabled: true}}, markers.ModeLocal, http.StatusConflict},
+		{"not an episode or a movie", fakeIntroEligibility{err: intromarkers.ErrMarkerItemNotFound}, markers.ModeLocal, http.StatusBadRequest},
+		{"mode off", fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{ItemID: "ep1", HasMediaFiles: true, IntroDetectionEnabled: true}}, markers.ModeOff, http.StatusConflict},
+		{"mode online", fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{ItemID: "ep1", HasMediaFiles: true, IntroDetectionEnabled: true}}, markers.ModeOnline, http.StatusConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1)}
+			handler := NewAdminIntroHandler(analyzer, tc.eligibility, context.Background(), nil)
+			handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(tc.mode)}}
+			_, err := handler.RedetectItemMarkers(t.Context(), "ep1", RedetectMarkersCredits)
+			requireAPIError(t, err, tc.status, "")
+			select {
+			case kinds := <-analyzer.kinds:
+				t.Fatalf("analyzed %+v", kinds)
+			case <-time.After(25 * time.Millisecond):
+			}
+		})
+	}
+}
+
+// One local analysis runs per item at a time, whatever kinds each request
+// selects.
+func TestAdminRedetectItemMarkersDedupsInFlightItem(t *testing.T) {
+	analyzer := &fakeIntroAnalyzer{started: make(chan string, 1), release: make(chan struct{})}
+	handler := redetectHandler(analyzer, "ep1", intromarkers.MarkerItemEpisode)
+	status, err := handler.RedetectItemMarkers(t.Context(), "ep1", RedetectMarkersIntro)
+	if err != nil || status != "queued" {
+		t.Fatalf("first: status=%q err=%v", status, err)
+	}
+	select {
+	case <-analyzer.started:
+	case <-time.After(time.Second):
+		t.Fatal("analysis did not start")
+	}
+	for _, kind := range []string{RedetectMarkersIntro, RedetectMarkersCredits} {
+		status, err := handler.RedetectItemMarkers(t.Context(), "ep1", kind)
+		if err != nil || status != "already_running" {
+			t.Fatalf("%s while running: status=%q err=%v", kind, status, err)
+		}
+	}
+	status, err = handler.RefreshEpisodeMarkers(t.Context(), "ep1", "redetect")
+	if err != nil || status != "already_running" {
+		t.Fatalf("redetect-intro while running: status=%q err=%v", status, err)
+	}
+	close(analyzer.release)
+}

@@ -203,20 +203,26 @@ export function useRefreshItemMetadata() {
   });
 }
 
-export type RedetectEpisodeIntroResponse = V2Result<"POST /api/v2/admin/items/{id}/redetect-intro">;
-export async function redetectEpisodeIntro(
-  episodeId: string,
-): Promise<RedetectEpisodeIntroResponse> {
-  return v2("POST /api/v2/admin/items/{id}/redetect-intro", {
-    path: { id: episodeId },
+/** The marker kinds an admin re-detection runs; a movie has credits only. */
+export type RedetectMarkersKind = "intro" | "credits" | "all";
+export type RedetectItemMarkersResponse =
+  V2Result<"POST /api/v2/admin/items/{id}/redetect-markers">;
+export async function redetectItemMarkers(
+  itemId: string,
+  kind: RedetectMarkersKind,
+): Promise<RedetectItemMarkersResponse> {
+  return v2("POST /api/v2/admin/items/{id}/redetect-markers", {
+    path: { id: itemId },
+    body: { kind },
     retryAuthentication: false,
   });
 }
 
-export function useRedetectEpisodeIntro() {
+export function useRedetectItemMarkers() {
   return useMutation({
     retry: false,
-    mutationFn: redetectEpisodeIntro,
+    mutationFn: ({ itemId, kind }: { itemId: string; kind: RedetectMarkersKind }) =>
+      redetectItemMarkers(itemId, kind),
     onSuccess: (response) => {
       toast.success(
         response.status === "already_running"

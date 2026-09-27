@@ -1717,6 +1717,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/items/{id}/redetect-markers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Explicitly rerun local detection of an episode's intro, credits, or both, or of a movie's best-effort credits. */
+    post: operations["redetectAdminItemMarkers"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/items/{id}/refresh-markers": {
     parameters: {
       query?: never;
@@ -12563,6 +12580,15 @@ export interface components {
       /** Format: int64 */
       season_number?: number;
     };
+    AdminItemMarkersRedetect: {
+      /**
+       * @description intro, credits, or all (both). A movie has credits only: all means credits, and intro is rejected.
+       * @default all
+       * @example credits
+       * @enum {string}
+       */
+      kind: "intro" | "credits" | "all";
+    };
     AdminItemMetadataRefreshInputBody: {
       /**
        * @default quick
@@ -12813,8 +12839,10 @@ export interface components {
     AdminMarkerCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
-      /** @description The item refresh-markers operation accepts movies, and local analysis looks for their end credits on a best-effort basis; redetect-intro stays episode-only, since movies never get intros */
+      /** @description The item refresh-markers operation, and redetect-markers with kind credits or all, accept movies, and local analysis looks for their end credits on a best-effort basis; redetect-intro stays episode-only, since movies never get intros */
       movie_credits: boolean;
+      /** @description The item redetect-markers operation reruns local detection of the kind requested: intro, credits, or all */
+      redetect_markers: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -43962,6 +43990,154 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  redetectAdminItemMarkers: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["AdminItemMarkersRedetect"];
+      };
+    };
+    responses: {
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminEpisodeMarkersStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };

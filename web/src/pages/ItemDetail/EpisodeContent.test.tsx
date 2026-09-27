@@ -49,7 +49,7 @@ const mocks = vi.hoisted(() => {
     useSeasonEpisodes: vi.fn(),
     useAuth: vi.fn(),
     useCurrentProfile: vi.fn(),
-    useRedetectEpisodeIntro: vi.fn(),
+    useRedetectItemMarkers: vi.fn(),
     useRefreshItemMetadata: vi.fn(),
     useWatchedStateMutation: vi.fn(),
     useRating: vi.fn(),
@@ -96,7 +96,7 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
 }));
 
 vi.mock("@/hooks/queries/items", () => ({
-  useRedetectEpisodeIntro: mocks.useRedetectEpisodeIntro,
+  useRedetectItemMarkers: mocks.useRedetectItemMarkers,
   useRefreshItemMetadata: mocks.useRefreshItemMetadata,
   useWatchedStateMutation: mocks.useWatchedStateMutation,
 }));
@@ -292,7 +292,7 @@ describe("EpisodeContent", () => {
       mutate: vi.fn(),
       isPending: false,
     });
-    mocks.useRedetectEpisodeIntro.mockReturnValue({
+    mocks.useRedetectItemMarkers.mockReturnValue({
       mutate: vi.fn(),
       isPending: false,
     });
@@ -542,10 +542,10 @@ describe("EpisodeContent", () => {
     expect(mocks.capturedActionBarProps.value).not.toHaveProperty("onRatingChange");
   });
 
-  it("passes intro re-detection action only for admins", () => {
+  it("passes marker re-detection only for admins", () => {
     const redetect = vi.fn();
     mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
-    mocks.useRedetectEpisodeIntro.mockReturnValue({
+    mocks.useRedetectItemMarkers.mockReturnValue({
       mutate: redetect,
       isPending: false,
     });
@@ -558,12 +558,13 @@ describe("EpisodeContent", () => {
 
     expect(mocks.capturedActionBarProps.value).toMatchObject({
       isAdmin: true,
-      isRedetectingIntro: false,
+      isRedetectingMarkers: false,
     });
-    const onRedetectIntro = mocks.capturedActionBarProps.value?.onRedetectIntro;
-    expect(typeof onRedetectIntro).toBe("function");
-    (onRedetectIntro as () => void)();
-    expect(redetect).toHaveBeenCalledWith("episode-1");
+    expect(mocks.capturedActionBarProps.value?.redetectCreditsOnly).toBeFalsy();
+    const onRedetectMarkers = mocks.capturedActionBarProps.value?.onRedetectMarkers;
+    expect(typeof onRedetectMarkers).toBe("function");
+    (onRedetectMarkers as (kind: string) => void)("intro");
+    expect(redetect).toHaveBeenCalledWith({ itemId: "episode-1", kind: "intro" });
 
     mocks.useAuth.mockReturnValue({ user: null });
     renderToStaticMarkup(
@@ -571,6 +572,6 @@ describe("EpisodeContent", () => {
         <EpisodeContent item={makeEpisodeItem()} />
       </MemoryRouter>,
     );
-    expect(mocks.capturedActionBarProps.value?.onRedetectIntro).toBeUndefined();
+    expect(mocks.capturedActionBarProps.value?.onRedetectMarkers).toBeUndefined();
   });
 });

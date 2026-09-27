@@ -135,7 +135,8 @@ provider marker the lookup withdrew. Unlike an intro group, a
 credits season group whose stored analysis still stands is not compared again
 from playback: most episodes have no credits local analysis can find, and
 every start would otherwise repeat the comparison. Admin refresh compares both
-kinds again.
+kinds again, and admin re-detection compares again the kinds it asks for:
+the intro, the credits, or both.
 
 ### Tail pass
 

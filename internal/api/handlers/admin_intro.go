@@ -111,6 +111,33 @@ func (h *AdminIntroHandler) RefreshEpisodeMarkers(ctx context.Context, itemID, a
 	return h.refreshItemMarkers(ctx, itemID, action, introMarkerKinds)
 }
 
+// The marker kinds RedetectItemMarkers accepts.
+const (
+	RedetectMarkersIntro   = "intro"
+	RedetectMarkersCredits = "credits"
+	RedetectMarkersAll     = "all"
+)
+
+// RedetectItemMarkers serves the /api/v2 redetect-markers operation. It
+// queues local re-detection of the marker kinds kind selects: an episode's
+// intro, credits, or both ("all", the default), or a movie's credits, which
+// "credits" and "all" mean for a movie. A movie has no local intro, so
+// "intro" takes episodes only and rejects a movie as not an episode.
+func (h *AdminIntroHandler) RedetectItemMarkers(ctx context.Context, itemID, kind string) (string, error) {
+	var kinds intromarkers.EpisodeMarkerKinds
+	switch kind {
+	case RedetectMarkersIntro:
+		kinds = introMarkerKinds
+	case RedetectMarkersCredits:
+		kinds = intromarkers.EpisodeMarkerKinds{Credits: true}
+	case RedetectMarkersAll, "":
+		kinds = allMarkerKinds
+	default:
+		return "", fieldError("kind", "Kind must be intro, credits, or all")
+	}
+	return h.refreshItemMarkers(ctx, itemID, "redetect-markers", kinds)
+}
+
 // refreshItemMarkers queues local marker analysis of an item for kinds. A
 // movie gets credits only, so a request without credits takes episodes
 // only, rejects a movie like any other item that is not an episode, and

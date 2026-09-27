@@ -221,33 +221,55 @@ these curation actions.
 
 ## Episode and movie marker analysis
 
-`POST /api/v2/admin/items/{id}/refresh-markers` and
+`POST /api/v2/admin/items/{id}/refresh-markers`,
+`POST /api/v2/admin/items/{id}/redetect-markers`, and
 `POST /api/v2/admin/items/{id}/redetect-intro` require acting-administrator
-authorization. Both run the existing local analyzer. `refresh-markers` finds an
-episode's intros and end credits, or a movie's end credits. Movie credits are
-best effort, and movies never get local intros. `redetect-intro`, like the v1
-routes, finds episode intros only and answers any other item, a movie
-included, with `400`. For local analysis the item must exist, have media
-files, and have at least one in a library with marker detection enabled: a
-series or mixed library for an episode, a movie or mixed library for a movie.
-`refresh-markers` answers an item that is neither an episode nor a movie with
-`400`. Marker settings must allow local analysis; off and online-only modes
-return `409`. Unconfigured dependencies return `503`.
+authorization and run the existing local analyzer, which finds an episode's
+intros and end credits and a movie's end credits. Movie credits are best
+effort, and movies never get local intros.
 
-`GET /api/v2/admin/markers/capabilities` tells a client whether it can send a
-movie to `refresh-markers`: `movie_credits: true` means the server accepts movie
-IDs there and looks for their credits locally. Servers without the field
-analyze episodes only and answer a movie with `400`. The document describes the
+- `refresh-markers` refreshes an episode or a movie from its configured
+  sources. In `both` mode, local analysis then fills an episode's missing
+  intro or credits, or a movie's missing credits; in `local` mode it runs
+  local analysis of every kind.
+- `redetect-markers` backs the web **Re-detect Markers** action for episodes
+  and **Re-detect Credits** for movies. Its optional JSON body
+  `{"kind": "intro" | "credits" | "all"}` selects what local detection runs
+  again; an absent body or kind means `all`. For an episode, `intro` and
+  `credits` run that kind alone and `all` runs both. For a movie, `credits`
+  and `all` run the credits analysis. `intro` takes episodes only, so it
+  answers a movie like any other item that is not an episode. Any other kind
+  returns a `422` validation problem at `body.kind`.
+- `redetect-intro` ports the v1 route and, like the v1 `refresh-markers` and
+  `redetect-intro` routes, finds episode intros only.
+
+For local analysis the item must exist, have media files, and have at least
+one in a library with marker detection enabled: a series or mixed library for
+an episode, a movie or mixed library for a movie. An item of the wrong type
+returns a `422` validation problem (`400` on v1): anything but an episode for
+`redetect-intro` and `redetect-markers` with `intro`, and anything but an
+episode or a movie otherwise. Marker settings must allow local analysis; off
+and online-only modes return `409`. Unconfigured dependencies return `503`.
+
+`GET /api/v2/admin/markers/capabilities` tells a client which of these it can
+use. `movie_credits: true` means the server accepts movie IDs in
+`refresh-markers` and in `redetect-markers` with `credits` or `all`, and looks
+for their credits locally. `redetect_markers: true` means the server offers
+`redetect-markers`. Servers without a field lack that support: without
+`movie_credits` they analyze episodes only and reject a movie, and without
+`redetect_markers` the operation does not exist. The document describes the
 build; marker settings and library switches still decide whether an item is
 analyzed.
 
-Both return `202` with `status: "queued"` or `status: "already_running"`.
+All three return `202` with `status: "queued"` or `status: "already_running"`.
 These statuses acknowledge process-local background work. There is no persisted
 job, job Location, cluster-wide exclusion, or restart recovery promise. Active
-work is coalesced by item ID within the process. Successful analysis retains
-the existing marker-update notifications.
+work is coalesced by item ID within the process: while any local analysis of
+an item runs, another request for that item reports `already_running`, whatever
+kinds it asks for. Successful analysis retains the existing marker-update
+notifications.
 
-Both operations are non-retryable. The web re-detection action disables mutation
+The operations are non-retryable. The web re-detection actions disable mutation
 retries and authentication replay. No native administrator caller or matching
 Jellyfin action exists; playback marker reads remain separate.
 

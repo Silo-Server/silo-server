@@ -454,7 +454,7 @@ func (a *Analyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (RunSum
 
 // AnalyzeEpisodeKinds analyzes the season groups of an episode's files for
 // the kinds selected, comparing each group again even when its stored
-// analysis still stands. Admin refresh uses it.
+// analysis still stands. Admin refresh and re-detection use it.
 func (a *Analyzer) AnalyzeEpisodeKinds(ctx context.Context, episodeID string, kinds EpisodeMarkerKinds) (RunSummary, error) {
 	return a.analyzeEpisode(ctx, episodeID, kinds, true)
 }
