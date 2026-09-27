@@ -22,30 +22,54 @@ type movieRunOptions struct {
 	progress func(done int)
 }
 
-// runMovies analyzes the movies the scheduled run covers, within the movie
-// budget, after the episodes.
-func (a *Analyzer) runMovies(ctx context.Context, progress func(done, total int)) (RunSummary, error) {
-	summary := RunSummary{}
-	candidates, err := a.repo.ListMovieCandidates(ctx, a.nodeName())
-	if err != nil {
-		return summary, err
-	}
-	summary.MoviesConsidered = len(candidates)
-	if len(candidates) == 0 {
-		return summary, nil
-	}
+// movieCandidatePageSize is how many movies the scheduled run lists at a
+// time, so a large library's backlog is neither read nor held at once.
+const movieCandidatePageSize = 200
+
+// runMovies analyzes the movies the scheduled run covers, a page at a time,
+// within the movie budget, after the episodes. The budget includes listing
+// the movies. progress is called with the number of movies finished and the
+// share of the budget used, from 0 to 1.
+func (a *Analyzer) runMovies(ctx context.Context, progress func(done int, budgetUsed float64)) (RunSummary, error) {
 	budget := a.movieBudget
 	if budget <= 0 {
 		budget = movieCreditsRunBudget
 	}
-	mergeRunSummary(&summary, a.analyzeMovies(ctx, candidates, movieRunOptions{
-		deadline: a.clock().Add(budget),
-		progress: func(done int) {
-			if progress != nil {
-				progress(done, len(candidates))
-			}
-		},
-	}))
+	started := a.clock()
+	deadline := started.Add(budget)
+	pageSize := a.moviePageSize
+	if pageSize <= 0 {
+		pageSize = movieCandidatePageSize
+	}
+	summary := RunSummary{}
+	var after *movieCandidateCursor
+	for {
+		candidates, next, err := a.repo.ListMovieCandidates(ctx, a.nodeName(), after, pageSize)
+		if err != nil {
+			return summary, err
+		}
+		finished := summary.MoviesConsidered
+		summary.MoviesConsidered += len(candidates)
+		if len(candidates) == 0 {
+			break
+		}
+		mergeRunSummary(&summary, a.analyzeMovies(ctx, candidates, movieRunOptions{
+			deadline: deadline,
+			progress: func(done int) {
+				if progress != nil {
+					progress(finished+done, min(1, float64(a.clock().Sub(started))/float64(budget)))
+				}
+			},
+		}))
+		if summary.MovieBudgetExhausted || ctx.Err() != nil || len(candidates) < pageSize {
+			break
+		}
+		if a.pastDeadline(deadline) {
+			summary.MovieBudgetExhausted = true
+			break
+		}
+		after = next
+	}
 	return summary, ctx.Err()
 }
 

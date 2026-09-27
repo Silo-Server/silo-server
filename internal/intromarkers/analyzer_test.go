@@ -29,6 +29,7 @@ type fakeIntroRepository struct {
 	artifacts          map[artifactSlot]Artifact
 	artifactFailures   []ArtifactFailure
 	groupListCalls     int
+	movieListCalls     int
 	// seasonStateHash, when set, is the only analysis hash seasonState
 	// answers for.
 	seasonStateHash string
@@ -68,10 +69,25 @@ func (f *fakeIntroRepository) ListChapterSilenceBackfillCandidates(context.Conte
 	return append([]Candidate(nil), f.backfillCandidates...), nil
 }
 
-func (f *fakeIntroRepository) ListMovieCandidates(context.Context, string) ([]Candidate, error) {
+// ListMovieCandidates pages movieCandidates in order; its cursor holds only
+// the last file's ID.
+func (f *fakeIntroRepository) ListMovieCandidates(_ context.Context, _ string, after *movieCandidateCursor, limit int) ([]Candidate, *movieCandidateCursor, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]Candidate(nil), f.movieCandidates...), nil
+	f.movieListCalls++
+	start := 0
+	if after != nil {
+		for i, candidate := range f.movieCandidates {
+			if candidate.FileID == after.fileID {
+				start = i + 1
+			}
+		}
+	}
+	page := append([]Candidate(nil), f.movieCandidates[start:min(len(f.movieCandidates), start+limit)]...)
+	if len(page) == 0 {
+		return nil, nil, nil
+	}
+	return page, &movieCandidateCursor{fileID: page[len(page)-1].FileID}, nil
 }
 
 func (f *fakeIntroRepository) ListMovieCandidatesForItem(_ context.Context, contentID string) ([]Candidate, error) {

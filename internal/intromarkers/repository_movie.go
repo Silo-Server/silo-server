@@ -3,6 +3,7 @@ package intromarkers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -12,10 +13,14 @@ import (
 // extras, no multi-part films) of at least movieCreditsMinimumDurationSeconds
 // in enabled movie and mixed libraries with marker detection on. Movies have
 // no episode or season, so both are empty.
-const movieCandidateSelectFrom = `
+const movieCandidateSelectFrom = movieCandidateSelect + movieCandidateFrom
+
+const movieCandidateSelect = `
 	SELECT mf.id,
 	       '',
-	       '',` + candidateFileColumns + `
+	       '',` + candidateFileColumns
+
+const movieCandidateFrom = `
 	FROM media_files mf
 	JOIN media_folders folders ON folders.id = mf.media_folder_id
 	JOIN media_items mi ON mi.content_id = mf.content_id`
@@ -31,8 +36,21 @@ const movieCandidateWhere = `
 	  AND COALESCE(mf.duration, 0) >= $1
 	  AND COALESCE(mf.presentation_part_total, 1) <= 1`
 
-// ListMovieCandidates returns the movie files the nightly run should
-// analyze for credits, never-analyzed files first, then the newest.
+// movieCandidateCursor is the position of a file in ListMovieCandidates'
+// order: whether its movie tail is a failure being retried, when the file
+// was created, and its ID.
+type movieCandidateCursor struct {
+	retried   bool
+	createdAt time.Time
+	fileID    int
+}
+
+// ListMovieCandidates returns up to limit of the movie files the nightly
+// run should analyze for credits, never-analyzed files first, then the
+// newest, starting after the file at after (nil for the first page). It
+// also returns the position of the last file listed, to pass as after for
+// the next page; the order is decided when a file is listed, so a file the
+// run analyzed and that is still eligible is not listed again.
 //
 // A file whose credits came from a higher-priority source is left out, as
 // is one whose movie tail pass is stored for the file as it is now: complete
@@ -50,9 +68,36 @@ const movieCandidateWhere = `
 //
 // The artifact lookup is a LEFT JOIN, a primary-key probe per file, like the
 // silence backfill's.
-func (r *Repository) ListMovieCandidates(ctx context.Context, node string) ([]Candidate, error) {
+func (r *Repository) ListMovieCandidates(ctx context.Context, node string, after *movieCandidateCursor, limit int) ([]Candidate, *movieCandidateCursor, error) {
 	key := movieCreditsTailKey()
-	rows, err := r.pool.Query(ctx, movieCandidateSelectFrom+`
+	args := []any{
+		movieCreditsMinimumDurationSeconds,
+		key.AlgorithmVersion,
+		key.ConfigHash,
+		key.Kind,
+		models.MarkerSourceScanner,
+		ArtifactComplete,
+		ArtifactUnusable,
+		ArtifactFailed,
+		node,
+		tailDetailNoVideo,
+		tailDetailUnsupportedCodec,
+		limit,
+	}
+	// The order is ascending on the retry flag, then descending on creation
+	// time and ID, so a page starts at a later flag or, on the same flag, at
+	// an older (created_at, id) pair.
+	page := ""
+	if after != nil {
+		page = `
+		  AND (COALESCE(art.status = $8, false) > $13
+		       OR (COALESCE(art.status = $8, false) = $13 AND (mf.created_at, mf.id) < ($14, $15)))`
+		args = append(args, after.retried, after.createdAt, after.fileID)
+	}
+	rows, err := r.pool.Query(ctx, movieCandidateSelect+`,
+	       COALESCE(art.status = $8, false),
+	       mf.created_at,
+	       mf.id`+movieCandidateFrom+`
 		LEFT JOIN media_intro_fingerprints art
 		       ON art.media_file_id = mf.id
 		      AND art.algorithm_version = $2
@@ -69,24 +114,20 @@ func (r *Repository) ListMovieCandidates(ctx context.Context, node string) ([]Ca
 		      AND (art.status = $6
 		           OR (art.status = $7 AND COALESCE(art.detail, '') NOT IN ($10, $11))
 		           OR (art.status = $8 AND art.retry_after > NOW() AND art.recorded_by = $9)),
-		      false)
-		ORDER BY COALESCE(art.status = $8, false), mf.created_at DESC, mf.id DESC`,
-		movieCreditsMinimumDurationSeconds,
-		key.AlgorithmVersion,
-		key.ConfigHash,
-		key.Kind,
-		models.MarkerSourceScanner,
-		ArtifactComplete,
-		ArtifactUnusable,
-		ArtifactFailed,
-		node,
-		tailDetailNoVideo,
-		tailDetailUnsupportedCodec,
+		      false)`+page+`
+		ORDER BY COALESCE(art.status = $8, false), mf.created_at DESC, mf.id DESC
+		LIMIT $12`,
+		args...,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("listing movie credits candidates: %w", err)
+		return nil, nil, fmt.Errorf("listing movie credits candidates: %w", err)
 	}
-	return scanCandidates(rows)
+	var last movieCandidateCursor
+	candidates, err := scanCandidates(rows, &last.retried, &last.createdAt, &last.fileID)
+	if err != nil || len(candidates) == 0 {
+		return candidates, nil, err
+	}
+	return candidates, &last, nil
 }
 
 // ListMovieCandidatesForItem returns the movie files of a movie item that

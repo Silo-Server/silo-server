@@ -175,7 +175,7 @@ func TestAnalyzeMovieStoresTheTailOnlyOnceCreditsAreSettled(t *testing.T) {
 }
 
 // RunEpisodes, the pass a server without Chromaprint runs outside the
-// cluster lock, leaves movies to the lock holder's Run.
+// cluster lock, leaves movies to RunMovies under the lock.
 func TestRunEpisodesLeavesMovies(t *testing.T) {
 	repo := &fakeIntroRepository{enabledLibraries: 1, movieCandidates: []Candidate{movieCandidate(10, 7200)}}
 	sampler := &fakeMovieSampler{}
@@ -185,6 +185,31 @@ func TestRunEpisodesLeavesMovies(t *testing.T) {
 	}
 	if summary.MoviesConsidered != 0 || sampler.tailCount() != 0 || len(creditsPatches(repo)) != 0 {
 		t.Fatalf("summary %+v, %d tail passes, patches %+v; want movies untouched", summary, sampler.tailCount(), creditsPatches(repo))
+	}
+}
+
+// RunMovies, the pass a server without Chromaprint runs under the cluster
+// lock after its episodes, analyzes movies and leaves episodes alone.
+func TestRunMoviesLeavesEpisodes(t *testing.T) {
+	repo := &fakeIntroRepository{
+		enabledLibraries:   1,
+		eligibleCandidates: []Candidate{{FileID: 1, EpisodeID: "episode", SeasonID: "season", DurationSeconds: 1800}},
+		movieCandidates:    []Candidate{movieCandidate(10, 7200)},
+	}
+	sampler := &fakeMovieSampler{}
+	summary, err := movieAnalyzer(repo, sampler).RunMovies(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RunMovies: %v", err)
+	}
+	if summary.FilesConsidered != 0 || summary.MoviesConsidered != 1 || summary.MovieCreditsMarkersWritten != 1 {
+		t.Fatalf("summary %+v; want the movie analyzed and no episodes", summary)
+	}
+
+	// The task merges both passes' summaries; they count the same libraries.
+	episodes := RunSummary{LibrariesScanned: 1, FilesConsidered: 4}
+	episodes.Merge(summary)
+	if episodes.LibrariesScanned != 1 || episodes.FilesConsidered != 4 || episodes.MovieCreditsMarkersWritten != 1 {
+		t.Fatalf("merged summary %+v; want both passes' counts over one library", episodes)
 	}
 }
 
@@ -302,6 +327,23 @@ func TestAnalyzeMovieWithoutVisualsUsesChaptersOnly(t *testing.T) {
 	}
 	if sampler.tailCount() != 0 || summary.MovieCreditsMarkersWritten != 0 {
 		t.Fatalf("%d tail passes, summary %+v", sampler.tailCount(), summary)
+	}
+}
+
+// The scheduled run lists movies a page at a time until none are left.
+func TestRunPagesMovies(t *testing.T) {
+	repo := &fakeIntroRepository{enabledLibraries: 1, movieCandidates: []Candidate{
+		movieCandidate(10, 7200), movieCandidate(11, 7200), movieCandidate(12, 7200), movieCandidate(13, 7200), movieCandidate(14, 7200),
+	}}
+	sampler := &fakeMovieSampler{}
+	analyzer := movieAnalyzer(repo, sampler)
+	analyzer.moviePageSize = 2
+	summary, err := analyzer.RunMovies(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RunMovies: %v", err)
+	}
+	if repo.movieListCalls != 3 || sampler.tailCount() != 5 || summary.MoviesConsidered != 5 || summary.MovieCreditsMarkersWritten != 5 {
+		t.Fatalf("%d listings, %d tail passes, summary %+v; want three pages covering five movies", repo.movieListCalls, sampler.tailCount(), summary)
 	}
 }
 
