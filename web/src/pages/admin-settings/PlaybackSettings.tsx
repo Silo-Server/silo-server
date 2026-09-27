@@ -314,9 +314,9 @@ export default function PlaybackSettings() {
           restartAll={allRestart([...TRANSCODING_ESSENTIAL_KEYS, ...TRANSCODING_ADVANCED_KEYS])}
         >
           <SettingField
-            label="Transcoding"
+            label="Video transcoding"
             type="toggle"
-            description="Off serves only files clients can already play."
+            description="Off never re-encodes video. Silo still repackages files and converts audio for devices that need it."
             value={form.getValue("playback.transcode_enabled")}
             onChange={(v) => form.setValue("playback.transcode_enabled", v)}
             restartRequired={restartKeys.has("playback.transcode_enabled")}
