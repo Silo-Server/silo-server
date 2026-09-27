@@ -3804,10 +3804,12 @@ func compatAACCodecString(profile string, transcoded bool) string {
 // compatDTSCodecString maps a copied DTS track's probed profile to its HLS
 // sample-entry code, matching Jellyfin 12: core DTS (and unknown profiles) is
 // dtsc, the lossless and high-resolution DTS-HD profiles are dtsh, and DTS
-// Express is dtse.
+// Express is dtse. jellyfin-ffmpeg 8 also reports DTS:X on an HRA stream; that
+// is still DTS-HD HRA underneath, so it stays dtsh where Jellyfin 12 falls
+// back to dtsc.
 func compatDTSCodecString(profile string) string {
 	switch strings.ToUpper(strings.TrimSpace(profile)) {
-	case "DTS-HD HRA", "DTS-HD MA", "DTS-HD MA + DTS:X", "DTS-HD MA + DTS:X IMAX": //nolint:goconst // ffprobe DTS profile names
+	case "DTS-HD HRA", "DTS-HD HRA + DTS:X", "DTS-HD HRA + DTS:X IMAX", "DTS-HD MA", "DTS-HD MA + DTS:X", "DTS-HD MA + DTS:X IMAX": //nolint:goconst // ffprobe DTS profile names
 		return hlsCodecDTSHD
 	case "DTS EXPRESS":
 		return "dtse"
