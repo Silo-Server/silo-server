@@ -131,6 +131,27 @@ describe("useMarkerDetectionKinds", () => {
     expect(result.current).toBeUndefined();
   });
 
+  it.each(["capabilities", "settings"])(
+    "offers every kind again when the %s refetch fails",
+    async (failing) => {
+      let fail = false;
+      const { client, wrapper } = setup((path) => {
+        const isFailing = path.endsWith(
+          failing === "capabilities" ? "/markers/capabilities" : "/settings/effective",
+        );
+        if (fail && isFailing) return jsonResponse({ title: "Unavailable", status: 503 }, 503);
+        return detectionServer(true, { "markers.detect_credits": "false" })(path);
+      });
+      client.setDefaultOptions({ queries: { retry: false } });
+      const { result } = renderHook(() => useMarkerDetectionKinds(), { wrapper });
+      await waitFor(() => expect(result.current).toEqual({ intro: true, credits: false }));
+
+      fail = true;
+      await act(() => client.refetchQueries());
+      await waitFor(() => expect(result.current).toBeUndefined());
+    },
+  );
+
   it("reads nothing until enabled", () => {
     const { calls, wrapper } = setup(detectionServer(true, {}));
     renderHook(() => useMarkerDetectionKinds(false), { wrapper });

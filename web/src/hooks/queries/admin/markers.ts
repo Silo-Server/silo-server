@@ -33,13 +33,15 @@ export interface MarkerDetectionKinds {
  * Reads the markers.detect_intros and markers.detect_credits settings. It
  * returns undefined until they load, when they cannot be read, and on an API
  * node that ignores them, so callers then offer every kind and leave the
- * decision to the server.
+ * decision to the server. A failed refetch counts as unreadable: the cached
+ * answer may describe another node or an outdated setting.
  */
 export function useMarkerDetectionKinds(enabled = true): MarkerDetectionKinds | undefined {
   const capabilities = useAdminMarkerCapabilities(enabled);
-  const honorsSettings = capabilities.data?.detection_kind_settings === true;
+  const honorsSettings =
+    !capabilities.isError && capabilities.data?.detection_kind_settings === true;
   const settings = useAdminServerSettings({ enabled: enabled && honorsSettings });
-  if (!honorsSettings || !settings.data) return undefined;
+  if (!honorsSettings || settings.isError || !settings.data) return undefined;
   return {
     intro: detectionToggleEnabled(settings.data["markers.detect_intros"]),
     credits: detectionToggleEnabled(settings.data["markers.detect_credits"]),
