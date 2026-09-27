@@ -461,3 +461,22 @@ func TestCompatDVStripOnAPIHostRequiresLocalAudioRecipeForDownmix(t *testing.T) 
 		})
 	}
 }
+
+func TestCompatDVStripIgnoresUnroutableNodes(t *testing.T) {
+	unhealthy := dvStripNode(t, "http://unhealthy:8080", dvStripTransformation)
+	unhealthy.Healthy = false
+	disabled := dvStripNode(t, "http://disabled:8080", dvStripTransformation)
+	disabled.Enabled = false
+	handler := &PlaybackHandler{
+		NodePlanner: dvStripNodePlanner{
+			compatToneMapInventoryPlanner: compatToneMapInventoryPlanner{urls: []string{unhealthy.URL, disabled.URL}},
+			nodes:                         map[string]*nodepool.Node{unhealthy.URL: unhealthy, disabled.URL: disabled},
+		},
+		compatDVRPUProbe:        func(context.Context, string) bool { return true },
+		compatDVStripLocalProbe: func() bool { return false },
+	}
+
+	if handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}, 0) {
+		t.Fatal("an unhealthy or disabled node made the strip executable")
+	}
+}

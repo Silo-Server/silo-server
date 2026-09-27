@@ -153,8 +153,8 @@ func (h *PlaybackHandler) compatDVStripLocalAvailable(ctx context.Context) bool 
 	return err == nil && registry.Available(playback.TransformationServerDV7HDR10V3)
 }
 
-// compatAnyTranscodeNodeCanStrip reports whether a pooled transcode node's
-// stored capability report advertises the strip recipe, and audio_to_aac v2
+// compatAnyTranscodeNodeCanStrip reports whether a routable pooled transcode
+// node's stored capability report advertises the strip recipe, and audio_to_aac v2
 // too when the remux downmixes surround audio.
 func (h *PlaybackHandler) compatAnyTranscodeNodeCanStrip(requiresAudioBoost bool) bool {
 	enumerator, canList := h.NodePlanner.(compatTranscodeNodeEnumerator)
@@ -163,8 +163,10 @@ func (h *PlaybackHandler) compatAnyTranscodeNodeCanStrip(requiresAudioBoost bool
 		return false
 	}
 	for _, nodeURL := range enumerator.TranscodeNodeURLs() {
+		// The URL list includes unhealthy nodes; only a node route selection
+		// could pick right now makes the strip executable.
 		node, ok := lookup.TranscodeNodeByURL(nodeURL)
-		if !ok {
+		if !ok || !node.Enabled || !node.Healthy {
 			continue
 		}
 		if info, ok := compatNodeReport(node); ok && compatSupportsDVStrip(info.Transformations) &&
