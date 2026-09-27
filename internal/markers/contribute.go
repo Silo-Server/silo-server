@@ -177,21 +177,31 @@ var urlInText = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://\S+`)
 // authSchemeInText matches a credential after an HTTP auth scheme word.
 var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)\s+[^\s"',;]+`)
 
-// secretPairInText matches a secret-named key followed by ":" or "=" and its
-// value, as in "api_key=abc" or `"x-api-key": "abc"`. The key markers mirror
-// logredact.SecretKey.
-var secretPairInText = regexp.MustCompile(`(?i)([\w.-]*(?:password|secret|token|api[_-]?key|authorization|cookie)[\w.-]*"?\s*[:=]\s*"?)[^\s"',;&]+`)
+// keyValueInText matches a key followed by ":" or "=" and its value, as in
+// "api_key=abc" or `"x-api-key": "abc"`. Whether the key names a secret is
+// left to logredact.SecretKey, so new markers there apply here too.
+var keyValueInText = regexp.MustCompile(`([\w.-]+)("?\s*[:=]\s*"?)([^\s"',;&]+)`)
 
 // submissionErrorText is a provider error's message safe to log and store.
 // URL errors are sanitized structurally; in other error text (gRPC status
 // text from a plugin, say) a quoted URL loses its query, fragment and
 // userinfo, and auth-scheme or key=value secrets are masked. It is best
-// effort over free text, not a guarantee.
+// effort over free text, not a guarantee: a bare secret with no key and no
+// auth scheme ("invalid token sk-abc") is left as is, since masking every
+// word after "token" would also eat ordinary diagnostics.
 func submissionErrorText(err error) string {
 	msg := logredact.SanitizeURLError(err).Error()
 	msg = urlInText.ReplaceAllStringFunc(msg, logredact.SanitizeURL)
 	msg = authSchemeInText.ReplaceAllString(msg, "${1} "+logredact.Placeholder)
-	return secretPairInText.ReplaceAllString(msg, "${1}"+logredact.Placeholder)
+	return keyValueInText.ReplaceAllStringFunc(msg, func(pair string) string {
+		m := keyValueInText.FindStringSubmatch(pair)
+		// Header-style names ("x-api-key") use hyphens where SecretKey's
+		// markers use underscores.
+		if !logredact.SecretKey(strings.ReplaceAll(m[1], "-", "_")) {
+			return pair
+		}
+		return m[1] + m[2] + logredact.Placeholder
+	})
 }
 
 func (s *ContributionService) contributeSegment(
@@ -265,7 +275,8 @@ func (s *ContributionService) contributeSegment(
 	}
 	claim, claimed, err := s.store.Claim(ctx, row, contributionClaimLease)
 	if err != nil {
-		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusError, Reason: err.Error()}, true
+		// Reason reaches the task error; a store error can quote a DSN.
+		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusError, Reason: submissionErrorText(err)}, true
 	}
 	if !claimed {
 		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusSkipped, Reason: "already submitted for this item"}, true

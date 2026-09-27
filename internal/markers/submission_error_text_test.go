@@ -31,6 +31,7 @@ func TestSubmissionErrorTextMasksSecretsOutsideHTTPURLs(t *testing.T) {
 		{`rpc error: desc = rejected {"x-api-key": "hdrkey9"}`, "hdrkey9", "rejected"},
 		{"upstream said: Authorization: Bearer eyJtok.en.sig was expired", "eyJtok", "was expired"},
 		{"token expired, please retry", "", "token expired, please retry"},
+		{"session_token=tk9zz; retry=3", "tk9zz", "retry=3"},
 	}
 	for _, tc := range cases {
 		got := submissionErrorText(&SubmissionInvalidError{Message: tc.in})
