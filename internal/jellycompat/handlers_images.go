@@ -151,8 +151,9 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 			h.serveImageURL(w, r, imageURL)
 			return
 		}
-	}
-	if imageURL, ok := h.images.LookupSized(routeID, imageType, "", imageSize); ok {
+		// A tag the client just received may name artwork newer than this
+		// node's route cache, so tagged requests resolve from the catalog.
+	} else if imageURL, ok := h.images.LookupSized(routeID, imageType, "", imageSize); ok {
 		h.serveImageURL(w, r, imageURL)
 		return
 	}

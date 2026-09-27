@@ -509,7 +509,7 @@ func TestHandleItemImageServesCurrentImageForTagSignedWithOldSecret(t *testing.T
 		UpdatedAt:       updatedAt,
 	}
 	cache := NewImageCache(time.Hour, func() time.Time { return updatedAt })
-	cache.RememberSized(routeID, "Primary", upstream.URL, compatCardImageSize)
+	cache.RememberSized(routeID, "Primary", "https://cdn.example.test/previous-poster.jpg", compatCardImageSize)
 	tag := newMapper(codec, &config.Config{
 		Auth: config.AuthConfig{JWTSecret: "old-secret"},
 	}).itemFromList(upstreamListItem{
@@ -534,8 +534,8 @@ func TestHandleItemImageServesCurrentImageForTagSignedWithOldSecret(t *testing.T
 
 	h.HandleItemImage(rec, req)
 
-	// A tag signed with an old secret is only a stale cache hint; the item's
-	// current image is still served.
+	// A tag signed with an old secret is only a stale cache hint. The item's
+	// current image is served, not the older URL this node's route cache holds.
 	assertImageRedirect(t, rec, upstream.URL)
 	if called {
 		t.Fatal("compat image route proxied the upstream image instead of redirecting")
