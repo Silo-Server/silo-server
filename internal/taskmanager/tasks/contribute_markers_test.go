@@ -241,6 +241,20 @@ func TestContributeMarkersTaskFailsWhenAllSubmissionsError(t *testing.T) {
 	}
 }
 
+func TestContributeMarkersTaskSucceedsWhenFailuresMixWithSkips(t *testing.T) {
+	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{
+		{Status: markers.OutcomeStatusSkipped, Provider: "introdb", Segment: markers.MarkerKindIntro},
+		{Status: markers.OutcomeStatusError, Provider: "introdb", Segment: markers.MarkerKindCredits, Reason: "AccessDenied"},
+	}}
+	cands := &fakeCandidates{ids: []int{10}}
+	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true}}
+	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
+
+	if err := task.Execute(context.Background(), &contribTestProgress{}); err != nil {
+		t.Fatalf("a run with skipped outcomes reported total failure: %v", err)
+	}
+}
+
 func TestContributeMarkersTaskCountsConflictAsSkipped(t *testing.T) {
 	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{{Status: markers.OutcomeStatusConflict}}}
 	cands := &fakeCandidates{ids: []int{10}}

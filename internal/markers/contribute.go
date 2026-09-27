@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -283,7 +284,8 @@ func (s *ContributionService) contributeSegment(
 			row.Status = OutcomeStatusError
 		}
 		if row.Status != OutcomeStatusConflict {
-			s.logger.WarnContext(ctx, "marker submission failed", "file_id", row.MediaFileID, "provider", providerID, "segment", seg.kind, "error", err)
+			// A provider error can quote a request URL; mask its credentials.
+			s.logger.WarnContext(ctx, "marker submission failed", "file_id", row.MediaFileID, "provider", providerID, "segment", seg.kind, "error", logredact.SanitizeURLError(err))
 		}
 		s.recordContribution(ctx, row)
 		if row.Status == OutcomeStatusConflict || row.Status == OutcomeStatusInvalid {

@@ -176,8 +176,10 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 
 	counts.write(progress, 0)
 	progress.Report(100, fmt.Sprintf("Contributed %d, skipped %d, invalid %d, failed %d", counts.submitted, counts.skipped, counts.invalid, counts.failed))
-	// A run where every attempt failed must not read as a success.
-	if counts.submitted == 0 && counts.failed > 0 {
+	// A run where every attempt failed must not read as a success. Skipped
+	// (already submitted) and invalid outcomes are answers from the provider,
+	// so a run that saw any is not a total failure.
+	if counts.submitted == 0 && counts.skipped == 0 && counts.invalid == 0 && counts.failed > 0 {
 		if counts.lastErr != nil {
 			return fmt.Errorf("all %d contribution attempts failed, e.g. %w", counts.failed, counts.lastErr)
 		}
