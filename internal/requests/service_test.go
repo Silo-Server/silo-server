@@ -507,7 +507,7 @@ func TestSubmitExplainsSeriesWithoutTVDBID(t *testing.T) {
 
 func TestSubmitKeepsUnrelatedSeriesFailureMessage(t *testing.T) {
 	req := Request{MediaType: MediaTypeSeries}
-	for _, msg := range []string{"sonarr: quality profile is required", "tvdb: HTTP 503 service unavailable"} {
+	for _, msg := range []string{"sonarr: quality profile is required", "tvdb: HTTP 503 service unavailable", "tvdb API key is missing"} {
 		if got := explainSubmissionFailure(req, msg); got != msg {
 			t.Fatalf("message = %q, want the backend message %q unchanged", got, msg)
 		}
@@ -516,6 +516,55 @@ func TestSubmitKeepsUnrelatedSeriesFailureMessage(t *testing.T) {
 	req.TVDBID = &tvdbID
 	if got := explainSubmissionFailure(req, "sonarr: tvdb lookup failed"); got != "sonarr: tvdb lookup failed" {
 		t.Fatalf("message = %q, want unchanged when the request has a TVDB id", got)
+	}
+}
+
+func TestExplainSubmissionFailureDistinguishesLookupFailure(t *testing.T) {
+	req := Request{MediaType: MediaTypeSeries}
+	if got := explainSubmissionFailure(req, "sonarr: tvdb_id is required"); got != missingTVDBIDMessage {
+		t.Fatalf("message = %q, want the missing-ID explanation", got)
+	}
+	req.tvdbLookupFailed = true
+	if got := explainSubmissionFailure(req, "sonarr: tvdb_id is required"); got != tvdbLookupFailedMessage {
+		t.Fatalf("message = %q, want the lookup-failed explanation", got)
+	}
+}
+
+func TestCreateRequestTreatsZeroTVDBIDAsMissing(t *testing.T) {
+	store := newFakeStore()
+	service := newTestService(store)
+	resolver := &fakeTVDBResolver{tvdbID: 456789}
+	service.SetTVDBIDResolver(resolver)
+	zero := 0
+
+	if _, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeSeries, TMDBID: 240001, TVDBID: &zero, Title: "Regional Series",
+	}); err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if got := store.created[0].Input.TVDBID; got == nil || *got != 456789 {
+		t.Fatalf("tvdb_id = %v, want the resolved 456789 in place of 0", got)
+	}
+}
+
+func TestRetryStopsWhenResolvedTVDBIDCannotBeSaved(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	store.setExternalIDsErr = errors.New("db unavailable")
+	store.requests["req-1"] = &Request{
+		ID: "req-1", MediaType: MediaTypeSeries, TMDBID: 240001,
+		Status: StatusQueued, Outcome: OutcomeFailed,
+	}
+	router := &fakeRouterProvider{}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+	service.SetTVDBIDResolver(&fakeTVDBResolver{tvdbID: 456789})
+
+	if _, err := service.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "req-1"); err == nil {
+		t.Fatalf("Retry succeeded, want the save error")
+	}
+	if router.fulfillCalls != 0 {
+		t.Fatalf("fulfill calls = %d, want 0 when the resolved ID was not saved", router.fulfillCalls)
 	}
 }
 
@@ -1685,6 +1734,8 @@ type fakeStore struct {
 	unnotified    []string
 	notified      []string
 
+	setExternalIDsErr error
+
 	listIntegrationsCalls int
 	getSettingsCalls      int
 }
@@ -1854,11 +1905,14 @@ func (f *fakeStore) ListFulfilledUnnotified(context.Context, int) ([]*Request, e
 func (f *fakeStore) SetExternalIDs(_ context.Context, id string, tvdbID int, imdbID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.setExternalIDsErr != nil {
+		return f.setExternalIDsErr
+	}
 	req := f.requests[id]
 	if req == nil {
 		return ErrNotFound
 	}
-	if req.TVDBID == nil {
+	if req.TVDBID == nil || *req.TVDBID <= 0 {
 		v := tvdbID
 		req.TVDBID = &v
 	}

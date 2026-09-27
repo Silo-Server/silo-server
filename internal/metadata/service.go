@@ -4538,9 +4538,12 @@ func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery
 // ResolveSeriesTVDBID asks the enabled series providers for the TVDB ID of a
 // series known by its IMDb or TMDB ID (the TVDB provider resolves these through
 // TVDB's remote-ID search). IMDb goes first because its IDs are unambiguous. A
-// result counts only when it echoes the ID it was looked up by, so a bare TMDB
-// number that matches some other source's ID on TVDB can't resolve to the wrong
-// series. Returns 0 when no provider knows a match.
+// result counts only when it echoes the ID it was looked up by and does not
+// name a different TMDB series, so neither a bare TMDB number that matches some
+// other source's ID on TVDB nor an IMDb ID for another series can resolve to the
+// wrong series. Returns 0 and a nil error when every provider answered and none
+// knows a match; returns 0 and the provider errors when nothing matched and at
+// least one provider failed, so callers can tell an outage from a miss.
 func (s *MetadataService) ResolveSeriesTVDBID(ctx context.Context, tmdbID int, imdbID string) (int, error) {
 	var lookups []map[string]string
 	if imdb := strings.TrimSpace(imdbID); imdb != "" {
@@ -4549,21 +4552,43 @@ func (s *MetadataService) ResolveSeriesTVDBID(ctx context.Context, tmdbID int, i
 	if tmdbID > 0 {
 		lookups = append(lookups, map[string]string{"tmdb": strconv.Itoa(tmdbID)})
 	}
+	if len(lookups) == 0 {
+		return 0, nil
+	}
+	chain, err := s.resolveChainCached(ctx, 0, "series")
+	if err != nil {
+		return 0, fmt.Errorf("resolving provider chain: %w", err)
+	}
+	var searchErrs []error
 	for _, ids := range lookups {
-		results, err := s.SearchProviders(ctx, SearchQuery{ContentType: "series", ProviderIDs: ids}, 0)
-		if err != nil {
-			return 0, err
-		}
-		for _, result := range results {
-			if !providerIDsConfirm(result.ProviderIDs, ids) {
+		for _, p := range chain {
+			sp, ok := p.(SearchProvider)
+			if !ok {
 				continue
 			}
-			if tvdbID, err := strconv.Atoi(strings.TrimSpace(result.ProviderIDs["tvdb"])); err == nil && tvdbID > 0 {
-				return tvdbID, nil
+			results, err := sp.Search(ctx, SearchQuery{ContentType: "series", ProviderIDs: ids})
+			if err != nil {
+				searchErrs = append(searchErrs, fmt.Errorf("%s: %w", p.Slug(), err))
+				continue
+			}
+			for _, result := range results {
+				if !providerIDsConfirm(result.ProviderIDs, ids) || conflictsWithTMDBID(result.ProviderIDs, tmdbID) {
+					continue
+				}
+				if tvdbID, err := strconv.Atoi(strings.TrimSpace(result.ProviderIDs["tvdb"])); err == nil && tvdbID > 0 {
+					return tvdbID, nil
+				}
 			}
 		}
 	}
-	return 0, nil
+	return 0, errors.Join(searchErrs...)
+}
+
+// conflictsWithTMDBID reports whether a result names a TMDB series other than
+// the one being resolved.
+func conflictsWithTMDBID(ids map[string]string, tmdbID int) bool {
+	got := strings.TrimSpace(ids["tmdb"])
+	return tmdbID > 0 && got != "" && got != strconv.Itoa(tmdbID)
 }
 
 // providerIDsConfirm reports whether got carries every ID in want.

@@ -434,7 +434,7 @@ func (r *Repository) MarkFulfilledNotified(ctx context.Context, id string) error
 func (r *Repository) SetExternalIDs(ctx context.Context, id string, tvdbID int, imdbID string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE media_requests
-		SET tvdb_id = COALESCE(tvdb_id, $2),
+		SET tvdb_id = CASE WHEN tvdb_id IS NULL OR tvdb_id <= 0 THEN $2 ELSE tvdb_id END,
 		    imdb_id = CASE WHEN imdb_id = '' THEN $3 ELSE imdb_id END,
 		    updated_at = now()
 		WHERE id = $1`, id, tvdbID, strings.TrimSpace(imdbID))

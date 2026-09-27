@@ -29,7 +29,8 @@ type Store interface {
 	SetStatus(ctx context.Context, id string, status Status, actor Viewer) (*Request, error)
 	SetOutcome(ctx context.Context, id string, outcome Outcome, actor Viewer, message string) (*Request, error)
 	// SetExternalIDs records a TVDB ID resolved after the request was created,
-	// and fills the IMDb ID when the row has none. An existing TVDB ID is kept.
+	// and fills the IMDb ID when the row has none. An existing positive TVDB ID
+	// is kept.
 	SetExternalIDs(ctx context.Context, id string, tvdbID int, imdbID string) error
 	ListTargets(ctx context.Context, requestID string) ([]Target, error)
 	CreateTarget(ctx context.Context, target Target) (Target, error)
