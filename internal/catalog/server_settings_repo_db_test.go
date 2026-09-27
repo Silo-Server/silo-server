@@ -25,7 +25,9 @@ func TestServerSettingsRepoGetManyReadsPresentKeys(t *testing.T) {
 	prefix := fmt.Sprintf("test.get_many.%d.", time.Now().UnixNano())
 	first, second, missing := prefix+"first", prefix+"second", prefix+"missing"
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM server_settings WHERE key = ANY($1)`, []string{first, second})
+		if _, err := pool.Exec(ctx, `DELETE FROM server_settings WHERE key = ANY($1)`, []string{first, second}); err != nil {
+			t.Logf("clean up test settings: %v", err)
+		}
 	})
 	repo := NewServerSettingsRepo(pool)
 	if err := repo.SetMany(ctx, map[string]string{first: "one", second: ""}); err != nil {

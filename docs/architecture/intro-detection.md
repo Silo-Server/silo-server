@@ -15,9 +15,10 @@ season groups, and the chapter silence backfill. With credits off, it skips
 credits chapters, credits season groups, and movies. Playback analyzes only
 the missing kinds that are on and skips files with none left. v2
 `redetect-markers` and `refresh-markers` narrow their kinds the same way;
-`redetect-markers` answers `409` when none of the requested kinds are on. v2
-`redetect-intro` and the v1 routes predate the settings and ignore them.
-Turning a kind off never deletes its markers.
+`redetect-markers` answers `409` when none of the requested kinds are on, and
+`refresh-markers` does too in `local` mode; in `both` mode the online refresh
+still runs. v2 `redetect-intro` and the v1 routes predate the settings and
+ignore them. Turning a kind off never deletes its markers.
 
 Every API server runs the task manager, so the task takes a PostgreSQL
 advisory lock before it analyzes anything. While one server holds it, a run on
