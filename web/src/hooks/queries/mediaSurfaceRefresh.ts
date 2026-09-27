@@ -183,7 +183,9 @@ function shouldInvalidateMediaSurfaceQuery(
 
   if (options.itemId) {
     const targetItemId = getQueryKeyItemId(queryKey);
-    if (targetItemId && targetItemId !== options.itemId) {
+    // Keys a caller named in watchedKeys (a watched episode's season or
+    // series, say) belong to other item IDs by design; don't narrow them away.
+    if (targetItemId && targetItemId !== options.itemId && !isWatchedKey(queryKey, options)) {
       return false;
     }
   }
@@ -205,6 +207,10 @@ function shouldInvalidateMediaSurfaceQuery(
     return true;
   }
 
+  return isWatchedKey(queryKey, options);
+}
+
+function isWatchedKey(queryKey: readonly unknown[], options: InvalidateMediaSurfaceOptions) {
   return (options.watchedKeys ?? []).some((key) => queryKeyStartsWith(queryKey, key));
 }
 

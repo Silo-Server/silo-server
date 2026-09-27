@@ -431,4 +431,20 @@ describe("invalidateMediaSurfaceQueries", () => {
     expect(queryClient.getQueryState(ratingKeys.list())?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(ratingKeys.item("item-2"))?.isInvalidated).toBe(false);
   });
+
+  it("still invalidates explicitly watched keys that belong to another item", async () => {
+    const queryClient = new QueryClient();
+    const seriesDetailKey = itemKeys.detail("series-1");
+    const otherDetailKey = itemKeys.detail("item-2");
+    queryClient.setQueryData(seriesDetailKey, { content_id: "series-1" });
+    queryClient.setQueryData(otherDetailKey, { content_id: "item-2" });
+
+    await invalidateMediaSurfaceQueries(queryClient, {
+      itemId: "episode-1",
+      watchedKeys: [seriesDetailKey],
+    });
+
+    expect(queryClient.getQueryState(seriesDetailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherDetailKey)?.isInvalidated).toBe(false);
+  });
 });
