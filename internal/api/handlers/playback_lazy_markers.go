@@ -72,7 +72,7 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 	mode := markers.NormalizeMode(rawMode)
 	lazyEnabled := strings.EqualFold(strings.TrimSpace(lazy), "true")
 	if !lazyEnabled {
-		if !h.onlineMarkersOnDemand(ctx) || (mode != markers.ModeOnline && mode != markers.ModeBoth) {
+		if !onlineMarkersOnDemand(ctx, h.SettingsRepo) || (mode != markers.ModeOnline && mode != markers.ModeBoth) {
 			return
 		}
 	}
@@ -179,7 +179,7 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 	// player already shows, and local analysis would be asked for it.
 	var overlay *models.MediaFile
 	if runOnline {
-		onDemand := h.onlineMarkersOnDemand(ctx)
+		onDemand := onlineMarkersOnDemand(ctx, h.SettingsRepo)
 		effective, overlaid, err := h.MarkerPopulation.Populate(ctx, file)
 		if err != nil {
 			slog.WarnContext(ctx, "playback marker lookup failed", "file_id", file.ID, "error", err)
@@ -269,13 +269,13 @@ func (h *PlaybackHandler) hasOnlineMarkerProviders() bool {
 }
 
 // onlineMarkersOnDemand reports whether online markers are looked up for each
-// playback and never saved. A setting that cannot be read counts as stored,
-// which leaves the stored row as the whole answer.
-func (h *PlaybackHandler) onlineMarkersOnDemand(ctx context.Context) bool {
-	if h == nil || h.SettingsRepo == nil {
+// playback or refresh and never saved. A setting that cannot be read counts as
+// stored, which leaves the stored row as the whole answer.
+func onlineMarkersOnDemand(ctx context.Context, settings MarkerSettingsReader) bool {
+	if settings == nil {
 		return false
 	}
-	raw, err := h.SettingsRepo.Get(ctx, markers.SettingOnlineStorage)
+	raw, err := settings.Get(ctx, markers.SettingOnlineStorage)
 	if err != nil {
 		return false
 	}
