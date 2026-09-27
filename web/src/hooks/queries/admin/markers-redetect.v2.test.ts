@@ -100,7 +100,7 @@ function missingMarkersRoute(path: string) {
     : jsonResponse({ status: "queued" }, 202);
 }
 
-it.each(["intro", "all"] as const)(
+it.each(["intro"] as const)(
   "retries an episode %s request through redetect-intro when redetect-markers is missing",
   async (kind) => {
     const { calls, bodies, client, wrapper } = setup(missingMarkersRoute);
@@ -124,6 +124,7 @@ it.each(["intro", "all"] as const)(
 
 it.each([
   ["an episode credits request", { introFallback: true }, "credits"],
+  ["an episode all request", { introFallback: true }, "all"],
   ["a movie credits request", {}, "credits"],
   ["a movie all request", {}, "all"],
 ] as const)("surfaces the 404 for %s", async (_label, options, kind) => {

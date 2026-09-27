@@ -254,8 +254,9 @@ function isMissingOperation(error: unknown): boolean {
 /**
  * Re-detects an item's markers. The capability read and this call can reach
  * different API nodes during a rolling deploy or rollback, so a 404 drops the
- * cached capability; with `introFallback` (episodes) a request that includes
- * the intro retries once through the older episode-only operation.
+ * cached capability; with `introFallback` (episodes) an intro-only request
+ * retries once through the older episode-only operation. Other kinds surface
+ * the error, since that operation cannot re-detect credits.
  */
 export function useRedetectItemMarkers({ introFallback = false } = {}) {
   const queryClient = useQueryClient();
@@ -267,7 +268,7 @@ export function useRedetectItemMarkers({ introFallback = false } = {}) {
       } catch (error) {
         if (!isMissingOperation(error)) throw error;
         void queryClient.invalidateQueries({ queryKey: adminKeys.markerCapabilities() });
-        if (!introFallback || kind === "credits") throw error;
+        if (!introFallback || kind !== "intro") throw error;
         return redetectEpisodeIntro(itemId);
       }
     },
