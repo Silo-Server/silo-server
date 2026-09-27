@@ -1709,7 +1709,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Refresh episode or movie markers using configured sources, or explicitly rerun local marker detection; movies get best-effort credits only. */
+    /** Explicitly rerun local intro detection for an episode; other items, movies included, are rejected. */
     post: operations["redetectAdminEpisodeIntro"];
     delete?: never;
     options?: never;
@@ -1726,7 +1726,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Refresh episode or movie markers using configured sources, or explicitly rerun local marker detection; movies get best-effort credits only. */
+    /** Refresh episode or movie markers using configured sources; movies get best-effort local credits only. */
     post: operations["refreshAdminEpisodeMarkers"];
     delete?: never;
     options?: never;
@@ -12881,7 +12881,7 @@ export interface components {
     AdminMarkerCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
-      /** @description The item refresh-markers and redetect-intro operations accept movies; local analysis looks for their end credits on a best-effort basis and never for intros */
+      /** @description The item refresh-markers operation accepts movies, and local analysis looks for their end credits on a best-effort basis; redetect-intro stays episode-only, since movies never get intros */
       movie_credits: boolean;
       /** @description Opaque revision of this document */
       revision: string;

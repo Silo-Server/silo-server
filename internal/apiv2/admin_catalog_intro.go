@@ -26,7 +26,7 @@ const (
 // item is analyzed.
 type AdminMarkerCapabilities struct {
 	Capability
-	MovieCredits bool `json:"movie_credits" doc:"The item refresh-markers and redetect-intro operations accept movies; local analysis looks for their end credits on a best-effort basis and never for intros"`
+	MovieCredits bool `json:"movie_credits" doc:"The item refresh-markers operation accepts movies, and local analysis looks for their end credits on a best-effort basis; redetect-intro stays episode-only, since movies never get intros"`
 }
 type AdminMarkerCapabilitiesOutput struct {
 	Status       int
@@ -42,10 +42,11 @@ func registerAdminCatalogIntro(reg *Registry) {
 	Register(reg, capabilities, func(context.Context, *CapabilityInput) (*AdminMarkerCapabilitiesOutput, error) {
 		return &AdminMarkerCapabilitiesOutput{Body: AdminMarkerCapabilities{MovieCredits: true}}, nil
 	})
-	for _, action := range []struct{ suffix, id, action string }{
-		{"refresh-markers", refreshAdminEpisodeMarkersOperation, "refresh-v2"}, {"redetect-intro", redetectAdminEpisodeIntroOperation, "redetect"},
+	for _, action := range []struct{ suffix, id, action, summary string }{
+		{"refresh-markers", refreshAdminEpisodeMarkersOperation, "refresh-v2", "Refresh episode or movie markers using configured sources; movies get best-effort local credits only."},
+		{"redetect-intro", redetectAdminEpisodeIntroOperation, "redetect", "Explicitly rerun local intro detection for an episode; other items, movies included, are rejected."},
 	} {
-		op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/admin/items/{id}/"+action.suffix, action.id, "admin-catalog", "Refresh episode or movie markers using configured sources, or explicitly rerun local marker detection; movies get best-effort credits only."), Class: ClassActingAdmin, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable}
+		op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/admin/items/{id}/"+action.suffix, action.id, "admin-catalog", action.summary), Class: ClassActingAdmin, ServiceBacked: true, DemoRestricted: true, RetrySafety: RetrySafetyNonRetryable}
 		op.DefaultStatus = http.StatusAccepted
 		Register(reg, op, func(ctx context.Context, in *AdminEpisodeMarkersInput) (*AdminEpisodeMarkersOutput, error) {
 			if reg.deps.AdminEpisodeMarkers == nil {

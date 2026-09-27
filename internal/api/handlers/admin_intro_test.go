@@ -673,6 +673,27 @@ func TestAdminMarkerRefreshOnlineRejectsItemsOtherThanEpisodesAndMovies(t *testi
 	}
 }
 
+// The v2 redetect-intro operation analyzes episode intros only, so a movie,
+// which never gets intros, is rejected with the message it had before
+// movies were analyzed, and never analyzed.
+func TestAdminIntroV2RedetectRejectsMovies(t *testing.T) {
+	analyzer := &fakeIntroAnalyzer{movies: make(chan string, 1)}
+	handler := NewAdminIntroHandler(analyzer, fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
+		ItemID: "movie1", Kind: intromarkers.MarkerItemMovie, HasMediaFiles: true, IntroDetectionEnabled: true,
+	}}, context.Background(), nil)
+	handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeLocal)}}
+	status, err := handler.RefreshEpisodeMarkers(t.Context(), "movie1", "redetect")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest || apiErr.Message != episodeMarkerMessages.wrongKind {
+		t.Fatalf("redetect: status=%q err=%v, want 400 %q", status, err, episodeMarkerMessages.wrongKind)
+	}
+	select {
+	case id := <-analyzer.movies:
+		t.Fatalf("redetect analyzed movie %q", id)
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
 // The frozen /api/v1 endpoints analyze episodes only: a movie is rejected
 // with the original message and never analyzed.
 func TestAdminIntroV1RejectsMovies(t *testing.T) {

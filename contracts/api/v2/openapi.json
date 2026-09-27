@@ -6926,7 +6926,7 @@
             "type": "boolean"
           },
           "movie_credits": {
-            "description": "The item refresh-markers and redetect-intro operations accept movies; local analysis looks for their end credits on a best-effort basis and never for intros",
+            "description": "The item refresh-markers operation accepts movies, and local analysis looks for their end credits on a best-effort basis; redetect-intro stays episode-only, since movies never get intros",
             "type": "boolean"
           },
           "revision": {
@@ -68593,7 +68593,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Refresh episode or movie markers using configured sources, or explicitly rerun local marker detection; movies get best-effort credits only.",
+        "summary": "Explicitly rerun local intro detection for an episode; other items, movies included, are rejected.",
         "tags": [
           "admin-catalog"
         ],
@@ -68747,7 +68747,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Refresh episode or movie markers using configured sources, or explicitly rerun local marker detection; movies get best-effort credits only.",
+        "summary": "Refresh episode or movie markers using configured sources; movies get best-effort local credits only.",
         "tags": [
           "admin-catalog"
         ],
