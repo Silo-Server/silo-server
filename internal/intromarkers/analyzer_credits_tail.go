@@ -129,7 +129,15 @@ func (a *Analyzer) ensureCreditsInputs(ctx context.Context, candidates []Candida
 				}
 			}
 			needTail := false
-			if _, wanted := opts.tailFileIDs[candidate.FileID]; opts.tails && wanted {
+			_, wanted := opts.tailFileIDs[candidate.FileID]
+			switch {
+			case !opts.tails || !wanted:
+			case tailUnusableBeforeSampling(candidate) != "":
+				// Decided from the file's current probe metadata, which a
+				// probe repair can change without changing the file, so it
+				// is not stored.
+				count(&inputs.tailCounts.unusable)
+			default:
 				artifact, stored := tails[candidate.FileID]
 				var storedArtifact *Artifact
 				if stored {
@@ -145,16 +153,6 @@ func (a *Analyzer) ensureCreditsInputs(ctx context.Context, candidates []Candida
 					count(&inputs.tailCounts.unusable)
 				default:
 					needTail = true
-				}
-			}
-			if needTail {
-				if detail := tailUnusableBeforeSampling(candidate); detail != "" {
-					needTail = false
-					if err := a.storeCreditsTailUnusable(ctx, candidate, detail); err != nil {
-						setErr(err)
-						return
-					}
-					count(&inputs.tailCounts.unusable)
 				}
 			}
 			if !needFingerprint && !needTail {
@@ -253,6 +251,11 @@ func (a *Analyzer) ensureCreditsInputs(ctx context.Context, candidates []Candida
 func (a *Analyzer) creditsTailArtifact(artifact *Artifact, candidate Candidate) (*creditsTail, ArtifactState) {
 	window := tailWindow(candidate)
 	state := artifact.State(window.identity(candidate), a.nodeName(), time.Now())
+	if state == ArtifactSkipped && artifact.Status == ArtifactUnusable && metadataTailDetail(artifact.Detail) {
+		// Stored by an earlier build from probe metadata the candidate
+		// no longer has.
+		return nil, ArtifactMissing
+	}
 	if state != ArtifactReady {
 		return nil, state
 	}
@@ -317,8 +320,8 @@ func (a *Analyzer) settleCreditsTail(ctx context.Context, candidate Candidate, t
 	return &tail, nil
 }
 
-// storeCreditsTailUnusable records why the candidate's tail cannot be
-// classified, so it is not decoded again until the file changes.
+// storeCreditsTailUnusable records why the candidate's decoded tail cannot
+// be classified, so it is not decoded again until the file changes.
 func (a *Analyzer) storeCreditsTailUnusable(ctx context.Context, candidate Candidate, detail string) error {
 	return a.repo.UpsertArtifact(ctx, Artifact{
 		MediaFileID:      candidate.FileID,

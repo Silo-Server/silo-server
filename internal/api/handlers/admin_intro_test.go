@@ -21,9 +21,14 @@ type fakeIntroAnalyzer struct {
 	release chan struct{}
 	summary intromarkers.RunSummary
 	err     error
+	// kinds receives the kinds of each analysis.
+	kinds chan intromarkers.EpisodeMarkerKinds
 }
 
-func (f *fakeIntroAnalyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (intromarkers.RunSummary, error) {
+func (f *fakeIntroAnalyzer) AnalyzeEpisodeKinds(ctx context.Context, episodeID string, kinds intromarkers.EpisodeMarkerKinds) (intromarkers.RunSummary, error) {
+	if f.kinds != nil {
+		f.kinds <- kinds
+	}
 	if f.started != nil {
 		f.started <- episodeID
 	}
@@ -472,4 +477,60 @@ func decodeRedetectStatus(t *testing.T, rec *httptest.ResponseRecorder) string {
 		t.Fatalf("decoding response: %v", err)
 	}
 	return response.Status
+}
+
+// The frozen v1 routes and v2 redetect-intro analyze episode intros only,
+// never credits; v2 refresh-markers in local mode analyzes both.
+func TestAdminIntroEndpointsKeepTheirAnalysisScope(t *testing.T) {
+	localHandler := func(analyzer *fakeIntroAnalyzer) *AdminIntroHandler {
+		handler := NewAdminIntroHandler(analyzer, fakeIntroEligibility{result: &intromarkers.EpisodeIntroEligibility{
+			EpisodeID: "ep1", HasMediaFiles: true, IntroDetectionEnabled: true,
+		}}, context.Background(), nil)
+		handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeLocal)}}
+		handler.FileResolver = fakeAdminIntroFileResolver{}
+		return handler
+	}
+	receiveKinds := func(t *testing.T, analyzer *fakeIntroAnalyzer) intromarkers.EpisodeMarkerKinds {
+		t.Helper()
+		select {
+		case kinds := <-analyzer.kinds:
+			return kinds
+		case <-time.After(time.Second):
+			t.Fatal("episode analysis did not run")
+			return intromarkers.EpisodeMarkerKinds{}
+		}
+	}
+
+	intro := intromarkers.EpisodeMarkerKinds{Intro: true}
+	for _, path := range []string{"/admin/items/ep1/refresh-markers", "/admin/items/ep1/redetect-intro"} {
+		analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1)}
+		handler := localHandler(analyzer)
+		router := chi.NewRouter()
+		router.Post("/admin/items/{id}/refresh-markers", handler.HandleRefreshEpisodeMarkers)
+		router.Post("/admin/items/{id}/redetect-intro", handler.HandleRedetectEpisodeIntro)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, nil))
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("v1 %s: %d %s", path, rec.Code, rec.Body.String())
+		}
+		if got := receiveKinds(t, analyzer); got != intro {
+			t.Fatalf("v1 %s analyzed %+v, want intros only", path, got)
+		}
+	}
+	for _, tc := range []struct {
+		action string
+		want   intromarkers.EpisodeMarkerKinds
+	}{
+		{"redetect", intro},
+		{"refresh-v2", intromarkers.EpisodeMarkerKinds{Intro: true, Credits: true}},
+	} {
+		analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1)}
+		status, err := localHandler(analyzer).RefreshEpisodeMarkers(t.Context(), "ep1", tc.action)
+		if err != nil || status != "queued" {
+			t.Fatalf("v2 %s: status=%q err=%v", tc.action, status, err)
+		}
+		if got := receiveKinds(t, analyzer); got != tc.want {
+			t.Fatalf("v2 %s analyzed %+v, want %+v", tc.action, got, tc.want)
+		}
+	}
 }

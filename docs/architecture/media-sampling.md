@@ -173,7 +173,7 @@ Status rules, applied by `Artifact.State`:
 | Status | Meaning | Next analysis |
 |---|---|---|
 | `complete` | The payload is valid. | Use it while the identity matches; otherwise compute again. |
-| `unusable` | The file cannot yield this artifact; `detail` says why (for example `no_video` or `sparse`). | Skip while the identity matches. A changed file or config hash computes again. |
+| `unusable` | The file cannot yield this artifact; `detail` says why (for example `no_stream` or `sparse`). | Skip while the identity matches. A changed file or config hash computes again. |
 | `failed` | An error that may be transient, in `last_error`. | The server in `recorded_by` skips the file until `retry_after`. Other servers retry at once, since the cause may be local to that server. |
 
 The retry delay starts at 12 hours and doubles for each consecutive failure on

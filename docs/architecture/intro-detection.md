@@ -94,10 +94,12 @@ end within 15 seconds of the end of the file becomes the end of the file.
    `Mid-Credits`, `After Credits`, `Pre-Credits`), the end of the credits
    (`Credits End`), or a generated `Chapter NN` are not credits, and neither
    is a match whose neighbor also matches. The end is the next chapter's
-   start. Chapter credits are authoritative.
+   start, even within 15 seconds of the end of the file, so a short scene
+   after the credits keeps its own chapter; only the last chapter's end snaps
+   to the end of the file. Chapter credits are authoritative.
 2. **Version copy.** Another file of the same episode whose duration is
-   within three seconds copies the chapter result, keeping its distance from
-   the end of the file (`credits-version-copy:v1`, confidence 0.85). Credits
+   within three seconds copies the chapter result of the closest such
+   version, keeping its distance from the end of the file (`credits-version-copy:v1`, confidence 0.85). Credits
    that ran to the end of the source run to the end of the copy.
 3. **Tail audio and video.** Each episode's tail is read once and cached: a
    Chromaprint fingerprint of its audio, its silences, and statistics of
@@ -115,11 +117,15 @@ An episode alone in its season group has no partner to compare audio with;
 with the tail pass available it still gets credits from chapters and video.
 
 Playback analysis looks only for the kinds the played file lacks, so an
-episode with an intro and no credits runs the credits steps alone. Unlike an
-intro group, a credits season group whose stored analysis still stands is not
-compared again from playback: most episodes have no credits local analysis
-can find, and every start would otherwise repeat the comparison. Admin
-refresh compares both kinds again.
+episode with an intro and no credits runs the credits steps alone. With
+`markers.online_storage` set to `on_demand`, the played file includes the
+online markers looked up for this playback, which are never saved; every
+marker update sent to players during the analysis lays them back over the
+stored row, where a manual marker still wins. Unlike an intro group, a
+credits season group whose stored analysis still stands is not compared again
+from playback: most episodes have no credits local analysis can find, and
+every start would otherwise repeat the comparison. Admin refresh compares both
+kinds again.
 
 ### Tail pass
 
@@ -201,15 +207,21 @@ Credits versions and caches:
 - Tail passes are `credits_tail` rows, keyed the same way by the pass
   parameters. Their payload (`credits-tail:v1`) holds an 18-byte record per
   keyframe (offset, the three black shares, and the luma and saturation
-  statistics) followed by the silences. A tail is stored `unusable` without
-  decoding it when the file has no video (`no_video`) or an all-intra codec
-  such as ProRes or MJPEG (`unsupported_codec`); after decoding when it has
-  more than 5000 keyframes (`too_many_keyframes`) or fewer than one per 30
-  seconds (`sparse`); and when ffmpeg fails in a way the file itself causes
-  (`invalid_data`, `no_stream`). Other failures are stored `failed` with
-  backoff.
+  statistics) followed by the silences. A tail is not decoded when the
+  file's probe metadata shows no video or an all-intra codec such as ProRes
+  or MJPEG. That check runs again on every analysis and is not stored, since
+  a probe repair can correct the codec without changing the file; the credits
+  season state's input signature covers it too. A tail is stored `unusable`
+  after decoding when it has more than 5000 keyframes (`too_many_keyframes`)
+  or fewer than one per 30 seconds (`sparse`), and when ffmpeg fails in a way
+  the file itself causes (`invalid_data`, `no_stream`). Other failures are
+  stored `failed` with backoff.
 - `CreditsAnalysisConfigHash` keys credits season state, apart from intro
-  state, and covers both artifact keys. Bump `CreditsBehaviorVersion` to
+  state. It covers the fingerprint key and, when the analysis ran tail
+  passes, the tail key, so a group settled while ffmpeg could not run tail
+  passes is analyzed again once it can. A run without tail passes also skips
+  a group a tail-capable run settled, so it cannot replace that run's audio
+  and video credits with audio-only ones. Bump `CreditsBehaviorVersion` to
   re-run every credits comparison over cached fingerprints and tails.
 - Credits algorithms rank in `markers.scannerAlgorithmPriority` as
   `credits-chapter:v1` (30), `credits-version-copy:v1` (24),

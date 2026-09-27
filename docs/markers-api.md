@@ -33,7 +33,8 @@ Both paths honor provider priority, manual edits, and provider quota limits.
 
 Local detection finds episode intros and end credits. It never replaces a
 marker from a higher-priority source, and it judges each kind separately, so
-an episode with an online intro can still get local credits.
+an episode with an online intro can still get local credits. With `on_demand`
+storage, players keep the online intro while playback detects the credits.
 
 `markers.detection_workers` sizes local detection: how many seasons the
 **Detect markers on this server** task analyzes at once, which also bounds how
@@ -52,7 +53,7 @@ or withdraw that provider's existing ranges.
 `POST /api/v2/admin/items/{id}/refresh-markers` explicitly refreshes an episode
 from its configured sources. In `both` mode, eligible local detection fills
 missing intro and credits markers. The existing v1 refresh endpoint retains its
-local-only behavior.
+local-only, intro-only behavior.
 
 ## Operations
 
