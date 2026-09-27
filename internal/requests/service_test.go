@@ -568,6 +568,45 @@ func TestRetryStopsWhenResolvedTVDBIDCannotBeSaved(t *testing.T) {
 	}
 }
 
+func TestRetryKeepsFailedTargetWhenResolvedTVDBIDCannotBeSaved(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	store.setExternalIDsErr = errors.New("db unavailable")
+	store.requests["req-1"] = &Request{
+		ID: "req-1", MediaType: MediaTypeSeries, TMDBID: 240001,
+		Status: StatusQueued, Outcome: OutcomeFailed,
+	}
+	store.targets = map[string][]Target{"req-1": {{
+		ID: 7, RequestID: "req-1", Quality: Quality1080p, Status: StatusFailed, LastError: "sonarr: tvdb_id is required",
+	}}}
+	service := newTestService(store)
+	service.SetRouterProvider(&fakeRouterProvider{})
+	service.SetTVDBIDResolver(&fakeTVDBResolver{tvdbID: 456789})
+
+	if _, err := service.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "req-1"); err == nil {
+		t.Fatalf("Retry succeeded, want the save error")
+	}
+	if got := store.targets["req-1"]; len(got) != 1 || got[0].ID != 7 {
+		t.Fatalf("targets = %+v, want the failed target kept", got)
+	}
+}
+
+func TestTMDBFailureCountsAsFailedTVDBLookup(t *testing.T) {
+	service := newTestServiceWithTMDB(newFakeStore(), &fakeTMDBClient{externalIDsErr: errors.New("tmdb: HTTP 429")})
+	service.SetTVDBIDResolver(&fakeTVDBResolver{})
+
+	input := CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 240001}
+	if !service.enrichExternalIDs(context.Background(), &input) {
+		t.Fatalf("enrichExternalIDs reported a confirmed miss, want a failed lookup when TMDB errored")
+	}
+	resolved := &fakeTVDBResolver{tvdbID: 456789}
+	service.SetTVDBIDResolver(resolved)
+	input = CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 240001}
+	if service.enrichExternalIDs(context.Background(), &input) {
+		t.Fatalf("enrichExternalIDs reported a failure although the providers resolved the ID")
+	}
+}
+
 func TestListMineAttachesTargets(t *testing.T) {
 	store := newFakeStore()
 	store.mine = []*Request{{
@@ -2367,6 +2406,7 @@ type fakeTMDBClient struct {
 	mu                sync.Mutex
 	page              *tmdb.MediaPage
 	externalIDs       *tmdb.ExternalIDs
+	externalIDsErr    error
 	externalIDsByID   map[int]*tmdb.ExternalIDs
 	externalIDCalls   []int
 	detail            *tmdb.MediaDetail
@@ -2402,6 +2442,9 @@ func (f *fakeTMDBClient) GetExternalIDs(_ context.Context, _ string, id int) (*t
 	f.mu.Lock()
 	f.externalIDCalls = append(f.externalIDCalls, id)
 	f.mu.Unlock()
+	if f.externalIDsErr != nil {
+		return nil, f.externalIDsErr
+	}
 	if f.externalIDsByID != nil {
 		return f.externalIDsByID[id], nil
 	}

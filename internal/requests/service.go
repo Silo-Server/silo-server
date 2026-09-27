@@ -1651,13 +1651,16 @@ func (s *Service) lookupAvailable(ctx context.Context, mediaType MediaType, ids 
 
 // enrichExternalIDs fills missing IMDb and TVDB IDs from TMDB and, for a
 // series still without a TVDB ID, from the metadata providers. It reports
-// whether that provider lookup failed rather than finding no match.
+// whether a series is left without a TVDB ID because a lookup (TMDB or a
+// metadata provider) failed, rather than because none exists.
 func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInput) (tvdbLookupFailed bool) {
 	if input == nil {
 		return false
 	}
+	tmdbFailed := false
 	if client, ok := s.tmdb.(TMDBExternalIDClient); ok {
 		externalIDs, err := client.GetExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID)
+		tmdbFailed = err != nil
 		if err == nil && externalIDs != nil {
 			if input.IMDbID == "" {
 				input.IMDbID = strings.TrimSpace(externalIDs.IMDbID)
@@ -1681,7 +1684,7 @@ func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInp
 			return true
 		}
 	}
-	return false
+	return tmdbFailed && input.MediaType == MediaTypeSeries && input.TVDBID == nil
 }
 
 // ensureSeriesTVDBID looks up a series request's missing TVDB ID again right
@@ -1713,10 +1716,11 @@ func (s *Service) ensureSeriesTVDBID(ctx context.Context, req *Request) error {
 const missingTVDBIDMessage = "No TVDB ID found for this series. TMDB has none, and the metadata providers found no match on TVDB, " +
 	"so the request backend can't add it. Add the TVDB ID on TMDB (or the TMDB or IMDb ID on TVDB), then retry."
 
-// tvdbLookupFailedMessage replaces the same error when a metadata provider
-// failed during the lookup, so the admin isn't sent to fix IDs that may exist.
-const tvdbLookupFailedMessage = "Couldn't look up a TVDB ID for this series: TMDB has none, and a metadata provider failed during the lookup, " +
-	"so the request backend can't add it yet. Check the metadata providers, then retry."
+// tvdbLookupFailedMessage replaces the same error when TMDB or a metadata
+// provider failed during the lookup, so the admin isn't sent to fix IDs that
+// may exist.
+const tvdbLookupFailedMessage = "Couldn't look up a TVDB ID for this series because TMDB or a metadata provider failed during the lookup, " +
+	"so the request backend can't add it yet. Check TMDB and the metadata providers, then retry."
 
 // missingTVDBIDError matches backend errors about a missing TVDB ID, such as
 // "sonarr: tvdb_id is required", and not other TVDB failures such as a
@@ -1831,6 +1835,11 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 	if len(want) == 0 {
 		return &req, nil
 	}
+	// Resolve before dropping the failed targets below, so a failed save
+	// leaves their error records in place.
+	if err := s.ensureSeriesTVDBID(ctx, &req); err != nil {
+		return nil, err
+	}
 	for _, t := range existing { // drop stale failed targets for the qualities we re-submit
 		if t.Status == StatusFailed {
 			for _, q := range want {
@@ -1841,9 +1850,6 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 				}
 			}
 		}
-	}
-	if err := s.ensureSeriesTVDBID(ctx, &req); err != nil {
-		return nil, err
 	}
 	s.populateRequesterIdentity(ctx, &req)
 	targets, msg, err := s.router.Fulfill(ctx, installationID, capabilityID, req, want, conns)
