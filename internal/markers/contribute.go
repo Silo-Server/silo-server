@@ -178,7 +178,7 @@ var urlInText = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://\S+`)
 // is always masked unless it is one of authSchemeProse, a fixed list of words
 // that cannot be credentials, so "basic authentication required" keeps its
 // noun while any token, however short or plain, fails closed.
-var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)(\s+)([^\s"',;]+)`)
+var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)(\s+["']?)([^\s"',;]+)`)
 
 var authSchemeProse = map[string]bool{
 	"auth": true, "authentication": true, "authorization": true,
