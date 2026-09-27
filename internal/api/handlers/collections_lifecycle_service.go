@@ -171,7 +171,7 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve updated collection")
 	}
 
-	return h.collectionView(ctx, *collection), nil
+	return h.collectionView(ctx, store, userID, *collection), nil
 }
 
 func (h *CollectionHandler) PreviewPersonalCollection(ctx context.Context, req PersonalCollectionPreviewRequest, filter catalog.AccessFilter) (PersonalCollectionPreviewView, error) {
@@ -392,11 +392,11 @@ func (h *CollectionHandler) personalCollectionStore(ctx context.Context, userID 
 
 // GetPersonalCollection returns one collection visible to the selected profile.
 func (h *CollectionHandler) GetPersonalCollection(ctx context.Context, userID int, profileID, id string) (PersonalCollectionView, error) {
-	_, c, err := h.personalCollectionStore(ctx, userID, profileID, id, false)
+	store, c, err := h.personalCollectionStore(ctx, userID, profileID, id, false)
 	if err != nil {
 		return PersonalCollectionView{}, err
 	}
-	return h.collectionView(ctx, *c), nil
+	return h.collectionView(ctx, store, userID, *c), nil
 }
 
 // UploadPersonalCollectionPoster stores uploaded image bytes for a collection's

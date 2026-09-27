@@ -1,0 +1,115 @@
+package handlers
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
+)
+
+// TestPersonalCollectionItemCountsDB is the regression test for #1552:
+// personal collections reported item_count 0 whatever their membership. Every
+// surface that shows the count must report the members the acting profile can
+// see, and follow membership changes.
+func TestPersonalCollectionItemCountsDB(t *testing.T) {
+	f := newPagingIntegrationFixture(t)
+	provider := pgstore.NewPostgresProvider(f.pool)
+	store, err := provider.ForUser(t.Context(), f.account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manual, err := store.CreateCollection(t.Context(), userstore.CreateCollectionInput{CreatorProfileID: "owner", Name: "Manual", CollectionType: "manual", IncludeInServerCollections: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// f.ids[0] lives in the library the viewer below cannot see.
+	for i, id := range f.ids[:3] {
+		if err := store.AddCollectionItem(t.Context(), manual.ID, id, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	smartDef := fmt.Sprintf(`{"library_ids":[%d,%d],"media_scope":"movie","match":"all","groups":[],"sort":{"field":"title","order":"asc"}}`, f.library, f.hidden)
+	smart, err := store.CreateCollection(t.Context(), userstore.CreateCollectionInput{CreatorProfileID: "owner", Name: "Smart", CollectionType: "smart", QueryDefinition: smartDef, IncludeInServerCollections: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewCollectionHandler(provider)
+	h.Executor = &catalog.QueryExecutor{Pool: f.pool}
+	libraryHandler := NewLibraryCollectionHandler(catalog.NewLibraryCollectionRepository(f.pool), nil, catalog.NewItemRepository(f.pool), nil)
+	libraryHandler.FolderRepo = catalog.NewFolderRepository(f.pool)
+	libraryHandler.Executor = h.Executor
+	libraryHandler.UserCollectionPool = f.pool
+	restricted := access.SetScope(t.Context(), access.Scope{AllowedLibraryIDs: []int{f.library}, LibrariesRestricted: true})
+
+	assertCounts := func(t *testing.T, ctx context.Context, wantManual, wantSmart int) {
+		t.Helper()
+		want := map[string]int{manual.ID: wantManual, smart.ID: wantSmart}
+		list, err := h.ListPersonalCollections(ctx, f.account, "owner")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list.Collections) != len(want) {
+			t.Fatalf("listed %d collections, want %d", len(list.Collections), len(want))
+		}
+		for _, c := range list.Collections {
+			if c.ItemCount != want[c.ID] {
+				t.Errorf("list: %s item_count = %d, want %d", c.Name, c.ItemCount, want[c.ID])
+			}
+			detail, err := h.GetPersonalCollection(ctx, f.account, "owner", c.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if detail.ItemCount != want[c.ID] {
+				t.Errorf("detail: %s item_count = %d, want %d", c.Name, detail.ItemCount, want[c.ID])
+			}
+		}
+		tab, err := libraryHandler.LibraryUserCollections(ctx, f.library, f.account, "owner")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tab) != len(want) {
+			t.Fatalf("library tab lists %d collections, want %d", len(tab), len(want))
+		}
+		for _, c := range tab {
+			if c.ItemCount != want[c.ID] {
+				t.Errorf("library tab: %s item_count = %d, want %d", c.Name, c.ItemCount, want[c.ID])
+			}
+		}
+	}
+
+	t.Run("hidden library members are not counted", func(t *testing.T) {
+		assertCounts(t, restricted, 2, 4)
+	})
+	t.Run("unrestricted viewer counts every member", func(t *testing.T) {
+		assertCounts(t, t.Context(), 3, 5)
+	})
+	t.Run("counts follow membership changes", func(t *testing.T) {
+		if err := store.AddCollectionItem(t.Context(), manual.ID, f.ids[3], 3); err != nil {
+			t.Fatal(err)
+		}
+		assertCounts(t, restricted, 3, 4)
+		for _, id := range f.ids[1:3] {
+			if err := store.RemoveCollectionItem(t.Context(), manual.ID, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		assertCounts(t, restricted, 1, 4)
+	})
+	t.Run("a new smart collection reports its matches", func(t *testing.T) {
+		created, err := h.CreatePersonalCollection(restricted, PersonalCollectionCreateCommand{UserID: f.account, ProfileID: "owner", Request: PersonalCollectionCreateRequest{
+			Name: "Created smart", CollectionType: "smart", QueryDefinition: []byte(smartDef),
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = store.DeleteCollection(context.Background(), created.ID) })
+		if created.ItemCount != 4 {
+			t.Fatalf("create: item_count = %d, want 4", created.ItemCount)
+		}
+	})
+}

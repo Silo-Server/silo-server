@@ -18,6 +18,7 @@ type ServerVisibleCollection struct {
 	Description      string `json:"description,omitempty"`
 	CollectionType   string `json:"collection_type"`
 	ItemCount        int    `json:"item_count"`
+	QueryDefinition  string `json:"-"`
 	PosterPath       string `json:"-"`
 	PosterURL        string `json:"poster_url,omitempty"`
 	PosterThumbhash  string `json:"poster_thumbhash,omitempty"`
@@ -40,7 +41,7 @@ func ListServerVisibleByLibrary(ctx context.Context, pool *pgxpool.Pool, userID 
 	rows, err := pool.Query(ctx,
 		`WITH visible_collections AS (
 			SELECT upc.id, upc.creator_profile_id, upc.name, upc.description, upc.collection_type,
-			       upc.item_count, upc.poster_url, upc.poster_thumbhash, upc.created_at, upc.updated_at,
+			       upc.item_count, upc.query_definition, upc.poster_url, upc.poster_thumbhash, upc.created_at, upc.updated_at,
 			       CASE
 			         WHEN upc.collection_type = 'smart' THEN upc.query_definition
 			         WHEN upc.source_config ? 'library_ids' THEN upc.source_config
@@ -57,7 +58,7 @@ func ListServerVisibleByLibrary(ctx context.Context, pool *pgxpool.Pool, userID 
 			  )
 		)
 		 SELECT id, creator_profile_id, name, description, collection_type, item_count,
-		        poster_url, poster_thumbhash, created_at, updated_at
+		        query_definition, poster_url, poster_thumbhash, created_at, updated_at
 		 FROM visible_collections
 		 WHERE TRUE
 		   AND (
@@ -80,7 +81,7 @@ func ListServerVisibleByLibrary(ctx context.Context, pool *pgxpool.Pool, userID 
 		var createdAt, updatedAt time.Time
 		if err := rows.Scan(
 			&c.ID, &c.CreatorProfileID, &c.Name, &c.Description, &c.CollectionType,
-			&c.ItemCount, &c.PosterPath, &c.PosterThumbhash, &createdAt, &updatedAt,
+			&c.ItemCount, &c.QueryDefinition, &c.PosterPath, &c.PosterThumbhash, &createdAt, &updatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning server-visible user collection: %w", err)
 		}

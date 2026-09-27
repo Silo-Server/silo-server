@@ -51,6 +51,28 @@ func (e *QueryExecutor) Preview(ctx context.Context, def QueryDefinition, access
 	return items, total, err
 }
 
+// Count answers how many items def matches for the viewer, capped at def.Limit,
+// without reading a page: the total PreviewCursorPage reports for the same
+// definition and access.
+func (e *QueryExecutor) Count(ctx context.Context, def QueryDefinition, access AccessFilter) (int, error) {
+	if e == nil || e.Pool == nil {
+		return 0, fmt.Errorf("query executor requires a database pool")
+	}
+	plan, err := e.buildPreviewPagePlan(def, access, 1, 0)
+	if err != nil {
+		return 0, err
+	}
+	if def.Limit != nil && !e.GroupByWork {
+		plan.maxResults = *def.Limit
+	}
+	countSQL, countArgs := plan.countSQL()
+	var total int
+	if err := e.Pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("counting query matches: %w", err)
+	}
+	return total, nil
+}
+
 func (e *QueryExecutor) PreviewPage(
 	ctx context.Context,
 	def QueryDefinition,
