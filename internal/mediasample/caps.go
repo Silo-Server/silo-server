@@ -74,7 +74,7 @@ func (c Capabilities) Require(req Request) error {
 		return unsupportedError("ffmpeg does not list the silencedetect filter")
 	}
 	if req.Samples != nil && !c.concatSamples {
-		return errors.New("ffmpeg cannot read a sampled input list (concat demuxer with file_packet_meta, file and pipe protocols)")
+		return unsupportedError("ffmpeg cannot read a sampled input list (concat demuxer with file_packet_meta, file and pipe protocols)")
 	}
 	if req.Stats != nil {
 		for _, filter := range statsFilters {
