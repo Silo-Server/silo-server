@@ -1,4 +1,24 @@
-import { api } from "@/api/client";
+import { createRoom, type RoomCreationDraft } from "@/api/v2/watchTogetherCreate";
+import { promoteRoomSuggestion } from "@/api/v2/watchTogetherSuggestionPromote";
+import {
+  createRoomSuggestion,
+  type SuggestionCreationDraft,
+} from "@/api/v2/watchTogetherSuggestionCreate";
+import { joinRoom } from "@/api/v2/watchTogetherJoin";
+import { selectRoomItem } from "@/api/v2/watchTogetherSelection";
+import { updateRoomPolicy } from "@/api/v2/watchTogetherPolicy";
+import { readRoom } from "@/api/v2/watchTogetherRoomRead";
+import { deleteRoomSuggestion } from "@/api/v2/watchTogetherSuggestionDelete";
+import { listRoomSuggestions, setRoomSuggestionVote } from "@/api/v2/watchTogetherSuggestions";
+import { captureProfileRequestContext, type ProfileRequestContextSnapshot } from "@/api/client";
+import { closeRoom } from "@/api/v2/watchTogetherClose";
+import { stageRoomItem } from "@/api/v2/watchTogetherStage";
+import { startRoomPlayback } from "@/api/v2/watchTogetherStart";
+import { stopRoomPlayback } from "@/api/v2/watchTogetherStop";
+import { updateRoomSelectionMode } from "@/api/v2/watchTogetherSelectionMode";
+import { queryRoomMemberState } from "@/api/v2/watchTogetherMemberState";
+import { readRoomPicker } from "@/api/v2/watchTogetherPicker";
+import { readWatchTogetherCapabilities } from "@/api/v2/watchTogetherCapabilities";
 
 export type GuestControlPolicy = "host_only" | "guest_play_pause";
 export type WatchTogetherRole = "host" | "guest";
@@ -14,6 +34,11 @@ export interface WatchTogetherRoomMember {
   is_host: boolean;
   is_self: boolean;
   connected: boolean;
+  is_ready?: boolean;
+  is_buffering?: boolean;
+  is_syncing?: boolean;
+  /** Lobby "I'm ready". Absent on older servers; always false once playing. */
+  lobby_ready?: boolean;
 }
 
 export interface WatchTogetherRoomSnapshot {
@@ -59,12 +84,6 @@ export interface WatchTogetherRoomResponse {
   room_access_token?: string;
 }
 
-export interface CreateWatchTogetherRoomInput {
-  file_id?: number;
-  library_id?: number;
-  selection_mode?: WatchTogetherSelectionMode;
-}
-
 export interface WatchTogetherSuggestion {
   id: string;
   room_id: string;
@@ -105,71 +124,110 @@ export interface SelectWatchTogetherRoomItemInput {
   library_id?: number;
 }
 
-export async function createWatchTogetherRoom(input: CreateWatchTogetherRoomInput = {}) {
-  return api<WatchTogetherRoomResponse>("/watch-together/rooms", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+export async function createWatchTogetherRoom(draft: RoomCreationDraft) {
+  return createRoom(draft);
 }
 
-export async function joinWatchTogetherRoom(input: JoinWatchTogetherRoomInput) {
-  return api<WatchTogetherRoomResponse>("/watch-together/join", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+export async function joinWatchTogetherRoom(
+  input: JoinWatchTogetherRoomInput,
+  authority = captureProfileRequestContext(),
+) {
+  return joinRoom({ ...input }, authority);
 }
 
-export async function getWatchTogetherRoom(roomId: string, roomToken: string) {
-  const params = new URLSearchParams({ room_token: roomToken });
-  return api<WatchTogetherRoomResponse>(`/watch-together/rooms/${roomId}?${params.toString()}`);
+export async function getWatchTogetherRoom(
+  roomId: string,
+  roomToken: string,
+  authority = captureProfileRequestContext(),
+) {
+  return readRoom(roomId, roomToken, authority);
 }
 
 export async function updateWatchTogetherRoomPolicy(
   roomId: string,
   guestControlPolicy: GuestControlPolicy,
+  authority = captureProfileRequestContext(),
 ) {
-  return api<WatchTogetherRoomResponse>(`/watch-together/rooms/${roomId}/policy`, {
-    method: "PATCH",
-    body: JSON.stringify({ guest_control_policy: guestControlPolicy }),
-  });
+  return updateRoomPolicy(roomId, guestControlPolicy, authority);
+}
+
+/** A lobby with a selection is staged: chosen, not yet started. */
+export function isRoomStaged(room: WatchTogetherRoomSnapshot | null | undefined): boolean {
+  return !!room && room.phase === "lobby" && !!room.selected_content_id;
+}
+
+export async function stageWatchTogetherRoomItem(
+  roomId: string,
+  input: SelectWatchTogetherRoomItemInput,
+  authority = captureProfileRequestContext(),
+) {
+  return stageRoomItem(roomId, { ...input }, authority);
+}
+
+export async function startWatchTogetherRoomPlayback(
+  roomId: string,
+  authority = captureProfileRequestContext(),
+) {
+  return startRoomPlayback(roomId, authority);
+}
+
+export async function stopWatchTogetherRoomPlayback(
+  roomId: string,
+  authority = captureProfileRequestContext(),
+) {
+  return stopRoomPlayback(roomId, authority);
+}
+
+export async function updateWatchTogetherRoomSelectionMode(
+  roomId: string,
+  mode: WatchTogetherSelectionMode,
+  authority = captureProfileRequestContext(),
+) {
+  return updateRoomSelectionMode(roomId, mode, authority);
+}
+
+export async function queryWatchTogetherMemberState(
+  roomId: string,
+  roomToken: string,
+  contentIds: string[],
+  authority = captureProfileRequestContext(),
+) {
+  return queryRoomMemberState(roomId, roomToken, contentIds, authority);
+}
+
+export async function getWatchTogetherRoomPicker(
+  roomId: string,
+  roomToken: string,
+  authority = captureProfileRequestContext(),
+) {
+  return readRoomPicker(roomId, roomToken, authority);
+}
+
+export async function getWatchTogetherCapabilities() {
+  return readWatchTogetherCapabilities();
 }
 
 export async function selectWatchTogetherRoomItem(
   roomId: string,
   input: SelectWatchTogetherRoomItemInput,
+  authority = captureProfileRequestContext(),
 ) {
-  return api<WatchTogetherRoomResponse>(`/watch-together/rooms/${roomId}/selection`, {
-    method: "PUT",
-    body: JSON.stringify(input),
-  });
+  return selectRoomItem(roomId, { ...input }, authority);
 }
 
-export async function closeWatchTogetherRoom(roomId: string) {
-  return api<void>(`/watch-together/rooms/${roomId}`, {
-    method: "DELETE",
-  });
+export async function closeWatchTogetherRoom(
+  roomId: string,
+  authority: ProfileRequestContextSnapshot | null = captureProfileRequestContext(),
+) {
+  return closeRoom(roomId, authority);
 }
 
 export async function listWatchTogetherSuggestions(roomId: string, roomToken: string) {
-  const params = new URLSearchParams({ room_token: roomToken });
-  return api<WatchTogetherSuggestionsResponse>(
-    `/watch-together/rooms/${roomId}/suggestions?${params.toString()}`,
-  );
+  return listRoomSuggestions(roomId, roomToken);
 }
 
-export async function createWatchTogetherSuggestion(
-  roomId: string,
-  roomToken: string,
-  input: CreateWatchTogetherSuggestionInput,
-) {
-  const params = new URLSearchParams({ room_token: roomToken });
-  return api<WatchTogetherSuggestionsResponse>(
-    `/watch-together/rooms/${roomId}/suggestions?${params.toString()}`,
-    {
-      method: "POST",
-      body: JSON.stringify(input),
-    },
-  );
+export async function createWatchTogetherSuggestion(draft: SuggestionCreationDraft) {
+  return createRoomSuggestion(draft);
 }
 
 export async function deleteWatchTogetherSuggestion(
@@ -177,13 +235,7 @@ export async function deleteWatchTogetherSuggestion(
   roomToken: string,
   suggestionId: string,
 ) {
-  const params = new URLSearchParams({ room_token: roomToken });
-  return api<WatchTogetherSuggestionsResponse>(
-    `/watch-together/rooms/${roomId}/suggestions/${suggestionId}?${params.toString()}`,
-    {
-      method: "DELETE",
-    },
-  );
+  return deleteRoomSuggestion(roomId, roomToken, suggestionId);
 }
 
 export async function voteWatchTogetherSuggestion(
@@ -191,13 +243,7 @@ export async function voteWatchTogetherSuggestion(
   roomToken: string,
   suggestionId: string,
 ) {
-  const params = new URLSearchParams({ room_token: roomToken });
-  return api<WatchTogetherSuggestionsResponse>(
-    `/watch-together/rooms/${roomId}/suggestions/${suggestionId}/vote?${params.toString()}`,
-    {
-      method: "POST",
-    },
-  );
+  return setRoomSuggestionVote(roomId, roomToken, suggestionId, true);
 }
 
 export async function unvoteWatchTogetherSuggestion(
@@ -205,28 +251,16 @@ export async function unvoteWatchTogetherSuggestion(
   roomToken: string,
   suggestionId: string,
 ) {
-  const params = new URLSearchParams({ room_token: roomToken });
-  return api<WatchTogetherSuggestionsResponse>(
-    `/watch-together/rooms/${roomId}/suggestions/${suggestionId}/vote?${params.toString()}`,
-    {
-      method: "DELETE",
-    },
-  );
+  return setRoomSuggestionVote(roomId, roomToken, suggestionId, false);
 }
 
 export async function promoteWatchTogetherSuggestion(
   roomId: string,
   roomToken: string,
   suggestionId: string,
+  authority = captureProfileRequestContext(),
 ) {
-  const params = new URLSearchParams({ room_token: roomToken });
-  return api<WatchTogetherRoomResponse>(
-    `/watch-together/rooms/${roomId}/suggestions/promote?${params.toString()}`,
-    {
-      method: "POST",
-      body: JSON.stringify({ suggestion_id: suggestionId }),
-    },
-  );
+  return promoteRoomSuggestion(roomId, roomToken, suggestionId, authority);
 }
 
 export function buildWatchTogetherInviteUrl(invitePath?: string | null) {

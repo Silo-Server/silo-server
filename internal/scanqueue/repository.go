@@ -55,7 +55,7 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 }
 
 const scanRunColumns = `id, media_folder_id, mode, path, trigger, status, result_payload,
-	error_message, autoscan_event_id, requested_at, started_at, completed_at, heartbeat_at, updated_at`
+	error_message, autoscan_event_id, followup_trigger, requested_at, started_at, completed_at, heartbeat_at, updated_at`
 
 func scanRunRow(row pgx.Row) (*models.ScanRun, error) {
 	var run models.ScanRun
@@ -69,6 +69,7 @@ func scanRunRow(row pgx.Row) (*models.ScanRun, error) {
 		&run.ResultPayload,
 		&run.ErrorMessage,
 		&run.AutoscanEventID,
+		&run.FollowupTrigger,
 		&run.RequestedAt,
 		&run.StartedAt,
 		&run.CompletedAt,
@@ -120,7 +121,7 @@ func (r *Repository) Create(ctx context.Context, input CreateInput) (*models.Sca
 
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		existing, lookupErr := r.GetActiveByScope(ctx, input.LibraryID, input.Mode, input.Path)
+		existing, lookupErr := r.coalesceIntoActive(ctx, r.pool, input)
 		if lookupErr != nil {
 			return nil, false, lookupErr
 		}
@@ -128,6 +129,59 @@ func (r *Repository) Create(ctx context.Context, input CreateInput) (*models.Sca
 	}
 
 	return nil, false, fmt.Errorf("create scan run: %w", err)
+}
+
+// coalesceIntoActive returns the accepted or running run that already owns
+// input's scope. An accepted run has not started, so it will see whatever the
+// new request is about. A running run may already have walked the scope, so
+// the request is recorded on it as an owed follow-up: when the run finishes,
+// one more scan of the same scope is enqueued with the request's trigger.
+// Direct admin triggers are never recorded because queue workers do not claim
+// them; a follow-up carrying one would sit until the stale janitor failed it.
+func (r *Repository) coalesceIntoActive(ctx context.Context, db dbExecutor, input CreateInput) (*models.ScanRun, error) {
+	requeue := !isDirectTrigger(input.Trigger)
+	return scanRunRow(db.QueryRow(ctx, `
+		UPDATE scan_runs
+		SET followup_trigger = CASE
+				WHEN $5 AND status = $6 AND followup_trigger = '' THEN $7
+				ELSE followup_trigger
+			END,
+			updated_at = CASE
+				WHEN $5 AND status = $6 AND followup_trigger = '' THEN NOW()
+				ELSE updated_at
+			END
+		WHERE id = (
+			SELECT id
+			FROM scan_runs
+			WHERE media_folder_id = $1
+			  AND mode = $2
+			  AND path = $3
+			  AND status = ANY($4)
+			ORDER BY requested_at ASC
+			LIMIT 1
+		)
+		RETURNING `+scanRunColumns,
+		input.LibraryID,
+		input.Mode,
+		input.Path,
+		[]string{StatusAccepted, StatusRunning},
+		requeue,
+		StatusRunning,
+		input.Trigger,
+	))
+}
+
+type dbExecutor interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func isDirectTrigger(trigger string) bool {
+	for _, direct := range directScanTriggers {
+		if trigger == direct {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Repository) CreateBatch(ctx context.Context, inputs []CreateInput) ([]*models.ScanRun, []bool, error) {
@@ -166,20 +220,7 @@ func (r *Repository) CreateBatch(ctx context.Context, inputs []CreateInput) ([]*
 			return nil, nil, fmt.Errorf("create scan run: %w", err)
 		}
 
-		existing, lookupErr := scanRunRow(tx.QueryRow(ctx, `
-			SELECT `+scanRunColumns+`
-			FROM scan_runs
-			WHERE media_folder_id = $1
-			  AND mode = $2
-			  AND path = $3
-			  AND status = ANY($4)
-			ORDER BY requested_at ASC
-			LIMIT 1`,
-			input.LibraryID,
-			input.Mode,
-			input.Path,
-			[]string{StatusAccepted, StatusRunning},
-		))
+		existing, lookupErr := r.coalesceIntoActive(ctx, tx, input)
 		if lookupErr != nil {
 			return nil, nil, lookupErr
 		}
@@ -395,12 +436,22 @@ func (r *Repository) UpdateProgress(ctx context.Context, id string, result *evt.
 	))
 }
 
+// Complete marks a running run completed. When a request for the same scope
+// was coalesced into the run while it was running, the owed follow-up scan is
+// enqueued in the same transaction; see CompleteWithFollowUp to observe it.
 func (r *Repository) Complete(ctx context.Context, id string, result *evt.ScanRunResult) (*models.ScanRun, error) {
+	run, _, err := r.CompleteWithFollowUp(ctx, id, result)
+	return run, err
+}
+
+// CompleteWithFollowUp is Complete returning the follow-up run it enqueued,
+// or nil when none was owed.
+func (r *Repository) CompleteWithFollowUp(ctx context.Context, id string, result *evt.ScanRunResult) (*models.ScanRun, *models.ScanRun, error) {
 	payload, err := json.Marshal(result)
 	if err != nil {
-		return nil, fmt.Errorf("marshal scan result: %w", err)
+		return nil, nil, fmt.Errorf("marshal scan result: %w", err)
 	}
-	return scanRunRow(r.pool.QueryRow(ctx, `
+	return r.finish(ctx, id, `
 		UPDATE scan_runs
 		SET status = $2,
 			result_payload = $3,
@@ -411,15 +462,21 @@ func (r *Repository) Complete(ctx context.Context, id string, result *evt.ScanRu
 		WHERE id = $1
 		  AND status = $4
 		RETURNING `+scanRunColumns,
-		id,
-		StatusCompleted,
-		payload,
-		StatusRunning,
-	))
+		id, StatusCompleted, payload, StatusRunning)
 }
 
+// Fail marks a running run failed. An owed follow-up is still enqueued: the
+// request that was coalesced into this run has not been served, and a
+// follow-up only exists because a new request arrived, so a persistently
+// failing scope cannot loop on its own.
 func (r *Repository) Fail(ctx context.Context, id string, errorMessage string) (*models.ScanRun, error) {
-	return scanRunRow(r.pool.QueryRow(ctx, `
+	run, _, err := r.FailWithFollowUp(ctx, id, errorMessage)
+	return run, err
+}
+
+// FailWithFollowUp is Fail returning the follow-up run it enqueued, or nil.
+func (r *Repository) FailWithFollowUp(ctx context.Context, id string, errorMessage string) (*models.ScanRun, *models.ScanRun, error) {
+	return r.finish(ctx, id, `
 		UPDATE scan_runs
 		SET status = $2,
 			error_message = $3,
@@ -429,11 +486,47 @@ func (r *Repository) Fail(ctx context.Context, id string, errorMessage string) (
 		WHERE id = $1
 		  AND status = $4
 		RETURNING `+scanRunColumns,
-		id,
-		StatusFailed,
-		errorMessage,
-		StatusRunning,
-	))
+		id, StatusFailed, errorMessage, StatusRunning)
+}
+
+// finish applies a terminal-status update and, when the finished run owes a
+// follow-up, inserts one accepted run for the same scope in the same
+// transaction. The insert cannot collide with the partial unique index: the
+// row it would collide with is the one this transaction just finished.
+func (r *Repository) finish(ctx context.Context, id string, updateSQL string, args ...any) (*models.ScanRun, *models.ScanRun, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin scan run finish: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	run, err := scanRunRow(tx.QueryRow(ctx, updateSQL, args...))
+	if err != nil {
+		return nil, nil, err
+	}
+	var followUp *models.ScanRun
+	if run.FollowupTrigger != "" {
+		followUp, err = scanRunRow(tx.QueryRow(ctx, `
+			INSERT INTO scan_runs (
+				id, media_folder_id, mode, path, trigger, status, autoscan_event_id
+			) VALUES ($1, $2, $3, $4, $5, $6, $7)
+			RETURNING `+scanRunColumns,
+			ulid.Make().String(),
+			run.MediaFolderID,
+			run.Mode,
+			run.Path,
+			run.FollowupTrigger,
+			StatusAccepted,
+			run.AutoscanEventID,
+		))
+		if err != nil {
+			return nil, nil, fmt.Errorf("enqueue follow-up scan run for %q: %w", id, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, fmt.Errorf("commit scan run finish: %w", err)
+	}
+	return run, followUp, nil
 }
 
 func (r *Repository) CancelAcceptedByLibrary(ctx context.Context, libraryID int) ([]*models.ScanRun, error) {

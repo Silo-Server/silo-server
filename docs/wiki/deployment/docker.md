@@ -109,6 +109,7 @@ volumes. `SILO_DATA_ROOT` defaults to `/opt/silo` and contains:
 | `/opt/silo/postgres` | Durable PostgreSQL data |
 | `/opt/silo/redis` | Redis persistence |
 | `/opt/silo/plugins` | Installed plugin cache |
+| `/opt/silo/artwork` | Local artwork cache and uploaded artwork |
 | `/opt/silo/compat` | Compatibility assets |
 | `/opt/silo/transcode` | Transient transcode output mounted at `/tmp/silo-transcode` |
 | `/opt/silo/catalog-seeds` | Read-only catalog seed data |
@@ -160,11 +161,16 @@ The Jellyfin/Emby and Audiobookshelf listeners are enabled by default, so
 **Admin > Settings** (`jellyfin_compat.enabled`, `audiobookshelf_compat.enabled`)
 if you do not use compatible clients.
 
+Audiobookshelf compatibility is a beta feature: it keeps working as-is on 1.0
+builds but is outside the 1.0 support promise and certification, until a later
+consolidated Books effort replaces it.
+
 > [!WARNING]
 > The application and compatibility port mappings listen on all host interfaces
 > by default and do not provide TLS themselves. Before allowing access beyond a
 > trusted local network, use a correctly configured HTTPS reverse proxy and
-> firewall, then set `SILO_PUBLIC_URL` and `SILO_TRUSTED_PROXIES` for that
+> firewall, then configure the Silo public URL and trusted proxies in the admin
+> settings for that
 > deployment. Do not expose PostgreSQL or Redis publicly.
 
 ## Hardware acceleration
@@ -221,7 +227,7 @@ by role — `mount="scratch"`, `mount="library-1"` — rather than by path, so a
 anonymous scrape cannot enumerate where your media lives. A node's `/health` is
 unauthenticated for the same reason and withholds paths on the same terms. The
 paths themselves are reported by the admin-authenticated
-`GET /api/v1/admin/system/resources` and by each node's bearer-authed `/status`.
+`GET /api/v2/admin/system/resources` and by each node's bearer-authed `/status`.
 
 At most eight mounts are sampled per host — the transcode scratch directory
 first, then library roots in order. The cap bounds probing, not just reporting:
@@ -335,6 +341,12 @@ Settings that change the index format, including enabling meaning-based search,
 also trigger an automatic background rebuild after restart. A compatible older
 Meilisearch index keeps serving keyword results while its replacement is built.
 
+The Compose file pins the Meilisearch version because Meilisearch will not open
+data written by a different version. To move to a new version, change
+`MEILISEARCH_IMAGE` and set `MEILI_UPGRADE_DB=true` in `.env` for one start,
+then remove it. Alternatively, empty `${SILO_DATA_ROOT}/meilisearch` and let
+Silo rebuild the index.
+
 ## External PostgreSQL and Redis
 
 > [!IMPORTANT]
@@ -361,6 +373,42 @@ docker compose -f docker-compose.yml -f your-override.yml config --quiet
 Running PostgreSQL on a dedicated VM or managed service simplifies upgrades,
 tuning, and backups. Redis can stay local or move to shared infrastructure if
 you already have it.
+
+### Valkey in place of Redis
+
+> [!WARNING]
+> Silo is currently tested only against Redis. Valkey support is provided
+> as-is, with no support offered for Valkey-specific problems.
+
+[Valkey](https://valkey.io/) supports the Redis protocol and the core commands
+Silo uses. The Go client connects to either server with a `redis://` URL; no
+Valkey-specific setting is needed. To connect to an existing Valkey server,
+follow the external-service Compose instructions above and set the Silo
+service's `REDIS_URL` to that server's address.
+
+For a new installation, save this bundled-service override as
+`valkey-override.yml`:
+
+```yaml
+services:
+  redis:
+    image: valkey/valkey:alpine
+```
+
+The base Compose file's `redis-cli ping` healthcheck works with the official
+Valkey image, which provides `redis-cli` as a compatibility link. Check the
+merged configuration and start the stack with the override:
+
+```sh
+docker compose -f docker-compose.yml -f valkey-override.yml config --quiet
+docker compose -f docker-compose.yml -f valkey-override.yml up -d
+```
+
+For an existing installation, check the Redis version and follow
+[Valkey's migration guide](https://valkey.io/topics/migration/) for its
+persisted data before switching images. The bundled Compose file reuses the
+same `/data` mount, but Redis 7.4 and later write data files that Valkey
+cannot read.
 
 ## Server roles and distributed deployments
 
@@ -495,6 +543,15 @@ a lock-holding backend behind. Migrations time out after 20 minutes by default;
 raise `SILO_MIGRATE_TIMEOUT` (a Go duration such as `60m`, or `0` for no limit)
 for very large libraries.
 
+Some releases rewrite large tables in place. The bigint id widening, for
+example, rewrites `users`, `media_files`, and `media_folders` and holds an
+ACCESS EXCLUSIVE lock on every table that references them for the duration, so
+nothing can read or write most of the schema until it commits. A rewrite needs
+free disk for a second copy of the table plus its rebuilt indexes, and on a
+large library the `media_files` copy can run past the 20-minute default, so set
+`SILO_MIGRATE_TIMEOUT` higher (or to `0`) before starting the update. The
+release notes name the releases that carry a migration like this.
+
 > [!WARNING]
 > Rolling back the image does not reverse migrations. Check what was applied
 > with `docker compose run --rm silo --migrate-status`. For a reversible
@@ -517,7 +574,9 @@ curl -fsS http://localhost:8090/api/v1/ready
 ```
 
 `health` reports process liveness. `ready` also checks required dependencies,
-including PostgreSQL and configured S3 storage.
+including PostgreSQL and configured S3 storage. Both are retained operational
+probes: they keep these paths after the `/api/v1` contract is retired, so probe
+configuration does not change when the server moves to `/api/v2`.
 
 ## Migrating from Continuum
 

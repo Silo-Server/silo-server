@@ -44,8 +44,7 @@ func hashEmailToken(token string) string {
 }
 
 // emailLinkBase is the externally reachable base URL for tokenized email
-// links: the admin's notifications.email.external_url, falling back to the
-// server's public URL.
+// links: the admin's server.public_url setting.
 func (s *System) emailLinkBase(ctx context.Context) string {
 	if base := s.Settings.EmailExternalURL(ctx); base != "" {
 		return base
@@ -54,8 +53,7 @@ func (s *System) emailLinkBase(ctx context.Context) string {
 }
 
 // SetPublicURL wires the server's externally reachable base URL, used as the
-// fallback for verification links when notifications.email.external_url is
-// unset. Optional.
+// fallback for verification links when the setting is unavailable. Optional.
 func (s *System) SetPublicURL(url string) {
 	if s != nil {
 		s.publicURL = strings.TrimRight(url, "/")
@@ -96,7 +94,7 @@ func (s *System) RequestEmailAddress(ctx context.Context, userID int, profileID,
 		return err
 	}
 
-	verifyURL := linkBase + "/api/v1/notifications/email/verify?token=" + token
+	verifyURL := linkBase + "/api/v2/notifications/email/verify?token=" + token
 	content := composeVerificationEmail(profile.Name, verifyURL)
 	err = s.mailSender.Send(ctx, mail.Message{
 		To:       []string{address},

@@ -10,12 +10,14 @@ import {
   mediaSurfaceKeys,
   personKeys,
   progressKeys,
+  ratingKeys,
   recKeys,
   sectionKeys,
   watchlistKeys,
 } from "./keys";
 import {
   cancelItemDetailQueries,
+  getQueryKeyItemId,
   invalidateMediaSurfaceQueries,
   removeItemFromHomeSectionCaches,
   scheduleMediaSurfaceInvalidation,
@@ -76,7 +78,7 @@ describe("invalidateMediaSurfaceQueries", () => {
       has_more: false,
       items: [],
     });
-    queryClient.setQueryData(progressKeys.list(), { progress: [] });
+    queryClient.setQueryData(progressKeys.list(), { items: [] });
     queryClient.setQueryData(historyKeys.list(), { items: [] });
     queryClient.setQueryData(favoriteKeys.list(), { items: [] });
     queryClient.setQueryData(watchlistKeys.list(), { items: [] });
@@ -411,5 +413,22 @@ describe("invalidateMediaSurfaceQueries", () => {
     expect(queryClient.getQueryState(item1WatchKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(item2DetailKey)?.isInvalidated).toBe(false);
     expect(queryClient.getQueryState(item2WatchKey)?.isInvalidated).toBe(false);
+  });
+
+  it("does not read the ratings list key as an item ID", async () => {
+    expect(getQueryKeyItemId(ratingKeys.list())).toBeUndefined();
+    expect(getQueryKeyItemId(ratingKeys.item("item-2"))).toBe("item-2");
+
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(ratingKeys.list(), []);
+    queryClient.setQueryData(ratingKeys.item("item-2"), {});
+
+    await invalidateMediaSurfaceQueries(queryClient, {
+      itemId: "item-1",
+      watchedKeys: [ratingKeys.all],
+    });
+
+    expect(queryClient.getQueryState(ratingKeys.list())?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(ratingKeys.item("item-2"))?.isInvalidated).toBe(false);
   });
 });

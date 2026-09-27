@@ -1,98 +1,93 @@
 import { Navigate } from "react-router";
+
+import { SiloBrand } from "@/components/SiloBrand";
 import { useAuth } from "@/hooks/useAuth";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useHasUnsavedChanges } from "@/hooks/useUnsavedChanges";
+import "@/styles/admin-settings.css";
+import "@/styles/setup-wizard.css";
+
 import { WizardProvider, useWizardContext } from "./setup-wizard/WizardContext";
 import { useWizardSteps } from "./setup-wizard/useWizardSteps";
-import { StepIndicator } from "./setup-wizard/StepIndicator";
-import { AccountStep } from "./setup-wizard/steps/AccountStep";
-import { ProfileStep } from "./setup-wizard/steps/ProfileStep";
-import { LibraryStep } from "./setup-wizard/steps/LibraryStep";
-import { ServerStorageStep } from "./setup-wizard/steps/ServerStorageStep";
-import { IntegrationsStep } from "./setup-wizard/steps/IntegrationsStep";
-import { DownloadsStep } from "./setup-wizard/steps/DownloadsStep";
-import { RecommendationsStep } from "./setup-wizard/steps/RecommendationsStep";
-import { NodesFinishStep } from "./setup-wizard/steps/NodesFinishStep";
 import type { WizardStepId } from "./setup-wizard/useWizardSteps";
+import type { SkippableStep } from "./setup-wizard/setupStorage";
+import { StepRail } from "./setup-wizard/StepRail";
+import { AccountStep } from "./setup-wizard/steps/AccountStep";
+import { ServerStep } from "./setup-wizard/steps/ServerStep";
+import { PlaybackStep } from "./setup-wizard/steps/PlaybackStep";
+import { StorageStep } from "./setup-wizard/steps/StorageStep";
+import { LibraryStep } from "./setup-wizard/steps/LibraryStep";
+import { SubtitlesStep } from "./setup-wizard/steps/SubtitlesStep";
+import { ConnectStep } from "./setup-wizard/steps/ConnectStep";
+import { FeaturesStep } from "./setup-wizard/steps/FeaturesStep";
+import { DoneStep } from "./setup-wizard/steps/DoneStep";
 
-const STEP_TITLES: Record<WizardStepId, string> = {
-  account: "Create your account",
-  profile: "Add a profile",
-  server: "Server & storage",
-  integrations: "Integrations",
-  downloads: "Downloads",
-  recommendations: "Recommendations",
-  library: "Add a library",
-  nodes: "You're all set",
-};
-
-const STEP_DESCRIPTIONS: Record<WizardStepId, string> = {
-  account: "This will be the admin account for managing your server.",
-  profile: "Profiles let different people track their own watch history and preferences.",
-  server: "Configure core infrastructure. All fields are optional and can be changed later.",
-  integrations: "Configure subtitle providers for automatic subtitle downloading.",
-  downloads: "Allow users to download media files for offline viewing.",
-  recommendations: "AI-powered recommendations using embeddings. Requires pgvector.",
-  library: "Point Silo at your media files. You can add more libraries later.",
-  nodes: "Silo is ready. Start exploring or fine-tune in admin settings.",
-};
+function StepContent({ step }: { step: WizardStepId }) {
+  switch (step) {
+    case "account":
+      return <AccountStep />;
+    case "server":
+      return <ServerStep />;
+    case "playback":
+      return <PlaybackStep />;
+    case "storage":
+      return <StorageStep />;
+    case "library":
+      return <LibraryStep />;
+    case "subtitles":
+      return <SubtitlesStep />;
+    case "connect":
+      return <ConnectStep />;
+    case "features":
+      return <FeaturesStep />;
+    case "done":
+      return <DoneStep />;
+  }
+}
 
 function WizardContent() {
-  const { user, profiles, librariesLoading, profilesLoading } = useWizardContext();
+  const { summaries, visit } = useWizardContext();
   const { steps, currentStep } = useWizardSteps();
-  const isAdmin = user?.role === "admin";
-  const profileComplete = profiles.length > 0;
-
-  if (profilesLoading || (user && profileComplete && isAdmin && librariesLoading)) {
-    return (
-      <div className="auth-shell items-start py-10 sm:py-14">
-        <div className="glass panel-border relative z-1 w-full max-w-2xl rounded-2xl p-7 sm:p-10">
-          <div className="space-y-3">
-            <div className="flex gap-1">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="bg-foreground/[0.06] h-1 flex-1 rounded-full" />
-              ))}
-            </div>
-            <div className="bg-foreground/[0.06] h-3 w-32 animate-pulse rounded" />
-          </div>
-          <div className="bg-foreground/[0.06] mt-8 h-8 w-48 animate-pulse rounded" />
-          <div className="bg-foreground/[0.06] mt-3 h-4 w-72 animate-pulse rounded" />
-        </div>
-      </div>
-    );
+  // The setup route mounts no router guard, so unsaved edits on the current
+  // step would be lost silently on a rail click. Ask first, the way the admin
+  // pages do through their guard.
+  const hasUnsavedChanges = useHasUnsavedChanges();
+  function visitStep(id: SkippableStep) {
+    if (
+      hasUnsavedChanges &&
+      !window.confirm("Leave this step? Your unsaved changes will be lost.")
+    ) {
+      return;
+    }
+    visit(id);
   }
 
   return (
-    <div className="auth-shell items-start py-10 sm:py-14">
-      <div className="glass panel-border relative z-1 w-full max-w-2xl rounded-2xl p-7 sm:p-10">
-        {/* Header */}
-        <div className="mb-10">
-          <StepIndicator steps={steps} />
-          <h1 className="text-foreground mt-6 text-[1.7rem] leading-tight font-bold tracking-[-0.03em] sm:text-3xl">
-            {STEP_TITLES[currentStep]}
-          </h1>
-          <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
-            {STEP_DESCRIPTIONS[currentStep]}
-          </p>
-        </div>
-
-        {/* Step content — keyed to trigger entrance animation on step change */}
-        <div key={currentStep} className="animate-[fade-in_0.25s_ease-out]">
-          {currentStep === "account" && <AccountStep />}
-          {currentStep === "profile" && <ProfileStep />}
-          {currentStep === "library" && <LibraryStep />}
-          {currentStep === "server" && <ServerStorageStep />}
-          {currentStep === "integrations" && <IntegrationsStep />}
-          {currentStep === "downloads" && <DownloadsStep />}
-          {currentStep === "recommendations" && <RecommendationsStep />}
-          {currentStep === "nodes" && <NodesFinishStep />}
-        </div>
+    <div className="setup-shell">
+      <div className="setup-frame">
+        <aside className="setup-side">
+          <div className="setup-brand">
+            <SiloBrand variant="mark" className="size-9" />
+            <span>
+              <span className="setup-brand-name">Silo</span>
+              <span className="setup-brand-sub">First-run setup</span>
+            </span>
+          </div>
+          <StepRail steps={steps} summaries={summaries} onVisit={visitStep} />
+        </aside>
+        <main className="setup-panel">
+          {/* Keyed on the step so the entrance runs once per step change. */}
+          <div key={currentStep} className="setup-panel-enter">
+            <StepContent step={currentStep} />
+          </div>
+        </main>
       </div>
     </div>
   );
 }
 
 export default function SetupWizard() {
-  const { user, loading, setupLoading, setupRequired } = useAuth();
+  const { user, loading, setupLoading, setupRequired, setupCompleted } = useAuth();
   useDocumentTitle("Setup");
 
   if (loading || setupLoading) {
@@ -105,6 +100,13 @@ export default function SetupWizard() {
 
   if (user && user.role !== "admin") {
     return <Navigate to="/profiles" replace />;
+  }
+
+  // The wizard is a one-time entrance. Once the server has recorded it as
+  // finished, the same settings live in the admin area and this route stays
+  // closed even to an admin who types it in.
+  if (setupCompleted) {
+    return <Navigate to="/admin/settings/general" replace />;
   }
 
   return (

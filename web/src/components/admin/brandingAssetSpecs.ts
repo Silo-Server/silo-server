@@ -45,28 +45,12 @@ export const BRANDING_ASSET_SPECS: Record<BrandingAssetKind, BrandingAssetSpec> 
     defaultUrl: "/silo-wordmark-sidebar.png",
     emptyCaption: "Default",
   },
-  // Light variants share their base kind's pipeline. With no upload they
-  // inherit the main asset instead of using a separate bundled default.
-  wordmark_light: {
-    storedPx: WORDMARK_PX,
-    maxUploadBytes: WORDMARK_MAX_BYTES,
-    guidance: `Wide artwork, ${WORDMARK_PX}px or wider. Stored as WebP capped at ${WORDMARK_PX}px wide; narrower images are not enlarged. PNG, JPEG, or WebP up to ${megabytes(WORDMARK_MAX_BYTES)}.`,
-    defaultUrl: null,
-    emptyCaption: "Falls back to the main logo",
-  },
   mark: {
     storedPx: MARK_PX,
     maxUploadBytes: MARK_MAX_BYTES,
     guidance: `Square artwork, ${MARK_PX}×${MARK_PX} or larger. Anything else is center-cropped to a square, then stored as WebP at exactly ${MARK_PX}×${MARK_PX} — smaller art is upscaled. PNG, JPEG, or WebP up to ${megabytes(MARK_MAX_BYTES)}.`,
     defaultUrl: "/silo-icon-1024.png",
     emptyCaption: "Default",
-  },
-  mark_light: {
-    storedPx: MARK_PX,
-    maxUploadBytes: MARK_MAX_BYTES,
-    guidance: `Square artwork, ${MARK_PX}×${MARK_PX} or larger. Anything else is center-cropped to a square, then stored as WebP at exactly ${MARK_PX}×${MARK_PX} — smaller art is upscaled. PNG, JPEG, or WebP up to ${megabytes(MARK_MAX_BYTES)}.`,
-    defaultUrl: null,
-    emptyCaption: "Falls back to the main icon",
   },
   favicon: {
     storedPx: null,

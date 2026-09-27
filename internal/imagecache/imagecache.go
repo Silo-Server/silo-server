@@ -28,14 +28,14 @@ const (
 	downloadTimeout  = 30 * time.Second
 )
 
-// ObjectPutter is the S3 interface required by Cacher.
+// ObjectPutter is the artwork storage interface required by Cacher.
 type ObjectPutter interface {
-	PutObject(ctx context.Context, bucket, key string, data []byte) error
-	Bucket() string
+	Put(context.Context, string, []byte) error
 }
 
-type objectMatcher interface {
-	ObjectMatches(ctx context.Context, bucket, key string, data []byte) (bool, error)
+// ContentMatcher avoids rewriting immutable objects with matching bytes.
+type ContentMatcher interface {
+	Matches(context.Context, string, []byte) (bool, error)
 }
 
 // ArtworkRevisionTracker persists the object manifest for an immutable
@@ -237,7 +237,6 @@ func (c *Cacher) CacheBytes(ctx context.Context, data []byte, req CacheRequest) 
 		return nil, fmt.Errorf("imagecache: generate variants: %w", err)
 	}
 	basePath := buildBasePath(req)
-	bucket := c.s3.Bucket()
 	revision := variantRevision(result)
 	variantPaths := buildVariantPaths(basePath, revision, result)
 	originalPath := variantPaths[artworkkey.OriginalVariant]
@@ -245,7 +244,7 @@ func (c *Cacher) CacheBytes(ctx context.Context, data []byte, req CacheRequest) 
 		return nil, err
 	}
 
-	uploadStats, err := c.uploadVariants(ctx, bucket, result, variantPaths)
+	uploadStats, err := c.uploadVariants(ctx, result, variantPaths)
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +303,7 @@ type uploadVariantStats struct {
 	existing int
 }
 
-func (c *Cacher) uploadVariants(ctx context.Context, bucket string, result *imageutil.VariantResult, variantPaths map[string]string) (uploadVariantStats, error) {
+func (c *Cacher) uploadVariants(ctx context.Context, result *imageutil.VariantResult, variantPaths map[string]string) (uploadVariantStats, error) {
 	var wg sync.WaitGroup
 	uploadErrs := make([]error, len(result.Variants))
 	stats := make([]uploadVariantStats, len(result.Variants))
@@ -313,14 +312,18 @@ func (c *Cacher) uploadVariants(ctx context.Context, bucket string, result *imag
 		go func(idx int, variant imageutil.Variant) {
 			defer wg.Done()
 			key := variantPaths[variant.Key]
-			if exists, err := objectMatches(ctx, c.s3, bucket, key, variant.Data); err != nil {
-				uploadErrs[idx] = fmt.Errorf("imagecache: check existing %s: %w", key, err)
-				return
-			} else if exists {
-				stats[idx].existing = 1
-				return
+			if matcher, ok := c.s3.(ContentMatcher); ok {
+				matches, err := matcher.Matches(ctx, key, variant.Data)
+				if err != nil {
+					uploadErrs[idx] = fmt.Errorf("imagecache: compare %s: %w", key, err)
+					return
+				}
+				if matches {
+					stats[idx].existing = 1
+					return
+				}
 			}
-			if err := putObjectWithRetry(ctx, c.s3, bucket, key, variant.Data); err != nil {
+			if err := putObjectWithRetry(ctx, c.s3, key, variant.Data); err != nil {
 				uploadErrs[idx] = fmt.Errorf("imagecache: upload %s: %w", key, err)
 				return
 			}
@@ -382,37 +385,26 @@ func (c *Cacher) trackRevision(ctx context.Context, imageType metadata.ImageType
 	return nil
 }
 
-// objectMatches reports whether the object at key already holds exactly data.
-// Backends that cannot verify content report false so the immutable object is
-// rewritten; bare existence must never be accepted as a content match.
-func objectMatches(ctx context.Context, putter ObjectPutter, bucket, key string, data []byte) (bool, error) {
-	matcher, ok := putter.(objectMatcher)
-	if !ok {
-		return false, nil
-	}
-	return matcher.ObjectMatches(ctx, bucket, key, data)
-}
-
-func putObjectWithRetry(ctx context.Context, putter ObjectPutter, bucket, key string, data []byte) error {
+func putObjectWithRetry(ctx context.Context, putter ObjectPutter, key string, data []byte) error {
 	const maxAttempts = 3
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if err := putter.PutObject(ctx, bucket, key, data); err != nil {
+		err := putter.Put(ctx, key, data)
+		if err != nil {
 			lastErr = err
 			if attempt == maxAttempts-1 {
-				// Final attempt failed; return immediately without a pointless backoff.
 				break
 			}
 			timer := time.NewTimer(time.Duration(attempt+1) * 500 * time.Millisecond)
 			select {
 			case <-timer.C:
-				continue
 			case <-ctx.Done():
 				timer.Stop()
 				return ctx.Err()
 			}
+		} else {
+			return nil
 		}
-		return nil
 	}
 	return lastErr
 }

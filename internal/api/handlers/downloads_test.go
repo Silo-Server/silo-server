@@ -1051,6 +1051,32 @@ func TestHandleDirectDownloadViaProxyMapsResolverError(t *testing.T) {
 	}
 }
 
+// An unknown file_id reaches the handler as the catalog not-found sentinel the
+// download service now returns, on every direct-download variant.
+func TestHandleDirectDownloadUnknownFileIsNotFound(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		t.Run("direct_"+method, func(t *testing.T) {
+			svc := &fakeDownloadService{directErr: catalog.ErrItemNotFound}
+			h := NewDownloadHandler(svc)
+			rec := httptest.NewRecorder()
+			h.HandleDirectDownload(rec, downloadTestRequest(method, "/direct-download?file_id=4242", nil, 7, "", ""))
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404 (body: %s)", rec.Code, rec.Body.String())
+			}
+		})
+		t.Run("proxy_"+method, func(t *testing.T) {
+			svc := &proxyDownloadService{fakeDownloadService: &fakeDownloadService{}, resolveErr: catalog.ErrItemNotFound}
+			h := NewDownloadHandler(svc)
+			h.SetProxyDelivery(nodepool.NewPlanner(nodepool.NewProxyPool(), nodepool.NewTranscodePool()), func() string { return "secret" })
+			rec := httptest.NewRecorder()
+			h.HandleDirectDownloadViaProxy(rec, downloadTestRequest(method, "/direct-download-proxy?file_id=4242", nil, 7, "", ""))
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404 (body: %s)", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestProxyPreflightCachesReachabilityByNodeAndPath(t *testing.T) {
 	requests := 0
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

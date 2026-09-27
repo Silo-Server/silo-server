@@ -115,6 +115,13 @@ func (r *Reader) GetSimilarUsersLiked(ctx context.Context, userID int, profileID
 // GetBecauseYouWatched returns a cached because-you-watched row, using the
 // requested source item when provided or the most recent completed items when not.
 func (r *Reader) GetBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
+	items, _, err := r.GetBecauseYouWatchedWithSource(ctx, userID, profileID, sourceItemID, limit, filter)
+	return items, err
+}
+
+// GetBecauseYouWatchedWithSource preserves the exact anchor used for the returned
+// recommendations. A caller must access-check the anchor before displaying it.
+func (r *Reader) GetBecauseYouWatchedWithSource(ctx context.Context, userID int, profileID, sourceItemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, string, error) {
 	limit = normalizeRecommendationLimit(limit)
 
 	sourceIDs := []string{}
@@ -123,7 +130,7 @@ func (r *Reader) GetBecauseYouWatched(ctx context.Context, userID int, profileID
 	} else {
 		recentCompleted, err := r.signalReader().RecentCompletedItemIDs(ctx, userID, profileID, 3)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		sourceIDs = append(sourceIDs, recentCompleted...)
 	}
@@ -131,7 +138,7 @@ func (r *Reader) GetBecauseYouWatched(ctx context.Context, userID int, profileID
 	for _, sourceID := range sourceIDs {
 		items, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeBecauseWatched, sourceID)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if len(items) == 0 {
 			continue
@@ -142,19 +149,19 @@ func (r *Reader) GetBecauseYouWatched(ctx context.Context, userID int, profileID
 			Items: items,
 		}}, filter)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		rows = trimRows(rows, limit)
 		if len(rows) == 0 {
-			return []ScoredItem{}, nil
+			return []ScoredItem{}, "", nil
 		}
-		return rows[0].Items, nil
+		return rows[0].Items, sourceID, nil
 	}
 
 	if r.refresh != nil {
 		r.refresh.RequestProfileRefresh(ctx, userID, profileID)
 	}
-	return []ScoredItem{}, nil
+	return []ScoredItem{}, "", nil
 }
 
 // GetTasteMatchRow returns the strongest matching personalized cluster row for a genre,

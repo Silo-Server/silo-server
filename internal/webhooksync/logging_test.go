@@ -84,7 +84,7 @@ func TestBuildWebhookRequestLogContextUsesRedactedPathPattern(t *testing.T) {
 	if strings.Contains(ctx.PathPattern, "raw-secret") {
 		t.Fatalf("expected secret to be redacted from path pattern: %q", ctx.PathPattern)
 	}
-	if ctx.PathPattern != "/api/v1/webhook-sync/webhooks/{secret}" {
+	if ctx.PathPattern != "/api/v2/webhook-sync/webhooks/{secret}" {
 		t.Fatalf("unexpected fallback path pattern: %q", ctx.PathPattern)
 	}
 }

@@ -8,6 +8,7 @@ import (
 type contextKey string
 
 const clientIPKey contextKey = "client_ip"
+const requestSchemeKey contextKey = "request_scheme"
 
 // peerIPKey holds the transport-level peer address exactly as the listener saw
 // it, before Middleware overwrote RemoteAddr with the resolved client IP.
@@ -27,9 +28,11 @@ func Middleware(resolver *Resolver) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			peer := r.RemoteAddr
+			scheme := resolver.requestScheme(r)
 			ip := resolver.ClientIP(r)
 			r.RemoteAddr = ip
 			ctx := context.WithValue(r.Context(), clientIPKey, ip)
+			ctx = context.WithValue(ctx, requestSchemeKey, scheme)
 			ctx = context.WithValue(ctx, peerIPKey, peer)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -63,4 +66,17 @@ func SetPeerContext(ctx context.Context, addr string) context.Context {
 // that depend on the clientip middleware without going through the full chain.
 func SetContext(ctx context.Context, ip string) context.Context {
 	return context.WithValue(ctx, clientIPKey, ip)
+}
+
+// RequestScheme returns the transport scheme or the scheme asserted by a trusted
+// proxy before RemoteAddr was rewritten. Empty means ambiguous proxy metadata.
+// Without Middleware, forwarding headers are never consulted.
+func RequestScheme(r *http.Request) string {
+	if scheme, ok := r.Context().Value(requestSchemeKey).(string); ok {
+		return scheme
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
 }

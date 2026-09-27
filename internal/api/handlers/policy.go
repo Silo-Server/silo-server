@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -75,7 +76,7 @@ func NewPolicyHandler(
 	return &PolicyHandler{system: system, store: store, decisions: decisions, editorAvailable: available}
 }
 
-type policyCapabilityResponse struct {
+type PolicyCapabilityView struct {
 	Enabled         bool     `json:"enabled"`
 	EditorAvailable bool     `json:"editor_available"`
 	DecisionTypes   []string `json:"decision_types"`
@@ -205,8 +206,16 @@ func (h *PolicyHandler) HandleCapability(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	writeJSON(w, http.StatusOK, h.PolicyCapability(r.Context()))
+}
+
+// PolicyCapability reports runtime health independently of editor authorization.
+func (h *PolicyHandler) PolicyCapability(_ context.Context) PolicyCapabilityView {
+	if h == nil || h.system == nil {
+		return PolicyCapabilityView{DecisionTypes: policy.DecisionTypes()}
+	}
 	degraded := h.system.DegradedState()
-	writeJSON(w, http.StatusOK, policyCapabilityResponse{
+	return PolicyCapabilityView{
 		Enabled:         true,
 		EditorAvailable: h.editorEnabled(),
 		DecisionTypes:   policy.DecisionTypes(),
@@ -215,7 +224,7 @@ func (h *PolicyHandler) HandleCapability(w http.ResponseWriter, r *http.Request)
 		DegradedReason:  degraded.Reason,
 		DegradedDomains: degraded.Domains,
 		EvalTimeouts:    h.system.EvalTimeouts(),
-	})
+	}
 }
 
 // HandleListVendor handles GET /admin/policy/vendor.
@@ -454,7 +463,7 @@ func (h *PolicyHandler) HandleActivateVersion(w http.ResponseWriter, r *http.Req
 		h.writeEvalCostError(w, err)
 		return
 	}
-	generation, err := h.store.Activate(r.Context(), documentID, versionID)
+	generation, err := h.store.Activate(r.Context(), documentID, versionID, h.evalBudget())
 	if err != nil {
 		h.writeStoreError(w, err, "Failed to activate policy version")
 		return
@@ -504,7 +513,7 @@ func (h *PolicyHandler) HandleSetDocumentEnabled(w http.ResponseWriter, r *http.
 			}
 		}
 	}
-	generation, err := h.store.SetEnabled(r.Context(), documentID, req.Enabled)
+	generation, err := h.store.SetEnabled(r.Context(), documentID, req.Enabled, h.evalBudget())
 	if err != nil {
 		h.writeStoreError(w, err, "Failed to update policy document")
 		return
@@ -698,6 +707,8 @@ func applyStatusCode(status policyApplyStatus) int {
 
 func (h *PolicyHandler) writeStoreError(w http.ResponseWriter, err error, fallback string) {
 	switch {
+	case errors.Is(err, policy.ErrPolicySlowEval):
+		h.writeEvalCostError(w, err)
 	case errors.Is(err, policy.ErrDocumentNotFound):
 		writeError(w, http.StatusNotFound, policyErrorNotFound, policyDocumentNotFoundMessage)
 	case errors.Is(err, policy.ErrVersionNotFound):

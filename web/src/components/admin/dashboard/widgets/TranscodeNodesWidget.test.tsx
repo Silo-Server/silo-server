@@ -8,10 +8,15 @@ import type { StreamNode } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
   useAdminNodes: vi.fn(),
+  useBuildInfo: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/admin/nodes", () => ({
   useAdminNodes: mocks.useAdminNodes,
+}));
+
+vi.mock("@/hooks/queries/admin/system", () => ({
+  useBuildInfo: mocks.useBuildInfo,
 }));
 
 import { TranscodeNodesWidget } from "./TranscodeNodesWidget";
@@ -69,6 +74,10 @@ function renderWidget() {
 describe("TranscodeNodesWidget", () => {
   beforeEach(() => {
     mocks.useAdminNodes.mockReset();
+    mocks.useBuildInfo.mockReset();
+    mocks.useBuildInfo.mockReturnValue({
+      data: { display: "aaaaaaaa", revision: "aaaaaaaa1111", available: true },
+    });
   });
 
   afterEach(() => {
@@ -121,6 +130,64 @@ describe("TranscodeNodesWidget", () => {
     const grid = container.querySelector('[style*="grid-template-columns"]');
     expect(grid).not.toBeNull();
     expect((grid as HTMLElement).style.gridTemplateColumns).toBe("repeat(2, minmax(0, 1fr))");
+  });
+
+  it("shows each node's build and flags one that differs from the server", () => {
+    mocks.useAdminNodes.mockReturnValue({
+      data: [
+        node({
+          id: 1,
+          name: "current",
+          last_stats: {
+            build: {
+              display: "aaaaaaaa",
+              revision: "aaaaaaaa1111",
+              build_number: 7,
+              available: true,
+            },
+          },
+        }),
+        node({
+          id: 2,
+          name: "behind",
+          last_stats: {
+            build: {
+              display: "bbbbbbbb",
+              revision: "bbbbbbbb2222",
+              build_number: 6,
+              available: true,
+            },
+          },
+        }),
+        node({ id: 3, name: "older-node" }),
+      ],
+      isLoading: false,
+      error: null,
+    });
+
+    renderWidget();
+
+    expect(screen.getByText("build 7 · aaaaaaaa")).toBeTruthy();
+    expect(screen.getByText("build 6 · bbbbbbbb · differs from server")).toBeTruthy();
+    // A node predating build reporting draws nothing rather than "unknown".
+    expect(screen.getAllByText(/^build /)).toHaveLength(2);
+  });
+
+  it("does not flag a build whose revision cannot be compared", () => {
+    mocks.useAdminNodes.mockReturnValue({
+      data: [
+        node({
+          last_stats: { build: { display: "unavailable", revision: "", available: false } },
+        }),
+      ],
+      isLoading: false,
+      error: null,
+    });
+
+    renderWidget();
+
+    expect(screen.getByText("build unavailable")).toBeTruthy();
+    expect(screen.queryByText(/differs from server/)).toBeNull();
   });
 
   it("says where transcodes run when no nodes exist", () => {

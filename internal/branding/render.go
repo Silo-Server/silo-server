@@ -13,7 +13,9 @@ type Snapshot struct {
 	ServerName    string
 	LoginSubtitle string
 	AccentColor   string // "" when unset
-	DefaultTheme  string // "" when unset
+	// DefaultTheme is reported only by the frozen /api/v1 branding response.
+	// It is not rendered into the shell and so is not part of RenderKey.
+	DefaultTheme string // "" when unset
 
 	assets map[AssetKind]string // kind -> content ref ("<hash><ext>")
 }
@@ -58,7 +60,6 @@ func (s Snapshot) RenderKey() string {
 		s.ServerName,
 		s.LoginSubtitle,
 		s.AccentColor,
-		s.DefaultTheme,
 		s.assets[KindWordmark],
 		s.assets[KindMark],
 		s.assets[KindFavicon],
@@ -75,9 +76,9 @@ const indexFaviconLink = `<link rel="icon" href="/favicon.ico" sizes="any" />`
 // RenderIndexHTML injects branding into the SPA shell: the browser tab title
 // and, when configured, the custom favicon link and a theme-color meta tag.
 // Favicon/manifest paths themselves are served dynamically by the frontend
-// handler, so only the title and the cache-bustable favicon href are rewritten
-// here. Replacements that don't match are no-ops, so a build that changes the
-// shell degrades gracefully to the bundled defaults.
+// handler, so only the cache-bustable favicon href is rewritten here.
+// Replacements that don't match are no-ops, so a build that changes the shell
+// degrades gracefully to the bundled defaults.
 func RenderIndexHTML(index []byte, snap Snapshot) []byte {
 	out := string(index)
 

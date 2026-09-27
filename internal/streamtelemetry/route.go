@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"reflect"
 	"sort"
 	"sync"
 
@@ -102,11 +101,15 @@ func sameDeclaration(a, b MediaRoute) bool {
 		capturePointer(a.Capture) == capturePointer(b.Capture)
 }
 
-func capturePointer(capture func(*http.Request) CaptureSet) uintptr {
+// capturePointer identifies a capture function by its code address, so two
+// declarations built by the same constructor compare equal. fmt's %p is used
+// rather than reflect.Value.Pointer: the route inventory refuses the reflect
+// calls that expose an address (internal/routeinventory/sweep.go).
+func capturePointer(capture func(*http.Request) CaptureSet) string {
 	if capture == nil {
-		return 0
+		return ""
 	}
-	return reflect.ValueOf(capture).Pointer()
+	return fmt.Sprintf("%p", capture)
 }
 
 func genericCapture(r *http.Request) CaptureSet {

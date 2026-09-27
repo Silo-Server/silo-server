@@ -1,0 +1,485 @@
+/* ================================================================
+   Setup wizard
+   ================================================================
+   One screen, two columns: the step rail on the left is the wizard's
+   spine (every step, in order, what each one chose), the content on
+   the right uses the same settings-row primitives as the admin pages so
+   first-run setup and later administration read as one product.
+
+   Everything here is built on the theme tokens; the wizard has no
+   colour of its own beyond the rail's accent, which is the same violet
+   the admin settings use for "this is the live/active thing".
+   ================================================================ */
+
+.setup-shell {
+  min-height: 100dvh;
+  position: relative;
+  overflow-x: hidden;
+  display: flex;
+  justify-content: center;
+  padding: 1.25rem 1rem 3rem;
+}
+
+.setup-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse at 0% 0%,
+      color-mix(in srgb, var(--settings-accent) 9%, transparent),
+      transparent 42%
+    ),
+    var(--background);
+}
+
+.setup-frame {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 62rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+}
+
+@media (min-width: 52rem) {
+  .setup-shell {
+    padding: 3rem 2rem 4rem;
+  }
+  .setup-frame {
+    grid-template-columns: 15rem minmax(0, 1fr);
+    gap: 3rem;
+  }
+}
+
+/* ── Brand + rail ─────────────────────────────────────────────── */
+
+.setup-side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+@media (min-width: 52rem) {
+  .setup-side {
+    position: sticky;
+    top: 3rem;
+    align-self: start;
+    gap: 2.25rem;
+  }
+}
+
+.setup-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.setup-brand-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+
+.setup-brand-sub {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.setup-rail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.setup-rail-list::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 52rem) {
+  .setup-rail-list {
+    flex-direction: column;
+    gap: 0;
+    overflow: visible;
+  }
+}
+
+.setup-rail-item {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+/* The ladder line: one continuous hairline behind the markers, drawn per
+   item so it stops cleanly at the first and last rung. */
+@media (min-width: 52rem) {
+  .setup-rail-item::before {
+    content: "";
+    position: absolute;
+    left: 0.5625rem;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: color-mix(in srgb, var(--border) 85%, transparent);
+  }
+  .setup-rail-item:first-child::before {
+    top: 1.125rem;
+  }
+  .setup-rail-item:last-child::before {
+    bottom: calc(100% - 1.125rem);
+  }
+  .setup-rail-item[data-state="done"]::before {
+    background: color-mix(in srgb, var(--settings-accent) 55%, var(--border));
+  }
+}
+
+.setup-rail-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem 0.4rem 0;
+  text-align: left;
+  color: var(--muted-foreground);
+  border-radius: 0.5rem;
+}
+
+@media (min-width: 52rem) {
+  .setup-rail-row {
+    padding: 0.5rem 0.5rem 0.5rem 0;
+  }
+}
+
+.setup-rail-row-button {
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-default);
+}
+
+.setup-rail-row-button:hover {
+  color: var(--foreground);
+}
+
+.setup-rail-row-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.setup-rail-marker {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 1.1875rem;
+  height: 1.1875rem;
+  margin-top: 0.0625rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--background);
+  transition:
+    background-color var(--duration-normal) var(--ease-default),
+    border-color var(--duration-normal) var(--ease-default),
+    box-shadow var(--duration-normal) var(--ease-default);
+}
+
+.setup-rail-item[data-state="done"] .setup-rail-marker {
+  background: var(--settings-accent);
+  border-color: var(--settings-accent);
+  color: var(--background);
+}
+
+.setup-rail-item[data-state="active"] .setup-rail-marker {
+  border-color: var(--foreground);
+  box-shadow:
+    inset 0 0 0 3px var(--background),
+    inset 0 0 0 9px var(--foreground);
+}
+
+.setup-rail-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.0625rem;
+}
+
+.setup-rail-label {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.setup-rail-item[data-state="active"] .setup-rail-label {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.setup-rail-item[data-state="done"] .setup-rail-label {
+  color: var(--foreground);
+}
+
+.setup-rail-summary {
+  font-size: 0.75rem;
+  line-height: 1rem;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12rem;
+}
+
+/* Narrow screens: a strip that only shows the current rung and its
+   neighbours; the rest are reachable by scrolling the strip. */
+@media (max-width: 51.99rem) {
+  .setup-rail-summary {
+    display: none;
+  }
+  .setup-rail-row {
+    padding-right: 0.75rem;
+  }
+}
+
+/* ── Content column ───────────────────────────────────────────── */
+
+.setup-panel {
+  min-width: 0;
+}
+
+.setup-step {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+}
+
+.setup-step-header {
+  max-width: 34rem;
+}
+
+.setup-step-title {
+  font-family: var(--font-family-display);
+  font-size: clamp(1.75rem, 1.4rem + 1.4vw, 2.25rem);
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--foreground);
+}
+
+.setup-step-lede {
+  margin-top: 0.75rem;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+}
+
+.setup-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.setup-section {
+  /* The panel is the admin group surface so the same rows look the same.
+     Rows draw their own vertical spacing, so the shell only adds a sliver
+     above the first and below the last. */
+  background: color-mix(in srgb, var(--surface-raised) 65%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 1.1rem;
+  padding: 0.25rem 1.25rem;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+/* The same surface holding free-form content (a form grid, an editor)
+   rather than settings rows, so it needs the full inset on every side. */
+.setup-section-padded {
+  padding: 1.25rem;
+}
+
+.setup-section-heading {
+  padding: 0.875rem 0 0.25rem;
+}
+
+.setup-section-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+
+.setup-section-caption {
+  margin-top: 0.125rem;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+
+/* Rows inside a wizard section use the admin row shell with a touch more
+   vertical room. */
+.setup-section .settings-field-row {
+  padding-block: 0.9rem;
+}
+
+.setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding-top: 0.25rem;
+}
+
+.setup-footnote {
+  flex-basis: 100%;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+@media (min-width: 40rem) {
+  .setup-footnote {
+    flex-basis: auto;
+    margin-left: auto;
+    text-align: right;
+  }
+}
+
+/* One orchestrated moment on step change: the new content settles in from
+   just below. --duration-fast collapses to 0ms under reduced motion. */
+.setup-panel-enter {
+  animation: slide-up var(--duration-fast) var(--ease-out) both;
+}
+
+/* ── Done step ────────────────────────────────────────────────── */
+
+.setup-recap {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.5rem 1.5rem;
+  padding: 1rem 1.25rem;
+  border-radius: 1.1rem;
+  background: color-mix(in srgb, var(--surface-raised) 65%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.setup-recap-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.5rem 0;
+  min-width: 0;
+}
+
+.setup-recap-label {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.setup-recap-value {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setup-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  font-size: 0.8125rem;
+}
+
+.setup-links a {
+  color: var(--muted-foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--muted-foreground) 40%, transparent);
+}
+
+.setup-links a:hover {
+  color: var(--foreground);
+}
+
+/* ── Step-specific rows ───────────────────────────────────────── */
+
+/* Fields revealed under a storage backend's summary row. */
+.setup-backend-fields {
+  padding: 0 0 0.5rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+.setup-backend-fields > .settings-field-row:last-of-type {
+  border-bottom: 0;
+}
+
+.setup-library-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0;
+}
+
+.setup-library-row[data-editing] .text-sm {
+  color: var(--settings-accent);
+}
+
+/* The inline library editor: a padded section stacking its groups. */
+.setup-library-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.setup-library-editor > .setup-section-title {
+  padding-bottom: 0.125rem;
+}
+
+.setup-add-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+  padding: 0.25rem 0;
+  transition: color var(--duration-fast) var(--ease-default);
+}
+
+.setup-add-row:hover {
+  color: var(--foreground);
+}
+
+.setup-add-row:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+/* A provider row's credential inputs, revealed when the provider is on. */
+.setup-provider-fields {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0 0 0.9rem 0;
+}
+
+@media (min-width: 40rem) {
+  .setup-provider-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+  .setup-provider-fields > .setup-provider-actions {
+    grid-column: 1 / -1;
+  }
+}
+
+.setup-provider-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+}

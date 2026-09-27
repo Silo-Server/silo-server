@@ -5,10 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"log/slog"
 	"path"
 
-	"github.com/Silo-Server/silo-server/internal/s3client"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 // SettingsStore is the subset of the server settings repository the branding
@@ -18,34 +19,25 @@ type SettingsStore interface {
 	Set(ctx context.Context, key, value string) error
 }
 
-// AssetStore is the subset of the S3 client used for branding asset bytes.
+// AssetStore stores branding asset bytes in the selected artwork backend.
 type AssetStore interface {
-	PutObject(ctx context.Context, bucket, key string, data []byte) error
-	GetObject(ctx context.Context, bucket, key string) ([]byte, error)
-	Bucket() string
+	Put(context.Context, string, []byte) error
+	Get(context.Context, string) (io.ReadCloser, blobstore.ObjectInfo, error)
+	Stat(context.Context, string) (blobstore.ObjectInfo, error)
 }
 
 // Service is the single source of truth for branding. It assembles a Snapshot
 // from settings, processes/stores uploaded assets, and streams them back.
-//
-// The store is optional: when S3 is not configured it is nil and asset
-// upload/serving returns ErrStorageUnavailable, while text branding (name,
-// subtitle, accent, default theme) keeps working.
 type Service struct {
 	settings SettingsStore
 	store    AssetStore
 }
 
-// NewService constructs a branding Service. Pass a nil store when S3 is not
-// configured: text branding keeps working while asset upload/serve returns
-// ErrStorageUnavailable. Callers holding a concrete *s3client.Client must pass
-// a nil AssetStore when that client is nil (rather than the typed-nil pointer)
-// to avoid the typed-nil interface trap — see the construction in cmd/silo.
 func NewService(settings SettingsStore, store AssetStore) *Service {
 	return &Service{settings: settings, store: store}
 }
 
-// HasStorage reports whether asset upload/serving is available.
+// HasStorage reports whether asset uploads can be served.
 func (s *Service) HasStorage() bool { return s != nil && s.store != nil }
 
 // Load reads the current branding configuration. Per-key read errors are
@@ -77,10 +69,9 @@ func (s *Service) UploadAsset(ctx context.Context, kind AssetKind, data []byte, 
 	if !ok {
 		return "", ErrInvalidKind
 	}
-	if !s.HasStorage() {
+	if s == nil || s.store == nil {
 		return "", ErrStorageUnavailable
 	}
-
 	out, _, ext, err := spec.process(data, declaredType)
 	if err != nil {
 		return "", err
@@ -93,7 +84,7 @@ func (s *Service) UploadAsset(ctx context.Context, kind AssetKind, data []byte, 
 	ref := hex.EncodeToString(sum[:])[:16] + ext
 	key := spec.s3Prefix + "/" + ref
 
-	if err := s.store.PutObject(ctx, s.store.Bucket(), key, out); err != nil {
+	if err := s.store.Put(ctx, key, out); err != nil {
 		return "", err
 	}
 	if err := s.settings.Set(ctx, spec.settingKey, ref); err != nil {
@@ -102,7 +93,7 @@ func (s *Service) UploadAsset(ctx context.Context, kind AssetKind, data []byte, 
 	return ref, nil
 }
 
-// DeleteAsset clears the custom asset of the given kind. The S3 object is left
+// DeleteAsset clears the custom asset of the given kind. The stored object is left
 // in place (orphaned objects are cheap and avoid concurrent-reader races); the
 // empty settings value is what deactivates it.
 func (s *Service) DeleteAsset(ctx context.Context, kind AssetKind) error {
@@ -114,8 +105,7 @@ func (s *Service) DeleteAsset(ctx context.Context, kind AssetKind) error {
 }
 
 // GetAsset fetches the bytes of the current custom asset of the given kind.
-// Returns ErrAssetNotConfigured when none is set, ErrStorageUnavailable when S3
-// is absent, and ErrAssetNotConfigured when the object is missing in S3.
+// Returns ErrAssetNotConfigured when none is set or the object is missing.
 func (s *Service) GetAsset(ctx context.Context, kind AssetKind) (data []byte, contentType, ref string, err error) {
 	spec, ok := assetSpecs[kind]
 	if !ok {
@@ -125,13 +115,18 @@ func (s *Service) GetAsset(ctx context.Context, kind AssetKind) (data []byte, co
 	if ref == "" {
 		return nil, "", "", ErrAssetNotConfigured
 	}
-	if !s.HasStorage() {
+	if s == nil || s.store == nil {
 		return nil, "", "", ErrStorageUnavailable
 	}
 	key := spec.s3Prefix + "/" + ref
-	data, err = s.store.GetObject(ctx, s.store.Bucket(), key)
+	var reader io.ReadCloser
+	reader, _, err = s.store.Get(ctx, key)
+	if err == nil {
+		data, err = io.ReadAll(reader)
+		_ = reader.Close()
+	}
 	if err != nil {
-		if errors.Is(err, s3client.ErrNotFound) {
+		if errors.Is(err, blobstore.ErrNotFound) {
 			return nil, "", "", ErrAssetNotConfigured
 		}
 		return nil, "", "", err
@@ -145,7 +140,10 @@ func (s *Service) GetAsset(ctx context.Context, kind AssetKind) (data []byte, co
 // defaults instead of serving broken images. Returns how many configured
 // assets were checked and how many of those were cleared.
 func (s *Service) ReconcileMissingAssets(ctx context.Context) (checked, cleared int, err error) {
-	if s == nil || !s.HasStorage() {
+	if s == nil {
+		return 0, 0, nil
+	}
+	if s.store == nil {
 		return 0, 0, nil
 	}
 	for kind, spec := range assetSpecs {
@@ -155,10 +153,10 @@ func (s *Service) ReconcileMissingAssets(ctx context.Context) (checked, cleared 
 		}
 		checked++
 		key := spec.s3Prefix + "/" + ref
-		_, getErr := s.store.GetObject(ctx, s.store.Bucket(), key)
+		_, getErr := s.store.Stat(ctx, key)
 		switch {
 		case getErr == nil:
-		case errors.Is(getErr, s3client.ErrNotFound):
+		case errors.Is(getErr, blobstore.ErrNotFound):
 			if setErr := s.settings.Set(ctx, spec.settingKey, ""); setErr != nil {
 				return checked, cleared, setErr
 			}

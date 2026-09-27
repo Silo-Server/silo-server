@@ -34,6 +34,10 @@ describe("computeSubtitleFontScale", () => {
     expect(computeSubtitleFontScale(1920, 1080, 2.35)).toBeCloseTo(1.5);
   });
 
+  it("scales against the visible viewport in Fill mode", () => {
+    expect(computeSubtitleFontScale(3440, 1440, 16 / 9, "cover")).toBe(2);
+  });
+
   it("falls back to 1 before measurements are available", () => {
     expect(computeSubtitleFontScale(0, 0, 16 / 9)).toBe(1);
     expect(computeSubtitleFontScale(1920, 1080, 0)).toBe(1);
@@ -56,6 +60,11 @@ describe("computeSubtitlePositionStyle", () => {
     expect(computeSubtitlePositionStyle("lower-third", 1000, 2000, 16 / 9)).toEqual({
       bottom: "786.25px",
     });
+  });
+
+  it("anchors Lower Third to the visible viewport in Fill mode", () => {
+    const style = computeSubtitlePositionStyle("lower-third", 3440, 1440, 16 / 9, "cover");
+    expect(Number.parseFloat(style.bottom as string)).toBeCloseTo(172.8);
   });
 });
 

@@ -1,6 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { api } from "@/api/client";
+import {
+  captureProfileRequestContext,
+  isCapturedProfileAuthorityActive,
+  StaleApiRequestContextError,
+  type ProfileRequestContextSnapshot,
+} from "@/api/client";
+import { v2 } from "@/api/v2/request";
 import type {
   AdminDownloadsStats,
   AdminPlaybackActivity,
@@ -68,20 +74,14 @@ export function normalizeDownloadsTopLimit(limit: number = DEFAULT_DOWNLOADS_TOP
   );
 }
 
-export function adminTimeseriesPath(hours: number): string {
-  return `/admin/stats/timeseries?hours=${normalizeInsightHours(hours)}`;
-}
-
-export function adminPlaybackActivityPath(hours: number): string {
-  return `/admin/stats/playback-activity?hours=${normalizeInsightHours(hours)}`;
-}
-
-export function adminTopActivityPath(days: number): string {
-  return `/admin/stats/top-activity?days=${normalizeTopActivityDays(days)}`;
-}
-
-export function adminDownloadsStatsPath(limit: number): string {
-  return `/admin/stats/downloads?limit=${normalizeDownloadsTopLimit(limit)}`;
+async function readDashboardInsight<T>(
+  read: (profileContext: ProfileRequestContextSnapshot) => Promise<T>,
+): Promise<T> {
+  const profileContext = captureProfileRequestContext();
+  if (!profileContext) throw new StaleApiRequestContextError();
+  const result = await read(profileContext);
+  if (!isCapturedProfileAuthorityActive(profileContext)) throw new StaleApiRequestContextError();
+  return result;
 }
 
 /** Minute-resolution stream counts and egress for the last `hours`. */
@@ -89,7 +89,10 @@ export function useAdminTimeseries(hours: number = DEFAULT_INSIGHT_HOURS) {
   const window = normalizeInsightHours(hours);
   return useQuery({
     queryKey: adminKeys.dashboardTimeseries(window),
-    queryFn: () => api<AdminTimeseries>(adminTimeseriesPath(window)),
+    queryFn: (): Promise<AdminTimeseries> =>
+      readDashboardInsight((profileContext) =>
+        v2("GET /api/v2/admin/stats/timeseries", { profileContext, query: { hours: window } }),
+      ),
     staleTime: SAMPLED_SERIES_STALE_TIME,
   });
 }
@@ -99,7 +102,13 @@ export function useAdminPlaybackActivity(hours: number = DEFAULT_INSIGHT_HOURS) 
   const window = normalizeInsightHours(hours);
   return useQuery({
     queryKey: adminKeys.playbackActivity(window),
-    queryFn: () => api<AdminPlaybackActivity>(adminPlaybackActivityPath(window)),
+    queryFn: (): Promise<AdminPlaybackActivity> =>
+      readDashboardInsight((profileContext) =>
+        v2("GET /api/v2/admin/stats/playback-activity", {
+          profileContext,
+          query: { hours: window },
+        }),
+      ),
     staleTime: SAMPLED_SERIES_STALE_TIME,
   });
 }
@@ -109,7 +118,10 @@ export function useAdminTopActivity(days: number = DEFAULT_TOP_ACTIVITY_DAYS) {
   const window = normalizeTopActivityDays(days);
   return useQuery({
     queryKey: adminKeys.topActivity(window),
-    queryFn: () => api<AdminTopActivity>(adminTopActivityPath(window)),
+    queryFn: (): Promise<AdminTopActivity> =>
+      readDashboardInsight((profileContext) =>
+        v2("GET /api/v2/admin/stats/top-activity", { profileContext, query: { days: window } }),
+      ),
     staleTime: TOP_ACTIVITY_STALE_TIME,
   });
 }
@@ -119,7 +131,10 @@ export function useAdminDownloadsStats(limit: number = DEFAULT_DOWNLOADS_TOP_LIM
   const topLimit = normalizeDownloadsTopLimit(limit);
   return useQuery({
     queryKey: adminKeys.downloadsStats(topLimit),
-    queryFn: () => api<AdminDownloadsStats>(adminDownloadsStatsPath(topLimit)),
+    queryFn: (): Promise<AdminDownloadsStats> =>
+      readDashboardInsight((profileContext) =>
+        v2("GET /api/v2/admin/stats/downloads", { profileContext, query: { limit: topLimit } }),
+      ),
     staleTime: SAMPLED_SERIES_STALE_TIME,
   });
 }

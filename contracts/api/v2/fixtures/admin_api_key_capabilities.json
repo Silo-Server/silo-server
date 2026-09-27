@@ -1,0 +1,29 @@
+{
+  "revision": "3a8a2bc5f7683e9d99e63cbce159772e6dac728b89fe6f55ec0c00a2501b0019",
+  "state": "available",
+  "allowed": true,
+  "available": true,
+  "guarded_configuration": true,
+  "scopes": [
+    {
+      "name": "admin:sessions:summary:read",
+      "description": "Read live playback summaries without diagnostic details or session control."
+    },
+    {
+      "name": "libraries:read",
+      "description": "Discover libraries visible to the account or selected profile, without storage metadata."
+    },
+    {
+      "name": "admin:users",
+      "description": "Manage user accounts: create, list, read, update, and delete users and read their profiles. Cannot create or modify admin accounts."
+    },
+    {
+      "name": "admin:access-groups:read",
+      "description": "Read access groups and their policies."
+    }
+  ],
+  "rate_tiers": [
+    "standard",
+    "elevated"
+  ]
+}

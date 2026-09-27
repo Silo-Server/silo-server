@@ -1,12 +1,13 @@
 package noderouting
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 )
 
-func TestCandidatesPreserveDefaultClusterBehavior(t *testing.T) {
+func TestCandidatesFollowSiloDefaults(t *testing.T) {
 	tests := []struct {
 		name     string
 		workload Workload
@@ -14,7 +15,7 @@ func TestCandidatesPreserveDefaultClusterBehavior(t *testing.T) {
 		want     string
 	}{
 		{"direct", WorkloadDirectPlay, DeliveryDirect, "direct_proxy"},
-		{"progressive remux", WorkloadRemux, DeliveryProgressiveRemux, "progressive_remux_proxy"},
+		{"progressive remux", WorkloadRemux, DeliveryProgressiveRemux, "progressive_remux_transcode_proxy"},
 		{"hls remux", WorkloadRemux, DeliveryHLSRemux, "hls_remux_transcode_proxy"},
 		{"video", WorkloadVideoTranscode, DeliveryHLSVideo, "hls_video_transcode_proxy"},
 	}
@@ -83,6 +84,55 @@ func TestCandidatesKeepExecutionPreferenceAheadOfEgressOnTie(t *testing.T) {
 	}
 	if got := result.Candidates[1].ID; got != "hls_video_transcode_proxy" {
 		t.Fatalf("second candidate = %q, want worker execution before local API", got)
+	}
+}
+
+func TestCandidatesPreferTranscodeNodeBeforeOtherExecutors(t *testing.T) {
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionPreferTranscode
+
+	tests := []struct {
+		name     string
+		delivery Delivery
+		want     []string
+	}{
+		{
+			name:     "HLS remux",
+			delivery: DeliveryHLSRemux,
+			want: []string{
+				"hls_remux_transcode_proxy",
+				"hls_remux_transcode_api",
+				"hls_remux_api",
+			},
+		},
+		{
+			name:     "progressive remux",
+			delivery: DeliveryProgressiveRemux,
+			want: []string{
+				"progressive_remux_transcode_proxy",
+				"progressive_remux_proxy",
+				"progressive_remux_api",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := Candidates(Request{
+				Workload: WorkloadRemux, Delivery: test.delivery,
+				Policy: policy, ProxyAllowed: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([]string, len(result.Candidates))
+			for i, candidate := range result.Candidates {
+				got[i] = candidate.ID
+			}
+			if !slices.Equal(got, test.want) {
+				t.Fatalf("candidates = %v, want %v", got, test.want)
+			}
+		})
 	}
 }
 

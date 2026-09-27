@@ -209,18 +209,10 @@ func parseLimit(r *http.Request, fallback int) int {
 	return limit
 }
 
-func (h *AdminLogsHandler) HandleLogStreamWebSocket(w http.ResponseWriter, r *http.Request) {
-	if h.streamHub == nil {
-		http.Error(w, "log stream unavailable", http.StatusServiceUnavailable)
-		return
-	}
-
+// parseStreamRequest validates the stream selection and filters shared by the
+// bridge and v2 handshakes without touching the connection.
+func (h *AdminLogsHandler) parseStreamRequest(r *http.Request) (logstream.Stream, opslog.ListOptions, activitylog.ListOptions, error) {
 	stream := logstream.Stream(strings.TrimSpace(r.URL.Query().Get("stream")))
-	if stream != logstream.StreamApp && stream != logstream.StreamAudit {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid stream")
-		return
-	}
-
 	var (
 		appOpts   opslog.ListOptions
 		auditOpts activitylog.ListOptions
@@ -231,17 +223,46 @@ func (h *AdminLogsHandler) HandleLogStreamWebSocket(w http.ResponseWriter, r *ht
 		appOpts, err = parseOperationalLogOptionsFromRequest(r)
 	case logstream.StreamAudit:
 		auditOpts, err = parseAuditLogOptionsFromRequest(r)
+	default:
+		return stream, appOpts, auditOpts, invalidQueryError("stream")
 	}
+	return stream, appOpts, auditOpts, err
+}
+
+func (h *AdminLogsHandler) HandleLogStreamWebSocket(w http.ResponseWriter, r *http.Request) {
+	if h.streamHub == nil {
+		http.Error(w, "log stream unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	stream, _, _, err := h.parseStreamRequest(r)
 	if err != nil {
+		if stream != logstream.StreamApp && stream != logstream.StreamAudit {
+			writeError(w, http.StatusBadRequest, "bad_request", "Invalid stream")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	h.serveLogStream(w, r, wsUpgrader)
+}
 
-	conn, err := wsUpgrader.Upgrade(w, r, nil)
+// serveLogStream upgrades with the given upgrader and runs the shared stream
+// loop: snapshot, buffered appends newer than the snapshot, then live appends
+// filtered like the list routes and deduplicated by id, with ping/pong
+// keepalive. The request context ending closes the connection.
+func (h *AdminLogsHandler) serveLogStream(w http.ResponseWriter, r *http.Request, upgrader websocket.Upgrader) {
+	stream, appOpts, auditOpts, err := h.parseStreamRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid stream")
+		return
+	}
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
+	stopClose := context.AfterFunc(r.Context(), func() { _ = conn.Close() })
+	defer stopClose()
 
 	events, unsubscribe := h.streamHub.Subscribe(func(msg logstream.Message) bool {
 		return msg.Type == logstream.MessageTypeAppend && msg.Stream == stream

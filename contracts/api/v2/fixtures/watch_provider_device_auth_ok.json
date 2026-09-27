@@ -1,0 +1,8 @@
+{
+  "id": "auth-1",
+  "provider": "trakt",
+  "user_code": "PUBLIC",
+  "verification_url": "",
+  "interval_seconds": 0,
+  "expires_at": "2026-01-02T03:04:05.678Z"
+}

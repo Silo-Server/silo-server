@@ -18,6 +18,12 @@ type subtitleReadySessionLookup interface {
 type SubtitleInventoryResolver interface {
 	MediaFile(ctx context.Context, fileID int) (*models.MediaFile, error)
 	AdditionalSubtitles(ctx context.Context, file *models.MediaFile) ([]SubtitleInventoryEntryV3, error)
+	// SessionClientFeatures returns the client features that pick the
+	// session's sidecar representations (SubtitleSidecarExtV3), so an event
+	// publishes the same URL as the session's plans. nil selects the defaults.
+	// An error means the representation is unknown; the event then omits the
+	// track rather than guess.
+	SessionClientFeatures(ctx context.Context, sessionID string) ([]string, error)
 }
 
 // SubtitleReadyNotifier pushes "subtitle ready" events to active playback
@@ -27,9 +33,10 @@ type SubtitleInventoryResolver interface {
 // It satisfies the subtitles/ai Notifier interface structurally, keeping the ai
 // package free of any playback dependency.
 type SubtitleReadyNotifier struct {
-	sessions  subtitleReadySessionLookup
-	hub       *RealtimeHub
-	inventory SubtitleInventoryResolver
+	sessions           subtitleReadySessionLookup
+	hub                *RealtimeHub
+	inventory          SubtitleInventoryResolver
+	translationSession *Session
 }
 
 // NewSubtitleReadyNotifier returns a notifier, or nil if its dependencies are
@@ -70,14 +77,14 @@ func (n *SubtitleReadyNotifier) SubtitleReady(ctx context.Context, mediaFileID, 
 
 // TranslationStarted tells one session a live translation has begun.
 func (n *SubtitleReadyNotifier) TranslationStarted(ctx context.Context, sessionID string, fileID int, jobID int64, trackKey, language, label string, totalCues int) {
-	n.sendTranslation(sessionID, func() (EventEnvelope, error) {
+	n.sendTranslation(sessionID, fileID, func() (EventEnvelope, error) {
 		return NewSubtitleTranslationStartedEvent(sessionID, fileID, jobID, trackKey, language, label, totalCues)
 	})
 }
 
 // TranslationCues pushes a batch of translated cues to one session.
 func (n *SubtitleReadyNotifier) TranslationCues(ctx context.Context, sessionID string, fileID int, jobID int64, trackKey string, cues []StreamCue, done, total int) {
-	n.sendTranslation(sessionID, func() (EventEnvelope, error) {
+	n.sendTranslation(sessionID, fileID, func() (EventEnvelope, error) {
 		return NewSubtitleTranslationCuesEvent(sessionID, fileID, jobID, trackKey, cues, done, total)
 	})
 }
@@ -85,14 +92,14 @@ func (n *SubtitleReadyNotifier) TranslationCues(ctx context.Context, sessionID s
 // TranslationCompleted tells one session a live translation finished.
 func (n *SubtitleReadyNotifier) TranslationCompleted(ctx context.Context, sessionID string, fileID int, jobID int64, trackKey string, subtitleID int, language, label string) {
 	track := n.resolveTrack(ctx, sessionID, fileID, subtitleID)
-	n.sendTranslation(sessionID, func() (EventEnvelope, error) {
+	n.sendTranslation(sessionID, fileID, func() (EventEnvelope, error) {
 		return NewSubtitleTranslationCompletedEvent(sessionID, fileID, jobID, trackKey, subtitleID, language, label, track)
 	})
 }
 
 // TranslationFailed tells one session a live translation failed.
 func (n *SubtitleReadyNotifier) TranslationFailed(ctx context.Context, sessionID string, fileID int, jobID int64, trackKey, message string) {
-	n.sendTranslation(sessionID, func() (EventEnvelope, error) {
+	n.sendTranslation(sessionID, fileID, func() (EventEnvelope, error) {
 		return NewSubtitleTranslationFailedEvent(sessionID, fileID, jobID, trackKey, message)
 	})
 }
@@ -119,7 +126,13 @@ func (n *SubtitleReadyNotifier) resolveTrack(ctx context.Context, sessionID stri
 			"file_id", fileID, "error", err)
 		return nil
 	}
-	items := SubtitleInventoryV3(sessionID, file, additional)
+	features, err := n.inventory.SessionClientFeatures(ctx, sessionID)
+	if err != nil {
+		slog.WarnContext(ctx, "subtitle realtime event omits track identity", "component", "playback",
+			"file_id", fileID, "error", err)
+		return nil
+	}
+	items := ScopeSubtitleInventoryV3(sessionID, file, BuildSubtitleInventoryV3(file, additional), features)
 	for i := range items {
 		if items[i].Source != SubtitleSourceDownloadedV3 {
 			continue
@@ -133,8 +146,8 @@ func (n *SubtitleReadyNotifier) resolveTrack(ctx context.Context, sessionID stri
 }
 
 // sendTranslation builds and delivers a translation event to a single session.
-func (n *SubtitleReadyNotifier) sendTranslation(sessionID string, build func() (EventEnvelope, error)) {
-	if n == nil || n.hub == nil || sessionID == "" {
+func (n *SubtitleReadyNotifier) sendTranslation(sessionID string, fileID int, build func() (EventEnvelope, error)) {
+	if n == nil || n.hub == nil || sessionID == "" || !n.translationSessionMatches(sessionID, fileID) {
 		return
 	}
 	event, err := build()

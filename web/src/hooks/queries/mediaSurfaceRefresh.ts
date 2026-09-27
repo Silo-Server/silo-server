@@ -166,7 +166,8 @@ export function getQueryKeyItemId(queryKey: readonly unknown[]): string | undefi
   if (queryKey[0] === "catalog" && queryKey[1] === "items" && typeof queryKey[2] === "string") {
     return queryKey[2];
   }
-  if (queryKey[0] === "ratings" && typeof queryKey[1] === "string") {
+  // ratingKeys.list() shares the ["ratings", x] shape; "list" is not an item ID.
+  if (queryKey[0] === "ratings" && typeof queryKey[1] === "string" && queryKey[1] !== "list") {
     return queryKey[1];
   }
   return undefined;

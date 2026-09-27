@@ -43,7 +43,7 @@ func TestCheckNodePassesResourceStatsThroughOpaquely(t *testing.T) {
 			"future_field_we_do_not_know":true}]
 	}`)
 
-	healthy, activeJobs, egressKbps, hash, lastStats := CheckNode(context.Background(), &Node{URL: url})
+	healthy, activeJobs, egressKbps, hash, lastStats, _ := CheckNode(context.Background(), &Node{URL: url})
 	if !healthy || activeJobs != 2 || egressKbps != 17 || hash != "sha256:abc" {
 		t.Fatalf("check = %v/%d/%d/%q, want the existing fields unchanged", healthy, activeJobs, egressKbps, hash)
 	}
@@ -84,7 +84,7 @@ func TestCheckNodeReportsNoStatsForOlderNodes(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			url := newStatsHealthNode(t, body)
-			healthy, _, _, _, lastStats := CheckNode(context.Background(), &Node{URL: url})
+			healthy, _, _, _, lastStats, _ := CheckNode(context.Background(), &Node{URL: url})
 			if !healthy {
 				t.Fatal("node reported unhealthy")
 			}
@@ -95,10 +95,30 @@ func TestCheckNodeReportsNoStatsForOlderNodes(t *testing.T) {
 	}
 }
 
+// A node's build identity rides along with the sample, and on its own is
+// enough to persist: a non-Linux node that cannot be sampled still knows what
+// revision it is running.
+func TestCheckNodeKeepsBuildIdentity(t *testing.T) {
+	url := newStatsHealthNode(t, `{"status":"ok","build":{"display":"abcdef12","revision":"abcdef1234","build_number":42,"available":true}}`)
+	_, _, _, _, lastStats, _ := CheckNode(context.Background(), &Node{URL: url})
+	var decoded struct {
+		Build struct {
+			Display     string `json:"display"`
+			BuildNumber int    `json:"build_number"`
+		} `json:"build"`
+	}
+	if err := json.Unmarshal(lastStats, &decoded); err != nil {
+		t.Fatalf("lastStats invalid: %v (%s)", err, lastStats)
+	}
+	if decoded.Build.Display != "abcdef12" || decoded.Build.BuildNumber != 42 {
+		t.Fatalf("build = %+v, want the node's identity carried through", decoded.Build)
+	}
+}
+
 // A node that reports only one half still persists that half.
 func TestCheckNodeKeepsAPartialSample(t *testing.T) {
 	url := newStatsHealthNode(t, `{"status":"ok","gpu":[{"device":"cuda:0","source":"nvidia-smi"}]}`)
-	_, _, _, _, lastStats := CheckNode(context.Background(), &Node{URL: url})
+	_, _, _, _, lastStats, _ := CheckNode(context.Background(), &Node{URL: url})
 	var decoded map[string]json.RawMessage
 	if err := json.Unmarshal(lastStats, &decoded); err != nil {
 		t.Fatalf("lastStats invalid: %v (%s)", err, lastStats)
@@ -120,7 +140,7 @@ func TestCheckNodeDropsAnOversizedResourceSample(t *testing.T) {
 	url := newStatsHealthNode(t, `{"status":"ok","active_jobs":3,"egress_kbps":9,
 		"system":{"cpu_pct":41,"junk":"`+padding+`"}}`)
 
-	healthy, activeJobs, egressKbps, _, lastStats := CheckNode(context.Background(), &Node{URL: url})
+	healthy, activeJobs, egressKbps, _, lastStats, _ := CheckNode(context.Background(), &Node{URL: url})
 	if !healthy || activeJobs != 3 || egressKbps != 9 {
 		t.Fatalf("check = %v/%d/%d, want the health verdict kept", healthy, activeJobs, egressKbps)
 	}
@@ -135,7 +155,7 @@ func TestCheckNodeRejectsAnOversizedHealthBody(t *testing.T) {
 	url := newStatsHealthNode(t, `{"status":"ok","active_jobs":3,"junk":"`+
 		strings.Repeat("x", maxHealthResponseBytes)+`"}`)
 
-	healthy, activeJobs, _, _, lastStats := CheckNode(context.Background(), &Node{URL: url})
+	healthy, activeJobs, _, _, lastStats, _ := CheckNode(context.Background(), &Node{URL: url})
 	if healthy || activeJobs != 0 || lastStats != nil {
 		t.Fatalf("check = %v/%d/%s, want an unreadable body treated as no answer", healthy, activeJobs, lastStats)
 	}
@@ -147,13 +167,13 @@ func TestApplyHealthClearsStatsWhenACheckCarriesNone(t *testing.T) {
 	pool := NewTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, URL: "http://node", Enabled: true}})
 
-	pool.ApplyHealth(1, "http://node", true, 1, 0, "", []byte(`{"system":{"cpu_pct":41}}`), time.Now())
+	pool.ApplyHealth(1, "http://node", true, 1, 0, "", []byte(`{"system":{"cpu_pct":41}}`), nil, time.Now())
 	stored := pool.Nodes()[0]
 	if len(stored.LastStats) == 0 {
 		t.Fatal("stats were not published to the pool")
 	}
 
-	pool.ApplyHealth(1, "http://node", false, 0, 0, "", nil, time.Now())
+	pool.ApplyHealth(1, "http://node", false, 0, 0, "", nil, nil, time.Now())
 	if got := pool.Nodes()[0].LastStats; got != nil {
 		t.Fatalf("LastStats = %s after a failed check, want nil", got)
 	}
@@ -166,7 +186,7 @@ func TestApplyHealthClonesStats(t *testing.T) {
 	pool.SetNodes([]*Node{{ID: 1, URL: "http://node", Enabled: true}})
 
 	buffer := []byte(`{"system":{"cpu_pct":41}}`)
-	pool.ApplyHealth(1, "http://node", true, 0, 0, "", buffer, time.Now())
+	pool.ApplyHealth(1, "http://node", true, 0, 0, "", buffer, nil, time.Now())
 	copy(buffer, []byte(`{"system":{"cpu_pct":99}}`))
 
 	if got := string(pool.Nodes()[0].LastStats); got != `{"system":{"cpu_pct":41}}` {
@@ -183,7 +203,7 @@ func TestApplyHealthIgnoresAResultForAReplacedWorker(t *testing.T) {
 	pool := NewTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, URL: "http://replacement", Enabled: true}})
 
-	pool.ApplyHealth(1, "http://original", true, 7, 0, "", []byte(`{"system":{"cpu_pct":41}}`), time.Now())
+	pool.ApplyHealth(1, "http://original", true, 7, 0, "", []byte(`{"system":{"cpu_pct":41}}`), nil, time.Now())
 
 	stored := pool.Nodes()[0]
 	if stored.ActiveJobs != 0 || len(stored.LastStats) != 0 || stored.LastHealthCheck != nil {
@@ -197,7 +217,7 @@ func TestApplyHealthAcceptsATrailingSlashDifference(t *testing.T) {
 	pool := NewTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, URL: "http://node/", Enabled: true}})
 
-	pool.ApplyHealth(1, "http://node", true, 3, 0, "", nil, time.Now())
+	pool.ApplyHealth(1, "http://node", true, 3, 0, "", nil, nil, time.Now())
 
 	if stored := pool.Nodes()[0]; stored.ActiveJobs != 3 {
 		t.Fatalf("active jobs = %d, want the result applied despite the trailing slash", stored.ActiveJobs)

@@ -1,0 +1,15 @@
+{
+  "provider": "down",
+  "hosts": [
+    {
+      "host": {
+        "id": "api",
+        "role": "api",
+        "name": "Living Room"
+      },
+      "state": "unavailable",
+      "addresses": [],
+      "error": "plugin process is backoff: plugin process exited"
+    }
+  ]
+}

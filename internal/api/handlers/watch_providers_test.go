@@ -115,6 +115,23 @@ func TestWatchProviderHandlerListsProviders(t *testing.T) {
 	}
 }
 
+// The frozen v1 contract keeps its original capability fields; rating sync is
+// served only by /api/v2.
+func TestWatchProviderHandlerOmitsRatingCapabilitiesFromV1(t *testing.T) {
+	service := stubWatchProviderService{providers: []watchsync.ProviderSummary{{
+		Key: "trakt", DisplayName: "Trakt",
+		Capabilities: watchsync.Capabilities{ImportWatched: true, ImportRatings: true, ExportRatings: true},
+	}}}
+	rec := httptest.NewRecorder()
+	NewWatchProviderHandler(service).HandleListProviders(rec, httptest.NewRequest(http.MethodGet, "/watch-providers/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); strings.Contains(body, "ratings") {
+		t.Fatalf("v1 provider list exposes rating fields: %s", body)
+	}
+}
+
 func TestWatchProviderHandlerReturnsEmptyProviderList(t *testing.T) {
 	handler := NewWatchProviderHandler(stubWatchProviderService{})
 

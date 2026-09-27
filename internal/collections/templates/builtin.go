@@ -57,30 +57,6 @@ var builtinTemplates = []Template{
 		Featured:            true,
 		TMDB:                &TMDBSpec{Preset: "trending", MediaType: "tv", TimeWindow: "week"},
 	},
-	{
-		ID:                  "trakt_trending_movies",
-		Title:               "Trakt Trending Movies",
-		Description:         "Movies with the most active watchers on Trakt right now.",
-		Icon:                "📈",
-		Category:            CategoryTrending,
-		Source:              SourceTrakt,
-		MediaKind:           MediaMovie,
-		DefaultLimit:        builtinDefaultLimit,
-		DefaultSyncSchedule: "0 */6 * * *",
-		Trakt:               &TraktSpec{Preset: "trending", MediaType: "movie"},
-	},
-	{
-		ID:                  "trakt_trending_shows",
-		Title:               "Trakt Trending Shows",
-		Description:         "Shows with the most active watchers on Trakt right now.",
-		Icon:                "📈",
-		Category:            CategoryTrending,
-		Source:              SourceTrakt,
-		MediaKind:           MediaTV,
-		DefaultLimit:        builtinDefaultLimit,
-		DefaultSyncSchedule: "0 */6 * * *",
-		Trakt:               &TraktSpec{Preset: "trending", MediaType: "tv"},
-	},
 
 	// ── Popular ────────────────────────────────────────────────────────────
 	{
@@ -106,30 +82,6 @@ var builtinTemplates = []Template{
 		DefaultLimit:        builtinDefaultLimit,
 		DefaultSyncSchedule: "0 4 * * *",
 		TMDB:                &TMDBSpec{Preset: "popular", MediaType: "tv"},
-	},
-	{
-		ID:                  "trakt_popular_movies",
-		Title:               "Trakt Popular Movies",
-		Description:         "Trakt's most popular movies of all time, ranked by user ratings.",
-		Icon:                "🌟",
-		Category:            CategoryPopular,
-		Source:              SourceTrakt,
-		MediaKind:           MediaMovie,
-		DefaultLimit:        builtinDefaultLimit,
-		DefaultSyncSchedule: "0 4 * * *",
-		Trakt:               &TraktSpec{Preset: "popular", MediaType: "movie"},
-	},
-	{
-		ID:                  "trakt_popular_shows",
-		Title:               "Trakt Popular Shows",
-		Description:         "Trakt's most popular shows of all time, ranked by user ratings.",
-		Icon:                "🌟",
-		Category:            CategoryPopular,
-		Source:              SourceTrakt,
-		MediaKind:           MediaTV,
-		DefaultLimit:        builtinDefaultLimit,
-		DefaultSyncSchedule: "0 4 * * *",
-		Trakt:               &TraktSpec{Preset: "popular", MediaType: "tv"},
 	},
 
 	// ── Top Rated ──────────────────────────────────────────────────────────
@@ -213,32 +165,6 @@ var builtinTemplates = []Template{
 	},
 
 	// ── Editorial / Profile-personalised ───────────────────────────────────
-	{
-		ID:                  "trakt_recommended_movies",
-		Title:               "Trakt Recommended Movies",
-		Description:         "Personalised movie picks for a connected Trakt profile.",
-		Icon:                "🎯",
-		Category:            CategoryEditorial,
-		Source:              SourceTrakt,
-		MediaKind:           MediaMovie,
-		DefaultLimit:        builtinDefaultLimit,
-		DefaultSyncSchedule: "0 7 * * *",
-		RequiresProfile:     true,
-		Trakt:               &TraktSpec{Preset: "recommended", MediaType: "movie"},
-	},
-	{
-		ID:                  "trakt_recommended_shows",
-		Title:               "Trakt Recommended Shows",
-		Description:         "Personalised show picks for a connected Trakt profile.",
-		Icon:                "🎯",
-		Category:            CategoryEditorial,
-		Source:              SourceTrakt,
-		MediaKind:           MediaTV,
-		DefaultLimit:        builtinDefaultLimit,
-		DefaultSyncSchedule: "0 7 * * *",
-		RequiresProfile:     true,
-		Trakt:               &TraktSpec{Preset: "recommended", MediaType: "tv"},
-	},
 
 	// ── Streaming Services (MDBList, community-curated) ────────────────────
 	// These point at top-ranked public lists from the MDBList /toplists/ page.

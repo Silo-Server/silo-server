@@ -14,10 +14,10 @@ func (f *fakeBatchMatcher) ProcessBatch(context.Context) (int, error) {
 	return f.processed, f.err
 }
 
-func TestMatchMediaTaskIsVisible(t *testing.T) {
+func TestMatchMediaTaskIsHidden(t *testing.T) {
 	task := NewMatchMediaTask(&fakeBatchMatcher{})
 
-	if task.IsHidden() {
-		t.Fatal("IsHidden() = true, want false")
+	if !task.IsHidden() {
+		t.Fatal("IsHidden() = false, want true")
 	}
 }

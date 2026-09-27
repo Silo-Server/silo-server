@@ -6,7 +6,7 @@ import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { SubtitleSearchModal } from "./SubtitleSearchModal";
 import { SubtitleTranslateModal } from "./SubtitleTranslateModal";
 import { SubtitleAppearancePanel } from "./SubtitleAppearancePanel";
-import { playerFetch } from "../player-fetch";
+import { playerV2 } from "../player-v2";
 import { getLanguageName } from "../utils/languageNames";
 import { sortSubtitlesBySource } from "../utils/subtitleSort";
 import { getSubtitleFormatLabel, isSubtitleFormatLabel } from "../utils/subtitleCodecs";
@@ -19,9 +19,11 @@ interface SubtitleMenuProps {
   onSelect: (index: number | null) => void;
   delayMs: number;
   onDelayChange: (ms: number) => void;
+  preferredSubtitleLanguage?: string | null;
   mediaFileId?: number;
   playerConfig?: PlayerConfig;
   onRefreshSubtitles?: () => void;
+  onSubtitleJobAccepted?: (jobId: string) => void;
   sessionId?: string;
   getSubtitleStartPosition?: () => number;
   audioTracks?: PlayerAudioTrack[];
@@ -48,9 +50,11 @@ export function SubtitleMenu({
   onSelect,
   delayMs,
   onDelayChange,
+  preferredSubtitleLanguage,
   mediaFileId,
   playerConfig,
   onRefreshSubtitles,
+  onSubtitleJobAccepted,
   sessionId,
   getSubtitleStartPosition,
   audioTracks,
@@ -60,6 +64,7 @@ export function SubtitleMenu({
   const [translateOpen, setTranslateOpen] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiTranscribeEnabled, setAiTranscribeEnabled] = useState(false);
+  const [onlineSearchEnabled, setOnlineSearchEnabled] = useState(true);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -72,10 +77,7 @@ export function SubtitleMenu({
   useEffect(() => {
     if (!playerConfig) return;
     let cancelled = false;
-    playerFetch<{ enabled: boolean; transcribe_enabled?: boolean }>(
-      playerConfig,
-      "/subtitles/ai/status",
-    )
+    playerV2(playerConfig, "GET /api/v2/subtitles/ai/status", {})
       .then((res) => {
         if (cancelled) return;
         setAiEnabled(Boolean(res?.enabled));
@@ -85,6 +87,28 @@ export function SubtitleMenu({
         if (cancelled) return;
         setAiEnabled(false);
         setAiTranscribeEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [playerConfig]);
+
+  // Online subtitle search is likewise a server-wide capability. Unlike AI this
+  // fails open: only an explicit enabled:false hides it, so older servers and
+  // probe failures keep today's behavior. Manual upload never depends on it.
+  useEffect(() => {
+    if (!playerConfig) return;
+    // A previous server's answer must not hide search on this one.
+    setOnlineSearchEnabled(true);
+    let cancelled = false;
+    playerV2(playerConfig, "GET /api/v2/subtitles/providers/status", {})
+      .then((res) => {
+        if (cancelled) return;
+        setOnlineSearchEnabled(res?.enabled !== false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOnlineSearchEnabled(true);
       });
     return () => {
       cancelled = true;
@@ -313,7 +337,7 @@ export function SubtitleMenu({
                   setOpen(false);
                 }}
               >
-                Search Online…
+                Add Subtitles…
               </button>
             )}
             {mediaFileId &&
@@ -365,6 +389,7 @@ export function SubtitleMenu({
             mediaFileId={mediaFileId}
             playerConfig={playerConfig}
             isOpen={searchOpen}
+            onlineSearchEnabled={onlineSearchEnabled}
             onClose={() => setSearchOpen(false)}
             onSubtitleDownloaded={() => {
               setSearchOpen(false);
@@ -379,12 +404,14 @@ export function SubtitleMenu({
           mediaFileId={mediaFileId}
           playerConfig={playerConfig}
           tracks={tracks}
+          preferredSubtitleLanguage={preferredSubtitleLanguage}
           audioTracks={audioTracks}
           translateEnabled={aiEnabled}
           transcribeEnabled={aiTranscribeEnabled}
           isOpen={translateOpen}
           sessionId={sessionId}
           getStartPosition={getSubtitleStartPosition}
+          onSubtitleJobAccepted={onSubtitleJobAccepted}
           onClose={() => setTranslateOpen(false)}
         />
       )}

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
 // TranscodePool manages transcode nodes with least-connections selection.
@@ -86,10 +88,10 @@ func (p *TranscodePool) Nodes() []*Node {
 
 // ApplyHealth records a health check result by swapping the node for an
 // updated copy, keeping published *Node values immutable.
-func (p *TranscodePool) ApplyHealth(id int, checkedURL string, healthy bool, activeJobs, egressKbps int, advertisedHash string, lastStats []byte, checkedAt time.Time) {
+func (p *TranscodePool) ApplyHealth(id int, checkedURL string, healthy bool, activeJobs, egressKbps int, advertisedHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess, checkedAt time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	applyNodeHealth(p.nodes, id, checkedURL, healthy, activeJobs, egressKbps, advertisedHash, lastStats, checkedAt)
+	applyNodeHealth(p.nodes, id, checkedURL, healthy, activeJobs, egressKbps, advertisedHash, lastStats, networkAccess, checkedAt)
 }
 
 // ApplyCapabilities records a freshly fetched capability report by swapping the
@@ -136,7 +138,7 @@ func sameNodeURL(a, b string) bool {
 // by id alone would then write one worker's health — and the scratch fill
 // transcode admission reads — onto the replacement, and the database fence
 // downstream cannot undo that. The pool would stay wrong until a later sweep.
-func applyNodeHealth(nodes []*Node, id int, checkedURL string, healthy bool, activeJobs, egressKbps int, advertisedHash string, lastStats []byte, checkedAt time.Time) {
+func applyNodeHealth(nodes []*Node, id int, checkedURL string, healthy bool, activeJobs, egressKbps int, advertisedHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess, checkedAt time.Time) {
 	for i, n := range nodes {
 		if n.ID != id || !sameNodeURL(n.URL, checkedURL) {
 			continue
@@ -159,6 +161,10 @@ func applyNodeHealth(nodes []*Node, id int, checkedURL string, healthy bool, act
 		} else {
 			clone.LastStats = nil
 		}
+		// Same rule for the network access report: a check that carried none
+		// clears it, so ClientURLFor never hands out an origin the node has
+		// stopped confirming. Cloned so the published copy is immutable.
+		clone.NetworkAccess = networkAccess.Normalized().Clone()
 		nodes[i] = &clone
 		return
 	}
