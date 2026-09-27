@@ -160,3 +160,16 @@ func withPNGDimensions(t *testing.T, data []byte, width, height uint32) []byte {
 	binary.BigEndian.PutUint32(out[ihdr+4+13:], crc32.ChecksumIEEE(out[ihdr:ihdr+4+13]))
 	return out
 }
+
+func TestProcessErrorClassifiesUndecodableSource(t *testing.T) {
+	full := testPNG(t, 600, 900)
+	cause := errors.New("vips failure")
+
+	if err := processError(full[:len(full)/2], "resize to w300", cause); !errors.Is(err, ErrInvalidImage) {
+		t.Fatalf("truncated source: err = %v, want ErrInvalidImage", err)
+	}
+	err := processError(full, "resize to w300", cause)
+	if errors.Is(err, ErrInvalidImage) || !errors.Is(err, cause) || err.Error() != "imageutil: resize to w300: vips failure" {
+		t.Fatalf("decodable source: err = %v, want the wrapped server error", err)
+	}
+}

@@ -40,6 +40,16 @@ var ErrInvalidImage = errors.New("imageutil: invalid image")
 // image.Decode allocates the whole raster before it reads the pixel data.
 const maxFallbackDecodePixels = 25_000_000
 
+// processError wraps a failed Process call on data. Source pixel data that does
+// not decode wraps ErrInvalidImage; any other failure stays a server error
+// that names the step.
+func processError(data []byte, step string, err error) error {
+	if undecodableSource(data) {
+		return fmt.Errorf("%w: %w", ErrInvalidImage, err)
+	}
+	return fmt.Errorf("imageutil: %s: %w", step, err)
+}
+
 // undecodableSource reports whether data is in a format the standard library
 // recognizes but its pixel data does not decode. libvips reads only the header
 // in Size, so a truncated PNG first fails inside Process, where the error is
@@ -98,10 +108,7 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 	fitWithin(&originalOptions, size, MaxCachedOriginalDimension)
 	original, err := bimg.NewImage(data).Process(originalOptions)
 	if err != nil {
-		if undecodableSource(data) {
-			return nil, fmt.Errorf("%w: %w", ErrInvalidImage, err)
-		}
-		return nil, fmt.Errorf("imageutil: encode original: %w", err)
+		return nil, processError(data, "encode original", err)
 	}
 	variants = append(variants, Variant{Key: "original", Data: original})
 
@@ -129,7 +136,7 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 		} else {
 			out, err = bimg.NewImage(data).Process(opts)
 			if err != nil {
-				return nil, fmt.Errorf("imageutil: resize to w%d: %w", w, err)
+				return nil, processError(data, fmt.Sprintf("resize to w%d", w), err)
 			}
 		}
 		previousWidth, previousHeight, previousOutput = opts.Width, opts.Height, out
