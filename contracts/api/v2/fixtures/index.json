@@ -1554,6 +1554,26 @@
       "body_file": null
     },
     {
+      "name": "admin_marker_capabilities",
+      "operation_id": "getAdminMarkerCapabilities",
+      "scenario": "Marker capabilities report local movie credits support.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/markers/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminMarkerCapabilities",
+      "body_file": "admin_marker_capabilities.json"
+    },
+    {
       "name": "admin_marker_contribute",
       "operation_id": "contributeAdminFileMarkers",
       "scenario": "Synchronous contribution returns existing per-provider outcomes.",

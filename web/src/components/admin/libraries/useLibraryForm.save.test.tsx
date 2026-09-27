@@ -195,6 +195,23 @@ describe("marker detection switch", () => {
     expect(screen.getByText(label)).toBeTruthy();
   });
 
+  it.each([
+    ["movies", /^Looks for end credits in movies/],
+    [
+      "series",
+      /episodes in this library\. Embedded intro and credits chapters are used when available\.$/,
+    ],
+    [
+      "mixed",
+      /episodes in this library\..* Movies get end credits only, on a best-effort basis\.$/,
+    ],
+  ])("describes what detection covers in %s libraries", (type, description) => {
+    const { result } = renderHook(() => useLibraryForm({ library: null }));
+    act(() => result.current.handleTypeChange(type));
+    render(<AdvancedFields form={result.current} chapterThumbnailsSupported={false} />);
+    expect(screen.getByText(description)).toBeTruthy();
+  });
+
   it("is hidden for book libraries", () => {
     const { result } = renderHook(() => useLibraryForm({ library: null }));
     act(() => result.current.handleTypeChange("audiobooks"));

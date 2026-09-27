@@ -202,6 +202,12 @@ func TestListMovieCandidatesPostgres(t *testing.T) {
 		case ArtifactUnusable:
 			err = repo.UpsertArtifact(ctx, Artifact{
 				MediaFileID: candidate.FileID, ArtifactKey: spec.key, ArtifactIdentity: spec.window.identity(candidate),
+				Status: ArtifactUnusable, Detail: tailDetailSparse,
+			})
+		case tailDetailNoVideo:
+			// Stored from probe metadata by an earlier build.
+			err = repo.UpsertArtifact(ctx, Artifact{
+				MediaFileID: candidate.FileID, ArtifactKey: spec.key, ArtifactIdentity: spec.window.identity(candidate),
 				Status: ArtifactUnusable, Detail: tailDetailNoVideo,
 			})
 		default:
@@ -223,6 +229,12 @@ func TestListMovieCandidatesPostgres(t *testing.T) {
 	// Another server retries the failure, after files never analyzed.
 	if got, want := f.listed(t, repo, "node-b"), []string{"scannerCredits", "mixed"}; !slices.Equal(got, want) {
 		t.Fatalf("candidates on another server %v, want %v", got, want)
+	}
+	// A tail ruled out by probe metadata is decided on every analysis, so
+	// such a row from an earlier build does not keep the file out.
+	store("scannerCredits", tailDetailNoVideo)
+	if got, want := f.listed(t, repo, "node-a"), []string{"scannerCredits"}; !slices.Equal(got, want) {
+		t.Fatalf("candidates with a metadata unusable row %v, want %v", got, want)
 	}
 	// An episode tail stored for a file does not count as its movie tail.
 	candidates, _ = repo.ListMovieCandidatesForFile(ctx, f.files["scannerCredits"])

@@ -16,11 +16,19 @@ import (
 )
 
 // IntroEpisodeAnalyzer runs local marker analysis for one item: an
-// episode's intros and credits, or a movie's credits.
+// episode's intros or credits, as selected, or a movie's credits.
 type IntroEpisodeAnalyzer interface {
-	AnalyzeEpisode(ctx context.Context, episodeID string) (intromarkers.RunSummary, error)
+	AnalyzeEpisodeKinds(ctx context.Context, episodeID string, kinds intromarkers.EpisodeMarkerKinds) (intromarkers.RunSummary, error)
 	AnalyzeMovie(ctx context.Context, contentID string) (intromarkers.RunSummary, error)
 }
+
+var (
+	// introMarkerKinds is what the endpoints that predate credits analyze:
+	// the frozen /api/v1 routes and /api/v2 redetect-intro.
+	introMarkerKinds = intromarkers.EpisodeMarkerKinds{Intro: true}
+	// allMarkerKinds selects every kind local analysis finds.
+	allMarkerKinds = intromarkers.EpisodeMarkerKinds{Intro: true, Credits: true}
+)
 
 // MarkerItemEligibilityChecker reports whether local marker analysis may run
 // for an episode or a movie, and which of the two the item is.
@@ -82,9 +90,9 @@ func (h *AdminIntroHandler) HandleRedetectEpisodeIntro(w http.ResponseWriter, r 
 }
 
 // handleEpisodeMarkers serves the frozen /api/v1 endpoints, which analyze
-// episodes only and keep their original messages.
+// episode intros only and keep their original messages.
 func (h *AdminIntroHandler) handleEpisodeMarkers(w http.ResponseWriter, r *http.Request, action string) {
-	status, err := h.refreshItemMarkers(r.Context(), chi.URLParam(r, "id"), action, true)
+	status, err := h.refreshItemMarkers(r.Context(), chi.URLParam(r, "id"), action, introMarkerKinds)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -92,20 +100,23 @@ func (h *AdminIntroHandler) handleEpisodeMarkers(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusAccepted, redetectIntroResponse{Status: status})
 }
 
-// RefreshEpisodeMarkers queues local marker analysis of an item, which may
-// be an episode (intros and credits) or a movie (credits only, best effort).
-// The name predates movies. It serves /api/v2.
+// RefreshEpisodeMarkers serves the frozen /api/v1 routes and the /api/v2
+// refresh-markers ("refresh-v2") and redetect-intro ("redetect") operations.
+// Every action but refresh-v2 predates credits and analyzes episode intros
+// only; refresh-v2 also takes movies, for their credits.
 func (h *AdminIntroHandler) RefreshEpisodeMarkers(ctx context.Context, itemID, action string) (string, error) {
 	if action == "refresh-v2" {
 		return h.refreshEpisodeMarkersV2(ctx, itemID)
 	}
-	return h.refreshItemMarkers(ctx, itemID, action, false)
+	return h.refreshItemMarkers(ctx, itemID, action, introMarkerKinds)
 }
 
-// refreshItemMarkers queues local marker analysis of an item. With
-// episodesOnly, as /api/v1 was frozen, a movie is rejected like any other
-// item that is not an episode, and messages name episodes.
-func (h *AdminIntroHandler) refreshItemMarkers(ctx context.Context, itemID, action string, episodesOnly bool) (string, error) {
+// refreshItemMarkers queues local marker analysis of an item for kinds. A
+// movie gets credits only, so a request without credits takes episodes
+// only, rejects a movie like any other item that is not an episode, and
+// keeps the messages of the endpoints that predate movies.
+func (h *AdminIntroHandler) refreshItemMarkers(ctx context.Context, itemID, action string, kinds intromarkers.EpisodeMarkerKinds) (string, error) {
+	episodesOnly := !kinds.Credits
 	if h == nil || h.analyzer == nil || h.eligibility == nil {
 		return "", apiError(http.StatusServiceUnavailable, "unavailable", "Intro detection is not configured")
 	}
@@ -163,8 +174,13 @@ func (h *AdminIntroHandler) refreshItemMarkers(ctx context.Context, itemID, acti
 	go func() {
 		defer h.inFlight.Delete(itemID)
 		start := time.Now()
-		h.logger.InfoContext(ctx, "admin markers: item refresh started", "item_id", itemID, "kind", kind, "action", action)
-		summary, err := h.analyzeItem(h.baseContext, itemID, kind)
+		h.logger.InfoContext(ctx, "admin markers: item refresh started",
+			"item_id", itemID,
+			"kind", kind,
+			"action", action,
+			"intro", kinds.Intro,
+			"credits", kinds.Credits)
+		summary, err := h.analyzeItem(h.baseContext, itemID, kind, kinds)
 		if err != nil {
 			h.logger.ErrorContext(ctx, "admin markers: item refresh failed",
 				"item_id", itemID,
@@ -222,12 +238,13 @@ var (
 	}
 )
 
-// analyzeItem runs local analysis of an item of kind.
-func (h *AdminIntroHandler) analyzeItem(ctx context.Context, itemID, kind string) (intromarkers.RunSummary, error) {
+// analyzeItem runs local analysis of an item of kind: an episode for kinds,
+// or a movie for its credits.
+func (h *AdminIntroHandler) analyzeItem(ctx context.Context, itemID, kind string, kinds intromarkers.EpisodeMarkerKinds) (intromarkers.RunSummary, error) {
 	if kind == intromarkers.MarkerItemMovie {
 		return h.analyzer.AnalyzeMovie(ctx, itemID)
 	}
-	return h.analyzer.AnalyzeEpisode(ctx, itemID)
+	return h.analyzer.AnalyzeEpisodeKinds(ctx, itemID, kinds)
 }
 
 // itemFiles returns the files of an item of kind: an episode's files, or a

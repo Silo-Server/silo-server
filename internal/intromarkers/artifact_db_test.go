@@ -203,6 +203,84 @@ func TestArtifactStatusesPostgres(t *testing.T) {
 	}
 }
 
+// Two servers can analyze a new file at once. A failure recorded while the
+// other server's first successful write is still in flight must not replace it.
+func TestArtifactFailureKeepsConcurrentFirstResultPostgres(t *testing.T) {
+	pool := openArtifactTestPool(t)
+	ctx := t.Context()
+	repo := NewRepository(pool)
+	first, second, identity := artifactFixture(t, pool)
+	key := ArtifactKey{Kind: "test_tail", AlgorithmVersion: 1, ConfigHash: ArtifactConfigHash("test_tail", "race")}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := execArtifactUpsert(ctx, tx, Artifact{
+		MediaFileID: first, ArtifactKey: key, ArtifactIdentity: identity(first), Status: ArtifactComplete,
+		PayloadFormat: "test:v1", ItemCount: 1, Payload: []byte{1}, RecordedBy: "node-b",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- repo.RecordArtifactFailure(ctx, ArtifactFailure{
+			MediaFileID: first, ArtifactKey: key, ArtifactIdentity: identity(first), RecordedBy: "node-a", Error: "ffmpeg exited 1", At: now,
+		})
+	}()
+	// The failure write reaches the key only after its own read found no row.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database()
+			  AND wait_event_type = 'Lock'
+			  AND query LIKE '%INSERT INTO media_intro_fingerprints%'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("RecordArtifactFailure returned %v before the first result committed", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("RecordArtifactFailure never waited on the in-flight first result")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := repo.LoadArtifact(ctx, first, key)
+	if err != nil || loaded == nil || loaded.Status != ArtifactComplete || loaded.RecordedBy != "node-b" {
+		t.Fatalf("artifact after a concurrent failure = %+v, %v; want the complete result kept", loaded, err)
+	}
+
+	// A failure over another kind's key reports the collision.
+	if err := repo.UpsertArtifact(ctx, Artifact{
+		MediaFileID: second, ArtifactKey: key, ArtifactIdentity: identity(second), Status: ArtifactComplete,
+		PayloadFormat: "test:v1", ItemCount: 1, Payload: []byte{1}, RecordedBy: "node-b",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	other := key
+	other.Kind = "other_kind"
+	if err := repo.RecordArtifactFailure(ctx, ArtifactFailure{
+		MediaFileID: second, ArtifactKey: other, ArtifactIdentity: identity(second), RecordedBy: "node-a", Error: "boom", At: now,
+	}); !errors.Is(err, ErrArtifactKindConflict) {
+		t.Fatalf("RecordArtifactFailure over another kind's key = %v, want ErrArtifactKindConflict", err)
+	}
+}
+
 // Old and new binaries share the table during a rolling deploy: a binary that
 // predates artifact kinds keeps upserting and reading intro fingerprints with
 // its own statements, and must read other statuses as cache misses.
