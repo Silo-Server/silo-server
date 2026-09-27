@@ -85,6 +85,45 @@ func TestHardwareDecoderDoesNotCacheACanceledProbe(t *testing.T) {
 	}
 }
 
+// TestHardwareDecoderRetriesAFailedAutoDetection resolves "auto" to no
+// hardware, as a smoke probe that failed under GPU contention does, and
+// expects the decoder to ask again once hardwareRetryInterval has passed or
+// the playback probe cache was invalidated, while a found backend stays
+// cached until an invalidation.
+func TestHardwareDecoderRetriesAFailedAutoDetection(t *testing.T) {
+	decoder := newHardwareDecoder("auto", "")
+	now := time.Unix(1_000_000, 0)
+	var generation uint64
+	decoder.now = func() time.Time { return now }
+	decoder.generation = func() uint64 { return generation }
+	var calls int
+	decoder.resolve = fakeResolve("none", &calls)
+	backend := func(want string, wantCalls int) {
+		t.Helper()
+		if accel, _ := decoder.backend(context.Background(), "ffmpeg"); accel != want || calls != wantCalls {
+			t.Fatalf("backend %q after %d resolutions, want %q after %d", accel, calls, want, wantCalls)
+		}
+	}
+	backend("none", 1)
+	now = now.Add(hardwareRetryInterval - time.Second)
+	backend("none", 1)
+
+	// The GPU recovers: the next resolution after the interval finds it.
+	decoder.resolve = fakeResolve("vaapi", &calls)
+	now = now.Add(time.Second)
+	backend("vaapi", 2)
+	now = now.Add(24 * time.Hour)
+	backend("vaapi", 2)
+
+	// An operator's re-probe invalidates a found backend too.
+	decoder.resolve = fakeResolve("none", &calls)
+	generation++
+	backend("none", 3)
+	decoder.resolve = fakeResolve("qsv", &calls)
+	generation++
+	backend("qsv", 4)
+}
+
 // creditsClipSegments are the scenes of a synthesized tail, in order: bright
 // and dark story, true black, scrolling text on black, and text on a flat
 // card. Every source runs at 10 frames a second.

@@ -141,7 +141,10 @@ resolves to VAAPI, QSV, or VideoToolbox (as chapter thumbnails resolve it,
 on the `playback.hw_device` devices), the episode and movie tail passes
 decode keyframes on the GPU first and in software if that fails (see
 [media sampling](media-sampling.md#hardware-decode)). Settings changes apply
-to the next pass without a restart. On a shared VAAPI host, the episode pass
+to the next pass without a restart. A resolved backend is kept until the
+playback probe cache is invalidated; when `auto` finds no hardware, as a
+smoke probe that fails under GPU contention reports, it is asked again after
+five minutes. On a shared VAAPI host, the episode pass
 over a 4K HEVC episode took 12 seconds instead of 54 and about 38 seconds of
 CPU instead of 87, audio included; a 1080p H.264 episode took 5 seconds
 instead of 12. Tails are cached under the same key whichever decoder read
