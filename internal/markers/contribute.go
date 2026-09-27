@@ -168,8 +168,10 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 	return outcomes, nil
 }
 
-// urlInText matches an http(s) URL inside free text.
-var urlInText = regexp.MustCompile(`https?://[^\s"'<>]+`)
+// urlInText matches an http(s) URL token inside free text. It takes the
+// whole non-space run, so trailing punctuation lands in the query or path
+// that SanitizeURL then trims, and anything unparseable fails closed.
+var urlInText = regexp.MustCompile(`https?://\S+`)
 
 // submissionErrorText is a provider error's message safe to log. URL errors
 // are sanitized structurally; a URL quoted in other error text (gRPC status
