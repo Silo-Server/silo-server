@@ -68,13 +68,13 @@ function useRetainedSettingsBaseline(
 
 export type CatalogSearchStatus = V2Result<"GET /api/v2/admin/catalog/search/status">;
 
-export function useAdminServerSettings() {
+export function useAdminServerSettings({ enabled = true }: { enabled?: boolean } = {}) {
   const profileContext = captureProfileRequestContext();
   return useQuery({
     queryKey: profileContext
       ? adminSettingsKey(profileContext)
       : [...adminKeys.serverSettings(), null],
-    enabled: profileContext !== null,
+    enabled: enabled && profileContext !== null,
     queryFn: () => {
       if (!profileContext) throw new StaleApiRequestContextError();
       return readAdminSettings(profileContext);

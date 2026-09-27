@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import ActionBar from "./ActionBar";
 
 vi.mock("@/playback/watchPlaybackContext", () => ({
@@ -10,6 +10,13 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
 
 vi.mock("@/components/AddToCollectionDialog", () => ({
   default: () => null,
+}));
+
+const markerMocks = vi.hoisted(() => ({
+  detectionKinds: undefined as { intro: boolean; credits: boolean } | undefined,
+}));
+vi.mock("@/hooks/queries/admin/markers", () => ({
+  useMarkerDetectionKinds: () => markerMocks.detectionKinds,
 }));
 
 describe("ActionBar detail menu", () => {
@@ -49,6 +56,56 @@ describe("ActionBar detail menu", () => {
 });
 
 describe("ActionBar marker re-detection", () => {
+  afterEach(() => {
+    markerMocks.detectionKinds = undefined;
+  });
+
+  it.each([
+    [{ intro: true, credits: false }, ["Intro"], ["Credits", "Intro and credits"]],
+    [{ intro: false, credits: true }, ["Credits"], ["Intro", "Intro and credits"]],
+    [{ intro: false, credits: false }, [], ["Intro", "Credits", "Intro and credits"]],
+  ])("with detection %j offers only %j", async (kinds, enabledLabels, disabledLabels) => {
+    markerMocks.detectionKinds = kinds;
+    render(
+      <MemoryRouter>
+        <ActionBar contentId="episode-1" isAdmin onRedetectMarkers={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByTitle("More"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Re-detect Markers" }));
+    const dialog = await screen.findByRole("dialog", { name: "Re-detect Markers" });
+    for (const name of enabledLabels) {
+      expect(within(dialog).getByRole("button", { name })).toBeEnabled();
+    }
+    for (const name of disabledLabels) {
+      const option = within(dialog).getByRole("button", { name });
+      expect(option).toBeDisabled();
+      expect(option).toHaveAccessibleDescription(/turned off in marker settings/);
+    }
+    expect(within(dialog).getByRole("link", { name: "Change marker settings" })).toHaveAttribute(
+      "href",
+      "/admin/settings/library",
+    );
+  });
+
+  it("links to marker settings only when a kind is off", async () => {
+    markerMocks.detectionKinds = { intro: true, credits: true };
+    render(
+      <MemoryRouter>
+        <ActionBar contentId="episode-1" isAdmin onRedetectMarkers={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByTitle("More"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Re-detect Markers" }));
+    const dialog = await screen.findByRole("dialog", { name: "Re-detect Markers" });
+    for (const name of ["Intro", "Credits", "Intro and credits"]) {
+      expect(within(dialog).getByRole("button", { name })).toBeEnabled();
+    }
+    expect(within(dialog).queryByRole("link")).toBeNull();
+  });
+
   it("asks admins which episode markers to re-detect", async () => {
     const onRedetectMarkers = vi.fn();
     render(
