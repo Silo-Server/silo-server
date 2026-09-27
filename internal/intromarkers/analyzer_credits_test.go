@@ -82,7 +82,7 @@ func TestCreditsVersionCopyUsesTheCompatibleSource(t *testing.T) {
 	repo := &fakeIntroRepository{}
 	analyzer := &Analyzer{repo: repo, config: DefaultConfig("ffmpeg")}
 
-	summary := analyzer.processCreditsChapters(context.Background(), []Candidate{short, long, target})
+	summary, _ := analyzer.processCreditsChapters(context.Background(), []Candidate{short, long, target})
 	if summary.CreditsVersionMarkersCopied != 1 {
 		t.Fatalf("summary %+v, want the version copied from the long source", summary)
 	}
@@ -148,9 +148,79 @@ func TestCreditsChaptersKeepHigherPriorityAndMatchingMarkers(t *testing.T) {
 	repo := &fakeIntroRepository{}
 	analyzer := &Analyzer{repo: repo, config: DefaultConfig("ffmpeg")}
 
-	summary := analyzer.processCreditsChapters(context.Background(), []Candidate{manual, written, upgrade})
+	summary, _ := analyzer.processCreditsChapters(context.Background(), []Candidate{manual, written, upgrade})
 	if len(repo.patches) != 1 || repo.patches[0].FileID != 30 || summary.CreditsChapterMarkersWritten != 1 {
 		t.Fatalf("patches %+v, want only the audio marker upgraded to the chapter", repo.patches)
+	}
+}
+
+// Chapter credits a file's chapters no longer produce, such as after a change
+// to the chapter title rules, are withdrawn: they outrank every audio and
+// video result, so nothing else could replace them. Other local results and
+// markers from other sources stay.
+func TestCreditsChaptersWithdrawStaleChapterResults(t *testing.T) {
+	story := []models.MediaChapter{chapter("Story", 0, 1500)}
+	scanner, manual := models.MarkerSourceScanner, models.MarkerSourceManual
+	stored := func(fileID int, episode, algorithm string, source *string) Candidate {
+		return Candidate{
+			FileID: fileID, EpisodeID: episode, DurationSeconds: 1500, Chapters: story,
+			CreditsStart: floatPtr(1410), CreditsEnd: floatPtr(1500), CreditsMarkersSource: source,
+			CreditsMarkersAlgorithm: strPtr(algorithm), CreditsMarkersConfidence: floatPtr(0.95),
+		}
+	}
+	chapterResult := stored(10, "ep1", CreditsChapterAlgorithm, &scanner)
+	copied := stored(20, "ep2", CreditsVersionCopyAlgorithm, &scanner)
+	audio := stored(30, "ep3", CreditsAudioAlgorithm, &scanner)
+	manualChapter := stored(40, "ep4", CreditsChapterAlgorithm, &manual)
+	legacy := stored(50, "ep5", CreditsChapterAlgorithm, nil)
+	legacy.MarkersSource = &scanner
+	current := stored(60, "ep6", CreditsChapterAlgorithm, &scanner)
+	current.Chapters = []models.MediaChapter{chapter("Story", 0, 1410), chapter("Credits", 1410, 1500)}
+	repo := &fakeIntroRepository{}
+	analyzer := &Analyzer{repo: repo, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
+
+	summary, withdrawn := analyzer.processCreditsChapters(context.Background(),
+		[]Candidate{chapterResult, copied, audio, manualChapter, legacy, current})
+	var got []int
+	for _, w := range repo.withdrawals {
+		if w.Kind != kindCredits || w.ExpectedFile == nil {
+			t.Fatalf("withdrawal %+v, want a guarded credits withdrawal", w)
+		}
+		got = append(got, w.FileID)
+	}
+	if len(got) != 3 || got[0] != 10 || got[1] != 20 || got[2] != 50 {
+		t.Fatalf("withdrew files %v, want the stale chapter, copy, and legacy chapter results", got)
+	}
+	if repo.withdrawals[1].Algorithm != CreditsVersionCopyAlgorithm {
+		t.Fatalf("withdrawal %+v, want it guarded by the stored algorithm", repo.withdrawals[1])
+	}
+	if summary.CreditsChapterMarkersWithdrawn != 3 || len(withdrawn) != 3 {
+		t.Fatalf("summary %+v, withdrawn %v; want three", summary, withdrawn)
+	}
+	if len(repo.patches) != 0 {
+		t.Fatalf("patches %+v, want the matching chapter result left as it is", repo.patches)
+	}
+}
+
+// A settled credits season is analyzed again when one of its files just lost
+// stale chapter credits, so audio can replace them without an admin forcing it.
+func TestAnalyzeEpisodeForPlaybackReplacesWithdrawnChapterCredits(t *testing.T) {
+	repo := &fakeIntroRepository{}
+	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
+	season := cachedCreditsSeason(t, analyzer, repo, 4)
+	target := season[1]
+	scanner := models.MarkerSourceScanner
+	target.CreditsStart, target.CreditsEnd = floatPtr(100), floatPtr(200)
+	target.CreditsMarkersSource, target.CreditsMarkersAlgorithm = &scanner, strPtr(CreditsChapterAlgorithm)
+	repo.episodeCandidates = map[string][]Candidate{target.EpisodeID: {target}}
+	repo.seasonState = &SeasonState{InputSignature: creditsInputSignature(season), Status: seasonStatusNotFound}
+
+	summary, err := analyzer.AnalyzeEpisodeForPlayback(context.Background(), target.EpisodeID, EpisodeMarkerKinds{Credits: true})
+	if err != nil {
+		t.Fatalf("AnalyzeEpisodeForPlayback: %v", err)
+	}
+	if summary.CreditsChapterMarkersWithdrawn != 1 || summary.CreditsGroupsSkipped != 0 || summary.CreditsAudioMarkersWritten != 1 {
+		t.Fatalf("summary %+v, want the chapter credits withdrawn and replaced from the settled season's audio", summary)
 	}
 }
 

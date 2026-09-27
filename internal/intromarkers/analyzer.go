@@ -88,6 +88,7 @@ type introRepository interface {
 	LoadSilenceRefinementAttempt(ctx context.Context, fileID int) (*SilenceRefinementAttempt, error)
 	UpsertSilenceRefinementAttempt(ctx context.Context, attempt SilenceRefinementAttempt) error
 	PatchMarker(ctx context.Context, patch MarkerPatch) (bool, error)
+	WithdrawMarker(ctx context.Context, withdrawal MarkerWithdrawal) (bool, error)
 	LoadSeasonState(ctx context.Context, state SeasonState, analysisHash string) (*SeasonState, error)
 	UpsertSeasonState(ctx context.Context, state SeasonState, analysisHash string) error
 	LoadFingerprint(ctx context.Context, candidate Candidate, cfg Config) (*Fingerprint, error)
@@ -402,8 +403,11 @@ func (a *Analyzer) runEpisodes(ctx context.Context, kinds EpisodeMarkerKinds, re
 			return summary, err
 		}
 	}
+	var withdrawnCredits map[int]struct{}
 	if kinds.Credits {
-		mergeRunSummary(&summary, a.processCreditsChapters(ctx, candidates))
+		var chapterSummary RunSummary
+		chapterSummary, withdrawnCredits = a.processCreditsChapters(ctx, candidates)
+		mergeRunSummary(&summary, chapterSummary)
 		if err := ctx.Err(); err != nil {
 			return summary, err
 		}
@@ -444,7 +448,7 @@ func (a *Analyzer) runEpisodes(ctx context.Context, kinds EpisodeMarkerKinds, re
 	}
 	summary.ChromaprintSupported = true
 
-	groupSummary := a.analyzeGroups(ctx, jobs, analyzeGroupOptions{persistState: true, creditsTail: creditsTail}, func(done int) {
+	groupSummary := a.analyzeGroups(ctx, jobs, analyzeGroupOptions{persistState: true, creditsTail: creditsTail, unsettledFileIDs: withdrawnCredits}, func(done int) {
 		report(40+float64(done)/float64(len(jobs))*55, fmt.Sprintf("Analyzed season group %d/%d", done, len(jobs)))
 	})
 	mergeRunSummary(&summary, groupSummary)
@@ -585,8 +589,11 @@ func (a *Analyzer) analyzeEpisode(ctx context.Context, episodeID string, kinds E
 		}
 		jobKinds = append(jobKinds, kindIntro)
 	}
+	var withdrawnCredits map[int]struct{}
 	if kinds.Credits {
-		mergeRunSummary(&summary, a.processCreditsChapters(ctx, candidates))
+		var chapterSummary RunSummary
+		chapterSummary, withdrawnCredits = a.processCreditsChapters(ctx, candidates)
+		mergeRunSummary(&summary, chapterSummary)
 		if err := ctx.Err(); err != nil {
 			return summary, err
 		}
@@ -627,9 +634,10 @@ func (a *Analyzer) analyzeEpisode(ctx context.Context, episodeID string, kinds E
 			return summary, err
 		}
 		groupSummary, err := a.analyzeJob(ctx, job, analyzeGroupOptions{
-			force:        job.kind == kindIntro || forceCredits,
-			patchFileIDs: job.patchFileIDs,
-			creditsTail:  creditsTail,
+			force:            job.kind == kindIntro || forceCredits,
+			patchFileIDs:     job.patchFileIDs,
+			creditsTail:      creditsTail,
+			unsettledFileIDs: withdrawnCredits,
 		})
 		mergeRunSummary(&summary, groupSummary)
 		if err != nil {
@@ -1078,6 +1086,20 @@ type analyzeGroupOptions struct {
 	persistState bool
 	// creditsTail runs the credits tail pass; see Analyzer.creditsTailReady.
 	creditsTail bool
+	// unsettledFileIDs are files whose chapter credits were just withdrawn.
+	// A credits group holding one is analyzed again even when its stored
+	// analysis still stands, so audio or video can replace them.
+	unsettledFileIDs map[int]struct{}
+}
+
+// anyCandidateIn reports whether any candidate's file is in fileIDs.
+func anyCandidateIn(candidates []Candidate, fileIDs map[int]struct{}) bool {
+	for _, candidate := range candidates {
+		if _, ok := fileIDs[candidate.FileID]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // minimumGroupEpisodes is how many episodes a season group of kind needs to
@@ -1487,6 +1509,7 @@ func mergeRunSummary(dst *RunSummary, src RunSummary) {
 	dst.CreditsGroupsSkipped += src.CreditsGroupsSkipped
 	dst.CreditsChapterMarkersWritten += src.CreditsChapterMarkersWritten
 	dst.CreditsVersionMarkersCopied += src.CreditsVersionMarkersCopied
+	dst.CreditsChapterMarkersWithdrawn += src.CreditsChapterMarkersWithdrawn
 	dst.CreditsFingerprintsComputed += src.CreditsFingerprintsComputed
 	dst.CreditsFingerprintCacheHits += src.CreditsFingerprintCacheHits
 	dst.CreditsFingerprintErrors += src.CreditsFingerprintErrors

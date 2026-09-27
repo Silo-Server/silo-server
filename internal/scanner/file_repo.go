@@ -1495,6 +1495,59 @@ func (r *FileRepository) ClearMarkers(ctx context.Context, fileID int, segments 
 	return r.upsertAndClearMarkers(ctx, fileID, nil, segments)
 }
 
+// WithdrawScannerMarker clears a file's intro or credits segment while it
+// still holds the scanner result algorithm wrote, and reports whether it
+// cleared it. Local analysis uses it to take back a result its current rules
+// no longer produce. A marker another source or detector has written since
+// stays. expected, when set, guards the file identity like
+// MarkerUpdate.ExpectedFile.
+func (r *FileRepository) WithdrawScannerMarker(ctx context.Context, fileID int, segment, algorithm string, expected *models.MediaFile) (bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin marker withdrawal transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	state, err := loadMarkerMutationState(ctx, tx, fileID)
+	if err != nil {
+		return false, err
+	}
+	if expected != nil && models.MarkerFileIdentity(expected) != models.MarkerFileIdentity(&state.file) {
+		return false, ErrStaleMarkerUpdate
+	}
+	flags, err := markerClearFlags([]string{segment})
+	if err != nil {
+		return false, err
+	}
+	var target *segmentState
+	switch {
+	case flags.intro:
+		target = &state.intro
+	case flags.credits:
+		target = &state.credits
+	default:
+		return false, fmt.Errorf("marker segment %q cannot be withdrawn", segment)
+	}
+	// A segment written before per-segment provenance carries only the
+	// file's shared source.
+	source := target.source
+	if source == nil || strings.TrimSpace(*source) == "" {
+		source = state.existingSource
+	}
+	if source == nil || strings.TrimSpace(*source) != models.MarkerSourceScanner ||
+		target.algorithm == nil || *target.algorithm != algorithm || !clearSegmentState(target) {
+		return false, tx.Commit(ctx)
+	}
+	wrote, err := writeMarkerMutationState(ctx, tx, fileID, state)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit marker withdrawal transaction: %w", err)
+	}
+	return wrote, nil
+}
+
 // UpsertAndClearMarkers applies manual marker sets and clears in one row-locking
 // transaction so mixed PUT bodies cannot partially persist.
 func (r *FileRepository) UpsertAndClearMarkers(ctx context.Context, fileID int, update MarkerUpdate, clearSegments []string) (bool, error) {

@@ -199,6 +199,9 @@ func (a *Analyzer) analyzeMovie(ctx context.Context, candidate Candidate, tailRe
 		}
 		return summary
 	}
+	// Chapter credits the chapters no longer produce give way to the tail
+	// pass below.
+	a.withdrawChapterCredits(ctx, candidate, &summary)
 	if !tailReady {
 		return summary
 	}
