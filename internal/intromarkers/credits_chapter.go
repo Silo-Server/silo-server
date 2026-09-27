@@ -30,6 +30,11 @@ var (
 	endingChapterPattern = regexp.MustCompile(`(?i)(^|\s)ending(\s|:|$)`)
 )
 
+// creditsChapterGapSeconds is the most time between two credits chapters that
+// still makes them adjacent. A wider gap is an unchaptered interval that the
+// credits run does not cross.
+const creditsChapterGapSeconds = 1.0
+
 // DetectChapterCredits finds the credits chapters of a file of the given
 // duration: the last run of adjacent chapters titled like credits, which
 // together form one segment, as when "Ending" is followed by "End Credits".
@@ -54,7 +59,8 @@ func DetectChapterCredits(chapters []models.MediaChapter, duration float64, isMo
 		return Segment{}, false
 	}
 	first := last
-	for first > 0 && isCredits(first-1) {
+	for first > 0 && isCredits(first-1) &&
+		sorted[first-1].EndSeconds >= sorted[first].StartSeconds-creditsChapterGapSeconds {
 		first--
 	}
 

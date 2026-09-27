@@ -139,6 +139,13 @@ func TestDetectChapterCredits(t *testing.T) {
 			duration: 1400, wantOK: true, wantStart: 1300, wantEnd: 1400,
 		},
 		{
+			name: "a gap between credits chapters ends the run",
+			chapters: []models.MediaChapter{
+				chapter("Story", 0, 1150), chapter("Ending", 1150, 1200), chapter("Credits", 1300, 1400),
+			},
+			duration: 1400, wantOK: true, wantStart: 1300, wantEnd: 1400,
+		},
+		{
 			name: "a run must start in the tail window",
 			chapters: []models.MediaChapter{
 				chapter("Story", 0, 900), chapter("End Credits", 900, 1100), chapter("Credits", 1100, 1400),
