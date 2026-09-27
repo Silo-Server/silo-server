@@ -174,6 +174,7 @@ var intentTables = []struct {
 	{"user_audio_preferences", colSeriesID, []string{colUserID, colProfileID}},
 	{"user_subtitle_preferences", colSeriesID, []string{colUserID, colProfileID}},
 	{"user_series_playback_preferences", colSeriesID, []string{colUserID, colProfileID}},
+	{"user_dropped_series", colSeriesID, []string{colUserID, colProfileID}},
 }
 
 // movePairs moves ALL state rows for each (from,to) pair: the whole-item path
@@ -258,7 +259,34 @@ func movePairs(ctx context.Context, tx pgx.Tx, pairs []IDPair, report *Report) (
 		}
 		report.IntentMoved += movedRows
 	}
-	return moveRatingSyncPairs(ctx, tx, fromIDs, toIDs)
+	if err := moveRatingSyncPairs(ctx, tx, fromIDs, toIDs); err != nil {
+		return err
+	}
+	return moveDroppedSyncPairs(ctx, tx, fromIDs, toIDs)
+}
+
+// moveDroppedSyncPairs moves watch-provider agreed drops along with the
+// user_dropped_series rows they describe, on the same terms as
+// moveRatingSyncPairs: the destination wins, and a moved row is unconfirmed so
+// the move never reads as a provider undrop.
+func moveDroppedSyncPairs(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []string) error {
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM watch_provider_dropped_items src
+		USING `+pairsCTE+`, watch_provider_dropped_items dest
+		WHERE src.series_id = p.from_id
+		  AND dest.series_id = p.to_id
+		  AND dest.connection_id = src.connection_id
+	`, fromIDs, toIDs); err != nil {
+		return fmt.Errorf("reattribute: watch_provider_dropped_items dedupe: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE watch_provider_dropped_items t
+		SET series_id = p.to_id, remote_seen = false, provider_item_key = '', updated_at = now()
+		FROM `+pairsCTE+` WHERE t.series_id = p.from_id
+	`, fromIDs, toIDs); err != nil {
+		return fmt.Errorf("reattribute: watch_provider_dropped_items move: %w", err)
+	}
+	return nil
 }
 
 // moveRatingSyncPairs moves watch-provider agreed ratings along with the

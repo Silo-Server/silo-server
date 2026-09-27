@@ -6718,10 +6718,10 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal. */
+    /** Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal. Dismissing an episode or series drops the whole show: every card of it leaves both rows until the profile watches it again or the dismissal is undone, and the drop is synced to watch providers. */
     put: operations["dismissHomeItem"];
     post?: never;
-    /** Show a dismissed card again; an item that was not dismissed is left as is. */
+    /** Show a dismissed card again; an item that was not dismissed is left as is. For an episode or series this undrops the show. */
     delete: operations["undismissHomeItem"];
     options?: never;
     head?: never;
@@ -17445,6 +17445,7 @@ export interface components {
       import_watched_enabled?: boolean;
       import_watchlist_enabled?: boolean;
       scrobble_enabled?: boolean;
+      sync_dropped_enabled?: boolean;
       sync_favorite_removals_enabled?: boolean;
       sync_watchlist_order_enabled?: boolean;
       sync_watchlist_removals_enabled?: boolean;
@@ -19368,7 +19369,7 @@ export interface components {
     HomeDismissal: {
       /**
        * Format: date-time
-       * @description Required for continue_watching: the card's progress_updated_at; the dismissal holds until the item is played again
+       * @description Required for continue_watching: the card's progress_updated_at; the dismissal holds until the item is played again. An episode dismissal drops its whole show instead, which holds until any episode of it is played again.
        */
       progress_updated_at?: string;
       /**
@@ -25852,6 +25853,8 @@ export interface components {
       remove_favorites: boolean;
       remove_watchlist: boolean;
       scrobble_playback: boolean;
+      /** @description The provider can read, drop, and undrop dropped shows. */
+      sync_dropped: boolean;
     };
     WatchProviderConnection: {
       auth_method: string;
@@ -25904,6 +25907,7 @@ export interface components {
       provider: string;
       provider_username?: string;
       scrobble_enabled: boolean;
+      sync_dropped_enabled: boolean;
       sync_favorite_removals_enabled: boolean;
       sync_watchlist_order_enabled: boolean;
       sync_watchlist_removals_enabled: boolean;
@@ -25943,6 +25947,8 @@ export interface components {
       import_watched_enabled: boolean;
       import_watchlist_enabled: boolean;
       scrobble_enabled: boolean;
+      /** @description Sync dropped shows both ways: dismissing a show's episode from Home drops the show on the provider, shows dropped on the provider are hidden from Next Up and Continue Watching, and watching a dropped show again undrops it on both sides. */
+      sync_dropped_enabled: boolean;
       sync_favorite_removals_enabled: boolean;
       sync_watchlist_order_enabled: boolean;
       sync_watchlist_removals_enabled: boolean;

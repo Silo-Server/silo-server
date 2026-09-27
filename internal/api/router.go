@@ -1076,6 +1076,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		deviceHandler.ProfileTokens = profileTokenService
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
+		if deps.DB != nil {
+			homeDismissalHandler.SetSeriesDrops(catalog.NewDroppedSeriesRepo(deps.DB))
+		}
+		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalDroppedEventDispatcher); ok {
+			homeDismissalHandler.SetLocalDroppedEventDispatcher(dispatcher)
+		}
 		subtitlePrefHandler = handlers.NewSubtitlePrefHandler(deps.UserStoreProvider)
 		subtitlePrefHandler.EventsHub = deps.EventsHub
 		audioPrefHandler = handlers.NewAudioPrefHandler(deps.UserStoreProvider)

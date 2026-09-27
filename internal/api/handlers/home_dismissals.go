@@ -11,11 +11,28 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
 type HomeDismissalHandler struct {
 	storeProvider userstore.UserStoreProvider
 	EventsHub     *evt.Hub
+
+	seriesDrops       seriesDropStore
+	droppedDispatcher LocalDroppedEventDispatcher
+}
+
+// seriesDropStore records dropped series. catalog.DroppedSeriesRepo satisfies it.
+type seriesDropStore interface {
+	ResolveDropSeries(ctx context.Context, itemID string) (string, bool, error)
+	Drop(ctx context.Context, userID int, profileID, seriesID string) error
+	Undrop(ctx context.Context, userID int, profileID, seriesID string) error
+}
+
+// LocalDroppedEventDispatcher sends a profile's dropped-series changes to its
+// watch providers.
+type LocalDroppedEventDispatcher interface {
+	HandleLocalDroppedEvent(ctx context.Context, event watchsync.LocalDroppedEvent) error
 }
 
 type upsertHomeDismissalRequest struct {
@@ -25,6 +42,18 @@ type upsertHomeDismissalRequest struct {
 
 func NewHomeDismissalHandler(provider userstore.UserStoreProvider) *HomeDismissalHandler {
 	return &HomeDismissalHandler{storeProvider: provider}
+}
+
+// SetSeriesDrops makes dismissing an episode or series drop the whole series.
+// Without it every dismissal hides only the dismissed card.
+func (h *HomeDismissalHandler) SetSeriesDrops(drops seriesDropStore) {
+	h.seriesDrops = drops
+}
+
+// SetLocalDroppedEventDispatcher configures where dropped-series changes are
+// sent for watch-provider sync.
+func (h *HomeDismissalHandler) SetLocalDroppedEventDispatcher(dispatcher LocalDroppedEventDispatcher) {
+	h.droppedDispatcher = dispatcher
 }
 
 // HomeDismissalCommand is a validated dismissal: the profile, the home
@@ -89,9 +118,26 @@ func (h *HomeDismissalHandler) HandleUpsertDismissal(w http.ResponseWriter, r *h
 
 // DismissHomeItem records the dismissal and publishes the user-state event.
 // It is an idempotent upsert: repeating it refreshes the dismissal stamp.
+//
+// Dismissing an episode or a series from either surface drops the whole
+// series instead: every card of it leaves Next Up and Continue Watching until
+// the profile watches it again or undoes the dismissal, and the drop is sent
+// to the profile's watch providers.
 func (h *HomeDismissalHandler) DismissHomeItem(ctx context.Context, cmd HomeDismissalCommand) error {
 	if err := cmd.validate(); err != nil {
 		return err
+	}
+	seriesID, drop, err := h.dropSeriesFor(ctx, cmd.ItemID)
+	if err != nil {
+		return err
+	}
+	if drop {
+		if err := h.seriesDrops.Drop(ctx, cmd.UserID, cmd.ProfileID, seriesID); err != nil {
+			return apiError(http.StatusInternalServerError, "internal_error", "Failed to save dismissal")
+		}
+		publishUserStateEvent(ctx, h.EventsHub, cmd.UserID, cmd.ProfileID, cmd.ItemID, seriesID, "home_dismissal", userStateEventState{})
+		h.dispatchDropped(ctx, cmd.UserID, cmd.ProfileID, seriesID)
+		return nil
 	}
 	dismissal := userstore.HomeItemDismissal{
 		ProfileID:   cmd.ProfileID,
@@ -143,8 +189,19 @@ func (h *HomeDismissalHandler) HandleDeleteDismissal(w http.ResponseWriter, r *h
 }
 
 // UndismissHomeItem removes the dismissal, if any, and publishes the
-// user-state event. Removing an absent dismissal succeeds.
+// user-state event. Removing an absent dismissal succeeds. For an episode or a
+// series it also undrops the series.
 func (h *HomeDismissalHandler) UndismissHomeItem(ctx context.Context, userID int, profileID, surface, itemID string) error {
+	seriesID, drop, err := h.dropSeriesFor(ctx, itemID)
+	if err != nil {
+		return err
+	}
+	if drop {
+		if err := h.seriesDrops.Undrop(ctx, userID, profileID, seriesID); err != nil {
+			return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete dismissal")
+		}
+	}
+	// Per-item dismissals written before series drops existed may remain.
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil || store == nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
@@ -152,8 +209,34 @@ func (h *HomeDismissalHandler) UndismissHomeItem(ctx context.Context, userID int
 	if err := store.DeleteHomeDismissal(ctx, profileID, surface, itemID); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete dismissal")
 	}
-	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, itemID, "", "home_dismissal", userStateEventState{})
+	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, itemID, seriesID, "home_dismissal", userStateEventState{})
+	if drop {
+		h.dispatchDropped(ctx, userID, profileID, seriesID)
+	}
 	return nil
+}
+
+// dropSeriesFor returns the series a dismissal of itemID drops, if any.
+func (h *HomeDismissalHandler) dropSeriesFor(ctx context.Context, itemID string) (string, bool, error) {
+	if h.seriesDrops == nil {
+		return "", false, nil
+	}
+	seriesID, ok, err := h.seriesDrops.ResolveDropSeries(ctx, itemID)
+	if err != nil {
+		return "", false, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve dismissed item")
+	}
+	return seriesID, ok, nil
+}
+
+func (h *HomeDismissalHandler) dispatchDropped(ctx context.Context, userID int, profileID, seriesID string) {
+	if h.droppedDispatcher == nil {
+		return
+	}
+	_ = h.droppedDispatcher.HandleLocalDroppedEvent(ctx, watchsync.LocalDroppedEvent{
+		UserID:    userID,
+		ProfileID: profileID,
+		SeriesIDs: []string{seriesID},
+	})
 }
 
 func validHomeSurface(surface string) bool {

@@ -20025,6 +20025,9 @@
           "scrobble_enabled": {
             "type": "boolean"
           },
+          "sync_dropped_enabled": {
+            "type": "boolean"
+          },
           "sync_favorite_removals_enabled": {
             "type": "boolean"
           },
@@ -24722,7 +24725,7 @@
         "additionalProperties": false,
         "properties": {
           "progress_updated_at": {
-            "description": "Required for continue_watching: the card's progress_updated_at; the dismissal holds until the item is played again",
+            "description": "Required for continue_watching: the card's progress_updated_at; the dismissal holds until the item is played again. An episode dismissal drops its whole show instead, which holds until any episode of it is played again.",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -40514,6 +40517,10 @@
           },
           "scrobble_playback": {
             "type": "boolean"
+          },
+          "sync_dropped": {
+            "description": "The provider can read, drop, and undrop dropped shows.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -40530,7 +40537,8 @@
           "provides_watchlist_order",
           "scrobble_playback",
           "import_ratings",
-          "export_ratings"
+          "export_ratings",
+          "sync_dropped"
         ],
         "type": "object"
       },
@@ -40642,6 +40650,9 @@
           "scrobble_enabled": {
             "type": "boolean"
           },
+          "sync_dropped_enabled": {
+            "type": "boolean"
+          },
           "sync_favorite_removals_enabled": {
             "type": "boolean"
           },
@@ -40672,6 +40683,7 @@
           "scrobble_enabled",
           "import_ratings_enabled",
           "export_ratings_enabled",
+          "sync_dropped_enabled",
           "credentials_configured"
         ],
         "type": "object"
@@ -40769,6 +40781,10 @@
           "scrobble_enabled": {
             "type": "boolean"
           },
+          "sync_dropped_enabled": {
+            "description": "Sync dropped shows both ways: dismissing a show's episode from Home drops the show on the provider, shows dropped on the provider are hidden from Next Up and Continue Watching, and watching a dropped show again undrops it on both sides.",
+            "type": "boolean"
+          },
           "sync_favorite_removals_enabled": {
             "type": "boolean"
           },
@@ -40793,7 +40809,8 @@
           "sync_watchlist_order_enabled",
           "scrobble_enabled",
           "import_ratings_enabled",
-          "export_ratings_enabled"
+          "export_ratings_enabled",
+          "sync_dropped_enabled"
         ],
         "type": "object"
       },
@@ -135807,7 +135824,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Show a dismissed card again; an item that was not dismissed is left as is.",
+        "summary": "Show a dismissed card again; an item that was not dismissed is left as is. For an episode or series this undrops the show.",
         "tags": [
           "home"
         ],
@@ -136013,7 +136030,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal.",
+        "summary": "Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal. Dismissing an episode or series drops the whole show: every card of it leaves both rows until the profile watches it again or the dismissal is undone, and the drop is synced to watch providers.",
         "tags": [
           "home"
         ],

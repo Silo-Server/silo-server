@@ -13,12 +13,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // watchTonightSectionFetcher provides access to live Continue Watching
 // and Next Up data for the Watch Tonight handler.
 type watchTonightSectionFetcher interface {
 	FetchNextUpItems(ctx context.Context, userID int, profileID string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter, limit int) ([]*models.MediaItem, map[string]sections.SectionItemMeta, error)
+	FilterDroppedProgress(ctx context.Context, userID int, profileID string, entries []userstore.WatchProgress) ([]userstore.WatchProgress, error)
 }
 
 type watchTonightItemResponse struct {
@@ -283,6 +285,14 @@ func (h *RecommendationsHandler) fetchLiveCWAndNextUp(ctx context.Context, userI
 	progressEntries, err := store.ListProgress(ctx, profileID, "in_progress", limit, 0)
 	if err != nil {
 		return nil, nil, err
+	}
+	if h.WatchTonightFetcher != nil {
+		filtered, dropErr := h.WatchTonightFetcher.FilterDroppedProgress(ctx, userID, profileID, progressEntries)
+		if dropErr != nil {
+			slog.WarnContext(ctx, "WatchTonight: dropped-series filter failed", "component", "api", "user_id", userID, "error", dropErr)
+		} else {
+			progressEntries = filtered
+		}
 	}
 
 	for _, entry := range progressEntries {

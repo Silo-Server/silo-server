@@ -135,6 +135,10 @@ media-source IDs or person IDs from titles. When `Fields` requests
 `MediaSourceCount`, library, Latest, and NextUp lists report the number of
 present, accessible versions of each movie or episode.
 
+Global `/Shows/NextUp` and the Resume lists leave out series the profile dropped,
+as Silo's Home does; `/Shows/NextUp?SeriesId=` still answers for a dropped series.
+See [dropped-shows.md](architecture/dropped-shows.md).
+
 Items carry Jellyfin 12's `OriginalLanguage` (movies and series). Episodes set
 `ParentPrimaryImageItemId` and `ParentPrimaryImageTag` to their season's poster,
 or to the series poster when the season has none; both are removed when the
