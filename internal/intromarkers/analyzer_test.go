@@ -28,6 +28,9 @@ type fakeIntroRepository struct {
 	artifacts          map[artifactSlot]Artifact
 	artifactFailures   []ArtifactFailure
 	groupListCalls     int
+	// seasonStateHash, when set, is the only analysis hash seasonState
+	// answers for.
+	seasonStateHash string
 }
 
 func (f *fakeIntroRepository) CountEnabledLibraries(context.Context) (int, error) {
@@ -93,10 +96,10 @@ func (f *fakeIntroRepository) PatchMarker(_ context.Context, patch MarkerPatch) 
 	return true, nil
 }
 
-func (f *fakeIntroRepository) LoadSeasonState(context.Context, SeasonState, string) (*SeasonState, error) {
+func (f *fakeIntroRepository) LoadSeasonState(_ context.Context, _ SeasonState, analysisHash string) (*SeasonState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.seasonState == nil {
+	if f.seasonState == nil || (f.seasonStateHash != "" && f.seasonStateHash != analysisHash) {
 		return nil, nil
 	}
 	state := *f.seasonState

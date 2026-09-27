@@ -457,3 +457,41 @@ func TestCreditsTailAfterProbeRepair(t *testing.T) {
 		})
 	}
 }
+
+// A season group settled while ffmpeg could not run tail passes is analyzed
+// again once it can, and the other way around.
+func TestCreditsSeasonStateIsKeyedByTailMode(t *testing.T) {
+	if CreditsAnalysisConfigHash(true) == CreditsAnalysisConfigHash(false) {
+		t.Fatal("credits season state must be keyed by whether tail passes ran")
+	}
+	inputs := creditsSeason(2, 60, 0)
+	var candidates []Candidate
+	sampler := &fakeTailSampler{frames: endCreditsFrames, points: map[int][]uint32{}}
+	for _, input := range inputs {
+		candidate := input.Candidate
+		candidate.SeasonID, candidate.MediaFolderID, candidate.CodecVideo, candidate.CodecAudio = "s1", 1, "h264", "aac"
+		candidates = append(candidates, candidate)
+		sampler.points[candidate.FileID] = input.Points
+	}
+	repo := &fakeIntroRepository{
+		seasonState:     &SeasonState{InputSignature: creditsInputSignature(candidates), Status: seasonStatusComplete},
+		seasonStateHash: CreditsAnalysisConfigHash(false),
+	}
+	analyzer, _ := tailAnalyzer(repo, sampler, "node-a")
+	group := soloGroup(candidates...)
+
+	summary, err := analyzer.analyzeCreditsGroup(context.Background(), group, analyzeGroupOptions{persistState: true})
+	if err != nil {
+		t.Fatalf("analyzeCreditsGroup: %v", err)
+	}
+	if summary.CreditsGroupsSkipped != 1 {
+		t.Fatalf("summary %+v, want the audio-only run to keep its settled state", summary)
+	}
+	summary, err = analyzer.analyzeCreditsGroup(context.Background(), group, analyzeGroupOptions{persistState: true, creditsTail: true})
+	if err != nil {
+		t.Fatalf("analyzeCreditsGroup: %v", err)
+	}
+	if summary.CreditsGroupsSkipped != 0 || sampler.callCount() != len(candidates) {
+		t.Fatalf("summary %+v with %d tail passes, want the group analyzed with tail passes", summary, sampler.callCount())
+	}
+}

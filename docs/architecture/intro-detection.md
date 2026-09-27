@@ -204,7 +204,9 @@ Credits versions and caches:
   the file itself causes (`invalid_data`, `no_stream`). Other failures are
   stored `failed` with backoff.
 - `CreditsAnalysisConfigHash` keys credits season state, apart from intro
-  state, and covers both artifact keys. Bump `CreditsBehaviorVersion` to
+  state. It covers the fingerprint key and, when the analysis ran tail
+  passes, the tail key, so a group settled while ffmpeg could not run tail
+  passes is analyzed again once it can. Bump `CreditsBehaviorVersion` to
   re-run every credits comparison over cached fingerprints and tails.
 - Credits algorithms rank in `markers.scannerAlgorithmPriority` as
   `credits-chapter:v1` (30), `credits-version-copy:v1` (24),

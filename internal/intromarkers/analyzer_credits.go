@@ -100,7 +100,7 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 		EpisodeCount:     distinctEpisodeCount(group.Candidates),
 		FileCount:        len(group.Candidates),
 	}
-	analysisHash := CreditsAnalysisConfigHash()
+	analysisHash := CreditsAnalysisConfigHash(opts.creditsTail)
 	existing, err := a.repo.LoadSeasonState(ctx, state, analysisHash)
 	if err != nil {
 		return summary, err

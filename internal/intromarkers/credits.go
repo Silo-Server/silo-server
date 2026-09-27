@@ -121,12 +121,18 @@ func creditsFingerprintKey() ArtifactKey {
 }
 
 // CreditsAnalysisConfigHash keys credits season analysis state: the credits
-// fingerprint and tail keys plus CreditsBehaviorVersion. It never equals an
-// intro analysis hash, so the two kinds keep separate season state.
-func CreditsAnalysisConfigHash() string {
+// fingerprint key, the tail key when the analysis ran tail passes, and
+// CreditsBehaviorVersion. A group settled without tail passes, while ffmpeg
+// lacked what they need, is analyzed again once they can run. It never
+// equals an intro analysis hash, so the two kinds keep separate season state.
+func CreditsAnalysisConfigHash(creditsTail bool) string {
+	tailHash := "none"
+	if creditsTail {
+		tailHash = creditsTailKey().ConfigHash
+	}
 	sum := sha256.Sum256([]byte(fmt.Sprintf("credits:%s:%s:%d",
 		creditsFingerprintKey().ConfigHash,
-		creditsTailKey().ConfigHash,
+		tailHash,
 		CreditsBehaviorVersion,
 	)))
 	return hex.EncodeToString(sum[:])[:16]
