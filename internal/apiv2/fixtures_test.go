@@ -1657,7 +1657,6 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, subtitleDownloadFixtureCases()...)
 	cases = append(cases, subtitleUploadFixtureCases()...)
 	cases = append(cases, adminSubtitleInspectionFixtureCases()...)
-	cases = append(cases, themeCatalogFixtureCases()...)
 	cases = append(cases, ebookProgressFixtureCases()...)
 	cases = append(cases, ebookConfigFixtureCases()...)
 	cases = append(cases, ebookAnnotationFixtureCases()...)
@@ -1819,7 +1818,6 @@ func fixtureDeps() Dependencies {
 	deps.AdminRequests = fixtureAdminRequests()
 	deps.AdminHistoryImports = fixtureAdminHistoryImports()
 	deps.AdminAPIKeys = fixtureAdminAPIKeys()
-	deps.ThemeCatalog = fixtureThemeCatalog()
 	deps.ThemeSongs = &fakeThemeSongs{}
 	deps.UserLibraries = new(fakeUserLibraries)
 	deps.AdminPlaybackSessions = new(fakeAdminPlaybackSessions)

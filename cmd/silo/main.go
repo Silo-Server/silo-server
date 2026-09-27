@@ -1788,8 +1788,8 @@ func main() {
 		pluginInstallationStore = installationStore
 		pluginRuntimeConfigStore = runtimeConfigStore
 		pluginHTTPProxy = plugins.NewHTTPProxyWithTypedResolver(pluginService, pluginInstallationStore)
+		pluginHTTPProxy = pluginHTTPProxy.WithUserThemeLookup(plugins.FixedUserThemeLookup{})
 		if deps.DB != nil {
-			pluginHTTPProxy = pluginHTTPProxy.WithUserThemeLookup(plugins.NewPgUserThemeLookup(deps.DB))
 			pluginHTTPProxy = pluginHTTPProxy.WithUserIdentityLookup(plugins.NewPgUserIdentityLookup(deps.DB))
 		}
 		// The admin network access reads name this process as the "api" host

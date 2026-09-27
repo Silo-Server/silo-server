@@ -51,7 +51,6 @@ func (s *Service) Load(ctx context.Context) Snapshot {
 		ServerName:    firstNonEmpty(get(KeyServerName), DefaultServerName),
 		LoginSubtitle: firstNonEmpty(get(KeyLoginSubtitle), DefaultLoginSubtitle),
 		AccentColor:   get(KeyAccentColor),
-		DefaultTheme:  get(KeyDefaultTheme),
 		assets:        make(map[AssetKind]string, len(assetSpecs)),
 	}
 	for kind, spec := range assetSpecs {
