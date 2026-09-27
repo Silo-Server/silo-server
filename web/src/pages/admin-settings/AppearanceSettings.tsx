@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, Check, RotateCcw } from "lucide-react";
 
 import { BrandingAssetField } from "@/components/admin/BrandingAssetField";
-import { BRANDING_ASSET_SPECS } from "@/components/admin/brandingAssetSpecs";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   OverlayPreviewCard,
@@ -43,10 +42,8 @@ import {
   type OverlayPosition,
   type PresetId,
 } from "@/lib/overlays";
-import { parseVarsJson } from "@/lib/themeExport";
-import type { ThemeVarOverrides } from "@/hooks/useCustomTheme";
-import type { ThemeToken } from "@/lib/themeTokens";
-import { THEME_IDS, THEMES } from "@/lib/themes";
+import { parseVarsJson } from "@/lib/themeTokens";
+import type { ThemeToken, ThemeVarOverrides } from "@/lib/themeTokens";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "./SaveBar";
@@ -68,14 +65,12 @@ const ACCENT_PRESETS = [
 ];
 
 const ACCENT_KEY = "branding.accent_color";
-const DEFAULT_THEME_KEY = "branding.default_theme";
 const THEME_VARS_KEY = "ui.admin_theme_vars";
 const CUSTOM_CSS_KEY = "ui.admin_custom_css";
-const CATALOG_URL_KEY = "theme.catalog_url";
 const OVERLAYS_ENABLED_KEY = "overlays.enabled";
 const OVERLAY_DEFAULTS_KEY = "defaults.card_overlays";
 
-const THEME_KEYS = [ACCENT_KEY, DEFAULT_THEME_KEY, THEME_VARS_KEY, CUSTOM_CSS_KEY, CATALOG_URL_KEY];
+const THEME_KEYS = [ACCENT_KEY, THEME_VARS_KEY, CUSTOM_CSS_KEY];
 
 const OVERLAY_KEYS = [OVERLAYS_ENABLED_KEY, OVERLAY_DEFAULTS_KEY];
 
@@ -113,6 +108,7 @@ export default function AppearanceSettings() {
   const [tokensTouched, setTokensTouched] = useState(false);
   const [overlayItemsTouched, setOverlayItemsTouched] = useState(false);
   const [confirmRestoreOverlaysOpen, setConfirmRestoreOverlaysOpen] = useState(false);
+  const [confirmResetThemeOpen, setConfirmResetThemeOpen] = useState(false);
   // Which sample the badge preview stands in for. View state only — show-only
   // overlays (network, show status) are otherwise impossible to see here.
   const [previewVariant, setPreviewVariant] = useState<OverlayPreviewVariant>("movie");
@@ -121,11 +117,13 @@ export default function AppearanceSettings() {
   const customAccentActive =
     Boolean(accentColor) &&
     !ACCENT_PRESETS.some((hex) => hex.toLowerCase() === accentColor.toLowerCase());
-  const defaultTheme = form.getValue(DEFAULT_THEME_KEY);
   const vars = parseVarsJson(form.getValue(THEME_VARS_KEY));
   const savedCss = form.getValue(CUSTOM_CSS_KEY);
   const rawCss = cssDraft ?? savedCss;
-  const hasThemeOverrides = Object.keys(vars).length > 0 || savedCss.length > 0;
+  // Cinema Dark is the only base theme, so "no customization" is exactly
+  // Cinema Dark as shipped.
+  const hasThemeOverrides =
+    Object.keys(vars).length > 0 || rawCss.length > 0 || Boolean(accentColor);
 
   // s3.public_bucket is not staged here, but getValue falls back to the full
   // settings response so the uploads can still be gated on it.
@@ -176,8 +174,10 @@ export default function AppearanceSettings() {
     form.setValue(CUSTOM_CSS_KEY, sanitizeCss(css));
   };
 
-  const resetAllThemeOverrides = () => {
-    setTokensTouched(true);
+  // Staged like any other edit: the admin still confirms the batch through the
+  // SaveBar, and Discard puts the previous customization back.
+  const resetToCinemaDark = () => {
+    setConfirmResetThemeOpen(false);
     setCssDraft("");
     setVars({});
     form.setValue(CUSTOM_CSS_KEY, "");
@@ -213,8 +213,7 @@ export default function AppearanceSettings() {
     form.discard();
   };
 
-  const themeAdvancedDirty =
-    tokensTouched || form.isDirty(CUSTOM_CSS_KEY) || form.isDirty(CATALOG_URL_KEY);
+  const themeAdvancedDirty = tokensTouched || form.isDirty(CUSTOM_CSS_KEY);
 
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
 
@@ -254,17 +253,6 @@ export default function AppearanceSettings() {
               preview="wide"
             />
             <BrandingAssetField
-              label="Logo (wordmark, light themes)"
-              description="Optional. Shown on light themes; falls back to the main logo."
-              kind="wordmark_light"
-              currentUrl={branding.wordmarkLightUrl}
-              fallbackUrl={branding.wordmarkUrl ?? BRANDING_ASSET_SPECS.wordmark.defaultUrl}
-              accept={IMAGE_ACCEPT}
-              enabled={assetStorageAvailable}
-              preview="wide"
-              previewBg="light"
-            />
-            <BrandingAssetField
               label="Logo (icon)"
               description="Shown in the collapsed sidebar and the installed app."
               kind="mark"
@@ -272,17 +260,6 @@ export default function AppearanceSettings() {
               accept={IMAGE_ACCEPT}
               enabled={assetStorageAvailable}
               preview="square"
-            />
-            <BrandingAssetField
-              label="Logo (icon, light themes)"
-              description="Optional. Shown on light themes; falls back to the main icon."
-              kind="mark_light"
-              currentUrl={branding.markLightUrl}
-              fallbackUrl={branding.markUrl ?? BRANDING_ASSET_SPECS.mark.defaultUrl}
-              accept={IMAGE_ACCEPT}
-              enabled={assetStorageAvailable}
-              preview="square"
-              previewBg="light"
             />
             <BrandingAssetField
               label="Favicon"
@@ -305,7 +282,21 @@ export default function AppearanceSettings() {
           </div>
         </FieldGroup>
 
-        <FieldGroup label="Colors and theme" restartAll={allRestart(THEME_KEYS)}>
+        <FieldGroup
+          label="Colors"
+          restartAll={allRestart(THEME_KEYS)}
+          actions={
+            <button
+              type="button"
+              onClick={() => setConfirmResetThemeOpen(true)}
+              disabled={!hasThemeOverrides}
+              className="text-muted-foreground hover:text-destructive inline-flex items-center gap-1.5 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
+            >
+              <RotateCcw className="h-3 w-3" aria-hidden="true" />
+              Reset to Cinema Dark
+            </button>
+          }
+        >
           <SettingFieldRow
             label="Accent color"
             description="Recolors buttons, focus outlines, and the sidebar."
@@ -374,71 +365,15 @@ export default function AppearanceSettings() {
             </div>
           </SettingFieldRow>
 
-          <SettingFieldRow
-            label="Default theme"
-            description="Used until someone picks their own theme."
-          >
-            <div className="flex flex-wrap justify-end gap-2 sm:max-w-[320px]">
-              <button
-                type="button"
-                onClick={() => form.setValue(DEFAULT_THEME_KEY, "")}
-                className={cn(
-                  "rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
-                  defaultTheme === ""
-                    ? "border-foreground bg-muted/50"
-                    : "border-border hover:bg-muted/30",
-                )}
-              >
-                No default
-              </button>
-              {THEME_IDS.map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => form.setValue(DEFAULT_THEME_KEY, id)}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
-                    defaultTheme === id
-                      ? "border-foreground bg-muted/50"
-                      : "border-border hover:bg-muted/30",
-                  )}
-                >
-                  <span
-                    className="h-3.5 w-3.5 rounded-full border border-black/10"
-                    style={{ backgroundColor: THEMES[id].previewBg }}
-                  >
-                    <span
-                      className="block h-full w-full scale-50 rounded-full"
-                      style={{ backgroundColor: THEMES[id].previewAccent }}
-                    />
-                  </span>
-                  {THEMES[id].label}
-                </button>
-              ))}
-            </div>
-          </SettingFieldRow>
-
-          <AdvancedSection id="appearance.theme" count={3} forceOpen={themeAdvancedDirty}>
+          <AdvancedSection id="appearance.theme" count={2} forceOpen={themeAdvancedDirty}>
             <div className="space-y-3 py-3.5">
               <div className="space-y-1">
                 <Label className="text-sm font-medium">Individual colors and fonts</Label>
                 <p className="text-muted-foreground text-xs leading-relaxed">
-                  Applied on top of the chosen theme.
+                  Applied on top of Cinema Dark for everyone.
                 </p>
               </div>
               <ThemePreviewCard vars={vars} />
-              {hasThemeOverrides && (
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={resetAllThemeOverrides}
-                    className="text-muted-foreground hover:text-destructive inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
-                  >
-                    <RotateCcw className="h-3 w-3" />
-                    Reset all
-                  </button>
-                </div>
-              )}
               <TokenEditor vars={vars} onSetVar={setToken} onResetVar={resetToken} />
             </div>
 
@@ -451,16 +386,6 @@ export default function AppearanceSettings() {
               </div>
               <RawCssEditor value={rawCss} onChange={handleCssChange} />
             </div>
-
-            <SettingField
-              label="Community theme list"
-              type="text"
-              hint="https://example.com/themes.json"
-              description="Address of a JSON list of community themes."
-              value={form.getValue(CATALOG_URL_KEY)}
-              onChange={(v) => form.setValue(CATALOG_URL_KEY, v)}
-              restartRequired={restartKeys.has(CATALOG_URL_KEY)}
-            />
           </AdvancedSection>
         </FieldGroup>
 
@@ -593,6 +518,16 @@ export default function AppearanceSettings() {
           </div>
         </FieldGroup>
       </div>
+
+      <ConfirmDialog
+        open={confirmResetThemeOpen}
+        onOpenChange={setConfirmResetThemeOpen}
+        title="Reset to Cinema Dark"
+        description="Remove the accent color, individual color and font overrides, and custom CSS, so everyone sees Cinema Dark as shipped. Nothing is written until you save."
+        confirmLabel="Reset"
+        variant="destructive"
+        onConfirm={resetToCinemaDark}
+      />
 
       <ConfirmDialog
         open={confirmRestoreOverlaysOpen}

@@ -408,7 +408,7 @@ func (s *Service) processLocalRatingEvent(ctx context.Context, event LocalRating
 func (s *Service) recordRatingEventError(ctx context.Context, conn Connection, err error) {
 	fresh, reloadErr := s.reloadConnection(ctx, conn)
 	if reloadErr != nil || fresh.ProviderAccountID != conn.ProviderAccountID {
-		slog.WarnContext(ctx, "local rating provider event failed", "component", "watchsync", "provider", conn.Provider, "connection_id", conn.ID, "error", err, "reload_error", reloadErr)
+		slog.WarnContext(ctx, "local rating or dropped-show provider event failed", "component", "watchsync", "provider", conn.Provider, "connection_id", conn.ID, "error", err, "reload_error", reloadErr)
 		return
 	}
 	s.recordLocalWatchEventError(ctx, fresh, err)
