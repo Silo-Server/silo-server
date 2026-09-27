@@ -292,3 +292,17 @@ func TestAdminCollectionTemplateApplyKeepsEntryReason(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminCollectionErrorRendersInvalidArtworkAsValidationProblem(t *testing.T) {
+	p := adminCollectionError(&handlers.APIError{
+		Status:  http.StatusBadRequest,
+		Code:    "bad_request",
+		Message: "The file is not a supported image.",
+	})
+	if p.Status != http.StatusUnprocessableEntity || p.Type != TypeValidationFailed.URI() {
+		t.Fatalf("problem = %#v", p)
+	}
+	if len(p.Errors) != 1 || p.Errors[0].Detail != "The file is not a supported image." {
+		t.Fatalf("problem errors = %#v", p.Errors)
+	}
+}
