@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -1068,6 +1069,26 @@ func setDetectionKinds(handler *AdminIntroHandler, intros, credits string) {
 	values[markers.SettingDetectCredits] = credits
 }
 
+// settledAnalyses waits, inside a synctest bubble, until every goroutine the
+// handler started has finished or is durably blocked, then returns the
+// analyses the analyzer received: the kinds of an episode analysis, or the
+// content ID of a movie analysis. Both are empty when nothing ran.
+func settledAnalyses(analyzer *fakeIntroAnalyzer) (*intromarkers.EpisodeMarkerKinds, string) {
+	synctest.Wait()
+	var episode *intromarkers.EpisodeMarkerKinds
+	select {
+	case kinds := <-analyzer.kinds:
+		episode = &kinds
+	default:
+	}
+	var movie string
+	select {
+	case movie = <-analyzer.movies:
+	default:
+	}
+	return episode, movie
+}
+
 // Re-detection runs the requested kinds the detection settings leave on,
 // and rejects the request with a conflict naming the kinds when none remain.
 func TestAdminRedetectItemMarkersFollowsDetectionSettings(t *testing.T) {
@@ -1077,12 +1098,12 @@ func TestAdminRedetectItemMarkersFollowsDetectionSettings(t *testing.T) {
 		item, itemKind  string
 		kind            string
 		intros, credits string
-		want            kinds
+		want            *kinds
 		movie           bool
 		conflict        string
 	}{
-		{name: "all with credits off", item: "ep1", itemKind: intromarkers.MarkerItemEpisode, kind: RedetectMarkersAll, credits: "false", want: kinds{Intro: true}},
-		{name: "all with intros off", item: "ep1", itemKind: intromarkers.MarkerItemEpisode, kind: RedetectMarkersAll, intros: "false", want: kinds{Credits: true}},
+		{name: "all with credits off", item: "ep1", itemKind: intromarkers.MarkerItemEpisode, kind: RedetectMarkersAll, credits: "false", want: &kinds{Intro: true}},
+		{name: "all with intros off", item: "ep1", itemKind: intromarkers.MarkerItemEpisode, kind: RedetectMarkersAll, intros: "false", want: &kinds{Credits: true}},
 		{name: "intro with intros off", item: "ep1", itemKind: intromarkers.MarkerItemEpisode, kind: RedetectMarkersIntro, intros: "false", conflict: markerKindsOffIntro},
 		{name: "credits with credits off", item: "ep1", itemKind: intromarkers.MarkerItemEpisode, kind: RedetectMarkersCredits, credits: "false", conflict: markerKindsOffCredits},
 		{name: "all with both off", item: "ep1", itemKind: intromarkers.MarkerItemEpisode, kind: RedetectMarkersAll, intros: "false", credits: "false", conflict: markerKindsOffBoth},
@@ -1090,41 +1111,27 @@ func TestAdminRedetectItemMarkersFollowsDetectionSettings(t *testing.T) {
 		{name: "movie with intros off", item: "movie1", itemKind: intromarkers.MarkerItemMovie, kind: RedetectMarkersAll, intros: "false", movie: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			analyzer := &fakeIntroAnalyzer{kinds: make(chan kinds, 1), movies: make(chan string, 1)}
-			handler := redetectHandler(analyzer, tc.item, tc.itemKind)
-			setDetectionKinds(handler, tc.intros, tc.credits)
-			status, err := handler.RedetectItemMarkers(t.Context(), tc.item, tc.kind)
-			if tc.conflict != "" {
-				var apiErr *APIError
-				if !errors.As(err, &apiErr) || apiErr.Status != http.StatusConflict || apiErr.Message != tc.conflict {
-					t.Fatalf("status=%q err=%v, want 409 %q", status, err, tc.conflict)
-				}
-				select {
-				case got := <-analyzer.kinds:
-					t.Fatalf("analyzed %+v", got)
-				case id := <-analyzer.movies:
-					t.Fatalf("analyzed movie %q", id)
-				case <-time.After(25 * time.Millisecond):
-				}
-				return
-			}
-			if err != nil || status != "queued" {
-				t.Fatalf("status=%q err=%v", status, err)
-			}
-			if tc.movie {
-				select {
-				case id := <-analyzer.movies:
-					if id != tc.item {
-						t.Fatalf("analyzed movie %q, want %q", id, tc.item)
+			synctest.Test(t, func(t *testing.T) {
+				analyzer := &fakeIntroAnalyzer{kinds: make(chan kinds, 1), movies: make(chan string, 1)}
+				handler := redetectHandler(analyzer, tc.item, tc.itemKind)
+				setDetectionKinds(handler, tc.intros, tc.credits)
+				status, err := handler.RedetectItemMarkers(t.Context(), tc.item, tc.kind)
+				if tc.conflict != "" {
+					var apiErr *APIError
+					if !errors.As(err, &apiErr) || apiErr.Status != http.StatusConflict || apiErr.Message != tc.conflict {
+						t.Fatalf("status=%q err=%v, want 409 %q", status, err, tc.conflict)
 					}
-				case <-time.After(time.Second):
-					t.Fatal("movie analysis did not run")
+				} else if err != nil || status != "queued" {
+					t.Fatalf("status=%q err=%v", status, err)
 				}
-				return
-			}
-			if got := receiveEpisodeKinds(t, analyzer); got != tc.want {
-				t.Fatalf("analyzed %+v, want %+v", got, tc.want)
-			}
+				episode, movie := settledAnalyses(analyzer)
+				if (episode == nil) != (tc.want == nil) || (episode != nil && *episode != *tc.want) {
+					t.Fatalf("analyzed episode kinds %+v, want %+v", episode, tc.want)
+				}
+				if wantMovie := map[bool]string{true: tc.item}[tc.movie]; movie != wantMovie {
+					t.Fatalf("analyzed movie %q, want %q", movie, wantMovie)
+				}
+			})
 		})
 	}
 }
@@ -1132,29 +1139,29 @@ func TestAdminRedetectItemMarkersFollowsDetectionSettings(t *testing.T) {
 // refresh-markers in local mode runs the kinds the detection settings leave
 // on and rejects an item with none left.
 func TestAdminMarkerRefreshLocalFollowsDetectionSettings(t *testing.T) {
-	analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1)}
-	handler := redetectHandler(analyzer, "ep1", intromarkers.MarkerItemEpisode)
-	handler.FileResolver = fakeAdminIntroFileResolver{}
-	setDetectionKinds(handler, "true", "false")
-	status, err := handler.RefreshEpisodeMarkers(t.Context(), "ep1", "refresh-v2")
-	if err != nil || status != "queued" {
-		t.Fatalf("episode: status=%q err=%v", status, err)
-	}
-	if got := receiveEpisodeKinds(t, analyzer); got != (intromarkers.EpisodeMarkerKinds{Intro: true}) {
-		t.Fatalf("analyzed %+v, want intros only", got)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1)}
+		handler := redetectHandler(analyzer, "ep1", intromarkers.MarkerItemEpisode)
+		handler.FileResolver = fakeAdminIntroFileResolver{}
+		setDetectionKinds(handler, "true", "false")
+		status, err := handler.RefreshEpisodeMarkers(t.Context(), "ep1", "refresh-v2")
+		if err != nil || status != "queued" {
+			t.Fatalf("episode: status=%q err=%v", status, err)
+		}
+		if got, _ := settledAnalyses(analyzer); got == nil || *got != (intromarkers.EpisodeMarkerKinds{Intro: true}) {
+			t.Fatalf("analyzed %+v, want intros only", got)
+		}
 
-	movieAnalyzer := &fakeIntroAnalyzer{movies: make(chan string, 1)}
-	movie := redetectHandler(movieAnalyzer, "movie1", intromarkers.MarkerItemMovie)
-	movie.FileResolver = fakeAdminIntroFileResolver{}
-	setDetectionKinds(movie, "true", "false")
-	_, err = movie.RefreshEpisodeMarkers(t.Context(), "movie1", "refresh-v2")
-	requireAPIError(t, err, http.StatusConflict, "")
-	select {
-	case id := <-movieAnalyzer.movies:
-		t.Fatalf("analyzed movie %q with credits detection off", id)
-	case <-time.After(25 * time.Millisecond):
-	}
+		movieAnalyzer := &fakeIntroAnalyzer{movies: make(chan string, 1)}
+		movie := redetectHandler(movieAnalyzer, "movie1", intromarkers.MarkerItemMovie)
+		movie.FileResolver = fakeAdminIntroFileResolver{}
+		setDetectionKinds(movie, "true", "false")
+		_, err = movie.RefreshEpisodeMarkers(t.Context(), "movie1", "refresh-v2")
+		requireAPIError(t, err, http.StatusConflict, "")
+		if _, id := settledAnalyses(movieAnalyzer); id != "" {
+			t.Fatalf("analyzed movie %q with credits detection off", id)
+		}
+	})
 }
 
 // refresh-markers in both mode still refreshes online markers, and local
@@ -1180,48 +1187,43 @@ func TestAdminMarkerRefreshBothFollowsDetectionSettings(t *testing.T) {
 		{name: "movie, intros off", kind: intromarkers.MarkerItemMovie, intros: "false", movie: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1), movies: make(chan string, 1)}
-			handler := NewAdminIntroHandler(analyzer, fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
-				ItemID: "item1", Kind: tc.kind, HasMediaFiles: true, IntroDetectionEnabled: true,
-			}}, t.Context(), nil)
-			handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeBoth)}}
-			setDetectionKinds(handler, tc.intros, tc.credits)
-			file := &models.MediaFile{ID: 42, EpisodeID: "item1"}
-			if tc.kind == intromarkers.MarkerItemMovie {
-				file = &models.MediaFile{ID: 42, ContentID: "item1"}
-			}
-			handler.FileResolver = fakeAdminIntroFileResolver{files: []*models.MediaFile{file}, byContent: map[string][]*models.MediaFile{"item1": {file}}}
-			refreshed := make(chan int, 1)
-			handler.OnlineMarkers = markerRefreshFunc(func(_ context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
-				refreshed <- file.ID
-				if tc.online != nil {
-					return tc.online(file), true, nil
+			synctest.Test(t, func(t *testing.T) {
+				analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1), movies: make(chan string, 1)}
+				handler := NewAdminIntroHandler(analyzer, fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
+					ItemID: "item1", Kind: tc.kind, HasMediaFiles: true, IntroDetectionEnabled: true,
+				}}, t.Context(), nil)
+				handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeBoth)}}
+				setDetectionKinds(handler, tc.intros, tc.credits)
+				file := &models.MediaFile{ID: 42, EpisodeID: "item1"}
+				if tc.kind == intromarkers.MarkerItemMovie {
+					file = &models.MediaFile{ID: 42, ContentID: "item1"}
 				}
-				return file, false, nil
+				handler.FileResolver = fakeAdminIntroFileResolver{files: []*models.MediaFile{file}, byContent: map[string][]*models.MediaFile{"item1": {file}}}
+				refreshed := make(chan int, 1)
+				handler.OnlineMarkers = markerRefreshFunc(func(_ context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
+					refreshed <- file.ID
+					if tc.online != nil {
+						return tc.online(file), true, nil
+					}
+					return file, false, nil
+				})
+				status, err := handler.RefreshEpisodeMarkers(t.Context(), "item1", "refresh-v2")
+				if err != nil || status != "queued" {
+					t.Fatalf("status=%q err=%v", status, err)
+				}
+				episode, movie := settledAnalyses(analyzer)
+				select {
+				case <-refreshed:
+				default:
+					t.Fatal("online refresh did not run")
+				}
+				if (episode == nil) != (tc.want == nil) || (episode != nil && *episode != *tc.want) {
+					t.Fatalf("analyzed episode kinds %+v, want %+v", episode, tc.want)
+				}
+				if (movie != "") != tc.movie {
+					t.Fatalf("analyzed movie %q, want movie analysis %v", movie, tc.movie)
+				}
 			})
-			status, err := handler.RefreshEpisodeMarkers(t.Context(), "item1", "refresh-v2")
-			if err != nil || status != "queued" {
-				t.Fatalf("status=%q err=%v", status, err)
-			}
-			select {
-			case <-refreshed:
-			case <-time.After(time.Second):
-				t.Fatal("online refresh did not run")
-			}
-			select {
-			case got := <-analyzer.kinds:
-				if tc.want == nil || got != *tc.want {
-					t.Fatalf("analyzed %+v, want %+v", got, tc.want)
-				}
-			case id := <-analyzer.movies:
-				if !tc.movie {
-					t.Fatalf("analyzed movie %q", id)
-				}
-			case <-time.After(100 * time.Millisecond):
-				if tc.want != nil || tc.movie {
-					t.Fatal("local analysis did not run")
-				}
-			}
 		})
 	}
 }
