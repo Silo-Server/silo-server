@@ -7,9 +7,7 @@ import {
   AVAILABLE_FONTS,
   getComputedToken,
 } from "@/lib/themeTokens";
-import type { ThemeToken, TokenMeta } from "@/lib/themeTokens";
-import { useTheme } from "@/hooks/useTheme";
-import type { ThemeVarOverrides } from "@/hooks/useCustomTheme";
+import type { ThemeToken, ThemeVarOverrides, TokenMeta } from "@/lib/themeTokens";
 import { cn } from "@/lib/utils";
 
 interface TokenEditorProps {
@@ -193,9 +191,7 @@ function FontInput({
 }
 
 export function TokenEditor({ vars, onSetVar, onResetVar }: TokenEditorProps) {
-  const { theme } = useTheme();
-
-  // Recompute when the base theme changes so fallback values stay current
+  // The base theme is fixed, so the painted values only need reading once.
   const computedValues = useMemo(() => {
     const map: Partial<Record<ThemeToken, string>> = {};
     for (const group of Object.values(TOKEN_GROUPS)) {
@@ -204,8 +200,7 @@ export function TokenEditor({ vars, onSetVar, onResetVar }: TokenEditorProps) {
       }
     }
     return map;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [theme]);
+  }, []);
 
   const handleSet = useCallback(
     (token: ThemeToken) => (value: string) => onSetVar(token, value),

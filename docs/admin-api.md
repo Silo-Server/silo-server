@@ -60,8 +60,8 @@ task's triggers with its configured poll interval.
 ## Branding assets
 
 Uploadable images white-label the server: the sidebar wordmark, the square
-mark (collapsed sidebar and installed PWA), optional light-theme variants of
-both, the browser favicon, and the login background. Each is stored in the public S3 bucket and referenced from a
+mark (collapsed sidebar and installed PWA), the browser favicon, and the login
+background. Each is stored in the public S3 bucket and referenced from a
 `server_settings` row, so uploads return `503 unavailable` until
 `s3.public_bucket` is configured.
 
@@ -75,7 +75,10 @@ both, the browser favicon, and the login background. Each is stored in the publi
 Public reads are deliberately unauthenticated: branding has to apply on the
 login page, before anyone has a session.
 
-`{kind}` is one of `wordmark`, `wordmark_light`, `mark`, `mark_light`, `favicon`, `login_bg` — the light variants follow their base kind's processing. Uploads are
+`{kind}` is one of `wordmark`, `mark`, `favicon`, `login_bg`. The web client has a
+single dark theme, so the former light-theme variants are gone from v2; the frozen
+v1 upload route still accepts `wordmark_light` and `mark_light` until v1 retires,
+and the public asset route still serves them. Uploads are
 processed per kind — the numbers below are the contract the admin UI quotes back
 to the operator, and they live in `internal/branding/assets.go`:
 

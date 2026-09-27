@@ -1761,6 +1761,8 @@ func TestCompatMasterAudioCodecJellyfin12Strings(t *testing.T) {
 		{"truehd", "", false, "mlpa"},
 		{"dts", "DTS-HD MA + DTS:X", false, "dtsh"},
 		{"dts", "DTS-HD HRA", false, "dtsh"},
+		{"dts", "DTS-HD HRA + DTS:X", false, "dtsh"},
+		{"dts", "DTS-HD HRA + DTS:X IMAX", false, "dtsh"},
 		{"dts", "DTS Express", false, "dtse"},
 		{"dts", "DTS-ES", false, "dtsc"},
 		{"dts", "", false, "dtsc"},
