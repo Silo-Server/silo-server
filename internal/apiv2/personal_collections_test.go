@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
@@ -35,12 +36,20 @@ func (f *fakePersonalCollections) ListPersonalCollections(_ context.Context, _ i
 	return f.list, nil
 }
 
-func (f *fakePersonalCollections) Capabilities() handlers.CollectionCapabilitiesView {
+func (f *fakePersonalCollections) Capabilities(ctx context.Context) handlers.CollectionCapabilitiesView {
+	presets := []string{"daily", "weekly", "monthly"}
+	customCron := apimw.IsAdmin(ctx)
+	if customCron {
+		presets = append([]string(nil), usercollections.AdminSyncSchedulePresets...)
+	}
 	return handlers.CollectionCapabilitiesView{
 		DisplayFilterFields:   []string{"type", "watched"},
 		DisplayFilterPresets:  handlers.CollectionDisplayFilterPresetsView{Watched: []string{"all", "watched", "unwatched"}, Media: []string{"all", "movie", "series"}},
 		CollectionDefaultSort: true, CollectionSortPreferences: true, EffectiveCollectionSort: true,
 		SortPreferenceKinds: []string{"library", "user", "watchlist", "favorites"},
+		UserCollectionSyncSchedule: &handlers.CollectionSyncScheduleCapabilitiesView{
+			Editable: true, Presets: presets, CustomCron: customCron,
+		},
 	}
 }
 
@@ -220,9 +229,13 @@ func TestGetCollectionCapabilities(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"groups":false,"imports":false,"artwork":false,"item_reorder":false,"display_filter_fields":["type","watched"],"display_filter_presets":{"watched":["all","watched","unwatched"],"media":["all","movie","series"]},"collection_default_sort":true,"collection_sort_preferences":true,"effective_collection_sort":true,"sort_preference_kinds":["library","user","watchlist","favorites"]}` + "\n"
+	want := `{"groups":false,"imports":false,"artwork":false,"item_reorder":false,"display_filter_fields":["type","watched"],"display_filter_presets":{"watched":["all","watched","unwatched"],"media":["all","movie","series"]},"collection_default_sort":true,"collection_sort_preferences":true,"effective_collection_sort":true,"sort_preference_kinds":["library","user","watchlist","favorites"],"user_collection_sync_schedule":{"editable":true,"presets":["daily","weekly","monthly"],"custom_cron":false}}` + "\n"
 	if !capabilityBodyMatches(t, rec.Body.Bytes(), want) {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+	admin := do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/collections/capabilities", "", with(bearer(adminToken), "X-Profile-Id", "p-owner"))
+	if admin.Code != 200 || !strings.Contains(admin.Body.String(), `"custom_cron":true`) || !strings.Contains(admin.Body.String(), `"0 */6 * * *"`) {
+		t.Fatalf("admin capabilities: %d %s", admin.Code, admin.Body.String())
 	}
 }
 
@@ -330,7 +343,7 @@ func TestImportCollections(t *testing.T) {
 			t.Fatalf("body lacks %s: %s", want, body)
 		}
 	}
-	if req := ci.lastMDB; req.URL != "https://mdblist.com/lists/u/top" || req.Limit == nil || *req.Limit != 25 || len(req.LibraryIDs) != 2 || req.LibraryIDs[1] != 2 || req.SyncSchedule != "daily" {
+	if req := ci.lastMDB; req.URL != "https://mdblist.com/lists/u/top" || req.Limit == nil || *req.Limit != 25 || len(req.LibraryIDs) != 2 || req.LibraryIDs[1] != 2 || req.SyncSchedule != "daily" || !req.AllowAdminSyncSchedule {
 		t.Fatalf("request = %+v", req)
 	}
 	// A library id that is not one is refused before the seam.

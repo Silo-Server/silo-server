@@ -3,11 +3,13 @@ package usercollections
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
@@ -45,6 +47,7 @@ type SchedulerResult struct {
 type dueCollection struct {
 	UserID       int
 	CollectionID string
+	SyncSchedule string
 }
 
 func (s *Scheduler) RunOnce(ctx context.Context) (json.RawMessage, error) {
@@ -83,11 +86,11 @@ func (s *Scheduler) RunOnce(ctx context.Context) (json.RawMessage, error) {
 
 func (s *Scheduler) listDue(ctx context.Context) ([]dueCollection, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT user_id, id
-		 FROM user_personal_collections
-		 WHERE sync_schedule IS NOT NULL
-		   AND next_sync_at IS NOT NULL
-		   AND next_sync_at <= NOW()`,
+		`SELECT c.user_id, c.id, c.sync_schedule
+		 FROM user_personal_collections c
+		 WHERE c.sync_schedule IS NOT NULL
+		   AND c.next_sync_at IS NOT NULL
+		   AND c.next_sync_at <= NOW()`,
 	)
 	if err != nil {
 		return nil, err
@@ -97,7 +100,7 @@ func (s *Scheduler) listDue(ctx context.Context) ([]dueCollection, error) {
 	var out []dueCollection
 	for rows.Next() {
 		var dc dueCollection
-		if err := rows.Scan(&dc.UserID, &dc.CollectionID); err != nil {
+		if err := rows.Scan(&dc.UserID, &dc.CollectionID, &dc.SyncSchedule); err != nil {
 			return nil, err
 		}
 		out = append(out, dc)
@@ -114,14 +117,52 @@ func (s *Scheduler) syncOne(ctx context.Context, dc dueCollection, mu *sync.Mute
 	}
 	defer s.inFlight.Delete(dc.CollectionID)
 
+	allowAdminSchedule, err := s.allowAdminSchedule(ctx, dc.UserID)
+	if err != nil {
+		mu.Lock()
+		result.Failed++
+		mu.Unlock()
+		s.logger.ErrorContext(ctx, "user collection sync scheduler: failed to recheck account role",
+			"user_id", dc.UserID,
+			"collection_id", dc.CollectionID,
+			"error", err,
+		)
+		return
+	}
+	if requiresScheduleDowngrade(dc.SyncSchedule, allowAdminSchedule) {
+		if err := s.downgradeSchedule(ctx, dc, time.Now()); err != nil {
+			mu.Lock()
+			result.Failed++
+			mu.Unlock()
+			s.logger.ErrorContext(ctx, "user collection sync scheduler: failed to downgrade privileged schedule",
+				"user_id", dc.UserID,
+				"collection_id", dc.CollectionID,
+				"error", err,
+			)
+			return
+		}
+		mu.Lock()
+		result.Skipped++
+		mu.Unlock()
+		return
+	}
+
 	startedAt := time.Now()
 	syncCtx, cancel := context.WithTimeout(ctx, collectionutil.SyncTimeout)
-	_, err := s.service.SyncCollection(syncCtx, dc.UserID, dc.CollectionID)
+	_, err = s.service.SyncCollection(syncCtx, dc.UserID, dc.CollectionID, dc.SyncSchedule, allowAdminSchedule)
 	cancel()
 	dur := time.Since(startedAt).Round(time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
+	if errors.Is(err, errSyncNoLongerEligible) {
+		result.Skipped++
+		s.logger.InfoContext(ctx, "user collection sync scheduler: skipped stale due collection",
+			"user_id", dc.UserID,
+			"collection_id", dc.CollectionID,
+		)
+		return
+	}
 	if err != nil {
 		result.Failed++
 		s.logger.ErrorContext(ctx, "user collection sync scheduler: sync failed",
@@ -141,13 +182,59 @@ func (s *Scheduler) syncOne(ctx context.Context, dc dueCollection, mu *sync.Mute
 	)
 }
 
-// advanceAfterFailure pushes next_sync_at forward by the user-sync minimum
-// interval so a broken source does not thrash the scheduler.
+func (s *Scheduler) allowAdminSchedule(ctx context.Context, userID int) (bool, error) {
+	var allowed bool
+	err := s.pool.QueryRow(ctx, `SELECT role = 'admin' FROM users WHERE id = $1`, userID).Scan(&allowed)
+	return allowed, err
+}
+
+func requiresScheduleDowngrade(schedule string, allowAdminSchedule bool) bool {
+	return !allowAdminSchedule && !isBoundedSyncSchedule(schedule)
+}
+
+// downgradeSchedule revokes a persisted admin-only cadence before a demoted
+// account can make another provider request. The role and old schedule checks
+// keep a concurrent promotion or schedule edit from being overwritten.
+func (s *Scheduler) downgradeSchedule(ctx context.Context, dc dueCollection, after time.Time) error {
+	daily := AllowedSyncSchedules["daily"]
+	next := catalog.ComputeNextSyncAtFrom(daily, after)
+	if next == nil {
+		return fmt.Errorf("computing bounded daily schedule")
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE user_personal_collections c
+		 SET sync_schedule = $1, next_sync_at = $2, updated_at = NOW()
+		 WHERE c.user_id = $3 AND c.id = $4 AND c.sync_schedule = $5
+		   AND EXISTS (
+		       SELECT 1 FROM users u
+		       WHERE u.id = c.user_id AND u.role <> 'admin'
+		   )`,
+		daily, next, dc.UserID, dc.CollectionID, dc.SyncSchedule,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		s.logger.WarnContext(ctx, "user collection sync scheduler: downgraded admin-only schedule",
+			"user_id", dc.UserID,
+			"collection_id", dc.CollectionID,
+			"previous_schedule", dc.SyncSchedule,
+			"sync_schedule", daily,
+		)
+	}
+	return nil
+}
+
+// advanceAfterFailure follows the collection's natural schedule, matching the
+// admin collection scheduler. Invalid stored schedules are parked for a day so
+// a legacy or manually edited row cannot thrash the scheduler.
 func (s *Scheduler) advanceAfterFailure(ctx context.Context, dc dueCollection, after time.Time) {
-	next := after.Add(time.Duration(MinSyncIntervalHours) * time.Hour)
+	next := nextSyncAfterFailure(dc.SyncSchedule, after)
 	if _, err := s.pool.Exec(ctx,
-		`UPDATE user_personal_collections SET next_sync_at = $1 WHERE user_id = $2 AND id = $3`,
-		next, dc.UserID, dc.CollectionID,
+		`UPDATE user_personal_collections
+		 SET next_sync_at = $1
+		 WHERE user_id = $2 AND id = $3 AND sync_schedule = $4`,
+		next, dc.UserID, dc.CollectionID, dc.SyncSchedule,
 	); err != nil {
 		s.logger.ErrorContext(ctx, "user collection sync scheduler: failed to advance next_sync_at after failure",
 			"user_id", dc.UserID,
@@ -155,6 +242,13 @@ func (s *Scheduler) advanceAfterFailure(ctx context.Context, dc dueCollection, a
 			"error", err,
 		)
 	}
+}
+
+func nextSyncAfterFailure(schedule string, after time.Time) time.Time {
+	if next := catalog.ComputeNextSyncAtFrom(schedule, after); next != nil {
+		return *next
+	}
+	return after.Add(24 * time.Hour)
 }
 
 func (s *Scheduler) IsInFlight(collectionID string) bool {

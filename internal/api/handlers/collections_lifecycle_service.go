@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -99,6 +100,22 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 			}
 		}
 		input.GroupID = &groupID
+	}
+	if req.SyncSchedule != nil {
+		if !catalog.IsSyncableType(existing.CollectionType) {
+			return none, fieldError("sync_schedule", "sync_schedule can only be edited for imported collections")
+		}
+		schedule, err := usercollections.ResolveSyncSchedule(*req.SyncSchedule, apimw.IsAdmin(ctx))
+		if err != nil {
+			return none, fieldError("sync_schedule", err.Error())
+		}
+		if schedule == nil {
+			input.ClearSyncSchedule = true
+			input.ClearNextSyncAt = true
+		} else {
+			input.SyncSchedule = schedule
+			input.NextSyncAt = usercollections.InitialNextSyncAt(schedule)
+		}
 	}
 
 	// Merge only requested source members in the store UPDATE so concurrent

@@ -8,8 +8,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
+	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -87,7 +89,12 @@ func (h *CollectionHandler) ListPersonalCollections(ctx context.Context, userID 
 }
 
 // Capabilities is the additive feature support collection clients detect.
-func (h *CollectionHandler) Capabilities() CollectionCapabilitiesView {
+func (h *CollectionHandler) Capabilities(ctx context.Context) CollectionCapabilitiesView {
+	syncPresets := append([]string(nil), usercollections.UserSyncSchedulePresets...)
+	customCron := apimw.IsAdmin(ctx)
+	if customCron {
+		syncPresets = append([]string(nil), usercollections.AdminSyncSchedulePresets...)
+	}
 	return CollectionCapabilitiesView{
 		DisplayFilterFields: []string{collectionFilterType, "watched"},
 		DisplayFilterPresets: CollectionDisplayFilterPresetsView{
@@ -98,6 +105,11 @@ func (h *CollectionHandler) Capabilities() CollectionCapabilitiesView {
 		CollectionSortPreferences: true,
 		EffectiveCollectionSort:   true,
 		SortPreferenceKinds:       sortPreferenceKinds,
+		UserCollectionSyncSchedule: &CollectionSyncScheduleCapabilitiesView{
+			Editable:   true,
+			Presets:    syncPresets,
+			CustomCron: customCron,
+		},
 	}
 }
 

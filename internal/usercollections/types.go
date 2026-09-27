@@ -40,11 +40,6 @@ const (
 	SourceModeTraktPreset SourceMode = "trakt_preset"
 )
 
-// MinSyncIntervalHours is the smallest interval (in hours between fires) that
-// a user is allowed to schedule. Stricter than admin to keep TMDB/Trakt API
-// quota bounded across many users.
-const MinSyncIntervalHours = 24
-
 var ErrSyncUnsupported = errors.New("collection cannot be synced")
 
 type SourceConfig struct {
