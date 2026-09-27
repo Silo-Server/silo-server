@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"errors"
 	"os"
 	"strings"
@@ -9,53 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-func TestCreateByOwnerSerializesOwnershipPostgres(t *testing.T) {
-	r := adminAccountsDB(t)
-	owner := testRoleAccount(t, r, models.RoleAdmin)
-	if _, err := r.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = $1`, owner.ID); err != nil {
-		t.Fatal(err)
-	}
-	next := testRoleAccount(t, r, models.RoleAdmin)
-	input := models.CreateUserInput{Username: "created-admin", Email: "created-admin@example.test", Password: "fixture-password", Role: models.RoleAdmin}
-	_, err := r.CreateByOwner(t.Context(), owner.ID, input, func(_ *models.User, _ pgx.Tx) error {
-		other, err := r.pool.Begin(t.Context())
-		if err != nil {
-			return err
-		}
-		defer func() { _ = other.Rollback(context.WithoutCancel(t.Context())) }()
-		if _, err := other.Exec(t.Context(), `SET LOCAL lock_timeout = '100ms'`); err != nil {
-			return err
-		}
-		_, err = other.Exec(t.Context(), `UPDATE users SET is_owner = false WHERE id = $1`, owner.ID)
-		if pgErr, ok := errors.AsType[*pgconn.PgError](err); !ok || pgErr.Code != "55P03" {
-			t.Fatalf("ownership write must wait for provisioning, got %v", err)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.TransferOwnership(t.Context(), owner.ID, next.ID); err != nil {
-		t.Fatal(err)
-	}
-	input.Username, input.Email = "refused-admin", "refused-admin@example.test"
-	_, err = r.CreateByOwner(t.Context(), owner.ID, input, func(_ *models.User, _ pgx.Tx) error {
-		t.Fatal("former Owner reached profile provisioning")
-		return nil
-	})
-	if !errors.Is(err, ErrAdminProtected) {
-		t.Fatalf("former Owner creation: %v", err)
-	}
-	if _, err := r.GetByUsername(t.Context(), input.Username); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("refused account persisted: %v", err)
-	}
-}
 
 func TestOwnerChecks(t *testing.T) {
 	owner := &models.User{ID: 1, Role: models.RoleAdmin, Enabled: true, IsOwner: true}
@@ -249,151 +204,6 @@ func TestOwnershipMoveEndsViewAsSessionsAndCredentialsPostgres(t *testing.T) {
 	if keys, links := countTestCredentials(t, r, admin.ID); keys != 0 || links != 0 {
 		t.Fatalf("new owner: keys %d, links %d; want both gone", keys, links)
 	}
-	if actor, err := lockedOwnerActor(t, r, admin.ID); err != nil || !actor.IsOwner {
-		t.Fatalf("locked actor read: %+v, %v", actor, err)
-	}
-}
-
-func TestAdminKeyNeedsTheCheckedStandingPostgres(t *testing.T) {
-	r := adminAccountsDB(t)
-	user := testRoleAccount(t, r, models.RoleUser)
-	keys := NewAPIKeyRepository(r.pool)
-	issuerAdmin := testRoleAccount(t, r, models.RoleAdmin)
-	checked := AccountStanding{Role: models.RoleUser, IssuerID: issuerAdmin.ID}
-	if _, err := keys.CreateForStanding(t.Context(), user.ID, checked, "ok", nil); err != nil {
-		t.Fatalf("key under an unchanged standing: %v", err)
-	}
-	if err := r.Update(t.Context(), user.ID, models.UpdateUserInput{Role: new(models.RoleAdmin)}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := keys.CreateForStanding(t.Context(), user.ID, checked, "stale", nil); !errors.Is(err, ErrAccountChanged) {
-		t.Fatalf("key under a stale standing: %v", err)
-	}
-	if n, _ := countTestCredentials(t, r, user.ID); n != 0 {
-		t.Fatalf("promoted account holds %d keys", n)
-	}
-
-	// An issuer that stopped being the Owner gets no key either.
-	owner := testRoleAccount(t, r, models.RoleAdmin)
-	if _, err := r.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = $1`, owner.ID); err != nil {
-		t.Fatal(err)
-	}
-	asOwner := AccountStanding{Role: models.RoleAdmin, IssuerID: owner.ID, IssuerIsOwner: true}
-	if _, err := keys.CreateForStanding(t.Context(), user.ID, asOwner, "owner", nil); err != nil {
-		t.Fatalf("key issued by the owner: %v", err)
-	}
-	if err := r.TransferOwnership(t.Context(), owner.ID, user.ID); err != nil {
-		t.Fatal(err)
-	}
-	other := testRoleAccount(t, r, models.RoleAdmin)
-	if _, err := keys.CreateForStanding(t.Context(), other.ID, AccountStanding{Role: models.RoleAdmin, IssuerID: owner.ID, IssuerIsOwner: true}, "stale issuer", nil); !errors.Is(err, ErrAccountChanged) {
-		t.Fatalf("key issued by a former owner: %v", err)
-	}
-}
-
-func TestImpersonationNeedsTheCheckedStandingPostgres(t *testing.T) {
-	r := adminAccountsDB(t)
-	owner := testRoleAccount(t, r, models.RoleAdmin)
-	if _, err := r.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = $1`, owner.ID); err != nil {
-		t.Fatal(err)
-	}
-	admin := testRoleAccount(t, r, models.RoleAdmin)
-	sessions := NewSessionRepository(r.pool)
-	session := func(id string) models.AuthSession {
-		now := time.Now()
-		return models.AuthSession{ID: id, UserID: admin.ID, DeviceName: "test", IPAddress: "127.0.0.1", ExpiresAt: now.Add(time.Hour), ImpersonatorUserID: &owner.ID, ImpersonationStartedAt: &now}
-	}
-	checked := AccountStanding{Role: models.RoleAdmin, IssuerID: owner.ID, IssuerIsOwner: true}
-	if err := sessions.CreateImpersonation(t.Context(), session("before"), checked); err != nil {
-		t.Fatalf("view-as under an unchanged standing: %v", err)
-	}
-	if err := r.TransferOwnership(t.Context(), owner.ID, admin.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := sessions.CreateImpersonation(t.Context(), session("after"), checked); !errors.Is(err, ErrImpersonationNotAllowed) {
-		t.Fatalf("view-as under a stale standing: %v", err)
-	}
-}
-
-// TestMutateAdminAccountLocksActorFirstPostgres pins the lock order an
-// ownership transfer uses: with the actor's id below the target's, the write
-// waits on the actor before it locks the target, so a transfer holding the
-// actor can still take the target instead of deadlocking.
-func TestMutateAdminAccountLocksActorFirstPostgres(t *testing.T) {
-	r := adminAccountsDB(t)
-	owner := testRoleAccount(t, r, models.RoleAdmin)
-	admin := testRoleAccount(t, r, models.RoleAdmin)
-	if owner.ID >= admin.ID {
-		t.Fatalf("expected ascending ids, got %d and %d", owner.ID, admin.ID)
-	}
-	transfer, err := r.pool.Begin(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = transfer.Rollback(t.Context()) }()
-	if _, err := transfer.Exec(t.Context(), `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, owner.ID); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() {
-		_, err := r.MutateAdminAccount(t.Context(), owner.ID, admin.ID, -1, &models.UpdateUserInput{Username: new(uuid.NewString())}, func(*models.User, pgx.Tx) (bool, error) { return false, nil })
-		done <- err
-	}()
-	// Wait until the write is blocked on the actor's row.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		var waiting int
-		if err := r.pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`).Scan(&waiting); err != nil {
-			t.Fatal(err)
-		}
-		if waiting > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the write never waited on the actor's row")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if _, err := transfer.Exec(t.Context(), `SET LOCAL lock_timeout = '2s'`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := transfer.Exec(t.Context(), `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, admin.ID); err != nil {
-		t.Fatalf("the write locked the target before the actor: %v", err)
-	}
-	if err := transfer.Commit(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestLockedActorMustStillBeAnEnabledAdminPostgres(t *testing.T) {
-	r := adminAccountsDB(t)
-	admin := testRoleAccount(t, r, models.RoleAdmin)
-	user := testRoleAccount(t, r, models.RoleUser)
-	disabled := testRoleAccount(t, r, models.RoleAdmin)
-	if err := r.Update(t.Context(), disabled.ID, models.UpdateUserInput{Enabled: new(false)}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := lockedOwnerActor(t, r, admin.ID); err != nil {
-		t.Fatalf("enabled admin: %v", err)
-	}
-	for name, id := range map[string]int{"demoted": user.ID, "disabled": disabled.ID, "deleted": user.ID + 1000} {
-		if _, err := lockedOwnerActor(t, r, id); !errors.Is(err, ErrNotActingAdmin) {
-			t.Errorf("%s actor: %v", name, err)
-		}
-	}
-	// A key issued by an admin demoted after the check is refused too.
-	keys := NewAPIKeyRepository(r.pool)
-	issuer := testRoleAccount(t, r, models.RoleAdmin)
-	checked := AccountStanding{Role: models.RoleUser, IssuerID: issuer.ID}
-	if err := r.Update(t.Context(), issuer.ID, models.UpdateUserInput{Role: new(models.RoleUser)}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := keys.CreateForStanding(t.Context(), user.ID, checked, "demoted issuer", nil); !errors.Is(err, ErrAccountChanged) {
-		t.Fatalf("key from a demoted issuer: %v", err)
-	}
 }
 
 func TestOwnershipMoveRevokesPendingAdminInvitationsPostgres(t *testing.T) {
@@ -423,106 +233,6 @@ func TestOwnershipMoveRevokesPendingAdminInvitationsPostgres(t *testing.T) {
 			t.Errorf("%s: revoked %v, want %v", email, revoked, wantRevoked)
 		}
 	}
-}
-
-// TestGuardedCredentialLocksInTransferOrderPostgres holds the lower-id
-// Owner the way a transfer does and checks that a guarded key insert for the
-// higher-id target waits on the Owner before it locks the target.
-func TestGuardedCredentialLocksInTransferOrderPostgres(t *testing.T) {
-	r := adminAccountsDB(t)
-	owner := testRoleAccount(t, r, models.RoleAdmin)
-	target := testRoleAccount(t, r, models.RoleAdmin)
-	if _, err := r.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = $1`, owner.ID); err != nil {
-		t.Fatal(err)
-	}
-	transfer, err := r.pool.Begin(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = transfer.Rollback(t.Context()) }()
-	if _, err := transfer.Exec(t.Context(), `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, owner.ID); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() {
-		standing := AccountStanding{Role: models.RoleAdmin, IssuerID: owner.ID, IssuerIsOwner: true}
-		_, err := NewAPIKeyRepository(r.pool).CreateForStanding(t.Context(), target.ID, standing, "racing", nil)
-		done <- err
-	}()
-	waitForLockWait(t, r)
-	if _, err := transfer.Exec(t.Context(), `SET LOCAL lock_timeout = '2s'`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := transfer.Exec(t.Context(), `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, target.ID); err != nil {
-		t.Fatalf("the insert locked the target before the issuer: %v", err)
-	}
-	if err := transfer.Commit(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-}
-
-// waitForLockWait waits until some backend is blocked on a row lock.
-func waitForLockWait(t *testing.T, r *UserRepository) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		var waiting int
-		if err := r.pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`).Scan(&waiting); err != nil {
-			t.Fatal(err)
-		}
-		if waiting > 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("no request waited on a row lock")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-func TestKeyMutationNeedsTheCheckedStandingPostgres(t *testing.T) {
-	r := adminAccountsDB(t)
-	owner := testRoleAccount(t, r, models.RoleAdmin)
-	if _, err := r.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = $1`, owner.ID); err != nil {
-		t.Fatal(err)
-	}
-	admin := testRoleAccount(t, r, models.RoleAdmin)
-	keys := NewAPIKeyRepository(r.pool)
-	checked := AccountStanding{Role: models.RoleAdmin, IssuerID: owner.ID, IssuerIsOwner: true}
-	key, err := keys.CreateForStanding(t.Context(), admin.ID, checked, "admin key", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	guard := APIKeyPrecondition{Any: true, Standing: &checked}
-	if _, err := keys.UpdateTierConditional(t.Context(), key.ID, "elevated", guard); err != nil {
-		t.Fatalf("tier change under an unchanged standing: %v", err)
-	}
-	other := testRoleAccount(t, r, models.RoleAdmin)
-	if err := r.TransferOwnership(t.Context(), owner.ID, other.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := keys.UpdateTierConditional(t.Context(), key.ID, "standard", guard); !errors.Is(err, ErrAccountChanged) {
-		t.Fatalf("tier change by a former owner: %v", err)
-	}
-	if err := keys.DeleteByAdminConditional(t.Context(), key.ID, guard); !errors.Is(err, ErrAccountChanged) {
-		t.Fatalf("revocation by a former owner: %v", err)
-	}
-	if n, _ := countTestCredentials(t, r, admin.ID); n != 1 {
-		t.Fatalf("admin keys after refused changes: %d", n)
-	}
-}
-
-func lockedOwnerActor(t *testing.T, r *UserRepository, id int) (OwnerActor, error) {
-	t.Helper()
-	tx, err := r.pool.Begin(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(t.Context()) }()
-	return LockOwnerActorInTransaction(t.Context(), tx, id)
 }
 
 // issueTestCredentials gives account id one API key and one reset link.
@@ -598,23 +308,23 @@ func TestInitialSetupClaimsOwnerPostgres(t *testing.T) {
 	if other.IsOwner {
 		t.Fatal("a later account became the owner")
 	}
-	if _, err := r.CheckOwnerTargetByID(t.Context(), other.ID, created.ID); !errors.Is(err, ErrOwnerProtected) {
+	if err := r.CheckOwnerTargetByID(t.Context(), other.ID, created.ID); !errors.Is(err, ErrOwnerProtected) {
 		t.Fatalf("another account targeting the owner: %v", err)
 	}
-	if _, err := r.CheckOwnerTargetByID(t.Context(), created.ID, created.ID); err != nil {
+	if err := r.CheckOwnerTargetByID(t.Context(), created.ID, created.ID); err != nil {
 		t.Fatalf("owner targeting itself: %v", err)
 	}
-	if _, err := r.CheckOwnerTargetByID(t.Context(), created.ID, other.ID); err != nil {
+	if err := r.CheckOwnerTargetByID(t.Context(), created.ID, other.ID); err != nil {
 		t.Fatalf("owner targeting another account: %v", err)
 	}
 	promoted := testRoleAccount(t, r, models.RoleAdmin)
-	if _, err := r.CheckOwnerTargetByID(t.Context(), other.ID, promoted.ID); !errors.Is(err, ErrAdminProtected) {
+	if err := r.CheckOwnerTargetByID(t.Context(), other.ID, promoted.ID); !errors.Is(err, ErrAdminProtected) {
 		t.Fatalf("an account targeting another admin: %v", err)
 	}
-	if _, err := r.CheckOwnerTargetByID(t.Context(), created.ID, promoted.ID); err != nil {
+	if err := r.CheckOwnerTargetByID(t.Context(), created.ID, promoted.ID); err != nil {
 		t.Fatalf("owner targeting another admin: %v", err)
 	}
-	if _, err := r.CheckOwnerTargetByID(t.Context(), created.ID, other.ID+1000); !errors.Is(err, ErrNotFound) {
+	if err := r.CheckOwnerTargetByID(t.Context(), created.ID, other.ID+1000); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing account: %v", err)
 	}
 }

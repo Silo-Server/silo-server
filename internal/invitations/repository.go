@@ -109,12 +109,6 @@ func (r *Repository) Resend(ctx context.Context, id int64, input models.CreateIn
 		return nil, err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
-	// Lock the resending account before the invitation row: an ownership
-	// transfer locks accounts before it revokes admin invitations, and the
-	// opposite order would deadlock against it.
-	if err := auth.LockAccountsInOrder(ctx, tx, int(input.InvitedBy)); err != nil {
-		return nil, err
-	}
 	prior, err := scanInvitation(tx.QueryRow(ctx, `SELECT `+invitationColumns+invitationFrom+`WHERE i.id=$1 FOR UPDATE OF i`, id))
 	if err != nil {
 		return nil, err
@@ -136,18 +130,6 @@ func (r *Repository) Resend(ctx context.Context, id int64, input models.CreateIn
 }
 
 func createInvitation(ctx context.Context, tx pgx.Tx, input models.CreateInvitationInput, tokenHash string) (*models.Invitation, error) {
-	if input.Role == models.RoleAdmin {
-		actor, err := auth.LockOwnerActorInTransaction(ctx, tx, int(input.InvitedBy))
-		if errors.Is(err, auth.ErrNotActingAdmin) {
-			return nil, ErrRoleNotAllowed
-		}
-		if err != nil {
-			return nil, err
-		}
-		if err := auth.CheckGrantAdmin(actor, input.Role); err != nil {
-			return nil, ErrRoleNotAllowed
-		}
-	}
 	// Lock/supersede first, so an acceptance winning this row lock is visible
 	// to the following account check. A failure rolls the supersession back.
 	_, err := tx.Exec(ctx, `UPDATE invitations SET revoked_at=clock_timestamp(), updated_at=clock_timestamp()

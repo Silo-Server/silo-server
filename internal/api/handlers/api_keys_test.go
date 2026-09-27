@@ -18,26 +18,14 @@ import (
 
 // fakeAPIKeyStore records what the handler asked to store.
 type fakeAPIKeyStore struct {
-	createdScopes  []string
-	created        bool
-	standing       *auth.AccountStanding
-	accountChanged bool
+	createdScopes []string
+	created       bool
 }
 
 func (s *fakeAPIKeyStore) Create(_ context.Context, userID int, label string, scopes []string) (*models.APIKey, error) {
 	s.created = true
 	s.createdScopes = scopes
 	return &models.APIKey{ID: 1, UserID: userID, Label: label, Key: "sa_generated", RateTier: "standard", Scopes: scopes}, nil
-}
-
-// CreateForStanding records the standing the handler checked and creates the
-// key; changed makes it report that the account changed meanwhile.
-func (s *fakeAPIKeyStore) CreateForStanding(ctx context.Context, userID int, standing auth.AccountStanding, label string, scopes []string) (*models.APIKey, error) {
-	s.standing = &standing
-	if s.accountChanged {
-		return nil, auth.ErrAccountChanged
-	}
-	return s.Create(ctx, userID, label, scopes)
 }
 
 func (s *fakeAPIKeyStore) ListByUser(context.Context, int) ([]*models.APIKeyMetadataWithUsage, error) {

@@ -29,8 +29,7 @@ type scopedKeyUserRepo struct {
 	// pre-checks and the locked write, as a concurrent promotion would.
 	promoteBeforeMutate bool
 	// updateErr, when set, is what Update returns.
-	updateErr        error
-	createByOwnerErr error
+	updateErr error
 }
 
 func (r *scopedKeyUserRepo) List(context.Context) ([]*models.User, error) {
@@ -46,27 +45,6 @@ func (r *scopedKeyUserRepo) Create(_ context.Context, input models.CreateUserInp
 	return r.user, nil
 }
 
-func (r *scopedKeyUserRepo) CreateByOwner(ctx context.Context, actorID int, input models.CreateUserInput, provision func(*models.User, pgx.Tx) error) (*models.User, error) {
-	if r.createByOwnerErr != nil {
-		return nil, r.createByOwnerErr
-	}
-	actor, err := r.GetByID(ctx, actorID)
-	if auth.IsNotFound(err) {
-		return nil, auth.ErrAdminProtected
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := auth.CheckGrantAdmin(auth.OwnerActor{ID: actor.ID, IsOwner: actor.IsOwner}, input.Role); err != nil {
-		return nil, err
-	}
-	u, err := r.Create(ctx, input)
-	if err != nil {
-		return nil, err
-	}
-	return u, provision(u, nil)
-}
-
 func (r *scopedKeyUserRepo) Update(_ context.Context, _ int, input models.UpdateUserInput) error {
 	if r.updateErr != nil {
 		return r.updateErr
@@ -79,7 +57,7 @@ func (r *scopedKeyUserRepo) Delete(context.Context, int) error { return nil }
 
 // MutateAdminAccount runs the handler's checks against the stored account the
 // way the transactional repository does, without a transaction.
-func (r *scopedKeyUserRepo) MutateAdminAccount(ctx context.Context, _, id int, _ int64, input *models.UpdateUserInput, validate func(*models.User, pgx.Tx) (bool, error)) (auth.AdminUserSnapshot, error) {
+func (r *scopedKeyUserRepo) MutateAdminAccount(ctx context.Context, id int, _ int64, input *models.UpdateUserInput, validate func(*models.User, pgx.Tx) (bool, error)) (auth.AdminUserSnapshot, error) {
 	current, err := r.GetByID(ctx, id)
 	if err != nil {
 		return auth.AdminUserSnapshot{}, err

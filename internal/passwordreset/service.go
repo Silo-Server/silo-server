@@ -66,7 +66,7 @@ const (
 // repository is the persistence surface Service needs (satisfied by
 // *Repository; an interface so tests can fake it).
 type repository interface {
-	Issue(ctx context.Context, userID int, tokenHash string, issuedBy *int, expiresAt time.Time, standing *auth.AccountStanding) error
+	Issue(ctx context.Context, userID int, tokenHash string, issuedBy *int, expiresAt time.Time) error
 	IssueUnlessRecent(ctx context.Context, userID int, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error)
 	Withdraw(ctx context.Context, userID int, tokenHash string) error
 	Lookup(ctx context.Context, tokenHash string) (*Link, error)
@@ -152,10 +152,6 @@ type IssueInput struct {
 	UserID   int
 	IssuedBy int
 	Delivery Delivery
-	// Standing, when set, is the role and Owner flag the issuer was
-	// authorized against; the link is stored only while the account still
-	// has them (auth.ErrAccountChanged otherwise).
-	Standing *auth.AccountStanding
 }
 
 // IssueResult reports a stored link. It may accompany a delivery error; then
@@ -209,7 +205,7 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 		issuedBy = &in.IssuedBy
 	}
 	expiresAt := s.now().Add(s.ttl)
-	if err := s.repo.Issue(ctx, user.ID, tokenHash, issuedBy, expiresAt, in.Standing); err != nil {
+	if err := s.repo.Issue(ctx, user.ID, tokenHash, issuedBy, expiresAt); err != nil {
 		return nil, err
 	}
 

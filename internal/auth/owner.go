@@ -35,28 +35,6 @@ var (
 	ErrOwnershipTarget = errors.New("ownership can only move to another enabled admin account")
 )
 
-// AccountStanding is what an authorization check saw when an administrator
-// issues a credential on an account: the account's role and Owner flag, and
-// whether the issuer was the Owner. The issuing write stores the credential
-// only while both accounts still stand that way, holding both rows
-// share-locked, so a promotion or ownership move that commits in between
-// cannot leave behind a credential the check would now refuse.
-type AccountStanding struct {
-	Role          string
-	IsOwner       bool
-	IssuerID      int
-	IssuerIsOwner bool
-}
-
-// ErrAccountChanged reports an account whose role or Owner flag changed
-// after the authorization check, so the credential was not issued.
-var ErrAccountChanged = errors.New("the account's role or ownership changed; reload and try again")
-
-// StandingOf is the standing actor's check sees on a loaded account.
-func StandingOf(actor OwnerActor, u *models.User) AccountStanding {
-	return AccountStanding{Role: u.Role, IsOwner: u.IsOwner, IssuerID: actor.ID, IssuerIsOwner: actor.IsOwner}
-}
-
 // OwnerActor is the account making a change, as the Owner rules see it. The
 // zero value is no account and never the Owner.
 type OwnerActor struct {
@@ -137,67 +115,6 @@ func (r *UserRepository) OwnerActor(ctx context.Context, actorID int) (OwnerActo
 	return ownerActor(ctx, r.pool, actorID)
 }
 
-// ErrNotActingAdmin refuses a write whose caller stopped being an enabled
-// admin, or no longer exists, between authenticating and the write.
-var ErrNotActingAdmin = errors.New("the account making the change is no longer an enabled admin")
-
-// LockOwnerActorInTransaction is OwnerActor read in the caller's
-// transaction with the actor's row share-locked, so an ownership transfer,
-// demotion or disable waits for the caller's write and the write sees one
-// that committed first. The actor must still be an enabled admin
-// (ErrNotActingAdmin otherwise).
-func LockOwnerActorInTransaction(ctx context.Context, tx pgx.Tx, actorID int) (OwnerActor, error) {
-	actor := OwnerActor{ID: actorID}
-	var role string
-	var enabled bool
-	err := tx.QueryRow(ctx, `SELECT is_owner, role, enabled FROM users WHERE id=$1 FOR SHARE`, actorID).Scan(&actor.IsOwner, &role, &enabled)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return actor, ErrNotActingAdmin
-	}
-	if err != nil {
-		return actor, err
-	}
-	if role != models.RoleAdmin || !enabled {
-		return actor, ErrNotActingAdmin
-	}
-	return actor, nil
-}
-
-// LockAccountsInOrder share-locks the users rows ids in ascending id order,
-// the order an ownership transfer locks them in, so a write that then checks
-// several accounts' standing cannot deadlock against a transfer.
-func LockAccountsInOrder(ctx context.Context, tx pgx.Tx, ids ...int) error {
-	_, err := tx.Exec(ctx, `SELECT 1 FROM users WHERE id = ANY($1) ORDER BY id FOR SHARE`, ids)
-	return err
-}
-
-// CreateByOwner holds the Owner's standing through account and profile creation.
-func (r *UserRepository) CreateByOwner(ctx context.Context, actorID int, input models.CreateUserInput, provision func(*models.User, pgx.Tx) error) (*models.User, error) {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	actor, err := LockOwnerActorInTransaction(ctx, tx, actorID)
-	if err != nil {
-		return nil, err
-	}
-	if err := CheckGrantAdmin(actor, input.Role); err != nil {
-		return nil, err
-	}
-	user, err := createUser(ctx, tx, input)
-	if err != nil {
-		return nil, err
-	}
-	if err := provision(user, tx); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-	return user, nil
-}
-
 func ownerActor(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, actorID int) (OwnerActor, error) {
@@ -213,9 +130,8 @@ func ownerActor(ctx context.Context, db interface {
 }
 
 // CheckOwnerTargetByID loads the actor and the account userID and applies
-// CheckOwnerTarget, for callers that hold only the account ID. It returns the
-// standing it checked, for a write that must not outlive it.
-func (r *UserRepository) CheckOwnerTargetByID(ctx context.Context, actorID, userID int) (AccountStanding, error) {
+// CheckOwnerTarget, for callers that hold only the account ID.
+func (r *UserRepository) CheckOwnerTargetByID(ctx context.Context, actorID, userID int) error {
 	var target models.User
 	var actorIsOwner bool
 	err := r.pool.QueryRow(ctx, `
@@ -224,12 +140,11 @@ func (r *UserRepository) CheckOwnerTargetByID(ctx context.Context, actorID, user
 		FROM users WHERE id = $2`, actorID, userID).Scan(&target.ID, &target.Role, &target.IsOwner, &actorIsOwner)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return AccountStanding{}, ErrNotFound
+			return ErrNotFound
 		}
-		return AccountStanding{}, err
+		return err
 	}
-	actor := OwnerActor{ID: actorID, IsOwner: actorIsOwner}
-	return StandingOf(actor, &target), CheckOwnerTarget(OwnerActor{ID: actorID, IsOwner: actorIsOwner}, &target)
+	return CheckOwnerTarget(OwnerActor{ID: actorID, IsOwner: actorIsOwner}, &target)
 }
 
 // TransferOwnership makes toID the Owner in place of fromID, which must be

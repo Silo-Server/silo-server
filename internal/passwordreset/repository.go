@@ -67,56 +67,24 @@ type Link struct {
 // Issue stores the digest of a new link for the account, replacing any
 // earlier one: an account has at most one live link. It refuses an account
 // that cannot sign in with a local password.
-func (r *Repository) Issue(ctx context.Context, userID int, tokenHash string, issuedBy *int, expiresAt time.Time, standing *auth.AccountStanding) error {
-	// With a standing, the link is stored only while the account and the
-	// issuer still have the role and Owner flags the issuer was authorized
-	// against, with both rows share-locked, so a promotion or ownership move
-	// that commits in between cannot leave behind a link the issuer may no
-	// longer hold.
-	from, guard, args := "users u", "", []any{userID, tokenHash, issuedBy, expiresAt}
-	if standing != nil {
-		from = "users u JOIN users a ON a.id = $5"
-		guard = " AND u.role = $6 AND u.is_owner = $7 AND a.role = 'admin' AND a.enabled AND a.is_owner = $8 FOR SHARE OF u, a"
-		args = append(args, standing.IssuerID, standing.Role, standing.IsOwner, standing.IssuerIsOwner)
-	}
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if standing != nil {
-		if err := auth.LockAccountsInOrder(ctx, tx, userID, standing.IssuerID); err != nil {
-			return err
-		}
-	}
-	tag, err := tx.Exec(ctx, `
+func (r *Repository) Issue(ctx context.Context, userID int, tokenHash string, issuedBy *int, expiresAt time.Time) error {
+	tag, err := r.pool.Exec(ctx, `
 		INSERT INTO password_reset_tokens (user_id, token_hash, password_fingerprint, issued_by, expires_at)
-		SELECT u.id, $2, `+passwordFingerprint+`, $3, $4 FROM `+from+` WHERE u.id = $1 AND `+eligibleAccount+guard+`
+		SELECT u.id, $2, `+passwordFingerprint+`, $3, $4 FROM users u WHERE u.id = $1 AND `+eligibleAccount+`
 		ON CONFLICT (user_id) DO UPDATE SET
 			token_hash = EXCLUDED.token_hash,
 			password_fingerprint = EXCLUDED.password_fingerprint,
 			issued_by = EXCLUDED.issued_by,
 			expires_at = EXCLUDED.expires_at,
-			created_at = now()`, args...)
+			created_at = now()`,
+		userID, tokenHash, issuedBy, expiresAt)
 	if err != nil {
 		return fmt.Errorf("issuing password reset link: %w", err)
 	}
-	if tag.RowsAffected() > 0 {
-		return tx.Commit(ctx)
+	if tag.RowsAffected() == 0 {
+		return ErrNotEligible
 	}
-	if standing != nil {
-		current := *standing
-		var issuerActs bool
-		err := tx.QueryRow(ctx, `
-			SELECT u.role, u.is_owner,
-			       COALESCE((SELECT is_owner FROM users WHERE id = $2), false),
-			       COALESCE((SELECT role = 'admin' AND enabled FROM users WHERE id = $2), false)
-			FROM users u WHERE u.id = $1`, userID, standing.IssuerID).Scan(&current.Role, &current.IsOwner, &current.IssuerIsOwner, &issuerActs)
-		if err == nil && (current != *standing || !issuerActs) {
-			return auth.ErrAccountChanged
-		}
-	}
-	return ErrNotEligible
+	return nil
 }
 
 // IssueUnlessRecent is Issue for a link the account holder asked for

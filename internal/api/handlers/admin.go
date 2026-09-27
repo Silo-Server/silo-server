@@ -802,6 +802,18 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 	if rejectScopedAPIKeyCreate(w, r, req.Role) {
 		return
 	}
+	if req.Role == roleAdmin {
+		actor, err := requestOwnerActor(r.Context(), h.userRepo)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+			return
+		}
+		if err := auth.CheckGrantAdmin(actor, req.Role); err != nil {
+			writeAPIError(w, ownerError(err))
+			return
+		}
+	}
+
 	if req.Username == "" || req.Email == "" || req.Password == "" || req.Role == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Username, email, password, and role are required")
 		return
@@ -853,7 +865,7 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	user, err := h.accountProvisioner.CreateAccountByAdmin(r.Context(), actorUserID(r.Context()), auth.CreateAccountInput{
+	user, err := h.accountProvisioner.CreateAccount(r.Context(), auth.CreateAccountInput{
 		User: models.CreateUserInput{
 			Username:                 req.Username,
 			Email:                    req.Email,
@@ -878,10 +890,6 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 		},
 	})
 	if err != nil {
-		if errors.Is(err, auth.ErrAdminProtected) || errors.Is(err, auth.ErrNotActingAdmin) {
-			writeAPIError(w, ownerError(err))
-			return
-		}
 		if auth.IsDuplicate(err) {
 			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
 			return
@@ -990,20 +998,20 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		AccessGroupID:            req.AccessGroupID.Optional(),
 	}
 
-	// The Owner rules and the write run in one transaction against the locked
-	// account, so a concurrent promotion or ownership transfer cannot slip
-	// between the check and the update.
+	// As in v2, the Owner rules run against the target account locked in the
+	// transaction that updates it and revokes its sign-ins.
 	repo, ok := h.userRepo.(adminAccountRepository)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
 		return
 	}
+	actor, err := requestOwnerActor(r.Context(), h.userRepo)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+		return
+	}
 	revoked := false
-	_, err = repo.MutateAdminAccount(r.Context(), actorUserID(r.Context()), id, -1, &updateInput, func(current *models.User, tx pgx.Tx) (bool, error) {
-		actor, err := h.transactionOwnerActor(r.Context(), tx)
-		if err != nil {
-			return false, err
-		}
+	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, _ pgx.Tx) (bool, error) {
 		if err := auth.CheckOwnerUpdate(actor, current, updateInput); err != nil {
 			return false, ownerError(err)
 		}
@@ -1060,13 +1068,14 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete user")
 		return
 	}
-	// As for updates, the Owner rules run against the locked account in the
-	// transaction that deletes it and revokes its sign-ins.
-	_, err = repo.MutateAdminAccount(r.Context(), actorUserID(r.Context()), id, -1, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
-		actor, err := h.transactionOwnerActor(r.Context(), tx)
-		if err != nil {
-			return false, err
-		}
+	actor, err := requestOwnerActor(r.Context(), h.userRepo)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+		return
+	}
+	// As for updates, the Owner rules run against the target account locked
+	// in the transaction that deletes it and revokes its sign-ins.
+	_, err = repo.MutateAdminAccount(r.Context(), id, -1, nil, func(current *models.User, _ pgx.Tx) (bool, error) {
 		if err := auth.CheckOwnerDelete(actor, current); err != nil {
 			return false, ownerError(err)
 		}

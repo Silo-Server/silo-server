@@ -69,23 +69,6 @@ func (p *AccountProvisioner) CreateAccount(
 	return user, nil
 }
 
-// CreateAccountByAdmin preserves legacy provisioning while serializing an admin
-// grant with ownership transfer. Ordinary accounts use the existing path.
-func (p *AccountProvisioner) CreateAccountByAdmin(ctx context.Context, actorID int, input CreateAccountInput) (*models.User, error) {
-	if input.User.Role != models.RoleAdmin {
-		return p.CreateAccount(ctx, input)
-	}
-	users, ok := p.users.(interface {
-		CreateByOwner(context.Context, int, models.CreateUserInput, func(*models.User, pgx.Tx) error) (*models.User, error)
-	})
-	if !ok {
-		return nil, errors.New("owner-guarded account creation unavailable")
-	}
-	return users.CreateByOwner(ctx, actorID, input.User, func(user *models.User, tx pgx.Tx) error {
-		return p.createProfileInTransactionOrBridge(ctx, tx, user.ID, input)
-	})
-}
-
 func (p *AccountProvisioner) createDefaultProfile(
 	ctx context.Context,
 	userID int,

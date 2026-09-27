@@ -139,18 +139,18 @@ administrator returns `422 validation_failed`. The previous Owner stays an
 administrator. The operation has no v1 route and is not retryable; a replay is
 refused because the caller is no longer the Owner. The capability endpoint reports
 `ownership_transfer`. Moving ownership ends every session in which someone views the
-server as the new Owner and deletes the new Owner's API keys and reset link, since
-the previous Owner could have created them; the new Owner creates new keys. It also
-revokes pending administrator invitations, which the new Owner can resend.
+server as the new Owner and the previous Owner's sessions viewing as other
+administrators. It deletes the new Owner's API keys and reset link, since the previous
+Owner could have created them; the new Owner creates new keys. It also revokes pending
+administrator invitations, which the new Owner can resend.
 
 Making an account an administrator deletes its API keys and its reset link. Any
 administrator may create those for an ordinary account, so after a promotion they
-would carry administrator authority that only the Owner grants. An API key or reset
-link an administrator issues on another account, and a View as session, is stored only
-while that account and the issuer keep the role and Owner flags the request was
-authorized against; a promotion or ownership move that lands in between returns
-`409 conflict` (`permission_denied` for View as). Moving ownership also ends the
-previous Owner's sessions viewing as other administrators.
+would carry administrator authority that only the Owner grants.
+
+These rules stop an administrator who deliberately tries to exceed its authority.
+They check the caller's standing when the request arrives; they do not order
+simultaneous requests around an ownership transfer, which a server sees rarely.
 
 When the Owner account is lost or locked out, someone with shell access to a node
 and the server's `DATABASE_URL` (no other server secret) recovers it with `silo owner set <username>`, for

@@ -8,13 +8,12 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/jackc/pgx/v5"
 )
 
 // ownerTargetChecker applies auth.CheckOwnerTarget to an account the caller
 // holds only the ID of. *auth.UserRepository implements it.
 type ownerTargetChecker interface {
-	CheckOwnerTargetByID(ctx context.Context, actorID, userID int) (auth.AccountStanding, error)
+	CheckOwnerTargetByID(ctx context.Context, actorID, userID int) error
 }
 
 // actorUserID is the login account making the request; zero without claims,
@@ -46,18 +45,6 @@ func requestOwnerActor(ctx context.Context, users interface {
 	return actor, nil
 }
 
-// transactionOwnerActor reads the caller's Owner standing inside an account
-// write, share-locking the caller's row so a concurrent ownership transfer
-// cannot commit between the check and the write. Test doubles run the write
-// without a transaction and fall back to the store.
-func (h *AdminHandler) transactionOwnerActor(ctx context.Context, tx pgx.Tx) (auth.OwnerActor, error) {
-	if tx == nil {
-		return requestOwnerActor(ctx, h.userRepo)
-	}
-	actor, err := auth.LockOwnerActorInTransaction(ctx, tx, actorUserID(ctx))
-	return actor, ownerError(err)
-}
-
 // codeOwnerProtected is the error code of a refusal under the Owner rules.
 const codeOwnerProtected = "owner_protected"
 
@@ -75,10 +62,6 @@ func ownerError(err error) error {
 		return &APIError{Status: http.StatusForbidden, Code: codeOwnerProtected, Message: "You cannot change your own role, disable your account, or delete it", cause: err}
 	case errors.Is(err, auth.ErrNotOwner):
 		return &APIError{Status: http.StatusForbidden, Code: codeOwnerProtected, Message: "Only the server owner can transfer ownership", cause: err}
-	case errors.Is(err, auth.ErrNotActingAdmin):
-		return &APIError{Status: http.StatusForbidden, Code: settingErrorForbidden, Message: "Admin access required", cause: err}
-	case errors.Is(err, auth.ErrAccountChanged):
-		return &APIError{Status: http.StatusConflict, Code: policyErrorConflict, Message: "The account's role or ownership changed; reload and try again", cause: err}
 	case errors.Is(err, auth.ErrOwnershipTarget):
 		return &APIError{Status: http.StatusUnprocessableEntity, Code: "validation_failed", Message: "Ownership can only move to another enabled admin account", cause: err}
 	}

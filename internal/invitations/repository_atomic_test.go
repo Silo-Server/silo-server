@@ -112,69 +112,6 @@ func (f atomicInvitationFixture) waitBlocked(t *testing.T) {
 		runtime.Gosched()
 	}
 }
-func TestAdminInvitationRechecksOwnerAfterTransferPostgres(t *testing.T) {
-	for _, resend := range []bool{false, true} {
-		t.Run(fmt.Sprintf("resend=%v", resend), func(t *testing.T) {
-			f := atomicInvitationDB(t)
-			if _, err := f.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = 1`); err != nil {
-				t.Fatal(err)
-			}
-			input := models.CreateInvitationInput{Email: "admin@example.invalid", Role: models.RoleAdmin, InvitedBy: 1, ExpiresAt: time.Now().Add(time.Hour)}
-			prior, err := f.repo.Create(t.Context(), input, HashToken("prior"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			// Pause the ownership change before commit, after the service could
-			// already have read the inviter as Owner.
-			tx, err := f.pool.Begin(t.Context())
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = tx.Rollback(context.WithoutCancel(t.Context())) }()
-			if _, err := tx.Exec(t.Context(), `UPDATE users SET is_owner = false WHERE id = 1`); err != nil {
-				t.Fatal(err)
-			}
-			done := make(chan error, 1)
-			go func() {
-				var err error
-				if resend {
-					_, err = f.repo.Resend(t.Context(), prior.ID, input, HashToken("replacement"))
-				} else {
-					_, err = f.repo.Create(t.Context(), input, HashToken("replacement"))
-				}
-				done <- err
-			}()
-			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-			defer cancel()
-			for {
-				select {
-				case err := <-done:
-					t.Fatalf("invitation did not wait for ownership change: %v", err)
-				default:
-				}
-				var blocked bool
-				if err := f.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE application_name=$1 AND wait_event_type='Lock')`, f.schema).Scan(&blocked); err != nil {
-					t.Fatal(err)
-				}
-				if blocked {
-					break
-				}
-				runtime.Gosched()
-			}
-			if err := tx.Commit(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			if err := <-done; !errors.Is(err, ErrRoleNotAllowed) {
-				t.Fatalf("former Owner issued invitation: %v", err)
-			}
-			stored, err := f.repo.GetByID(t.Context(), prior.ID)
-			if err != nil || stored.RevokedAt != nil {
-				t.Fatalf("refused issuance superseded existing invitation: %+v, %v", stored, err)
-			}
-		})
-	}
-}
-
 func TestInvitationAtomicConcurrentAccept(t *testing.T) {
 	f := atomicInvitationDB(t)
 	inv := f.invite(t, "concurrent")
@@ -652,58 +589,5 @@ func TestInvitationListPageDB(t *testing.T) {
 		if _, _, err := f.repo.ListPage(t.Context(), nil, limit); err == nil {
 			t.Fatalf("accepted limit%d", limit)
 		}
-	}
-}
-
-// TestAdminInvitationResendLocksAccountBeforeInvitationPostgres holds the
-// Owner row the way an ownership transfer does and checks that a resend waits
-// on it before locking the invitation, so the transfer can still revoke the
-// invitation instead of deadlocking.
-func TestAdminInvitationResendLocksAccountBeforeInvitationPostgres(t *testing.T) {
-	f := atomicInvitationDB(t)
-	if _, err := f.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = 1`); err != nil {
-		t.Fatal(err)
-	}
-	input := models.CreateInvitationInput{Email: "admin@example.invalid", Role: models.RoleAdmin, InvitedBy: 1, ExpiresAt: time.Now().Add(time.Hour)}
-	prior, err := f.repo.Create(t.Context(), input, HashToken("prior"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	transfer, err := f.pool.Begin(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = transfer.Rollback(context.WithoutCancel(t.Context())) }()
-	if _, err := transfer.Exec(t.Context(), `SELECT 1 FROM users WHERE id = 1 FOR UPDATE`); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() {
-		_, err := f.repo.Resend(t.Context(), prior.ID, input, HashToken("replacement"))
-		done <- err
-	}()
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-	defer cancel()
-	for {
-		var blocked bool
-		if err := f.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE application_name=$1 AND wait_event_type='Lock')`, f.schema).Scan(&blocked); err != nil {
-			t.Fatal(err)
-		}
-		if blocked {
-			break
-		}
-		runtime.Gosched()
-	}
-	if _, err := transfer.Exec(t.Context(), `SET LOCAL lock_timeout = '2s'`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := transfer.Exec(t.Context(), `UPDATE invitations SET revoked_at = clock_timestamp() WHERE role = 'admin' AND accepted_at IS NULL AND revoked_at IS NULL`); err != nil {
-		t.Fatalf("the resend locked the invitation before the account: %v", err)
-	}
-	if err := transfer.Commit(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; !errors.Is(err, ErrNotClaimable) {
-		t.Fatalf("resend of an invitation the transfer revoked: %v", err)
 	}
 }
