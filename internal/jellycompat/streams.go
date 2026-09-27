@@ -262,7 +262,7 @@ func compatHLSUsesFMP4(source PlaybackMediaSource) bool {
 func compatWebOSDVMPEGTS(userAgent string, source PlaybackMediaSource) bool {
 	ua := strings.ToLower(userAgent)
 	if (!strings.Contains(ua, "web0s") && !strings.Contains(ua, "webos")) ||
-		source.SupportsDirectPlay || !compatHLSCopiesVideo(source) {
+		source.SupportsDirectPlay || !compatHLSCopiesVideo(source) || source.DVStripToHDR10 {
 		return false
 	}
 	video := compatPrimaryVideoTrack(source.Version)
@@ -2744,7 +2744,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	}
 	if compatHLSCopiesVideo(source) {
 		opts.TargetCodecVideo = compatCopyCodec
-		opts.VideoSampleEntry = playback.VideoSampleEntryForDVCopy(file.PrimaryDVProfile())
+		opts.VideoSampleEntry, opts.VideoBitstreamFilter = compatCopyVideoRecipe(source, file.PrimaryDVProfile())
 		opts.CopyVideoMPEGTS = source.HLSRemuxMPEGTS
 	}
 	if !compatHLSTranscodesAudio(source) {
@@ -3582,6 +3582,10 @@ func generateCompatCopyVideoMasterManifest(source PlaybackMediaSource, routeItem
 
 func generateCompatCopyVideoMasterManifestForVariant(source PlaybackMediaSource, variantURL string) []byte {
 	video := compatPrimaryVideoTrack(source.Version)
+	if source.DVStripToHDR10 {
+		// The variant carries the HDR10 base layer, not the Dolby Vision source.
+		video = compatPrimaryVideoTrack(compatHDR10BaseVersion(source.Version))
+	}
 	audio := compatAudioTrack(source.Version, effectiveCompatAudioStreamIndex(source))
 
 	bandwidth := source.Version.Bitrate * 1000

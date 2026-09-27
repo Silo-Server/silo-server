@@ -1,0 +1,212 @@
+package jellycompat
+
+import (
+	"context"
+	"log/slog"
+	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/noderouting"
+	"github.com/Silo-Server/silo-server/internal/playback"
+)
+
+// Jellyfin clients reject a Dolby Vision range type they cannot render by
+// listing it in a VideoRangeType condition; Jellyfin Android TV does so for
+// DOVIWithHDR10 when the user disables Dolby Vision profile 8 or the display
+// lacks Dolby Vision. Jellyfin's server then copies the video and strips the
+// Dolby Vision RPUs, handing the client the HDR10 base layer unchanged. The
+// helpers below give jellycompat the same route: an HLS remux whose video copy
+// runs the dovi_rpu strip, instead of a tone-mapped encode or no route at all.
+
+// compatDVStripCandidate reports whether a version's primary video is Dolby
+// Vision with an HDR10 base layer that survives the strip: every profile 7
+// stream (the enhancement layer is dropped by stream mapping) and profile 8
+// streams whose compatibility id identifies HDR10. It mirrors the native
+// planner's canStripDolbyVisionToHDR10V3.
+func compatDVStripCandidate(version catalog.FileVersion) bool {
+	video := compatPrimaryVideoTrack(version)
+	switch strings.ToLower(strings.TrimSpace(video.Codec)) {
+	case compatVideoCodecHEVC, compatVideoCodecH265:
+	default:
+		return false
+	}
+	return video.DVProfile == 7 || video.DVProfile == 8 && video.DVBLCompatID == 1
+}
+
+// compatHDR10BaseVersion describes the stream a strip produces: the same
+// file with the primary video's Dolby Vision signaling removed, so device
+// profile conditions evaluate the HDR10 (or HDR10+) base layer the client
+// will actually decode.
+func compatHDR10BaseVersion(version catalog.FileVersion) catalog.FileVersion {
+	if len(version.VideoTracks) == 0 {
+		return version
+	}
+	tracks := append(version.VideoTracks[:0:0], version.VideoTracks...)
+	video := tracks[0]
+	video.VideoRangeType = compatRangeHDR10
+	if video.HDR10Plus {
+		video.VideoRangeType = compatRangeHDR10Plus
+	}
+	video.DolbyVision = ""
+	video.DVProfile = 0
+	video.DVLevel = 0
+	video.DVBLCompatID = 0
+	video.DVConfigPresent = false
+	video.DVBLCompatIDPresent = false
+	video.DVBLPresent = false
+	video.DVRPUPresent = false
+	tracks[0] = video
+	version.VideoTracks = tracks
+	version.HDR = true
+	return version
+}
+
+// applyCompatDVStrip replaces source with an HDR10 strip remux when the client
+// rejects the Dolby Vision stream as-is but accepts its HDR10 base layer and
+// some executor the routing policy allows can run the strip. Sources the
+// client can already play, direct stream, or copy are returned unchanged.
+func (h *PlaybackHandler) applyCompatDVStrip(
+	ctx context.Context,
+	routeItemID, playSessionID string,
+	source PlaybackMediaSource,
+	profile DeviceProfile,
+	req playbackInfoRequest,
+	allow4KTranscode bool,
+) PlaybackMediaSource {
+	if source.SupportsDirectPlay || source.SupportsDirectStream || compatHLSCopiesVideo(source) ||
+		!compatDVStripCandidate(source.Version) {
+		return source
+	}
+	// Direct play would hand the client the original Dolby Vision bytes, so
+	// evaluate the base layer only as a copy remux.
+	req.EnableDirectPlay = boolPtr(false)
+	stripped := h.buildPlaybackSource(routeItemID, playSessionID, compatHDR10BaseVersion(source.Version), profile, req, allow4KTranscode)
+	if !stripped.HLSRemux || !h.compatDVStripExecutable(ctx, source.Version) {
+		return source
+	}
+	// The negotiated source still names the original file: MediaStreams keep
+	// describing its Dolby Vision video, as Jellyfin does for a transcode.
+	stripped.Version = source.Version
+	stripped.ETag = source.ETag
+	stripped.SupportsDirectPlay = false
+	stripped.SupportsDirectStream = false
+	stripped.DOVIVariant = false
+	stripped.DVStripToHDR10 = true
+	return stripped
+}
+
+// compatDVStripExecutable reports whether this file's RPUs can be stripped and
+// whether a route the playback policy allows has an executor with the
+// dovi_rpu filter: the API host's FFmpeg or a pooled transcode node that
+// advertises server_dv7_to_hdr10.
+func (h *PlaybackHandler) compatDVStripExecutable(ctx context.Context, version catalog.FileVersion) bool {
+	if !h.compatDVRPUStrippable(ctx, version.FilePath) {
+		return false
+	}
+	compiled, err := noderouting.Candidates(noderouting.Request{
+		Workload: noderouting.WorkloadRemux, Delivery: noderouting.DeliveryHLSRemux,
+		Policy: h.playbackRoutingPolicy(), ProxyAllowed: h.JWTSecret != "",
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "compile Jellyfin-compatible Dolby Vision strip routes", "component", "jellycompat", "error", err)
+		return false
+	}
+	nodesChecked := false
+	for _, shape := range compiled.Candidates {
+		switch shape.Execution {
+		case noderouting.ExecutionAPI:
+			if h.compatDVStripLocalAvailable() {
+				return true
+			}
+		case noderouting.ExecutionTranscode:
+			if nodesChecked {
+				continue
+			}
+			nodesChecked = true
+			if nodes, _ := h.compatDVStripNodeURLs(ctx); len(nodes) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (h *PlaybackHandler) compatDVRPUStrippable(ctx context.Context, filePath string) bool {
+	if h.compatDVRPUProbe != nil {
+		return h.compatDVRPUProbe(ctx, filePath)
+	}
+	return playback.DVRPUStrippable(ctx, h.FFmpegPath, filePath)
+}
+
+func (h *PlaybackHandler) compatDVStripLocalAvailable() bool {
+	if h.compatDVStripLocalProbe != nil {
+		return h.compatDVStripLocalProbe()
+	}
+	return playback.DoviRPUFilterAvailable(h.FFmpegPath)
+}
+
+// compatDVStripNodeURLs returns the pooled transcode nodes that advertise the
+// server_dv7_to_hdr10 recipe, the same capability the native planner requires.
+func (h *PlaybackHandler) compatDVStripNodeURLs(ctx context.Context) (map[string]struct{}, error) {
+	enumerator, ok := h.NodePlanner.(compatTranscodeNodeEnumerator)
+	if !ok {
+		return map[string]struct{}{}, nil
+	}
+	return h.compatNodeURLsSupporting(ctx, enumerator.TranscodeNodeURLs(), h.toneMapCapabilityTimeout(), compatSupportsDVStrip)
+}
+
+func compatSupportsDVStrip(transformations []playback.TransformationV3) bool {
+	for _, transformation := range transformations {
+		if strings.EqualFold(strings.TrimSpace(transformation.Name), playback.TransformationServerDV7HDR10V3) &&
+			strings.EqualFold(strings.TrimSpace(transformation.Executor), playback.ExecutorServerV3) &&
+			strings.TrimSpace(transformation.RecipeVersion) == compatDVStripRecipeVersion {
+			return true
+		}
+	}
+	return false
+}
+
+// compatDVStripRecipeVersion pins the server_dv7_to_hdr10 recipe jellycompat
+// runs, matching the version the native planner freezes into its plans.
+const compatDVStripRecipeVersion = "1"
+
+// compatDVStripRouting narrows HLS route selection for a strip remux to
+// executors that can run it: transcode nodes advertising the recipe, and the
+// API host only when its own FFmpeg has the dovi_rpu filter.
+func (h *PlaybackHandler) compatDVStripRouting(
+	ctx context.Context,
+	eligible func(*nodepool.Node) bool,
+	excludedShapes map[string]struct{},
+) (func(*nodepool.Node) bool, map[string]struct{}) {
+	capable, _ := h.compatDVStripNodeURLs(ctx)
+	baseEligible := eligible
+	eligible = func(node *nodepool.Node) bool {
+		if node == nil {
+			return false
+		}
+		if _, supported := capable[strings.TrimRight(node.URL, "/")]; !supported {
+			return false
+		}
+		return baseEligible == nil || baseEligible(node)
+	}
+	if !h.compatDVStripLocalAvailable() {
+		excluded := make(map[string]struct{}, len(excludedShapes)+1)
+		for id := range excludedShapes {
+			excluded[id] = struct{}{}
+		}
+		excluded[noderouting.ShapeHLSRemuxAPI] = struct{}{}
+		excludedShapes = excluded
+	}
+	return eligible, excludedShapes
+}
+
+// compatCopyVideoRecipe returns the sample entry and bitstream filter for a
+// copy-video HLS session: the HDR10 strip tags the base layer hvc1, and an
+// unstripped Dolby Vision copy keeps its dvh1 entry.
+func compatCopyVideoRecipe(source PlaybackMediaSource, dvProfile int) (sampleEntry, bitstreamFilter string) {
+	if source.DVStripToHDR10 {
+		return playback.VideoSampleEntryHVC1, playback.DV7ToHDR10BitstreamFilter
+	}
+	return playback.VideoSampleEntryForDVCopy(dvProfile), ""
+}

@@ -254,6 +254,17 @@ variant, listed before the `hvc1` fallback. MPEG-TS remuxes keep the single
 variant. Audio and subtitle streams carry `LocalizedLanguage`, and audio
 streams carry `LocalizedOriginal`, in English.
 
+When a client's `VideoRangeType` conditions reject a Dolby Vision stream with
+an HDR10 base layer (HEVC profile 7, or profile 8 with compatibility ID 1) but
+accept HDR10, `PlaybackInfo` offers an HLS remux that strips the Dolby Vision
+RPUs with FFmpeg's `dovi_rpu` filter, as Jellyfin does. The client receives the
+HDR10 base layer tagged `hvc1` with `VIDEO-RANGE=PQ`, without a re-encode or
+tone mapping. The strip runs only where the remux routing policy allows: on
+the API server when its FFmpeg has the filter (FFmpeg 7.1 or later), or on a
+transcode node that advertises `server_dv7_to_hdr10`. With no such executor,
+or when the file's RPUs cannot be parsed, negotiation falls back to a full
+encode, which needs tone mapping.
+
 Subtitle inventory preserves text and bitmap tracks. Selected embedded text or
 bitmap subtitles can burn through the existing local or remote full-encode
 path when that output is supported. Unsupported output combinations are not
