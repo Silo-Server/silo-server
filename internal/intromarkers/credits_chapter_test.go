@@ -33,6 +33,14 @@ func TestIsCreditsChapterTitle(t *testing.T) {
 		{"Mid Credits", false, false, "mid-credits scene"},
 		{"After Credits", false, false, "after-credits scene"},
 		{"Pre-credits", false, false, "pre-credits scene"},
+		{"Credits Scene", false, false, "a scene during the credits"},
+		{"End Credits Stinger", false, false, "a stinger in the credits"},
+		{"Credits Tag", false, false, "a tag scene"},
+		{"Outro: Bonus Scene", false, false, "a bonus scene"},
+		{"Credits + Bonus", false, false, "credits with bonus material"},
+		{"Ending Scene", false, false, "the story's ending scene"},
+		{"ED: Last Scene", true, true, "an anime ending song named like a scene"},
+		{"Credits: Tagline Studio", true, true, "a word only starting with tag"},
 		{"Credits End", false, false, "credits end marks where credits stop"},
 		{"Credits: End", false, false, "credits end with colon"},
 		{"Ed's Story", false, false, "a name, not ED"},
@@ -118,6 +126,13 @@ func TestDetectChapterCredits(t *testing.T) {
 				chapter("Credits", 1300, 1350), chapter("Credits", 1350, 1400),
 			},
 			duration: 1400, wantOK: true, wantStart: 1200, wantEnd: 1260,
+		},
+		{
+			name: "a credits scene after the credits keeps its chapter",
+			chapters: []models.MediaChapter{
+				chapter("Story", 0, 1300), chapter("End Credits", 1300, 1370), chapter("Credits Scene", 1370, 1400),
+			},
+			duration: 1400, wantOK: true, wantStart: 1300, wantEnd: 1370,
 		},
 		{
 			name:     "credits must start in the tail window",

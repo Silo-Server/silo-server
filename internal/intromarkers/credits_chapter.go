@@ -17,6 +17,11 @@ var (
 	// aroundCreditsPattern matches scenes placed around the credits, such as
 	// "Post-Credits Scene", which are story rather than credits.
 	aroundCreditsPattern = regexp.MustCompile(`(?i)\b(post|mid|after|pre)[\s-]*credits?\b`)
+	// creditsScenePattern matches a credits or ending title that names a
+	// scene, such as "Credits Scene", "End Credits Stinger", or "Ending
+	// Scene", which is story that plays with or after the credits. Anime
+	// "ED: …" titles are exempt, since their song names can hold these words.
+	creditsScenePattern = regexp.MustCompile(`(?i)\b(scenes?|stingers?|tags?|bonus)\b`)
 	// explicitEDChapterPattern matches anime ending chapters: "ED", "ED2",
 	// "ED: Title". It is case-sensitive so "Ed's Story" is not an ending.
 	explicitEDChapterPattern = regexp.MustCompile(`^ED(\d+)?([ :-].*)?$`)
@@ -85,10 +90,10 @@ func isCreditsChapterTitle(title string, isMovie bool) bool {
 		return false
 	}
 	if match := creditsChapterPattern.FindStringSubmatchIndex(title); match != nil {
-		return !creditsEndPattern.MatchString(title[match[5]:])
+		return !creditsEndPattern.MatchString(title[match[5]:]) && !creditsScenePattern.MatchString(title)
 	}
 	if explicitEDChapterPattern.MatchString(title) {
 		return true
 	}
-	return !isMovie && endingChapterPattern.MatchString(title)
+	return !isMovie && endingChapterPattern.MatchString(title) && !creditsScenePattern.MatchString(title)
 }
