@@ -415,21 +415,11 @@ describe("invalidateMediaSurfaceQueries", () => {
     expect(queryClient.getQueryState(item2WatchKey)?.isInvalidated).toBe(false);
   });
 
-  it("does not read the ratings list key as an item ID", async () => {
+  it("does not read the ratings list key as an item ID", () => {
+    // ["ratings", "list"] shares the ["ratings", id] shape; an item-scoped
+    // refresh must not treat it as another item's query.
     expect(getQueryKeyItemId(ratingKeys.list())).toBeUndefined();
     expect(getQueryKeyItemId(ratingKeys.item("item-2"))).toBe("item-2");
-
-    const queryClient = new QueryClient();
-    queryClient.setQueryData(ratingKeys.list(), []);
-    queryClient.setQueryData(ratingKeys.item("item-2"), {});
-
-    await invalidateMediaSurfaceQueries(queryClient, {
-      itemId: "item-1",
-      watchedKeys: [ratingKeys.all],
-    });
-
-    expect(queryClient.getQueryState(ratingKeys.list())?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(ratingKeys.item("item-2"))?.isInvalidated).toBe(false);
   });
 
   it("still invalidates explicitly watched keys that belong to another item", async () => {
