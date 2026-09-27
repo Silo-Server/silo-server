@@ -174,7 +174,6 @@ var intentTables = []struct {
 	{"user_audio_preferences", colSeriesID, []string{colUserID, colProfileID}},
 	{"user_subtitle_preferences", colSeriesID, []string{colUserID, colProfileID}},
 	{"user_series_playback_preferences", colSeriesID, []string{colUserID, colProfileID}},
-	{"user_dropped_series", colSeriesID, []string{colUserID, colProfileID}},
 }
 
 // movePairs moves ALL state rows for each (from,to) pair: the whole-item path
@@ -259,10 +258,47 @@ func movePairs(ctx context.Context, tx pgx.Tx, pairs []IDPair, report *Report) (
 		}
 		report.IntentMoved += movedRows
 	}
+	droppedMoved, err := moveDroppedSeriesPairs(ctx, tx, fromIDs, toIDs)
+	if err != nil {
+		return err
+	}
+	report.IntentMoved += droppedMoved
 	if err := moveRatingSyncPairs(ctx, tx, fromIDs, toIDs); err != nil {
 		return err
 	}
 	return moveDroppedSyncPairs(ctx, tx, fromIDs, toIDs)
+}
+
+// moveDroppedSeriesPairs moves profile drops to the destination series. When
+// the profile dropped both, the later drop wins: the earlier one may already
+// have ended through watching, and keeping it would bring the merged series
+// back.
+func moveDroppedSeriesPairs(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []string) (int, error) {
+	if _, err := tx.Exec(ctx, `
+		UPDATE user_dropped_series dest SET dropped_at = src.dropped_at
+		FROM `+pairsCTE+`, user_dropped_series src
+		WHERE src.series_id = p.from_id AND dest.series_id = p.to_id
+		  AND dest.user_id = src.user_id AND dest.profile_id = src.profile_id
+		  AND src.dropped_at > dest.dropped_at
+	`, fromIDs, toIDs); err != nil {
+		return 0, fmt.Errorf("reattribute: user_dropped_series merge: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM user_dropped_series src
+		USING `+pairsCTE+`, user_dropped_series dest
+		WHERE src.series_id = p.from_id AND dest.series_id = p.to_id
+		  AND dest.user_id = src.user_id AND dest.profile_id = src.profile_id
+	`, fromIDs, toIDs); err != nil {
+		return 0, fmt.Errorf("reattribute: user_dropped_series dedupe: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE user_dropped_series t SET series_id = p.to_id
+		FROM `+pairsCTE+` WHERE t.series_id = p.from_id
+	`, fromIDs, toIDs)
+	if err != nil {
+		return 0, fmt.Errorf("reattribute: user_dropped_series move: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 // moveDroppedSyncPairs moves watch-provider agreed drops along with the

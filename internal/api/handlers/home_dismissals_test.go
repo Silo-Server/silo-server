@@ -3,8 +3,16 @@ package handlers
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
+
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
@@ -162,5 +170,38 @@ func TestDismissWithoutDropStoreKeepsPerItemBehavior(t *testing.T) {
 	}
 	if len(store.upserted) != 1 {
 		t.Fatalf("upserted %+v, want one per-item dismissal", store.upserted)
+	}
+}
+
+func v1DismissalRequest(method, surface, itemID, body string) *http.Request {
+	req := httptest.NewRequest(method, "/api/v1/home/dismissals/"+surface+"/"+itemID, strings.NewReader(body))
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("surface", surface)
+	routeCtx.URLParams.Add("item_id", itemID)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+	ctx = apimw.SetClaims(ctx, &auth.Claims{UserID: 1})
+	ctx = apimw.SetProfileID(ctx, "p")
+	return req.WithContext(ctx)
+}
+
+func TestV1DismissalRoutesKeepPerCardDismissals(t *testing.T) {
+	h, store, drops, dispatcher := newDismissalTestHandler()
+
+	rec := httptest.NewRecorder()
+	h.HandleUpsertDismissal(rec, v1DismissalRequest(http.MethodPut, userstore.HomeSurfaceNextUp, "episode-1", `{"series_id":"series-1"}`))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("PUT status = %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	h.HandleDeleteDismissal(rec, v1DismissalRequest(http.MethodDelete, userstore.HomeSurfaceNextUp, "episode-1", ""))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if len(store.upserted) != 1 || store.upserted[0].MediaItemID != "episode-1" {
+		t.Fatalf("upserted %+v, want a per-card dismissal of episode-1", store.upserted)
+	}
+	if len(drops.dropped)+len(drops.undropped) != 0 || len(dispatcher.events) != 0 {
+		t.Fatalf("v1 dropped %v, undropped %v, dispatched %v; want none", drops.dropped, drops.undropped, dispatcher.events)
 	}
 }

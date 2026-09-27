@@ -146,6 +146,15 @@ func (r *DroppedSeriesRepo) pruneEnded(ctx context.Context, userID int, profileI
 	return nil
 }
 
+// PurgeProfile deletes a deleted profile's drops. The table has no profile
+// foreign key because profiles may live in the SQLite user store.
+func (r *DroppedSeriesRepo) PurgeProfile(ctx context.Context, userID int, profileID string) error {
+	if _, err := r.pool.Exec(ctx, `DELETE FROM user_dropped_series WHERE user_id = $1 AND profile_id = $2`, userID, profileID); err != nil {
+		return fmt.Errorf("purging profile drops: %w", err)
+	}
+	return nil
+}
+
 // ActiveSeriesIDs returns the series whose drop is active for a profile.
 func (r *DroppedSeriesRepo) ActiveSeriesIDs(ctx context.Context, userID int, profileID string) ([]string, error) {
 	return activeDroppedSeriesIDs(ctx, r.pool, userID, profileID)

@@ -17,8 +17,9 @@ watch sync removes it.
 The rule reads `user_watch_progress` in PostgreSQL, so on deployments that keep watch
 state in the SQLite user store a drop never ends by watching; it ends only when undone.
 
-A Home dismissal (`PUT /api/v2/home/dismissals/{surface}/{item_id}`, and the v1 route
-behind the same handler) of an episode or a series drops the series, from either surface.
+A v2 Home dismissal (`PUT /api/v2/home/dismissals/{surface}/{item_id}`) of an episode or
+a series drops the series, from either surface. The frozen v1 route keeps per-card
+dismissals.
 Undoing the dismissal (`DELETE` on the same path) undrops it. Movies, audiobooks, and
 ebooks keep per-item dismissals. Dismissing again refreshes `dropped_at`, which re-drops a
 series the profile watched since.
@@ -82,5 +83,6 @@ undrop a show that is watched.
   time, so an imported Simkl drop is stamped with the sync time.
 
 Maintenance keeps both tables with their series: orphan cleanup treats them as
-references, and catalog merges and splits move them, with a moved agreed row reset to
-unconfirmed.
+references, and catalog merges and splits move them. When a profile dropped both series
+of a merge, the later drop wins, and a moved agreed row is reset to unconfirmed. Deleting
+a profile deletes its drops on either user store backend.

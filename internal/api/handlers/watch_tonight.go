@@ -290,6 +290,9 @@ func (h *RecommendationsHandler) liveContinueWatchingProgress(ctx context.Contex
 		return nil, nil
 	}
 	var kept []userstore.WatchProgress
+	// Offset pages over a live, updated_at-ordered source can repeat a row
+	// that a concurrent write or a timestamp tie moved across a boundary.
+	seen := make(map[string]struct{}, limit)
 	for page := 0; page < watchTonightProgressMaxPages && len(kept) < limit; page++ {
 		entries, err := store.ListProgress(ctx, profileID, "in_progress", limit, page*limit)
 		if err != nil {
@@ -304,7 +307,13 @@ func (h *RecommendationsHandler) liveContinueWatchingProgress(ctx context.Contex
 				entries = filtered
 			}
 		}
-		kept = append(kept, entries...)
+		for _, entry := range entries {
+			if _, dup := seen[entry.MediaItemID]; dup {
+				continue
+			}
+			seen[entry.MediaItemID] = struct{}{}
+			kept = append(kept, entry)
+		}
 		if raw < limit {
 			break
 		}

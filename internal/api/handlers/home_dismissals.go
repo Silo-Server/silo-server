@@ -105,7 +105,8 @@ func (h *HomeDismissalHandler) HandleUpsertDismissal(w http.ResponseWriter, r *h
 		return
 	}
 
-	if err := h.DismissHomeItem(r.Context(), HomeDismissalCommand{
+	// The frozen v1 contract keeps per-card dismissals; only v2 drops shows.
+	if err := h.dismissHomeItem(r.Context(), false, HomeDismissalCommand{
 		UserID: userID, ProfileID: profileID, Surface: surface, ItemID: itemID,
 		SeriesID: req.SeriesID, ProgressUpdatedAt: req.ProgressUpdatedAt,
 	}); err != nil {
@@ -124,10 +125,14 @@ func (h *HomeDismissalHandler) HandleUpsertDismissal(w http.ResponseWriter, r *h
 // the profile watches it again or undoes the dismissal, and the drop is sent
 // to the profile's watch providers.
 func (h *HomeDismissalHandler) DismissHomeItem(ctx context.Context, cmd HomeDismissalCommand) error {
+	return h.dismissHomeItem(ctx, true, cmd)
+}
+
+func (h *HomeDismissalHandler) dismissHomeItem(ctx context.Context, dropSeries bool, cmd HomeDismissalCommand) error {
 	if err := cmd.validate(); err != nil {
 		return err
 	}
-	seriesID, drop, err := h.dropSeriesFor(ctx, cmd.ItemID)
+	seriesID, drop, err := h.dropSeriesFor(ctx, dropSeries, cmd.ItemID)
 	if err != nil {
 		return err
 	}
@@ -180,7 +185,7 @@ func (h *HomeDismissalHandler) HandleDeleteDismissal(w http.ResponseWriter, r *h
 		return
 	}
 
-	if err := h.UndismissHomeItem(r.Context(), userID, profileID, surface, itemID); err != nil {
+	if err := h.undismissHomeItem(r.Context(), false, userID, profileID, surface, itemID); err != nil {
 		writeAPIError(w, err)
 		return
 	}
@@ -192,7 +197,11 @@ func (h *HomeDismissalHandler) HandleDeleteDismissal(w http.ResponseWriter, r *h
 // user-state event. Removing an absent dismissal succeeds. For an episode or a
 // series it also undrops the series.
 func (h *HomeDismissalHandler) UndismissHomeItem(ctx context.Context, userID int, profileID, surface, itemID string) error {
-	seriesID, drop, err := h.dropSeriesFor(ctx, itemID)
+	return h.undismissHomeItem(ctx, true, userID, profileID, surface, itemID)
+}
+
+func (h *HomeDismissalHandler) undismissHomeItem(ctx context.Context, dropSeries bool, userID int, profileID, surface, itemID string) error {
+	seriesID, drop, err := h.dropSeriesFor(ctx, dropSeries, itemID)
 	if err != nil {
 		return err
 	}
@@ -217,8 +226,9 @@ func (h *HomeDismissalHandler) UndismissHomeItem(ctx context.Context, userID int
 }
 
 // dropSeriesFor returns the series a dismissal of itemID drops, if any.
-func (h *HomeDismissalHandler) dropSeriesFor(ctx context.Context, itemID string) (string, bool, error) {
-	if h.seriesDrops == nil {
+// dropSeries is false on the frozen v1 routes, which keep per-card dismissals.
+func (h *HomeDismissalHandler) dropSeriesFor(ctx context.Context, dropSeries bool, itemID string) (string, bool, error) {
+	if !dropSeries || h.seriesDrops == nil {
 		return "", false, nil
 	}
 	seriesID, ok, err := h.seriesDrops.ResolveDropSeries(ctx, itemID)

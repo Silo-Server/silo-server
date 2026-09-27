@@ -268,3 +268,23 @@ func TestDroppedSeriesDropPrunesEndedDrops(t *testing.T) {
 		t.Fatalf("rows = %+v, want the ended drops pruned", rows)
 	}
 }
+
+func TestDroppedSeriesPurgeProfile(t *testing.T) {
+	f := seedDroppedSeries(t)
+	ctx := t.Context()
+	for _, profile := range []string{f.profile, f.profile + "-other"} {
+		if err := f.repo.Drop(ctx, f.userID, profile, f.seriesA); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.repo.PurgeProfile(ctx, f.userID, f.profile); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.active(t); len(got) != 0 {
+		t.Fatalf("purged profile still has drops %v", got)
+	}
+	other, err := f.repo.ActiveSeriesIDs(ctx, f.userID, f.profile+"-other")
+	if err != nil || len(other) != 1 {
+		t.Fatalf("other profile drops = %v (%v), want its own kept", other, err)
+	}
+}

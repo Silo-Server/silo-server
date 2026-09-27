@@ -992,6 +992,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		profileHandler = handlers.NewProfileHandler(deps.UserStoreProvider)
 		profileHandler.UserRepo = userRepo
 		profileHandler.EventsHub = deps.EventsHub
+		if deps.DB != nil {
+			// Drops live in Postgres whichever store holds the profile.
+			profileHandler.DroppedSeriesPurger = catalog.NewDroppedSeriesRepo(deps.DB)
+		}
 		profileHandler.ProfileTokens = profileTokenService
 		// Private S3 preserves existing avatar keys and presigned delivery. Local
 		// avatars use the signed artwork endpoint. Never use public S3 here.
