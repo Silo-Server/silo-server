@@ -322,7 +322,7 @@ func TestCompatDVStripDecisionsNeverWaitOnNodes(t *testing.T) {
 		compatDVStripLocalProbe: func() bool { return false },
 	}
 
-	if !handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}) {
+	if !handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}, false) {
 		t.Fatal("strip not executable although a pooled node's stored report advertises it")
 	}
 	eligible, _ := handler.compatDVStripRouting(nil, nil)
@@ -337,7 +337,41 @@ func TestCompatDVStripDecisionsNeverWaitOnNodes(t *testing.T) {
 		compatToneMapInventoryPlanner: compatToneMapInventoryPlanner{urls: []string{"http://legacy:8080"}},
 		nodes:                         map[string]*nodepool.Node{"http://legacy:8080": dvStripNode(t, "http://legacy:8080")},
 	}
-	if handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}) {
+	if handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}, false) {
 		t.Fatal("strip executable with neither a local filter nor a capable node")
+	}
+}
+
+func TestCompatDVStripRequiresAudioBoostOnTheSameNode(t *testing.T) {
+	audioBoost := playback.TransformationV3{
+		Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3,
+		RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
+	}
+	stripOnly := dvStripNode(t, "http://strip:8080", dvStripTransformation)
+	audioOnly := dvStripNode(t, "http://audio:8080", audioBoost)
+	handler := &PlaybackHandler{
+		NodePlanner: dvStripNodePlanner{
+			compatToneMapInventoryPlanner: compatToneMapInventoryPlanner{urls: []string{stripOnly.URL, audioOnly.URL}},
+			nodes:                         map[string]*nodepool.Node{stripOnly.URL: stripOnly, audioOnly.URL: audioOnly},
+		},
+		compatDVRPUProbe:        func(context.Context, string) bool { return true },
+		compatDVStripLocalProbe: func() bool { return false },
+	}
+	version := catalog.FileVersion{FilePath: "/media/movie.mkv"}
+
+	if !handler.compatDVStripExecutable(context.Background(), version, false) {
+		t.Fatal("strip with copied audio should use the strip-capable node")
+	}
+	if handler.compatDVStripExecutable(context.Background(), version, true) {
+		t.Fatal("strip with a surround downmix needs one node with both recipes")
+	}
+
+	both := dvStripNode(t, "http://both:8080", dvStripTransformation, audioBoost)
+	handler.NodePlanner = dvStripNodePlanner{
+		compatToneMapInventoryPlanner: compatToneMapInventoryPlanner{urls: []string{both.URL}},
+		nodes:                         map[string]*nodepool.Node{both.URL: both},
+	}
+	if !handler.compatDVStripExecutable(context.Background(), version, true) {
+		t.Fatal("a node with both recipes should carry a downmixing strip")
 	}
 }

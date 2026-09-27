@@ -83,7 +83,13 @@ func (h *PlaybackHandler) applyCompatDVStrip(
 	// evaluate the base layer only as a copy remux.
 	req.EnableDirectPlay = boolPtr(false)
 	stripped := h.buildPlaybackSource(routeItemID, playSessionID, compatHDR10BaseVersion(source.Version), profile, req, allow4KTranscode)
-	if !stripped.HLSRemux || !h.compatDVStripExecutable(ctx, source.Version) {
+	if !stripped.HLSRemux {
+		return source
+	}
+	// A surround-to-stereo AAC remux also needs audio_to_aac v2, and route
+	// selection requires both recipes on one executor.
+	requiresAudioBoost := compatHLSRecipeSourceAudioChannels(stripped) > 2
+	if !h.compatDVStripExecutable(ctx, source.Version, requiresAudioBoost) {
 		return source
 	}
 	// The negotiated source still names the original file: MediaStreams keep
@@ -103,7 +109,7 @@ func (h *PlaybackHandler) applyCompatDVStrip(
 // stored capability report advertises server_dv7_to_hdr10. Negotiation reads
 // stored reports rather than asking nodes, so an unresponsive node cannot
 // stall PlaybackInfo.
-func (h *PlaybackHandler) compatDVStripExecutable(ctx context.Context, version catalog.FileVersion) bool {
+func (h *PlaybackHandler) compatDVStripExecutable(ctx context.Context, version catalog.FileVersion, requiresAudioBoost bool) bool {
 	if !h.compatDVRPUStrippable(ctx, version.FilePath) {
 		return false
 	}
@@ -127,7 +133,7 @@ func (h *PlaybackHandler) compatDVStripExecutable(ctx context.Context, version c
 	if apiAllowed && h.compatDVStripLocalAvailable() {
 		return true
 	}
-	return transcodeAllowed && h.compatAnyTranscodeNodeCanStrip()
+	return transcodeAllowed && h.compatAnyTranscodeNodeCanStrip(requiresAudioBoost)
 }
 
 func (h *PlaybackHandler) compatDVRPUStrippable(ctx context.Context, filePath string) bool {
@@ -145,15 +151,21 @@ func (h *PlaybackHandler) compatDVStripLocalAvailable() bool {
 }
 
 // compatAnyTranscodeNodeCanStrip reports whether a pooled transcode node's
-// stored capability report advertises the strip recipe.
-func (h *PlaybackHandler) compatAnyTranscodeNodeCanStrip() bool {
+// stored capability report advertises the strip recipe, and audio_to_aac v2
+// too when the remux downmixes surround audio.
+func (h *PlaybackHandler) compatAnyTranscodeNodeCanStrip(requiresAudioBoost bool) bool {
 	enumerator, canList := h.NodePlanner.(compatTranscodeNodeEnumerator)
 	lookup, canLookup := h.NodePlanner.(compatTranscodeNodeLookup)
 	if !canList || !canLookup {
 		return false
 	}
 	for _, nodeURL := range enumerator.TranscodeNodeURLs() {
-		if node, ok := lookup.TranscodeNodeByURL(nodeURL); ok && compatNodeCanStrip(node) {
+		node, ok := lookup.TranscodeNodeByURL(nodeURL)
+		if !ok {
+			continue
+		}
+		if info, ok := compatNodeReport(node); ok && compatSupportsDVStrip(info.Transformations) &&
+			(!requiresAudioBoost || compatSupportsAudioBoost(info.Transformations)) {
 			return true
 		}
 	}
@@ -164,15 +176,18 @@ func (h *PlaybackHandler) compatAnyTranscodeNodeCanStrip() bool {
 // sweep refetches whenever the node's reported hash changes. The remote start
 // confirms the recipe against the node's live report before dispatching.
 func compatNodeCanStrip(node *nodepool.Node) bool {
-	raw := node.StoredCapabilities()
-	if len(raw) == 0 {
-		return false
-	}
+	info, ok := compatNodeReport(node)
+	return ok && compatSupportsDVStrip(info.Transformations)
+}
+
+// compatNodeReport decodes a node's stored capability report.
+func compatNodeReport(node *nodepool.Node) (playback.HWAccelInfo, bool) {
 	var info playback.HWAccelInfo
-	if err := json.Unmarshal(raw, &info); err != nil {
-		return false
+	raw := node.StoredCapabilities()
+	if len(raw) == 0 || json.Unmarshal(raw, &info) != nil {
+		return playback.HWAccelInfo{}, false
 	}
-	return compatSupportsDVStrip(info.Transformations)
+	return info, true
 }
 
 func compatSupportsDVStrip(transformations []playback.TransformationV3) bool {
