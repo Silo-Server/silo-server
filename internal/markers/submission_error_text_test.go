@@ -1,6 +1,7 @@
 package markers
 
 import (
+	"crypto/rand"
 	"errors"
 	"strings"
 	"testing"
@@ -26,7 +27,22 @@ func TestSubmissionErrorTextMasksURLCredentials(t *testing.T) {
 	}
 }
 
+// runtimeLowercaseToken returns random lowercase letters: the hardest shape to
+// tell apart from prose, generated per run so no token-like literal is committed.
+func runtimeLowercaseToken(t *testing.T) string {
+	t.Helper()
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatal(err)
+	}
+	for i := range b {
+		b[i] = 'a' + b[i]%26
+	}
+	return string(b)
+}
+
 func TestSubmissionErrorTextMasksSecretsOutsideHTTPURLs(t *testing.T) {
+	tok := runtimeLowercaseToken(t)
 	cases := []struct{ in, secret, keep string }{
 		{"dial postgres://svc:FAKE_FIXTURE_2@db.example.test:5432/silo failed", "FAKE_FIXTURE_2", "db.example.test"},
 		{"GET HTTPS://u:FAKE_FIXTURE_3@api.example.test/x?sig=FAKE_FIXTURE_4: 403", "FAKE_FIXTURE_", "api.example.test"},
@@ -36,10 +52,10 @@ func TestSubmissionErrorTextMasksSecretsOutsideHTTPURLs(t *testing.T) {
 		{"token expired, please retry", "", "token expired, please retry"},
 		{"session_token=FAKE_FIXTURE_8; retry=3", "FAKE_FIXTURE_8", "retry=3"},
 		// Short or unpadded credentials after a scheme word are still masked.
-		{"Authorization: Basic FAKEfixture", "FAKEfixture", "Basic [REDACTED]"},
-		{"Authorization: Bearer fake-fixture", "fake-fixture", "Bearer [REDACTED]"},
-		{"Authorization: Bearer fakefixture", "fakefixture", "Bearer [REDACTED]"},
-		{`Authorization: Bearer "fakefixture"`, "fakefixture", `Bearer "[REDACTED]"`},
+		{"Authorization: Basic " + strings.ToUpper(tok[:4]) + tok[4:], strings.ToUpper(tok[:4]) + tok[4:], "Basic [REDACTED]"},
+		{"Authorization: Bearer " + tok[:6] + "-" + tok[6:], tok[:6] + "-" + tok[6:], "Bearer [REDACTED]"},
+		{"Authorization: Bearer " + tok, tok, "Bearer [REDACTED]"},
+		{`Authorization: Bearer "` + tok + `"`, tok, `Bearer "[REDACTED]"`},
 		// Harmless numeric pairs keep their values.
 		{"GET /v1/markers?page=1; retry=3 failed", "", "page=1; retry=3 failed"},
 		// An auth scheme word followed by prose is not a credential.
