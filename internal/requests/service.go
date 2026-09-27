@@ -702,7 +702,7 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 	if err := s.ensureCreateAllowedByCeiling(ctx, viewer, normalized); err != nil {
 		return nil, err
 	}
-	tvdbLookupFailed := s.enrichExternalIDs(ctx, &normalized, false)
+	tvdbLookupFailed := s.enrichExternalIDs(ctx, &normalized)
 	isAnime := s.detectRequestAnime(ctx, normalized.MediaType, normalized.TMDBID)
 
 	matches, err := s.lookupPresence(ctx, normalized.MediaType, []PresenceCandidate{createPresenceCandidate(normalized)})
@@ -1656,11 +1656,10 @@ func (s *Service) lookupAvailable(ctx context.Context, mediaType MediaType, ids 
 }
 
 // enrichExternalIDs fills missing IMDb and TVDB IDs from TMDB and, for a
-// series still without a TVDB ID, from the metadata providers. refresh skips
-// the TMDB client's cache, so an ID added on TMDB since the last lookup is
-// seen. It reports whether a series is left without a TVDB ID because a lookup
-// (TMDB or a metadata provider) failed, rather than because none exists.
-func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInput, refresh bool) (tvdbLookupFailed bool) {
+// series still without a TVDB ID, from the metadata providers. It reports
+// whether a series is left without a TVDB ID because a lookup (TMDB or a
+// metadata provider) failed, rather than because none exists.
+func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInput) (tvdbLookupFailed bool) {
 	if input == nil {
 		return false
 	}
@@ -1670,11 +1669,13 @@ func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInp
 	// match found by it can't always be checked against the TMDB ID.
 	lookupIMDbID := ""
 	if client, ok := s.tmdb.(TMDBExternalIDClient); ok {
-		getExternalIDs := client.GetExternalIDs
-		if refresher, ok := s.tmdb.(TMDBExternalIDRefresher); ok && refresh {
-			getExternalIDs = refresher.RefreshExternalIDs
+		externalIDs, err := client.GetExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID)
+		// A cached answer without a TVDB ID may predate the admin adding one
+		// on TMDB (the failure message asks them to), so ask TMDB again.
+		if refresher, ok := s.tmdb.(TMDBExternalIDRefresher); ok && input.MediaType == MediaTypeSeries &&
+			input.TVDBID == nil && err == nil && (externalIDs == nil || externalIDs.TVDBID <= 0) {
+			externalIDs, err = refresher.RefreshExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID)
 		}
-		externalIDs, err := getExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID)
 		tmdbFailed = err != nil
 		if err == nil && externalIDs != nil {
 			lookupIMDbID = strings.TrimSpace(externalIDs.IMDbID)
@@ -1711,16 +1712,19 @@ func (s *Service) ensureSeriesTVDBID(ctx context.Context, req *Request) error {
 		return nil
 	}
 	input := CreateRequestInput{MediaType: req.MediaType, TMDBID: req.TMDBID, IMDbID: strings.TrimSpace(req.IMDbID)}
-	req.tvdbLookupFailed = s.enrichExternalIDs(ctx, &input, true)
+	req.tvdbLookupFailed = s.enrichExternalIDs(ctx, &input)
 	if input.TVDBID == nil {
 		return nil
 	}
 	// Save before submitting: a backend that accepted the series under an ID
 	// the request row doesn't carry would leave the two out of step.
-	if err := s.store.SetExternalIDs(ctx, req.ID, *input.TVDBID, input.IMDbID); err != nil {
+	// Submit the ID the row holds: a concurrent submission may have saved a
+	// different one first, and SetExternalIDs keeps it.
+	saved, err := s.store.SetExternalIDs(ctx, req.ID, *input.TVDBID, input.IMDbID)
+	if err != nil {
 		return err
 	}
-	req.TVDBID = input.TVDBID
+	req.TVDBID = &saved
 	if req.IMDbID == "" {
 		req.IMDbID = input.IMDbID
 	}

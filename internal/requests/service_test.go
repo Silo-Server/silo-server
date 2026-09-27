@@ -494,6 +494,52 @@ func TestRetryRefreshesTMDBExternalIDs(t *testing.T) {
 	}
 }
 
+func TestCreateRequestRefreshesCachedTMDBMiss(t *testing.T) {
+	store := newFakeStore()
+	client := &refreshingTMDBClient{
+		fakeTMDBClient: &fakeTMDBClient{externalIDs: &tmdb.ExternalIDs{}},
+		fresh:          &tmdb.ExternalIDs{TVDBID: 456789},
+	}
+	service := NewService(store, client, &fakePresence{})
+	service.SetUserRepository(requestUserRepo{})
+
+	if _, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeSeries, TMDBID: 240001, Title: "Regional Series",
+	}); err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if got := store.created[0].Input.TVDBID; got == nil || *got != 456789 {
+		t.Fatalf("tvdb_id = %v, want the refreshed 456789", got)
+	}
+}
+
+func TestRetrySubmitsTheSavedTVDBID(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	// A concurrent submission already saved a TVDB ID after this one loaded
+	// the request without it.
+	saved := 111
+	store.requests["req-1"] = &Request{
+		ID: "req-1", MediaType: MediaTypeSeries, TMDBID: 240001,
+		Status: StatusQueued, Outcome: OutcomeFailed,
+	}
+	service := newTestService(store)
+	router := &fakeRouterProvider{}
+	service.SetRouterProvider(router)
+	service.SetTVDBIDResolver(&fakeTVDBResolver{tvdbID: 456789})
+	req := *store.requests["req-1"]
+	req.Status = StatusApproved
+	req.Outcome = OutcomeActive
+	store.requests["req-1"].TVDBID = &saved
+
+	if _, err := service.submitApprovedRequest(context.Background(), req, Viewer{UserID: 1, IsAdmin: true}, nil); err != nil {
+		t.Fatalf("submitApprovedRequest returned error: %v", err)
+	}
+	if router.gotTVDBID == nil || *router.gotTVDBID != saved {
+		t.Fatalf("router got tvdb_id %v, want the saved %d", router.gotTVDBID, saved)
+	}
+}
+
 func TestCreateRequestSkipsTVDBResolverWhenTMDBHasTVDBID(t *testing.T) {
 	store := newFakeStore()
 	service := newTestServiceWithTMDB(store, &fakeTMDBClient{externalIDs: &tmdb.ExternalIDs{TVDBID: 12345}})
@@ -657,13 +703,13 @@ func TestTMDBFailureCountsAsFailedTVDBLookup(t *testing.T) {
 	service.SetTVDBIDResolver(&fakeTVDBResolver{})
 
 	input := CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 240001}
-	if !service.enrichExternalIDs(context.Background(), &input, false) {
+	if !service.enrichExternalIDs(context.Background(), &input) {
 		t.Fatalf("enrichExternalIDs reported a confirmed miss, want a failed lookup when TMDB errored")
 	}
 	resolved := &fakeTVDBResolver{tvdbID: 456789}
 	service.SetTVDBIDResolver(resolved)
 	input = CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 240001}
-	if service.enrichExternalIDs(context.Background(), &input, false) {
+	if service.enrichExternalIDs(context.Background(), &input) {
 		t.Fatalf("enrichExternalIDs reported a failure although the providers resolved the ID")
 	}
 }
@@ -2002,15 +2048,15 @@ func (f *fakeStore) ListFulfilledUnnotified(context.Context, int) ([]*Request, e
 	return out, nil
 }
 
-func (f *fakeStore) SetExternalIDs(_ context.Context, id string, tvdbID int, imdbID string) error {
+func (f *fakeStore) SetExternalIDs(_ context.Context, id string, tvdbID int, imdbID string) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.setExternalIDsErr != nil {
-		return f.setExternalIDsErr
+		return 0, f.setExternalIDsErr
 	}
 	req := f.requests[id]
 	if req == nil {
-		return ErrNotFound
+		return 0, ErrNotFound
 	}
 	if req.TVDBID == nil || *req.TVDBID <= 0 {
 		v := tvdbID
@@ -2019,7 +2065,7 @@ func (f *fakeStore) SetExternalIDs(_ context.Context, id string, tvdbID int, imd
 	if req.IMDbID == "" {
 		req.IMDbID = imdbID
 	}
-	return nil
+	return *req.TVDBID, nil
 }
 
 func (f *fakeStore) MarkFulfilledNotified(_ context.Context, id string) error {
