@@ -258,6 +258,18 @@ func (a *Analyzer) Preflight(ctx context.Context) error {
 // Run analyzes every library with marker detection enabled: episodes for
 // intros and credits, then movies for credits within the movie budget.
 func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, error) {
+	return a.run(ctx, progress, true)
+}
+
+// RunEpisodes analyzes the episodes of every library with marker detection
+// enabled, as Run does, and leaves movies alone. A server without
+// Chromaprint runs it outside the cluster lock, so the movie pass, which
+// does not need Chromaprint, stays with the lock holder.
+func (a *Analyzer) RunEpisodes(ctx context.Context, progress ProgressFunc) (RunSummary, error) {
+	return a.run(ctx, progress, false)
+}
+
+func (a *Analyzer) run(ctx context.Context, progress ProgressFunc, movies bool) (RunSummary, error) {
 	report := func(percent float64, message string) {
 		if progress != nil {
 			progress(percent, message)
@@ -273,6 +285,12 @@ func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, 
 	if libraries == 0 {
 		report(100, "No libraries with marker detection enabled")
 		return summary, nil
+	}
+
+	if !movies {
+		episodeSummary, err := a.runEpisodes(ctx, report)
+		mergeRunSummary(&summary, episodeSummary)
+		return summary, err
 	}
 
 	// Episodes take the first 85 percent of the progress bar, movies the rest.

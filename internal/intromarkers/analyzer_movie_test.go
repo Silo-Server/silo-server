@@ -174,6 +174,20 @@ func TestAnalyzeMovieStoresTheTailOnlyOnceCreditsAreSettled(t *testing.T) {
 	}
 }
 
+// RunEpisodes, the pass a server without Chromaprint runs outside the
+// cluster lock, leaves movies to the lock holder's Run.
+func TestRunEpisodesLeavesMovies(t *testing.T) {
+	repo := &fakeIntroRepository{enabledLibraries: 1, movieCandidates: []Candidate{movieCandidate(10, 7200)}}
+	sampler := &fakeMovieSampler{}
+	summary, err := movieAnalyzer(repo, sampler).RunEpisodes(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RunEpisodes: %v", err)
+	}
+	if summary.MoviesConsidered != 0 || sampler.tailCount() != 0 || len(creditsPatches(repo)) != 0 {
+		t.Fatalf("summary %+v, %d tail passes, patches %+v; want movies untouched", summary, sampler.tailCount(), creditsPatches(repo))
+	}
+}
+
 func TestAnalyzeMoviePrefersChapters(t *testing.T) {
 	movie := movieCandidate(10, 7200)
 	movie.Chapters = []models.MediaChapter{

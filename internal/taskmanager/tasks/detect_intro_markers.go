@@ -21,7 +21,10 @@ type MarkerSettingsReader interface {
 type markerAnalysisRunner interface {
 	// Preflight reports what this server lacks to compare season groups.
 	Preflight(ctx context.Context) error
+	// Run analyzes episodes, then movies.
 	Run(ctx context.Context, progress intromarkers.ProgressFunc) (intromarkers.RunSummary, error)
+	// RunEpisodes analyzes episodes only.
+	RunEpisodes(ctx context.Context, progress intromarkers.ProgressFunc) (intromarkers.RunSummary, error)
 }
 
 // detectMarkersAdvisoryLock spells "SILOMRKR".
@@ -31,9 +34,10 @@ const detectMarkersAdvisoryLock int64 = 0x53494C4F4D524B52
 // process runs the task manager, so an advisory lock keeps one analysis pass
 // running across the cluster; the other servers skip their run instead of
 // repeating the same ffmpeg work. A server whose ffmpeg cannot fingerprint
-// runs its chapter-only pass without the lock, so it never makes a capable
-// server skip. Playback-time and per-item analysis do not go through this
-// task and are not serialized by it.
+// runs its chapter-only episode pass without the lock, so it never makes a
+// capable server skip, and leaves movies to the lock holder. Playback-time
+// and per-item analysis do not go through this task and are not serialized
+// by it.
 type DetectIntroMarkersTask struct {
 	analyzer markerAnalysisRunner
 	settings MarkerSettingsReader
@@ -95,14 +99,15 @@ func (t *DetectIntroMarkersTask) Execute(ctx context.Context, progress taskmanag
 		progress.Report(100, fmt.Sprintf("Marker population skipped; mode is %s", mode))
 		return nil
 	}
-	lock := t.lock
+	lock, run := t.lock, t.analyzer.Run
 	if err := t.analyzer.Preflight(ctx); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
 		// This server can only read chapters. Leave the lock to a server that
-		// can also compare season groups.
-		lock = nil
+		// can also compare season groups, and the movie pass, which the lock
+		// keeps to one server, to the lock holder.
+		lock, run = nil, t.analyzer.RunEpisodes
 	}
 	if lock != nil {
 		release, acquired, err := lock.TryAcquire(ctx)
@@ -121,7 +126,7 @@ func (t *DetectIntroMarkersTask) Execute(ctx context.Context, progress taskmanag
 		defer release()
 	}
 
-	summary, err := t.analyzer.Run(ctx, func(percent float64, message string) {
+	summary, err := run(ctx, func(percent float64, message string) {
 		progress.Report(percent, message)
 	})
 	if data, marshalErr := json.Marshal(summary); marshalErr == nil {
