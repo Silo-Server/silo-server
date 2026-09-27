@@ -31,6 +31,8 @@ type fakeIntroRepository struct {
 	// seasonStateHash, when set, is the only analysis hash seasonState
 	// answers for.
 	seasonStateHash string
+	// patchErr, when set, fails the patches it returns an error for.
+	patchErr func(MarkerPatch) error
 }
 
 func (f *fakeIntroRepository) CountEnabledLibraries(context.Context) (int, error) {
@@ -89,6 +91,11 @@ func (f *fakeIntroRepository) UpsertSilenceRefinementAttempt(_ context.Context, 
 func (f *fakeIntroRepository) PatchMarker(_ context.Context, patch MarkerPatch) (bool, error) {
 	if _, err := patch.markerUpdate(); err != nil {
 		return false, err
+	}
+	if f.patchErr != nil {
+		if err := f.patchErr(patch); err != nil {
+			return false, err
+		}
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()

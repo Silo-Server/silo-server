@@ -87,10 +87,12 @@ end within 15 seconds of the end of the file becomes the end of the file.
    `Mid-Credits`, `After Credits`, `Pre-Credits`), the end of the credits
    (`Credits End`), or a generated `Chapter NN` are not credits, and neither
    is a match whose neighbor also matches. The end is the next chapter's
-   start. Chapter credits are authoritative.
+   start, even within 15 seconds of the end of the file, so a short scene
+   after the credits keeps its own chapter; only the last chapter's end snaps
+   to the end of the file. Chapter credits are authoritative.
 2. **Version copy.** Another file of the same episode whose duration is
-   within three seconds copies the chapter result, keeping its distance from
-   the end of the file (`credits-version-copy:v1`, confidence 0.85). Credits
+   within three seconds copies the chapter result of the closest such
+   version, keeping its distance from the end of the file (`credits-version-copy:v1`, confidence 0.85). Credits
    that ran to the end of the source run to the end of the copy.
 3. **Tail audio and video.** Each episode's tail is read once and cached: a
    Chromaprint fingerprint of its audio, its silences, and statistics of
@@ -108,11 +110,15 @@ An episode alone in its season group has no partner to compare audio with;
 with the tail pass available it still gets credits from chapters and video.
 
 Playback analysis looks only for the kinds the played file lacks, so an
-episode with an intro and no credits runs the credits steps alone. Unlike an
-intro group, a credits season group whose stored analysis still stands is not
-compared again from playback: most episodes have no credits local analysis
-can find, and every start would otherwise repeat the comparison. Admin
-refresh compares both kinds again.
+episode with an intro and no credits runs the credits steps alone. With
+`markers.online_storage` set to `on_demand`, the played file includes the
+online markers looked up for this playback, which are never saved; every
+marker update sent to players during the analysis lays them back over the
+stored row, where a manual marker still wins. Unlike an intro group, a
+credits season group whose stored analysis still stands is not compared again
+from playback: most episodes have no credits local analysis can find, and
+every start would otherwise repeat the comparison. Admin refresh compares both
+kinds again.
 
 ### Tail pass
 

@@ -30,7 +30,7 @@ func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, episode
 		return "", apiError(http.StatusConflict, "conflict", "Marker detection is disabled")
 	}
 	if mode == markers.ModeLocal {
-		return h.RefreshEpisodeMarkers(ctx, episodeID, "refresh")
+		return h.refreshLocalEpisodeMarkers(ctx, episodeID, "refresh", allMarkerKinds)
 	}
 	if h.OnlineMarkers == nil {
 		return "", apiError(http.StatusServiceUnavailable, "unavailable", "Online markers are not configured")
@@ -71,7 +71,7 @@ func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, episode
 			}
 		}
 		if local && needsLocal && ctx.Err() == nil {
-			if _, err := h.analyzer.AnalyzeEpisode(ctx, episodeID); err != nil {
+			if _, err := h.analyzer.AnalyzeEpisodeKinds(ctx, episodeID, allMarkerKinds); err != nil {
 				h.logger.WarnContext(ctx, "local marker refresh failed", "episode_id", episodeID, "error", err)
 			}
 			h.notifyEpisodeMarkerUpdates(ctx, episodeID, "refresh")

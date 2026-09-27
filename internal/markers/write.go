@@ -351,40 +351,22 @@ func ApplyResult(file *models.MediaFile, result Result) *models.MediaFile {
 		return nil
 	}
 	next := *file
-	byKind := make(map[string][]models.MarkerSegment, 4)
-	for _, segment := range models.EffectiveMarkerSegments(file) {
-		byKind[segment.Kind] = append(byKind[segment.Kind], segment)
-	}
+	byKind := segmentsByKind(file)
 	payload := BuildUpdatePayload(result)
-	now := time.Now().UTC()
-	targets := []struct {
-		kind                        string
-		incoming                    SegmentPayload
-		start, end                  **float64
-		source, provider, algorithm **string
-		confidence                  **float64
-		detectedAt                  **time.Time
-	}{
-		{models.MarkerSegmentIntro, payload.Intro, &next.IntroStart, &next.IntroEnd, &next.IntroMarkersSource, &next.IntroMarkersProvider, &next.IntroMarkersAlgorithm, &next.IntroMarkersConfidence, &next.IntroMarkersDetectedAt},
-		{models.MarkerSegmentCredits, payload.Credits, &next.CreditsStart, &next.CreditsEnd, &next.CreditsMarkersSource, &next.CreditsMarkersProvider, &next.CreditsMarkersAlgorithm, &next.CreditsMarkersConfidence, &next.CreditsMarkersDetectedAt},
-		{models.MarkerSegmentRecap, payload.Recap, &next.RecapStart, &next.RecapEnd, &next.RecapMarkersSource, &next.RecapMarkersProvider, &next.RecapMarkersAlgorithm, &next.RecapMarkersConfidence, &next.RecapMarkersDetectedAt},
-		{models.MarkerSegmentPreview, payload.Preview, &next.PreviewStart, &next.PreviewEnd, &next.PreviewMarkersSource, &next.PreviewMarkersProvider, &next.PreviewMarkersAlgorithm, &next.PreviewMarkersConfidence, &next.PreviewMarkersDetectedAt},
+	incomingByKind := map[string]SegmentPayload{
+		models.MarkerSegmentIntro:   payload.Intro,
+		models.MarkerSegmentCredits: payload.Credits,
+		models.MarkerSegmentRecap:   payload.Recap,
+		models.MarkerSegmentPreview: payload.Preview,
 	}
-	for _, target := range targets {
-		existing := SegmentPayload{Start: *target.start, End: *target.end, Ranges: byKind[target.kind], Provider: *target.provider, Confidence: *target.confidence}
-		if *target.source != nil {
-			existing.Source = **target.source
-		} else if existing.Present() && file.MarkersSource != nil {
-			existing.Source = *file.MarkersSource
-		}
-		if *target.algorithm != nil {
-			existing.Algorithm = **target.algorithm
-		}
-		incoming := target.incoming
+	now := time.Now().UTC()
+	for _, target := range fileSegmentFields(&next) {
+		existing := target.payload(file, byKind[target.kind])
+		incoming := incomingByKind[target.kind]
 		if !incoming.Present() {
 			if existing.Source != models.MarkerSourceManual && existing.Provider != nil && slices.Contains(result.RefreshedProviders, *existing.Provider) {
 				delete(byKind, target.kind)
-				*target.start, *target.end, *target.source, *target.provider, *target.algorithm, *target.confidence, *target.detectedAt = nil, nil, nil, nil, nil, nil, nil
+				target.clear()
 			}
 			continue
 		}
@@ -402,28 +384,8 @@ func ApplyResult(file *models.MediaFile, result Result) *models.MediaFile {
 		*target.source, *target.provider, *target.algorithm = &incoming.Source, incoming.Provider, &incoming.Algorithm
 		*target.confidence, *target.detectedAt = incoming.Confidence, &now
 	}
-	next.MarkerSegments = make([]models.MarkerSegment, 0)
-	for _, kind := range []string{models.MarkerSegmentIntro, models.MarkerSegmentCredits, models.MarkerSegmentRecap, models.MarkerSegmentPreview} {
-		next.MarkerSegments = append(next.MarkerSegments, byKind[kind]...)
-	}
-	next.MarkerSegments = models.EffectiveMarkerSegments(&next)
-	next.MarkersSource, next.MarkersConfidence = nil, nil
-	for _, target := range targets {
-		if len(byKind[target.kind]) == 0 {
-			continue
-		}
-		source, confidence := *target.source, *target.confidence
-		if source == nil {
-			source, confidence = file.MarkersSource, file.MarkersConfidence
-		}
-		if source == nil {
-			continue
-		}
-		if next.MarkersSource == nil || models.MarkerSourcePriority(*source) > models.MarkerSourcePriority(*next.MarkersSource) ||
-			(models.MarkerSourcePriority(*source) == models.MarkerSourcePriority(*next.MarkersSource) && confidenceGreater(confidence, next.MarkersConfidence)) {
-			next.MarkersSource, next.MarkersConfidence = source, confidence
-		}
-	}
+	setSegments(&next, byKind)
+	summarizeSources(&next, file.MarkersSource, file.MarkersConfidence)
 	return &next
 }
 
