@@ -297,9 +297,9 @@ func (h *CollectionHandler) ReorderCollectionGroups(ctx context.Context, userID 
 func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore.UserStore, userID int, collections []userstore.Collection) []PersonalCollectionView {
 	var counts map[string]int
 	if userstore.HasCatalogSQLState(store) {
-		sources := make([]personalCollectionCountSource, 0, len(collections))
+		sources := make([]catalog.PersonalCollectionDefinition, 0, len(collections))
 		for _, c := range collections {
-			sources = append(sources, personalCollectionCountSource{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition})
+			sources = append(sources, catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition})
 		}
 		counts = visiblePersonalCollectionCounts(ctx, h.Executor, userID, sources, AccessFilterFromContext(ctx, ""))
 	}

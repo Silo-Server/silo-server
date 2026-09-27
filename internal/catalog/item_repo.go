@@ -809,8 +809,9 @@ func itemAccessConditions(access AccessFilter, args *[]any, argIdx *int) []strin
 }
 
 // CountVisiblePersonalCollectionMembers counts, per collection, the members of
-// the account's personal collections that the viewer can see: the membership
-// rows GetByIDsWithAccess would return for the collection's items page.
+// the account's hand-picked or imported personal collections that the viewer
+// can see, as their catalog view counts them. It ignores smart definitions and
+// display filters; CountPersonalCollection handles those collections.
 // Collections with no visible members are absent from the result. It reads the
 // Postgres user store's membership table, so callers must not use it for
 // collections kept elsewhere.
@@ -846,6 +847,8 @@ func buildCountVisiblePersonalCollectionMembersSQL(userID int, collectionIDs []s
 	for _, c := range itemAccessConditions(access, &args, &argIdx) {
 		sql += "\n            AND " + c
 	}
+	// The catalog view never lists manga chapters as items.
+	sql += "\n            AND " + MangaChapterExclusionWhere("mi")
 	return sql + "\n            GROUP BY upci.collection_id", args
 }
 

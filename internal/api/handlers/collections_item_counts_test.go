@@ -100,6 +100,60 @@ func TestPersonalCollectionItemCountsDB(t *testing.T) {
 		}
 		assertCounts(t, restricted, 1, 4)
 	})
+	t.Run("counts match the catalog view, display filters included", func(t *testing.T) {
+		series := fmt.Sprintf("%s-series", f.ids[0])
+		f.exec(t, `INSERT INTO media_items(content_id,type,title) VALUES($1,'series','Same title')`, series)
+		f.exec(t, `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, series, f.library)
+		t.Cleanup(func() {
+			_, _ = f.pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, series)
+		})
+		display := func(kind string) string {
+			return `{"match":"all","groups":[{"match":"all","rules":[{"field":"type","op":"is","value":"` + kind + `"}]}]}`
+		}
+		// Every movie in the fixture's two libraries plus the series; the viewer
+		// sees f.ids[1:] and the series.
+		smartAll := fmt.Sprintf(`{"library_ids":[%d,%d],"match":"all","groups":[],"sort":{"field":"title","order":"asc"}}`, f.library, f.hidden)
+		cases := []struct {
+			name, kind, query, display string
+			members                    []string
+			want                       int
+		}{
+			{"mixed members", "manual", "", "", []string{f.ids[0], f.ids[1], series}, 2},
+			{"mixed members, movies only", "manual", "", display("movie"), []string{f.ids[0], f.ids[1], series}, 1},
+			{"mixed members, series only", "manual", "", display("series"), []string{f.ids[0], f.ids[1], series}, 1},
+			{"smart", "smart", smartAll, "", nil, 5},
+			{"smart, movies only", "smart", smartAll, display("movie"), nil, 4},
+			{"smart, series only", "smart", smartAll, display("series"), nil, 1},
+		}
+		resolver := catalog.NewCatalogResolver(catalog.NewBrowseRepository(f.pool), catalog.NewItemRepository(f.pool)).WithUserStoreProvider(provider)
+		viewer := AccessFilterFromContext(restricted, "")
+		viewer.UserID, viewer.ProfileID = f.account, "owner"
+		for _, tc := range cases {
+			c, err := store.CreateCollection(t.Context(), userstore.CreateCollectionInput{CreatorProfileID: "owner", Name: tc.name, CollectionType: tc.kind, QueryDefinition: tc.query, DisplayQueryDefinition: tc.display})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, id := range tc.members {
+				if err := store.AddCollectionItem(t.Context(), c.ID, id, i); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := h.GetPersonalCollection(restricted, f.account, "owner", c.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			view, err := resolver.Resolve(t.Context(), catalog.CatalogRequest{Source: catalog.CatalogSourceUserCollection, CollectionID: c.ID, CursorPaging: true, UseSourceOrder: true, Limit: 1}, viewer)
+			if err != nil {
+				t.Fatalf("%s: catalog view: %v", tc.name, err)
+			}
+			if got.ItemCount != tc.want || view.Total != tc.want {
+				t.Errorf("%s: item_count = %d, catalog view total = %d, want %d", tc.name, got.ItemCount, view.Total, tc.want)
+			}
+			if err := store.DeleteCollection(t.Context(), c.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
 	t.Run("a new smart collection reports its matches", func(t *testing.T) {
 		created, err := h.CreatePersonalCollection(restricted, PersonalCollectionCreateCommand{UserID: f.account, ProfileID: "owner", Request: PersonalCollectionCreateRequest{
 			Name: "Created smart", CollectionType: "smart", QueryDefinition: []byte(smartDef),

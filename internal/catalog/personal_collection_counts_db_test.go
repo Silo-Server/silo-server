@@ -10,8 +10,8 @@ import (
 )
 
 // TestCountVisiblePersonalCollectionMembersDB pins the personal collection
-// item_count (#1552) to the members the viewer's items page returns: rows for
-// missing items, sub-items, and other accounts never count, and library and
+// item_count (#1552) to the members the viewer can see: rows for missing items,
+// manga chapters, sub-items, and other accounts never count, and library and
 // maturity limits apply as they do in GetByIDsWithAccess.
 func TestCountVisiblePersonalCollectionMembersDB(t *testing.T) {
 	pool := newBatchEquivTestPool(t)
@@ -35,17 +35,20 @@ func TestCountVisiblePersonalCollectionMembersDB(t *testing.T) {
 	mature := fmt.Sprintf("collection-count-mature-%d", suffix)
 	hidden := fmt.Sprintf("collection-count-hidden-%d", suffix)
 	missing := fmt.Sprintf("collection-count-missing-%d", suffix)
+	chapter := fmt.Sprintf("collection-count-chapter-%d", suffix)
 	for _, seed := range []struct {
 		id      string
 		age     int
 		library int
-	}{{shown, 6, shownLib}, {mature, 16, shownLib}, {hidden, 6, hiddenLib}} {
+	}{{shown, 6, shownLib}, {mature, 16, shownLib}, {hidden, 6, hiddenLib}, {chapter, 6, shownLib}} {
 		batchEquivExec(t, pool, `INSERT INTO media_items (content_id, type, title, advisory_age) VALUES ($1, 'movie', $1, $2)`, seed.id, seed.age)
 		batchEquivExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, seed.id, seed.library)
 	}
+	batchEquivExec(t, pool, `UPDATE media_items SET type = 'ebook' WHERE content_id = $1`, chapter)
+	batchEquivExec(t, pool, `INSERT INTO manga_chapters (chapter_content_id, series_content_id) VALUES ($1, $2)`, chapter, shown)
 	manual := fmt.Sprintf("collection-count-manual-%d", suffix)
 	empty := fmt.Sprintf("collection-count-empty-%d", suffix)
-	for _, member := range []string{shown, mature, hidden, missing} {
+	for _, member := range []string{shown, mature, hidden, missing, chapter} {
 		batchEquivExec(t, pool, `INSERT INTO user_personal_collection_items (user_id, collection_id, media_item_id) VALUES ($1, $2, $3)`, account, manual, member)
 	}
 	batchEquivExec(t, pool, `INSERT INTO user_personal_collection_items (user_id, collection_id, media_item_id, sub_item_id) VALUES ($1, $2, $3, 'chapter-1')`, account, manual, shown)
@@ -53,7 +56,7 @@ func TestCountVisiblePersonalCollectionMembersDB(t *testing.T) {
 	t.Cleanup(func() {
 		batchEquivExec(t, pool, `DELETE FROM users WHERE id = ANY($1)`, []int{account, otherAccount})
 		batchEquivExec(t, pool, `DELETE FROM user_collection_revisions WHERE user_id = ANY($1)`, []int{account, otherAccount})
-		batchEquivExec(t, pool, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{shown, mature, hidden})
+		batchEquivExec(t, pool, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{shown, mature, hidden, chapter})
 		batchEquivExec(t, pool, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{shownLib, hiddenLib})
 	})
 
