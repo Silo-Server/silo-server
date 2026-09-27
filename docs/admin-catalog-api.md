@@ -223,11 +223,12 @@ these curation actions.
 
 `POST /api/v2/admin/items/{id}/refresh-markers` and
 `POST /api/v2/admin/items/{id}/redetect-intro` require acting-administrator
-authorization. Both retain the existing local episode analyzer, which finds
-intros and end credits. The episode
-must exist, have media files, and belong to a library with intro detection
-enabled. Marker settings must allow local analysis; off and online-only modes
-return `409`. Unconfigured dependencies return `503`.
+authorization. Both retain the existing local episode analyzer.
+`refresh-markers` finds intros and end credits; `redetect-intro`, like the v1
+routes, finds intros only. The episode must exist, have media files, and
+belong to a library with intro detection enabled. Marker settings must allow
+local analysis; off and online-only modes return `409`. Unconfigured
+dependencies return `503`.
 
 Both return `202` with `status: "queued"` or `status: "already_running"`.
 These statuses acknowledge process-local background work. There is no persisted

@@ -15,9 +15,19 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// IntroEpisodeAnalyzer runs local marker analysis of an episode for the
+// kinds selected.
 type IntroEpisodeAnalyzer interface {
-	AnalyzeEpisode(ctx context.Context, episodeID string) (intromarkers.RunSummary, error)
+	AnalyzeEpisodeKinds(ctx context.Context, episodeID string, kinds intromarkers.EpisodeMarkerKinds) (intromarkers.RunSummary, error)
 }
+
+var (
+	// introMarkerKinds is what the endpoints that predate credits analyze:
+	// the frozen /api/v1 routes and /api/v2 redetect-intro.
+	introMarkerKinds = intromarkers.EpisodeMarkerKinds{Intro: true}
+	// allMarkerKinds selects every kind local analysis finds.
+	allMarkerKinds = intromarkers.EpisodeMarkerKinds{Intro: true, Credits: true}
+)
 
 type IntroEpisodeEligibilityChecker interface {
 	EpisodeIntroEligibility(ctx context.Context, episodeID string) (*intromarkers.EpisodeIntroEligibility, error)
@@ -84,10 +94,18 @@ func (h *AdminIntroHandler) handleEpisodeMarkers(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusAccepted, redetectIntroResponse{Status: status})
 }
 
+// RefreshEpisodeMarkers serves the frozen /api/v1 routes and the /api/v2
+// refresh-markers ("refresh-v2") and redetect-intro ("redetect") operations.
+// Every action but refresh-v2 predates credits and analyzes intros only.
 func (h *AdminIntroHandler) RefreshEpisodeMarkers(ctx context.Context, episodeID, action string) (string, error) {
 	if action == "refresh-v2" {
 		return h.refreshEpisodeMarkersV2(ctx, episodeID)
 	}
+	return h.refreshLocalEpisodeMarkers(ctx, episodeID, action, introMarkerKinds)
+}
+
+// refreshLocalEpisodeMarkers queues local analysis of an episode for kinds.
+func (h *AdminIntroHandler) refreshLocalEpisodeMarkers(ctx context.Context, episodeID, action string, kinds intromarkers.EpisodeMarkerKinds) (string, error) {
 	if h == nil || h.analyzer == nil || h.eligibility == nil {
 		return "", apiError(http.StatusServiceUnavailable, "unavailable", "Intro detection is not configured")
 	}
@@ -137,8 +155,12 @@ func (h *AdminIntroHandler) RefreshEpisodeMarkers(ctx context.Context, episodeID
 	go func() {
 		defer h.inFlight.Delete(episodeID)
 		start := time.Now()
-		h.logger.InfoContext(ctx, "admin markers: episode refresh started", "episode_id", episodeID, "action", action)
-		summary, err := h.analyzer.AnalyzeEpisode(h.baseContext, episodeID)
+		h.logger.InfoContext(ctx, "admin markers: episode refresh started",
+			"episode_id", episodeID,
+			"action", action,
+			"intro", kinds.Intro,
+			"credits", kinds.Credits)
+		summary, err := h.analyzer.AnalyzeEpisodeKinds(h.baseContext, episodeID, kinds)
 		if err != nil {
 			h.logger.ErrorContext(ctx, "admin markers: episode refresh failed",
 				"episode_id", episodeID,

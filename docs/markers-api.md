@@ -53,7 +53,7 @@ or withdraw that provider's existing ranges.
 `POST /api/v2/admin/items/{id}/refresh-markers` explicitly refreshes an episode
 from its configured sources. In `both` mode, eligible local detection fills
 missing intro and credits markers. The existing v1 refresh endpoint retains its
-local-only behavior.
+local-only, intro-only behavior.
 
 ## Operations
 

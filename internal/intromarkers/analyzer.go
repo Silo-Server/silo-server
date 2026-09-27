@@ -340,10 +340,16 @@ type EpisodeMarkerKinds struct {
 func (k EpisodeMarkerKinds) Any() bool { return k.Intro || k.Credits }
 
 // AnalyzeEpisode analyzes the season groups of an episode's files for every
-// marker kind, comparing each group again even when its stored analysis
-// still stands. Admin refresh uses it.
+// marker kind, as AnalyzeEpisodeKinds does. It is the all-kinds shorthand.
 func (a *Analyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (RunSummary, error) {
-	return a.analyzeEpisode(ctx, episodeID, EpisodeMarkerKinds{Intro: true, Credits: true}, true)
+	return a.AnalyzeEpisodeKinds(ctx, episodeID, EpisodeMarkerKinds{Intro: true, Credits: true})
+}
+
+// AnalyzeEpisodeKinds analyzes the season groups of an episode's files for
+// the kinds selected, comparing each group again even when its stored
+// analysis still stands. Admin refresh uses it.
+func (a *Analyzer) AnalyzeEpisodeKinds(ctx context.Context, episodeID string, kinds EpisodeMarkerKinds) (RunSummary, error) {
+	return a.analyzeEpisode(ctx, episodeID, kinds, true)
 }
 
 // AnalyzeEpisodeForPlayback analyzes only the marker kinds a played file
