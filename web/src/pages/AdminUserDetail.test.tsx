@@ -873,7 +873,9 @@ describe("AdminUserDetail server owner", () => {
     mocks.user = { ...adminUser, role: "admin", is_owner: true };
     mocks.viewer = { id: 99 };
     renderUserDetail();
-    expect(await screen.findByText("Owner")).toBeInTheDocument();
+    // The header badge and the Account panel both show "owner" in place of "admin".
+    expect(await screen.findAllByText("owner")).toHaveLength(2);
+    expect(screen.queryByText("admin")).toBeNull();
     expect(screen.getByText(/Only the owner can change this account/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Edit/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: "View as user" })).toBeDisabled();

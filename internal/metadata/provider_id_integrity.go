@@ -907,6 +907,22 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			WHERE media_item_id = $1
 			ON CONFLICT (connection_id, media_item_id) DO NOTHING`},
 	{"delete source watch provider rating items", `DELETE FROM watch_provider_rating_items WHERE media_item_id = $1`},
+	// A drop follows its series; the later drop wins when both carry one.
+	{"merge dropped series", `
+			INSERT INTO user_dropped_series (user_id, profile_id, series_id, dropped_at)
+			SELECT user_id, profile_id, $2, dropped_at
+			FROM user_dropped_series
+			WHERE series_id = $1
+			ON CONFLICT (user_id, profile_id, series_id) DO UPDATE
+			SET dropped_at = GREATEST(user_dropped_series.dropped_at, EXCLUDED.dropped_at)`},
+	{"delete source dropped series", `DELETE FROM user_dropped_series WHERE series_id = $1`},
+	{"merge watch provider dropped items", `
+			INSERT INTO watch_provider_dropped_items (connection_id, provider_account_id, series_id, provider_item_key, remote_seen, updated_at)
+			SELECT connection_id, provider_account_id, $2, '', false, NOW()
+			FROM watch_provider_dropped_items
+			WHERE series_id = $1
+			ON CONFLICT (connection_id, series_id) DO NOTHING`},
+	{"delete source watch provider dropped items", `DELETE FROM watch_provider_dropped_items WHERE series_id = $1`},
 }
 
 func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID, canonicalID string) error {

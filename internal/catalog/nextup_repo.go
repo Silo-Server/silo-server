@@ -23,6 +23,11 @@ type NextUpQuery struct {
 	EnableResumable  bool       // include in-progress episodes
 	EnableRewatching bool       // accepted but deferred (no-op)
 	DateCutoff       *time.Time // only series with activity after this date
+
+	// droppedSeriesIDs are the profile's actively dropped series, which a
+	// global lookup excludes. ListNextUp loads them; a series-scoped lookup
+	// never excludes its own series.
+	droppedSeriesIDs []string
 }
 
 // NextUpResult is one row from the next-up query.
@@ -56,6 +61,14 @@ func (r *NextUpRepository) ListNextUp(ctx context.Context, q NextUpQuery) ([]Nex
 	limit := q.Limit
 	if limit <= 0 {
 		limit = 20
+	}
+
+	if q.SeriesID == "" {
+		dropped, err := activeDroppedSeriesIDs(ctx, r.pool, q.UserID, q.ProfileID)
+		if err != nil {
+			return nil, err
+		}
+		q.droppedSeriesIDs = dropped
 	}
 
 	var results []NextUpResult
@@ -252,6 +265,17 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 				  AND NOT (e.series_id = ANY($%d))`, cursorUpdatedAtArg, cursorMediaItemIDArg, cursorSeenArg)
 		seedSeen = fmt.Sprintf("$%d::text[] || pick.series_id", cursorSeenArg)
 		args = append(args, cursor.updatedAt, cursor.mediaItemID, cursor.seen)
+		argIdx += 3
+	}
+
+	// Dropped series are excluded inside every walk step, like hidden rows, so
+	// they neither become anchors nor spend the walk's series budget. Without
+	// drops the query text is unchanged.
+	droppedFilter := ""
+	if q.SeriesID == "" && len(q.droppedSeriesIDs) > 0 {
+		droppedFilter = fmt.Sprintf(`
+					  AND NOT (e.series_id = ANY($%d::text[]))`, argIdx)
+		args = append(args, q.droppedSeriesIDs)
 	}
 
 	// When resumable items are disabled, suppress next-up only if the series has
@@ -426,8 +450,8 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		completed_episodes AS (
 			SELECT series_id, season_number, episode_number, updated_at
 			FROM walk
-		)`, seedSeen, cursorFilter, dateCutoffFilter, anchorLateral,
-			dateCutoffFilter, anchorLateral, nextUpAnchorMaxSeries)
+		)`, seedSeen, cursorFilter, dateCutoffFilter+droppedFilter, anchorLateral,
+			dateCutoffFilter+droppedFilter, anchorLateral, nextUpAnchorMaxSeries)
 	}
 
 	if q.SeriesID != "" {
@@ -556,6 +580,10 @@ func buildListResumableFirstEpisodesQuery(q NextUpQuery, inProgressIDs []string)
 		  )`
 	if q.SeriesID != "" {
 		completedSeriesGate = ""
+	}
+	if q.SeriesID == "" && len(q.droppedSeriesIDs) > 0 {
+		args = append(args, q.droppedSeriesIDs)
+		seriesFilter = fmt.Sprintf(" AND NOT (e.series_id = ANY($%d::text[]))", len(args))
 	}
 
 	query := fmt.Sprintf(`

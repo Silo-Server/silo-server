@@ -26,6 +26,10 @@ func NewBrandingHandler(svc *branding.Service) *BrandingHandler {
 // historical {server_name, login_subtitle} shape — new fields are additive per
 // the v1 API rules. Asset URLs are stable, cache-bustable paths (empty when no
 // custom asset is set).
+//
+// default_theme and the light logo URLs are retired from the web client and
+// from /api/v2, but this frozen v1 response keeps reporting whatever is stored
+// until v1 retires.
 type brandingResponse struct {
 	ServerName       string `json:"server_name"`
 	LoginSubtitle    string `json:"login_subtitle"`

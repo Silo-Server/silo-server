@@ -280,7 +280,6 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 	for _, id := range []string{"getOnboardingFlow", "getOnboardingState", "updateOnboardingProgress", "getOnboardingCapabilities"} {
 		profileToken[id] = true
 	}
-	profileToken["refreshThemeCatalog"] = true
 	for _, id := range historyImportOperationIDs {
 		profileToken[id] = true
 	}

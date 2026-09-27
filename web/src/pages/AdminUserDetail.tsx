@@ -81,7 +81,12 @@ import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonatio
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { canManageAccount, canTransferOwnership, canViewAsAccount } from "@/lib/accountOwner";
+import {
+  accountRoleLabel,
+  canManageAccount,
+  canTransferOwnership,
+  canViewAsAccount,
+} from "@/lib/accountOwner";
 import { formatPlaybackQualityPreset } from "@/lib/playback-quality";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
@@ -249,8 +254,9 @@ function AdminUserDetailPage() {
         <div className="min-w-0 flex-1 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">{user.username}</h1>
-            <Badge variant={user.role === "admin" ? "default" : "secondary"}>{user.role}</Badge>
-            {user.is_owner && <Badge variant="outline">Owner</Badge>}
+            <Badge variant={user.role === "admin" ? "default" : "secondary"}>
+              {accountRoleLabel(user)}
+            </Badge>
             <Badge variant={user.enabled ? "outline" : "destructive"}>
               {user.enabled ? "Active" : "Disabled"}
             </Badge>
@@ -445,7 +451,7 @@ function OverviewTab({ user }: { user: AdminUser }) {
         <div className="divide-border divide-y">
           <DetailRow label="Username" value={user.username} />
           <DetailRow label="Email" value={user.email} />
-          <DetailRow label="Role" value={user.role} />
+          <DetailRow label="Role" value={accountRoleLabel(user)} />
           <DetailRow label="Status" value={user.enabled ? "Active" : "Disabled"} />
           <DetailRow label="Created" value={formatDate(user.created_at)} />
           <DetailRow label="Updated" value={formatDate(user.updated_at)} />
@@ -1430,11 +1436,16 @@ function EditUserForm({
               )}
               <div className="space-y-2">
                 <Label htmlFor={roleSelectId}>Role</Label>
-                <Select value={role} onValueChange={setRole} disabled={user.is_owner || ownAccount}>
+                <Select
+                  value={user.is_owner ? "owner" : role}
+                  onValueChange={setRole}
+                  disabled={user.is_owner || ownAccount}
+                >
                   <SelectTrigger id={roleSelectId}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    {user.is_owner && <SelectItem value="owner">Owner</SelectItem>}
                     <SelectItem value="user">User</SelectItem>
                     <SelectItem value="admin" disabled={adminRoleLocked}>
                       Admin

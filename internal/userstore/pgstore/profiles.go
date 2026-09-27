@@ -340,6 +340,7 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		"user_series_playback_preferences",
 		"user_library_playback_preferences",
 		"user_setting_values",
+		"user_dropped_series",
 	}
 	for _, table := range cascadeTables {
 		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id = $1 AND profile_id = $2", table), s.userID, id); err != nil {
