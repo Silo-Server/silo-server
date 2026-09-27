@@ -174,10 +174,13 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 // fails closed.
 var urlInText = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://\S+`)
 
-// authSchemeInText matches a credential after an HTTP auth scheme word. The
-// value must look like one (a digit, "=" padding or 16+ characters), so prose
-// such as "basic authentication required" keeps its noun.
-var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)\s+([^\s"',;]*[0-9=][^\s"',;]*|[^\s"',;]{16,})`)
+// authSchemeInText matches the word after an HTTP auth scheme word. It is
+// masked unless it is a plain lowercase word (proseWord), so short or
+// unpadded credentials ("Basic dXNlcjpwYXNz") fail closed while prose such as
+// "basic authentication required" keeps its noun.
+var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)(\s+)([^\s"',;]+)`)
+
+var proseWord = regexp.MustCompile(`^[a-z]+$`)
 
 // keyValueInText matches a key followed by ":" or "=" and its value, as in
 // "api_key=abc" or `"x-api-key": "abc"`. Whether the key names a secret is
@@ -190,13 +193,20 @@ var keyValueInText = regexp.MustCompile(`([\w.-]+)("?\s*[:=]\s*"?)([^\s"',;&]+)`
 // userinfo, and auth-scheme or key=value secrets are masked. It is best
 // effort over free text, not a guarantee: a bare secret with no key and no
 // auth scheme ("invalid token sk-abc") is left as is, since masking every
-// word after "token" would also eat ordinary diagnostics. Also unmasked: a
+// word after "token" would also eat ordinary diagnostics. Also unmasked: an
+// all-lowercase-letters credential after "Bearer"/"Basic" (read as prose), a
 // scheme-relative URL ("//user:pass@host"), and the tail of a quoted query
 // value containing a space, which \S+ splits off the URL.
 func submissionErrorText(err error) string {
 	msg := logredact.SanitizeURLError(err).Error()
 	msg = urlInText.ReplaceAllStringFunc(msg, logredact.SanitizeURL)
-	msg = authSchemeInText.ReplaceAllString(msg, "${1} "+logredact.Placeholder)
+	msg = authSchemeInText.ReplaceAllStringFunc(msg, func(match string) string {
+		m := authSchemeInText.FindStringSubmatch(match)
+		if proseWord.MatchString(m[3]) {
+			return match
+		}
+		return m[1] + m[2] + logredact.Placeholder
+	})
 	return keyValueInText.ReplaceAllStringFunc(msg, func(pair string) string {
 		m := keyValueInText.FindStringSubmatch(pair)
 		// Header-style names ("x-api-key") use hyphens where SecretKey's

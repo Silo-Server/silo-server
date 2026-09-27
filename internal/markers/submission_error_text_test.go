@@ -35,6 +35,11 @@ func TestSubmissionErrorTextMasksSecretsOutsideHTTPURLs(t *testing.T) {
 		{"upstream said: Authorization: Bearer FAKE_FIXTURE_7 was expired", "FAKE_FIXTURE_7", "Bearer [REDACTED] was expired"},
 		{"token expired, please retry", "", "token expired, please retry"},
 		{"session_token=FAKE_FIXTURE_8; retry=3", "FAKE_FIXTURE_8", "retry=3"},
+		// Short or unpadded credentials after a scheme word are still masked.
+		{"Authorization: Basic FAKEfixture", "FAKEfixture", "Basic [REDACTED]"},
+		{"Authorization: Bearer fake-fixture", "fake-fixture", "Bearer [REDACTED]"},
+		// Harmless numeric pairs keep their values.
+		{"GET /v1/markers?page=1; retry=3 failed", "", "page=1; retry=3 failed"},
 		// An auth scheme word followed by prose is not a credential.
 		{"code = Unauthenticated desc = basic authentication required", "", "basic authentication required"},
 	}
