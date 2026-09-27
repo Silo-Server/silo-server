@@ -11,7 +11,8 @@ func TestSubmissionErrorTextMasksURLCredentials(t *testing.T) {
 	got := submissionErrorText(err)
 	for _, secret := range []string{"user:pass", "token", "s3cr3t", "frag"} {
 		if strings.Contains(got, secret) {
-			t.Fatalf("submissionErrorText kept %q: %s", secret, got)
+			// Never echo the value this test protects.
+			t.Fatalf("submissionErrorText kept a value that should have been masked (output length %d)", len(got))
 		}
 	}
 	if !strings.Contains(got, "https://api.example.test/v1/markers") || !strings.Contains(got, "rejected") {

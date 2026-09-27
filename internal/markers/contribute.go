@@ -278,7 +278,10 @@ func (s *ContributionService) contributeSegment(
 	result, err := sub.SubmitMarker(submitCtx, req)
 	cancel()
 	if err != nil {
-		msg := err.Error()
+		// Sanitized once here: the message is stored on the contribution
+		// row, returned as the outcome's Reason (which the task can surface
+		// as its own error) and logged below.
+		msg := submissionErrorText(err)
 		row.Error = &msg
 		var conflict *SubmissionConflictError
 		var invalid *SubmissionInvalidError
@@ -299,7 +302,7 @@ func (s *ContributionService) contributeSegment(
 			row.Status = OutcomeStatusError
 		}
 		if row.Status != OutcomeStatusConflict {
-			s.logger.WarnContext(ctx, "marker submission failed", "file_id", row.MediaFileID, "provider", providerID, "segment", seg.kind, "error", submissionErrorText(err))
+			s.logger.WarnContext(ctx, "marker submission failed", "file_id", row.MediaFileID, "provider", providerID, "segment", seg.kind, "error", msg)
 		}
 		s.recordContribution(ctx, row)
 		if row.Status == OutcomeStatusConflict || row.Status == OutcomeStatusInvalid {
