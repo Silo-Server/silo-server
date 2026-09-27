@@ -154,6 +154,9 @@ function queryKeyStartsWith(queryKey: readonly unknown[], prefix: readonly unkno
   );
 }
 
+// Only these shapes are narrowed by itemId. episodeKeys.byItem is left out on
+// purpose: it is invalidated only through watchedKeys, and mapping it here
+// would change which episode lists a refresh touches.
 export function getQueryKeyItemId(queryKey: readonly unknown[]): string | undefined {
   if (!Array.isArray(queryKey) || queryKey.length < 2) return undefined;
   if (

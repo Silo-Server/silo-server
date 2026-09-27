@@ -406,6 +406,12 @@ describe("invalidateMediaSurfaceQueries", () => {
     queryClient.setQueryData(item2DetailKey, { content_id: "item-2" });
     queryClient.setQueryData(item1WatchKey, { content_id: "item-1" });
     queryClient.setQueryData(item2WatchKey, { content_id: "item-2" });
+    // Catalog keys pass activeCatalogQueryMatchesLibrary, so only the itemId
+    // gate narrows them; this is the shape catalog.item.changed drives (#796).
+    const item1CatalogKey = catalogKeys.itemDetail("item-1");
+    const item2CatalogKey = catalogKeys.itemDetail("item-2");
+    queryClient.setQueryData(item1CatalogKey, { content_id: "item-1" });
+    queryClient.setQueryData(item2CatalogKey, { content_id: "item-2" });
 
     await invalidateMediaSurfaceQueries(queryClient, { itemId: "item-1" });
 
@@ -413,6 +419,8 @@ describe("invalidateMediaSurfaceQueries", () => {
     expect(queryClient.getQueryState(item1WatchKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(item2DetailKey)?.isInvalidated).toBe(false);
     expect(queryClient.getQueryState(item2WatchKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(item1CatalogKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(item2CatalogKey)?.isInvalidated).toBe(false);
   });
 
   it("does not read the ratings list key as an item ID", () => {
