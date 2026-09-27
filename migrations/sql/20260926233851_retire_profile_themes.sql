@@ -9,9 +9,10 @@
 -- account-level user_settings rows (ui_theme, ui_custom_theme_vars,
 -- ui_custom_css) stay, like every other row the settings cutover converted.
 --
--- It also deletes the retired admin default theme and the light-theme logo
--- references. The logo objects stay in storage; only the setting that pointed
--- at them goes. None of these server_settings rows is encrypted.
+-- The retired admin default theme and light-theme logo references
+-- (branding.default_theme, branding.wordmark_light_ref, branding.mark_light_ref)
+-- are deliberately kept: the web client and /api/v2 ignore them, but the
+-- frozen /api/v1 branding response still reports them until v1 retires.
 --
 -- No revision or idempotency bookkeeping needs a matching write: each
 -- user_setting_values row carries its own revision, reads resolve an absent
@@ -22,11 +23,8 @@
 DELETE FROM public.user_setting_values
  WHERE key IN ('ui.theme', 'ui.custom_theme_vars', 'ui.custom_css');
 
-DELETE FROM public.server_settings
- WHERE key IN ('branding.default_theme', 'branding.wordmark_light_ref', 'branding.mark_light_ref');
-
 -- +goose Down
 -- Irreversible: the deleted choices are not recorded anywhere, and an older
 -- server resolves each missing profile setting to its default theme with no
--- custom styling, and each missing branding row to the built-in default.
+-- custom styling.
 SELECT 1;

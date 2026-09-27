@@ -27,13 +27,9 @@ func NewBrandingHandler(svc *branding.Service) *BrandingHandler {
 // the v1 API rules. Asset URLs are stable, cache-bustable paths (empty when no
 // custom asset is set).
 //
-// default_theme is retired: the web client has a single theme and the server no
-// longer stores an admin default, so the field is always omitted. It stays on
-// the struct because this frozen v1 shape keeps every field it published until
-// v1 retires. The light logo URLs are reported whenever a light asset is
-// stored. The retire_profile_themes migration deleted the existing references,
-// so they are omitted until something uploads one through the v1 route, which
-// still accepts those kinds.
+// default_theme and the light logo URLs are retired from the web client and
+// from /api/v2, but this frozen v1 response keeps reporting whatever is stored
+// until v1 retires.
 type brandingResponse struct {
 	ServerName       string `json:"server_name"`
 	LoginSubtitle    string `json:"login_subtitle"`
@@ -57,6 +53,7 @@ func (h *BrandingHandler) HandleGetBranding(w http.ResponseWriter, r *http.Reque
 		ServerName:       snap.ServerName,
 		LoginSubtitle:    snap.LoginSubtitle,
 		AccentColor:      snap.AccentColor,
+		DefaultTheme:     snap.DefaultTheme,
 		WordmarkURL:      snap.AssetURL(branding.KindWordmark),
 		WordmarkLightURL: snap.AssetURL(branding.KindWordmarkLight),
 		MarkURL:          snap.AssetURL(branding.KindMark),

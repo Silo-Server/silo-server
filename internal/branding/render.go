@@ -13,6 +13,9 @@ type Snapshot struct {
 	ServerName    string
 	LoginSubtitle string
 	AccentColor   string // "" when unset
+	// DefaultTheme is reported only by the frozen /api/v1 branding response.
+	// It is not rendered into the shell and so is not part of RenderKey.
+	DefaultTheme string // "" when unset
 
 	assets map[AssetKind]string // kind -> content ref ("<hash><ext>")
 }

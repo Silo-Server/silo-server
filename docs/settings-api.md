@@ -113,6 +113,10 @@ Every list-valued query parameter is sent once per value. `keys=<csv>` becomes
 `listEffectiveSettings`. A comma inside a value is part of the key name and will be rejected as
 an unknown key.
 
+The examples in this section mirror the committed v2 fixtures, which use `ui.theme`. That
+key is deprecated and no client reads it (see [Retired theme settings](#retired-theme-settings));
+the request and response mechanics are the same for every key.
+
 ```http
 GET /api/v2/settings/values?scope=profile&keys=ui.theme&keys=playback.preferred_quality
 GET /api/v2/settings/values/effective?keys=ui.theme&library_ids=3&library_ids=7
@@ -472,10 +476,8 @@ The web client has one theme, Cinema Dark. Only an administrator customizes it, 
 the accent color and the overrides `admin-css` returns (`ui.admin_theme_vars` and
 `ui.admin_custom_css`), layered on that theme. The v2 branding document therefore
 has no default theme and no light-theme logo URLs, and v2 has no theme catalog.
-The frozen v1 `/theme/branding` response keeps its `default_theme` field, now always
-omitted, and its light logo URLs. The migration deleted the stored light logo references,
-so those URLs are omitted until the v1 upload route, which still accepts the light
-kinds, sets one again. The v1
+The frozen v1 `/theme/branding` response is unchanged: it still reports a stored
+`default_theme` and light logo URLs. The server keeps those settings for v1 alone. The v1
 `/theme/catalog`, `/theme/catalog/refresh` and `/theme/download` routes keep their
 behavior, and `theme.catalog_url` its default, until v1 retires.
 

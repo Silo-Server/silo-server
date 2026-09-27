@@ -7,9 +7,10 @@ import (
 
 const retireProfileThemesMigration = "20260926233851_retire_profile_themes"
 
-// The migration deletes every stored profile theme choice at every scope and
-// the three retired branding rows, and nothing else: other appearance
-// settings, the admin theme overrides, and the remaining branding rows stay.
+// The migration deletes every stored profile theme choice at every scope, and
+// nothing else: other appearance settings and every server setting, including
+// the admin theme overrides and the retired branding rows /api/v1 still
+// reports, stay.
 func TestRetireProfileThemesMigrationDeletesOnlyRetiredRowsPostgres(t *testing.T) {
 	tx, schema := adminMigrationFixture(t)
 	migrationExec(t, tx, `
@@ -69,7 +70,9 @@ INSERT INTO user_setting_values (user_id, key, scope, profile_id, device_id, val
 	if got := keys("SELECT key FROM user_setting_values ORDER BY key"); !slices.Equal(got, wantValues) {
 		t.Fatalf("user_setting_values keys = %v, want %v", got, wantValues)
 	}
-	wantSettings := []string{"branding.accent_color", "branding.wordmark_ref", "theme.catalog_url", "ui.admin_custom_css", "ui.admin_theme_vars"}
+	// server_settings is untouched: the frozen /api/v1 branding response still
+	// reports the retired default theme and light-logo references.
+	wantSettings := []string{"branding.accent_color", "branding.default_theme", "branding.mark_light_ref", "branding.wordmark_light_ref", "branding.wordmark_ref", "theme.catalog_url", "ui.admin_custom_css", "ui.admin_theme_vars"}
 	if got := keys("SELECT key FROM server_settings ORDER BY key"); !slices.Equal(got, wantSettings) {
 		t.Fatalf("server_settings keys = %v, want %v", got, wantSettings)
 	}

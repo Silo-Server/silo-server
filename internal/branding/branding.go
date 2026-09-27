@@ -40,6 +40,10 @@ const (
 	KeyServerName    = "branding.server_name"
 	KeyLoginSubtitle = "branding.login_subtitle"
 	KeyAccentColor   = "branding.accent_color"
+	// KeyDefaultTheme is the retired admin default theme. The web client has
+	// one theme and ignores it; only the frozen /api/v1 branding response still
+	// reports it, until v1 retires.
+	KeyDefaultTheme = "branding.default_theme"
 )
 
 // Defaults applied when a branding setting is unset. ServerName/LoginSubtitle
