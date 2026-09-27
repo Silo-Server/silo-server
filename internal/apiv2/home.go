@@ -172,7 +172,7 @@ func registerHome(reg *Registry) {
 		"Upcoming and recent airings and releases in a window of the viewer's local days, grouped by day.")), reg.getCalendar)
 
 	dismiss := humaOp(http.MethodPut, Prefix+"/home/dismissals/{surface}/{item_id}", opDismissHomeItem, "home",
-		"Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal. Dismissing an episode or series drops the whole show: every card of it leaves both rows until the profile watches it again or the dismissal is undone, and the drop is synced to watch providers.")
+		"Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal. Dismissing an episode or series drops the whole show: every card of it leaves both rows until the profile watches it again or the dismissal is undone. Watch provider connections with dropped-show sync on, for providers that support it, send the drop to the provider.")
 	dismiss.DefaultStatus = http.StatusNoContent
 	dismissOp := viewerOperation(dismiss)
 	dismissOp.RetrySafety = RetrySafetyNaturalIdempotent

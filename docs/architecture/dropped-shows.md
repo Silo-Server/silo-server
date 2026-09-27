@@ -48,7 +48,8 @@ Only v2 exposes the setting and capability; the frozen v1 responses omit them.
 last agreed are dropped. Each series is a three-way merge of the local drop, the remote
 drop, and that agreed value; the side that moved wins. When the provider dropped a show
 before the profile's latest watch of it in Silo, the show is undropped on the provider
-instead of imported, because watching undrops. `remote_seen`, account scoping, the empty
+instead of imported, because watching undrops. A drop that watching ended locally is restored when the provider's drop is newer than
+that watch, since the user dropped the show again there. `remote_seen`, account scoping, the empty
 read guard, and the rule that a series missing from a complete read counts as undropped
 only when no row shares one of its ids all follow
 [watch-provider-rating-sync.md](watch-provider-rating-sync.md). Local imports are

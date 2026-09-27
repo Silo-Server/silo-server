@@ -24,6 +24,7 @@ func TestDecideDropped(t *testing.T) {
 	for _, tc := range []struct {
 		name                string
 		local, remote, base bool
+		endedByWatch        bool
 		activity, remoteAt  time.Time
 		want                droppedAction
 	}{
@@ -38,9 +39,13 @@ func TestDecideDropped(t *testing.T) {
 		{name: "dropped remotely at unknown time", remote: true, activity: newer, want: droppedImportDrop},
 		{name: "watched in silo after the remote drop", remote: true, remoteAt: older, activity: newer, want: droppedExportUndrop},
 		{name: "undropped remotely", local: true, base: true, want: droppedImportUndrop},
+		{name: "watched in silo, provider still holds the older drop", remote: true, base: true, endedByWatch: true, remoteAt: older, activity: newer, want: droppedExportUndrop},
+		{name: "re-dropped on the provider after the watch", remote: true, base: true, endedByWatch: true, remoteAt: newer, activity: older, want: droppedImportDrop},
+		{name: "undone in silo, provider still holds the drop", remote: true, base: true, remoteAt: newer, want: droppedExportUndrop},
+		{name: "watch ended the drop, provider drop time unknown", remote: true, base: true, endedByWatch: true, activity: newer, want: droppedExportUndrop},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := decideDropped(tc.local, tc.remote, tc.base, tc.activity, tc.remoteAt); got != tc.want {
+			if got := decideDropped(tc.local, tc.remote, tc.base, tc.endedByWatch, tc.activity, tc.remoteAt); got != tc.want {
 				t.Fatalf("decideDropped = %d, want %d", got, tc.want)
 			}
 		})
@@ -124,6 +129,24 @@ func TestSyncDroppedWatchingAgainUndropsOnProvider(t *testing.T) {
 	h.sync()
 	if h.state(droppedTestSeriesA) != nil || len(h.provider.undropped) != 1 || h.provider.undropped[0].MediaItemID != droppedTestSeriesB {
 		t.Fatalf("state = %#v undropped = %v; want series A forgotten without another write", h.state(droppedTestSeriesA), keys(h.provider.undropped))
+	}
+}
+
+func TestSyncDroppedImportsAProviderReDropAfterALocalWatch(t *testing.T) {
+	h := newDroppedHarness(t)
+	h.store.drop(droppedTestSeriesA, h.at(1))
+	h.agree(droppedTestSeriesA, true)
+	h.store.activity[droppedTestSeriesA] = h.at(2) // watched in Silo: the drop ended
+	// Dropped again on the provider after that watch.
+	h.provider.batch = DroppedImportBatch{Rows: []RemoteDropped{h.remoteRow(droppedTestSeriesA, h.at(3))}, Complete: true}
+
+	h.sync()
+
+	if len(h.provider.undropped) != 0 {
+		t.Fatalf("undropped = %v, want the newer provider drop kept", keys(h.provider.undropped))
+	}
+	if !h.store.active(droppedTestSeriesA) || !h.store.rows[droppedTestSeriesA].Equal(h.at(3)) {
+		t.Fatalf("local drop = %v active=%v, want re-dropped at the provider time", h.store.rows[droppedTestSeriesA], h.store.active(droppedTestSeriesA))
 	}
 }
 

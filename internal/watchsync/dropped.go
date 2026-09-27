@@ -64,17 +64,21 @@ const (
 
 // decideDropped merges one series. base is the agreed value. localActivity is
 // the profile's latest watch of the series and remoteAt the remote drop time;
-// either may be zero when unknown.
-func decideDropped(local, remote, base bool, localActivity, remoteAt time.Time) droppedAction {
+// either may be zero when unknown. endedByWatch means the profile still has a
+// drop row that watching ended, as opposed to no row after an undo.
+func decideDropped(local, remote, base, endedByWatch bool, localActivity, remoteAt time.Time) droppedAction {
 	switch {
 	case local == remote:
 		return droppedAgree
+	case remote && !remoteAt.IsZero() && localActivity.After(remoteAt):
+		// Watched in Silo after the provider's drop: watching undrops.
+		return droppedExportUndrop
+	case remote && endedByWatch && !remoteAt.IsZero() && remoteAt.After(localActivity):
+		// Dropped on the provider after the watch that ended the local drop.
+		return droppedImportDrop
 	case remote == base && local:
 		return droppedExportDrop
 	case remote == base:
-		return droppedExportUndrop
-	case remote && !remoteAt.IsZero() && localActivity.After(remoteAt):
-		// Watched in Silo after the provider's drop: watching undrops.
 		return droppedExportUndrop
 	case remote:
 		return droppedImportDrop
@@ -459,7 +463,7 @@ func (s *Service) reconcileDropped(
 	if importAllowed {
 		var candidates []string
 		for id, item := range items {
-			if item.remote && !item.local() && !item.base {
+			if item.remote && !item.local() {
 				candidates = append(candidates, id)
 			}
 		}
@@ -471,7 +475,8 @@ func (s *Service) reconcileDropped(
 
 	for id, item := range items {
 		local := item.local()
-		switch decideDropped(local, item.remote, item.base, activity[id], item.remoteAt) {
+		endedByWatch := item.row != nil && !item.row.Active
+		switch decideDropped(local, item.remote, item.base, endedByWatch, activity[id], item.remoteAt) {
 		case droppedAgree:
 			if local {
 				seen := item.stored != nil && item.stored.RemoteSeen

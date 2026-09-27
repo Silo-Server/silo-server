@@ -99,7 +99,7 @@ type WatchProviderSettings struct {
 	ScrobbleEnabled              bool `json:"scrobble_enabled"`
 	ImportRatingsEnabled         bool `json:"import_ratings_enabled" doc:"Import the provider's movie and series ratings as stars (1-2 is 1 star, 9-10 is 5 stars)."`
 	ExportRatingsEnabled         bool `json:"export_ratings_enabled" doc:"Send the profile's star ratings to the provider (stars times two) and clear removed ones."`
-	SyncDroppedEnabled           bool `json:"sync_dropped_enabled" doc:"Sync dropped shows both ways: dismissing a show's episode from Home drops the show on the provider, shows dropped on the provider are hidden from Next Up and Continue Watching, and watching a dropped show again undrops it on both sides."`
+	SyncDroppedEnabled           bool `json:"sync_dropped_enabled" doc:"Sync dropped shows both ways: dismissing a show's episode from Home drops the show on the provider, shows dropped on the provider are hidden from Continue Watching and the profile-wide Next Up (a single series' Next Up still lists them), and watching a dropped show again undrops it on both sides."`
 }
 
 func watchProviderSettingsOf(status watchsync.ConnectionStatus) WatchProviderSettings {
