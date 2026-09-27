@@ -288,7 +288,14 @@ func TestCreditsTailUnusableFilesAreNotDecodedAgain(t *testing.T) {
 			if calls := sampler.callCount(); calls != map[bool]int{true: 1}[tt.sampled] {
 				t.Fatalf("%d tail passes, want %v", calls, tt.sampled)
 			}
-			if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status != ArtifactUnusable || artifact.Detail != tt.detail {
+			// A tail ruled out by probe metadata is decided again on every
+			// analysis rather than stored.
+			artifact := repo.artifact(1, ArtifactKindCreditsTail)
+			if metadataTailDetail(tt.detail) {
+				if artifact.Status != "" {
+					t.Fatalf("artifact %+v, want none stored for %q", artifact, tt.detail)
+				}
+			} else if artifact.Status != ArtifactUnusable || artifact.Detail != tt.detail {
 				t.Fatalf("artifact %+v, want unusable with %q", artifact, tt.detail)
 			}
 			if last := repo.upsertedStates[len(repo.upsertedStates)-1]; last.Status != seasonStatusNotFound {
@@ -400,5 +407,53 @@ func TestCreditsTailPassWithoutFramesIsRetried(t *testing.T) {
 	}
 	if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status == ArtifactUnusable {
 		t.Fatalf("artifact %+v, want no unusable tail", artifact)
+	}
+}
+
+// A probe repair can fill in a missing or misread video codec without
+// changing the file. The tail is then sampled, even over a settled season
+// group or a no_video row an earlier build stored.
+func TestCreditsTailAfterProbeRepair(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		before string
+		legacy bool
+	}{
+		{name: "missing codec", before: ""},
+		{name: "misread all-intra codec", before: "mjpeg"},
+		{name: "stored no_video row", before: "", legacy: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			candidate := tailCandidate(1, "e1", 1500)
+			candidate.CodecVideo = tt.before
+			repo := &fakeIntroRepository{}
+			sampler := &fakeTailSampler{frames: endCreditsFrames}
+			analyzer, _ := tailAnalyzer(repo, sampler, "node-a")
+			if tt.legacy {
+				repo.artifacts = map[artifactSlot]Artifact{{1, ArtifactKindCreditsTail}: {
+					MediaFileID: 1, ArtifactKey: creditsTailKey(), ArtifactIdentity: tailWindow(candidate).identity(candidate),
+					Status: ArtifactUnusable, Detail: tailDetailNoVideo,
+				}}
+			} else {
+				summary, err := analyzer.analyzeCreditsGroup(context.Background(), soloGroup(candidate), analyzeGroupOptions{persistState: true, creditsTail: true})
+				if err != nil {
+					t.Fatalf("analyzeCreditsGroup: %v", err)
+				}
+				if summary.CreditsTailUnusable != 1 || sampler.callCount() != 0 {
+					t.Fatalf("summary %+v with %d tail passes, want the tail ruled out unsampled", summary, sampler.callCount())
+				}
+				settled := repo.upsertedStates[len(repo.upsertedStates)-1]
+				repo.seasonState = &settled
+			}
+
+			candidate.CodecVideo = "h264"
+			summary, err := analyzer.analyzeCreditsGroup(context.Background(), soloGroup(candidate), analyzeGroupOptions{persistState: true, creditsTail: true})
+			if err != nil {
+				t.Fatalf("analyzeCreditsGroup: %v", err)
+			}
+			if sampler.callCount() != 1 || summary.CreditsTailScansComputed != 1 || summary.CreditsVideoMarkersWritten != 1 {
+				t.Fatalf("summary %+v with %d tail passes, want the repaired file sampled and placed", summary, sampler.callCount())
+			}
+		})
 	}
 }

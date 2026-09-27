@@ -96,7 +96,7 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 		SeasonID:         group.SeasonID,
 		MediaFolderID:    group.MediaFolderID,
 		AnalysisGroupKey: group.AnalysisGroupKey,
-		InputSignature:   InputSignature(group.Candidates),
+		InputSignature:   creditsInputSignature(group.Candidates),
 		EpisodeCount:     distinctEpisodeCount(group.Candidates),
 		FileCount:        len(group.Candidates),
 	}

@@ -194,13 +194,15 @@ Credits versions and caches:
 - Tail passes are `credits_tail` rows, keyed the same way by the pass
   parameters. Their payload (`credits-tail:v1`) holds an 18-byte record per
   keyframe (offset, the three black shares, and the luma and saturation
-  statistics) followed by the silences. A tail is stored `unusable` without
-  decoding it when the file has no video (`no_video`) or an all-intra codec
-  such as ProRes or MJPEG (`unsupported_codec`); after decoding when it has
-  more than 5000 keyframes (`too_many_keyframes`) or fewer than one per 30
-  seconds (`sparse`); and when ffmpeg fails in a way the file itself causes
-  (`invalid_data`, `no_stream`). Other failures are stored `failed` with
-  backoff.
+  statistics) followed by the silences. A tail is not decoded when the
+  file's probe metadata shows no video or an all-intra codec such as ProRes
+  or MJPEG. That check runs again on every analysis and is not stored, since
+  a probe repair can correct the codec without changing the file; the credits
+  season state's input signature covers it too. A tail is stored `unusable`
+  after decoding when it has more than 5000 keyframes (`too_many_keyframes`)
+  or fewer than one per 30 seconds (`sparse`), and when ffmpeg fails in a way
+  the file itself causes (`invalid_data`, `no_stream`). Other failures are
+  stored `failed` with backoff.
 - `CreditsAnalysisConfigHash` keys credits season state, apart from intro
   state, and covers both artifact keys. Bump `CreditsBehaviorVersion` to
   re-run every credits comparison over cached fingerprints and tails.

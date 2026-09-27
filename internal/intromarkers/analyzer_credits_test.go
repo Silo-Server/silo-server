@@ -139,7 +139,7 @@ func TestAnalyzeEpisodeForPlaybackKeepsSettledCreditsSeason(t *testing.T) {
 	season := cachedCreditsSeason(t, analyzer, repo, 4)
 	target := season[1]
 	repo.episodeCandidates = map[string][]Candidate{target.EpisodeID: {target}}
-	repo.seasonState = &SeasonState{InputSignature: InputSignature(season), Status: seasonStatusNotFound}
+	repo.seasonState = &SeasonState{InputSignature: creditsInputSignature(season), Status: seasonStatusNotFound}
 
 	summary, err := analyzer.AnalyzeEpisodeForPlayback(context.Background(), target.EpisodeID, EpisodeMarkerKinds{Credits: true})
 	if err != nil {
