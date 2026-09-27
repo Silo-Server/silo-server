@@ -2801,13 +2801,14 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 func compatNegotiationVariant(sources []PlaybackMediaSource) string {
 	var variant strings.Builder
 	for _, source := range sources {
-		fmt.Fprintf(&variant, "%s|a=%s|s=%s|r=%t|ts=%t|ta=%t;",
+		fmt.Fprintf(&variant, "%s|a=%s|s=%s|r=%t|ts=%t|ta=%t|dv=%t;",
 			source.ID,
 			compatOptionalIndex(source.SelectedAudioStreamIndex),
 			compatOptionalIndex(source.SelectedSubtitleStreamIndex),
 			source.HLSRemux,
 			source.HLSRemuxMPEGTS,
 			source.TranscodeAudio,
+			source.DVStripToHDR10,
 		)
 	}
 	return variant.String()

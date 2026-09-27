@@ -88,8 +88,9 @@ func TestPlaybackInfoStripsDolbyVisionForClientThatRejectsIt(t *testing.T) {
 		t.Fatalf("media sources = %#v, want one", response.MediaSources)
 	}
 	dto := response.MediaSources[0]
-	if dto.SupportsDirectPlay || dto.SupportsDirectStream || !dto.SupportsTranscoding || dto.TranscodingURL == "" {
-		t.Fatalf("media source = %+v, want only an HLS route", dto)
+	if dto.SupportsDirectPlay || dto.SupportsDirectStream || !dto.SupportsTranscoding ||
+		!strings.HasPrefix(dto.TranscodingURL, "/Videos/"+routeID+"/remux-dv-v1/master.m3u8?") {
+		t.Fatalf("media source = %+v, want only the remux-dv-v1 HLS route", dto)
 	}
 	stored, ok := handler.playbackStore.Get(response.PlaySessionID)
 	if !ok || len(stored.MediaSources) != 1 {
