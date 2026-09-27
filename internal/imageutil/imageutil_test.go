@@ -2,6 +2,7 @@ package imageutil
 
 import (
 	"bytes"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -87,5 +88,12 @@ func BenchmarkThumbhashLargeJPEG(b *testing.B) {
 		if _, err := Thumbhash(data); err != nil {
 			b.Fatalf("Thumbhash: %v", err)
 		}
+	}
+}
+
+func TestGenerateVariantsWrapsErrInvalidImage(t *testing.T) {
+	_, err := GenerateVariants([]byte("not an image"), []int{300})
+	if !errors.Is(err, ErrInvalidImage) {
+		t.Fatalf("err = %v, want ErrInvalidImage", err)
 	}
 }

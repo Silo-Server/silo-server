@@ -5,6 +5,7 @@ package imageutil
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -28,6 +29,10 @@ const (
 // that pool is the only source of parallelism and the pools are sized per
 // CPU core; see tasks.imageCacheWorkerCount. Do not raise VIPS_CONCURRENCY
 // in deployments without lowering those pools, or the host oversubscribes.
+
+// ErrInvalidImage reports source bytes that libvips cannot read as an image.
+// Failures after the image was read, such as encoding a variant, do not wrap it.
+var ErrInvalidImage = errors.New("imageutil: invalid image")
 
 // MaxCachedOriginalDimension caps the longest edge of a cached "original"
 // variant. Provider artwork wider than this is downscaled on ingest, so a
@@ -57,7 +62,7 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 	// Validate input by reading size.
 	size, err := img.Size()
 	if err != nil {
-		return nil, fmt.Errorf("imageutil: invalid image: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidImage, err)
 	}
 
 	variants := make([]Variant, 0, len(widths)+1)
@@ -116,7 +121,7 @@ func GenerateSquareVariants(data []byte, sizes []int) (*VariantResult, error) {
 	img := bimg.NewImage(data)
 	size, err := img.Size()
 	if err != nil {
-		return nil, fmt.Errorf("imageutil: invalid image: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidImage, err)
 	}
 
 	squareSize := size.Width
@@ -214,7 +219,7 @@ func normalizeThumbhashSource(data []byte) ([]byte, error) {
 	img := bimg.NewImage(data)
 	size, err := img.Size()
 	if err != nil {
-		return nil, fmt.Errorf("imageutil: invalid image: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidImage, err)
 	}
 	opts := bimg.Options{
 		Type:          bimg.PNG,

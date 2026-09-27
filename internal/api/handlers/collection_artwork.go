@@ -81,8 +81,7 @@ func readCollectionImageMultipart(r *http.Request, fieldName string) ([]byte, er
 }
 
 // invalidCollectionImage reports artwork the caller supplied that Silo cannot
-// use. It is a 400 so both listeners answer with a validation error rather
-// than a 500.
+// use. The v2 routes render the 400 as a validation problem instead of a 500.
 func invalidCollectionImage(message string, cause error) *APIError {
 	return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: message, cause: cause}
 }
@@ -120,7 +119,7 @@ func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, invalidCollectionImage(fmt.Sprintf("The image source returned status %d.", resp.StatusCode), nil)
+		return nil, invalidCollectionImage("The image source did not return an image.", nil)
 	}
 	if resp.ContentLength > collectionImageMaxBytes {
 		return nil, invalidCollectionImage("The image exceeds the 10 MB limit.", nil)
@@ -156,8 +155,8 @@ func uploadCollectionImageVariants(
 }
 
 // generateCollectionImageVariants decodes the image and renders its resized
-// variants without touching storage. Bytes that are not a supported image
-// fail with invalidCollectionImage.
+// variants without touching storage. Bytes libvips cannot read fail with
+// invalidCollectionImage; an encode failure stays a server error.
 func generateCollectionImageVariants(imageType string, fileData []byte) (*imageutil.VariantResult, error) {
 	var widths []int
 	switch imageType {
@@ -170,8 +169,11 @@ func generateCollectionImageVariants(imageType string, fileData []byte) (*imageu
 	}
 
 	result, err := imageutil.GenerateVariants(fileData, widths)
-	if err != nil {
+	if errors.Is(err, imageutil.ErrInvalidImage) {
 		return nil, invalidCollectionImage("The file is not a supported image.", err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("generating image variants: %w", err)
 	}
 	return result, nil
 }

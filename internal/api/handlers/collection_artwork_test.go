@@ -235,9 +235,9 @@ func TestProcessCollectionPoster_InvalidImageKeepsExistingPoster(t *testing.T) {
 		func() ([]byte, error) { return []byte("not an image"), nil },
 		"",
 	)
-	mapped, ok := errors.AsType[*APIError](collectionArtworkError(err, "Failed to store collection artwork"))
-	if !ok || mapped.Status != http.StatusBadRequest {
-		t.Fatalf("err = %v, want a 400 APIError", err)
+	mapped := collectionArtworkError(err, "Failed to store collection artwork")
+	if apiErr, ok := errors.AsType[*APIError](mapped); !ok || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("mapped err = %v, want a 400 APIError", mapped)
 	}
 	items, _, err := store.List(context.Background(), userCollectionImagePrefix+"/collection-1/poster/", "", 0)
 	if err != nil {
