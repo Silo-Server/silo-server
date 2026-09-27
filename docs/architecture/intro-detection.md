@@ -130,8 +130,12 @@ the center 90 by 80 percent of the picture scaled to 480 pixels wide. Audio
 is read in full either way, so the video adds decode time but no reads. The
 pass runs only for files whose credits local analysis may write and that
 have no chapter credits; other files of the season get an audio-only
-fingerprint. A file without audio gets its pass without audio. If ffmpeg
-lacks a filter the pass needs, credits come from chapters and audio alone.
+fingerprint. A file without audio gets its pass without audio. ffmpeg fails
+the whole run when an output finds no stream, so when probe metadata names
+audio the file cannot give, the pass runs again on the video alone and the
+fingerprint is stored as having no audio. A pass that still finds no stream
+lacks video, and an audio-only run decides the fingerprint. If ffmpeg lacks
+a filter the pass needs, credits come from chapters and audio alone.
 
 Each keyframe is classified against the tail's black level, the 1st
 percentile of its 10th-percentile luma, capped at 30:
