@@ -114,6 +114,7 @@ func (p *Provider) Capabilities() watchsync.Capabilities {
 		ScrobblePlayback: true,
 		ImportRatings:    true,
 		ExportRatings:    true,
+		SyncDropped:      true,
 	}
 }
 

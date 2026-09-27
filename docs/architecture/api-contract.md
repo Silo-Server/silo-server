@@ -1865,7 +1865,9 @@ rating run counters exist only on v2, as do the `import_ratings` and `export_rat
 capability flags, which v2 projects through its own `WatchProviderCapabilities` type. The
 frozen v1 provider, connection, and run responses omit all of them, and a v1 settings
 update ignores the toggles. See
-[watch-provider-rating-sync.md](watch-provider-rating-sync.md) for the sync rules.
+[watch-provider-rating-sync.md](watch-provider-rating-sync.md) for the sync rules. The
+dropped-show setting (`sync_dropped_enabled`) and `sync_dropped` capability are v2-only in
+the same way; see [dropped-shows.md](dropped-shows.md).
 
 ### Webhook connection management
 

@@ -11,7 +11,6 @@
  * Related files:
  *   docs/design-system.md — Design philosophy and usage guidance
  *   src/app.css          — CSS tokens (colors, radii, shadows, motion)
- *   src/lib/themes.ts    — Theme definitions and metadata
  *
  * ─── HOW TO USE ───
  *
