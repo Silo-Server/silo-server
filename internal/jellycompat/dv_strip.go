@@ -80,16 +80,16 @@ func (h *PlaybackHandler) applyCompatDVStrip(
 		return source
 	}
 	// Direct play would hand the client the original Dolby Vision bytes, so
-	// evaluate the base layer only as a copy remux.
+	// evaluate the base layer only as a copy remux, tagged as the strip writes it.
 	req.EnableDirectPlay = boolPtr(false)
+	profile.hlsRemuxSampleEntry = playback.VideoSampleEntryHVC1
 	stripped := h.buildPlaybackSource(routeItemID, playSessionID, compatHDR10BaseVersion(source.Version), profile, req, allow4KTranscode)
 	if !stripped.HLSRemux {
 		return source
 	}
-	// A surround-to-stereo AAC remux also needs audio_to_aac v2, and route
-	// selection requires both recipes on one executor.
-	requiresAudioBoost := compatHLSRecipeSourceAudioChannels(stripped) > 2
-	if !h.compatDVStripExecutable(ctx, source.Version, requiresAudioBoost) {
+	// A surround-to-stereo AAC remux also needs audio_to_aac v2 on the same
+	// executor.
+	if !h.compatDVStripExecutable(ctx, source.Version, compatHLSRecipeSourceAudioChannels(stripped)) {
 		return source
 	}
 	// The negotiated source still names the original file: MediaStreams keep
@@ -109,10 +109,7 @@ func (h *PlaybackHandler) applyCompatDVStrip(
 // stored capability report advertises server_dv7_to_hdr10. Negotiation reads
 // stored reports rather than asking nodes, so an unresponsive node cannot
 // stall PlaybackInfo.
-func (h *PlaybackHandler) compatDVStripExecutable(ctx context.Context, version catalog.FileVersion, requiresAudioBoost bool) bool {
-	if !h.compatDVRPUStrippable(ctx, version.FilePath) {
-		return false
-	}
+func (h *PlaybackHandler) compatDVStripExecutable(ctx context.Context, version catalog.FileVersion, sourceAudioChannels int) bool {
 	compiled, err := noderouting.Candidates(noderouting.Request{
 		Workload: noderouting.WorkloadRemux, Delivery: noderouting.DeliveryHLSRemux,
 		Policy: h.playbackRoutingPolicy(), ProxyAllowed: h.JWTSecret != "",
@@ -130,10 +127,12 @@ func (h *PlaybackHandler) compatDVStripExecutable(ctx context.Context, version c
 			transcodeAllowed = true
 		}
 	}
-	if apiAllowed && h.compatDVStripLocalAvailable() {
-		return true
-	}
-	return transcodeAllowed && h.compatAnyTranscodeNodeCanStrip(requiresAudioBoost)
+	executor := apiAllowed && h.compatDVStripLocalAvailable(ctx) &&
+		h.requireLocalAudioDownmixCapability(ctx, sourceAudioChannels) == nil ||
+		transcodeAllowed && h.compatAnyTranscodeNodeCanStrip(sourceAudioChannels > 2)
+	// The per-file RPU probe can read the source for seconds, so it runs only
+	// once an executor exists.
+	return executor && h.compatDVRPUStrippable(ctx, version.FilePath)
 }
 
 func (h *PlaybackHandler) compatDVRPUStrippable(ctx context.Context, filePath string) bool {
@@ -143,11 +142,15 @@ func (h *PlaybackHandler) compatDVRPUStrippable(ctx context.Context, filePath st
 	return playback.DVRPUStrippable(ctx, h.FFmpegPath, filePath)
 }
 
-func (h *PlaybackHandler) compatDVStripLocalAvailable() bool {
+// compatDVStripLocalAvailable reads the API host's cached transformation
+// registry, the same probe that gates local audio_to_aac, for the dovi_rpu
+// strip recipe.
+func (h *PlaybackHandler) compatDVStripLocalAvailable(ctx context.Context) bool {
 	if h.compatDVStripLocalProbe != nil {
 		return h.compatDVStripLocalProbe()
 	}
-	return playback.DoviRPUFilterAvailable(h.FFmpegPath)
+	registry, err := h.localAudioTransformationRegistry(ctx)
+	return err == nil && registry.Available(playback.TransformationServerDV7HDR10V3)
 }
 
 // compatAnyTranscodeNodeCanStrip reports whether a pooled transcode node's
@@ -172,9 +175,22 @@ func (h *PlaybackHandler) compatAnyTranscodeNodeCanStrip(requiresAudioBoost bool
 	return false
 }
 
+// compatTranscodeNodeCanStrip checks the stored report of the node a remote
+// start is about to use. Restarts and audio switches can reach a node without
+// fresh route selection, so the start confirms the recipe itself; a node whose
+// FFmpeg then rejects the filter fails the start and the caller retries
+// elsewhere.
+func (h *PlaybackHandler) compatTranscodeNodeCanStrip(nodeURL string) bool {
+	lookup, ok := h.NodePlanner.(compatTranscodeNodeLookup)
+	if !ok {
+		return false
+	}
+	node, ok := lookup.TranscodeNodeByURL(strings.TrimRight(nodeURL, "/"))
+	return ok && compatNodeCanStrip(node)
+}
+
 // compatNodeCanStrip reads a node's stored capability report, which the health
-// sweep refetches whenever the node's reported hash changes. The remote start
-// confirms the recipe against the node's live report before dispatching.
+// sweep refetches whenever the node's reported hash changes.
 func compatNodeCanStrip(node *nodepool.Node) bool {
 	info, ok := compatNodeReport(node)
 	return ok && compatSupportsDVStrip(info.Transformations)
@@ -210,6 +226,7 @@ const compatDVStripRecipeVersion = "1"
 // the recipe, and the API host only when its own FFmpeg has the dovi_rpu
 // filter.
 func (h *PlaybackHandler) compatDVStripRouting(
+	ctx context.Context,
 	eligible func(*nodepool.Node) bool,
 	excludedShapes map[string]struct{},
 ) (func(*nodepool.Node) bool, map[string]struct{}) {
@@ -217,7 +234,7 @@ func (h *PlaybackHandler) compatDVStripRouting(
 	eligible = func(node *nodepool.Node) bool {
 		return node != nil && compatNodeCanStrip(node) && (baseEligible == nil || baseEligible(node))
 	}
-	if !h.compatDVStripLocalAvailable() {
+	if !h.compatDVStripLocalAvailable(ctx) {
 		excluded := make(map[string]struct{}, len(excludedShapes)+1)
 		for id := range excludedShapes {
 			excluded[id] = struct{}{}

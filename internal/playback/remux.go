@@ -113,12 +113,6 @@ func supportsDoviRPUFilter(bin string) bool {
 	return available
 }
 
-// DoviRPUFilterAvailable reports whether the configured FFmpeg can run the
-// dovi_rpu strip that turns a Dolby Vision copy into its HDR10 base layer.
-func DoviRPUFilterAvailable(ffmpegPath string) bool {
-	return supportsDoviRPUFilter(ResolveFFmpegPath(ffmpegPath))
-}
-
 // remuxDVProfile neutralizes a Dolby Vision profile the local ffmpeg cannot
 // handle. Profile 7 is the only profile that triggers an RPU strip in
 // buildRemuxArgs; when the strip is unavailable — the dovi_rpu filter is

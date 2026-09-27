@@ -1029,7 +1029,7 @@ func (h *PlaybackHandler) resolveCompatHLSRouteOnNodeWithPolicy(
 		return noderouting.Decision{}, err
 	}
 	if source.DVStripToHDR10 && !videoTranscode {
-		eligible, excludedShapes = h.compatDVStripRouting(eligible, excludedShapes)
+		eligible, excludedShapes = h.compatDVStripRouting(ctx, eligible, excludedShapes)
 	}
 	currentTranscodeURL := session.TranscodeNodeURL
 	if requiredTranscodeURL != "" {
@@ -1535,16 +1535,8 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 			return fmt.Errorf("transcode node does not support %s recipe %s", playback.TransformationAudioToAACV3, playback.TransformationAudioToAACRecipeVersionV3)
 		}
 	}
-	if source.DVStripToHDR10 && compatHLSCopiesVideo(source) {
-		capabilityCtx, cancelCapabilityFetch := context.WithTimeout(ctx, h.toneMapCapabilityTimeout())
-		info, capabilityErr := h.remoteToneMapCapabilityInfo(capabilityCtx, transcodeNodeURL)
-		cancelCapabilityFetch()
-		if capabilityErr != nil {
-			return fmt.Errorf("load transcode node Dolby Vision strip capability: %w", capabilityErr)
-		}
-		if !compatSupportsDVStrip(info.Transformations) {
-			return fmt.Errorf("transcode node does not support %s recipe %s", playback.TransformationServerDV7HDR10V3, compatDVStripRecipeVersion)
-		}
+	if source.DVStripToHDR10 && compatHLSCopiesVideo(source) && !h.compatTranscodeNodeCanStrip(transcodeNodeURL) {
+		return fmt.Errorf("transcode node does not support %s recipe %s", playback.TransformationServerDV7HDR10V3, compatDVStripRecipeVersion)
 	}
 	if h.sessionMgr != nil {
 		if err := h.sessionMgr.SetTranscodeNodeURL(upstreamSessionID, transcodeNodeURL); err != nil {

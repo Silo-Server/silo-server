@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // dvStripProfile8Track is a Dolby Vision profile 8.1 video: HEVC Main 10
@@ -32,6 +33,13 @@ func dvStripProfile8Track() models.VideoTrack {
 // rejects range types with a NotEquals condition gated by an InCollection
 // ApplyCondition over the same list.
 func androidTVRangeProfile(unsupportedHEVC ...string) string {
+	return rangeProfileJSON(nil, unsupportedHEVC...)
+}
+
+// rangeProfileJSON builds the Android TV range profile with extra HEVC
+// conditions, such as the VideoCodecTag requirement Jellyfin Web sends on
+// Safari.
+func rangeProfileJSON(extraHEVC []map[string]any, unsupportedHEVC ...string) string {
 	values := strings.Join(unsupportedHEVC, "|")
 	profile := map[string]any{
 		"Name":                "AndroidTV-Default",
@@ -48,6 +56,8 @@ func androidTVRangeProfile(unsupportedHEVC ...string) string {
 			"Type": "Video", "Codec": "hevc",
 			"Conditions":      []map[string]any{{"Condition": "NotEquals", "Property": "VideoRangeType", "Value": values, "IsRequired": false}},
 			"ApplyConditions": []map[string]any{{"Condition": "EqualsAny", "Property": "VideoRangeType", "Value": values, "IsRequired": false}},
+		}, {
+			"Type": "Video", "Codec": "hevc", "Conditions": extraHEVC,
 		}},
 	}
 	body, _ := json.Marshal(map[string]any{"DeviceProfile": profile})
@@ -287,7 +297,7 @@ func TestCompatDVStripRoutingRequiresCapableExecutors(t *testing.T) {
 	legacy := dvStripNode(t, "http://legacy:8080")
 	handler := &PlaybackHandler{compatDVStripLocalProbe: func() bool { return false }}
 
-	eligible, excluded := handler.compatDVStripRouting(nil, map[string]struct{}{"other": {}})
+	eligible, excluded := handler.compatDVStripRouting(context.Background(), nil, map[string]struct{}{"other": {}})
 
 	if !eligible(capable) || eligible(legacy) || eligible(nil) {
 		t.Fatal("strip routing must accept only nodes advertising server_dv7_to_hdr10")
@@ -300,7 +310,7 @@ func TestCompatDVStripRoutingRequiresCapableExecutors(t *testing.T) {
 	}
 
 	handler.compatDVStripLocalProbe = func() bool { return true }
-	if _, excluded = handler.compatDVStripRouting(nil, nil); len(excluded) != 0 {
+	if _, excluded = handler.compatDVStripRouting(context.Background(), nil, nil); len(excluded) != 0 {
 		t.Fatalf("excluded shapes = %v, want the API remux shape kept when local FFmpeg can strip", excluded)
 	}
 }
@@ -322,10 +332,10 @@ func TestCompatDVStripDecisionsNeverWaitOnNodes(t *testing.T) {
 		compatDVStripLocalProbe: func() bool { return false },
 	}
 
-	if !handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}, false) {
+	if !handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}, 0) {
 		t.Fatal("strip not executable although a pooled node's stored report advertises it")
 	}
-	eligible, _ := handler.compatDVStripRouting(nil, nil)
+	eligible, _ := handler.compatDVStripRouting(context.Background(), nil, nil)
 	if !eligible(capable) {
 		t.Fatal("capable node rejected during route selection")
 	}
@@ -337,7 +347,7 @@ func TestCompatDVStripDecisionsNeverWaitOnNodes(t *testing.T) {
 		compatToneMapInventoryPlanner: compatToneMapInventoryPlanner{urls: []string{"http://legacy:8080"}},
 		nodes:                         map[string]*nodepool.Node{"http://legacy:8080": dvStripNode(t, "http://legacy:8080")},
 	}
-	if handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}, false) {
+	if handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}, 0) {
 		t.Fatal("strip executable with neither a local filter nor a capable node")
 	}
 }
@@ -359,10 +369,10 @@ func TestCompatDVStripRequiresAudioBoostOnTheSameNode(t *testing.T) {
 	}
 	version := catalog.FileVersion{FilePath: "/media/movie.mkv"}
 
-	if !handler.compatDVStripExecutable(context.Background(), version, false) {
+	if !handler.compatDVStripExecutable(context.Background(), version, 0) {
 		t.Fatal("strip with copied audio should use the strip-capable node")
 	}
-	if handler.compatDVStripExecutable(context.Background(), version, true) {
+	if handler.compatDVStripExecutable(context.Background(), version, 6) {
 		t.Fatal("strip with a surround downmix needs one node with both recipes")
 	}
 
@@ -371,7 +381,83 @@ func TestCompatDVStripRequiresAudioBoostOnTheSameNode(t *testing.T) {
 		compatToneMapInventoryPlanner: compatToneMapInventoryPlanner{urls: []string{both.URL}},
 		nodes:                         map[string]*nodepool.Node{both.URL: both},
 	}
-	if !handler.compatDVStripExecutable(context.Background(), version, true) {
+	if !handler.compatDVStripExecutable(context.Background(), version, 6) {
 		t.Fatal("a node with both recipes should carry a downmixing strip")
+	}
+}
+
+func TestPlaybackInfoStripsForClientRequiringHVC1(t *testing.T) {
+	handler, routeID := newDVStripHandler(t, true)
+	requireHVC1 := []map[string]any{{"Condition": "EqualsAny", "Property": "VideoCodecTag", "Value": "hvc1|dvh1", "IsRequired": true}}
+
+	response := postPlaybackInfo(t, handler, routeID, rangeProfileJSON(requireHVC1, androidTVDVProfile8Disabled...))
+
+	stored, _ := handler.playbackStore.Get(response.PlaySessionID)
+	if stored == nil || len(stored.MediaSources) != 1 || !stored.MediaSources[0].DVStripToHDR10 {
+		t.Fatalf("media sources = %+v, want the strip, whose output is tagged hvc1", response.MediaSources)
+	}
+}
+
+func TestCompatDVStripProbesSourceOnlyWithAnExecutor(t *testing.T) {
+	probed := false
+	handler := &PlaybackHandler{
+		compatDVRPUProbe:        func(context.Context, string) bool { probed = true; return true },
+		compatDVStripLocalProbe: func() bool { return false },
+	}
+
+	if handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}, 0) {
+		t.Fatal("strip executable without any executor")
+	}
+	if probed {
+		t.Fatal("the source was probed although no executor could strip it")
+	}
+}
+
+func TestCompatTranscodeNodeCanStripReadsStoredReport(t *testing.T) {
+	capable := dvStripNode(t, "http://capable:8080", dvStripTransformation)
+	legacy := dvStripNode(t, "http://legacy:8080")
+	handler := &PlaybackHandler{NodePlanner: dvStripNodePlanner{
+		nodes: map[string]*nodepool.Node{capable.URL: capable, legacy.URL: legacy},
+	}}
+
+	if !handler.compatTranscodeNodeCanStrip(capable.URL + "/") {
+		t.Fatal("remote start rejected a node whose stored report advertises the strip")
+	}
+	if handler.compatTranscodeNodeCanStrip(legacy.URL) || handler.compatTranscodeNodeCanStrip("http://gone:8080") {
+		t.Fatal("remote start accepted a node without the strip recipe")
+	}
+}
+
+func TestCompatDVStripOnAPIHostRequiresLocalAudioRecipeForDownmix(t *testing.T) {
+	localRegistry := func(audio bool) func(context.Context, string, tonemap.Capabilities) (*playback.TransformationRegistryV3, error) {
+		return func(context.Context, string, tonemap.Capabilities) (*playback.TransformationRegistryV3, error) {
+			specs := []playback.TransformationSpecV3{{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true}}
+			if audio {
+				specs = append(specs, playback.TransformationSpecV3{
+					Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true,
+				})
+			}
+			return playback.NewTransformationRegistryV3(specs), nil
+		}
+	}
+	version := catalog.FileVersion{FilePath: "/media/movie.mkv"}
+	for name, tc := range map[string]struct {
+		audio    bool
+		channels int
+		want     bool
+	}{
+		"copied audio needs only the strip":     {audio: false, channels: 0, want: true},
+		"downmix without local audio_to_aac v2": {audio: false, channels: 6, want: false},
+		"downmix with local audio_to_aac v2":    {audio: true, channels: 6, want: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			handler := &PlaybackHandler{
+				compatDVRPUProbe:         func(context.Context, string) bool { return true },
+				compatAudioRegistryProbe: localRegistry(tc.audio),
+			}
+			if got := handler.compatDVStripExecutable(context.Background(), version, tc.channels); got != tc.want {
+				t.Fatalf("compatDVStripExecutable = %t, want %t", got, tc.want)
+			}
+		})
 	}
 }
