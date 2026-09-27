@@ -74,6 +74,11 @@ func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, itemID 
 		ctx, cancel := context.WithTimeout(h.baseContext, playbackLazyMarkerTimeout)
 		defer cancel()
 		needsLocal := false
+		// On-demand online markers are never saved, so the reload after
+		// local analysis lacks them; keep each file's overlay to lay back
+		// over it, as lazy playback does.
+		onDemand := onlineMarkersOnDemand(ctx, h.Settings)
+		overlays := make(map[int]*models.MediaFile, len(files))
 		for _, file := range files {
 			if file == nil || ctx.Err() != nil {
 				continue
@@ -81,6 +86,9 @@ func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, itemID 
 			effective, changed, err := h.OnlineMarkers.Refresh(ctx, file)
 			if err != nil {
 				h.logger.WarnContext(ctx, "online marker refresh failed", "file_id", file.ID, "error", err)
+			}
+			if onDemand && changed && effective != nil {
+				overlays[effective.ID] = effective
 			}
 			// Tell active playback of what the online sources changed now,
 			// whether or not local analysis follows.
@@ -95,7 +103,7 @@ func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, itemID 
 			if _, err := h.analyzeItem(ctx, itemID, kind, allMarkerKinds); err != nil {
 				h.logger.WarnContext(ctx, "local marker refresh failed", "item_id", itemID, "kind", kind, "error", err)
 			}
-			h.notifyItemMarkerUpdates(ctx, itemID, kind, "refresh")
+			h.notifyItemMarkerUpdates(ctx, itemID, kind, "refresh", overlays)
 		}
 	}()
 	return markerRefreshQueued, nil

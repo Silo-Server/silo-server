@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -639,6 +641,115 @@ func TestAdminMarkerRefreshNotifiesOnlineMovieChanges(t *testing.T) {
 			t.Fatalf("%s: %d local analyses, %d more updates; want none", tc.mode, len(analyzer.movies), len(notifier.ch))
 		}
 	}
+}
+
+// stagedMovieFiles serves a movie's stored files: before, until local
+// analysis has run, and after from then on.
+type stagedMovieFiles struct {
+	mu            sync.Mutex
+	analyzed      bool
+	before, after []*models.MediaFile
+}
+
+func (s *stagedMovieFiles) GetByContentID(context.Context, string) ([]*models.MediaFile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.analyzed {
+		return append([]*models.MediaFile(nil), s.after...), nil
+	}
+	return append([]*models.MediaFile(nil), s.before...), nil
+}
+
+func (s *stagedMovieFiles) GetByEpisodeID(context.Context, string) ([]*models.MediaFile, error) {
+	return nil, nil
+}
+
+// stagingAnalyzer marks the staged files analyzed when a movie analysis runs.
+type stagingAnalyzer struct {
+	*fakeIntroAnalyzer
+	files *stagedMovieFiles
+}
+
+func (a stagingAnalyzer) AnalyzeMovie(ctx context.Context, contentID string) (intromarkers.RunSummary, error) {
+	a.files.mu.Lock()
+	a.files.analyzed = true
+	a.files.mu.Unlock()
+	return a.fakeIntroAnalyzer.AnalyzeMovie(ctx, contentID)
+}
+
+// With on-demand online storage, a refresh of a two-version movie that finds
+// online credits for one version and runs local analysis for the other keeps
+// the first version's unsaved online credits in the update sent after the
+// analysis, instead of a stored snapshot without them.
+func TestAdminMarkerRefreshKeepsOnDemandOverlayAfterLocalAnalysis(t *testing.T) {
+	introStart, introEnd := 0.0, 90.0
+	manual := models.MarkerSourceManual
+	withIntro := &models.MediaFile{ID: 1, ContentID: "movie1", IntroStart: &introStart, IntroEnd: &introEnd, IntroMarkersSource: &manual}
+	localStart, localEnd := 6400.0, 6900.0
+	scanner := models.MarkerSourceScanner
+	files := &stagedMovieFiles{
+		before: []*models.MediaFile{withIntro, {ID: 2, ContentID: "movie1"}},
+		after: []*models.MediaFile{withIntro, {
+			ID: 2, ContentID: "movie1", CreditsStart: &localStart, CreditsEnd: &localEnd, CreditsMarkersSource: &scanner,
+		}},
+	}
+	analyzer := stagingAnalyzer{fakeIntroAnalyzer: &fakeIntroAnalyzer{movies: make(chan string, 1)}, files: files}
+	handler := NewAdminIntroHandler(analyzer, fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
+		ItemID: "movie1", Kind: intromarkers.MarkerItemMovie, HasMediaFiles: true, IntroDetectionEnabled: true,
+	}}, t.Context(), nil)
+	handler.Settings = fakeMarkerSettings{values: map[string]string{
+		markers.SettingMode:          string(markers.ModeBoth),
+		markers.SettingOnlineStorage: string(markers.OnlineStorageOnDemand),
+	}}
+	handler.FileResolver = files
+	notifier := fakeAdminIntroMarkerNotifier{ch: make(chan *models.MediaFile, 8)}
+	handler.MarkerUpdateNotifier = notifier
+	handler.OnlineMarkers = markerRefreshFunc(func(_ context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
+		if file.ID != 1 {
+			return file, false, nil
+		}
+		start, end := 6500.0, 7000.0
+		online := models.MarkerSourceOnline
+		view := *file
+		view.CreditsStart, view.CreditsEnd, view.CreditsMarkersSource = &start, &end, &online
+		return &view, true, nil
+	})
+
+	status, err := handler.RefreshEpisodeMarkers(t.Context(), "movie1", "refresh-v2")
+	if err != nil || status != "queued" {
+		t.Fatalf("refresh: status=%q err=%v", status, err)
+	}
+	select {
+	case <-analyzer.movies:
+	case <-time.After(time.Second):
+		t.Fatal("local analysis did not run for the version without online credits")
+	}
+	waitForRefreshIdle(t, handler, "movie1")
+	close(notifier.ch)
+	last := map[int]*models.MediaFile{}
+	for notified := range notifier.ch {
+		last[notified.ID] = notified
+	}
+	if got := last[1]; got == nil || got.CreditsStart == nil || *got.CreditsStart != 6500 || got.IntroEnd == nil {
+		t.Fatalf("last update for version 1 lacks its manual intro or online credits at 6500: %v", markerSummary(got))
+	}
+	if got := last[2]; got == nil || got.CreditsStart == nil || *got.CreditsStart != 6400 {
+		t.Fatalf("last update for version 2 lacks its local credits at 6400: %v", markerSummary(got))
+	}
+}
+
+// markerSummary describes a file's intro and credits for a test failure.
+func markerSummary(file *models.MediaFile) string {
+	if file == nil {
+		return "no update"
+	}
+	value := func(v *float64) string {
+		if v == nil {
+			return "none"
+		}
+		return strconv.FormatFloat(*v, 'f', -1, 64)
+	}
+	return "intro_end=" + value(file.IntroEnd) + " credits_start=" + value(file.CreditsStart)
 }
 
 // waitForRefreshIdle waits until no refresh of itemID is in flight.

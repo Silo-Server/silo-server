@@ -209,7 +209,7 @@ func (h *AdminIntroHandler) refreshItemMarkers(ctx context.Context, itemID, acti
 			"credits_fingerprints_computed", summary.CreditsFingerprintsComputed,
 			"credits_tail_scans_computed", summary.CreditsTailScansComputed,
 			"errors", len(summary.Errors))
-		h.notifyItemMarkerUpdates(h.baseContext, itemID, kind, action)
+		h.notifyItemMarkerUpdates(h.baseContext, itemID, kind, action, nil)
 	}()
 
 	return markerRefreshQueued, nil
@@ -266,7 +266,10 @@ func (h *AdminIntroHandler) itemFiles(ctx context.Context, itemID, kind string) 
 	return movieFiles, nil
 }
 
-func (h *AdminIntroHandler) notifyItemMarkerUpdates(ctx context.Context, itemID, kind, action string) {
+// notifyItemMarkerUpdates tells active playback the markers of an item's
+// files as stored, with each file's on-demand online overlay from overlays,
+// keyed by file ID, laid over its stored row.
+func (h *AdminIntroHandler) notifyItemMarkerUpdates(ctx context.Context, itemID, kind, action string, overlays map[int]*models.MediaFile) {
 	if h == nil || h.FileResolver == nil || h.MarkerUpdateNotifier == nil {
 		return
 	}
@@ -280,6 +283,9 @@ func (h *AdminIntroHandler) notifyItemMarkerUpdates(ctx context.Context, itemID,
 		return
 	}
 	for _, file := range files {
+		if file != nil {
+			file = markers.OverlayOnline(file, overlays[file.ID])
+		}
 		if !hasAnyPlaybackMarker(file) {
 			continue
 		}
