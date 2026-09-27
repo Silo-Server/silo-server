@@ -323,7 +323,12 @@ export function buildTMDBCollectionSourceInput({
   source_url: string;
   source_config: Record<string, unknown>;
 } {
-  const parsedId = parseOptionalPositiveInteger(collectionId) ?? 0;
+  // A number input accepts exponent notation, so parse the whole value:
+  // parseInt would read "1e3" as 1 rather than 1000.
+  const trimmedId = collectionId.trim();
+  const numericId = Number(trimmedId);
+  const parsedId =
+    trimmedId !== "" && Number.isSafeInteger(numericId) && numericId > 0 ? numericId : 0;
   const parsedLimit = parseOptionalPositiveInteger(limit);
   const source_config: Record<string, unknown> = {
     mode: "tmdb_collection",

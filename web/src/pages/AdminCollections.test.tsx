@@ -242,4 +242,13 @@ describe("AdminCollections helpers", () => {
       },
     });
   });
+
+  it("parses a TMDB collection ID entered in exponent notation", () => {
+    const exponent = buildTMDBCollectionSourceInput({ collectionId: "1e3", limit: "" });
+    expect(exponent.source_config).toEqual({ mode: "tmdb_collection", collection_id: 1000 });
+    for (const invalid of ["1.5", "12abc", "-4"]) {
+      const input = buildTMDBCollectionSourceInput({ collectionId: invalid, limit: "" });
+      expect(input.source_config.collection_id).toBe(0);
+    }
+  });
 });
