@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
@@ -25,9 +28,7 @@ type blockingArtworkRevisionDeleter struct {
 	deleted [][]string
 }
 
-func (d *blockingArtworkRevisionDeleter) Bucket() string { return "artwork" }
-
-func (d *blockingArtworkRevisionDeleter) DeleteObjects(ctx context.Context, _ string, keys []string) (int, error) {
+func (d *blockingArtworkRevisionDeleter) Delete(ctx context.Context, keys []string) (int, error) {
 	d.once.Do(func() { close(d.started) })
 	if d.release != nil {
 		select {
@@ -56,8 +57,37 @@ func artworkRevisionGCTestPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+type failingArtworkRevisionGCExecBeginner struct {
+	pool *pgxpool.Pool
+}
+
+func (b failingArtworkRevisionGCExecBeginner) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := b.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &failingArtworkRevisionGCExecTx{Tx: tx}, nil
+}
+
+type failingArtworkRevisionGCExecTx struct {
+	pgx.Tx
+	execs int
+}
+
+func (tx *failingArtworkRevisionGCExecTx) Exec(
+	ctx context.Context,
+	sql string,
+	args ...any,
+) (pgconn.CommandTag, error) {
+	tx.execs++
+	if tx.execs == 2 {
+		return pgconn.CommandTag{}, errors.New("injected heal lease failure")
+	}
+	return tx.Tx.Exec(ctx, sql, args...)
+}
+
 func TestProcessArtworkRevisionGCBatchContinuesAfterRetryFailure(t *testing.T) {
-	candidates := []artworkRevisionGCCandidate{{id: 1}, {id: 2}, {id: 3}}
+	candidates := []artworkRevisionGCCandidate{{id: 1}, {id: 2}, {id: 3}, {id: 4}}
 	processed := make([]int64, 0, len(candidates))
 	retryErr := errors.New("schedule retry")
 
@@ -70,6 +100,8 @@ func TestProcessArtworkRevisionGCBatchContinuesAfterRetryFailure(t *testing.T) {
 				return artworkRevisionGCSuperseded, errors.New("delete object")
 			case 2:
 				return artworkRevisionGCReferenced, nil
+			case 3:
+				return artworkRevisionGCDeletionPendingHeal, nil
 			default:
 				return artworkRevisionGCDeleted, nil
 			}
@@ -85,12 +117,54 @@ func TestProcessArtworkRevisionGCBatchContinuesAfterRetryFailure(t *testing.T) {
 	if !errors.Is(err, retryErr) {
 		t.Fatalf("process batch error = %v, want %v", err, retryErr)
 	}
-	if !slices.Equal(processed, []int64{1, 2, 3}) {
+	if !slices.Equal(processed, []int64{1, 2, 3, 4}) {
 		t.Fatalf("processed candidates = %v, want all candidates", processed)
 	}
-	want := ArtworkRevisionGCStats{Claimed: 3, Deleted: 1, Referenced: 1, Retried: 1}
+	want := ArtworkRevisionGCStats{Claimed: 4, Deleted: 1, Referenced: 1, Retried: 1}
 	if stats != want {
 		t.Fatalf("stats = %+v, want %+v", stats, want)
+	}
+}
+
+func TestArtworkRevisionGCHealingSQLTargetsOneReferencedPath(t *testing.T) {
+	surface := artworkSweepSurfaces()[0]
+	query := artworkRevisionGCHealingSQL(surface, surface.resetSet(), surface.remoteSourcePredicate())
+	for _, want := range []string{
+		"UPDATE " + surface.table,
+		"target." + surface.pathCol + " = $1",
+		"candidate.id = $2",
+		"candidate.deleted_at IS NOT NULL",
+		"candidate.locked_by IN ('', $3)",
+		surface.remoteSourcePredicate(),
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("heal query missing %q: %s", want, query)
+		}
+	}
+	if strings.Contains(query, "unnest(") {
+		t.Fatalf("exceptional healing must retain one-path lock width: %s", query)
+	}
+	if strings.Contains(query, "FOR UPDATE") {
+		t.Fatalf("heal query must not invert source-to-candidate lock ordering: %s", query)
+	}
+}
+
+func TestArtworkRevisionGCFinalizeSQLMaterializesReferenceSweep(t *testing.T) {
+	query := artworkRevisionGCFinalizeSQL()
+	for _, want := range []string{
+		"WITH referenced AS MATERIALIZED",
+		"unnest($1::bigint[], $2::text[])",
+		"candidate.deleted_at IS NOT NULL",
+		"candidate.locked_by IN ('', $3)",
+		"NOT EXISTS",
+		"RETURNING candidate.id",
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("finalize query missing %q: %s", want, query)
+		}
+	}
+	if got := strings.Count(query, " = ANY($2)"); got != len(artworkSweepSurfaces()) {
+		t.Fatalf("final reference sweep covers %d surfaces, want %d", got, len(artworkSweepSurfaces()))
 	}
 }
 
@@ -417,11 +491,444 @@ func TestArtworkRevisionGCExpandsTriggerManifestFromImageType(t *testing.T) {
 	deleted := deleter.deleted
 	deleter.mu.Unlock()
 	if len(deleted) != 1 {
-		t.Fatalf("DeleteObjects calls = %d, want 1", len(deleted))
+		t.Fatalf("Delete calls = %d, want 1", len(deleted))
 	}
 	want := artworkkey.ObjectKeys(originalPath, "backdrop")
 	if !slices.Equal(deleted[0], want) {
 		t.Fatalf("deleted keys = %v, want expanded manifest %v", deleted[0], want)
+	}
+}
+
+func TestArtworkRevisionGCBatchReferenceGateHealsRaces(t *testing.T) {
+	pool := artworkRevisionGCTestPool(t)
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	workerID := fmt.Sprintf("gc-batch-heal-worker-%d", suffix)
+	type healCase struct {
+		contentID string
+		path      string
+		source    string
+		want      string
+		id        int64
+	}
+	cases := []healCase{
+		{
+			contentID: fmt.Sprintf("gc-batch-heal-remote-%d", suffix),
+			path:      fmt.Sprintf("tmdb/movies/%d/poster/original.remote-gone.webp", suffix),
+			source:    fmt.Sprintf("https://images.example/%d/poster.jpg", suffix),
+			want:      fmt.Sprintf("https://images.example/%d/poster.jpg", suffix),
+		},
+		{
+			contentID: fmt.Sprintf("gc-batch-heal-clear-%d", suffix),
+			path:      fmt.Sprintf("tmdb/movies/%d/poster/original.local-gone.webp", suffix),
+		},
+	}
+	contentIDs := make([]string, 0, len(cases))
+	paths := make([]string, 0, len(cases))
+	for i := range cases {
+		item := &cases[i]
+		contentIDs = append(contentIDs, item.contentID)
+		paths = append(paths, item.path)
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO media_items (
+				content_id, type, title, status, genres, poster_path, poster_source_path
+			) VALUES ($1, 'movie', 'GC Batch Heal', 'matched', '{}'::text[], $2, $3)`,
+			item.contentID, item.path, item.source); err != nil {
+			t.Fatalf("seed batch heal item: %v", err)
+		}
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO artwork_revision_gc_candidates (
+				original_path, image_type, object_keys, not_before, next_attempt_at,
+				deleted_at, locked_at, locked_by
+			) VALUES ($1, 'poster', '{}', NOW() - interval '1 hour', NOW() - interval '1 hour',
+				NOW() - interval '1 hour', NOW(), $2)
+			RETURNING id`, item.path, workerID).Scan(&item.id); err != nil {
+			t.Fatalf("seed batch heal candidate: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, contentIDs)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = ANY($1)`, paths)
+	})
+
+	pending := make([]artworkRevisionGCPendingHeal, 0, len(cases))
+	for _, item := range cases {
+		pending = append(pending, artworkRevisionGCPendingHeal{
+			candidate:    artworkRevisionGCCandidate{id: item.id, originalPath: item.path},
+			originalPath: item.path,
+		})
+	}
+	collector := NewArtworkRevisionGarbageCollector(pool, &blockingArtworkRevisionDeleter{started: make(chan struct{})})
+	result, err := collector.finishPendingHeals(ctx, pending, workerID)
+	if err != nil {
+		t.Fatalf("finishPendingHeals: %v", err)
+	}
+	healed := result.healedPaths
+	if len(healed) != len(cases) {
+		t.Fatalf("healed paths = %v, want both deleted revisions", healed)
+	}
+	for _, item := range cases {
+		if _, ok := healed[item.path]; !ok {
+			t.Fatalf("healed paths missing %q: %v", item.path, healed)
+		}
+		var got string
+		if err := pool.QueryRow(ctx, `SELECT poster_path FROM media_items WHERE content_id = $1`, item.contentID).Scan(&got); err != nil {
+			t.Fatalf("load batch healed item: %v", err)
+		}
+		if got != item.want {
+			t.Fatalf("poster_path = %q, want %q", got, item.want)
+		}
+	}
+	var remaining int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM artwork_revision_gc_candidates WHERE original_path = ANY($1)`, paths).Scan(&remaining); err != nil {
+		t.Fatalf("count batch heal candidates: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("candidate rows remaining = %d, want 0", remaining)
+	}
+}
+
+func TestArtworkRevisionGCHealStatementRollsBackBeforeRetry(t *testing.T) {
+	pool := artworkRevisionGCTestPool(t)
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	contentID := fmt.Sprintf("gc-heal-rollback-%d", suffix)
+	originalPath := fmt.Sprintf("tmdb/movies/%d/poster/original.rollback.webp", suffix)
+	sourcePath := fmt.Sprintf("https://images.example/%d/poster.jpg", suffix)
+	workerID := fmt.Sprintf("gc-heal-rollback-worker-%d", suffix)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (
+			content_id, type, title, status, genres, poster_path, poster_source_path
+		) VALUES ($1, 'movie', 'GC Heal Rollback', 'matched', '{}'::text[], $2, $3)`,
+		contentID, originalPath, sourcePath); err != nil {
+		t.Fatalf("seed rollback item: %v", err)
+	}
+	var candidateID int64
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO artwork_revision_gc_candidates (
+			original_path, image_type, object_keys, not_before, next_attempt_at,
+			deleted_at, locked_at, locked_by
+		) VALUES ($1, 'poster', '{}', NOW() - interval '1 hour', NOW() - interval '1 hour',
+			NOW() - interval '1 hour', NOW(), $2)
+		RETURNING id`, originalPath, workerID).Scan(&candidateID); err != nil {
+		t.Fatalf("seed rollback candidate: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, contentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, originalPath)
+	})
+
+	surface := artworkSweepSurfaces()[0]
+	query := artworkRevisionGCHealingSQL(surface, surface.resetSet(), surface.remoteSourcePredicate())
+	healed := make(map[string]struct{})
+	err := healArtworkRevisionRows(
+		ctx,
+		failingArtworkRevisionGCExecBeginner{pool: pool},
+		surface,
+		query,
+		artworkRevisionGCPendingHeal{
+			candidate:    artworkRevisionGCCandidate{id: candidateID, originalPath: originalPath},
+			originalPath: originalPath,
+		},
+		workerID,
+		healed,
+	)
+	if err == nil || !strings.Contains(err.Error(), "injected heal lease failure") {
+		t.Fatalf("heal error = %v, want injected lease failure", err)
+	}
+	if len(healed) != 0 {
+		t.Fatalf("rolled-back heal reported success: %v", healed)
+	}
+
+	var posterPath, lockedBy string
+	var nextAttempt time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT item.poster_path, candidate.locked_by, candidate.next_attempt_at
+		FROM media_items AS item
+		JOIN artwork_revision_gc_candidates AS candidate ON candidate.original_path = item.poster_path
+		WHERE item.content_id = $1`, contentID).Scan(&posterPath, &lockedBy, &nextAttempt); err != nil {
+		t.Fatalf("load rolled-back state: %v", err)
+	}
+	if posterPath != originalPath {
+		t.Fatalf("poster_path = %q, want rolled-back path %q", posterPath, originalPath)
+	}
+	if lockedBy != workerID {
+		t.Fatalf("locked_by = %q, want original worker lease", lockedBy)
+	}
+	if nextAttempt.After(time.Now()) {
+		t.Fatalf("next_attempt_at = %v, want original due time after rollback", nextAttempt)
+	}
+
+	collector := NewArtworkRevisionGarbageCollector(pool, &blockingArtworkRevisionDeleter{started: make(chan struct{})})
+	retried, retryErr := collector.retryDeletedCandidate(ctx, artworkRevisionGCPendingHeal{
+		candidate: artworkRevisionGCCandidate{
+			id:           candidateID,
+			originalPath: originalPath,
+		},
+		originalPath: originalPath,
+	}, workerID, err)
+	if retryErr != nil {
+		t.Fatalf("retryDeletedCandidate: %v", retryErr)
+	}
+	if !retried {
+		t.Fatal("rolled-back heal was not scheduled for retry")
+	}
+	var notBefore time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT not_before, next_attempt_at, locked_by
+		FROM artwork_revision_gc_candidates
+		WHERE id = $1`, candidateID).Scan(&notBefore, &nextAttempt, &lockedBy); err != nil {
+		t.Fatalf("load retry state: %v", err)
+	}
+	if notBefore.After(time.Now()) {
+		t.Fatalf("not_before = %v, want immediate heal eligibility", notBefore)
+	}
+	if nextAttempt.After(time.Now().Add(2 * time.Minute)) {
+		t.Fatalf("next_attempt_at = %v, want bounded retry delay", nextAttempt)
+	}
+	if lockedBy != "" {
+		t.Fatalf("locked_by = %q, want retry lease released", lockedBy)
+	}
+}
+
+func TestArtworkRevisionGCFinalGuardRearmsVisibleReference(t *testing.T) {
+	pool := artworkRevisionGCTestPool(t)
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	contentID := fmt.Sprintf("gc-final-guard-%d", suffix)
+	originalPath := fmt.Sprintf("tmdb/movies/%d/poster/original.final-guard.webp", suffix)
+	workerID := fmt.Sprintf("gc-final-guard-worker-%d", suffix)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, status, genres, poster_path)
+		VALUES ($1, 'movie', 'GC Final Guard', 'matched', '{}'::text[], $2)`, contentID, originalPath); err != nil {
+		t.Fatalf("seed final guard item: %v", err)
+	}
+	var candidateID int64
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO artwork_revision_gc_candidates (
+			original_path, image_type, object_keys, not_before, next_attempt_at,
+			deleted_at, locked_at, locked_by
+		) VALUES ($1, 'poster', '{}', NOW() - interval '1 hour', NOW() - interval '1 hour',
+			NOW() - interval '1 hour', NOW(), $2)
+		RETURNING id`, originalPath, workerID).Scan(&candidateID); err != nil {
+		t.Fatalf("seed final guard candidate: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, contentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, originalPath)
+	})
+
+	collector := NewArtworkRevisionGarbageCollector(pool, &blockingArtworkRevisionDeleter{started: make(chan struct{})})
+	finalizedIDs, rearmedIDs, err := collector.finalizePendingHeals(
+		ctx,
+		[]int64{candidateID},
+		[]string{originalPath},
+		workerID,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("finalizePendingHeals: %v", err)
+	}
+	if len(finalizedIDs) != 0 {
+		t.Fatalf("visible reference finalized as unreferenced: %v", finalizedIDs)
+	}
+	if _, ok := rearmedIDs[candidateID]; !ok {
+		t.Fatalf("guarded candidate was not rearmed: %v", rearmedIDs)
+	}
+
+	var deletedAt *time.Time
+	var nextAttempt time.Time
+	var due bool
+	var lockedBy string
+	if err := pool.QueryRow(ctx, `
+		SELECT deleted_at, next_attempt_at, next_attempt_at <= NOW(), locked_by
+		FROM artwork_revision_gc_candidates
+		WHERE id = $1`, candidateID).Scan(&deletedAt, &nextAttempt, &due, &lockedBy); err != nil {
+		t.Fatalf("load guarded candidate: %v", err)
+	}
+	if deletedAt == nil {
+		t.Fatal("guarded candidate lost its durable deleted_at marker")
+	}
+	if !due {
+		t.Fatalf("next_attempt_at = %v, want immediate follow-up", nextAttempt)
+	}
+	if lockedBy != "" {
+		t.Fatalf("locked_by = %q, want guarded candidate released", lockedBy)
+	}
+}
+
+func TestArtworkRevisionGCBatchHealPreservesRetrackedRevision(t *testing.T) {
+	pool := artworkRevisionGCTestPool(t)
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	contentID := fmt.Sprintf("gc-batch-heal-retracked-%d", suffix)
+	originalPath := fmt.Sprintf("tmdb/movies/%d/poster/original.retracked.webp", suffix)
+	workerID := fmt.Sprintf("gc-batch-heal-retracked-worker-%d", suffix)
+	newKeys := []string{originalPath, fmt.Sprintf("tmdb/movies/%d/poster/w500.retracked.webp", suffix)}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, status, genres, poster_path)
+		VALUES ($1, 'movie', 'GC Retracked Heal', 'matched', '{}'::text[], $2)`, contentID, originalPath); err != nil {
+		t.Fatalf("seed retracked item: %v", err)
+	}
+	var candidateID int64
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO artwork_revision_gc_candidates (
+			original_path, image_type, object_keys, not_before, next_attempt_at,
+			deleted_at, locked_at, locked_by
+		) VALUES ($1, 'poster', '{}', NOW() - interval '1 hour', NOW() - interval '1 hour',
+			NOW() - interval '1 hour', NOW(), $2)
+		RETURNING id`, originalPath, workerID).Scan(&candidateID); err != nil {
+		t.Fatalf("seed retracked candidate: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, contentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, originalPath)
+	})
+
+	tracker := catalog.NewArtworkRevisionTracker(pool)
+	if err := tracker.TrackArtworkRevision(ctx, originalPath, "poster", newKeys); err != nil {
+		t.Fatalf("retrack revision: %v", err)
+	}
+	collector := NewArtworkRevisionGarbageCollector(pool, &blockingArtworkRevisionDeleter{started: make(chan struct{})})
+	result, err := collector.finishPendingHeals(ctx, []artworkRevisionGCPendingHeal{{
+		candidate:    artworkRevisionGCCandidate{id: candidateID, originalPath: originalPath},
+		originalPath: originalPath,
+	}}, workerID)
+	if err != nil {
+		t.Fatalf("finishPendingHeals: %v", err)
+	}
+	if len(result.healedPaths) != 0 || len(result.finalizedIDs) != 0 {
+		t.Fatalf("retracked revision was healed or finalized: %+v", result)
+	}
+
+	var posterPath string
+	if err := pool.QueryRow(ctx, `SELECT poster_path FROM media_items WHERE content_id = $1`, contentID).Scan(&posterPath); err != nil {
+		t.Fatalf("load retracked item: %v", err)
+	}
+	if posterPath != originalPath {
+		t.Fatalf("poster_path = %q, want retracked path %q preserved", posterPath, originalPath)
+	}
+	var deletedAt *time.Time
+	var objectKeys []string
+	if err := pool.QueryRow(ctx, `
+		SELECT deleted_at, object_keys
+		FROM artwork_revision_gc_candidates
+		WHERE id = $1`, candidateID).Scan(&deletedAt, &objectKeys); err != nil {
+		t.Fatalf("load retracked candidate: %v", err)
+	}
+	if deletedAt != nil {
+		t.Fatalf("deleted_at = %v, want retracker to clear it", *deletedAt)
+	}
+	if !slices.Equal(objectKeys, newKeys) {
+		t.Fatalf("object_keys = %v, want retracked manifest %v", objectKeys, newKeys)
+	}
+}
+
+func TestArtworkRevisionGCBatchHealRechecksRetrackBetweenSurfaces(t *testing.T) {
+	pool := artworkRevisionGCTestPool(t)
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	contentID := fmt.Sprintf("gc-batch-heal-mid-retrack-%d", suffix)
+	originalPath := fmt.Sprintf("tmdb/movies/%d/poster/original.mid-retrack.webp", suffix)
+	posterSource := fmt.Sprintf("https://images.example/%d/poster.jpg", suffix)
+	backdropSource := fmt.Sprintf("https://images.example/%d/backdrop.jpg", suffix)
+	workerID := fmt.Sprintf("gc-batch-heal-mid-retrack-worker-%d", suffix)
+	newKeys := []string{originalPath, fmt.Sprintf("tmdb/movies/%d/poster/w500.mid-retrack.webp", suffix)}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (
+			content_id, type, title, status, genres, poster_path, poster_source_path,
+			backdrop_path, backdrop_source_path
+		) VALUES ($1, 'movie', 'GC Mid-Heal Retrack', 'matched', '{}'::text[], $2, $3, $2, $4)`,
+		contentID, originalPath, posterSource, backdropSource); err != nil {
+		t.Fatalf("seed mid-heal retrack item: %v", err)
+	}
+	var candidateID int64
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO artwork_revision_gc_candidates (
+			original_path, image_type, object_keys, not_before, next_attempt_at,
+			deleted_at, locked_at, locked_by
+		) VALUES ($1, 'poster', '{}', NOW() - interval '1 hour', NOW() - interval '1 hour',
+			NOW() - interval '1 hour', NOW(), $2)
+		RETURNING id`, originalPath, workerID).Scan(&candidateID); err != nil {
+		t.Fatalf("seed mid-heal retrack candidate: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, contentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, originalPath)
+	})
+
+	posterSurface := artworkSweepSurfaces()[0]
+	posterReset := artworkRevisionGCHealingSQL(
+		posterSurface,
+		posterSurface.resetSet(),
+		posterSurface.remoteSourcePredicate(),
+	)
+	firstHealed := make(map[string]struct{})
+	if err := healArtworkRevisionRows(
+		ctx,
+		pool,
+		posterSurface,
+		posterReset,
+		artworkRevisionGCPendingHeal{
+			candidate:    artworkRevisionGCCandidate{id: candidateID, originalPath: originalPath},
+			originalPath: originalPath,
+		},
+		workerID,
+		firstHealed,
+	); err != nil {
+		t.Fatalf("heal first surface: %v", err)
+	}
+	if _, ok := firstHealed[originalPath]; !ok {
+		t.Fatalf("first surface did not heal %q", originalPath)
+	}
+
+	tracker := catalog.NewArtworkRevisionTracker(pool)
+	if err := tracker.TrackArtworkRevision(ctx, originalPath, "poster", newKeys); err != nil {
+		t.Fatalf("retrack between heal surfaces: %v", err)
+	}
+	collector := NewArtworkRevisionGarbageCollector(pool, &blockingArtworkRevisionDeleter{started: make(chan struct{})})
+	result, err := collector.finishPendingHeals(ctx, []artworkRevisionGCPendingHeal{{
+		candidate:    artworkRevisionGCCandidate{id: candidateID, originalPath: originalPath},
+		originalPath: originalPath,
+	}}, workerID)
+	if err != nil {
+		t.Fatalf("finishPendingHeals after retrack: %v", err)
+	}
+	if len(result.healedPaths) != 0 || len(result.finalizedIDs) != 0 {
+		t.Fatalf("later surfaces ignored cleared deleted_at: %+v", result)
+	}
+
+	var posterPath, backdropPath string
+	if err := pool.QueryRow(ctx, `
+		SELECT poster_path, backdrop_path
+		FROM media_items
+		WHERE content_id = $1`, contentID).Scan(&posterPath, &backdropPath); err != nil {
+		t.Fatalf("load mid-heal retrack item: %v", err)
+	}
+	if posterPath != posterSource {
+		t.Fatalf("poster_path = %q, want first surface reset %q", posterPath, posterSource)
+	}
+	if backdropPath != originalPath {
+		t.Fatalf("backdrop_path = %q, want retracked path %q preserved", backdropPath, originalPath)
+	}
+	var deletedAt *time.Time
+	var objectKeys []string
+	if err := pool.QueryRow(ctx, `
+		SELECT deleted_at, object_keys
+		FROM artwork_revision_gc_candidates
+		WHERE id = $1`, candidateID).Scan(&deletedAt, &objectKeys); err != nil {
+		t.Fatalf("load mid-heal retracked candidate: %v", err)
+	}
+	if deletedAt != nil {
+		t.Fatalf("deleted_at = %v, want retracker to clear it", *deletedAt)
+	}
+	if !slices.Equal(objectKeys, newKeys) {
+		t.Fatalf("object_keys = %v, want retracked manifest %v", objectKeys, newKeys)
 	}
 }
 
@@ -542,5 +1049,179 @@ func TestArtworkRevisionGCDormantSweep(t *testing.T) {
 	}
 	if referencedNext != nil {
 		t.Fatalf("referenced dormant row was re-armed: %v", *referencedNext)
+	}
+}
+
+type callbackArtworkRevisionDeleter struct {
+	delete func(context.Context, []string) (int, error)
+}
+
+func (d callbackArtworkRevisionDeleter) Delete(ctx context.Context, keys []string) (int, error) {
+	return d.delete(ctx, keys)
+}
+
+func TestArtworkRevisionGCRunLocksUploadsDuringBatchDelete(t *testing.T) {
+	pool := artworkRevisionGCTestPool(t)
+	ctx := t.Context()
+	path := fmt.Sprintf("tmdb/movies/gc-run-%d/poster/original.old.webp", time.Now().UnixNano())
+	var id int64
+	if err := pool.QueryRow(ctx, `INSERT INTO artwork_revision_gc_candidates
+		(original_path, object_keys, not_before, next_attempt_at)
+		VALUES ($1, $2, NOW() - interval '1 hour', NOW() - interval '1 hour') RETURNING id`,
+		path, []string{path}).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, path)
+	})
+	locked := false
+	deleter := callbackArtworkRevisionDeleter{delete: func(ctx context.Context, keys []string) (int, error) {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			return 0, err
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = tx.Exec(ctx, `SELECT id FROM artwork_revision_gc_candidates WHERE id = $1 FOR UPDATE NOWAIT`, id)
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "55P03" {
+			locked = true
+		} else if err != nil {
+			return 0, err
+		}
+		return len(keys), nil
+	}}
+	stats, err := NewArtworkRevisionGarbageCollector(pool, deleter).Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !locked {
+		t.Fatal("Run deleted objects without locking out concurrent uploads")
+	}
+	if stats.Deleted != 1 {
+		t.Fatalf("stats = %+v, want one deletion", stats)
+	}
+}
+
+func TestArtworkRevisionGCRunRetainsPartialDeletionForHealing(t *testing.T) {
+	for _, failure := range []string{"error", "short", "canceled"} {
+		t.Run(failure, func(t *testing.T) {
+			pool := artworkRevisionGCTestPool(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			contentID := fmt.Sprintf("gc-partial-%d", time.Now().UnixNano())
+			path := "tmdb/movies/" + contentID + "/poster/original.old.webp"
+			if _, err := pool.Exec(ctx, `INSERT INTO artwork_revision_gc_candidates
+				(original_path, object_keys, not_before, next_attempt_at)
+				VALUES ($1, $2, NOW() - interval '1 hour', NOW() - interval '1 hour')`,
+				path, []string{path, path + ".variant"}); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, contentID)
+				_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, path)
+			})
+			calls := 0
+			deleter := callbackArtworkRevisionDeleter{delete: func(ctx context.Context, keys []string) (int, error) {
+				calls++
+				if calls > 1 {
+					return len(keys), nil
+				}
+				_, err := pool.Exec(ctx, `INSERT INTO media_items
+					(content_id, type, title, status, genres, poster_path, poster_source_path)
+					VALUES ($1, 'movie', 'Partial deletion test', 'matched', '{}', $2, 'https://images.example/poster.jpg')`, contentID, path)
+				if err != nil {
+					return 0, err
+				}
+				if failure == "canceled" {
+					cancel()
+					return 1, ctx.Err()
+				}
+				if failure == "short" {
+					return 1, nil
+				}
+				return 1, errors.New("partial storage failure")
+			}}
+			collector := NewArtworkRevisionGarbageCollector(pool, deleter)
+			_, _ = collector.Run(ctx)
+			ctx = t.Context()
+			var deletedAt, nextAttempt *time.Time
+			if err := pool.QueryRow(ctx, `SELECT deleted_at, next_attempt_at FROM artwork_revision_gc_candidates WHERE original_path = $1`, path).Scan(&deletedAt, &nextAttempt); err != nil {
+				t.Fatal(err)
+			}
+			if deletedAt == nil || nextAttempt == nil {
+				t.Fatalf("partial deletion lost durable healing state: deleted_at=%v next_attempt_at=%v", deletedAt, nextAttempt)
+			}
+			if calls != 1 {
+				t.Fatalf("delete calls = %d, want one bounded batch attempt", calls)
+			}
+			if _, err := pool.Exec(ctx, `UPDATE artwork_revision_gc_candidates SET next_attempt_at = NOW(), locked_at = NULL, locked_by = '' WHERE original_path = $1`, path); err != nil {
+				t.Fatal(err)
+			}
+			stats, err := collector.Run(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var poster string
+			if err := pool.QueryRow(ctx, `SELECT poster_path FROM media_items WHERE content_id = $1`, contentID).Scan(&poster); err != nil {
+				t.Fatal(err)
+			}
+			if poster != "https://images.example/poster.jpg" || stats.Healed != 1 {
+				t.Fatalf("poster=%q stats=%+v, want healed reference", poster, stats)
+			}
+		})
+	}
+}
+
+func TestArtworkRevisionGCBatchRechecksOwnershipAndReferences(t *testing.T) {
+	pool := artworkRevisionGCTestPool(t)
+	ctx := t.Context()
+	worker := fmt.Sprintf("gc-batch-guards-%d", time.Now().UnixNano())
+	var candidates []artworkRevisionGCCandidate
+	var paths []string
+	for i := range 4 {
+		path := fmt.Sprintf("tmdb/movies/%s-%d/poster/original.old.webp", worker, i)
+		candidate := artworkRevisionGCCandidate{originalPath: path, objectKeys: []string{path}}
+		if err := pool.QueryRow(ctx, `INSERT INTO artwork_revision_gc_candidates
+			(original_path, object_keys, not_before, next_attempt_at, locked_at, locked_by)
+			VALUES ($1, $2, NOW() - interval '1 hour', NOW() - interval '1 hour', NOW(), $3) RETURNING id`,
+			path, candidate.objectKeys, worker).Scan(&candidate.id); err != nil {
+			t.Fatal(err)
+		}
+		candidates = append(candidates, candidate)
+		paths = append(paths, path)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, worker)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = ANY($1)`, paths)
+	})
+	// Both changes occur after claim's snapshot and must survive bulk deletion.
+	if err := catalog.NewArtworkRevisionTracker(pool).TrackArtworkRevision(ctx, paths[2], "poster", []string{paths[2]}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, status, genres, poster_path)
+		VALUES ($1, 'movie', 'Concurrent reference', 'matched', '{}', $2)`, worker, paths[3]); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	deleter := callbackArtworkRevisionDeleter{delete: func(_ context.Context, keys []string) (int, error) {
+		calls++
+		if !slices.Equal(keys, paths[:2]) {
+			t.Errorf("deleted keys = %v, want only the two unreferenced, still-owned paths", keys)
+		}
+		return len(keys), nil
+	}}
+	deleted, _, err := NewArtworkRevisionGarbageCollector(pool, deleter).processCandidatesToHeal(ctx, candidates, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || len(deleted) != 2 {
+		t.Fatalf("calls=%d deleted=%v, want two candidates in one storage call", calls, deleted)
+	}
+	var tombstones int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM artwork_revision_gc_candidates
+		WHERE original_path = ANY($1) AND deleted_at IS NOT NULL`, paths[2:]).Scan(&tombstones); err != nil {
+		t.Fatal(err)
+	}
+	if tombstones != 0 {
+		t.Fatal("republished or referenced artwork was marked deleted")
 	}
 }

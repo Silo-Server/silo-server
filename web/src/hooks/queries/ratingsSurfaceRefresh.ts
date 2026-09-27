@@ -24,6 +24,19 @@ export async function invalidateRatingSurfaceQueries(queryClient: QueryClient, i
   });
 }
 
+// invalidateAllRatingSurfaceQueries marks every rating-derived surface stale
+// after ratings changed outside a single-item edit, such as a watch-provider
+// import.
+export async function invalidateAllRatingSurfaceQueries(queryClient: QueryClient) {
+  await queryClient.invalidateQueries({
+    predicate: (query) =>
+      startsWith(query.queryKey, ratingKeys.all) ||
+      startsWith(query.queryKey, catalogKeys.all) ||
+      startsWith(query.queryKey, recKeys.all) ||
+      startsWith(query.queryKey, sectionKeys.all),
+  });
+}
+
 function startsWith(queryKey: readonly unknown[], prefix: readonly unknown[]) {
   return (
     prefix.length <= queryKey.length && prefix.every((part, index) => part === queryKey[index])

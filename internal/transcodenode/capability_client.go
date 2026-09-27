@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/telemetry"
+
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -49,7 +51,7 @@ func FetchHWCapabilitiesPayload(ctx context.Context, baseClient *http.Client, no
 	client.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	response, err := client.Do(request)
+	response, err := telemetry.DoTrustedNode(&client, request, "capabilities")
 	if err != nil {
 		return playback.HWAccelInfo{}, nil, 0, logredact.SanitizeURLError(err)
 	}

@@ -3,220 +3,25 @@ package chapterthumbs
 import (
 	"context"
 	"errors"
-	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
-func TestSoftwareToneMapFilterResolver(t *testing.T) {
-	tests := []struct {
-		name       string
-		output     string
-		probeErr   error
-		wantFilter string
-		wantReason string
-		wantError  string
-		wantCalls  int
-	}{
-		{
-			name:       "prefers tonemapx bt2390",
-			output:     " .S. zscale V->V\n .S. tonemap V->V\n .S. tonemapx V->V\n",
-			wantFilter: softwareToneMapFilterBT2390,
-			wantCalls:  1,
-		},
-		{
-			name:       "falls back to standard hable",
-			output:     " .S. zscale V->V\n .S. tonemap V->V\n",
-			wantFilter: softwareToneMapFilterHable,
-			wantCalls:  1,
-		},
-		{
-			name:       "requires zscale",
-			output:     " .S. tonemapx V->V\n",
-			wantReason: reasonToneMapUnsupported,
-			wantError:  "lacks the required zscale filter",
-			wantCalls:  1,
-		},
-		{
-			name:       "requires a tone map filter",
-			output:     " .S. zscale V->V Description mentions tonemap but does not provide it.\n",
-			wantReason: reasonToneMapUnsupported,
-			wantError:  "lacks the required tonemapx or tonemap filter",
-			wantCalls:  1,
-		},
-		{
-			name:       "does not cache transient probe failure",
-			output:     "probe stderr",
-			probeErr:   errors.New("exit status 1"),
-			wantReason: reasonFFmpegProbeFailed,
-			wantError:  "FFmpeg filter probe failed: exit status 1: probe stderr",
-			wantCalls:  2,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			calls := 0
-			resolver := newSoftwareToneMapFilterResolver(func(ffmpegPath string) ([]byte, error) {
-				calls++
-				if cacheKey := softwareToneMapCacheKey(ffmpegPath); cacheKey != "/test/ffmpeg" {
-					t.Fatalf("ffmpegPath = %q, cache key = %q, want /test/ffmpeg", ffmpegPath, cacheKey)
-				}
-				return []byte(tt.output), tt.probeErr
-			})
-
-			for _, ffmpegPath := range []string{"/test/ffmpeg", "/test/../test/ffmpeg"} {
-				filter, reason, err := resolver.resolve(ffmpegPath)
-				if tt.wantError != "" {
-					if err == nil || !strings.Contains(err.Error(), tt.wantError) {
-						t.Fatalf("resolve() error = %v, want containing %q", err, tt.wantError)
-					}
-					if reason != tt.wantReason {
-						t.Fatalf("resolve() reason = %q, want %q", reason, tt.wantReason)
-					}
-					continue
-				}
-				if err != nil {
-					t.Fatalf("resolve() error = %v", err)
-				}
-				if filter != tt.wantFilter {
-					t.Fatalf("resolve() filter = %q, want %q", filter, tt.wantFilter)
-				}
-				if reason != "" {
-					t.Fatalf("resolve() reason = %q, want empty", reason)
-				}
-			}
-			if calls != tt.wantCalls {
-				t.Fatalf("probe calls = %d, want %d", calls, tt.wantCalls)
-			}
-		})
-	}
-}
-
-func TestSoftwareToneMapFilterResolverKeepsExecutableSeparateFromCacheKey(t *testing.T) {
-	workingDirectory, err := filepath.Abs(".")
-	if err != nil {
-		t.Fatalf("resolve working directory: %v", err)
-	}
-
-	calls := 0
-	resolver := newSoftwareToneMapFilterResolver(func(ffmpegPath string) ([]byte, error) {
-		calls++
-		if ffmpegPath != "./ffmpeg" {
-			t.Fatalf("probe path = %q, want ./ffmpeg", ffmpegPath)
-		}
-		return []byte(" .S. zscale V->V\n .S. tonemap V->V\n"), nil
-	})
-
-	for _, ffmpegPath := range []string{"./ffmpeg", filepath.Join(workingDirectory, "ffmpeg")} {
-		filter, reason, err := resolver.resolve(ffmpegPath)
-		if err != nil || reason != "" || filter != softwareToneMapFilterHable {
-			t.Fatalf("resolve(%q) = %q, %q, %v", ffmpegPath, filter, reason, err)
-		}
-	}
-	if calls != 1 {
-		t.Fatalf("probe calls = %d, want 1 cached call", calls)
-	}
-}
-
-func TestSoftwareToneMapFilterResolverCoalescesTransientProbeFailures(t *testing.T) {
-	const callers = 8
-
-	probeStarted := make(chan struct{})
-	releaseProbe := make(chan struct{})
-	var probeCalls atomic.Int32
-	resolver := newSoftwareToneMapFilterResolver(func(string) ([]byte, error) {
-		if probeCalls.Add(1) == 1 {
-			close(probeStarted)
-			<-releaseProbe
-			return []byte("temporary stderr"), errors.New("resource temporarily unavailable")
-		}
-		return []byte(" .S. zscale V->V\n .S. tonemap V->V\n"), nil
-	})
-
-	type resolveResult struct {
-		filter string
-		reason string
-		err    error
-	}
-	results := make(chan resolveResult, callers)
-	start := make(chan struct{})
-	var callersReady sync.WaitGroup
-	callersReady.Add(callers)
-	for range callers {
-		go func() {
-			callersReady.Done()
-			<-start
-			filter, reason, err := resolver.resolve("/test/ffmpeg")
-			results <- resolveResult{filter: filter, reason: reason, err: err}
-		}()
-	}
-	callersReady.Wait()
-	close(start)
-	<-probeStarted
-
-	deadline := time.Now().Add(time.Second)
-	for {
-		resolver.mu.Lock()
-		call := resolver.inFlight["/test/ffmpeg"]
-		waiters := 0
-		if call != nil {
-			waiters = call.waiters
-		}
-		resolver.mu.Unlock()
-		if waiters == callers-1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("coalesced waiters = %d, want %d", waiters, callers-1)
-		}
-		runtime.Gosched()
-	}
-	close(releaseProbe)
-
-	for range callers {
-		result := <-results
-		if result.filter != "" || result.reason != reasonFFmpegProbeFailed || result.err == nil {
-			t.Fatalf("resolve() = %q, %q, %v, want shared transient failure", result.filter, result.reason, result.err)
-		}
-	}
-	if calls := probeCalls.Load(); calls != 1 {
-		t.Fatalf("concurrent probe calls = %d, want 1", calls)
-	}
-
-	filter, reason, err := resolver.resolve("/test/ffmpeg")
-	if err != nil || reason != "" || filter != softwareToneMapFilterHable {
-		t.Fatalf("retry resolve() = %q, %q, %v", filter, reason, err)
-	}
-	if calls := probeCalls.Load(); calls != 2 {
-		t.Fatalf("probe calls after retry = %d, want 2", calls)
-	}
-
-	filter, reason, err = resolver.resolve("/test/ffmpeg")
-	if err != nil || reason != "" || filter != softwareToneMapFilterHable {
-		t.Fatalf("cached resolve() = %q, %q, %v", filter, reason, err)
-	}
-	if calls := probeCalls.Load(); calls != 2 {
-		t.Fatalf("probe calls after cached resolve = %d, want 2", calls)
-	}
-}
-
 func TestExtractFrameSoftwareHDRWithoutHardware(t *testing.T) {
-	resolver := resolverWithFilters(t, "zscale", "tonemapx")
+	resolver := capabilitiesWithFilters(t, "zscale", "tonemapx")
 	var remaining time.Duration
 	data, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
-		InputPath:               "/media/movie.mkv",
-		SeekSeconds:             42.5,
-		FFmpegPath:              "/test/ffmpeg",
-		HWAccel:                 hwAccelNone,
-		ToneMap:                 true,
-		AllowSoftwareToneMap:    true,
-		softwareToneMapResolver: resolver,
+		InputPath:            "/media/movie.mkv",
+		SeekSeconds:          42.5,
+		FFmpegPath:           "/test/ffmpeg",
+		HWAccel:              hwAccelNone,
+		ToneMap:              true,
+		AllowSoftwareToneMap: true,
+		loadCapabilities:     resolver,
 		RunFunc: func(ctx context.Context, _ string, args []string) ([]byte, error) {
 			deadline, ok := ctx.Deadline()
 			if !ok {
@@ -270,17 +75,17 @@ func TestExtractFramePassesCallerContextToHWAccelResolution(t *testing.T) {
 }
 
 func TestExtractFrameSoftwareHDRDisabledByDefault(t *testing.T) {
-	resolver := newSoftwareToneMapFilterResolver(func(string) ([]byte, error) {
+	resolver := capabilitiesFromListing(func(string) ([]byte, error) {
 		t.Fatal("software filter probe should not run while CPU tone mapping is disabled")
 		return nil, nil
 	})
 
 	_, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
-		InputPath:               "/media/movie.mkv",
-		FFmpegPath:              "/test/ffmpeg",
-		HWAccel:                 hwAccelNone,
-		ToneMap:                 true,
-		softwareToneMapResolver: resolver,
+		InputPath:        "/media/movie.mkv",
+		FFmpegPath:       "/test/ffmpeg",
+		HWAccel:          hwAccelNone,
+		ToneMap:          true,
+		loadCapabilities: resolver,
 		RunFunc: func(context.Context, string, []string) ([]byte, error) {
 			t.Fatal("CPU extraction should not run while CPU tone mapping is disabled")
 			return nil, nil
@@ -341,15 +146,15 @@ func TestExtractFrameVideoToolboxUsesHardwareDecodeOnce(t *testing.T) {
 }
 
 func TestExtractFrameVideoToolboxHDRUsesSoftwareToneMap(t *testing.T) {
-	resolver := resolverWithFilters(t, "zscale", "tonemapx")
+	resolver := capabilitiesWithFilters(t, "zscale", "tonemapx")
 	data, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
-		InputPath:               "/media/hdr.mkv",
-		SeekSeconds:             42.5,
-		FFmpegPath:              "/test/ffmpeg",
-		HWAccel:                 "videotoolbox",
-		ToneMap:                 true,
-		AllowSoftwareToneMap:    true,
-		softwareToneMapResolver: resolver,
+		InputPath:            "/media/hdr.mkv",
+		SeekSeconds:          42.5,
+		FFmpegPath:           "/test/ffmpeg",
+		HWAccel:              "videotoolbox",
+		ToneMap:              true,
+		AllowSoftwareToneMap: true,
+		loadCapabilities:     resolver,
 		RunFunc: func(_ context.Context, _ string, args []string) ([]byte, error) {
 			joined := strings.Join(args, " ")
 			if !strings.Contains(joined, "-hwaccel videotoolbox") {
@@ -402,18 +207,18 @@ func TestExtractFrameUnsupportedHardwarePreservesSDRRetry(t *testing.T) {
 
 func TestExtractFrameProbesAndRunsSameRelativeFFmpeg(t *testing.T) {
 	var probedPath, extractPath string
-	resolver := newSoftwareToneMapFilterResolver(func(ffmpegPath string) ([]byte, error) {
+	resolver := capabilitiesFromListing(func(ffmpegPath string) ([]byte, error) {
 		probedPath = ffmpegPath
 		return []byte(" .S. zscale V->V\n .S. tonemap V->V\n"), nil
 	})
 
 	_, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
-		InputPath:               "/media/movie.mkv",
-		FFmpegPath:              " ./ffmpeg ",
-		HWAccel:                 hwAccelNone,
-		ToneMap:                 true,
-		AllowSoftwareToneMap:    true,
-		softwareToneMapResolver: resolver,
+		InputPath:            "/media/movie.mkv",
+		FFmpegPath:           " ./ffmpeg ",
+		HWAccel:              hwAccelNone,
+		ToneMap:              true,
+		AllowSoftwareToneMap: true,
+		loadCapabilities:     resolver,
 		RunFunc: func(_ context.Context, ffmpegPath string, _ []string) ([]byte, error) {
 			extractPath = ffmpegPath
 			return []byte("frame"), nil
@@ -429,7 +234,7 @@ func TestExtractFrameProbesAndRunsSameRelativeFFmpeg(t *testing.T) {
 
 func TestExtractFrameRetriesTransientSoftwareProbeFailure(t *testing.T) {
 	probeCalls := 0
-	resolver := newSoftwareToneMapFilterResolver(func(string) ([]byte, error) {
+	resolver := capabilitiesFromListing(func(string) ([]byte, error) {
 		probeCalls++
 		if probeCalls == 1 {
 			return []byte("temporary stderr"), errors.New("resource temporarily unavailable")
@@ -437,12 +242,12 @@ func TestExtractFrameRetriesTransientSoftwareProbeFailure(t *testing.T) {
 		return []byte(" .S. zscale V->V\n .S. tonemap V->V\n"), nil
 	})
 	opts := FrameExtractOptions{
-		InputPath:               "/media/movie.mkv",
-		FFmpegPath:              "/test/ffmpeg",
-		HWAccel:                 hwAccelNone,
-		ToneMap:                 true,
-		AllowSoftwareToneMap:    true,
-		softwareToneMapResolver: resolver,
+		InputPath:            "/media/movie.mkv",
+		FFmpegPath:           "/test/ffmpeg",
+		HWAccel:              hwAccelNone,
+		ToneMap:              true,
+		AllowSoftwareToneMap: true,
+		loadCapabilities:     resolver,
 		RunFunc: func(context.Context, string, []string) ([]byte, error) {
 			return []byte("frame"), nil
 		},
@@ -461,18 +266,18 @@ func TestExtractFrameRetriesTransientSoftwareProbeFailure(t *testing.T) {
 }
 
 func TestExtractFrameHardwareHDRSuccessSkipsSoftwareProbe(t *testing.T) {
-	resolver := newSoftwareToneMapFilterResolver(func(string) ([]byte, error) {
+	resolver := capabilitiesFromListing(func(string) ([]byte, error) {
 		t.Fatal("software filter probe should not run after hardware success")
 		return nil, nil
 	})
 	calls := 0
 	data, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
-		InputPath:               "/media/movie.mkv",
-		SeekSeconds:             42.5,
-		HWAccel:                 "vaapi",
-		HWDevice:                "/dev/dri/renderD128",
-		ToneMap:                 true,
-		softwareToneMapResolver: resolver,
+		InputPath:        "/media/movie.mkv",
+		SeekSeconds:      42.5,
+		HWAccel:          "vaapi",
+		HWDevice:         "/dev/dri/renderD128",
+		ToneMap:          true,
+		loadCapabilities: resolver,
 		RunFunc: func(_ context.Context, _ string, args []string) ([]byte, error) {
 			calls++
 			if !strings.Contains(strings.Join(args, " "), "tonemap_vaapi") {
@@ -490,17 +295,17 @@ func TestExtractFrameHardwareHDRSuccessSkipsSoftwareProbe(t *testing.T) {
 }
 
 func TestExtractFrameHardwareHDRFailureDoesNotUseSoftwareWhenDisabled(t *testing.T) {
-	resolver := newSoftwareToneMapFilterResolver(func(string) ([]byte, error) {
+	resolver := capabilitiesFromListing(func(string) ([]byte, error) {
 		t.Fatal("software filter probe should not run while CPU tone mapping is disabled")
 		return nil, nil
 	})
 	calls := 0
 	_, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
-		InputPath:               "/media/movie.mkv",
-		HWAccel:                 hwAccelVAAPI,
-		HWDevice:                "/dev/dri/renderD128",
-		ToneMap:                 true,
-		softwareToneMapResolver: resolver,
+		InputPath:        "/media/movie.mkv",
+		HWAccel:          "vaapi",
+		HWDevice:         "/dev/dri/renderD128",
+		ToneMap:          true,
+		loadCapabilities: resolver,
 		RunFunc: func(context.Context, string, []string) ([]byte, error) {
 			calls++
 			return nil, context.DeadlineExceeded
@@ -518,17 +323,17 @@ func TestExtractFrameHardwareHDRFailureDoesNotUseSoftwareWhenDisabled(t *testing
 }
 
 func TestExtractFrameHardwareHDRFailureFallsBackWithFreshDeadline(t *testing.T) {
-	resolver := resolverWithFilters(t, "zscale", "tonemapx")
+	resolver := capabilitiesWithFilters(t, "zscale", "tonemapx")
 	calls := 0
 	var hwRemaining, cpuRemaining time.Duration
 	data, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
-		InputPath:               "/media/movie.mkv",
-		SeekSeconds:             42.5,
-		HWAccel:                 "vaapi",
-		HWDevice:                "/dev/dri/renderD128",
-		ToneMap:                 true,
-		AllowSoftwareToneMap:    true,
-		softwareToneMapResolver: resolver,
+		InputPath:            "/media/movie.mkv",
+		SeekSeconds:          42.5,
+		HWAccel:              "vaapi",
+		HWDevice:             "/dev/dri/renderD128",
+		ToneMap:              true,
+		AllowSoftwareToneMap: true,
+		loadCapabilities:     resolver,
 		RunFunc: func(ctx context.Context, _ string, args []string) ([]byte, error) {
 			calls++
 			deadline, ok := ctx.Deadline()
@@ -557,18 +362,18 @@ func TestExtractFrameHardwareHDRFailureFallsBackWithFreshDeadline(t *testing.T) 
 }
 
 func TestExtractFrameInvalidHardwareMediaDoesNotRetryOnCPU(t *testing.T) {
-	resolver := newSoftwareToneMapFilterResolver(func(string) ([]byte, error) {
+	resolver := capabilitiesFromListing(func(string) ([]byte, error) {
 		t.Fatal("software filter probe should not run for invalid media")
 		return nil, nil
 	})
 	calls := 0
 	_, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
-		InputPath:               "/media/movie.mkv",
-		SeekSeconds:             42.5,
-		HWAccel:                 "vaapi",
-		HWDevice:                "/dev/dri/renderD128",
-		ToneMap:                 true,
-		softwareToneMapResolver: resolver,
+		InputPath:        "/media/movie.mkv",
+		SeekSeconds:      42.5,
+		HWAccel:          "vaapi",
+		HWDevice:         "/dev/dri/renderD128",
+		ToneMap:          true,
+		loadCapabilities: resolver,
 		RunFunc: func(context.Context, string, []string) ([]byte, error) {
 			calls++
 			return nil, errors.New("Invalid NAL unit size")
@@ -586,15 +391,15 @@ func TestExtractFrameInvalidHardwareMediaDoesNotRetryOnCPU(t *testing.T) {
 }
 
 func TestExtractFrameMissingSoftwareFiltersIsActionable(t *testing.T) {
-	resolver := resolverWithFilters(t, "zscale")
+	resolver := capabilitiesWithFilters(t, "zscale")
 	calls := 0
 	_, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
-		InputPath:               "/media/movie.mkv",
-		SeekSeconds:             42.5,
-		HWAccel:                 hwAccelNone,
-		ToneMap:                 true,
-		AllowSoftwareToneMap:    true,
-		softwareToneMapResolver: resolver,
+		InputPath:            "/media/movie.mkv",
+		SeekSeconds:          42.5,
+		HWAccel:              hwAccelNone,
+		ToneMap:              true,
+		AllowSoftwareToneMap: true,
+		loadCapabilities:     resolver,
 		RunFunc: func(context.Context, string, []string) ([]byte, error) {
 			calls++
 			return nil, nil
@@ -612,16 +417,16 @@ func TestExtractFrameMissingSoftwareFiltersIsActionable(t *testing.T) {
 }
 
 func TestExtractFramePreservesHardwareAndCPUFailures(t *testing.T) {
-	resolver := resolverWithFilters(t, "zscale", "tonemap")
+	resolver := capabilitiesWithFilters(t, "zscale", "tonemap")
 	calls := 0
 	_, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
-		InputPath:               "/media/movie.mkv",
-		SeekSeconds:             42.5,
-		HWAccel:                 "vaapi",
-		HWDevice:                "/dev/dri/renderD128",
-		ToneMap:                 true,
-		AllowSoftwareToneMap:    true,
-		softwareToneMapResolver: resolver,
+		InputPath:            "/media/movie.mkv",
+		SeekSeconds:          42.5,
+		HWAccel:              "vaapi",
+		HWDevice:             "/dev/dri/renderD128",
+		ToneMap:              true,
+		AllowSoftwareToneMap: true,
+		loadCapabilities:     resolver,
 		RunFunc: func(context.Context, string, []string) ([]byte, error) {
 			calls++
 			if calls == 1 {
@@ -671,14 +476,30 @@ func TestRemoteProbeFailureAllowsPreferredLocalFallback(t *testing.T) {
 	}
 }
 
-func resolverWithFilters(t *testing.T, filters ...string) *softwareToneMapFilterResolver {
+// softwareToneMapFilterBT2390 is the software tone-map chain mediasample picks
+// when ffmpeg lists tonemapx, byte for byte.
+const softwareToneMapFilterBT2390 = "tonemapx=tonemap=bt2390,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p"
+
+// capabilitiesFromListing loads capabilities from the ffmpeg -filters listing
+// probe returns.
+func capabilitiesFromListing(probe func(ffmpegPath string) ([]byte, error)) func(context.Context, string) (mediasample.Capabilities, error) {
+	return func(_ context.Context, ffmpegPath string) (mediasample.Capabilities, error) {
+		output, err := probe(ffmpegPath)
+		if err != nil {
+			return mediasample.Capabilities{}, err
+		}
+		return mediasample.FilterCapabilities(output), nil
+	}
+}
+
+func capabilitiesWithFilters(t *testing.T, filters ...string) func(context.Context, string) (mediasample.Capabilities, error) {
 	t.Helper()
 	lines := make([]string, 0, len(filters))
 	for _, filter := range filters {
 		lines = append(lines, " .S. "+filter+" V->V")
 	}
 	output := strings.Join(lines, "\n")
-	return newSoftwareToneMapFilterResolver(func(string) ([]byte, error) {
+	return capabilitiesFromListing(func(string) ([]byte, error) {
 		return []byte(output), nil
 	})
 }
@@ -687,5 +508,70 @@ func assertApproximateDeadline(t *testing.T, got time.Duration, want time.Durati
 	t.Helper()
 	if got < want-time.Second || got > want+time.Second {
 		t.Fatalf("deadline remaining = %s, want about %s", got, want)
+	}
+}
+
+// TestExtractFrameKeepsLegacyReasonsAndFallback pins the persisted reasons
+// and fallback rules chapter thumbnails had before they moved onto
+// mediasample, where mediasample's own causes would differ.
+func TestExtractFrameKeepsLegacyReasonsAndFallback(t *testing.T) {
+	tests := []struct {
+		name       string
+		accel      string
+		toneMap    bool
+		results    []string
+		wantReason string
+		wantCalls  int
+	}{
+		{name: "unknown option is not a tone-map failure", accel: hwAccelNone, results: []string{"Unrecognized option 'x'.\nError splitting the argument list: Option not found"}, wantReason: reasonChapterExtractFailed, wantCalls: 1},
+		{name: "missing decoder is not a tone-map failure", accel: hwAccelNone, results: []string{"Decoder not found"}, wantReason: reasonChapterExtractFailed, wantCalls: 1},
+		{name: "missing filter is a tone-map failure", accel: hwAccelNone, results: []string{"[AVFilterGraph @ 0x1] No such filter: 'zscale'"}, wantReason: reasonToneMapUnsupported, wantCalls: 1},
+		{name: "hardware tone-map error", accel: "vaapi", toneMap: true, results: []string{"[Parsed_tonemap_vaapi_2 @ 0x1] Failed to create processing pipeline.\nError reinitializing filters!"}, wantReason: reasonToneMapUnsupported, wantCalls: 1},
+		{name: "hardware-only plan with a missing decoder", accel: "vaapi", toneMap: true, results: []string{"Decoder not found"}, wantReason: reasonChapterExtractFailed, wantCalls: 1},
+		{name: "hardware without a stream falls back", accel: "vaapi", results: []string{"Output file #0 does not contain any stream", ""}, wantCalls: 2},
+		{name: "hardware killed while logging invalid data stops", accel: "qsv", results: []string{"signal: killed (Invalid data found when processing input)"}, wantReason: reasonDecodeInvalidData, wantCalls: 1},
+		{name: "sdr retry after invalid data", accel: "nvenc", results: []string{"Invalid data found when processing input", ""}, wantCalls: 2},
+		{name: "sdr retry fails twice", accel: "nvenc", results: []string{"Invalid data found when processing input", "signal: killed"}, wantReason: reasonChapterExtractFailed, wantCalls: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			data, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
+				InputPath:      "/media/movie.mkv",
+				SeekSeconds:    42.5,
+				HWAccel:        tt.accel,
+				HWDevice:       "/dev/dri/renderD128",
+				ToneMap:        tt.toneMap,
+				resolveHWAccel: func(_ context.Context, accel, _, _ string) string { return accel },
+				RunFunc: func(context.Context, string, []string) ([]byte, error) {
+					calls++
+					if message := tt.results[calls-1]; message != "" {
+						return nil, errors.New(message)
+					}
+					return []byte("frame"), nil
+				},
+			})
+			if reason != tt.wantReason || calls != tt.wantCalls {
+				t.Fatalf("ExtractFrame() reason %q after %d calls (error %v), want %q after %d", reason, calls, err, tt.wantReason, tt.wantCalls)
+			}
+			if (tt.wantReason == "") != (err == nil && string(data) == "frame") {
+				t.Fatalf("ExtractFrame() = %q, %v, want a frame only without a reason", data, err)
+			}
+		})
+	}
+}
+
+func TestExtractReasonForAttemptTimeouts(t *testing.T) {
+	timeout := mediasample.AttemptError{Reason: mediasample.ReasonTimeout, Err: context.DeadlineExceeded}
+	plan := extractPlan{attempts: extractAttempts("vaapi", false, false), accel: "vaapi"}
+	if got := plan.reason(plan.attempts[0], timeout, false); got != reasonHWTimeout {
+		t.Fatalf("hardware attempt timeout reason = %q, want %q", got, reasonHWTimeout)
+	}
+	if got := plan.reason(plan.attempts[1], timeout, true); got != reasonCPUTimeout {
+		t.Fatalf("software attempt timeout reason = %q, want %q", got, reasonCPUTimeout)
+	}
+	canceled := mediasample.AttemptError{Reason: mediasample.ReasonCanceled, Err: context.Canceled}
+	if got := plan.reason(plan.attempts[0], canceled, false); got != reasonChapterExtractFailed {
+		t.Fatalf("canceled attempt reason = %q, want %q", got, reasonChapterExtractFailed)
 	}
 }

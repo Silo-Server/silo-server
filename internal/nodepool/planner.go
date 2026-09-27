@@ -45,7 +45,7 @@ type SessionPlanner interface {
 // have no predictable bitrate, so implementations must not admit them onto a
 // proxy with a configured bandwidth cap.
 type DownloadPlanner interface {
-	PlanDownload(sessionID string, preferredGroup ...string) Plan
+	PlanDownloadWith(sessionID string, eligible func(*Node) bool, preferredGroup ...string) Plan
 	ReleaseSession(sessionID string)
 }
 
@@ -205,6 +205,13 @@ func (p *Planner) TranscodeNodeHealthy(nodeURL string) bool {
 // transfer rate, so capped proxies are excluded instead of being oversubscribed
 // during the egress meter's convergence window.
 func (p *Planner) PlanDownload(sessionID string, preferredGroup ...string) Plan {
+	return p.PlanDownloadWith(sessionID, nil, preferredGroup...)
+}
+
+// PlanDownloadWith restricts selection to eligible proxies before applying
+// group preferences and reserving capacity. The predicate runs under the
+// planner lock and must be cheap and non-blocking; nil accepts every proxy.
+func (p *Planner) PlanDownloadWith(sessionID string, eligible func(*Node) bool, preferredGroup ...string) Plan {
 	if p == nil || p.proxies == nil || sessionID == "" {
 		return Plan{}
 	}
@@ -221,6 +228,9 @@ func (p *Planner) PlanDownload(sessionID string, preferredGroup ...string) Plan 
 	}
 	var candidates, fallback []*Node
 	for _, node := range p.proxies.Nodes() {
+		if node != nil && eligible != nil && !eligible(node) {
+			continue
+		}
 		if node == nil || !node.Enabled || !node.Healthy || !p.underCap(node, now) {
 			continue
 		}

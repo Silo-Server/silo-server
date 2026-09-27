@@ -17,6 +17,7 @@ export type {
   PlayerPictureInPictureChange,
   PlayerPlaybackStateChange,
   PlayerPlaybackTransport,
+  PlaybackStartTrigger,
   SeriesContext,
   EpisodeRef,
   IntroSkipMode,

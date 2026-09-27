@@ -1,0 +1,11 @@
+{
+  "revision": "f0b5e50b48a77fed38fed6c59e913aac676878e0a5f8ae09e0ff67faaadcf1f8",
+  "state": "available",
+  "allowed": true,
+  "people_media_scope": true,
+  "person_prefetch": true,
+  "provider": "meilisearch",
+  "result_window_limit": 1000,
+  "session_ttl_seconds": 900,
+  "max_sessions_per_account": 16
+}

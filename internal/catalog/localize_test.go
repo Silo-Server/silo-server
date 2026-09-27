@@ -67,6 +67,30 @@ func TestApplyItemLocalizationFullRowOverridesEverything(t *testing.T) {
 	}
 }
 
+func TestApplyItemLocalizationKeepsManuallySelectedArtwork(t *testing.T) {
+	item := baseItem()
+	item.LockedFields = []int{fieldImagesLocked}
+	loc := &models.MediaItemLocalization{
+		Title:              "Titre",
+		PosterPath:         "posters/fr.jpg",
+		BackdropPath:       "backdrops/fr.jpg",
+		LogoPath:           "logos/fr.png",
+		PosterSourcePath:   "poster-provider",
+		BackdropSourcePath: "backdrop-provider",
+		LogoSourcePath:     "logo-provider",
+	}
+	got := applyItemLocalization(item, loc)
+	if got.Title != "Titre" {
+		t.Errorf("localized title lost: %q", got.Title)
+	}
+	if got.PosterPath != item.PosterPath || got.BackdropPath != item.BackdropPath || got.LogoPath != item.LogoPath {
+		t.Errorf("localized artwork replaced a manual selection: %+v", got)
+	}
+	if got.PosterSourcePath != item.PosterSourcePath || got.BackdropSourcePath != item.BackdropSourcePath || got.LogoSourcePath != item.LogoSourcePath {
+		t.Errorf("localized artwork sources replaced manual sources: %+v", got)
+	}
+}
+
 func TestApplyItemLocalizationDoesNotMutateBase(t *testing.T) {
 	item := baseItem()
 	_ = applyItemLocalization(item, &models.MediaItemLocalization{Title: "Titre"})
@@ -88,12 +112,24 @@ func TestApplyItemLocalizationNilLocalizationClones(t *testing.T) {
 
 func TestApplySeasonLocalizationPartialRow(t *testing.T) {
 	season := &models.Season{ContentID: "s1", Title: "Season 1", Overview: "Base.", PosterPath: "p.jpg", PosterThumbhash: "h"}
-	got := applySeasonLocalization(season, &models.SeasonLocalization{Overview: "Saison résumé."})
+	got := applySeasonLocalization(season, &models.SeasonLocalization{Overview: "Saison résumé."}, false)
 	if got.Overview != "Saison résumé." {
 		t.Errorf("overview not applied: %q", got.Overview)
 	}
 	if got.Title != "Season 1" || got.PosterPath != "p.jpg" || got.PosterThumbhash != "h" {
 		t.Errorf("empty fields blanked the base: %+v", got)
+	}
+}
+
+func TestApplySeasonLocalizationKeepsManuallySelectedPoster(t *testing.T) {
+	season := &models.Season{ContentID: "s1", Title: "Season 1", PosterPath: "manual.jpg", PosterSourcePath: "manual-source", PosterThumbhash: "manual-hash"}
+	loc := &models.SeasonLocalization{Title: "Saison 1", PosterPath: "provider.jpg", PosterSourcePath: "provider-source", PosterThumbhash: "provider-hash"}
+	got := applySeasonLocalization(season, loc, true)
+	if got.Title != "Saison 1" {
+		t.Errorf("localized title lost: %q", got.Title)
+	}
+	if got.PosterPath != season.PosterPath || got.PosterSourcePath != season.PosterSourcePath || got.PosterThumbhash != season.PosterThumbhash {
+		t.Errorf("localized poster replaced a manual selection: %+v", got)
 	}
 }
 

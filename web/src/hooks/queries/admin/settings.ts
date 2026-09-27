@@ -1,24 +1,31 @@
+import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
+import { useRef } from "react";
+import {
+  adminSettingsKey,
+  readAdminSettings,
+  captureSettingsBaseline,
+  type SettingsValues,
+  type SettingsBaseline,
+} from "@/api/v2/adminSettingsSnapshot";
+import { jellyfinCompatStatusKey } from "@/api/v2/jellyfinStatusCache";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import {
+  captureProfileRequestContext,
+  isCapturedProfileAuthorityActive,
+  StaleApiRequestContextError,
+  type ProfileRequestContextSnapshot,
+} from "@/api/client";
 import type {
   AdminSettingUpdateResponse,
   AdminServerStatus,
   AdminSettingsUpdateResponse,
   AdminSettingsConnectionCheckRequest,
-  ConnectionCheckResponse,
   JellyfinCompatSettingsPatch,
   JellyfinCompatStatus,
   JellyfinCompatWebInstallRequest,
 } from "@/api/types";
 import { adminKeys, compatKeys, settingsKeys, themeKeys } from "../keys";
 import { toast } from "sonner";
-
-type ServerSettings = Record<string, string>;
-
-interface SensitiveStatusResponse {
-  configured: string[];
-  managed_by_env?: string[];
-}
 
 /**
  * server_settings keys surfaced by GET /settings/overlay-config, in the order
@@ -36,70 +43,101 @@ function affectsOverlayConfig(key: string) {
   return (OVERLAY_CONFIG_SERVER_KEYS as readonly string[]).includes(key);
 }
 
-export interface CatalogSearchStatus {
-  configured_provider: string;
-  active_provider: string;
-  degraded: boolean;
-  degraded_reason?: string;
-  meilisearch: {
-    configured: boolean;
-    healthy: boolean;
-    circuit_state: string;
-    circuit_reason?: string;
-    circuit_until?: string;
-    last_fallback?: string;
-    timeout_ms: number;
-    matching_strategy: string;
-    index_types?: string[];
-    semantic_enabled: boolean;
-    binary_quantized: boolean;
-    semantic_ratio: number;
-    embedder: string;
+/* eslint-disable react-hooks/refs -- baseline capture must observe authority synchronously. */
+function useRetainedSettingsBaseline(
+  displayed: SettingsValues | undefined,
+  current: SettingsValues | undefined,
+) {
+  const baseline = useRef<SettingsValues | undefined>(undefined);
+  const context = captureProfileRequestContext();
+  const authority = JSON.stringify(context ? adminSettingsKey(context) : null);
+  const baselineAuthority = useRef(authority);
+  if (baselineAuthority.current !== authority) {
+    baselineAuthority.current = authority;
+    baseline.current = undefined;
+  }
+  if (!baseline.current && current) baseline.current = current;
+  return {
+    capture: () => captureSettingsBaseline(displayed ?? baseline.current),
+    reset: () => {
+      baseline.current = undefined;
+    },
   };
-  index: {
-    active_index_uid: string;
-    schema_version: number;
-    expected_schema_version: number;
-    rebuild_required: boolean;
-    document_count: number;
-    vector_document_count: number;
-    pending_events: number;
-    dead_lettered_events: number;
-    last_rebuild_at?: string;
-    last_sync_at?: string;
-    last_processed_event_id: number;
-  };
-  semantic?: {
-    ready: boolean;
-    disabled_reason?: string;
-    vector_coverage_ratio: number;
-    coverage_updated_at?: string;
-    per_type?: Array<{
-      type: string;
-      eligible: number;
-      vectorized: number;
-      vector_coverage_ratio: number;
-      ready: boolean;
-    }>;
-    capability: {
-      ok: boolean;
-      reason?: string;
-      embedder?: string;
-      dimensions?: number;
-    };
-  };
-  tasks: Array<{
-    key: string;
-    name: string;
-    href: string;
-  }>;
 }
+/* eslint-enable react-hooks/refs */
+
+export type CatalogSearchStatus = V2Result<"GET /api/v2/admin/catalog/search/status">;
 
 export function useAdminServerSettings() {
+  const profileContext = captureProfileRequestContext();
   return useQuery({
-    queryKey: adminKeys.serverSettings(),
-    queryFn: () => api<ServerSettings>("/admin/settings/effective").then((d) => d ?? {}),
+    queryKey: profileContext
+      ? adminSettingsKey(profileContext)
+      : [...adminKeys.serverSettings(), null],
+    enabled: profileContext !== null,
+    queryFn: () => {
+      if (!profileContext) throw new StaleApiRequestContextError();
+      return readAdminSettings(profileContext);
+    },
+    // The record carries its displayed validator in a WeakMap; do not replace it
+    // with an older equal-valued record when only a redacted secret changed.
+    structuralSharing: false,
     staleTime: 30_000,
+  });
+}
+
+export type StorageTransitionPolicy = "start_fresh" | "preserve_uploads" | "migrate_all";
+export type StorageTransitionCapabilities =
+  V2Result<"GET /api/v2/admin/storage-transitions/capabilities">;
+export type StorageTransitionSourceHealth =
+  V2Result<"GET /api/v2/admin/storage-transitions/source-health">;
+
+export function useStorageTransitionCapabilities() {
+  return useQuery({
+    queryKey: [...adminKeys.serverStatus(), "storage-transition-capabilities"] as const,
+    queryFn: () => v2("GET /api/v2/admin/storage-transitions/capabilities"),
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+export function useStorageTransitionSourceHealth(probe: boolean, enabled: boolean) {
+  return useQuery({
+    queryKey: [...adminKeys.serverStatus(), "storage-transition-source-health", probe] as const,
+    enabled,
+    queryFn: () => v2("GET /api/v2/admin/storage-transitions/source-health", { query: { probe } }),
+    retry: false,
+    staleTime: 0,
+    refetchInterval: (query) =>
+      !probe && query.state.data?.recovery_pending === true ? 5_000 : false,
+  });
+}
+
+export function useCreateStorageTransition() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: (request: { policy: StorageTransitionPolicy; values: Record<string, string> }) =>
+      v2("POST /api/v2/admin/storage-transitions", { body: request }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.jobs("storage_transition") }),
+      ]);
+    },
+  });
+}
+
+export function useCancelStorageTransition() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: (id: string) => v2("POST /api/v2/admin/jobs/{id}/cancel", { path: { id } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: adminKeys.jobs("storage_transition") });
+    },
   });
 }
 
@@ -118,29 +156,49 @@ export interface RestartKeysResponse {
 export function useAdminRestartKeys() {
   return useQuery({
     queryKey: adminKeys.restartKeys(),
-    queryFn: () => api<RestartKeysResponse>("/admin/settings/restart-keys"),
+    queryFn: () => v2("GET /api/v2/admin/settings/restart-keys"),
     staleTime: 5 * 60_000,
     retry: false,
   });
 }
 
-export function useAdminServerStatus() {
+export function useAdminServerStatus(enabled = true) {
   return useQuery({
     queryKey: adminKeys.serverStatus(),
-    queryFn: () => api<AdminServerStatus>("/admin/server/status"),
+    enabled,
+    queryFn: async (): Promise<AdminServerStatus> => {
+      const profileContext = captureProfileRequestContext();
+      if (!profileContext) throw new StaleApiRequestContextError();
+      const status = await v2("GET /api/v2/admin/server/status", { profileContext });
+      if (!isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      return status;
+    },
     staleTime: 15_000,
   });
 }
 
-export function useUpdateServerSettings() {
+export function useUpdateServerSettings(displayed?: SettingsValues) {
+  const { data: current } = useAdminServerSettings();
+  const retained = useRetainedSettingsBaseline(displayed, current);
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (values: Record<string, string>) =>
-      api<AdminSettingsUpdateResponse>("/admin/settings", {
-        method: "PUT",
-        body: JSON.stringify({ values }),
-      }),
-    onSuccess: async (_data, values) => {
+  const mutation = useMutation({
+    retry: false,
+    mutationFn: async (intent: SettingsBaseline & { values: SettingsValues }) => {
+      let acknowledgedETag = "";
+      const result = await v2("PUT /api/v2/admin/settings", {
+        body: { values: intent.values },
+        headers: { "If-Match": intent.etag },
+        profileContext: intent.profileContext,
+        retryAuthentication: false,
+        onResponse: (response) => {
+          acknowledgedETag = response.headers.get("ETag") ?? "";
+        },
+      });
+      return { ...result, acknowledgedETag };
+    },
+    onSuccess: async (_data, { values, profileContext }) => {
+      if (!isCapturedProfileAuthorityActive(profileContext)) return;
       const keys = Object.keys(values);
       const invalidations = [
         queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
@@ -174,22 +232,75 @@ export function useUpdateServerSettings() {
         );
       }
       await Promise.all(invalidations);
+      if (isCapturedProfileAuthorityActive(profileContext)) retained.reset();
     },
-    onError: (err) => {
+    onError: (err, intent) => {
+      if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
       toast.error(err instanceof Error ? err.message : "Failed to update settings");
     },
   });
+  const capture = (values: SettingsValues) => ({
+    ...retained.capture(),
+    values: { ...values },
+  });
+  return {
+    ...mutation,
+    variables: mutation.variables?.values,
+    mutate: (
+      values: SettingsValues,
+      options?: { onSuccess?: (result: AdminSettingsUpdateResponse) => void },
+    ) => {
+      try {
+        const intent = capture(values);
+        mutation.mutate(intent, {
+          onSuccess: (result) => {
+            if (isCapturedProfileAuthorityActive(intent.profileContext))
+              options?.onSuccess?.(result);
+          },
+        });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+      }
+    },
+    mutateAsync: async (values: SettingsValues) => {
+      const intent = capture(values);
+      const result = await mutation.mutateAsync(intent);
+      if (!isCapturedProfileAuthorityActive(intent.profileContext))
+        throw new StaleApiRequestContextError();
+      // The refetch may already include a competing write. Advance retained
+      // edits only when it matches the state captured by our acknowledged PUT.
+      const refreshed = queryClient.getQueryState<SettingsValues>(
+        adminSettingsKey(intent.profileContext),
+      );
+      const settingsSnapshot =
+        refreshed?.status === "success" &&
+        !refreshed.isInvalidated &&
+        refreshed.data &&
+        result.acknowledgedETag &&
+        captureSettingsBaseline(refreshed.data).etag === result.acknowledgedETag
+          ? refreshed.data
+          : undefined;
+      return { ...result, settingsSnapshot };
+    },
+  };
 }
 
-export function useUpdateServerSetting() {
+export function useUpdateServerSetting(displayed?: SettingsValues) {
+  const { data: current } = useAdminServerSettings();
+  const retained = useRetainedSettingsBaseline(displayed, current);
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ key, value }: { key: string; value: string }) =>
-      api<AdminSettingUpdateResponse>(`/admin/settings/${key}`, {
-        method: "PUT",
-        body: JSON.stringify({ value }),
+  const mutation = useMutation({
+    retry: false,
+    mutationFn: (intent: SettingsBaseline & { key: string; value: string }) =>
+      v2("PUT /api/v2/admin/settings/{key}", {
+        path: { key: intent.key },
+        body: { value: intent.value },
+        headers: { "If-Match": intent.etag },
+        profileContext: intent.profileContext,
+        retryAuthentication: false,
       }),
     onSuccess: async (_data, variables) => {
+      if (!isCapturedProfileAuthorityActive(variables.profileContext)) return;
       const invalidations = [
         queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
         queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() }),
@@ -223,17 +334,52 @@ export function useUpdateServerSetting() {
         );
       }
       await Promise.all(invalidations);
+      if (isCapturedProfileAuthorityActive(variables.profileContext)) retained.reset();
     },
-    onError: (err) => {
+    onError: (err, intent) => {
+      if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
       toast.error(err instanceof Error ? err.message : "Failed to update setting");
     },
   });
+  const capture = (values: { key: string; value: string }) => ({
+    ...retained.capture(),
+    ...values,
+  });
+  return {
+    ...mutation,
+    variables: mutation.variables
+      ? { key: mutation.variables.key, value: mutation.variables.value }
+      : undefined,
+    mutate: (
+      values: { key: string; value: string },
+      options?: { onSuccess?: (result: AdminSettingUpdateResponse) => void },
+    ) => {
+      try {
+        const intent = capture(values);
+        mutation.mutate(intent, {
+          onSuccess: (result) => {
+            if (isCapturedProfileAuthorityActive(intent.profileContext))
+              options?.onSuccess?.(result);
+          },
+        });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+      }
+    },
+    mutateAsync: async (values: { key: string; value: string }) => {
+      const intent = capture(values);
+      const result = await mutation.mutateAsync(intent);
+      if (!isCapturedProfileAuthorityActive(intent.profileContext))
+        throw new StaleApiRequestContextError();
+      return result;
+    },
+  };
 }
 
 export function useAdminSensitiveStatus() {
   return useQuery({
     queryKey: [...adminKeys.serverSettings(), "sensitive-status"] as const,
-    queryFn: () => api<SensitiveStatusResponse>("/admin/settings/sensitive-status"),
+    queryFn: () => v2("GET /api/v2/admin/settings/sensitive-status"),
     staleTime: 30_000,
   });
 }
@@ -241,17 +387,19 @@ export function useAdminSensitiveStatus() {
 export function useCheckAdminSettingsConnection() {
   return useMutation({
     mutationFn: ({ kind, body }: { kind: string; body: AdminSettingsConnectionCheckRequest }) =>
-      api<ConnectionCheckResponse>(`/admin/settings/check/${kind}`, {
-        method: "POST",
-        body: JSON.stringify(body),
+      v2("POST /api/v2/admin/settings/check/{kind}", {
+        path: { kind },
+        body,
+        retryAuthentication: false,
       }),
+    retry: false,
   });
 }
 
 export function useCatalogSearchStatus(enabled = true) {
   return useQuery({
     queryKey: adminKeys.catalogSearchStatus(),
-    queryFn: () => api<CatalogSearchStatus>("/admin/catalog/search/status"),
+    queryFn: ({ signal }) => v2("GET /api/v2/admin/catalog/search/status", { signal }),
     enabled,
     staleTime: 15_000,
     refetchInterval: (query) => (query.state.data?.index.rebuild_required ? 2_000 : false),
@@ -259,77 +407,200 @@ export function useCatalogSearchStatus(enabled = true) {
 }
 
 export function useJellyfinCompatStatus() {
+  const profileContext = captureProfileRequestContext();
   return useQuery({
-    queryKey: adminKeys.jellyfinCompatStatus(),
-    queryFn: () => api<JellyfinCompatStatus>("/admin/jellyfin-compat/status"),
+    queryKey: profileContext
+      ? jellyfinCompatStatusKey(profileContext)
+      : [...adminKeys.jellyfinCompatStatus(), null],
+    enabled: profileContext !== null,
+    queryFn: async (): Promise<JellyfinCompatStatus> => {
+      if (!profileContext || !isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      const status = await v2("GET /api/v2/admin/jellyfin-compat/status", { profileContext });
+      if (!isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      return {
+        ...status,
+        operation: status.operation
+          ? { ...status.operation, started_at: status.operation.started_at ?? "" }
+          : undefined,
+      };
+    },
     staleTime: 15_000,
   });
 }
 
 export function useUpdateJellyfinCompatSettings() {
+  const { data: displayed } = useAdminServerSettings();
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body: JellyfinCompatSettingsPatch) =>
-      api<JellyfinCompatStatus>("/admin/jellyfin-compat/settings", {
-        method: "PATCH",
-        body: JSON.stringify(body),
+  const mutation = useMutation({
+    retry: false,
+    mutationFn: (intent: SettingsBaseline & { body: JellyfinCompatSettingsPatch }) =>
+      v2("PATCH /api/v2/admin/jellyfin-compat/settings", {
+        body: intent.body,
+        headers: { "If-Match": intent.etag },
+        profileContext: intent.profileContext,
+        retryAuthentication: false,
       }),
-    onSuccess: async () => {
+    onSuccess: async (_result, intent) => {
+      if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
+        queryClient.invalidateQueries({
+          queryKey: jellyfinCompatStatusKey(intent.profileContext),
+          exact: true,
+        }),
         queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
         queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() }),
-        // Keeps the user-facing Connect Apps card from serving a stale
-        // address after an admin edits it.
         queryClient.invalidateQueries({ queryKey: compatKeys.all }),
       ]);
     },
-    onError: (err) => {
+    onError: (err, intent) => {
+      if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
       toast.error(err instanceof Error ? err.message : "Failed to update Jellyfin compatibility");
+    },
+  });
+  const capture = (body: JellyfinCompatSettingsPatch) => ({
+    ...captureSettingsBaseline(displayed),
+    body: { ...body },
+  });
+  return {
+    ...mutation,
+    variables: mutation.variables?.body,
+    mutate: (body: JellyfinCompatSettingsPatch) => {
+      try {
+        mutation.mutate(capture(body));
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+      }
+    },
+    mutateAsync: async (body: JellyfinCompatSettingsPatch) => {
+      const intent = capture(body);
+      const result = await mutation.mutateAsync(intent);
+      if (!isCapturedProfileAuthorityActive(intent.profileContext))
+        throw new StaleApiRequestContextError();
+      return result;
+    },
+  };
+}
+
+/**
+ * Jellyfin Web asset commands are coalescing: a repeat while the same-kind
+ * operation runs returns that running operation, and a running operation of the
+ * other kind is a 409. Each intent captures its authority at click time, sends
+ * once without authentication replay, and refuses to run after the authority
+ * changed. Progress is local to the replica that accepted it.
+ */
+type JellyfinWebIntent = {
+  body: JellyfinCompatWebInstallRequest;
+  profileContext: ProfileRequestContextSnapshot | null;
+};
+function jellyfinWebIntent(body: JellyfinCompatWebInstallRequest = {}): JellyfinWebIntent {
+  return { body: { ...body }, profileContext: captureProfileRequestContext() };
+}
+function jellyfinWebAuthorityActive(intent: JellyfinWebIntent): boolean {
+  return intent.profileContext !== null && isCapturedProfileAuthorityActive(intent.profileContext);
+}
+function useJellyfinWebCommand(kind: "install" | "remove", started: string, failed: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: async (intent: JellyfinWebIntent): Promise<JellyfinCompatStatus> => {
+      if (!intent.profileContext || !jellyfinWebAuthorityActive(intent))
+        throw new StaleApiRequestContextError();
+      const common = { profileContext: intent.profileContext, retryAuthentication: false };
+      const status =
+        kind === "install"
+          ? await v2("POST /api/v2/admin/jellyfin-compat/web/install", {
+              ...common,
+              body: intent.body,
+            })
+          : await v2("POST /api/v2/admin/jellyfin-compat/web/remove", common);
+      if (!jellyfinWebAuthorityActive(intent)) throw new StaleApiRequestContextError();
+      return {
+        ...status,
+        operation: status.operation
+          ? { ...status.operation, started_at: status.operation.started_at ?? "" }
+          : undefined,
+      };
+    },
+    onSuccess: async (_result, intent) => {
+      if (!intent.profileContext || !jellyfinWebAuthorityActive(intent)) return;
+      toast.success(started);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: jellyfinCompatStatusKey(intent.profileContext),
+          exact: true,
+        }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() }),
+      ]);
+    },
+    onError: (err, intent) => {
+      if (!jellyfinWebAuthorityActive(intent)) return;
+      toast.error(err instanceof Error ? err.message : failed);
     },
   });
 }
 
 export function useInstallJellyfinCompatWeb() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body: JellyfinCompatWebInstallRequest = {}) =>
-      api<JellyfinCompatStatus>("/admin/jellyfin-compat/web/install", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: async () => {
-      toast.success("Jellyfin Web install started");
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
-        queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
-        queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() }),
-      ]);
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to install Jellyfin Web assets");
-    },
-  });
+  const mutation = useJellyfinWebCommand(
+    "install",
+    "Jellyfin Web install started",
+    "Failed to install Jellyfin Web assets",
+  );
+  return {
+    ...mutation,
+    variables: mutation.variables?.body,
+    mutate: (body: JellyfinCompatWebInstallRequest = {}) =>
+      mutation.mutate(jellyfinWebIntent(body)),
+    mutateAsync: (body: JellyfinCompatWebInstallRequest = {}) =>
+      mutation.mutateAsync(jellyfinWebIntent(body)),
+  };
 }
 
 export function useRemoveJellyfinCompatWeb() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () =>
-      api<JellyfinCompatStatus>("/admin/jellyfin-compat/web/remove", {
-        method: "POST",
-        body: JSON.stringify({}),
-      }),
-    onSuccess: async () => {
-      toast.success("Jellyfin Web removal started");
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
-        queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
-        queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() }),
-      ]);
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to remove Jellyfin Web assets");
+  const mutation = useJellyfinWebCommand(
+    "remove",
+    "Jellyfin Web removal started",
+    "Failed to remove Jellyfin Web assets",
+  );
+  return {
+    ...mutation,
+    mutate: () => mutation.mutate(jellyfinWebIntent()),
+    mutateAsync: () => mutation.mutateAsync(jellyfinWebIntent()),
+  };
+}
+
+/** Reads one stored setting for the setup wizard. Protected/empty values stay absent. */
+export function useAdminSettingValue(key: string) {
+  const profileContext = captureProfileRequestContext();
+  return useQuery({
+    queryKey: [
+      ...adminKeys.serverSettings(),
+      "key",
+      key,
+      profileContext?.serverOrigin,
+      profileContext?.authContextVersion,
+      profileContext?.profileId,
+    ],
+    enabled: profileContext !== null,
+    queryFn: async (): Promise<string | null> => {
+      if (!profileContext || !isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      try {
+        const result = await v2("GET /api/v2/admin/settings/{key}", {
+          path: { key },
+          profileContext,
+        });
+        if (!isCapturedProfileAuthorityActive(profileContext))
+          throw new StaleApiRequestContextError();
+        return result.value;
+      } catch (error) {
+        if (!isCapturedProfileAuthorityActive(profileContext))
+          throw new StaleApiRequestContextError();
+        if (error instanceof V2ProblemError && error.status === 404) return null;
+        throw error;
+      }
     },
   });
 }

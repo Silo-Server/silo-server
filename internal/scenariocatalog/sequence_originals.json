@@ -1,0 +1,159 @@
+[
+  {
+    "row": {
+      "listener": "api",
+      "method": "GET",
+      "path": "/api/v1/auth/device",
+      "registration_index": 1
+    },
+    "scenario": {
+      "id": "device_lookup.rate_limited.r1",
+      "category": "status_headers",
+      "description": "The rate-limited registration variant answers 429 with Retry-After once the per-IP device_lookup burst (20) is spent.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device",
+        "repeat": 21
+      },
+      "expect": {
+        "status": 429,
+        "headers": [
+          {
+            "name": "Retry-After",
+            "op": "matches",
+            "value": "^[0-9]+$"
+          },
+          {
+            "name": "X-RateLimit-Remaining",
+            "op": "equals",
+            "value": "0"
+          },
+          {
+            "name": "X-RateLimit-Limit",
+            "op": "exists"
+          },
+          {
+            "name": "X-RateLimit-Reset",
+            "op": "matches",
+            "value": "^[0-9]+$"
+          },
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "rate_limit_exceeded"
+          },
+          {
+            "pointer": "/retry_after",
+            "op": "type",
+            "value": "integer"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message",
+              "retry_after"
+            ]
+          }
+        ]
+      },
+      "requires": [
+        "rate_limiter"
+      ],
+      "fresh_state": true,
+      "notes": "The 429 body has a third key (retry_after) unlike every other error envelope; flagged for the section PR.",
+      "v2_expectation": null
+    },
+    "operation": "getDeviceLogin"
+  },
+  {
+    "row": {
+      "listener": "api",
+      "method": "POST",
+      "path": "/api/v1/auth/device/poll",
+      "registration_index": 1
+    },
+    "scenario": {
+      "id": "device_poll.rate_limited.r1",
+      "category": "status_headers",
+      "description": "The rate-limited registration variant answers 429 with Retry-After once the per-IP device_poll burst (30) is spent.",
+      "principal": {
+        "class": "public"
+      },
+      "request": {
+        "path": "/api/v1/auth/device/poll",
+        "repeat": 31,
+        "body": {
+          "device_code": "x"
+        }
+      },
+      "expect": {
+        "status": 429,
+        "headers": [
+          {
+            "name": "Retry-After",
+            "op": "matches",
+            "value": "^[0-9]+$"
+          },
+          {
+            "name": "X-RateLimit-Remaining",
+            "op": "equals",
+            "value": "0"
+          },
+          {
+            "name": "X-RateLimit-Limit",
+            "op": "exists"
+          },
+          {
+            "name": "X-RateLimit-Reset",
+            "op": "matches",
+            "value": "^[0-9]+$"
+          },
+          {
+            "name": "Content-Type",
+            "op": "equals",
+            "value": "application/json"
+          }
+        ],
+        "body": [
+          {
+            "pointer": "/error",
+            "op": "equals",
+            "value": "rate_limit_exceeded"
+          },
+          {
+            "pointer": "/retry_after",
+            "op": "type",
+            "value": "integer"
+          },
+          {
+            "pointer": "",
+            "op": "keys_equal",
+            "value": [
+              "error",
+              "message",
+              "retry_after"
+            ]
+          }
+        ]
+      },
+      "requires": [
+        "rate_limiter"
+      ],
+      "fresh_state": true,
+      "notes": "The 429 body has a third key (retry_after) unlike every other error envelope; flagged for the section PR.",
+      "v2_expectation": null
+    },
+    "operation": "pollDeviceLogin"
+  }
+]

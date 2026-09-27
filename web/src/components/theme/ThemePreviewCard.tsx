@@ -1,4 +1,4 @@
-import type { ThemeVarOverrides } from "@/hooks/useCustomTheme";
+import type { ThemeVarOverrides } from "@/lib/themeTokens";
 
 interface ThemePreviewCardProps {
   vars: ThemeVarOverrides;

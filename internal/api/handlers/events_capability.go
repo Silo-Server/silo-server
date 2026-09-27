@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 
 	evt "github.com/Silo-Server/silo-server/internal/events"
 )
@@ -55,12 +56,19 @@ type eventsCapabilityResponse struct {
 // server, not to silently fall back.
 func (h *EventsHandler) HandleCapability(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(eventsCapabilityResponse{
+	_ = json.NewEncoder(w).Encode(h.EventsCapability())
+}
+
+type EventsCapability = eventsCapabilityResponse
+
+// EventsCapability returns the subscription limits enforced by the shared socket.
+func (h *EventsHandler) EventsCapability() EventsCapability {
+	return EventsCapability{
 		SchemaVersion:               1,
 		SubscribeFrame:              true,
 		DeclaredChannels:            true,
 		SubscribeGracePeriodSeconds: int(subscribeGracePeriod.Seconds()),
 		MaxRequestedChannels:        maxRequestedChannels,
-		Channels:                    evt.ClientChannels,
-	})
+		Channels:                    slices.Clone(evt.ClientChannels),
+	}
 }

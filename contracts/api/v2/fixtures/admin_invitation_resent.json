@@ -1,0 +1,18 @@
+{
+  "invitation": {
+    "id": "8",
+    "email": "invitee@example.invalid",
+    "role": "user",
+    "library_ids": null,
+    "create_profile": true,
+    "show_tour": true,
+    "note": "",
+    "invited_by": "2",
+    "invited_by_name": "Admin",
+    "status": "pending",
+    "expires_at": "2099-01-01T00:00:00.000Z",
+    "created_at": "2026-01-02T03:04:05.678Z"
+  },
+  "claim_url": "https://server.example.invalid/invite/replacement-token",
+  "delivery_status": "not_configured"
+}

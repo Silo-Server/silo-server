@@ -1379,6 +1379,19 @@ func TestCopyFMP4RecipeCardsFailClosedBeforeNodeReconstruction(t *testing.T) {
 	}
 }
 
+func TestValidateThrottleAttestation(t *testing.T) {
+	request := TranscodeStartRequest{ThrottleSeconds: 180}
+	if err := ValidateThrottleAttestation(request, TranscodeStartResponse{ThrottleSeconds: 180}); err != nil {
+		t.Fatalf("matching attestation rejected: %v", err)
+	}
+	if err := ValidateThrottleAttestation(request, TranscodeStartResponse{}); !errors.Is(err, ErrThrottleAttestationMismatch) {
+		t.Fatalf("missing attestation error = %v, want %v", err, ErrThrottleAttestationMismatch)
+	}
+	if err := ValidateThrottleAttestation(TranscodeStartRequest{}, TranscodeStartResponse{}); err != nil {
+		t.Fatalf("disabled throttle rejected legacy node response: %v", err)
+	}
+}
+
 func TestHandleStartRejectsUnversionedSourceAudioRecipeBeforeExecution(t *testing.T) {
 	server := newTestServer(t)
 	body, err := json.Marshal(TranscodeStartRequest{
@@ -3248,6 +3261,107 @@ func TestHandleStartUsesConfiguredHWDeviceList(t *testing.T) {
 	}
 }
 
+func TestHandleStartAndReconstructArmRequestedThrottle(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		reconstruct bool
+	}{
+		{name: "fresh start"},
+		{name: "reconstruct", reconstruct: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newTestServer(t)
+			server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+			ffmpegPath := filepath.Join(t.TempDir(), "looping-ffmpeg.sh")
+			if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nwhile :; do sleep 0.1; done\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+			started := make(chan int, 1)
+			server.startThrottler = func(_ *playback.TranscodeSession, seconds int) { started <- seconds }
+
+			var session *playback.TranscodeSession
+			if test.reconstruct {
+				card := nativeTransportCard("session-1", "transport-1")
+				card.ThrottleSeconds = 180
+				var err error
+				session, err = server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), "transport-1", -1, *card)
+				if err != nil {
+					t.Fatalf("spawnReconstruct: %v", err)
+				}
+			} else {
+				body, err := json.Marshal(TranscodeStartRequest{
+					SessionID: "session-1", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264",
+					TargetCodecAudio: "aac", SegmentDuration: 2, ThrottleSeconds: 180,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				rr := httptest.NewRecorder()
+				server.handleStart(rr, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
+				if rr.Code != http.StatusAccepted {
+					t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+				}
+				server.mu.RLock()
+				session = server.sessions["session-1"]
+				server.mu.RUnlock()
+			}
+			if session == nil {
+				t.Fatal("session was not registered")
+			}
+			t.Cleanup(func() { _ = session.CloseProcess() })
+			select {
+			case got := <-started:
+				if got != 180 {
+					t.Fatalf("throttle seconds = %d, want 180", got)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("node did not arm the requested throttle")
+			}
+		})
+	}
+}
+
+func TestShutdownDrainsSessionsAndRejectsNewStarts(t *testing.T) {
+	server := newTestServer(t)
+	for _, id := range []string{"one", "two"} {
+		dir := server.sessionOutputDir(id)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		server.sessions[id] = playback.NewTranscodeSessionForTest(dir)
+		server.activeJobs.Add(1)
+	}
+
+	if err := server.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs = %d, want 0", got)
+	}
+	server.mu.RLock()
+	remaining := len(server.sessions)
+	server.mu.RUnlock()
+	if remaining != 0 {
+		t.Fatalf("remaining sessions = %d, want 0", remaining)
+	}
+	for _, id := range []string{"one", "two"} {
+		if _, err := os.Stat(server.sessionOutputDir(id)); !os.IsNotExist(err) {
+			t.Fatalf("session directory %q still exists (err=%v)", id, err)
+		}
+	}
+
+	body, err := json.Marshal(TranscodeStartRequest{SessionID: "late", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", SegmentDuration: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	server.handleStart(rr, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("late start status = %d, want %d", rr.Code, http.StatusServiceUnavailable)
+	}
+}
+
 func TestRemoteSessionTrackingPreservesResolvedToneMapMode(t *testing.T) {
 	for _, test := range []struct {
 		name        string
@@ -3680,4 +3794,103 @@ func TestHandleStartPreservesVideoSampleEntry(t *testing.T) {
 	if got := session.Opts().VideoSampleEntry; got != playback.VideoSampleEntryHVC1 {
 		t.Fatalf("VideoSampleEntry = %q", got)
 	}
+}
+
+func TestShutdownDrainsProgressiveRemuxAndRejectsLateRequests(t *testing.T) {
+	server := newTestServer(t)
+	server.nodeRowID = func() (int, bool) { return 11, true }
+	server.registeredNodeURL = func() (string, bool) { return "http://node", true }
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	ffmpegScript := "#!/bin/sh\n" +
+		"for arg in \"$@\"; do\n" +
+		"  if [ \"$arg\" = \"pipe:1\" ]; then\n" +
+		"    while :; do printf node-remux-bytes; sleep 0.01; done\n" +
+		"  fi\n" +
+		"done\n" +
+		"exit 0\n"
+	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	claims := streamtoken.Claims{
+		SessionID: "playback-force-reload", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-force-reload-real",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
+	}
+	card := playback.RecipeCardFromClaims(&claims)
+	recipes := &stubRecipeStore{card: &card, ok: true}
+	server.SetRecipeStore(recipes)
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/remux/"+claims.TranscodeTransportID, nil)
+	request.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", claims.TranscodeTransportID)
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	writer := newAbortableBlockingResponseWriter()
+	t.Cleanup(func() { _ = writer.SetWriteDeadline(time.Now()) })
+	requestCtx, cancelRequest := context.WithCancel(t.Context())
+	t.Cleanup(cancelRequest)
+	request = request.WithContext(context.WithValue(requestCtx, chi.RouteCtxKey, routeContext))
+	handlerDone := make(chan struct{})
+	go func() {
+		server.handleRemux(writer, request)
+		close(handlerDone)
+	}()
+	waitCtx, cancelWait := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancelWait()
+	select {
+	case <-writer.writeStarted:
+	case <-waitCtx.Done():
+		t.Fatal("progressive remux did not reach the blocked client write")
+	}
+	if got := server.activeJobs.Load(); got != 1 {
+		t.Fatalf("active jobs before shutdown = %d, want 1", got)
+	}
+
+	if err := server.Shutdown(waitCtx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-handlerDone:
+	case <-waitCtx.Done():
+		t.Fatal("shutdown returned without draining the progressive remux handler")
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after shutdown = %d, want 0", got)
+	}
+	server.mu.RLock()
+	_, active := server.progressiveRemuxes[claims.TranscodeTransportID]
+	server.mu.RUnlock()
+	if active {
+		t.Fatal("shutdown left the drained remux registered")
+	}
+
+	if !recipes.ok || len(recipes.deletes) != 0 {
+		t.Fatal("shutdown revoked reconstruction authority")
+	}
+	hits := recipes.hits
+
+	// Shutdown retains durable authority, but neither HEAD nor GET may admit
+	// work into this process after its drain has completed.
+	for _, method := range []string{http.MethodHead, http.MethodGet} {
+		late := request.Clone(request.Context())
+		late.Method = method
+		rr := httptest.NewRecorder()
+		server.handleRemux(rr, late)
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Fatalf("late %s status=%d body=%s", method, rr.Code, rr.Body.String())
+		}
+	}
+	if recipes.hits != hits {
+		t.Fatal("late request reached durable authority lookup")
+	}
+
 }

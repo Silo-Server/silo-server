@@ -66,3 +66,10 @@ func TestBackfillMediaItemAliasesTaskAdvancesCursorUntilShortBatch(t *testing.T)
 		t.Fatalf("result = %#v", result)
 	}
 }
+
+func TestBackfillMediaItemAliasesTaskIsManualOnly(t *testing.T) {
+	task := NewBackfillMediaItemAliasesTask(nil)
+	if !task.ManualOnly() || len(task.DefaultTriggers()) != 0 {
+		t.Fatalf("ManualOnly() = %v, DefaultTriggers() = %#v; want manual-only with no schedule", task.ManualOnly(), task.DefaultTriggers())
+	}
+}

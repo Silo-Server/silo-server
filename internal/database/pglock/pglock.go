@@ -22,6 +22,10 @@ import (
 // always throwing the connection away.
 const releaseTimeout = 5 * time.Second
 
+// ArtworkReconcileLockKey serializes managed storage-transition recovery with
+// the administrator-triggered artwork reconcile task across all API nodes.
+const ArtworkReconcileLockKey int64 = 0x53494c4f535452
+
 // Lock is a held session-level advisory lock and the connection holding it.
 type Lock struct {
 	conn *pgxpool.Conn

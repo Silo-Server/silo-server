@@ -1,25 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import { v2 } from "@/api/v2/request";
 import { adminKeys } from "../keys";
 import { toast } from "sonner";
-
-interface JobStatus {
-  running: boolean;
-  count: number;
-  total?: number;
-}
-
-interface RecommendationsStatusResponse {
-  embeddings: JobStatus;
-  taste_profiles: JobStatus;
-  cowatch: JobStatus;
-  recommendations: JobStatus;
-}
 
 export function useRecommendationsStatus() {
   return useQuery({
     queryKey: adminKeys.recommendationsStatus(),
-    queryFn: () => api<RecommendationsStatusResponse>("/admin/recommendations/status"),
+    queryFn: () => v2("GET /api/v2/admin/recommendations/status"),
     refetchInterval: 5000,
   });
 }
@@ -27,7 +14,9 @@ export function useRecommendationsStatus() {
 export function useTriggerEmbeddings() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api("/admin/recommendations/trigger/embeddings", { method: "POST" }),
+    retry: false,
+    mutationFn: () =>
+      v2("POST /api/v2/admin/recommendations/trigger/embeddings", { retryAuthentication: false }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: adminKeys.recommendationsStatus() });
     },
@@ -40,7 +29,11 @@ export function useTriggerEmbeddings() {
 export function useTriggerTasteProfiles() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api("/admin/recommendations/trigger/taste-profiles", { method: "POST" }),
+    retry: false,
+    mutationFn: () =>
+      v2("POST /api/v2/admin/recommendations/trigger/taste-profiles", {
+        retryAuthentication: false,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: adminKeys.recommendationsStatus() });
     },
@@ -53,7 +46,9 @@ export function useTriggerTasteProfiles() {
 export function useTriggerCowatch() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api("/admin/recommendations/trigger/cowatch", { method: "POST" }),
+    retry: false,
+    mutationFn: () =>
+      v2("POST /api/v2/admin/recommendations/trigger/cowatch", { retryAuthentication: false }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: adminKeys.recommendationsStatus() });
     },
@@ -66,7 +61,11 @@ export function useTriggerCowatch() {
 export function useTriggerRecommendations() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api("/admin/recommendations/trigger/recommendations", { method: "POST" }),
+    retry: false,
+    mutationFn: () =>
+      v2("POST /api/v2/admin/recommendations/trigger/recommendations", {
+        retryAuthentication: false,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: adminKeys.recommendationsStatus() });
     },

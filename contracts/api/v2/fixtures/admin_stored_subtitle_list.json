@@ -1,0 +1,27 @@
+{
+  "items": [
+    {
+      "id": "9007199254740993",
+      "media_file_id": "42",
+      "provider": "upload",
+      "language": "en",
+      "format": "",
+      "release_name": "",
+      "score": 0,
+      "hearing_impaired": false,
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "downloaded_by": "2",
+      "uploader_username": "",
+      "media_title": "",
+      "media_type": "",
+      "file_path": ""
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7ImNyZWF0ZWRfYXQiOiIyMDI2LTAxLTAyVDAzOjA0OjA1LjY3ODEyMzQ1NloiLCJpZCI6OTAwNzE5OTI1NDc0MDk5M319.818Wcuh2k0ARpnP8miwyCjF1RUEXuNXQ2e-PnBbBeUo",
+    "has_more": true
+  },
+  "total": 3,
+  "uploads": 1,
+  "provider_downloads": 2
+}

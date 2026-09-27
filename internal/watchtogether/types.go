@@ -82,6 +82,12 @@ type MemberSummary struct {
 	IsHost      bool   `json:"is_host"`
 	IsSelf      bool   `json:"is_self"`
 	Connected   bool   `json:"connected"`
+	IsReady     bool   `json:"is_ready,omitempty"`
+	IsBuffering bool   `json:"is_buffering,omitempty"`
+	IsSyncing   bool   `json:"is_syncing,omitempty"`
+	// LobbyReady is the member's lobby "I'm ready". It is only meaningful
+	// while the room is in the lobby and is always false once playing.
+	LobbyReady bool `json:"lobby_ready"`
 }
 
 type Snapshot struct {
@@ -145,9 +151,13 @@ type TransportRequest struct {
 }
 
 type StateReport struct {
+	CommandID       string
 	SessionID       string
 	PositionSeconds float64
 	IsPaused        bool
+	// IsReady marks a periodic state report as a readiness acknowledgement
+	// for CommandID while the room is waiting.
+	IsReady bool
 }
 
 type TransportCommand struct {
@@ -189,10 +199,11 @@ type CreateSuggestionInput struct {
 
 // SuggestionStore provides persistence for room suggestions and votes.
 type SuggestionStore interface {
+	ListSuggestionsPage(context.Context, string, int, string, int, *SuggestionPosition) ([]Suggestion, bool, error)
 	CreateSuggestion(ctx context.Context, s Suggestion) (*Suggestion, error)
 	GetSuggestion(ctx context.Context, id string) (*Suggestion, error)
-	ListSuggestions(ctx context.Context, roomID string, voterProfileID string) ([]Suggestion, error)
+	ListSuggestions(ctx context.Context, roomID string, voterUserID int, voterProfileID string) ([]Suggestion, error)
 	DeleteSuggestion(ctx context.Context, id string) error
-	AddVote(ctx context.Context, suggestionID string, voterProfileID string) error
-	RemoveVote(ctx context.Context, suggestionID string, voterProfileID string) error
+	AddVote(ctx context.Context, suggestionID string, voterUserID int, voterProfileID string) error
+	RemoveVote(ctx context.Context, suggestionID string, voterUserID int, voterProfileID string) error
 }

@@ -1,6 +1,6 @@
 import { useCallback } from "react";
-import { ApiClientError } from "@/api/client";
 import {
+  isSettingValueMissing,
   useClearSettingValue,
   useSetSettingValue,
   type EffectiveSettingsMap,
@@ -54,7 +54,7 @@ export function useProfileDefaultWriter(effective: EffectiveSettingsMap | undefi
         await clearValue.mutateAsync({ key, identity: DEVICE_SCOPE });
       } catch (error) {
         // Nothing to clear is the state this asks for.
-        if (error instanceof ApiClientError && error.status === 404) return;
+        if (isSettingValueMissing(error)) return;
         throw error;
       }
     },
@@ -68,7 +68,7 @@ export function useProfileDefaultWriter(effective: EffectiveSettingsMap | undefi
         try {
           await clearValue.mutateAsync({ key, identity });
         } catch (error) {
-          if (error instanceof ApiClientError && error.status === 404) return;
+          if (isSettingValueMissing(error)) return;
           throw error;
         }
       };

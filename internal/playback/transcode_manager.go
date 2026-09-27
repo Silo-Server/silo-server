@@ -81,9 +81,14 @@ type TranscodeManager struct {
 	// falls through to ResolveToneMapExecutor and StartTranscode.
 	resolveToneMapExecutor func(context.Context, TranscodeOpts) (TranscodeOpts, error)
 	startTranscode         func(context.Context, TranscodeOpts) (*TranscodeSession, error)
+	autoTranscodePipeline  func(context.Context, TranscodeOpts) *AutoTranscodePipeline
 
 	transcodeMu sync.RWMutex
 	transcodes  map[string]*TranscodeSession
+	// shuttingDown is set under transcodeMu before the shutdown drain takes the
+	// live map. Every publication path checks it under the same lock so a late
+	// FFmpeg process cannot escape the drain and leave its cache behind.
+	shuttingDown bool
 
 	// inFlightMu guards reconstructInFlight, the set of session ids whose ffmpeg
 	// is mid-reconstruct. Cleanup unions it with the live map so a dir being
@@ -193,24 +198,40 @@ func (m *TranscodeManager) GetTranscodeSession(sessionID string) *TranscodeSessi
 }
 
 // RegisterTranscodeSession inserts a freshly started transcode session into the
-// live map. Used by the normal (non-reconstruct) start paths.
-func (m *TranscodeManager) RegisterTranscodeSession(sessionID string, ts *TranscodeSession) {
+// live map. It returns false and closes the session when shutdown has begun.
+func (m *TranscodeManager) RegisterTranscodeSession(sessionID string, ts *TranscodeSession) bool {
 	m.transcodeMu.Lock()
+	if m.shuttingDown {
+		m.transcodeMu.Unlock()
+		if ts != nil {
+			_ = ts.Close()
+		}
+		return false
+	}
 	m.transcodes[sessionID] = ts
 	m.transcodeMu.Unlock()
+	return true
 }
 
 // SwapTranscodeSession atomically publishes a prepared successor and returns
-// the predecessor without closing it. Protocol-v3 replans use plan-scoped
+// the predecessor without closing it. The boolean is false when shutdown has
+// begun; in that case the successor is closed. Protocol-v3 replans use plan-scoped
 // output directories, so the caller can commit state first, publish the new
 // process, and only then reap the old process without either process writing to
 // the other's directory.
-func (m *TranscodeManager) SwapTranscodeSession(sessionID string, successor *TranscodeSession) *TranscodeSession {
+func (m *TranscodeManager) SwapTranscodeSession(sessionID string, successor *TranscodeSession) (*TranscodeSession, bool) {
 	m.transcodeMu.Lock()
+	if m.shuttingDown {
+		m.transcodeMu.Unlock()
+		if successor != nil {
+			_ = successor.Close()
+		}
+		return nil, false
+	}
 	predecessor := m.transcodes[sessionID]
 	m.transcodes[sessionID] = successor
 	m.transcodeMu.Unlock()
-	return predecessor
+	return predecessor, true
 }
 
 // SwapTranscodeSessionIf publishes successor only while the live map still
@@ -222,6 +243,13 @@ func (m *TranscodeManager) SwapTranscodeSessionIf(
 	successor *TranscodeSession,
 ) bool {
 	m.transcodeMu.Lock()
+	if m.shuttingDown {
+		m.transcodeMu.Unlock()
+		if successor != nil {
+			_ = successor.Close()
+		}
+		return false
+	}
 	defer m.transcodeMu.Unlock()
 	if m.transcodes[sessionID] != expected {
 		return false
@@ -652,8 +680,11 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		BasePlayMethod:         method,
 		TranscodeNodeURL:       card.TranscodeNodeURL,
 		TranscodeTransportID:   card.TranscodeTransportID,
+		RoutingNetworkProvider: card.RoutingNetworkProvider,
+		StreamLocation:         card.StreamLocation,
 		RoutingWorkload:        card.RoutingWorkload,
 		RoutingExecution:       card.RoutingExecution,
+		RoutingExecutionNodeID: card.RoutingExecutionNodeID,
 		RoutingEgress:          card.RoutingEgress,
 		RoutingEgressNodeID:    card.RoutingEgressNodeID,
 		AudioTrackIndex:        card.AudioTrackIndex,
@@ -681,6 +712,12 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		SubtitleTrackIndex: card.SubtitleTrackIndex,
 		SubtitleBurnIn:     card.SubtitleBurnIn,
 		SegmentDuration:    card.SegmentDuration,
+	}
+	if card.IsTranscodeRecipe() {
+		s.OutputContainer = HLSOutputContainer(card.TranscodeOpts("", "", nil))
+		s.OutputProtocol = OutputProtocolHLS
+	} else if method == PlayRemux {
+		s.OutputContainer, s.OutputProtocol = OutputContainerFMP4, OutputProtocolHTTP
 	}
 	// Enforce the same per-user concurrency caps a fresh StartSession would, so a
 	// replayed token cannot reconstruct past the user's limit. Reconstructing the
@@ -889,7 +926,15 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	if startTranscode == nil {
 		startTranscode = StartTranscode
 	}
-	transcodeSession, err := startTranscode(ctx, opts)
+	newPipeline := m.autoTranscodePipeline
+	if newPipeline == nil {
+		newPipeline = NewAutoTranscodePipeline
+	}
+	// Under hw_accel=auto a reconstruct walks the same safer paths as a fresh
+	// start, keeping a slow process rather than duplicating it. Every other
+	// recipe starts once without waiting, as segment requests already wait for
+	// a reconstructed process.
+	transcodeSession, err := StartReconstructTranscode(ctx, newPipeline(ctx, opts), TranscodeStartup{Start: startTranscode})
 	if err != nil {
 		slog.ErrorContext(ctx, "reconstruct transcode start failed", "component", "playback", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		return nil, err
@@ -900,6 +945,11 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	// belt-and-braces, closing only the duplicate ffmpeg process (never the shared
 	// output dir the winner serves) on the should-be-impossible race.
 	m.transcodeMu.Lock()
+	if m.shuttingDown {
+		m.transcodeMu.Unlock()
+		_ = transcodeSession.Close()
+		return nil, context.Canceled
+	}
 	if existing := m.transcodes[sessionID]; existing != nil {
 		m.transcodeMu.Unlock()
 		_ = transcodeSession.CloseProcess()
@@ -1006,6 +1056,32 @@ func (m *TranscodeManager) CloseTranscodeSession(sessionID, transcodeNodeURL str
 	}
 
 	m.StopRemoteTranscode(sessionID, transcodeNodeURL)
+}
+
+// StartShutdownCleanup closes every local transcode when ctx is canceled and
+// returns a channel closed after cleanup finishes.
+func (m *TranscodeManager) StartShutdownCleanup(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
+	if m == nil || ctx == nil {
+		close(done)
+		return done
+	}
+	go func() {
+		defer close(done)
+		<-ctx.Done()
+
+		m.transcodeMu.Lock()
+		m.shuttingDown = true
+		transcodes := m.transcodes
+		m.transcodes = make(map[string]*TranscodeSession)
+		m.transcodeMu.Unlock()
+		for _, session := range transcodes {
+			if session != nil {
+				_ = session.Close()
+			}
+		}
+	}()
+	return done
 }
 
 // CloseTranscodeSessionIf tears down a transcode session only when the live map

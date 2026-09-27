@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
 // InputPathAuthorizer approves a local media input before a node passes it to
@@ -49,6 +52,42 @@ func (a *CatalogPathAuthorizer) Allowed(ctx context.Context, path string) (bool,
 	}
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular(), nil
+}
+
+// ThemeInputApprover approves a detail-page theme file as the input of a
+// progressive AAC conversion. Theme files are not media_files rows, so they
+// have their own authority, reachable only from theme tokens: every other node
+// input still goes through InputPathAuthorizer.
+type ThemeInputApprover interface {
+	AllowedTheme(ctx context.Context, id int64, path string, size int64, modified time.Time) (bool, error)
+}
+
+type themePathSource interface {
+	IsActiveTheme(ctx context.Context, id int64, path string) (bool, error)
+}
+
+// ThemeInputAuthorizer permits a theme only when its id still names that exact
+// path in an enabled library and the file on this node is the one the token
+// described, so a signed token cannot turn FFmpeg on any other file.
+type ThemeInputAuthorizer struct {
+	themes themePathSource
+}
+
+// NewThemeInputAuthorizer creates a theme input authority backed by the theme
+// catalog.
+func NewThemeInputAuthorizer(themes themePathSource) *ThemeInputAuthorizer {
+	return &ThemeInputAuthorizer{themes: themes}
+}
+
+func (a *ThemeInputAuthorizer) AllowedTheme(ctx context.Context, id int64, path string, size int64, modified time.Time) (bool, error) {
+	if a == nil || a.themes == nil || id <= 0 || !plainAbsolutePath(path) {
+		return false, nil
+	}
+	active, err := a.themes.IsActiveTheme(ctx, id, path)
+	if err != nil || !active {
+		return false, err
+	}
+	return themesongs.Unchanged(path, size, modified), nil
 }
 
 func plainAbsolutePath(path string) bool {

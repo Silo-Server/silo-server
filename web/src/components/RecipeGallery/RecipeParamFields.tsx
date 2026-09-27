@@ -12,14 +12,26 @@ import type { BrowseItem } from "@/api/types";
 import type { RecipeDefinition } from "@/lib/recipes";
 
 export interface RecipeParamFieldsProps {
+  libraryCollectionsOnly?: boolean;
   def: RecipeDefinition;
   params: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
 }
 
-export default function RecipeParamFields({ def, params, onChange }: RecipeParamFieldsProps) {
+export default function RecipeParamFields({
+  def,
+  params,
+  onChange,
+  libraryCollectionsOnly = false,
+}: RecipeParamFieldsProps) {
   if (def.type === "collection") {
-    return <CollectionParamField params={params} onChange={onChange} />;
+    return (
+      <CollectionParamField
+        params={params}
+        onChange={onChange}
+        libraryCollectionsOnly={libraryCollectionsOnly}
+      />
+    );
   }
   if (def.type === "continue_watching") {
     return <ContinueTypeParamField params={params} onChange={onChange} />;
@@ -613,8 +625,15 @@ function CuratedItemsParamField({ params, onChange }: ParamFieldProps) {
   );
 }
 
-function CollectionParamField({ params, onChange }: ParamFieldProps) {
-  const { collections, isLoading } = useAllUserCollections();
+function CollectionParamField({
+  params,
+  onChange,
+  libraryCollectionsOnly,
+}: ParamFieldProps & { libraryCollectionsOnly: boolean }) {
+  const { collections: allCollections, isLoading } = useAllUserCollections();
+  const collections = libraryCollectionsOnly
+    ? allCollections.filter((collection) => collection.source === "library")
+    : allCollections;
   const libraryID = (params.library_collection_id as string) ?? "";
   const userID = (params.user_collection_id as string) ?? "";
   const value = userID || libraryID;

@@ -82,9 +82,16 @@ func TestEbookMetadataTaskPropertiesAndScopes(t *testing.T) {
 		t.Fatalf("backfill description does not explain legacy work: %q", backfillTask.Description())
 	}
 	for _, task := range []taskmanager.Task{syncTask, backfillTask} {
-		if task.Category() != taskmanager.TaskCategoryMetadata || task.IsHidden() {
-			t.Fatalf("unexpected task properties for %q", task.Key())
+		if task.Category() != taskmanager.TaskCategoryMetadata {
+			t.Fatalf("unexpected category for %q", task.Key())
 		}
+		scoped, ok := task.(taskmanager.LibraryScopedTask)
+		if !ok || !scoped.ServesLibrary(" Ebooks ") || scoped.ServesLibrary("audiobooks") {
+			t.Fatalf("%q is not scoped to ebook libraries", task.Key())
+		}
+	}
+	if syncTask.IsHidden() || !backfillTask.IsHidden() {
+		t.Fatalf("hidden = sync %v, backfill %v; want sync visible and backfill hidden", syncTask.IsHidden(), backfillTask.IsHidden())
 	}
 	triggers := syncTask.DefaultTriggers()
 	if len(triggers) != 1 || triggers[0].Type != taskmanager.TriggerTypeInterval || triggers[0].IntervalMs != 5*60*1000 {

@@ -23,7 +23,7 @@ var updateRouteManifest = flag.Bool("update-route-manifest", false, "update chec
 func TestMediaRouteManifest(t *testing.T) {
 	declareProxyMediaRoutes()
 	makeRouter := func() chi.Routes {
-		return NewServer(nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{}), nodesessions.NewTracker(nil, "", "", "")).Handler().(chi.Routes)
+		return NewServer(nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{}), nodesessions.NewTracker(nil, "", "", "")).router()
 	}
 	assertMediaManifest(t, []chi.Routes{makeRouter(), makeRouter()}, proxyMediaRoutes, "testdata/media_routes.txt")
 }

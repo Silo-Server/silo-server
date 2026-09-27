@@ -1,17 +1,8 @@
 import type { ItemDetail, Season } from "@/api/types";
 
-export interface SeriesContinueWatchingItem {
-  contentId: string;
-  seriesId?: string;
-  title?: string;
-}
-
 export interface SeriesPrimaryAction {
   label: string;
-  context?: string;
-  directHref?: string;
-  targetSeasonId?: string;
-  targetEpisodeNumber?: number;
+  href?: string;
 }
 
 export interface LeafPrimaryAction {
@@ -22,12 +13,6 @@ export interface LeafPrimaryAction {
 export interface EpisodeNavigationState {
   parentSeasonHref?: string;
   parentSeasonLabel?: string;
-}
-
-interface ResolveSeriesPrimaryActionInput {
-  seriesId: string;
-  seasons: Season[];
-  continueWatching: SeriesContinueWatchingItem[];
 }
 
 function clampProgress(progress: number): number {
@@ -96,69 +81,28 @@ export function resolveEpisodeSiblingSeason(
   };
 }
 
-export function resolveSeriesPrimaryAction({
-  seriesId,
-  seasons,
-  continueWatching,
-}: ResolveSeriesPrimaryActionInput): SeriesPrimaryAction {
-  const resumeItem = continueWatching.find((entry) => entry.seriesId === seriesId);
-  if (resumeItem) {
-    return {
-      label: "Resume",
-      directHref: `/watch/${resumeItem.contentId}`,
-      context: resumeItem.title ? `Continue ${resumeItem.title}` : undefined,
-    };
+/**
+ * The series play button. The server resolves `play_content_id` for the
+ * acting profile with the rule every series card uses: the newest in-progress
+ * episode, else the first unwatched one, else the first available one. The
+ * label reads the series watch rollup from the same detail response, so the
+ * button is final as soon as the detail arrives.
+ */
+export function resolveSeriesPrimaryAction(
+  item: Pick<ItemDetail, "play_content_id" | "user_data">,
+): SeriesPrimaryAction {
+  if (!item.play_content_id) {
+    return { label: "Browse Series" };
   }
 
-  const sortedSeasons = seasons.slice().sort((a, b) => a.season_number - b.season_number);
-
-  const latestStartedSeason = sortedSeasons
-    .slice()
-    .reverse()
-    .find((season) => {
-      if (!season.user_data) {
-        return false;
-      }
-
-      return (
-        season.user_data.in_progress_count > 0 ||
-        season.user_data.watched_count > 0 ||
-        season.user_data.unplayed_count < season.episode_count
-      );
-    });
-
-  if (latestStartedSeason) {
-    const nextSeason = sortedSeasons.find(
-      (season) => season.season_number > latestStartedSeason.season_number,
-    );
-    const latestSeasonIsComplete = latestStartedSeason.user_data?.played === true;
-    const targetSeason = latestSeasonIsComplete && nextSeason ? nextSeason : latestStartedSeason;
-    const watchedCount = targetSeason.user_data?.watched_count ?? 0;
-    const targetEpisodeNumber =
-      targetSeason.content_id === latestStartedSeason.content_id
-        ? Math.min(watchedCount + 1, targetSeason.episode_count)
-        : 1;
-
-    return {
-      label: "Play Latest",
-      targetSeasonId: targetSeason.content_id,
-      targetEpisodeNumber,
-      context: `Jump back into ${getSeasonDisplayTitle(targetSeason)}`,
-    };
+  const href = `/watch/${item.play_content_id}`;
+  const rollup = item.user_data && "in_progress_count" in item.user_data ? item.user_data : null;
+  if (rollup && rollup.in_progress_count > 0) {
+    return { label: "Resume", href };
   }
-
-  const firstSeason = sortedSeasons[0];
-  if (firstSeason) {
-    return {
-      label: "Start From Episode 1",
-      targetSeasonId: firstSeason.content_id,
-      targetEpisodeNumber: 1,
-      context: `Begin with ${getSeasonDisplayTitle(firstSeason)}`,
-    };
+  if (rollup && rollup.watched_count > 0 && !rollup.played) {
+    return { label: "Play Next", href };
   }
-
-  return {
-    label: "Browse Series",
-    context: "Episodes are not available yet",
-  };
+  // Unstarted and fully watched series both resolve to the first episode.
+  return { label: "Start From Episode 1", href };
 }

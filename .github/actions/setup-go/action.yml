@@ -1,0 +1,64 @@
+name: Set up Go for this repository
+description: >-
+  Installs libvips, the Go toolchain from go.mod, a per-commit build and module
+  cache, and the stub frontend bundle that cmd/silo embeds.
+
+inputs:
+  cache-name:
+    description: >-
+      Distinguishes the build cache of one job from another's. Jobs compile
+      different things (a lint job type-checks, a test job builds test
+      binaries), so each keeps a cache that matches its own work.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # github.com/h2non/bimg binds libvips through cgo and pkg-config, so
+    # nothing under ./... compiles without the headers. The Dockerfile
+    # installs the same package in its build stage.
+    - name: Install libvips
+      shell: bash
+      run: |
+        # libvips and its dependencies use the runner's official Ubuntu sources.
+        test -f /etc/apt/sources.list.d/ubuntu.sources
+        apt_options=(
+          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+          -o Dir::Etc::sourceparts=-
+        )
+        sudo apt-get "${apt_options[@]}" update
+        sudo apt-get "${apt_options[@]}" install -y --no-install-recommends libvips-dev
+
+    # setup-go's own cache is keyed on go.sum alone and written only on a
+    # miss, so between dependency bumps every run restored a build cache
+    # from weeks ago and recompiled the tree. The cache below is keyed on the
+    # commit and restored by prefix, so each run starts from the newest
+    # cache any earlier run saved.
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+        cache: false
+
+    - name: Read the Go version
+      id: go
+      shell: bash
+      run: echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the Go build and module cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: go-${{ inputs.cache-name }}-${{ runner.os }}-${{ steps.go.outputs.version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+        restore-keys: |
+          go-${{ inputs.cache-name }}-${{ runner.os }}-${{ steps.go.outputs.version }}-${{ hashFiles('go.sum') }}-
+          go-${{ inputs.cache-name }}-${{ runner.os }}-${{ steps.go.outputs.version }}-
+
+    # cmd/silo embeds the built frontend, so nothing under ./... compiles
+    # without web/dist. The Go jobs never serve it, so a placeholder is
+    # enough; the Docker workflow builds the real bundle.
+    - name: Stub the embedded frontend bundle
+      shell: bash
+      run: make embed-stub

@@ -25,7 +25,7 @@ describe("buildSettingsOverview health tiles", () => {
     const model = buildSettingsOverview({});
 
     expect(model.tiles).toHaveLength(5);
-    expect(model.cards).toHaveLength(12);
+    expect(model.cards).toHaveLength(13);
     expect(tile({}, "storage").stateText).toBe("Not set up");
     expect(card({}, "general")).toEqual({ id: "general" });
   });
@@ -296,6 +296,7 @@ describe("buildSettingsOverview groups", () => {
       "ai",
       "notifications",
       "compatibility",
+      "network-access",
     ]);
   });
 

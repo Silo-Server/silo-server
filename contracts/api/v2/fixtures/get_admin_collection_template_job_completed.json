@@ -1,0 +1,40 @@
+{
+  "template_result": {
+    "bundle_id": "bundle",
+    "dry_run": false,
+    "delete_existing": false,
+    "deleted": [],
+    "delete_skipped": [],
+    "delete_failed": [],
+    "created": [
+      {
+        "template_id": "recent",
+        "template_title": "Recently added",
+        "library_id": "1",
+        "library_name": "Movies",
+        "collection_id": "c1"
+      }
+    ],
+    "skipped": [
+      {
+        "template_id": "existing",
+        "template_title": "Existing",
+        "library_id": "1",
+        "library_name": "Movies",
+        "reason": "operation_failed"
+      }
+    ],
+    "failed": [],
+    "sync_queued": [],
+    "featured": [],
+    "featured_failed": []
+  },
+  "id": "collection-job",
+  "kind": "template_bundle_apply",
+  "state": "succeeded",
+  "terminal": true,
+  "cancelable": false,
+  "created_at": "2026-01-02T03:04:05.678Z",
+  "started_at": "2026-01-02T03:04:05.678Z",
+  "finished_at": "2026-01-02T03:04:05.678Z"
+}

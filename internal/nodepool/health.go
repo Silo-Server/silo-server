@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
 // healthResponse is the JSON response from a node's /health endpoint.
@@ -29,8 +31,20 @@ type healthResponse struct {
 	// data, nothing here routes on them, and decoding them would make nodepool
 	// depend on the sampler's schema — so a node running a newer build can add
 	// fields without an API-side change.
-	System json.RawMessage `json:"system"`
-	GPU    json.RawMessage `json:"gpu"`
+	System      json.RawMessage `json:"system"`
+	GPU         json.RawMessage `json:"gpu"`
+	Attribution json.RawMessage `json:"attribution"`
+	SampledAt   json.RawMessage `json:"sampled_at"`
+	// Build is the node's own build identity, carried opaquely for the same
+	// reason as the sample: it is display data for the nodes dashboard.
+	Build json.RawMessage `json:"build"`
+	// NetworkAccess is the node's report about the network access provider
+	// plugins running beside it, keyed by provider slug. Unlike the sample it
+	// is decoded here, because stream URL selection routes on it: an overlay
+	// client is handed the origin the matching provider reports on the proxy.
+	// Absent on a node that predates the field or runs no providers, which
+	// reads as "no overlay origins" — see CheckNode.
+	NetworkAccess netaccess.NodeNetworkAccess `json:"network_access,omitempty"`
 }
 
 // maxHealthResponseBytes bounds a node's whole /health body.
@@ -51,50 +65,59 @@ const maxHealthResponseBytes = 256 << 10
 const maxLastStatsBytes = 32 << 10
 
 // CheckNode pings a node's /health endpoint and returns its health status,
-// active job count, reported egress bandwidth, capability hash, and the opaque
-// resource-stats blob to persist (nil when the node reported none).
-func CheckNode(ctx context.Context, n *Node) (healthy bool, activeJobs, egressKbps int, capabilitiesHash string, lastStats []byte) {
+// active job count, reported egress bandwidth, capability hash, the opaque
+// resource-stats blob to persist (nil when the node reported none), and the
+// node's network access report (nil when it reported none).
+//
+// A missing network_access field is a report of no providers, not "keep what
+// you had": the node either predates the field or runs no provider, and in
+// both cases no overlay client can reach it through one. Treating absence as
+// "unchanged" would let an origin from a previous build outlive the process
+// that served it, and the cost of clearing is only a fallback to the API
+// relay until the next 30 s sweep.
+func CheckNode(ctx context.Context, n *Node) (healthy bool, activeJobs, egressKbps int, capabilitiesHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, NodeEndpoint(n.URL, "/api/v1/health"), nil)
 	if err != nil {
-		return false, 0, 0, "", nil
+		return false, 0, 0, "", nil, nil
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return false, 0, 0, "", nil
+		return false, 0, 0, "", nil, nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return false, 0, 0, "", nil
+		return false, 0, 0, "", nil, nil
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHealthResponseBytes+1))
 	if err != nil {
-		return false, 0, 0, "", nil
+		return false, 0, 0, "", nil, nil
 	}
 	if len(body) > maxHealthResponseBytes {
 		// Nothing in the body can be trusted to be well-formed at that size, so
 		// the node is treated as not answering rather than partially believed.
 		slog.WarnContext(ctx, "node health response too large to read", "component", "nodepool",
 			"id", n.ID, "name", n.Name, "url", n.URL, "limit_bytes", maxHealthResponseBytes)
-		return false, 0, 0, "", nil
+		return false, 0, 0, "", nil, nil
 	}
 
 	var hr healthResponse
 	if err := json.Unmarshal(body, &hr); err != nil {
-		return false, 0, 0, "", nil
+		return false, 0, 0, "", nil, nil
 	}
 
-	return true, hr.ActiveJobs, hr.EgressKbps, hr.CapabilitiesHash, marshalLastStats(ctx, n, hr)
+	return true, hr.ActiveJobs, hr.EgressKbps, hr.CapabilitiesHash, marshalLastStats(ctx, n, hr), hr.NetworkAccess.Normalized()
 }
 
-// marshalLastStats packs a health response's resource fields into the blob
-// stored on the node row, or nil when the node sent neither.
+// marshalLastStats packs a health response's resource fields and build
+// identity into the blob stored on the node row, or nil when the node sent
+// none of them.
 //
 // nil is what a node predating resource sampling produces, and it must persist
 // as SQL NULL rather than as an empty object: "this node cannot report" and
@@ -103,13 +126,19 @@ func CheckNode(ctx context.Context, n *Node) (healthy bool, activeJobs, egressKb
 func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 	system := trimJSONNull(hr.System)
 	gpu := trimJSONNull(hr.GPU)
-	if system == nil && gpu == nil {
+	attribution := trimJSONNull(hr.Attribution)
+	sampledAt := trimJSONNull(hr.SampledAt)
+	build := trimJSONNull(hr.Build)
+	if system == nil && gpu == nil && attribution == nil && build == nil {
 		return nil
 	}
 	payload := struct {
-		System json.RawMessage `json:"system,omitempty"`
-		GPU    json.RawMessage `json:"gpu,omitempty"`
-	}{System: system, GPU: gpu}
+		System      json.RawMessage `json:"system,omitempty"`
+		GPU         json.RawMessage `json:"gpu,omitempty"`
+		Attribution json.RawMessage `json:"attribution,omitempty"`
+		SampledAt   json.RawMessage `json:"sampled_at,omitempty"`
+		Build       json.RawMessage `json:"build,omitempty"`
+	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil
@@ -303,7 +332,7 @@ func (hc *HealthChecker) Start(ctx context.Context) {
 }
 
 // applyHealthFunc is a pool's copy-on-write health writer.
-type applyHealthFunc func(id int, checkedURL string, healthy bool, activeJobs, egressKbps int, advertisedHash string, lastStats []byte, checkedAt time.Time)
+type applyHealthFunc func(id int, checkedURL string, healthy bool, activeJobs, egressKbps int, advertisedHash string, lastStats []byte, networkAccess netaccess.NodeNetworkAccess, checkedAt time.Time)
 
 // applyCapabilitiesFunc is a pool's copy-on-write capability writer.
 type applyCapabilitiesFunc func(id int, fetchedFrom string, capabilities []byte, hash string, refreshedAt time.Time, drift *string, driftBaseline []byte)
@@ -312,13 +341,13 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 	var wg sync.WaitGroup
 	check := func(n *Node, applyHealth applyHealthFunc, applyCapabilities applyCapabilitiesFunc) {
 		wg.Go(func() {
-			healthy, activeJobs, egressKbps, capabilitiesHash, lastStats := CheckNode(ctx, n)
+			healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess := CheckNode(ctx, n)
 
 			// Publish the result through the pool lock so readers never see
 			// a Node struct mutated in place (the pool swaps in a copy). Fenced
 			// on the checked URL, like the database write below: the pool can be
 			// reloaded with a different worker on this id while the check runs.
-			applyHealth(n.ID, n.URL, healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, time.Now())
+			applyHealth(n.ID, n.URL, healthy, activeJobs, egressKbps, capabilitiesHash, lastStats, networkAccess, time.Now())
 
 			if n.Healthy && !healthy {
 				slog.WarnContext(ctx, "stream node unhealthy", "component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL)
@@ -330,7 +359,7 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 				// Fenced on the URL that was checked: last_stats feeds transcode
 				// admission, so one worker's disk reading must never land on a
 				// row an administrator has since repointed at another.
-				if err := hc.repo.UpdateHealth(ctx, n.ID, n.URL, healthy, activeJobs, egressKbps, lastStats); err != nil {
+				if err := hc.repo.UpdateHealth(ctx, n.ID, n.URL, healthy, activeJobs, egressKbps, lastStats, networkAccess); err != nil {
 					if errors.Is(err, ErrNodeMoved) {
 						slog.InfoContext(ctx, "discarded a health result for a node that changed identity mid-check",
 							"component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL)

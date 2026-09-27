@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -25,6 +26,13 @@ func NewSQLiteUserStore(db *sql.DB) *SQLiteUserStore {
 var _ userstore.UserStore = (*SQLiteUserStore)(nil)
 var _ userstore.DeviceRegistry = (*SQLiteUserStore)(nil)
 var _ userstore.WatchedBatchWriter = (*SQLiteUserStore)(nil)
+var _ userstore.SectionOverrideEnumerator = (*SQLiteUserStore)(nil)
+
+// ListAllSectionOverrides exposes the account-wide read capability used by
+// scheduled section maintenance.
+func (s *SQLiteUserStore) ListAllSectionOverrides(_ context.Context) ([]userstore.SectionOverride, error) {
+	return ListAllSectionOverrides(s.db)
+}
 
 // --- Profiles ---
 
@@ -104,6 +112,10 @@ func (s *SQLiteUserStore) ListProgress(_ context.Context, profileID, status stri
 	return ListProgress(s.db, profileID, status, limit, offset)
 }
 
+func (s *SQLiteUserStore) ListProgressPage(_ context.Context, profileID, status string, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, error) {
+	return ListProgressPage(s.db, profileID, status, after, limit)
+}
+
 // ListProgressFiltered cannot push the type/library predicate down: the
 // per-user SQLite store has no catalog tables (media_items/episodes/
 // media_item_libraries live in the shared Postgres schema). It therefore
@@ -140,6 +152,10 @@ func (s *SQLiteUserStore) AddHistoryIfMissing(_ context.Context, entry userstore
 
 func (s *SQLiteUserStore) ListHistory(_ context.Context, profileID string, limit, offset int) ([]userstore.WatchHistoryEntry, error) {
 	return ListHistory(s.db, profileID, limit, offset)
+}
+
+func (s *SQLiteUserStore) ListHistoryPage(_ context.Context, profileID string, after *userstore.HistoryKey, limit int) ([]userstore.WatchHistoryEntry, error) {
+	return ListHistoryPage(s.db, profileID, after, limit)
 }
 
 func (s *SQLiteUserStore) ListCompletedHistory(_ context.Context, query userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
@@ -192,12 +208,24 @@ func (s *SQLiteUserStore) ListFavorites(_ context.Context, profileID string, lim
 	return ListFavorites(s.db, profileID, limit, offset)
 }
 
+func (s *SQLiteUserStore) ListFavoritesPage(_ context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.Favorite, error) {
+	return ListFavoritesPage(s.db, profileID, after, limit)
+}
+
 func (s *SQLiteUserStore) ListFavoritesByMediaItems(_ context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error) {
 	return ListFavoritesByMediaItems(s.db, profileID, mediaItemIDs)
 }
 
 func (s *SQLiteUserStore) IsFavorite(_ context.Context, profileID, mediaItemID string) (bool, error) {
 	return IsFavorite(s.db, profileID, mediaItemID)
+}
+
+func (s *SQLiteUserStore) GetFavorite(_ context.Context, profileID, mediaItemID string) (*userstore.Favorite, error) {
+	return GetFavorite(s.db, profileID, mediaItemID)
+}
+
+func (s *SQLiteUserStore) GetWatchlistEntry(_ context.Context, profileID, mediaItemID string) (*userstore.WatchlistEntry, error) {
+	return GetWatchlistEntry(s.db, profileID, mediaItemID)
 }
 
 func (s *SQLiteUserStore) AddToWatchlist(_ context.Context, profileID, mediaItemID string) error {
@@ -218,6 +246,10 @@ func (s *SQLiteUserStore) ReplaceWatchlistOrder(_ context.Context, profileID str
 
 func (s *SQLiteUserStore) ListWatchlist(_ context.Context, profileID string, limit, offset int) ([]userstore.WatchlistEntry, error) {
 	return ListWatchlist(s.db, profileID, limit, offset)
+}
+
+func (s *SQLiteUserStore) ListWatchlistPage(_ context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.WatchlistEntry, error) {
+	return ListWatchlistPage(s.db, profileID, after, limit)
 }
 
 func (s *SQLiteUserStore) ListWatchlistByMediaItems(_ context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error) {
@@ -481,6 +513,10 @@ func (s *SQLiteUserStore) ListAllSettingValues(_ context.Context) ([]userstore.S
 	return ListAllSettingValues(s.db)
 }
 
+func (s *SQLiteUserStore) ListSettingValuesByScope(_ context.Context, profileID string, scope settingscontract.Scope, keys []string) ([]userstore.SettingValue, error) {
+	return ListSettingValuesByScope(s.db, profileID, scope, keys)
+}
+
 func (s *SQLiteUserStore) UpsertSettingValue(_ context.Context, id userstore.SettingIdentity, value json.RawMessage) (*userstore.SettingValue, error) {
 	return UpsertSettingValue(s.db, id, value)
 }
@@ -519,4 +555,8 @@ func (s *SQLiteUserStore) PutSettingMutation(_ context.Context, record userstore
 
 func (s *SQLiteUserStore) DeleteExpiredSettingMutations(_ context.Context, before time.Time) (int64, error) {
 	return DeleteExpiredSettingMutations(s.db, before)
+}
+
+func (s *SQLiteUserStore) ListAdminSettingValuesPage(ctx context.Context, after userstore.SettingIdentity, limit int) ([]userstore.SettingValue, bool, error) {
+	return listAdminSettingValuesPage(ctx, s.db, after, limit)
 }

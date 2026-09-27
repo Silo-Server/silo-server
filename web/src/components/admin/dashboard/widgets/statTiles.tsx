@@ -1,5 +1,15 @@
 import type { ReactNode } from "react";
-import { Activity, Film, Gauge, HardDrive, Tv, UserCheck, Users, Zap } from "lucide-react";
+import {
+  Activity,
+  Film,
+  Gauge,
+  HardDrive,
+  ShieldCheck,
+  Tv,
+  UserCheck,
+  Users,
+  Zap,
+} from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminSessions, useAdminStats } from "@/hooks/queries/admin/stats";
 import {
@@ -155,6 +165,28 @@ export function ShowsStatWidget() {
       value={stats ? stats.total_shows.toLocaleString() : "—"}
       sub={formatFileCount(stats?.total_show_files)}
       icon={<Tv className="h-4 w-4" />}
+      isLoading={statsQuery.isLoading || (!stats && !statsQuery.error)}
+      error={statsQuery.error}
+    />
+  );
+}
+
+/**
+ * How many movies and series carry an advisory age. A profile's advisory-age
+ * limit only hides titles that have one, and the provider that supplies them is
+ * rate limited per day, so this is how an admin sees what the limit acts on.
+ */
+export function AdvisoryCoverageStatWidget() {
+  const statsQuery = useAdminStats();
+  const stats = statsQuery.data;
+  const titles = stats ? stats.total_movies + stats.total_shows : 0;
+  const covered = stats?.advisory_titles ?? 0;
+  return (
+    <StatTile
+      label="Advisory ages"
+      value={stats ? (titles > 0 ? `${Math.round((covered / titles) * 100)}%` : "—") : "—"}
+      sub={`${covered.toLocaleString()} of ${titles.toLocaleString()} titles`}
+      icon={<ShieldCheck className="h-4 w-4" />}
       isLoading={statsQuery.isLoading || (!stats && !statsQuery.error)}
       error={statsQuery.error}
     />

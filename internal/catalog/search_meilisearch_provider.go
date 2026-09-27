@@ -69,6 +69,7 @@ type MeilisearchProviderConfig struct {
 }
 
 type MeilisearchSearchProvider struct {
+	sessions  *searchSessionStore
 	itemRepo  *ItemRepository
 	stateRepo meilisearchIndexStateStore
 	fallback  *PostgresSearchProvider
@@ -158,6 +159,9 @@ func NewMeilisearchSearchProvider(
 }
 
 func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearchRequest) (*CatalogSearchResult, error) {
+	if req.CursorPaging {
+		return p.searchCursorPage(ctx, req)
+	}
 	if req.Access.AllowedLibraryIDs != nil && len(req.Access.AllowedLibraryIDs) == 0 {
 		return &CatalogSearchResult{
 			Items:      []*models.MediaItem{},
@@ -349,6 +353,12 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 			return nil, fmt.Errorf("meilisearch candidate scan cap reached")
 		}
 		nextLimit := batchSize
+		if scanned == 0 {
+			// Allow some filtered or stale hits without another round trip,
+			// while avoiding a full batch for small pages. Later rounds retain
+			// the larger backfill batches for sparse access.
+			nextLimit = min(nextLimit, 2*target)
+		}
 		if remaining := meilisearchCandidateScanCap - scanned; remaining < nextLimit {
 			nextLimit = remaining
 		}

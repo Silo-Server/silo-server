@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siloserver.org/contracts/api/v2/breaking-approvals.schema.json",
+  "title": "Native API v2 pre-lock breaking-change approvals",
+  "description": "One entry per approved breaking change against the merge base, keyed by the exact operation and the change fingerprint the semantic diff prints. No entry may be a pattern; prose alone approves nothing. Ignored entirely once contracts/api/v2/LOCKED exists.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["approvals"],
+  "properties": {
+    "approvals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operation_id", "change_id", "fingerprint", "reason", "approved_in"],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "description": "The one operationId the change is on; a component change is approved under the operation that exposes it.",
+            "pattern": "^[a-z][A-Za-z0-9]*$"
+          },
+          "change_id": {
+            "type": "string",
+            "description": "The oasdiff rule id the diff reported.",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          },
+          "fingerprint": {
+            "type": "string",
+            "description": "The 64-hex SHA-256 the diff prints for this exact change.",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the break is accepted pre-lock and how clients were coordinated.",
+            "minLength": 20
+          },
+          "approved_in": {
+            "type": "string",
+            "description": "The pull request or issue that ratified it, as #NNN.",
+            "pattern": "^#[0-9]+$"
+          }
+        }
+      }
+    }
+  }
+}

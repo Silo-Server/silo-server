@@ -17,7 +17,8 @@ type Entry struct {
 	Attrs             map[string]any `json:"attrs,omitempty"`
 }
 
-// Writer buffers operational log entries for asynchronous persistence.
+// Writer buffers operational log entries for asynchronous persistence. Handler
+// calls Write on the logging goroutine, so it must not block or log.
 type Writer interface {
 	Write(entry Entry)
 	Close() error

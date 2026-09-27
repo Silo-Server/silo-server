@@ -388,7 +388,7 @@ func TestCreateSourceWebhookReturnsURL(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	wantURL := `"webhook_url":"https://silo.example/api/v1/autoscan/webhooks/` + testWebhookToken + `"`
+	wantURL := `"webhook_url":"https://silo.example/api/v2/autoscan/webhooks/` + testWebhookToken + `"`
 	if !strings.Contains(body, wantURL) {
 		t.Fatalf("response missing %s: %s", wantURL, body)
 	}

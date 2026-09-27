@@ -534,6 +534,93 @@ func TestPollOnceAppliesSourceRewritesBeforeEnqueue(t *testing.T) {
 	}
 }
 
+func TestPollOnceStructuredFileChangeAcceptsDirectoryTarget(t *testing.T) {
+	// The real resolver widens a video file change to its directory. The
+	// service must enqueue that subtree target rather than dropping the change
+	// as "not a file".
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
+			PathRewrites: []PathRewrite{{From: "/ceph/tv", To: "/mnt/media/tv"}},
+		}},
+	}
+	prov := &fakeProvider{changes: map[string][]Change{
+		"cephfs": {{
+			SourcePath: "/ceph/tv/Show/S01/E01.mkv",
+			Scope:      ChangeScopeFile,
+		}},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := NewService(store, prov, passthroughConnRes{}, directoryWideningResolver{}, q, allowSuppressor{}, nil)
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("expected 1 scan, got %d: %+v", len(q.enqueued), q.enqueued)
+	}
+	if got := q.enqueued[0].Mode; got != scantrigger.ModeSubtree {
+		t.Fatalf("mode = %q, want %q", got, scantrigger.ModeSubtree)
+	}
+	if got := q.enqueued[0].Path; got != "/mnt/media/tv/Show/S01" {
+		t.Fatalf("path = %q", got)
+	}
+}
+
+func TestPollOnceDebouncesFileChangesOnReportedPathNotWidenedTarget(t *testing.T) {
+	// Two different videos in one directory both widen to the same subtree
+	// target. The suppression claim must be keyed on each reported file so a
+	// later event for the second file is not swallowed by the first file's
+	// window; the queue coalesces it into the running scan and owes a
+	// follow-up. Within one cycle they still collapse to one enqueue.
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
+		}},
+	}
+	prov := &fakeProvider{changes: map[string][]Change{
+		"cephfs": {
+			{SourcePath: "/mnt/media/tv/Show/S01/E01.mkv", Scope: ChangeScopeFile},
+			{SourcePath: "/mnt/media/tv/Show/S01/E02.mkv", Scope: ChangeScopeFile},
+		},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	sup := &recordingSuppressor{}
+	svc := NewService(store, prov, passthroughConnRes{}, directoryWideningResolver{}, q, sup, nil)
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 || q.enqueued[0].Path != "/mnt/media/tv/Show/S01" {
+		t.Fatalf("expected one directory scan, got %+v", q.enqueued)
+	}
+	want := []string{"7|/mnt/media/tv/Show/S01/E01.mkv", "7|/mnt/media/tv/Show/S01/E02.mkv"}
+	if len(sup.claimed) != 2 || sup.claimed[0] != want[0] || sup.claimed[1] != want[1] {
+		t.Fatalf("claimed keys = %v, want %v", sup.claimed, want)
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("expected one finished event, got %d", len(store.events))
+	}
+	if ev := store.events[0]; ev.ScansSuppressed != 0 || ev.TargetsClaimed != 1 {
+		t.Fatalf("event counts = %+v, want 0 suppressed and 1 target", ev)
+	}
+}
+
+// directoryWideningResolver mimics the real resolver's handling of video file
+// paths: an existing file resolves to a subtree scan of its directory.
+type directoryWideningResolver struct{ fakeResolver }
+
+func (directoryWideningResolver) Resolve(_ context.Context, req scantrigger.Request) (*scantrigger.Target, error) {
+	if !strings.HasPrefix(req.Path, "/mnt/media/") {
+		return nil, nil
+	}
+	path := req.Path
+	if filepath.Ext(path) == ".mkv" {
+		path = filepath.Dir(path)
+	}
+	return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: scantrigger.ModeSubtree, Path: path, Trigger: req.Trigger}, nil
+}
+
 func TestPollOnceStructuredFileChangeEnqueuesExactFile(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},

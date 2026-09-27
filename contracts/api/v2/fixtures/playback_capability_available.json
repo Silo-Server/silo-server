@@ -1,0 +1,24 @@
+{
+  "revision": "e5f15968d75c1594cd21ce96cf6d861307e7b5968d1fb116c52158fd8179fc8e",
+  "state": "available",
+  "allowed": true,
+  "installation_id": "11111111-1111-4111-8111-111111111111",
+  "protocol_versions": [
+    3
+  ],
+  "features": [
+    "playback_plan_v3",
+    "neutral_playback_v3_contract_v1",
+    "layout_aware_passthrough",
+    "device_quirks_v1",
+    "output_display_evidence_v1",
+    "direct_stream_resume_v1",
+    "software_video_decode_v1",
+    "plan_source_duration_v1",
+    "sequenced_progress_v1"
+  ],
+  "deliveries": [
+    "original_http",
+    "server_transcode_hls"
+  ]
+}

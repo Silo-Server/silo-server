@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "key": "/catalog-seeds/a.json.gz",
+      "size_bytes": 0
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7ImFmdGVyIjoiL2NhdGFsb2ctc2VlZHMvYS5qc29uLmd6In19.Kvx399SKagjuTabCdFQP6WrZA9HVG1H9BmW53y5McQI",
+    "has_more": true
+  }
+}

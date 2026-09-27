@@ -1,28 +1,25 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
-  api,
   ApiClientError,
   bootstrapAccessToken,
+  captureSessionIdentity,
   getAccessToken,
+  isSessionIdentityCurrent,
   onProfileUnverified,
-  restoreUserSession,
+  onSessionRejected,
+  refreshAuthentication,
   setAccessToken,
   setProfileId,
   setProfileToken,
   setRefreshToken,
+  type SessionIdentitySnapshot,
 } from "@/api/client";
 import { storage } from "@/utils/storage";
-import type {
-  AuthProviderOption,
-  LoginResponse,
-  Profile,
-  SetupRequest,
-  SetupStatusResponse,
-  SignupRequest,
-  User,
-  VerifyPinResponse,
-} from "@/api/types";
+import type { LoginResponse, Profile, User } from "@/api/types";
+import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
+import { listProfiles, verifyProfilePIN, type ProfileVerification } from "@/hooks/queries/profiles";
+import { restoreUserSession, sessionFromTokenPair, userFromAccount } from "@/api/v2/account";
 import { queryClient } from "@/lib/query-client";
 import {
   clearStoredImpersonationAdminSession,
@@ -31,15 +28,27 @@ import {
   type StoredImpersonationAdminSession,
 } from "@/lib/impersonationSession";
 
+/** One sign-in option the server offers, as the v2 listAuthProviders operation describes it. */
+export type AuthProviderOption = V2Result<"GET /api/v2/auth/providers">["items"][number];
+
 interface AuthState {
   user: User | null;
+  /** The signed-in account while it holds a temporary password; `user` is null until it is changed. */
+  pendingPasswordChange: User | null;
   profile: Profile | null;
   loading: boolean;
   setupLoading: boolean;
   setupRequired: boolean;
+  /** The first-run wizard was finished on this server; /setup must not reopen. */
+  setupCompleted: boolean;
+  /** Re-reads the public setup status, e.g. after the wizard records completion. */
+  refreshSetupStatus: () => Promise<void>;
   providers: AuthProviderOption[];
   isImpersonating: boolean;
-  login: (username: string, password: string, provider?: string) => Promise<void>;
+  /** Resolves with the signed-in account; a temporary password confines it to changing the password. */
+  login: (username: string, password: string, provider?: string) => Promise<User>;
+  /** Swaps a temporary-password session for an unrestricted one after the password was changed. */
+  settleTemporaryPassword: () => Promise<void>;
   completeLogin: (data: LoginResponse) => void;
   setupInitialUser: (username: string, email: string, password: string) => Promise<void>;
   signup: (username: string, email: string, password: string, inviteCode: string) => Promise<void>;
@@ -47,7 +56,7 @@ interface AuthState {
   endImpersonation: () => Promise<void>;
   logout: () => void;
   selectProfile: (profile: Profile, profileToken?: string) => void;
-  verifyProfilePin: (profileId: string, pin: string) => Promise<VerifyPinResponse>;
+  verifyProfilePin: (profileId: string, pin: string) => Promise<ProfileVerification>;
   clearProfile: () => void;
 }
 
@@ -65,6 +74,14 @@ export function getBootstrapProfile(profiles: Profile[]): Profile | null {
 }
 
 function isRecoverableImpersonationAuthError(error: unknown): boolean {
+  // The current-user fetch and endImpersonation run over v2 and fail with a
+  // Problem: a stale session is 401, and a session the server no longer
+  // considers impersonating is 409 `conflict`. The ApiClientError branch keeps
+  // the v1 admin impersonate flow's answers recoverable.
+  if (error instanceof V2ProblemError) {
+    return error.status === 401 || (error.status === 409 && error.problemType === "conflict");
+  }
+
   if (!(error instanceof ApiClientError)) {
     return false;
   }
@@ -193,14 +210,25 @@ export async function endImpersonationWithRecovery({
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  // The account the session authenticates. A temporary password confines the
+  // session to choosing a new one, so until then the app treats it as signed
+  // out: nothing keyed on `user` runs, and only the password change sees it.
+  const [account, setUser] = useState<User | null>(null);
+  const user = account?.password_change_required ? null : account;
+  const pendingPasswordChange = account?.password_change_required ? account : null;
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [setupLoading, setSetupLoading] = useState(true);
   const [setupRequired, setSetupRequired] = useState(false);
+  const [setupCompleted, setSetupCompleted] = useState(false);
   const [providers, setProviders] = useState<AuthProviderOption[]>([]);
   const isImpersonating = Boolean(user?.impersonation?.active);
   const soleProfileBootstrapRef = useRef<string | null>(null);
+  // The committed account, for the auth callbacks, which run after commit.
+  const signedInUserIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    signedInUserIdRef.current = account?.id ?? null;
+  }, [account]);
 
   const restoreProfile = useCallback(() => {
     const savedProfile = storage.get(storage.KEYS.CURRENT_PROFILE);
@@ -232,6 +260,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         preserveStoredImpersonationAdminSession?: boolean;
       } = {},
     ) => {
+      // A different account replacing a signed-in one. Drop the old account's
+      // cache before the new one renders, so the new account's reads start on
+      // an empty cache instead of being thrown away a render later.
+      if (signedInUserIdRef.current !== null && signedInUserIdRef.current !== data.user.id) {
+        queryClient.clear();
+      }
       setAccessToken(data.access_token);
       setRefreshToken(data.refresh_token);
       if (!options.preserveStoredImpersonationAdminSession) {
@@ -259,8 +293,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearActiveAuthState]);
 
   const restoreAdminUser = useCallback(
-    async (storedSession: { accessToken: string; refreshToken: string }) => {
-      const restoredSession = await restoreUserSession<User>(storedSession);
+    async (
+      storedSession: { accessToken: string; refreshToken: string },
+      isCurrent: () => boolean = () => true,
+    ) => {
+      const restoredSession = await restoreUserSession(storedSession);
+      // A sign-in that replaced the session during the exchange keeps it.
+      if (!isCurrent()) return false;
       clearProfile();
       queryClient.clear();
       setAccessToken(restoredSession.accessToken);
@@ -268,19 +307,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearStoredImpersonationAdminSession();
       setUser(restoredSession.user);
       setSetupRequired(false);
+      return true;
     },
     [clearProfile],
   );
 
-  const recoverPreservedAdminSession = useCallback(async () => {
-    const storedSession = loadStoredImpersonationAdminSession();
-    if (!storedSession) {
-      return false;
-    }
+  const recoverPreservedAdminSession = useCallback(
+    async (isCurrent?: () => boolean) => {
+      const storedSession = loadStoredImpersonationAdminSession();
+      if (!storedSession) {
+        return false;
+      }
 
-    await restoreAdminUser(storedSession);
-    return true;
-  }, [restoreAdminUser]);
+      return restoreAdminUser(storedSession, isCurrent);
+    },
+    [restoreAdminUser],
+  );
 
   const beginImpersonation = useCallback(
     (data: LoginResponse, returnPath: string) => {
@@ -307,28 +349,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const endImpersonation = useCallback(async () => {
     await endImpersonationWithRecovery({
-      endImpersonationRequest: () => api("/auth/impersonation/end", { method: "POST" }),
+      endImpersonationRequest: () => v2("POST /api/v2/auth/impersonation/end"),
       loadStoredImpersonationAdminSession,
-      restoreAdminUser,
+      restoreAdminUser: async (storedSession) => {
+        await restoreAdminUser(storedSession);
+      },
       clearAuthState,
       clearActiveAuthState,
     });
   }, [clearActiveAuthState, clearAuthState, restoreAdminUser]);
 
+  const refreshSetupStatus = useCallback(async () => {
+    try {
+      const status = await v2("GET /api/v2/system/setup");
+      setSetupRequired(status.needs_setup);
+      setSetupCompleted(status.wizard_completed === true);
+    } catch {
+      // Keep the last known status; the next app load re-reads it.
+    }
+  }, []);
+
   const logout = useCallback(() => {
     // Fire and forget the server logout
     if (getAccessToken()) {
-      api("/auth/logout", { method: "POST" }).catch(() => {});
+      v2("POST /api/v2/auth/logout").catch(() => {});
     }
     clearAuthState();
   }, [clearAuthState]);
 
   const verifyProfilePin = useCallback(
-    async (profileId: string, pin: string): Promise<VerifyPinResponse> => {
-      return api<VerifyPinResponse>(`/profiles/${profileId}/verify-pin`, {
-        method: "POST",
-        body: JSON.stringify({ pin }),
-      });
+    async (profileId: string, pin: string): Promise<ProfileVerification> => {
+      return verifyProfilePIN(profileId, pin);
     },
     [],
   );
@@ -353,64 +404,121 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => onProfileUnverified(null);
   }, [clearProfile]);
 
+  // The server stopped accepting this session mid-use. An admin viewing as
+  // another user goes back to their own preserved session, as the boot
+  // restore does; otherwise the session and its cached pages are dropped so
+  // RequireAuth sends the user to sign-in. Requests refused on the same
+  // session while a recovery runs join it instead of spending the admin's
+  // refresh token again. Nothing here overrides a sign-in that replaced the
+  // rejected session meanwhile.
+  const sessionRejectionRef = useRef<{
+    session: SessionIdentitySnapshot;
+    handling: Promise<void>;
+  } | null>(null);
+  useEffect(() => {
+    onSessionRejected(() => {
+      const inFlight = sessionRejectionRef.current;
+      if (inFlight && isSessionIdentityCurrent(inFlight.session)) return;
+      const session = captureSessionIdentity();
+      const isCurrent = () => isSessionIdentityCurrent(session);
+      const handling = (async () => {
+        try {
+          if (await recoverPreservedAdminSession(isCurrent)) {
+            restoreProfile();
+            return;
+          }
+        } catch {
+          // The admin session is gone too; fall through to sign-in.
+        }
+        if (isCurrent()) clearActiveAuthState();
+      })().finally(() => {
+        if (sessionRejectionRef.current?.handling === handling) sessionRejectionRef.current = null;
+      });
+      sessionRejectionRef.current = { session, handling };
+    });
+    return () => onSessionRejected(null);
+  }, [clearActiveAuthState, recoverPreservedAdminSession, restoreProfile]);
+
   useEffect(() => {
     let cancelled = false;
 
-    async function initialize() {
+    async function loadSetupStatus() {
       try {
-        const [status, availableProviders] = await Promise.all([
-          api<SetupStatusResponse>("/auth/setup"),
-          api<AuthProviderOption[]>("/auth/providers"),
+        // Independent reads: a failed provider list must not blank the setup
+        // status, or an admin visiting /setup during that outage would see
+        // the finished wizard again.
+        const [status, availableProviders] = await Promise.allSettled([
+          v2("GET /api/v2/system/setup"),
+          v2("GET /api/v2/auth/providers"),
         ]);
         if (cancelled) {
           return;
         }
-        setSetupRequired(status.needs_setup);
-        setProviders(availableProviders ?? []);
-      } catch {
-        if (!cancelled) {
+        if (status.status === "fulfilled") {
+          setSetupRequired(status.value.needs_setup);
+          setSetupCompleted(status.value.wizard_completed === true);
+        } else {
           setSetupRequired(false);
-          setProviders([]);
+          setSetupCompleted(false);
         }
+        setProviders(
+          availableProviders.status === "fulfilled" ? (availableProviders.value.items ?? []) : [],
+        );
       } finally {
         if (!cancelled) {
           setSetupLoading(false);
         }
       }
+    }
 
+    async function restoreSession() {
+      // A sign-in on another path (the OAuth completion page, a login,
+      // impersonation) or a sign-out can replace the session while this
+      // restore waits on the network. From then on the restore speaks for a
+      // session that is gone: it must not apply its user or clear the new
+      // session's tokens.
+      let session = captureSessionIdentity();
+      const superseded = () => cancelled || !isSessionIdentityCurrent(session);
       try {
         await initializeAuthSession({
           refreshToken: storage.get(storage.KEYS.REFRESH_TOKEN),
           hasStoredImpersonationAdminSession: Boolean(loadStoredImpersonationAdminSession()),
-          bootstrapAccessToken: () => bootstrapAccessToken(),
-          fetchCurrentUser: () => api<User>("/auth/me"),
+          bootstrapAccessToken: async () => {
+            const restored = await bootstrapAccessToken();
+            // Installing the restored token starts the session the rest of
+            // the restore answers for. The refresh single-flight already
+            // discards an exchange that another sign-in overtook.
+            if (restored) session = captureSessionIdentity();
+            return restored;
+          },
+          fetchCurrentUser: () => v2("GET /api/v2/account/me").then(userFromAccount),
           applyCurrentUser: (currentUser) => {
-            if (cancelled) {
+            if (superseded()) {
               return;
             }
             setUser(currentUser);
           },
           restoreProfile: () => {
-            if (cancelled) {
+            if (superseded()) {
               return;
             }
             restoreProfile();
           },
           recoverPreservedAdminSession: async () => {
-            if (cancelled) {
+            if (superseded()) {
               return false;
             }
             return recoverPreservedAdminSession();
           },
           clearTokens: () => {
-            if (cancelled) {
+            if (superseded()) {
               return;
             }
             setAccessToken(null);
             setRefreshToken(null);
           },
           clearActiveAuthState: () => {
-            if (cancelled) {
+            if (superseded()) {
               return;
             }
             clearActiveAuthState();
@@ -423,7 +531,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    initialize();
+    // The restore runs beside the public setup reads, not after them. Those
+    // reads are sent first because a request issued while the restore is in
+    // flight waits for it, and they need no session.
+    void loadSetupStatus();
+    void restoreSession();
 
     return () => {
       cancelled = true;
@@ -447,7 +559,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     soleProfileBootstrapRef.current = bootstrapKey;
 
     let cancelled = false;
-    api<{ profiles: Profile[] }>("/profiles")
+    listProfiles()
       .then((data) => {
         if (cancelled) {
           return;
@@ -466,46 +578,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (username: string, password: string, provider?: string) => {
-      const data = await api<LoginResponse>("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ username, password, provider }),
+      const tokens = await v2("POST /api/v2/auth/login", {
+        body: { username, password, provider },
       });
-      applyAuthenticatedUser(data);
+      const session = sessionFromTokenPair(tokens);
+      applyAuthenticatedUser(session);
+      return session.user;
     },
     [applyAuthenticatedUser],
   );
 
+  // Tokens carry the temporary-password restriction from when they were
+  // issued; the server drops it from the ones a refresh issues once the
+  // account has a new password. Rotation keeps the session identity, so a
+  // sign-out meanwhile still discards the result.
+  const settleTemporaryPassword = useCallback(async () => {
+    const session = captureSessionIdentity();
+    if (!(await refreshAuthentication())) {
+      throw new Error("Your password was changed, but the session ended. Sign in again.");
+    }
+    const account = userFromAccount(await v2("GET /api/v2/account/me"));
+    if (!isSessionIdentityCurrent(session)) return;
+    setUser(account);
+  }, []);
+
   const setupInitialUser = useCallback(
     async (username: string, email: string, password: string) => {
-      const body: SetupRequest = {
-        username,
-        email,
-        password,
-        create_default_profile: true,
-      };
-      const data = await api<LoginResponse>("/auth/setup", {
-        method: "POST",
-        body: JSON.stringify(body),
+      const tokens = await v2("POST /api/v2/auth/setup", {
+        body: { username, email, password, create_default_profile: true },
       });
-      applyAuthenticatedUser(data);
+      const session = sessionFromTokenPair(tokens);
+      // The default profile is created with the account. Select it in the
+      // same batch as the user so profile-scoped work (the wizard's settings
+      // reads) can start on the first render, instead of waiting for the
+      // sole-profile bootstrap effect to run a render later.
+      setAccessToken(session.access_token);
+      setRefreshToken(session.refresh_token);
+      const created = getBootstrapProfile((await listProfiles().catch(() => null))?.profiles ?? []);
+      applyAuthenticatedUser(session);
+      if (created) selectProfile(created);
     },
-    [applyAuthenticatedUser],
+    [applyAuthenticatedUser, selectProfile],
   );
 
   const signup = useCallback(
     async (username: string, email: string, password: string, inviteCode: string) => {
-      const body: SignupRequest = {
-        username,
-        email,
-        password,
-        invite_code: inviteCode,
-        create_default_profile: true,
-      };
-      const data = await api<LoginResponse>("/auth/signup", {
-        method: "POST",
-        body: JSON.stringify(body),
+      const tokens = await v2("POST /api/v2/auth/signup", {
+        body: { username, email, password, invite_code: inviteCode, create_default_profile: true },
       });
-      applyAuthenticatedUser(data);
+      applyAuthenticatedUser(sessionFromTokenPair(tokens));
     },
     [applyAuthenticatedUser],
   );
@@ -514,13 +635,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
+        pendingPasswordChange,
         profile,
         loading,
         setupLoading,
         setupRequired,
+        setupCompleted,
+        refreshSetupStatus,
         providers,
         isImpersonating,
         login,
+        settleTemporaryPassword,
         completeLogin: applyAuthenticatedUser,
         setupInitialUser,
         signup,
