@@ -128,9 +128,9 @@ func TestDetectChapterCredits(t *testing.T) {
 			duration: 1400, wantOK: true, wantStart: 1300, wantEnd: 1400,
 		},
 		{
-			name: "a run too long for credits is rejected",
+			name: "a run must start in the tail window",
 			chapters: []models.MediaChapter{
-				chapter("Story", 0, 900), chapter("Ending", 900, 1100), chapter("End Credits", 1100, 1400),
+				chapter("Story", 0, 900), chapter("End Credits", 900, 1100), chapter("Credits", 1100, 1400),
 			},
 			duration: 1400,
 		},
