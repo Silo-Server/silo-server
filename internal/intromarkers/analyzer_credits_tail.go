@@ -166,7 +166,10 @@ func (a *Analyzer) ensureCreditsInputs(ctx context.Context, candidates []Candida
 			}
 			// A file without audio gets its tail pass alone; its fingerprint
 			// goes the audio-only way, and a run that finds no audio stream
-			// is stored as having none.
+			// is stored as having none. A tail pass that finds no stream
+			// has already ruled out missing audio alone (see
+			// SampleCreditsTail), so its video is missing and the audio-only
+			// run decides the fingerprint.
 			tailFingerprint := needFingerprint && needTail && candidate.hasAudio()
 			var sample creditsTailSample
 			var sampleErr error
@@ -177,7 +180,8 @@ func (a *Analyzer) ensureCreditsInputs(ctx context.Context, candidates []Candida
 			var fpOK bool
 			var fpErr error
 			switch {
-			case needFingerprint && !tailFingerprint:
+			case needFingerprint && !tailFingerprint,
+				tailFingerprint && mediasample.Classify(sampleErr) == mediasample.ReasonNoStream:
 				fp, fpOK, fpErr = a.extractor.ExtractCredits(ctx, candidate)
 			case tailFingerprint && sampleErr != nil:
 				fpErr = sampleErr

@@ -248,6 +248,13 @@ func (a *Analyzer) ffmpegAcquirer() func(context.Context) (func(), error) {
 
 type ProgressFunc func(percent float64, message string)
 
+// Preflight reports what this server's ffmpeg lacks for Chromaprint
+// comparison. Without it, Run still reads chapters and refines them with
+// silence, but compares no season groups.
+func (a *Analyzer) Preflight(ctx context.Context) error {
+	return a.extractor.Preflight(ctx)
+}
+
 // Run analyzes every library with marker detection enabled: episodes for
 // intros and credits, then movies for credits within the movie budget.
 func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, error) {

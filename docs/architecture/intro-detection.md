@@ -12,8 +12,10 @@ Every API server runs the task manager, so the task takes a PostgreSQL
 advisory lock before it analyzes anything. While one server holds it, a run on
 another server succeeds without analyzing and records `skipped` in its result
 data. The admin UI does not show that result data yet, so a skipped run
-appears there as a completed run. Analysis started from playback or for a
-single item does not take the lock.
+appears there as a completed run. A server whose ffmpeg cannot compute
+Chromaprint fingerprints runs its chapter-only pass without the lock, so it
+never makes a server that can compare season groups skip. Analysis started
+from playback or for a single item does not take the lock.
 
 ## Pipeline
 
@@ -123,7 +125,8 @@ episode with an intro and no credits runs the credits steps alone. With
 `markers.online_storage` set to `on_demand`, the played file includes the
 online markers looked up for this playback, which are never saved; every
 marker update sent to players during the analysis lays them back over the
-stored row, where a manual marker still wins. Unlike an intro group, a
+stored row, where a manual marker still wins, and leaves out a stored
+provider marker the lookup withdrew. Unlike an intro group, a
 credits season group whose stored analysis still stands is not compared again
 from playback: most episodes have no credits local analysis can find, and
 every start would otherwise repeat the comparison. Admin refresh compares both
@@ -139,8 +142,12 @@ the center 90 by 80 percent of the picture scaled to 480 pixels wide. Audio
 is read in full either way, so the video adds decode time but no reads. The
 pass runs only for files whose credits local analysis may write and that
 have no chapter credits; other files of the season get an audio-only
-fingerprint. A file without audio gets its pass without audio. If ffmpeg
-lacks a filter the pass needs, credits come from chapters and audio alone.
+fingerprint. A file without audio gets its pass without audio. ffmpeg fails
+the whole run when an output finds no stream, so when probe metadata names
+audio the file cannot give, the pass runs again on the video alone and the
+fingerprint is stored as having no audio. A pass that still finds no stream
+lacks video, and an audio-only run decides the fingerprint. If ffmpeg lacks
+a filter the pass needs, credits come from chapters and audio alone.
 
 Each keyframe is classified against the tail's black level, the 1st
 percentile of its 10th-percentile luma, capped at 30:

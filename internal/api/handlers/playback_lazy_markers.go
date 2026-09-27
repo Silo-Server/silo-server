@@ -72,8 +72,7 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 	mode := markers.NormalizeMode(rawMode)
 	lazyEnabled := strings.EqualFold(strings.TrimSpace(lazy), "true")
 	if !lazyEnabled {
-		storage, err := h.SettingsRepo.Get(ctx, markers.SettingOnlineStorage)
-		if err != nil || storage != "on_demand" || (mode != markers.ModeOnline && mode != markers.ModeBoth) {
+		if !h.onlineMarkersOnDemand(ctx) || (mode != markers.ModeOnline && mode != markers.ModeBoth) {
 			return
 		}
 	}
@@ -277,7 +276,11 @@ func (h *PlaybackHandler) onlineMarkersOnDemand(ctx context.Context) bool {
 		return false
 	}
 	raw, err := h.SettingsRepo.Get(ctx, markers.SettingOnlineStorage)
-	return err == nil && markers.OnlineStorage(strings.TrimSpace(raw)) == markers.OnlineStorageOnDemand
+	if err != nil {
+		return false
+	}
+	storage, err := markers.ParseOnlineStorage(raw)
+	return err == nil && storage == markers.OnlineStorageOnDemand
 }
 
 func (h *PlaybackHandler) reloadPlaybackMarkerFile(ctx context.Context, fileID int) *models.MediaFile {

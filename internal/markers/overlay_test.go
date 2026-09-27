@@ -165,3 +165,32 @@ func TestOverlayOnlineWithoutView(t *testing.T) {
 		t.Fatalf("OverlayOnline(nil, view) = %+v, want nil", got)
 	}
 }
+
+// A refreshed provider that no longer has a marker withdraws its stored one
+// from the view. The overlay carries that withdrawal, while a manual marker
+// and a local one saved after the view was read stay.
+func TestOverlayOnlineCarriesProviderWithdrawals(t *testing.T) {
+	provider := "provider"
+	stored := overlayFile(
+		overlaySegment{models.MarkerSegmentIntro, 20, 80, models.MarkerSourceOnline},
+		overlaySegment{models.MarkerSegmentCredits, 1700, 1780, models.MarkerSourceOnline},
+	)
+	stored.IntroMarkersProvider, stored.CreditsMarkersProvider = &provider, &provider
+	view := ApplyResult(stored, Result{RefreshedProviders: []string{provider}})
+	if view.IntroStart != nil || view.CreditsStart != nil {
+		t.Fatalf("view kept withdrawn markers: intro %v, credits %v", view.IntroStart, view.CreditsStart)
+	}
+
+	if got := OverlayOnline(stored, view); got.IntroStart != nil || got.CreditsStart != nil || len(got.MarkerSegments) != 0 || got.MarkersSource != nil {
+		t.Fatalf("withdrawn markers came back: intro %v, credits %v, segments %+v", got.IntroStart, got.CreditsStart, got.MarkerSegments)
+	}
+
+	later := overlayFile(
+		overlaySegment{models.MarkerSegmentIntro, 5, 45, models.MarkerSourceManual},
+		overlaySegment{models.MarkerSegmentCredits, 1690, 1770, models.MarkerSourceScanner},
+	)
+	later.IntroMarkersProvider = &provider
+	got := OverlayOnline(later, view)
+	assertOverlaySegment(t, got, models.MarkerSegmentIntro, 5, models.MarkerSourceManual)
+	assertOverlaySegment(t, got, models.MarkerSegmentCredits, 1690, models.MarkerSourceScanner)
+}

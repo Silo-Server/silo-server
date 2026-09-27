@@ -19,6 +19,8 @@ type MarkerSettingsReader interface {
 // markerAnalysisRunner runs one library-wide marker analysis pass.
 // *intromarkers.Analyzer implements it.
 type markerAnalysisRunner interface {
+	// Preflight reports what this server lacks to compare season groups.
+	Preflight(ctx context.Context) error
 	Run(ctx context.Context, progress intromarkers.ProgressFunc) (intromarkers.RunSummary, error)
 }
 
@@ -28,8 +30,10 @@ const detectMarkersAdvisoryLock int64 = 0x53494C4F4D524B52
 // DetectIntroMarkersTask runs the library-wide marker analysis. Every API
 // process runs the task manager, so an advisory lock keeps one analysis pass
 // running across the cluster; the other servers skip their run instead of
-// repeating the same ffmpeg work. Playback-time and per-item analysis do not
-// go through this task and are not serialized by it.
+// repeating the same ffmpeg work. A server whose ffmpeg cannot fingerprint
+// runs its chapter-only pass without the lock, so it never makes a capable
+// server skip. Playback-time and per-item analysis do not go through this
+// task and are not serialized by it.
 type DetectIntroMarkersTask struct {
 	analyzer markerAnalysisRunner
 	settings MarkerSettingsReader
@@ -91,8 +95,17 @@ func (t *DetectIntroMarkersTask) Execute(ctx context.Context, progress taskmanag
 		progress.Report(100, fmt.Sprintf("Marker population skipped; mode is %s", mode))
 		return nil
 	}
-	if t.lock != nil {
-		release, acquired, err := t.lock.TryAcquire(ctx)
+	lock := t.lock
+	if err := t.analyzer.Preflight(ctx); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		// This server can only read chapters. Leave the lock to a server that
+		// can also compare season groups.
+		lock = nil
+	}
+	if lock != nil {
+		release, acquired, err := lock.TryAcquire(ctx)
 		if err != nil {
 			return fmt.Errorf("claiming marker detection: %w", err)
 		}
