@@ -260,18 +260,30 @@ func (a *Analyzer) Preflight(ctx context.Context) error {
 // Run analyzes every library with marker detection enabled: episodes for
 // intros and credits, then movies for credits within the movie budget.
 func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, error) {
-	return a.run(ctx, progress, true)
+	return a.run(ctx, progress, runPasses{episodes: true, movies: true})
 }
 
 // RunEpisodes analyzes the episodes of every library with marker detection
 // enabled, as Run does, and leaves movies alone. A server without
-// Chromaprint runs it outside the cluster lock, so the movie pass, which
-// does not need Chromaprint, stays with the lock holder.
+// Chromaprint runs it outside the cluster lock, then RunMovies under it, so
+// the movie pass stays on one server.
 func (a *Analyzer) RunEpisodes(ctx context.Context, progress ProgressFunc) (RunSummary, error) {
-	return a.run(ctx, progress, false)
+	return a.run(ctx, progress, runPasses{episodes: true})
 }
 
-func (a *Analyzer) run(ctx context.Context, progress ProgressFunc, movies bool) (RunSummary, error) {
+// RunMovies analyzes the movies of every library with marker detection
+// enabled for credits within the movie budget, as Run does after the
+// episodes, and leaves episodes alone.
+func (a *Analyzer) RunMovies(ctx context.Context, progress ProgressFunc) (RunSummary, error) {
+	return a.run(ctx, progress, runPasses{movies: true})
+}
+
+// runPasses selects the passes of a scheduled run.
+type runPasses struct {
+	episodes, movies bool
+}
+
+func (a *Analyzer) run(ctx context.Context, progress ProgressFunc, passes runPasses) (RunSummary, error) {
 	report := func(percent float64, message string) {
 		if progress != nil {
 			progress(percent, message)
@@ -289,24 +301,29 @@ func (a *Analyzer) run(ctx context.Context, progress ProgressFunc, movies bool) 
 		return summary, nil
 	}
 
-	if !movies {
+	if !passes.movies {
 		episodeSummary, err := a.runEpisodes(ctx, report)
 		mergeRunSummary(&summary, episodeSummary)
 		return summary, err
 	}
 
-	// Episodes take the first 85 percent of the progress bar, movies the rest.
-	episodeSummary, err := a.runEpisodes(ctx, func(percent float64, message string) {
-		report(percent*0.85, message)
-	})
-	mergeRunSummary(&summary, episodeSummary)
-	if err != nil {
-		return summary, err
+	// With both passes, episodes take the first 85 percent of the progress
+	// bar and movies the rest.
+	moviesFrom := 0.0
+	if passes.episodes {
+		moviesFrom = 85
+		episodeSummary, err := a.runEpisodes(ctx, func(percent float64, message string) {
+			report(percent*moviesFrom/100, message)
+		})
+		mergeRunSummary(&summary, episodeSummary)
+		if err != nil {
+			return summary, err
+		}
 	}
 
-	report(85, "Checking movies for credits")
+	report(moviesFrom, "Checking movies for credits")
 	movieSummary, err := a.runMovies(ctx, func(done, total int) {
-		report(85+float64(done)/float64(total)*15, fmt.Sprintf("Checked %d/%d movies for credits", done, total))
+		report(moviesFrom+float64(done)/float64(total)*(100-moviesFrom), fmt.Sprintf("Checked %d/%d movies for credits", done, total))
 	})
 	mergeRunSummary(&summary, movieSummary)
 	if err != nil {
@@ -1319,6 +1336,15 @@ func distinctFingerprintEpisodeCount(inputs []fingerprintInput) int {
 		seen[input.Candidate.EpisodeID] = struct{}{}
 	}
 	return len(seen)
+}
+
+// Merge adds src's counts to s, as when one task runs RunEpisodes and
+// RunMovies. Both passes count the same libraries, so s keeps the larger
+// library count rather than their sum.
+func (s *RunSummary) Merge(src RunSummary) {
+	libraries := max(s.LibrariesScanned, src.LibrariesScanned)
+	mergeRunSummary(s, src)
+	s.LibrariesScanned = libraries
 }
 
 func mergeRunSummary(dst *RunSummary, src RunSummary) {

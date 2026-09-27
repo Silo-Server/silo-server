@@ -14,10 +14,13 @@ another server succeeds without analyzing and records `skipped` in its result
 data. The admin UI does not show that result data yet, so a skipped run
 appears there as a completed run. A server whose ffmpeg cannot compute
 Chromaprint fingerprints runs its chapter-only episode pass without the lock,
-so it never makes a server that can compare season groups skip, and leaves
-movies to the lock holder. If ffmpeg's capability listing itself fails, the
-task keeps the lock. Analysis started from playback or for a single item does
-not take the lock.
+so it never makes a server that can compare season groups skip. It then tries
+the lock for the movie pass, which needs no Chromaprint: if it gets the lock
+it analyzes movies under it, and if another server holds it, it skips the
+movies, which the lock holder analyzes. A single server without Chromaprint
+therefore still analyzes movies. If ffmpeg's capability listing itself fails,
+the task keeps the lock for the whole run. Analysis started from playback or
+for a single item does not take the lock.
 
 ## Pipeline
 

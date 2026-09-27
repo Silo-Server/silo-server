@@ -16,11 +16,17 @@ import (
 )
 
 type fakeMarkerAnalysisRunner struct {
-	// runs counts full runs; episodeRuns counts episode-only runs.
+	// runs counts full runs; episodeRuns and movieRuns count episode-only
+	// and movie-only runs.
 	runs        int
 	episodeRuns int
-	summary     intromarkers.RunSummary
-	err         error
+	movieRuns   int
+	// calls records the runs in order, sharing its log with a recordingLock.
+	calls   *[]string
+	summary intromarkers.RunSummary
+	// movieSummary is what a movie-only run returns.
+	movieSummary intromarkers.RunSummary
+	err          error
 	// block waits for ctx cancellation and returns its error.
 	block bool
 	// preflightErr is what this server's ffmpeg lacks for fingerprinting.
@@ -36,7 +42,42 @@ func (f *fakeMarkerAnalysisRunner) Run(ctx context.Context, _ intromarkers.Progr
 
 func (f *fakeMarkerAnalysisRunner) RunEpisodes(ctx context.Context, _ intromarkers.ProgressFunc) (intromarkers.RunSummary, error) {
 	f.episodeRuns++
+	f.record("episodes")
 	return f.result(ctx)
+}
+
+func (f *fakeMarkerAnalysisRunner) RunMovies(ctx context.Context, _ intromarkers.ProgressFunc) (intromarkers.RunSummary, error) {
+	f.movieRuns++
+	f.record("movies")
+	summary, err := f.result(ctx)
+	if err == nil {
+		summary = f.movieSummary
+	}
+	return summary, err
+}
+
+func (f *fakeMarkerAnalysisRunner) record(call string) {
+	if f.calls != nil {
+		*f.calls = append(*f.calls, call)
+	}
+}
+
+// recordingLock records its acquisition and release in a shared call log.
+type recordingLock struct {
+	fakeClusterLock
+	calls *[]string
+}
+
+func (l *recordingLock) TryAcquire(ctx context.Context) (func(), bool, error) {
+	release, acquired, err := l.fakeClusterLock.TryAcquire(ctx)
+	*l.calls = append(*l.calls, fmt.Sprintf("lock acquired=%t", acquired))
+	if !acquired {
+		return release, acquired, err
+	}
+	return func() {
+		*l.calls = append(*l.calls, "unlock")
+		release()
+	}, true, nil
 }
 
 func (f *fakeMarkerAnalysisRunner) result(ctx context.Context) (intromarkers.RunSummary, error) {
@@ -77,18 +118,75 @@ func TestDetectIntroMarkersSkipsWhenAnotherServerHoldsLock(t *testing.T) {
 	assertDetectMarkersSkipped(t, progress)
 }
 
-func TestDetectIntroMarkersWithoutChromaprintRunsWithoutLock(t *testing.T) {
-	// The lock is held elsewhere; a server that cannot fingerprint must neither
-	// take it nor skip its chapter-only pass because of it. It leaves movies,
-	// which the lock keeps to one server, to the lock holder.
-	runner := &fakeMarkerAnalysisRunner{preflightErr: fmt.Errorf("ffmpeg lacks chromaprint: %w", mediasample.ErrUnsupported)}
-	lock := &fakeClusterLock{err: errors.New("lock must not be consulted")}
-	if err := newTestDetectMarkersTask(runner, lock).Execute(t.Context(), &fakeProgress{}); err != nil {
-		t.Fatalf("Execute = %v, want nil", err)
-	}
-	if runner.episodeRuns != 1 || runner.runs != 0 || lock.released != 0 {
-		t.Fatalf("episode runs=%d full runs=%d released=%d, want one unlocked episode-only run", runner.episodeRuns, runner.runs, lock.released)
-	}
+func TestDetectIntroMarkersWithoutChromaprint(t *testing.T) {
+	// A server that cannot fingerprint runs its chapter-only episode pass
+	// before it consults the lock, so it never makes a capable server skip,
+	// then runs movies, which need no Chromaprint, only under the lock.
+	unsupported := fmt.Errorf("ffmpeg lacks chromaprint: %w", mediasample.ErrUnsupported)
+	t.Run("lock free runs movies under it", func(t *testing.T) {
+		var calls []string
+		runner := &fakeMarkerAnalysisRunner{
+			preflightErr: unsupported,
+			calls:        &calls,
+			summary:      intromarkers.RunSummary{LibrariesScanned: 2, FilesConsidered: 5},
+			movieSummary: intromarkers.RunSummary{LibrariesScanned: 2, MoviesConsidered: 3, MovieCreditsMarkersWritten: 1},
+		}
+		lock := &recordingLock{fakeClusterLock: fakeClusterLock{acquired: true}, calls: &calls}
+		progress := &fakeProgress{}
+		if err := newTestDetectMarkersTask(runner, lock).Execute(t.Context(), progress); err != nil {
+			t.Fatalf("Execute = %v, want nil", err)
+		}
+		want := []string{"episodes", "lock acquired=true", "movies", "unlock"}
+		if fmt.Sprint(calls) != fmt.Sprint(want) || runner.runs != 0 {
+			t.Fatalf("calls = %v full runs = %d, want %v and no full run", calls, runner.runs, want)
+		}
+		var summary intromarkers.RunSummary
+		if err := json.Unmarshal(progress.resultData, &summary); err != nil {
+			t.Fatalf("result data %q: %v", progress.resultData, err)
+		}
+		if summary.LibrariesScanned != 2 || summary.FilesConsidered != 5 || summary.MoviesConsidered != 3 || summary.MovieCreditsMarkersWritten != 1 {
+			t.Fatalf("result summary = %+v, want the episode and movie passes merged", summary)
+		}
+	})
+	t.Run("lock held elsewhere skips movies", func(t *testing.T) {
+		var calls []string
+		runner := &fakeMarkerAnalysisRunner{preflightErr: unsupported, calls: &calls, summary: intromarkers.RunSummary{FilesConsidered: 5}}
+		lock := &recordingLock{calls: &calls}
+		progress := &fakeProgress{}
+		if err := newTestDetectMarkersTask(runner, lock).Execute(t.Context(), progress); err != nil {
+			t.Fatalf("Execute = %v, want nil", err)
+		}
+		want := []string{"episodes", "lock acquired=false"}
+		if fmt.Sprint(calls) != fmt.Sprint(want) || runner.runs != 0 {
+			t.Fatalf("calls = %v full runs = %d, want %v and no full run", calls, runner.runs, want)
+		}
+		var summary intromarkers.RunSummary
+		if err := json.Unmarshal(progress.resultData, &summary); err != nil || summary.FilesConsidered != 5 {
+			t.Fatalf("result data %q err=%v, want the episode summary", progress.resultData, err)
+		}
+	})
+	t.Run("episode failure skips the lock", func(t *testing.T) {
+		var calls []string
+		runner := &fakeMarkerAnalysisRunner{preflightErr: unsupported, calls: &calls, err: errors.New("database unavailable")}
+		lock := &recordingLock{fakeClusterLock: fakeClusterLock{acquired: true}, calls: &calls}
+		if err := newTestDetectMarkersTask(runner, lock).Execute(t.Context(), &fakeProgress{}); err == nil {
+			t.Fatal("Execute = nil, want the episode pass error")
+		}
+		if fmt.Sprint(calls) != "[episodes]" {
+			t.Fatalf("calls = %v, want only the episode pass", calls)
+		}
+	})
+	t.Run("without a lock runs both passes", func(t *testing.T) {
+		runner := &fakeMarkerAnalysisRunner{preflightErr: unsupported}
+		task := NewDetectIntroMarkersTask(nil, nil, nil)
+		task.analyzer = runner
+		if err := task.Execute(t.Context(), &fakeProgress{}); err != nil {
+			t.Fatalf("Execute = %v, want nil", err)
+		}
+		if runner.runs != 1 || runner.episodeRuns != 0 || runner.movieRuns != 0 {
+			t.Fatalf("runs=%d episode runs=%d movie runs=%d, want one full run", runner.runs, runner.episodeRuns, runner.movieRuns)
+		}
+	})
 }
 
 func TestDetectIntroMarkersPreflightFailureKeepsLock(t *testing.T) {
@@ -145,8 +243,8 @@ func TestDetectIntroMarkersReleasesLock(t *testing.T) {
 		if err := newTestDetectMarkersTask(runner, lock).Execute(t.Context(), progress); err != nil {
 			t.Fatalf("Execute = %v", err)
 		}
-		if runner.runs != 1 || runner.episodeRuns != 0 || lock.released != 1 {
-			t.Fatalf("runs=%d episode runs=%d released=%d, want one full locked run", runner.runs, runner.episodeRuns, lock.released)
+		if runner.runs != 1 || runner.episodeRuns != 0 || runner.movieRuns != 0 || lock.released != 1 {
+			t.Fatalf("runs=%d episode runs=%d movie runs=%d released=%d, want one full locked run", runner.runs, runner.episodeRuns, runner.movieRuns, lock.released)
 		}
 		var summary intromarkers.RunSummary
 		if err := json.Unmarshal(progress.resultData, &summary); err != nil || summary.LibrariesScanned != 2 {
