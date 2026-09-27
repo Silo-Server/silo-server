@@ -257,25 +257,37 @@ func TestCompatWebOSDolbyVisionMPEGTSSkipsStrip(t *testing.T) {
 	}
 }
 
-func TestCompatDVStripRoutingRequiresCapableExecutors(t *testing.T) {
-	capableServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{Transformations: []playback.TransformationV3{{
-			Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: "1",
-		}}})
-	}))
-	defer capableServer.Close()
-	legacyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{})
-	}))
-	defer legacyServer.Close()
-	capable := &nodepool.Node{URL: capableServer.URL, Enabled: true, Healthy: true}
-	legacy := &nodepool.Node{URL: legacyServer.URL, Enabled: true, Healthy: true}
-	handler := &PlaybackHandler{
-		NodePlanner:             compatToneMapInventoryPlanner{urls: []string{capable.URL, legacy.URL}},
-		compatDVStripLocalProbe: func() bool { return false },
-	}
+// dvStripNodePlanner lists and resolves pooled transcode nodes by URL, as
+// *nodepool.Planner does.
+type dvStripNodePlanner struct {
+	compatToneMapInventoryPlanner
+	nodes map[string]*nodepool.Node
+}
 
-	eligible, excluded := handler.compatDVStripRouting(context.Background(), nil, map[string]struct{}{"other": {}})
+func (p dvStripNodePlanner) TranscodeNodeByURL(nodeURL string) (*nodepool.Node, bool) {
+	node, ok := p.nodes[nodeURL]
+	return node, ok
+}
+
+func dvStripNode(t *testing.T, url string, transformations ...playback.TransformationV3) *nodepool.Node {
+	t.Helper()
+	report, err := json.Marshal(playback.HWAccelInfo{Transformations: transformations})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &nodepool.Node{URL: url, Enabled: true, Healthy: true, Capabilities: report}
+}
+
+var dvStripTransformation = playback.TransformationV3{
+	Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: "1",
+}
+
+func TestCompatDVStripRoutingRequiresCapableExecutors(t *testing.T) {
+	capable := dvStripNode(t, "http://capable:8080", dvStripTransformation)
+	legacy := dvStripNode(t, "http://legacy:8080")
+	handler := &PlaybackHandler{compatDVStripLocalProbe: func() bool { return false }}
+
+	eligible, excluded := handler.compatDVStripRouting(nil, map[string]struct{}{"other": {}})
 
 	if !eligible(capable) || eligible(legacy) || eligible(nil) {
 		t.Fatal("strip routing must accept only nodes advertising server_dv7_to_hdr10")
@@ -288,38 +300,44 @@ func TestCompatDVStripRoutingRequiresCapableExecutors(t *testing.T) {
 	}
 
 	handler.compatDVStripLocalProbe = func() bool { return true }
-	if _, excluded = handler.compatDVStripRouting(context.Background(), nil, nil); len(excluded) != 0 {
+	if _, excluded = handler.compatDVStripRouting(nil, nil); len(excluded) != 0 {
 		t.Fatalf("excluded shapes = %v, want the API remux shape kept when local FFmpeg can strip", excluded)
 	}
 }
 
-func TestCompatDVStripSkipsNodeReportsWhenAPIHostCanStrip(t *testing.T) {
+func TestCompatDVStripDecisionsNeverWaitOnNodes(t *testing.T) {
 	var hits atomic.Int32
-	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits.Add(1)
-		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{})
+		w.WriteHeader(http.StatusOK)
 	}))
-	defer node.Close()
+	defer server.Close()
+	capable := dvStripNode(t, server.URL, dvStripTransformation)
 	handler := &PlaybackHandler{
-		NodePlanner:             compatToneMapInventoryPlanner{urls: []string{node.URL}},
+		NodePlanner: dvStripNodePlanner{
+			compatToneMapInventoryPlanner: compatToneMapInventoryPlanner{urls: []string{capable.URL}},
+			nodes:                         map[string]*nodepool.Node{capable.URL: capable},
+		},
 		compatDVRPUProbe:        func(context.Context, string) bool { return true },
-		compatDVStripLocalProbe: func() bool { return true },
+		compatDVStripLocalProbe: func() bool { return false },
 	}
 
-	// The default policy prefers transcode nodes, which must not delay a
-	// negotiation the API host can serve.
 	if !handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}) {
-		t.Fatal("strip not executable although the API host has dovi_rpu")
+		t.Fatal("strip not executable although a pooled node's stored report advertises it")
 	}
-	eligible, _ := handler.compatDVStripRouting(context.Background(), nil, nil)
+	eligible, _ := handler.compatDVStripRouting(nil, nil)
+	if !eligible(capable) {
+		t.Fatal("capable node rejected during route selection")
+	}
 	if got := hits.Load(); got != 0 {
-		t.Fatalf("node capability requests = %d before any node was considered, want 0", got)
+		t.Fatalf("node requests = %d, want negotiation and route selection to read stored reports only", got)
 	}
-	if eligible(&nodepool.Node{URL: node.URL}) {
-		t.Fatal("a node without server_dv7_to_hdr10 was accepted")
+
+	handler.NodePlanner = dvStripNodePlanner{
+		compatToneMapInventoryPlanner: compatToneMapInventoryPlanner{urls: []string{"http://legacy:8080"}},
+		nodes:                         map[string]*nodepool.Node{"http://legacy:8080": dvStripNode(t, "http://legacy:8080")},
 	}
-	eligible(&nodepool.Node{URL: node.URL})
-	if got := hits.Load(); got != 1 {
-		t.Fatalf("node capability requests = %d after two eligibility checks, want one sweep", got)
+	if handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}) {
+		t.Fatal("strip executable with neither a local filter nor a capable node")
 	}
 }

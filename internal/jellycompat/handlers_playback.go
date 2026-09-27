@@ -600,7 +600,7 @@ func (h *PlaybackHandler) compatAudioBoostNodeURLs(ctx context.Context, timeout 
 	if !ok {
 		return map[string]struct{}{}, nil
 	}
-	return h.compatNodeURLsSupporting(ctx, enumerator.TranscodeNodeURLs(), timeout, compatSupportsAudioBoost)
+	return h.compatAudioBoostNodeURLsFor(ctx, enumerator.TranscodeNodeURLs(), timeout)
 }
 
 func (h *PlaybackHandler) compatAudioBoostProxyNodeURLs(ctx context.Context, timeout time.Duration) (map[string]struct{}, error) {
@@ -608,18 +608,10 @@ func (h *PlaybackHandler) compatAudioBoostProxyNodeURLs(ctx context.Context, tim
 	if !ok {
 		return map[string]struct{}{}, nil
 	}
-	return h.compatNodeURLsSupporting(ctx, enumerator.ProxyNodeURLs(), timeout, compatSupportsAudioBoost)
+	return h.compatAudioBoostNodeURLsFor(ctx, enumerator.ProxyNodeURLs(), timeout)
 }
 
-// compatNodeURLsSupporting fetches each node's capability report under one
-// deadline and returns the nodes whose advertised transformations satisfy
-// supports. Nodes whose report cannot be read are left out.
-func (h *PlaybackHandler) compatNodeURLsSupporting(
-	ctx context.Context,
-	nodeURLs []string,
-	timeout time.Duration,
-	supports func([]playback.TransformationV3) bool,
-) (map[string]struct{}, error) {
+func (h *PlaybackHandler) compatAudioBoostNodeURLsFor(ctx context.Context, nodeURLs []string, timeout time.Duration) (map[string]struct{}, error) {
 	result := make(map[string]struct{})
 	fetchCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -645,7 +637,7 @@ func (h *PlaybackHandler) compatNodeURLsSupporting(
 			probeErr = errors.Join(probeErr, capability.err)
 			continue
 		}
-		if supports(capability.info.Transformations) {
+		if compatSupportsAudioBoost(capability.info.Transformations) {
 			result[strings.TrimRight(nodeURLs[i], "/")] = struct{}{}
 		}
 	}
@@ -1037,7 +1029,7 @@ func (h *PlaybackHandler) resolveCompatHLSRouteOnNodeWithPolicy(
 		return noderouting.Decision{}, err
 	}
 	if source.DVStripToHDR10 && !videoTranscode {
-		eligible, excludedShapes = h.compatDVStripRouting(ctx, eligible, excludedShapes)
+		eligible, excludedShapes = h.compatDVStripRouting(eligible, excludedShapes)
 	}
 	currentTranscodeURL := session.TranscodeNodeURL
 	if requiredTranscodeURL != "" {

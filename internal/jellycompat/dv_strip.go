@@ -2,10 +2,9 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -100,10 +99,10 @@ func (h *PlaybackHandler) applyCompatDVStrip(
 
 // compatDVStripExecutable reports whether this file's RPUs can be stripped and
 // whether a route the playback policy allows has an executor with the
-// dovi_rpu filter: the API host's FFmpeg or a pooled transcode node that
-// advertises server_dv7_to_hdr10. The local check runs first, so a capable API
-// host never waits on node capability reports, and a node sweep during
-// negotiation is bounded like PlaybackInfo's tone-map discovery.
+// dovi_rpu filter: the API host's FFmpeg or a pooled transcode node whose
+// stored capability report advertises server_dv7_to_hdr10. Negotiation reads
+// stored reports rather than asking nodes, so an unresponsive node cannot
+// stall PlaybackInfo.
 func (h *PlaybackHandler) compatDVStripExecutable(ctx context.Context, version catalog.FileVersion) bool {
 	if !h.compatDVRPUStrippable(ctx, version.FilePath) {
 		return false
@@ -128,11 +127,7 @@ func (h *PlaybackHandler) compatDVStripExecutable(ctx context.Context, version c
 	if apiAllowed && h.compatDVStripLocalAvailable() {
 		return true
 	}
-	if !transcodeAllowed {
-		return false
-	}
-	nodes, _ := h.compatDVStripNodeURLs(ctx, compatToneMapNegotiationTimeout)
-	return len(nodes) > 0
+	return transcodeAllowed && h.compatAnyTranscodeNodeCanStrip()
 }
 
 func (h *PlaybackHandler) compatDVRPUStrippable(ctx context.Context, filePath string) bool {
@@ -149,14 +144,35 @@ func (h *PlaybackHandler) compatDVStripLocalAvailable() bool {
 	return playback.DoviRPUFilterAvailable(h.FFmpegPath)
 }
 
-// compatDVStripNodeURLs returns the pooled transcode nodes that advertise the
-// server_dv7_to_hdr10 recipe, the same capability the native planner requires.
-func (h *PlaybackHandler) compatDVStripNodeURLs(ctx context.Context, timeout time.Duration) (map[string]struct{}, error) {
-	enumerator, ok := h.NodePlanner.(compatTranscodeNodeEnumerator)
-	if !ok {
-		return map[string]struct{}{}, nil
+// compatAnyTranscodeNodeCanStrip reports whether a pooled transcode node's
+// stored capability report advertises the strip recipe.
+func (h *PlaybackHandler) compatAnyTranscodeNodeCanStrip() bool {
+	enumerator, canList := h.NodePlanner.(compatTranscodeNodeEnumerator)
+	lookup, canLookup := h.NodePlanner.(compatTranscodeNodeLookup)
+	if !canList || !canLookup {
+		return false
 	}
-	return h.compatNodeURLsSupporting(ctx, enumerator.TranscodeNodeURLs(), timeout, compatSupportsDVStrip)
+	for _, nodeURL := range enumerator.TranscodeNodeURLs() {
+		if node, ok := lookup.TranscodeNodeByURL(nodeURL); ok && compatNodeCanStrip(node) {
+			return true
+		}
+	}
+	return false
+}
+
+// compatNodeCanStrip reads a node's stored capability report, which the health
+// sweep refetches whenever the node's reported hash changes. The remote start
+// confirms the recipe against the node's live report before dispatching.
+func compatNodeCanStrip(node *nodepool.Node) bool {
+	raw := node.StoredCapabilities()
+	if len(raw) == 0 {
+		return false
+	}
+	var info playback.HWAccelInfo
+	if err := json.Unmarshal(raw, &info); err != nil {
+		return false
+	}
+	return compatSupportsDVStrip(info.Transformations)
 }
 
 func compatSupportsDVStrip(transformations []playback.TransformationV3) bool {
@@ -175,28 +191,16 @@ func compatSupportsDVStrip(transformations []playback.TransformationV3) bool {
 const compatDVStripRecipeVersion = "1"
 
 // compatDVStripRouting narrows HLS route selection for a strip remux to
-// executors that can run it: transcode nodes advertising the recipe, and the
-// API host only when its own FFmpeg has the dovi_rpu filter. Node reports are
-// fetched on the first node the resolver considers, so a route that settles on
-// the API host never waits on them.
+// executors that can run it: transcode nodes whose stored report advertises
+// the recipe, and the API host only when its own FFmpeg has the dovi_rpu
+// filter.
 func (h *PlaybackHandler) compatDVStripRouting(
-	ctx context.Context,
 	eligible func(*nodepool.Node) bool,
 	excludedShapes map[string]struct{},
 ) (func(*nodepool.Node) bool, map[string]struct{}) {
-	capableNodes := sync.OnceValue(func() map[string]struct{} {
-		capable, _ := h.compatDVStripNodeURLs(ctx, h.toneMapCapabilityTimeout())
-		return capable
-	})
 	baseEligible := eligible
 	eligible = func(node *nodepool.Node) bool {
-		if node == nil {
-			return false
-		}
-		if _, supported := capableNodes()[strings.TrimRight(node.URL, "/")]; !supported {
-			return false
-		}
-		return baseEligible == nil || baseEligible(node)
+		return node != nil && compatNodeCanStrip(node) && (baseEligible == nil || baseEligible(node))
 	}
 	if !h.compatDVStripLocalAvailable() {
 		excluded := make(map[string]struct{}, len(excludedShapes)+1)
