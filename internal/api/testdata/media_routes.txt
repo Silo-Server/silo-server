@@ -737,10 +737,6 @@ GET /api/v2/system/setup	non-media
 GET /api/v2/theme/admin-css	non-media
 GET /api/v2/theme/branding	non-media
 GET /api/v2/theme/capabilities	non-media
-GET /api/v2/theme/catalog	non-media
-GET /api/v2/theme/catalog/capabilities	non-media
-POST /api/v2/theme/catalog/refresh	non-media
-GET /api/v2/theme/download	non-media
 GET /api/v2/user/libraries	non-media
 GET /api/v2/user/libraries/capabilities	non-media
 GET /api/v2/watch-providers	non-media
@@ -1902,10 +1898,6 @@ GET /api/v2/system/setup	non-media
 GET /api/v2/theme/admin-css	non-media
 GET /api/v2/theme/branding	non-media
 GET /api/v2/theme/capabilities	non-media
-GET /api/v2/theme/catalog	non-media
-GET /api/v2/theme/catalog/capabilities	non-media
-POST /api/v2/theme/catalog/refresh	non-media
-GET /api/v2/theme/download	non-media
 GET /api/v2/user/libraries	non-media
 GET /api/v2/user/libraries/capabilities	non-media
 GET /api/v2/watch-providers	non-media

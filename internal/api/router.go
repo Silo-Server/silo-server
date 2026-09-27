@@ -880,6 +880,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			requestSvc.SetUserRepository(userRepo)
 		}
 		requestSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
+		if tvdbResolver, ok := deps.MetadataService.(mediarequests.TVDBIDResolver); ok {
+			requestSvc.SetTVDBIDResolver(tvdbResolver)
+		}
 		if viewerResolver != nil {
 			requestSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: viewerResolver})
 		}
@@ -992,6 +995,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		profileHandler = handlers.NewProfileHandler(deps.UserStoreProvider)
 		profileHandler.UserRepo = userRepo
 		profileHandler.EventsHub = deps.EventsHub
+		if deps.DB != nil {
+			// Drops live in Postgres whichever store holds the profile.
+			profileHandler.DroppedSeriesPurger = catalog.NewDroppedSeriesRepo(deps.DB)
+		}
 		profileHandler.ProfileTokens = profileTokenService
 		// Private S3 preserves existing avatar keys and presigned delivery. Local
 		// avatars use the signed artwork endpoint. Never use public S3 here.
@@ -1076,6 +1083,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		deviceHandler.ProfileTokens = profileTokenService
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
+		if deps.DB != nil {
+			homeDismissalHandler.SetSeriesDrops(catalog.NewDroppedSeriesRepo(deps.DB), itemRepo)
+		}
+		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalDroppedEventDispatcher); ok {
+			homeDismissalHandler.SetLocalDroppedEventDispatcher(dispatcher)
+		}
 		subtitlePrefHandler = handlers.NewSubtitlePrefHandler(deps.UserStoreProvider)
 		subtitlePrefHandler.EventsHub = deps.EventsHub
 		audioPrefHandler = handlers.NewAudioPrefHandler(deps.UserStoreProvider)
@@ -2228,7 +2241,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if settingsRepo != nil {
 		themeHandler = handlers.NewThemeHandler(settingsRepo)
 		v2deps.ThemeOverrides = themeHandler
-		v2deps.ThemeCatalog = themeHandler
 	}
 	if deps.BrandingService != nil {
 		v2deps.Branding = deps.BrandingService

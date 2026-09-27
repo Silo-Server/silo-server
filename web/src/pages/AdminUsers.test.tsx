@@ -331,7 +331,8 @@ describe("AdminUsers row actions", () => {
     mocks.viewer = { id: 8 };
     renderPage();
     const row = screen.getByRole("link", { name: "founder" }).closest("tr")!;
-    expect(within(row).getByText("Owner")).toBeInTheDocument();
+    expect(within(row).getByText("owner")).toBeInTheDocument();
+    expect(within(row).queryByText("admin")).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit founder" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete founder" })).toBeNull();
     expect(screen.queryByRole("button", { name: "View as user: founder" })).toBeNull();

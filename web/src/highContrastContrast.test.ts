@@ -5,25 +5,18 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * Computed WCAG contrast for the tokens high contrast mode rewrites, per theme.
+ * Computed WCAG contrast for the tokens high contrast mode rewrites on the
+ * base theme.
  *
- * Asserting that the declarations merely exist is not enough: the block used to
- * push every token toward white, which raises contrast on a dark theme and
- * destroys it on a light one. On cinema-light that drove `--muted-foreground`
- * to 1.36:1 and `--foreground` to 1.10:1 against the page — high contrast mode
- * made the theme unreadable, and nothing in the suite noticed. These tests do
- * the colour maths so a future theme, or a changed mix percentage, cannot
- * reintroduce that silently.
+ * Asserting that the declarations merely exist is not enough: the block once
+ * pushed every token toward white, which destroyed contrast on a light theme
+ * and nothing in the suite noticed. These tests do the colour maths so a
+ * changed mix percentage or base colour cannot make high contrast worse
+ * silently.
  */
 const css = readFileSync(fileURLToPath(new URL("./app.css", import.meta.url)), "utf8");
 
-const THEMES = [
-  "midnight-cinema",
-  "cinema-light",
-  "cobalt-studio",
-  "oxblood-noir",
-  "evergreen-studio",
-] as const;
+const THEMES = ["midnight-cinema"] as const;
 
 /** WCAG 2.1 AA for normal-size body text. */
 const AA_TEXT = 4.5;

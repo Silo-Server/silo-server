@@ -188,6 +188,29 @@ describe("home dismissal query hooks", () => {
       itemId: "ep-1",
     });
     expect(mocks.toastSuccess).toHaveBeenCalledWith(
+      "Show dropped",
+      expect.objectContaining({
+        action: expect.objectContaining({
+          label: "Undo",
+        }),
+      }),
+    );
+  });
+
+  it("keeps continue watching toast copy for movie dismissals", async () => {
+    useDismissHomeItem();
+    const mutation = latestMutationOptions();
+
+    const variables: DismissHomeItemVariables = {
+      itemId: "movie-1",
+      surface: "continue_watching",
+      mediaType: "movie",
+      progressUpdatedAt: "2026-03-22T18:10:00Z",
+    };
+
+    await mutation.onSuccess?.(undefined, variables);
+
+    expect(mocks.toastSuccess).toHaveBeenCalledWith(
       "Removed from Continue Watching",
       expect.objectContaining({
         action: expect.objectContaining({
