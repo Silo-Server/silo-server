@@ -136,6 +136,7 @@ func TestSyncDroppedImportsAProviderReDropAfterALocalWatch(t *testing.T) {
 	h := newDroppedHarness(t)
 	h.store.drop(droppedTestSeriesA, h.at(1))
 	h.agree(droppedTestSeriesA, true)
+	h.repo.droppedStates[0].UpdatedAt = h.at(1)
 	h.store.activity[droppedTestSeriesA] = h.at(2) // watched in Silo: the drop ended
 	// Dropped again on the provider after that watch.
 	h.provider.batch = DroppedImportBatch{Rows: []RemoteDropped{h.remoteRow(droppedTestSeriesA, h.at(3))}, Complete: true}
@@ -147,6 +148,20 @@ func TestSyncDroppedImportsAProviderReDropAfterALocalWatch(t *testing.T) {
 	}
 	if !h.store.active(droppedTestSeriesA) || !h.store.rows[droppedTestSeriesA].Equal(h.at(3)) {
 		t.Fatalf("local drop = %v active=%v, want re-dropped at the provider time", h.store.rows[droppedTestSeriesA], h.store.active(droppedTestSeriesA))
+	}
+
+	// The provider undrops it again: the imported drop is agreed, so the
+	// undrop is imported rather than the drop being sent back.
+	h.provider.batch = DroppedImportBatch{Rows: []RemoteDropped{h.remoteRow(droppedTestSeriesB, h.at(3))}, Complete: true}
+	h.store.activity[droppedTestSeriesB] = h.at(4)
+	h.sync()
+	if h.store.active(droppedTestSeriesA) {
+		t.Fatal("the provider undrop must be imported")
+	}
+	for _, item := range h.provider.dropped {
+		if item.MediaItemID == droppedTestSeriesA {
+			t.Fatal("the imported drop must not be sent back to the provider")
+		}
 	}
 }
 

@@ -514,6 +514,9 @@ func (s *Service) reconcileDropped(
 			}
 			if applied {
 				result.imported++
+				// Agree on the drop as imported, so a restored drop newer
+				// than the old agreement does not read as a local change.
+				item.row = &catalog.DroppedSeries{SeriesID: id, DroppedAt: droppedAt, Active: true}
 				agreeDropped(item, item.observed)
 			}
 		case droppedImportUndrop:

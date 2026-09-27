@@ -25947,7 +25947,7 @@ export interface components {
       import_watched_enabled: boolean;
       import_watchlist_enabled: boolean;
       scrobble_enabled: boolean;
-      /** @description Sync dropped shows both ways: dismissing a show's episode from Home drops the show on the provider, shows dropped on the provider are hidden from Continue Watching and the profile-wide Next Up (a single series' Next Up still lists them), and watching a dropped show again undrops it on both sides. */
+      /** @description Sync dropped shows both ways: dismissing a show, or one of its episodes, from Home drops the show on the provider, shows dropped on the provider are hidden from Continue Watching and the profile-wide Next Up (a single series' Next Up still lists them), and watching a dropped show again undrops it on both sides. */
       sync_dropped_enabled: boolean;
       sync_favorite_removals_enabled: boolean;
       sync_watchlist_order_enabled: boolean;
