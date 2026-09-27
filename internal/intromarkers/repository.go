@@ -644,10 +644,9 @@ func (r *Repository) LoadArtifacts(ctx context.Context, fileIDs []int, key Artif
 	return artifacts, nil
 }
 
-// artifactUpsert writes every column of a row. Its ON CONFLICT target is the
-// primary key older binaries upsert on, and it never takes over another
-// kind's row.
-const artifactUpsert = `
+// artifactInsert writes every column of a row. The statements built on it
+// conflict on the primary key older binaries upsert on.
+const artifactInsert = `
 	INSERT INTO media_intro_fingerprints (
 	    media_file_id,
 	    kind,
@@ -670,7 +669,10 @@ const artifactUpsert = `
 	    recorded_by
 	) VALUES (
 	    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''), $12, $13, $14, $15, $16, NULLIF($17, ''), $18, $19
-	)
+	)`
+
+// artifactUpsert replaces any row for the key, but never another kind's.
+const artifactUpsert = artifactInsert + `
 	ON CONFLICT (media_file_id, algorithm_version, config_hash) DO UPDATE SET
 	    file_hash = EXCLUDED.file_hash,
 	    file_size = EXCLUDED.file_size,
@@ -690,12 +692,29 @@ const artifactUpsert = `
 	    updated_at = NOW()
 	WHERE media_intro_fingerprints.kind = EXCLUDED.kind`
 
+// artifactInsertNew writes a row only when the key has none.
+const artifactInsertNew = artifactInsert + `
+	ON CONFLICT (media_file_id, algorithm_version, config_hash) DO NOTHING`
+
 func execArtifactUpsert(ctx context.Context, q artifactDB, a Artifact) error {
+	written, err := execArtifactWrite(ctx, q, artifactUpsert, a)
+	if err != nil {
+		return err
+	}
+	if !written {
+		return fmt.Errorf("upserting %s artifact for file %d: %w", a.Kind, a.MediaFileID, ErrArtifactKindConflict)
+	}
+	return nil
+}
+
+// execArtifactWrite runs one of the artifactInsert statements for a and
+// reports whether it wrote a row.
+func execArtifactWrite(ctx context.Context, q artifactDB, query string, a Artifact) (bool, error) {
 	payload := a.Payload
 	if payload == nil {
 		payload = []byte{}
 	}
-	tag, err := q.Exec(ctx, artifactUpsert,
+	tag, err := q.Exec(ctx, query,
 		a.MediaFileID,
 		a.Kind,
 		a.AlgorithmVersion,
@@ -717,12 +736,9 @@ func execArtifactUpsert(ctx context.Context, q artifactDB, a Artifact) error {
 		a.RecordedBy,
 	)
 	if err != nil {
-		return fmt.Errorf("upserting %s artifact for file %d: %w", a.Kind, a.MediaFileID, err)
+		return false, fmt.Errorf("writing %s artifact for file %d: %w", a.Kind, a.MediaFileID, err)
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("upserting %s artifact for file %d: %w", a.Kind, a.MediaFileID, ErrArtifactKindConflict)
-	}
-	return nil
+	return tag.RowsAffected() > 0, nil
 }
 
 func validateArtifactKey(key ArtifactKey) error {
@@ -772,25 +788,40 @@ func (r *Repository) RecordArtifactFailure(ctx context.Context, failure Artifact
 		failure.At = time.Now().UTC()
 	}
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
-		previous, err := loadArtifact(ctx, tx, failure.MediaFileID, failure.ArtifactKey, true)
-		if err != nil {
-			return err
+		// Locking the row serializes this with other writers only when it
+		// exists. Without one, the failure is inserted only if the key is
+		// still free; a row another server wrote meanwhile is locked and
+		// judged on the second pass.
+		for range 2 {
+			previous, err := loadArtifact(ctx, tx, failure.MediaFileID, failure.ArtifactKey, true)
+			if err != nil {
+				return err
+			}
+			if previous != nil && previous.ArtifactIdentity == failure.ArtifactIdentity &&
+				(previous.Status == ArtifactComplete || previous.Status == ArtifactUnusable) {
+				return nil
+			}
+			count, retryAfter := nextArtifactFailure(previous, failure)
+			row := Artifact{
+				MediaFileID:      failure.MediaFileID,
+				ArtifactKey:      failure.ArtifactKey,
+				ArtifactIdentity: failure.ArtifactIdentity,
+				Status:           ArtifactFailed,
+				FailureCount:     count,
+				LastError:        failure.Error,
+				RetryAfter:       &retryAfter,
+				RecordedBy:       failure.RecordedBy,
+			}
+			if previous != nil {
+				return execArtifactUpsert(ctx, tx, row)
+			}
+			inserted, err := execArtifactWrite(ctx, tx, artifactInsertNew, row)
+			if err != nil || inserted {
+				return err
+			}
 		}
-		if previous != nil && previous.ArtifactIdentity == failure.ArtifactIdentity &&
-			(previous.Status == ArtifactComplete || previous.Status == ArtifactUnusable) {
-			return nil
-		}
-		count, retryAfter := nextArtifactFailure(previous, failure)
-		return execArtifactUpsert(ctx, tx, Artifact{
-			MediaFileID:      failure.MediaFileID,
-			ArtifactKey:      failure.ArtifactKey,
-			ArtifactIdentity: failure.ArtifactIdentity,
-			Status:           ArtifactFailed,
-			FailureCount:     count,
-			LastError:        failure.Error,
-			RetryAfter:       &retryAfter,
-			RecordedBy:       failure.RecordedBy,
-		})
+		// The key stayed taken by a row this kind cannot see: another kind's.
+		return fmt.Errorf("recording %s artifact failure for file %d: %w", failure.Kind, failure.MediaFileID, ErrArtifactKindConflict)
 	})
 }
 

@@ -16,8 +16,10 @@ import (
 // each threshold name the false positive it removed.
 const (
 	// blackLevelPercentile is the share of keyframes whose YLOW sets the
-	// file's black level. It skips a few keyframes of broken or faded
-	// pictures.
+	// file's black level. In a long tail it skips a few keyframes of broken
+	// or faded pictures. A tail of fewer than 200 keyframes uses its
+	// darkest: it may hold only a few black keyframes, and those set the
+	// level.
 	blackLevelPercentile = 0.01
 	// maxBlackLevel caps the black level, so a tail with no dark keyframes
 	// cannot count a dim scene as black.
@@ -114,8 +116,8 @@ func classifyKeyframes(frames []mediasample.FrameStats) []creditsKeyframe {
 	return keyframes
 }
 
-// tailBlackLevel is the tail's black level: its 1st percentile of YLOW,
-// capped at maxBlackLevel.
+// tailBlackLevel is the tail's black level: the YLOW of the keyframe ranked
+// len/100 from the darkest (at least the darkest), capped at maxBlackLevel.
 func tailBlackLevel(frames []mediasample.FrameStats) float64 {
 	lows := make([]float64, len(frames))
 	for i, frame := range frames {

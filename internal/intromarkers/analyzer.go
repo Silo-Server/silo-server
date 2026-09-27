@@ -387,10 +387,16 @@ type EpisodeMarkerKinds struct {
 func (k EpisodeMarkerKinds) Any() bool { return k.Intro || k.Credits }
 
 // AnalyzeEpisode analyzes the season groups of an episode's files for every
-// marker kind, comparing each group again even when its stored analysis
-// still stands. Admin refresh uses it.
+// marker kind, as AnalyzeEpisodeKinds does. It is the all-kinds shorthand.
 func (a *Analyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (RunSummary, error) {
-	return a.analyzeEpisode(ctx, episodeID, EpisodeMarkerKinds{Intro: true, Credits: true}, true)
+	return a.AnalyzeEpisodeKinds(ctx, episodeID, EpisodeMarkerKinds{Intro: true, Credits: true})
+}
+
+// AnalyzeEpisodeKinds analyzes the season groups of an episode's files for
+// the kinds selected, comparing each group again even when its stored
+// analysis still stands. Admin refresh uses it.
+func (a *Analyzer) AnalyzeEpisodeKinds(ctx context.Context, episodeID string, kinds EpisodeMarkerKinds) (RunSummary, error) {
+	return a.analyzeEpisode(ctx, episodeID, kinds, true)
 }
 
 // AnalyzeEpisodeForPlayback analyzes only the marker kinds a played file
@@ -1260,9 +1266,12 @@ func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidat
 // settleSeasonState records a group's analysis status. A failed extraction
 // (unlike a file with no audio to fingerprint) may succeed later, so the
 // group stays partial and is retried even though its inputs have not
-// changed.
+// changed. A failed status stands, since partial would settle it for a while.
 func settleSeasonState(state *SeasonState, status string, counts fingerprintCounts) {
 	state.Status = status
+	if status == seasonStatusFailed {
+		return
+	}
 	if failed := counts.failed + counts.deferred; failed > 0 {
 		state.Status = seasonStatusPartial
 		state.LastError = fmt.Sprintf("%d fingerprint extraction(s) failed", failed)

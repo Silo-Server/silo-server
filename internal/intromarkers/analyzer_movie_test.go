@@ -154,7 +154,7 @@ func TestAnalyzeMovieStoresTheTailOnlyOnceCreditsAreSettled(t *testing.T) {
 	}
 
 	sampler.onSilences = nil
-	repo.patchErr = errors.New("database went away")
+	repo.patchErr = func(MarkerPatch) error { return errors.New("database went away") }
 	summary, err := analyzer.AnalyzeMovie(context.Background(), "movie")
 	if err != nil {
 		t.Fatalf("AnalyzeMovie: %v", err)

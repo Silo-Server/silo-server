@@ -288,7 +288,14 @@ func TestCreditsTailUnusableFilesAreNotDecodedAgain(t *testing.T) {
 			if calls := sampler.callCount(); calls != map[bool]int{true: 1}[tt.sampled] {
 				t.Fatalf("%d tail passes, want %v", calls, tt.sampled)
 			}
-			if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status != ArtifactUnusable || artifact.Detail != tt.detail {
+			// A tail ruled out by probe metadata is decided again on every
+			// analysis rather than stored.
+			artifact := repo.artifact(1, ArtifactKindCreditsTail)
+			if metadataTailDetail(tt.detail) {
+				if artifact.Status != "" {
+					t.Fatalf("artifact %+v, want none stored for %q", artifact, tt.detail)
+				}
+			} else if artifact.Status != ArtifactUnusable || artifact.Detail != tt.detail {
 				t.Fatalf("artifact %+v, want unusable with %q", artifact, tt.detail)
 			}
 			if last := repo.upsertedStates[len(repo.upsertedStates)-1]; last.Status != seasonStatusNotFound {
@@ -400,5 +407,120 @@ func TestCreditsTailPassWithoutFramesIsRetried(t *testing.T) {
 	}
 	if artifact := repo.artifact(1, ArtifactKindCreditsTail); artifact.Status == ArtifactUnusable {
 		t.Fatalf("artifact %+v, want no unusable tail", artifact)
+	}
+}
+
+// A probe repair can fill in a missing or misread video codec without
+// changing the file. The tail is then sampled, even over a settled season
+// group or a no_video row an earlier build stored.
+func TestCreditsTailAfterProbeRepair(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		before string
+		legacy bool
+	}{
+		{name: "missing codec", before: ""},
+		{name: "misread all-intra codec", before: "mjpeg"},
+		{name: "stored no_video row", before: "", legacy: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			candidate := tailCandidate(1, "e1", 1500)
+			candidate.CodecVideo = tt.before
+			repo := &fakeIntroRepository{}
+			sampler := &fakeTailSampler{frames: endCreditsFrames}
+			analyzer, _ := tailAnalyzer(repo, sampler, "node-a")
+			if tt.legacy {
+				repo.artifacts = map[artifactSlot]Artifact{{1, ArtifactKindCreditsTail}: {
+					MediaFileID: 1, ArtifactKey: creditsTailKey(), ArtifactIdentity: tailWindow(candidate).identity(candidate),
+					Status: ArtifactUnusable, Detail: tailDetailNoVideo,
+				}}
+			} else {
+				summary, err := analyzer.analyzeCreditsGroup(context.Background(), soloGroup(candidate), analyzeGroupOptions{persistState: true, creditsTail: true})
+				if err != nil {
+					t.Fatalf("analyzeCreditsGroup: %v", err)
+				}
+				if summary.CreditsTailUnusable != 1 || sampler.callCount() != 0 {
+					t.Fatalf("summary %+v with %d tail passes, want the tail ruled out unsampled", summary, sampler.callCount())
+				}
+				settled := repo.upsertedStates[len(repo.upsertedStates)-1]
+				repo.seasonState = &settled
+			}
+
+			candidate.CodecVideo = "h264"
+			summary, err := analyzer.analyzeCreditsGroup(context.Background(), soloGroup(candidate), analyzeGroupOptions{persistState: true, creditsTail: true})
+			if err != nil {
+				t.Fatalf("analyzeCreditsGroup: %v", err)
+			}
+			if sampler.callCount() != 1 || summary.CreditsTailScansComputed != 1 || summary.CreditsVideoMarkersWritten != 1 {
+				t.Fatalf("summary %+v with %d tail passes, want the repaired file sampled and placed", summary, sampler.callCount())
+			}
+		})
+	}
+}
+
+// A season group settled while ffmpeg could not run tail passes is analyzed
+// again once it can, and the other way around.
+func TestCreditsSeasonStateIsKeyedByTailMode(t *testing.T) {
+	if CreditsAnalysisConfigHash(true) == CreditsAnalysisConfigHash(false) {
+		t.Fatal("credits season state must be keyed by whether tail passes ran")
+	}
+	inputs := creditsSeason(2, 60, 0)
+	var candidates []Candidate
+	sampler := &fakeTailSampler{frames: endCreditsFrames, points: map[int][]uint32{}}
+	for _, input := range inputs {
+		candidate := input.Candidate
+		candidate.SeasonID, candidate.MediaFolderID, candidate.CodecVideo, candidate.CodecAudio = "s1", 1, "h264", "aac"
+		candidates = append(candidates, candidate)
+		sampler.points[candidate.FileID] = input.Points
+	}
+	repo := &fakeIntroRepository{
+		seasonState:     &SeasonState{InputSignature: creditsInputSignature(candidates), Status: seasonStatusComplete},
+		seasonStateHash: CreditsAnalysisConfigHash(false),
+	}
+	analyzer, _ := tailAnalyzer(repo, sampler, "node-a")
+	group := soloGroup(candidates...)
+
+	summary, err := analyzer.analyzeCreditsGroup(context.Background(), group, analyzeGroupOptions{persistState: true})
+	if err != nil {
+		t.Fatalf("analyzeCreditsGroup: %v", err)
+	}
+	if summary.CreditsGroupsSkipped != 1 {
+		t.Fatalf("summary %+v, want the audio-only run to keep its settled state", summary)
+	}
+	summary, err = analyzer.analyzeCreditsGroup(context.Background(), group, analyzeGroupOptions{persistState: true, creditsTail: true})
+	if err != nil {
+		t.Fatalf("analyzeCreditsGroup: %v", err)
+	}
+	if summary.CreditsGroupsSkipped != 0 || sampler.callCount() != len(candidates) {
+		t.Fatalf("summary %+v with %d tail passes, want the group analyzed with tail passes", summary, sampler.callCount())
+	}
+}
+
+// A server that cannot run tail passes keeps off a group a tail-capable
+// server settled, so its audio-only result cannot replace the audio and
+// video markers written there.
+func TestAudioOnlyCreditsRunKeepsTailSettledGroup(t *testing.T) {
+	repo := &fakeIntroRepository{}
+	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
+	season := cachedCreditsSeason(t, analyzer, repo, 3)
+	group := candidateGroup{SeasonID: "season1", MediaFolderID: 7, AnalysisGroupKey: season[0].AnalysisGroupKey(), Candidates: season}
+	repo.seasonState = &SeasonState{InputSignature: creditsInputSignature(season), Status: seasonStatusComplete}
+	repo.seasonStateHash = CreditsAnalysisConfigHash(true)
+
+	summary, err := analyzer.analyzeCreditsGroup(context.Background(), group, analyzeGroupOptions{persistState: true})
+	if err != nil {
+		t.Fatalf("analyzeCreditsGroup: %v", err)
+	}
+	if summary.CreditsGroupsSkipped != 1 || len(repo.patches) != 0 || len(repo.upsertedStates) != 0 {
+		t.Fatalf("summary %+v with patches %+v and states %+v, want the tail-settled group skipped", summary, repo.patches, repo.upsertedStates)
+	}
+
+	// Without that state the same run places the season's credits.
+	repo.seasonState = nil
+	if _, err := analyzer.analyzeCreditsGroup(context.Background(), group, analyzeGroupOptions{persistState: true}); err != nil {
+		t.Fatalf("analyzeCreditsGroup: %v", err)
+	}
+	if len(patchesOfKind(repo.patches, kindCredits)) == 0 {
+		t.Fatal("audio-only run wrote no credits, so the skip above proves nothing")
 	}
 }

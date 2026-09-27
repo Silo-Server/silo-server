@@ -71,8 +71,15 @@ func (c Candidate) hasVideo() bool { return strings.TrimSpace(c.CodecVideo) != "
 
 func (c Candidate) hasAudio() bool { return strings.TrimSpace(c.CodecAudio) != "" }
 
+// metadataTailDetail reports whether an unusable tail's detail came from
+// tailUnusableBeforeSampling rather than from decoding the tail.
+func metadataTailDetail(detail string) bool {
+	return detail == tailDetailNoVideo || detail == tailDetailUnsupportedCodec
+}
+
 // tailUnusableBeforeSampling returns why the candidate's tail cannot be
-// analyzed without decoding it, or "".
+// analyzed without decoding it, or "". It reads probe metadata, so callers
+// decide it again on every analysis instead of storing it.
 func tailUnusableBeforeSampling(candidate Candidate) string {
 	if !candidate.hasVideo() {
 		return tailDetailNoVideo
