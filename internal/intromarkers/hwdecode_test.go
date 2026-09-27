@@ -155,10 +155,11 @@ func TestVideoToolboxKeyframeClassesMatchSoftware(t *testing.T) {
 	for _, codec := range []struct {
 		name    string
 		surface string
+		depth   int
 		encoder []string
 	}{
-		{"h264", "nv12", []string{"-c:v", "libx264", "-pix_fmt", "yuv420p"}},
-		{"hevc 10-bit", "p010le", []string{"-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le", "-x265-params", "log-level=error"}},
+		{"h264", "nv12", 8, []string{"-c:v", "libx264", "-pix_fmt", "yuv420p"}},
+		{"hevc 10-bit", "p010le", 10, []string{"-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le", "-x265-params", "log-level=error"}},
 	} {
 		t.Run(codec.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "tail.mkv")
@@ -166,7 +167,7 @@ func TestVideoToolboxKeyframeClassesMatchSoftware(t *testing.T) {
 			if !videoToolboxDecodes(ctx, ffmpeg, path, codec.surface) {
 				t.Skip("VideoToolbox cannot decode the clip on this host")
 			}
-			candidate := Candidate{FileID: 1, FilePath: path, DurationSeconds: 120, CodecVideo: "h264"}
+			candidate := Candidate{FileID: 1, FilePath: path, DurationSeconds: 120, CodecVideo: "h264", VideoBitDepth: codec.depth}
 			window := fingerprintWindow{Start: 0, End: 120}
 			req := creditsTailRequest(ctx, candidate, window, false)
 
@@ -252,6 +253,17 @@ func TestSampleCreditsTailFallsBackFromBrokenHardware(t *testing.T) {
 	}
 	if !strings.Contains(log.String(), `level=WARN msg="credits tail hardware decode failed; using software" decoder=hardware:vaapi`) {
 		t.Fatalf("log %q, want the hardware failure at warn level", log.String())
+	}
+}
+
+func TestTailRequestsCarryTheVideoBitDepth(t *testing.T) {
+	candidate := Candidate{FileID: 1, FilePath: "/media/movie.mkv", DurationSeconds: 7200, CodecVideo: "hevc", CodecAudio: "aac", VideoBitDepth: 10}
+	window := fingerprintWindow{Start: 6600, End: 7200}
+	if depth := creditsTailRequest(context.Background(), candidate, window, false).VideoBitDepth; depth != 10 {
+		t.Errorf("episode tail request bit depth %d, want 10", depth)
+	}
+	if depth := movieTailRequest(context.Background(), candidate, window).VideoBitDepth; depth != 10 {
+		t.Errorf("movie tail request bit depth %d, want 10", depth)
 	}
 }
 

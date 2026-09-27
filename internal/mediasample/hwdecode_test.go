@@ -4,26 +4,32 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
 
-// The stats chain the credits tail pass measures: software and VideoToolbox
-// frames are cropped and then scaled, VAAPI surfaces are scaled on the GPU and
-// then cropped.
+// The stats chain the credits tail pass measures: software frames and
+// downloaded VideoToolbox surfaces are cropped and then scaled, VAAPI surfaces
+// are scaled and converted to NV12 on the GPU and then cropped.
 const (
 	softwareTailChain = "crop=trunc(iw*0.9/2)*2:trunc(ih*0.8/2)*2,scale=480:-2:flags=area,format=yuv420p," +
 		"blackframe=amount=0:threshold=20,blackframe=amount=0:threshold=26,blackframe=amount=0:threshold=32,signalstats,metadata=print"
-	gpuTailChain = "scale_vaapi=w=534:h=-2,hwdownload,format=nv12,crop=trunc(iw*0.9/2)*2:trunc(ih*0.8/2)*2,format=yuv420p," +
+	gpuTailChain = "scale_vaapi=w=534:h=-2:format=nv12,hwdownload,format=nv12,crop=trunc(iw*0.9/2)*2:trunc(ih*0.8/2)*2,format=yuv420p," +
 		"blackframe=amount=0:threshold=20,blackframe=amount=0:threshold=26,blackframe=amount=0:threshold=32,signalstats,metadata=print"
+	vtTailChain      = "hwdownload,format=nv12," + softwareTailChain
+	vt10BitTailChain = "hwdownload,format=p010le," + softwareTailChain
 )
 
 func TestBuildStatsGraphScalesVAAPISurfacesOnTheGPU(t *testing.T) {
-	graph := buildStatsGraph(tailStats(), true)
+	graph := buildStatsGraph(tailStats(), "vaapi", 10)
 	if graph.filter != gpuTailChain {
 		t.Fatalf("filter\n got %s\nwant %s", graph.filter, gpuTailChain)
 	}
@@ -47,6 +53,21 @@ func TestBuildStatsGraphScalesVAAPISurfacesOnTheGPU(t *testing.T) {
 	}
 }
 
+// TestBuildStatsGraphDownloadsVideoToolboxSurfaces expects the download to
+// name the surface format of the source's depth, since hwdownload cannot
+// convert, and the software chain after it.
+func TestBuildStatsGraphDownloadsVideoToolboxSurfaces(t *testing.T) {
+	for depth, want := range map[int]string{0: vtTailChain, 8: vtTailChain, 10: vt10BitTailChain} {
+		graph := buildStatsGraph(tailStats(), "videotoolbox", depth)
+		if graph.filter != want {
+			t.Errorf("%d bits: filter\n got %s\nwant %s", depth, graph.filter, want)
+		}
+		if !reflect.DeepEqual(graph.blackframes, []int{5, 6, 7}) || graph.metadata != 9 {
+			t.Errorf("%d bits: instances: blackframe %v, metadata %d", depth, graph.blackframes, graph.metadata)
+		}
+	}
+}
+
 // creditsTailRequest is the episode credits tail pass: audio and keyframe
 // statistics of one window.
 func creditsTailRequest() Request {
@@ -60,11 +81,17 @@ func creditsTailRequest() Request {
 	}
 }
 
+// tenBit marks req's source as 10-bit.
+func tenBit(req Request) Request {
+	req.VideoBitDepth = 10
+	return req
+}
+
 func TestBuildArgsDecodesStatsOnHardware(t *testing.T) {
 	const (
 		vaapi = "-init_hw_device vaapi=hw:/dev/dri/renderD128 -filter_hw_device hw -hwaccel vaapi -hwaccel_output_format vaapi "
 		qsv   = "-init_hw_device vaapi=va:/dev/dri/renderD129,driver=iHD,kernel_driver=i915,vendor_id=0x8086 -init_hw_device qsv=qs@va -filter_hw_device va -hwaccel vaapi -hwaccel_output_format vaapi "
-		vt    = "-hwaccel videotoolbox "
+		vt    = "-hwaccel videotoolbox -hwaccel_output_format videotoolbox_vld "
 	)
 	windowArgs := func(decode, chain string) string {
 		return "-hide_banner -nostdin -loglevel repeat+info -threads 1 -filter_threads 1 -skip_frame:v nokey " + decode +
@@ -85,10 +112,11 @@ func TestBuildArgsDecodesStatsOnHardware(t *testing.T) {
 	}{
 		{name: "window vaapi", req: creditsTailRequest(), hw: hardwareDecode{Accel: "vaapi", Device: "/dev/dri/renderD128"}, want: windowArgs(vaapi, gpuTailChain)},
 		{name: "window qsv", req: creditsTailRequest(), hw: hardwareDecode{Accel: "qsv", Device: "/dev/dri/renderD129"}, want: windowArgs(qsv, gpuTailChain)},
-		{name: "window videotoolbox", req: creditsTailRequest(), hw: hardwareDecode{Accel: "videotoolbox"}, want: windowArgs(vt, softwareTailChain)},
+		{name: "window videotoolbox", req: creditsTailRequest(), hw: hardwareDecode{Accel: "videotoolbox"}, want: windowArgs(vt, vtTailChain)},
+		{name: "window videotoolbox 10-bit", req: tenBit(creditsTailRequest()), hw: hardwareDecode{Accel: "videotoolbox"}, want: windowArgs(vt, vt10BitTailChain)},
 		{name: "samples vaapi", req: samplesRequest(5400, 5403), hw: hardwareDecode{Accel: "vaapi", Device: "/dev/dri/renderD128"}, want: samplesArgs(vaapi, gpuTailChain)},
 		{name: "samples qsv", req: samplesRequest(5400, 5403), hw: hardwareDecode{Accel: "qsv", Device: "/dev/dri/renderD129"}, want: samplesArgs(qsv, gpuTailChain)},
-		{name: "samples videotoolbox", req: samplesRequest(5400, 5403), hw: hardwareDecode{Accel: "videotoolbox"}, want: samplesArgs(vt, softwareTailChain)},
+		{name: "samples videotoolbox", req: samplesRequest(5400, 5403), hw: hardwareDecode{Accel: "videotoolbox"}, want: samplesArgs(vt, vtTailChain)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -250,5 +278,70 @@ func TestRunStatsHardwareWithoutADeviceMovesOn(t *testing.T) {
 	_, err = runner.Run(context.Background(), statsOnlyRequest(Attempt{Hardware: true}))
 	if Classify(err) != ReasonUnsupported || Classify(err).Permanent() || len(fake.calls) != 0 {
 		t.Fatalf("error %v after %d processes, want unsupported before ffmpeg starts", err, len(fake.calls))
+	}
+}
+
+// TestVideoToolboxStatsDecodeOnHardwareOrFail runs stats attempts on
+// VideoToolbox. A stream it decodes, 8-bit H.264 or 10-bit HEVC given its
+// depth, is measured on hardware. A stream it cannot decode, VP8, fails the
+// hardware attempt rather than passing a quiet software decode off as
+// hardware, so the software attempt after it runs.
+func TestVideoToolboxStatsDecodeOnHardwareOrFail(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("VideoToolbox is macOS only")
+	}
+	ffmpeg, caps := realFFmpeg(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	stats := Request{Window: &Window{DurationSeconds: 3, KeyframesOnly: true}, Stats: validStats()}
+	if err := caps.Require(stats); err != nil {
+		t.Skipf("ffmpeg cannot measure stats: %v", err)
+	}
+	clip := func(name string, encoder ...string) string {
+		path := filepath.Join(t.TempDir(), name)
+		args := append([]string{"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=10", "-t", "3"}, encoder...)
+		if output, err := exec.CommandContext(ctx, ffmpeg, append(args, "-g", "5", path)...).CombinedOutput(); err != nil {
+			t.Skipf("cannot encode %s: %v: %s", name, err, output)
+		}
+		return path
+	}
+	run := func(path string, depth int, attempts ...Attempt) (Result, error) {
+		req := stats
+		req.Input, req.VideoBitDepth, req.Attempts = path, depth, attempts
+		return (Runner{FFmpegPath: ffmpeg, HWAccel: "videotoolbox"}).Run(ctx, req)
+	}
+	sample := func(path string, depth int) (Result, error) {
+		req := Request{Input: path, Samples: &Samples{Seconds: []float64{0.5, 1.5, 2.5}}, Stats: validStats(), VideoBitDepth: depth, Attempts: []Attempt{{Hardware: true}}}
+		return (Runner{FFmpegPath: ffmpeg, HWAccel: "videotoolbox"}).Run(ctx, req)
+	}
+
+	for _, tt := range []struct {
+		name    string
+		depth   int
+		encoder []string
+	}{
+		{"h264.mkv", 8, []string{"-c:v", "libx264", "-pix_fmt", "yuv420p"}},
+		{"hevc10.mkv", 10, []string{"-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le", "-x265-params", "log-level=error"}},
+	} {
+		path := clip(tt.name, tt.encoder...)
+		result, err := run(path, tt.depth, Attempt{Hardware: true})
+		if err != nil {
+			t.Skipf("VideoToolbox cannot decode %s on this host: %v", tt.name, err)
+		}
+		if result.Decoder != "hardware:videotoolbox" || len(result.Frames) < 5 {
+			t.Fatalf("%s: decoder %q with %d frames", tt.name, result.Decoder, len(result.Frames))
+		}
+		if result, err := sample(path, tt.depth); err != nil || result.Decoder != "hardware:videotoolbox" || len(result.Frames) != 3 {
+			t.Fatalf("%s samples: decoder %q with %d frames, error %v", tt.name, result.Decoder, len(result.Frames), err)
+		}
+	}
+
+	vp8 := clip("vp8.webm", "-c:v", "libvpx")
+	if result, err := run(vp8, 8, Attempt{Hardware: true}); err == nil {
+		t.Fatalf("VP8 decoded as %q with %d frames, want the hardware attempt to fail", result.Decoder, len(result.Frames))
+	}
+	result, err := run(vp8, 8, Attempt{Hardware: true}, Attempt{})
+	if err != nil || result.Decoder != "software" || len(result.Frames) < 5 {
+		t.Fatalf("VP8 with a software attempt: decoder %q with %d frames, error %v", result.Decoder, len(result.Frames), err)
 	}
 }

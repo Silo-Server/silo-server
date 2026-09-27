@@ -90,7 +90,8 @@ const candidateFileColumns = `
 	       COALESCE(mf.episode_number, 0),
 	       mf.file_modified_at,
 	       COALESCE(mf.codec_video, ''),
-	       COALESCE(mf.codec_audio, '')`
+	       COALESCE(mf.codec_audio, ''),
+	       mf.video_tracks->0`
 
 const baseCandidateWhere = `
 	WHERE mf.episode_id IS NOT NULL
@@ -397,7 +398,7 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 	var candidates []Candidate
 	for rows.Next() {
 		var c Candidate
-		var chaptersJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON []byte
+		var chaptersJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON, videoTrackJSON []byte
 		if err := rows.Scan(
 			&c.FileID,
 			&c.EpisodeID,
@@ -432,6 +433,7 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 			&c.FileModifiedAt,
 			&c.CodecVideo,
 			&c.CodecAudio,
+			&videoTrackJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scanning intro marker candidate: %w", err)
 		}
@@ -447,6 +449,12 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 				return nil, fmt.Errorf("unmarshaling audio tracks for file %d: %w", c.FileID, err)
 			}
 			c.AudioLanguage = effectiveAudioLanguage(tracks)
+		}
+		// The bit depth only shapes a hardware decode, so a video track that
+		// does not parse leaves it unknown rather than failing the scan.
+		var videoTrack models.VideoTrack
+		if len(videoTrackJSON) > 0 && json.Unmarshal(videoTrackJSON, &videoTrack) == nil {
+			c.VideoBitDepth = models.NormalizeVideoBitDepth(videoTrack.BitDepth, videoTrack.PixelFormat, videoTrack.Profile)
 		}
 		if len(subtitleTracksJSON) > 0 {
 			if err := json.Unmarshal(subtitleTracksJSON, &c.SubtitleTracks); err != nil {

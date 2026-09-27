@@ -255,8 +255,11 @@ type Candidate struct {
 	DurationSeconds float64
 	// CodecVideo and CodecAudio are the probed codecs of the file's first
 	// video and audio streams, empty when it has none.
-	CodecVideo             string
-	CodecAudio             string
+	CodecVideo string
+	CodecAudio string
+	// VideoBitDepth is the probed bit depth of the first video stream, zero
+	// when unknown. Hardware decoding on VideoToolbox needs it.
+	VideoBitDepth          int
 	PresentationGroupKey   string
 	EditionKey             string
 	AudioLanguage          string

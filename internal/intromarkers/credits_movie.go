@@ -91,8 +91,9 @@ func movieTailRequest(ctx context.Context, candidate Candidate, window fingerpri
 			Width:           tailWidth,
 			BlackThresholds: creditsBlackThresholds,
 		},
-		Threads:    1,
-		Background: backgroundAnalysis(ctx),
+		Threads:       1,
+		VideoBitDepth: candidate.VideoBitDepth,
+		Background:    backgroundAnalysis(ctx),
 	}
 }
 

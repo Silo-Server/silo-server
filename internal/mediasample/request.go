@@ -35,6 +35,11 @@ type Request struct {
 	Attempts []Attempt `json:"attempts,omitempty"`
 	// Threads caps ffmpeg's decoder threads. Zero leaves ffmpeg's default.
 	Threads int `json:"threads,omitempty"`
+	// VideoBitDepth is the bit depth of the input's first video stream, zero
+	// when unknown. A hardware attempt on VideoToolbox needs it to download
+	// the decoded surfaces, whose format follows the source's depth; an
+	// unknown depth is taken as 8 bits.
+	VideoBitDepth int `json:"video_bit_depth,omitempty"`
 	// Background marks work nobody is waiting on. On Linux its ffmpeg runs at
 	// the lowest CPU priority (nice 19) and in the idle I/O class; elsewhere it
 	// runs like any other request.
@@ -127,6 +132,7 @@ const (
 	maxStatsWidth     = 3840
 	maxBlackLevels    = 8
 	maxSamples        = 10000
+	maxVideoBitDepth  = 16
 )
 
 // Validate reports whether the request can be run.
@@ -187,6 +193,9 @@ func (r Request) Validate() error {
 	}
 	if r.Threads < 0 || r.Threads > maxThreads {
 		return fmt.Errorf("threads %d is outside 0..%d", r.Threads, maxThreads)
+	}
+	if r.VideoBitDepth < 0 || r.VideoBitDepth > maxVideoBitDepth {
+		return fmt.Errorf("video bit depth %d is outside 0..%d", r.VideoBitDepth, maxVideoBitDepth)
 	}
 	if len(r.Attempts) > maxAttempts {
 		return fmt.Errorf("request has %d attempts, at most %d are allowed", len(r.Attempts), maxAttempts)

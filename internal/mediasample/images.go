@@ -142,7 +142,7 @@ func buildImageArgs(req Request, attempt Attempt, hw hardwareDecode, softwareTon
 		args = append(args, "-threads", strconv.Itoa(req.Threads))
 	}
 	if attempt.Hardware {
-		decode, err := hardwareDecodeArgs(hw)
+		decode, err := hardwareDecodeArgs(hw, false)
 		if err != nil {
 			return nil, err
 		}

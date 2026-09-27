@@ -144,8 +144,12 @@ software.
 - QSV and VAAPI decode into VAAPI surfaces on a render device. QSV
   initializes its VAAPI parent device the way playback does
   (`tonemap.QSVInitDeviceArgs`) and decodes through it.
-- VideoToolbox decodes into system-memory frames, so software filters apply
-  to them directly.
+- VideoToolbox decodes `Images` into system-memory frames, so software
+  filters apply to them directly. `Stats` asks for VideoToolbox surfaces
+  (`-hwaccel_output_format videotoolbox_vld`) and downloads them, because
+  only surfaces prove the decode ran on hardware: given a stream VideoToolbox
+  cannot decode, such as VP8, plain `-hwaccel videotoolbox` quietly decodes
+  in software, while the download of a software frame fails the attempt.
 - Each hardware attempt reserves one render device through
   `playback.AcquireHWDevice`, falling back to `playback.PickRenderDevice`,
   before its timeout starts, and releases it when the attempt ends, before
@@ -159,16 +163,27 @@ software.
   cannot mark an artifact unusable.
 
 `Stats` on VAAPI surfaces (VAAPI and QSV) scales the whole picture on the
-GPU before the download, and the crop follows:
+GPU and converts it to 8-bit NV12 there before the download, since a 10-bit
+source decodes into P010 surfaces that not every driver downloads as NV12.
+The crop follows:
 
 ```text
-scale_vaapi=w=SW:h=-2,hwdownload,format=nv12,crop=…,format=yuv420p,blackframe=…,signalstats,metadata=print
+scale_vaapi=w=SW:h=-2:format=nv12,hwdownload,format=nv12,crop=…,format=yuv420p,blackframe=…,signalstats,metadata=print
 ```
 
 `SW` is `Width / CropWidth` rounded to an even number (534 for the credits
 pass's 0.9 crop to 480), so the cropped picture is about `Width` pixels wide,
-as in software. VideoToolbox frames, like software ones, take the software
-chain. `-skip_frame:v nokey` still applies, in `Window` and `Samples` modes
+as in software. VideoToolbox surfaces are downloaded as they are, then take
+the software chain:
+
+```text
+hwdownload,format=nv12,crop=…,scale=W:-2:flags=area,format=yuv420p,blackframe=…,signalstats,metadata=print
+```
+
+`hwdownload` cannot convert, and a VideoToolbox surface keeps its source's
+depth, so the download names `p010le` when the request's `VideoBitDepth` is
+above 8. An unknown depth is taken as 8; a 10-bit source without its depth,
+or a 4:2:2 one, fails the hardware attempt. `-skip_frame:v nokey` still applies, in `Window` and `Samples` modes
 alike. The VAAPI chain measures slightly different pixels (GPU scaling
 before the crop instead of area scaling after it). On a 4K HEVC Dolby Vision
 episode, a 1080p H.264 episode, and a 1080p movie, its credits keyframe

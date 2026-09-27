@@ -177,7 +177,7 @@ func (r Runner) reserveHardware(attempt Attempt) (hardwareDecode, func(), *Attem
 		device = playback.PickRenderDevice("")
 	}
 	hw.Device = device
-	if _, err := hardwareDecodeArgs(hw); err != nil {
+	if _, err := hardwareDecodeArgs(hw, false); err != nil {
 		release()
 		return hardwareDecode{}, nil, &AttemptError{Reason: ReasonUnsupported, Err: err}
 	}

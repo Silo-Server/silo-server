@@ -38,8 +38,9 @@ const errorLogLevel = "error"
 // applies only to the output it precedes.
 //
 // A hardware attempt adds the decode options of hw (see hwdecode.go) to the
-// input's options and, when its frames stay on the GPU, scales them there
-// (see buildStatsGraph). Audio decodes in software either way.
+// input's options. Its frames stay in hardware surfaces, which the stats
+// chain downloads, on VAAPI after scaling them on the GPU (see
+// buildStatsGraph). Audio decodes in software either way.
 func buildArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float64) ([]string, []byte, error) {
 	if (req.Window == nil) == (req.Samples == nil) {
 		return nil, nil, errors.New("request needs exactly one sampling mode")
@@ -53,7 +54,7 @@ func buildArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float
 			return nil, nil, errors.New("hardware decode needs a video output")
 		}
 		var err error
-		if decode, err = hardwareDecodeArgs(hw); err != nil {
+		if decode, err = hardwareDecodeArgs(hw, true); err != nil {
 			return nil, nil, err
 		}
 	}
