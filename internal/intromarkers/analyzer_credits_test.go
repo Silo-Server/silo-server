@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -89,6 +90,42 @@ func TestCreditsVersionCopyUsesTheCompatibleSource(t *testing.T) {
 	copied := patches[len(patches)-1]
 	if copied.FileID != 12 || copied.Algorithm != CreditsVersionCopyAlgorithm || copied.Start != 1468 || copied.End != 1558 {
 		t.Fatalf("copy patch = %+v, want 1468-1558 from the 1560-second source", copied)
+	}
+}
+
+// A credits marker that fails to write leaves the season group retryable,
+// so the next run writes it instead of skipping the group.
+func TestCreditsWriteFailureLeavesSeasonRetryable(t *testing.T) {
+	repo := &fakeIntroRepository{enabledLibraries: 1}
+	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
+	season := cachedCreditsSeason(t, analyzer, repo, 3)
+	repo.eligibleCandidates = season
+	failing := season[0].FileID
+	repo.patchErr = func(patch MarkerPatch) error {
+		if patch.Kind == kindCredits && patch.FileID == failing {
+			return errors.New("database unavailable")
+		}
+		return nil
+	}
+
+	summary, err := analyzer.Run(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary.CreditsAudioMarkersWritten != 2 || len(summary.Errors) == 0 {
+		t.Fatalf("summary %+v, want two credits written and the failure reported", summary)
+	}
+	var credits *SeasonState
+	for i, state := range repo.upsertedStates {
+		if state.MarkersWritten == 2 {
+			credits = &repo.upsertedStates[i]
+		}
+	}
+	if credits == nil {
+		t.Fatalf("season states %+v, want a credits state", repo.upsertedStates)
+	}
+	if credits.Status != seasonStatusFailed || credits.settled(time.Now()) {
+		t.Fatalf("credits state %+v, want an unsettled failed state", *credits)
 	}
 }
 

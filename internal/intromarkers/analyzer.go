@@ -1210,9 +1210,12 @@ func (a *Analyzer) storeFingerprint(ctx context.Context, kind markerKind, fp Fin
 // settleSeasonState records a group's analysis status. A failed extraction
 // (unlike a file with no audio to fingerprint) may succeed later, so the
 // group stays partial and is retried even though its inputs have not
-// changed.
+// changed. A failed status stands, since partial would settle it for a while.
 func settleSeasonState(state *SeasonState, status string, counts fingerprintCounts) {
 	state.Status = status
+	if status == seasonStatusFailed {
+		return
+	}
 	if failed := counts.failed + counts.deferred; failed > 0 {
 		state.Status = seasonStatusPartial
 		state.LastError = fmt.Sprintf("%d fingerprint extraction(s) failed", failed)

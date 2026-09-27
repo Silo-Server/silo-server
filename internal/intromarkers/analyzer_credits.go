@@ -161,6 +161,7 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 		byFileID[candidate.FileID] = candidate
 	}
 	limits := creditsLimitsFor(false)
+	errorsBefore := len(summary.Errors)
 	for fileID, segment := range segments {
 		if !shouldPatchGroupFile(fileID, opts.patchFileIDs) {
 			continue
@@ -179,6 +180,12 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 		return summary, err
 	}
 	state.MarkersWritten = summary.CreditsAudioMarkersWritten
+	// A marker that failed to write leaves the group unsettled, so the next
+	// run writes it instead of skipping the group until its inputs change.
+	if failed := len(summary.Errors) - errorsBefore; failed > 0 {
+		state.LastError = fmt.Sprintf("credits marker write failed for %d file(s)", failed)
+		return summary, persist(seasonStatusFailed)
+	}
 	return summary, persist(seasonStatusComplete)
 }
 
