@@ -128,10 +128,13 @@ export interface ActionBarProps {
   inWatchlist?: boolean;
   onRefresh?: (mode: RefreshItemMetadataMode) => void;
   isRefreshing?: boolean;
-  /** Re-detects local markers; an episode asks for the intro, the credits, or both. */
+  /** Re-detects local markers; without redetectKind the admin picks intro, credits, or both. */
   onRedetectMarkers?: (kind: RedetectMarkersKind) => void;
-  /** A movie has credits only, which the action then re-detects directly. */
-  redetectCreditsOnly?: boolean;
+  /**
+   * Re-detects this one kind directly, without the picker: credits for a movie,
+   * which has no intro, or intro for an episode on a server without redetect-markers.
+   */
+  redetectKind?: "intro" | "credits";
   isRedetectingMarkers?: boolean;
   onEditMetadata?: () => void;
   onMatchItem?: () => void;
@@ -187,7 +190,7 @@ export default function ActionBar({
   onRefresh,
   isRefreshing = false,
   onRedetectMarkers,
-  redetectCreditsOnly = false,
+  redetectKind,
   isRedetectingMarkers = false,
   onEditMetadata,
   onMatchItem,
@@ -788,15 +791,17 @@ export default function ActionBar({
                       closeMenu={closeOverflowMenu}
                       disabled={isRedetectingMarkers}
                       onAction={() =>
-                        redetectCreditsOnly
-                          ? onRedetectMarkers("credits")
-                          : setRedetectDialogOpen(true)
+                        redetectKind ? onRedetectMarkers(redetectKind) : setRedetectDialogOpen(true)
                       }
                     >
                       <RefreshCw
                         className={`size-4 ${isRedetectingMarkers ? "animate-spin" : ""}`}
                       />
-                      {redetectCreditsOnly ? "Re-detect Credits" : "Re-detect Markers"}
+                      {redetectKind === "credits"
+                        ? "Re-detect Credits"
+                        : redetectKind === "intro"
+                          ? "Re-detect Intro Markers"
+                          : "Re-detect Markers"}
                     </DetailOverflowMenuItem>
                   )}
                   {canCurateMetadata && onEditMetadata && (
@@ -871,7 +876,7 @@ export default function ActionBar({
           onConfirm={handleRefreshConfirm}
           isPending={isRefreshing}
         />
-        {isAdmin && onRedetectMarkers && !redetectCreditsOnly && (
+        {isAdmin && onRedetectMarkers && !redetectKind && (
           <RedetectMarkersDialog
             open={redetectDialogOpen}
             onOpenChange={setRedetectDialogOpen}
