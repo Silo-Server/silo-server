@@ -46,7 +46,7 @@ vi.mock("@/hooks/queries/catalog", () => ({
   useCatalogMetadataFilters: (...args: unknown[]) => mockUseCatalogFilters(...args),
 }));
 
-vi.mock("@/hooks/queries/people", () => ({
+vi.mock("@/hooks/queries/personSearch", () => ({
   usePersonSearch: (...args: unknown[]) => mockUsePersonSearch(...args),
 }));
 

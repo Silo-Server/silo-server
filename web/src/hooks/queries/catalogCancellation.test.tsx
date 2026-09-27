@@ -8,7 +8,7 @@ import { setProfileId } from "@/api/client";
 import { installPolicyStorageMocks } from "@/pages/admin-policy/policyTestUtils";
 import { useAudiobookGroups } from "./audiobookGroups";
 import { useMetadataAIStatus } from "./metadataAI";
-import { usePersonSearch } from "./people";
+import { usePersonSearch } from "./personSearch";
 import { personKeys } from "./keys";
 
 describe("catalog query cancellation", () => {
