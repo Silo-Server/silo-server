@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -59,6 +60,26 @@ func TestAdminEpisodeMarkersTransport(t *testing.T) {
 func adminCatalogIntroFixtureCases() []fixtureCase {
 	return []fixtureCase{
 		{name: "admin_episode_markers_refresh", operationID: "refreshAdminEpisodeMarkers", method: "POST", path: Prefix + "/admin/items/episode-1/refresh-markers", headers: bearer(adminToken), status: 202, schema: "#/components/schemas/AdminEpisodeMarkersStatus", assertHeaders: []string{"Content-Type"}, scenario: "Marker refresh acknowledges configured online or local sources."},
+		{name: "admin_marker_capabilities", operationID: "getAdminMarkerCapabilities", method: "GET", path: Prefix + "/admin/markers/capabilities", headers: bearer(adminToken), status: 200, schema: "#/components/schemas/AdminMarkerCapabilities", assertHeaders: []string{"Content-Type", "Cache-Control"}, scenario: "Marker capabilities report local movie credits support."},
 		{name: "admin_episode_intro_redetect", operationID: "redetectAdminEpisodeIntro", method: "POST", path: Prefix + "/admin/items/episode-1/redetect-intro", headers: bearer(adminToken), status: 202, schema: "#/components/schemas/AdminEpisodeMarkersStatus", assertHeaders: []string{"Content-Type"}, scenario: "Intro re-detection preserves the same local execution service and eligibility checks."},
+	}
+}
+
+func TestAdminMarkerCapabilities(t *testing.T) {
+	// Build discovery needs no marker service.
+	h := NewHandler(pilotDeps(nil, nil))
+	path := Prefix + "/admin/markers/capabilities"
+	requireProblem(t, do(t, h, "GET", path, "", nil), TypeAuthenticationRequired)
+	requireProblem(t, do(t, h, "GET", path, "", bearer(memberToken)), TypePermissionDenied)
+	rec := do(t, h, "GET", path, "", bearer(adminToken))
+	if rec.Code != 200 || rec.Header().Get("ETag") == "" {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["state"] != StateAvailable || got["movie_credits"] != true || got["allowed"] != true {
+		t.Fatalf("capabilities %v, want movie credits available", got)
 	}
 }
