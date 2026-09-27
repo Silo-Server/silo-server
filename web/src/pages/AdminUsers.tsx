@@ -9,7 +9,7 @@ import {
   useAdminUserCapabilities,
   useViewerIsOwner,
 } from "@/hooks/queries/admin/users";
-import { canManageAccount, canViewAsAccount } from "@/lib/accountOwner";
+import { accountRoleLabel, canManageAccount, canViewAsAccount } from "@/lib/accountOwner";
 import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
@@ -430,12 +430,9 @@ function AdminUsersPage() {
                     </TableCell>
                     <TableCell>{u.email}</TableCell>
                     <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        <Badge variant={u.role === "admin" ? "default" : "secondary"}>
-                          {u.role}
-                        </Badge>
-                        {u.is_owner && <Badge variant="outline">Owner</Badge>}
-                      </div>
+                      <Badge variant={u.role === "admin" ? "default" : "secondary"}>
+                        {accountRoleLabel(u)}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       {u.role === "admin" ? (
@@ -995,7 +992,7 @@ function UserForm({
               <div className="space-y-2">
                 <Label htmlFor={roleId}>Role</Label>
                 <Select
-                  value={role}
+                  value={user?.is_owner ? "owner" : role}
                   onValueChange={setRole}
                   disabled={user?.is_owner || ownAccount}
                 >
@@ -1003,6 +1000,7 @@ function UserForm({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    {user?.is_owner && <SelectItem value="owner">Owner</SelectItem>}
                     <SelectItem value="user">User</SelectItem>
                     <SelectItem value="admin" disabled={adminRoleLocked}>
                       Admin
