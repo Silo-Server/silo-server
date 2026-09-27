@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -138,21 +140,147 @@ func seedMovieFixture(t *testing.T, pool *pgxpool.Pool) *movieFixture {
 // order.
 func (f *movieFixture) listed(t *testing.T, repo *Repository, node string) []string {
 	t.Helper()
-	candidates, err := repo.ListMovieCandidates(t.Context(), node)
+	candidates, _, err := repo.ListMovieCandidates(t.Context(), node, nil, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return f.names(candidateIDs(candidates))
+}
+
+// names returns the names of the fixture files among ids, in order.
+func (f *movieFixture) names(ids []int) []string {
 	names := map[int]string{}
 	for name, id := range f.files {
 		names[id] = name
 	}
 	var got []string
-	for _, candidate := range candidates {
-		if name, ok := names[candidate.FileID]; ok {
+	for _, id := range ids {
+		if name, ok := names[id]; ok {
 			got = append(got, name)
 		}
 	}
 	return got
+}
+
+func candidateIDs(candidates []Candidate) []int {
+	ids := make([]int, 0, len(candidates))
+	for _, candidate := range candidates {
+		ids = append(ids, candidate.FileID)
+	}
+	return ids
+}
+
+// pagedMovieRepository records the pages of the scheduled movie listing.
+type pagedMovieRepository struct {
+	*Repository
+	mu     sync.Mutex
+	pages  [][]int
+	onList func()
+}
+
+func (r *pagedMovieRepository) ListMovieCandidates(ctx context.Context, node string, after *movieCandidateCursor, limit int) ([]Candidate, *movieCandidateCursor, error) {
+	candidates, next, err := r.Repository.ListMovieCandidates(ctx, node, after, limit)
+	r.mu.Lock()
+	r.pages = append(r.pages, candidateIDs(candidates))
+	onList := r.onList
+	r.mu.Unlock()
+	if onList != nil {
+		onList()
+	}
+	return candidates, next, err
+}
+
+func (r *pagedMovieRepository) listed() []int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Concat(r.pages...)
+}
+
+func pagedMovieAnalyzer(repo *pagedMovieRepository, sampler *fakeMovieSampler) *Analyzer {
+	return &Analyzer{
+		repo: repo, extractor: &fakeFingerprintExtractor{}, movieSampler: sampler, config: DefaultConfig("ffmpeg"),
+		node: "node-a", logger: slog.New(slog.DiscardHandler), moviePageSize: 1, workers: 1,
+	}
+}
+
+// The scheduled run lists movies a page at a time and analyzes each once,
+// even those that stay eligible after their analysis.
+func TestRunMoviesPagesCandidatesPostgres(t *testing.T) {
+	pool := movieTestPool(t)
+	f := seedMovieFixture(t, pool)
+	repo := &pagedMovieRepository{Repository: NewRepository(pool)}
+	if _, err := pagedMovieAnalyzer(repo, &fakeMovieSampler{}).RunMovies(t.Context(), nil); err != nil {
+		t.Fatalf("RunMovies: %v", err)
+	}
+	want := []string{"newer", "older", "mixed", "scannerCredits"}
+	if got := f.names(repo.listed()); !slices.Equal(got, want) {
+		t.Fatalf("listed across pages %v, want %v", got, want)
+	}
+	repo.mu.Lock()
+	pages := len(repo.pages)
+	repo.mu.Unlock()
+	if pages < len(want) {
+		t.Fatalf("%d pages, want at least %d with one movie per page", pages, len(want))
+	}
+	// Without video metadata they are decided unusable on every analysis
+	// and nothing is stored, so all of them are still eligible.
+	if got := f.listed(t, repo.Repository, "node-a"); !slices.Equal(got, want) {
+		t.Fatalf("candidates after the run %v, want %v still eligible", got, want)
+	}
+}
+
+// The movie budget covers listing the movies, and a spent budget stops the
+// run from listing further pages.
+func TestRunMoviesStopsPagingAtTheBudgetPostgres(t *testing.T) {
+	pool := movieTestPool(t)
+	f := seedMovieFixture(t, pool)
+	if _, err := pool.Exec(t.Context(), `UPDATE media_files SET codec_video = 'h264' WHERE file_path LIKE $1`, "/"+f.prefix+"%"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		// listing and sampling spend the budget when set.
+		listing, sampling bool
+		wantTails         int
+	}{
+		{name: "spent while analyzing", sampling: true, wantTails: 1},
+		{name: "spent while listing", listing: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			now := time.Date(2026, 9, 26, 3, 30, 0, 0, time.UTC)
+			spend := func() {
+				mu.Lock()
+				now = now.Add(61 * time.Minute)
+				mu.Unlock()
+			}
+			repo := &pagedMovieRepository{Repository: NewRepository(pool)}
+			sampler := &fakeMovieSampler{}
+			if tc.listing {
+				repo.onList = spend
+			}
+			if tc.sampling {
+				sampler.onSample = spend
+			}
+			analyzer := pagedMovieAnalyzer(repo, sampler)
+			analyzer.now = func() time.Time {
+				mu.Lock()
+				defer mu.Unlock()
+				return now
+			}
+			summary, err := analyzer.RunMovies(t.Context(), nil)
+			if err != nil {
+				t.Fatalf("RunMovies: %v", err)
+			}
+			repo.mu.Lock()
+			pages := len(repo.pages)
+			repo.mu.Unlock()
+			if pages != 1 || sampler.tailCount() != tc.wantTails || !summary.MovieBudgetExhausted {
+				t.Fatalf("%d pages, %d tail passes, summary %+v; want one page, %d tail passes, and the budget exhausted",
+					pages, sampler.tailCount(), summary, tc.wantTails)
+			}
+		})
+	}
 }
 
 func TestListMovieCandidatesPostgres(t *testing.T) {

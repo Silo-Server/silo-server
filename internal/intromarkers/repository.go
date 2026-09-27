@@ -393,13 +393,16 @@ func (r *Repository) IsFileInEnabledLibrary(ctx context.Context, fileID int) (bo
 	return true, nil
 }
 
-func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
+// scanCandidates scans candidates from rows. A query that selects more
+// columns after the candidate columns passes their destinations as extra;
+// after the scan they hold the last row's values.
+func scanCandidates(rows pgx.Rows, extra ...any) ([]Candidate, error) {
 	defer rows.Close()
 	var candidates []Candidate
 	for rows.Next() {
 		var c Candidate
 		var chaptersJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON, videoTrackJSON []byte
-		if err := rows.Scan(
+		if err := rows.Scan(append([]any{
 			&c.FileID,
 			&c.EpisodeID,
 			&c.SeasonID,
@@ -434,7 +437,7 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 			&c.CodecVideo,
 			&c.CodecAudio,
 			&videoTrackJSON,
-		); err != nil {
+		}, extra...)...); err != nil {
 			return nil, fmt.Errorf("scanning intro marker candidate: %w", err)
 		}
 		c.ChaptersHash = chaptersHash(chaptersJSON)
