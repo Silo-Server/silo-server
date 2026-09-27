@@ -198,8 +198,10 @@ func snapshot(v any) any {
 	return json.RawMessage(raw)
 }
 
-// urlInText matches an http(s) URL inside free text.
-var urlInText = regexp.MustCompile(`https?://[^\s"'<>]+`)
+// urlInText matches an http(s) URL token inside free text. It takes the
+// whole non-space run, so trailing punctuation lands in the query or path
+// that SanitizeURL then trims, and anything unparseable fails closed.
+var urlInText = regexp.MustCompile(`https?://\S+`)
 
 // errorText is an error's message safe to persist: URL errors are sanitized
 // structurally, and any other URL quoted in the text (a presigned S3 URL in an
