@@ -298,9 +298,13 @@ metadata (no video, or an all-intra codec) is decided on every analysis and
 never stored, and an unusable row an earlier build stored that way does not
 keep a movie out. Such movies, like movies whose credits come from a chapter,
 are listed on every run, but analyzing them reads no artifact and runs no
-ffmpeg. The run starts no new movie after 60
-minutes and reports `movie_budget_exhausted`; the remaining movies wait for
-the next run. Run summaries count `movies_considered` and
+ffmpeg. The run lists movies 200 at a time, each page starting after the
+last movie of the one before in that order, so a movie analyzed in this run
+that is still eligible is not listed again in it. The run starts no new
+movie, and lists no further page, once 60 minutes have passed since it
+started listing movies, and then reports `movie_budget_exhausted`; the
+remaining movies wait for the next run. Run summaries count
+`movies_considered` (the movies the run listed) and
 `movie_credits_markers_written`; the credits tail counters include movies.
 
 Playback analysis of a movie without credits analyzes that file alone, with

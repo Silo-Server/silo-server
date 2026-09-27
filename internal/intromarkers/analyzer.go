@@ -31,6 +31,9 @@ type Analyzer struct {
 	// means movieCreditsRunBudget. now, when set, replaces time.Now for it.
 	movieBudget time.Duration
 	now         func() time.Time
+	// moviePageSize is how many movies a scheduled run lists at a time;
+	// zero means movieCandidatePageSize.
+	moviePageSize int
 	// node names this server in recorded silence refinement failures, which
 	// only defer retries on the server that recorded them.
 	node string
@@ -75,7 +78,7 @@ type introRepository interface {
 	ListCandidatesForEpisode(ctx context.Context, episodeID string) ([]Candidate, error)
 	ListCandidatesForGroup(ctx context.Context, mediaFolderID int, seasonID, analysisGroupKey string) ([]Candidate, error)
 	ListChapterSilenceBackfillCandidates(ctx context.Context, limit int, cfg Config, node string) ([]Candidate, error)
-	ListMovieCandidates(ctx context.Context, node string) ([]Candidate, error)
+	ListMovieCandidates(ctx context.Context, node string, after *movieCandidateCursor, limit int) ([]Candidate, *movieCandidateCursor, error)
 	ListMovieCandidatesForItem(ctx context.Context, contentID string) ([]Candidate, error)
 	ListMovieCandidatesForFile(ctx context.Context, fileID int) ([]Candidate, error)
 	LoadSilenceRefinementAttempt(ctx context.Context, fileID int) (*SilenceRefinementAttempt, error)
@@ -322,8 +325,8 @@ func (a *Analyzer) run(ctx context.Context, progress ProgressFunc, passes runPas
 	}
 
 	report(moviesFrom, "Checking movies for credits")
-	movieSummary, err := a.runMovies(ctx, func(done, total int) {
-		report(moviesFrom+float64(done)/float64(total)*(100-moviesFrom), fmt.Sprintf("Checked %d/%d movies for credits", done, total))
+	movieSummary, err := a.runMovies(ctx, func(done int, budgetUsed float64) {
+		report(moviesFrom+budgetUsed*(100-moviesFrom), fmt.Sprintf("Checked %d movies for credits", done))
 	})
 	mergeRunSummary(&summary, movieSummary)
 	if err != nil {

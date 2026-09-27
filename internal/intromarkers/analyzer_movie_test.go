@@ -330,6 +330,23 @@ func TestAnalyzeMovieWithoutVisualsUsesChaptersOnly(t *testing.T) {
 	}
 }
 
+// The scheduled run lists movies a page at a time until none are left.
+func TestRunPagesMovies(t *testing.T) {
+	repo := &fakeIntroRepository{enabledLibraries: 1, movieCandidates: []Candidate{
+		movieCandidate(10, 7200), movieCandidate(11, 7200), movieCandidate(12, 7200), movieCandidate(13, 7200), movieCandidate(14, 7200),
+	}}
+	sampler := &fakeMovieSampler{}
+	analyzer := movieAnalyzer(repo, sampler)
+	analyzer.moviePageSize = 2
+	summary, err := analyzer.RunMovies(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RunMovies: %v", err)
+	}
+	if repo.movieListCalls != 3 || sampler.tailCount() != 5 || summary.MoviesConsidered != 5 || summary.MovieCreditsMarkersWritten != 5 {
+		t.Fatalf("%d listings, %d tail passes, summary %+v; want three pages covering five movies", repo.movieListCalls, sampler.tailCount(), summary)
+	}
+}
+
 // The scheduled run stops starting movies once the movie budget is spent;
 // the movie in progress finishes and the rest wait for the next run.
 func TestRunStopsMoviesAtTheBudget(t *testing.T) {
