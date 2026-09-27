@@ -24,6 +24,7 @@ type fakeIntroRepository struct {
 	seasonState        *SeasonState
 	upsertedStates     []SeasonState
 	patches            []MarkerPatch
+	withdrawals        []MarkerWithdrawal
 	silenceAttempts    map[int]SilenceRefinementAttempt
 	upsertedAttempts   []SilenceRefinementAttempt
 	artifacts          map[artifactSlot]Artifact
@@ -143,6 +144,13 @@ func (f *fakeIntroRepository) PatchMarker(_ context.Context, patch MarkerPatch) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.patches = append(f.patches, patch)
+	return true, nil
+}
+
+func (f *fakeIntroRepository) WithdrawMarker(_ context.Context, withdrawal MarkerWithdrawal) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.withdrawals = append(f.withdrawals, withdrawal)
 	return true, nil
 }
 

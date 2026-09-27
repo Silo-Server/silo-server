@@ -511,6 +511,16 @@ func (r *Repository) PatchMarker(ctx context.Context, patch MarkerPatch) (bool, 
 	return scanner.NewFileRepository(r.pool).UpsertMarkers(ctx, patch.FileID, update)
 }
 
+// WithdrawMarker clears a file's marker of withdrawal.Kind while it still
+// holds the scanner result withdrawal.Algorithm wrote, and reports whether it
+// did. A marker another source or detector has written since stays.
+func (r *Repository) WithdrawMarker(ctx context.Context, withdrawal MarkerWithdrawal) (bool, error) {
+	if withdrawal.Kind != kindIntro && withdrawal.Kind != kindCredits {
+		return false, fmt.Errorf("marker withdrawal for file %d has no marker kind", withdrawal.FileID)
+	}
+	return scanner.NewFileRepository(r.pool).WithdrawScannerMarker(ctx, withdrawal.FileID, withdrawal.Kind.String(), withdrawal.Algorithm, withdrawal.ExpectedFile)
+}
+
 func (patch MarkerPatch) markerUpdate() (scanner.MarkerUpdate, error) {
 	if patch.Kind != kindIntro && patch.Kind != kindCredits {
 		return scanner.MarkerUpdate{}, fmt.Errorf("marker patch for file %d has no marker kind", patch.FileID)

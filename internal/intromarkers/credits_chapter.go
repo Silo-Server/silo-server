@@ -17,6 +17,11 @@ var (
 	// aroundCreditsPattern matches scenes placed around the credits, such as
 	// "Post-Credits Scene", which are story rather than credits.
 	aroundCreditsPattern = regexp.MustCompile(`(?i)\b(post|mid|after|pre)[\s-]*credits?\b`)
+	// creditsScenePattern matches a credits or ending title that names a
+	// scene, such as "Credits Scene", "End Credits Stinger", or "Ending
+	// Scene", which is story that plays with or after the credits. Anime
+	// "ED: …" titles are exempt, since their song names can hold these words.
+	creditsScenePattern = regexp.MustCompile(`(?i)\b(scenes?|stingers?|tags?|bonus(es)?)\b`)
 	// explicitEDChapterPattern matches anime ending chapters: "ED", "ED2",
 	// "ED: Title". It is case-sensitive so "Ed's Story" is not an ending.
 	explicitEDChapterPattern = regexp.MustCompile(`^ED(\d+)?([ :-].*)?$`)
@@ -34,10 +39,16 @@ var (
 // scene.
 const maximumAmbiguousCreditsChapterSeconds = 180.0
 
-// DetectChapterCredits finds the credits chapter of a file of the given
-// duration: the last chapter titled like credits whose neighbors are not.
-// The chapter must start in the file's credits tail window and last as long
-// as credits can. Its end is the next chapter's start, which an authored
+// creditsChapterGapSeconds is the most time between two credits chapters that
+// still makes them adjacent. A wider gap is an unchaptered interval that the
+// credits run does not cross.
+const creditsChapterGapSeconds = 1.0
+
+// DetectChapterCredits finds the credits chapters of a file of the given
+// duration: the last run of adjacent chapters titled like credits, which
+// together form one segment, as when "Ending" is followed by "End Credits".
+// The run must start in the file's credits tail window and last as long as
+// credits can. Its end is the next chapter's start, which an authored
 // chapter after the credits keeps; the last chapter's end moves to the end of
 // the file when it lies within the EOF snap.
 func DetectChapterCredits(chapters []models.MediaChapter, duration float64, isMovie bool) (Segment, bool) {
@@ -55,41 +66,43 @@ func DetectChapterCredits(chapters []models.MediaChapter, duration float64, isMo
 		return !ambiguousCreditsTitle(title) || chapterSpan(sorted, i, duration) <= maximumAmbiguousCreditsChapterSeconds
 	}
 
-	for i := len(sorted) - 1; i >= 0; i-- {
-		if !isCredits(i) {
-			continue
-		}
-		// Two credits-like chapters in a row leave it unclear which one the
-		// credits are.
-		if (i > 0 && isCredits(i-1)) || (i+1 < len(sorted) && isCredits(i+1)) {
-			continue
-		}
-		chapter := sorted[i]
-		end := chapter.EndSeconds
-		bounded := i+1 < len(sorted) && sorted[i+1].StartSeconds > chapter.StartSeconds
-		if bounded {
-			end = sorted[i+1].StartSeconds
-		}
-		if end <= 0 || end > duration {
-			end = duration
-		}
-		// A following chapter, such as a post-credits scene, is not credits
-		// however short it is.
-		if !bounded {
-			end = snapCreditsEnd(end, duration)
-		}
-		length := end - chapter.StartSeconds
-		if chapter.StartSeconds < limits.windowStart(duration) || length < limits.minSeconds || length > limits.maxSeconds {
-			return Segment{}, false
-		}
-		return Segment{
-			Start:      chapter.StartSeconds,
-			End:        end,
-			Confidence: creditsChapterConfidence,
-			Algorithm:  CreditsChapterAlgorithm,
-		}, true
+	last := len(sorted) - 1
+	for last >= 0 && !isCredits(last) {
+		last--
 	}
-	return Segment{}, false
+	if last < 0 {
+		return Segment{}, false
+	}
+	first := last
+	for first > 0 && isCredits(first-1) &&
+		sorted[first-1].EndSeconds >= sorted[first].StartSeconds-creditsChapterGapSeconds {
+		first--
+	}
+
+	start := sorted[first].StartSeconds
+	end := sorted[last].EndSeconds
+	bounded := last+1 < len(sorted) && sorted[last+1].StartSeconds > sorted[last].StartSeconds
+	if bounded {
+		end = sorted[last+1].StartSeconds
+	}
+	if end <= 0 || end > duration {
+		end = duration
+	}
+	// A following chapter, such as a post-credits scene, is not credits
+	// however short it is.
+	if !bounded {
+		end = snapCreditsEnd(end, duration)
+	}
+	length := end - start
+	if start < limits.windowStart(duration) || length < limits.minSeconds || length > limits.maxSeconds {
+		return Segment{}, false
+	}
+	return Segment{
+		Start:      start,
+		End:        end,
+		Confidence: creditsChapterConfidence,
+		Algorithm:  CreditsChapterAlgorithm,
+	}, true
 }
 
 // chapterSpan is how long chapter i of sorted plays: until the next chapter
@@ -121,11 +134,12 @@ func isCreditsChapterTitle(title string, isMovie bool) bool {
 		aroundCreditsPattern.MatchString(title) {
 		return false
 	}
+	explicitED := explicitEDChapterPattern.MatchString(title)
 	if match := creditsChapterPattern.FindStringSubmatchIndex(title); match != nil {
-		return !creditsEndPattern.MatchString(title[match[5]:])
+		return !creditsEndPattern.MatchString(title[match[5]:]) && (explicitED || !creditsScenePattern.MatchString(title))
 	}
-	if explicitEDChapterPattern.MatchString(title) {
+	if explicitED {
 		return true
 	}
-	return !isMovie && endingChapterPattern.MatchString(title)
+	return !isMovie && endingChapterPattern.MatchString(title) && !creditsScenePattern.MatchString(title)
 }

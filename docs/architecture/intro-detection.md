@@ -109,20 +109,28 @@ Credits start in the file's tail window: the last 450 seconds of an episode,
 or its last 40 percent when that is shorter. They last 15 to 450 seconds. An
 end within 15 seconds of the end of the file becomes the end of the file.
 
-1. **Chapters.** The last chapter titled like credits (`Credits`,
-   `End Credits`, `End Titles`, `Outro`, case-sensitive `ED`, `ED2`, `ED: …`,
-   or `Ending`) is the credits (`credits-chapter:v1`, confidence 0.95).
-   Titles that name an intro, a scene around the credits (`Post-Credits`,
-   `Mid-Credits`, `After Credits`, `Pre-Credits`), the end of the credits
-   (`Credits End`), or a generated `Chapter NN` are not credits, and neither
-   is a match whose neighbor also matches. A chapter that counts as credits
-   only by `Ending` or `Outro` may last at most 180 seconds, in episodes and
-   movies alike. A longer one is taken for the story's final scene: it is
-   not credits and does not make a neighboring credits chapter ambiguous.
-   The end is the next chapter's start, even within 15 seconds of the end
-   of the file, so a short scene
-   after the credits keeps its own chapter; only the last chapter's end snaps
-   to the end of the file. Chapter credits are authoritative.
+1. **Chapters.** The last run of adjacent chapters titled like credits
+   (`Credits`, `End Credits`, `End Titles`, `Outro`, case-sensitive `ED`,
+   `ED2`, `ED: …`, or `Ending`) is the credits (`credits-chapter:v1`,
+   confidence 0.95), so an `ED` song followed by a `Credits` chapter is one
+   segment. Titles that name an intro, a scene around the credits
+   (`Post-Credits`, `Mid-Credits`, `After Credits`, `Pre-Credits`), the end
+   of the credits (`Credits End`), or a generated `Chapter NN` are not
+   credits. Neither is a credits or `Ending` title that names a scene
+   (`Credits Scene`, `Stinger`, `Tag`, `Bonus`), though an `ED: …` song
+   title may hold those words. A chapter that counts as credits only by
+   `Ending` or `Outro` may last at most 180 seconds, in episodes and movies
+   alike; a longer one is taken for the story's final scene, so it is not
+   credits and does not join a run. The whole run must fit the tail window and
+   length limits. The end is the next chapter's start, even within 15
+   seconds of the end of the file, so a short scene after the credits keeps
+   its own chapter; only a run that ends with the last chapter snaps to the
+   end of the file. Chapter credits are authoritative, so they outrank every
+   audio and video result. When a file's chapters no longer produce the
+   chapter or version-copy credits stored for it, such as after a remux or a
+   change to these title rules, analysis withdraws them and analyzes the
+   file's season again, even when its stored analysis still stands, so audio
+   or video can replace them.
 2. **Version copy.** Another file of the same episode whose duration is
    within three seconds copies the chapter result of the closest such
    version, keeping its distance from the end of the file (`credits-version-copy:v1`, confidence 0.85). Credits
@@ -298,7 +306,9 @@ online provider or a manual edit, are left alone.
 
 - **Chapters.** A credits chapter, by the episode title rules without
   `Ending`, which in a movie is as likely the story's ending, places the
-  credits (`credits-chapter:v1`). It needs no ffmpeg.
+  credits (`credits-chapter:v1`). It needs no ffmpeg. Chapter credits the
+  movie's chapters no longer produce are withdrawn, and the tail pass runs
+  in their place.
 - **Tail pass.** Otherwise the movie's tail window, its last 900 seconds or
   last quarter when that is shorter, is sampled every three seconds: the
   keyframe at or before each time, with the episode tail pass's statistics

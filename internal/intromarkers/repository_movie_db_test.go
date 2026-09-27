@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/migrations"
 )
 
@@ -382,6 +383,20 @@ func TestListMovieCandidatesPostgres(t *testing.T) {
 	}
 	if got, want := f.listed(t, repo, "node-a"), []string{"newer", "scannerCredits"}; !slices.Equal(got, want) {
 		t.Fatalf("candidates after replacing a file %v, want %v", got, want)
+	}
+	// Chapter credits keep a movie listed even with its tail stored, so a
+	// chapter rule change can withdraw them.
+	store("newer", ArtifactComplete)
+	if got, want := f.listed(t, repo, "node-a"), []string{"scannerCredits"}; !slices.Equal(got, want) {
+		t.Fatalf("candidates with the replaced file's tail stored %v, want %v", got, want)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_files SET credits_start = 6700, credits_end = 7200,
+		credits_markers_source = $2, credits_markers_algorithm = $3 WHERE id = $1`,
+		f.files["newer"], models.MarkerSourceScanner, CreditsChapterAlgorithm); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := f.listed(t, repo, "node-a"), []string{"newer", "scannerCredits"}; !slices.Equal(got, want) {
+		t.Fatalf("candidates with chapter credits over a stored tail %v, want %v", got, want)
 	}
 }
 

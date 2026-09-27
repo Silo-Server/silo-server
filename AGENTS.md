@@ -129,6 +129,7 @@ Sibling repos are usually checked out side-by-side in the same parent directory.
 - `silo-plugin-sdk` — public plugin SDK, protobuf contracts, generated plugin API, manifest
   helpers, runtime bootstrap.
 - `silo-plugins` — central plugin catalog / repository manifest.
+- `siloserver.org` — project website and user manual.
 - First-party plugins (`silo-plugin-metadata-tmdb`, `silo-plugin-metadata-tvdb`, …) each have
   their own repo.
 
@@ -144,6 +145,12 @@ done until each of these has been handled or ruled out:
   coordinated multi-repo changes over leaving a platform behind.
 - jellycompat parity was considered (does the Jellyfin surface need the same behavior?).
 - The relevant `docs/*-api.md` is updated when the contract changes.
+
+Separately, any change that leaves the user manual on siloserver.org wrong or incomplete (a
+setting, default, label, setup step, or feature behavior it describes) is not done until an
+issue is open on `Silo-Server/siloserver.org`.
+[Update the user manual](CONTRIBUTING.md#update-the-user-manual) covers when to open one and
+what goes in it.
 
 ## Building and verifying
 

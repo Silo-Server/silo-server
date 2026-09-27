@@ -232,6 +232,27 @@ func TestAnalyzeMoviePrefersChapters(t *testing.T) {
 	}
 }
 
+// A movie's chapter credits that its chapters no longer produce are withdrawn,
+// and the tail pass places its credits instead.
+func TestAnalyzeMovieWithdrawsStaleChapterCredits(t *testing.T) {
+	movie := movieCandidate(10, 7200)
+	start, end, scanner := 6700.0, 7200.0, models.MarkerSourceScanner
+	movie.CreditsStart, movie.CreditsEnd, movie.CreditsMarkersSource = &start, &end, &scanner
+	movie.CreditsMarkersAlgorithm = strPtr(CreditsChapterAlgorithm)
+	repo := &fakeIntroRepository{movieCandidates: []Candidate{movie}}
+	sampler := &fakeMovieSampler{}
+	summary, err := movieAnalyzer(repo, sampler).AnalyzeMovie(context.Background(), "movie")
+	if err != nil {
+		t.Fatalf("AnalyzeMovie: %v", err)
+	}
+	if len(repo.withdrawals) != 1 || repo.withdrawals[0].FileID != 10 || summary.CreditsChapterMarkersWithdrawn != 1 {
+		t.Fatalf("withdrawals %+v, summary %+v; want the stale chapter credits withdrawn", repo.withdrawals, summary)
+	}
+	if sampler.tailCount() != 1 {
+		t.Fatalf("%d tail passes, want the tail pass to run in the chapter's place", sampler.tailCount())
+	}
+}
+
 func TestAnalyzeMovieLeavesHigherPriorityCredits(t *testing.T) {
 	movie := movieCandidate(10, 7200)
 	start, end, online := 6500.0, 7200.0, models.MarkerSourceOnline

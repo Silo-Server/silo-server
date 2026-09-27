@@ -771,7 +771,7 @@ func waitForRefreshIdle(t *testing.T, handler *AdminIntroHandler, itemID string)
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for {
-		if _, running := handler.inFlight.Load(itemID); !running {
+		if !handler.itemRunning(itemID) {
 			return
 		}
 		if time.Now().After(deadline) {
@@ -1035,31 +1035,157 @@ func TestAdminRedetectItemMarkersRejectsIneligibleItemsAndModes(t *testing.T) {
 	}
 }
 
-// One local analysis runs per item at a time, whatever kinds each request
-// selects.
-func TestAdminRedetectItemMarkersDedupsInFlightItem(t *testing.T) {
-	analyzer := &fakeIntroAnalyzer{started: make(chan string, 1), release: make(chan struct{})}
+// One local analysis runs per item at a time. A request for kinds the running
+// analysis, with what is queued behind it, already covers reports
+// already_running; one for further kinds queues just those to run next.
+func TestAdminRedetectItemMarkersQueuesKindsTheRunningAnalysisLacks(t *testing.T) {
+	type kinds = intromarkers.EpisodeMarkerKinds
+	analyzer := &fakeIntroAnalyzer{
+		started: make(chan string, 2),
+		release: make(chan struct{}),
+		kinds:   make(chan intromarkers.EpisodeMarkerKinds, 2),
+	}
 	handler := redetectHandler(analyzer, "ep1", intromarkers.MarkerItemEpisode)
 	status, err := handler.RedetectItemMarkers(t.Context(), "ep1", RedetectMarkersIntro)
 	if err != nil || status != "queued" {
 		t.Fatalf("first: status=%q err=%v", status, err)
 	}
-	select {
-	case <-analyzer.started:
-	case <-time.After(time.Second):
-		t.Fatal("analysis did not start")
+	if got := receiveEpisodeKinds(t, analyzer); got != (kinds{Intro: true}) {
+		t.Fatalf("first analysis ran %+v, want intro", got)
 	}
-	for _, kind := range []string{RedetectMarkersIntro, RedetectMarkersCredits} {
-		status, err := handler.RedetectItemMarkers(t.Context(), "ep1", kind)
-		if err != nil || status != "already_running" {
-			t.Fatalf("%s while running: status=%q err=%v", kind, status, err)
+	<-analyzer.started
+
+	for _, step := range []struct {
+		name, kind string
+		redetect   bool
+		want       string
+	}{
+		{"intro again", RedetectMarkersIntro, false, "already_running"},
+		{"redetect-intro", "", true, "already_running"},
+		{"all", RedetectMarkersAll, false, "queued"},
+		{"credits after all", RedetectMarkersCredits, false, "already_running"},
+		{"all again", RedetectMarkersAll, false, "already_running"},
+	} {
+		if step.redetect {
+			status, err = handler.RefreshEpisodeMarkers(t.Context(), "ep1", "redetect")
+		} else {
+			status, err = handler.RedetectItemMarkers(t.Context(), "ep1", step.kind)
+		}
+		if err != nil || status != step.want {
+			t.Fatalf("%s while running: status=%q err=%v, want %q", step.name, status, err, step.want)
 		}
 	}
-	status, err = handler.RefreshEpisodeMarkers(t.Context(), "ep1", "redetect")
-	if err != nil || status != "already_running" {
-		t.Fatalf("redetect-intro while running: status=%q err=%v", status, err)
-	}
+
 	close(analyzer.release)
+	// The intro was running when all was asked for, so only credits run next.
+	if got := receiveEpisodeKinds(t, analyzer); got != (kinds{Credits: true}) {
+		t.Fatalf("queued analysis ran %+v, want credits only", got)
+	}
+	waitForRefreshIdle(t, handler, "ep1")
+	select {
+	case got := <-analyzer.kinds:
+		t.Fatalf("ran a third analysis for %+v", got)
+	default:
+	}
+
+	status, err = handler.RedetectItemMarkers(t.Context(), "ep1", RedetectMarkersIntro)
+	if err != nil || status != "queued" {
+		t.Fatalf("after idle: status=%q err=%v", status, err)
+	}
+	if got := receiveEpisodeKinds(t, analyzer); got != (kinds{Intro: true}) {
+		t.Fatalf("analysis after idle ran %+v, want intro", got)
+	}
+}
+
+// The frozen /api/v1 routes keep reporting already_running while any analysis
+// of the episode runs, and queue nothing.
+func TestAdminIntroV1RedetectDoesNotQueueBehindRunningAnalysis(t *testing.T) {
+	analyzer := &fakeIntroAnalyzer{
+		started: make(chan string, 1),
+		release: make(chan struct{}),
+		kinds:   make(chan intromarkers.EpisodeMarkerKinds, 2),
+	}
+	handler := redetectHandler(analyzer, "ep1", intromarkers.MarkerItemEpisode)
+	router := chi.NewRouter()
+	router.Post("/admin/items/{id}/redetect-intro", handler.HandleRedetectEpisodeIntro)
+
+	if status, err := handler.RedetectItemMarkers(t.Context(), "ep1", RedetectMarkersCredits); err != nil || status != "queued" {
+		t.Fatalf("credits: status=%q err=%v", status, err)
+	}
+	receiveEpisodeKinds(t, analyzer)
+	<-analyzer.started
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/items/ep1/redetect-intro", nil))
+	if rec.Code != http.StatusAccepted || decodeRedetectStatus(t, rec) != "already_running" {
+		t.Fatalf("v1 redetect while running: %d %s", rec.Code, rec.Body.String())
+	}
+
+	close(analyzer.release)
+	waitForRefreshIdle(t, handler, "ep1")
+	select {
+	case got := <-analyzer.kinds:
+		t.Fatalf("v1 request queued an analysis for %+v", got)
+	default:
+	}
+}
+
+// An online refresh and local analysis of the same item exclude each other
+// without queuing: the online refresh claims every kind, and itself does not
+// wait behind local analysis.
+func TestAdminMarkerRefreshOnlineAndLocalAnalysisDoNotQueue(t *testing.T) {
+	newHandler := func(analyzer *fakeIntroAnalyzer, online markerRefreshFunc) *AdminIntroHandler {
+		handler := redetectHandler(analyzer, "ep1", intromarkers.MarkerItemEpisode)
+		handler.Settings.(fakeMarkerSettings).values[markers.SettingMode] = string(markers.ModeBoth)
+		handler.FileResolver = fakeAdminIntroFileResolver{files: []*models.MediaFile{{ID: 42, EpisodeID: "ep1"}}}
+		handler.OnlineMarkers = online
+		return handler
+	}
+
+	t.Run("local analysis running", func(t *testing.T) {
+		analyzer := &fakeIntroAnalyzer{started: make(chan string, 1), release: make(chan struct{})}
+		handler := newHandler(analyzer, func(context.Context, *models.MediaFile) (*models.MediaFile, bool, error) {
+			t.Error("online refresh ran while local analysis was running")
+			return nil, false, nil
+		})
+		if status, err := handler.RedetectItemMarkers(t.Context(), "ep1", RedetectMarkersIntro); err != nil || status != "queued" {
+			t.Fatalf("intro: status=%q err=%v", status, err)
+		}
+		<-analyzer.started
+		if status, err := handler.RefreshEpisodeMarkers(t.Context(), "ep1", "refresh-v2"); err != nil || status != "already_running" {
+			t.Fatalf("online refresh while running: status=%q err=%v", status, err)
+		}
+		close(analyzer.release)
+		waitForRefreshIdle(t, handler, "ep1")
+	})
+
+	t.Run("online refresh running", func(t *testing.T) {
+		analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1)}
+		onlineStarted, releaseOnline := make(chan struct{}), make(chan struct{})
+		handler := newHandler(analyzer, func(_ context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
+			close(onlineStarted)
+			<-releaseOnline
+			start, end := 0.0, 60.0
+			refreshed := *file
+			refreshed.IntroStart, refreshed.IntroEnd = &start, &end
+			refreshed.CreditsStart, refreshed.CreditsEnd = &start, &end
+			return &refreshed, true, nil
+		})
+		if status, err := handler.RefreshEpisodeMarkers(t.Context(), "ep1", "refresh-v2"); err != nil || status != "queued" {
+			t.Fatalf("online refresh: status=%q err=%v", status, err)
+		}
+		<-onlineStarted
+		if status, err := handler.RedetectItemMarkers(t.Context(), "ep1", RedetectMarkersCredits); err != nil || status != "already_running" {
+			t.Fatalf("credits while online refresh runs: status=%q err=%v", status, err)
+		}
+		close(releaseOnline)
+		waitForRefreshIdle(t, handler, "ep1")
+		select {
+		case got := <-analyzer.kinds:
+			t.Fatalf("ran local analysis for %+v after a complete online refresh", got)
+		default:
+		}
+	})
 }
 
 // receiveEpisodeKinds waits for an episode analysis and returns its kinds.
