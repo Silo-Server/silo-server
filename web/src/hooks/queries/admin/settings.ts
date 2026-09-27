@@ -8,6 +8,7 @@ import {
   type SettingsBaseline,
 } from "@/api/v2/adminSettingsSnapshot";
 import { jellyfinCompatStatusKey } from "@/api/v2/jellyfinStatusCache";
+import { PASSWORD_RESET_CAPABILITY_KEY } from "@/hooks/queries/passwordReset";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   captureProfileRequestContext,
@@ -223,6 +224,8 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
             queryKey: adminKeys.users(),
             predicate: (query) => query.queryKey.at(-1) === "capabilities",
           }),
+          // Self-service reset also needs the public URL.
+          queryClient.invalidateQueries({ queryKey: PASSWORD_RESET_CAPABILITY_KEY }),
         );
       }
       if (keys.some((key) => key.startsWith("catalog.search."))) {

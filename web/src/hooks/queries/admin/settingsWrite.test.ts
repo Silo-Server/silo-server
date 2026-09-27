@@ -257,6 +257,7 @@ it("refreshes the link capabilities when the public URL changes", async () => {
   const listKey = ["admin", "users", "scope"];
   client.setQueryData(capabilitiesKey, { password_reset_link: false });
   client.setQueryData(listKey, []);
+  client.setQueryData(["auth", "password-reset-capability"], { state: "unavailable" });
   const { result } = renderHook(
     () => ({ read: useAdminServerSettings(), write: useUpdateServerSettings() }),
     { wrapper },
@@ -266,4 +267,5 @@ it("refreshes the link capabilities when the public URL changes", async () => {
   await waitFor(() => expect(result.current.write.isSuccess).toBe(true));
   expect(client.getQueryState(capabilitiesKey)?.isInvalidated).toBe(true);
   expect(client.getQueryState(listKey)?.isInvalidated).toBe(false);
+  expect(client.getQueryState(["auth", "password-reset-capability"])?.isInvalidated).toBe(true);
 });

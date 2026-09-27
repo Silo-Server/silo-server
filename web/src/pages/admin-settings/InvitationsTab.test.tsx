@@ -172,6 +172,7 @@ it("asks for the public URL before anyone fills in an invitation", () => {
   render(<InvitationsTab />, { wrapper: MemoryRouter });
   expect(screen.getByRole("button", { name: "Invite someone" })).toBeDisabled();
   expect(screen.getByTitle("Resend with a fresh link")).toBeDisabled();
+  expect(screen.getByTitle("Revoke this link")).not.toBeDisabled();
   expect(
     screen.getByText(/Set the Silo public URL to create invitation links/),
   ).toBeInTheDocument();

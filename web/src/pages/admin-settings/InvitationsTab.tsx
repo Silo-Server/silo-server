@@ -404,9 +404,9 @@ function InvitationManager() {
                     setRevokeError("");
                     setConfirmRevoke({ row: inv, profileContext: captureInvitationAuthority() });
                   }}
-                  resending={
-                    resend.isPending || revoke.isPending || !!resendError || publicURLMissing
-                  }
+                  resending={resend.isPending || revoke.isPending || !!resendError}
+                  // A fresh link needs the public URL; revoking one does not.
+                  resendBlocked={publicURLMissing}
                 />
               ))}
             </TableBody>
@@ -431,12 +431,14 @@ function InvitationRow({
   onResend,
   onRevoke,
   resending,
+  resendBlocked,
   resendAllowed,
 }: {
   invitation: Invitation;
   onResend: () => void;
   onRevoke: () => void;
   resending: boolean;
+  resendBlocked: boolean;
   resendAllowed: boolean;
 }) {
   const badge = STATUS_BADGES[invitation.status];
@@ -473,7 +475,7 @@ function InvitationRow({
               variant="ghost"
               size="sm"
               onClick={onResend}
-              disabled={resending}
+              disabled={resending || resendBlocked}
               title="Resend with a fresh link"
             >
               <RotateCw className="h-4 w-4" />
