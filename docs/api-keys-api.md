@@ -143,5 +143,5 @@ uses integer IDs, spells the tier field `tier` rather than `rate_tier`, has no
 cursor pagination, and does not use `ETag`/`If-Match` preconditions. Those routes are
 frozen: no feature work lands on them, and Silo 1.0 answers the whole `/api/v1`
 namespace with `410 Gone` and the `client_upgrade_required` problem code. Build
-against `/api/v2`. `POST /api/v1/api-keys` keeps its frozen behavior and still lets
-any login account create a key; only the v2 route requires an admin account.
+against `/api/v2`. Both `POST /api/v1/api-keys` and `POST /api/v2/api-keys` require
+an admin account; v1 refuses anyone else with `403 forbidden` before reading the body.
