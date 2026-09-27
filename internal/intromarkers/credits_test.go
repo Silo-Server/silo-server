@@ -63,7 +63,7 @@ func TestCreditsKeysAreNamespaced(t *testing.T) {
 	if key.ConfigHash != ArtifactConfigHash(ArtifactKindCreditsFingerprint, creditsFingerprintParams) {
 		t.Fatalf("credits key %+v is not derived from its kind and parameters", key)
 	}
-	if CreditsAnalysisConfigHash() == cfg.AnalysisConfigHash() {
+	if CreditsAnalysisConfigHash(true) == cfg.AnalysisConfigHash() || CreditsAnalysisConfigHash(false) == cfg.AnalysisConfigHash() {
 		t.Fatal("credits and intro season state must use different hashes")
 	}
 }

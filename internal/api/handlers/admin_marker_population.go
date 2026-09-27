@@ -36,7 +36,7 @@ func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, itemID 
 		return "", apiError(http.StatusConflict, "conflict", "Marker detection is disabled")
 	}
 	if mode == markers.ModeLocal {
-		return h.RefreshEpisodeMarkers(ctx, itemID, "refresh")
+		return h.refreshItemMarkers(ctx, itemID, "refresh", allMarkerKinds)
 	}
 	if h.OnlineMarkers == nil {
 		return "", apiError(http.StatusServiceUnavailable, "unavailable", "Online markers are not configured")
@@ -78,16 +78,21 @@ func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, itemID 
 			if file == nil || ctx.Err() != nil {
 				continue
 			}
-			effective, _, err := h.OnlineMarkers.Refresh(ctx, file)
+			effective, changed, err := h.OnlineMarkers.Refresh(ctx, file)
 			if err != nil {
 				h.logger.WarnContext(ctx, "online marker refresh failed", "file_id", file.ID, "error", err)
+			}
+			// Tell active playback of what the online sources changed now,
+			// whether or not local analysis follows.
+			if changed && effective != nil && h.MarkerUpdateNotifier != nil {
+				h.MarkerUpdateNotifier.MarkersUpdated(ctx, effective)
 			}
 			if localMarkersMissing(effective, kind) {
 				needsLocal = true
 			}
 		}
 		if local && needsLocal && ctx.Err() == nil {
-			if _, err := h.analyzeItem(ctx, itemID, kind); err != nil {
+			if _, err := h.analyzeItem(ctx, itemID, kind, allMarkerKinds); err != nil {
 				h.logger.WarnContext(ctx, "local marker refresh failed", "item_id", itemID, "kind", kind, "error", err)
 			}
 			h.notifyItemMarkerUpdates(ctx, itemID, kind, "refresh")

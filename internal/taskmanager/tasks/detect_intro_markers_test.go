@@ -14,15 +14,30 @@ import (
 )
 
 type fakeMarkerAnalysisRunner struct {
-	runs    int
-	summary intromarkers.RunSummary
-	err     error
+	// runs counts full runs; episodeRuns counts episode-only runs.
+	runs        int
+	episodeRuns int
+	summary     intromarkers.RunSummary
+	err         error
 	// block waits for ctx cancellation and returns its error.
 	block bool
+	// preflightErr is what this server's ffmpeg lacks for fingerprinting.
+	preflightErr error
 }
+
+func (f *fakeMarkerAnalysisRunner) Preflight(context.Context) error { return f.preflightErr }
 
 func (f *fakeMarkerAnalysisRunner) Run(ctx context.Context, _ intromarkers.ProgressFunc) (intromarkers.RunSummary, error) {
 	f.runs++
+	return f.result(ctx)
+}
+
+func (f *fakeMarkerAnalysisRunner) RunEpisodes(ctx context.Context, _ intromarkers.ProgressFunc) (intromarkers.RunSummary, error) {
+	f.episodeRuns++
+	return f.result(ctx)
+}
+
+func (f *fakeMarkerAnalysisRunner) result(ctx context.Context) (intromarkers.RunSummary, error) {
 	if f.block {
 		<-ctx.Done()
 		return f.summary, ctx.Err()
@@ -60,6 +75,30 @@ func TestDetectIntroMarkersSkipsWhenAnotherServerHoldsLock(t *testing.T) {
 	assertDetectMarkersSkipped(t, progress)
 }
 
+func TestDetectIntroMarkersWithoutChromaprintRunsWithoutLock(t *testing.T) {
+	// The lock is held elsewhere; a server that cannot fingerprint must neither
+	// take it nor skip its chapter-only pass because of it. It leaves movies,
+	// which the lock keeps to one server, to the lock holder.
+	runner := &fakeMarkerAnalysisRunner{preflightErr: errors.New("ffmpeg lacks chromaprint")}
+	lock := &fakeClusterLock{err: errors.New("lock must not be consulted")}
+	if err := newTestDetectMarkersTask(runner, lock).Execute(t.Context(), &fakeProgress{}); err != nil {
+		t.Fatalf("Execute = %v, want nil", err)
+	}
+	if runner.episodeRuns != 1 || runner.runs != 0 || lock.released != 0 {
+		t.Fatalf("episode runs=%d full runs=%d released=%d, want one unlocked episode-only run", runner.episodeRuns, runner.runs, lock.released)
+	}
+}
+
+func TestDetectIntroMarkersPreflightCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	runner := &fakeMarkerAnalysisRunner{preflightErr: context.Canceled}
+	err := newTestDetectMarkersTask(runner, &fakeClusterLock{acquired: true}).Execute(ctx, &fakeProgress{})
+	if !errors.Is(err, context.Canceled) || runner.runs != 0 {
+		t.Fatalf("Execute error=%v runs=%d, want context.Canceled and no run", err, runner.runs)
+	}
+}
+
 func TestDetectIntroMarkersLockErrorFailsRun(t *testing.T) {
 	runner := &fakeMarkerAnalysisRunner{}
 	lockErr := errors.New("database unavailable")
@@ -77,8 +116,8 @@ func TestDetectIntroMarkersReleasesLock(t *testing.T) {
 		if err := newTestDetectMarkersTask(runner, lock).Execute(t.Context(), progress); err != nil {
 			t.Fatalf("Execute = %v", err)
 		}
-		if runner.runs != 1 || lock.released != 1 {
-			t.Fatalf("runs=%d released=%d, want 1/1", runner.runs, lock.released)
+		if runner.runs != 1 || runner.episodeRuns != 0 || lock.released != 1 {
+			t.Fatalf("runs=%d episode runs=%d released=%d, want one full locked run", runner.runs, runner.episodeRuns, lock.released)
 		}
 		var summary intromarkers.RunSummary
 		if err := json.Unmarshal(progress.resultData, &summary); err != nil || summary.LibrariesScanned != 2 {

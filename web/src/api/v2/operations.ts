@@ -151,6 +151,7 @@ export const v2Operations = {
   "GET /api/v2/admin/logs/audit": "listAdminAuditLogs",
   "GET /api/v2/admin/logs/ws": "connectAdminLogsSocket",
   "GET /api/v2/admin/logs/ws/capabilities": "getAdminLogsSocketCapabilities",
+  "GET /api/v2/admin/markers/capabilities": "getAdminMarkerCapabilities",
   "GET /api/v2/admin/markers/files/{fileId}/history": "listAdminFileMarkerHistory",
   "GET /api/v2/admin/markers/history": "listAdminMarkerHistory",
   "GET /api/v2/admin/markers/items/{id}/history": "listAdminItemMarkerHistory",

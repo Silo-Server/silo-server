@@ -28,7 +28,8 @@ var (
 // DetectChapterCredits finds the credits chapter of a file of the given
 // duration: the last chapter titled like credits whose neighbors are not.
 // The chapter must start in the file's credits tail window and last as long
-// as credits can; its end is the next chapter's start, moved to the end of
+// as credits can. Its end is the next chapter's start, which an authored
+// chapter after the credits keeps; the last chapter's end moves to the end of
 // the file when it lies within the EOF snap.
 func DetectChapterCredits(chapters []models.MediaChapter, duration float64, isMovie bool) (Segment, bool) {
 	if duration <= 0 || len(chapters) == 0 {
@@ -50,13 +51,18 @@ func DetectChapterCredits(chapters []models.MediaChapter, duration float64, isMo
 		}
 		chapter := sorted[i]
 		end := chapter.EndSeconds
-		if i+1 < len(sorted) && sorted[i+1].StartSeconds > chapter.StartSeconds {
+		bounded := i+1 < len(sorted) && sorted[i+1].StartSeconds > chapter.StartSeconds
+		if bounded {
 			end = sorted[i+1].StartSeconds
 		}
 		if end <= 0 || end > duration {
 			end = duration
 		}
-		end = snapCreditsEnd(end, duration)
+		// A following chapter, such as a post-credits scene, is not credits
+		// however short it is.
+		if !bounded {
+			end = snapCreditsEnd(end, duration)
+		}
 		length := end - chapter.StartSeconds
 		if chapter.StartSeconds < limits.windowStart(duration) || length < limits.minSeconds || length > limits.maxSeconds {
 			return Segment{}, false

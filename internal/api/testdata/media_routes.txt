@@ -170,6 +170,7 @@ GET /api/v2/admin/logs/audit	non-media
 GET /api/v2/admin/logs/ws	non-media
 POST /api/v2/admin/logs/ws-ticket	non-media
 GET /api/v2/admin/logs/ws/capabilities	non-media
+GET /api/v2/admin/markers/capabilities	non-media
 GET /api/v2/admin/markers/files/{fileId}/history	non-media
 GET /api/v2/admin/markers/history	non-media
 GET /api/v2/admin/markers/items/{id}/history	non-media
@@ -1334,6 +1335,7 @@ GET /api/v2/admin/logs/audit	non-media
 GET /api/v2/admin/logs/ws	non-media
 POST /api/v2/admin/logs/ws-ticket	non-media
 GET /api/v2/admin/logs/ws/capabilities	non-media
+GET /api/v2/admin/markers/capabilities	non-media
 GET /api/v2/admin/markers/files/{fileId}/history	non-media
 GET /api/v2/admin/markers/history	non-media
 GET /api/v2/admin/markers/items/{id}/history	non-media

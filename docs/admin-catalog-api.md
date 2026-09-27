@@ -223,14 +223,23 @@ these curation actions.
 
 `POST /api/v2/admin/items/{id}/refresh-markers` and
 `POST /api/v2/admin/items/{id}/redetect-intro` require acting-administrator
-authorization. Both retain the existing local analyzer, which finds an episode's
-intros and end credits and a movie's end credits. Movie credits are best effort,
-and movies never get local intros, including through `redetect-intro`. For local
-analysis the item must be an episode or a movie (any other item returns `400`),
-have media files, and have at least one in a library with marker detection
-enabled: a series or mixed library for an episode, a movie or mixed library for
-a movie. Marker settings must allow local analysis; off and online-only modes
+authorization. Both run the existing local analyzer. `refresh-markers` finds an
+episode's intros and end credits, or a movie's end credits. Movie credits are
+best effort, and movies never get local intros. `redetect-intro`, like the v1
+routes, finds episode intros only and answers any other item, a movie
+included, with `400`. For local analysis the item must exist, have media
+files, and have at least one in a library with marker detection enabled: a
+series or mixed library for an episode, a movie or mixed library for a movie.
+`refresh-markers` answers an item that is neither an episode nor a movie with
+`400`. Marker settings must allow local analysis; off and online-only modes
 return `409`. Unconfigured dependencies return `503`.
+
+`GET /api/v2/admin/markers/capabilities` tells a client whether it can send a
+movie to `refresh-markers`: `movie_credits: true` means the server accepts movie
+IDs there and looks for their credits locally. Servers without the field
+analyze episodes only and answer a movie with `400`. The document describes the
+build; marker settings and library switches still decide whether an item is
+analyzed.
 
 Both return `202` with `status: "queued"` or `status: "already_running"`.
 These statuses acknowledge process-local background work. There is no persisted

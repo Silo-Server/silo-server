@@ -248,9 +248,28 @@ func (a *Analyzer) ffmpegAcquirer() func(context.Context) (func(), error) {
 
 type ProgressFunc func(percent float64, message string)
 
+// Preflight reports what this server's ffmpeg lacks for Chromaprint
+// comparison. Without it, Run still reads chapters and refines them with
+// silence, but compares no season groups.
+func (a *Analyzer) Preflight(ctx context.Context) error {
+	return a.extractor.Preflight(ctx)
+}
+
 // Run analyzes every library with marker detection enabled: episodes for
 // intros and credits, then movies for credits within the movie budget.
 func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, error) {
+	return a.run(ctx, progress, true)
+}
+
+// RunEpisodes analyzes the episodes of every library with marker detection
+// enabled, as Run does, and leaves movies alone. A server without
+// Chromaprint runs it outside the cluster lock, so the movie pass, which
+// does not need Chromaprint, stays with the lock holder.
+func (a *Analyzer) RunEpisodes(ctx context.Context, progress ProgressFunc) (RunSummary, error) {
+	return a.run(ctx, progress, false)
+}
+
+func (a *Analyzer) run(ctx context.Context, progress ProgressFunc, movies bool) (RunSummary, error) {
 	report := func(percent float64, message string) {
 		if progress != nil {
 			progress(percent, message)
@@ -266,6 +285,12 @@ func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, 
 	if libraries == 0 {
 		report(100, "No libraries with marker detection enabled")
 		return summary, nil
+	}
+
+	if !movies {
+		episodeSummary, err := a.runEpisodes(ctx, report)
+		mergeRunSummary(&summary, episodeSummary)
+		return summary, err
 	}
 
 	// Episodes take the first 85 percent of the progress bar, movies the rest.
@@ -387,10 +412,16 @@ type EpisodeMarkerKinds struct {
 func (k EpisodeMarkerKinds) Any() bool { return k.Intro || k.Credits }
 
 // AnalyzeEpisode analyzes the season groups of an episode's files for every
-// marker kind, comparing each group again even when its stored analysis
-// still stands. Admin refresh uses it.
+// marker kind, as AnalyzeEpisodeKinds does. It is the all-kinds shorthand.
 func (a *Analyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (RunSummary, error) {
-	return a.analyzeEpisode(ctx, episodeID, EpisodeMarkerKinds{Intro: true, Credits: true}, true)
+	return a.AnalyzeEpisodeKinds(ctx, episodeID, EpisodeMarkerKinds{Intro: true, Credits: true})
+}
+
+// AnalyzeEpisodeKinds analyzes the season groups of an episode's files for
+// the kinds selected, comparing each group again even when its stored
+// analysis still stands. Admin refresh uses it.
+func (a *Analyzer) AnalyzeEpisodeKinds(ctx context.Context, episodeID string, kinds EpisodeMarkerKinds) (RunSummary, error) {
+	return a.analyzeEpisode(ctx, episodeID, kinds, true)
 }
 
 // AnalyzeEpisodeForPlayback analyzes only the marker kinds a played file
@@ -1260,9 +1291,12 @@ func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidat
 // settleSeasonState records a group's analysis status. A failed extraction
 // (unlike a file with no audio to fingerprint) may succeed later, so the
 // group stays partial and is retried even though its inputs have not
-// changed.
+// changed. A failed status stands, since partial would settle it for a while.
 func settleSeasonState(state *SeasonState, status string, counts fingerprintCounts) {
 	state.Status = status
+	if status == seasonStatusFailed {
+		return
+	}
 	if failed := counts.failed + counts.deferred; failed > 0 {
 		state.Status = seasonStatusPartial
 		state.LastError = fmt.Sprintf("%d fingerprint extraction(s) failed", failed)
