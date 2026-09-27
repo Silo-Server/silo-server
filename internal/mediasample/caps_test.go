@@ -188,6 +188,10 @@ func TestRequire(t *testing.T) {
 	if err := (Capabilities{}).Require(silence); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "silencedetect") {
 		t.Fatalf("without silencedetect: %v", err)
 	}
+	sampled := Request{Samples: &Samples{Seconds: []float64{1}}}
+	if err := (Capabilities{}).Require(sampled); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "sampled input list") {
+		t.Fatalf("without sampled input lists: %v", err)
+	}
 
 	tail := Request{
 		Audio: &AudioOutput{Fingerprint: true, Silence: &SilenceParams{NoiseDB: -50, MinSeconds: 0.5}},
