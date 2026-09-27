@@ -483,6 +483,38 @@ func waitForLockWait(t *testing.T, r *UserRepository) {
 	}
 }
 
+func TestKeyMutationNeedsTheCheckedStandingPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	owner := testRoleAccount(t, r, models.RoleAdmin)
+	if _, err := r.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = $1`, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	admin := testRoleAccount(t, r, models.RoleAdmin)
+	keys := NewAPIKeyRepository(r.pool)
+	checked := AccountStanding{Role: models.RoleAdmin, IssuerID: owner.ID, IssuerIsOwner: true}
+	key, err := keys.CreateForStanding(t.Context(), admin.ID, checked, "admin key", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := APIKeyPrecondition{Any: true, Standing: &checked}
+	if _, err := keys.UpdateTierConditional(t.Context(), key.ID, "elevated", guard); err != nil {
+		t.Fatalf("tier change under an unchanged standing: %v", err)
+	}
+	other := testRoleAccount(t, r, models.RoleAdmin)
+	if err := r.TransferOwnership(t.Context(), owner.ID, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keys.UpdateTierConditional(t.Context(), key.ID, "standard", guard); !errors.Is(err, ErrAccountChanged) {
+		t.Fatalf("tier change by a former owner: %v", err)
+	}
+	if err := keys.DeleteByAdminConditional(t.Context(), key.ID, guard); !errors.Is(err, ErrAccountChanged) {
+		t.Fatalf("revocation by a former owner: %v", err)
+	}
+	if n, _ := countTestCredentials(t, r, admin.ID); n != 1 {
+		t.Fatalf("admin keys after refused changes: %d", n)
+	}
+}
+
 func lockedOwnerActor(t *testing.T, r *UserRepository, id int) (OwnerActor, error) {
 	t.Helper()
 	tx, err := r.pool.Begin(t.Context())

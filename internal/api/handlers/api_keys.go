@@ -75,19 +75,19 @@ func (h *APIKeyHandler) createAdminKey(ctx context.Context, userID int, label st
 }
 
 // checkOwnerKey is checkOwnerAccount for the account holding key id.
-func (h *APIKeyHandler) checkOwnerKey(ctx context.Context, id int64) error {
+// It returns the standing it checked, for the guarded write to hold.
+func (h *APIKeyHandler) checkOwnerKey(ctx context.Context, id int64) (*auth.AccountStanding, error) {
 	if h.Owners == nil {
-		return nil
+		return nil, nil
 	}
 	key, err := h.repo.GetMetadataByID(ctx, id)
 	if errors.Is(err, auth.ErrAPIKeyNotFound) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = h.checkOwnerAccount(ctx, key.UserID)
-	return err
+	return h.checkOwnerAccount(ctx, key.UserID)
 }
 
 // NewAPIKeyHandler creates a new APIKeyHandler.
@@ -315,14 +315,19 @@ func (h *APIKeyHandler) HandleAdminDeleteAPIKey(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid API key ID")
 		return
 	}
-	if err := h.checkOwnerKey(r.Context(), id); err != nil {
+	standing, err := h.checkOwnerKey(r.Context(), id)
+	if err != nil {
 		writeAPIError(w, err)
 		return
 	}
 
-	if err := h.repo.DeleteByAdmin(r.Context(), id); err != nil {
+	if err := h.repo.DeleteByAdminConditional(r.Context(), id, auth.APIKeyPrecondition{Any: true, Standing: standing}); err != nil {
 		if errors.Is(err, auth.ErrAPIKeyNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "API key not found")
+			return
+		}
+		if errors.Is(err, auth.ErrAccountChanged) {
+			writeAPIError(w, ownerError(err))
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete API key")
@@ -368,14 +373,19 @@ func (h *APIKeyHandler) HandleAdminUpdateTier(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "bad_request", "Tier must be 'standard' or 'elevated'")
 		return
 	}
-	if err := h.checkOwnerKey(r.Context(), id); err != nil {
+	standing, err := h.checkOwnerKey(r.Context(), id)
+	if err != nil {
 		writeAPIError(w, err)
 		return
 	}
 
-	if err := h.repo.UpdateTier(r.Context(), id, req.Tier); err != nil {
+	if _, err := h.repo.UpdateTierConditional(r.Context(), id, req.Tier, auth.APIKeyPrecondition{Any: true, Standing: standing}); err != nil {
 		if errors.Is(err, auth.ErrAPIKeyNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "API key not found")
+			return
+		}
+		if errors.Is(err, auth.ErrAccountChanged) {
+			writeAPIError(w, ownerError(err))
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update tier")
@@ -467,21 +477,25 @@ func (h *APIKeyHandler) ListAdminAPIKeysPage(ctx context.Context, after *auth.AP
 	return out, more, nil
 }
 func (h *APIKeyHandler) UpdateAdminAPIKeyTier(ctx context.Context, id int64, tier string, guard auth.APIKeyPrecondition) (*APIKeyConfiguration, error) {
-	if err := h.checkOwnerKey(ctx, id); err != nil {
-		return nil, err
-	}
-	key, err := h.repo.UpdateTierConditional(ctx, id, tier, guard)
+	standing, err := h.checkOwnerKey(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	guard.Standing = standing
+	key, err := h.repo.UpdateTierConditional(ctx, id, tier, guard)
+	if err != nil {
+		return nil, ownerError(err)
 	}
 	out := apiKeyConfigurationOf(key)
 	return &out, nil
 }
 func (h *APIKeyHandler) DeleteAdminAPIKey(ctx context.Context, id int64, guard auth.APIKeyPrecondition) error {
-	if err := h.checkOwnerKey(ctx, id); err != nil {
+	standing, err := h.checkOwnerKey(ctx, id)
+	if err != nil {
 		return err
 	}
-	return h.repo.DeleteByAdminConditional(ctx, id, guard)
+	guard.Standing = standing
+	return ownerError(h.repo.DeleteByAdminConditional(ctx, id, guard))
 }
 
 func (h *APIKeyHandler) ListAdminUserAPIKeysPage(ctx context.Context, userID int, after *auth.APIKeyPageKey, limit int) ([]AdminAPIKeyListItem, bool, error) {

@@ -109,6 +109,12 @@ func (r *Repository) Resend(ctx context.Context, id int64, input models.CreateIn
 		return nil, err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	// Lock the resending account before the invitation row: an ownership
+	// transfer locks accounts before it revokes admin invitations, and the
+	// opposite order would deadlock against it.
+	if err := auth.LockAccountsInOrder(ctx, tx, int(input.InvitedBy)); err != nil {
+		return nil, err
+	}
 	prior, err := scanInvitation(tx.QueryRow(ctx, `SELECT `+invitationColumns+invitationFrom+`WHERE i.id=$1 FOR UPDATE OF i`, id))
 	if err != nil {
 		return nil, err

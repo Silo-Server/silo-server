@@ -21,6 +21,10 @@ var ErrAPIKeyPreconditionInvalid = errors.New("invalid API key revision precondi
 type APIKeyPrecondition struct {
 	Revision int64
 	Any      bool
+	// Standing, when set, is what the Owner rules saw on the key's account
+	// and the administrator changing it. The change applies only while both
+	// accounts still stand that way (ErrAccountChanged otherwise).
+	Standing *AccountStanding
 }
 
 func (p APIKeyPrecondition) validate() error {
@@ -128,6 +132,11 @@ func (r *APIKeyRepository) ListAllPage(ctx context.Context, after *APIKeyPageKey
 }
 
 func lockAPIKeyMetadata(ctx context.Context, tx pgx.Tx, id int64, guard APIKeyPrecondition) (*models.APIKeyMetadata, error) {
+	if guard.Standing != nil {
+		if err := lockKeyStanding(ctx, tx, id, *guard.Standing); err != nil {
+			return nil, err
+		}
+	}
 	current, err := scanAPIKeyMetadata(tx.QueryRow(ctx, `SELECT `+apiKeyMetadataColumns+` FROM api_keys ak WHERE ak.id=$1 FOR UPDATE`, id))
 	if err != nil {
 		return nil, err
@@ -137,6 +146,35 @@ func lockAPIKeyMetadata(ctx context.Context, tx pgx.Tx, id int64, guard APIKeyPr
 	}
 	return current, nil
 }
+
+// lockKeyStanding share-locks the key's account and the administrator in id
+// order before the key row is locked, the order an ownership transfer takes
+// accounts and then keys, and requires both to keep the checked standing. A
+// key's account never changes, so reading it unlocked is safe. A missing key
+// passes, so the caller reports it the way it always has.
+func lockKeyStanding(ctx context.Context, tx pgx.Tx, id int64, standing AccountStanding) error {
+	var userID int
+	err := tx.QueryRow(ctx, `SELECT user_id FROM api_keys WHERE id=$1`, id).Scan(&userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := LockAccountsInOrder(ctx, tx, userID, standing.IssuerID); err != nil {
+		return err
+	}
+	var same bool
+	err = tx.QueryRow(ctx, `
+		SELECT u.role = $3 AND u.is_owner = $4 AND a.role = 'admin' AND a.enabled AND a.is_owner = $5
+		FROM users u, users a WHERE u.id = $1 AND a.id = $2`,
+		userID, standing.IssuerID, standing.Role, standing.IsOwner, standing.IssuerIsOwner).Scan(&same)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !same {
+		return ErrAccountChanged
+	}
+	return err
+}
+
 func (r *APIKeyRepository) UpdateTierConditional(ctx context.Context, id int64, tier string, guard APIKeyPrecondition) (*models.APIKeyMetadata, error) {
 	if tier != apiKeyRateTierStandard && tier != apiKeyRateTierElevated {
 		return nil, ErrInvalidAPIKeyTier

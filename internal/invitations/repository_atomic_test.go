@@ -654,3 +654,56 @@ func TestInvitationListPageDB(t *testing.T) {
 		}
 	}
 }
+
+// TestAdminInvitationResendLocksAccountBeforeInvitationPostgres holds the
+// Owner row the way an ownership transfer does and checks that a resend waits
+// on it before locking the invitation, so the transfer can still revoke the
+// invitation instead of deadlocking.
+func TestAdminInvitationResendLocksAccountBeforeInvitationPostgres(t *testing.T) {
+	f := atomicInvitationDB(t)
+	if _, err := f.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	input := models.CreateInvitationInput{Email: "admin@example.invalid", Role: models.RoleAdmin, InvitedBy: 1, ExpiresAt: time.Now().Add(time.Hour)}
+	prior, err := f.repo.Create(t.Context(), input, HashToken("prior"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	transfer, err := f.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = transfer.Rollback(context.WithoutCancel(t.Context())) }()
+	if _, err := transfer.Exec(t.Context(), `SELECT 1 FROM users WHERE id = 1 FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.repo.Resend(t.Context(), prior.ID, input, HashToken("replacement"))
+		done <- err
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	for {
+		var blocked bool
+		if err := f.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE application_name=$1 AND wait_event_type='Lock')`, f.schema).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			break
+		}
+		runtime.Gosched()
+	}
+	if _, err := transfer.Exec(t.Context(), `SET LOCAL lock_timeout = '2s'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := transfer.Exec(t.Context(), `UPDATE invitations SET revoked_at = clock_timestamp() WHERE role = 'admin' AND accepted_at IS NULL AND revoked_at IS NULL`); err != nil {
+		t.Fatalf("the resend locked the invitation before the account: %v", err)
+	}
+	if err := transfer.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; !errors.Is(err, ErrNotClaimable) {
+		t.Fatalf("resend of an invitation the transfer revoked: %v", err)
+	}
+}
