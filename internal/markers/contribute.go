@@ -168,18 +168,30 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 	return outcomes, nil
 }
 
-// urlInText matches an http(s) URL token inside free text. It takes the
-// whole non-space run, so trailing punctuation lands in the query or path
-// that SanitizeURL then trims, and anything unparseable fails closed.
-var urlInText = regexp.MustCompile(`https?://\S+`)
+// urlInText matches a URL token of any scheme (postgres://, HTTPS://) inside
+// free text. It takes the whole non-space run, so trailing punctuation lands
+// in the query or path that SanitizeURL then trims, and anything unparseable
+// fails closed.
+var urlInText = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://\S+`)
 
-// submissionErrorText is a provider error's message safe to log. URL errors
-// are sanitized structurally; a URL quoted in other error text (gRPC status
-// text from a plugin, say) loses its query, fragment and userinfo, where
-// credentials travel.
+// authSchemeInText matches a credential after an HTTP auth scheme word.
+var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)\s+[^\s"',;]+`)
+
+// secretPairInText matches a secret-named key followed by ":" or "=" and its
+// value, as in "api_key=abc" or `"x-api-key": "abc"`. The key markers mirror
+// logredact.SecretKey.
+var secretPairInText = regexp.MustCompile(`(?i)([\w.-]*(?:password|secret|token|api[_-]?key|authorization|cookie)[\w.-]*"?\s*[:=]\s*"?)[^\s"',;&]+`)
+
+// submissionErrorText is a provider error's message safe to log and store.
+// URL errors are sanitized structurally; in other error text (gRPC status
+// text from a plugin, say) a quoted URL loses its query, fragment and
+// userinfo, and auth-scheme or key=value secrets are masked. It is best
+// effort over free text, not a guarantee.
 func submissionErrorText(err error) string {
 	msg := logredact.SanitizeURLError(err).Error()
-	return urlInText.ReplaceAllStringFunc(msg, logredact.SanitizeURL)
+	msg = urlInText.ReplaceAllStringFunc(msg, logredact.SanitizeURL)
+	msg = authSchemeInText.ReplaceAllString(msg, "${1} "+logredact.Placeholder)
+	return secretPairInText.ReplaceAllString(msg, "${1}"+logredact.Placeholder)
 }
 
 func (s *ContributionService) contributeSegment(
