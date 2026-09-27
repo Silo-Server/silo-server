@@ -1147,6 +1147,21 @@ func (c *Client) GetExternalIDs(ctx context.Context, mediaType string, id int) (
 	return cloneExternalIDs(ids), nil
 }
 
+// RefreshExternalIDs drops any cached external IDs for the entry and fetches
+// them again, for callers acting on an ID that may have just been added on
+// TMDB (for example an admin retrying a request after fixing it upstream).
+func (c *Client) RefreshExternalIDs(ctx context.Context, mediaType string, id int) (*ExternalIDs, error) {
+	if c.externalIDCache != nil {
+		switch mediaType {
+		case "movie":
+			c.externalIDCache.Invalidate(fmt.Sprintf("external_ids:/movie/%d/external_ids", id))
+		case "tv":
+			c.externalIDCache.Invalidate(fmt.Sprintf("external_ids:/tv/%d/external_ids", id))
+		}
+	}
+	return c.GetExternalIDs(ctx, mediaType, id)
+}
+
 func cloneExternalIDs(ids *ExternalIDs) *ExternalIDs {
 	if ids == nil {
 		return nil

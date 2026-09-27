@@ -453,6 +453,47 @@ func TestCreateRequestDoesNotTrustCallerIMDbIDForTVDBLookup(t *testing.T) {
 	}
 }
 
+// refreshingTMDBClient layers RefreshExternalIDs onto fakeTMDBClient and
+// answers it with fresh data, standing in for an ID just added on TMDB.
+type refreshingTMDBClient struct {
+	*fakeTMDBClient
+	fresh        *tmdb.ExternalIDs
+	refreshCalls int
+}
+
+func (c *refreshingTMDBClient) RefreshExternalIDs(context.Context, string, int) (*tmdb.ExternalIDs, error) {
+	c.refreshCalls++
+	return c.fresh, nil
+}
+
+func TestRetryRefreshesTMDBExternalIDs(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	store.requests["req-1"] = &Request{
+		ID: "req-1", MediaType: MediaTypeSeries, TMDBID: 240001,
+		Status: StatusQueued, Outcome: OutcomeFailed,
+	}
+	// The cached lookup still has no TVDB ID; TMDB itself now does.
+	client := &refreshingTMDBClient{
+		fakeTMDBClient: &fakeTMDBClient{externalIDs: &tmdb.ExternalIDs{}},
+		fresh:          &tmdb.ExternalIDs{TVDBID: 456789},
+	}
+	service := NewService(store, client, &fakePresence{})
+	service.SetUserRepository(requestUserRepo{})
+	router := &fakeRouterProvider{}
+	service.SetRouterProvider(router)
+
+	if _, err := service.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "req-1"); err != nil {
+		t.Fatalf("Retry returned error: %v", err)
+	}
+	if client.refreshCalls != 1 {
+		t.Fatalf("refresh calls = %d, want 1", client.refreshCalls)
+	}
+	if router.gotTVDBID == nil || *router.gotTVDBID != 456789 {
+		t.Fatalf("router got tvdb_id %v, want the refreshed 456789", router.gotTVDBID)
+	}
+}
+
 func TestCreateRequestSkipsTVDBResolverWhenTMDBHasTVDBID(t *testing.T) {
 	store := newFakeStore()
 	service := newTestServiceWithTMDB(store, &fakeTMDBClient{externalIDs: &tmdb.ExternalIDs{TVDBID: 12345}})
@@ -616,13 +657,13 @@ func TestTMDBFailureCountsAsFailedTVDBLookup(t *testing.T) {
 	service.SetTVDBIDResolver(&fakeTVDBResolver{})
 
 	input := CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 240001}
-	if !service.enrichExternalIDs(context.Background(), &input) {
+	if !service.enrichExternalIDs(context.Background(), &input, false) {
 		t.Fatalf("enrichExternalIDs reported a confirmed miss, want a failed lookup when TMDB errored")
 	}
 	resolved := &fakeTVDBResolver{tvdbID: 456789}
 	service.SetTVDBIDResolver(resolved)
 	input = CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 240001}
-	if service.enrichExternalIDs(context.Background(), &input) {
+	if service.enrichExternalIDs(context.Background(), &input, false) {
 		t.Fatalf("enrichExternalIDs reported a failure although the providers resolved the ID")
 	}
 }

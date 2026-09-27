@@ -26,6 +26,12 @@ type TMDBExternalIDClient interface {
 	GetExternalIDs(ctx context.Context, mediaType string, id int) (*tmdb.ExternalIDs, error)
 }
 
+// TMDBExternalIDRefresher bypasses the client's external-ID cache. Detected by
+// type assertion, like TMDBExternalIDClient.
+type TMDBExternalIDRefresher interface {
+	RefreshExternalIDs(ctx context.Context, mediaType string, id int) (*tmdb.ExternalIDs, error)
+}
+
 // TMDBCertificationClient resolves a title's content rating. Detected by type
 // assertion on the service's TMDBClient, like TMDBExternalIDClient.
 type TMDBCertificationClient interface {
@@ -696,7 +702,7 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 	if err := s.ensureCreateAllowedByCeiling(ctx, viewer, normalized); err != nil {
 		return nil, err
 	}
-	tvdbLookupFailed := s.enrichExternalIDs(ctx, &normalized)
+	tvdbLookupFailed := s.enrichExternalIDs(ctx, &normalized, false)
 	isAnime := s.detectRequestAnime(ctx, normalized.MediaType, normalized.TMDBID)
 
 	matches, err := s.lookupPresence(ctx, normalized.MediaType, []PresenceCandidate{createPresenceCandidate(normalized)})
@@ -1650,10 +1656,11 @@ func (s *Service) lookupAvailable(ctx context.Context, mediaType MediaType, ids 
 }
 
 // enrichExternalIDs fills missing IMDb and TVDB IDs from TMDB and, for a
-// series still without a TVDB ID, from the metadata providers. It reports
-// whether a series is left without a TVDB ID because a lookup (TMDB or a
-// metadata provider) failed, rather than because none exists.
-func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInput) (tvdbLookupFailed bool) {
+// series still without a TVDB ID, from the metadata providers. refresh skips
+// the TMDB client's cache, so an ID added on TMDB since the last lookup is
+// seen. It reports whether a series is left without a TVDB ID because a lookup
+// (TMDB or a metadata provider) failed, rather than because none exists.
+func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInput, refresh bool) (tvdbLookupFailed bool) {
 	if input == nil {
 		return false
 	}
@@ -1663,7 +1670,11 @@ func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInp
 	// match found by it can't always be checked against the TMDB ID.
 	lookupIMDbID := ""
 	if client, ok := s.tmdb.(TMDBExternalIDClient); ok {
-		externalIDs, err := client.GetExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID)
+		getExternalIDs := client.GetExternalIDs
+		if refresher, ok := s.tmdb.(TMDBExternalIDRefresher); ok && refresh {
+			getExternalIDs = refresher.RefreshExternalIDs
+		}
+		externalIDs, err := getExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID)
 		tmdbFailed = err != nil
 		if err == nil && externalIDs != nil {
 			lookupIMDbID = strings.TrimSpace(externalIDs.IMDbID)
@@ -1700,7 +1711,7 @@ func (s *Service) ensureSeriesTVDBID(ctx context.Context, req *Request) error {
 		return nil
 	}
 	input := CreateRequestInput{MediaType: req.MediaType, TMDBID: req.TMDBID, IMDbID: strings.TrimSpace(req.IMDbID)}
-	req.tvdbLookupFailed = s.enrichExternalIDs(ctx, &input)
+	req.tvdbLookupFailed = s.enrichExternalIDs(ctx, &input, true)
 	if input.TVDBID == nil {
 		return nil
 	}
