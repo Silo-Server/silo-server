@@ -58,6 +58,7 @@ func (f *versionsFileFetcher) GetByExtraID(ctx context.Context, id string) ([]*m
 }
 
 type versionsFixture struct {
+	pool    *pgxpool.Pool
 	svc     *DetailService
 	queries *versionsQueryCounter
 	images  *versionsImageCounter
@@ -91,7 +92,7 @@ func newVersionsFixture(t testing.TB) *versionsFixture {
 			t.Fatal(err)
 		}
 	}
-	f := &versionsFixture{queries: counter, images: &versionsImageCounter{}, files: &versionsFileFetcher{files: map[string][]*models.MediaFile{}}, ids: map[string]string{}}
+	f := &versionsFixture{pool: pool, queries: counter, images: &versionsImageCounter{}, files: &versionsFileFetcher{files: map[string][]*models.MediaFile{}}, ids: map[string]string{}}
 	prefix := fmt.Sprintf("versions-%d-", time.Now().UnixNano())
 	if err := pool.QueryRow(t.Context(), `INSERT INTO media_folders (type,name) VALUES ('movies',$1) RETURNING id`, prefix).Scan(&f.library); err != nil {
 		t.Fatal(err)
