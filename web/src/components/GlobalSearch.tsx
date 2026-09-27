@@ -383,11 +383,13 @@ export function GlobalSearch({
     debouncedQuery.length > 0 &&
     resultCount === 0 &&
     !previewQuery.isError &&
+    !peopleQuery.isError &&
     !tmdbStillLoading &&
     !tmdbWillRender &&
     !canRequest.isResolving &&
     !tmdbDebounceCatchingUp;
-  const showError = previewQuery.isError;
+  // With nothing else to show, a failed people search cannot claim "No matches".
+  const showError = previewQuery.isError || (peopleQuery.isError && resultCount === 0);
   function moveResultFocus(nextIndex: number) {
     if (resultCount === 0) {
       setSelectedKey(null);

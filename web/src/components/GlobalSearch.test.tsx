@@ -596,6 +596,20 @@ describe("GlobalSearch people results", () => {
     expect(markup).not.toContain("No matches");
   });
 
+  it("reports a failed people search instead of 'No matches' when no title matches", () => {
+    mocks.useQuery.mockReturnValue({
+      data: { total: 0, has_more: false, items: [] },
+      isFetching: false,
+      isError: false,
+    });
+    mocks.usePersonSearch.mockReturnValue({ data: undefined, isFetching: false, isError: true });
+
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test Actor" });
+
+    expect(markup).toContain("Could not load results");
+    expect(markup).not.toContain("No matches");
+  });
+
   it("hides the people group when the people search fails", () => {
     mocks.usePersonSearch.mockReturnValue({ data: undefined, isFetching: false, isError: true });
 
