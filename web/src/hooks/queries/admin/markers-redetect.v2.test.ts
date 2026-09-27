@@ -9,21 +9,23 @@ import { useAdminMarkerCapabilities } from "./markers";
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 beforeEach(installPolicyStorageMocks);
 afterEach(() => vi.unstubAllGlobals());
-function setup(response: () => Response) {
+function setup(response: (path: string) => Response) {
   const calls: string[] = [];
   const bodies: unknown[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      calls.push(new URL(String(input), "http://localhost").pathname);
+      const path = new URL(String(input), "http://localhost").pathname;
+      calls.push(path);
       bodies.push(typeof init?.body === "string" ? JSON.parse(init.body) : init?.body);
-      return response();
+      return response(path);
     }),
   );
   const client = new QueryClient({ defaultOptions: { mutations: { retry: 3 } } });
   return {
     calls,
     bodies,
+    client,
     wrapper: ({ children }: { children: ReactNode }) =>
       createElement(QueryClientProvider, { client }, children),
   };
@@ -89,4 +91,65 @@ it("does not read marker capabilities for non-admins", () => {
   const { calls, wrapper } = setup(() => jsonResponse({}, 200));
   renderHook(() => useAdminMarkerCapabilities(false), { wrapper });
   expect(calls).toEqual([]);
+});
+
+// An older API node answers the route it does not have with a 404.
+function missingMarkersRoute(path: string) {
+  return path.endsWith("/redetect-markers")
+    ? jsonResponse({ title: "Not Found", status: 404 }, 404)
+    : jsonResponse({ status: "queued" }, 202);
+}
+
+it.each(["intro", "all"] as const)(
+  "retries an episode %s request through redetect-intro when redetect-markers is missing",
+  async (kind) => {
+    const { calls, bodies, client, wrapper } = setup(missingMarkersRoute);
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const { result } = renderHook(() => useRedetectItemMarkers({ introFallback: true }), {
+      wrapper,
+    });
+    await act(async () => {
+      await expect(result.current.mutateAsync({ itemId: "episode-1", kind })).resolves.toEqual({
+        status: "queued",
+      });
+    });
+    expect(calls).toEqual([
+      "/api/v2/admin/items/episode-1/redetect-markers",
+      "/api/v2/admin/items/episode-1/redetect-intro",
+    ]);
+    expect(bodies).toEqual([{ kind }, undefined]);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin", "markerCapabilities"] });
+  },
+);
+
+it.each([
+  ["an episode credits request", { introFallback: true }, "credits"],
+  ["a movie credits request", {}, "credits"],
+  ["a movie all request", {}, "all"],
+] as const)("surfaces the 404 for %s", async (_label, options, kind) => {
+  const { calls, client, wrapper } = setup(missingMarkersRoute);
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  const { result } = renderHook(() => useRedetectItemMarkers(options), { wrapper });
+  await act(async () => {
+    await expect(result.current.mutateAsync({ itemId: "item-1", kind })).rejects.toThrow();
+  });
+  expect(calls).toEqual(["/api/v2/admin/items/item-1/redetect-markers"]);
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin", "markerCapabilities"] });
+});
+
+it("does not fall back or drop capabilities on other failures", async () => {
+  const { calls, client, wrapper } = setup(() =>
+    jsonResponse({ title: "Conflict", status: 409 }, 409),
+  );
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  const { result } = renderHook(() => useRedetectItemMarkers({ introFallback: true }), {
+    wrapper,
+  });
+  await act(async () => {
+    await expect(
+      result.current.mutateAsync({ itemId: "episode-1", kind: "intro" }),
+    ).rejects.toThrow();
+  });
+  expect(calls).toEqual(["/api/v2/admin/items/episode-1/redetect-markers"]);
+  expect(invalidate).not.toHaveBeenCalled();
 });

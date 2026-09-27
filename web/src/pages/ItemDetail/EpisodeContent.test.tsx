@@ -578,6 +578,7 @@ describe("EpisodeContent", () => {
     expect(typeof onRedetectMarkers).toBe("function");
     (onRedetectMarkers as (kind: string) => void)("intro");
     expect(redetect).toHaveBeenCalledWith({ itemId: "episode-1", kind: "intro" });
+    expect(mocks.useRedetectItemMarkers).toHaveBeenCalledWith({ introFallback: true });
 
     mocks.useAuth.mockReturnValue({ user: null });
     renderToStaticMarkup(

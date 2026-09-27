@@ -70,7 +70,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const [mediaInfoOpen, setMediaInfoOpen] = useState(false);
   const [mediaInfoFileId, setMediaInfoFileId] = useState<number | null>(null);
   const refreshMetadataMutation = useRefreshItemMetadata();
-  const redetectMarkersMutation = useRedetectItemMarkers();
+  const redetectMarkersMutation = useRedetectItemMarkers({ introFallback: true });
   const redetectIntroMutation = useRedetectEpisodeIntro();
   // An API node without redetect-markers (rolling deploy, rollback) keeps the
   // older intro-only re-detection.

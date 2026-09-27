@@ -9,7 +9,7 @@ import type {
   ItemSplitRequest,
   WatchDetail,
 } from "@/api/types";
-import { v2, type V2Result } from "@/api/v2/request";
+import { V2ProblemError, V2TransportError, v2, type V2Result } from "@/api/v2/request";
 import { adminTaskJobFromV2 } from "@/api/v2/adminTasks";
 import { catalogItemDetailFromV2 } from "@/api/v2/catalog";
 import { watchDetailFromV2 } from "@/api/v2/watch";
@@ -245,11 +245,32 @@ const redetectionToasts = {
   },
 };
 
-export function useRedetectItemMarkers() {
+function isMissingOperation(error: unknown): boolean {
+  return (
+    (error instanceof V2ProblemError || error instanceof V2TransportError) && error.status === 404
+  );
+}
+
+/**
+ * Re-detects an item's markers. The capability read and this call can reach
+ * different API nodes during a rolling deploy or rollback, so a 404 drops the
+ * cached capability; with `introFallback` (episodes) a request that includes
+ * the intro retries once through the older episode-only operation.
+ */
+export function useRedetectItemMarkers({ introFallback = false } = {}) {
+  const queryClient = useQueryClient();
   return useMutation({
     retry: false,
-    mutationFn: ({ itemId, kind }: { itemId: string; kind: RedetectMarkersKind }) =>
-      redetectItemMarkers(itemId, kind),
+    mutationFn: async ({ itemId, kind }: { itemId: string; kind: RedetectMarkersKind }) => {
+      try {
+        return await redetectItemMarkers(itemId, kind);
+      } catch (error) {
+        if (!isMissingOperation(error)) throw error;
+        void queryClient.invalidateQueries({ queryKey: adminKeys.markerCapabilities() });
+        if (!introFallback || kind === "credits") throw error;
+        return redetectEpisodeIntro(itemId);
+      }
+    },
     ...redetectionToasts,
   });
 }
