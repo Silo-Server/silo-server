@@ -46,6 +46,9 @@ func (a *fakePlaybackIntroAnalyzer) AnalyzeMovieFile(ctx context.Context, fileID
 	a.movieFiles = append(a.movieFiles, fileID)
 	a.interactive = append(a.interactive, mediasample.Interactive(ctx))
 	a.mu.Unlock()
+	if a.onCall != nil {
+		a.onCall()
+	}
 	if a.started != nil {
 		select {
 		case a.started <- struct{}{}:
@@ -644,6 +647,29 @@ func TestOnDemandPlaybackMarkersKeepOnlineIntroWhileLocalFindsCredits(t *testing
 			}
 		})
 	}
+}
+
+// A movie in on-demand mode keeps its online intro while local analysis
+// finds its credits.
+func TestOnDemandPlaybackMarkersKeepOnlineIntroForMovies(t *testing.T) {
+	notified, analyzer := onDemandOverlayRun{
+		storage: "on_demand",
+		file:    lazyMarkerMovieFile(),
+		view: func(stored *models.MediaFile) *models.MediaFile {
+			return withMarker(stored, models.MarkerSegmentIntro, 30, 90, models.MarkerSourceOnline)
+		},
+		afterLocal: func(stored *models.MediaFile) *models.MediaFile {
+			return withMarker(stored, models.MarkerSegmentCredits, 6800, 7100, models.MarkerSourceScanner)
+		},
+	}.run(t)
+
+	if len(analyzer.movieFiles) != 1 || len(analyzer.kinds) != 0 {
+		t.Fatalf("movie analyses %v, episode analyses %v; want one movie analysis", analyzer.movieFiles, analyzer.kinds)
+	}
+	for i, file := range notified {
+		assertSegment(t, fmt.Sprintf("update %d", i), file, models.MarkerSegmentIntro, 30, 90)
+	}
+	assertSegment(t, "final update", notified[len(notified)-1], models.MarkerSegmentCredits, 6800, 7100)
 }
 
 // Online credits without an intro send local analysis after the intro only,
