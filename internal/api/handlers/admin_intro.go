@@ -92,7 +92,7 @@ func (h *AdminIntroHandler) HandleRedetectEpisodeIntro(w http.ResponseWriter, r 
 // handleEpisodeMarkers serves the frozen /api/v1 endpoints, which analyze
 // episode intros only and keep their original messages.
 func (h *AdminIntroHandler) handleEpisodeMarkers(w http.ResponseWriter, r *http.Request, action string) {
-	status, err := h.refreshItemMarkers(r.Context(), chi.URLParam(r, "id"), action, introMarkerKinds)
+	status, err := h.refreshItemMarkers(r.Context(), chi.URLParam(r, "id"), action, introMarkerKinds, false)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -108,7 +108,7 @@ func (h *AdminIntroHandler) RefreshEpisodeMarkers(ctx context.Context, itemID, a
 	if action == "refresh-v2" {
 		return h.refreshEpisodeMarkersV2(ctx, itemID)
 	}
-	return h.refreshItemMarkers(ctx, itemID, action, introMarkerKinds)
+	return h.refreshItemMarkers(ctx, itemID, action, introMarkerKinds, false)
 }
 
 // The marker kinds RedetectItemMarkers accepts.
@@ -135,14 +135,17 @@ func (h *AdminIntroHandler) RedetectItemMarkers(ctx context.Context, itemID, kin
 	default:
 		return "", fieldError("kind", "Kind must be intro, credits, or all")
 	}
-	return h.refreshItemMarkers(ctx, itemID, "redetect-markers", kinds)
+	return h.refreshItemMarkers(ctx, itemID, "redetect-markers", kinds, true)
 }
 
 // refreshItemMarkers queues local marker analysis of an item for kinds. A
 // movie gets credits only, so a request without credits takes episodes
 // only, rejects a movie like any other item that is not an episode, and
-// keeps the messages of the endpoints that predate movies.
-func (h *AdminIntroHandler) refreshItemMarkers(ctx context.Context, itemID, action string, kinds intromarkers.EpisodeMarkerKinds) (string, error) {
+// keeps the messages of the endpoints that predate movies. followSettings
+// narrows kinds to the kinds markers.detect_intros and
+// markers.detect_credits leave on, and rejects the request when none
+// remain; the endpoints that predate those settings leave it unset.
+func (h *AdminIntroHandler) refreshItemMarkers(ctx context.Context, itemID, action string, kinds intromarkers.EpisodeMarkerKinds, followSettings bool) (string, error) {
 	episodesOnly := !kinds.Credits
 	if h == nil || h.analyzer == nil || h.eligibility == nil {
 		return "", apiError(http.StatusServiceUnavailable, "unavailable", "Intro detection is not configured")
@@ -192,6 +195,11 @@ func (h *AdminIntroHandler) refreshItemMarkers(ctx context.Context, itemID, acti
 		}
 		return "", apiError(http.StatusConflict, "conflict", message)
 	}
+	if followSettings {
+		if kinds, err = h.enabledItemMarkerKinds(ctx, itemID, eligibility.Kind, kinds); err != nil {
+			return "", err
+		}
+	}
 
 	if _, loaded := h.inFlight.LoadOrStore(itemID, struct{}{}); loaded {
 		return markerRefreshAlreadyRunning, nil
@@ -240,6 +248,44 @@ func (h *AdminIntroHandler) refreshItemMarkers(ctx context.Context, itemID, acti
 	}()
 
 	return markerRefreshQueued, nil
+}
+
+// enabledItemMarkerKinds narrows requested, the kinds asked of an item of
+// kind, to the kinds the detection settings leave on. It returns a conflict
+// naming the requested kinds when none remain. A movie is only analyzed for
+// credits.
+func (h *AdminIntroHandler) enabledItemMarkerKinds(ctx context.Context, itemID, kind string, requested intromarkers.EpisodeMarkerKinds) (intromarkers.EpisodeMarkerKinds, error) {
+	enabled, err := intromarkers.EnabledMarkerKinds(ctx, h.Settings)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "admin markers: load detection kinds failed", "item_id", itemID, "error", err)
+		return intromarkers.EpisodeMarkerKinds{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load marker settings")
+	}
+	if kind == intromarkers.MarkerItemMovie {
+		requested = intromarkers.EpisodeMarkerKinds{Credits: true}
+	}
+	if kinds := requested.And(enabled); kinds.Any() {
+		return kinds, nil
+	}
+	return intromarkers.EpisodeMarkerKinds{}, apiError(http.StatusConflict, "conflict", markerKindsOffMessage(requested))
+}
+
+// The conflicts of a request whose kinds are all turned off.
+const (
+	markerKindsOffBoth    = "Intro and credits detection are turned off in marker settings"
+	markerKindsOffIntro   = "Intro detection is turned off in marker settings"
+	markerKindsOffCredits = "Credits detection is turned off in marker settings"
+)
+
+// markerKindsOffMessage names the requested kinds that are turned off.
+func markerKindsOffMessage(requested intromarkers.EpisodeMarkerKinds) string {
+	switch {
+	case requested.Intro && requested.Credits:
+		return markerKindsOffBoth
+	case requested.Intro:
+		return markerKindsOffIntro
+	default:
+		return markerKindsOffCredits
+	}
 }
 
 // markerRefreshMessages are the messages of a local marker refresh that

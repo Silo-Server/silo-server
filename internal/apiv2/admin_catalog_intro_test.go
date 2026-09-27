@@ -100,6 +100,13 @@ func TestAdminItemMarkersRedetectTransport(t *testing.T) {
 	if rec.Code != 409 {
 		t.Fatalf("conflict: %d %s", rec.Code, rec.Body)
 	}
+	// Requested kinds turned off in marker settings answer a conflict that
+	// names them.
+	f.err = &handlers.APIError{Status: http.StatusConflict, Code: "conflict", Message: "Credits detection is turned off in marker settings"}
+	rec = do(t, h, "POST", path, `{"kind":"credits"}`, bearer(adminToken))
+	if rec.Code != 409 || !strings.Contains(rec.Body.String(), `"detail":"Credits detection is turned off in marker settings"`) {
+		t.Fatalf("kind turned off: %d %s", rec.Code, rec.Body)
+	}
 	deps.AdminEpisodeMarkers = nil
 	h = newTestHandler(t, deps)
 	rec = do(t, h, "POST", path, "", bearer(adminToken))

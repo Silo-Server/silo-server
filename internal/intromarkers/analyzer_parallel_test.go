@@ -82,7 +82,7 @@ func TestRunAnalyzesGroupsInParallelWithinFFmpegLimit(t *testing.T) {
 		logger: slog.New(slog.DiscardHandler), ffmpegSlots: mediasample.NewLimiter(2),
 	}
 
-	summary, err := analyzer.Run(context.Background(), nil)
+	summary, err := analyzer.Run(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -363,7 +363,7 @@ func TestFingerprintLookupsShareOneBoundAcrossGroups(t *testing.T) {
 		logger: slog.New(slog.DiscardHandler), ffmpegSlots: mediasample.NewLimiter(3), workers: 3,
 	}
 
-	if _, err := analyzer.Run(context.Background(), nil); err != nil {
+	if _, err := analyzer.Run(context.Background(), allMarkerKinds, nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if repo.peak != maxConcurrentFingerprintLookups {

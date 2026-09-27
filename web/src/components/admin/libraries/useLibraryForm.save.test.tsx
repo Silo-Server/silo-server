@@ -196,14 +196,14 @@ describe("marker detection switch", () => {
   });
 
   it.each([
-    ["movies", /^Looks for end credits in movies/],
+    ["movies", /^Looks for end credits in movies.* Needs Detect credits on in server settings\.$/],
     [
       "series",
-      /episodes in this library\. Embedded intro and credits chapters are used when available\.$/,
+      /episodes in this library\. Embedded intro and credits chapters are used when available\. Detect intros and Detect credits in server settings choose which markers it finds\.$/,
     ],
     [
       "mixed",
-      /episodes in this library\..* Movies get end credits only, on a best-effort basis\.$/,
+      /episodes in this library\..* Movies get end credits only, on a best-effort basis\. Detect intros and Detect credits/,
     ],
   ])("describes what detection covers in %s libraries", (type, description) => {
     const { result } = renderHook(() => useLibraryForm({ library: null }));

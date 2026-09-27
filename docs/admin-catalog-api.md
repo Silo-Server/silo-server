@@ -230,8 +230,10 @@ effort, and movies never get local intros.
 
 - `refresh-markers` refreshes an episode or a movie from its configured
   sources. In `both` mode, local analysis then fills an episode's missing
-  intro or credits, or a movie's missing credits; in `local` mode it runs
-  local analysis of every kind.
+  intro or credits, or a movie's missing credits, for the kinds the detection
+  settings leave on, and is skipped when none apply. In `local` mode it runs
+  local analysis of every kind that is on, and returns the same `409` as
+  `redetect-markers` when none are.
 - `redetect-markers` backs the web **Re-detect Markers** action for episodes
   and **Re-detect Credits** for movies. Its optional JSON body
   `{"kind": "intro" | "credits" | "all"}` selects what local detection runs
@@ -239,9 +241,14 @@ effort, and movies never get local intros.
   `credits` run that kind alone and `all` runs both. For a movie, `credits`
   and `all` run the credits analysis. `intro` takes episodes only, so it
   answers a movie like any other item that is not an episode. Any other kind
-  returns a `422` validation problem at `body.kind`.
+  returns a `422` validation problem at `body.kind`. The requested kinds are
+  narrowed to those `markers.detect_intros` and `markers.detect_credits` leave
+  on; when none remain, it returns a `409` conflict whose detail names the
+  kinds that are off, such as `Credits detection is turned off in marker
+  settings`. A movie counts as a credits request.
 - `redetect-intro` ports the v1 route and, like the v1 `refresh-markers` and
-  `redetect-intro` routes, finds episode intros only.
+  `redetect-intro` routes, finds episode intros only, whatever the detection
+  settings say.
 
 For local analysis the item must exist, have media files, and have at least
 one in a library with marker detection enabled: a series or mixed library for

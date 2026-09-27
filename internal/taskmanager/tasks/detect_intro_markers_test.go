@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
@@ -21,6 +22,10 @@ type fakeMarkerAnalysisRunner struct {
 	runs        int
 	episodeRuns int
 	movieRuns   int
+	// kinds is what the last full or episode-only run analyzed; movieKinds
+	// is what the last movie-only run was given.
+	kinds      intromarkers.EpisodeMarkerKinds
+	movieKinds intromarkers.EpisodeMarkerKinds
 	// calls records the runs in order, sharing its log with a recordingLock.
 	calls   *[]string
 	summary intromarkers.RunSummary
@@ -35,19 +40,22 @@ type fakeMarkerAnalysisRunner struct {
 
 func (f *fakeMarkerAnalysisRunner) Preflight(context.Context) error { return f.preflightErr }
 
-func (f *fakeMarkerAnalysisRunner) Run(ctx context.Context, _ intromarkers.ProgressFunc) (intromarkers.RunSummary, error) {
+func (f *fakeMarkerAnalysisRunner) Run(ctx context.Context, kinds intromarkers.EpisodeMarkerKinds, _ intromarkers.ProgressFunc) (intromarkers.RunSummary, error) {
 	f.runs++
+	f.kinds = kinds
 	return f.result(ctx)
 }
 
-func (f *fakeMarkerAnalysisRunner) RunEpisodes(ctx context.Context, _ intromarkers.ProgressFunc) (intromarkers.RunSummary, error) {
+func (f *fakeMarkerAnalysisRunner) RunEpisodes(ctx context.Context, kinds intromarkers.EpisodeMarkerKinds, _ intromarkers.ProgressFunc) (intromarkers.RunSummary, error) {
 	f.episodeRuns++
+	f.kinds = kinds
 	f.record("episodes")
 	return f.result(ctx)
 }
 
-func (f *fakeMarkerAnalysisRunner) RunMovies(ctx context.Context, _ intromarkers.ProgressFunc) (intromarkers.RunSummary, error) {
+func (f *fakeMarkerAnalysisRunner) RunMovies(ctx context.Context, kinds intromarkers.EpisodeMarkerKinds, _ intromarkers.ProgressFunc) (intromarkers.RunSummary, error) {
 	f.movieRuns++
+	f.movieKinds = kinds
 	f.record("movies")
 	summary, err := f.result(ctx)
 	if err == nil {
@@ -284,6 +292,109 @@ func TestDetectIntroMarkersNilPoolRunsWithoutLock(t *testing.T) {
 	}
 	if runner.runs != 1 {
 		t.Fatalf("analyzer runs = %d, want 1", runner.runs)
+	}
+}
+
+func TestDetectIntroMarkersRunsTheEnabledKinds(t *testing.T) {
+	cases := []struct {
+		name     string
+		settings map[string]string
+		want     intromarkers.EpisodeMarkerKinds
+	}{
+		{name: "defaults", settings: map[string]string{}, want: intromarkers.EpisodeMarkerKinds{Intro: true, Credits: true}},
+		{name: "credits off", settings: map[string]string{markers.SettingDetectCredits: "false"}, want: intromarkers.EpisodeMarkerKinds{Intro: true}},
+		{name: "intros off", settings: map[string]string{markers.SettingDetectIntros: "false"}, want: intromarkers.EpisodeMarkerKinds{Credits: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.settings[markers.SettingMode] = "local"
+			task := NewDetectIntroMarkersTask(nil, nil, &fakeSettingsStore{values: tc.settings})
+			runner := &fakeMarkerAnalysisRunner{}
+			task.analyzer = runner
+			if err := task.Execute(t.Context(), &fakeProgress{}); err != nil {
+				t.Fatalf("Execute = %v", err)
+			}
+			if runner.runs != 1 || runner.kinds != tc.want {
+				t.Fatalf("runs=%d kinds=%+v, want one run for %+v", runner.runs, runner.kinds, tc.want)
+			}
+		})
+	}
+}
+
+// A server without Chromaprint runs its chapter-only episode pass and its
+// movie pass for the enabled kinds too. Movies are credits work, so with
+// credits off it stops after the episodes and never claims the lock.
+func TestDetectIntroMarkersWithoutChromaprintRunsTheEnabledKinds(t *testing.T) {
+	cases := []struct {
+		name      string
+		setting   string
+		want      intromarkers.EpisodeMarkerKinds
+		wantCalls []string
+	}{
+		{
+			name:      "intros off",
+			setting:   markers.SettingDetectIntros,
+			want:      intromarkers.EpisodeMarkerKinds{Credits: true},
+			wantCalls: []string{"episodes", "lock acquired=true", "movies", "unlock"},
+		},
+		{
+			name:      "credits off",
+			setting:   markers.SettingDetectCredits,
+			want:      intromarkers.EpisodeMarkerKinds{Intro: true},
+			wantCalls: []string{"episodes"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []string
+			runner := &fakeMarkerAnalysisRunner{
+				preflightErr: fmt.Errorf("ffmpeg lacks chromaprint: %w", mediasample.ErrUnsupported),
+				calls:        &calls,
+			}
+			lock := &recordingLock{fakeClusterLock: fakeClusterLock{acquired: true}, calls: &calls}
+			task := newTestDetectMarkersTask(runner, lock)
+			task.settings = &fakeSettingsStore{values: map[string]string{
+				markers.SettingMode: "local",
+				tc.setting:          "false",
+			}}
+			progress := &fakeProgress{}
+			if err := task.Execute(t.Context(), progress); err != nil {
+				t.Fatalf("Execute = %v", err)
+			}
+			if fmt.Sprint(calls) != fmt.Sprint(tc.wantCalls) || runner.runs != 0 {
+				t.Fatalf("calls = %v full runs = %d, want %v and no full run", calls, runner.runs, tc.wantCalls)
+			}
+			if runner.kinds != tc.want {
+				t.Fatalf("episode kinds = %+v, want %+v", runner.kinds, tc.want)
+			}
+			if runner.movieRuns > 0 && runner.movieKinds != tc.want {
+				t.Fatalf("movie kinds = %+v, want %+v", runner.movieKinds, tc.want)
+			}
+			if !tc.want.Credits && progress.lastMessage != detectMarkersMoviesCreditsOff {
+				t.Fatalf("progress = %q, want %q", progress.lastMessage, detectMarkersMoviesCreditsOff)
+			}
+		})
+	}
+}
+
+func TestDetectIntroMarkersSkipsWhenBothKindsAreOff(t *testing.T) {
+	lock := &fakeClusterLock{acquired: true}
+	runner := &fakeMarkerAnalysisRunner{}
+	task := newTestDetectMarkersTask(runner, lock)
+	task.settings = &fakeSettingsStore{values: map[string]string{
+		markers.SettingMode:          "both",
+		markers.SettingDetectIntros:  "false",
+		markers.SettingDetectCredits: "false",
+	}}
+	progress := &fakeProgress{}
+	if err := task.Execute(t.Context(), progress); err != nil {
+		t.Fatalf("Execute = %v, want nil", err)
+	}
+	if runner.runs != 0 || lock.released != 0 {
+		t.Fatalf("runs=%d released=%d, want no run and no lock taken", runner.runs, lock.released)
+	}
+	if progress.lastMessage != "Marker detection skipped; intro and credits detection are turned off" {
+		t.Fatalf("progress = %q", progress.lastMessage)
 	}
 }
 

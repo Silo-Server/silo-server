@@ -103,10 +103,26 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 		}
 	}
 
+	// localKinds is what local analysis may look for: an episode's intros
+	// and credits and a movie's credits, less the kinds turned off
+	// server-wide.
+	var localKinds intromarkers.EpisodeMarkerKinds
+	if shouldRunLocal {
+		enabled, err := intromarkers.EnabledMarkerKinds(ctx, h.SettingsRepo)
+		if err != nil {
+			slog.WarnContext(ctx, "playback lazy markers: load detection kinds failed", "component", "api",
+				"session_id", session.ID,
+				"file_id", file.ID,
+				"episode_id", file.EpisodeID,
+				"error", err)
+		}
+		localKinds = intromarkers.EpisodeMarkerKinds{Intro: isEpisode, Credits: true}.And(enabled)
+		shouldRunLocal = err == nil && localKinds.Any()
+	}
+
 	if shouldRunLocal {
 		// Local analysis runs only in libraries that opted in to it, and
-		// needs an analyzer. It finds an episode's intros and credits and a
-		// movie's credits.
+		// needs an analyzer.
 		ok, err := h.IntroRepository.IntroDetectionEligibleForPlayback(ctx, file.ID)
 		if err != nil {
 			slog.WarnContext(ctx, "playback lazy markers: local eligibility check failed", "component", "api",
@@ -122,6 +138,9 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 		}
 	}
 
+	if !shouldRunLocal {
+		localKinds = intromarkers.EpisodeMarkerKinds{}
+	}
 	if !shouldRunOnline && !shouldRunLocal {
 		slog.DebugContext(ctx, "playback lazy markers: skipped; no eligible detection path", "component", "api",
 			"session_id", session.ID,
@@ -143,16 +162,21 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 		"episode_id", file.EpisodeID,
 		"mode", mode,
 		"run_online", shouldRunOnline,
-		"run_local", shouldRunLocal)
-	go h.runLazyPlaybackMarkers(sessionID, &fileSnapshot, mode, shouldRunOnline, shouldRunLocal)
+		"run_local", shouldRunLocal,
+		"local_intro", localKinds.Intro,
+		"local_credits", localKinds.Credits)
+	go h.runLazyPlaybackMarkers(sessionID, &fileSnapshot, mode, shouldRunOnline, localKinds)
 }
 
+// runLazyPlaybackMarkers looks the file's markers up online when runOnline is
+// set, then runs local analysis for the kinds of localKinds the file still
+// lacks. An empty localKinds runs no local analysis.
 func (h *PlaybackHandler) runLazyPlaybackMarkers(
 	sessionID string,
 	file *models.MediaFile,
 	mode markers.Mode,
 	runOnline bool,
-	runLocal bool,
+	localKinds intromarkers.EpisodeMarkerKinds,
 ) {
 	if file == nil {
 		return
@@ -166,6 +190,9 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 	ctx, cancel := context.WithTimeout(base, playbackLazyMarkerTimeout)
 	defer cancel()
 	isEpisode := strings.TrimSpace(file.EpisodeID) != ""
+	localMissing := func(file *models.MediaFile) intromarkers.EpisodeMarkerKinds {
+		return missingLocalMarkers(file, isEpisode).And(localKinds)
+	}
 
 	slog.Info("playback lazy markers: started",
 		"session_id", sessionID,
@@ -193,7 +220,7 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 			}
 			if hasAnyMarker(file) {
 				h.notifyPlaybackMarkers(ctx, sessionID, file, mode)
-				if !runLocal || !missingLocalMarkers(file, isEpisode).Any() {
+				if !localMissing(file).Any() {
 					return
 				}
 			}
@@ -206,14 +233,13 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 		file = refreshed
 		if hasAnyMarker(refreshed) {
 			h.notifyPlaybackMarkers(ctx, sessionID, refreshed, mode)
-			if !runLocal || !missingLocalMarkers(refreshed, isEpisode).Any() {
+			if !localMissing(refreshed).Any() {
 				return
 			}
 		}
 	}
 
-	if runLocal {
-		kinds := missingLocalMarkers(file, isEpisode)
+	if kinds := localMissing(file); kinds.Any() {
 		slog.Info("playback lazy markers: local analyzer started",
 			"session_id", sessionID,
 			"file_id", file.ID,

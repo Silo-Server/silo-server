@@ -63,6 +63,11 @@ func registerAdminCatalogIntro(reg *Registry) {
 		{"redetect-intro", redetectAdminEpisodeIntroOperation, "redetect", "Explicitly rerun local intro detection for an episode; other items, movies included, are rejected."},
 	} {
 		op := adminItemMarkersOperation(action.suffix, action.id, action.summary)
+		if action.id == refreshAdminEpisodeMarkersOperation {
+			// Local-mode refreshes answer 409 like redetect-markers when
+			// detection cannot run or every missing kind is turned off.
+			op.Errors = append(op.Errors, http.StatusConflict)
+		}
 		Register(reg, op, func(ctx context.Context, in *AdminEpisodeMarkersInput) (*AdminEpisodeMarkersOutput, error) {
 			if reg.deps.AdminEpisodeMarkers == nil {
 				return nil, unavailable("episode marker analysis")
@@ -75,8 +80,9 @@ func registerAdminCatalogIntro(reg *Registry) {
 		})
 	}
 	redetect := adminItemMarkersOperation("redetect-markers", redetectAdminItemMarkersOperation, "Explicitly rerun local detection of an episode's intro, credits, or both, or of a movie's best-effort credits.")
-	// Disabled library detection, missing files, and markers.mode off or
-	// online answer 409.
+	// Disabled library detection, missing files, markers.mode off or
+	// online, and requested kinds all turned off by markers.detect_intros
+	// and markers.detect_credits answer 409.
 	redetect.Errors = append(redetect.Errors, http.StatusConflict)
 	Register(reg, redetect, func(ctx context.Context, in *AdminItemMarkersRedetectInput) (*AdminEpisodeMarkersOutput, error) {
 		if reg.deps.AdminEpisodeMarkers == nil {

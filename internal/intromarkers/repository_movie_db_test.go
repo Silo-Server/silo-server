@@ -209,7 +209,7 @@ func TestRunMoviesPagesCandidatesPostgres(t *testing.T) {
 	pool := movieTestPool(t)
 	f := seedMovieFixture(t, pool)
 	repo := &pagedMovieRepository{Repository: NewRepository(pool)}
-	if _, err := pagedMovieAnalyzer(repo, &fakeMovieSampler{}).RunMovies(t.Context(), nil); err != nil {
+	if _, err := pagedMovieAnalyzer(repo, &fakeMovieSampler{}).RunMovies(t.Context(), allMarkerKinds, nil); err != nil {
 		t.Fatalf("RunMovies: %v", err)
 	}
 	want := []string{"newer", "older", "mixed", "scannerCredits"}
@@ -268,7 +268,7 @@ func TestRunMoviesStopsPagingAtTheBudgetPostgres(t *testing.T) {
 				defer mu.Unlock()
 				return now
 			}
-			summary, err := analyzer.RunMovies(t.Context(), nil)
+			summary, err := analyzer.RunMovies(t.Context(), allMarkerKinds, nil)
 			if err != nil {
 				t.Fatalf("RunMovies: %v", err)
 			}

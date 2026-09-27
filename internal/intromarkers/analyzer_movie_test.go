@@ -102,7 +102,7 @@ func TestRunPlacesMovieCreditsFromVideo(t *testing.T) {
 	sampler := &fakeMovieSampler{silences: []mediasample.Interval{{Start: 6597.5, End: 6598.5}}}
 	analyzer := movieAnalyzer(repo, sampler)
 
-	summary, err := analyzer.Run(context.Background(), nil)
+	summary, err := analyzer.Run(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestAnalyzeMovieStoresTheTailOnlyOnceCreditsAreSettled(t *testing.T) {
 func TestRunEpisodesLeavesMovies(t *testing.T) {
 	repo := &fakeIntroRepository{enabledLibraries: 1, movieCandidates: []Candidate{movieCandidate(10, 7200)}}
 	sampler := &fakeMovieSampler{}
-	summary, err := movieAnalyzer(repo, sampler).RunEpisodes(context.Background(), nil)
+	summary, err := movieAnalyzer(repo, sampler).RunEpisodes(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("RunEpisodes: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestRunMoviesLeavesEpisodes(t *testing.T) {
 		movieCandidates:    []Candidate{movieCandidate(10, 7200)},
 	}
 	sampler := &fakeMovieSampler{}
-	summary, err := movieAnalyzer(repo, sampler).RunMovies(context.Background(), nil)
+	summary, err := movieAnalyzer(repo, sampler).RunMovies(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("RunMovies: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestRunPagesMovies(t *testing.T) {
 	sampler := &fakeMovieSampler{}
 	analyzer := movieAnalyzer(repo, sampler)
 	analyzer.moviePageSize = 2
-	summary, err := analyzer.RunMovies(context.Background(), nil)
+	summary, err := analyzer.RunMovies(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("RunMovies: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestRunStopsMoviesAtTheBudget(t *testing.T) {
 		return now
 	}
 
-	summary, err := analyzer.Run(context.Background(), nil)
+	summary, err := analyzer.Run(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

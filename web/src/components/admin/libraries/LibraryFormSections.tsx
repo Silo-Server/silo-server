@@ -429,15 +429,17 @@ function markerDetectionCopy(support: {
     return {
       title: "Detect credits markers (best effort)",
       description:
-        "Looks for end credits in movies in this library, from embedded chapters and the picture near the end. Some movies get no credits marker, or one that starts late.",
+        "Looks for end credits in movies in this library, from embedded chapters and the picture near the end. Some movies get no credits marker, or one that starts late. Needs Detect credits on in server settings.",
     };
   }
   const episodes =
     "Runs background audio analysis for episodes in this library. Embedded intro and credits chapters are used when available.";
+  const kinds =
+    "Detect intros and Detect credits in server settings choose which markers it finds.";
   return {
     title: "Detect intro and credits markers",
     description: support.movieCreditsDetection
-      ? `${episodes} Movies get end credits only, on a best-effort basis.`
-      : episodes,
+      ? `${episodes} Movies get end credits only, on a best-effort basis. ${kinds}`
+      : `${episodes} ${kinds}`,
   };
 }

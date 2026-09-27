@@ -1047,3 +1047,196 @@ func TestAdminRedetectItemMarkersDedupsInFlightItem(t *testing.T) {
 	}
 	close(analyzer.release)
 }
+
+// receiveEpisodeKinds waits for an episode analysis and returns its kinds.
+func receiveEpisodeKinds(t *testing.T, analyzer *fakeIntroAnalyzer) intromarkers.EpisodeMarkerKinds {
+	t.Helper()
+	select {
+	case kinds := <-analyzer.kinds:
+		return kinds
+	case <-time.After(time.Second):
+		t.Fatal("episode analysis did not run")
+		return intromarkers.EpisodeMarkerKinds{}
+	}
+}
+
+// setDetectionKinds stores markers.detect_intros and markers.detect_credits
+// in the handler's fake settings.
+func setDetectionKinds(handler *AdminIntroHandler, intros, credits string) {
+	values := handler.Settings.(fakeMarkerSettings).values
+	values[markers.SettingDetectIntros] = intros
+	values[markers.SettingDetectCredits] = credits
+}
+
+// Re-detection runs the requested kinds the detection settings leave on,
+// and rejects the request with a conflict naming the kinds when none remain.
+func TestAdminRedetectItemMarkersFollowsDetectionSettings(t *testing.T) {
+	type kinds = intromarkers.EpisodeMarkerKinds
+	for _, tc := range []struct {
+		name            string
+		item, itemKind  string
+		kind            string
+		intros, credits string
+		want            kinds
+		movie           bool
+		conflict        string
+	}{
+		{name: "all with credits off", item: "ep1", itemKind: intromarkers.MarkerItemEpisode, kind: RedetectMarkersAll, credits: "false", want: kinds{Intro: true}},
+		{name: "all with intros off", item: "ep1", itemKind: intromarkers.MarkerItemEpisode, kind: RedetectMarkersAll, intros: "false", want: kinds{Credits: true}},
+		{name: "intro with intros off", item: "ep1", itemKind: intromarkers.MarkerItemEpisode, kind: RedetectMarkersIntro, intros: "false", conflict: markerKindsOffIntro},
+		{name: "credits with credits off", item: "ep1", itemKind: intromarkers.MarkerItemEpisode, kind: RedetectMarkersCredits, credits: "false", conflict: markerKindsOffCredits},
+		{name: "all with both off", item: "ep1", itemKind: intromarkers.MarkerItemEpisode, kind: RedetectMarkersAll, intros: "false", credits: "false", conflict: markerKindsOffBoth},
+		{name: "movie with credits off", item: "movie1", itemKind: intromarkers.MarkerItemMovie, kind: RedetectMarkersAll, credits: "false", conflict: markerKindsOffCredits},
+		{name: "movie with intros off", item: "movie1", itemKind: intromarkers.MarkerItemMovie, kind: RedetectMarkersAll, intros: "false", movie: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			analyzer := &fakeIntroAnalyzer{kinds: make(chan kinds, 1), movies: make(chan string, 1)}
+			handler := redetectHandler(analyzer, tc.item, tc.itemKind)
+			setDetectionKinds(handler, tc.intros, tc.credits)
+			status, err := handler.RedetectItemMarkers(t.Context(), tc.item, tc.kind)
+			if tc.conflict != "" {
+				var apiErr *APIError
+				if !errors.As(err, &apiErr) || apiErr.Status != http.StatusConflict || apiErr.Message != tc.conflict {
+					t.Fatalf("status=%q err=%v, want 409 %q", status, err, tc.conflict)
+				}
+				select {
+				case got := <-analyzer.kinds:
+					t.Fatalf("analyzed %+v", got)
+				case id := <-analyzer.movies:
+					t.Fatalf("analyzed movie %q", id)
+				case <-time.After(25 * time.Millisecond):
+				}
+				return
+			}
+			if err != nil || status != "queued" {
+				t.Fatalf("status=%q err=%v", status, err)
+			}
+			if tc.movie {
+				select {
+				case id := <-analyzer.movies:
+					if id != tc.item {
+						t.Fatalf("analyzed movie %q, want %q", id, tc.item)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("movie analysis did not run")
+				}
+				return
+			}
+			if got := receiveEpisodeKinds(t, analyzer); got != tc.want {
+				t.Fatalf("analyzed %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// refresh-markers in local mode runs the kinds the detection settings leave
+// on and rejects an item with none left.
+func TestAdminMarkerRefreshLocalFollowsDetectionSettings(t *testing.T) {
+	analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1)}
+	handler := redetectHandler(analyzer, "ep1", intromarkers.MarkerItemEpisode)
+	handler.FileResolver = fakeAdminIntroFileResolver{}
+	setDetectionKinds(handler, "true", "false")
+	status, err := handler.RefreshEpisodeMarkers(t.Context(), "ep1", "refresh-v2")
+	if err != nil || status != "queued" {
+		t.Fatalf("episode: status=%q err=%v", status, err)
+	}
+	if got := receiveEpisodeKinds(t, analyzer); got != (intromarkers.EpisodeMarkerKinds{Intro: true}) {
+		t.Fatalf("analyzed %+v, want intros only", got)
+	}
+
+	movieAnalyzer := &fakeIntroAnalyzer{movies: make(chan string, 1)}
+	movie := redetectHandler(movieAnalyzer, "movie1", intromarkers.MarkerItemMovie)
+	movie.FileResolver = fakeAdminIntroFileResolver{}
+	setDetectionKinds(movie, "true", "false")
+	_, err = movie.RefreshEpisodeMarkers(t.Context(), "movie1", "refresh-v2")
+	requireAPIError(t, err, http.StatusConflict, "")
+	select {
+	case id := <-movieAnalyzer.movies:
+		t.Fatalf("analyzed movie %q with credits detection off", id)
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
+// refresh-markers in both mode still refreshes online markers, and local
+// analysis fills only the missing kinds the detection settings leave on.
+func TestAdminMarkerRefreshBothFollowsDetectionSettings(t *testing.T) {
+	withIntro := func(file *models.MediaFile) *models.MediaFile {
+		start, end := 0.0, 60.0
+		refreshed := *file
+		refreshed.IntroStart, refreshed.IntroEnd = &start, &end
+		return &refreshed
+	}
+	for _, tc := range []struct {
+		name            string
+		kind            string
+		online          func(*models.MediaFile) *models.MediaFile
+		intros, credits string
+		want            *intromarkers.EpisodeMarkerKinds
+		movie           bool
+	}{
+		{name: "episode missing only credits, credits off", kind: intromarkers.MarkerItemEpisode, online: withIntro, credits: "false"},
+		{name: "episode missing both, intros off", kind: intromarkers.MarkerItemEpisode, intros: "false", want: &intromarkers.EpisodeMarkerKinds{Credits: true}},
+		{name: "movie, credits off", kind: intromarkers.MarkerItemMovie, credits: "false"},
+		{name: "movie, intros off", kind: intromarkers.MarkerItemMovie, intros: "false", movie: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1), movies: make(chan string, 1)}
+			handler := NewAdminIntroHandler(analyzer, fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
+				ItemID: "item1", Kind: tc.kind, HasMediaFiles: true, IntroDetectionEnabled: true,
+			}}, t.Context(), nil)
+			handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeBoth)}}
+			setDetectionKinds(handler, tc.intros, tc.credits)
+			file := &models.MediaFile{ID: 42, EpisodeID: "item1"}
+			if tc.kind == intromarkers.MarkerItemMovie {
+				file = &models.MediaFile{ID: 42, ContentID: "item1"}
+			}
+			handler.FileResolver = fakeAdminIntroFileResolver{files: []*models.MediaFile{file}, byContent: map[string][]*models.MediaFile{"item1": {file}}}
+			refreshed := make(chan int, 1)
+			handler.OnlineMarkers = markerRefreshFunc(func(_ context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
+				refreshed <- file.ID
+				if tc.online != nil {
+					return tc.online(file), true, nil
+				}
+				return file, false, nil
+			})
+			status, err := handler.RefreshEpisodeMarkers(t.Context(), "item1", "refresh-v2")
+			if err != nil || status != "queued" {
+				t.Fatalf("status=%q err=%v", status, err)
+			}
+			select {
+			case <-refreshed:
+			case <-time.After(time.Second):
+				t.Fatal("online refresh did not run")
+			}
+			select {
+			case got := <-analyzer.kinds:
+				if tc.want == nil || got != *tc.want {
+					t.Fatalf("analyzed %+v, want %+v", got, tc.want)
+				}
+			case id := <-analyzer.movies:
+				if !tc.movie {
+					t.Fatalf("analyzed movie %q", id)
+				}
+			case <-time.After(100 * time.Millisecond):
+				if tc.want != nil || tc.movie {
+					t.Fatal("local analysis did not run")
+				}
+			}
+		})
+	}
+}
+
+// The v1 routes and v2 redetect-intro predate the detection settings and
+// keep analyzing intros whatever they say.
+func TestAdminIntroEndpointsIgnoreDetectionSettings(t *testing.T) {
+	analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1)}
+	handler := redetectHandler(analyzer, "ep1", intromarkers.MarkerItemEpisode)
+	setDetectionKinds(handler, "false", "false")
+	status, err := handler.RefreshEpisodeMarkers(t.Context(), "ep1", "redetect")
+	if err != nil || status != "queued" {
+		t.Fatalf("redetect-intro: status=%q err=%v", status, err)
+	}
+	if got := receiveEpisodeKinds(t, analyzer); got != (intromarkers.EpisodeMarkerKinds{Intro: true}) {
+		t.Fatalf("redetect-intro analyzed %+v, want intros", got)
+	}
+}

@@ -310,6 +310,59 @@ func TestMaybeQueueLazyPlaybackMarkersRunsLocalForMissingCredits(t *testing.T) {
 	}
 }
 
+// The server-wide detection settings narrow what playback analyzes: a kind
+// turned off is never looked for, and a file with nothing left to find gets
+// no analysis.
+func TestLazyPlaybackMarkersHonorDetectionKindSettings(t *testing.T) {
+	type kinds = intromarkers.EpisodeMarkerKinds
+	withIntro := func(file *models.MediaFile) *models.MediaFile {
+		return withMarker(file, models.MarkerSegmentIntro, 10, 60, models.MarkerSourceOnline)
+	}
+	cases := []struct {
+		name       string
+		file       *models.MediaFile
+		intros     string
+		credits    string
+		wantKinds  []kinds
+		wantMovies int
+	}{
+		{name: "episode with credits off", file: lazyMarkerTestFile(), credits: "false", wantKinds: []kinds{{Intro: true}}},
+		{name: "episode with intros off", file: lazyMarkerTestFile(), intros: "false", wantKinds: []kinds{{Credits: true}}},
+		{name: "episode with its intro and credits off", file: withIntro(lazyMarkerTestFile()), credits: "false"},
+		{name: "episode with both off", file: lazyMarkerTestFile(), intros: "false", credits: "false"},
+		{name: "movie with credits off", file: lazyMarkerMovieFile(), credits: "false"},
+		{name: "movie with intros off", file: lazyMarkerMovieFile(), intros: "false", wantMovies: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				analyzer := &fakePlaybackIntroAnalyzer{}
+				handler := newLazyMarkerTestHandler(tc.file, analyzer, nil)
+				handler.MarkerLazyContext = t.Context()
+				handler.SettingsRepo = testPlaybackSettingsRepo{values: map[string]string{
+					markers.SettingLazyPlayback:  "true",
+					markers.SettingMode:          "local",
+					markers.SettingDetectIntros:  tc.intros,
+					markers.SettingDetectCredits: tc.credits,
+				}}
+
+				handler.maybeQueueLazyPlaybackMarkers(t.Context(), &playback.Session{ID: "session-1"}, tc.file)
+				synctest.Wait()
+
+				if got := analyzer.requestedKinds(); !slices.Equal(got, tc.wantKinds) {
+					t.Fatalf("episode analyses = %+v, want %+v", got, tc.wantKinds)
+				}
+				analyzer.mu.Lock()
+				movies := len(analyzer.movieFiles)
+				analyzer.mu.Unlock()
+				if movies != tc.wantMovies {
+					t.Fatalf("movie analyses = %d, want %d", movies, tc.wantMovies)
+				}
+			})
+		})
+	}
+}
+
 func TestMissingLocalMarkersPerKind(t *testing.T) {
 	marker := func(v float64) *float64 { return &v }
 	type kinds = intromarkers.EpisodeMarkerKinds
