@@ -10,8 +10,10 @@ Every API server runs the task manager, so the task takes a PostgreSQL
 advisory lock before it analyzes anything. While one server holds it, a run on
 another server succeeds without analyzing and records `skipped` in its result
 data. The admin UI does not show that result data yet, so a skipped run
-appears there as a completed run. Analysis started from playback or for a
-single item does not take the lock.
+appears there as a completed run. A server whose ffmpeg cannot compute
+Chromaprint fingerprints runs its chapter-only pass without the lock, so it
+never makes a server that can compare season groups skip. Analysis started
+from playback or for a single item does not take the lock.
 
 ## Pipeline
 

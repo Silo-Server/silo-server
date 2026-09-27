@@ -19,7 +19,11 @@ type fakeMarkerAnalysisRunner struct {
 	err     error
 	// block waits for ctx cancellation and returns its error.
 	block bool
+	// preflightErr is what this server's ffmpeg lacks for fingerprinting.
+	preflightErr error
 }
+
+func (f *fakeMarkerAnalysisRunner) Preflight(context.Context) error { return f.preflightErr }
 
 func (f *fakeMarkerAnalysisRunner) Run(ctx context.Context, _ intromarkers.ProgressFunc) (intromarkers.RunSummary, error) {
 	f.runs++
@@ -58,6 +62,29 @@ func TestDetectIntroMarkersSkipsWhenAnotherServerHoldsLock(t *testing.T) {
 		t.Fatalf("analyzer runs = %d, want 0", runner.runs)
 	}
 	assertDetectMarkersSkipped(t, progress)
+}
+
+func TestDetectIntroMarkersWithoutChromaprintRunsWithoutLock(t *testing.T) {
+	// The lock is held elsewhere; a server that cannot fingerprint must neither
+	// take it nor skip its chapter-only pass because of it.
+	runner := &fakeMarkerAnalysisRunner{preflightErr: errors.New("ffmpeg lacks chromaprint")}
+	lock := &fakeClusterLock{err: errors.New("lock must not be consulted")}
+	if err := newTestDetectMarkersTask(runner, lock).Execute(t.Context(), &fakeProgress{}); err != nil {
+		t.Fatalf("Execute = %v, want nil", err)
+	}
+	if runner.runs != 1 || lock.released != 0 {
+		t.Fatalf("runs=%d released=%d, want one unlocked run", runner.runs, lock.released)
+	}
+}
+
+func TestDetectIntroMarkersPreflightCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	runner := &fakeMarkerAnalysisRunner{preflightErr: context.Canceled}
+	err := newTestDetectMarkersTask(runner, &fakeClusterLock{acquired: true}).Execute(ctx, &fakeProgress{})
+	if !errors.Is(err, context.Canceled) || runner.runs != 0 {
+		t.Fatalf("Execute error=%v runs=%d, want context.Canceled and no run", err, runner.runs)
+	}
 }
 
 func TestDetectIntroMarkersLockErrorFailsRun(t *testing.T) {
