@@ -115,8 +115,12 @@ end within 15 seconds of the end of the file becomes the end of the file.
    Titles that name an intro, a scene around the credits (`Post-Credits`,
    `Mid-Credits`, `After Credits`, `Pre-Credits`), the end of the credits
    (`Credits End`), or a generated `Chapter NN` are not credits, and neither
-   is a match whose neighbor also matches. The end is the next chapter's
-   start, even within 15 seconds of the end of the file, so a short scene
+   is a match whose neighbor also matches. A chapter that counts as credits
+   only by `Ending` or `Outro` may last at most 180 seconds, in episodes and
+   movies alike. A longer one is taken for the story's final scene: it is
+   not credits and does not make a neighboring credits chapter ambiguous.
+   The end is the next chapter's start, even within 15 seconds of the end
+   of the file, so a short scene
    after the credits keeps its own chapter; only the last chapter's end snaps
    to the end of the file. Chapter credits are authoritative.
 2. **Version copy.** Another file of the same episode whose duration is

@@ -120,6 +120,38 @@ func TestDetectChapterCredits(t *testing.T) {
 			duration: 1400, wantOK: true, wantStart: 1200, wantEnd: 1260,
 		},
 		{
+			name:     "a long chapter titled ending is the story's final scene",
+			chapters: []models.MediaChapter{chapter("Story", 0, 1100), chapter("Ending", 1100, 1400)},
+			duration: 1400,
+		},
+		{
+			name:     "a long outro chapter is not credits",
+			chapters: []models.MediaChapter{chapter("Story", 0, 1150), chapter("Outro", 1150, 1400)},
+			duration: 1400,
+		},
+		{
+			name:     "a short ending chapter is credits",
+			chapters: []models.MediaChapter{chapter("Part B", 0, 1310), chapter("Ending", 1310, 1400)},
+			duration: 1400, wantOK: true, wantStart: 1310, wantEnd: 1400,
+		},
+		{
+			name:     "a long chapter that names the credits is not limited",
+			chapters: []models.MediaChapter{chapter("Story", 0, 1100), chapter("Ending Credits", 1100, 1400)},
+			duration: 1400, wantOK: true, wantStart: 1100, wantEnd: 1400,
+		},
+		{
+			name:     "a long ED chapter is not limited",
+			chapters: []models.MediaChapter{chapter("Part B", 0, 1150), chapter("ED: Song", 1150, 1400)},
+			duration: 1400, wantOK: true, wantStart: 1150, wantEnd: 1400,
+		},
+		{
+			name: "a long ending scene does not hide the credits after it",
+			chapters: []models.MediaChapter{
+				chapter("Story", 0, 1000), chapter("Ending", 1000, 1300), chapter("Credits", 1300, 1400),
+			},
+			duration: 1400, wantOK: true, wantStart: 1300, wantEnd: 1400,
+		},
+		{
 			name:     "credits must start in the tail window",
 			chapters: []models.MediaChapter{chapter("Story", 0, 900), chapter("Credits", 900, 1400)},
 			duration: 1400,
