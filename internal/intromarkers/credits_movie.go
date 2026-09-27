@@ -92,7 +92,7 @@ func movieTailRequest(ctx context.Context, candidate Candidate, window fingerpri
 			BlackThresholds: creditsBlackThresholds,
 		},
 		Threads:       1,
-		VideoBitDepth: candidate.VideoBitDepth,
+		VideoBitDepth: mediasample.VideoBitDepthHint(candidate.VideoBitDepth),
 		Background:    backgroundAnalysis(ctx),
 	}
 }

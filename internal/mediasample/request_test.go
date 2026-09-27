@@ -122,6 +122,26 @@ func TestValidate(t *testing.T) {
 
 // samplesMode replaces a request's window and audio with samples at the
 // given times and a stats output.
+// TestVideoBitDepthHintKeepsProbedRequestsValid covers a probe reporting an
+// implausible depth, such as 32 for a raw float source: the hint drops it to
+// unknown, so the request still validates and software can decode it.
+func TestVideoBitDepthHintKeepsProbedRequestsValid(t *testing.T) {
+	for _, test := range []struct{ probed, want int }{
+		{-1, 0}, {0, 0}, {8, 8}, {10, 10}, {16, 16}, {17, 0}, {32, 0},
+	} {
+		got := VideoBitDepthHint(test.probed)
+		if got != test.want {
+			t.Errorf("VideoBitDepthHint(%d) = %d, want %d", test.probed, got, test.want)
+		}
+		req := validRequest()
+		req.Stats = validStats()
+		req.VideoBitDepth = got
+		if err := req.Validate(); err != nil {
+			t.Errorf("request with probed depth %d: %v", test.probed, err)
+		}
+	}
+}
+
 func samplesMode(seconds ...float64) func(*Request) {
 	return func(r *Request) {
 		r.Window, r.Audio, r.Stats = nil, nil, validStats()

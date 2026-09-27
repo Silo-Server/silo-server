@@ -182,7 +182,9 @@ hwdownload,format=nv12,crop=…,scale=W:-2:flags=area,format=yuv420p,blackframe=
 
 `hwdownload` cannot convert, and a VideoToolbox surface keeps its source's
 depth, so the download names `p010le` when the request's `VideoBitDepth` is
-above 8. An unknown depth is taken as 8; a 10-bit source without its depth,
+above 8. Callers pass a probed depth through `VideoBitDepthHint`, which
+turns anything outside 1..16 into unknown so the request stays valid for its
+software attempt. An unknown depth is taken as 8; a 10-bit source without its depth,
 or a 4:2:2 one, fails the hardware attempt. `-skip_frame:v nokey` still applies, in `Window` and `Samples` modes
 alike. The VAAPI chain measures slightly different pixels (GPU scaling
 before the crop instead of area scaling after it). On a 4K HEVC Dolby Vision

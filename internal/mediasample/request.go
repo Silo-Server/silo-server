@@ -38,7 +38,9 @@ type Request struct {
 	// VideoBitDepth is the bit depth of the input's first video stream, zero
 	// when unknown. A hardware attempt on VideoToolbox needs it to download
 	// the decoded surfaces, whose format follows the source's depth; an
-	// unknown depth is taken as 8 bits.
+	// unknown depth is taken as 8 bits. Validate accepts 0..16; callers pass
+	// a probed depth through VideoBitDepthHint so an implausible probe value
+	// becomes unknown instead of invalidating the request.
 	VideoBitDepth int `json:"video_bit_depth,omitempty"`
 	// Background marks work nobody is waiting on. On Linux its ffmpeg runs at
 	// the lowest CPU priority (nice 19) and in the idle I/O class; elsewhere it
@@ -134,6 +136,17 @@ const (
 	maxSamples        = 10000
 	maxVideoBitDepth  = 16
 )
+
+// VideoBitDepthHint returns a probed video bit depth as a Request's
+// VideoBitDepth: the depth itself when it is 1..16, else zero (unknown). The
+// depth only picks the VideoToolbox download format, so a value outside that
+// range must not stop a request that software can still decode.
+func VideoBitDepthHint(depth int) int {
+	if depth < 1 || depth > maxVideoBitDepth {
+		return 0
+	}
+	return depth
+}
 
 // Validate reports whether the request can be run.
 func (r Request) Validate() error {

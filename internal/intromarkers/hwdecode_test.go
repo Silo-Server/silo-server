@@ -304,6 +304,59 @@ func TestTailRequestsCarryTheVideoBitDepth(t *testing.T) {
 	if depth := movieTailRequest(context.Background(), candidate, window).VideoBitDepth; depth != 10 {
 		t.Errorf("movie tail request bit depth %d, want 10", depth)
 	}
+
+	// A probed depth past what hardware download formats cover only picks
+	// the VideoToolbox format, so it becomes unknown rather than failing
+	// the request that software can decode.
+	candidate.VideoBitDepth = 32
+	for name, req := range map[string]mediasample.Request{
+		"episode": creditsTailRequest(context.Background(), candidate, window, false),
+		"movie":   movieTailRequest(context.Background(), candidate, window),
+	} {
+		if req.VideoBitDepth != 0 {
+			t.Errorf("%s tail request bit depth %d for a 32-bit probe, want 0 (unknown)", name, req.VideoBitDepth)
+		}
+		if err := req.Validate(); err != nil {
+			t.Errorf("%s tail request for a 32-bit probe: %v", name, err)
+		}
+	}
+}
+
+// TestSampleTailsDecodeASourceWithAnImplausibleBitDepth runs both tail passes
+// in software on a candidate whose probe reported 32 bits.
+func TestSampleTailsDecodeASourceWithAnImplausibleBitDepth(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	caps, err := mediasample.LoadCapabilities(ctx, ffmpeg)
+	if err != nil {
+		t.Skipf("ffmpeg capabilities unavailable: %v", err)
+	}
+	candidate := Candidate{FileID: 1, DurationSeconds: 120, CodecVideo: "h264", VideoBitDepth: 32}
+	if err := caps.Require(creditsTailRequest(ctx, candidate, tailWindow(candidate), false)); err != nil {
+		t.Skipf("ffmpeg cannot run the tail pass: %v", err)
+	}
+	candidate.FilePath = filepath.Join(t.TempDir(), "source.mkv")
+	synthesizeCreditsClip(ctx, t, ffmpeg, candidate.FilePath)
+
+	extractor := NewChromaprintExtractor(DefaultConfig(ffmpeg))
+	sample, err := extractor.SampleCreditsTail(ctx, candidate, false)
+	if err != nil {
+		t.Fatalf("SampleCreditsTail: %v", err)
+	}
+	if len(sample.Tail.Frames) == 0 {
+		t.Fatal("episode tail has no keyframes")
+	}
+	tail, err := extractor.SampleMovieTail(ctx, candidate)
+	if err != nil {
+		t.Fatalf("SampleMovieTail: %v", err)
+	}
+	if len(tail.Frames) == 0 {
+		t.Fatal("movie tail has no keyframes")
+	}
 }
 
 func TestHardwareDecoderReportsEachBackendsFirstFailure(t *testing.T) {

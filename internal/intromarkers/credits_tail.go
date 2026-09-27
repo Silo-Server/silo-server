@@ -122,7 +122,7 @@ func creditsTailRequest(ctx context.Context, candidate Candidate, window fingerp
 			Width:           tailWidth,
 			BlackThresholds: creditsBlackThresholds,
 		}
-		req.VideoBitDepth = candidate.VideoBitDepth
+		req.VideoBitDepth = mediasample.VideoBitDepthHint(candidate.VideoBitDepth)
 	}
 	if candidate.hasAudio() {
 		req.Audio = &mediasample.AudioOutput{
