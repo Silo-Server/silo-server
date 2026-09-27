@@ -82,7 +82,7 @@ func routerDescriptor(req Request) *pluginv1.RequestDescriptor {
 	if req.TMDBID != 0 {
 		ids["tmdb"] = strconv.Itoa(req.TMDBID)
 	}
-	if req.TVDBID != nil {
+	if req.TVDBID != nil && *req.TVDBID > 0 {
 		ids["tvdb"] = strconv.Itoa(*req.TVDBID)
 	}
 	if req.IMDbID != "" {

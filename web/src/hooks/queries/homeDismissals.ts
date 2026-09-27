@@ -27,7 +27,13 @@ function dismissalBody({ progressUpdatedAt, seriesId, surface }: DismissHomeItem
     : { series_id: seriesId };
 }
 
+// Dismissing an episode or series drops the whole show on the server.
+export function dismissalDropsShow(mediaType: string | undefined) {
+  return mediaType === "episode" || mediaType === "series";
+}
+
 function dismissalSuccessLabel({ mediaType, surface }: DismissHomeItemVariables) {
+  if (dismissalDropsShow(mediaType)) return "Show dropped";
   if (surface === "next_up") return "Removed from Next Up";
   if (mediaType === "audiobook") return "Removed from Continue Listening";
   if (mediaType === "ebook") return "Removed from Continue Reading";

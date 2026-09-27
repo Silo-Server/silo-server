@@ -279,6 +279,42 @@ func TestGetExternalIDsCachesSuccess(t *testing.T) {
 	}
 }
 
+func TestRefreshExternalIDsBypassesCache(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		if r.URL.Path != "/tv/77/external_ids" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if n == 1 {
+			_, _ = w.Write([]byte(`{"imdb_id":"tt77"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"imdb_id":"tt77","tvdb_id":456}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	if _, err := client.GetExternalIDs(context.Background(), "tv", 77); err != nil {
+		t.Fatalf("GetExternalIDs returned error: %v", err)
+	}
+	refreshed, err := client.RefreshExternalIDs(context.Background(), "tv", 77)
+	if err != nil {
+		t.Fatalf("RefreshExternalIDs returned error: %v", err)
+	}
+	if calls.Load() != 2 || refreshed.TVDBID != 456 {
+		t.Fatalf("upstream calls = %d, refreshed = %+v; want a second fetch with the new TVDB ID", calls.Load(), refreshed)
+	}
+	cached, err := client.GetExternalIDs(context.Background(), "tv", 77)
+	if err != nil || cached.TVDBID != 456 || calls.Load() != 2 {
+		t.Fatalf("GetExternalIDs after refresh = %+v, %v (calls %d); want the refreshed value from cache", cached, err, calls.Load())
+	}
+}
+
 func TestDiscoverMovieAppliesFilters(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

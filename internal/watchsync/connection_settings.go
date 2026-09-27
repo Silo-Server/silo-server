@@ -51,8 +51,9 @@ func (r *PostgresRepository) UpdateConnectionSettings(ctx context.Context, provi
  scrobble_enabled=COALESCE($13,scrobble_enabled),
  import_ratings_enabled=COALESCE($14,import_ratings_enabled),
  export_ratings_enabled=COALESCE($15,export_ratings_enabled),
+ sync_dropped_enabled=COALESCE($16,sync_dropped_enabled),
  updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond')
- WHERE id=$1 RETURNING `+connectionColumns, current.ID, update.ImportWatchedEnabled, update.ImportProgressEnabled, update.ExportWatchedEnabled, update.ExportUnwatchedEnabled, update.ImportFavoritesEnabled, update.ExportFavoritesEnabled, update.SyncFavoriteRemovalsEnabled, update.ImportWatchlistEnabled, update.ExportWatchlistEnabled, update.SyncWatchlistRemovalsEnabled, update.SyncWatchlistOrderEnabled, update.ScrobbleEnabled, update.ImportRatingsEnabled, update.ExportRatingsEnabled))
+ WHERE id=$1 RETURNING `+connectionColumns, current.ID, update.ImportWatchedEnabled, update.ImportProgressEnabled, update.ExportWatchedEnabled, update.ExportUnwatchedEnabled, update.ImportFavoritesEnabled, update.ExportFavoritesEnabled, update.SyncFavoriteRemovalsEnabled, update.ImportWatchlistEnabled, update.ExportWatchlistEnabled, update.SyncWatchlistRemovalsEnabled, update.SyncWatchlistOrderEnabled, update.ScrobbleEnabled, update.ImportRatingsEnabled, update.ExportRatingsEnabled, update.SyncDroppedEnabled))
 	if err != nil {
 		return Connection{}, fmt.Errorf("update watch provider settings: %w", err)
 	}

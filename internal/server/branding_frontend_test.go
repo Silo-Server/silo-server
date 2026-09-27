@@ -101,11 +101,10 @@ func TestFrontendShellCacheFollowsBrandingChanges(t *testing.T) {
 	}
 }
 
-// TestFrontendShellCarriesBrandedDefaultTheme covers the admin's default theme
-// reaching the boot script before first paint. The shell is served no-cache
-// and revalidated by ETag, so the ETag has to change with the default or a
-// browser would keep painting the old one.
-func TestFrontendShellCarriesBrandedDefaultTheme(t *testing.T) {
+// TestFrontendShellIgnoresRetiredDefaultTheme covers the retired admin default
+// theme: the web client has one theme, so a leftover branding.default_theme row
+// must neither reach the shell nor change its ETag.
+func TestFrontendShellIgnoresRetiredDefaultTheme(t *testing.T) {
 	settings := fakeSettings{}
 	withBranding(t, settings)
 	handler := FrontendHandler()
@@ -117,35 +116,13 @@ func TestFrontendShellCarriesBrandedDefaultTheme(t *testing.T) {
 	}
 
 	unset := serve()
-	if strings.Contains(unset.Body.String(), "data-default-theme") {
-		t.Fatalf("shell carries a default theme when none is set: %q", unset.Body.String())
+	settings["branding.default_theme"] = "cinema-light"
+	stale := serve()
+	if strings.Contains(stale.Body.String(), "data-default-theme") {
+		t.Fatalf("shell carries the retired default theme: %q", stale.Body.String())
 	}
-
-	settings[branding.KeyDefaultTheme] = "cinema-light"
-	light := serve()
-	if !strings.Contains(light.Body.String(), `<html data-default-theme="cinema-light" `) {
-		t.Fatalf("shell does not carry the branded default theme: %q", light.Body.String())
-	}
-	if light.Header().Get("ETag") == unset.Header().Get("ETag") {
-		t.Fatal("etag must change when the default theme is set")
-	}
-
-	settings[branding.KeyDefaultTheme] = "cobalt-studio"
-	cobalt := serve()
-	if !strings.Contains(cobalt.Body.String(), `data-default-theme="cobalt-studio"`) {
-		t.Fatalf("shell does not follow a changed default theme: %q", cobalt.Body.String())
-	}
-	if cobalt.Header().Get("ETag") == light.Header().Get("ETag") {
-		t.Fatal("etag must change when the default theme changes")
-	}
-
-	// A browser holding the old shell revalidates and gets the new one.
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("If-None-Match", light.Header().Get("ETag"))
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `data-default-theme="cobalt-studio"`) {
-		t.Fatalf("stale shell revalidation: status = %d body = %q", rr.Code, rr.Body.String())
+	if stale.Header().Get("ETag") != unset.Header().Get("ETag") {
+		t.Fatal("a retired setting must not change the shell ETag")
 	}
 }
 
