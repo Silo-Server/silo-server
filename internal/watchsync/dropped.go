@@ -95,7 +95,7 @@ type droppedItem struct {
 	// stored is the agreed-drop row, nil when there is none.
 	stored *DroppedSyncState
 	// base is the agreed value used for the decision: whether a state row
-	// exists.
+	// exists and predates the profile's drop.
 	base     bool
 	remote   bool
 	remoteAt time.Time
@@ -105,6 +105,12 @@ type droppedItem struct {
 }
 
 func (item *droppedItem) local() bool { return item.row != nil && item.row.Active }
+
+// droppedAfterAgreement reports whether the profile dropped the series after
+// the agreed row was last recorded.
+func (item *droppedItem) droppedAfterAgreement() bool {
+	return item.row != nil && item.stored != nil && item.row.DroppedAt.After(item.stored.UpdatedAt)
+}
 
 func (item *droppedItem) providerKey() string {
 	if item.remoteKey != "" {
@@ -282,7 +288,9 @@ func (s *Service) loadDroppedItems(ctx context.Context, conn Connection, onlyIDs
 			items[state.SeriesID] = item
 		}
 		item.stored = &state
-		item.base = true
+		// A drop made after the agreement (a dismissal after watching ended
+		// the agreed drop) is a local change, however the agreement reads.
+		item.base = !item.droppedAfterAgreement()
 	}
 	return items, warnings, nil
 }
@@ -440,7 +448,7 @@ func (s *Service) reconcileDropped(
 	var deletes, inactive []string
 	var drops, undrops []*droppedItem
 	agreeDropped := func(item *droppedItem, seen bool) {
-		if item.stored == nil || item.stored.RemoteSeen != seen || item.stored.ProviderItemKey != item.providerKey() {
+		if item.stored == nil || item.stored.RemoteSeen != seen || item.stored.ProviderItemKey != item.providerKey() || item.droppedAfterAgreement() {
 			upserts = append(upserts, DroppedSyncState{
 				ConnectionID:      conn.ID,
 				ProviderAccountID: conn.ProviderAccountID,

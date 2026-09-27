@@ -150,6 +150,32 @@ func TestSyncDroppedImportsAProviderReDropAfterALocalWatch(t *testing.T) {
 	}
 }
 
+func TestRedroppingAfterAWatchEndedTheAgreedDropIsSent(t *testing.T) {
+	h := newDroppedHarness(t)
+	h.store.drop(droppedTestSeriesA, h.at(1))
+	h.agree(droppedTestSeriesA, true)
+	h.repo.droppedStates[0].UpdatedAt = h.at(1)
+	// Watching ended the drop, then the profile dismissed the show again.
+	h.store.activity[droppedTestSeriesA] = h.at(2)
+	h.store.drop(droppedTestSeriesA, h.at(3))
+
+	event := LocalDroppedEvent{UserID: h.conn.UserID, ProfileID: h.conn.ProfileID, SeriesIDs: []string{droppedTestSeriesA}}
+	if err := h.service.processLocalDroppedEvent(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	if ids := keys(h.provider.dropped); !slices.Equal(ids, []string{droppedTestSeriesA}) {
+		t.Fatalf("dropped = %v, want the re-drop sent", ids)
+	}
+
+	// The provider undropped the show when the watch reached it; a read
+	// that no longer lists it must not delete the new drop.
+	h.provider.batch = DroppedImportBatch{Complete: true}
+	h.sync()
+	if !h.store.active(droppedTestSeriesA) {
+		t.Fatal("the re-drop must survive a read taken before the provider saw it")
+	}
+}
+
 func TestSyncDroppedUndoSurvivesAStaleRead(t *testing.T) {
 	h := newDroppedHarness(t)
 	h.store.drop(droppedTestSeriesA, h.at(1))

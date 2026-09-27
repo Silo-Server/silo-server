@@ -1028,7 +1028,7 @@ func (r *PostgresRepository) ListDroppedEventConnections(ctx context.Context, us
 // state; otherwise only the listed series.
 func (r *PostgresRepository) ListDroppedSyncStates(ctx context.Context, connectionID, providerAccountID string, seriesIDs []string) ([]DroppedSyncState, error) {
 	query := `
-		SELECT connection_id::text, provider_account_id, series_id, provider_item_key, remote_seen
+		SELECT connection_id::text, provider_account_id, series_id, provider_item_key, remote_seen, updated_at
 		FROM watch_provider_dropped_items
 		WHERE connection_id = $1::uuid AND provider_account_id = $2`
 	args := []any{connectionID, providerAccountID}
@@ -1044,7 +1044,7 @@ func (r *PostgresRepository) ListDroppedSyncStates(ctx context.Context, connecti
 	var states []DroppedSyncState
 	for rows.Next() {
 		var state DroppedSyncState
-		if err := rows.Scan(&state.ConnectionID, &state.ProviderAccountID, &state.SeriesID, &state.ProviderItemKey, &state.RemoteSeen); err != nil {
+		if err := rows.Scan(&state.ConnectionID, &state.ProviderAccountID, &state.SeriesID, &state.ProviderItemKey, &state.RemoteSeen, &state.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan dropped sync state: %w", err)
 		}
 		states = append(states, state)

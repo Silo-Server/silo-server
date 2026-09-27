@@ -598,6 +598,9 @@ type DroppedSyncState struct {
 	SeriesID          string
 	ProviderItemKey   string
 	RemoteSeen        bool
+	// UpdatedAt is when the agreement was last recorded. A local drop made
+	// after it is a local change the provider has not been told about.
+	UpdatedAt time.Time
 }
 
 // LocalRatingEvent reports that a profile set or cleared ratings. It carries

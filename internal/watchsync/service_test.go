@@ -637,6 +637,7 @@ func (r *serviceFakeRepo) ListDroppedSyncStates(_ context.Context, connectionID,
 
 func (r *serviceFakeRepo) UpsertDroppedSyncStates(_ context.Context, states []DroppedSyncState) error {
 	for _, state := range states {
+		state.UpdatedAt = time.Now()
 		replaced := false
 		for i := range r.droppedStates {
 			existing := &r.droppedStates[i]
