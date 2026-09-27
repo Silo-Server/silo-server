@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -289,5 +290,36 @@ func TestCompatDVStripRoutingRequiresCapableExecutors(t *testing.T) {
 	handler.compatDVStripLocalProbe = func() bool { return true }
 	if _, excluded = handler.compatDVStripRouting(context.Background(), nil, nil); len(excluded) != 0 {
 		t.Fatalf("excluded shapes = %v, want the API remux shape kept when local FFmpeg can strip", excluded)
+	}
+}
+
+func TestCompatDVStripSkipsNodeReportsWhenAPIHostCanStrip(t *testing.T) {
+	var hits atomic.Int32
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{})
+	}))
+	defer node.Close()
+	handler := &PlaybackHandler{
+		NodePlanner:             compatToneMapInventoryPlanner{urls: []string{node.URL}},
+		compatDVRPUProbe:        func(context.Context, string) bool { return true },
+		compatDVStripLocalProbe: func() bool { return true },
+	}
+
+	// The default policy prefers transcode nodes, which must not delay a
+	// negotiation the API host can serve.
+	if !handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}) {
+		t.Fatal("strip not executable although the API host has dovi_rpu")
+	}
+	eligible, _ := handler.compatDVStripRouting(context.Background(), nil, nil)
+	if got := hits.Load(); got != 0 {
+		t.Fatalf("node capability requests = %d before any node was considered, want 0", got)
+	}
+	if eligible(&nodepool.Node{URL: node.URL}) {
+		t.Fatal("a node without server_dv7_to_hdr10 was accepted")
+	}
+	eligible(&nodepool.Node{URL: node.URL})
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("node capability requests = %d after two eligibility checks, want one sweep", got)
 	}
 }

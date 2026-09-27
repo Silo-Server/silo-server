@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -99,7 +101,9 @@ func (h *PlaybackHandler) applyCompatDVStrip(
 // compatDVStripExecutable reports whether this file's RPUs can be stripped and
 // whether a route the playback policy allows has an executor with the
 // dovi_rpu filter: the API host's FFmpeg or a pooled transcode node that
-// advertises server_dv7_to_hdr10.
+// advertises server_dv7_to_hdr10. The local check runs first, so a capable API
+// host never waits on node capability reports, and a node sweep during
+// negotiation is bounded like PlaybackInfo's tone-map discovery.
 func (h *PlaybackHandler) compatDVStripExecutable(ctx context.Context, version catalog.FileVersion) bool {
 	if !h.compatDVRPUStrippable(ctx, version.FilePath) {
 		return false
@@ -112,24 +116,23 @@ func (h *PlaybackHandler) compatDVStripExecutable(ctx context.Context, version c
 		slog.WarnContext(ctx, "compile Jellyfin-compatible Dolby Vision strip routes", "component", "jellycompat", "error", err)
 		return false
 	}
-	nodesChecked := false
+	apiAllowed, transcodeAllowed := false, false
 	for _, shape := range compiled.Candidates {
 		switch shape.Execution {
 		case noderouting.ExecutionAPI:
-			if h.compatDVStripLocalAvailable() {
-				return true
-			}
+			apiAllowed = true
 		case noderouting.ExecutionTranscode:
-			if nodesChecked {
-				continue
-			}
-			nodesChecked = true
-			if nodes, _ := h.compatDVStripNodeURLs(ctx); len(nodes) > 0 {
-				return true
-			}
+			transcodeAllowed = true
 		}
 	}
-	return false
+	if apiAllowed && h.compatDVStripLocalAvailable() {
+		return true
+	}
+	if !transcodeAllowed {
+		return false
+	}
+	nodes, _ := h.compatDVStripNodeURLs(ctx, compatToneMapNegotiationTimeout)
+	return len(nodes) > 0
 }
 
 func (h *PlaybackHandler) compatDVRPUStrippable(ctx context.Context, filePath string) bool {
@@ -148,12 +151,12 @@ func (h *PlaybackHandler) compatDVStripLocalAvailable() bool {
 
 // compatDVStripNodeURLs returns the pooled transcode nodes that advertise the
 // server_dv7_to_hdr10 recipe, the same capability the native planner requires.
-func (h *PlaybackHandler) compatDVStripNodeURLs(ctx context.Context) (map[string]struct{}, error) {
+func (h *PlaybackHandler) compatDVStripNodeURLs(ctx context.Context, timeout time.Duration) (map[string]struct{}, error) {
 	enumerator, ok := h.NodePlanner.(compatTranscodeNodeEnumerator)
 	if !ok {
 		return map[string]struct{}{}, nil
 	}
-	return h.compatNodeURLsSupporting(ctx, enumerator.TranscodeNodeURLs(), h.toneMapCapabilityTimeout(), compatSupportsDVStrip)
+	return h.compatNodeURLsSupporting(ctx, enumerator.TranscodeNodeURLs(), timeout, compatSupportsDVStrip)
 }
 
 func compatSupportsDVStrip(transformations []playback.TransformationV3) bool {
@@ -173,19 +176,24 @@ const compatDVStripRecipeVersion = "1"
 
 // compatDVStripRouting narrows HLS route selection for a strip remux to
 // executors that can run it: transcode nodes advertising the recipe, and the
-// API host only when its own FFmpeg has the dovi_rpu filter.
+// API host only when its own FFmpeg has the dovi_rpu filter. Node reports are
+// fetched on the first node the resolver considers, so a route that settles on
+// the API host never waits on them.
 func (h *PlaybackHandler) compatDVStripRouting(
 	ctx context.Context,
 	eligible func(*nodepool.Node) bool,
 	excludedShapes map[string]struct{},
 ) (func(*nodepool.Node) bool, map[string]struct{}) {
-	capable, _ := h.compatDVStripNodeURLs(ctx)
+	capableNodes := sync.OnceValue(func() map[string]struct{} {
+		capable, _ := h.compatDVStripNodeURLs(ctx, h.toneMapCapabilityTimeout())
+		return capable
+	})
 	baseEligible := eligible
 	eligible = func(node *nodepool.Node) bool {
 		if node == nil {
 			return false
 		}
-		if _, supported := capable[strings.TrimRight(node.URL, "/")]; !supported {
+		if _, supported := capableNodes()[strings.TrimRight(node.URL, "/")]; !supported {
 			return false
 		}
 		return baseEligible == nil || baseEligible(node)
