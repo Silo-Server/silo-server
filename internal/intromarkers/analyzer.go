@@ -237,7 +237,9 @@ type ProgressFunc func(percent float64, message string)
 
 // Preflight reports what this server's ffmpeg lacks for Chromaprint
 // comparison. Without it, Run still reads chapters and refines them with
-// silence, but compares no season groups.
+// silence, but compares no season groups. The error matches
+// mediasample.ErrUnsupported only when ffmpeg's capability listing succeeded
+// and lacks Chromaprint.
 func (a *Analyzer) Preflight(ctx context.Context) error {
 	return a.extractor.Preflight(ctx)
 }
