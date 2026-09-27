@@ -152,6 +152,15 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 	); tags != nil {
 		dto.BackdropImageTags = tags
 	}
+	// Advertise the logo as Jellyfin does, so clients that check ImageTags
+	// know it exists. Episodes carry no logo of their own; theirs belongs to
+	// the series.
+	if item.LogoURL != "" && item.Type != "episode" {
+		dto.ImageTags["Logo"] = m.imageTagSigner.Tag(
+			imageTagSeed(item.ContentID, "Logo", compatCardImageSize, item.LogoPath, "", item.UpdatedAt),
+			item.LogoURL,
+		)
+	}
 	if ratio := primaryAspectRatio(item.Type); ratio != nil {
 		dto.PrimaryImageAspectRatio = ratio
 	}
@@ -253,6 +262,7 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		PosterThumbhash:   item.PosterThumbhash,
 		BackdropPath:      item.BackdropPath,
 		BackdropThumbhash: item.BackdropThumbhash,
+		LogoURL:           item.LogoURL,
 		LogoPath:          item.LogoPath,
 		UpdatedAt:         item.UpdatedAt,
 		SeasonCount:       item.SeasonCount,
