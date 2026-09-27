@@ -127,8 +127,7 @@ func (h *PlaybackHandler) compatDVStripExecutable(ctx context.Context, version c
 			transcodeAllowed = true
 		}
 	}
-	executor := apiAllowed && h.compatDVStripLocalAvailable(ctx) &&
-		h.requireLocalAudioDownmixCapability(ctx, sourceAudioChannels) == nil ||
+	executor := apiAllowed && h.compatAPIHostCanStrip(ctx, sourceAudioChannels) ||
 		transcodeAllowed && h.compatAnyTranscodeNodeCanStrip(sourceAudioChannels > 2)
 	// The per-file RPU probe can read the source for seconds, so it runs only
 	// once an executor exists.
@@ -140,6 +139,13 @@ func (h *PlaybackHandler) compatDVRPUStrippable(ctx context.Context, filePath st
 		return h.compatDVRPUProbe(ctx, filePath)
 	}
 	return playback.DVRPUStrippable(ctx, h.FFmpegPath, filePath)
+}
+
+// compatAPIHostCanStrip reports whether the API host can run a strip remux:
+// the dovi_rpu recipe, and audio_to_aac v2 as well when it downmixes surround
+// audio.
+func (h *PlaybackHandler) compatAPIHostCanStrip(ctx context.Context, sourceAudioChannels int) bool {
+	return h.compatDVStripLocalAvailable(ctx) && h.requireLocalAudioDownmixCapability(ctx, sourceAudioChannels) == nil
 }
 
 // compatDVStripLocalAvailable reads the API host's cached transformation
@@ -225,18 +231,20 @@ const compatDVStripRecipeVersion = "1"
 
 // compatDVStripRouting narrows HLS route selection for a strip remux to
 // executors that can run it: transcode nodes whose stored report advertises
-// the recipe, and the API host only when its own FFmpeg has the dovi_rpu
-// filter.
+// the recipe, and the API host only when it can run the whole recipe,
+// including a surround downmix. Node audio capability is already required by
+// compatTranscodeEligibility.
 func (h *PlaybackHandler) compatDVStripRouting(
 	ctx context.Context,
 	eligible func(*nodepool.Node) bool,
 	excludedShapes map[string]struct{},
+	sourceAudioChannels int,
 ) (func(*nodepool.Node) bool, map[string]struct{}) {
 	baseEligible := eligible
 	eligible = func(node *nodepool.Node) bool {
 		return node != nil && compatNodeCanStrip(node) && (baseEligible == nil || baseEligible(node))
 	}
-	if !h.compatDVStripLocalAvailable(ctx) {
+	if !h.compatAPIHostCanStrip(ctx, sourceAudioChannels) {
 		excluded := make(map[string]struct{}, len(excludedShapes)+1)
 		for id := range excludedShapes {
 			excluded[id] = struct{}{}

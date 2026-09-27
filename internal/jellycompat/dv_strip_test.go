@@ -297,7 +297,7 @@ func TestCompatDVStripRoutingRequiresCapableExecutors(t *testing.T) {
 	legacy := dvStripNode(t, "http://legacy:8080")
 	handler := &PlaybackHandler{compatDVStripLocalProbe: func() bool { return false }}
 
-	eligible, excluded := handler.compatDVStripRouting(context.Background(), nil, map[string]struct{}{"other": {}})
+	eligible, excluded := handler.compatDVStripRouting(context.Background(), nil, map[string]struct{}{"other": {}}, 0)
 
 	if !eligible(capable) || eligible(legacy) || eligible(nil) {
 		t.Fatal("strip routing must accept only nodes advertising server_dv7_to_hdr10")
@@ -310,7 +310,7 @@ func TestCompatDVStripRoutingRequiresCapableExecutors(t *testing.T) {
 	}
 
 	handler.compatDVStripLocalProbe = func() bool { return true }
-	if _, excluded = handler.compatDVStripRouting(context.Background(), nil, nil); len(excluded) != 0 {
+	if _, excluded = handler.compatDVStripRouting(context.Background(), nil, nil, 0); len(excluded) != 0 {
 		t.Fatalf("excluded shapes = %v, want the API remux shape kept when local FFmpeg can strip", excluded)
 	}
 }
@@ -335,7 +335,7 @@ func TestCompatDVStripDecisionsNeverWaitOnNodes(t *testing.T) {
 	if !handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}, 0) {
 		t.Fatal("strip not executable although a pooled node's stored report advertises it")
 	}
-	eligible, _ := handler.compatDVStripRouting(context.Background(), nil, nil)
+	eligible, _ := handler.compatDVStripRouting(context.Background(), nil, nil, 0)
 	if !eligible(capable) {
 		t.Fatal("capable node rejected during route selection")
 	}
@@ -457,6 +457,12 @@ func TestCompatDVStripOnAPIHostRequiresLocalAudioRecipeForDownmix(t *testing.T) 
 			}
 			if got := handler.compatDVStripExecutable(context.Background(), version, tc.channels); got != tc.want {
 				t.Fatalf("compatDVStripExecutable = %t, want %t", got, tc.want)
+			}
+			// Route selection must agree, so a downmix never lands on an API
+			// host that lacks the audio recipe.
+			_, excluded := handler.compatDVStripRouting(context.Background(), nil, nil, tc.channels)
+			if _, apiExcluded := excluded[noderouting.ShapeHLSRemuxAPI]; apiExcluded == tc.want {
+				t.Fatalf("API remux shape excluded = %t, want %t", apiExcluded, !tc.want)
 			}
 		})
 	}

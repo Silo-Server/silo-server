@@ -1029,7 +1029,7 @@ func (h *PlaybackHandler) resolveCompatHLSRouteOnNodeWithPolicy(
 		return noderouting.Decision{}, err
 	}
 	if source.DVStripToHDR10 && !videoTranscode {
-		eligible, excludedShapes = h.compatDVStripRouting(ctx, eligible, excludedShapes)
+		eligible, excludedShapes = h.compatDVStripRouting(ctx, eligible, excludedShapes, compatHLSRecipeSourceAudioChannels(source))
 	}
 	currentTranscodeURL := session.TranscodeNodeURL
 	if requiredTranscodeURL != "" {
