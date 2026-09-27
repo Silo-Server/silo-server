@@ -228,6 +228,12 @@ func (a *Analyzer) analyzeMovie(ctx context.Context, candidate Candidate, tailRe
 // credits. It returns no tail when the tail is unusable, backing off after
 // a failure, fails now, or deadline passed while it waited for ffmpeg.
 func (a *Analyzer) movieTail(ctx context.Context, candidate Candidate, deadline time.Time, summary *RunSummary) (tail *creditsTail, sampled bool) {
+	// Decided from the file's current probe metadata, which a probe repair
+	// can change without changing the file, so it is not stored.
+	if tailUnusableBeforeSampling(candidate) != "" {
+		summary.CreditsTailUnusable++
+		return nil, false
+	}
 	spec := movieTailSpec(candidate)
 	artifacts, err := a.loadCreditsArtifacts(ctx, []Candidate{candidate}, spec.key)
 	if err != nil {
@@ -249,14 +255,6 @@ func (a *Analyzer) movieTail(ctx context.Context, candidate Candidate, deadline 
 	case state == ArtifactSkipped:
 		return nil, false
 	}
-	if detail := tailUnusableBeforeSampling(candidate); detail != "" {
-		if err := a.storeCreditsTailUnusable(ctx, candidate, spec, detail); err != nil {
-			summary.Errors = append(summary.Errors, err.Error())
-		}
-		summary.CreditsTailUnusable++
-		return nil, false
-	}
-
 	release, err := a.ffmpegAcquirer()(ctx)
 	if err != nil {
 		return nil, false

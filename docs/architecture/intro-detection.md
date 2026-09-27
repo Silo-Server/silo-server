@@ -281,7 +281,12 @@ file as it is now (complete, unusable, or failed on this server and still
 backing off), never-analyzed files first, then the newest; files retried
 after a failure come last. Once a movie's tail is stored, the run does not
 look at it again until the file changes; admin refresh and playback place its
-credits again from the stored tail. The run starts no new movie after 60
+credits again from the stored tail. As for episodes, a tail ruled out by probe
+metadata (no video, or an all-intra codec) is decided on every analysis and
+never stored, and an unusable row an earlier build stored that way does not
+keep a movie out. Such movies, like movies whose credits come from a chapter,
+are listed on every run, but analyzing them reads no artifact and runs no
+ffmpeg. The run starts no new movie after 60
 minutes and reports `movie_budget_exhausted`; the remaining movies wait for
 the next run. Run summaries count `movies_considered` and
 `movie_credits_markers_written`; the credits tail counters include movies.

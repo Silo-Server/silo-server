@@ -39,7 +39,11 @@ const movieCandidateWhere = `
 // or unusable, or failed on this server and still backing off. A sampled
 // tail is stored only once the credits placed from it are written, so a
 // complete tail means its credits were settled; admin refresh or playback
-// analyze it again on request. The tail's window follows from the file's duration
+// analyze it again on request. An unusable row an earlier build stored from
+// probe metadata does not count: that verdict is now decided on every
+// analysis, so a probe repair brings the file back. Such files, and movies
+// that get credits from a chapter, are listed on every run, but their
+// analysis reads no artifact and runs no ffmpeg. The tail's window follows from the file's duration
 // and the key's parameters, so matching the file hash, size, and duration
 // matches the whole identity. Failed files retried after their backoff come
 // last.
@@ -62,7 +66,9 @@ func (r *Repository) ListMovieCandidates(ctx context.Context, node string) ([]Ca
 		      art.file_hash = COALESCE(mf.file_hash, '')
 		      AND art.file_size = COALESCE(mf.file_size, 0)
 		      AND art.duration_seconds = COALESCE(mf.duration, 0)
-		      AND (art.status IN ($6, $7) OR (art.status = $8 AND art.retry_after > NOW() AND art.recorded_by = $9)),
+		      AND (art.status = $6
+		           OR (art.status = $7 AND COALESCE(art.detail, '') NOT IN ($10, $11))
+		           OR (art.status = $8 AND art.retry_after > NOW() AND art.recorded_by = $9)),
 		      false)
 		ORDER BY COALESCE(art.status = $8, false), mf.created_at DESC, mf.id DESC`,
 		movieCreditsMinimumDurationSeconds,
@@ -74,6 +80,8 @@ func (r *Repository) ListMovieCandidates(ctx context.Context, node string) ([]Ca
 		ArtifactUnusable,
 		ArtifactFailed,
 		node,
+		tailDetailNoVideo,
+		tailDetailUnsupportedCodec,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing movie credits candidates: %w", err)

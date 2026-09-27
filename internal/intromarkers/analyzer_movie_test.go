@@ -222,20 +222,60 @@ func TestAnalyzeMovieStatuses(t *testing.T) {
 	if summary.CreditsTailUnusable != 1 || summary.CreditsTailScanErrors != 1 || len(creditsPatches(repo)) != 0 {
 		t.Fatalf("summary %+v", summary)
 	}
-	if artifact := repo.artifact(11, ArtifactKindCreditsTail); artifact.Status != ArtifactUnusable || artifact.Detail != tailDetailNoVideo {
-		t.Fatalf("no-video artifact %+v", artifact)
+	// A tail ruled out by probe metadata is decided on every analysis, not
+	// stored.
+	if artifact := repo.artifact(11, ArtifactKindCreditsTail); artifact.Status != "" {
+		t.Fatalf("no-video artifact status %q, want none stored", artifact.Status)
 	}
 	if artifact := repo.artifact(12, ArtifactKindCreditsTail); artifact.Status != ArtifactFailed || artifact.RecordedBy != "node-a" {
 		t.Fatalf("failed artifact %+v", artifact)
 	}
 
-	// The next analysis skips both: one is unusable, the other backs off.
+	// The next analysis samples neither: one has no video, the other backs
+	// off.
 	summary, err = analyzer.AnalyzeMovie(context.Background(), "movie")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sampler.tailCount() != 1 || summary.CreditsTailUnusable != 1 || summary.CreditsTailScanErrors != 0 {
 		t.Fatalf("%d tail passes, summary %+v; want no new pass", sampler.tailCount(), summary)
+	}
+}
+
+// A probe repair can fill in a missing or misread video codec without
+// changing the file. The movie's tail is then sampled, even over a no_video
+// row an earlier build stored.
+func TestAnalyzeMovieTailAfterProbeRepair(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		movie := movieCandidate(10, 7200)
+		movie.CodecVideo = "mjpeg"
+		repo := &fakeIntroRepository{movieCandidates: []Candidate{movie}}
+		sampler := &fakeMovieSampler{}
+		analyzer := movieAnalyzer(repo, sampler)
+		if legacy {
+			spec := movieTailSpec(movie)
+			repo.artifacts = map[artifactSlot]Artifact{{10, ArtifactKindCreditsTail}: {
+				MediaFileID: 10, ArtifactKey: spec.key, ArtifactIdentity: spec.window.identity(movie),
+				Status: ArtifactUnusable, Detail: tailDetailNoVideo,
+			}}
+		} else {
+			summary, err := analyzer.AnalyzeMovie(context.Background(), "movie")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if summary.CreditsTailUnusable != 1 || sampler.tailCount() != 0 || repo.artifact(10, ArtifactKindCreditsTail).Status != "" {
+				t.Fatalf("summary %+v, %d tail passes; want the tail ruled out, unsampled and unstored", summary, sampler.tailCount())
+			}
+		}
+
+		repo.movieCandidates[0].CodecVideo = "hevc"
+		summary, err := analyzer.AnalyzeMovie(context.Background(), "movie")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sampler.tailCount() != 1 || summary.CreditsTailScansComputed != 1 || summary.MovieCreditsMarkersWritten != 1 {
+			t.Fatalf("legacy=%t: summary %+v, %d tail passes; want the repaired movie sampled and placed", legacy, summary, sampler.tailCount())
+		}
 	}
 }
 
