@@ -6942,6 +6942,10 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "detection_kind_settings": {
+            "description": "Local detection honors the markers.detect_intros and markers.detect_credits server settings, which turn intro and credits detection on or off separately",
+            "type": "boolean"
+          },
           "movie_credits": {
             "description": "The item refresh-markers operation, and redetect-markers with kind credits or all, accept movies, and local analysis looks for their end credits on a best-effort basis; redetect-intro stays episode-only, since movies never get intros",
             "type": "boolean"
@@ -6968,6 +6972,7 @@
         "required": [
           "movie_credits",
           "redetect_markers",
+          "detection_kind_settings",
           "revision",
           "state",
           "allowed"
@@ -68744,6 +68749,16 @@
               }
             },
             "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {

@@ -871,7 +871,7 @@ func TestRunBackfillsExistingChapterMarkerWithSilenceBudget(t *testing.T) {
 	}}
 	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, refiner: refiner, config: DefaultConfig("ffmpeg")}
 
-	summary, err := analyzer.Run(context.Background(), nil)
+	summary, err := analyzer.Run(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -922,7 +922,7 @@ func TestRunBackfillRecordsNoImprovementAttempt(t *testing.T) {
 	}
 	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, refiner: &fakeBoundaryRefiner{}, config: cfg, node: "node-a"}
 
-	summary, err := analyzer.Run(context.Background(), nil)
+	summary, err := analyzer.Run(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -1015,7 +1015,7 @@ func TestSilenceRefinementFailureBacksOff(t *testing.T) {
 			refiner := &fakeBoundaryRefiner{errors: map[int]error{10: errors.New("ffmpeg exited 1")}}
 			analyzer := &Analyzer{repo: repo, refiner: refiner, config: cfg, logger: slog.New(slog.DiscardHandler), node: "node-a"}
 
-			summary, err := analyzer.runSilenceBackfill(context.Background())
+			summary, err := analyzer.runSilenceBackfill(context.Background(), allMarkerKinds)
 			if err != nil {
 				t.Fatalf("runSilenceBackfill returned error: %v", err)
 			}
@@ -1064,7 +1064,7 @@ func TestSilenceRefinementCancellationIsNotRecorded(t *testing.T) {
 	repo := &fakeIntroRepository{backfillCandidates: []Candidate{chapterBackfillCandidate(10)}}
 	analyzer := &Analyzer{repo: repo, refiner: cancelingBoundaryRefiner{cancel: cancel}, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
 
-	if _, err := analyzer.runSilenceBackfill(ctx); err != nil {
+	if _, err := analyzer.runSilenceBackfill(ctx, allMarkerKinds); err != nil {
 		t.Fatalf("runSilenceBackfill returned error: %v", err)
 	}
 	if len(repo.upsertedAttempts) != 0 {

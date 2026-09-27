@@ -12839,6 +12839,8 @@ export interface components {
     AdminMarkerCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description Local detection honors the markers.detect_intros and markers.detect_credits server settings, which turn intro and credits detection on or off separately */
+      detection_kind_settings: boolean;
       /** @description The item refresh-markers operation, and redetect-markers with kind credits or all, accept movies, and local analysis looks for their end credits on a best-effort basis; redetect-intro stays episode-only, since movies never get intros */
       movie_credits: boolean;
       /** @description The item redetect-markers operation reruns local detection of the kind requested: intro, credits, or all */
@@ -44246,6 +44248,15 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

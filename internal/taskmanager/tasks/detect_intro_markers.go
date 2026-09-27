@@ -18,19 +18,19 @@ type MarkerSettingsReader interface {
 	Get(ctx context.Context, key string) (string, error)
 }
 
-// markerAnalysisRunner runs one library-wide marker analysis pass.
-// *intromarkers.Analyzer implements it.
+// markerAnalysisRunner runs one library-wide marker analysis pass for the
+// marker kinds selected. *intromarkers.Analyzer implements it.
 type markerAnalysisRunner interface {
 	// Preflight reports what this server lacks to compare season groups. An
 	// error matching mediasample.ErrUnsupported means ffmpeg lacks Chromaprint;
 	// any other error means the check itself failed.
 	Preflight(ctx context.Context) error
 	// Run analyzes episodes, then movies.
-	Run(ctx context.Context, progress intromarkers.ProgressFunc) (intromarkers.RunSummary, error)
+	Run(ctx context.Context, kinds intromarkers.EpisodeMarkerKinds, progress intromarkers.ProgressFunc) (intromarkers.RunSummary, error)
 	// RunEpisodes analyzes episodes only.
-	RunEpisodes(ctx context.Context, progress intromarkers.ProgressFunc) (intromarkers.RunSummary, error)
+	RunEpisodes(ctx context.Context, kinds intromarkers.EpisodeMarkerKinds, progress intromarkers.ProgressFunc) (intromarkers.RunSummary, error)
 	// RunMovies analyzes movies only.
-	RunMovies(ctx context.Context, progress intromarkers.ProgressFunc) (intromarkers.RunSummary, error)
+	RunMovies(ctx context.Context, kinds intromarkers.EpisodeMarkerKinds, progress intromarkers.ProgressFunc) (intromarkers.RunSummary, error)
 }
 
 // detectMarkersAdvisoryLock spells "SILOMRKR".
@@ -107,6 +107,14 @@ func (t *DetectIntroMarkersTask) Execute(ctx context.Context, progress taskmanag
 		progress.Report(100, fmt.Sprintf("Marker population skipped; mode is %s", mode))
 		return nil
 	}
+	kinds, err := intromarkers.EnabledMarkerKinds(ctx, t.settings)
+	if err != nil {
+		return fmt.Errorf("loading marker detection kinds: %w", err)
+	}
+	if !kinds.Any() {
+		progress.Report(100, "Marker detection skipped; intro and credits detection are turned off")
+		return nil
+	}
 	if err := t.analyzer.Preflight(ctx); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -116,7 +124,7 @@ func (t *DetectIntroMarkersTask) Execute(ctx context.Context, progress taskmanag
 		// compare season groups. A failed listing proves nothing and Run
 		// probes again, so keep the lock. Without a lock, Run covers both.
 		if errors.Is(err, mediasample.ErrUnsupported) && t.lock != nil {
-			return t.executeChapterOnly(ctx, progress)
+			return t.executeChapterOnly(ctx, kinds, progress)
 		}
 	}
 	if t.lock != nil {
@@ -136,7 +144,7 @@ func (t *DetectIntroMarkersTask) Execute(ctx context.Context, progress taskmanag
 		defer release()
 	}
 
-	summary, err := t.analyzer.Run(ctx, func(percent float64, message string) {
+	summary, err := t.analyzer.Run(ctx, kinds, func(percent float64, message string) {
 		progress.Report(percent, message)
 	})
 	setDetectMarkersSummary(progress, summary)
@@ -148,16 +156,28 @@ func (t *DetectIntroMarkersTask) Execute(ctx context.Context, progress taskmanag
 
 const detectMarkersMoviesElsewhere = "Marker detection completed; another server is checking movies"
 
+const detectMarkersMoviesCreditsOff = "Intro detection completed; credits detection is turned off"
+
 // executeChapterOnly runs the episode pass of a server that cannot
 // fingerprint without the lock, then the movie pass under it. Episodes take
-// the first 85 percent of the progress bar, movies the rest.
-func (t *DetectIntroMarkersTask) executeChapterOnly(ctx context.Context, progress taskmanager.ProgressReporter) error {
-	summary, err := t.analyzer.RunEpisodes(ctx, func(percent float64, message string) {
-		progress.Report(percent*0.85, message)
+// the first 85 percent of the progress bar, movies the rest. Movies are
+// credits work, so with credits turned off the task stops after the
+// episodes and never claims the lock a capable server would then skip on.
+func (t *DetectIntroMarkersTask) executeChapterOnly(ctx context.Context, kinds intromarkers.EpisodeMarkerKinds, progress taskmanager.ProgressReporter) error {
+	episodeShare := 0.85
+	if !kinds.Credits {
+		episodeShare = 1
+	}
+	summary, err := t.analyzer.RunEpisodes(ctx, kinds, func(percent float64, message string) {
+		progress.Report(percent*episodeShare, message)
 	})
 	setDetectMarkersSummary(progress, summary)
 	if err != nil {
 		return fmt.Errorf("detecting markers: %w", err)
+	}
+	if !kinds.Credits {
+		progress.Report(100, detectMarkersMoviesCreditsOff)
+		return nil
 	}
 	release, acquired, err := t.lock.TryAcquire(ctx)
 	if err != nil {
@@ -168,7 +188,7 @@ func (t *DetectIntroMarkersTask) executeChapterOnly(ctx context.Context, progres
 		return nil
 	}
 	defer release()
-	movies, err := t.analyzer.RunMovies(ctx, func(percent float64, message string) {
+	movies, err := t.analyzer.RunMovies(ctx, kinds, func(percent float64, message string) {
 		progress.Report(85+percent*0.15, message)
 	})
 	summary.Merge(movies)

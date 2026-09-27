@@ -39,9 +39,23 @@ a marker from a higher-priority source, and it judges each kind separately, so
 an episode with an online intro can still get local credits. With `on_demand`
 storage, players keep the online intro while playback detects the credits.
 
-`markers.detection_workers` sizes local detection: how many seasons the
-**Detect markers on this server** task analyzes at once, which also bounds how
-many ffmpeg processes read audio and video. It defaults to `1` and accepts 1 to 64.
+`markers.detect_intros` and `markers.detect_credits` choose which kinds local
+detection finds, server-wide. Each is `true` or `false`, independent of the
+other, and defaults to `true`; a change applies without a restart. Credits
+detection costs more, since it reads the end of each episode and movie. With
+credits off, the **Detect markers on this server** task, playback detection,
+and admin refresh skip episode credits and movies; with intros off, they skip
+episode intros. Chapter markers of a kind that is off are skipped as well.
+Turning a kind off keeps the markers already saved.
+`detection_kind_settings` on `GET /api/v2/admin/markers/capabilities` reports
+that the server honors the two settings; an older server stores them through
+the generic settings endpoint but ignores them, so clients offer the switches
+only when it is `true`.
+
+`markers.detection_workers` sizes local detection: how many seasons or movies
+the **Detect markers on this server** task analyzes at once, which also bounds
+how many ffmpeg processes read audio and video. It defaults to `1` and accepts
+1 to 64.
 Detection mostly waits on reading each file's opening and closing minutes, so
 a higher value finishes a large library sooner on fast storage, at the cost of
 load that competes with playback. Analysis started from playback always has one
@@ -57,13 +71,15 @@ or withdraw that provider's existing ranges.
 or a movie from its configured sources; `movie_credits` on
 `GET /api/v2/admin/markers/capabilities` reports that movies are accepted. In
 `both` mode, eligible local detection fills missing intro and credits markers
-of an episode, or missing credits of a movie.
+of an episode, or missing credits of a movie, for the kinds the two detection
+settings leave on.
 `POST /api/v2/admin/items/{id}/redetect-markers`, which `redetect_markers` on
 the same capabilities document reports, reruns local detection of an episode's
 intro, credits, or both, or of a movie's credits; see
 [admin-catalog-api.md](admin-catalog-api.md#episode-and-movie-marker-analysis).
 The v1 refresh endpoint retains its local-only behavior, and it, the v1
-re-detect endpoint, and v2 `redetect-intro` analyze episode intros only.
+re-detect endpoint, and v2 `redetect-intro` analyze episode intros only,
+whatever the detection settings say.
 
 ## Operations
 

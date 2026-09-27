@@ -1596,7 +1596,7 @@
     {
       "name": "admin_marker_capabilities",
       "operation_id": "getAdminMarkerCapabilities",
-      "scenario": "Marker capabilities report local movie credits and marker re-detection support.",
+      "scenario": "Marker capabilities report local movie credits, marker re-detection, and detection kind settings support.",
       "request": {
         "method": "GET",
         "path": "/api/v2/admin/markers/capabilities",

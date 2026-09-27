@@ -42,6 +42,19 @@ func (f *fakeSettingsStore) Get(_ context.Context, key string) (string, error) {
 	return f.values[key], nil
 }
 
+func (f *fakeSettingsStore) GetMany(_ context.Context, keys ...string) (map[string]string, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := f.values[key]; ok {
+			out[key] = value
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeSettingsStore) Set(_ context.Context, key, value string) error {
 	if f.values == nil {
 		f.values = map[string]string{}

@@ -8,6 +8,17 @@ limit come from `internal/mediasample` (see [media sampling](media-sampling.md))
 Credits detection is described [below](#credits), and movies
 [after it](#movie-credits).
 
+`markers.detect_intros` and `markers.detect_credits` (both default `true`)
+choose the kinds, and are read at the start of each run, playback analysis,
+and admin request. With intros off, the task skips intro chapters, intro
+season groups, and the chapter silence backfill. With credits off, it skips
+credits chapters, credits season groups, and movies. Playback analyzes only
+the missing kinds that are on and skips files with none left. v2
+`redetect-markers` and `refresh-markers` narrow their kinds the same way;
+`redetect-markers` answers `409` when none of the requested kinds are on. v2
+`redetect-intro` and the v1 routes predate the settings and ignore them.
+Turning a kind off never deletes its markers.
+
 Every API server runs the task manager, so the task takes a PostgreSQL
 advisory lock before it analyzes anything. While one server holds it, a run on
 another server succeeds without analyzing and records `skipped` in its result
@@ -18,7 +29,8 @@ so it never makes a server that can compare season groups skip. It then tries
 the lock for the movie pass, which needs no Chromaprint: if it gets the lock
 it analyzes movies under it, and if another server holds it, it skips the
 movies, which the lock holder analyzes. A single server without Chromaprint
-therefore still analyzes movies. If ffmpeg's capability listing itself fails,
+therefore still analyzes movies. With credits off it has no movie pass, so it
+stops after the episodes without trying the lock. If ffmpeg's capability listing itself fails,
 the task keeps the lock for the whole run. Analysis started from playback or
 for a single item does not take the lock.
 

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -273,25 +274,28 @@ func (a *Analyzer) Preflight(ctx context.Context) error {
 	return a.extractor.Preflight(ctx)
 }
 
-// Run analyzes every library with marker detection enabled: episodes for
-// intros and credits, then movies for credits within the movie budget.
-func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, error) {
-	return a.run(ctx, progress, runPasses{episodes: true, movies: true})
+// Run analyzes every library with marker detection enabled for the kinds
+// selected: episodes for intros, credits, or both, then movies for credits
+// within the movie budget. Movies are skipped when credits are not
+// selected.
+func (a *Analyzer) Run(ctx context.Context, kinds EpisodeMarkerKinds, progress ProgressFunc) (RunSummary, error) {
+	return a.run(ctx, kinds, progress, runPasses{episodes: true, movies: true})
 }
 
 // RunEpisodes analyzes the episodes of every library with marker detection
-// enabled, as Run does, and leaves movies alone. A server without
-// Chromaprint runs it outside the cluster lock, then RunMovies under it, so
-// the movie pass stays on one server.
-func (a *Analyzer) RunEpisodes(ctx context.Context, progress ProgressFunc) (RunSummary, error) {
-	return a.run(ctx, progress, runPasses{episodes: true})
+// enabled for the kinds selected, as Run does, and leaves movies alone. A
+// server without Chromaprint runs it outside the cluster lock, then
+// RunMovies under it, so the movie pass stays on one server.
+func (a *Analyzer) RunEpisodes(ctx context.Context, kinds EpisodeMarkerKinds, progress ProgressFunc) (RunSummary, error) {
+	return a.run(ctx, kinds, progress, runPasses{episodes: true})
 }
 
 // RunMovies analyzes the movies of every library with marker detection
 // enabled for credits within the movie budget, as Run does after the
-// episodes, and leaves episodes alone.
-func (a *Analyzer) RunMovies(ctx context.Context, progress ProgressFunc) (RunSummary, error) {
-	return a.run(ctx, progress, runPasses{movies: true})
+// episodes, and leaves episodes alone. It does nothing when kinds leaves
+// credits out.
+func (a *Analyzer) RunMovies(ctx context.Context, kinds EpisodeMarkerKinds, progress ProgressFunc) (RunSummary, error) {
+	return a.run(ctx, kinds, progress, runPasses{movies: true})
 }
 
 // runPasses selects the passes of a scheduled run.
@@ -299,7 +303,7 @@ type runPasses struct {
 	episodes, movies bool
 }
 
-func (a *Analyzer) run(ctx context.Context, progress ProgressFunc, passes runPasses) (RunSummary, error) {
+func (a *Analyzer) run(ctx context.Context, kinds EpisodeMarkerKinds, progress ProgressFunc, passes runPasses) (RunSummary, error) {
 	report := func(percent float64, message string) {
 		if progress != nil {
 			progress(percent, message)
@@ -307,6 +311,12 @@ func (a *Analyzer) run(ctx context.Context, progress ProgressFunc, passes runPas
 	}
 
 	summary := RunSummary{}
+	// Movies are checked for credits only.
+	movies := passes.movies && kinds.Credits
+	if !passes.episodes && !movies {
+		report(100, "Credits detection is turned off")
+		return summary, nil
+	}
 	libraries, err := a.repo.CountEnabledLibraries(ctx)
 	if err != nil {
 		return summary, err
@@ -316,11 +326,21 @@ func (a *Analyzer) run(ctx context.Context, progress ProgressFunc, passes runPas
 		report(100, "No libraries with marker detection enabled")
 		return summary, nil
 	}
+	if !kinds.Any() {
+		report(100, "Intro and credits detection are turned off")
+		return summary, nil
+	}
 
-	if !passes.movies {
-		episodeSummary, err := a.runEpisodes(ctx, report)
+	if !movies {
+		episodeSummary, err := a.runEpisodes(ctx, kinds, report)
 		mergeRunSummary(&summary, episodeSummary)
-		return summary, err
+		if err != nil {
+			return summary, err
+		}
+		if passes.movies {
+			report(100, "Intro detection completed; credits detection is turned off")
+		}
+		return summary, nil
 	}
 
 	// With both passes, episodes take the first 85 percent of the progress
@@ -328,7 +348,7 @@ func (a *Analyzer) run(ctx context.Context, progress ProgressFunc, passes runPas
 	moviesFrom := 0.0
 	if passes.episodes {
 		moviesFrom = 85
-		episodeSummary, err := a.runEpisodes(ctx, func(percent float64, message string) {
+		episodeSummary, err := a.runEpisodes(ctx, kinds, func(percent float64, message string) {
 			report(percent*moviesFrom/100, message)
 		})
 		mergeRunSummary(&summary, episodeSummary)
@@ -353,9 +373,9 @@ func (a *Analyzer) run(ctx context.Context, progress ProgressFunc, passes runPas
 	return summary, nil
 }
 
-// runEpisodes analyzes the episodes of every enabled library, reporting
-// progress from 0 to 100.
-func (a *Analyzer) runEpisodes(ctx context.Context, report ProgressFunc) (RunSummary, error) {
+// runEpisodes analyzes the episodes of every enabled library for kinds,
+// reporting progress from 0 to 100.
+func (a *Analyzer) runEpisodes(ctx context.Context, kinds EpisodeMarkerKinds, report ProgressFunc) (RunSummary, error) {
 	summary := RunSummary{}
 	candidates, err := a.repo.ListEligibleCandidates(ctx)
 	if err != nil {
@@ -368,36 +388,40 @@ func (a *Analyzer) runEpisodes(ctx context.Context, report ProgressFunc) (RunSum
 	}
 
 	report(10, fmt.Sprintf("Checking embedded chapters for %d files", len(candidates)))
-	_, chapterSummary := a.processChapterCandidates(ctx, candidates, chapterProcessingOptions{
-		allowEpisodeCopy: true,
-		progress: func(i, total int) {
-			if i%25 == 0 {
-				report(10+float64(i)/float64(total)*20, fmt.Sprintf("Checked %d/%d files for chapter markers", i+1, total))
-			}
-		},
-	})
-	mergeRunSummary(&summary, chapterSummary)
-	if err := ctx.Err(); err != nil {
-		return summary, err
+	if kinds.Intro {
+		_, chapterSummary := a.processChapterCandidates(ctx, candidates, chapterProcessingOptions{
+			allowEpisodeCopy: true,
+			progress: func(i, total int) {
+				if i%25 == 0 {
+					report(10+float64(i)/float64(total)*20, fmt.Sprintf("Checked %d/%d files for chapter markers", i+1, total))
+				}
+			},
+		})
+		mergeRunSummary(&summary, chapterSummary)
+		if err := ctx.Err(); err != nil {
+			return summary, err
+		}
 	}
-	mergeRunSummary(&summary, a.processCreditsChapters(ctx, candidates))
-	if err := ctx.Err(); err != nil {
-		return summary, err
+	if kinds.Credits {
+		mergeRunSummary(&summary, a.processCreditsChapters(ctx, candidates))
+		if err := ctx.Err(); err != nil {
+			return summary, err
+		}
 	}
 
 	// Each kind compares the files whose marker of that kind local analysis
 	// may write, so an online intro does not keep a file out of the credits
 	// comparison.
-	creditsTail := a.creditsTailReady(ctx)
+	creditsTail := kinds.Credits && a.creditsTailReady(ctx)
 	var jobs []groupJob
-	for _, kind := range []markerKind{kindIntro, kindCredits} {
+	for _, kind := range kinds.markerKinds() {
 		for _, group := range groupCandidates(ownCandidates(candidates, kind), minimumGroupEpisodes(kind, creditsTail)) {
 			jobs = append(jobs, groupJob{kind: kind, group: group})
 		}
 	}
 	countGroupJobs(&summary, jobs)
 	if len(jobs) == 0 {
-		backfillSummary, err := a.runSilenceBackfill(ctx)
+		backfillSummary, err := a.runSilenceBackfill(ctx, kinds)
 		mergeRunSummary(&summary, backfillSummary)
 		if err != nil {
 			return summary, err
@@ -410,7 +434,7 @@ func (a *Analyzer) runEpisodes(ctx context.Context, report ProgressFunc) (RunSum
 	if err := a.extractor.Preflight(ctx); err != nil {
 		summary.ChromaprintSupported = false
 		summary.ChromaprintSupportMessage = err.Error()
-		backfillSummary, backfillErr := a.runSilenceBackfill(ctx)
+		backfillSummary, backfillErr := a.runSilenceBackfill(ctx, kinds)
 		mergeRunSummary(&summary, backfillSummary)
 		if backfillErr != nil {
 			return summary, backfillErr
@@ -428,7 +452,7 @@ func (a *Analyzer) runEpisodes(ctx context.Context, report ProgressFunc) (RunSum
 		return summary, err
 	}
 
-	backfillSummary, err := a.runSilenceBackfill(ctx)
+	backfillSummary, err := a.runSilenceBackfill(ctx, kinds)
 	mergeRunSummary(&summary, backfillSummary)
 	if err != nil {
 		return summary, err
@@ -446,10 +470,67 @@ type EpisodeMarkerKinds struct {
 // Any reports whether k selects at least one kind.
 func (k EpisodeMarkerKinds) Any() bool { return k.Intro || k.Credits }
 
+// And returns the kinds both k and other select.
+func (k EpisodeMarkerKinds) And(other EpisodeMarkerKinds) EpisodeMarkerKinds {
+	return EpisodeMarkerKinds{Intro: k.Intro && other.Intro, Credits: k.Credits && other.Credits}
+}
+
+// markerKinds lists the kinds k selects, intro first.
+func (k EpisodeMarkerKinds) markerKinds() []markerKind {
+	var out []markerKind
+	if k.Intro {
+		out = append(out, kindIntro)
+	}
+	if k.Credits {
+		out = append(out, kindCredits)
+	}
+	return out
+}
+
+// allMarkerKinds selects every kind local analysis finds.
+var allMarkerKinds = EpisodeMarkerKinds{Intro: true, Credits: true}
+
+// SettingsReader reads server settings.
+type SettingsReader interface {
+	Get(ctx context.Context, key string) (string, error)
+}
+
+// snapshotSettingsReader reads several settings in one snapshot; keys without
+// a value are absent from the map. *catalog.EncryptedSettingsRepo implements
+// it.
+type snapshotSettingsReader interface {
+	GetMany(ctx context.Context, keys ...string) (map[string]string, error)
+}
+
+// EnabledMarkerKinds reads markers.detect_intros and markers.detect_credits:
+// the kinds local detection finds server-wide. A nil reader enables both.
+// The settings are read on every call, so a change applies to the next
+// analysis without a restart. Both are read in one snapshot, so a save that
+// changes them together is never seen half-applied.
+func EnabledMarkerKinds(ctx context.Context, settings SettingsReader) (EpisodeMarkerKinds, error) {
+	if settings == nil {
+		return allMarkerKinds, nil
+	}
+	// Separate reads could straddle a save that changes both settings
+	// together, so a store without snapshot reads is an error.
+	snapshot, ok := settings.(snapshotSettingsReader)
+	if !ok {
+		return EpisodeMarkerKinds{}, fmt.Errorf("loading %s and %s: settings store does not support snapshot reads", markers.SettingDetectIntros, markers.SettingDetectCredits)
+	}
+	values, err := snapshot.GetMany(ctx, markers.SettingDetectIntros, markers.SettingDetectCredits)
+	if err != nil {
+		return EpisodeMarkerKinds{}, fmt.Errorf("loading %s and %s: %w", markers.SettingDetectIntros, markers.SettingDetectCredits, err)
+	}
+	return EpisodeMarkerKinds{
+		Intro:   markers.DetectionToggleEnabled(values[markers.SettingDetectIntros]),
+		Credits: markers.DetectionToggleEnabled(values[markers.SettingDetectCredits]),
+	}, nil
+}
+
 // AnalyzeEpisode analyzes the season groups of an episode's files for every
 // marker kind, as AnalyzeEpisodeKinds does. It is the all-kinds shorthand.
 func (a *Analyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (RunSummary, error) {
-	return a.AnalyzeEpisodeKinds(ctx, episodeID, EpisodeMarkerKinds{Intro: true, Credits: true})
+	return a.AnalyzeEpisodeKinds(ctx, episodeID, allMarkerKinds)
 }
 
 // AnalyzeEpisodeKinds analyzes the season groups of an episode's files for
@@ -852,10 +933,12 @@ func compatibleEpisodeVersionDuration(source, target Candidate) bool {
 	return diff <= episodeVersionCopyDurationToleranceSeconds
 }
 
-func (a *Analyzer) runSilenceBackfill(ctx context.Context) (RunSummary, error) {
+// runSilenceBackfill refines chapter intros that were written before silence
+// refinement ran. It is intro work, so it waits while kinds leaves intros out.
+func (a *Analyzer) runSilenceBackfill(ctx context.Context, kinds EpisodeMarkerKinds) (RunSummary, error) {
 	summary := RunSummary{}
 	cfg := a.config.normalized()
-	if !cfg.SilenceRefinementEnabled || cfg.SilenceBackfillLimit <= 0 {
+	if !kinds.Intro || !cfg.SilenceRefinementEnabled || cfg.SilenceBackfillLimit <= 0 {
 		return summary, nil
 	}
 	candidates, err := a.repo.ListChapterSilenceBackfillCandidates(ctx, cfg.SilenceBackfillLimit, cfg, a.node)

@@ -41,8 +41,9 @@ const (
 // item is analyzed.
 type AdminMarkerCapabilities struct {
 	Capability
-	MovieCredits    bool `json:"movie_credits" doc:"The item refresh-markers operation, and redetect-markers with kind credits or all, accept movies, and local analysis looks for their end credits on a best-effort basis; redetect-intro stays episode-only, since movies never get intros"`
-	RedetectMarkers bool `json:"redetect_markers" doc:"The item redetect-markers operation reruns local detection of the kind requested: intro, credits, or all"`
+	MovieCredits          bool `json:"movie_credits" doc:"The item refresh-markers operation, and redetect-markers with kind credits or all, accept movies, and local analysis looks for their end credits on a best-effort basis; redetect-intro stays episode-only, since movies never get intros"`
+	RedetectMarkers       bool `json:"redetect_markers" doc:"The item redetect-markers operation reruns local detection of the kind requested: intro, credits, or all"`
+	DetectionKindSettings bool `json:"detection_kind_settings" doc:"Local detection honors the markers.detect_intros and markers.detect_credits server settings, which turn intro and credits detection on or off separately"`
 }
 type AdminMarkerCapabilitiesOutput struct {
 	Status       int
@@ -56,13 +57,18 @@ func (c AdminMarkerCapabilities) capabilityState() string { return StateAvailabl
 func registerAdminCatalogIntro(reg *Registry) {
 	capabilities := Operation{Operation: humaOp(http.MethodGet, Prefix+"/admin/markers/capabilities", "getAdminMarkerCapabilities", "admin-catalog", "Discover marker analysis supported by this build, such as local movie credits. Support does not promise that marker settings or a library allow analysis."), Class: ClassActingAdmin}
 	Register(reg, capabilities, func(context.Context, *CapabilityInput) (*AdminMarkerCapabilitiesOutput, error) {
-		return &AdminMarkerCapabilitiesOutput{Body: AdminMarkerCapabilities{MovieCredits: true, RedetectMarkers: true}}, nil
+		return &AdminMarkerCapabilitiesOutput{Body: AdminMarkerCapabilities{MovieCredits: true, RedetectMarkers: true, DetectionKindSettings: true}}, nil
 	})
 	for _, action := range []struct{ suffix, id, action, summary string }{
 		{"refresh-markers", refreshAdminEpisodeMarkersOperation, "refresh-v2", "Refresh episode or movie markers using configured sources; movies get best-effort local credits only."},
 		{"redetect-intro", redetectAdminEpisodeIntroOperation, "redetect", "Explicitly rerun local intro detection for an episode; other items, movies included, are rejected."},
 	} {
 		op := adminItemMarkersOperation(action.suffix, action.id, action.summary)
+		if action.id == refreshAdminEpisodeMarkersOperation {
+			// Local-mode refreshes answer 409 like redetect-markers when
+			// detection cannot run or every missing kind is turned off.
+			op.Errors = append(op.Errors, http.StatusConflict)
+		}
 		Register(reg, op, func(ctx context.Context, in *AdminEpisodeMarkersInput) (*AdminEpisodeMarkersOutput, error) {
 			if reg.deps.AdminEpisodeMarkers == nil {
 				return nil, unavailable("episode marker analysis")
@@ -75,8 +81,9 @@ func registerAdminCatalogIntro(reg *Registry) {
 		})
 	}
 	redetect := adminItemMarkersOperation("redetect-markers", redetectAdminItemMarkersOperation, "Explicitly rerun local detection of an episode's intro, credits, or both, or of a movie's best-effort credits.")
-	// Disabled library detection, missing files, and markers.mode off or
-	// online answer 409.
+	// Disabled library detection, missing files, markers.mode off or
+	// online, and requested kinds all turned off by markers.detect_intros
+	// and markers.detect_credits answer 409.
 	redetect.Errors = append(redetect.Errors, http.StatusConflict)
 	Register(reg, redetect, func(ctx context.Context, in *AdminItemMarkersRedetectInput) (*AdminEpisodeMarkersOutput, error) {
 		if reg.deps.AdminEpisodeMarkers == nil {

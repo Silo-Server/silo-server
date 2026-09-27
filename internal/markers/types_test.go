@@ -3,6 +3,7 @@ package markers
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -277,6 +278,10 @@ func TestNormalizeSetting(t *testing.T) {
 		{name: "mode rejects unknown", key: SettingMode, value: "remote", wantErr: true},
 		{name: "lazy true", key: SettingLazyPlayback, value: "TRUE", want: "true"},
 		{name: "lazy rejects unknown", key: SettingLazyPlayback, value: "yes", wantErr: true},
+		{name: "detect intros false", key: SettingDetectIntros, value: " False ", want: "false"},
+		{name: "detect intros rejects unknown", key: SettingDetectIntros, value: "off", wantErr: true},
+		{name: "detect credits true", key: SettingDetectCredits, value: "true", want: "true"},
+		{name: "detect credits rejects empty", key: SettingDetectCredits, value: "", wantErr: true},
 		{name: "other rejected", key: "playback.foo", value: " raw ", wantErr: true},
 	}
 
@@ -296,5 +301,26 @@ func TestNormalizeSetting(t *testing.T) {
 				t.Fatalf("NormalizeSetting = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeSettingNamesTheDetectionKey(t *testing.T) {
+	_, err := NormalizeSetting(SettingDetectCredits, "maybe")
+	if err == nil || !strings.Contains(err.Error(), SettingDetectCredits) {
+		t.Fatalf("error = %v, want it to name %s", err, SettingDetectCredits)
+	}
+}
+
+func TestDetectionToggleEnabled(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"":        true,
+		"true":    true,
+		" TRUE ":  true,
+		"false":   false,
+		" False ": false,
+	} {
+		if got := DetectionToggleEnabled(raw); got != want {
+			t.Errorf("DetectionToggleEnabled(%q) = %v, want %v", raw, got, want)
+		}
 	}
 }

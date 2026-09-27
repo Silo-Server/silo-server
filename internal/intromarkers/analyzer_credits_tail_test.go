@@ -100,7 +100,7 @@ func TestRunPlacesVideoCreditsOnALoneEpisode(t *testing.T) {
 	sampler := &fakeTailSampler{frames: endCreditsFrames}
 	analyzer, extractor := tailAnalyzer(repo, sampler, "node-a")
 
-	summary, err := analyzer.Run(context.Background(), nil)
+	summary, err := analyzer.Run(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestRunPlacesVideoCreditsOnALoneEpisode(t *testing.T) {
 		t.Fatalf("tail artifact %+v", artifact)
 	}
 
-	summary, err = analyzer.Run(context.Background(), nil)
+	summary, err = analyzer.Run(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestRunPlacesVideoCreditsOnALoneEpisode(t *testing.T) {
 func TestRunWithoutTailPassLeavesLoneEpisodes(t *testing.T) {
 	repo := &fakeIntroRepository{enabledLibraries: 1, eligibleCandidates: []Candidate{tailCandidate(1, "e1", 1500)}}
 	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
-	summary, err := analyzer.Run(context.Background(), nil)
+	summary, err := analyzer.Run(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

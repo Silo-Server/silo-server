@@ -108,7 +108,7 @@ func TestCreditsWriteFailureLeavesSeasonRetryable(t *testing.T) {
 		return nil
 	}
 
-	summary, err := analyzer.Run(context.Background(), nil)
+	summary, err := analyzer.Run(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestRunWritesAudioCreditsAndSeasonState(t *testing.T) {
 	}
 	repo.eligibleCandidates = append(append([]Candidate(nil), season...), manual)
 
-	summary, err := analyzer.Run(context.Background(), nil)
+	summary, err := analyzer.Run(context.Background(), allMarkerKinds, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

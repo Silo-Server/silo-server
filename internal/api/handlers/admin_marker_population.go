@@ -22,7 +22,7 @@ const (
 // refreshEpisodeMarkersV2 refreshes an episode's or a movie's markers from
 // the configured sources. In both mode, local analysis then fills what the
 // online sources left missing: an episode's intro or credits, or a movie's
-// credits.
+// credits, for the kinds the detection settings leave on.
 func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, itemID string) (string, error) {
 	if h == nil || h.Settings == nil || h.FileResolver == nil {
 		return "", apiError(http.StatusServiceUnavailable, "unavailable", "Marker refresh is not configured")
@@ -36,7 +36,7 @@ func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, itemID 
 		return "", apiError(http.StatusConflict, "conflict", "Marker detection is disabled")
 	}
 	if mode == markers.ModeLocal {
-		return h.refreshItemMarkers(ctx, itemID, "refresh", allMarkerKinds)
+		return h.refreshItemMarkers(ctx, itemID, "refresh", allMarkerKinds, true)
 	}
 	if h.OnlineMarkers == nil {
 		return "", apiError(http.StatusServiceUnavailable, "unavailable", "Online markers are not configured")
@@ -65,7 +65,17 @@ func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, itemID 
 	if len(files) == 0 {
 		return "", apiError(http.StatusConflict, "conflict", "Item has no media files to refresh")
 	}
-	local := mode == markers.ModeBoth && h.analyzer != nil && eligibility != nil && eligibility.IntroDetectionEnabled
+	// localKinds is what local analysis may fill after the online refresh.
+	// The online refresh does not depend on the detection settings, so
+	// failing to read them only skips local analysis.
+	var localKinds intromarkers.EpisodeMarkerKinds
+	if mode == markers.ModeBoth && h.analyzer != nil && eligibility != nil && eligibility.IntroDetectionEnabled {
+		enabled, err := intromarkers.EnabledMarkerKinds(ctx, h.Settings)
+		if err != nil {
+			h.logger.WarnContext(ctx, "admin markers: load detection kinds failed; skipping local analysis", "item_id", itemID, "error", err)
+		}
+		localKinds = intromarkers.EpisodeMarkerKinds{Intro: kind != intromarkers.MarkerItemMovie, Credits: true}.And(enabled)
+	}
 	if _, loaded := h.inFlight.LoadOrStore(itemID, struct{}{}); loaded {
 		return markerRefreshAlreadyRunning, nil
 	}
@@ -95,28 +105,16 @@ func (h *AdminIntroHandler) refreshEpisodeMarkersV2(ctx context.Context, itemID 
 			if changed && effective != nil && h.MarkerUpdateNotifier != nil {
 				h.MarkerUpdateNotifier.MarkersUpdated(ctx, effective)
 			}
-			if localMarkersMissing(effective, kind) {
+			if missingLocalMarkers(effective, kind != intromarkers.MarkerItemMovie).And(localKinds).Any() {
 				needsLocal = true
 			}
 		}
-		if local && needsLocal && ctx.Err() == nil {
-			if _, err := h.analyzeItem(ctx, itemID, kind, allMarkerKinds); err != nil {
+		if needsLocal && ctx.Err() == nil {
+			if _, err := h.analyzeItem(ctx, itemID, kind, localKinds); err != nil {
 				h.logger.WarnContext(ctx, "local marker refresh failed", "item_id", itemID, "kind", kind, "error", err)
 			}
 			h.notifyItemMarkerUpdates(ctx, itemID, kind, "refresh", overlays)
 		}
 	}()
 	return markerRefreshQueued, nil
-}
-
-// localMarkersMissing reports whether local analysis could fill a marker the
-// refreshed file lacks: an episode's intro or credits, or a movie's credits.
-func localMarkersMissing(file *models.MediaFile, kind string) bool {
-	if file == nil {
-		return true
-	}
-	if kind == intromarkers.MarkerItemMovie {
-		return file.CreditsStart == nil
-	}
-	return file.IntroEnd == nil || file.CreditsStart == nil
 }

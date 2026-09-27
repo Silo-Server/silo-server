@@ -100,6 +100,13 @@ func TestAdminItemMarkersRedetectTransport(t *testing.T) {
 	if rec.Code != 409 {
 		t.Fatalf("conflict: %d %s", rec.Code, rec.Body)
 	}
+	// Requested kinds turned off in marker settings answer a conflict that
+	// names them.
+	f.err = &handlers.APIError{Status: http.StatusConflict, Code: "conflict", Message: "Credits detection is turned off in marker settings"}
+	rec = do(t, h, "POST", path, `{"kind":"credits"}`, bearer(adminToken))
+	if rec.Code != 409 || !strings.Contains(rec.Body.String(), `"detail":"Credits detection is turned off in marker settings"`) {
+		t.Fatalf("kind turned off: %d %s", rec.Code, rec.Body)
+	}
 	deps.AdminEpisodeMarkers = nil
 	h = newTestHandler(t, deps)
 	rec = do(t, h, "POST", path, "", bearer(adminToken))
@@ -110,7 +117,7 @@ func TestAdminItemMarkersRedetectTransport(t *testing.T) {
 func adminCatalogIntroFixtureCases() []fixtureCase {
 	return []fixtureCase{
 		{name: "admin_episode_markers_refresh", operationID: "refreshAdminEpisodeMarkers", method: "POST", path: Prefix + "/admin/items/episode-1/refresh-markers", headers: bearer(adminToken), status: 202, schema: "#/components/schemas/AdminEpisodeMarkersStatus", assertHeaders: []string{"Content-Type"}, scenario: "Marker refresh acknowledges configured online or local sources."},
-		{name: "admin_marker_capabilities", operationID: "getAdminMarkerCapabilities", method: "GET", path: Prefix + "/admin/markers/capabilities", headers: bearer(adminToken), status: 200, schema: "#/components/schemas/AdminMarkerCapabilities", assertHeaders: []string{"Content-Type", "Cache-Control"}, scenario: "Marker capabilities report local movie credits and marker re-detection support."},
+		{name: "admin_marker_capabilities", operationID: "getAdminMarkerCapabilities", method: "GET", path: Prefix + "/admin/markers/capabilities", headers: bearer(adminToken), status: 200, schema: "#/components/schemas/AdminMarkerCapabilities", assertHeaders: []string{"Content-Type", "Cache-Control"}, scenario: "Marker capabilities report local movie credits, marker re-detection, and detection kind settings support."},
 		{name: "admin_episode_intro_redetect", operationID: "redetectAdminEpisodeIntro", method: "POST", path: Prefix + "/admin/items/episode-1/redetect-intro", headers: bearer(adminToken), status: 202, schema: "#/components/schemas/AdminEpisodeMarkersStatus", assertHeaders: []string{"Content-Type"}, scenario: "Intro re-detection preserves the same local execution service and eligibility checks."},
 		{name: "admin_item_markers_redetect", operationID: "redetectAdminItemMarkers", method: "POST", path: Prefix + "/admin/items/episode-1/redetect-markers", headers: bearer(adminToken), body: `{"kind":"credits"}`, status: 202, schema: "#/components/schemas/AdminEpisodeMarkersStatus", assertHeaders: []string{"Content-Type"}, scenario: "Marker re-detection reruns local detection of the requested kinds."},
 		{name: "admin_item_markers_redetect_unknown_kind", operationID: "redetectAdminItemMarkers", method: "POST", path: Prefix + "/admin/items/episode-1/redetect-markers", headers: bearer(adminToken), body: `{"kind":"outro"}`, status: 422, schema: "#/components/schemas/Problem", assertHeaders: []string{"Content-Type"}, scenario: "A kind other than intro, credits, or all is rejected before analysis is queued."},
@@ -131,7 +138,7 @@ func TestAdminMarkerCapabilities(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got["state"] != StateAvailable || got["movie_credits"] != true || got["redetect_markers"] != true || got["allowed"] != true {
-		t.Fatalf("capabilities %v, want movie credits and marker re-detection available", got)
+	if got["state"] != StateAvailable || got["movie_credits"] != true || got["redetect_markers"] != true || got["detection_kind_settings"] != true || got["allowed"] != true {
+		t.Fatalf("capabilities %v, want movie credits, marker re-detection, and detection kind settings available", got)
 	}
 }
