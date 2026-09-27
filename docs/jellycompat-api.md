@@ -170,6 +170,14 @@ request disables Primary images.
 | `GET /Items/{id}/ThemeSongs`, `/ThemeVideos` | Local theme songs for a visible owner; theme videos remain empty. |
 | `GET /Persons`, `/Persons/{name}` | People with credits in movies or series visible to the current profile. `/Persons` accepts Jellyfin 12's `StartIndex`, `NameStartsWith`, `NameLessThan`, and `NameStartsWithOrGreater` (lowercased name comparisons) and a library or movie/series `ParentId`; other parents match nobody. Pages without `SearchTerm` hold up to 100 people; searches stay capped at 20. Person photo tags are signed and appear only in responses that passed this visibility check. `GET /Items/{personId}/Images/Primary` accepts a matching signed `tag` without authentication, as Jellyfin Web sends image requests without credentials; otherwise the session must see a credit for the person. Either check runs before cached artwork is used. |
 
+`/Library/VirtualFolders` reports `LibraryOptions.EnableRealtimeMonitor` from
+Silo's configuration: `true` only while both the server-wide
+`scanner.realtime_monitoring` setting and the library's own
+`realtime_monitoring` switch are on. The server setting is read live, so a
+change shows on the next request. This applies to both the viewer response and
+the admin API-key response that autoscan tools read. Jellyfin clients cannot
+change either switch through this surface.
+
 These changes do not implement every advanced query option. Compound sorts,
 full `IsMissing` semantics, multiple person-ID predicates, populated tag facets,
 and the `Tags`, `StudioIds`, and `HasSubtitles` item filters remain outside this

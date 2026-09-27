@@ -181,6 +181,73 @@ describe("saving library processing settings", () => {
       });
     },
   );
+
+  it("turns real-time monitoring on for a new library by default", () => {
+    const { result } = renderHook(() => useLibraryForm({ library: null }));
+    act(() => {
+      result.current.setName("Movies");
+      result.current.updatePath(0, "/media");
+    });
+    act(() => {
+      result.current.submit();
+    });
+    expect(mutate.mock.calls[0]![0]).toMatchObject({ realtime_monitoring: true });
+  });
+
+  it("creates a library with real-time monitoring switched off", () => {
+    const { result } = renderHook(() => useLibraryForm({ library: null }));
+    act(() => {
+      result.current.setName("Movies");
+      result.current.updatePath(0, "/media");
+      result.current.setRealtimeMonitoring(false);
+    });
+    act(() => {
+      result.current.submit();
+    });
+    expect(mutate.mock.calls[0]![0]).toMatchObject({ realtime_monitoring: false });
+  });
+
+  it.each([false, true])("preserves an existing real-time monitoring switch of %s", (enabled) => {
+    const library = {
+      id: 1,
+      name: "Movies",
+      type: "movies",
+      paths: ["/media"],
+      realtime_monitoring: enabled,
+    } as Library;
+    const { result } = renderHook(() => useLibraryForm({ library }));
+    act(() => {
+      result.current.setName("Films");
+    });
+    act(() => {
+      result.current.submit();
+    });
+    expect(mutate.mock.calls[0]![0]).toMatchObject({
+      id: 1,
+      body: { name: "Films", realtime_monitoring: enabled },
+    });
+  });
+
+  it("updates the real-time monitoring switch", () => {
+    const library = {
+      id: 1,
+      name: "Movies",
+      type: "movies",
+      paths: ["/media"],
+      realtime_monitoring: true,
+    } as Library;
+    const { result } = renderHook(() => useLibraryForm({ library }));
+    act(() => {
+      result.current.setRealtimeMonitoring(false);
+    });
+    act(() => {
+      result.current.submit();
+    });
+    expect(mutate.mock.calls[0]![0]).toMatchObject({
+      id: 1,
+      body: { realtime_monitoring: false },
+    });
+  });
 });
 
 describe("marker detection switch", () => {

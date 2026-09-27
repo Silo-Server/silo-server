@@ -22,6 +22,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
+	"github.com/Silo-Server/silo-server/internal/librarymonitor"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/routeinventory"
@@ -1721,7 +1722,8 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, networkAccessFixtureCases()...)
 	cases = append(cases, serverIdentityFixtureCases()...)
 	cases = append(cases, themeSongsFixtureCases()...)
-	return append(cases, passwordResetFixtureCases()...)
+	cases = append(cases, passwordResetFixtureCases()...)
+	return append(cases, libraryMonitoringFixtureCases()...)
 }
 
 // fixtureMultipartType is the multipart Content-Type of the avatar fixtures,
@@ -1765,6 +1767,12 @@ func fixtureDeps() Dependencies {
 	deps.PersonalCollections = &fixturePersonalCollections{fakePersonalCollections: fakePersonalCollections{list: handlers.PersonalCollectionListView{Collections: []handlers.PersonalCollectionView{fixtureCollectionView()}, Groups: []handlers.CollectionGroupView{}}}}
 	deps.CollectionImports = &fakeCollectionImports{configured: true}
 	deps, _ = withLibraryAdmin(deps)
+	deps.LibraryMonitoring = &fakeLibraryMonitoring{snap: librarymonitor.StatusSnapshot{
+		ServerEnabled: true,
+		Libraries:     []*models.MediaFolder{monitoredFolder(1, 0), monitoredFolder(2, 1)},
+		Reports: []librarymonitor.NodeReport{{NodeID: "node-a", LibraryID: 1, State: librarymonitor.StateMonitoring,
+			Backend: librarymonitor.BackendInotify, Directories: 4812, UpdatedAt: fixedTime()}},
+	}}
 	deps.DeviceSettings = &fakeDeviceSettings{}
 	deps.LibraryJobs = &fakeLibraryJobs{job: &models.AdminJob{ID: "job-2", JobType: adminjob.JobTypeLibraryRefresh, Status: adminjob.StatusQueued, RequestedAt: fixedTime()}}
 

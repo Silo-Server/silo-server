@@ -322,10 +322,11 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 			continue
 		}
 		lib := upstreamUserLibrary{
-			ID:         f.ID,
-			Name:       f.Name,
-			Type:       f.Type,
-			PosterPath: f.PosterPath,
+			ID:                 f.ID,
+			Name:               f.Name,
+			Type:               f.Type,
+			PosterPath:         f.PosterPath,
+			RealtimeMonitoring: f.RealtimeMonitoring,
 		}
 		if f.PosterPath != "" && s.posterPresigner != nil {
 			ttl := s.presignTTL

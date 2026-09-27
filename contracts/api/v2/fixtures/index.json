@@ -6029,6 +6029,26 @@
       "body_file": "get_item_markers_ok.json"
     },
     {
+      "name": "get_library_capabilities_ok",
+      "operation_id": "getLibraryCapabilities",
+      "scenario": "Administrator discovery of the library features this build supports.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LibraryCapabilities",
+      "body_file": "get_library_capabilities_ok.json"
+    },
+    {
       "name": "get_library_collections_locked_profile",
       "operation_id": "getLibraryCollections",
       "scenario": "A PIN-locked profile without X-Profile-Token.",
@@ -6212,6 +6232,26 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/LibraryProviders",
       "body_file": "get_library_providers_ok.json"
+    },
+    {
+      "name": "get_library_realtime_monitoring_ok",
+      "operation_id": "getLibraryRealtimeMonitoring",
+      "scenario": "One library monitored by a node, one with no fresh node report.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/realtime-monitoring",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LibraryRealtimeMonitoring",
+      "body_file": "get_library_realtime_monitoring_ok.json"
     },
     {
       "name": "get_library_section_items_not_found",

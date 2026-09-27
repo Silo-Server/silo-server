@@ -6,6 +6,7 @@ import type {
   LibraryMountCheckResponse,
   LibraryMountCheckRoot,
   LibraryProviderChainResponse,
+  LibraryRealtimeMonitoring,
   LibraryRoot,
   LibrarySkippedRoot,
   StaleMediaID,
@@ -31,6 +32,7 @@ type MetadataMatchQueueStatusV2 = components["schemas"]["MetadataMatchQueueStatu
 type ProviderChainLevelV2 = components["schemas"]["ProviderChainLevel"];
 type ProviderChainLevelInputV2 = components["schemas"]["ProviderChainLevelInput"];
 type AdminJobV2 = components["schemas"]["AdminJob"];
+type LibraryRealtimeMonitoringV2 = components["schemas"]["LibraryRealtimeMonitoring"];
 
 export function libraryFromV2(library: LibraryV2): Library {
   return {
@@ -45,6 +47,7 @@ export function libraryFromV2(library: LibraryV2): Library {
     chapter_thumbnails_supported: library.chapter_thumbnails_supported,
     intro_detection_enabled: library.intro_detection_enabled,
     trailer_kinds: library.trailer_kinds,
+    realtime_monitoring: library.realtime_monitoring,
     sort_order: library.sort_order,
     poster_url: library.poster_url,
     last_scanned_at: library.last_scanned_at ?? null,
@@ -72,6 +75,21 @@ export function libraryCreateToV2(body: CreateLibraryRequest): V2Body<"POST /api
       ? {}
       : { intro_detection_enabled: body.intro_detection_enabled }),
     ...(body.trailer_kinds === undefined ? {} : { trailer_kinds: body.trailer_kinds }),
+    ...(body.realtime_monitoring === undefined
+      ? {}
+      : { realtime_monitoring: body.realtime_monitoring }),
+  };
+}
+
+export function libraryRealtimeMonitoringFromV2(
+  status: LibraryRealtimeMonitoringV2,
+): LibraryRealtimeMonitoring {
+  return {
+    server_enabled: status.server_enabled,
+    libraries: status.libraries.map((entry) => ({
+      ...entry,
+      library_id: Number(entry.library_id),
+    })),
   };
 }
 

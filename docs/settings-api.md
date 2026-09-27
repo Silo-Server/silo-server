@@ -979,6 +979,12 @@ catalog read return only the versions stored in the `library_id` it was given.
 It is server-wide, applies without a restart, and never affects playback; see
 "Library-scoped version lists" in [catalog-api.md](catalog-api.md).
 
+`scanner.realtime_monitoring` (default `true`) is the server-wide real-time
+monitoring switch: Silo scans library folders automatically when their files
+change. A library is monitored only while this setting, the library's own
+`realtime_monitoring` switch (see [libraries-api.md](libraries-api.md)), and the
+library itself are all on. The setting applies without a restart.
+
 `access.unrated_content` (`hide` or `allow`, default `hide`) decides whether a
 profile with a content-rating ceiling sees titles that have no rating: an empty
 rating or an explicit marker such as `NR` or `Not Rated`. A rating the server

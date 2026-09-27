@@ -3206,6 +3206,11 @@ export interface Library {
   intro_detection_enabled: boolean;
   /** Allow-list of video kinds fetched during metadata refresh; empty disables. */
   trailer_kinds: string[];
+  /**
+   * The library's own real-time monitoring switch. It only takes effect while
+   * the server-wide scanner.realtime_monitoring setting is on.
+   */
+  realtime_monitoring: boolean;
   sort_order: number;
   poster_url?: string;
   last_scanned_at: string | null;
@@ -3345,6 +3350,46 @@ export interface CreateLibraryRequest {
   chapter_thumbnails_enabled?: boolean;
   intro_detection_enabled?: boolean;
   trailer_kinds?: string[];
+  /** Omitted on create means on. */
+  realtime_monitoring?: boolean;
+}
+
+/**
+ * Effective real-time monitoring state of one library, from
+ * getLibraryRealtimeMonitoring. The first four states are derived from
+ * settings and report freshness; the rest come from a server node's report.
+ */
+export type LibraryRealtimeMonitoringState =
+  | "server_disabled"
+  | "library_disabled"
+  | "monitoring_off"
+  | "not_reporting"
+  | "starting"
+  | "monitoring"
+  | "unsupported_filesystem"
+  | "unsupported_platform"
+  | "limit_reached"
+  | "root_unavailable"
+  | "error";
+
+export interface LibraryRealtimeMonitoringEntry {
+  library_id: number;
+  /** The library's own switch. */
+  enabled: boolean;
+  state: LibraryRealtimeMonitoringState;
+  /** "inotify", "fanotify", or empty. */
+  backend: string;
+  detail: string;
+  directories: number;
+  /** Present only with a fresh node report. */
+  node_id?: string;
+  updated_at?: string;
+}
+
+export interface LibraryRealtimeMonitoring {
+  /** The server-wide scanner.realtime_monitoring setting. */
+  server_enabled: boolean;
+  libraries: LibraryRealtimeMonitoringEntry[];
 }
 
 export interface ScanRequest {

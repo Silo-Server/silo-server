@@ -194,6 +194,45 @@ describe("LibraryMetadataSettings", () => {
     expect(keys).not.toContain("catalog.search.meilisearch.rebuild_batch_size");
   });
 
+  it("offers the server-wide real-time monitoring switch, on by default", () => {
+    const rendered = render({ "catalog.search.provider": "postgres" });
+
+    expect(text(rendered)).toContain("Real-time monitoring");
+    expect(text(rendered)).toContain(
+      "Scan automatically when files in library folders change. Silo scans only what changed, usually within seconds. Works on local disks; network shares (NFS, SMB) aren't supported. Libraries can opt out individually.",
+    );
+    expect(toggleDisabled(rendered, "Real-time monitoring")).toBe(false);
+    expect(toggleChecked(rendered, "Real-time monitoring")).toBe(true);
+
+    const calls = useSettingsFormMock.mock.calls;
+    const keys: string[] = calls[calls.length - 1]?.[0]?.keys ?? [];
+    expect(keys).toContain("scanner.realtime_monitoring");
+  });
+
+  it("reflects a stored off value for real-time monitoring", () => {
+    const rendered = render({ "scanner.realtime_monitoring": "false" });
+
+    expect(toggleChecked(rendered, "Real-time monitoring")).toBe(false);
+  });
+
+  it("does not mark real-time monitoring as restart-only when every worker setting is", () => {
+    useRestartKeysMock.mockReturnValue(
+      new Set([
+        "scanner.workers",
+        "matcher.workers",
+        "matcher.batch_size",
+        "metadata.image_workers",
+      ]),
+    );
+
+    const rendered = render({ "catalog.search.provider": "postgres" }, ["scanner.workers"]);
+
+    // The Scanning group holds a live setting, so it must not claim that every
+    // field in it waits for a restart; the worker fields carry their own badge.
+    expect(text(rendered)).not.toContain("Changes apply after a restart");
+    expect(rendered).toContain("Takes effect after a server restart");
+  });
+
   it("keeps marker behavior and points provider setup at the providers page", () => {
     const rendered = render({ "catalog.search.provider": "postgres" });
 

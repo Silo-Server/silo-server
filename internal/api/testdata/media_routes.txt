@@ -523,8 +523,10 @@ GET /api/v2/invitations/{token}	non-media
 POST /api/v2/invitations/{token}/accept	non-media
 GET /api/v2/libraries	non-media
 POST /api/v2/libraries	non-media
+GET /api/v2/libraries/capabilities	non-media
 GET /api/v2/libraries/metadata-match-queue	non-media
 GET /api/v2/libraries/provider-defaults	non-media
+GET /api/v2/libraries/realtime-monitoring	non-media
 POST /api/v2/libraries/reorder	non-media
 GET /api/v2/libraries/roots	non-media
 DELETE /api/v2/libraries/roots/override	non-media
@@ -1687,8 +1689,10 @@ GET /api/v2/invitations/{token}	non-media
 POST /api/v2/invitations/{token}/accept	non-media
 GET /api/v2/libraries	non-media
 POST /api/v2/libraries	non-media
+GET /api/v2/libraries/capabilities	non-media
 GET /api/v2/libraries/metadata-match-queue	non-media
 GET /api/v2/libraries/provider-defaults	non-media
+GET /api/v2/libraries/realtime-monitoring	non-media
 POST /api/v2/libraries/reorder	non-media
 GET /api/v2/libraries/roots	non-media
 DELETE /api/v2/libraries/roots/override	non-media

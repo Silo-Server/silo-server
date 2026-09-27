@@ -144,6 +144,16 @@ func (d *Dependencies) CurrentConfig() *config.Config {
 	return d.Config
 }
 
+// RealtimeMonitoringEnabled reads the hot-reloaded server-wide
+// scanner.realtime_monitoring switch. Without any config it reports the
+// setting's default, on.
+func (d *Dependencies) RealtimeMonitoringEnabled() bool {
+	if cfg := d.CurrentConfig(); cfg != nil {
+		return cfg.Scanner.RealtimeMonitoring
+	}
+	return true
+}
+
 // Server wraps the compat HTTP handler.
 type Server struct {
 	cfg     *config.Config

@@ -16,6 +16,8 @@ type upstreamUserLibrary struct {
 	Type       string `json:"type"`
 	PosterURL  string `json:"poster_url,omitempty"`
 	PosterPath string `json:"-"`
+	// RealtimeMonitoring is the library's own real-time monitoring switch.
+	RealtimeMonitoring bool `json:"-"`
 }
 
 type upstreamListItem struct {

@@ -190,6 +190,8 @@ type Dependencies struct {
 	EventsHub                 *evt.Hub
 	ScanRegistry              *evt.ScanRegistry
 	LibraryScanQueue          *scanqueue.Service
+	LibraryMonitor            interface{ Poke() }            // real-time library monitor, reconciled after library mutations (nil when this node runs none)
+	LibraryMonitoring         apiv2.LibraryMonitoringService // real-time monitoring status for the v2 admin read (may be nil)
 	ActivityLogWriter         activitylog.Writer
 	ActivityLogRepo           *activitylog.Repo
 	OpsLogRepo                *opslog.Repo
@@ -655,6 +657,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		libraryHandler.EventsHub = deps.EventsHub
 		libraryHandler.ScanRegistry = deps.ScanRegistry
 		libraryHandler.ScanQueue = deps.LibraryScanQueue
+		libraryHandler.RealtimeMonitor = deps.LibraryMonitor
 		libraryHandler.MovieMatchQueueRepo = deps.MovieMatchQueueRepo
 		libraryHandler.SeriesMatchQueueRepo = deps.SeriesRootMatchQueueRepo
 		libraryHandler.RawMatchBacklogRepo = deps.FileRepo
@@ -2474,6 +2477,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if subtitlePrefHandler != nil {
 		v2deps.SubtitlePreferences = subtitlePrefHandler
 	}
+	v2deps.LibraryMonitoring = deps.LibraryMonitoring
 	if libraryHandler != nil {
 		v2deps.LibraryAdmin = libraryHandler
 		v2deps.UserLibraries = libraryHandler

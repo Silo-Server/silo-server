@@ -68,6 +68,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
+	"github.com/Silo-Server/silo-server/internal/librarymonitor"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/logfilter"
 	"github.com/Silo-Server/silo-server/internal/logredact"
@@ -104,6 +105,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
+	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/server"
@@ -2315,6 +2317,48 @@ func main() {
 	if libraryScanQueue != nil {
 		libraryScanQueue.Start()
 		defer libraryScanQueue.Stop()
+	}
+
+	// Real-time library monitoring. The status read serves every node's
+	// reports; the monitor itself runs wherever this process can scan, watches
+	// the library folders this node can see, and queues scans for changes. Its
+	// folder walks run in the background, so startup never waits on them.
+	if needsScanner && deps.DB != nil && deps.FolderRepo != nil {
+		monitorStatus := librarymonitor.NewStatusStore(deps.DB)
+		deps.LibraryMonitoring = &librarymonitor.StatusReader{
+			Store:         monitorStatus,
+			Folders:       deps.FolderRepo,
+			ServerEnabled: func() bool { return configWatcher.Config().Scanner.RealtimeMonitoring },
+		}
+		if libraryScanQueue != nil {
+			serverEnabled := configWatcher.Config().Scanner.RealtimeMonitoring
+			libraryMonitor, monitorErr := librarymonitor.New(librarymonitor.Config{
+				NodeID:        nodeID,
+				Folders:       deps.FolderRepo,
+				Resolver:      scantrigger.NewResolver(deps.FolderRepo),
+				Queue:         libraryScanQueue,
+				Status:        monitorStatus,
+				Logger:        slog.Default(),
+				ServerEnabled: serverEnabled,
+			})
+			if monitorErr != nil {
+				slog.Error("real-time library monitoring disabled", "error", monitorErr)
+			} else {
+				configWatcher.OnChange(func(old, updated *config.Config) {
+					if old == nil || old.Scanner.RealtimeMonitoring != updated.Scanner.RealtimeMonitoring {
+						libraryMonitor.SetServerEnabled(updated.Scanner.RealtimeMonitoring)
+					}
+				})
+				// A reload between reading the switch and registering the hook
+				// would otherwise be missed.
+				if live := configWatcher.Config().Scanner.RealtimeMonitoring; live != serverEnabled {
+					libraryMonitor.SetServerEnabled(live)
+				}
+				libraryMonitor.Start(appCtx)
+				defer libraryMonitor.Stop()
+				deps.LibraryMonitor = libraryMonitor
+			}
+		}
 	}
 
 	if userStoreProvider != nil && pluginService != nil {

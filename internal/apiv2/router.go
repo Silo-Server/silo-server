@@ -324,6 +324,9 @@ type Dependencies struct {
 	// (*handlers.LibraryHandler).
 	LibraryAdmin LibraryAdminService
 	LibraryJobs  LibraryJobService
+	// LibraryMonitoring reads real-time library monitoring status
+	// (*librarymonitor.StatusReader).
+	LibraryMonitoring LibraryMonitoringService
 	// LibrarySections answers a library's sections to viewers
 	// (*handlers.SectionHandler).
 	LibrarySections LibrarySectionService

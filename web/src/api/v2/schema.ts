@@ -7089,6 +7089,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/libraries/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover library features supported by this build. */
+    get: operations["getLibraryCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/libraries/metadata-match-queue": {
     parameters: {
       query?: never;
@@ -7115,6 +7132,23 @@ export interface paths {
     };
     /** The provider chain a new library of a type would be seeded with, per content level. */
     get: operations["getLibraryProviderDefaults"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/libraries/realtime-monitoring": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Report whether real-time monitoring works for each library: the server switch, then each library's effective state from settings and the fresh reports of the server nodes that can see its folders. */
+    get: operations["getLibraryRealtimeMonitoring"];
     put?: never;
     post?: never;
     delete?: never;
@@ -19732,6 +19766,11 @@ export interface components {
       /** @description Presigned poster URL; absent when the library has no poster */
       poster_url?: string;
       /**
+       * @description Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on.
+       * @example true
+       */
+      realtime_monitoring: boolean;
+      /**
        * Format: date-time
        * @description When the warning was raised; absent when none
        */
@@ -19761,6 +19800,22 @@ export interface components {
        * @example movies
        */
       type: string;
+    };
+    LibraryCapabilities: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      /**
+       * @description This build supports real-time library monitoring and its status read
+       * @example true
+       */
+      realtime_monitoring: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
     };
     LibraryCollection: {
       /** @description The page's items; empty, never null */
@@ -19847,6 +19902,11 @@ export interface components {
        *     ]
        */
       paths: string[];
+      /**
+       * @description Scan automatically when files in the library's folders change; omitted means true. Takes effect only while the server-wide scanner.realtime_monitoring setting is on.
+       * @example true
+       */
+      realtime_monitoring?: boolean;
       /**
        * @description Remote video kinds to fetch; omitted applies the default (every provider kind), empty disables them
        * @example [
@@ -20009,6 +20069,70 @@ export interface components {
     LibraryProvidersSet: {
       levels: components["schemas"]["ProviderChainLevelInput"][];
     };
+    LibraryRealtimeMonitoring: {
+      /** @description One entry per library, in sort order then by ID */
+      libraries: components["schemas"]["LibraryRealtimeMonitoringEntry"][];
+      /**
+       * @description The server-wide scanner.realtime_monitoring setting
+       * @example true
+       */
+      server_enabled: boolean;
+    };
+    LibraryRealtimeMonitoringEntry: {
+      /**
+       * @description Kernel notification backend of the reporting node: inotify, fanotify, or empty
+       * @example inotify
+       */
+      backend: string;
+      /**
+       * @description Why monitoring is not working, or a caveat about it; empty when there is nothing to say
+       * @example
+       */
+      detail: string;
+      /**
+       * Format: int64
+       * @description Folders the reporting node records for the library
+       * @example 4812
+       */
+      directories: number;
+      /**
+       * @description The library's own realtime_monitoring switch
+       * @example true
+       */
+      enabled: boolean;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      library_id: string;
+      /**
+       * @description The server node whose report the state comes from; absent without a fresh report
+       * @example node-a
+       */
+      node_id?: string;
+      /**
+       * @description server_disabled, library_disabled, monitoring_off and not_reporting are derived from settings and report freshness, checked in that order; otherwise the best state a server node reported in the last 3 minutes (monitoring, then starting, limit_reached, root_unavailable, unsupported_filesystem, unsupported_platform, error)
+       * @example monitoring
+       * @enum {string}
+       */
+      state:
+        | "server_disabled"
+        | "library_disabled"
+        | "monitoring_off"
+        | "not_reporting"
+        | "starting"
+        | "monitoring"
+        | "unsupported_filesystem"
+        | "unsupported_platform"
+        | "limit_reached"
+        | "root_unavailable"
+        | "error";
+      /**
+       * Format: date-time
+       * @description When that node last reported; absent without a fresh report
+       */
+      updated_at?: string;
+    };
     LibraryRefresh: {
       /**
        * @description quick refreshes stale items only; full refreshes every item. Default quick
@@ -20127,6 +20251,11 @@ export interface components {
        *     ]
        */
       paths?: string[];
+      /**
+       * @description Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on.
+       * @example true
+       */
+      realtime_monitoring?: boolean;
       /**
        * @description Replaces the allow-list; empty disables remote videos
        * @example [
@@ -91829,6 +91958,138 @@ export interface operations {
       };
     };
   };
+  getLibraryCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LibraryCapabilities"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   listMetadataMatchQueues: {
     parameters: {
       query?: never;
@@ -91959,6 +92220,112 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["LibraryProviderDefaults"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getLibraryRealtimeMonitoring: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LibraryRealtimeMonitoring"];
         };
       };
       /** @description Bad Request */

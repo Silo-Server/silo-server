@@ -27,12 +27,18 @@ const ARTWORK_KEYS = ["metadata.cache_images"];
 
 const BROWSING_KEYS = ["catalog.scope_versions_to_library", "access.unrated_content"];
 
+// A top-level toggle in the Scanning group, outside the collapsed worker
+// tuning, and applied live without a restart.
+const REALTIME_MONITORING_KEY = "scanner.realtime_monitoring";
+
 const SCANNER_KEYS = [
   "scanner.workers",
   "matcher.workers",
   "matcher.batch_size",
   "metadata.image_workers",
 ];
+
+const SCANNING_GROUP_KEYS = [REALTIME_MONITORING_KEY, ...SCANNER_KEYS];
 
 const MARKER_KEYS = [
   "markers.mode",
@@ -63,7 +69,13 @@ const SEARCH_KEYS = ["catalog.search.provider", ...MEILI_KEYS];
 // without a control here because the defaults are right for every deployment we
 // support — catalog.search.meilisearch.{rebuild_batch_size,
 // rebuild_task_queue_depth,index_types,embedder,binary_quantized}.
-const KEYS = [...ARTWORK_KEYS, ...BROWSING_KEYS, ...SCANNER_KEYS, ...MARKER_KEYS, ...SEARCH_KEYS];
+const KEYS = [
+  ...ARTWORK_KEYS,
+  ...BROWSING_KEYS,
+  ...SCANNING_GROUP_KEYS,
+  ...MARKER_KEYS,
+  ...SEARCH_KEYS,
+];
 
 export default function LibraryMetadataSettings() {
   const form = useSettingsForm({ keys: KEYS });
@@ -179,8 +191,8 @@ export default function LibraryMetadataSettings() {
 
         <FieldGroup
           label="Scanning"
-          restartAll={allRestart(SCANNER_KEYS)}
-          dirty={anyDirty(SCANNER_KEYS)}
+          restartAll={allRestart(SCANNING_GROUP_KEYS)}
+          dirty={anyDirty(SCANNING_GROUP_KEYS)}
           actions={
             workerOverrides ? (
               <Button
@@ -196,6 +208,14 @@ export default function LibraryMetadataSettings() {
             ) : undefined
           }
         >
+          <SettingField
+            label="Real-time monitoring"
+            type="toggle"
+            description="Scan automatically when files in library folders change. Silo scans only what changed, usually within seconds. Works on local disks; network shares (NFS, SMB) aren't supported. Libraries can opt out individually."
+            value={form.getValue(REALTIME_MONITORING_KEY) || "true"}
+            onChange={(value) => form.setValue(REALTIME_MONITORING_KEY, value)}
+            restartRequired={restartKeys.has(REALTIME_MONITORING_KEY)}
+          />
           <AdvancedSection
             id="library.scanning"
             count={SCANNER_KEYS.length}

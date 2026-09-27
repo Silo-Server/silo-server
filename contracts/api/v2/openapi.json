@@ -25521,6 +25521,13 @@
             "description": "Presigned poster URL; absent when the library has no poster",
             "type": "string"
           },
+          "realtime_monitoring": {
+            "description": "Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on.",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "scan_warning_at": {
             "description": "When the warning was raised; absent when none",
             "format": "date-time",
@@ -25579,7 +25586,45 @@
           "chapter_thumbnails_supported",
           "intro_detection_enabled",
           "trailer_kinds",
+          "realtime_monitoring",
           "sort_order"
+        ],
+        "type": "object"
+      },
+      "LibraryCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "realtime_monitoring": {
+            "description": "This build supports real-time library monitoring and its status read",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "realtime_monitoring",
+          "revision",
+          "state",
+          "allowed"
         ],
         "type": "object"
       },
@@ -25802,6 +25847,13 @@
             },
             "minItems": 1,
             "type": "array"
+          },
+          "realtime_monitoring": {
+            "description": "Scan automatically when files in the library's folders change; omitted means true. Takes effect only while the server-wide scanner.realtime_monitoring setting is on.",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           },
           "trailer_kinds": {
             "description": "Remote video kinds to fetch; omitted applies the default (every provider kind), empty disables them",
@@ -26195,6 +26247,115 @@
         ],
         "type": "object"
       },
+      "LibraryRealtimeMonitoring": {
+        "additionalProperties": false,
+        "properties": {
+          "libraries": {
+            "description": "One entry per library, in sort order then by ID",
+            "items": {
+              "$ref": "#/components/schemas/LibraryRealtimeMonitoringEntry"
+            },
+            "type": "array"
+          },
+          "server_enabled": {
+            "description": "The server-wide scanner.realtime_monitoring setting",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "server_enabled",
+          "libraries"
+        ],
+        "type": "object"
+      },
+      "LibraryRealtimeMonitoringEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "backend": {
+            "description": "Kernel notification backend of the reporting node: inotify, fanotify, or empty",
+            "examples": [
+              "inotify"
+            ],
+            "type": "string"
+          },
+          "detail": {
+            "description": "Why monitoring is not working, or a caveat about it; empty when there is nothing to say",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "directories": {
+            "description": "Folders the reporting node records for the library",
+            "examples": [
+              4812
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "enabled": {
+            "description": "The library's own realtime_monitoring switch",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "library_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "node_id": {
+            "description": "The server node whose report the state comes from; absent without a fresh report",
+            "examples": [
+              "node-a"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "description": "server_disabled, library_disabled, monitoring_off and not_reporting are derived from settings and report freshness, checked in that order; otherwise the best state a server node reported in the last 3 minutes (monitoring, then starting, limit_reached, root_unavailable, unsupported_filesystem, unsupported_platform, error)",
+            "enum": [
+              "server_disabled",
+              "library_disabled",
+              "monitoring_off",
+              "not_reporting",
+              "starting",
+              "monitoring",
+              "unsupported_filesystem",
+              "unsupported_platform",
+              "limit_reached",
+              "root_unavailable",
+              "error"
+            ],
+            "examples": [
+              "monitoring"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When that node last reported; absent without a fresh report",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "library_id",
+          "enabled",
+          "state",
+          "backend",
+          "detail",
+          "directories"
+        ],
+        "type": "object"
+      },
       "LibraryRefresh": {
         "additionalProperties": false,
         "properties": {
@@ -26472,6 +26633,13 @@
             },
             "minItems": 1,
             "type": "array"
+          },
+          "realtime_monitoring": {
+            "description": "Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on.",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           },
           "trailer_kinds": {
             "description": "Replaces the allow-list; empty disables remote videos",
@@ -138574,6 +138742,205 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/libraries/capabilities": {
+      "get": {
+        "operationId": "getLibraryCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discover library features supported by this build.",
+        "tags": [
+          "libraries"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-conditional": true
+      }
+    },
     "/api/v2/libraries/metadata-match-queue": {
       "get": {
         "operationId": "listMetadataMatchQueues",
@@ -138866,6 +139233,148 @@
           }
         ],
         "summary": "The provider chain a new library of a type would be seeded with, per content level.",
+        "tags": [
+          "libraries"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/libraries/realtime-monitoring": {
+      "get": {
+        "operationId": "getLibraryRealtimeMonitoring",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryRealtimeMonitoring"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Report whether real-time monitoring works for each library: the server switch, then each library's effective state from settings and the fresh reports of the server nodes that can see its folders.",
         "tags": [
           "libraries"
         ],

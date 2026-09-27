@@ -14,6 +14,7 @@
   "trailer_kinds": [
     "trailer"
   ],
+  "realtime_monitoring": true,
   "sort_order": 0,
   "poster_url": "https://s3.example.test/poster.jpg",
   "last_scanned_at": "2026-01-02T03:04:05.678Z",

@@ -497,6 +497,7 @@ var libraryOperationIDs = []string{
 	"setRootOverride", "deleteRootOverride", "listSkippedRoots", "listStaleIds", "rematchStaleId", "listUnmatchedItems",
 	"confirmEmptyRootCleanup", "getMetadataMatchQueue", "retryMetadataMatchQueue", "cancelMetadataMatchQueue", "refreshLibraryMetadata",
 	"getLibraryProviders", "setLibraryProviders", "uploadLibraryPoster", "deleteLibraryPoster",
+	"getLibraryRealtimeMonitoring", "getLibraryCapabilities",
 }
 
 // libraryViewOperationIDs is every profile-scoped library read the

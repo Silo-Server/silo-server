@@ -565,6 +565,7 @@ func registerAll(reg *Registry) {
 	registerHistory(reg)
 	registerDeviceSettings(reg)
 	registerLibraries(reg)
+	registerLibraryMonitoring(reg)
 	registerLibraryJobs(reg)
 	registerLibraryViews(reg)
 	registerPersonalCollections(reg)

@@ -1,0 +1,166 @@
+package librarymonitor
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestAggregateLibrary(t *testing.T) {
+	tests := []struct {
+		name      string
+		roots     []rootView
+		wantOK    bool
+		want      LibraryStatus
+		wantInDet []string
+		// exactDet makes wantInDet's only entry the whole detail.
+		exactDet bool
+	}{
+		{
+			name:   "no visible root writes no row",
+			roots:  []rootView{{path: "/a", state: stateInvisible}, {path: "/b", state: stateInvisible}},
+			wantOK: false,
+		},
+		{
+			name: "all monitoring sums directories",
+			roots: []rootView{
+				{path: "/a", state: StateMonitoring, backend: "inotify", directories: 10},
+				{path: "/b", state: StateMonitoring, backend: "inotify", directories: 5},
+			},
+			wantOK: true,
+			want:   LibraryStatus{LibraryID: 7, State: StateMonitoring, Backend: "inotify", Directories: 15},
+		},
+		{
+			name: "invisible roots are skipped",
+			roots: []rootView{
+				{path: "/a", state: StateMonitoring, backend: "inotify", directories: 10},
+				{path: "/elsewhere", state: stateInvisible},
+			},
+			wantOK: true,
+			want:   LibraryStatus{LibraryID: 7, State: StateMonitoring, Backend: "inotify", Directories: 10},
+		},
+		{
+			name: "worst root wins and is named",
+			roots: []rootView{
+				{path: "/a", state: StateMonitoring, backend: "inotify", directories: 10},
+				{path: "/b", state: StateLimitReached, backend: "inotify", detail: "limit text", directories: 90},
+				{path: "/c", state: StateRootUnavailable, detail: "gone"},
+			},
+			wantOK:    true,
+			want:      LibraryStatus{LibraryID: 7, State: StateLimitReached, Backend: "inotify", Directories: 100},
+			wantInDet: []string{"/b: limit text", "/c: gone"},
+		},
+		{
+			name: "error beats everything",
+			roots: []rootView{
+				{path: "/a", state: StateUnsupportedFilesystem, detail: "nfs"},
+				{path: "/b", state: StateError, detail: "boom"},
+			},
+			wantOK: true,
+			want:   LibraryStatus{LibraryID: 7, State: StateError},
+		},
+		{
+			name: "starting beats monitoring",
+			roots: []rootView{
+				{path: "/a", state: StateMonitoring, backend: "fanotify"},
+				{path: "/b", state: StateStarting},
+			},
+			wantOK: true,
+			want:   LibraryStatus{LibraryID: 7, State: StateStarting, Backend: "fanotify"},
+		},
+		{
+			name: "unsupported filesystem beats starting",
+			roots: []rootView{
+				{path: "/a", state: StateStarting},
+				{path: "/b", state: StateUnsupportedFilesystem},
+			},
+			wantOK: true,
+			want:   LibraryStatus{LibraryID: 7, State: StateUnsupportedFilesystem},
+		},
+		{
+			name: "mixed backends name inotify",
+			roots: []rootView{
+				{path: "/a", state: StateMonitoring, backend: "fanotify"},
+				{path: "/b", state: StateMonitoring, backend: "inotify", detail: "fanotify unavailable: reason"},
+			},
+			wantOK:    true,
+			want:      LibraryStatus{LibraryID: 7, State: StateMonitoring, Backend: "inotify"},
+			wantInDet: []string{"/b: fanotify unavailable: reason"},
+		},
+		{
+			name: "a detail every root shares is said once, without paths",
+			roots: []rootView{
+				{path: "/a", state: StateMonitoring, backend: "inotify", detail: "fanotify unavailable: reason."},
+				{path: "/b", state: StateMonitoring, backend: "inotify", detail: "fanotify unavailable: reason."},
+			},
+			wantOK:    true,
+			want:      LibraryStatus{LibraryID: 7, State: StateMonitoring, Backend: "inotify"},
+			wantInDet: []string{"fanotify unavailable: reason."},
+			exactDet:  true,
+		},
+		{
+			name: "roots with the same detail are named together",
+			roots: []rootView{
+				{path: "/a", state: StateMonitoring, backend: "inotify", detail: "One."},
+				{path: "/b", state: StateMonitoring, backend: "inotify", detail: "One."},
+				{path: "/c", state: StateMonitoring, backend: "inotify", detail: "Two."},
+			},
+			wantOK:    true,
+			want:      LibraryStatus{LibraryID: 7, State: StateMonitoring, Backend: "inotify"},
+			wantInDet: []string{"/a, /b: One. /c: Two."},
+			exactDet:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := aggregateLibrary(7, tt.roots)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if !ok {
+				return
+			}
+			detail := got.Detail
+			got.Detail = ""
+			if got != tt.want {
+				t.Fatalf("got %+v, want %+v", got, tt.want)
+			}
+			if tt.exactDet && detail != tt.wantInDet[0] {
+				t.Fatalf("detail = %q, want %q", detail, tt.wantInDet[0])
+			}
+			for _, part := range tt.wantInDet {
+				if !strings.Contains(detail, part) {
+					t.Fatalf("detail %q does not contain %q", detail, part)
+				}
+			}
+		})
+	}
+}
+
+func TestRootStatusDetail(t *testing.T) {
+	limit := (&rootState{state: StateLimitReached, limit: 8192, dirs: 12000}).statusDetail()
+	for _, part := range []string{"max_user_watches (8192)", "12000", "on the host", "CAP_SYS_ADMIN"} {
+		if !strings.Contains(limit, part) {
+			t.Errorf("limit detail %q does not contain %q", limit, part)
+		}
+	}
+	nfsName := classifyFSType(0x6969).Name
+	nfs := (&rootState{state: StateUnsupportedFilesystem, fsName: nfsName}).statusDetail()
+	if !strings.Contains(nfs, nfsName+" network") || !strings.Contains(nfs, "nightly scan") {
+		t.Errorf("unsupported detail = %q", nfs)
+	}
+	fuse := (&rootState{state: StateMonitoring, notes: []string{fuseCaveat}}).statusDetail()
+	if fuse != fuseCaveat {
+		t.Errorf("monitoring detail = %q, want the FUSE caveat", fuse)
+	}
+	if got := (&rootState{state: StateMonitoring}).statusDetail(); got != "" {
+		t.Errorf("plain monitoring detail = %q, want empty", got)
+	}
+}
+
+func TestRootStatusDetailSummarizesNetworkFolders(t *testing.T) {
+	rs := &rootState{state: StateMonitoring, unsupportedMounts: []string{"/m/a", "/m/b", "/m/c", "/m/d", "/m/e"}}
+	want := "Folders on network filesystems aren't monitored: /m/a, /m/b, /m/c and 2 more."
+	if got := rs.statusDetail(); got != want {
+		t.Fatalf("detail = %q, want %q", got, want)
+	}
+}
