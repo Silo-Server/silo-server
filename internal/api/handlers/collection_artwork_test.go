@@ -255,3 +255,78 @@ func TestCollectionArtworkError_HidesServerFailures(t *testing.T) {
 		t.Fatalf("err = %#v, want the 500 fallback", err)
 	}
 }
+
+// failingPutStore rejects every Put so a test can fail storage after decoding.
+type failingPutStore struct{ blobstore.Store }
+
+func (failingPutStore) Put(context.Context, string, []byte) error {
+	return errors.New("storage unavailable")
+}
+
+func TestProcessCollectionPoster_StorageFailureKeepsExistingPoster(t *testing.T) {
+	store, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFilesystem: %v", err)
+	}
+	existing := userCollectionImagePrefix + "/collection-1/poster/original.webp"
+	if err := store.Put(context.Background(), existing, []byte("current poster")); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	h := &CollectionHandler{ArtworkStore: failingPutStore{store}}
+	_, err = h.processCollectionPoster(
+		context.Background(),
+		nil,
+		"collection-1",
+		"profile-1",
+		func() ([]byte, error) { return testCollectionPosterJPEG(t), nil },
+		"",
+	)
+	if err == nil {
+		t.Fatal("processCollectionPoster succeeded, want the storage error")
+	}
+	items, _, err := store.List(context.Background(), userCollectionImagePrefix+"/collection-1/poster/", "", 0)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(items) != 1 || items[0].Key != existing {
+		t.Fatalf("stored poster objects = %#v, want only %q", items, existing)
+	}
+}
+
+func TestPruneCollectionImageVariants_RemovesOnlyStaleObjects(t *testing.T) {
+	ctx := context.Background()
+	store, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFilesystem: %v", err)
+	}
+	variants, err := generateCollectionImageVariants("poster", testCollectionPosterJPEG(t))
+	if err != nil {
+		t.Fatalf("generateCollectionImageVariants: %v", err)
+	}
+	if _, _, err := storeCollectionImageVariants(ctx, store, userCollectionImagePrefix, "collection-1", "poster", variants); err != nil {
+		t.Fatalf("storeCollectionImageVariants: %v", err)
+	}
+	stale := userCollectionImagePrefix + "/collection-1/poster/original.jpg"
+	other := userCollectionImagePrefix + "/collection-1/backdrop/original.jpg"
+	for _, key := range []string{stale, other} {
+		if err := store.Put(ctx, key, []byte("old")); err != nil {
+			t.Fatalf("Put %s: %v", key, err)
+		}
+	}
+
+	if err := pruneCollectionImageVariants(ctx, store, userCollectionImagePrefix, "collection-1", "poster", variants); err != nil {
+		t.Fatalf("pruneCollectionImageVariants: %v", err)
+	}
+	items, _, err := store.List(ctx, userCollectionImagePrefix+"/collection-1/", "", 0)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	got := make(map[string]bool, len(items))
+	for _, item := range items {
+		got[item.Key] = true
+	}
+	if got[stale] || !got[other] || len(got) != len(variants.Variants)+1 {
+		t.Fatalf("objects after prune = %v", got)
+	}
+}

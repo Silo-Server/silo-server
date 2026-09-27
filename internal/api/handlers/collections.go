@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -533,13 +534,12 @@ func (h *CollectionHandler) processCollectionPoster(
 	if artwork == nil {
 		return true, fmt.Errorf("poster upload requires configured artwork storage")
 	}
-	// Decode before clearing so an unusable file keeps the current poster.
+	// Decode and store before pruning so a file that cannot be decoded or
+	// stored never leaves the collection without a poster. The variant keys
+	// are fixed, so storing overwrites the current poster in place.
 	variants, err := generateCollectionImageVariants("poster", fileData)
 	if err != nil {
 		return true, fmt.Errorf("poster: %w", err)
-	}
-	if err := removeCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, "poster"); err != nil {
-		return true, fmt.Errorf("clearing previous poster: %w", err)
 	}
 	s3Path, thumbhash, err := storeCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, "poster", variants)
 	if err != nil {
@@ -556,6 +556,10 @@ func (h *CollectionHandler) processCollectionPoster(
 			return true, errCollectionForbidden
 		}
 		return true, fmt.Errorf("persisting poster: %w", err)
+	}
+	if err := pruneCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, "poster", variants); err != nil {
+		slog.WarnContext(ctx, "failed to prune stale collection poster variants", "component", "api",
+			"collection_id", collectionID, "error", err)
 	}
 	return true, nil
 }

@@ -189,7 +189,7 @@ func storeCollectionImageVariants(
 ) (s3Path, thumbhashStr string, err error) {
 	var w300Data []byte
 	for _, v := range result.Variants {
-		key := fmt.Sprintf("%s/%s/%s/%s%s", prefix, collectionID, imageType, v.Key, result.Ext)
+		key := collectionImageVariantKey(prefix, collectionID, imageType, v.Key, result.Ext)
 		if err := store.Put(ctx, key, v.Data); err != nil {
 			return "", "", fmt.Errorf("uploading %s: %w", v.Key, err)
 		}
@@ -208,6 +208,42 @@ func storeCollectionImageVariants(
 		}
 	}
 	return s3Path, thumbhashStr, nil
+}
+
+func collectionImageVariantKey(prefix, collectionID, imageType, variant, ext string) string {
+	return fmt.Sprintf("%s/%s/%s/%s%s", prefix, collectionID, imageType, variant, ext)
+}
+
+// pruneCollectionImageVariants deletes stored objects for the collection /
+// imageType that are not part of result, such as variants an older encoder
+// wrote under another extension.
+func pruneCollectionImageVariants(
+	ctx context.Context,
+	store blobstore.Store,
+	prefix, collectionID, imageType string,
+	result *imageutil.VariantResult,
+) error {
+	keep := make(map[string]bool, len(result.Variants))
+	for _, v := range result.Variants {
+		keep[collectionImageVariantKey(prefix, collectionID, imageType, v.Key, result.Ext)] = true
+	}
+	items, _, err := store.List(ctx, fmt.Sprintf("%s/%s/%s/", prefix, collectionID, imageType), "", 0)
+	if err != nil {
+		return fmt.Errorf("listing objects: %w", err)
+	}
+	var stale []string
+	for _, item := range items {
+		if !keep[item.Key] {
+			stale = append(stale, item.Key)
+		}
+	}
+	if len(stale) == 0 {
+		return nil
+	}
+	if _, err := store.Delete(ctx, stale); err != nil {
+		return fmt.Errorf("deleting stale variants: %w", err)
+	}
+	return nil
 }
 
 // removeCollectionImageVariants deletes every stored variant for the given
