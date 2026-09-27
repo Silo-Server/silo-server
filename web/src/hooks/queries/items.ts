@@ -218,21 +218,47 @@ export async function redetectItemMarkers(
   });
 }
 
+export type RedetectEpisodeIntroResponse = V2Result<"POST /api/v2/admin/items/{id}/redetect-intro">;
+/**
+ * Re-detects an episode's intro through the older episode-only operation,
+ * for API nodes that do not advertise the redetect_markers capability.
+ */
+export async function redetectEpisodeIntro(
+  episodeId: string,
+): Promise<RedetectEpisodeIntroResponse> {
+  return v2("POST /api/v2/admin/items/{id}/redetect-intro", {
+    path: { id: episodeId },
+    retryAuthentication: false,
+  });
+}
+
+const redetectionToasts = {
+  onSuccess: (response: { status: string }) => {
+    toast.success(
+      response.status === "already_running"
+        ? "Re-detection already running"
+        : "Re-detection started",
+    );
+  },
+  onError: (error: unknown) => {
+    toast.error(error instanceof Error ? error.message : "Failed to start re-detection");
+  },
+};
+
 export function useRedetectItemMarkers() {
   return useMutation({
     retry: false,
     mutationFn: ({ itemId, kind }: { itemId: string; kind: RedetectMarkersKind }) =>
       redetectItemMarkers(itemId, kind),
-    onSuccess: (response) => {
-      toast.success(
-        response.status === "already_running"
-          ? "Re-detection already running"
-          : "Re-detection started",
-      );
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to start re-detection");
-    },
+    ...redetectionToasts,
+  });
+}
+
+export function useRedetectEpisodeIntro() {
+  return useMutation({
+    retry: false,
+    mutationFn: redetectEpisodeIntro,
+    ...redetectionToasts,
   });
 }
 

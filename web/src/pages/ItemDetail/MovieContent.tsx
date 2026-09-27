@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import type { FileVersion, ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
 import { useRedetectItemMarkers, useRefreshItemMetadata } from "@/hooks/queries/items";
+import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
 import { useAuth } from "@/hooks/useAuth";
@@ -65,6 +66,9 @@ export default function MovieContent({
 
   const refreshMetadataMutation = useRefreshItemMetadata();
   const redetectMarkersMutation = useRedetectItemMarkers();
+  // Movies have no re-detect action on an API node without redetect-markers.
+  const markerCapabilities = useAdminMarkerCapabilities(isAdmin);
+  const canRedetectMarkers = markerCapabilities.data?.redetect_markers === true;
   const deleteSubtitlePreference = useDeleteSubtitlePreference();
   const setSubtitlePreference = useSetSubtitlePreference();
   const [editOpen, setEditOpen] = useState(false);
@@ -299,11 +303,11 @@ export default function MovieContent({
             }
             isRefreshing={refreshMetadataMutation.isPending}
             onRedetectMarkers={
-              isAdmin
+              isAdmin && canRedetectMarkers
                 ? (kind) => redetectMarkersMutation.mutate({ itemId: item.content_id, kind })
                 : undefined
             }
-            redetectCreditsOnly
+            redetectKind="credits"
             isRedetectingMarkers={redetectMarkersMutation.isPending}
             isAdmin={isAdmin}
             canCurateMetadata={canCurateMetadata}

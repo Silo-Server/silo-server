@@ -7,6 +7,21 @@ import { adminKeys } from "@/hooks/queries/keys";
 
 const ADMIN_STALE_TIME = 30_000;
 
+/**
+ * Reads the marker analysis this API build supports. During a rolling deploy
+ * the web bundle can be newer than the node answering, so callers gate newer
+ * marker actions on it and treat a failed read as "not supported".
+ */
+export function useAdminMarkerCapabilities(enabled = true) {
+  return useQuery({
+    queryKey: adminKeys.markerCapabilities(),
+    queryFn: ({ signal }) => v2("GET /api/v2/admin/markers/capabilities", { signal }),
+    staleTime: ADMIN_STALE_TIME,
+    retry: false,
+    enabled,
+  });
+}
+
 export function useMarkerProviders() {
   return useQuery({
     queryKey: adminKeys.markerProviders(),

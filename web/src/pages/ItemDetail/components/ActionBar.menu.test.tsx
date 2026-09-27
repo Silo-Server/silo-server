@@ -96,7 +96,7 @@ describe("ActionBar marker re-detection", () => {
         <ActionBar
           contentId="movie-1"
           isAdmin
-          redetectCreditsOnly
+          redetectKind="credits"
           onRedetectMarkers={onRedetectMarkers}
         />
       </MemoryRouter>,
@@ -106,6 +106,26 @@ describe("ActionBar marker re-detection", () => {
     expect(screen.queryByRole("menuitem", { name: "Re-detect Markers" })).toBeNull();
     await userEvent.click(screen.getByRole("menuitem", { name: "Re-detect Credits" }));
     expect(onRedetectMarkers).toHaveBeenCalledExactlyOnceWith("credits");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("re-detects an episode intro directly when only the intro operation exists", async () => {
+    const onRedetectMarkers = vi.fn();
+    render(
+      <MemoryRouter>
+        <ActionBar
+          contentId="episode-1"
+          isAdmin
+          redetectKind="intro"
+          onRedetectMarkers={onRedetectMarkers}
+        />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByTitle("More"));
+    expect(screen.queryByRole("menuitem", { name: "Re-detect Markers" })).toBeNull();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Re-detect Intro Markers" }));
+    expect(onRedetectMarkers).toHaveBeenCalledExactlyOnceWith("intro");
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
