@@ -54,6 +54,7 @@ type Shape struct {
 const (
 	ShapeProgressiveRemuxAPI            = "progressive_remux_api"
 	ShapeProgressiveRemuxTranscodeProxy = "progressive_remux_transcode_proxy"
+	ShapeHLSRemuxAPI                    = "hls_remux_api"
 )
 
 func (s Shape) NeedsTranscodeNode() bool { return s.Execution == ExecutionTranscode }
@@ -162,7 +163,7 @@ func legalShapes(workload Workload, delivery Delivery) []Shape {
 		}
 	case DeliveryHLSRemux:
 		return []Shape{
-			shape("hls_remux_api", ExecutionAPI, EgressAPI),
+			shape(ShapeHLSRemuxAPI, ExecutionAPI, EgressAPI),
 			shape("hls_remux_transcode_api", ExecutionTranscode, EgressAPI),
 			shape("hls_remux_transcode_proxy", ExecutionTranscode, EgressProxy),
 		}

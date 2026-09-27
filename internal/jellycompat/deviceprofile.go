@@ -34,6 +34,11 @@ type DeviceProfile struct {
 	ContainerProfiles   []ContainerProfile   `json:"ContainerProfiles,omitempty"`
 	CodecProfiles       []CodecProfile       `json:"CodecProfiles,omitempty"`
 	SubtitleProfiles    []SubtitleProfile    `json:"SubtitleProfiles,omitempty"`
+
+	// hlsRemuxSampleEntry, when set, is the sample entry a copy-video HLS remux
+	// will write, overriding the one derived from the source's Dolby Vision
+	// profile. The HDR10 strip sets it because its output is always hvc1.
+	hlsRemuxSampleEntry string
 }
 
 type ContainerProfile struct {

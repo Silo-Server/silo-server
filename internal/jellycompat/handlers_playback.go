@@ -340,8 +340,12 @@ type PlaybackHandler struct {
 	// driven to refresh a stale token, so the node reconstructs from this
 	// server-authoritative store instead (see internal/noderecipe). Optional
 	// (nil disables it — integrated/no-node deployments need no handoff).
-	RecipeNodeStore          recipeNodePutter
-	compatToneMapProbe       func(context.Context, string, string, string) (tonemap.Capabilities, error)
+	RecipeNodeStore    recipeNodePutter
+	compatToneMapProbe func(context.Context, string, string, string) (tonemap.Capabilities, error)
+	// Test hooks for the Dolby Vision strip: the per-file RPU probe and the
+	// API host's dovi_rpu filter check.
+	compatDVRPUProbe         func(context.Context, string) bool
+	compatDVStripLocalProbe  func() bool
 	compatAudioRegistryMu    sync.Mutex
 	compatAudioRegistry      *playback.TransformationRegistryV3
 	compatAudioRegistryPath  string
@@ -1024,6 +1028,9 @@ func (h *PlaybackHandler) resolveCompatHLSRouteOnNodeWithPolicy(
 	if err != nil {
 		return noderouting.Decision{}, err
 	}
+	if source.DVStripToHDR10 && !videoTranscode {
+		eligible, excludedShapes = h.compatDVStripRouting(ctx, eligible, excludedShapes, compatHLSRecipeSourceAudioChannels(source))
+	}
 	currentTranscodeURL := session.TranscodeNodeURL
 	if requiredTranscodeURL != "" {
 		requiredTranscodeURL = strings.TrimRight(requiredTranscodeURL, "/")
@@ -1528,6 +1535,9 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 			return fmt.Errorf("transcode node does not support %s recipe %s", playback.TransformationAudioToAACV3, playback.TransformationAudioToAACRecipeVersionV3)
 		}
 	}
+	if source.DVStripToHDR10 && compatHLSCopiesVideo(source) && !h.compatTranscodeNodeCanStrip(transcodeNodeURL) {
+		return fmt.Errorf("transcode node does not support %s recipe %s", playback.TransformationServerDV7HDR10V3, compatDVStripRecipeVersion)
+	}
 	if h.sessionMgr != nil {
 		if err := h.sessionMgr.SetTranscodeNodeURL(upstreamSessionID, transcodeNodeURL); err != nil {
 			return fmt.Errorf("bind transcode node: %w", err)
@@ -1662,7 +1672,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	}
 	if compatHLSCopiesVideo(source) {
 		reqBody.TargetCodecVideo = compatCopyCodec
-		reqBody.VideoSampleEntry = playback.VideoSampleEntryForDVCopy(file.PrimaryDVProfile())
+		reqBody.VideoSampleEntry, reqBody.VideoBitstreamFilter = compatCopyVideoRecipe(source, file.PrimaryDVProfile())
 		reqBody.CopyVideoMPEGTS = source.HLSRemuxMPEGTS
 		reqBody.CopyFMP4RecipeVersion = playback.CopyFMP4RecipeVersion
 	}
@@ -1867,6 +1877,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		SubtitleCodec:          reqBody.SubtitleCodec,
 		TargetBitrateKbps:      reqBody.TargetBitrateKbps,
 		VideoSampleEntry:       reqBody.VideoSampleEntry,
+		VideoBitstreamFilter:   reqBody.VideoBitstreamFilter,
 		CopyVideoMPEGTS:        reqBody.CopyVideoMPEGTS,
 		SegmentDuration:        reqBody.SegmentDuration,
 		AudioTrackIndex:        reqBody.AudioTrackIndex,
@@ -2177,6 +2188,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		if req.MediaSourceID != "" && !mediaSourceIDsEqual(source.ID, req.MediaSourceID) {
 			continue
 		}
+		source = h.applyCompatDVStrip(r.Context(), routeItemID, playSessionID, source, profile, req, allow4KTranscode)
 
 		// Resolve the client's subtitle selection against both the
 		// embedded/external tracks and any downloaded subtitles before
@@ -2773,13 +2785,14 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 func compatNegotiationVariant(sources []PlaybackMediaSource) string {
 	var variant strings.Builder
 	for _, source := range sources {
-		fmt.Fprintf(&variant, "%s|a=%s|s=%s|r=%t|ts=%t|ta=%t;",
+		fmt.Fprintf(&variant, "%s|a=%s|s=%s|r=%t|ts=%t|ta=%t|dv=%t;",
 			source.ID,
 			compatOptionalIndex(source.SelectedAudioStreamIndex),
 			compatOptionalIndex(source.SelectedSubtitleStreamIndex),
 			source.HLSRemux,
 			source.HLSRemuxMPEGTS,
 			source.TranscodeAudio,
+			source.DVStripToHDR10,
 		)
 	}
 	return variant.String()
@@ -3678,6 +3691,7 @@ func applyCompatSubtitleDelivery(source *PlaybackMediaSource, profile DeviceProf
 			source.HLSRemux = false
 			source.HLSRemuxAudioStreamIndexes = nil
 			source.HLSRemuxMPEGTS = false
+			source.DVStripToHDR10 = false
 			if source.SupportsTranscoding {
 				ordinal := 0
 				for preceding := 0; preceding < index; preceding++ {
