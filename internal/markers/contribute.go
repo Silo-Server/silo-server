@@ -174,8 +174,10 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 // fails closed.
 var urlInText = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://\S+`)
 
-// authSchemeInText matches a credential after an HTTP auth scheme word.
-var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)\s+[^\s"',;]+`)
+// authSchemeInText matches a credential after an HTTP auth scheme word. The
+// value must look like one (a digit, "=" padding or 16+ characters), so prose
+// such as "basic authentication required" keeps its noun.
+var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)\s+([^\s"',;]*[0-9=][^\s"',;]*|[^\s"',;]{16,})`)
 
 // keyValueInText matches a key followed by ":" or "=" and its value, as in
 // "api_key=abc" or `"x-api-key": "abc"`. Whether the key names a secret is
@@ -188,7 +190,9 @@ var keyValueInText = regexp.MustCompile(`([\w.-]+)("?\s*[:=]\s*"?)([^\s"',;&]+)`
 // userinfo, and auth-scheme or key=value secrets are masked. It is best
 // effort over free text, not a guarantee: a bare secret with no key and no
 // auth scheme ("invalid token sk-abc") is left as is, since masking every
-// word after "token" would also eat ordinary diagnostics.
+// word after "token" would also eat ordinary diagnostics. Also unmasked: a
+// scheme-relative URL ("//user:pass@host"), and the tail of a quoted query
+// value containing a space, which \S+ splits off the URL.
 func submissionErrorText(err error) string {
 	msg := logredact.SanitizeURLError(err).Error()
 	msg = urlInText.ReplaceAllStringFunc(msg, logredact.SanitizeURL)
@@ -198,6 +202,11 @@ func submissionErrorText(err error) string {
 		// Header-style names ("x-api-key") use hyphens where SecretKey's
 		// markers use underscores.
 		if !logredact.SecretKey(strings.ReplaceAll(m[1], "-", "_")) {
+			return pair
+		}
+		// "Authorization: Bearer [REDACTED]": the scheme word is not the
+		// secret, and the pass above already masked what follows it.
+		if strings.EqualFold(m[3], "bearer") || strings.EqualFold(m[3], "basic") {
 			return pair
 		}
 		return m[1] + m[2] + logredact.Placeholder
