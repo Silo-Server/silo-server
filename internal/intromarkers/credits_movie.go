@@ -135,10 +135,12 @@ func (e *ChromaprintExtractor) SampleMovieTail(ctx context.Context, candidate Ca
 	if window.empty() {
 		return creditsTail{}, fmt.Errorf("file %d has no tail window", candidate.FileID)
 	}
-	result, err := analysisRunner(e.config).Run(ctx, movieTailRequest(ctx, candidate, window))
+	req := movieTailRequest(ctx, candidate, window)
+	result, err := e.tailRunner(ctx, &req).Run(ctx, req)
 	if err != nil {
 		return creditsTail{}, fmt.Errorf("sampling the movie tail of file %d: %w", candidate.FileID, err)
 	}
+	e.logTailDecoder(ctx, candidate, req, result)
 	return creditsTail{Frames: result.Frames}, nil
 }
 

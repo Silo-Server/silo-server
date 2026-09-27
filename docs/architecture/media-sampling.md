@@ -66,7 +66,7 @@ Supported today:
 |---|---|
 | Sampling mode | `Window` (start and duration; `KeyframesOnly` decodes only video keyframes and needs `Stats`), `Samples` (the keyframe at or before each of a list of times; `Stats` only), `At` (the frame at a time; `Images` only) |
 | Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals), `Stats` (per-frame picture statistics), `Images` (JPEG images) |
-| Attempts | software; hardware (QSV, VAAPI, VideoToolbox) for `Images` only |
+| Attempts | software; hardware (QSV, VAAPI, VideoToolbox) for requests with a video output (`Images` or `Stats`); see [Hardware decode](#hardware-decode) |
 
 Audio and `Stats` may share one run: ffmpeg reads the input once and writes
 the audio output first and the statistics of the first video stream
@@ -131,6 +131,54 @@ Outputs read from ffmpeg's log run at `-loglevel repeat+info`: without
 repeated N times" and per-frame values would be lost. Fingerprint-only runs
 keep `-loglevel warning`.
 
+## Hardware decode
+
+An attempt with `Hardware` set decodes the request's video on the runner's
+`HWAccel` (`hwdecode.go`). `HWAccel` is a backend the caller resolved with
+`playback.ResolveHWAccelWithFFmpegContext` from `playback.hw_accel` and
+`playback.hw_device`, never `auto`. Only QSV, VAAPI, and VideoToolbox decode
+here (`SupportsHardwareDecode`); NVENC does not. A hardware attempt needs a
+video output (`Images` or `Stats`). Audio in the same run always decodes in
+software.
+
+- QSV and VAAPI decode into VAAPI surfaces on a render device. QSV
+  initializes its VAAPI parent device the way playback does
+  (`tonemap.QSVInitDeviceArgs`) and decodes through it.
+- VideoToolbox decodes into system-memory frames, so software filters apply
+  to them directly.
+- Each hardware attempt reserves one render device through
+  `playback.AcquireHWDevice`, falling back to `playback.PickRenderDevice`,
+  before its timeout starts, and releases it when the attempt ends, before
+  the next attempt. A multi-device `Runner.HWDevice` list therefore resolves
+  to one device per attempt. A hardware attempt that cannot be built, such as
+  VAAPI without a render device, fails as `unsupported` without starting
+  ffmpeg.
+- A caller that wants a result on any host lists a software attempt after
+  the hardware one. A failed run takes its reason from its last attempt, so
+  once the software attempt has run, a hardware failure costs only time and
+  cannot mark an artifact unusable.
+
+`Stats` on VAAPI surfaces (VAAPI and QSV) scales the whole picture on the
+GPU before the download, and the crop follows:
+
+```text
+scale_vaapi=w=SW:h=-2,hwdownload,format=nv12,crop=…,format=yuv420p,blackframe=…,signalstats,metadata=print
+```
+
+`SW` is `Width / CropWidth` rounded to an even number (534 for the credits
+pass's 0.9 crop to 480), so the cropped picture is about `Width` pixels wide,
+as in software. VideoToolbox frames, like software ones, take the software
+chain. `-skip_frame:v nokey` still applies, in `Window` and `Samples` modes
+alike. The VAAPI chain measures slightly different pixels (GPU scaling
+before the crop instead of area scaling after it). On a 4K HEVC Dolby Vision
+episode, a 1080p H.264 episode, and a 1080p movie, its credits keyframe
+classes agreed with software on 99.8 to 100 percent of keyframes, with the
+same runs and the same credits; VideoToolbox classified synthesized H.264
+and 10-bit HEVC tails identically to software. Statistics are therefore
+comparable across decoders, and artifacts do not record which one produced
+them. `Result.Decoder` names the attempt that produced a result
+(`hardware:vaapi`, `software`).
+
 ## Images
 
 `At` with an `Images` output decodes one frame and returns it as a JPEG
@@ -144,20 +192,9 @@ a time past the end of the video, fails the attempt as `empty`.
 `ImageOutput.Width` scales the image to an even width, keeping the aspect
 ratio; zero keeps the source size.
 
-Hardware attempts (`hwdecode.go`):
-
-- QSV and VAAPI decode into VAAPI surfaces on a render device and download
-  them to system memory as NV12 (`hwdownload,format=nv12`). QSV initializes
-  its VAAPI parent device the way playback does (`tonemap.QSVInitDeviceArgs`).
-- VideoToolbox decodes into system-memory frames, so software filters apply
-  to them directly.
-- Each hardware attempt reserves one render device through
-  `playback.AcquireHWDevice`, falling back to `playback.PickRenderDevice`,
-  before its timeout starts, and releases it when the attempt ends, before
-  the next attempt. A multi-device `Runner.HWDevice` list therefore resolves
-  to one device per attempt. A hardware attempt that cannot be built, such as
-  VAAPI without a render device, fails as `unsupported` without starting
-  ffmpeg.
+A hardware image attempt downloads VAAPI surfaces as NV12
+(`hwdownload,format=nv12`) before any scaling; see
+[Hardware decode](#hardware-decode).
 
 `ImageOutput.ToneMap` converts an HDR source to SDR with the tone-map chains
 chapter thumbnails have always used, kept byte for byte; they differ from the

@@ -1301,16 +1301,16 @@ func main() {
 	deps.AdminJobCancelRegistry = adminJobCancelRegistry
 	if needsWorkers && deps.DB != nil {
 		deps.IntroRepository = intromarkers.NewRepository(deps.DB)
-		deps.IntroAnalyzer = intromarkers.NewAnalyzer(
-			deps.IntroRepository,
-			intromarkers.DefaultConfig(cfg.Playback.FFmpegPath),
-			slog.Default(),
-		)
-		// markers.detection_workers applies without a restart.
+		introConfig := intromarkers.DefaultConfig(cfg.Playback.FFmpegPath)
+		introConfig.HWAccel, introConfig.HWDevice = cfg.Playback.HWAccel, cfg.Playback.HWDevice
+		deps.IntroAnalyzer = intromarkers.NewAnalyzer(deps.IntroRepository, introConfig, slog.Default())
+		// markers.detection_workers, and the playback hardware settings that
+		// credits tail passes decode on, apply without a restart.
 		introAnalyzer := deps.IntroAnalyzer
 		introAnalyzer.SetWorkers(cfg.Markers.DetectionWorkers)
 		configWatcher.OnChange(func(_, updated *config.Config) {
 			introAnalyzer.SetWorkers(updated.Markers.DetectionWorkers)
+			introAnalyzer.SetHardwareDecode(updated.Playback.HWAccel, updated.Playback.HWDevice)
 		})
 	}
 	if deps.DB != nil {

@@ -163,10 +163,11 @@ func (e *ChromaprintExtractor) SampleCreditsTail(ctx context.Context, candidate 
 		return creditsTailSample{}, fmt.Errorf("file %d has no tail window", candidate.FileID)
 	}
 	req := creditsTailRequest(ctx, candidate, window, fingerprint)
-	result, err := analysisRunner(e.config).Run(ctx, req)
+	result, err := e.tailRunner(ctx, &req).Run(ctx, req)
 	if err != nil {
 		return creditsTailSample{}, fmt.Errorf("sampling the credits tail of file %d: %w", candidate.FileID, err)
 	}
+	e.logTailDecoder(ctx, candidate, req, result)
 	sample := creditsTailSample{Tail: creditsTail{Frames: result.Frames, Silences: result.Silences}}
 	if req.Audio != nil && req.Audio.Fingerprint {
 		key := creditsFingerprintKey()

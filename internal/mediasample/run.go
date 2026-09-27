@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
 
@@ -125,16 +126,22 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, to
 	if attempt.Hardware {
 		decoder = "hardware:" + r.HWAccel
 	}
-	// An image attempt reserves its device and settles its filters before
-	// its timeout starts, so neither eats into the decode's time.
+	// A hardware attempt reserves its device, and an image attempt settles
+	// its filters, before its timeout starts, so neither eats into the
+	// decode's time.
+	hw, release, failure := r.reserveHardware(attempt)
+	if failure != nil {
+		failure.Decoder = decoder
+		return Result{}, failure
+	}
+	defer release()
 	var imageArgs []string
 	if req.At != nil {
-		args, release, failure := r.prepareImage(ctx, req, attempt, toneMap)
+		args, failure := r.prepareImage(ctx, req, attempt, hw, toneMap)
 		if failure != nil {
 			failure.Decoder = decoder
 			return Result{}, failure
 		}
-		defer release()
 		imageArgs = args
 	}
 	attemptCtx := ctx
@@ -143,7 +150,7 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, to
 		attemptCtx, cancel = context.WithTimeout(ctx, time.Duration(attempt.TimeoutSeconds*float64(time.Second)))
 		defer cancel()
 	}
-	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, attempt: attempt, decoder: decoder}
+	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, attempt: attempt, hw: hw, decoder: decoder}
 	switch {
 	case req.At != nil:
 		return run.image(req, imageArgs)
@@ -153,14 +160,40 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, to
 	return run.decode(req, 0)
 }
 
+// reserveHardware returns the hardware attempt decodes on. A hardware
+// attempt reserves one render device through playback.AcquireHWDevice,
+// falling back to playback.PickRenderDevice, until release is called. A
+// multi-device HWDevice therefore resolves to one device per attempt, and the
+// reservation spans only this attempt. A hardware attempt the host cannot
+// run, such as VAAPI without a render device, fails as unsupported without
+// starting ffmpeg: that is no fault of the request or the file.
+func (r Runner) reserveHardware(attempt Attempt) (hardwareDecode, func(), *AttemptError) {
+	hw := hardwareDecode{Accel: r.HWAccel}
+	if !attempt.Hardware {
+		return hw, func() {}, nil
+	}
+	device, release := playback.AcquireHWDevice(r.HWDevice, r.HWAccel)
+	if device == "" {
+		device = playback.PickRenderDevice("")
+	}
+	hw.Device = device
+	if _, err := hardwareDecodeArgs(hw); err != nil {
+		release()
+		return hardwareDecode{}, nil, &AttemptError{Reason: ReasonUnsupported, Err: err}
+	}
+	return hw, release, nil
+}
+
 // attemptRun is one attempt in progress. ctx is the caller's context and
 // attemptCtx the attempt's, which the attempt's timeout may end first; every
-// ffmpeg process of the attempt shares it.
+// ffmpeg process of the attempt shares it. hw is the hardware the attempt
+// reserved, if it decodes on hardware.
 type attemptRun struct {
 	runner     Runner
 	ctx        context.Context
 	attemptCtx context.Context
 	attempt    Attempt
+	hw         hardwareDecode
 	decoder    string
 }
 
@@ -191,7 +224,7 @@ func (a attemptRun) samples(req Request) (Result, *AttemptError) {
 // decode runs req's decode and parses its outputs. inputStart offsets the
 // inpoints of a Samples list.
 func (a attemptRun) decode(req Request, inputStart float64) (Result, *AttemptError) {
-	args, stdinBytes, err := buildArgs(req, a.attempt, hardwareDecode{Accel: a.runner.HWAccel, Device: a.runner.HWDevice}, inputStart)
+	args, stdinBytes, err := buildArgs(req, a.attempt, a.hw, inputStart)
 	if err != nil {
 		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonArgs, Err: err}
 	}
@@ -204,9 +237,9 @@ func (a attemptRun) decode(req Request, inputStart float64) (Result, *AttemptErr
 	var stats *statsParser
 	if req.Stats != nil {
 		if req.Samples != nil {
-			stats = newSampledStatsParser(buildStatsGraph(*req.Stats))
+			stats = newSampledStatsParser(req.statsGraph(a.attempt, a.hw.Accel))
 		} else {
-			stats = newStatsParser(buildStatsGraph(*req.Stats), req.Window.StartSeconds)
+			stats = newStatsParser(req.statsGraph(a.attempt, a.hw.Accel), req.Window.StartSeconds)
 		}
 		handlers = append(handlers, stats.line)
 	}

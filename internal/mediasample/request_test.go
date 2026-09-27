@@ -58,7 +58,9 @@ func TestValidate(t *testing.T) {
 		{name: "too many attempts", modify: func(r *Request) { r.Attempts = make([]Attempt, 5) }},
 		{name: "negative timeout", modify: func(r *Request) { r.Attempts = []Attempt{{TimeoutSeconds: -1}} }},
 		{name: "timeout past a day", modify: func(r *Request) { r.Attempts = []Attempt{{TimeoutSeconds: 1e12}} }},
-		{name: "hardware attempt", modify: func(r *Request) { r.Stats = validStats(); r.Attempts = []Attempt{{Hardware: true}} }},
+		{name: "hardware attempt without video", modify: func(r *Request) { r.Attempts = []Attempt{{Hardware: true}, {}} }},
+		{name: "stats on hardware", modify: func(r *Request) { r.Stats = validStats(); r.Attempts = []Attempt{{Hardware: true}, {}} }, ok: true},
+		{name: "samples on hardware", modify: func(r *Request) { samplesMode(3, 6)(r); r.Attempts = []Attempt{{Hardware: true}, {}} }, ok: true},
 		{name: "frame image", modify: atMode(42.5, &ImageOutput{}), ok: true},
 		{name: "frame image at zero", modify: atMode(0, &ImageOutput{Width: 320, ToneMap: &ToneMap{}}), ok: true},
 		{name: "frame image on hardware", modify: func(r *Request) {

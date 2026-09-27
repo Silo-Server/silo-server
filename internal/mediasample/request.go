@@ -108,8 +108,9 @@ type StatsOutput struct {
 
 // Attempt is one decode attempt.
 type Attempt struct {
-	// Hardware decodes on the Runner's configured hardware (see hwdecode.go).
-	// Only Images offer it so far; Validate rejects it for other outputs.
+	// Hardware decodes video on the Runner's configured hardware (see
+	// hwdecode.go). It needs a video output (Images or Stats); audio always
+	// decodes in software.
 	Hardware bool `json:"hardware,omitempty"`
 	// TimeoutSeconds bounds the attempt. Zero means only the caller's context
 	// bounds it.
@@ -194,8 +195,8 @@ func (r Request) Validate() error {
 		if !finite(attempt.TimeoutSeconds) || attempt.TimeoutSeconds < 0 || attempt.TimeoutSeconds > maxAttemptSeconds {
 			return fmt.Errorf("attempt %d timeout must be between 0 and %d seconds", i+1, maxAttemptSeconds)
 		}
-		if attempt.Hardware && r.Images == nil {
-			return fmt.Errorf("attempt %d asks for hardware decode, which only images offer yet", i+1)
+		if attempt.Hardware && r.Images == nil && r.Stats == nil {
+			return fmt.Errorf("attempt %d asks for hardware decode without a video output", i+1)
 		}
 	}
 	return nil

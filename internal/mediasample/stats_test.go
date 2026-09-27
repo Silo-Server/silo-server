@@ -16,7 +16,7 @@ func tailStats() StatsOutput {
 }
 
 func TestBuildStatsGraphNamesFilterInstances(t *testing.T) {
-	graph := buildStatsGraph(tailStats())
+	graph := buildStatsGraph(tailStats(), false)
 	want := "crop=trunc(iw*0.9/2)*2:trunc(ih*0.8/2)*2,scale=480:-2:flags=area,format=yuv420p," +
 		"blackframe=amount=0:threshold=20,blackframe=amount=0:threshold=26,blackframe=amount=0:threshold=32," +
 		"signalstats,metadata=print"
@@ -73,7 +73,7 @@ func TestRunParsesStatsFromJellyfinFFmpegLog(t *testing.T) {
 }
 
 func TestStatsParserJoinsBlackframeByFrameIndex(t *testing.T) {
-	graph := buildStatsGraph(tailStats())
+	graph := buildStatsGraph(tailStats(), false)
 	p := newStatsParser(graph, 100)
 	stats := func(frame string) []string {
 		lines := []string{"[Parsed_metadata_7 @ 0xm] frame:" + frame + "    pts:0    pts_time:" + frame}
@@ -138,7 +138,7 @@ func TestMetadataParser(t *testing.T) {
 }
 
 func TestStatsWithoutBlackThresholdsKeepsEveryFrame(t *testing.T) {
-	graph := buildStatsGraph(StatsOutput{CropWidth: 1, CropHeight: 1, Width: 320})
+	graph := buildStatsGraph(StatsOutput{CropWidth: 1, CropHeight: 1, Width: 320}, false)
 	p := newStatsParser(graph, 0)
 	p.line("[Parsed_metadata_4 @ 0x1] frame:0    pts:0    pts_time:0.5")
 	for _, key := range []string{"YMIN", "YLOW", "YAVG", "YHIGH", "YMAX", "SATLOW", "SATAVG", "SATHIGH", "SATMAX"} {

@@ -2,6 +2,7 @@ package mediasample
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -70,11 +71,22 @@ type statsGraph struct {
 //
 // Every blackframe reports every frame (amount=0), and metadata=print logs
 // each frame's time and the statistics the filters before it attached.
-func buildStatsGraph(stats StatsOutput) statsGraph {
-	filters := []string{
-		fmt.Sprintf("crop=trunc(iw*%s/2)*2:trunc(ih*%s/2)*2", formatShare(stats.CropWidth), formatShare(stats.CropHeight)),
-		fmt.Sprintf("scale=%d:-2:flags=area", stats.Width),
-		"format=yuv420p",
+//
+// With gpuScale, for frames decoded into VAAPI surfaces, the GPU scales the
+// whole picture before the download instead, and the crop follows it:
+//
+//	scale_vaapi=w=SW:h=-2,hwdownload,format=nv12,crop=…,format=yuv420p,…
+//
+// SW is the even width whose crop keeps about W pixels, so the measured
+// picture has about the size the software chain gives it.
+func buildStatsGraph(stats StatsOutput, gpuScale bool) statsGraph {
+	crop := fmt.Sprintf("crop=trunc(iw*%s/2)*2:trunc(ih*%s/2)*2", formatShare(stats.CropWidth), formatShare(stats.CropHeight))
+	filters := []string{crop, fmt.Sprintf("scale=%d:-2:flags=area", stats.Width), "format=yuv420p"}
+	if gpuScale {
+		// hwDownloadFilter holds two filters, which count as two positions.
+		filters = []string{fmt.Sprintf("scale_vaapi=w=%d:h=-2", gpuScaleWidth(stats))}
+		filters = append(filters, strings.Split(hwDownloadFilter, ",")...)
+		filters = append(filters, crop, "format=yuv420p")
 	}
 	graph := statsGraph{}
 	for _, threshold := range stats.BlackThresholds {
@@ -86,6 +98,19 @@ func buildStatsGraph(stats StatsOutput) statsGraph {
 	filters = append(filters, filterMetadata+"=print")
 	graph.filter = strings.Join(filters, ",")
 	return graph
+}
+
+// statsGraph returns the stats chain of attempt, whose hardware decodes on
+// accel.
+func (r Request) statsGraph(attempt Attempt, accel string) statsGraph {
+	return buildStatsGraph(*r.Stats, attempt.Hardware && !framesInSystemMemory(accel))
+}
+
+// gpuScaleWidth is the even width the GPU scales a picture to so that its
+// StatsOutput crop is about Width pixels wide: Width / CropWidth, rounded to
+// the nearest even number (534 for a 0.9 crop to 480).
+func gpuScaleWidth(stats StatsOutput) int {
+	return 2 * int(math.Round(float64(stats.Width)/stats.CropWidth/2))
 }
 
 // formatShare prints a crop share as ffmpeg expressions take it.

@@ -27,6 +27,9 @@ type Analyzer struct {
 	// movieSampler runs movie tail passes. Nil leaves movie credits to
 	// chapters.
 	movieSampler movieTailSampler
+	// hardware is where the tail samplers decode keyframes; SetHardwareDecode
+	// updates it. Nil when the samplers are replaced.
+	hardware *hardwareDecoder
 	// movieBudget bounds how long a scheduled run starts new movies; zero
 	// means movieCreditsRunBudget. now, when set, replaces time.Now for it.
 	movieBudget time.Duration
@@ -108,11 +111,13 @@ func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer
 		node = "silo"
 	}
 	extractor := NewChromaprintExtractor(config)
+	extractor.logger = logger
 	return &Analyzer{
 		repo:               repo,
 		extractor:          extractor,
 		tailSampler:        extractor,
 		movieSampler:       extractor,
+		hardware:           extractor.hardware,
 		refiner:            NewSilenceBoundaryRefiner(config),
 		chromaprintRefiner: NewDialogueBoundaryRefiner(config),
 		config:             config,
@@ -120,6 +125,14 @@ func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer
 		node:               node,
 		workers:            config.MaxParallelFFmpeg,
 		ffmpegSlots:        mediasample.NewLimiter(config.MaxParallelFFmpeg),
+	}
+}
+
+// SetHardwareDecode applies the playback.hw_accel and playback.hw_device
+// settings to the next credits tail pass without a restart.
+func (a *Analyzer) SetHardwareDecode(accel, device string) {
+	if a.hardware != nil {
+		a.hardware.set(accel, device)
 	}
 }
 

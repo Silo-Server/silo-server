@@ -3,6 +3,7 @@ package intromarkers
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
@@ -10,10 +11,14 @@ import (
 
 type ChromaprintExtractor struct {
 	config Config
+	// hardware is where tail passes decode keyframes (see hwdecode.go).
+	hardware *hardwareDecoder
+	logger   *slog.Logger
 }
 
 func NewChromaprintExtractor(config Config) *ChromaprintExtractor {
-	return &ChromaprintExtractor{config: config.normalized()}
+	config = config.normalized()
+	return &ChromaprintExtractor{config: config, hardware: newHardwareDecoder(config.HWAccel, config.HWDevice), logger: slog.Default()}
 }
 
 // fingerprintRequest is the sampling request for the audio in a window of a

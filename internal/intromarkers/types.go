@@ -67,6 +67,12 @@ type Config struct {
 	DialogueRefinementWindowSeconds           float64
 	DialogueRefinementMaxShiftSeconds         float64
 	DialogueRefinementMinimumRemainingSeconds float64
+	// HWAccel and HWDevice are the playback.hw_accel and playback.hw_device
+	// settings. Credits tail passes decode keyframes on the hardware they
+	// resolve to and fall back to software (see hwdecode.go). They shape no
+	// artifact or hash.
+	HWAccel  string
+	HWDevice string
 }
 
 // Intro duration bounds for a Chromaprint match. Twelve seconds keeps most

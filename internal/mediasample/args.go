@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// hardwareDecode is the Runner's hardware decode configuration. Hardware
-// attempts will apply it to video outputs; none does yet.
+// hardwareDecode is the hardware a hardware attempt decodes video on: the
+// Runner's accelerator and the one render device the attempt reserved.
 type hardwareDecode struct {
 	Accel  string
 	Device string
@@ -36,15 +36,26 @@ const errorLogLevel = "error"
 // Each output reads the same input once: the audio output first, then the
 // stats output of the first video stream. Every output repeats -t, which
 // applies only to the output it precedes.
+//
+// A hardware attempt adds the decode options of hw (see hwdecode.go) to the
+// input's options and, when its frames stay on the GPU, scales them there
+// (see buildStatsGraph). Audio decodes in software either way.
 func buildArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float64) ([]string, []byte, error) {
 	if (req.Window == nil) == (req.Samples == nil) {
 		return nil, nil, errors.New("request needs exactly one sampling mode")
 	}
-	if attempt.Hardware {
-		return nil, nil, fmt.Errorf("hardware decode (%s) is not offered for sampling yet", hw.Accel)
-	}
 	if !req.hasOutput() {
 		return nil, nil, errors.New("request has no output")
+	}
+	var decode []string
+	if attempt.Hardware {
+		if req.Stats == nil {
+			return nil, nil, errors.New("hardware decode needs a video output")
+		}
+		var err error
+		if decode, err = hardwareDecodeArgs(hw); err != nil {
+			return nil, nil, err
+		}
 	}
 	level := "warning"
 	if req.parsesStderr() {
@@ -58,11 +69,12 @@ func buildArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float
 		}
 	}
 	if req.Samples != nil {
-		return buildSamplesArgs(req, args, inputStart)
+		return buildSamplesArgs(req, attempt, hw, append(args, decode...), inputStart)
 	}
 	if req.Window.KeyframesOnly {
 		args = append(args, "-skip_frame:v", "nokey")
 	}
+	args = append(args, decode...)
 	args = append(args,
 		"-ss", formatSeconds(req.Window.StartSeconds),
 		"-i", req.Input,
@@ -85,7 +97,7 @@ func buildArgs(req Request, attempt Attempt, hw hardwareDecode, inputStart float
 	if req.Stats != nil {
 		args = append(args, "-t", duration,
 			"-map", "0:V:0", "-an", "-sn", "-dn",
-			"-vf", buildStatsGraph(*req.Stats).filter,
+			"-vf", req.statsGraph(attempt, hw.Accel).filter,
 			"-f", "null", "-")
 	}
 	return args, nil, nil
@@ -105,9 +117,10 @@ func quietArgs(level string) []string {
 }
 
 // buildSamplesArgs finishes the arguments of a Samples request, whose only
-// output is the statistics of the first video stream, after the global
-// options in args. See concat.go for how the list samples the input.
-func buildSamplesArgs(req Request, args []string, inputStart float64) ([]string, []byte, error) {
+// output is the statistics of the first video stream, after the global and
+// hardware decode options in args. See concat.go for how the list samples the
+// input.
+func buildSamplesArgs(req Request, attempt Attempt, hw hardwareDecode, args []string, inputStart float64) ([]string, []byte, error) {
 	if req.Audio != nil || req.Stats == nil {
 		return nil, nil, errors.New("samples take only a stats output")
 	}
@@ -118,7 +131,7 @@ func buildSamplesArgs(req Request, args []string, inputStart float64) ([]string,
 	args = append(args, concatInputArgs...)
 	args = append(args, "-i", concatListInput,
 		"-map", "0:V:0", "-an", "-sn", "-dn",
-		"-vf", buildStatsGraph(*req.Stats).filter,
+		"-vf", req.statsGraph(attempt, hw.Accel).filter,
 		"-f", "null", "-")
 	return args, list, nil
 }

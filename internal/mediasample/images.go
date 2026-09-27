@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -107,42 +106,25 @@ func (r Runner) selectSoftwareToneMap(ctx context.Context) (string, *AttemptErro
 	return "", &AttemptError{Reason: ReasonUnsupported, Err: errors.New("configured FFmpeg lacks the required tonemapx or tonemap filter")}
 }
 
-// prepareImage settles what an image attempt needs before ffmpeg starts: the
-// software tone-map chain, and for a hardware attempt one render device,
-// reserved until release is called. A multi-device HWDevice resolves to one
-// device per attempt, so the reservation spans only this attempt.
-func (r Runner) prepareImage(ctx context.Context, req Request, attempt Attempt, toneMap *toneMapResolver) ([]string, func(), *AttemptError) {
+// prepareImage settles what an image attempt on hw needs before ffmpeg
+// starts: the software tone-map chain, and the arguments.
+func (r Runner) prepareImage(ctx context.Context, req Request, attempt Attempt, hw hardwareDecode, toneMap *toneMapResolver) ([]string, *AttemptError) {
 	softwareToneMap := ""
 	if req.softwareToneMaps(attempt, r.HWAccel) {
 		if !req.Images.ToneMap.AllowSoftware {
-			return nil, nil, &AttemptError{Reason: ReasonUnsupported, Err: errors.New("software HDR tone mapping is disabled")}
+			return nil, &AttemptError{Reason: ReasonUnsupported, Err: errors.New("software HDR tone mapping is disabled")}
 		}
 		filter, failure := toneMap.resolve(ctx, r)
 		if failure != nil {
-			return nil, nil, failure
+			return nil, failure
 		}
 		softwareToneMap = filter
 	}
-	release := func() {}
-	hw := hardwareDecode{Accel: r.HWAccel}
-	if attempt.Hardware {
-		hw.Device, release = playback.AcquireHWDevice(r.HWDevice, r.HWAccel)
-		if hw.Device == "" {
-			hw.Device = playback.PickRenderDevice("")
-		}
-	}
 	args, err := buildImageArgs(req, attempt, hw, softwareToneMap)
 	if err != nil {
-		release()
-		// A hardware attempt fails here when the host lacks the device or the
-		// backend, which is no fault of the request.
-		reason := ReasonArgs
-		if attempt.Hardware {
-			reason = ReasonUnsupported
-		}
-		return nil, nil, &AttemptError{Reason: reason, Err: err}
+		return nil, &AttemptError{Reason: ReasonArgs, Err: err}
 	}
-	return args, release, nil
+	return args, nil
 }
 
 // buildImageArgs builds the arguments of an At request with an Images
