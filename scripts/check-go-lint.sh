@@ -65,6 +65,11 @@ if command -v golangci-lint >/dev/null 2>&1; then
 		printf '%s\n' "Staged Go files also have unstaged changes; the lint gate cannot check the commit as staged." >&2
 		printf '%s\n' "Stage or stash them (git stash --keep-index) and commit again." >&2
 		failed=1
+	elif ! git rev-parse --verify --quiet "${BASE_REF:-origin/main}" >/dev/null; then
+		# lint-changed.sh diffs against this ref; without it the lint output
+		# would not name the real cause.
+		printf '%s\n' "Cannot lint the commit: base ref '${BASE_REF:-origin/main}' is missing. Run: git fetch origin main (or set BASE_REF)." >&2
+		failed=1
 	elif ! "$repo_root/scripts/lint-changed.sh"; then
 		# lint-changed.sh reports CI's changed-line findings for the touched
 		# packages. A type-check failure is a real finding and fails too.
