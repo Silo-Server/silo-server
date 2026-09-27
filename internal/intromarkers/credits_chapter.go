@@ -25,10 +25,11 @@ var (
 	endingChapterPattern = regexp.MustCompile(`(?i)(^|\s)ending(\s|:|$)`)
 )
 
-// DetectChapterCredits finds the credits chapter of a file of the given
-// duration: the last chapter titled like credits whose neighbors are not.
-// The chapter must start in the file's credits tail window and last as long
-// as credits can. Its end is the next chapter's start, which an authored
+// DetectChapterCredits finds the credits chapters of a file of the given
+// duration: the last run of adjacent chapters titled like credits, which
+// together form one segment, as when "Ending" is followed by "End Credits".
+// The run must start in the file's credits tail window and last as long as
+// credits can. Its end is the next chapter's start, which an authored
 // chapter after the credits keeps; the last chapter's end moves to the end of
 // the file when it lies within the EOF snap.
 func DetectChapterCredits(chapters []models.MediaChapter, duration float64, isMovie bool) (Segment, bool) {
@@ -40,41 +41,42 @@ func DetectChapterCredits(chapters []models.MediaChapter, duration float64, isMo
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].StartSeconds < sorted[j].StartSeconds })
 	isCredits := func(i int) bool { return isCreditsChapterTitle(sorted[i].Title, isMovie) }
 
-	for i := len(sorted) - 1; i >= 0; i-- {
-		if !isCredits(i) {
-			continue
-		}
-		// Two credits-like chapters in a row leave it unclear which one the
-		// credits are.
-		if (i > 0 && isCredits(i-1)) || (i+1 < len(sorted) && isCredits(i+1)) {
-			continue
-		}
-		chapter := sorted[i]
-		end := chapter.EndSeconds
-		bounded := i+1 < len(sorted) && sorted[i+1].StartSeconds > chapter.StartSeconds
-		if bounded {
-			end = sorted[i+1].StartSeconds
-		}
-		if end <= 0 || end > duration {
-			end = duration
-		}
-		// A following chapter, such as a post-credits scene, is not credits
-		// however short it is.
-		if !bounded {
-			end = snapCreditsEnd(end, duration)
-		}
-		length := end - chapter.StartSeconds
-		if chapter.StartSeconds < limits.windowStart(duration) || length < limits.minSeconds || length > limits.maxSeconds {
-			return Segment{}, false
-		}
-		return Segment{
-			Start:      chapter.StartSeconds,
-			End:        end,
-			Confidence: creditsChapterConfidence,
-			Algorithm:  CreditsChapterAlgorithm,
-		}, true
+	last := len(sorted) - 1
+	for last >= 0 && !isCredits(last) {
+		last--
 	}
-	return Segment{}, false
+	if last < 0 {
+		return Segment{}, false
+	}
+	first := last
+	for first > 0 && isCredits(first-1) {
+		first--
+	}
+
+	start := sorted[first].StartSeconds
+	end := sorted[last].EndSeconds
+	bounded := last+1 < len(sorted) && sorted[last+1].StartSeconds > sorted[last].StartSeconds
+	if bounded {
+		end = sorted[last+1].StartSeconds
+	}
+	if end <= 0 || end > duration {
+		end = duration
+	}
+	// A following chapter, such as a post-credits scene, is not credits
+	// however short it is.
+	if !bounded {
+		end = snapCreditsEnd(end, duration)
+	}
+	length := end - start
+	if start < limits.windowStart(duration) || length < limits.minSeconds || length > limits.maxSeconds {
+		return Segment{}, false
+	}
+	return Segment{
+		Start:      start,
+		End:        end,
+		Confidence: creditsChapterConfidence,
+		Algorithm:  CreditsChapterAlgorithm,
+	}, true
 }
 
 // isCreditsChapterTitle reports whether a chapter title names end credits.

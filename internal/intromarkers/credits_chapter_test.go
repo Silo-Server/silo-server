@@ -105,19 +105,34 @@ func TestDetectChapterCredits(t *testing.T) {
 			duration: 1400, wantOK: true, wantStart: 1300, wantEnd: 1370,
 		},
 		{
-			name: "ambiguous neighbors are skipped",
+			name: "adjacent credits chapters form one segment",
 			chapters: []models.MediaChapter{
 				chapter("Story", 0, 1250), chapter("End Credits", 1250, 1300), chapter("Credits", 1300, 1400),
 			},
-			duration: 1400,
+			duration: 1400, wantOK: true, wantStart: 1250, wantEnd: 1400,
 		},
 		{
-			name: "an earlier unambiguous match is used after skipping ambiguous ones",
+			name: "an anime ending song and its credits form one segment",
+			chapters: []models.MediaChapter{
+				chapter("Part B", 0, 1200), chapter("ED", 1200, 1290), chapter("Credits", 1290, 1330),
+				chapter("Preview", 1330, 1400),
+			},
+			duration: 1400, wantOK: true, wantStart: 1200, wantEnd: 1330,
+		},
+		{
+			name: "split credits at the end win over an earlier outro",
 			chapters: []models.MediaChapter{
 				chapter("Story", 0, 1200), chapter("Outro", 1200, 1260), chapter("Story 2", 1260, 1300),
 				chapter("Credits", 1300, 1350), chapter("Credits", 1350, 1400),
 			},
-			duration: 1400, wantOK: true, wantStart: 1200, wantEnd: 1260,
+			duration: 1400, wantOK: true, wantStart: 1300, wantEnd: 1400,
+		},
+		{
+			name: "a run too long for credits is rejected",
+			chapters: []models.MediaChapter{
+				chapter("Story", 0, 900), chapter("Ending", 900, 1100), chapter("End Credits", 1100, 1400),
+			},
+			duration: 1400,
 		},
 		{
 			name:     "credits must start in the tail window",
