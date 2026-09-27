@@ -15,8 +15,9 @@ data. The admin UI does not show that result data yet, so a skipped run
 appears there as a completed run. A server whose ffmpeg cannot compute
 Chromaprint fingerprints runs its chapter-only episode pass without the lock,
 so it never makes a server that can compare season groups skip, and leaves
-movies to the lock holder. Analysis started from playback or for a single item
-does not take the lock.
+movies to the lock holder. If ffmpeg's capability listing itself fails, the
+task keeps the lock. Analysis started from playback or for a single item does
+not take the lock.
 
 ## Pipeline
 
