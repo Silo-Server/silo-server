@@ -52,18 +52,31 @@ func (c Capabilities) HasMuxer(name string) bool {
 // built-in crop, scale, and format.
 var statsFilters = []string{filterBlackframe, filterSignalstats, filterMetadata}
 
-// Require reports the first thing req needs that the binary lacks.
+// ErrUnsupported marks a Require error: the binary's capability listing
+// succeeded and lacks something the request needs. A failed listing is not
+// ErrUnsupported, because it proves nothing about the binary.
+var ErrUnsupported = errors.New("ffmpeg lacks a required capability")
+
+// unsupportedError keeps Require's specific message while matching
+// ErrUnsupported.
+type unsupportedError string
+
+func (e unsupportedError) Error() string        { return string(e) }
+func (e unsupportedError) Is(target error) bool { return target == ErrUnsupported }
+
+// Require reports the first thing req needs that the binary lacks. Its errors
+// match ErrUnsupported.
 func (c Capabilities) Require(req Request) error {
 	if req.Audio != nil && req.Audio.Fingerprint {
 		if !c.HasMuxer("chromaprint") {
-			return errors.New("ffmpeg does not list the chromaprint muxer")
+			return unsupportedError("ffmpeg does not list the chromaprint muxer")
 		}
 		if !c.chromaprintRaw {
-			return errors.New("ffmpeg chromaprint muxer does not advertise raw fingerprint output")
+			return unsupportedError("ffmpeg chromaprint muxer does not advertise raw fingerprint output")
 		}
 	}
 	if req.Audio != nil && req.Audio.Silence != nil && !c.HasFilter("silencedetect") {
-		return errors.New("ffmpeg does not list the silencedetect filter")
+		return unsupportedError("ffmpeg does not list the silencedetect filter")
 	}
 	if req.Samples != nil && !c.concatSamples {
 		return errors.New("ffmpeg cannot read a sampled input list (concat demuxer with file_packet_meta, file and pipe protocols)")
@@ -71,7 +84,7 @@ func (c Capabilities) Require(req Request) error {
 	if req.Stats != nil {
 		for _, filter := range statsFilters {
 			if !c.HasFilter(filter) {
-				return fmt.Errorf("ffmpeg does not list the %s filter", filter)
+				return unsupportedError(fmt.Sprintf("ffmpeg does not list the %s filter", filter))
 			}
 		}
 	}

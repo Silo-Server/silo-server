@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
 type fakeMarkerAnalysisRunner struct {
@@ -79,7 +81,7 @@ func TestDetectIntroMarkersWithoutChromaprintRunsWithoutLock(t *testing.T) {
 	// The lock is held elsewhere; a server that cannot fingerprint must neither
 	// take it nor skip its chapter-only pass because of it. It leaves movies,
 	// which the lock keeps to one server, to the lock holder.
-	runner := &fakeMarkerAnalysisRunner{preflightErr: errors.New("ffmpeg lacks chromaprint")}
+	runner := &fakeMarkerAnalysisRunner{preflightErr: fmt.Errorf("ffmpeg lacks chromaprint: %w", mediasample.ErrUnsupported)}
 	lock := &fakeClusterLock{err: errors.New("lock must not be consulted")}
 	if err := newTestDetectMarkersTask(runner, lock).Execute(t.Context(), &fakeProgress{}); err != nil {
 		t.Fatalf("Execute = %v, want nil", err)
@@ -87,6 +89,33 @@ func TestDetectIntroMarkersWithoutChromaprintRunsWithoutLock(t *testing.T) {
 	if runner.episodeRuns != 1 || runner.runs != 0 || lock.released != 0 {
 		t.Fatalf("episode runs=%d full runs=%d released=%d, want one unlocked episode-only run", runner.episodeRuns, runner.runs, lock.released)
 	}
+}
+
+func TestDetectIntroMarkersPreflightFailureKeepsLock(t *testing.T) {
+	// A failed capability listing proves nothing about ffmpeg, and Run probes
+	// again, so the run must stay under the lock.
+	preflightErr := errors.New("ffmpeg listing timed out")
+	t.Run("acquired", func(t *testing.T) {
+		runner := &fakeMarkerAnalysisRunner{preflightErr: preflightErr}
+		lock := &fakeClusterLock{acquired: true}
+		if err := newTestDetectMarkersTask(runner, lock).Execute(t.Context(), &fakeProgress{}); err != nil {
+			t.Fatalf("Execute = %v, want nil", err)
+		}
+		if runner.runs != 1 || lock.released != 1 {
+			t.Fatalf("runs=%d released=%d, want one locked run", runner.runs, lock.released)
+		}
+	})
+	t.Run("held elsewhere", func(t *testing.T) {
+		runner := &fakeMarkerAnalysisRunner{preflightErr: preflightErr}
+		progress := &fakeProgress{}
+		if err := newTestDetectMarkersTask(runner, &fakeClusterLock{}).Execute(t.Context(), progress); err != nil {
+			t.Fatalf("Execute = %v, want nil", err)
+		}
+		if runner.runs != 0 {
+			t.Fatalf("analyzer runs = %d, want 0", runner.runs)
+		}
+		assertDetectMarkersSkipped(t, progress)
+	})
 }
 
 func TestDetectIntroMarkersPreflightCancellation(t *testing.T) {

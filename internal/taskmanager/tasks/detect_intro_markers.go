@@ -3,12 +3,14 @@ package tasks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/markers"
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
@@ -19,7 +21,9 @@ type MarkerSettingsReader interface {
 // markerAnalysisRunner runs one library-wide marker analysis pass.
 // *intromarkers.Analyzer implements it.
 type markerAnalysisRunner interface {
-	// Preflight reports what this server lacks to compare season groups.
+	// Preflight reports what this server lacks to compare season groups. An
+	// error matching mediasample.ErrUnsupported means ffmpeg lacks Chromaprint;
+	// any other error means the check itself failed.
 	Preflight(ctx context.Context) error
 	// Run analyzes episodes, then movies.
 	Run(ctx context.Context, progress intromarkers.ProgressFunc) (intromarkers.RunSummary, error)
@@ -104,10 +108,14 @@ func (t *DetectIntroMarkersTask) Execute(ctx context.Context, progress taskmanag
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
-		// This server can only read chapters. Leave the lock to a server that
-		// can also compare season groups, and the movie pass, which the lock
-		// keeps to one server, to the lock holder.
-		lock, run = nil, t.analyzer.RunEpisodes
+		// Only a capability listing that lacks Chromaprint proves this server
+		// can only read chapters; leave the lock to a server that can also
+		// compare season groups, and the movie pass, which the lock keeps to
+		// one server, to the lock holder. A failed listing proves nothing and
+		// Run probes again, so keep the lock.
+		if errors.Is(err, mediasample.ErrUnsupported) {
+			lock, run = nil, t.analyzer.RunEpisodes
+		}
 	}
 	if lock != nil {
 		release, acquired, err := lock.TryAcquire(ctx)
