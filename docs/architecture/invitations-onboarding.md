@@ -41,7 +41,9 @@ dump yields no usable links.
 - **Privilege ceiling.** Creating or resending an invitation granting `admin`
   requires the server Owner. The write transaction checks and share-locks the
   inviter's row so an ownership transfer cannot commit between authorization
-  and storage. Invitations already stored remain redeemable after a transfer.
+  and storage. Moving ownership revokes pending `admin` invitations, so a
+  former Owner cannot keep a link that grants the role; the new Owner resends
+  any it still wants.
 - **Invitation binding unchanged.** Pre-bound `library_ids` and
   `access_group_id` are applied verbatim at accept and then feed the existing
   inherit/override policy resolver: the group supplies every field the

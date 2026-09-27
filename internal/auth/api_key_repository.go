@@ -78,7 +78,15 @@ func (r *APIKeyRepository) CreateForStanding(ctx context.Context, userID int, st
 	if scopes == nil {
 		scopes = []string{}
 	}
-	created, err := scanAPIKey(r.pool.QueryRow(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err := LockAccountsInOrder(ctx, tx, userID, standing.IssuerID); err != nil {
+		return nil, err
+	}
+	created, err := scanAPIKey(tx.QueryRow(ctx, `
 		INSERT INTO api_keys (user_id, label, api_key, scopes)
 		SELECT u.id, $2, $3, $4 FROM users u JOIN users a ON a.id = $7
 		WHERE u.id = $1 AND u.role = $5 AND u.is_owner = $6
@@ -88,7 +96,10 @@ func (r *APIKeyRepository) CreateForStanding(ctx context.Context, userID int, st
 	if errors.Is(err, ErrAPIKeyNotFound) {
 		return nil, ErrAccountChanged
 	}
-	return created, err
+	if err != nil {
+		return nil, err
+	}
+	return created, tx.Commit(ctx)
 }
 
 func (r *APIKeyRepository) Create(ctx context.Context, userID int, label string, scopes []string) (*models.APIKey, error) {

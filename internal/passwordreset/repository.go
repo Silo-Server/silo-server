@@ -79,7 +79,17 @@ func (r *Repository) Issue(ctx context.Context, userID int, tokenHash string, is
 		guard = " AND u.role = $6 AND u.is_owner = $7 AND a.role = 'admin' AND a.enabled AND a.is_owner = $8 FOR SHARE OF u, a"
 		args = append(args, standing.IssuerID, standing.Role, standing.IsOwner, standing.IssuerIsOwner)
 	}
-	tag, err := r.pool.Exec(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if standing != nil {
+		if err := auth.LockAccountsInOrder(ctx, tx, userID, standing.IssuerID); err != nil {
+			return err
+		}
+	}
+	tag, err := tx.Exec(ctx, `
 		INSERT INTO password_reset_tokens (user_id, token_hash, password_fingerprint, issued_by, expires_at)
 		SELECT u.id, $2, `+passwordFingerprint+`, $3, $4 FROM `+from+` WHERE u.id = $1 AND `+eligibleAccount+guard+`
 		ON CONFLICT (user_id) DO UPDATE SET
@@ -92,12 +102,12 @@ func (r *Repository) Issue(ctx context.Context, userID int, tokenHash string, is
 		return fmt.Errorf("issuing password reset link: %w", err)
 	}
 	if tag.RowsAffected() > 0 {
-		return nil
+		return tx.Commit(ctx)
 	}
 	if standing != nil {
 		current := *standing
 		var issuerActs bool
-		err := r.pool.QueryRow(ctx, `
+		err := tx.QueryRow(ctx, `
 			SELECT u.role, u.is_owner,
 			       COALESCE((SELECT is_owner FROM users WHERE id = $2), false),
 			       COALESCE((SELECT role = 'admin' AND enabled FROM users WHERE id = $2), false)

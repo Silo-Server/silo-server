@@ -396,6 +396,93 @@ func TestLockedActorMustStillBeAnEnabledAdminPostgres(t *testing.T) {
 	}
 }
 
+func TestOwnershipMoveRevokesPendingAdminInvitationsPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	owner := testRoleAccount(t, r, models.RoleAdmin)
+	if _, err := r.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = $1`, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	admin := testRoleAccount(t, r, models.RoleAdmin)
+	for _, inv := range []struct{ email, role string }{{"admin-invite", "admin"}, {"user-invite", "user"}} {
+		if _, err := r.pool.Exec(t.Context(), `
+			INSERT INTO invitations (email, token_hash, role, invited_by, expires_at, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, now() + interval '1 day', now(), now())`,
+			inv.email+"@example.test", uuid.NewString(), inv.role, owner.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.TransferOwnership(t.Context(), owner.ID, admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	for email, wantRevoked := range map[string]bool{"admin-invite@example.test": true, "user-invite@example.test": false} {
+		var revoked bool
+		if err := r.pool.QueryRow(t.Context(), `SELECT revoked_at IS NOT NULL FROM invitations WHERE email = $1`, email).Scan(&revoked); err != nil {
+			t.Fatal(err)
+		}
+		if revoked != wantRevoked {
+			t.Errorf("%s: revoked %v, want %v", email, revoked, wantRevoked)
+		}
+	}
+}
+
+// TestGuardedCredentialLocksInTransferOrderPostgres holds the lower-id
+// Owner the way a transfer does and checks that a guarded key insert for the
+// higher-id target waits on the Owner before it locks the target.
+func TestGuardedCredentialLocksInTransferOrderPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	owner := testRoleAccount(t, r, models.RoleAdmin)
+	target := testRoleAccount(t, r, models.RoleAdmin)
+	if _, err := r.pool.Exec(t.Context(), `UPDATE users SET is_owner = true WHERE id = $1`, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	transfer, err := r.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = transfer.Rollback(t.Context()) }()
+	if _, err := transfer.Exec(t.Context(), `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		standing := AccountStanding{Role: models.RoleAdmin, IssuerID: owner.ID, IssuerIsOwner: true}
+		_, err := NewAPIKeyRepository(r.pool).CreateForStanding(t.Context(), target.ID, standing, "racing", nil)
+		done <- err
+	}()
+	waitForLockWait(t, r)
+	if _, err := transfer.Exec(t.Context(), `SET LOCAL lock_timeout = '2s'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := transfer.Exec(t.Context(), `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, target.ID); err != nil {
+		t.Fatalf("the insert locked the target before the issuer: %v", err)
+	}
+	if err := transfer.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// waitForLockWait waits until some backend is blocked on a row lock.
+func waitForLockWait(t *testing.T, r *UserRepository) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var waiting int
+		if err := r.pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no request waited on a row lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func lockedOwnerActor(t *testing.T, r *UserRepository, id int) (OwnerActor, error) {
 	t.Helper()
 	tx, err := r.pool.Begin(t.Context())

@@ -163,6 +163,14 @@ func LockOwnerActorInTransaction(ctx context.Context, tx pgx.Tx, actorID int) (O
 	return actor, nil
 }
 
+// LockAccountsInOrder share-locks the users rows ids in ascending id order,
+// the order an ownership transfer locks them in, so a write that then checks
+// several accounts' standing cannot deadlock against a transfer.
+func LockAccountsInOrder(ctx context.Context, tx pgx.Tx, ids ...int) error {
+	_, err := tx.Exec(ctx, `SELECT 1 FROM users WHERE id = ANY($1) ORDER BY id FOR SHARE`, ids)
+	return err
+}
+
 // CreateByOwner holds the Owner's standing through account and profile creation.
 func (r *UserRepository) CreateByOwner(ctx context.Context, actorID int, input models.CreateUserInput, provision func(*models.User, pgx.Tx) error) (*models.User, error) {
 	tx, err := r.pool.Begin(ctx)
@@ -275,9 +283,9 @@ func (r *UserRepository) TransferOwnership(ctx context.Context, fromID, toID int
 // single-Owner index is checked row by row. It also ends every session in
 // which someone views the server as the new Owner, and the previous Owner's
 // sessions viewing as other admins, and deletes the new Owner's API keys and
-// reset link: nobody may act as the Owner, only the Owner may act as another
-// admin, and a credential issued before the move must not carry the Owner's
-// authority.
+// reset link, and revokes pending admin invitations: nobody may act as the
+// Owner, only the Owner may act as another admin, and nothing issued before
+// the move may carry the Owner's authority.
 func moveOwnership(ctx context.Context, tx pgx.Tx, fromID, toID int) error {
 	if fromID > 0 {
 		if _, err := tx.Exec(ctx, `UPDATE users SET is_owner = false WHERE id = $1`, fromID); err != nil {
@@ -298,6 +306,14 @@ func moveOwnership(ctx context.Context, tx pgx.Tx, fromID, toID int) error {
 		UPDATE auth_sessions s SET revoked_at = NOW() FROM users t
 		WHERE s.impersonator_user_id = $1 AND s.user_id = t.id AND t.role = 'admin' AND s.revoked_at IS NULL`, fromID); err != nil {
 		return fmt.Errorf("ending the previous owner's sessions viewing as admins: %w", err)
+	}
+	// Pending admin invitations were issued under the previous ownership; a
+	// kept link must not let a former Owner grant the admin role. The new
+	// Owner resends any it still wants.
+	if _, err := tx.Exec(ctx, `
+		UPDATE invitations SET revoked_at = clock_timestamp(), updated_at = clock_timestamp()
+		WHERE role = 'admin' AND accepted_at IS NULL AND revoked_at IS NULL`); err != nil {
+		return fmt.Errorf("revoking pending admin invitations: %w", err)
 	}
 	// The previous Owner may have created keys and a reset link on the
 	// account before handing it over; none of them may carry Owner authority.

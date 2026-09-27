@@ -105,7 +105,15 @@ func (r *SessionRepository) CreateImpersonation(ctx context.Context, session mod
 	if session.IPAddress != "" {
 		ipArg = session.IPAddress
 	}
-	tag, err := r.pool.Exec(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err := LockAccountsInOrder(ctx, tx, session.UserID, *session.ImpersonatorUserID); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `
 		INSERT INTO auth_sessions
 			(id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at)
 		SELECT $1, t.id, $3, $4, $5, a.id, $7 FROM users t JOIN users a ON a.id = $6
@@ -121,7 +129,7 @@ func (r *SessionRepository) CreateImpersonation(ctx context.Context, session mod
 	if tag.RowsAffected() == 0 {
 		return ErrImpersonationNotAllowed
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 // createWithQuerier inserts a new auth session using the provided exec-capable
