@@ -585,6 +585,72 @@ func TestAdminMarkerRefreshBothRunsLocalForMovieWithoutCredits(t *testing.T) {
 	}
 }
 
+// An online refresh that changes a movie's markers tells active playback,
+// in online mode and in both mode when no local analysis follows; one that
+// changes nothing does not.
+func TestAdminMarkerRefreshNotifiesOnlineMovieChanges(t *testing.T) {
+	for _, tc := range []struct {
+		mode    markers.Mode
+		changed bool
+	}{{markers.ModeOnline, true}, {markers.ModeBoth, true}, {markers.ModeOnline, false}} {
+		analyzer := &fakeIntroAnalyzer{movies: make(chan string, 1)}
+		handler := NewAdminIntroHandler(analyzer, fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
+			ItemID: "movie1", Kind: intromarkers.MarkerItemMovie, HasMediaFiles: true, IntroDetectionEnabled: true,
+		}}, t.Context(), nil)
+		handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(tc.mode)}}
+		handler.FileResolver = fakeAdminIntroFileResolver{byContent: map[string][]*models.MediaFile{"movie1": {{ID: 7, ContentID: "movie1"}}}}
+		notifier := fakeAdminIntroMarkerNotifier{ch: make(chan *models.MediaFile, 2)}
+		handler.MarkerUpdateNotifier = notifier
+		done := make(chan struct{})
+		handler.OnlineMarkers = markerRefreshFunc(func(_ context.Context, file *models.MediaFile) (*models.MediaFile, bool, error) {
+			defer close(done)
+			start, end := 6500.0, 7000.0
+			withCredits := *file
+			withCredits.CreditsStart, withCredits.CreditsEnd = &start, &end
+			return &withCredits, tc.changed, nil
+		})
+		status, err := handler.RefreshEpisodeMarkers(t.Context(), "movie1", "refresh-v2")
+		if err != nil || status != "queued" {
+			t.Fatalf("%s: refresh: status=%q err=%v", tc.mode, status, err)
+		}
+		<-done
+		if !tc.changed {
+			waitForRefreshIdle(t, handler, "movie1")
+			if len(notifier.ch) != 0 {
+				t.Fatalf("%s: notified although the online refresh changed nothing", tc.mode)
+			}
+			continue
+		}
+		select {
+		case notified := <-notifier.ch:
+			if notified.ID != 7 || notified.CreditsStart == nil || *notified.CreditsStart != 6500 {
+				t.Fatalf("%s: notified %+v, want file 7 with the online credits", tc.mode, notified)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("%s: no marker update for the online credits", tc.mode)
+		}
+		waitForRefreshIdle(t, handler, "movie1")
+		if len(analyzer.movies) != 0 || len(notifier.ch) != 0 {
+			t.Fatalf("%s: %d local analyses, %d more updates; want none", tc.mode, len(analyzer.movies), len(notifier.ch))
+		}
+	}
+}
+
+// waitForRefreshIdle waits until no refresh of itemID is in flight.
+func waitForRefreshIdle(t *testing.T, handler *AdminIntroHandler, itemID string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, running := handler.inFlight.Load(itemID); !running {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("refresh of %s still running", itemID)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // An item that is neither an episode nor a movie, such as an audiobook, has
 // no marker files to refresh online, even though it owns media files.
 func TestAdminMarkerRefreshOnlineRejectsItemsOtherThanEpisodesAndMovies(t *testing.T) {
