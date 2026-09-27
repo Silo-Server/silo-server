@@ -1081,7 +1081,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
 		if deps.DB != nil {
-			homeDismissalHandler.SetSeriesDrops(catalog.NewDroppedSeriesRepo(deps.DB))
+			homeDismissalHandler.SetSeriesDrops(catalog.NewDroppedSeriesRepo(deps.DB), itemRepo)
 		}
 		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalDroppedEventDispatcher); ok {
 			homeDismissalHandler.SetLocalDroppedEventDispatcher(dispatcher)

@@ -3,12 +3,14 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
@@ -20,6 +22,11 @@ type HomeDismissalHandler struct {
 
 	seriesDrops       seriesDropStore
 	droppedDispatcher LocalDroppedEventDispatcher
+	// dropAccess checks that the viewer may see a series before it is
+	// dropped, since a drop is sent on to the profile's watch providers.
+	dropAccess interface {
+		EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
+	}
 }
 
 // seriesDropStore records dropped series. catalog.DroppedSeriesRepo satisfies it.
@@ -45,9 +52,13 @@ func NewHomeDismissalHandler(provider userstore.UserStoreProvider) *HomeDismissa
 }
 
 // SetSeriesDrops makes dismissing an episode or series drop the whole series.
-// Without it every dismissal hides only the dismissed card.
-func (h *HomeDismissalHandler) SetSeriesDrops(drops seriesDropStore) {
+// Without it every dismissal hides only the dismissed card. access, when set,
+// refuses a drop of a series outside the viewer's library access.
+func (h *HomeDismissalHandler) SetSeriesDrops(drops seriesDropStore, access interface {
+	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
+}) {
 	h.seriesDrops = drops
+	h.dropAccess = access
 }
 
 // SetLocalDroppedEventDispatcher configures where dropped-series changes are
@@ -137,6 +148,14 @@ func (h *HomeDismissalHandler) dismissHomeItem(ctx context.Context, dropSeries b
 		return err
 	}
 	if drop {
+		if h.dropAccess != nil {
+			if err := h.dropAccess.EnsureAccessible(ctx, seriesID, AccessFilterFromContext(ctx, "")); err != nil {
+				if errors.Is(err, catalog.ErrItemNotFound) {
+					return apiError(http.StatusNotFound, "not_found", "Item not found")
+				}
+				return apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
+			}
+		}
 		if err := h.seriesDrops.Drop(ctx, cmd.UserID, cmd.ProfileID, seriesID); err != nil {
 			return apiError(http.StatusInternalServerError, "internal_error", "Failed to save dismissal")
 		}

@@ -13,6 +13,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
@@ -80,7 +81,7 @@ func newDismissalTestHandler() (*HomeDismissalHandler, *dismissalTestStore, *fak
 	drops := &fakeSeriesDrops{series: map[string]string{"episode-1": "series-1", "series-1": "series-1"}}
 	dispatcher := &fakeDroppedDispatcher{}
 	h := NewHomeDismissalHandler(dismissalTestProvider{store: store})
-	h.SetSeriesDrops(drops)
+	h.SetSeriesDrops(drops, nil)
 	h.SetLocalDroppedEventDispatcher(dispatcher)
 	return h, store, drops, dispatcher
 }
@@ -203,5 +204,29 @@ func TestV1DismissalRoutesKeepPerCardDismissals(t *testing.T) {
 	}
 	if len(drops.dropped)+len(drops.undropped) != 0 || len(dispatcher.events) != 0 {
 		t.Fatalf("v1 dropped %v, undropped %v, dispatched %v; want none", drops.dropped, drops.undropped, dispatcher.events)
+	}
+}
+
+type deniedSeriesAccess struct{ denied string }
+
+func (a deniedSeriesAccess) EnsureAccessible(_ context.Context, contentID string, _ catalog.AccessFilter) error {
+	if contentID == a.denied {
+		return catalog.ErrItemNotFound
+	}
+	return nil
+}
+
+func TestDismissRefusesToDropAnInaccessibleSeries(t *testing.T) {
+	h, store, drops, dispatcher := newDismissalTestHandler()
+	h.SetSeriesDrops(drops, deniedSeriesAccess{denied: "series-1"})
+
+	err := h.DismissHomeItem(t.Context(), HomeDismissalCommand{UserID: 1, ProfileID: "p", Surface: userstore.HomeSurfaceNextUp, ItemID: "episode-1", SeriesID: "series-1"})
+
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusNotFound {
+		t.Fatalf("err = %v, want a not-found API error", err)
+	}
+	if len(drops.dropped) != 0 || len(dispatcher.events) != 0 || len(store.upserted) != 0 {
+		t.Fatalf("dropped %v, dispatched %v, upserted %v; want nothing", drops.dropped, dispatcher.events, store.upserted)
 	}
 }
