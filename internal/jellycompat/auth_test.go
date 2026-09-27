@@ -125,7 +125,7 @@ func TestPlaybackSessionAuth_CaseInsensitivePlaySessionId(t *testing.T) {
 	sessions := NewSessionStore(30*24*time.Hour, clock)
 	_ = sessions.Put(Session{Token: "compat-tok", StreamAppUserID: 1})
 	playbackStore := NewPlaybackSessionStore(time.Hour, clock)
-	playbackStore.Put(PlaybackSession{ID: "ps-abc", CompatToken: "compat-tok"})
+	playbackStore.Put(PlaybackSession{ID: "ps-abc", CompatToken: "compat-tok", RouteItemID: "itm", MediaSources: []PlaybackMediaSource{{ID: "x"}}})
 
 	mw := PlaybackSessionAuth(sessions, playbackStore, nil)
 
@@ -144,7 +144,7 @@ func TestPlaybackSessionAuth_CaseInsensitivePlaySessionId(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/Videos/itm/stream?"+tc.rawQuery, nil)
+			req := requestWithCompatRouteItem(httptest.NewRequest("GET", "/Videos/itm/stream?"+tc.rawQuery, nil), "itm")
 			rec := httptest.NewRecorder()
 			gotSession := false
 			mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

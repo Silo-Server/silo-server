@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 const defaultBaseURL = "https://api.mdblist.com"
@@ -152,59 +154,42 @@ func canonicalListURL(user, slug string) string {
 	return fmt.Sprintf("https://mdblist.com/lists/%s/%s", user, slug)
 }
 
+// sanitizeAPIKeyError keeps the API key out of a request or transport
+// error. logredact masks the apikey parameter in any *url.Error; the key can
+// still appear elsewhere in the text (a transport or proxy quoting the whole
+// request URL), so any remaining raw or query-escaped form is masked too.
 func sanitizeAPIKeyError(err error, apiKey string) error {
 	if err == nil {
 		return nil
 	}
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
-		sanitized := *urlErr
-		if parsed, parseErr := url.Parse(sanitized.URL); parseErr == nil {
-			q := parsed.Query()
-			if q.Has("apikey") {
-				q.Set("apikey", "[REDACTED]")
-				parsed.RawQuery = q.Encode()
-				sanitized.URL = parsed.String()
-			}
-		}
-		if apiKey != "" && strings.Contains(sanitized.URL, apiKey) {
-			sanitized.URL = strings.ReplaceAll(sanitized.URL, apiKey, "[REDACTED]")
-		}
-		// url.Error.Error prints Err too, and a transport error can quote
-		// the request URL.
-		sanitized.Err = redactAPIKey(sanitized.Err, apiKey)
-		return &sanitized
+	err = logredact.SanitizeURLError(err)
+	if msg := err.Error(); redactAPIKey(msg, apiKey) != msg {
+		err = redactedError{message: redactAPIKey(msg, apiKey), cause: err}
 	}
-	return redactAPIKey(err, apiKey)
+	return err
 }
 
-// redactedError hides an API key in a wrapped transport error's text while
-// keeping the original reachable through errors.Is/As and its timeout
-// classification, which url.Error.Timeout reads by type assertion.
+// redactedError carries a masked message. It has no Unwrap, so walking the
+// chain with errors.Unwrap cannot reach the unmasked text; errors.Is and
+// errors.As still see the cause, which keeps sentinel matching and net.Error
+// timeout classification working at any depth.
 type redactedError struct {
-	err  error
-	text string
+	message string
+	cause   error
 }
 
-func (e *redactedError) Error() string { return e.text }
-func (e *redactedError) Unwrap() error { return e.err }
-func (e *redactedError) Timeout() bool {
-	t, ok := e.err.(interface{ Timeout() bool })
-	return ok && t.Timeout()
-}
+func (e redactedError) Error() string        { return e.message }
+func (e redactedError) Is(target error) bool { return errors.Is(e.cause, target) }
+func (e redactedError) As(target any) bool   { return errors.As(e.cause, target) }
 
-// redactAPIKey replaces the key, raw or query-escaped, in err's text.
-func redactAPIKey(err error, apiKey string) error {
-	if err == nil || apiKey == "" {
-		return err
+// redactAPIKey masks every occurrence of the API key, raw or query-escaped.
+func redactAPIKey(text, apiKey string) string {
+	if apiKey == "" {
+		return text
 	}
-	text := err.Error()
-	redacted := strings.ReplaceAll(text, apiKey, "[REDACTED]")
+	text = strings.ReplaceAll(text, apiKey, logredact.Placeholder)
 	if escaped := url.QueryEscape(apiKey); escaped != apiKey {
-		redacted = strings.ReplaceAll(redacted, escaped, "[REDACTED]")
+		text = strings.ReplaceAll(text, escaped, logredact.Placeholder)
 	}
-	if redacted == text {
-		return err
-	}
-	return &redactedError{err: err, text: redacted}
+	return text
 }

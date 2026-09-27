@@ -1,3 +1,4 @@
+import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -6,7 +7,10 @@ import { createElement } from "react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
+import {
+  installPolicyStorageMocks,
+  jsonResponse as rawJSONResponse,
+} from "@/pages/admin-policy/policyTestUtils";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 
 import {
@@ -19,6 +23,18 @@ import {
   useUpdateAdminUserSetting,
 } from "./users";
 
+function jsonResponse(body: unknown, status = 200) {
+  if (body && typeof body === "object" && !Array.isArray(body) && "values" in body) {
+    const values = body as { values: unknown[]; revision: number };
+    return rawJSONResponse(
+      { items: values.values, revision: values.revision, page: { has_more: false } },
+      status,
+    );
+  }
+  if (Array.isArray(body))
+    return rawJSONResponse({ items: body, page: { has_more: false } }, status);
+  return rawJSONResponse(body, status);
+}
 // These hooks moved off the removed string-registry routes
 // (/admin/users/{id}/settings, /device-settings, /profiles/{pid}/device-settings/…)
 // onto the canonical values API. Every assertion here pins the new URL shape
@@ -69,7 +85,13 @@ const valuesResponse = {
 
 describe("admin canonical settings hooks", () => {
   beforeEach(() => {
+    setAccessToken("account");
+    setProfileId("owner");
+    setProfileToken(null);
     installPolicyStorageMocks();
+    setAccessToken("account");
+    setProfileId("owner");
+    setProfileToken(null);
   });
 
   afterEach(() => {
@@ -80,7 +102,7 @@ describe("admin canonical settings hooks", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input) => {
-        expect(String(input)).toBe("/api/v1/admin/users/7/settings/values");
+        expect(String(input)).toBe("/api/v2/admin/users/7/settings/values?limit=200");
         return jsonResponse(valuesResponse);
       }),
     );
@@ -117,14 +139,17 @@ describe("admin canonical settings hooks", () => {
       "fetch",
       vi.fn<typeof fetch>(async (input) => {
         const url = String(input);
-        if (url === "/api/v1/admin/users/7/settings/values") {
+        if (url === "/api/v2/admin/users/7/settings/values?limit=200") {
           return jsonResponse(valuesResponse);
         }
-        if (url === "/api/v1/admin/devices") {
+        if (url === "/api/v2/admin/devices?limit=100") {
           return jsonResponse({
-            devices: [
+            page: { has_more: false },
+            items: [
               {
-                user_id: 7,
+                user_id: "7",
+                profiles: [],
+                last_updated: null,
                 device_id: "tv-1",
                 device_name: "Living Room TV",
                 device_platform: "tvos",
@@ -132,7 +157,7 @@ describe("admin canonical settings hooks", () => {
             ],
           });
         }
-        if (url === "/api/v1/admin/users/7/profiles") {
+        if (url === "/api/v2/admin/users/7/profiles") {
           return jsonResponse([{ id: "p1", name: "Laura" }]);
         }
         throw new Error(`unexpected request: ${url}`);
@@ -142,7 +167,7 @@ describe("admin canonical settings hooks", () => {
     const { result } = renderHook(() => useAdminUserDeviceSettings(7), {
       wrapper: createWrapper(),
     });
-    await waitFor(() => expect(result.current.data.length).toBe(1));
+    await waitFor(() => expect(result.current.data[0]?.profile_name).toBe("Laura"));
 
     expect(result.current.data).toEqual([
       {
@@ -167,7 +192,7 @@ describe("admin canonical settings hooks", () => {
       "fetch",
       vi.fn<typeof fetch>(async (input) => {
         const url = String(input);
-        if (url === "/api/v1/admin/users/7/settings/values") {
+        if (url === "/api/v2/admin/users/7/settings/values?limit=200") {
           return jsonResponse({
             revision: 1,
             values: [
@@ -183,10 +208,10 @@ describe("admin canonical settings hooks", () => {
             ],
           });
         }
-        if (url === "/api/v1/admin/devices") {
-          return jsonResponse({ devices: [] });
+        if (url === "/api/v2/admin/devices?limit=100") {
+          return jsonResponse({ items: [], page: { has_more: false } });
         }
-        if (url === "/api/v1/admin/users/7/profiles") {
+        if (url === "/api/v2/admin/users/7/profiles") {
           return jsonResponse([{ id: "p1", name: "Laura" }]);
         }
         throw new Error(`unexpected request: ${url}`);
@@ -208,7 +233,7 @@ describe("admin canonical settings hooks", () => {
       const url = String(input);
       if (init?.method === "PUT") {
         expect(url).toBe(
-          "/api/v1/admin/users/7/settings/values/playback.auto_skip_intro?scope=profile&profile_id=p1",
+          "/api/v2/admin/users/7/settings/values/playback.auto_skip_intro?scope=profile&profile_id=p1",
         );
         // Booleans travel typed, not as the "true" string the old registry stored.
         expect(JSON.parse(String(init.body))).toEqual({ value: true });
@@ -233,7 +258,7 @@ describe("admin canonical settings hooks", () => {
       const url = String(input);
       if (init?.method === "PUT") {
         expect(url).toBe(
-          "/api/v1/admin/users/7/settings/values/ui.card_presentation?scope=profile_client&profile_id=p1&client_family=tv",
+          "/api/v2/admin/users/7/settings/values/ui.card_presentation?scope=profile_client&profile_id=p1&client_family=tv",
         );
         return jsonResponse({
           key: SETTING_KEYS.UI_CARD_PRESENTATION,
@@ -243,7 +268,7 @@ describe("admin canonical settings hooks", () => {
           value: { poster_size: "large", caption: "artwork" },
         });
       }
-      expect(url).toBe("/api/v1/admin/users/7/settings/values");
+      expect(url).toBe("/api/v2/admin/users/7/settings/values?limit=200");
       return jsonResponse({
         revision: 5,
         values: [
@@ -282,7 +307,7 @@ describe("admin canonical settings hooks", () => {
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       expect(init?.method).toBe("DELETE");
       expect(String(input)).toBe(
-        "/api/v1/admin/users/7/settings/values/playback.subtitle_mode?scope=profile&profile_id=p1",
+        "/api/v2/admin/users/7/settings/values/playback.subtitle_mode?scope=profile&profile_id=p1",
       );
       return new Response(null, { status: 204 });
     });
@@ -301,7 +326,7 @@ describe("admin canonical settings hooks", () => {
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       expect(init?.method).toBe("PUT");
       expect(String(input)).toBe(
-        "/api/v1/admin/users/7/settings/values/nav.shortcuts?scope=profile&profile_id=p1",
+        "/api/v2/admin/users/7/settings/values/nav.shortcuts?scope=profile&profile_id=p1",
       );
       expect(JSON.parse(String(init?.body))).toEqual({ value: { items: [] } });
       return jsonResponse({
@@ -326,7 +351,7 @@ describe("admin canonical settings hooks", () => {
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       if (init?.method === "PUT") {
         expect(String(input)).toBe(
-          "/api/v1/admin/users/7/settings/values/player.audio_sync_ms?scope=profile_device&profile_id=p1&device_id=tv-1",
+          "/api/v2/admin/users/7/settings/values/player.audio_sync_ms?scope=profile_device&profile_id=p1&device_id=tv-1",
         );
         expect(JSON.parse(String(init.body))).toEqual({ value: 250 });
         return jsonResponse({ key: "player.audio_sync_ms", scope: "profile_device", value: 250 });
@@ -357,9 +382,13 @@ describe("admin canonical settings hooks", () => {
         // The first key's row is already gone: that is the goal state, not a
         // failure, so the loop must carry on to the second key.
         if (url.includes("player.hdr_enabled")) {
-          return jsonResponse(
-            { error: "not_found", message: "No value is set at this scope" },
-            404,
+          return new Response(
+            JSON.stringify({
+              type: "https://silo.example/problems/not_found",
+              title: "Not found",
+              status: 404,
+            }),
+            { status: 404, headers: { "Content-Type": "application/problem+json" } },
           );
         }
         return new Response(null, { status: 204 });
@@ -380,8 +409,8 @@ describe("admin canonical settings hooks", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(deleted).toEqual([
-      "/api/v1/admin/users/7/settings/values/player.hdr_enabled?scope=profile_device&profile_id=p1&device_id=tv-1",
-      "/api/v1/admin/users/7/settings/values/player.audio_sync_ms?scope=profile_device&profile_id=p1&device_id=tv-1",
+      "/api/v2/admin/users/7/settings/values/player.hdr_enabled?scope=profile_device&profile_id=p1&device_id=tv-1",
+      "/api/v2/admin/users/7/settings/values/player.audio_sync_ms?scope=profile_device&profile_id=p1&device_id=tv-1",
     ]);
   });
 });

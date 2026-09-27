@@ -1,10 +1,11 @@
 import { Link } from "react-router";
 import { CheckCircle2, CircleSlash, XCircle } from "lucide-react";
 
-import type { StreamNode } from "@/api/types";
+import type { NodeBuildInfo, StreamNode } from "@/api/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminNodes } from "@/hooks/queries/admin/nodes";
+import { useBuildInfo } from "@/hooks/queries/admin/system";
 import { formatRelativeTime } from "@/lib/date";
 import { useMeasuredSize } from "../charts/useMeasuredSize";
 import { SectionError } from "../feedback";
@@ -30,9 +31,15 @@ const NODE_CARD_MIN_WIDTH_PX = 260;
  * A deployment with no stream nodes is the normal single-server shape, not a
  * misconfiguration, so the empty state says where transcodes actually run
  * rather than reading as a missing dependency.
+ *
+ * Each node also shows the build it reported on its last health check, and a
+ * node on a different revision from this server is flagged so a half-finished
+ * rollout is visible from the dashboard.
  */
 export function TranscodeNodesWidget() {
   const nodesQuery = useAdminNodes();
+  const buildQuery = useBuildInfo();
+  const serverRevision = buildQuery.data?.revision || null;
   const nodes = sortNodes(nodesQuery.data ?? []);
   const { ref, size } = useMeasuredSize<HTMLDivElement>();
   const columns = size ? Math.max(1, Math.floor(size.width / NODE_CARD_MIN_WIDTH_PX)) : 1;
@@ -71,13 +78,13 @@ export function TranscodeNodesWidget() {
             style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
           >
             {nodes.map((node) => (
-              <NodeCard key={node.id} node={node} />
+              <NodeCard key={node.id} node={node} serverRevision={serverRevision} />
             ))}
           </div>
         ) : (
           <div className="space-y-1.5">
             {nodes.map((node) => (
-              <NodeRow key={node.id} node={node} />
+              <NodeRow key={node.id} node={node} serverRevision={serverRevision} />
             ))}
           </div>
         )}
@@ -89,7 +96,10 @@ export function TranscodeNodesWidget() {
 /** Type first so each fleet reads as a block, then name for a stable order. */
 function sortNodes(nodes: StreamNode[]): StreamNode[] {
   return [...nodes].sort(
-    (a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name) || a.id - b.id,
+    (a, b) =>
+      a.type.localeCompare(b.type) ||
+      a.name.localeCompare(b.name) ||
+      String(a.id).localeCompare(String(b.id)),
   );
 }
 
@@ -113,10 +123,11 @@ function FleetSummary({ nodes }: { nodes: StreamNode[] }) {
 }
 
 /** Compact stacked row for narrow slots. */
-function NodeRow({ node }: { node: StreamNode }) {
+function NodeRow({ node, serverRevision }: { node: StreamNode; serverRevision: string | null }) {
   const status = nodeStatus(node);
   const StatusIcon = status.icon;
   const jobs = jobLoad(node);
+  const build = nodeBuild(node, serverRevision);
 
   return (
     <div className="bg-surface border-border rounded-md border px-3 py-2">
@@ -144,6 +155,12 @@ function NodeRow({ node }: { node: StreamNode }) {
             {node.type}
             {node.group ? ` · ${node.group}` : ""} · checked {lastCheckLabel(node)}
           </span>
+          {build ? (
+            <>
+              <span className="text-border/70">·</span>
+              <BuildLabel build={build} />
+            </>
+          ) : null}
         </div>
       </div>
     </div>
@@ -154,10 +171,11 @@ function NodeRow({ node }: { node: StreamNode }) {
  * One node as a card for wide slots: identity on top, the load meter with its
  * own room, and the vitals as labelled pairs instead of a squeezed one-liner.
  */
-function NodeCard({ node }: { node: StreamNode }) {
+function NodeCard({ node, serverRevision }: { node: StreamNode; serverRevision: string | null }) {
   const status = nodeStatus(node);
   const StatusIcon = status.icon;
   const jobs = jobLoad(node);
+  const build = nodeBuild(node, serverRevision);
 
   return (
     <div className="bg-surface border-border flex flex-col gap-2 rounded-md border p-3">
@@ -182,7 +200,21 @@ function NodeCard({ node }: { node: StreamNode }) {
         <span>{formatMbps(node.egress_kbps / 1_000)}</span>
         <span>checked {lastCheckLabel(node)}</span>
       </div>
+      {build ? (
+        <div className="text-muted-foreground text-[11px] tabular-nums">
+          <BuildLabel build={build} />
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function BuildLabel({ build }: { build: NodeBuild }) {
+  return (
+    <span className={build.outdated ? "text-warning" : undefined} title={build.title}>
+      build {build.label}
+      {build.outdated ? " · differs from server" : ""}
+    </span>
   );
 }
 
@@ -205,6 +237,38 @@ function JobsMeter({ node, jobs }: { node: StreamNode; jobs: ReturnType<typeof j
       </div>
     </div>
   );
+}
+
+interface NodeBuild {
+  label: string;
+  title: string;
+  outdated: boolean;
+}
+
+/**
+ * The build a node reported on its last health check. Null on a node that
+ * predates build reporting, so nothing is drawn rather than "unknown" on every
+ * card of an older fleet. A node is only called out as differing when both it
+ * and the server know their revision: a build with stripped metadata cannot be
+ * compared, and flagging it would be noise on every dev build.
+ */
+function nodeBuild(node: StreamNode, serverRevision: string | null): NodeBuild | null {
+  const build: NodeBuildInfo | null | undefined = node.last_stats?.build;
+  if (!build) {
+    return null;
+  }
+  const display = build.display || "unavailable";
+  const label = build.build_number ? `${build.build_number} · ${display}` : display;
+  const outdated =
+    Boolean(build.available && build.revision && serverRevision) &&
+    build.revision !== serverRevision;
+  const title = [
+    build.revision ? `Revision ${build.revision}` : "Revision unavailable",
+    build.built_at ? `built ${build.built_at}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return { label, title, outdated };
 }
 
 function lastCheckLabel(node: StreamNode): string {

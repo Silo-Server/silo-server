@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildHWDeviceRows,
   chapterThumbnailExecutionOptions,
+  describeDetection,
+  hasHardwareToneMapCapability,
   hasUsableTranscodeNode,
   nodeInventoriesDiverge,
   parseHWDeviceList,
@@ -200,5 +202,58 @@ describe("chapterThumbnailExecutionOptions", () => {
 
   it("never disables local extraction", () => {
     expect(disabledValues("transcode_nodes_only", false)).not.toContain("local");
+  });
+});
+
+describe("describeDetection", () => {
+  it("returns nothing before a probe has answered", () => {
+    expect(describeDetection(undefined)).toBeUndefined();
+  });
+
+  it("names the backend, first device, and node source", () => {
+    expect(
+      describeDetection({
+        resolved: "vaapi",
+        render_devices: ["/dev/dri/renderD128"],
+        intel_detected: true,
+        source: "transcode_node",
+      }),
+    ).toBe("Detected VA-API on /dev/dri/renderD128 (transcode node)");
+    expect(
+      describeDetection({
+        resolved: "none",
+        render_devices: [],
+        intel_detected: false,
+        source: "local",
+      }),
+    ).toBe("No supported graphics hardware found");
+  });
+});
+
+describe("hasHardwareToneMapCapability", () => {
+  it("is true only when a validated hardware tone mapper is listed", () => {
+    expect(hasHardwareToneMapCapability(undefined)).toBe(false);
+    expect(
+      hasHardwareToneMapCapability({
+        resolved: "nvenc",
+        render_devices: [],
+        intel_detected: false,
+        source: "local",
+        tone_map_capabilities: [
+          { mode: "software", backend: "software", filter: "zscale", source_kinds: ["hdr10"] },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      hasHardwareToneMapCapability({
+        resolved: "nvenc",
+        render_devices: [],
+        intel_detected: false,
+        source: "local",
+        tone_map_capabilities: [
+          { mode: "hardware", backend: "cuda", filter: "tonemap_cuda", source_kinds: ["hdr10"] },
+        ],
+      }),
+    ).toBe(true);
   });
 });

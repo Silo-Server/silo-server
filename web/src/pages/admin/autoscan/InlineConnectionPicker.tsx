@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Plus, XCircle } from "lucide-react";
 
 import type { AutoscanConnectionTestInput, AutoscanConnectionTestResult } from "@/api/types";
@@ -79,7 +79,26 @@ export function InlineConnectionPicker({
   // would label a Radarr server "sonarr", and the connection test cannot catch
   // it because it probes only the URL and key.
   const [manualKind, setManualKind] = useState("");
-  const [testResult, setTestResult] = useState<AutoscanConnectionTestResult | null>(null);
+  const kindsScope = connectionKinds.join("/");
+  const testScope = useMemo(
+    () => ({ adding, name, baseUrl, apiKey, reuseId, manualKind, value, idPrefix, kindsScope }),
+    [adding, name, baseUrl, apiKey, reuseId, manualKind, value, idPrefix, kindsScope],
+  );
+  const activeDraft = useRef<object | null>(testScope);
+  useLayoutEffect(() => {
+    activeDraft.current = testScope;
+    return () => {
+      activeDraft.current = null;
+    };
+  }, [testScope]);
+  const [testOutcome, setTestOutcome] = useState<{
+    scope: object;
+    result: AutoscanConnectionTestResult;
+  } | null>(null);
+  const testResult = testOutcome?.scope === testScope ? testOutcome.result : null;
+  function setTestResult(result: AutoscanConnectionTestResult | null) {
+    setTestOutcome(result ? { scope: testScope, result } : null);
+  }
 
   // Requests integrations this source could bind, minus any already linked by a
   // saved connection — re-offering those would create a second connection to
@@ -156,6 +175,7 @@ export function InlineConnectionPicker({
 
     createConnection.mutate(body, {
       onSuccess: (created) => {
+        if (activeDraft.current !== testScope) return;
         // Select what was just made, so the operator never has to find it.
         onChange(created.id);
         setAdding(false);

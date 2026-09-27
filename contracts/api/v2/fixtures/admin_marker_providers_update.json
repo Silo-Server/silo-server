@@ -1,0 +1,9 @@
+{
+  "provider": "plugin:7:markers",
+  "is_submitter": false,
+  "fetch_enabled": false,
+  "fetch_priority": 0,
+  "contribute_enabled": false,
+  "contribute_auto_local": false,
+  "contribute_min_confidence": 0
+}

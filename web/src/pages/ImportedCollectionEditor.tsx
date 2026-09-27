@@ -99,10 +99,15 @@ const SOURCE_THEMES: Record<ImportedType, SourceTheme> = {
 
 interface ImportedCollectionEditorProps {
   collection: Collection;
+  etag: string;
   onClose: () => void;
 }
 
-export function ImportedCollectionEditor({ collection, onClose }: ImportedCollectionEditorProps) {
+export function ImportedCollectionEditor({
+  collection,
+  etag,
+  onClose,
+}: ImportedCollectionEditorProps) {
   const importedType = collection.collection_type as ImportedType;
   const theme = SOURCE_THEMES[importedType];
 
@@ -229,7 +234,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
       body.max_items = parsedMaxItems ?? 0;
     }
     updateMutation.mutate(
-      { id: collection.id, body, poster: posterFile },
+      { id: collection.id, etag, body, poster: posterFile },
       {
         onSuccess: () => {
           setPosterFile(null);
@@ -261,11 +266,14 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
   }
 
   function handleDelete() {
-    deleteMutation.mutate(collection.id, {
-      onSuccess: () => {
-        onClose();
+    deleteMutation.mutate(
+      { id: collection.id, etag },
+      {
+        onSuccess: () => {
+          onClose();
+        },
       },
-    });
+    );
   }
 
   const sourceUrl = readableSourceURL(collection);
@@ -296,6 +304,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
         sourceUrl={sourceUrl}
         isSyncing={isSyncing}
         onSyncNow={handleSyncNow}
+        syncSupported={collectionCapabilities?.imports === true}
         readOnly={readOnly}
       />
 
@@ -503,7 +512,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
             />
           </FormSection>
 
-          {!readOnly ? (
+          {!readOnly && collectionCapabilities?.artwork ? (
             <FormSection
               number="05"
               title="Poster"
@@ -569,6 +578,7 @@ function SourceBanner({
   sourceUrl,
   isSyncing,
   onSyncNow,
+  syncSupported,
   readOnly,
 }: {
   theme: SourceTheme;
@@ -577,6 +587,7 @@ function SourceBanner({
   sourceUrl: string | null;
   isSyncing: boolean;
   onSyncNow: () => void;
+  syncSupported: boolean;
   readOnly: boolean;
 }) {
   const last = formatLastSync(collection);
@@ -652,7 +663,7 @@ function SourceBanner({
               type="button"
               size="sm"
               onClick={onSyncNow}
-              disabled={isSyncing || readOnly}
+              disabled={isSyncing || readOnly || !syncSupported}
               className="gap-1.5 font-semibold"
               style={{
                 backgroundColor: theme.accent,

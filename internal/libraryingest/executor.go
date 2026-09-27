@@ -301,7 +301,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		return nil, drainerErr
 	default:
 	}
-	if err := e.reconcileSkippedRoots(scanCtx, folder.ID, folder.Type, mode, claim.path, matchScopes, scanResult); err != nil {
+	if err := e.reconcileSkippedRoots(scanCtx, folder.ID, folder.Type, mode, claim.path, matchScopes, scanResult, folder.Paths...); err != nil {
 		return nil, err
 	}
 
@@ -516,6 +516,7 @@ func (e *Executor) reconcileSkippedRoots(
 	scopePath string,
 	matchScopes []string,
 	scanResult *scanner.ScanResult,
+	libraryRoots ...string,
 ) error {
 	if e == nil || e.skippedRootRepo == nil {
 		return nil
@@ -526,7 +527,7 @@ func (e *Executor) reconcileSkippedRoots(
 	case scanResult != nil:
 		observations = append(observations, scanResult.RootObservations...)
 	case mode == scopeModeFile:
-		observation, ok := scanner.ObserveRoot(scopePath, folderType)
+		observation, ok := scanner.ObserveRoot(scopePath, folderType, libraryRoots...)
 		if ok {
 			observations = append(observations, observation)
 		}

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +93,24 @@ func TestSearchSurfacesUpstreamErrors(t *testing.T) {
 	}
 }
 
+// assertErrorOmitsAPIKey fails when the key appears anywhere errors.Unwrap
+// can reach, not only in the top-level message. It never prints the key.
+func assertErrorOmitsAPIKey(t *testing.T, err error, apiKey string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if msg := e.Error(); strings.Contains(msg, apiKey) {
+			t.Fatalf("error chain leaks the API key: %q", strings.ReplaceAll(msg, apiKey, "[KEY]"))
+		}
+		var urlErr *url.Error
+		if errors.As(e, &urlErr) && strings.Contains(urlErr.URL, apiKey) {
+			t.Fatalf("url.Error.URL leaks the API key: %q", strings.ReplaceAll(urlErr.URL, apiKey, "[KEY]"))
+		}
+	}
+}
+
 func TestTransportErrorOmitsAPIKey(t *testing.T) {
 	secretKey := "super-secret-mdblist-key-12345"
 	c := NewClient(secretKey, &http.Client{})
@@ -100,17 +120,7 @@ func TestTransportErrorOmitsAPIKey(t *testing.T) {
 	defer cancel()
 
 	_, err := c.Search(ctx, "test")
-	if err == nil {
-		t.Fatal("expected transport error, got nil")
-	}
-
-	errStr := err.Error()
-	if strings.Contains(errStr, secretKey) {
-		t.Fatalf("transport error leaked API key! error string: %s", errStr)
-	}
-	if !strings.Contains(errStr, "REDACTED") {
-		t.Fatalf("expected REDACTED in sanitized transport error string: %s", errStr)
-	}
+	assertErrorOmitsAPIKey(t, err, secretKey)
 }
 
 // urlQuotingTransport fails every request with an error that quotes the full
@@ -121,22 +131,44 @@ func (t urlQuotingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return nil, fmt.Errorf("dial %s: %w", req.URL, t.cause)
 }
 
+// urlTimeoutError is a net.Error timeout whose message quotes the request
+// URL, key included, as a transport's own timeout error can.
+type urlTimeoutError struct{ url string }
+
+func (e urlTimeoutError) Error() string { return "read " + e.url + ": i/o timeout" }
+func (urlTimeoutError) Timeout() bool   { return true }
+func (urlTimeoutError) Temporary() bool { return true }
+
+type timeoutTransport struct{}
+
+func (timeoutTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return nil, urlTimeoutError{url: req.URL.String()}
+}
+
 func TestTransportErrorRedactsAPIKeyInWrappedError(t *testing.T) {
 	secretKey := "super-secret-mdblist-key-12345"
 	cause := errors.New("connection refused")
 	c := NewClient(secretKey, &http.Client{Transport: urlQuotingTransport{cause: cause}})
 
 	_, err := c.Search(context.Background(), "test")
-	if err == nil {
-		t.Fatal("expected transport error, got nil")
-	}
-	if strings.Contains(err.Error(), secretKey) {
-		t.Fatalf("transport error leaked API key: %s", err)
-	}
+	assertErrorOmitsAPIKey(t, err, secretKey)
+	// The transport quoted the URL in its own text, so the key is masked there.
 	if !strings.Contains(err.Error(), "REDACTED") {
-		t.Fatalf("expected REDACTED in sanitized transport error: %s", err)
+		t.Fatalf("expected REDACTED in the sanitized error: %q", strings.ReplaceAll(err.Error(), secretKey, "[KEY]"))
 	}
 	if !errors.Is(err, cause) {
-		t.Fatalf("sanitized error no longer wraps its cause: %v", err)
+		t.Fatalf("sanitized error no longer matches its cause: %q", strings.ReplaceAll(err.Error(), secretKey, "[KEY]"))
+	}
+}
+
+func TestTransportErrorKeepsTimeoutClassification(t *testing.T) {
+	secretKey := "super-secret-mdblist-key-12345"
+	c := NewClient(secretKey, &http.Client{Transport: timeoutTransport{}})
+
+	_, err := c.Search(context.Background(), "test")
+	assertErrorOmitsAPIKey(t, err, secretKey)
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Fatalf("sanitized error lost its timeout classification: %q", strings.ReplaceAll(err.Error(), secretKey, "[KEY]"))
 	}
 }

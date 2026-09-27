@@ -55,6 +55,7 @@ func (h *countingHerdHost) Stop(id int) error {
 }
 
 func (h *countingHerdHost) Shutdown(context.Context) error { return nil }
+func (h *countingHerdHost) NextStartSeq() uint64           { return 0 }
 
 func (h *countingHerdHost) startCount() int {
 	h.mu.Lock()
@@ -183,6 +184,7 @@ func (h *ctxCaptureHost) Stop(id int) error {
 }
 
 func (h *ctxCaptureHost) Shutdown(context.Context) error { return nil }
+func (h *ctxCaptureHost) NextStartSeq() uint64           { return 0 }
 
 func (h *ctxCaptureHost) canceledDuringLaunch() bool {
 	h.mu.Lock()

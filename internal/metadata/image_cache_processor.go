@@ -111,8 +111,7 @@ type LibraryRootResolver interface {
 // ImagePrefixDeleter deletes cached image objects under a key prefix; used to
 // sweep the previous hashed local/ prefix after a successful re-cache.
 type ImagePrefixDeleter interface {
-	DeletePrefix(ctx context.Context, bucket, prefix string) (int, error)
-	Bucket() string
+	DeletePrefix(context.Context, string) (int, error)
 }
 
 type SeasonArtworkUpdater interface {
@@ -975,7 +974,7 @@ func (p *ImageCacheProcessor) deleteStaleLocalPrefix(ctx context.Context, previo
 	if strings.HasPrefix(cachedPath, prefix) {
 		return
 	}
-	if _, err := p.prefixDeleter.DeletePrefix(ctx, p.prefixDeleter.Bucket(), prefix); err != nil {
+	if _, err := p.prefixDeleter.DeletePrefix(ctx, prefix); err != nil {
 		p.logger.WarnContext(ctx, "metadata image cache: failed to delete stale local image prefix", "prefix", prefix, "error", err)
 	}
 }

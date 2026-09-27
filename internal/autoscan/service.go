@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
@@ -652,7 +653,13 @@ func (s *Service) resolveAndClaim(ctx context.Context, changes []Change, ttl tim
 			}
 			resolvedAny = true
 			stats.ChangesResolved++
-			if !s.claimTarget(ctx, *target, ttl, seenTargets, &targets, &claimed) {
+			// Debounce on the path the source reported, not the scan target.
+			// A video file resolves to a scan of its directory, and two
+			// different files landing in one directory a few seconds apart
+			// are two events that both need serving; the queue coalesces the
+			// second into the running scan and owes it a follow-up, which a
+			// suppression keyed on the directory would have swallowed.
+			if !s.claimTarget(ctx, *target, filepath.Clean(change.SourcePath), ttl, seenTargets, &targets, &claimed) {
 				stats.Suppressed++
 			}
 		default:
@@ -685,7 +692,7 @@ func (s *Service) resolveAndClaim(ctx context.Context, changes []Change, ttl tim
 		}
 		resolvedAny = true
 		stats.ChangesResolved++
-		if !s.claimTarget(ctx, *target, ttl, seenTargets, &targets, &claimed) {
+		if !s.claimTarget(ctx, *target, target.Path, ttl, seenTargets, &targets, &claimed) {
 			stats.Suppressed++
 		}
 	}
@@ -737,7 +744,10 @@ func (s *Service) resolveChange(ctx context.Context, change Change, stats *resol
 		target, err = s.resolver.ResolveMissingSubtree(ctx, change.SourcePath, scanTrigger)
 	case ChangeScopeFile:
 		target, err = s.resolver.Resolve(ctx, scantrigger.Request{Path: change.SourcePath, Trigger: scanTrigger})
-		if err == nil && target != nil && target.Mode != scantrigger.ModeFile {
+		// A file change resolves to the file itself or, for video, to its
+		// directory. A change that resolves to a whole library was not a file
+		// path and is dropped rather than turned into a full scan.
+		if err == nil && target != nil && target.Mode == scantrigger.ModeLibrary {
 			return nil, false
 		}
 		if isRequestError(err) {
@@ -764,28 +774,37 @@ func (s *Service) resolveChange(ctx context.Context, change Change, stats *resol
 	return target, true
 }
 
+// claimTarget claims one scan target for this cycle. debouncePath is the path
+// the suppression window is keyed on: the change the source reported, which
+// may be narrower than target.Path. Within one cycle, changes that widen to
+// the same target are still collapsed to one enqueue; the queue's own
+// dedupe handles the cross-cycle case.
 func (s *Service) claimTarget(
 	ctx context.Context,
 	target scantrigger.Target,
+	debouncePath string,
 	ttl time.Duration,
 	seenTargets map[string]struct{},
 	targets *[]scantrigger.Target,
 	claimed *[]string,
 ) bool {
-	targetKey := fmt.Sprintf("%d|%s|%s", target.Folder.ID, target.Mode, target.Path)
-	if _, seen := seenTargets[targetKey]; seen {
-		return false
-	}
-	seenTargets[targetKey] = struct{}{}
-
-	key := fmt.Sprintf("%d|%s", target.Folder.ID, target.Path)
+	key := fmt.Sprintf("%d|%s", target.Folder.ID, debouncePath)
 	ok, serr := s.suppress.ShouldScan(ctx, key, ttl)
 	if serr != nil || !ok {
 		return false
 	}
+	*claimed = append(*claimed, key)
+
+	targetKey := fmt.Sprintf("%d|%s|%s", target.Folder.ID, target.Mode, target.Path)
+	if _, seen := seenTargets[targetKey]; seen {
+		// Claimed, but already enqueued this cycle under another change that
+		// resolved to the same target. Not a suppression: the enqueue covers
+		// it, because the target has not started running yet.
+		return true
+	}
+	seenTargets[targetKey] = struct{}{}
 	target.Trigger = scanTrigger
 	*targets = append(*targets, target)
-	*claimed = append(*claimed, key)
 	return true
 }
 

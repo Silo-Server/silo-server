@@ -1,0 +1,9 @@
+{
+  "id": "7",
+  "name": "Al Pacino",
+  "bio": "Actor",
+  "birth_date": "1940-04-25",
+  "birthplace": "New York",
+  "photo_url": "https://cdn.example/people/7.jpg",
+  "tmdb_id": "1158"
+}

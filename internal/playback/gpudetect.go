@@ -164,6 +164,7 @@ type HWAccelInfo struct {
 	Source              string               `json:"source"`
 	NodeURL             string               `json:"node_url,omitempty"`
 	Transformations     []TransformationV3   `json:"transformations,omitempty"`
+	TransportFeatures   []string             `json:"transport_features,omitempty"`
 	ToneMapCapabilities tonemap.Capabilities `json:"tone_map_capabilities,omitempty"`
 	// BootID is this host's kernel boot identity (Linux only). Paired with a
 	// render device's PCI address it distinguishes "same GPU, same boot" from
@@ -831,6 +832,13 @@ func verifyHWAccelBackend(ctx context.Context, backend, ffmpegPath string, candi
 	entry.Skipped = !probed && len(devices) > 0 && ctx.Err() == nil
 	entry.Reason = strings.Join(reasons, "; ")
 	return entry, complete
+}
+
+// HWProbeGeneration reports how many times InvalidateHWProbeCache has run. A
+// caller that keeps a resolved backend of its own compares it to know when
+// that backend must be resolved again.
+func HWProbeGeneration() uint64 {
+	return hwProbeGeneration()
 }
 
 // hwProbeGeneration reads the current invalidation generation.

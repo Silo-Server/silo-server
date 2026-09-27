@@ -16,17 +16,17 @@ type collectionPreferenceLibraryReader interface {
 	GetByID(ctx context.Context, id string) (*models.LibraryCollection, error)
 }
 
-// collectionSortPreferenceRequest saves the sort a viewer chose while browsing
+// CollectionSortPreferenceRequest saves the sort a viewer chose while browsing
 // a collection or personal list. An empty Field pins the viewer to source order.
 // DELETE removes the preference and restores the source's default behavior.
-type collectionSortPreferenceRequest struct {
+type CollectionSortPreferenceRequest struct {
 	CollectionKind string `json:"collection_kind"`
 	CollectionID   string `json:"collection_id"`
 	Field          string `json:"field"`
 	Order          string `json:"order"`
 }
 
-type collectionSortPreferenceResponse struct {
+type CollectionSortPreferenceResponse struct {
 	CollectionKind string `json:"collection_kind"`
 	CollectionID   string `json:"collection_id"`
 	Field          string `json:"field"`
@@ -80,53 +80,18 @@ func (h *CollectionHandler) HandleSetCollectionSortPreference(w http.ResponseWri
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
 
-	var req collectionSortPreferenceRequest
+	var req CollectionSortPreferenceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
 
-	kind, collectionID, ok := normalizeCollectionRef(req.CollectionKind, req.CollectionID)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "bad_request", "collection_kind must be 'library', 'user', 'watchlist', or 'favorites'; collection_id is required for collection kinds")
-		return
-	}
-
-	field, order, valid := normalizeSortPreference(kind, req.Field, req.Order)
-	if !valid {
-		writeError(w, http.StatusBadRequest, "bad_request", "Unsupported sort field or order for this collection")
-		return
-	}
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
+	view, err := h.SetPersonalCollectionSortPreference(r.Context(), userID, profileID, requestAccessFilter(r), req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
+		writeAPIError(w, err)
 		return
 	}
-	if !h.canSaveCollectionSortPreference(r, store, kind, collectionID) {
-		// Use one not-found response for absent and inaccessible collections so
-		// the preference endpoint cannot be used to enumerate hidden IDs.
-		writeError(w, http.StatusNotFound, "not_found", "Collection not found")
-		return
-	}
-
-	if err := store.SetCollectionSortPreference(r.Context(), userstore.CollectionSortPreference{
-		ProfileID:      profileID,
-		CollectionKind: kind,
-		CollectionID:   collectionID,
-		SortField:      field,
-		SortOrder:      order,
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save sort preference")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, collectionSortPreferenceResponse{
-		CollectionKind: kind,
-		CollectionID:   collectionID,
-		Field:          field,
-		Order:          order,
-	})
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (h *CollectionHandler) canSaveCollectionSortPreference(
@@ -134,21 +99,7 @@ func (h *CollectionHandler) canSaveCollectionSortPreference(
 	store userstore.UserStore,
 	kind, collectionID string,
 ) bool {
-	switch kind {
-	case userstore.CollectionKindWatchlist, userstore.CollectionKindFavorites:
-		return true
-	case userstore.CollectionKindLibrary:
-		if h.LibraryCollections == nil {
-			return false
-		}
-		collection, err := h.LibraryCollections.GetByID(r.Context(), collectionID)
-		return err == nil && catalog.CanAccessLibraryCollection(collection, requestAccessFilter(r))
-	case userstore.CollectionKindUser:
-		collection, err := store.GetCollection(r.Context(), collectionID)
-		return err == nil && catalog.ProfileCanAccessCollection(collection, apimw.GetProfileID(r.Context()))
-	default:
-		return false
-	}
+	return h.canSaveCollectionSortPreferenceContext(r.Context(), apimw.GetProfileID(r.Context()), requestAccessFilter(r), store, kind, collectionID)
 }
 
 // HandleClearCollectionSortPreference handles DELETE /collections/sort-preference,
@@ -158,23 +109,10 @@ func (h *CollectionHandler) HandleClearCollectionSortPreference(w http.ResponseW
 	profileID := apimw.GetProfileID(r.Context())
 
 	values := r.URL.Query()
-	kind, collectionID, ok := normalizeCollectionRef(values.Get("collection_kind"), values.Get("collection_id"))
-	if !ok {
-		writeError(w, http.StatusBadRequest, "bad_request", "collection_kind must be 'library', 'user', 'watchlist', or 'favorites'; collection_id is required for collection kinds")
+	if err := h.ClearPersonalCollectionSortPreference(r.Context(), userID, profileID, values.Get("collection_kind"), values.Get("collection_id")); err != nil {
+		writeAPIError(w, err)
 		return
 	}
-
-	store, err := h.storeProvider.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return
-	}
-
-	if err := store.ClearCollectionSortPreference(r.Context(), profileID, kind, collectionID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear sort preference")
-		return
-	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -219,4 +157,79 @@ func normalizeSortPreference(kind, rawField, rawOrder string) (string, string, b
 	}
 	qs, ok := catalog.NormalizeCollectionSort(field, rawOrder, true)
 	return qs.Field, qs.Order, ok
+}
+
+func (h *CollectionHandler) SetPersonalCollectionSortPreference(ctx context.Context, userID int, profileID string, access catalog.AccessFilter, req CollectionSortPreferenceRequest) (CollectionSortPreferenceResponse, error) {
+	kind, collectionID, ok := normalizeCollectionRef(req.CollectionKind, req.CollectionID)
+	if !ok {
+		return CollectionSortPreferenceResponse{}, apiError(http.StatusBadRequest, "bad_request", "collection_kind must be 'library', 'user', 'watchlist', or 'favorites'; collection_id is required for collection kinds")
+	}
+
+	field, order, valid := normalizeSortPreference(kind, req.Field, req.Order)
+	if !valid {
+		return CollectionSortPreferenceResponse{}, apiError(http.StatusBadRequest, "bad_request", "Unsupported sort field or order for this collection")
+	}
+
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return CollectionSortPreferenceResponse{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	if !h.canSaveCollectionSortPreferenceContext(ctx, profileID, access, store, kind, collectionID) {
+		// Use one not-found response for absent and inaccessible collections so
+		// the preference endpoint cannot be used to enumerate hidden IDs.
+		return CollectionSortPreferenceResponse{}, apiError(http.StatusNotFound, "not_found", "Collection not found")
+	}
+
+	if err := store.SetCollectionSortPreference(ctx, userstore.CollectionSortPreference{
+		ProfileID:      profileID,
+		CollectionKind: kind,
+		CollectionID:   collectionID,
+		SortField:      field,
+		SortOrder:      order,
+	}); err != nil {
+		return CollectionSortPreferenceResponse{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to save sort preference")
+	}
+
+	return CollectionSortPreferenceResponse{
+		CollectionKind: kind,
+		CollectionID:   collectionID,
+		Field:          field,
+		Order:          order,
+	}, nil
+}
+
+func (h *CollectionHandler) canSaveCollectionSortPreferenceContext(ctx context.Context, profileID string, access catalog.AccessFilter, store userstore.UserStore, kind, collectionID string) bool {
+	switch kind {
+	case userstore.CollectionKindWatchlist, userstore.CollectionKindFavorites:
+		return true
+	case userstore.CollectionKindLibrary:
+		if h.LibraryCollections == nil {
+			return false
+		}
+		collection, err := h.LibraryCollections.GetByID(ctx, collectionID)
+		return err == nil && catalog.CanAccessLibraryCollection(collection, access)
+	case userstore.CollectionKindUser:
+		collection, err := store.GetCollection(ctx, collectionID)
+		return err == nil && catalog.ProfileCanAccessCollection(collection, profileID)
+	default:
+		return false
+	}
+}
+
+func (h *CollectionHandler) ClearPersonalCollectionSortPreference(ctx context.Context, userID int, profileID, rawKind, rawID string) error {
+	kind, collectionID, ok := normalizeCollectionRef(rawKind, rawID)
+	if !ok {
+		return apiError(http.StatusBadRequest, "bad_request", "collection_kind must be 'library', 'user', 'watchlist', or 'favorites'; collection_id is required for collection kinds")
+	}
+
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+
+	if err := store.ClearCollectionSortPreference(ctx, profileID, kind, collectionID); err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to clear sort preference")
+	}
+
+	return nil
 }

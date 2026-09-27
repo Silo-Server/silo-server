@@ -385,12 +385,14 @@ func siloItemToSmartcollItem(mi *models.MediaItem) smartcoll.Item {
 		return smartcoll.Item{}
 	}
 	it := smartcoll.Item{
-		ID:              mi.ContentID,
-		Title:           mi.Title,
-		Genres:          mi.Genres,
-		Year:            mi.Year,
-		Language:        mi.OriginalLanguage,
-		DurationSeconds: mi.Runtime,
+		ID:       mi.ContentID,
+		Title:    mi.Title,
+		Genres:   mi.Genres,
+		Year:     mi.Year,
+		Language: audiobookLanguage(mi),
+		// The native catalog stores runtime in minutes; smart-collection
+		// predicates and ABS responses use audiobook seconds.
+		DurationSeconds: int(audiobookDurationSeconds(mi)),
 	}
 	for _, p := range mi.People {
 		switch p.Kind {

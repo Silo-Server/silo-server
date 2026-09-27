@@ -44,6 +44,19 @@ func seedAudiobook(t *testing.T, pool *pgxpool.Pool, label, poster string, refre
 		refreshedAt = time.Now()
 	}
 
+	// claimBatch only selects items with a library membership, and
+	// media_item_libraries references media_folders, so the fixture creates
+	// both. Deleting the folder cascades the membership; deleting the item
+	// removes its state row.
+	var folderID int
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO media_folders (type, name)
+		VALUES ('audiobooks', $1)
+		RETURNING id
+	`, fmt.Sprintf("Claim Fixture %d", time.Now().UnixNano())).Scan(&folderID); err != nil {
+		t.Fatalf("seed media folder for %s: %v", contentID, err)
+	}
+
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO media_items (
 			content_id, type, title, genres, poster_path, last_refreshed,
@@ -52,11 +65,19 @@ func seedAudiobook(t *testing.T, pool *pgxpool.Pool, label, poster string, refre
 	`, contentID, poster, refreshedAt); err != nil {
 		t.Fatalf("seed audiobook %s: %v", contentID, err)
 	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
+		VALUES ($1, $2, now())
+	`, contentID, folderID); err != nil {
+		t.Fatalf("seed library membership for %s: %v", contentID, err)
+	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(),
 			`DELETE FROM media_item_provider_ids WHERE content_id = $1`, contentID)
 		_, _ = pool.Exec(context.Background(),
 			`DELETE FROM media_items WHERE content_id = $1`, contentID)
+		_, _ = pool.Exec(context.Background(),
+			`DELETE FROM media_folders WHERE id = $1`, folderID)
 	})
 	return contentID
 }
@@ -65,9 +86,19 @@ func giveProviderID(t *testing.T, pool *pgxpool.Pool, contentID string) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(), `
 		INSERT INTO media_item_provider_ids (content_id, provider, provider_id, item_type)
-		VALUES ($1, 'asin', $2, 'audiobook')
+		VALUES ($1, 'audiobook-metadata', $2, 'audiobook')
 	`, contentID, "B0"+contentID[len(contentID)-8:]); err != nil {
 		t.Fatalf("seed provider id for %s: %v", contentID, err)
+	}
+}
+
+func giveASINHint(t *testing.T, pool *pgxpool.Pool, contentID string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO media_item_provider_ids (content_id, provider, provider_id, item_type)
+		VALUES ($1, 'asin', $2, 'audiobook')
+	`, contentID, "B0"+contentID[len(contentID)-8:]); err != nil {
+		t.Fatalf("seed ASIN hint for %s: %v", contentID, err)
 	}
 }
 
@@ -134,6 +165,63 @@ func TestClaimBatchSelectsOnIdentityNotCoverArt(t *testing.T) {
 	if got[alreadyPassed] {
 		t.Error("an audiobook with last_refreshed set was claimed; last_refreshed is the " +
 			"retry bound that stops unmatchable items looping against the provider")
+	}
+}
+
+func TestClaimBatchTreatsScannerASINAsAMetadataHint(t *testing.T) {
+	pool := newClaimTestPool(t)
+	e := &Enricher{pool: pool, chainRepo: metadata.NewChainRepository(pool), batchSize: 500}
+
+	contentID := seedAudiobook(t, pool, "asin-hint", "/covers/embedded.jpg", false)
+	giveASINHint(t, pool, contentID)
+
+	if got := claimedIDs(t, e); !got[contentID] {
+		t.Fatal("an audiobook with only a scanner-supplied ASIN hint was not claimed")
+	}
+}
+
+// A transient provider failure during a scheduled retry must not remove the
+// item from the queue. RecordFailure parks the row with outcome NULL and a
+// backoff while last_refreshed stays set from the earlier pass, so eligibility
+// has to keep the parked retry claimable once the backoff elapses.
+func TestClaimBatchReclaimsParkedProviderFailure(t *testing.T) {
+	pool := newClaimTestPool(t)
+	ctx := context.Background()
+	e := newTestEnricher(pool)
+	contentID := seedAudiobook(t, pool, "parked-failure", "/covers/embedded.jpg", false)
+
+	batch, err := e.claimBatch(ctx)
+	if err != nil {
+		t.Fatalf("first claimBatch: %v", err)
+	}
+	var claimToken string
+	for _, item := range batch {
+		if item.ContentID == contentID {
+			claimToken = item.ClaimToken
+		}
+	}
+	if claimToken == "" {
+		t.Fatalf("first batch did not claim fixture %q", contentID)
+	}
+	if err := e.state.RecordFailure(ctx, contentID, claimToken, EnrichmentErrorTransient, "provider timeout"); err != nil {
+		t.Fatalf("RecordFailure: %v", err)
+	}
+	// The item had completed an earlier pass, so last_refreshed is stamped
+	// even though the current retry failed.
+	if _, err := pool.Exec(ctx, `UPDATE media_items SET last_refreshed = now() WHERE content_id = $1`, contentID); err != nil {
+		t.Fatalf("stamp last_refreshed: %v", err)
+	}
+	if got := claimedIDs(t, e); got[contentID] {
+		t.Fatal("a backed-off provider failure was claimed before its retry was due")
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE audiobook_enrichment_state SET next_attempt_at = now() - interval '1 minute'
+		WHERE content_id = $1
+	`, contentID); err != nil {
+		t.Fatalf("expire backoff: %v", err)
+	}
+	if got := claimedIDs(t, e); !got[contentID] {
+		t.Fatal("a parked provider failure was never reclaimed after its backoff elapsed")
 	}
 }
 

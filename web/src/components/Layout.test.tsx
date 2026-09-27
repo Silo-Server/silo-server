@@ -136,7 +136,21 @@ function setRoute(pathname: string, key: string, search = "") {
   mocks.location = { pathname, search, key };
 }
 
+let onHeaderResize: ResizeObserverCallback;
+const disconnectHeaderObserver = vi.fn();
+
 beforeEach(() => {
+  disconnectHeaderObserver.mockReset();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: ResizeObserverCallback) {
+        onHeaderResize = callback;
+      }
+      observe = vi.fn();
+      disconnect = disconnectHeaderObserver;
+    },
+  );
   vi.useFakeTimers();
   mocks.location = { pathname: "/", search: "", key: "home" };
   mocks.navigate.mockReset();
@@ -171,6 +185,23 @@ afterEach(() => {
 });
 
 describe("Layout mobile profile", () => {
+  it("updates the viewport offset when the mobile header resizes or disappears", () => {
+    const view = renderLayout();
+    const header = view.container.querySelector<HTMLElement>(".mobile-header")!;
+    const shell = header.parentElement!;
+    header.style.marginTop = "15px";
+    const bounds = vi.spyOn(header, "getBoundingClientRect");
+    bounds.mockReturnValue({ height: 82 } as DOMRect);
+    act(() => onHeaderResize([], {} as ResizeObserver));
+    expect(shell.style.getPropertyValue("--detail-header-height")).toBe("97px");
+
+    bounds.mockReturnValue({ height: 0 } as DOMRect);
+    act(() => onHeaderResize([], {} as ResizeObserver));
+    expect(shell.style.getPropertyValue("--detail-header-height")).toBe("0px");
+    view.unmount();
+    expect(disconnectHeaderObserver).toHaveBeenCalledOnce();
+  });
+
   it("renders the current profile avatar in the settings link", () => {
     renderLayout();
 
@@ -195,6 +226,45 @@ describe("Layout mobile profile", () => {
     );
 
     expect(document.documentElement).not.toHaveAttribute("data-home-route");
+  });
+});
+
+describe("Layout sidebar collapse", () => {
+  it("stays collapsed from item to person and back, then expands on Home", () => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
+      window.setTimeout(() => callback(performance.now()), 16),
+    );
+    setRoute("/item/movie-1", "item");
+    const view = renderLayout();
+
+    for (const [pathname, key, collapsed] of [
+      ["/person/1", "person", true],
+      ["/item/movie-1", "item-back", true],
+      ["/", "home-back", false],
+    ] as const) {
+      setRoute(pathname, key);
+      view.rerender(
+        <MemoryRouter>
+          <Layout>
+            <Harness />
+          </Layout>
+        </MemoryRouter>,
+      );
+      act(() => vi.advanceTimersByTime(16));
+
+      expect(document.documentElement.hasAttribute("data-sidebar-collapsed")).toBe(collapsed);
+      expect(screen.getByTestId("sidebar-surface").hasAttribute("data-collapsed")).toBe(collapsed);
+      expect(screen.getByRole("main")).toHaveClass(collapsed ? "lg:ml-16" : "lg:ml-[260px]");
+    }
+  });
+
+  it("starts collapsed when opening a person page directly", () => {
+    setRoute("/person/1", "person");
+    renderLayout();
+
+    expect(screen.getByTestId("sidebar-surface")).toHaveAttribute("data-collapsed", "true");
+    expect(screen.getByRole("main")).toHaveClass("lg:ml-16");
+    expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
   });
 });
 

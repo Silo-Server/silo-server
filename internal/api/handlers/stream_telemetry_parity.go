@@ -17,6 +17,9 @@ import (
 // the handler up.
 const parityScanLimit = 60_000
 
+// StreamTelemetryParityScanLimit is the existing per-source scan bound.
+const StreamTelemetryParityScanLimit = parityScanLimit
+
 // StreamTelemetryParityHandler serves P0d's admin parity projection: the merged
 // stream-telemetry view beside both legacy live-session projections, and the
 // diff between them.
@@ -50,11 +53,12 @@ type parityViewResponse struct {
 }
 
 type paritySourceResponse struct {
-	Source    string                        `json:"source"`
-	Available bool                          `json:"available"`
-	Error     string                        `json:"error,omitempty"`
-	Notes     []string                      `json:"notes,omitempty"`
-	Report    *streamtelemetry.ParityReport `json:"report,omitempty"`
+	LegacyMayBeTruncated bool                          `json:"-"`
+	Source               string                        `json:"source"`
+	Available            bool                          `json:"available"`
+	Error                string                        `json:"error,omitempty"`
+	Notes                []string                      `json:"notes,omitempty"`
+	Report               *streamtelemetry.ParityReport `json:"report,omitempty"`
 }
 
 type parityResponse struct {
@@ -67,23 +71,28 @@ type parityResponse struct {
 // HandleGetStreamTelemetryParity handles
 // GET /api/v1/admin/stream-telemetry/parity.
 func (h *StreamTelemetryParityHandler) HandleGetStreamTelemetryParity(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.ReadStreamTelemetryParity(r.Context()))
+}
+
+// StreamTelemetryParityView is the existing internal comparison snapshot.
+type StreamTelemetryParityView = parityResponse
+
+// ReadStreamTelemetryParity shares the comparison without legacy serialization.
+func (h *StreamTelemetryParityHandler) ReadStreamTelemetryParity(ctx context.Context) StreamTelemetryParityView {
 	if h == nil || h.Registry == nil || !h.Registry.Enabled() {
 		// The honest answer is "there is nothing to compare", not an empty
 		// report that reads as agreement.
-		writeJSON(w, http.StatusOK, parityResponse{
+		return parityResponse{
 			Reason:  "stream telemetry is disabled on this process",
 			Sources: []paritySourceResponse{},
-		})
-		return
+		}
 	}
 
-	ctx := r.Context()
 	view, status := h.ViewCache.View(ctx)
 	response := parityResponse{Enabled: true, View: describeView(view, status), Sources: []paritySourceResponse{}}
 	if !status.Available {
 		response.Reason = "the global view has not been built yet"
-		writeJSON(w, http.StatusOK, response)
-		return
+		return response
 	}
 
 	telemetry := streamtelemetry.LiveSessionsFromGlobalView(view)
@@ -91,7 +100,7 @@ func (h *StreamTelemetryParityHandler) HandleGetStreamTelemetryParity(w http.Res
 		h.comparePostgres(ctx, telemetry),
 		h.compareNodeSessions(ctx, telemetry),
 	)
-	writeJSON(w, http.StatusOK, response)
+	return response
 }
 
 // describeView surfaces the completeness flag alongside the diff on purpose. A
@@ -164,7 +173,7 @@ func (h *StreamTelemetryParityHandler) comparePostgres(ctx context.Context, tele
 	}
 
 	report := streamtelemetry.CompareLiveSessions(source, telemetry, legacy, streamtelemetry.DefaultParityLimit)
-	return paritySourceResponse{Source: source, Available: true, Report: &report}
+	return paritySourceResponse{Source: source, Available: true, Report: &report, LegacyMayBeTruncated: len(legacy) >= parityScanLimit}
 }
 
 func (h *StreamTelemetryParityHandler) compareNodeSessions(ctx context.Context, telemetry []streamtelemetry.LiveSession) paritySourceResponse {
@@ -197,7 +206,7 @@ func (h *StreamTelemetryParityHandler) compareNodeSessions(ctx context.Context, 
 		legacy = append(legacy, session)
 	}
 
-	response := paritySourceResponse{Source: source, Available: true}
+	response := paritySourceResponse{Source: source, Available: true, LegacyMayBeTruncated: result.Truncated}
 	if result.Undecodable > 0 {
 		response.Notes = append(response.Notes, "undecodable records skipped")
 	}

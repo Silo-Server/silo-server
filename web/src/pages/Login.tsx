@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import QRCode from "react-qr-code";
-import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
-import { api } from "@/api/client";
-import type { DeviceLoginPollResponse, DeviceLoginStartResponse, Profile } from "@/api/types";
-import { getBootstrapProfile, useAuth } from "@/hooks/useAuth";
+import { Link, Navigate, useSearchParams } from "react-router";
+import { useQuery } from "@tanstack/react-query";
+import { sessionFromTokenPair } from "@/api/v2/account";
+import { v2, type V2Result } from "@/api/v2/request";
+import { useAuth } from "@/hooks/useAuth";
+import { usePasswordResetAvailable } from "@/hooks/queries/passwordReset";
+import { CHANGE_PASSWORD_PATH, usePostSignInNavigation } from "@/hooks/usePostSignInNavigation";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
 import { Input } from "@/components/ui/input";
@@ -23,6 +26,8 @@ import { useServerBranding } from "@/hooks/useServerBranding";
 import { AuthBackground } from "@/components/auth/AuthBackground";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
 import { toast } from "sonner";
+
+type DeviceLoginSession = V2Result<"POST /api/v2/auth/device/start">;
 
 function detectPlatform() {
   const ua = navigator.userAgent;
@@ -70,7 +75,7 @@ export default function Login() {
   const [provider, setProvider] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [startingDeviceLogin, setStartingDeviceLogin] = useState(false);
-  const [deviceSession, setDeviceSession] = useState<DeviceLoginStartResponse | null>(null);
+  const [deviceSession, setDeviceSession] = useState<DeviceLoginSession | null>(null);
   const [deviceStatusMessage, setDeviceStatusMessage] = useState("");
   const [devicePolling, setDevicePolling] = useState(false);
   const [showDeviceFallback, setShowDeviceFallback] = useState(false);
@@ -78,16 +83,27 @@ export default function Login() {
     login,
     completeLogin,
     profile,
-    selectProfile,
     user,
+    pendingPasswordChange,
     loading,
     setupLoading,
     setupRequired,
     providers = [],
   } = useAuth();
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { serverName, loginSubtitle } = useServerBranding();
+  // Always refetch on mount so a cached answer from before an admin closed
+  // signups can't show the link, and show it only from that fresh result.
+  const signupStatusQuery = useQuery({
+    queryKey: ["auth", "signup-status"],
+    queryFn: () => v2("GET /api/v2/auth/signup"),
+    refetchOnMount: "always",
+  });
+  const signupOpen =
+    signupStatusQuery.isSuccess &&
+    signupStatusQuery.isFetchedAfterMount &&
+    signupStatusQuery.data.enabled;
+  const { available: passwordResetAvailable } = usePasswordResetAvailable();
 
   useDocumentTitle("Sign In");
 
@@ -111,26 +127,7 @@ export default function Login() {
     credentialProviders[0]?.id ||
     "";
 
-  const navigateAfterLogin = useCallback(async () => {
-    if (redirectTarget) {
-      navigate(redirectTarget, { replace: true });
-      return;
-    }
-
-    try {
-      const profileList = await api<{ profiles: Profile[] }>("/profiles");
-      const soleProfile = getBootstrapProfile(profileList.profiles ?? []);
-      if (soleProfile) {
-        selectProfile(soleProfile);
-        navigate("/");
-        return;
-      }
-    } catch {
-      navigate("/profiles");
-      return;
-    }
-    navigate("/profiles");
-  }, [navigate, redirectTarget, selectProfile]);
+  const navigateAfterLogin = usePostSignInNavigation(redirectTarget);
 
   useEffect(() => {
     if (!deviceSession) {
@@ -146,29 +143,19 @@ export default function Login() {
       let shouldPollAgain = true;
       try {
         setDevicePolling(true);
-        const result = await api<DeviceLoginPollResponse>("/auth/device/poll", {
-          method: "POST",
-          body: JSON.stringify({ device_code: currentSession.device_code }),
+        const result = await v2("POST /api/v2/auth/device/poll", {
+          body: { device_code: currentSession.device_code },
         });
         if (cancelled) {
           return;
         }
 
-        if (
-          result.status === "approved" &&
-          result.access_token &&
-          result.refresh_token &&
-          result.user
-        ) {
+        if (result.status === "approved" && result.tokens) {
           shouldPollAgain = false;
-          completeLogin({
-            access_token: result.access_token,
-            refresh_token: result.refresh_token,
-            expires_in: result.expires_in ?? 0,
-            user: result.user,
-          });
+          const session = sessionFromTokenPair(result.tokens);
+          completeLogin(session);
           setDeviceStatusMessage("Signed in. Loading profiles...");
-          void navigateAfterLogin();
+          void navigateAfterLogin(session.user);
           return;
         }
 
@@ -230,13 +217,17 @@ export default function Login() {
   if (user) {
     return <Navigate to={redirectTarget || (profile ? "/" : "/profiles")} replace />;
   }
+  if (pendingPasswordChange) {
+    const redirect = redirectTarget ? `?redirect=${encodeURIComponent(redirectTarget)}` : "";
+    return <Navigate to={`${CHANGE_PASSWORD_PATH}${redirect}`} replace />;
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await login(username, password, selectedProvider || undefined);
-      await navigateAfterLogin();
+      const signedIn = await login(username, password, selectedProvider || undefined);
+      await navigateAfterLogin(signedIn);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -247,10 +238,7 @@ export default function Login() {
   async function handleStartDeviceLogin() {
     setStartingDeviceLogin(true);
     try {
-      const data = await api<DeviceLoginStartResponse>("/auth/device/start", {
-        method: "POST",
-        body: JSON.stringify(buildDevicePayload()),
-      });
+      const data = await v2("POST /api/v2/auth/device/start", { body: buildDevicePayload() });
       setDeviceSession(data);
       setDeviceStatusMessage("Waiting for approval on your phone...");
       setShowDeviceFallback(false);
@@ -264,6 +252,12 @@ export default function Login() {
   const signupHref = redirectTarget
     ? `/signup?redirect=${encodeURIComponent(redirectTarget)}`
     : "/signup";
+  // Only a local password can be reset here; an external provider owns its own.
+  const forgotPasswordShown =
+    passwordResetAvailable && (!selectedProvider || selectedProvider === "local");
+  const forgotPasswordHref = username.trim()
+    ? `/forgot-password?login=${encodeURIComponent(username.trim())}`
+    : "/forgot-password";
 
   return (
     <main className="auth-shell">
@@ -286,7 +280,7 @@ export default function Login() {
                 <form
                   key={entry.id}
                   method="post"
-                  action={`/api/v1/auth/oauth/${entry.installation_id}/init${nextParam}`}
+                  action={`/api/v2/auth/oauth/${entry.installation_id}/init${nextParam}`}
                 >
                   <Button type="submit" variant="outline" className="w-full justify-start gap-3">
                     {entry.icon_url && <img src={entry.icon_url} alt="" className="h-5 w-5" />}
@@ -314,7 +308,17 @@ export default function Login() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-baseline justify-between gap-2">
+                <Label htmlFor="password">Password</Label>
+                {forgotPasswordShown && (
+                  <Link
+                    to={forgotPasswordHref}
+                    className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
+                  >
+                    Forgot password?
+                  </Link>
+                )}
+              </div>
               <PasswordInput
                 id="password"
                 value={password}
@@ -423,12 +427,14 @@ export default function Login() {
             </div>
           </div>
 
-          <p className="text-muted-foreground text-center text-sm">
-            Don&apos;t have an account?{" "}
-            <Link to={signupHref} className="text-foreground underline hover:no-underline">
-              Sign up
-            </Link>
-          </p>
+          {signupOpen && (
+            <p className="text-muted-foreground text-center text-sm">
+              Don&apos;t have an account?{" "}
+              <Link to={signupHref} className="text-foreground underline hover:no-underline">
+                Sign up
+              </Link>
+            </p>
+          )}
         </CardContent>
       </Card>
     </main>

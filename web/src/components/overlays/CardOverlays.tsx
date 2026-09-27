@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
 
+import { useLanguageNamesLoaded } from "@/lib/languageNamesLoader";
 import { OverlayIcon, WORDMARK_TEXT, getPreset, orderedOverlaysForPosition } from "@/lib/overlays";
 import { cn } from "@/lib/utils";
 import type {
@@ -263,6 +264,10 @@ export default function CardOverlays({
   variant = "poster",
   hasProgressBar = false,
 }: CardOverlaysProps) {
+  // The language badge resolves names from lazily loaded data and stays empty
+  // until it arrives; this re-renders the card when it does. Cards without the
+  // badge skip the re-render.
+  useLanguageNamesLoaded(prefs.items.original_language?.enabled === true);
   const preset = getPreset(prefs.preset);
   const resolve = (pos: OverlayPosition): ResolvedBadge[] =>
     orderedOverlaysForPosition(prefs, pos)

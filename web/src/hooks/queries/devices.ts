@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api } from "@/api/client";
-import type { UserDevice, UserDeviceListResponse } from "@/api/types";
+import { v2 } from "@/api/v2/request";
+import type { UserDevice } from "@/api/types";
 
 import { deviceKeys, settingsKeys } from "./keys";
 
@@ -18,10 +18,16 @@ export function useMyDevices(options?: { household?: boolean; enabled?: boolean 
   return useQuery({
     queryKey: deviceKeys.list(household ? "household" : "own"),
     queryFn: async () => {
-      const result = await api<UserDeviceListResponse>(
-        `/devices${household ? "?scope=household" : ""}`,
-      );
-      return result.devices ?? [];
+      const devices: UserDevice[] = [];
+      let cursor: string | undefined;
+      do {
+        const result = await v2("GET /api/v2/devices", {
+          query: { scope: household ? "household" : "profile", limit: 200, cursor },
+        });
+        devices.push(...result.items);
+        cursor = result.page?.next_cursor || undefined;
+      } while (cursor);
+      return devices;
     },
     enabled: options?.enabled ?? true,
     staleTime: 30 * 1000,
@@ -29,11 +35,19 @@ export function useMyDevices(options?: { household?: boolean; enabled?: boolean 
 }
 
 /** Both mutations move settings, so both invalidate the value caches too. */
-function useDeviceMutation(path: (device: DeviceTarget) => string) {
+function useDeviceMutation(forget: boolean) {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: (device: DeviceTarget) => api(path(device), { method: "DELETE" }),
+    mutationFn: (device: DeviceTarget) => {
+      const input = {
+        path: { device_id: device.deviceId },
+        query: { profile_id: device.profileId },
+      };
+      return forget
+        ? v2("DELETE /api/v2/devices/{device_id}", input)
+        : v2("DELETE /api/v2/devices/{device_id}/settings", input);
+    },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: deviceKeys.all });
       void qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
@@ -47,22 +61,14 @@ export interface DeviceTarget {
   profileId?: string;
 }
 
-function targetQuery(device: DeviceTarget): string {
-  return device.profileId ? `?profile_id=${encodeURIComponent(device.profileId)}` : "";
-}
-
 /** Remove the device's settings and drop it from the registry. */
 export function useForgetDevice() {
-  return useDeviceMutation(
-    (device) => `/devices/${encodeURIComponent(device.deviceId)}${targetQuery(device)}`,
-  );
+  return useDeviceMutation(true);
 }
 
 /** Return a device to the profile's own values without forgetting it. */
 export function useClearDeviceSettings() {
-  return useDeviceMutation(
-    (device) => `/devices/${encodeURIComponent(device.deviceId)}/settings${targetQuery(device)}`,
-  );
+  return useDeviceMutation(false);
 }
 
 /**

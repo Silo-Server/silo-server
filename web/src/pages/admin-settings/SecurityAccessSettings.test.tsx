@@ -58,6 +58,7 @@ const SERVER_CONFIG: RateLimitConfig = {
     login: { requests_per_minute: 20, burst: 10 },
     signup: { requests_per_minute: 10, burst: 6 },
     setup: { requests_per_minute: 10, burst: 6 },
+    password_change: { requests_per_minute: 10, burst: 5 },
     device_start: { requests_per_minute: 20, burst: 10 },
     device_lookup: { requests_per_minute: 60, burst: 20 },
     device_poll: { requests_per_minute: 120, burst: 30 },
@@ -130,14 +131,34 @@ describe("SecurityAccessSettings", () => {
     expect(screen.getByRole("heading", { name: "Security & Access" })).toBeInTheDocument();
   });
 
-  it("keeps the token and proxy keys on the batched settings form", () => {
+  it("keeps the token, proxy, and local server keys on the batched settings form", () => {
     render(<SecurityAccessSettings />);
 
     expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toEqual([
       "auth.access_token_expiry",
       "auth.refresh_token_expiry",
       "clientip.trusted_proxies",
+      "media_servers.allow_private_destinations",
     ]);
+  });
+
+  it("stages the local server switch and warns while it is on", async () => {
+    const setValue = vi.fn();
+    useSettingsFormMock.mockReturnValue(makeForm({ setValue }));
+    const { rerender } = render(<SecurityAccessSettings />);
+
+    expect(screen.queryByText(/Anyone who can sign in/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("switch", { name: /Local servers for every account/i }));
+    expect(setValue).toHaveBeenCalledWith("media_servers.allow_private_destinations", "true");
+
+    useSettingsFormMock.mockReturnValue(
+      makeForm({
+        getValue: (key: string) =>
+          key === "media_servers.allow_private_destinations" ? "true" : "",
+      }),
+    );
+    rerender(<SecurityAccessSettings />);
+    expect(screen.getByText(/Anyone who can sign in/)).toBeInTheDocument();
   });
 
   it("shows only the rate limiting switch until Advanced is opened", async () => {
@@ -185,10 +206,12 @@ describe("SecurityAccessSettings", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Save$/i }));
 
     await waitFor(() =>
-      expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ enabled: false })),
+      expect(mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ config: expect.objectContaining({ enabled: false }) }),
+      ),
     );
     expect(save).toHaveBeenCalled();
-    // PUT /admin/rate-limits/config validates `backend: redis` against the
+    // PATCH /api/v2/admin/rate-limits/config validates `backend: redis` against the
     // persisted settings, so running the two writers concurrently lets the
     // limiter be judged against the state this very save is replacing.
     expect(order).toEqual(["settings", "rate-limits"]);
@@ -290,5 +313,69 @@ describe("SecurityAccessSettings", () => {
 
     expect(screen.queryByText(/no limiter is running/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/running limiter is using/i)).not.toBeInTheDocument();
+  });
+  it("drops a draft when identical configuration arrives under different authority", async () => {
+    rateLimitConfigMock.mockReturnValue({
+      data: {
+        ...SERVER_CONFIG,
+        etag: '"a"',
+        profileContext: { profileId: "a", authContextVersion: 1 },
+      },
+      isLoading: false,
+    });
+    const { rerender } = render(<SecurityAccessSettings />);
+    await userEvent.click(screen.getByRole("switch", { name: /Enable rate limiting/i }));
+    expect(screen.getByRole("switch", { name: /Enable rate limiting/i })).not.toBeChecked();
+    rateLimitConfigMock.mockReturnValue({
+      data: {
+        ...SERVER_CONFIG,
+        etag: '"b"',
+        profileContext: { profileId: "b", authContextVersion: 1 },
+      },
+      isLoading: false,
+    });
+    rerender(<SecurityAccessSettings />);
+    expect(screen.getByRole("switch", { name: /Enable rate limiting/i })).toBeChecked();
+    expect(screen.queryByText("1 unsaved change")).not.toBeInTheDocument();
+  });
+  it("captures rate-limit intent before awaiting the preceding settings writer", async () => {
+    let finish!: () => void;
+    const save = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const mutateAsync = vi.fn().mockResolvedValue(undefined);
+    const profileContext = { profileId: "a", authContextVersion: 1 };
+    useSettingsFormMock.mockReturnValue(makeForm({ dirtyCount: 1, save }));
+    updateRateLimitMock.mockReturnValue({ mutateAsync, isPending: false });
+    rateLimitConfigMock.mockReturnValue({
+      data: { ...SERVER_CONFIG, etag: '"a"', profileContext },
+      isLoading: false,
+    });
+    const { rerender } = render(<SecurityAccessSettings />);
+    await userEvent.click(screen.getByRole("switch", { name: /Enable rate limiting/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^Save$/i }));
+    expect(save).toHaveBeenCalled();
+    rateLimitConfigMock.mockReturnValue({
+      data: {
+        ...SERVER_CONFIG,
+        etag: '"b"',
+        profileContext: { profileId: "b", authContextVersion: 2 },
+      },
+      isLoading: false,
+    });
+    rerender(<SecurityAccessSettings />);
+    finish();
+    await waitFor(() =>
+      expect(mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({ enabled: false }),
+          etag: '"a"',
+          profileContext,
+        }),
+      ),
+    );
   });
 });

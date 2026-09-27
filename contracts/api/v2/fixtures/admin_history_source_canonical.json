@@ -1,0 +1,11 @@
+{
+  "needs_reconfiguration": false,
+  "id": "1",
+  "name": "Source",
+  "source_type": "emby",
+  "base_url": "https://source.example.test",
+  "system_id": "",
+  "enabled": true,
+  "sort_order": 0,
+  "has_admin_token": true
+}

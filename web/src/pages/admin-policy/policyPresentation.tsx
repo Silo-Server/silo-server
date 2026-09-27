@@ -1,6 +1,6 @@
 import { Eye, KeyRound, MonitorPlay, ScrollText, type LucideIcon } from "lucide-react";
 
-import type { PolicyDocument } from "@/api/types";
+import type { PolicyDocument } from "@/api/adminPolicy";
 import { cn } from "@/lib/utils";
 
 import { formatPolicyDomain } from "./policyPageUtils";
@@ -91,7 +91,7 @@ export function policyDocumentStatus(document: PolicyDocument): PolicyDocumentSt
 }
 
 const STATUS_PRESENTATION: Record<PolicyDocumentStatus, { label: string; dot: string }> = {
-  live: { label: "Live", dot: "bg-emerald-400" },
+  live: { label: "Active", dot: "bg-emerald-400" },
   draft: { label: "Draft", dot: "bg-amber-400" },
   disabled: { label: "Disabled", dot: "bg-muted-foreground/50" },
 };

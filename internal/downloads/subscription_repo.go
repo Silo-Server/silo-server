@@ -68,9 +68,12 @@ func scanSubscriptions(rows pgx.Rows) ([]*Subscription, error) {
 // Upsert inserts the subscription, or updates the existing one for the same
 // (user, profile, device, series) — re-monitoring a series is idempotent and
 // rewrites the mode/options in place. created_at is preserved on update so the
-// future-only cutoff stays anchored to the first subscribe. Returns the stored row.
+// future-only cutoff stays anchored to the first subscribe. Re-monitoring also
+// forgets the episodes deleted under the monitor, as CreateOrGet does. Returns
+// the stored row.
 func (r *SubscriptionRepository) Upsert(ctx context.Context, s *Subscription) (*Subscription, error) {
-	const q = `INSERT INTO download_subscriptions
+	const q = `WITH stored AS (
+		INSERT INTO download_subscriptions
 		(id, user_id, profile_id, device_id, series_id, mode, season_numbers, target_season,
 		 delete_watched, max_storage_bytes, active, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, now(), now())
@@ -82,7 +85,11 @@ func (r *SubscriptionRepository) Upsert(ctx context.Context, s *Subscription) (*
 			max_storage_bytes = excluded.max_storage_bytes,
 			active = true,
 			updated_at = now()
-		RETURNING ` + subscriptionColumns
+		RETURNING ` + subscriptionColumns + `
+	), forgotten AS (
+		DELETE FROM download_subscription_exclusions x USING stored WHERE x.subscription_id = stored.id
+	)
+	SELECT ` + subscriptionColumns + ` FROM stored`
 	return scanSubscription(r.pool.QueryRow(ctx, q,
 		s.ID, s.UserID, s.ProfileID, s.DeviceID, s.SeriesID, s.Mode,
 		intsToInt32s(s.SeasonNumbers), int32Ptr(s.TargetSeason),

@@ -16,9 +16,83 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
+
+func TestHandleHLSSegmentRecoversNetworkRouteRecordedAfterRecipe(t *testing.T) {
+	for _, provider := range []string{"", "tailscale"} {
+		t.Run("provider="+provider, func(t *testing.T) {
+			const upstreamID = "upstream-network"
+			source := PlaybackMediaSource{ID: "source-42", FileID: 42, Version: catalog.FileVersion{FileID: 42}}
+			sessions := playback.NewSessionManager(0, 0)
+			sessions.RegisterReconstructed(&playback.Session{
+				ID: upstreamID, UserID: 7, ProfileID: "profile-1", MediaFileID: 42, PlayMethod: playback.PlayTranscode,
+			})
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			store.Put(PlaybackSession{
+				ID: "play-network", CompatToken: "compat-token", RouteItemID: "item", UpstreamSessionID: upstreamID,
+				UpstreamPlayMethod: "transcode", MediaSources: []PlaybackMediaSource{source},
+			})
+			handler := &PlaybackHandler{playbackStore: store, sessionMgr: sessions}
+			// Startup persists the executable recipe before the master manifest binds
+			// its route. Recovery must use that later assignment, not the old card.
+			if err := handler.persistTranscodeRecipe(t.Context(), "play-network", upstreamID, playback.TranscodeOpts{
+				SessionID: upstreamID, InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+				AudioTrackIndex: compatAudioTrackIndexOrDefault(source), SegmentDuration: 2,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			ctx := netaccess.WithPath(t.Context(), netaccess.Path{Provider: provider})
+			if err := handler.recordNodeRoutingAssignment(ctx, "play-network", upstreamID, *compatLocalVideoAPIRoutingAssignment()); err != nil {
+				t.Fatal(err)
+			}
+			stored, _ := store.Get("play-network")
+			if stored.Recipe.RoutingNetworkProvider != nil {
+				t.Fatal("fixture must retain the recipe written before route assignment")
+			}
+
+			// A restart leaves only the durable compat row and cached HLS bytes.
+			recovered := playback.NewSessionManager(0, 0)
+			tm := playback.NewTranscodeManager()
+			tm.Sessions = recovered
+			root := t.TempDir()
+			output := filepath.Join(root, upstreamID)
+			if err := os.MkdirAll(output, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(output, "seg_00000.ts"), []byte("cached HLS segment"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			ffmpegPath := writeCompatTestFFmpeg(t)
+			tm.Config = func() playback.TranscodeRuntimeConfig {
+				return playback.TranscodeRuntimeConfig{TranscodeDir: root, FFmpegPath: ffmpegPath, HWAccel: playback.HWAccelNone}
+			}
+			t.Cleanup(func() { tm.CloseTranscodeSession(upstreamID, "") })
+			handler.sessionMgr, handler.tm = recovered, tm
+			req := httptest.NewRequest(http.MethodGet, "/Videos/item/hls/play-network/seg_00000.ts", nil)
+			routeCtx := chi.NewRouteContext()
+			routeCtx.URLParams.Add("playlistId", "play-network")
+			routeCtx.URLParams.Add("segmentId", "seg_00000")
+			routeCtx.URLParams.Add("segmentContainer", "ts")
+			requestCtx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+			requestCtx = context.WithValue(requestCtx, compatSessionKey, &Session{Token: "compat-token", StreamAppUserID: 7})
+			recorder := httptest.NewRecorder()
+			handler.HandleHLSSegment(recorder, req.WithContext(requestCtx))
+			if recorder.Code != http.StatusOK || recorder.Body.String() != "cached HLS segment" {
+				t.Fatalf("segment response = %d %s", recorder.Code, recorder.Body.String())
+			}
+			current, err := recovered.GetSession(upstreamID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if current.RoutingNetworkProvider == nil || *current.RoutingNetworkProvider != provider || current.RoutingWorkload != "video_transcode" || current.RoutingExecution != "api" || current.RoutingEgress != "api" {
+				t.Fatalf("recovered route = %#v", current)
+			}
+		})
+	}
+}
 
 // TestHLSSegmentErrorResponse pins the never-500 contract for the HLS segment
 // handler: a segment that will never materialize (absent, or whose transcode

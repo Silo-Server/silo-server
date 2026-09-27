@@ -1,16 +1,18 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/fstest"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
-	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
 // fakeSettings is an in-memory branding.SettingsStore.
@@ -22,25 +24,30 @@ func (f fakeSettings) Set(_ context.Context, key, value string) error    { f[key
 // fakeAssetStore is an in-memory branding.AssetStore.
 type fakeAssetStore struct{ data map[string][]byte }
 
-func (f *fakeAssetStore) PutObject(_ context.Context, _, key string, data []byte) error {
+func (f *fakeAssetStore) Put(_ context.Context, key string, data []byte) error {
 	f.data[key] = data
 	return nil
 }
-func (f *fakeAssetStore) GetObject(_ context.Context, _, key string) ([]byte, error) {
+func (f *fakeAssetStore) Get(_ context.Context, key string) (io.ReadCloser, blobstore.ObjectInfo, error) {
 	if d, ok := f.data[key]; ok {
-		return d, nil
+		return io.NopCloser(bytes.NewReader(d)), blobstore.ObjectInfo{Key: key, Size: int64(len(d))}, nil
 	}
-	return nil, s3client.ErrNotFound
+	return nil, blobstore.ObjectInfo{}, blobstore.ErrNotFound
 }
-func (f *fakeAssetStore) Bucket() string { return "test" }
+func (f *fakeAssetStore) Stat(_ context.Context, key string) (blobstore.ObjectInfo, error) {
+	if d, ok := f.data[key]; ok {
+		return blobstore.ObjectInfo{Key: key, Size: int64(len(d))}, nil
+	}
+	return blobstore.ObjectInfo{}, blobstore.ErrNotFound
+}
 
 func withBranding(t *testing.T, settings fakeSettings) {
 	t.Helper()
 	prevFS, prevBranding := WebDistFS, Branding
 	WebDistFS = fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte(
-			`<!doctype html><head><title>Silo</title>` +
-				`<link rel="icon" href="/favicon.ico" sizes="any" /></head><body></body>`)},
+			`<!doctype html><html lang="en" data-theme="midnight-cinema"><head><title>Silo</title>` +
+				`<link rel="icon" href="/favicon.ico" sizes="any" /></head><body></body></html>`)},
 		"favicon.ico": &fstest.MapFile{Data: []byte("STATIC_ICO")},
 	}
 	Branding = branding.NewService(settings, nil) // no S3: text branding only
@@ -91,6 +98,31 @@ func TestFrontendShellCacheFollowsBrandingChanges(t *testing.T) {
 	}
 	if renamed.Header().Get("ETag") == first.Header().Get("ETag") {
 		t.Fatal("etag must change when the rendered shell changes")
+	}
+}
+
+// TestFrontendShellIgnoresRetiredDefaultTheme covers the retired admin default
+// theme: the web client has one theme, so a leftover branding.default_theme row
+// must neither reach the shell nor change its ETag.
+func TestFrontendShellIgnoresRetiredDefaultTheme(t *testing.T) {
+	settings := fakeSettings{}
+	withBranding(t, settings)
+	handler := FrontendHandler()
+
+	serve := func() *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+		return rr
+	}
+
+	unset := serve()
+	settings["branding.default_theme"] = "cinema-light"
+	stale := serve()
+	if strings.Contains(stale.Body.String(), "data-default-theme") {
+		t.Fatalf("shell carries the retired default theme: %q", stale.Body.String())
+	}
+	if stale.Header().Get("ETag") != unset.Header().Get("ETag") {
+		t.Fatal("a retired setting must not change the shell ETag")
 	}
 }
 

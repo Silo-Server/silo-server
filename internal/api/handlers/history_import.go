@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,8 +23,79 @@ func NewHistoryImportHandler(service *historyimport.Service) *HistoryImportHandl
 	return &HistoryImportHandler{service: service}
 }
 
+func (h *HistoryImportHandler) Service() *historyimport.Service { return h.service }
+
+// ListImportSources is the seam v1 GET /history-imports/sources and v2
+// listHistoryImportSources share: the enabled sources a user may import from.
+func (h *HistoryImportHandler) ListImportSources(ctx context.Context) ([]historyimport.Source, error) {
+	return h.service.ListUserSources(ctx)
+}
+
+// LoginEmbyConnect is the seam behind POST /history-imports/emby-connect/login:
+// it exchanges Emby Connect credentials for a connect session. A failure is
+// the *APIError v1 answers with.
+func (h *HistoryImportHandler) LoginEmbyConnect(ctx context.Context, userID int, input historyimport.LoginConnectInput) (*historyimport.ConnectSessionLoginResult, error) {
+	session, err := h.service.LoginConnect(ctx, userID, input)
+	if err != nil {
+		slog.ErrorContext(ctx, "history import emby connect login failed", "component", "api", "user_id", userID, "error", err)
+		return nil, historyImportAPIError(err)
+	}
+	return session, nil
+}
+
+// CreateImportRun is the seam behind POST /history-imports/runs: it validates
+// the source, resolves credentials, and atomically enqueues durable intent.
+func (h *HistoryImportHandler) CreateImportRun(ctx context.Context, userID int, input historyimport.CreateRunInput) (*historyimport.Run, error) {
+	run, err := h.service.CreateRun(ctx, userID, input)
+	if err != nil {
+		return nil, historyImportAPIError(err)
+	}
+	return run, nil
+}
+
+// ListImportRuns is the seam behind v1 GET /history-imports/runs: the newest
+// limit runs of the account.
+func (h *HistoryImportHandler) ListImportRuns(ctx context.Context, userID, limit int) ([]historyimport.Run, error) {
+	return h.service.ListRuns(ctx, userID, limit)
+}
+
+// ListImportRunsPage is the keyset page v2 listHistoryImportRuns reads:
+// runs strictly older than after in (created_at, id) order, and whether
+// more follow.
+func (h *HistoryImportHandler) ListImportRunsPage(ctx context.Context, userID int, after *historyimport.RunKey, limit int) ([]historyimport.Run, bool, error) {
+	return h.service.ListRunsPage(ctx, userID, after, limit)
+}
+
+// GetImportRun is the seam behind GET /history-imports/runs/{id}.
+func (h *HistoryImportHandler) GetImportRun(ctx context.Context, userID int, runID string) (*historyimport.Run, error) {
+	run, err := h.service.GetRun(ctx, userID, runID)
+	if err != nil {
+		return nil, historyImportAPIError(err)
+	}
+	return run, nil
+}
+
+// CreatePlexPin is the seam behind POST /history-imports/plex/auth/pin.
+func (h *HistoryImportHandler) CreatePlexPin(ctx context.Context, userID int) (*historyimport.PlexPinResponse, error) {
+	pin, err := h.service.CreatePlexPin(ctx, userID)
+	if err != nil {
+		slog.ErrorContext(ctx, "history import plex pin creation failed", "component", "api", "user_id", userID, "error", err)
+		return nil, historyImportAPIError(err)
+	}
+	return pin, nil
+}
+
+// CheckPlexPin is the seam behind POST /history-imports/plex/auth/check.
+func (h *HistoryImportHandler) CheckPlexPin(ctx context.Context, userID int, sessionID string) (*historyimport.PlexCheckResponse, error) {
+	result, err := h.service.CheckPlexPin(ctx, userID, sessionID)
+	if err != nil {
+		return nil, historyImportAPIError(err)
+	}
+	return result, nil
+}
+
 func (h *HistoryImportHandler) HandleListSources(w http.ResponseWriter, r *http.Request) {
-	sources, err := h.service.ListUserSources(r.Context())
+	sources, err := h.ListImportSources(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list history import sources")
 		return
@@ -48,10 +120,9 @@ func (h *HistoryImportHandler) HandleLoginConnect(w http.ResponseWriter, r *http
 		return
 	}
 
-	session, err := h.service.LoginConnect(r.Context(), userID, req)
+	session, err := h.LoginEmbyConnect(r.Context(), userID, req)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "history import emby connect login failed", "component", "api", "user_id", userID, "error", err)
-		h.writeHistoryImportError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, session)
@@ -70,12 +141,12 @@ func (h *HistoryImportHandler) HandleCreateRun(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	run, err := h.service.CreateRun(r.Context(), userID, req)
+	run, err := h.CreateImportRun(r.Context(), userID, req)
 	if err != nil {
-		h.writeHistoryImportError(w, err)
+		writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, run)
+	writeJSON(w, http.StatusCreated, historyimport.PublicRun(*run))
 }
 
 func (h *HistoryImportHandler) HandleListRuns(w http.ResponseWriter, r *http.Request) {
@@ -85,10 +156,13 @@ func (h *HistoryImportHandler) HandleListRuns(w http.ResponseWriter, r *http.Req
 		return
 	}
 	limit, _ := parsePagination(r)
-	runs, err := h.service.ListRuns(r.Context(), userID, limit)
+	runs, err := h.ListImportRuns(r.Context(), userID, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list history import runs")
 		return
+	}
+	for i := range runs {
+		runs[i] = historyimport.PublicRun(runs[i])
 	}
 	writeJSON(w, http.StatusOK, runs)
 }
@@ -104,12 +178,12 @@ func (h *HistoryImportHandler) HandleGetRun(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "bad_request", "Run ID is required")
 		return
 	}
-	run, err := h.service.GetRun(r.Context(), userID, runID)
+	run, err := h.GetImportRun(r.Context(), userID, runID)
 	if err != nil {
-		h.writeHistoryImportError(w, err)
+		writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, run)
+	writeJSON(w, http.StatusOK, historyimport.PublicRun(*run))
 }
 
 func (h *HistoryImportHandler) HandleCreatePlexPin(w http.ResponseWriter, r *http.Request) {
@@ -118,10 +192,9 @@ func (h *HistoryImportHandler) HandleCreatePlexPin(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return
 	}
-	pin, err := h.service.CreatePlexPin(r.Context(), userID)
+	pin, err := h.CreatePlexPin(r.Context(), userID)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "history import plex pin creation failed", "component", "api", "user_id", userID, "error", err)
-		h.writeHistoryImportError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, pin)
@@ -142,9 +215,9 @@ func (h *HistoryImportHandler) HandleCheckPlexPin(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, "bad_request", "session_id is required")
 		return
 	}
-	result, err := h.service.CheckPlexPin(r.Context(), userID, req.SessionID)
+	result, err := h.CheckPlexPin(r.Context(), userID, req.SessionID)
 	if err != nil {
-		h.writeHistoryImportError(w, err)
+		writeAPIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -206,36 +279,67 @@ func (h *HistoryImportHandler) HandleAdminDeleteSource(w http.ResponseWriter, r 
 }
 
 func (h *HistoryImportHandler) writeHistoryImportError(w http.ResponseWriter, err error) {
+	writeAPIError(w, historyImportAPIError(err))
+}
+
+// historyImportAPIError maps a history import failure onto the v1 decision
+// (status, code, message). Upstream statuses carry the historyimport
+// upstream-error code so the v2 listener can tell a rejected source
+// credential from a Silo authentication failure.
+func historyImportAPIError(err error) *APIError {
+	if message, refused := historyimport.ServerAddressMessage(err); refused {
+		return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: message, cause: err}
+	}
 	switch {
+	case errors.Is(err, historyimport.ErrPersonalAdmissionUncertain):
+		return &APIError{Status: http.StatusServiceUnavailable, Code: "dependency_unavailable", Message: historyimport.ErrPersonalAdmissionUncertain.Error(), cause: err}
+	case errors.Is(err, historyimport.ErrPersonalCredentialsUnavailable):
+		return &APIError{Status: http.StatusServiceUnavailable, Code: "dependency_unavailable", Message: "Personal imports are unavailable. No import was accepted.", cause: err}
+	case errors.Is(err, historyimport.ErrPersonalSessionChanged), errors.Is(err, historyimport.ErrRunConfigurationChanged), errors.Is(err, historyimport.ErrSourceDisabled):
+		return &APIError{Status: http.StatusConflict, Code: policyErrorConflict, Message: "The import source or login session changed. Review the configuration and authenticate again.", cause: err}
+
 	case errors.Is(err, historyimport.ErrSourceNotFound),
 		errors.Is(err, historyimport.ErrRunNotFound),
 		errors.Is(err, historyimport.ErrProfileNotFound),
 		errors.Is(err, historyimport.ErrConnectSessionNotFound),
 		errors.Is(err, historyimport.ErrPlexSessionNotFound),
 		errors.Is(err, historyimport.ErrMappingNotFound):
-		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		return &APIError{Status: http.StatusNotFound, Code: policyErrorNotFound, Message: err.Error(), cause: err}
 	case errors.Is(err, historyimport.ErrConnectSessionExpired),
 		errors.Is(err, historyimport.ErrConnectSessionUsed),
 		errors.Is(err, historyimport.ErrPlexSessionExpired),
 		errors.Is(err, historyimport.ErrPlexSessionUsed),
 		errors.Is(err, historyimport.ErrNoAdminToken):
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: err.Error(), cause: err}
 	case errors.Is(err, historyimport.ErrActiveRunExists),
 		errors.Is(err, historyimport.ErrMappingDuplicate):
-		writeError(w, http.StatusConflict, "conflict", err.Error())
+		return &APIError{Status: http.StatusConflict, Code: policyErrorConflict, Message: err.Error(), cause: err}
 	default:
 		if status := historyimport.UpstreamHTTPStatus(err); status > 0 {
-			httpStatus, code, message := historyImportUpstreamError(status)
-			writeError(w, httpStatus, code, message)
-			return
+			return HistoryImportUpstreamAPIError(status)
 		}
 		if err != nil && looksLikeValidationError(err) {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
+			return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: err.Error(), cause: err}
 		}
 		slog.Error("history import: unhandled error", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "History import request failed")
+		return &APIError{Status: http.StatusInternalServerError, Code: policyErrorInternal, Message: "History import request failed", cause: err}
 	}
+}
+
+// ErrHistoryImportUpstream is the cause of an *APIError that reports the
+// source server's answer rather than Silo's: errors.Is distinguishes it from
+// a Silo authentication problem on the same status.
+var errHistoryImportUpstream = errors.New("history import: upstream server error")
+
+// IsHistoryImportUpstreamError reports whether err wraps a source server
+// failure.
+func IsHistoryImportUpstreamError(err error) bool { return errors.Is(err, errHistoryImportUpstream) }
+
+// HistoryImportUpstreamAPIError is the *APIError a source server answering
+// with status produces; tests of the v2 mapping build it without a client.
+func HistoryImportUpstreamAPIError(status int) *APIError {
+	httpStatus, code, message := historyImportUpstreamError(status)
+	return &APIError{Status: httpStatus, Code: code, Message: message, cause: errHistoryImportUpstream}
 }
 
 func historyImportUpstreamError(status int) (int, string, string) {

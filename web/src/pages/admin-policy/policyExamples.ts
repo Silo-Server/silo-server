@@ -11,6 +11,7 @@ export const POLICY_EXAMPLE_INPUTS: Record<string, unknown> = {
     disabled_library_ids: [3],
     profile_present: true,
     profile_max_content_rating: "PG-13",
+    profile_max_advisory_age: 12,
     profile_max_playback_quality: "720p",
     profile_library_restricted: true,
     profile_allowed_library_ids: [1, 2],

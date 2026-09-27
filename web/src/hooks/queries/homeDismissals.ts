@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api } from "@/api/client";
+import { v2 } from "@/api/v2/request";
 import {
   invalidateMediaSurfaceQueries,
   removeItemFromHomeSectionCaches,
@@ -18,7 +18,7 @@ export interface DismissHomeItemVariables {
 }
 
 function dismissalPath({ itemId, surface }: DismissHomeItemVariables) {
-  return `/home/dismissals/${surface}/${encodeURIComponent(itemId)}`;
+  return { surface, item_id: itemId };
 }
 
 function dismissalBody({ progressUpdatedAt, seriesId, surface }: DismissHomeItemVariables) {
@@ -27,7 +27,13 @@ function dismissalBody({ progressUpdatedAt, seriesId, surface }: DismissHomeItem
     : { series_id: seriesId };
 }
 
+// Dismissing an episode or series drops the whole show on the server.
+export function dismissalDropsShow(mediaType: string | undefined) {
+  return mediaType === "episode" || mediaType === "series";
+}
+
 function dismissalSuccessLabel({ mediaType, surface }: DismissHomeItemVariables) {
+  if (dismissalDropsShow(mediaType)) return "Show dropped";
   if (surface === "next_up") return "Removed from Next Up";
   if (mediaType === "audiobook") return "Removed from Continue Listening";
   if (mediaType === "ebook") return "Removed from Continue Reading";
@@ -39,9 +45,7 @@ export function useDismissHomeItem() {
 
   const undoMutation = useMutation({
     mutationFn: (variables: DismissHomeItemVariables) =>
-      api(dismissalPath(variables), {
-        method: "DELETE",
-      }),
+      v2("DELETE /api/v2/home/dismissals/{surface}/{item_id}", { path: dismissalPath(variables) }),
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to undo removal");
     },
@@ -53,9 +57,9 @@ export function useDismissHomeItem() {
 
   return useMutation({
     mutationFn: (variables: DismissHomeItemVariables) =>
-      api(dismissalPath(variables), {
-        method: "PUT",
-        body: JSON.stringify(dismissalBody(variables)),
+      v2("PUT /api/v2/home/dismissals/{surface}/{item_id}", {
+        path: dismissalPath(variables),
+        body: dismissalBody(variables),
       }),
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to remove item");
