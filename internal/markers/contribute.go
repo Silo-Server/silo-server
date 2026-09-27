@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -167,6 +168,18 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 	return outcomes, nil
 }
 
+// urlInText matches an http(s) URL inside free text.
+var urlInText = regexp.MustCompile(`https?://[^\s"'<>]+`)
+
+// submissionErrorText is a provider error's message safe to log. URL errors
+// are sanitized structurally; a URL quoted in other error text (gRPC status
+// text from a plugin, say) loses its query, fragment and userinfo, where
+// credentials travel.
+func submissionErrorText(err error) string {
+	msg := logredact.SanitizeURLError(err).Error()
+	return urlInText.ReplaceAllStringFunc(msg, logredact.SanitizeURL)
+}
+
 func (s *ContributionService) contributeSegment(
 	ctx context.Context,
 	sub Submitter,
@@ -284,8 +297,7 @@ func (s *ContributionService) contributeSegment(
 			row.Status = OutcomeStatusError
 		}
 		if row.Status != OutcomeStatusConflict {
-			// A provider error can quote a request URL; mask its credentials.
-			s.logger.WarnContext(ctx, "marker submission failed", "file_id", row.MediaFileID, "provider", providerID, "segment", seg.kind, "error", logredact.SanitizeURLError(err))
+			s.logger.WarnContext(ctx, "marker submission failed", "file_id", row.MediaFileID, "provider", providerID, "segment", seg.kind, "error", submissionErrorText(err))
 		}
 		s.recordContribution(ctx, row)
 		if row.Status == OutcomeStatusConflict || row.Status == OutcomeStatusInvalid {
