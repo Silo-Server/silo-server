@@ -412,7 +412,9 @@ describe("MovieContent", () => {
     const redetect = vi.fn();
     mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
     mocks.useRedetectItemMarkers.mockReturnValue({ mutate: redetect, isPending: false });
-    mocks.useAdminMarkerCapabilities.mockReturnValue({ data: { redetect_markers: true } });
+    mocks.useAdminMarkerCapabilities.mockReturnValue({
+      data: { redetect_markers: true, movie_credits: true },
+    });
 
     renderToStaticMarkup(
       <MemoryRouter initialEntries={["/item/movie-1"]}>
@@ -443,7 +445,12 @@ describe("MovieContent", () => {
     ["a pending capability read", { data: undefined }],
     ["a failed capability read", { data: undefined, isError: true }],
     ["a node without redetect_markers", { data: { movie_credits: true } }],
-    ["a node with redetect_markers off", { data: { redetect_markers: false } }],
+    [
+      "a node with redetect_markers off",
+      { data: { redetect_markers: false, movie_credits: true } },
+    ],
+    ["a node without movie_credits", { data: { redetect_markers: true } }],
+    ["a node with movie_credits off", { data: { redetect_markers: true, movie_credits: false } }],
   ])("offers no credits re-detection for %s", (_label, capability) => {
     mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
     mocks.useAdminMarkerCapabilities.mockReturnValue(capability);

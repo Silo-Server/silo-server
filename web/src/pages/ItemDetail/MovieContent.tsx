@@ -66,9 +66,12 @@ export default function MovieContent({
 
   const refreshMetadataMutation = useRefreshItemMetadata();
   const redetectMarkersMutation = useRedetectItemMarkers();
-  // Movies have no re-detect action on an API node without redetect-markers.
+  // Movies have no re-detect action on an API node without redetect-markers
+  // or movie credits.
   const markerCapabilities = useAdminMarkerCapabilities(isAdmin);
-  const canRedetectMarkers = markerCapabilities.data?.redetect_markers === true;
+  const canRedetectMovieCredits =
+    markerCapabilities.data?.redetect_markers === true &&
+    markerCapabilities.data?.movie_credits === true;
   const deleteSubtitlePreference = useDeleteSubtitlePreference();
   const setSubtitlePreference = useSetSubtitlePreference();
   const [editOpen, setEditOpen] = useState(false);
@@ -303,7 +306,7 @@ export default function MovieContent({
             }
             isRefreshing={refreshMetadataMutation.isPending}
             onRedetectMarkers={
-              isAdmin && canRedetectMarkers
+              isAdmin && canRedetectMovieCredits
                 ? (kind) => redetectMarkersMutation.mutate({ itemId: item.content_id, kind })
                 : undefined
             }
