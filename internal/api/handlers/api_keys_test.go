@@ -48,12 +48,17 @@ func (s *fakeAPIKeyStore) UpdateTier(context.Context, int64, string) error {
 
 func createAPIKey(t *testing.T, body string) (*httptest.ResponseRecorder, *fakeAPIKeyStore) {
 	t.Helper()
+	return createAPIKeyAs(t, models.RoleAdmin, body)
+}
+
+func createAPIKeyAs(t *testing.T, role, body string) (*httptest.ResponseRecorder, *fakeAPIKeyStore) {
+	t.Helper()
 	store := &fakeAPIKeyStore{}
 	h := NewAPIKeyHandler(store)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", strings.NewReader(body))
 	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{
 		UserID:    7,
-		Role:      "user",
+		Role:      role,
 		TokenType: auth.TokenTypeAccess,
 		SessionID: "s1",
 	}))
@@ -99,6 +104,20 @@ func TestHandleCreateAPIKeyRejectsUnknownScope(t *testing.T) {
 	}
 	if store.created {
 		t.Fatal("an unknown scope must not create a key")
+	}
+}
+
+// Only server admins create API keys (#1189 AC2). The role check runs before
+// the body is read, so a regular account is refused even with a bad body.
+func TestHandleCreateAPIKeyRequiresAdmin(t *testing.T) {
+	for _, body := range []string{`{"label":"ci"}`, `{"label":""}`, `x`} {
+		rec, store := createAPIKeyAs(t, models.RoleUser, body)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("body %q: status = %d, want 403 (body %s)", body, rec.Code, rec.Body.String())
+		}
+		if store.created {
+			t.Fatalf("body %q: a regular account must not create a key", body)
+		}
 	}
 }
 

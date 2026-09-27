@@ -85,10 +85,10 @@ describe("SettingsLayout", () => {
       </MemoryRouter>,
     );
 
-    // Five groups, eighteen sections — every card the same height so no group
+    // Five groups, sixteen sections — every card the same height so no group
     // is visually ranked above another.
     expect(markup.match(/2xl:grid-cols-4/g)).toHaveLength(5);
-    expect(markup.match(/lg:h-28/g)).toHaveLength(18);
+    expect(markup.match(/lg:h-28/g)).toHaveLength(16);
     expect(markup).not.toContain("max-w-5xl");
   });
 

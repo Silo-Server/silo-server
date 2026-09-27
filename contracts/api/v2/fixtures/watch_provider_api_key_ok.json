@@ -15,7 +15,8 @@
     "provides_watchlist_order": false,
     "scrobble_playback": false,
     "import_ratings": false,
-    "export_ratings": false
+    "export_ratings": false,
+    "sync_dropped": false
   },
   "auth_method": "",
   "connected": true,
@@ -33,5 +34,6 @@
   "scrobble_enabled": false,
   "import_ratings_enabled": false,
   "export_ratings_enabled": false,
+  "sync_dropped_enabled": false,
   "credentials_configured": false
 }

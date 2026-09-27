@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 11
+const Revision = 12
 
 // Setting keys, one constant per definition.
 const (
@@ -222,4 +222,7 @@ var ClientLocal = []string{
 // other.
 var Deprecated = []string{
 	PlaybackAutoSkipIntro,
+	UiCustomCss,
+	UiCustomThemeVars,
+	UiTheme,
 }

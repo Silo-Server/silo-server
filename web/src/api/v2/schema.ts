@@ -6718,10 +6718,10 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal. */
+    /** Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal. Dismissing an episode or series drops the whole show: every card of it leaves both rows until the profile watches it again or the dismissal is undone. Watch provider connections with dropped-show sync on, for providers that support it, send the drop to the provider. */
     put: operations["dismissHomeItem"];
     post?: never;
-    /** Show a dismissed card again; an item that was not dismissed is left as is. */
+    /** Show a dismissed card again; an item that was not dismissed is left as is. For an episode or series this undrops the show. */
     delete: operations["undismissHomeItem"];
     options?: never;
     head?: never;
@@ -9727,74 +9727,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v2/theme/catalog": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Read portable theme documents from the configured approved upstream. */
-    get: operations["getThemeCatalog"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v2/theme/catalog/capabilities": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Read portable theme documents from the configured approved upstream. */
-    get: operations["getThemeCatalogCapabilities"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v2/theme/catalog/refresh": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Read portable theme documents from the configured approved upstream. */
-    post: operations["refreshThemeCatalog"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v2/theme/download": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Read portable theme documents from the configured approved upstream. */
-    get: operations["downloadThemeFile"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v2/user/libraries": {
     parameters: {
       query?: never;
@@ -11214,7 +11146,7 @@ export interface components {
     };
     AdminBrandingAsset: {
       /** @enum {string} */
-      kind: "wordmark" | "wordmark_light" | "mark" | "mark_light" | "favicon" | "login_bg";
+      kind: "wordmark" | "mark" | "favicon" | "login_bg";
       /** @description Content-addressed reference of the stored bytes */
       ref: string;
       /** @description Stable public asset path with the ref as cache-buster */
@@ -11223,7 +11155,7 @@ export interface components {
     AdminBrandingAssetForm: {
       /**
        * Format: binary
-       * @description The image: PNG, JPEG or WebP for every kind; favicon also accepts ICO and SVG. Per-kind caps: 8 MiB (wordmark, wordmark_light, mark, mark_light), 1 MiB (favicon), 12 MiB (login_bg).
+       * @description The image: PNG, JPEG or WebP for every kind; favicon also accepts ICO and SVG. Per-kind caps: 8 MiB (wordmark, mark), 1 MiB (favicon), 12 MiB (login_bg).
        */
       file: string;
     };
@@ -16177,15 +16109,12 @@ export interface components {
     };
     BrandingConfiguration: {
       accent_color?: string;
-      default_theme?: string;
       favicon_url?: string;
       login_bg_url?: string;
       login_subtitle: string;
-      mark_light_url?: string;
       mark_url?: string;
       server_name: string;
       storage_available: boolean;
-      wordmark_light_url?: string;
       wordmark_url?: string;
     };
     BulkItemFailure: {
@@ -17516,6 +17445,7 @@ export interface components {
       import_watched_enabled?: boolean;
       import_watchlist_enabled?: boolean;
       scrobble_enabled?: boolean;
+      sync_dropped_enabled?: boolean;
       sync_favorite_removals_enabled?: boolean;
       sync_watchlist_order_enabled?: boolean;
       sync_watchlist_removals_enabled?: boolean;
@@ -19439,7 +19369,7 @@ export interface components {
     HomeDismissal: {
       /**
        * Format: date-time
-       * @description Required for continue_watching: the card's progress_updated_at; the dismissal holds until the item is played again
+       * @description Required for continue_watching: the card's progress_updated_at; the dismissal holds until the item is played again. An episode dismissal drops its whole show instead, which holds until any episode of it is played again.
        */
       progress_updated_at?: string;
       /**
@@ -25214,59 +25144,6 @@ export interface components {
        */
       container: string;
     };
-    ThemeCatalogCapabilitiesOutputBody: {
-      /** @description Whether the current principal may use the capability */
-      allowed: boolean;
-      available: boolean;
-      /** Format: int64 */
-      catalog_byte_limit: number;
-      /** @description Opaque revision of this document */
-      revision: string;
-      /**
-       * @description Support and configuration state, not health
-       * @enum {string}
-       */
-      state: "available" | "disabled" | "not_configured" | "unsupported";
-      /** Format: int64 */
-      theme_byte_limit: number;
-    };
-    ThemeCatalogDocument: {
-      themes: components["schemas"]["ThemeCatalogEntry"][];
-      updatedAt?: string;
-      /** Format: int64 */
-      version: number;
-    };
-    ThemeCatalogEntry: {
-      author: string;
-      description: string;
-      downloadUrl: string;
-      id: string;
-      name: string;
-      previewAccent: string;
-      previewBg: string;
-      tags: string[];
-      version: string;
-    };
-    ThemeCatalogResponse: {
-      document: components["schemas"]["ThemeCatalogDocument"];
-      stale: boolean;
-    };
-    ThemeDownloadResponse: {
-      document: components["schemas"]["ThemeFileDocument"];
-    };
-    ThemeFileDocument: {
-      author?: string;
-      baseTheme: string;
-      createdAt?: string;
-      customCss: string;
-      description?: string;
-      name: string;
-      vars: {
-        [key: string]: string;
-      };
-      /** Format: int64 */
-      version: number;
-    };
     ThemeOverrides: {
       raw_css: string;
       vars: string;
@@ -25976,6 +25853,8 @@ export interface components {
       remove_favorites: boolean;
       remove_watchlist: boolean;
       scrobble_playback: boolean;
+      /** @description The provider can read, drop, and undrop dropped shows. */
+      sync_dropped: boolean;
     };
     WatchProviderConnection: {
       auth_method: string;
@@ -26028,6 +25907,7 @@ export interface components {
       provider: string;
       provider_username?: string;
       scrobble_enabled: boolean;
+      sync_dropped_enabled: boolean;
       sync_favorite_removals_enabled: boolean;
       sync_watchlist_order_enabled: boolean;
       sync_watchlist_removals_enabled: boolean;
@@ -26067,6 +25947,8 @@ export interface components {
       import_watched_enabled: boolean;
       import_watchlist_enabled: boolean;
       scrobble_enabled: boolean;
+      /** @description Sync dropped shows both ways: dismissing a show, or one of its episodes, from Home drops the show on the provider, shows dropped on the provider are hidden from Continue Watching and the profile-wide Next Up (a single series' Next Up still lists them), and watching a dropped show again undrops it on both sides. */
+      sync_dropped_enabled: boolean;
       sync_favorite_removals_enabled: boolean;
       sync_watchlist_order_enabled: boolean;
       sync_watchlist_removals_enabled: boolean;
@@ -31311,7 +31193,7 @@ export interface operations {
       };
       path: {
         /** @description Branding asset slot */
-        kind: "wordmark" | "wordmark_light" | "mark" | "mark_light" | "favicon" | "login_bg";
+        kind: "wordmark" | "mark" | "favicon" | "login_bg";
       };
       cookie?: never;
     };
@@ -31451,7 +31333,7 @@ export interface operations {
       };
       path: {
         /** @description Branding asset slot */
-        kind: "wordmark" | "wordmark_light" | "mark" | "mark_light" | "favicon" | "login_bg";
+        kind: "wordmark" | "mark" | "favicon" | "login_bg";
       };
       cookie?: never;
     };
@@ -113414,390 +113296,6 @@ export interface operations {
       };
       /** @description Unprocessable Entity */
       422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  getThemeCatalog: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ThemeCatalogResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  getThemeCatalogCapabilities: {
-    parameters: {
-      query?: never;
-      header?: {
-        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
-        "If-Match"?: string;
-        "If-None-Match"?: string;
-      };
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          "Cache-Control"?: string;
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ThemeCatalogCapabilitiesOutputBody"];
-        };
-      };
-      /** @description The representation named by If-None-Match is current; no body. */
-      304: {
-        headers: {
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Precondition Failed */
-      412: {
-        headers: {
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  refreshThemeCatalog: {
-    parameters: {
-      query?: never;
-      header?: {
-        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
-        "X-Profile-Id"?: string;
-        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
-        "X-Profile-Token"?: string;
-      };
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ThemeCatalogResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  downloadThemeFile: {
-    parameters: {
-      query: {
-        url: string;
-      };
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ThemeDownloadResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
         headers: {
           [name: string]: unknown;
         };
