@@ -179,13 +179,13 @@ func TestRequire(t *testing.T) {
 
 	noRaw := full
 	noRaw.chromaprintRaw = false
-	if err := noRaw.Require(fingerprint); err == nil || !strings.Contains(err.Error(), "raw fingerprint") {
+	if err := noRaw.Require(fingerprint); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "raw fingerprint") {
 		t.Fatalf("without raw output: %v", err)
 	}
-	if err := (Capabilities{}).Require(fingerprint); err == nil || !strings.Contains(err.Error(), "chromaprint muxer") {
+	if err := (Capabilities{}).Require(fingerprint); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "chromaprint muxer") {
 		t.Fatalf("without the muxer: %v", err)
 	}
-	if err := (Capabilities{}).Require(silence); err == nil || !strings.Contains(err.Error(), "silencedetect") {
+	if err := (Capabilities{}).Require(silence); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "silencedetect") {
 		t.Fatalf("without silencedetect: %v", err)
 	}
 
@@ -204,13 +204,13 @@ func TestRequire(t *testing.T) {
 				partial.filters[name] = struct{}{}
 			}
 		}
-		if err := partial.Require(tail); err == nil || !strings.Contains(err.Error(), missing) {
+		if err := partial.Require(tail); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), missing) {
 			t.Fatalf("without %s: %v", missing, err)
 		}
 	}
 	noMuxer := full
 	noMuxer.muxers = nil
-	if err := noMuxer.Require(tail); err == nil || !strings.Contains(err.Error(), "chromaprint muxer") {
+	if err := noMuxer.Require(tail); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "chromaprint muxer") {
 		t.Fatalf("tail pass without the chromaprint muxer: %v", err)
 	}
 	tail.Audio.Fingerprint = false
@@ -290,6 +290,8 @@ func TestLoadCapabilitiesDoesNotCacheFailures(t *testing.T) {
 
 	if _, err := LoadCapabilities(context.Background(), binary); err == nil {
 		t.Fatal("LoadCapabilities succeeded while listings fail")
+	} else if errors.Is(err, ErrUnsupported) {
+		t.Fatalf("failed listing = %v, must not claim the binary lacks a capability", err)
 	}
 	f.err = nil
 	caps, err := LoadCapabilities(context.Background(), binary)
