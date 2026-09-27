@@ -210,6 +210,9 @@ function shouldInvalidateMediaSurfaceQuery(
   return isWatchedKey(queryKey, options);
 }
 
+// isWatchedKey is a prefix match on purpose: everything under a watched key
+// (a watched season's or episode's detail variants) changes with it, so it is
+// exempt from the itemId narrowing too. Don't tighten it to an exact match.
 function isWatchedKey(queryKey: readonly unknown[], options: InvalidateMediaSurfaceOptions) {
   return (options.watchedKeys ?? []).some((key) => queryKeyStartsWith(queryKey, key));
 }
