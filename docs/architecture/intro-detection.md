@@ -114,7 +114,8 @@ episode with an intro and no credits runs the credits steps alone. With
 `markers.online_storage` set to `on_demand`, the played file includes the
 online markers looked up for this playback, which are never saved; every
 marker update sent to players during the analysis lays them back over the
-stored row, where a manual marker still wins. Unlike an intro group, a
+stored row, where a manual marker still wins, and leaves out a stored
+provider marker the lookup withdrew. Unlike an intro group, a
 credits season group whose stored analysis still stands is not compared again
 from playback: most episodes have no credits local analysis can find, and
 every start would otherwise repeat the comparison. Admin refresh compares both

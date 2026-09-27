@@ -549,30 +549,35 @@ func assertRequestedKinds(t *testing.T, analyzer *fakePlaybackIntroAnalyzer, wan
 
 // An on-demand online intro is never saved. Every update players get keeps it,
 // local analysis is asked only for the missing credits, and the final update
-// carries the online intro with the local credits.
+// carries the online intro with the local credits. The setting is read the way
+// the marker lookup reads it, whatever its case.
 func TestOnDemandPlaybackMarkersKeepOnlineIntroWhileLocalFindsCredits(t *testing.T) {
-	notified, analyzer := onDemandOverlayRun{
-		storage: "on_demand",
-		file:    lazyMarkerTestFile(),
-		view: func(stored *models.MediaFile) *models.MediaFile {
-			return withMarker(stored, models.MarkerSegmentIntro, 20, 80, models.MarkerSourceOnline)
-		},
-		afterLocal: func(stored *models.MediaFile) *models.MediaFile {
-			return withMarker(stored, models.MarkerSegmentCredits, 1700, 1780, models.MarkerSourceScanner)
-		},
-	}.run(t)
+	for _, storage := range []string{"on_demand", " ON_DEMAND "} {
+		t.Run(storage, func(t *testing.T) {
+			notified, analyzer := onDemandOverlayRun{
+				storage: storage,
+				file:    lazyMarkerTestFile(),
+				view: func(stored *models.MediaFile) *models.MediaFile {
+					return withMarker(stored, models.MarkerSegmentIntro, 20, 80, models.MarkerSourceOnline)
+				},
+				afterLocal: func(stored *models.MediaFile) *models.MediaFile {
+					return withMarker(stored, models.MarkerSegmentCredits, 1700, 1780, models.MarkerSourceScanner)
+				},
+			}.run(t)
 
-	assertRequestedKinds(t, analyzer, intromarkers.EpisodeMarkerKinds{Credits: true})
-	if len(notified) < 2 {
-		t.Fatalf("marker updates = %d, want the online update and the local one", len(notified))
-	}
-	for i, file := range notified {
-		assertSegment(t, fmt.Sprintf("update %d", i), file, models.MarkerSegmentIntro, 20, 80)
-	}
-	final := notified[len(notified)-1]
-	assertSegment(t, "final update", final, models.MarkerSegmentCredits, 1700, 1780)
-	if final.IntroMarkersSource == nil || *final.IntroMarkersSource != models.MarkerSourceOnline {
-		t.Fatalf("final intro source = %v, want online", final.IntroMarkersSource)
+			assertRequestedKinds(t, analyzer, intromarkers.EpisodeMarkerKinds{Credits: true})
+			if len(notified) < 2 {
+				t.Fatalf("marker updates = %d, want the online update and the local one", len(notified))
+			}
+			for i, file := range notified {
+				assertSegment(t, fmt.Sprintf("update %d", i), file, models.MarkerSegmentIntro, 20, 80)
+			}
+			final := notified[len(notified)-1]
+			assertSegment(t, "final update", final, models.MarkerSegmentCredits, 1700, 1780)
+			if final.IntroMarkersSource == nil || *final.IntroMarkersSource != models.MarkerSourceOnline {
+				t.Fatalf("final intro source = %v, want online", final.IntroMarkersSource)
+			}
+		})
 	}
 }
 
