@@ -61,7 +61,9 @@ type movieCandidateCursor struct {
 // probe metadata does not count: that verdict is now decided on every
 // analysis, so a probe repair brings the file back. Such files, and movies
 // that get credits from a chapter, are listed on every run, but their
-// analysis reads no artifact and runs no ffmpeg. The tail's window follows from the file's duration
+// analysis reads no artifact and runs no ffmpeg. So is a movie whose stored
+// credits came from a chapter, even with its tail stored, so analysis can
+// withdraw them once its chapters no longer produce them. The tail's window follows from the file's duration
 // and the key's parameters, so matching the file hash, size, and duration
 // matches the whole identity. Failed files retried after their backoff come
 // last.
@@ -83,6 +85,7 @@ func (r *Repository) ListMovieCandidates(ctx context.Context, node string, after
 		tailDetailNoVideo,
 		tailDetailUnsupportedCodec,
 		limit,
+		CreditsChapterAlgorithm,
 	}
 	// The order is ascending on the retry flag, then descending on creation
 	// time and ID, so a page starts at a later flag or, on the same flag, at
@@ -90,8 +93,8 @@ func (r *Repository) ListMovieCandidates(ctx context.Context, node string, after
 	page := ""
 	if after != nil {
 		page = `
-		  AND (COALESCE(art.status = $8, false) > $13
-		       OR (COALESCE(art.status = $8, false) = $13 AND (mf.created_at, mf.id) < ($14, $15)))`
+		  AND (COALESCE(art.status = $8, false) > $14
+		       OR (COALESCE(art.status = $8, false) = $14 AND (mf.created_at, mf.id) < ($15, $16)))`
 		args = append(args, after.retried, after.createdAt, after.fileID)
 	}
 	rows, err := r.pool.Query(ctx, movieCandidateSelect+`,
@@ -107,14 +110,15 @@ func (r *Repository) ListMovieCandidates(ctx context.Context, node string, after
 		  AND (mf.credits_start IS NULL
 		       OR mf.credits_end IS NULL
 		       OR COALESCE(NULLIF(BTRIM(mf.credits_markers_source), ''), BTRIM(mf.markers_source), '') = $5)
-		  AND NOT COALESCE(
-		      art.file_hash = COALESCE(mf.file_hash, '')
-		      AND art.file_size = COALESCE(mf.file_size, 0)
-		      AND art.duration_seconds = COALESCE(mf.duration, 0)
-		      AND (art.status = $6
-		           OR (art.status = $7 AND COALESCE(art.detail, '') NOT IN ($10, $11))
-		           OR (art.status = $8 AND art.retry_after > NOW() AND art.recorded_by = $9)),
-		      false)`+page+`
+		  AND (COALESCE(mf.credits_markers_algorithm, '') = $13
+		       OR NOT COALESCE(
+		           art.file_hash = COALESCE(mf.file_hash, '')
+		           AND art.file_size = COALESCE(mf.file_size, 0)
+		           AND art.duration_seconds = COALESCE(mf.duration, 0)
+		           AND (art.status = $6
+		                OR (art.status = $7 AND COALESCE(art.detail, '') NOT IN ($10, $11))
+		                OR (art.status = $8 AND art.retry_after > NOW() AND art.recorded_by = $9)),
+		           false))`+page+`
 		ORDER BY COALESCE(art.status = $8, false), mf.created_at DESC, mf.id DESC
 		LIMIT $12`,
 		args...,

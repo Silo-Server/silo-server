@@ -1536,7 +1536,10 @@ func (r *FileRepository) WithdrawScannerMarker(ctx context.Context, fileID int, 
 	}
 	if source == nil || strings.TrimSpace(*source) != models.MarkerSourceScanner ||
 		target.algorithm == nil || *target.algorithm != algorithm || !clearSegmentState(target) {
-		return false, tx.Commit(ctx)
+		if err := tx.Commit(ctx); err != nil {
+			return false, fmt.Errorf("commit marker withdrawal transaction: %w", err)
+		}
+		return false, nil
 	}
 	wrote, err := writeMarkerMutationState(ctx, tx, fileID, state)
 	if err != nil {
