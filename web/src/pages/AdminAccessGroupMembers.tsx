@@ -137,6 +137,8 @@ export function AccessGroupMembers({
       setAddRetryIds(failedIds);
     } else {
       setSelected(failedIds);
+      // A later move supersedes an earlier failed add's retry selection.
+      setAddRetryIds(new Set());
       if (failedIds.size === 0) setMoveTarget("");
     }
     setFailedAdding(isAdd);
