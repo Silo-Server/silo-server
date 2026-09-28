@@ -316,11 +316,44 @@ describe("AdminAccessGroups", () => {
     const confirm = await screen.findByRole("alertdialog");
     expect(within(confirm).getByText("Move 1 user to Kids?")).toBeInTheDocument();
     expect(within(confirm).getByText("1 from no group")).toBeInTheDocument();
+    // An ungrouped account inherits the no-group policy, so its losses are listed.
+    expect(within(confirm).getByText("Downloads: Allowed → Not allowed")).toBeInTheDocument();
+    expect(within(confirm).getByText("Concurrent streams: Unlimited → 1")).toBeInTheDocument();
     await user.click(within(confirm).getByRole("button", { name: "Move" }));
 
     await waitFor(() => expect(adminUsers.update).toHaveBeenCalledTimes(1));
     expect(adminUsers.update.mock.calls[0]![0].user.id).toBe(9);
     expect(String(adminUsers.update.mock.calls[0]![1].access_group_id)).toBe("1");
+    adminUsers.data = [];
+  });
+
+  it("waits for the group list before members can be moved or added", async () => {
+    const serve = globalThis.fetch;
+    let failGroups = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) =>
+        failGroups &&
+        String(input) === "/api/v2/admin/access-groups?limit=200" &&
+        (init?.method ?? "GET") === "GET"
+          ? jsonResponse({ error: "unavailable", message: "down" }, 503)
+          : serve(input, init),
+      ),
+    );
+    adminUsers.data = [member(8, "sam", "user", 2)];
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+
+    // Without the list, sam's group 2 can't be told apart from no group.
+    expect(await within(members).findByText(/Could not load access groups/)).toBeInTheDocument();
+    expect(within(members).getByRole("button", { name: "Add users" })).toBeDisabled();
+
+    failGroups = false;
+    await user.click(within(members).getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(within(members).getByRole("button", { name: "Add users" })).toBeEnabled(),
+    );
     adminUsers.data = [];
   });
 

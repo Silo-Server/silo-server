@@ -627,7 +627,12 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
         )}
       </section>
 
-      <AccessGroupMembers group={group} groups={groups.data ?? []} />
+      <AccessGroupMembers
+        group={group}
+        groups={groups.data ?? []}
+        groupsReady={groups.isSuccess}
+        onRetryGroups={groups.isError ? () => void groups.refetch() : undefined}
+      />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1">

@@ -40,7 +40,7 @@ import {
 import { accessGroupsKey } from "@/hooks/queries/admin/accessGroups";
 import { adminUsersKey, useAdminUsers } from "@/hooks/queries/admin/users";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
-import { groupPolicyChanges } from "@/lib/accessGroupPolicyChanges";
+import { NO_GROUP_POLICY, groupPolicyChanges } from "@/lib/accessGroupPolicyChanges";
 
 /** A pending group change awaiting the admin's confirmation. */
 interface GroupMove {
@@ -56,9 +56,15 @@ interface GroupMove {
 export function AccessGroupMembers({
   group,
   groups,
+  groupsReady,
+  onRetryGroups,
 }: {
   group: AccessGroup;
   groups: AccessGroup[];
+  // The group list names each member's current group; without it the move
+  // confirmation can't say what changes, so moves wait for it.
+  groupsReady: boolean;
+  onRetryGroups?: () => void;
 }) {
   const users = useAdminUsers();
   const libraries = useAdminLibraries();
@@ -144,7 +150,7 @@ export function AccessGroupMembers({
           type="button"
           variant="outline"
           size="sm"
-          disabled={!users.isSuccess}
+          disabled={!users.isSuccess || !groupsReady}
           onClick={() => setAdding(true)}
         >
           Add users
@@ -152,6 +158,14 @@ export function AccessGroupMembers({
       </div>
 
       {users.isPending && <p className="text-muted-foreground text-sm">Loading members...</p>}
+      {!groupsReady && onRetryGroups && (
+        <p role="alert" className="text-sm">
+          Could not load access groups, so members can&apos;t be moved yet.{" "}
+          <Button variant="link" className="h-auto p-0" onClick={onRetryGroups}>
+            Retry
+          </Button>
+        </p>
+      )}
       {users.isError && (
         <p role="alert" className="text-sm">
           Could not load members.{" "}
@@ -209,7 +223,7 @@ export function AccessGroupMembers({
               <Button
                 type="button"
                 size="sm"
-                disabled={selectedMembers.length === 0 || !moveTarget || saving}
+                disabled={selectedMembers.length === 0 || !moveTarget || saving || !groupsReady}
                 onClick={() => {
                   const target = otherGroups.find(
                     (candidate) => String(candidate.id) === moveTarget,
@@ -366,6 +380,9 @@ function ConfirmMoveDialog({
     bySource.set(key, [...(bySource.get(key) ?? []), user]);
   }
   const count = move.users.length;
+  const unresolved = [...bySource.keys()].some(
+    (key) => key !== "none" && !groups.some((candidate) => String(candidate.id) === key),
+  );
   return (
     <AlertDialog open onOpenChange={(open) => !open && !saving && onCancel()}>
       <AlertDialogContent>
@@ -380,16 +397,25 @@ function ConfirmMoveDialog({
         </AlertDialogHeader>
         <div className="max-h-72 space-y-3 overflow-y-auto text-sm">
           {[...bySource.entries()].map(([key, sourceUsers]) => {
-            const source = groups.find((candidate) => String(candidate.id) === key);
-            const changes = source ? groupPolicyChanges(source, move.target, libraryNames) : null;
-            const who = `${sourceUsers.length} from ${source?.name ?? "no group"}`;
+            const source =
+              key === "none" ? null : groups.find((candidate) => String(candidate.id) === key);
+            // An ungrouped account inherits the no-group policy; a group ID
+            // missing from the list is unresolved (not "no group") and its
+            // changes are unknown.
+            const changes =
+              source === undefined
+                ? null
+                : groupPolicyChanges(source ?? NO_GROUP_POLICY, move.target, libraryNames);
+            const who = `${sourceUsers.length} from ${
+              source === null ? "no group" : (source?.name ?? `group #${key}`)
+            }`;
             return (
               <div key={key}>
                 <p className="font-medium">{who}</p>
                 {changes === null ? (
                   <p className="text-muted-foreground">
-                    They start inheriting {move.target.name}&apos;s settings instead of the server
-                    defaults.
+                    Their current group couldn&apos;t be loaded, so the settings that change are
+                    unknown.
                   </p>
                 ) : changes.length === 0 ? (
                   <p className="text-muted-foreground">No inherited settings change.</p>
@@ -409,7 +435,7 @@ function ConfirmMoveDialog({
         <AlertDialogFooter>
           <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            disabled={saving}
+            disabled={saving || unresolved}
             onClick={(event) => {
               event.preventDefault();
               onConfirm();

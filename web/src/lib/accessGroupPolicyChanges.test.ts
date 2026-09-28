@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 
 import type { AccessGroup } from "@/api/types";
-import { groupPolicyChanges } from "./accessGroupPolicyChanges";
+import { NO_GROUP_POLICY, groupPolicyChanges } from "./accessGroupPolicyChanges";
 
 const base: AccessGroup = {
   id: 1,
@@ -71,4 +71,34 @@ it("identifies the libraries when equal-sized groups grant different access", ()
     ]),
   );
   expect(changes).toEqual([{ label: "Libraries", from: "Movies, Series", to: "Series, Anime" }]);
+});
+
+it("keeps whole-kbps bitrate caps apart", () => {
+  const from = { ...base, max_remote_stream_bitrate_kbps: 128, max_local_stream_bitrate_kbps: 64 };
+  const to = { ...base, max_remote_stream_bitrate_kbps: 64, max_local_stream_bitrate_kbps: 128 };
+  expect(groupPolicyChanges(from, to)).toEqual([
+    { label: "Remote stream bitrate", from: "0.128 Mbps", to: "0.064 Mbps" },
+    { label: "Local stream bitrate", from: "0.064 Mbps", to: "0.128 Mbps" },
+  ]);
+});
+
+it("compares an ungrouped account against the no-group policy", () => {
+  expect(
+    groupPolicyChanges(
+      NO_GROUP_POLICY,
+      base,
+      new Map([
+        [2, "Movies"],
+        [3, "Series"],
+      ]),
+    ),
+  ).toEqual([
+    { label: "Libraries", from: "All libraries", to: "Movies, Series" },
+    { label: "Playback quality", from: expect.any(String), to: expect.any(String) },
+    { label: "Downloads", from: "Allowed", to: "Not allowed" },
+    { label: "Concurrent streams", from: "Unlimited", to: "1" },
+    { label: "Remote stream bitrate", from: "Unlimited", to: "8 Mbps" },
+    { label: "Permissions", from: "All", to: "None" },
+    { label: "Requests", from: "Allowed", to: "Not allowed" },
+  ]);
 });
