@@ -11,9 +11,12 @@ package pglock
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -54,6 +57,55 @@ func TryAcquire(ctx context.Context, pool *pgxpool.Pool, key int64) (*Lock, bool
 	if !locked {
 		conn.Release()
 		return nil, false, nil
+	}
+	return &Lock{conn: conn, key: key}, true, nil
+}
+
+// lockNotAvailable is the SQLSTATE PostgreSQL reports when lock_timeout ends a
+// lock wait.
+const lockNotAvailable = "55P03"
+
+// Acquire takes advisory lock key, waiting up to wait for the session holding
+// it to release it. It reports acquired false (with a nil Lock and no error)
+// when the wait runs out, or when pool is nil. A wait of zero or less does not
+// wait at all. ctx still bounds the call.
+//
+// PostgreSQL enforces the wait with a transaction-local lock_timeout, so a
+// wait that runs out leaves the lock queue and returns a clean connection to
+// the pool. The lock itself is session-level and outlives that transaction.
+// Any other failure closes the connection instead of returning it, because
+// PostgreSQL may have granted the lock just before reporting the error.
+//
+// The caller owns the returned Lock and must call Release exactly once.
+func Acquire(ctx context.Context, pool *pgxpool.Pool, key int64, wait time.Duration) (*Lock, bool, error) {
+	if wait <= 0 {
+		return TryAcquire(ctx, pool, key)
+	}
+	if pool == nil {
+		return nil, false, nil
+	}
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("acquiring connection for advisory lock %d: %w", key, err)
+	}
+	tx, err := conn.Begin(ctx)
+	if err == nil {
+		_, err = tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`, strconv.FormatInt(max(wait.Milliseconds(), 1), 10))
+	}
+	if err == nil {
+		_, err = tx.Exec(ctx, `SELECT pg_advisory_lock($1)`, key)
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == lockNotAvailable {
+			_ = tx.Rollback(ctx)
+			conn.Release()
+			return nil, false, nil
+		}
+	}
+	if err == nil {
+		err = tx.Commit(ctx)
+	}
+	if err != nil {
+		_ = conn.Hijack().Close(context.WithoutCancel(ctx))
+		return nil, false, fmt.Errorf("acquiring advisory lock %d: %w", key, err)
 	}
 	return &Lock{conn: conn, key: key}, true, nil
 }

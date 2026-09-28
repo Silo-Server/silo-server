@@ -238,6 +238,38 @@ describe("Requests (Yours list)", () => {
     );
   });
 
+  it("shows how far a request's download is, without naming a blocked import", () => {
+    mocks.mine = [
+      request("r13", "Heat", {
+        status: "downloading",
+        state: "processing",
+        download: {
+          phase: "downloading",
+          percent: 43,
+          downloads: 1,
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      }),
+      request("r14", "Ronin", {
+        status: "downloading",
+        state: "processing",
+        download: {
+          phase: "import_blocked",
+          percent: 100,
+          downloads: 1,
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      }),
+    ];
+    renderYours();
+
+    const heat = row("Heat");
+    expect(within(heat).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "43");
+    expect(within(heat).getByText("Downloading · 43%")).toBeInTheDocument();
+    expect(within(row("Ronin")).getByText("Waiting for import")).toBeInTheDocument();
+    expect(screen.queryByText("Import blocked")).not.toBeInTheDocument();
+  });
+
   it("shows when a request was made and when it last changed", () => {
     mocks.mine = [
       request("r11", "Old Movie", { updated_at: "2026-01-01T00:00:30Z" }),

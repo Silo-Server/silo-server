@@ -49,6 +49,9 @@ type RouterTargetStatus struct {
 	Status         Status
 	ExternalStatus string
 	Message        string
+	// Progress is set by a plugin that declares reports_download_progress
+	// while the target has downloads in flight; nil means none.
+	Progress *DownloadProgress
 }
 
 type RouterOption struct {
@@ -198,9 +201,42 @@ func (p *pluginRouterProvider) CheckStatus(ctx context.Context, installationID i
 		out = append(out, RouterTargetStatus{
 			Quality: Quality(st.GetQuality()), ConnectionID: st.GetConnectionId(),
 			Status: Status(st.GetStatus()), ExternalStatus: st.GetExternalStatus(), Message: st.GetMessage(),
+			Progress: downloadProgressFromProto(st.GetProgress()),
 		})
 	}
 	return out, nil
+}
+
+// downloadProgressFromProto normalizes a plugin's progress report. An unknown
+// or empty phase reads as downloading, but a report with neither a phase nor
+// a size carries nothing and maps to nil. Byte counts are clamped so that
+// 0 <= left <= total; a total of 0 means the size is unknown.
+func downloadProgressFromProto(p *pluginv1.DownloadProgress) *DownloadProgress {
+	if p == nil {
+		return nil
+	}
+	phase := DownloadPhase(p.GetPhase())
+	total := max(p.GetBytesTotal(), 0)
+	if phase == "" && total == 0 {
+		return nil
+	}
+	switch phase {
+	case DownloadPhaseQueued, DownloadPhaseDownloading, DownloadPhasePaused,
+		DownloadPhaseStalled, DownloadPhaseImporting, DownloadPhaseImportBlocked:
+	default:
+		phase = DownloadPhaseDownloading
+	}
+	out := &DownloadProgress{
+		Phase:      phase,
+		BytesTotal: total,
+		BytesLeft:  min(max(p.GetBytesLeft(), 0), total),
+		Downloads:  int(max(p.GetDownloads(), 0)),
+	}
+	if eta := p.GetEstimatedCompletion(); eta != nil && eta.IsValid() {
+		at := eta.AsTime().UTC()
+		out.EstimatedCompletion = &at
+	}
+	return out
 }
 
 func (p *pluginRouterProvider) ListConfigOptions(ctx context.Context, installationID int, capabilityID string, conn ResolvedRouterConnection) (map[string][]RouterOption, error) {

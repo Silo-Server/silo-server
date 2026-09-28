@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { MediaRequest, RequestMediaDetail } from "@/api/types";
 import { CancelRequestDialog } from "@/components/CancelRequestDialog";
+import { RequestDownloadProgress } from "@/components/RequestDownloadProgress";
 import { RequestSeasonsDialog } from "@/components/RequestSeasonsDialog";
 import {
   useCancelMediaRequest,
@@ -58,9 +59,10 @@ interface RequestActionBarProps {
 
 /**
  * The action row for a title outside the library: Request in the Play pill's
- * place, the request's state once there is one, and cancelling or following
- * that request. Owns the request mutations so their pending state re-renders
- * only this row, as MediaUserActionBar does for library items.
+ * place, the request's state once there is one, cancelling or following that
+ * request, and how far its download is. Owns the request mutations so their
+ * pending state re-renders only this row, as MediaUserActionBar does for
+ * library items.
  */
 export default function RequestActionBar({ item, libraryHref }: RequestActionBarProps) {
   const navigate = useViewTransitionNavigate();
@@ -148,6 +150,9 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
   return (
     <>
       <ActionBar primaryAction={primaryAction} secondaryActions={secondaryActions} links={links} />
+      {item.request.download ? (
+        <RequestDownloadProgress download={item.request.download} className="mt-3 max-w-xs" />
+      ) : null}
       {ownRequest ? (
         <CancelRequestDialog
           title={item.title}
@@ -173,11 +178,16 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
 /**
  * The viewer's own request for this title, while they can still cancel it. The
  * detail payload says a title has a request but not whose it is, so look for
- * it among the account's own active requests.
+ * it among the account's own active requests. The title's download progress
+ * comes from the detail, so another request downloading is no reason to read
+ * the list again.
  */
 function useOwnCancellableRequest(item: RequestMediaDetail): MediaRequest | undefined {
   const mayCancel = item.request.status === "pending" || item.request.status === "approved";
-  const mine = useMyMediaRequests({ outcome: "active" }, { enabled: mayCancel });
+  const mine = useMyMediaRequests(
+    { outcome: "active" },
+    { enabled: mayCancel, pollDownloads: false },
+  );
   if (!mayCancel) return undefined;
   const requestID = item.request.request_id;
   return mine.data?.find(

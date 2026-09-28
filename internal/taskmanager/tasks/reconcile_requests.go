@@ -4,14 +4,35 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// requestReconcileAdvisoryLock spells "SILORQRC".
+// requestReconcileAdvisoryLock spells "SILORQRC". It lets one server run each
+// reconcile pass.
 const requestReconcileAdvisoryLock int64 = 0x53494C4F52515243
+
+// requestTargetWriteAdvisoryLock spells "SILORQTW". It keeps the reconcile pass
+// and the download refresh pass from writing request targets at the same time:
+// reconcile waits for it, and the refresh skips while it is held.
+const requestTargetWriteAdvisoryLock int64 = 0x53494C4F52515457
+
+// requestTargetWriteWait bounds how long a reconcile pass waits for a download
+// refresh pass to finish. A refresh pass asks about at most 200 requests and
+// normally ends well inside a minute; requestDownloadRefreshBudget cuts it off
+// before this wait runs out, even while a download server stops answering.
+const requestTargetWriteWait = 2 * time.Minute
+
+// requestDownloadRefreshBudget bounds a download refresh pass. A plugin call
+// may take the router's full 60-second deadline, and one server that stops
+// answering can hang every call on it, so without a bound a pass could hold
+// the target write lock past requestTargetWriteWait and fail the reconcile
+// pass waiting for it. The margin covers the writes that apply the last
+// answer after the budget cuts the call in flight.
+const requestDownloadRefreshBudget = 90 * time.Second
 
 type RequestReconciler interface {
 	ReconcileRequests(ctx context.Context, limit int) (requests.ReconcileResult, error)
@@ -21,11 +42,13 @@ type RequestReconciler interface {
 // process runs the task manager, so an advisory lock lets one server run each
 // pass; the others skip. The per-request submission claim already prevents a
 // double submission, so the lock only saves the duplicate router status calls
-// and presence lookups.
+// and presence lookups. The pass then waits for the request target write lock,
+// so it runs after a download refresh pass in progress instead of skipping.
 type ReconcileRequestsTask struct {
 	reconciler RequestReconciler
 	limit      int
 	lock       clusterLock
+	writeLock  waitingClusterLock
 }
 
 // NewReconcileRequestsTask constructs the task. A nil pool runs without the
@@ -36,7 +59,8 @@ func NewReconcileRequestsTask(reconciler RequestReconciler, limit int, pool *pgx
 	}
 	t := &ReconcileRequestsTask{reconciler: reconciler, limit: limit}
 	if pool != nil {
-		t.lock = advisoryClusterLock{pool: pool, key: requestReconcileAdvisoryLock}
+		t.lock = advisoryClusterLock{pool: pool, key: requestReconcileAdvisoryLock, name: "request reconcile"}
+		t.writeLock = advisoryClusterLock{pool: pool, key: requestTargetWriteAdvisoryLock, name: "request target writes", wait: requestTargetWriteWait}
 	}
 	return t
 }
@@ -71,6 +95,16 @@ func (t *ReconcileRequestsTask) Execute(ctx context.Context, progress taskmanage
 		if !acquired {
 			progress.Report(100, "Another server is reconciling media requests")
 			return nil
+		}
+		defer release()
+	}
+	if t.writeLock != nil {
+		release, acquired, err := t.writeLock.Acquire(ctx)
+		if err != nil {
+			return fmt.Errorf("acquiring request target write lock: %w", err)
+		}
+		if !acquired {
+			return fmt.Errorf("request download refresh held the request target write lock for over %s", requestTargetWriteWait)
 		}
 		defer release()
 	}

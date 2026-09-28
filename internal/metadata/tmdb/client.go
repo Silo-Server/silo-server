@@ -31,9 +31,14 @@ const (
 	// never changes. The stale-window failure mode is safe — a title that
 	// gains a cert stays hidden (fail-closed) for at most the TTL.
 	certificationCacheTTL = 7 * 24 * time.Hour
-	// certificationFetchTimeout bounds the shared (caller-detached)
-	// singleflight fetch; see GetCertification.
-	certificationFetchTimeout = 30 * time.Second
+	// sharedFetchTimeout bounds a shared (caller-detached) singleflight
+	// fetch; see cachedCertification and GetMediaDetail.
+	sharedFetchTimeout = 30 * time.Second
+	// mediaDetailCacheTTL is deliberately short: a detail is large, so the
+	// cache holds only the titles being looked at right now. It is long enough
+	// that a title page polling a download's progress every 30 seconds, and
+	// everyone else viewing the title, share one fetch.
+	mediaDetailCacheTTL = 2 * time.Minute
 )
 
 // Client is an HTTP client for the TMDB collection preset API surface.
@@ -46,6 +51,7 @@ type Client struct {
 	discoverPageCache    *cache.TTLCache[*MediaPage]
 	externalIDCache      *cache.TTLCache[*ExternalIDs]
 	certificationCache   *cache.TTLCache[string]
+	mediaDetailCache     *cache.TTLCache[*MediaDetail]
 	cacheGroup           singleflight.Group
 	responseCacheTTL     time.Duration
 }
@@ -71,6 +77,7 @@ func NewClient(apiKey string, rateLimit int) *Client {
 		discoverPageCache:    cache.NewTTLCache[*MediaPage](),
 		externalIDCache:      cache.NewTTLCache[*ExternalIDs](),
 		certificationCache:   cache.NewTTLCache[string](),
+		mediaDetailCache:     cache.NewTTLCache[*MediaDetail](),
 		responseCacheTTL:     defaultResponseCacheTTL,
 	}
 }
@@ -96,6 +103,9 @@ func (c *Client) Close() {
 	}
 	if c.certificationCache != nil {
 		c.certificationCache.Close()
+	}
+	if c.mediaDetailCache != nil {
+		c.mediaDetailCache.Close()
 	}
 }
 
@@ -889,29 +899,105 @@ func (c *Client) GetList(ctx context.Context, id, limit int) ([]CollectionResult
 //
 // Cast is sorted by TMDB billing order and capped at 24 entries to keep the
 // payload bounded.
+//
+// A detail is cached for mediaDetailCacheTTL, and concurrent callers for one
+// title share a fetch. Each caller gets its own copy.
 func (c *Client) GetMediaDetail(ctx context.Context, mediaType string, id int) (*MediaDetail, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("tmdb: media id must be > 0 (got %d)", id)
 	}
-
+	var fetch func(context.Context) (*MediaDetail, error)
 	switch mediaType {
 	case "movie":
-		path := fmt.Sprintf("/movie/%d?append_to_response=credits,external_ids,recommendations,release_dates,keywords", id)
-		var resp movieDetailResponse
-		if err := c.doGet(ctx, path, &resp); err != nil {
-			return nil, err
+		fetch = func(fetchCtx context.Context) (*MediaDetail, error) {
+			path := fmt.Sprintf("/movie/%d?append_to_response=credits,external_ids,recommendations,release_dates,keywords", id)
+			var resp movieDetailResponse
+			if err := c.doGet(fetchCtx, path, &resp); err != nil {
+				return nil, err
+			}
+			return normalizeMovieDetail(&resp), nil
 		}
-		return normalizeMovieDetail(&resp), nil
 	case "series", "tv":
-		path := fmt.Sprintf("/tv/%d?append_to_response=credits,external_ids,recommendations,content_ratings,keywords", id)
-		var resp tvDetailResponse
-		if err := c.doGet(ctx, path, &resp); err != nil {
-			return nil, err
+		mediaType = "tv"
+		fetch = func(fetchCtx context.Context) (*MediaDetail, error) {
+			path := fmt.Sprintf("/tv/%d?append_to_response=credits,external_ids,recommendations,content_ratings,keywords", id)
+			var resp tvDetailResponse
+			if err := c.doGet(fetchCtx, path, &resp); err != nil {
+				return nil, err
+			}
+			return normalizeTVDetail(&resp), nil
 		}
-		return normalizeTVDetail(&resp), nil
 	default:
 		return nil, fmt.Errorf("tmdb: invalid media type for detail: %q", mediaType)
 	}
+
+	cacheKey := "media_detail:" + mediaType + ":" + strconv.Itoa(id)
+	if c.mediaDetailCache != nil {
+		if cached, ok := c.mediaDetailCache.Get(cacheKey); ok {
+			return cloneMediaDetail(cached), nil
+		}
+	}
+	// DoChan + select for the same reason as cachedCertification: the shared
+	// fetch survives any one caller's disconnect, and each caller stops
+	// waiting on its own cancellation.
+	resultCh := c.cacheGroup.DoChan(cacheKey, func() (any, error) {
+		if c.mediaDetailCache != nil {
+			if cached, ok := c.mediaDetailCache.Get(cacheKey); ok {
+				return cached, nil
+			}
+		}
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sharedFetchTimeout)
+		defer cancel()
+		detail, err := fetch(fetchCtx)
+		if err != nil {
+			return nil, err
+		}
+		if c.mediaDetailCache != nil {
+			c.mediaDetailCache.Set(cacheKey, detail, mediaDetailCacheTTL)
+		}
+		return detail, nil
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return nil, result.Err
+		}
+		detail, ok := result.Val.(*MediaDetail)
+		if !ok {
+			return nil, fmt.Errorf("tmdb: invalid cached media detail response")
+		}
+		return cloneMediaDetail(detail), nil
+	}
+}
+
+// cloneMediaDetail copies a detail deeply enough that a caller changing its
+// copy cannot change the cached one.
+func cloneMediaDetail(detail *MediaDetail) *MediaDetail {
+	if detail == nil {
+		return nil
+	}
+	cloned := *detail
+	cloned.Genres = slices.Clone(detail.Genres)
+	if detail.Certifications != nil {
+		cloned.Certifications = make(map[string][]string, len(detail.Certifications))
+		for country, certs := range detail.Certifications {
+			cloned.Certifications[country] = slices.Clone(certs)
+		}
+	}
+	cloned.ProductionCompanies = slices.Clone(detail.ProductionCompanies)
+	cloned.KeywordIDs = slices.Clone(detail.KeywordIDs)
+	cloned.GenreIDs = slices.Clone(detail.GenreIDs)
+	cloned.CompanyIDs = slices.Clone(detail.CompanyIDs)
+	cloned.NetworkIDs = slices.Clone(detail.NetworkIDs)
+	cloned.OriginCountries = slices.Clone(detail.OriginCountries)
+	cloned.Networks = slices.Clone(detail.Networks)
+	cloned.Seasons = slices.Clone(detail.Seasons)
+	cloned.Cast = slices.Clone(detail.Cast)
+	cloned.Creators = slices.Clone(detail.Creators)
+	cloned.Recommendations = slices.Clone(detail.Recommendations)
+	return &cloned
 }
 
 func normalizeMovieDetail(resp *movieDetailResponse) *MediaDetail {
@@ -1276,7 +1362,8 @@ func cloneExternalIDs(ids *ExternalIDs) *ExternalIDs {
 // "TV-MA", ...), or "" when the title has no US certification. It uses the
 // dedicated release_dates / content_ratings sub-resources instead of the full
 // detail payload for the same reason GetExternalIDs does: the detail response
-// is 100+ KB and uncached, while these are a country list of a few KB.
+// is 100+ KB and cached only briefly, while these are a country list of a few
+// KB.
 //
 // Unlike GetMediaDetail's display rating, this deliberately does NOT fall
 // back to another country's certification: the value feeds the US-scale
@@ -1352,7 +1439,7 @@ func (c *Client) cachedCertification(ctx context.Context, cacheKey string, fetch
 				return cached, nil
 			}
 		}
-		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), certificationFetchTimeout)
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sharedFetchTimeout)
 		defer cancel()
 		cert, err := fetch(fetchCtx)
 		if err != nil {

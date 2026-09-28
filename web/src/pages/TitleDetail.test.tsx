@@ -312,8 +312,50 @@ describe("TitleDetail", () => {
       // The ownership lookup only runs while the request could still be withdrawn.
       expect(mocks.useMyMediaRequests).toHaveBeenCalledWith(
         { outcome: "active" },
-        { enabled: false },
+        { enabled: false, pollDownloads: false },
       );
+    });
+
+    it("does not poll the viewer's requests while another of them downloads", () => {
+      mocks.mine = [
+        ownPending,
+        {
+          ...ownPending,
+          id: "req-2",
+          tmdb_id: 604,
+          status: "downloading",
+          download: { phase: "downloading", downloads: 1, updated_at: "2026-01-01T00:00:00Z" },
+        },
+      ];
+      renderDetail();
+
+      // The title shows only its own progress, which comes from its detail.
+      expect(primaryButton("Cancel request")).toBeEnabled();
+      expect(mocks.useMyMediaRequests).toHaveBeenCalledWith(
+        { outcome: "active" },
+        { enabled: true, pollDownloads: false },
+      );
+    });
+
+    it("shows how far the request's download is under its state", () => {
+      renderDetail({
+        ...baseDetail,
+        request: {
+          ...baseDetail.request,
+          status: "downloading",
+          state: "processing",
+          download: {
+            phase: "import_blocked",
+            percent: 100,
+            downloads: 1,
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        },
+      });
+
+      expect(primaryButton("Processing")).toBeDisabled();
+      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "100");
+      expect(screen.getByText("Waiting for import")).toBeInTheDocument();
     });
 
     it("prefers the state the server derived", () => {

@@ -60,6 +60,95 @@ type Target struct {
 	// only); empty when the plugin routed it.
 	RouteID   string `json:"-"`
 	RouteName string `json:"-"`
+	// Download is how far the target's downloads are, while its plugin reports
+	// any (v2 only).
+	Download *DownloadProgress `json:"-"`
+}
+
+// DownloadPhase is where a target's downloads are, as its router plugin
+// reports them. The set is open: clients read an unknown phase as downloading.
+type DownloadPhase string
+
+const (
+	DownloadPhaseQueued        DownloadPhase = "queued"
+	DownloadPhaseDownloading   DownloadPhase = "downloading"
+	DownloadPhasePaused        DownloadPhase = "paused"
+	DownloadPhaseStalled       DownloadPhase = "stalled"
+	DownloadPhaseImporting     DownloadPhase = "importing"
+	DownloadPhaseImportBlocked DownloadPhase = "import_blocked"
+)
+
+// downloadPhaseRank orders phases for aggregation, highest first:
+// import_blocked > stalled > downloading > importing > paused > queued. A
+// download that needs attention outranks the rest; otherwise downloading wins
+// while anything still downloads. An unknown phase ranks as downloading.
+func downloadPhaseRank(phase DownloadPhase) int {
+	switch phase {
+	case DownloadPhaseImportBlocked:
+		return 5
+	case DownloadPhaseStalled:
+		return 4
+	case DownloadPhaseImporting:
+		return 2
+	case DownloadPhasePaused:
+		return 1
+	case DownloadPhaseQueued:
+		return 0
+	default:
+		return 3
+	}
+}
+
+// DownloadProgress is how far a target's downloads are, as the downstream
+// service last reported them. BytesTotal is 0 while the size is unknown.
+// UpdatedAt is when the server last heard from the plugin.
+type DownloadProgress struct {
+	Phase               DownloadPhase
+	BytesTotal          int64
+	BytesLeft           int64
+	EstimatedCompletion *time.Time
+	Downloads           int
+	UpdatedAt           time.Time
+}
+
+// Download aggregates the progress of the request's live (queued or
+// downloading) targets, 1080p and 4K together: bytes and downloads are
+// summed, the phase is the highest ranked, the estimate is the latest, and
+// UpdatedAt is the oldest report, so the figure is only as fresh as its
+// stalest part. The total is unknown (0) when any target's is. It is nil when
+// no live target reports progress.
+func (r *Request) Download() *DownloadProgress {
+	var out *DownloadProgress
+	sizeKnown := true
+	for _, t := range r.Targets {
+		if t.Download == nil || (t.Status != StatusQueued && t.Status != StatusDownloading) {
+			continue
+		}
+		d := *t.Download
+		if d.BytesTotal <= 0 {
+			sizeKnown = false
+		}
+		if out == nil {
+			out = &d
+			continue
+		}
+		if downloadPhaseRank(d.Phase) > downloadPhaseRank(out.Phase) {
+			out.Phase = d.Phase
+		}
+		out.BytesTotal += d.BytesTotal
+		out.BytesLeft += d.BytesLeft
+		out.Downloads += d.Downloads
+		if d.EstimatedCompletion != nil && (out.EstimatedCompletion == nil || d.EstimatedCompletion.After(*out.EstimatedCompletion)) {
+			out.EstimatedCompletion = d.EstimatedCompletion
+		}
+		if d.UpdatedAt.Before(out.UpdatedAt) {
+			out.UpdatedAt = d.UpdatedAt
+		}
+	}
+	if out != nil && !sizeKnown {
+		out.BytesTotal, out.BytesLeft = 0, 0
+	}
+	return out
 }
 
 type Availability string
@@ -316,6 +405,9 @@ type RequestState struct {
 	RequestedByViewer bool `json:"-"`
 	// State is the active request's user-facing state (v2 only).
 	State State `json:"-"`
+	// Download is the active request's download progress. Only the title
+	// detail fills it; search and discovery do not load targets (v2 only).
+	Download *DownloadProgress `json:"-"`
 }
 
 type MediaResult struct {
@@ -498,4 +590,13 @@ type ReconcileResult struct {
 	// Deferred counts submissions that failed and were rescheduled.
 	Deferred int `json:"deferred"`
 	Errors   int `json:"errors"`
+}
+
+// DownloadRefreshResult counts one download refresh pass. Checked counts the
+// requests whose targets were asked about, Updated those where a target's
+// status moved.
+type DownloadRefreshResult struct {
+	Checked int `json:"checked"`
+	Updated int `json:"updated"`
+	Errors  int `json:"errors"`
 }

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 )
@@ -17,6 +18,8 @@ import (
 type fakeRequests struct {
 	requests []*mediarequests.Request
 	err      error
+	// detailDownload is the download progress GetDetail reports.
+	detailDownload *mediarequests.DownloadProgress
 
 	lastViewer mediarequests.Viewer
 	lastFilter mediarequests.ListFilter
@@ -78,7 +81,7 @@ func (f *fakeRequests) GetDetail(_ context.Context, viewer mediarequests.Viewer,
 		MediaType: mediaType, TMDBID: tmdbID, IMDbID: "tt0113277", Title: "Heat", Year: 1995, Runtime: 170, Genres: []string{"Crime"},
 		Cast: []mediarequests.MediaCastMember{{Name: "Al Pacino", Character: "Vincent Hanna"}}, Director: "Michael Mann",
 		Recommendations: []mediarequests.MediaResult{fixtureResult(950)}, Availability: mediarequests.AvailabilityAvailable,
-		LibraryContentID: "movie:heat-1995", Request: mediarequests.RequestState{Reason: "already_available"},
+		LibraryContentID: "movie:heat-1995", Request: mediarequests.RequestState{Reason: "already_available", Download: f.detailDownload},
 	}, nil
 }
 
@@ -212,7 +215,22 @@ func fixtureRequests() *fakeRequests {
 	other.RequestedByUserID, other.RequestedByProfileID = 2, "p-primary"
 	pending := fixtureMediaRequest("r-2", 950)
 	pending.Status = mediarequests.StatusPending
-	return &fakeRequests{requests: []*mediarequests.Request{fixtureMediaRequest("r-1", 949), pending, other}}
+	// r-1 is downloading, so the fixtures show a request with download
+	// progress next to ones without.
+	downloading := fixtureMediaRequest("r-1", 949)
+	downloading.Status = mediarequests.StatusDownloading
+	downloading.Targets[0].Status = mediarequests.StatusDownloading
+	downloading.Targets[0].Download = fixtureDownload()
+	return &fakeRequests{requests: []*mediarequests.Request{downloading, pending, other}}
+}
+
+// fixtureDownload is a 4 GiB download 43% of the way.
+func fixtureDownload() *mediarequests.DownloadProgress {
+	eta := fixedTime().Add(12 * time.Minute)
+	return &mediarequests.DownloadProgress{
+		Phase: mediarequests.DownloadPhaseDownloading, BytesTotal: 4294967296, BytesLeft: 2448131358,
+		EstimatedCompletion: &eta, Downloads: 1, UpdatedAt: fixedTime(),
+	}
 }
 
 func decodeBody(t *testing.T, rec interface{ String() string }, into any) {

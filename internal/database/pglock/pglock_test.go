@@ -122,3 +122,112 @@ func TestTryAcquireNilPoolReportsNotAcquired(t *testing.T) {
 		t.Fatalf("Release on nil lock: %v", err)
 	}
 }
+
+// lockWaiters counts the sessions queued for advisory lock key.
+func lockWaiters(t *testing.T, pool *pgxpool.Pool, key int64) int {
+	t.Helper()
+	var waiters int
+	err := pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM pg_locks
+		WHERE locktype = 'advisory'
+			AND NOT granted
+			AND ((classid::bigint << 32) | objid::bigint) = $1`, key).Scan(&waiters)
+	if err != nil {
+		t.Fatalf("inspect pg_locks: %v", err)
+	}
+	return waiters
+}
+
+func TestAcquireWaitsForTheHolder(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	held, acquired, err := TryAcquire(ctx, pool, pglockTestKey)
+	if err != nil || !acquired {
+		t.Fatalf("TryAcquire = (%v, %v), want acquired", acquired, err)
+	}
+	type result struct {
+		lock     *Lock
+		acquired bool
+		err      error
+	}
+	done := make(chan result, 1)
+	go func() {
+		lock, acquired, err := Acquire(ctx, pool, pglockTestKey, 20*time.Second)
+		done <- result{lock, acquired, err}
+	}()
+	for lockWaiters(t, pool, pglockTestKey) == 0 {
+		select {
+		case got := <-done:
+			t.Fatalf("Acquire returned (%v, %v) while the lock was held", got.acquired, got.err)
+		case <-ctx.Done():
+			t.Fatal("Acquire never queued for the lock")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if err := held.Release(ctx); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	got := <-done
+	if got.err != nil || !got.acquired {
+		t.Fatalf("Acquire = (%v, %v), want acquired once the holder released", got.acquired, got.err)
+	}
+	// The lock outlives the transaction that set the wait.
+	if !lockHeld(t, pool, pglockTestKey) {
+		t.Fatal("advisory lock not held after Acquire")
+	}
+	if _, again, err := TryAcquire(ctx, pool, pglockTestKey); err != nil || again {
+		t.Fatalf("TryAcquire beside Acquire's lock = (%v, %v), want not acquired", again, err)
+	}
+	if err := got.lock.Release(ctx); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if lockHeld(t, pool, pglockTestKey) {
+		t.Fatal("advisory lock still held after Release")
+	}
+}
+
+// A wait that runs out reports not acquired and hands the connection back
+// without the lock_timeout it set. The single-connection pool makes the next
+// borrower get the same session.
+func TestAcquireGivesUpAfterTheWait(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	config := pool.Config().Copy()
+	config.MaxConns = 1
+	single, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("connect single-connection pool: %v", err)
+	}
+	t.Cleanup(single.Close)
+
+	held, acquired, err := TryAcquire(ctx, pool, pglockTestKey)
+	if err != nil || !acquired {
+		t.Fatalf("TryAcquire = (%v, %v), want acquired", acquired, err)
+	}
+	defer func() { _ = held.Release(ctx) }()
+
+	lock, acquired, err := Acquire(ctx, single, pglockTestKey, 100*time.Millisecond)
+	if err != nil || acquired || lock != nil {
+		t.Fatalf("Acquire = (%v, %v, %v), want (nil, false, nil) after the wait", lock, acquired, err)
+	}
+	if waiters := lockWaiters(t, pool, pglockTestKey); waiters != 0 {
+		t.Fatalf("%d sessions still queued for the lock, want none", waiters)
+	}
+	var timeout string
+	if err := single.QueryRow(ctx, `SHOW lock_timeout`).Scan(&timeout); err != nil {
+		t.Fatalf("read lock_timeout: %v", err)
+	}
+	if timeout != "0" {
+		t.Fatalf("pooled session lock_timeout = %q, want the default 0", timeout)
+	}
+}
+
+func TestAcquireNilPoolReportsNotAcquired(t *testing.T) {
+	lock, acquired, err := Acquire(context.Background(), nil, pglockTestKey, time.Minute)
+	if err != nil || acquired || lock != nil {
+		t.Fatalf("Acquire(nil pool) = (%v, %v, %v), want (nil, false, nil)", lock, acquired, err)
+	}
+}

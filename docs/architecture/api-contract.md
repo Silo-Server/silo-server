@@ -1818,6 +1818,13 @@ series detail lists the regular seasons with availability and request coverage;
 requests carry `seasons`, `season_progress` and the `partially_available` state;
 `GET /api/v2/requests/status` advertises `season_requests_supported`.
 
+While a request downloads, requests, their targets and the title detail's
+request state carry `download` (phase, percent, bytes, estimated completion,
+and when the server last heard from the download server), and
+`GET /api/v2/requests/status` advertises `download_progress_supported`. The
+phase is an open set: clients render an unknown one like `downloading`. See
+[Media requests](media-requests.md#download-progress).
+
 A profile can follow a title another profile already requested, to be notified
 when it becomes available, with `PUT` and `DELETE
 /api/v2/requests/follows/{media_type}/{tmdb_id}`. Both are naturally idempotent.

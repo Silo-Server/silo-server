@@ -129,7 +129,7 @@ require (
 )
 
 require (
-	github.com/Silo-Server/silo-plugin-sdk v0.18.0
+	github.com/Silo-Server/silo-plugin-sdk v0.18.1-0.20260928194839-1abd582d0304
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.14 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.30 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.30 // indirect

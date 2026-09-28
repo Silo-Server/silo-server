@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"math/bits"
 	"net/http"
 	"slices"
 	"strconv"
@@ -30,6 +31,21 @@ type RequestMediaState struct {
 	Following   bool   `json:"following" doc:"Whether the viewer will be notified when the media becomes available: they requested it or follow it" example:"false"`
 	// RequestedByViewer tells a client whether to offer a follow toggle.
 	RequestedByViewer bool `json:"requested_by_viewer" doc:"Whether the viewing profile made the active request, so there is nothing to follow" example:"false"`
+	// Download is filled on the title detail only: search and discovery do
+	// not load each result's targets.
+	Download *RequestDownload `json:"download,omitempty" doc:"How far the active request's downloads are, while its download server reports them. Only the title detail (getRequestMediaDetail) carries it"`
+}
+
+// RequestDownload is how far downloads are, as the download server last
+// reported them.
+type RequestDownload struct {
+	Phase                 string   `json:"phase" doc:"queued, downloading, paused, stalled, importing or import_blocked. More values may be added: read an unknown one as downloading, without a percentage" example:"downloading"`
+	Percent               *int     `json:"percent,omitempty" minimum:"0" maximum:"100" doc:"How much has downloaded, rounded down; absent while the size is unknown" example:"43"`
+	BytesTotal            *int64   `json:"bytes_total,omitempty" minimum:"1" doc:"Size of the downloads in bytes; absent while unknown" example:"4294967296"`
+	BytesLeft             *int64   `json:"bytes_left,omitempty" minimum:"0" doc:"Bytes still to download; present whenever bytes_total is" example:"2448131358"`
+	EstimatedCompletionAt *Instant `json:"estimated_completion_at,omitempty" doc:"When the download server expects the downloads to finish; absent when it cannot tell" example:"2026-01-02T03:16:05.000Z"`
+	Downloads             int      `json:"downloads" minimum:"0" doc:"Distinct downloads in flight; a season pack counts once" example:"1"`
+	UpdatedAt             Instant  `json:"updated_at" doc:"When the server last heard from the download server. A client may hide figures older than about ten minutes" example:"2026-01-02T03:04:05.000Z"`
 }
 
 // RequestMediaResult is one discovery or search card.
@@ -184,6 +200,8 @@ type RequestTarget struct {
 	RouteName       string  `json:"route_name,omitempty" doc:"The routing rule that sent this target to its server, as named when it was sent"`
 	CreatedAt       Instant `json:"created_at" example:"2026-01-02T03:04:05.000Z"`
 	UpdatedAt       Instant `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
+	// Download is set while the target's router plugin reports progress.
+	Download *RequestDownload `json:"download,omitempty" doc:"How far this target's downloads are, while its download server reports them"`
 }
 
 // MediaRequest is one media request.
@@ -218,6 +236,7 @@ type MediaRequest struct {
 	UpdatedAt            Instant                 `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
 	ApprovedAt           *Instant                `json:"approved_at,omitempty"`
 	CompletedAt          *Instant                `json:"completed_at,omitempty"`
+	Download             *RequestDownload        `json:"download,omitempty" doc:"How far the request's downloads are over all its servers (1080p and 4K together), while any reports them: bytes summed, the phase that needs the most attention, the latest estimate, and the oldest report's time"`
 }
 
 // MediaRequestOutput is a single-request response.
@@ -810,6 +829,7 @@ func mediaRequestOf(r *mediarequests.Request) MediaRequest {
 		UpdatedAt:        NewInstant(r.UpdatedAt),
 		ApprovedAt:       instantPtr(r.ApprovedAt),
 		CompletedAt:      instantPtr(r.CompletedAt),
+		Download:         requestDownloadOf(r.Download()),
 	}
 	if r.RequestedByUserID != 0 {
 		out.RequestedByUserID = IDFromInt(int64(r.RequestedByUserID))
@@ -821,9 +841,38 @@ func mediaRequestOf(r *mediarequests.Request) MediaRequest {
 			IntegrationKind: t.IntegrationKind, InstanceName: t.InstanceName, Quality: string(t.Quality),
 			IsAnime: t.IsAnime, ExternalID: t.ExternalID, ExternalStatus: t.ExternalStatus, Status: string(t.Status),
 			LastError: t.LastError, RouteName: t.RouteName, CreatedAt: NewInstant(t.CreatedAt), UpdatedAt: NewInstant(t.UpdatedAt),
+			Download: requestDownloadOf(t.Download),
 		})
 	}
 	return out
+}
+
+// requestDownloadOf maps download progress. The byte counts and percent are
+// left out while the size is unknown (a total of 0).
+func requestDownloadOf(d *mediarequests.DownloadProgress) *RequestDownload {
+	if d == nil {
+		return nil
+	}
+	out := &RequestDownload{
+		Phase:                 string(d.Phase),
+		EstimatedCompletionAt: instantPtr(d.EstimatedCompletion),
+		Downloads:             max(d.Downloads, 0),
+		UpdatedAt:             NewInstant(d.UpdatedAt),
+	}
+	if d.BytesTotal > 0 {
+		total, left := d.BytesTotal, min(max(d.BytesLeft, 0), d.BytesTotal)
+		percent := downloadPercent(total, left)
+		out.BytesTotal, out.BytesLeft, out.Percent = &total, &left, &percent
+	}
+	return out
+}
+
+// downloadPercent is floor((total-left)*100/total) for 0 <= left <= total and
+// total > 0. The product is taken in 128 bits, so no total can overflow it.
+func downloadPercent(total, left int64) int {
+	hi, lo := bits.Mul64(uint64(total-left), 100)
+	percent, _ := bits.Div64(hi, lo, uint64(total))
+	return int(percent)
 }
 
 func requestSeasonProgressOf(progress []mediarequests.SeasonProgress) []RequestSeasonProgress {
@@ -835,7 +884,7 @@ func requestSeasonProgressOf(progress []mediarequests.SeasonProgress) []RequestS
 }
 
 func requestMediaStateOf(s mediarequests.RequestState) RequestMediaState {
-	return RequestMediaState{Status: string(s.Status), Requestable: s.Requestable, Reason: s.Reason, RequestID: ID(s.RequestID), Following: s.Following, RequestedByViewer: s.RequestedByViewer, State: string(s.State)}
+	return RequestMediaState{Status: string(s.Status), Requestable: s.Requestable, Reason: s.Reason, RequestID: ID(s.RequestID), Following: s.Following, RequestedByViewer: s.RequestedByViewer, State: string(s.State), Download: requestDownloadOf(s.Download)}
 }
 
 func requestMediaResultsOf(results []mediarequests.MediaResult) []RequestMediaResult {
