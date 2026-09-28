@@ -413,7 +413,8 @@ func TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries(t *testing.T
 }
 
 // A batch shares the series' preference lookups only with that series'
-// episodes; an episode of another series keeps its own series-level choice.
+// episodes; an episode of another series keeps its own series-level subtitle
+// and audio choices.
 func TestGetEpisodeDetailsForSeriesKeepsAnotherSeriesPreferences(t *testing.T) {
 	f := newVersionsFixture(t)
 	store := newDetailTestStore(t)
@@ -430,6 +431,9 @@ func TestGetEpisodeDetailsForSeriesKeepsAnotherSeriesPreferences(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Audio too: English for the profile, French for the other series.
+	setProfileAudioLanguage(t, store, "en")
+	setScopedAudioLanguage(t, store, settingscontract.ScopeProfileSeries, f.ids["series"]+"-other", 0, "fr")
 	f.svc.SetUserStoreProvider(&countingUserStores{store: store})
 
 	otherSeries, otherEpisode := f.ids["series"]+"-other", f.ids["episode"]+"-other"
@@ -445,12 +449,22 @@ func TestGetEpisodeDetailsForSeriesKeepsAnotherSeriesPreferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for id, want := range map[string]string{f.ids["episode"]: "always", otherEpisode: "off"} {
+	for id, want := range map[string]struct {
+		mode  string
+		audio int
+	}{f.ids["episode"]: {"always", 0}, otherEpisode: {"off", 1}} {
 		if details[id] == nil {
 			t.Fatalf("episode %s missing from the batch", id)
 		}
-		if got := details[id].EffectiveSubtitleMode; got != want {
-			t.Fatalf("episode %s subtitle mode = %q, want %q", id, got, want)
+		if got := details[id].EffectiveSubtitleMode; got != want.mode {
+			t.Fatalf("episode %s subtitle mode = %q, want %q", id, got, want.mode)
+		}
+		got := details[id].Versions[0].EffectiveAudioTrackIndex
+		if got == nil {
+			t.Fatalf("episode %s has no effective audio track", id)
+		}
+		if *got != want.audio {
+			t.Fatalf("episode %s audio track = %d, want %d", id, *got, want.audio)
 		}
 	}
 }
