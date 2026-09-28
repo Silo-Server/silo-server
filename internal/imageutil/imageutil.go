@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	_ "image/jpeg"
-	_ "image/png"
+	"image/jpeg"
+	"image/png"
 	"slices"
 	"sort"
 
@@ -38,7 +38,8 @@ var ErrInvalidImage = errors.New("imageutil: invalid image")
 // maxPixelCheckPixels bounds the raster PixelDataUndecodable lets the
 // standard library allocate. A few-kilobyte upload can declare large
 // dimensions, and image.Decode allocates the whole raster before it reads the
-// pixel data. 4 megapixels costs at most 32 MB, at 16 bits per channel.
+// pixel data. At 4 megapixels that is 32 MB for a 16-bit PNG, and about twice
+// that for an interlaced one, whose passes are decoded into separate images.
 const maxPixelCheckPixels = 4_000_000
 
 // PixelDataUndecodable reports whether data is a JPEG or PNG whose header
@@ -46,8 +47,8 @@ const maxPixelCheckPixels = 4_000_000
 // Size, so such a file first fails inside Process, where the error looks like
 // an encoder failure. Callers use it after GenerateVariants fails to tell
 // damaged input from a server fault. Other formats, including those other
-// packages register with image, and sources above maxPixelCheckPixels report
-// false.
+// packages register with image, sources above maxPixelCheckPixels, and
+// features the standard library does not support report false.
 func PixelDataUndecodable(data []byte) bool {
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || (format != "jpeg" && format != "png") ||
@@ -55,7 +56,9 @@ func PixelDataUndecodable(data []byte) bool {
 		return false
 	}
 	_, _, err = image.Decode(bytes.NewReader(data))
-	return err != nil
+	var jpegUnsupported jpeg.UnsupportedError
+	var pngUnsupported png.UnsupportedError
+	return err != nil && !errors.As(err, &jpegUnsupported) && !errors.As(err, &pngUnsupported)
 }
 
 // MaxCachedOriginalDimension caps the longest edge of a cached "original"

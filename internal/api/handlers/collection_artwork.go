@@ -121,9 +121,10 @@ func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL
 
 	if resp.StatusCode != http.StatusOK {
 		// The client message omits the upstream status so the route does not
-		// report how an arbitrary URL answered; keep it for operators.
+		// report how an arbitrary URL answered; keep it for operators. The
+		// host is the one that answered, after any redirects.
 		slog.InfoContext(ctx, "collection artwork source did not return an image", "component", "api",
-			"host", parsed.Host, "status", resp.StatusCode)
+			"host", resp.Request.URL.Host, "status", resp.StatusCode)
 		return nil, invalidCollectionImage("The image source did not return an image.", nil)
 	}
 	if resp.ContentLength > collectionImageMaxBytes {

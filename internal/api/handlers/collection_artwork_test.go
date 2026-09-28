@@ -9,6 +9,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -215,6 +216,46 @@ func TestDownloadCollectionImageURL_ClientErrorsAre400(t *testing.T) {
 				t.Fatalf("err = %v, want a 400 APIError", err)
 			}
 		})
+	}
+}
+
+// lockedBuffer collects log output written from the HTTP client's goroutines.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestDownloadCollectionImageURL_LogsTheHostThatAnswered(t *testing.T) {
+	missing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(missing.Close)
+	redirect := httptest.NewServer(http.RedirectHandler(missing.URL+"/poster.jpg", http.StatusFound))
+	t.Cleanup(redirect.Close)
+
+	var logs lockedBuffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	if _, err := downloadCollectionImageURL(context.Background(), redirect.Client(), redirect.URL+"/poster.jpg"); err == nil {
+		t.Fatal("downloadCollectionImageURL succeeded, want the 404 error")
+	}
+	missingHost := strings.TrimPrefix(missing.URL, "http://")
+	if got := logs.String(); !strings.Contains(got, "host="+missingHost) || !strings.Contains(got, "status=404") {
+		t.Fatalf("log = %q, want host=%s status=404", got, missingHost)
 	}
 }
 
