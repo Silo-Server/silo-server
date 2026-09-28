@@ -596,9 +596,14 @@ func (h *LibraryCollectionHandler) UploadAdminCollectionArtwork(ctx context.Cont
 	if len(data) == 0 || len(data) > collectionImageMaxBytes {
 		return apiError(400, "bad_request", "Artwork must be nonempty and at most 10 MiB")
 	}
-	if _, err := h.repo.GetByID(ctx, id); err != nil {
+	oldPath, err := h.adminCollectionImagePath(ctx, id, kind)
+	if err != nil {
 		return err
 	}
+	// Revisioned keys (issue #1258) mean the replacement uploads to a new key
+	// that cannot collide with the current artwork, so upload and commit it
+	// first. A failed upload or update then leaves the last valid image
+	// untouched. The previous revision is cleaned up only after the commit.
 	path, hash, err := h.processCollectionImage(ctx, id, kind, data)
 	if err != nil {
 		return err
@@ -613,7 +618,11 @@ func (h *LibraryCollectionHandler) UploadAdminCollectionArtwork(ctx context.Cont
 		input.BackdropURL = &path
 		input.BackdropThumbhash = &hash
 	}
-	return h.repo.Update(ctx, input)
+	if err := h.repo.Update(ctx, input); err != nil {
+		return err
+	}
+	h.cleanUpReplacedCollectionImage(ctx, id, kind, oldPath)
+	return nil
 }
 func (h *LibraryCollectionHandler) SetAdminCollectionArtworkSource(ctx context.Context, id, kind, url string) error {
 	if _, err := h.repo.GetByID(ctx, id); err != nil {

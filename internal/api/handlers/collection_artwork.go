@@ -2,13 +2,18 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 )
@@ -22,6 +27,8 @@ const (
 	collectionTemplateImageDir = "/images/collection-templates/"
 
 	collectionImageMaxBytes = 10 << 20 // 10 MB
+
+	collectionImageCleanupTimeout = 30 * time.Second
 )
 
 // storeBundledCollectionPosterIfS3Configured stores a built-in collection
@@ -119,9 +126,11 @@ func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL
 }
 
 // uploadCollectionImageVariants generates resized variants for the given
-// image bytes, uploads them under "{prefix}/{collectionID}/{imageType}/", and
+// image bytes, uploads them as revisioned artwork keys under
+// "{prefix}/{collectionID}/{imageType}/" (e.g. "original.{revision}.webp"), and
 // returns the S3 path of the original variant plus a thumbhash computed from
-// the w300 variant.
+// the w300 variant. The content revision gives replacement artwork a new URL
+// (issue #1258).
 func uploadCollectionImageVariants(
 	ctx context.Context,
 	store blobstore.Store,
@@ -146,9 +155,17 @@ func uploadCollectionImageVariants(
 		return "", "", fmt.Errorf("generating image variants: %w", err)
 	}
 
+	// Revision the key by content so replacement artwork lands on a new key,
+	// and therefore a new public URL, rather than overwriting a fixed key that
+	// stays cached by the CDN and browsers (issue #1258). Revisions stay in the
+	// imageType directory, so removeCollectionImageVariants still clears every
+	// one of them by that prefix.
+	basePath := collectionImageDir(prefix, collectionID, imageType)
+	revision := collectionImageRevision(fileData)
+
 	var w300Data []byte
 	for _, v := range result.Variants {
-		key := fmt.Sprintf("%s/%s/%s/%s%s", prefix, collectionID, imageType, v.Key, result.Ext)
+		key := artworkkey.Build(basePath, v.Key, revision, result.Ext)
 		if err := store.Put(ctx, key, v.Data); err != nil {
 			return "", "", fmt.Errorf("uploading %s: %w", v.Key, err)
 		}
@@ -167,6 +184,101 @@ func uploadCollectionImageVariants(
 		}
 	}
 	return s3Path, thumbhashStr, nil
+}
+
+// collectionImageRevision derives a short content revision for artwork keys.
+// Two uploads with the same bytes reuse the same revision (idempotent
+// re-upload); different bytes produce a different revision, so a replacement is
+// served from a new URL that no cache holds yet.
+func collectionImageRevision(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:8])
+}
+
+// collectionImageDir returns the directory holding every revision and variant
+// of one collection image, without a trailing slash.
+func collectionImageDir(prefix, collectionID, imageType string) string {
+	return fmt.Sprintf("%s/%s/%s", prefix, collectionID, imageType)
+}
+
+// removeReplacedCollectionImageVersion deletes the variants of the revision
+// that a replacement superseded, identified from the previously stored path. It
+// runs after the new revision is committed, and currentPath is the path the row
+// holds on a fresh read at cleanup time.
+//
+// Only the superseded revision is removed, never "everything but the new
+// revision", so a concurrent replacement that committed its own revision is
+// never deleted. The revision is skipped when the row still points at it
+// (currentPath), which guards against a concurrent restore of the same content:
+// re-uploading the old bytes reuses the old keys, so deleting them would strip
+// the artwork the row now references. A legacy fixed key (no revision) selects
+// the unrevisioned variants in the same directory. An oldPath outside this
+// collection image's directory (a bundled-template path, or empty) is a no-op.
+func removeReplacedCollectionImageVersion(
+	ctx context.Context,
+	store blobstore.Store,
+	prefix, collectionID, imageType, oldPath, currentPath string,
+) error {
+	if store == nil {
+		return nil
+	}
+	dir := collectionImageDir(prefix, collectionID, imageType) + "/"
+	if !isCollectionImageKeyIn(dir, oldPath) {
+		return nil
+	}
+	oldRevision := artworkkey.Revision(oldPath)
+	if isCollectionImageKeyIn(dir, currentPath) && artworkkey.Revision(currentPath) == oldRevision {
+		return nil
+	}
+	items, _, err := store.List(ctx, dir, "", 0)
+	if err != nil {
+		return fmt.Errorf("listing objects: %w", err)
+	}
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		if isCollectionImageKeyIn(dir, item.Key) && artworkkey.Revision(item.Key) == oldRevision {
+			keys = append(keys, item.Key)
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	if _, err := store.Delete(ctx, keys); err != nil {
+		return fmt.Errorf("deleting replaced collection variants: %w", err)
+	}
+	return nil
+}
+
+// cleanUpReplacedCollectionImage runs after a replacement image is committed.
+// It reads the path the row now holds and removes the revision oldPath named.
+// Callers upload the replacement under its own revision and commit it before
+// calling this, so a failed upload or update leaves the stored artwork intact.
+// Failures here only log: the committed artwork is intact and the worst case
+// is an orphaned revision. The replacement is already committed, so cleanup
+// outlives a canceled request, bounded by collectionImageCleanupTimeout.
+func cleanUpReplacedCollectionImage(
+	ctx context.Context,
+	store blobstore.Store,
+	prefix, collectionID, imageType, oldPath string,
+	readCurrent func(context.Context) (string, error),
+) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), collectionImageCleanupTimeout)
+	defer cancel()
+	currentPath, err := readCurrent(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "collection artwork: skipping variant cleanup, re-read failed", "component", "api", "collection_id", collectionID, "kind", imageType, "error", err)
+		return
+	}
+	if err := removeReplacedCollectionImageVersion(ctx, store, prefix, collectionID, imageType, oldPath, currentPath); err != nil {
+		slog.WarnContext(ctx, "collection artwork: previous variant cleanup failed", "component", "api", "collection_id", collectionID, "kind", imageType, "error", err)
+	}
+}
+
+// isCollectionImageKeyIn reports whether key is an object directly inside dir
+// (which carries a trailing slash).
+func isCollectionImageKeyIn(dir, key string) bool {
+	name, ok := strings.CutPrefix(key, dir)
+	return ok && name != "" && !strings.Contains(name, "/")
 }
 
 // removeCollectionImageVariants deletes every stored variant for the given
