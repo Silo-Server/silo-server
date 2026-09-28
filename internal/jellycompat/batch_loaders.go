@@ -47,18 +47,36 @@ type episodeRepoForBatchLoader interface {
 	HasFilesByIDs(ctx context.Context, contentIDs []string) (map[string]bool, error)
 	ListBySeason(ctx context.Context, seriesID string, seasonNum int) ([]*models.Episode, error)
 	ListBySeries(ctx context.Context, seriesID string) ([]*models.Episode, error)
+	ListBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]*models.Episode, error)
 	ListAdjacentInSeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) ([]*models.Episode, error)
 }
 
 func (h *ItemsHandler) fetchCompatItemsByContentIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]upstreamListItem, error) {
+	listItems, err := h.loadCompatItemsByContentIDs(ctx, session, contentIDs, libraryID)
+	if err != nil {
+		return nil, err
+	}
+	presignCompatListItems(ctx, h.detailSvc, listItems)
+	fillListItemDurations(ctx, h.durationSrc, listItems)
+	result := make(map[string]upstreamListItem, len(listItems))
+	for _, listItem := range listItems {
+		result[listItem.ContentID] = listItem
+	}
+	return result, nil
+}
+
+// loadCompatItemsByContentIDs returns the access-filtered media_items rows for
+// contentIDs as list items, without presigned images or durations, for callers
+// that only need to know which members exist and what type they are.
+func (h *ItemsHandler) loadCompatItemsByContentIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) ([]upstreamListItem, error) {
 	normalized := normalizeContentIDs(contentIDs)
 	if len(normalized) == 0 {
-		return map[string]upstreamListItem{}, nil
+		return nil, nil
 	}
 
 	pool := h.compatPool()
 	if pool == nil {
-		return h.fetchCompatItemsByContentIDsFallback(ctx, session, normalized, libraryID)
+		return h.loadCompatItemsByContentIDsFallback(ctx, session, normalized, libraryID)
 	}
 
 	access := h.resolveAccessFilter(ctx, session)
@@ -67,7 +85,7 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDs(ctx context.Context, session
 	args := []any{normalized}
 	argIdx := 2
 	if !applyCompatLibraryAccess(&access, libraryID, "mi.content_id", &conditions, &args, &argIdx) {
-		return map[string]upstreamListItem{}, nil
+		return nil, nil
 	}
 	catalog.ApplySectionAccessFilter("mi", access, &conditions, &args, &argIdx)
 
@@ -91,25 +109,18 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDs(ctx context.Context, session
 	for _, item := range items {
 		listItems = append(listItems, mediaItemToListItem(item))
 	}
-	presignCompatListItems(ctx, h.detailSvc, listItems)
-	fillListItemDurations(ctx, h.durationSrc, listItems)
-	result := make(map[string]upstreamListItem, len(listItems))
-	for _, listItem := range listItems {
-		result[listItem.ContentID] = listItem
-	}
-	return result, nil
+	return listItems, nil
 }
 
-func (h *ItemsHandler) fetchCompatItemsByContentIDsFallback(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]upstreamListItem, error) {
-	result := make(map[string]upstreamListItem, len(contentIDs))
+func (h *ItemsHandler) loadCompatItemsByContentIDsFallback(ctx context.Context, session *Session, contentIDs []string, libraryID *int) ([]upstreamListItem, error) {
 	if h.itemRepo == nil {
-		return result, nil
+		return nil, nil
 	}
 
 	access := h.resolveAccessFilter(ctx, session)
 	if libraryID != nil && *libraryID > 0 {
 		if !narrowAccessToLibrary(&access, *libraryID) {
-			return result, nil
+			return nil, nil
 		}
 	}
 
@@ -121,12 +132,7 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDsFallback(ctx context.Context,
 	for _, item := range items {
 		listItems = append(listItems, mediaItemToListItem(item))
 	}
-	presignCompatListItems(ctx, h.detailSvc, listItems)
-	fillListItemDurations(ctx, h.durationSrc, listItems)
-	for _, listItem := range listItems {
-		result[listItem.ContentID] = listItem
-	}
-	return result, nil
+	return listItems, nil
 }
 
 // narrowAccessToLibrary intersects the viewer's effective access policy with a

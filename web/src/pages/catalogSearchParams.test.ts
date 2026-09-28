@@ -332,6 +332,8 @@ describe("buildCatalogHref", () => {
 
   it("builds canonical person catalog URLs from raw route ids", () => {
     expect(buildPersonCatalogHref("117290402172239876")).toBe("/person/117290402172239876");
+    // Person IDs are opaque strings in the contract.
+    expect(buildPersonCatalogHref("a/b?c")).toBe("/person/a%2Fb%3Fc");
   });
 });
 

@@ -251,6 +251,15 @@ const adminUser: AdminUser = {
   created_at: "2026-07-01T12:00:00Z",
   updated_at: "2026-07-01T12:00:00Z",
 };
+// The signed-in viewer (mocks.viewer, id 1) as the server Owner.
+const ownerViewer: AdminUser = {
+  ...adminUser,
+  id: 1,
+  username: "owner",
+  email: "owner@example.test",
+  role: "admin",
+  is_owner: true,
+};
 
 it("seeds list edits from canonical GET and preserves drafts through explicit conflict reload", async () => {
   vi.stubGlobal(
@@ -322,11 +331,33 @@ describe("AdminUsers row actions", () => {
     mocks.viewer = { id: 8 };
     renderPage();
     const row = screen.getByRole("link", { name: "founder" }).closest("tr")!;
-    expect(within(row).getByText("Owner")).toBeInTheDocument();
+    expect(within(row).getByText("owner")).toBeInTheDocument();
+    expect(within(row).queryByText("admin")).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit founder" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete founder" })).toBeNull();
     expect(screen.queryByRole("button", { name: "View as user: founder" })).toBeNull();
     expect(screen.getByRole("button", { name: "Edit taylor" })).toBeInTheDocument();
+  });
+
+  it("keeps an admin other than the owner off other admin accounts", () => {
+    const other = { ...adminUser, id: 9, username: "other", role: "admin" };
+    const self = { ...adminUser, id: 8, username: "self", role: "admin" };
+    mocks.users = [adminUser, owner, other, self];
+    mocks.viewer = { id: 8 };
+    renderPage();
+    expect(screen.queryByRole("button", { name: "Edit other" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete other" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit self" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete self" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit taylor" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete taylor" })).toBeInTheDocument();
+  });
+
+  it("lets the owner manage other admins", () => {
+    mocks.users = [owner, { ...adminUser, id: 9, username: "other", role: "admin" }];
+    renderPage();
+    expect(screen.getByRole("button", { name: "Edit other" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete other" })).toBeInTheDocument();
   });
 
   it("lets the owner edit itself and view as another admin, but not delete itself", () => {
@@ -511,6 +542,8 @@ describe("AdminUsers user dialog policy hints", () => {
   }
 
   it("keeps a new user's hints on its group while the group list loads", async () => {
+    // Only the server Owner may create an admin.
+    mocks.users = [ownerViewer];
     const user = userEvent.setup();
     renderPage();
     const dialog = await openLimits(user, /Add User/);
@@ -602,7 +635,7 @@ describe("AdminUsers user dialog policy hints", () => {
   });
 
   it("disables the group picker for admins", async () => {
-    mocks.users = [{ ...adminUser, username: "root", role: "admin" }];
+    mocks.users = [{ ...adminUser, username: "root", role: "admin" }, ownerViewer];
     mocks.accessGroups = [defaultGroup, guests];
     mocks.accessGroupsLoaded = true;
     const user = userEvent.setup();
@@ -613,7 +646,8 @@ describe("AdminUsers user dialog policy hints", () => {
   });
 
   it("previews the default group for an admin demoted from the list", async () => {
-    mocks.users = [{ ...adminUser, username: "root", role: "admin" }];
+    // Only the server Owner may demote another admin.
+    mocks.users = [{ ...adminUser, username: "root", role: "admin" }, ownerViewer];
     mocks.accessGroups = [defaultGroup];
     mocks.accessGroupsLoaded = true;
     const user = userEvent.setup();

@@ -40,7 +40,7 @@ type BulkMetadataEnrichmentTask struct {
 func NewBulkMetadataEnrichmentTask(enricher bulkMetadataEnricher, pool *pgxpool.Pool) *BulkMetadataEnrichmentTask {
 	t := &BulkMetadataEnrichmentTask{enricher: enricher}
 	if pool != nil {
-		t.lock = advisoryClusterLock{pool: pool, key: bulkMetadataEnrichmentAdvisoryLock}
+		t.lock = advisoryClusterLock{pool: pool, key: bulkMetadataEnrichmentAdvisoryLock, name: "bulk metadata enrichment"}
 	}
 	return t
 }

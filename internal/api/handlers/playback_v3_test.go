@@ -607,6 +607,20 @@ func (s *mutablePlaybackSettingsV3) Get(_ context.Context, key string) (string, 
 	return s.values[key], nil
 }
 
+func (s *mutablePlaybackSettingsV3) GetMany(ctx context.Context, keys ...string) (map[string]string, error) {
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		value, err := s.Get(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		if value != "" {
+			out[key] = value
+		}
+	}
+	return out, nil
+}
+
 func TestPlannerSettingsV3ResultPreservesStoreFailure(t *testing.T) {
 	handler := &PlaybackHandler{SettingsRepo: &mutablePlaybackSettingsV3{err: context.DeadlineExceeded}}
 	_, err := handler.plannerSettingsV3Result(context.Background())

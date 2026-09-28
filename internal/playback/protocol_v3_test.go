@@ -3040,6 +3040,25 @@ func TestPlanPlaybackV3PublishesAvailableQualities(t *testing.T) {
 	}
 }
 
+// A viewer whose account may not transcode is refused every rung at
+// admission, so the ladder must not offer them.
+func TestAvailableQualitiesV3ViewerTranscodeDisabledPublishesOriginalOnly(t *testing.T) {
+	source := SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 960, BitrateKbps: 10_852, DynamicRange: DynamicRangeSDRV3}
+	input := PlannerInputV3{
+		Request:  validStartRequestV3(),
+		Settings: PlannerSettingsV3{TranscodeEnabled: true},
+	}
+	if got := availableQualitiesV3(input, source); len(got) < 2 {
+		t.Fatalf("allowed viewer qualities = %#v, want the transcode ladder", got)
+	}
+
+	input.Settings.ViewerTranscodeDisabled = true
+	got := availableQualitiesV3(input, source)
+	if len(got) != 1 || got[0].Label != QualityOriginalV3 || !got[0].PreservesSource {
+		t.Fatalf("restricted viewer qualities = %#v, want original only", got)
+	}
+}
+
 func TestAvailableQualitiesV3UnknownSourceHeightPublishesNoFixedRungs(t *testing.T) {
 	request := validStartRequestV3()
 	qualities := availableQualitiesV3(PlannerInputV3{

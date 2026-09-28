@@ -48,6 +48,11 @@ func TestEffectiveAdminSettingsMarkerDefaultsPreserveExplicitModes(t *testing.T)
 			if got := effective["markers.online_storage"]; got != "stored" {
 				t.Fatalf("markers.online_storage = %q, want stored", got)
 			}
+			for _, key := range []string{"markers.detect_intros", "markers.detect_credits"} {
+				if got := effective[key]; got != "true" {
+					t.Fatalf("%s = %q, want true", key, got)
+				}
+			}
 		})
 	}
 }

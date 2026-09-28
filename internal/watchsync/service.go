@@ -25,6 +25,7 @@ type Service struct {
 	storeProvider  userstore.UserStoreProvider
 	ratings        ratingStore
 	ratingStaler   ratingProfileStaler
+	dropped        droppedStore
 	locks          sync.Map
 	scrobbleQueues sync.Map
 }
@@ -143,6 +144,7 @@ func (s *Service) GetConnectionStatus(ctx context.Context, userID int, profileID
 		ScrobbleEnabled:              true,
 		ImportRatingsEnabled:         true,
 		ExportRatingsEnabled:         true,
+		SyncDroppedEnabled:           true,
 	}
 	if configurable, ok := provider.(connectionConfigProvider); ok {
 		status.ConnectionConfigSchema = configurable.ConnectionConfigSchema()
@@ -164,6 +166,7 @@ func (s *Service) GetConnectionStatus(ctx context.Context, userID int, profileID
 		status.ScrobbleEnabled = conn.ScrobbleEnabled
 		status.ImportRatingsEnabled = conn.ImportRatingsEnabled
 		status.ExportRatingsEnabled = conn.ExportRatingsEnabled
+		status.SyncDroppedEnabled = conn.SyncDroppedEnabled
 		status.LastInboundSyncAt = conn.LastInboundSyncAt
 		status.LastProgressSyncAt = conn.LastProgressSyncAt
 		status.LastOutboundSyncAt = conn.LastOutboundSyncAt
@@ -631,12 +634,13 @@ func (s *Service) persistConnection(
 			ScrobbleEnabled:           true,
 			ImportRatingsEnabled:      true,
 			ExportRatingsEnabled:      true,
+			SyncDroppedEnabled:        true,
 		}
 	}
 	rebound := ok && conn.ProviderAccountID != "" && account.ID != "" && account.ID != conn.ProviderAccountID
 	if rebound {
-		// Rating read cursors belong to the previous account.
-		conn.SyncCursors = withoutRatingCursors(conn.SyncCursors)
+		// Rating and dropped-show read cursors belong to the previous account.
+		conn.SyncCursors = withoutDroppedCursors(withoutRatingCursors(conn.SyncCursors))
 	}
 	conn.Provider = providerKey
 	conn.UserID = userID
@@ -664,6 +668,9 @@ func (s *Service) persistConnection(
 		// account without them.
 		if err := s.repo.ClearRatingSyncStates(ctx, saved.ID, saved.ProviderAccountID); err != nil {
 			slog.WarnContext(ctx, "failed to clear agreed ratings of a previous provider account", "component", "watchsync", "provider", providerKey, "connection_id", saved.ID, "error", err)
+		}
+		if err := s.repo.ClearDroppedSyncStates(ctx, saved.ID, saved.ProviderAccountID); err != nil {
+			slog.WarnContext(ctx, "failed to clear agreed drops of a previous provider account", "component", "watchsync", "provider", providerKey, "connection_id", saved.ID, "error", err)
 		}
 		return nil
 	})
@@ -804,7 +811,22 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			rateLimited = &rle
 		}
 	}
-	if conn.ImportWatchedEnabled && provider.Capabilities().ImportWatched {
+	// Dropped shows run first: they cost a request or two, and a large
+	// history read that exhausts the provider's rate limit must not starve
+	// them. Order does not change the merge: imported history keeps its
+	// original watch time, and providers undrop a show that is watched.
+	if conn.SyncDroppedEnabled && provider.Capabilities().SyncDropped {
+		result, err := s.syncDropped(ctx, conn, cfg, provider)
+		run.Warning = appendWarning(run.Warning, result.Warnings)
+		if err != nil {
+			recordFlowError("dropped shows", err)
+		} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
+			flowErrors = append(flowErrors, "dropped shows connection refresh: "+refreshErr.Error())
+		} else {
+			conn = refreshed
+		}
+	}
+	if rateLimited == nil && conn.ImportWatchedEnabled && provider.Capabilities().ImportWatched {
 		importer, ok := provider.(WatchedImporter)
 		if !ok {
 			flowErrors = append(flowErrors, fmt.Sprintf("provider %q does not implement watched import", conn.Provider))
@@ -999,7 +1021,8 @@ func providerSyncNeedsAccessToken(caps Capabilities) bool {
 		caps.RemoveWatchlist ||
 		caps.ScrobblePlayback ||
 		caps.ImportRatings ||
-		caps.ExportRatings
+		caps.ExportRatings ||
+		caps.SyncDropped
 }
 
 func (s *Service) completeSyncRun(ctx context.Context, run SyncRun) (SyncRun, error) {

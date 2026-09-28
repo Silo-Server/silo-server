@@ -198,6 +198,36 @@ func TestContributeAutoGatesOnThresholdAndKind(t *testing.T) {
 	}
 }
 
+// Local credits detection writes scanner credits, but automatic contribution
+// stays intro-only: detected credits are submitted only on request.
+func TestContributeAutoSubmitsOnlyScannerIntros(t *testing.T) {
+	cfg := fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.5}}
+	file := newContribFile()
+	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
+	file.IntroMarkersSource = strPtr(models.MarkerSourceScanner)
+	file.IntroMarkersConfidence = floatPtr(0.9)
+	file.CreditsStart, file.CreditsEnd = floatPtr(1500), floatPtr(1800)
+	file.CreditsMarkersSource = strPtr(models.MarkerSourceScanner)
+	file.CreditsMarkersConfidence = floatPtr(0.95)
+	file.CreditsMarkersAlgorithm = strPtr("credits-chapter:v1")
+
+	sub := &fakeSubmitter{id: "introdb"}
+	if _, err := newContribService(sub, cfg, &fakeRecorder{}).ContributeFile(context.Background(), file, ContributeOptions{Auto: true}); err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	if len(sub.submitted) != 1 || sub.submitted[0].Segment != MarkerKindIntro {
+		t.Fatalf("automatic contribution submitted %+v, want only the scanner intro", sub.submitted)
+	}
+
+	onRequest := &fakeSubmitter{id: "introdb"}
+	if _, err := newContribService(onRequest, cfg, &fakeRecorder{}).ContributeFile(context.Background(), file, ContributeOptions{}); err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	if len(onRequest.submitted) != 2 {
+		t.Fatalf("contribution on request submitted %+v, want the intro and the credits", onRequest.submitted)
+	}
+}
+
 func TestContributeSkipsDuplicate(t *testing.T) {
 	sub := &fakeSubmitter{id: "introdb"}
 	file := newContribFile()

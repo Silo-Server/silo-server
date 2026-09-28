@@ -108,8 +108,8 @@ func TestRequiredAPIKeyCreateRefusalAcceptance(t *testing.T) {
 	if err := requiredPairedResults(results, scenariocatalog.RequiredAPIKeyCreateRefusalScenarios); err != nil {
 		t.Error(err)
 	}
-	if requests != 10 || effects != 20 {
-		t.Errorf("paired creation refusal evidence %dHTTP/%dPG, want10/20", requests, effects)
+	if requests != 12 || effects != 24 {
+		t.Errorf("paired creation refusal evidence %dHTTP/%dPG, want12/24", requests, effects)
 	}
 	if err := WriteReport(results); err != nil {
 		t.Fatal(err)

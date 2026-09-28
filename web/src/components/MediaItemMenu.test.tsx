@@ -58,7 +58,8 @@ vi.mock("@/hooks/useUICustomization", () => ({
   useUICustomization: () => ({ cardPresentation: { poster_size: mocks.posterSize } }),
 }));
 
-vi.mock("@/hooks/queries/homeDismissals", () => ({
+vi.mock("@/hooks/queries/homeDismissals", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/homeDismissals")>()),
   useDismissHomeItem: () => ({ isPending: false, mutateAsync: vi.fn() }),
 }));
 

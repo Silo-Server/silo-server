@@ -23,17 +23,17 @@ type AdminBrandingAssetService interface {
 const brandingAssetFormOverhead = 1 << 20
 
 type AdminBrandingAssetKindInput struct {
-	Kind string `path:"kind" enum:"wordmark,wordmark_light,mark,mark_light,favicon,login_bg" doc:"Branding asset slot" example:"wordmark"`
+	Kind string `path:"kind" enum:"wordmark,mark,favicon,login_bg" doc:"Branding asset slot" example:"wordmark"`
 }
 type AdminBrandingAssetForm struct {
-	File huma.FormFile `form:"file" contentType:"image/png,image/jpeg,image/webp,image/x-icon,image/vnd.microsoft.icon,image/svg+xml" required:"true" doc:"The image: PNG, JPEG or WebP for every kind; favicon also accepts ICO and SVG. Per-kind caps: 8 MiB (wordmark, wordmark_light, mark, mark_light), 1 MiB (favicon), 12 MiB (login_bg)."`
+	File huma.FormFile `form:"file" contentType:"image/png,image/jpeg,image/webp,image/x-icon,image/vnd.microsoft.icon,image/svg+xml" required:"true" doc:"The image: PNG, JPEG or WebP for every kind; favicon also accepts ICO and SVG. Per-kind caps: 8 MiB (wordmark, mark), 1 MiB (favicon), 12 MiB (login_bg)."`
 }
 type AdminBrandingAssetUploadInput struct {
-	Kind    string `path:"kind" enum:"wordmark,wordmark_light,mark,mark_light,favicon,login_bg" doc:"Branding asset slot" example:"wordmark"`
+	Kind    string `path:"kind" enum:"wordmark,mark,favicon,login_bg" doc:"Branding asset slot" example:"wordmark"`
 	RawBody huma.MultipartFormFiles[AdminBrandingAssetForm]
 }
 type AdminBrandingAsset struct {
-	Kind string `json:"kind" enum:"wordmark,wordmark_light,mark,mark_light,favicon,login_bg"`
+	Kind string `json:"kind" enum:"wordmark,mark,favicon,login_bg"`
 	Ref  string `json:"ref" doc:"Content-addressed reference of the stored bytes"`
 	URL  string `json:"url" doc:"Stable public asset path with the ref as cache-buster"`
 }

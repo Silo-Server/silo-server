@@ -121,6 +121,7 @@ export function QualityMenu({
 
       {open && (
         <PlayerMenuSurface
+          anchorRef={menuRef}
           className="absolute right-0 bottom-full z-30 mb-2 min-w-[200px] rounded-lg bg-black/90 py-1 shadow-lg backdrop-blur"
           onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}

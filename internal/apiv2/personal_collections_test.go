@@ -108,6 +108,7 @@ type fakeCollectionImports struct {
 	configured bool
 	lastMDB    handlers.UserImportMDBListRequest
 	lastTMDB   handlers.UserImportTMDBRequest
+	lastList   handlers.UserImportTMDBListRequest
 	lastTrakt  handlers.UserImportTraktRequest
 	lastQuery  string
 }
@@ -134,6 +135,11 @@ func (f *fakeCollectionImports) ImportMDBList(_ context.Context, _ int, _ string
 
 func (f *fakeCollectionImports) ImportTMDB(_ context.Context, _ int, _ string, req handlers.UserImportTMDBRequest) (handlers.UserImportView, error) {
 	f.lastTMDB = req
+	return f.view()
+}
+
+func (f *fakeCollectionImports) ImportTMDBList(_ context.Context, _ int, _ string, req handlers.UserImportTMDBListRequest) (handlers.UserImportView, error) {
+	f.lastList = req
 	return f.view()
 }
 
@@ -220,7 +226,7 @@ func TestGetCollectionCapabilities(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"groups":false,"imports":false,"artwork":false,"item_reorder":false,"display_filter_fields":["type","watched"],"display_filter_presets":{"watched":["all","watched","unwatched"],"media":["all","movie","series"]},"collection_default_sort":true,"collection_sort_preferences":true,"effective_collection_sort":true,"sort_preference_kinds":["library","user","watchlist","favorites"]}` + "\n"
+	want := `{"groups":false,"imports":false,"import_sources":[],"artwork":false,"item_reorder":false,"display_filter_fields":["type","watched"],"display_filter_presets":{"watched":["all","watched","unwatched"],"media":["all","movie","series"]},"collection_default_sort":true,"collection_sort_preferences":true,"effective_collection_sort":true,"sort_preference_kinds":["library","user","watchlist","favorites"]}` + "\n"
 	if !capabilityBodyMatches(t, rec.Body.Bytes(), want) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
@@ -344,6 +350,11 @@ func TestImportCollections(t *testing.T) {
 	if rec.Code != 201 || ci.lastTMDB.Preset != "trending" || ci.lastTMDB.MediaType != "movie" || ci.lastTMDB.TimeWindow != "week" {
 		t.Fatalf("%d %+v", rec.Code, ci.lastTMDB)
 	}
+	rec = do(t, h, http.MethodPost, "/api/v2/collections/import/tmdb-list", `{"title":"My list","url":"https://www.themoviedb.org/list/310-my-movie-list","limit":40}`, viewerHeaders())
+	if rec.Code != 201 || ci.lastList.URL != "https://www.themoviedb.org/list/310-my-movie-list" || ci.lastList.Title != "My list" || ci.lastList.Limit == nil || *ci.lastList.Limit != 40 {
+		t.Fatalf("%d %+v", rec.Code, ci.lastList)
+	}
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections/import/tmdb-list", `{"title":"My list"}`, viewerHeaders()), TypeValidationFailed)
 	rec = do(t, h, http.MethodPost, "/api/v2/collections/import/trakt", `{"title":"Trending","preset":"trending"}`, viewerHeaders())
 	if rec.Code != 201 || ci.lastTrakt.Preset != "trending" || ci.lastTrakt.MediaType != "" {
 		t.Fatalf("%d %+v", rec.Code, ci.lastTrakt)

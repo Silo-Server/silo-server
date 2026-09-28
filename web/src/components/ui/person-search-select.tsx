@@ -2,7 +2,7 @@ import * as React from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { Check, ChevronsUpDown } from "lucide-react";
 
-import { usePersonSearch } from "@/hooks/queries/people";
+import { usePersonSearch } from "@/hooks/queries/personSearch";
 import { useDebounce } from "@/hooks/useDebounce";
 import { cn } from "@/lib/utils";
 import { PortalContainerContext } from "./portal-container-context";

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AdminUser } from "@/api/types";
 import { AdminUserPasswordResetDialog } from "./AdminUserPasswordResetDialog";
@@ -24,15 +25,17 @@ const user = {
 
 function mount(props: Partial<Parameters<typeof AdminUserPasswordResetDialog>[0]> = {}) {
   return render(
-    <QueryClientProvider client={new QueryClient()}>
-      <AdminUserPasswordResetDialog
-        user={user}
-        emailAvailable
-        linkAvailable
-        onClose={vi.fn()}
-        {...props}
-      />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={new QueryClient()}>
+        <AdminUserPasswordResetDialog
+          user={user}
+          emailAvailable
+          linkAvailable
+          onClose={vi.fn()}
+          {...props}
+        />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -76,4 +79,16 @@ it("explains why a delivery is unavailable", () => {
   mount({ emailAvailable: false });
   expect(screen.getByRole("button", { name: "Email reset link" })).toBeDisabled();
   expect(screen.getByText(/Set up email in Settings/)).toBeInTheDocument();
+});
+
+it("points to General settings while no public URL is set", () => {
+  // Without a link base the server reports neither delivery as available.
+  mount({ emailAvailable: false, linkAvailable: false });
+  expect(screen.getByRole("button", { name: "Create link to share" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Email reset link" })).toBeDisabled();
+  expect(screen.getByText(/Set the Silo public URL to create reset links/)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /General settings/ })).toHaveAttribute(
+    "href",
+    "/admin/settings/general",
+  );
 });

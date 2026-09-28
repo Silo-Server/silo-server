@@ -225,4 +225,7 @@ var ClientLocal = []string{
 // other.
 var Deprecated = []string{
 	PlaybackAutoSkipIntro,
+	UiCustomCss,
+	UiCustomThemeVars,
+	UiTheme,
 }

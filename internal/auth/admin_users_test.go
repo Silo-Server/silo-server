@@ -47,7 +47,7 @@ func adminAccountsDB(t *testing.T) *UserRepository {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	_, err = pool.Exec(t.Context(), `CREATE TABLE access_groups (LIKE public.access_groups INCLUDING ALL); CREATE TABLE users (LIKE public.users INCLUDING ALL EXCLUDING IDENTITY); ALTER TABLE users DROP COLUMN IF EXISTS admin_revision; CREATE SEQUENCE test_user_ids; ALTER TABLE users ALTER COLUMN id SET DEFAULT nextval('test_user_ids'); CREATE TABLE auth_sessions (LIKE public.auth_sessions INCLUDING ALL); CREATE TABLE abs_sessions (LIKE public.abs_sessions INCLUDING ALL); CREATE TABLE device_login_requests (LIKE public.device_login_requests INCLUDING ALL)`)
+	_, err = pool.Exec(t.Context(), `CREATE TABLE access_groups (LIKE public.access_groups INCLUDING ALL); CREATE TABLE users (LIKE public.users INCLUDING ALL EXCLUDING IDENTITY); ALTER TABLE users DROP COLUMN IF EXISTS admin_revision; CREATE SEQUENCE test_user_ids; ALTER TABLE users ALTER COLUMN id SET DEFAULT nextval('test_user_ids'); CREATE TABLE auth_sessions (LIKE public.auth_sessions INCLUDING ALL); CREATE TABLE abs_sessions (LIKE public.abs_sessions INCLUDING ALL); CREATE TABLE device_login_requests (LIKE public.device_login_requests INCLUDING ALL); CREATE TABLE api_keys (LIKE public.api_keys INCLUDING ALL); CREATE TRIGGER api_key_configuration_revision BEFORE INSERT OR UPDATE ON api_keys FOR EACH ROW EXECUTE FUNCTION public.advance_api_key_configuration_revision(); CREATE TABLE password_reset_tokens (LIKE public.password_reset_tokens INCLUDING ALL); CREATE TABLE invitations (LIKE public.invitations INCLUDING ALL)`)
 	if err != nil {
 		t.Fatal(err)
 	}

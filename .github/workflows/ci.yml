@@ -241,6 +241,15 @@ jobs:
           SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable
         run: go test -race -count=1 -run '^(TestHistoryImportCancellation.*|TestQueue.*)$' ./migrations/ ./internal/historyimport/
 
+      # 20260925144545 moves marker claims between rows that share a payload
+      # while the payload index still exists. The replay seeds a winner-first
+      # pair and a NULL-key row sharing a keyed payload; either alone failed
+      # the original. make test-go has no database, so only this step runs it.
+      - name: Test the marker claim migration against Postgres
+        env:
+          SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable
+        run: go test -race -count=1 -run '^TestMarkerContributionClaimsByTargetMigrationPostgres$' ./migrations/
+
       # Compiles every package on the way, so there is no separate build step.
       - name: Test
         run: make test-go
@@ -292,6 +301,9 @@ jobs:
 
       - name: Test taste cluster replacement against Postgres
         run: go test -race -count=1 -run '^TestUpsertTasteClusters.*Postgres$' ./internal/recommendations/
+
+      - name: Test image cache cleanup resumption against Postgres
+        run: go test -race -count=1 -run '^(TestImageCacheCleanup|TestRequeuedImageCacheCleanup|TestJobOutcomeIsRecorded)' ./internal/adminjob/
 
   web:
     name: Web

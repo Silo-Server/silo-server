@@ -95,7 +95,7 @@ func TestRequiredAPIKeyCreateAcceptance(t *testing.T) {
 							t.Errorf("frozen exchange: %v", failures)
 						}
 						after := snapshot()
-						checkCreatedAPIKey(t, response.Raw, transport, s.ID, e.fixtures["member_user_id"], before, after)
+						checkCreatedAPIKey(t, response.Raw, transport, s.ID, e.fixtures["admin_user_id"], before, after)
 						if len(after) != len(before)+1 {
 							t.Error("unexpected API-key row count after creation")
 						}
@@ -121,7 +121,7 @@ func TestRequiredAPIKeyCreateAcceptance(t *testing.T) {
 }
 
 // checkCreatedAPIKey links the receipt to the persisted row without logging credentials.
-func checkCreatedAPIKey(t *testing.T, raw []byte, transport, scenario, member string, before, after map[string]json.RawMessage) {
+func checkCreatedAPIKey(t *testing.T, raw []byte, transport, scenario, owner string, before, after map[string]json.RawMessage) {
 	t.Helper()
 	var receipt struct {
 		ID        json.RawMessage
@@ -157,7 +157,7 @@ func checkCreatedAPIKey(t *testing.T, raw []byte, transport, scenario, member st
 	if scenario == "keys_create.scoped" {
 		scopes, label = []string{"admin:users"}, "scoped"
 	}
-	if strconv.FormatInt(row.ID, 10) != id || strconv.FormatInt(row.UserID, 10) != member || row.Key != receipt.Key || row.Key == "" || row.Label != label || row.RateTier != "standard" || !slices.Equal(row.Scopes, scopes) || row.LastUsedAt != nil {
+	if strconv.FormatInt(row.ID, 10) != id || strconv.FormatInt(row.UserID, 10) != owner || row.Key != receipt.Key || row.Key == "" || row.Label != label || row.RateTier != "standard" || !slices.Equal(row.Scopes, scopes) || row.LastUsedAt != nil {
 		t.Error("created row does not match exact receipt/account/normalized configuration")
 	}
 	created := row.CreatedAt

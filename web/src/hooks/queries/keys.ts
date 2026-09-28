@@ -334,7 +334,6 @@ export const downloadKeys = {
 export const themeKeys = {
   all: ["theme"] as const,
   adminCss: () => ["theme", "admin-css"] as const,
-  catalogIndex: () => ["theme", "catalog"] as const,
   branding: () => ["theme", "branding"] as const,
 };
 
@@ -462,6 +461,7 @@ export const adminKeys = {
   task: (key: string) => ["admin", "tasks", key] as const,
   taskHistory: (key: string) => ["admin", "tasks", key, "history"] as const,
   taskMetrics: (key: string) => ["admin", "tasks", key, "metrics"] as const,
+  markerCapabilities: () => ["admin", "markerCapabilities"] as const,
   markerProviders: () => ["admin", "markerProviders"] as const,
   markerProvider: (provider: string) => ["admin", "markerProviders", provider] as const,
   markerProviderValidation: (provider: string) =>

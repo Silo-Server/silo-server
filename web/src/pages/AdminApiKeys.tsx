@@ -81,14 +81,16 @@ export default function AdminApiKeys() {
 function ApiKeyManager() {
   const capability = useAdminApiKeyCapabilities();
   const viewerId = useAuth().user?.id;
-  // Only the server Owner may change or revoke the Owner's keys. Until the
-  // account list loads successfully, nobody is offered the actions.
+  // Only the server Owner may change or revoke another admin's keys, and
+  // nobody else may touch the Owner's. Until the account list loads
+  // successfully, nobody is offered the actions.
   const accounts = useAdminUsers();
-  const ownerId = accounts.data?.find((u) => u.is_owner)?.id;
-  const ownerLocked = (userId: string) =>
-    accounts.isPending ||
-    accounts.isError ||
-    (ownerId !== undefined && ownerId !== viewerId && Number(userId) === ownerId);
+  const viewerIsOwner = accounts.data?.some((u) => u.id === viewerId && u.is_owner) ?? false;
+  const ownerLocked = (userId: string) => {
+    if (accounts.isPending || accounts.isError) return true;
+    const account = accounts.data?.find((u) => u.id === Number(userId));
+    return account !== undefined && !canManageAccount(account, viewerId, viewerIsOwner);
+  };
   const keys = useAdminApiKeys(capability.data?.available === true);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -388,6 +390,7 @@ function CreateApiKeyForm({
 }) {
   const { user } = useAuth();
   const users = useAdminUsers();
+  const viewerIsOwner = users.data?.some((u) => u.id === user?.id && u.is_owner) ?? false;
   const [profileContext] = useState(captureAdminApiKeyAuthority);
   const [label, setLabel] = useState("");
   const [userId, setUserId] = useState(String(user?.id ?? ""));
@@ -459,7 +462,7 @@ function CreateApiKeyForm({
           <SelectContent>
             <SelectGroup>
               {users.data
-                ?.filter((u) => canManageAccount(u, user?.id))
+                ?.filter((u) => canManageAccount(u, user?.id, viewerIsOwner))
                 .map((u) => (
                   <SelectItem key={u.id} value={String(u.id)}>
                     {u.username}

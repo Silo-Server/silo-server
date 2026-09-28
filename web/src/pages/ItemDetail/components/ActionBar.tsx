@@ -39,7 +39,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { FileVersion, PlaybackVariant } from "@/api/types";
-import type { RefreshItemMetadataMode } from "@/hooks/queries/items";
+import type { RedetectMarkersKind, RefreshItemMetadataMode } from "@/hooks/queries/items";
 import type {
   PlayerSubtitleTrackSignature,
   PrePlaySubtitleSelection,
@@ -47,6 +47,7 @@ import type {
 } from "@/player/types";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
 import { MarkerEditor } from "@/components/markers/MarkerEditor";
+import RedetectMarkersDialog from "@/components/markers/RedetectMarkersDialog";
 import StarRating from "@/components/StarRating";
 import { MediaActionIcon } from "@/components/mediaActionIcons";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
@@ -127,8 +128,14 @@ export interface ActionBarProps {
   inWatchlist?: boolean;
   onRefresh?: (mode: RefreshItemMetadataMode) => void;
   isRefreshing?: boolean;
-  onRedetectIntro?: () => void;
-  isRedetectingIntro?: boolean;
+  /** Re-detects local markers; without redetectKind the admin picks intro, credits, or both. */
+  onRedetectMarkers?: (kind: RedetectMarkersKind) => void;
+  /**
+   * Re-detects this one kind directly, without the picker: credits for a movie,
+   * which has no intro, or intro for an episode on a server without redetect-markers.
+   */
+  redetectKind?: "intro" | "credits";
+  isRedetectingMarkers?: boolean;
   onEditMetadata?: () => void;
   onMatchItem?: () => void;
   onSplitItem?: () => void;
@@ -182,8 +189,9 @@ export default function ActionBar({
   inWatchlist = false,
   onRefresh,
   isRefreshing = false,
-  onRedetectIntro,
-  isRedetectingIntro = false,
+  onRedetectMarkers,
+  redetectKind,
+  isRedetectingMarkers = false,
   onEditMetadata,
   onMatchItem,
   onSplitItem,
@@ -228,6 +236,7 @@ export default function ActionBar({
   const scrollFrameRef = useRef<number | null>(null);
   const typeaheadRef = useRef<{ query: string; at: number }>({ query: "", at: 0 });
   const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
+  const [redetectDialogOpen, setRedetectDialogOpen] = useState(false);
   const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
   const [markerEditorOpen, setMarkerEditorOpen] = useState(false);
   const showMarkerEditor = canEditMarkers && !!contentId;
@@ -314,6 +323,10 @@ export default function ActionBar({
   const handleRefreshConfirm = (mode: RefreshItemMetadataMode) => {
     setRefreshDialogOpen(false);
     onRefresh?.(mode);
+  };
+  const handleRedetectConfirm = (kind: RedetectMarkersKind) => {
+    setRedetectDialogOpen(false);
+    onRedetectMarkers?.(kind);
   };
   const closeOverflowMenu = useCallback(() => setOverflowOpen(false), []);
   const toggleOverflowMenu = useCallback(() => {
@@ -470,7 +483,7 @@ export default function ActionBar({
   const hasOverflowActions = Boolean(
     restartHref || onToggleWatchlist || onDownload || onSearchSubtitles,
   );
-  const hasAdminActions = Boolean(isAdmin && (contentId || onRedetectIntro));
+  const hasAdminActions = Boolean(isAdmin && (contentId || onRedetectMarkers));
   const hasMetadataActions = Boolean(
     (canCurateMetadata && (onRefresh || onEditMetadata || onMatchItem || onShowMediaInfo)) ||
     showMarkerEditor,
@@ -773,14 +786,22 @@ export default function ActionBar({
                       Refresh Metadata
                     </DetailOverflowMenuItem>
                   )}
-                  {isAdmin && onRedetectIntro && (
+                  {isAdmin && onRedetectMarkers && (
                     <DetailOverflowMenuItem
                       closeMenu={closeOverflowMenu}
-                      disabled={isRedetectingIntro}
-                      onAction={onRedetectIntro}
+                      disabled={isRedetectingMarkers}
+                      onAction={() =>
+                        redetectKind ? onRedetectMarkers(redetectKind) : setRedetectDialogOpen(true)
+                      }
                     >
-                      <RefreshCw className={`size-4 ${isRedetectingIntro ? "animate-spin" : ""}`} />
-                      Re-detect Intro Markers
+                      <RefreshCw
+                        className={`size-4 ${isRedetectingMarkers ? "animate-spin" : ""}`}
+                      />
+                      {redetectKind === "credits"
+                        ? "Re-detect Credits"
+                        : redetectKind === "intro"
+                          ? "Re-detect Intro Markers"
+                          : "Re-detect Markers"}
                     </DetailOverflowMenuItem>
                   )}
                   {canCurateMetadata && onEditMetadata && (
@@ -855,6 +876,14 @@ export default function ActionBar({
           onConfirm={handleRefreshConfirm}
           isPending={isRefreshing}
         />
+        {isAdmin && onRedetectMarkers && !redetectKind && (
+          <RedetectMarkersDialog
+            open={redetectDialogOpen}
+            onOpenChange={setRedetectDialogOpen}
+            onConfirm={handleRedetectConfirm}
+            isPending={isRedetectingMarkers}
+          />
+        )}
         {contentId && (
           <AddToCollectionDialog
             open={addToCollectionOpen}

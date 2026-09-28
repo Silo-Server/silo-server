@@ -27,7 +27,6 @@ export function setAppDocumentTitle(name: string) {
 
 const SETTINGS_TITLES: Record<string, string> = {
   account: "Account Settings",
-  appearance: "Appearance Settings",
   interface: "Navigation & Card Settings",
   accessibility: "Accessibility Settings",
   playback: "Playback Settings",

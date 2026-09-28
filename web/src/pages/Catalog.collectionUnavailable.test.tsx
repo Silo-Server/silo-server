@@ -18,7 +18,7 @@ vi.mock("@/hooks/queries/catalog", () => ({
   useCatalogFilters: () => ({ data: undefined, isLoading: false }),
   useCatalogMetadataFilters: () => ({ data: undefined, isLoading: false }),
 }));
-vi.mock("@/hooks/queries/people", () => ({
+vi.mock("@/hooks/queries/personSearch", () => ({
   usePersonSearch: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 vi.mock("@/hooks/useCanRequest", () => ({

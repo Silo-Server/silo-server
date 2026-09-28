@@ -76,7 +76,7 @@ vi.mock("sonner", () => ({
 
 import {
   fetchWatchDetail,
-  redetectEpisodeIntro,
+  redetectItemMarkers,
   useRefreshItemMetadata,
   useWatchedStateMutation,
 } from "./items";
@@ -164,17 +164,19 @@ describe("item query helpers", () => {
       }),
     );
     vi.stubGlobal("fetch", fetch);
-    await redetectEpisodeIntro("episode 1/id:abc");
+    await redetectItemMarkers("episode 1/id:abc", "credits");
 
-    expect(mocks.v2).toHaveBeenCalledWith("POST /api/v2/admin/items/{id}/redetect-intro", {
+    expect(mocks.v2).toHaveBeenCalledWith("POST /api/v2/admin/items/{id}/redetect-markers", {
       path: { id: "episode 1/id:abc" },
+      body: { kind: "credits" },
       retryAuthentication: false,
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0]?.[0]).toBe(
-      "/api/v2/admin/items/episode%201%2Fid%3Aabc/redetect-intro",
+      "/api/v2/admin/items/episode%201%2Fid%3Aabc/redetect-markers",
     );
     expect(fetch.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetch.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ kind: "credits" }));
     expect(mocks.api).not.toHaveBeenCalled();
   });
 

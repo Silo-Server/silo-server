@@ -153,7 +153,20 @@ func (r *Repository) Complete(ctx context.Context, tokenHash, newPassword string
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // rollback after commit is a no-op
 
+	// Lock the account before the link, the order a promotion takes them in
+	// (it updates the account, then deletes its links), so completing a link
+	// cannot deadlock against one. The claim below re-checks the link.
 	var userID int
+	err = tx.QueryRow(ctx, `SELECT user_id FROM password_reset_tokens WHERE token_hash = $1`, tokenHash).Scan(&userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("finding password reset link: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
+		return nil, fmt.Errorf("locking password reset account: %w", err)
+	}
 	err = tx.QueryRow(ctx, `SELECT t.user_id`+usableLink("clock_timestamp()")+` FOR UPDATE OF t, u`, tokenHash).Scan(&userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound

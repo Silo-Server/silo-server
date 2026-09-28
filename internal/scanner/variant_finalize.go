@@ -35,51 +35,7 @@ func (s *Scanner) FinalizeVariantsByPathPrefix(
 		return nil
 	}
 
-	type groupSummary struct {
-		maxPartIndex int
-	}
-
-	groupTotals := make(map[string]*groupSummary)
-	for _, file := range files {
-		if file == nil || file.MissingSince != nil {
-			continue
-		}
-		ownerKey := stableOwnerKey(file)
-		if ownerKey == "" {
-			continue
-		}
-		hints := naming.ParseVariantHints(file.FilePath, folder.Type, folder.Paths...)
-		if file.EditionSource == "import" && file.EditionKey != "" {
-			hints = &naming.VariantHints{
-				EditionRaw:            file.EditionRaw,
-				EditionKey:            file.EditionKey,
-				EditionSource:         file.EditionSource,
-				EditionConfidence:     file.EditionConfidence,
-				PresentationKind:      file.PresentationKind,
-				PresentationGroupKey:  file.PresentationGroupKey,
-				PresentationPartIndex: file.PresentationPartIndex,
-				MultiEpisodeStart:     file.MultiEpisodeStart,
-				MultiEpisodeEnd:       file.MultiEpisodeEnd,
-			}
-		}
-		if hints == nil {
-			continue
-		}
-		if (hints.PresentationKind != "multipart_movie" && hints.PresentationKind != "split_episode") ||
-			hints.PresentationGroupKey == "" || hints.PresentationPartIndex <= 0 {
-			continue
-		}
-		groupKey := ownerKey + "|" + hints.EditionKey + "|" + hints.PresentationKind + "|" + hints.PresentationGroupKey
-		summary := groupTotals[groupKey]
-		if summary == nil {
-			summary = &groupSummary{}
-			groupTotals[groupKey] = summary
-		}
-		if hints.PresentationPartIndex > summary.maxPartIndex {
-			summary.maxPartIndex = hints.PresentationPartIndex
-		}
-	}
-
+	partTotals := variantPartTotals(files, folder)
 	for _, file := range files {
 		if file == nil || file.MissingSince != nil {
 			continue
@@ -89,30 +45,13 @@ func (s *Scanner) FinalizeVariantsByPathPrefix(
 			continue
 		}
 
-		hints := naming.ParseVariantHints(file.FilePath, folder.Type, folder.Paths...)
-		if file.EditionSource == "import" && file.EditionKey != "" {
-			hints = &naming.VariantHints{
-				EditionRaw:            file.EditionRaw,
-				EditionKey:            file.EditionKey,
-				EditionSource:         file.EditionSource,
-				EditionConfidence:     file.EditionConfidence,
-				PresentationKind:      file.PresentationKind,
-				PresentationGroupKey:  file.PresentationGroupKey,
-				PresentationPartIndex: file.PresentationPartIndex,
-				MultiEpisodeStart:     file.MultiEpisodeStart,
-				MultiEpisodeEnd:       file.MultiEpisodeEnd,
-			}
-		}
+		hints := variantHintsForFile(file, folder)
 		if hints == nil {
 			hints = &naming.VariantHints{}
 		}
 		partTotal := 0
-		if (hints.PresentationKind == "multipart_movie" || hints.PresentationKind == "split_episode") &&
-			hints.PresentationGroupKey != "" && hints.PresentationPartIndex > 0 {
-			groupKey := ownerKey + "|" + hints.EditionKey + "|" + hints.PresentationKind + "|" + hints.PresentationGroupKey
-			if summary := groupTotals[groupKey]; summary != nil {
-				partTotal = summary.maxPartIndex
-			}
+		if groupKey, ok := variantPartGroupKey(ownerKey, hints); ok {
+			partTotal = partTotals[groupKey]
 		}
 
 		if !variantMetadataChanged(file, hints, partTotal) {
@@ -136,6 +75,75 @@ func (s *Scanner) FinalizeVariantsByPathPrefix(
 	}
 
 	return nil
+}
+
+// variantPartTotals returns the part count for each group of files that are
+// parts of one split movie or episode. A group needs at least two distinct part
+// numbers: a lone "Part 2" file is a whole episode or movie with the part in
+// its title, such as "Resurrection Ship, Part 2" or "Mockingjay - Part 2".
+func variantPartTotals(files []*models.MediaFile, folder *models.MediaFolder) map[string]int {
+	partsByGroup := make(map[string]map[int]struct{})
+	for _, file := range files {
+		if file == nil || file.MissingSince != nil {
+			continue
+		}
+		ownerKey := stableOwnerKey(file)
+		if ownerKey == "" {
+			continue
+		}
+		hints := variantHintsForFile(file, folder)
+		if hints == nil {
+			continue
+		}
+		groupKey, ok := variantPartGroupKey(ownerKey, hints)
+		if !ok {
+			continue
+		}
+		if partsByGroup[groupKey] == nil {
+			partsByGroup[groupKey] = make(map[int]struct{})
+		}
+		partsByGroup[groupKey][hints.PresentationPartIndex] = struct{}{}
+	}
+
+	totals := make(map[string]int, len(partsByGroup))
+	for groupKey, parts := range partsByGroup {
+		if len(parts) < 2 {
+			continue
+		}
+		for partIndex := range parts {
+			totals[groupKey] = max(totals[groupKey], partIndex)
+		}
+	}
+	return totals
+}
+
+func variantPartGroupKey(ownerKey string, hints *naming.VariantHints) (string, bool) {
+	if (hints.PresentationKind != "multipart_movie" && hints.PresentationKind != "split_episode") ||
+		hints.PresentationGroupKey == "" || hints.PresentationPartIndex <= 0 {
+		return "", false
+	}
+	return ownerKey + "|" + hints.EditionKey + "|" + hints.PresentationKind + "|" + hints.PresentationGroupKey, true
+}
+
+// editionSourceImport marks edition and presentation fields set by an import
+// rather than parsed from the filename; scans keep them as they are.
+const editionSourceImport = "import"
+
+func variantHintsForFile(file *models.MediaFile, folder *models.MediaFolder) *naming.VariantHints {
+	if file.EditionSource == editionSourceImport && file.EditionKey != "" {
+		return &naming.VariantHints{
+			EditionRaw:            file.EditionRaw,
+			EditionKey:            file.EditionKey,
+			EditionSource:         file.EditionSource,
+			EditionConfidence:     file.EditionConfidence,
+			PresentationKind:      file.PresentationKind,
+			PresentationGroupKey:  file.PresentationGroupKey,
+			PresentationPartIndex: file.PresentationPartIndex,
+			MultiEpisodeStart:     file.MultiEpisodeStart,
+			MultiEpisodeEnd:       file.MultiEpisodeEnd,
+		}
+	}
+	return naming.ParseVariantHints(file.FilePath, folder.Type, folder.Paths...)
 }
 
 func (s *Scanner) variantFinalizationFilesForScope(

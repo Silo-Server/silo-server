@@ -821,6 +821,12 @@ func (m *SessionManager) limitsForUser(ctx context.Context, userID int) (Session
 	return limits, nil
 }
 
+// LimitsForUser returns the account-level playback limits admission enforces
+// for userID, so planning can avoid offering routes admission would refuse.
+func (m *SessionManager) LimitsForUser(ctx context.Context, userID int) (SessionLimits, error) {
+	return m.limitsForUser(ctx, userID)
+}
+
 // CheckTranscodingAllowed verifies account-level restrictions before an
 // existing session switches to video or audio transcoding.
 func (m *SessionManager) CheckTranscodingAllowed(ctx context.Context, userID int, requiresVideoTranscode bool) error {

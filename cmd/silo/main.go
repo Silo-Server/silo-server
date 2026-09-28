@@ -83,6 +83,7 @@ import (
 	// builtin registry on import; buildProviders resolves their seeded chain
 	// entries in-process (no gRPC).
 	_ "github.com/Silo-Server/silo-server/internal/metadata/nfo"
+	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
@@ -677,6 +678,13 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "compat-web" {
 		if err := runCompatWebCommand(context.Background(), os.Args[2:]); err != nil {
 			log.Fatalf("compat-web: %v", err)
+		}
+		return
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "owner" {
+		if err := runOwnerCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
+			log.Fatalf("owner: %v", err)
 		}
 		return
 	}
@@ -1294,16 +1302,16 @@ func main() {
 	deps.AdminJobCancelRegistry = adminJobCancelRegistry
 	if needsWorkers && deps.DB != nil {
 		deps.IntroRepository = intromarkers.NewRepository(deps.DB)
-		deps.IntroAnalyzer = intromarkers.NewAnalyzer(
-			deps.IntroRepository,
-			intromarkers.DefaultConfig(cfg.Playback.FFmpegPath),
-			slog.Default(),
-		)
-		// markers.detection_workers applies without a restart.
+		introConfig := intromarkers.DefaultConfig(cfg.Playback.FFmpegPath)
+		introConfig.HWAccel, introConfig.HWDevice = cfg.Playback.HWAccel, cfg.Playback.HWDevice
+		deps.IntroAnalyzer = intromarkers.NewAnalyzer(deps.IntroRepository, introConfig, slog.Default())
+		// markers.detection_workers, and the playback hardware settings that
+		// credits tail passes decode on, apply without a restart.
 		introAnalyzer := deps.IntroAnalyzer
 		introAnalyzer.SetWorkers(cfg.Markers.DetectionWorkers)
 		configWatcher.OnChange(func(_, updated *config.Config) {
 			introAnalyzer.SetWorkers(updated.Markers.DetectionWorkers)
+			introAnalyzer.SetHardwareDecode(updated.Playback.HWAccel, updated.Playback.HWDevice)
 		})
 	}
 	if deps.DB != nil {
@@ -1781,8 +1789,8 @@ func main() {
 		pluginInstallationStore = installationStore
 		pluginRuntimeConfigStore = runtimeConfigStore
 		pluginHTTPProxy = plugins.NewHTTPProxyWithTypedResolver(pluginService, pluginInstallationStore)
+		pluginHTTPProxy = pluginHTTPProxy.WithUserThemeLookup(plugins.FixedUserThemeLookup{})
 		if deps.DB != nil {
-			pluginHTTPProxy = pluginHTTPProxy.WithUserThemeLookup(plugins.NewPgUserThemeLookup(deps.DB))
 			pluginHTTPProxy = pluginHTTPProxy.WithUserIdentityLookup(plugins.NewPgUserIdentityLookup(deps.DB))
 		}
 		// The admin network access reads name this process as the "api" host
@@ -2326,7 +2334,8 @@ func main() {
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider).
-			WithRatingStore(catalog.NewRatingsRepo(deps.DB), recommendations.NewRepo(deps.DB))
+			WithRatingStore(catalog.NewRatingsRepo(deps.DB), recommendations.NewRepo(deps.DB)).
+			WithDroppedStore(catalog.NewDroppedSeriesRepo(deps.DB))
 		backgroundInit = append(backgroundInit, func(ctx context.Context) {
 			if compatTerminalRecoveryReady != nil {
 				select {
@@ -2728,7 +2737,7 @@ func main() {
 		taskMgr.Register(tasks.NewRebuildCatalogSearchIndexTask(catalogSearchIndexer))
 		maintenanceSteps = append(maintenanceSteps, tasks.NewCatalogSearchEventRetentionTask(catalog.NewSearchIndexEventRepository(deps.DB)))
 		if deps.IntroAnalyzer != nil {
-			taskMgr.Register(tasks.NewDetectIntroMarkersTask(deps.IntroAnalyzer, settingsRepo))
+			taskMgr.Register(tasks.NewDetectIntroMarkersTask(deps.DB, deps.IntroAnalyzer, settingsRepo))
 		}
 		if deps.MarkerPopulation != nil {
 			taskMgr.Register(tasks.NewSyncMarkersTask(deps.MarkerPopulation))
@@ -2896,15 +2905,20 @@ func main() {
 		if watchProviderService != nil {
 			taskMgr.Register(tasks.NewSyncWatchProvidersTask(watchProviderService))
 		}
+		// The TMDB client lets a submission started here pick up a TVDB ID
+		// added on TMDB after the request was created.
 		requestReconcileSvc := mediarequests.NewService(
 			mediarequests.NewRepository(deps.DB, deps.SecretCipher),
-			nil,
+			tmdb.NewClient(cfg.TMDBAPIKey, 40),
 			mediarequests.NewCatalogPresence(
 				catalog.NewItemRepository(deps.DB),
 				catalog.NewProviderIDRepository(deps.DB),
 			),
 		)
 		requestReconcileSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
+		if metadataService != nil {
+			requestReconcileSvc.SetTVDBIDResolver(metadataService)
+		}
 		api.AttachRequestRouter(requestReconcileSvc, pluginService)
 		requestReconcileSvc.SetGroupPolicyProvider(accessGroupStore)
 		if userStoreProvider != nil {

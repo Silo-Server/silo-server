@@ -818,6 +818,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/collections/import/tmdb-list": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Import a public TMDB list as a collection. */
+    post: operations["importAdminTMDBList"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/collections/import/trakt": {
     parameters: {
       query?: never;
@@ -1709,8 +1726,25 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Refresh episode markers using configured sources, or explicitly rerun local intro detection. */
+    /** Explicitly rerun local intro detection for an episode; other items, movies included, are rejected. */
     post: operations["redetectAdminEpisodeIntro"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/items/{id}/redetect-markers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Explicitly rerun local detection of an episode's intro, credits, or both, or of a movie's best-effort credits. */
+    post: operations["redetectAdminItemMarkers"];
     delete?: never;
     options?: never;
     head?: never;
@@ -1726,7 +1760,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Refresh episode markers using configured sources, or explicitly rerun local intro detection. */
+    /** Refresh episode or movie markers using configured sources; movies get best-effort local credits only. */
     post: operations["refreshAdminEpisodeMarkers"];
     delete?: never;
     options?: never;
@@ -2119,6 +2153,23 @@ export interface paths {
     };
     /** Discover whether the administrator log stream handshake is served. */
     get: operations["getAdminLogsSocketCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/markers/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover marker analysis supported by this build, such as local movie credits. Support does not promise that marker settings or a library allow analysis. */
+    get: operations["getAdminMarkerCapabilities"];
     put?: never;
     post?: never;
     delete?: never;
@@ -4478,6 +4529,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/users/{id}/transfer-ownership": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Transfer server ownership to another enabled admin account.
+     * @description Only the server Owner may call this, from a signed-in session: an API key or an impersonation session is refused with 403, like any caller that is not the Owner. The previous Owner stays an admin.
+     */
+    post: operations["transferAdminUserOwnership"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/users/capabilities": {
     parameters: {
       query?: never;
@@ -5749,6 +5820,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/collections/import/tmdb-list": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Import a public TMDB list as a synced collection. Creates the collection and runs its first sync. Not idempotent: a retry after a lost response creates a second collection. */
+    post: operations["importTMDBListCollection"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/collections/import/trakt": {
     parameters: {
       query?: never;
@@ -6698,10 +6786,10 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal. */
+    /** Hide a card from Continue Watching or Next Up for the acting profile; repeating it refreshes the dismissal. Dismissing an episode or series drops the whole show: every card of it leaves both rows until the profile watches it again or the dismissal is undone. Watch provider connections with dropped-show sync on, for providers that support it, send the drop to the provider. */
     put: operations["dismissHomeItem"];
     post?: never;
-    /** Show a dismissed card again; an item that was not dismissed is left as is. */
+    /** Show a dismissed card again; an item that was not dismissed is left as is. For an episode or series this undrops the show. */
     delete: operations["undismissHomeItem"];
     options?: never;
     head?: never;
@@ -9707,74 +9795,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v2/theme/catalog": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Read portable theme documents from the configured approved upstream. */
-    get: operations["getThemeCatalog"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v2/theme/catalog/capabilities": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Read portable theme documents from the configured approved upstream. */
-    get: operations["getThemeCatalogCapabilities"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v2/theme/catalog/refresh": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Read portable theme documents from the configured approved upstream. */
-    post: operations["refreshThemeCatalog"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v2/theme/download": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Read portable theme documents from the configured approved upstream. */
-    get: operations["downloadThemeFile"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v2/user/libraries": {
     parameters: {
       query?: never;
@@ -10658,6 +10678,8 @@ export interface components {
       default_profile: boolean;
       exact_identity_filter: boolean;
       guarded_configuration: boolean;
+      /** @description Whether transferAdminUserOwnership can make another enabled admin the server Owner */
+      ownership_transfer: boolean;
       /** @description Whether createAdminUserPasswordReset can email the link; needs the public URL and a configured mail server */
       password_reset_email: boolean;
       /** @description Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL */
@@ -11192,7 +11214,7 @@ export interface components {
     };
     AdminBrandingAsset: {
       /** @enum {string} */
-      kind: "wordmark" | "wordmark_light" | "mark" | "mark_light" | "favicon" | "login_bg";
+      kind: "wordmark" | "mark" | "favicon" | "login_bg";
       /** @description Content-addressed reference of the stored bytes */
       ref: string;
       /** @description Stable public asset path with the ref as cache-buster */
@@ -11201,7 +11223,7 @@ export interface components {
     AdminBrandingAssetForm: {
       /**
        * Format: binary
-       * @description The image: PNG, JPEG or WebP for every kind; favicon also accepts ICO and SVG. Per-kind caps: 8 MiB (wordmark, wordmark_light, mark, mark_light), 1 MiB (favicon), 12 MiB (login_bg).
+       * @description The image: PNG, JPEG or WebP for every kind; favicon also accepts ICO and SVG. Per-kind caps: 8 MiB (wordmark, mark), 1 MiB (favicon), 12 MiB (login_bg).
        */
       file: string;
     };
@@ -11484,6 +11506,15 @@ export interface components {
       allowed: boolean;
       artwork: boolean;
       groups: boolean;
+      /**
+       * @description Import sources a new collection can be created from; empty when imports is false
+       * @example [
+       *       "mdblist",
+       *       "tmdb",
+       *       "tmdb_list"
+       *     ]
+       */
+      import_sources: ("mdblist" | "tmdb" | "tmdb_list")[];
       imports: boolean;
       item_reorder: boolean;
       /** @description Opaque revision of this document */
@@ -12592,6 +12623,15 @@ export interface components {
       /** Format: int64 */
       season_number?: number;
     };
+    AdminItemMarkersRedetect: {
+      /**
+       * @description intro, credits, or all (both). A movie has credits only: all means credits, and intro is rejected.
+       * @default all
+       * @example credits
+       * @enum {string}
+       */
+      kind: "intro" | "credits" | "all";
+    };
     AdminItemMetadataRefreshInputBody: {
       /**
        * @default quick
@@ -12838,6 +12878,23 @@ export interface components {
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
       streams: string[];
+    };
+    AdminMarkerCapabilities: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      /** @description Local detection honors the markers.detect_intros and markers.detect_credits server settings, which turn intro and credits detection on or off separately */
+      detection_kind_settings: boolean;
+      /** @description The item refresh-markers operation, and redetect-markers with kind credits or all, accept movies, and local analysis looks for their end credits on a best-effort basis; redetect-intro stays episode-only, since movies never get intros */
+      movie_credits: boolean;
+      /** @description The item redetect-markers operation reruns local detection of the kind requested: intro, credits, or all */
+      redetect_markers: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
     };
     AdminMarkerContribution: {
       content_hash: string;
@@ -15584,6 +15641,32 @@ export interface components {
       time_window?: string;
       title: string;
     };
+    AdminTMDBListImport: {
+      description?: string;
+      featured?: boolean;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      library_id?: string;
+      library_ids?: string[];
+      /** Format: int64 */
+      limit?: number;
+      management_key?: string;
+      management_mode?: string;
+      management_source?: string;
+      poster_url?: string;
+      sort_config?: unknown;
+      /** Format: int64 */
+      sort_order?: number;
+      sync_schedule?: string;
+      title: string;
+      /**
+       * @description A public TMDB list page (https://www.themoviedb.org/list/...) or its numeric ID
+       * @example https://www.themoviedb.org/list/310-my-movie-list
+       */
+      url: string;
+    };
     AdminTopTitle: {
       media_item_id: string;
       media_type: string;
@@ -16155,15 +16238,12 @@ export interface components {
     };
     BrandingConfiguration: {
       accent_color?: string;
-      default_theme?: string;
       favicon_url?: string;
       login_bg_url?: string;
       login_subtitle: string;
-      mark_light_url?: string;
       mark_url?: string;
       server_name: string;
       storage_available: boolean;
-      wordmark_light_url?: string;
       wordmark_url?: string;
     };
     BulkItemFailure: {
@@ -17167,6 +17247,15 @@ export interface components {
       effective_collection_sort: boolean;
       /** @description The acting account supports collection groups */
       groups: boolean;
+      /**
+       * @description Import sources the acting account can create a collection from; empty when imports is false
+       * @example [
+       *       "mdblist",
+       *       "tmdb",
+       *       "tmdb_list"
+       *     ]
+       */
+      import_sources: ("mdblist" | "tmdb" | "tmdb_list")[];
       /** @description The acting account supports imported collections */
       imports: boolean;
       /** @description The acting account supports reordering collection items */
@@ -17420,6 +17509,7 @@ export interface components {
       tmdb?: components["schemas"]["TMDBSpec"];
       tmdb_collection?: components["schemas"]["TMDBCollectionSpec"];
       tmdb_discover?: components["schemas"]["TMDBDiscoverSpec"];
+      tmdb_list?: components["schemas"]["TMDBListSpec"];
       trakt?: components["schemas"]["TraktSpec"];
     };
     CollectionTemplateBundle: {
@@ -17494,6 +17584,7 @@ export interface components {
       import_watched_enabled?: boolean;
       import_watchlist_enabled?: boolean;
       scrobble_enabled?: boolean;
+      sync_dropped_enabled?: boolean;
       sync_favorite_removals_enabled?: boolean;
       sync_watchlist_order_enabled?: boolean;
       sync_watchlist_removals_enabled?: boolean;
@@ -19417,7 +19508,7 @@ export interface components {
     HomeDismissal: {
       /**
        * Format: date-time
-       * @description Required for continue_watching: the card's progress_updated_at; the dismissal holds until the item is played again
+       * @description Required for continue_watching: the card's progress_updated_at; the dismissal holds until the item is played again. An episode dismissal drops its whole show instead, which holds until any episode of it is played again.
        */
       progress_updated_at?: string;
       /**
@@ -25192,59 +25283,6 @@ export interface components {
        */
       container: string;
     };
-    ThemeCatalogCapabilitiesOutputBody: {
-      /** @description Whether the current principal may use the capability */
-      allowed: boolean;
-      available: boolean;
-      /** Format: int64 */
-      catalog_byte_limit: number;
-      /** @description Opaque revision of this document */
-      revision: string;
-      /**
-       * @description Support and configuration state, not health
-       * @enum {string}
-       */
-      state: "available" | "disabled" | "not_configured" | "unsupported";
-      /** Format: int64 */
-      theme_byte_limit: number;
-    };
-    ThemeCatalogDocument: {
-      themes: components["schemas"]["ThemeCatalogEntry"][];
-      updatedAt?: string;
-      /** Format: int64 */
-      version: number;
-    };
-    ThemeCatalogEntry: {
-      author: string;
-      description: string;
-      downloadUrl: string;
-      id: string;
-      name: string;
-      previewAccent: string;
-      previewBg: string;
-      tags: string[];
-      version: string;
-    };
-    ThemeCatalogResponse: {
-      document: components["schemas"]["ThemeCatalogDocument"];
-      stale: boolean;
-    };
-    ThemeDownloadResponse: {
-      document: components["schemas"]["ThemeFileDocument"];
-    };
-    ThemeFileDocument: {
-      author?: string;
-      baseTheme: string;
-      createdAt?: string;
-      customCss: string;
-      description?: string;
-      name: string;
-      vars: {
-        [key: string]: string;
-      };
-      /** Format: int64 */
-      version: number;
-    };
     ThemeOverrides: {
       raw_css: string;
       vars: string;
@@ -25399,6 +25437,52 @@ export interface components {
       /** Format: int64 */
       with_runtime_lte?: number;
       without_genres?: number[];
+    };
+    TMDBListCollectionImport: {
+      /** @example  */
+      description?: string;
+      /** @description Display filter fragment */
+      display_query_definition?: unknown;
+      /** @example false */
+      is_shared?: boolean;
+      /**
+       * @description Libraries the sync matches against; every library when omitted
+       * @example [
+       *       "1"
+       *     ]
+       */
+      library_ids?: string[];
+      /**
+       * Format: int64
+       * @description Cap on synced items; the server's own maximum applies when omitted
+       * @example 50
+       */
+      limit?: number;
+      /**
+       * @description A bundled template poster path or an image URL
+       * @example
+       */
+      poster_url?: string;
+      /** @description Default sort document */
+      sort_config?: unknown;
+      /**
+       * @description Sync cadence name; the server default when omitted
+       * @example daily
+       */
+      sync_schedule?: string;
+      /**
+       * @description The new collection's name; trimmed
+       * @example Trending movies
+       */
+      title: string;
+      /**
+       * @description A public TMDB list page (https://www.themoviedb.org/list/...) or its numeric ID
+       * @example https://www.themoviedb.org/list/310-my-movie-list
+       */
+      url: string;
+    };
+    TMDBListSpec: {
+      url: string;
     };
     TMDBSpec: {
       media_type: string;
@@ -25954,6 +26038,8 @@ export interface components {
       remove_favorites: boolean;
       remove_watchlist: boolean;
       scrobble_playback: boolean;
+      /** @description The provider can read, drop, and undrop dropped shows. */
+      sync_dropped: boolean;
     };
     WatchProviderConnection: {
       auth_method: string;
@@ -26006,6 +26092,7 @@ export interface components {
       provider: string;
       provider_username?: string;
       scrobble_enabled: boolean;
+      sync_dropped_enabled: boolean;
       sync_favorite_removals_enabled: boolean;
       sync_watchlist_order_enabled: boolean;
       sync_watchlist_removals_enabled: boolean;
@@ -26045,6 +26132,8 @@ export interface components {
       import_watched_enabled: boolean;
       import_watchlist_enabled: boolean;
       scrobble_enabled: boolean;
+      /** @description Sync dropped shows both ways: dismissing a show, or one of its episodes, from Home drops the show on the provider, shows dropped on the provider are hidden from Continue Watching and the profile-wide Next Up (a single series' Next Up still lists them), and watching a dropped show again undrops it on both sides. */
+      sync_dropped_enabled: boolean;
       sync_favorite_removals_enabled: boolean;
       sync_watchlist_order_enabled: boolean;
       sync_watchlist_removals_enabled: boolean;
@@ -31289,7 +31378,7 @@ export interface operations {
       };
       path: {
         /** @description Branding asset slot */
-        kind: "wordmark" | "wordmark_light" | "mark" | "mark_light" | "favicon" | "login_bg";
+        kind: "wordmark" | "mark" | "favicon" | "login_bg";
       };
       cookie?: never;
     };
@@ -31429,7 +31518,7 @@ export interface operations {
       };
       path: {
         /** @description Branding asset slot */
-        kind: "wordmark" | "wordmark_light" | "mark" | "mark_light" | "favicon" | "login_bg";
+        kind: "wordmark" | "mark" | "favicon" | "login_bg";
       };
       cookie?: never;
     };
@@ -35449,6 +35538,144 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": components["schemas"]["AdminTMDBImport"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCollectionImportResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  importAdminTMDBList: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminTMDBListImport"];
       };
     };
     responses: {
@@ -44073,6 +44300,154 @@ export interface operations {
       };
     };
   };
+  redetectAdminItemMarkers: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["AdminItemMarkersRedetect"];
+      };
+    };
+    responses: {
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminEpisodeMarkersStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   refreshAdminEpisodeMarkers: {
     parameters: {
       query?: never;
@@ -44136,6 +44511,15 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -47126,6 +47510,138 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminLogsSocketCapabilitiesOutputBody"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminMarkerCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminMarkerCapabilities"];
         };
       };
       /** @description The representation named by If-None-Match is current; no body. */
@@ -68815,6 +69331,113 @@ export interface operations {
       };
     };
   };
+  transferAdminUserOwnership: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getAdminAccountCapabilities: {
     parameters: {
       query?: never;
@@ -78911,6 +79534,144 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": components["schemas"]["TMDBCollectionImport"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionImportResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  importTMDBListCollection: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TMDBListCollectionImport"];
       };
     };
     responses: {
@@ -113285,390 +114046,6 @@ export interface operations {
       };
       /** @description Unprocessable Entity */
       422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  getThemeCatalog: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ThemeCatalogResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  getThemeCatalogCapabilities: {
-    parameters: {
-      query?: never;
-      header?: {
-        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
-        "If-Match"?: string;
-        "If-None-Match"?: string;
-      };
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          "Cache-Control"?: string;
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ThemeCatalogCapabilitiesOutputBody"];
-        };
-      };
-      /** @description The representation named by If-None-Match is current; no body. */
-      304: {
-        headers: {
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Precondition Failed */
-      412: {
-        headers: {
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  refreshThemeCatalog: {
-    parameters: {
-      query?: never;
-      header?: {
-        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
-        "X-Profile-Id"?: string;
-        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
-        "X-Profile-Token"?: string;
-      };
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ThemeCatalogResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  downloadThemeFile: {
-    parameters: {
-      query: {
-        url: string;
-      };
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ThemeDownloadResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
         headers: {
           [name: string]: unknown;
         };
