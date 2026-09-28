@@ -316,12 +316,14 @@ is no longer on its way, and the follower can request it themselves. The
 requesting profile never needs a follow: the fulfilled notification always
 reaches it. When a request's fulfilled notification goes out, it is also sent
 to the title's followers, marked `follower` so its wording does not say
-"your request", and those follows are then cleared. A series can have a
-completed request still waiting for the library beside a newer open request
-for other seasons, so the notification goes only to the follows made before
-its request completed; later follows were made for the open request and wait
-for it. Declining that open request leaves the earlier follows for the
-completed one. A dispatch failure leaves
+"your request", and those follows are then cleared. A series can have
+completed requests still waiting for the library beside a newer open request
+for other seasons. A title has one open request at a time, so a request's
+notification goes to the follows made after the title's previous request
+completed and no later than it did; the others wait for their own request.
+Declining the open request leaves the follows the completed ones are waiting
+to tell, and clearing a request's follows spares a profile that followed again
+since. A dispatch failure leaves
 the follows for the retry, and the server-channel announcement waits until an
 attempt has reached every recipient, so a retry does not repeat it.
 

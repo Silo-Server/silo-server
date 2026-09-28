@@ -1992,7 +1992,7 @@ type fakeStore struct {
 	reconciled    []string
 	follows       map[string]Follower // key: media_type/tmdb_id/user_id/profile_id
 	followedAt    map[string]time.Time
-	clearErr      error // returned by ClearTitleFollowers when set
+	clearErr      error // returned by ClearRequestFollowers when set
 	routes        []Route
 	factsSet      map[string]RoutingFacts
 	groupLimits   map[int64]*GroupLimit
@@ -2595,13 +2595,26 @@ func (f *fakeStore) FollowedTitles(_ context.Context, mediaType MediaType, tmdbI
 	return out, nil
 }
 
-func (f *fakeStore) ListTitleFollowers(_ context.Context, mediaType MediaType, tmdbID int, followedBy *time.Time) ([]Follower, error) {
+func (f *fakeStore) ListRequestFollowers(_ context.Context, req Request) ([]Follower, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	prefix := fmt.Sprintf("%s/%d/", mediaType, tmdbID)
+	// The window the repository uses: after the title's previous completed
+	// request, no later than this one.
+	var after time.Time
+	if req.CompletedAt != nil {
+		for _, other := range f.requests {
+			if other.ID != req.ID && other.MediaType == req.MediaType && other.TMDBID == req.TMDBID &&
+				other.Status == StatusCompleted && other.CompletedAt != nil &&
+				other.CompletedAt.Before(*req.CompletedAt) && other.CompletedAt.After(after) {
+				after = *other.CompletedAt
+			}
+		}
+	}
+	prefix := fmt.Sprintf("%s/%d/", req.MediaType, req.TMDBID)
 	var out []Follower
 	for key, follower := range f.follows {
-		if strings.HasPrefix(key, prefix) && (followedBy == nil || !f.followedAt[key].After(*followedBy)) {
+		at := f.followedAt[key]
+		if strings.HasPrefix(key, prefix) && at.After(after) && (req.CompletedAt == nil || !at.After(*req.CompletedAt)) {
 			out = append(out, follower)
 		}
 	}
@@ -2614,14 +2627,17 @@ func (f *fakeStore) ListTitleFollowers(_ context.Context, mediaType MediaType, t
 	return out, nil
 }
 
-func (f *fakeStore) ClearTitleFollowers(_ context.Context, mediaType MediaType, tmdbID int, followers []Follower) error {
+func (f *fakeStore) ClearRequestFollowers(_ context.Context, req Request, followers []Follower) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.clearErr != nil {
 		return f.clearErr
 	}
 	for _, follower := range followers {
-		delete(f.follows, followKey(mediaType, tmdbID, follower.UserID, follower.ProfileID))
+		key := followKey(req.MediaType, req.TMDBID, follower.UserID, follower.ProfileID)
+		if req.CompletedAt == nil || !f.followedAt[key].After(*req.CompletedAt) {
+			delete(f.follows, key)
+		}
 	}
 	return nil
 }
