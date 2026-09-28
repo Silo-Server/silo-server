@@ -105,6 +105,12 @@ type Event struct {
 	OldDir  string
 	OldName string
 
+	// Found is set on an EventCreate for a file the backend found while
+	// walking a directory that was just created, rather than one the kernel
+	// reported: the file may have been written before the directory's watch
+	// existed, so its close-write may never arrive.
+	Found bool
+
 	// Root is set for EventRootLost, EventLimitReached, and EventRewalk.
 	Root string
 	// Err is set for EventLimitReached.

@@ -321,7 +321,6 @@ func testConfig(folders *fakeFolders, queue *fakeQueue, status *fakeStatus) Conf
 	return Config{
 		NodeID:            "node-test",
 		Folders:           folders,
-		Resolver:          scantrigger.NewResolver(folders),
 		Queue:             queue,
 		Status:            status,
 		Logger:            quietLogger(),

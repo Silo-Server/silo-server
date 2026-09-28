@@ -365,10 +365,15 @@ func (b *inotifyBackend) isClosed() bool {
 
 // aliasLocked reports whether watch w is already recorded for r under some
 // logical path, which makes another path to it a symlink alias.
+//
+// Only paths the root's current walk generation recorded count. A re-walk
+// after events were lost (an overflow) must not treat a renamed directory as
+// an alias of its old path, which the same watch descriptor still carries
+// until the walk's cleanup drops it.
 func (b *inotifyBackend) aliasLocked(w *inotifyWatch, r *inotifyRoot) bool {
 	for p := range w.paths {
 		if d := b.byPath[p]; d != nil {
-			if _, ok := d.roots[r]; ok {
+			if gen, ok := d.roots[r]; ok && gen == r.gen {
 				return true
 			}
 		}
@@ -599,7 +604,7 @@ func (b *inotifyBackend) arrived(kind EventKind, parents []inotifyParent, name s
 			return
 		}
 		for _, p := range parents {
-			b.walkRegister(filepath.Join(p.path, name), p.roots)
+			b.walkRegister(filepath.Join(p.path, name), p.roots, kind == EventCreate)
 		}
 	}
 	for _, p := range parents {
@@ -686,7 +691,7 @@ func (b *inotifyBackend) renamed(from inotifyMove, name string, isDir bool, pare
 	covered := slices.Clone(lost)
 	if newDir && !newIgnored {
 		for _, p := range parents {
-			b.walkRegister(filepath.Join(p.path, name), p.roots)
+			b.walkRegister(filepath.Join(p.path, name), p.roots, false)
 			for _, r := range p.roots {
 				covered = append(covered, r.path)
 			}
@@ -720,8 +725,14 @@ func inotifyPaths(parents []inotifyParent) []string {
 // walkRegister records a subtree that appeared at runtime for roots. Hitting
 // the watch limit releases every affected root, so no status claims
 // coverage with holes.
-func (b *inotifyBackend) walkRegister(dir string, roots []*inotifyRoot) {
-	err := walkTree(b.ctx, dir, walkVisitor{
+//
+// For a directory that was just created (created), files found below it are
+// reported as Found creates: a recursive copy can write them before the new
+// directory's watch exists, and the tracker must wait for them before it
+// reports the directory. A directory moved in arrives whole, so its files are
+// not reported.
+func (b *inotifyBackend) walkRegister(dir string, roots []*inotifyRoot, created bool) {
+	v := walkVisitor{
 		enter: func(d string, link bool) (bool, error) {
 			ok, err := b.register(d, link, roots)
 			if errors.Is(err, unix.ENOSPC) {
@@ -730,7 +741,13 @@ func (b *inotifyBackend) walkRegister(dir string, roots []*inotifyRoot) {
 			return ok, err
 		},
 		listed: b.setSkipped,
-	})
+	}
+	if created {
+		v.file = func(path string) {
+			b.emit(Event{Kind: EventCreate, Dir: filepath.Dir(path), Name: filepath.Base(path), Found: true})
+		}
+	}
+	err := walkTree(b.ctx, dir, v)
 	if !errors.Is(err, errWalkLimit) {
 		return
 	}
@@ -812,7 +829,7 @@ func (b *inotifyBackend) reevaluate(p inotifyParent) {
 		isRoot = isRoot || r.path == p.path
 	}
 	b.mu.Unlock()
-	b.walkRegister(p.path, p.roots)
+	b.walkRegister(p.path, p.roots, false)
 	reportUnskipped(b.emit, p.path, isRoot, entries)
 }
 
@@ -833,14 +850,22 @@ func (b *inotifyBackend) handleSelf(wd int, mask uint32) {
 				continue
 			}
 			for r := range d.roots {
-				if r.path == p {
+				switch {
+				case r.path == p:
 					lost = append(lost, r.path)
-				} else if mask&unix.IN_UNMOUNT != 0 {
+				case mask&unix.IN_UNMOUNT != 0:
 					// A filesystem mounted inside the root went away. Its
 					// paths are dropped with IN_IGNORED; the root is walked
 					// again, and reconcile walks it once more when a
 					// filesystem is mounted there again, which sends no
 					// event.
+					b.rewalks[r.path] = struct{}{}
+				case d.link && mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0:
+					// A symlink's target was moved or deleted where it
+					// really lives, which may be outside every watched
+					// directory: no entry event reports it. Walk the root
+					// again, so the stale path is dropped and a target now
+					// in place is recorded.
 					b.rewalks[r.path] = struct{}{}
 				}
 			}

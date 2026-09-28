@@ -105,7 +105,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
-	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/server"
@@ -2335,7 +2334,6 @@ func main() {
 			libraryMonitor, monitorErr := librarymonitor.New(librarymonitor.Config{
 				NodeID:        nodeID,
 				Folders:       deps.FolderRepo,
-				Resolver:      scantrigger.NewResolver(deps.FolderRepo),
 				Queue:         libraryScanQueue,
 				Status:        monitorStatus,
 				Logger:        slog.Default(),

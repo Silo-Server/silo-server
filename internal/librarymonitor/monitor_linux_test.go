@@ -687,3 +687,37 @@ func TestStopDoesNotWaitForAStuckEventLoop(t *testing.T) {
 		t.Fatal("Stop waited for an event loop stuck in a stat")
 	}
 }
+
+// A backend whose event stream ends while the monitor runs (its reader
+// failed) watches nothing. Its roots must be recorded again with a new
+// backend instead of reporting monitoring over a dead stream.
+func TestFailedBackendIsReplaced(t *testing.T) {
+	root := t.TempDir()
+	folders := &fakeFolders{}
+	folders.set(library(1, root))
+	var (
+		mu      sync.Mutex
+		created []*fakeBackend
+	)
+	_, _, _, status := fakeMonitor(t, folders, func(cfg *Config) {
+		cfg.hooks.primary = func(BackendOptions) (Backend, error) {
+			b := newFakeBackend("inotify")
+			mu.Lock()
+			created = append(created, b)
+			mu.Unlock()
+			return b, nil
+		}
+	})
+	waitStatus(t, status, "monitoring", onlyMonitoring(1))
+	mu.Lock()
+	first := created[0]
+	mu.Unlock()
+	waitCall(t, first, "add "+root)
+
+	_ = first.Close() // the reader fails
+	waitStatus(t, status, "monitoring on a new backend", func(rows []LibraryStatus) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return onlyMonitoring(1)(rows) && len(created) == 2 && created[1].addCount(root) == 1
+	})
+}

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 )
@@ -22,6 +23,7 @@ func (m *Monitor) flush(ctx context.Context, now time.Time) {
 
 	m.mu.Lock()
 	desired := m.desired
+	resolver := m.cfg.NewResolver(folderSnapshot(m.listed))
 	libraryScans := make([]int, 0, len(m.libraryScans))
 	for id := range m.libraryScans {
 		libraryScans = append(libraryScans, id)
@@ -49,7 +51,7 @@ func (m *Monitor) flush(ctx context.Context, now time.Time) {
 		}
 	}
 	for _, c := range changes {
-		target, err := m.resolve(ctx, c)
+		target, err := m.resolve(ctx, resolver, c)
 		if err != nil {
 			var reqErr *scantrigger.RequestError
 			if errors.As(err, &reqErr) {
@@ -107,17 +109,34 @@ func (m *Monitor) retryOrDrop(ctx context.Context, c change, err error) {
 
 // resolve maps one change to a scan target with the resolver method for its
 // kind.
-func (m *Monitor) resolve(ctx context.Context, c change) (*scantrigger.Target, error) {
+func (m *Monitor) resolve(ctx context.Context, r Resolver, c change) (*scantrigger.Target, error) {
 	switch c.kind {
 	case changeFile, changeDir:
-		return m.cfg.Resolver.Resolve(ctx, scantrigger.Request{Path: c.path, Trigger: Trigger})
+		return r.Resolve(ctx, scantrigger.Request{Path: c.path, Trigger: Trigger})
 	case changeVanishedFile:
-		return m.cfg.Resolver.ResolveVanishedPath(ctx, c.path, Trigger)
+		return r.ResolveVanishedPath(ctx, c.path, Trigger)
 	case changeVanishedDir:
-		return m.cfg.Resolver.ResolveMissingSubtree(ctx, c.path, Trigger)
+		return r.ResolveMissingSubtree(ctx, c.path, Trigger)
 	default:
 		return nil, fmt.Errorf("unknown change kind %d", c.kind)
 	}
+}
+
+// folderSnapshot serves the libraries the last reconcile listed, so a flush
+// resolves a whole burst of changes without a database query per path. A
+// library created or edited on this node is re-listed at once (Poke); one
+// edited on another node shows up within the reconcile interval.
+type folderSnapshot []*models.MediaFolder
+
+func (s folderSnapshot) List(context.Context) ([]*models.MediaFolder, error) { return s, nil }
+
+func (s folderSnapshot) GetByID(_ context.Context, id int) (*models.MediaFolder, error) {
+	for _, f := range s {
+		if f.ID == id {
+			return f, nil
+		}
+	}
+	return nil, catalog.ErrFolderNotFound
 }
 
 func libraryTarget(folder *models.MediaFolder) scantrigger.Target {

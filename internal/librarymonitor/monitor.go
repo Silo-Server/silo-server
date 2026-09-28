@@ -72,10 +72,13 @@ type Queuer interface {
 // shrink them.
 type Config struct {
 	// NodeID identifies this node's status rows.
-	NodeID   string
-	Folders  FolderLister
-	Resolver Resolver
-	Queue    Queuer
+	NodeID  string
+	Folders FolderLister
+	// NewResolver builds the resolver a flush maps its changes with, over
+	// the libraries the last reconcile listed; nil uses
+	// scantrigger.NewResolver.
+	NewResolver func(scantrigger.FolderRepository) Resolver
+	Queue       Queuer
 	// Status receives node reports; nil disables reporting.
 	Status StatusReporter
 	Logger *slog.Logger
@@ -160,6 +163,9 @@ type Monitor struct {
 	roots        map[string]*rootState
 	desiredOrder []*models.MediaFolder
 	desired      map[int]*models.MediaFolder
+	// listed is every library the last reconcile listed; a flush resolves
+	// changes against it.
+	listed       []*models.MediaFolder
 	libraryScans map[int]struct{}
 	primary      Backend
 	// removals counts detached roots; a limit_reached root retries when
@@ -178,6 +184,8 @@ type Monitor struct {
 type backendEvent struct {
 	backend Backend
 	ev      Event
+	// closed: the backend's event stream ended while the monitor runs.
+	closed bool
 }
 
 // rootState is one configured root path on this node.
@@ -241,8 +249,11 @@ type fileID struct {
 
 // New builds a Monitor. Start runs it.
 func New(cfg Config) (*Monitor, error) {
-	if cfg.Folders == nil || cfg.Resolver == nil || cfg.Queue == nil {
-		return nil, errors.New("librarymonitor: Folders, Resolver, and Queue are required")
+	if cfg.Folders == nil || cfg.Queue == nil {
+		return nil, errors.New("librarymonitor: Folders and Queue are required")
+	}
+	if cfg.NewResolver == nil {
+		cfg.NewResolver = func(f scantrigger.FolderRepository) Resolver { return scantrigger.NewResolver(f) }
 	}
 	setDefault(&cfg.QuietWindow, DefaultQuietWindow)
 	setDefault(&cfg.FlushInterval, DefaultFlushInterval)
@@ -463,6 +474,7 @@ func (m *Monitor) applyFolders(folders []*models.MediaFolder) {
 	m.mu.Lock()
 	m.desiredOrder = order
 	m.desired = desired
+	m.listed = sorted
 	var releases []rootRelease
 	for path, rs := range m.roots {
 		if _, ok := rootLibs[path]; ok {
@@ -833,6 +845,15 @@ func (m *Monitor) forward(b Backend) {
 			return
 		}
 	}
+	// The stream ends when Stop closes the backend, or when its reader
+	// failed. Only the second needs handling.
+	if m.ctx.Err() != nil {
+		return
+	}
+	select {
+	case m.events <- backendEvent{backend: b, closed: true}:
+	case <-m.ctx.Done():
+	}
 }
 
 // finish applies an attempt's outcome.
@@ -877,6 +898,12 @@ func (m *Monitor) finishLocked(rs *rootState, out outcome) (retry bool, releases
 		rs.state = StateRootUnavailable
 		rs.everSeen = true
 		return false, releases
+	}
+	if out.backend != nil && out.backend != m.primary {
+		// The backend failed while the attempt walked with it.
+		releases = m.discardLocked(rs, out, releases)
+		rs.state = StateStarting
+		return true, releases
 	}
 	if hit != nil {
 		// The watch limit was hit at runtime while the attempt ran, and the
@@ -937,6 +964,10 @@ func (m *Monitor) discardLocked(rs *rootState, out outcome, releases []rootRelea
 
 // handleEvent routes one backend event.
 func (m *Monitor) handleEvent(be backendEvent, now time.Time) {
+	if be.closed {
+		m.handleBackendClosed(be.backend)
+		return
+	}
 	ev := be.ev
 	switch ev.Kind {
 	case EventOverflow:
@@ -963,6 +994,36 @@ func (m *Monitor) handleEvent(be backendEvent, now time.Time) {
 		}
 		m.tracker.observe(ev, now)
 	}
+}
+
+// handleBackendClosed replaces a backend whose event stream ended while the
+// monitor runs: its reader failed, so nothing it records is watched any
+// more. Its roots report starting and are recorded again with a new backend
+// on the reconcile this asks for; a root still being walked with it is
+// discarded when that attempt finishes (see finishLocked).
+func (m *Monitor) handleBackendClosed(b Backend) {
+	m.log.Error("librarymonitor: the kernel event stream stopped; recording library folders again", "backend", b.Name())
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return
+	}
+	if m.primary == b {
+		m.primary = nil
+	}
+	for _, rs := range m.roots {
+		if rs.backend == b {
+			rs.backend = nil
+			rs.backendName = ""
+			rs.state = StateStarting
+			m.removals++
+		}
+	}
+	m.mu.Unlock()
+	// Frees the descriptor; the reader has already stopped.
+	go func() { _ = b.Close() }()
+	m.markDirty()
+	m.Poke()
 }
 
 // handleOverflow re-walks every root on the backend, to record directories

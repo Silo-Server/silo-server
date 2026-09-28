@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,7 +23,7 @@ func newFlushMonitor(t *testing.T, resolver *fakeResolver, queue *fakeQueue, lib
 	m, err := New(Config{
 		NodeID:      "node-test",
 		Folders:     &fakeFolders{},
-		Resolver:    resolver,
+		NewResolver: func(scantrigger.FolderRepository) Resolver { return resolver },
 		Queue:       queue,
 		Logger:      quietLogger(),
 		QuietWindow: 5 * time.Second,
@@ -264,5 +266,63 @@ func TestHandleEventDropsIgnoredNames(t *testing.T) {
 	want := []string{"file /lib/M/movie.mkv", "vanished_file /lib/M/old.mkv"}
 	if !reflect.DeepEqual(resolved, want) {
 		t.Fatalf("resolved %v, want %v", resolved, want)
+	}
+}
+
+// countingFolders counts library listings, which production serves from the
+// database.
+type countingFolders struct {
+	fakeFolders
+	lists atomic.Int32
+}
+
+func (f *countingFolders) List(ctx context.Context) ([]*models.MediaFolder, error) {
+	f.lists.Add(1)
+	return f.fakeFolders.List(ctx)
+}
+
+// A burst resolves against the libraries the last reconcile listed, with the
+// real resolver: no library listing per changed path, and more targets than
+// the cap still collapse to one library scan.
+func TestFlushResolvesABurstWithoutListingLibrariesPerPath(t *testing.T) {
+	root := t.TempDir()
+	lib := library(1, root)
+	lib.Type = "movies"
+	folders := &countingFolders{}
+	folders.set(lib)
+	built := 0
+	queue := newFakeQueue()
+	m, err := New(Config{
+		NodeID:  "node-test",
+		Folders: folders,
+		NewResolver: func(f scantrigger.FolderRepository) Resolver {
+			built++
+			return scantrigger.NewResolver(f)
+		},
+		Queue:       queue,
+		Logger:      quietLogger(),
+		QuietWindow: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.desired[lib.ID] = lib
+	m.listed = []*models.MediaFolder{lib}
+	for i := 0; i <= maxTargetsPerLibrary; i++ {
+		name := fmt.Sprintf("Movie %04d (2020)", i)
+		mkdirs(t, root, name)
+		writeFile(t, filepath.Join(root, name, name+".mkv"), "x")
+		m.tracker.observe(Event{Kind: EventCloseWrite, Dir: filepath.Join(root, name), Name: name + ".mkv"}, t0)
+	}
+
+	m.flush(context.Background(), t0.Add(5*time.Second))
+	if got, want := takeBatch(t, queue), []string{"1 library  realtime_monitor"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("enqueued %v, want %v", got, want)
+	}
+	if n := folders.lists.Load(); n != 0 {
+		t.Fatalf("flush listed libraries %d times, want none", n)
+	}
+	if built != 1 {
+		t.Fatalf("built %d resolvers, want one per flush", built)
 	}
 }

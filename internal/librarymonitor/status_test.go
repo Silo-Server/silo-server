@@ -151,7 +151,7 @@ func TestAggregateLibrary(t *testing.T) {
 // spawned, or it was just added) must still name the path its first root's
 // detail belongs to.
 func TestStatusRowsNameThePathWhileAnotherHasNoState(t *testing.T) {
-	m, err := New(Config{Folders: &fakeFolders{}, Resolver: &fakeResolver{}, Queue: newFakeQueue(), Logger: quietLogger()})
+	m, err := New(Config{Folders: &fakeFolders{}, Queue: newFakeQueue(), Logger: quietLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}

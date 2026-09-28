@@ -512,7 +512,10 @@ func TestInotifyMoveOutReportedDuringASteadyStream(t *testing.T) {
 				return
 			default:
 			}
-			_ = os.WriteFile(busy, []byte("x"), 0o644)
+			if err := os.WriteFile(busy, []byte("x"), 0o644); err != nil {
+				t.Errorf("writing the busy file: %v", err)
+				return
+			}
 			time.Sleep(time.Millisecond)
 		}
 	}()
@@ -572,4 +575,148 @@ func eventStrings(events []Event) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+// A recursive copy can write into a new directory before the directory's
+// watch exists. The walk of the new directory reports what it finds as Found
+// creates, so the tracker waits for those files.
+func TestInotifyReportsFilesFoundInANewDirectory(t *testing.T) {
+	root := t.TempDir()
+	newDir := filepath.Join(root, "New")
+	b := newTestInotify(t, inotifyHooks{addWatch: func(fd int, path string, mask uint32) (int, error) {
+		if path == newDir {
+			// The copy got here first.
+			writeFile(t, filepath.Join(newDir, "a.mkv"), "partial")
+		}
+		return unix.InotifyAddWatch(fd, path, mask)
+	}})
+	if err := b.AddRoot(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	mkdirs(t, root, "New")
+	events := nextEvents(t, b, isEvent(EventCreate, root, "New"))
+	found := false
+	for _, ev := range events {
+		if ev.Kind == EventCreate && ev.Dir == newDir && ev.Name == "a.mkv" && ev.Found {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("events %v, want a Found create for New/a.mkv", eventStrings(events))
+	}
+}
+
+// eventLog drains a backend's events in the background, so its reader never
+// blocks, and lets a test wait for one.
+type eventLog struct {
+	mu     sync.Mutex
+	events []Event
+	added  chan struct{}
+}
+
+func drainEvents(b Backend) *eventLog {
+	l := &eventLog{added: make(chan struct{}, 1)}
+	go func() {
+		for ev := range b.Events() {
+			l.mu.Lock()
+			l.events = append(l.events, ev)
+			l.mu.Unlock()
+			select {
+			case l.added <- struct{}{}:
+			default:
+			}
+		}
+	}()
+	return l
+}
+
+func (l *eventLog) waitFor(t *testing.T, what string, match func(Event) bool) {
+	t.Helper()
+	deadline := time.After(waitTimeout)
+	for {
+		l.mu.Lock()
+		for _, ev := range l.events {
+			if match(ev) {
+				l.mu.Unlock()
+				return
+			}
+		}
+		l.mu.Unlock()
+		select {
+		case <-l.added:
+		case <-deadline:
+			t.Fatalf("no %s event", what)
+		}
+	}
+}
+
+// When the kernel queue overflows, a directory rename can be lost. The
+// re-walk that follows must record the renamed directory even though its
+// watch descriptor still carries the old path.
+func TestInotifyRewalkAfterALostRenameRecordsTheNewName(t *testing.T) {
+	root := t.TempDir()
+	mkdirs(t, root, "Before/Deep", "flood")
+	b := newTestInotify(t, inotifyHooks{})
+	if err := b.AddRoot(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	log := drainEvents(b)
+
+	// Stall the reader and queue more events than the kernel keeps
+	// (fs.inotify.max_queued_events, 16384 by default), so the rename that
+	// follows is dropped.
+	b.mu.Lock()
+	for i := range 10000 {
+		f, err := os.Create(filepath.Join(root, "flood", fmt.Sprintf("f%05d", i)))
+		if err != nil {
+			b.mu.Unlock()
+			t.Fatal(err)
+		}
+		_ = f.Close()
+	}
+	renameErr := os.Rename(filepath.Join(root, "Before"), filepath.Join(root, "After"))
+	b.mu.Unlock()
+	if renameErr != nil {
+		t.Fatal(renameErr)
+	}
+	log.waitFor(t, "overflow", func(ev Event) bool { return ev.Kind == EventOverflow })
+
+	if err := b.AddRoot(context.Background(), root); err != nil { // the monitor's re-walk
+		t.Fatal(err)
+	}
+	if got := b.pathsWithPrefix(filepath.Join(root, "After")); len(got) != 2 {
+		t.Fatalf("recorded %v, want After and After/Deep", got)
+	}
+	if stale := b.pathsWithPrefix(filepath.Join(root, "Before")); len(stale) != 0 {
+		t.Fatalf("stale paths %v", stale)
+	}
+	writeFile(t, filepath.Join(root, "After", "Deep", "x.mkv"), "x")
+	log.waitFor(t, "close-write under After/Deep", isEvent(EventCloseWrite, filepath.Join(root, "After", "Deep"), "x.mkv"))
+}
+
+// A symlinked directory's target can move where it really lives, outside
+// every watched directory. The backend asks for a re-walk, which drops the
+// stale path.
+func TestInotifySymlinkTargetMovedOutsideAsksForARewalk(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	mkdirs(t, outside, "Target/Sub")
+	if err := os.Symlink(filepath.Join(outside, "Target"), filepath.Join(root, "Link")); err != nil {
+		t.Fatal(err)
+	}
+	b := newTestInotify(t, inotifyHooks{})
+	if err := b.AddRoot(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	mustRename(t, filepath.Join(outside, "Target"), filepath.Join(outside, "Moved"))
+	nextEvents(t, b, func(ev Event) bool { return ev.Kind == EventRewalk && ev.Root == root })
+
+	if err := b.AddRoot(context.Background(), root); err != nil { // the monitor's re-walk
+		t.Fatal(err)
+	}
+	if stale := b.pathsWithPrefix(filepath.Join(root, "Link")); len(stale) != 0 {
+		t.Fatalf("stale paths after the target moved: %v", stale)
+	}
+	if got := b.watchCount(); got != 1 {
+		t.Fatalf("watches = %d, want only the root's", got)
+	}
 }

@@ -229,3 +229,34 @@ func TestTrackerDropUnderForgetsARoot(t *testing.T) {
 	tr.dropUnder("/lib")
 	assertReady(t, tr, t0.Add(5*time.Second), change{path: "/other/b.mkv", kind: changeVanishedFile})
 }
+
+// A file a walk found in a new directory may have been written before the
+// directory was watched, so its close-write may never come. The directory
+// waits for it; the file counts as complete once its size and mtime hold
+// across a quiet window.
+func TestTrackerFoundFileHoldsItsNewDirectoryUntilStable(t *testing.T) {
+	files := fakeFiles{
+		"/lib/New":       {mode: fs.ModeDir | 0o755},
+		"/lib/New/a.mkv": regular(1, 100, t0),
+	}
+	tr := newTestTracker(files)
+	tr.observe(Event{Kind: EventCreate, Dir: "/lib", Name: "New", IsDir: true}, t0)
+	tr.observe(Event{Kind: EventCreate, Dir: "/lib/New", Name: "a.mkv", Found: true}, t0)
+
+	assertReady(t, tr, t0.Add(6*time.Second)) // first stat
+	files["/lib/New/a.mkv"] = regular(1, 200, t0.Add(8*time.Second))
+	assertReady(t, tr, t0.Add(11*time.Second)) // still growing
+	assertReady(t, tr, t0.Add(16*time.Second), change{path: "/lib/New", kind: changeDir})
+}
+
+func TestTrackerFoundFileCompletesAtItsCloseWrite(t *testing.T) {
+	files := fakeFiles{
+		"/lib/New":       {mode: fs.ModeDir | 0o755},
+		"/lib/New/a.mkv": regular(1, 100, t0),
+	}
+	tr := newTestTracker(files)
+	tr.observe(Event{Kind: EventCreate, Dir: "/lib", Name: "New", IsDir: true}, t0)
+	tr.observe(Event{Kind: EventCreate, Dir: "/lib/New", Name: "a.mkv", Found: true}, t0)
+	tr.observe(Event{Kind: EventCloseWrite, Dir: "/lib/New", Name: "a.mkv"}, t0.Add(3*time.Second))
+	assertReady(t, tr, t0.Add(8*time.Second), change{path: "/lib/New", kind: changeDir})
+}

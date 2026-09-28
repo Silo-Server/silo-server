@@ -77,6 +77,10 @@ type pendingPath struct {
 	// anything below it; the quiet window runs from here.
 	last    time.Time
 	created time.Time
+	// found: a file a walk found in a new directory (Event.Found). Its
+	// close-write may have happened before the directory was watched, so it
+	// is polled for stability from the start, once per quiet window.
+	found bool
 	// Stability polling for a created file that never saw a close-write.
 	nextPoll time.Time
 	polled   bool
@@ -146,6 +150,9 @@ func (t *tracker) observe(ev Event, now time.Time) {
 			// A hardlink arrives whole; link count 1 is a copy that has
 			// only started.
 			t.created(path, changeFile, st.nlink > 1, now)
+			if p := t.pending[path]; ev.Found && !p.complete {
+				p.found = true
+			}
 		}
 	case EventCloseWrite:
 		t.present(path, changeFile, true, now)
@@ -338,7 +345,11 @@ func (t *tracker) incompleteBelow(dir string) bool {
 // a close-write.
 func (t *tracker) pollIncomplete(now time.Time) {
 	for path, p := range t.pending {
-		if p.complete || p.kind != changeFile || now.Sub(p.created) < t.createdFallback || now.Before(p.nextPoll) {
+		wait, every := t.createdFallback, t.stablePoll
+		if p.found {
+			wait, every = 0, t.quiet
+		}
+		if p.complete || p.kind != changeFile || now.Sub(p.created) < wait || now.Before(p.nextPoll) {
 			continue
 		}
 		st, err := t.stat(path)
@@ -352,7 +363,7 @@ func (t *tracker) pollIncomplete(now time.Time) {
 		}
 		if p.polled && st.size == p.size && st.mtime.Equal(p.mtime) {
 			p.complete = true
-			// Unchanged across a whole poll interval is quieter than the
+			// Unchanged across a whole poll interval is as quiet as the
 			// quiet window; report now.
 			p.last = now.Add(-t.quiet)
 			continue
@@ -360,6 +371,6 @@ func (t *tracker) pollIncomplete(now time.Time) {
 		p.polled = true
 		p.size = st.size
 		p.mtime = st.mtime
-		p.nextPoll = now.Add(t.stablePoll)
+		p.nextPoll = now.Add(every)
 	}
 }

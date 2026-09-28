@@ -23,6 +23,9 @@ type walkVisitor struct {
 	// boundary, so adding or removing its .nomedia or .ignore is seen, but
 	// the walk does not descend into it.
 	listed func(dir string, skipped bool)
+	// file, when set, receives every file (or symlink to a file) in a
+	// listed directory that is not skipped.
+	file func(path string)
 }
 
 // walkTree records dir and every directory below it that the scanner would
@@ -169,7 +172,11 @@ func (w *treeWalk) dir(ctx context.Context, logical, physical string, link bool)
 				continue
 			}
 			info, err := os.Stat(resolved)
-			if err != nil || !info.IsDir() {
+			if err != nil {
+				continue
+			}
+			if !info.IsDir() {
+				w.foundFile(childLogical)
 				continue
 			}
 			childPhysical = filepath.Clean(resolved)
@@ -179,6 +186,9 @@ func (w *treeWalk) dir(ctx context.Context, logical, physical string, link bool)
 				continue
 			}
 		default:
+			if entry.Type().IsRegular() {
+				w.foundFile(childLogical)
+			}
 			continue
 		}
 		if w.onUnsupportedMount(childPhysical) {
@@ -189,6 +199,12 @@ func (w *treeWalk) dir(ctx context.Context, logical, physical string, link bool)
 		}
 	}
 	return nil
+}
+
+func (w *treeWalk) foundFile(path string) {
+	if w.v.file != nil {
+		w.v.file(path)
+	}
 }
 
 // symlinkToDir reports whether path is a symlink to a directory, which the

@@ -36,9 +36,9 @@ Two switches control monitoring:
 
 A library is monitored only when the server switch is on, the library is
 enabled, and its own switch is on. The monitor's desired set is exactly those
-libraries, expanded to their folder paths. jellycompat's
-`EnableRealtimeMonitor` reports the same combination (server switch and library
-switch).
+libraries, expanded to their folder paths. jellycompat lists only enabled
+libraries, and for each one `EnableRealtimeMonitor` is true exactly when the
+server switch and the library's own switch are on.
 
 ## Where it runs
 
@@ -151,7 +151,12 @@ close-write, so per-write events would only add volume.
   IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF | IN_ONLYDIR | IN_EXCL_UNLINK`. The
   kernel adds `IN_IGNORED`, `IN_UNMOUNT`, and `IN_Q_OVERFLOW` on its own.
 - A new directory gets its watch before it is listed, so a file created while
-  the listing runs still produces an event.
+  the listing runs still produces an event. A recursive copy can write files
+  into a new directory before its watch exists; the walk of a directory that
+  was just created reports the files it finds (`Event.Found`), and the tracker
+  holds the directory until they are complete (see
+  [Event handling](#event-handling)). A directory moved in arrives whole, so
+  its files are not reported.
 - A directory reachable under several paths (overlapping library folders, or a
   symlink in one folder pointing into another) has one watch descriptor.
   Watches are reference-counted per folder and path, so removing one folder
@@ -168,6 +173,16 @@ close-write, so per-write events would only add volume.
   like a real directory's.
 - `IN_UNMOUNT` on a directory below a folder (a filesystem mounted inside it
   went away) asks the monitor to walk the folder again.
+- `IN_MOVE_SELF` or `IN_DELETE_SELF` on a directory the walk reached through a
+  symlink also asks for a re-walk: the link's target was moved or deleted where
+  it really lives, which may be outside every watched directory, so no entry
+  event reports it. The re-walk drops the stale path and records a target
+  that is back in place. A target that returns later, with nothing watched
+  seeing it, is picked up by the next re-walk or the nightly scan.
+- A re-walk records every directory it reaches afresh. A path counts as a
+  symlink alias only against paths the same walk recorded, so a directory
+  renamed while its events were lost (an overflow) is recorded under its new
+  name, and the walk's cleanup drops the old one.
 - Move halves are paired by cookie. If a read ends between the two halves, the
   moved-from waits at most 20 ms for its partner before it counts as a move
   out. The wait is checked after every read, so a steady stream of other
@@ -248,6 +263,7 @@ quiet for 5 seconds**; another event on the same path restarts the window.
 | `IN_CREATE`, file with link count > 1 | Hardlink (arr import when downloads share the filesystem) | File change |
 | `IN_CREATE`, symlink | Symlink placed | File change |
 | `IN_CREATE`, file with link count 1 | A copy has started | Waits for `IN_CLOSE_WRITE`. Without one after 2 minutes, the file is checked every 30 seconds and reported once two checks agree on size and mtime. |
+| File found by the walk of a new directory, link count 1 | Possibly written before the directory was watched | Complete at its `IN_CLOSE_WRITE`, or once its size and mtime hold across one quiet window; the new directory waits for it. |
 | `IN_CREATE` / `IN_MOVED_TO`, directory | New or moved-in folder | The backend records the subtree first. One subtree change for the folder, held while anything below it is still incomplete; it absorbs the changes below it. |
 | `IN_DELETE` / `IN_MOVED_FROM`, file | Removed or moved out | Vanished-file change, unless the file was created (`IN_CREATE`) since the last report: then it never existed for the catalog and is dropped. That covers rsync's and downloaders' temp names renamed into place. A moved-in file is not dropped this way, because a move can replace an existing file. |
 | `IN_DELETE` / `IN_MOVED_FROM`, directory | Removed or moved out | Vanished-subtree change; pending changes below it are dropped |
@@ -260,7 +276,10 @@ quiet for 5 seconds**; another event on the same path restarts the window.
 Every 2 seconds the monitor flushes reported changes:
 
 1. Each change is resolved with `scantrigger.Resolver`, the resolver autoscan
-   uses: `Resolve` for present files and folders, `ResolveVanishedPath` for
+   uses, over the library list from the last reconcile, so a burst of changes
+   costs no database query per path. A library created or edited on this node
+   is listed again at once; one edited on another node within the reconcile
+   interval. The resolver uses `Resolve` for present files and folders, `ResolveVanishedPath` for
    vanished files, `ResolveMissingSubtree` for vanished folders. The vanished
    resolvers refuse to queue cleanup while the library's root is missing, so a
    lost mount never turns into removals. The scanner still treats a folder
@@ -287,12 +306,19 @@ and the monitor report the same import, the queue merges them.
 
 ## Overflow
 
-When the kernel reports a queue overflow, the monitor re-walks every folder on
-that backend, to record directories created in the gap, and queues one
-whole-library scan for each library with a folder on that backend. Libraries
-on the other backend are unaffected. A folder whose first walk on that backend
-is still running counts too: its library scan is queued at once, and the
+When the kernel reports a queue overflow, the monitor re-walks every monitored
+folder, to record directories created in the gap, and queues one
+whole-library scan for each library with a monitored folder. A folder whose
+first walk is still running counts too: its library scan is queued at once, and the
 folder is walked again as soon as the first walk ends.
+
+## Backend failure
+
+If the backend's event stream ends while the monitor is running (its reader
+hit an unexpected read error), nothing it records is watched any more. The
+monitor logs an error, drops that backend, marks its folders `starting`, and
+reconciles at once: a new inotify instance records every folder again. Changes
+made in the gap are the nightly scan's job.
 
 ## Folder loss
 
