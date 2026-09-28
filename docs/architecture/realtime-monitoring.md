@@ -215,8 +215,10 @@ directories the scanner would enter (`walkTree`). They skip:
   recorded (a library folder with such a marker holds one watch), so its
   markers keep being checked. Other changes in it are dropped. When a marker
   is deleted, moved away, or rewritten so it no longer excludes the directory,
-  the directory is walked and reported as one folder change. A library folder
-  itself reports one change per entry in it. When a marker appears,
+  the directory is walked and reported as one folder change. For a library
+  folder itself a whole-library scan is queued instead: a change to a file
+  directly in the library folder resolves to a single-file scan, which does
+  not apply the folder's own ignore rules. When a marker appears,
   everything recorded below the directory is dropped, except what a library
   folder configured below it records: markers above a library folder do not
   apply to it, as in the scanner. Marker files are never reported as changes
@@ -225,9 +227,12 @@ directories the scanner would enter (`walkTree`). They skip:
   walk. A pattern-ignored folder costs a watch, and a change there resolves to
   a scan that the scanner then filters. Creating, rewriting, or removing an
   `.ignore` or `.siloignore` in a monitored directory reports the directory for
-  a scan (one change per entry for a library folder itself), so entries its
-  patterns now include or exclude are picked up; the files themselves are never
-  reported.
+  a scan (a whole-library scan for a library folder itself, as above), so
+  entries its patterns now include or exclude are picked up; the files
+  themselves are never reported.
+- A walk lists a directory before applying what its ignore files say. If a
+  marker changed in between and the event for it was handled first, the walk
+  follows that newer answer instead of its own listing.
 - Symlinked directories are followed, as the scanner follows them. Loops are
   cut by physical path within a walk, and across walks because a directory
   already recorded for the same folder under another path is not recorded
@@ -261,8 +266,10 @@ directories the scanner would enter (`walkTree`). They skip:
   with `EACCES` or `EPERM`); the scanner cannot read it either. Below a
   library folder it is skipped with everything under it, and the folder's
   status detail names it ("Folders Silo can't read aren't monitored: …") so
-  the status never claims it. It is checked again on the folder's next walk;
-  a directory that appears unreadable at runtime asks for one at once. A
+  the status never claims it. Nothing reports a permission change on a
+  directory that is not watched, so every reconcile checks whether such a
+  directory can be opened now and walks the folder again when one can. A
+  directory that appears unreadable at runtime asks for a walk at once. A
   library folder Silo cannot watch, or any other kernel error, fails the walk,
   and the folder shows `error` with the reason. Only a directory that vanished
   or stopped being a directory after it was listed (`ENOENT`, `ENOTDIR`) is

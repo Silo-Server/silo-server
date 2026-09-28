@@ -98,6 +98,10 @@ type inotifyDir struct {
 	// below it: it keeps its watch, so a change to its .nomedia or .ignore
 	// is seen, but nothing below it is recorded.
 	skipped bool
+	// markers counts re-evaluations of its ignore files (reevaluate). A walk
+	// applies its own listing only if none ran since it recorded the
+	// directory; otherwise the re-evaluation read a newer state.
+	markers uint64
 }
 
 type inotifyRoot struct {
@@ -212,6 +216,7 @@ func (b *inotifyBackend) AddRoot(ctx context.Context, root string) error {
 	// count the directories the root needs for the status detail.
 	total := 0
 	limited := false
+	seen := b.newMarkerSeen()
 	err := walkTree(ctx, root, walkVisitor{
 		enter: func(dir string, link bool) (bool, error) {
 			total++
@@ -234,10 +239,12 @@ func (b *inotifyBackend) AddRoot(ctx context.Context, root string) error {
 			}
 			if !ok {
 				total--
+				return false, nil
 			}
-			return ok, nil
+			seen.record(dir)
+			return true, nil
 		},
-		listed: b.setSkipped,
+		listed: seen.listed,
 	})
 	if err != nil {
 		return err
@@ -343,13 +350,43 @@ func (b *inotifyBackend) register(dir string, link bool, roots []*inotifyRoot) (
 	return recorded, nil
 }
 
-// setSkipped records whether dir's ignore files exclude what is below it.
-func (b *inotifyBackend) setSkipped(dir string, skipped bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if d := b.byPath[dir]; d != nil {
-		d.skipped = skipped
+// markerSeen is one walk's view of the directories it recorded: the
+// re-evaluation count of each when the walk recorded it (see
+// inotifyDir.markers). The walk calls record and listed from one goroutine.
+type markerSeen struct {
+	b    *inotifyBackend
+	seen map[string]uint64
+}
+
+func (b *inotifyBackend) newMarkerSeen() *markerSeen {
+	return &markerSeen{b: b, seen: make(map[string]uint64)}
+}
+
+// record notes dir's re-evaluation count right after the walk recorded it,
+// before the walk lists it.
+func (s *markerSeen) record(dir string) {
+	s.b.mu.Lock()
+	defer s.b.mu.Unlock()
+	if d := s.b.byPath[dir]; d != nil {
+		s.seen[dir] = d.markers
 	}
+}
+
+// listed applies the walk's listing of dir, whether its ignore files exclude
+// what is below it, unless a re-evaluation ran since record: it read the
+// directory after the walk may have, so its answer stands and is returned.
+func (s *markerSeen) listed(dir string, skipped bool) bool {
+	s.b.mu.Lock()
+	defer s.b.mu.Unlock()
+	d := s.b.byPath[dir]
+	if d == nil {
+		return skipped
+	}
+	if seen, ok := s.seen[dir]; ok && d.markers != seen {
+		return d.skipped
+	}
+	d.skipped = skipped
+	return skipped
 }
 
 // inSkipped reports whether the directory parents name is one whose ignore
@@ -749,15 +786,19 @@ func inotifyPaths(parents []inotifyParent) []string {
 // reports the directory. A directory moved in arrives whole, so its files are
 // not reported.
 func (b *inotifyBackend) walkRegister(dir string, roots []*inotifyRoot, created bool) {
+	seen := b.newMarkerSeen()
 	v := walkVisitor{
 		enter: func(d string, link bool) (bool, error) {
 			ok, err := b.register(d, link, roots)
 			if errors.Is(err, unix.ENOSPC) {
 				return false, errWalkLimit
 			}
+			if ok {
+				seen.record(d)
+			}
 			return ok, err
 		},
-		listed: b.setSkipped,
+		listed: seen.listed,
 	}
 	if created {
 		v.file = func(path string) {
@@ -842,6 +883,9 @@ func (b *inotifyBackend) reevaluate(p inotifyParent, rulesChanged bool) {
 	skipped := dirSkipped(p.path, entries)
 	b.mu.Lock()
 	d := b.byPath[p.path]
+	if d != nil {
+		d.markers++ // a walk that listed it earlier defers to this reading
+	}
 	if d == nil || (d.skipped == skipped && (skipped || !rulesChanged)) {
 		b.mu.Unlock()
 		return
@@ -852,7 +896,7 @@ func (b *inotifyBackend) reevaluate(p inotifyParent, rulesChanged bool) {
 	}
 	if d.skipped == skipped {
 		b.mu.Unlock()
-		reportFolder(b.emit, p.path, isRoot, entries)
+		reportFolder(b.emit, p.path, isRoot)
 		return
 	}
 	d.skipped = skipped
@@ -885,7 +929,7 @@ func (b *inotifyBackend) reevaluate(p inotifyParent, rulesChanged bool) {
 	}
 	b.mu.Unlock()
 	b.walkRegister(p.path, p.roots, false)
-	reportFolder(b.emit, p.path, isRoot, entries)
+	reportFolder(b.emit, p.path, isRoot)
 }
 
 // handleSelf handles events about a watched directory itself. Deleting,

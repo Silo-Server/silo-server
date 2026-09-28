@@ -102,10 +102,11 @@ func TestWalkTreeSkipsWhatTheScannerSkips(t *testing.T) {
 			}
 			return true, nil
 		},
-		listed: func(dir string, skipped bool) {
+		listed: func(dir string, skipped bool) bool {
 			if skipped {
 				entered = append(entered, "skip "+rel(t, root, dir))
 			}
+			return skipped
 		},
 	})
 	if err != nil {

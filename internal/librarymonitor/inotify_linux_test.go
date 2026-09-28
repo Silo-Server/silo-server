@@ -460,7 +460,7 @@ func TestInotifyIgnoreMarkerAtTheLibraryFolder(t *testing.T) {
 	if err := os.Remove(filepath.Join(root, ".nomedia")); err != nil {
 		t.Fatal(err)
 	}
-	nextEvents(t, b, isEvent(EventMovedTo, root, "Movie"))
+	nextEvents(t, b, func(ev Event) bool { return ev.Kind == EventRescanRoot && ev.Root == root })
 	if got := b.Directories(root); got != 2 {
 		t.Fatalf("directories = %d after the marker went, want 2", got)
 	}
@@ -851,13 +851,49 @@ func TestInotifyIgnoreRuleChangesRescanTheFolder(t *testing.T) {
 	events := nextEvents(t, b, func(ev Event) bool {
 		return ev.Kind == EventMovedTo && ev.Dir == root && ev.Name == "Movie A" && ev.IsDir
 	})
+	// On the library folder itself, only a library scan applies the rules
+	// to entries directly in it.
 	writeFile(t, filepath.Join(root, ".siloignore"), "Other\n")
-	more := nextEvents(t, b, func(ev Event) bool {
-		return ev.Kind == EventMovedTo && ev.Dir == root && ev.Name == "Other"
-	})
+	more := nextEvents(t, b, func(ev Event) bool { return ev.Kind == EventRescanRoot && ev.Root == root })
 	for _, ev := range append(events, more...) {
 		if ignoreFile(ev.Name) {
 			t.Fatalf("an ignore file was reported: %v", eventStrings([]Event{ev}))
 		}
+	}
+}
+
+// A walk lists a directory, then applies what it saw. If a marker changed in
+// between and the read loop re-evaluated the directory, the walk's listing
+// is stale: the re-evaluation's answer stands, and the walk follows it.
+func TestInotifyWalkListingDefersToANewerMarkerCheck(t *testing.T) {
+	root := t.TempDir()
+	mkdirs(t, root, "Dir")
+	dir := filepath.Join(root, "Dir")
+	b := newTestInotify(t, inotifyHooks{})
+	if err := b.AddRoot(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	skippedNow := func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return b.byPath[dir].skipped
+	}
+
+	seen := b.newMarkerSeen()
+	seen.record(dir)
+	// The read loop re-evaluates after a marker appeared.
+	b.mu.Lock()
+	b.byPath[dir].markers++
+	b.byPath[dir].skipped = true
+	b.mu.Unlock()
+	if got := seen.listed(dir, false); !got || !skippedNow() {
+		t.Fatalf("stale listing applied: listed = %v, skipped = %v, want both true", got, skippedNow())
+	}
+
+	// Without a re-evaluation in between, the walk's listing applies.
+	seen = b.newMarkerSeen()
+	seen.record(dir)
+	if got := seen.listed(dir, false); got || skippedNow() {
+		t.Fatalf("listing not applied: listed = %v, skipped = %v, want both false", got, skippedNow())
 	}
 }

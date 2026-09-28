@@ -19,10 +19,12 @@ type walkVisitor struct {
 	// error aborts the walk.
 	enter func(dir string, link bool) (bool, error)
 	// listed reports, once dir was listed, whether its ignore files exclude
-	// it and everything below it. A skipped directory stays recorded as a
-	// boundary, so adding or removing its .nomedia or .ignore is seen, but
-	// the walk does not descend into it.
-	listed func(dir string, skipped bool)
+	// it and everything below it, and returns whether the walk treats it as
+	// skipped: the backend may know a newer answer (a marker changed after
+	// the listing). A skipped directory stays recorded as a boundary, so
+	// adding or removing its .nomedia or .ignore is seen, but the walk does
+	// not descend into it.
+	listed func(dir string, skipped bool) bool
 	// file, when set, receives every file (or symlink to a file) in a
 	// listed directory that is not skipped.
 	file func(path string)
@@ -159,7 +161,7 @@ func (w *treeWalk) dir(ctx context.Context, logical, physical string, link bool)
 	}
 	skipped := dirSkipped(logical, entries)
 	if w.v.listed != nil {
-		w.v.listed(logical, skipped)
+		skipped = w.v.listed(logical, skipped)
 	}
 	if skipped {
 		return nil

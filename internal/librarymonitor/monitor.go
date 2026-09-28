@@ -666,6 +666,7 @@ func (m *Monitor) try(ctx context.Context, rs *rootState, ticket *walkTicket) ou
 	attached, rewalk, everSeen, recorded := rs.backend, rs.rewalk, rs.everSeen, rs.identity
 	recordedMounts := rs.mounts
 	notes := rs.notes
+	unreadable := slices.Clone(rs.unreadable)
 	rs.rewalk = false
 	m.mu.Unlock()
 
@@ -687,12 +688,14 @@ func (m *Monitor) try(ctx context.Context, rs *rootState, ticket *walkTicket) ou
 	}
 	if attached != nil {
 		sameFolder := id == recorded
-		if sameFolder && !rewalk && mounts.signature == recordedMounts {
+		if sameFolder && !rewalk && mounts.signature == recordedMounts && !anyReadable(unreadable) {
 			return outcome{keep: true}
 		}
 		if sameFolder {
-			// Asked to (overflow, a lost mark, an unmount below the root),
-			// or a filesystem was mounted or unmounted inside it.
+			// Asked to (overflow, an unmount below the root), a filesystem
+			// was mounted or unmounted inside it, or a directory the last
+			// walk could not read is readable now: nothing reports a
+			// permission change on a directory that is not watched.
 			if err := m.gate.wait(ctx, ticket); err != nil {
 				return outcome{canceled: true}
 			}
@@ -865,6 +868,18 @@ func (m *Monitor) forward(b Backend) {
 	}
 }
 
+// anyReadable reports whether any of dirs can be opened for reading now,
+// which is what watching it needs.
+func anyReadable(dirs []string) bool {
+	for _, dir := range dirs {
+		if f, err := os.Open(dir); err == nil {
+			_ = f.Close()
+			return true
+		}
+	}
+	return false
+}
+
 // finish applies an attempt's outcome.
 func (m *Monitor) finish(rs *rootState, out outcome) {
 	m.mu.Lock()
@@ -989,6 +1004,8 @@ func (m *Monitor) handleEvent(be backendEvent, now time.Time) {
 		m.handleLimit(be.backend, ev)
 	case EventRewalk:
 		m.handleRewalk(be.backend, ev.Root)
+	case EventRescanRoot:
+		m.handleRescanRoot(ev.Root)
 	case EventRename:
 		switch {
 		case ignoredName(ev.OldName) && ignoredName(ev.Name):
@@ -1035,6 +1052,18 @@ func (m *Monitor) handleBackendClosed(b Backend) {
 	go func() { _ = b.Close() }()
 	m.markDirty()
 	m.Poke()
+}
+
+// handleRescanRoot queues a whole-library scan for each monitored library
+// with root as a folder.
+func (m *Monitor) handleRescanRoot(root string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if rs := m.roots[root]; rs != nil && rs.wanted {
+		for _, id := range rs.libraries {
+			m.libraryScans[id] = struct{}{}
+		}
+	}
 }
 
 // handleOverflow re-walks every root on the backend, to record directories

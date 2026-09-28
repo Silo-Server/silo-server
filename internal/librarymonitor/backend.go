@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"path/filepath"
 	"time"
@@ -62,6 +61,10 @@ const (
 	// was unmounted. Nothing is queued; changes made in the gap are the
 	// nightly scan's job.
 	EventRewalk
+	// EventRescanRoot: Root's contents need a whole-library scan: ignore
+	// rules on the library folder itself changed, and only a library scan
+	// applies them to entries directly in it.
+	EventRescanRoot
 )
 
 func (k EventKind) String() string {
@@ -86,6 +89,8 @@ func (k EventKind) String() string {
 		return "limit_reached"
 	case EventRewalk:
 		return "rewalk"
+	case EventRescanRoot:
+		return "rescan_root"
 	default:
 		return fmt.Sprintf("EventKind(%d)", int(k))
 	}
@@ -254,24 +259,15 @@ func expireMoves[M any](moves []M, now time.Time, wait time.Duration, at func(M)
 
 // reportFolder reports a directory whose contents need a scan, because its
 // ignore markers no longer exclude it or its ignore rules changed: one
-// directory change for it, or for a root, whose parent is outside the
-// library, one change per entry in it.
-func reportFolder(emit func(Event), dir string, isRoot bool, entries []fs.DirEntry) {
-	if !isRoot {
-		emit(Event{Kind: EventMovedTo, Dir: filepath.Dir(dir), Name: filepath.Base(dir), IsDir: true})
+// directory change for it, or for a library folder itself a whole-library
+// scan (EventRescanRoot). A path change directly in a library folder resolves
+// to a single-file scan, which does not apply the folder's own ignore rules.
+func reportFolder(emit func(Event), dir string, isRoot bool) {
+	if isRoot {
+		emit(Event{Kind: EventRescanRoot, Root: dir})
 		return
 	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if ignoredName(name) || ignoreFile(name) {
-			continue
-		}
-		isDir := entry.IsDir() || (entry.Type()&fs.ModeSymlink != 0 && symlinkToDir(filepath.Join(dir, name)))
-		if isDir && ignoredDir(name) {
-			continue
-		}
-		emit(Event{Kind: EventMovedTo, Dir: dir, Name: name, IsDir: isDir})
-	}
+	emit(Event{Kind: EventMovedTo, Dir: filepath.Dir(dir), Name: filepath.Base(dir), IsDir: true})
 }
 
 // eventName returns an entry name from a kernel event without the NUL

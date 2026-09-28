@@ -721,3 +721,51 @@ func TestFailedBackendIsReplaced(t *testing.T) {
 		return onlyMonitoring(1)(rows) && len(created) == 2 && created[1].addCount(root) == 1
 	})
 }
+
+// A rescan request for a library folder queues one library scan for its
+// library and leaves other libraries alone.
+func TestRescanRootQueuesALibraryScan(t *testing.T) {
+	rootA, rootB := t.TempDir(), t.TempDir()
+	folders := &fakeFolders{}
+	folders.set(library(1, rootA), library(2, rootB))
+	_, b, queue, status := fakeMonitor(t, folders, nil)
+	waitStatus(t, status, "monitoring", onlyMonitoring(1, 2))
+
+	b.events <- Event{Kind: EventRescanRoot, Root: rootA}
+	if got := waitTargets(t, queue, "1 library  realtime_monitor"); len(got) != 1 {
+		t.Fatalf("enqueued %v, want only library 1's scan", got)
+	}
+}
+
+// A directory Silo could not read is named in the status. Nothing reports a
+// permission change on a directory that is not watched, so reconcile checks
+// it again and walks the folder once it is readable.
+func TestUnreadableFolderIsRecordedOnceReadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission bits do not deny access")
+	}
+	root := t.TempDir()
+	mkdirs(t, root, "Locked/Inside")
+	locked := filepath.Join(root, "Locked")
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	folders := &fakeFolders{}
+	folders.set(library(1, root))
+	status := newFakeStatus()
+	m := startMonitor(t, testConfig(folders, newFakeQueue(), status))
+	waitStatus(t, status, "the unreadable folder named", func(rows []LibraryStatus) bool {
+		row, ok := statusOf(rows, 1)
+		return ok && row.State == StateMonitoring && strings.Contains(row.Detail, locked)
+	})
+
+	if err := os.Chmod(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m.Poke()
+	waitStatus(t, status, "the folder recorded", func(rows []LibraryStatus) bool {
+		row, ok := statusOf(rows, 1)
+		return ok && row.State == StateMonitoring && row.Detail == "" && row.Directories == 3
+	})
+}
