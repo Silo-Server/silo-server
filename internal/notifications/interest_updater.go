@@ -293,6 +293,12 @@ func (u *InterestUpdater) resolveSeriesIDs(ctx context.Context, itemIDs []string
 // source-of-truth user state. It is the single shared path for live updates,
 // backfill, and repair, so all three stay drift-free.
 func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profileID, seriesID string) error {
+	return u.recomputeSeries(ctx, userID, profileID, seriesID, nil)
+}
+
+// recomputeSeries is RecomputeSeries with an optional cache of the profile's
+// Home dismissals, which a rebuild shares across the profile's series.
+func (u *InterestUpdater) recomputeSeries(ctx context.Context, userID int, profileID, seriesID string, dismissals *homeDismissals) error {
 	store, err := u.stores.ForUser(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("open user store: %w", err)
@@ -328,6 +334,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	}
 
 	var inProgress []userstore.WatchProgress
+	started := make([]string, 0, 16)
 	hasProgression := false
 	lastCompletedKey := 0
 	hasCompleted := false
@@ -346,6 +353,9 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		}
 		for episodeID, entry := range progress {
 			hasProgression = true
+			if entry.Completed || entry.PositionSeconds > 0 {
+				started = append(started, episodeID)
+			}
 			if !entry.Completed && entry.PositionSeconds > 0 {
 				entry.MediaItemID = episodeID
 				inProgress = append(inProgress, entry)
@@ -401,13 +411,20 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	// removal lapses.
 	continueWatching, nextUpCandidate := false, false
 	if hasProgression {
-		hides, err := u.loadHomeHides(ctx, store, userID, profileID, seriesID, episodeKeys,
+		hides, err := u.loadHomeHides(ctx, store, dismissals, userID, profileID, seriesID,
 			len(inProgress) > 0, nextExpected != nil)
 		if err != nil {
 			return err
 		}
 		continueWatching = hides.continueWatchingVisible(inProgress)
-		nextUpCandidate = hides.nextUpVisible(nextEpisodeAt(episodeKeys, nextExpected))
+		nextUpCandidate = !hides.dropped
+		if nextUpCandidate && hides.dismissesNextUpIn(episodeKeys) {
+			next, err := u.nextUpEpisode(ctx, seriesID, *nextExpected, started)
+			if err != nil {
+				return err
+			}
+			nextUpCandidate = hides.nextUpVisible(next)
+		}
 	}
 
 	flags := SeriesInterest{
