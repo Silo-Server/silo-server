@@ -871,8 +871,8 @@ func (b *inotifyBackend) markerChanged(parents []inotifyParent, name string) {
 
 // reevaluate applies a directory's current ignore files. A directory they
 // now exclude keeps its own watch but drops everything recorded below it. A
-// directory they no longer exclude is walked, and reported so its contents
-// get scanned. When rules changed (an .ignore or .siloignore was created,
+// directory they no longer exclude is walked. Either way it is reported, so
+// a scan reconciles what the change excluded or included. When rules changed (an .ignore or .siloignore was created,
 // rewritten, or removed) and the directory stays included, it is reported
 // too: its patterns may now include or exclude entries in it.
 func (b *inotifyBackend) reevaluate(p inotifyParent, rulesChanged bool) {
@@ -925,6 +925,8 @@ func (b *inotifyBackend) reevaluate(p inotifyParent, rulesChanged bool) {
 		}
 		b.mu.Unlock()
 		b.rewalkAliased(aliased, nil)
+		// The scan reconciles what the marker now excludes.
+		reportFolder(b.emit, p.path, isRoot)
 		return
 	}
 	b.mu.Unlock()

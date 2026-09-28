@@ -221,7 +221,8 @@ directories the scanner would enter (`walkTree`). They skip:
   not apply the folder's own ignore rules. When a marker appears,
   everything recorded below the directory is dropped, except what a library
   folder configured below it records: markers above a library folder do not
-  apply to it, as in the scanner. Marker files are never reported as changes
+  apply to it, as in the scanner. The directory is then reported the same way,
+  so the scan retires what the marker now excludes. Marker files are never reported as changes
   themselves.
 - Pattern rules inside `.ignore` and `.siloignore` are not applied to the
   walk. A pattern-ignored folder costs a watch, and a change there resolves to

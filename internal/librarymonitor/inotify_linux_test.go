@@ -897,3 +897,21 @@ func TestInotifyWalkListingDefersToANewerMarkerCheck(t *testing.T) {
 		t.Fatalf("listing not applied: listed = %v, skipped = %v, want both false", got, skippedNow())
 	}
 }
+
+// A marker that now excludes a directory is reported like one that stops
+// excluding it, so a scan reconciles the media it hides.
+func TestInotifyNewMarkerReportsTheFolder(t *testing.T) {
+	root := t.TempDir()
+	mkdirs(t, root, "Movie A/Extras")
+	b := newTestInotify(t, inotifyHooks{})
+	if err := b.AddRoot(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "Movie A", ".nomedia"), "")
+	nextEvents(t, b, func(ev Event) bool {
+		return ev.Kind == EventMovedTo && ev.Dir == root && ev.Name == "Movie A" && ev.IsDir
+	})
+	if got := b.pathsWithPrefix(filepath.Join(root, "Movie A", "Extras")); len(got) != 0 {
+		t.Fatalf("still records %v below the marker", got)
+	}
+}
