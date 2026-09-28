@@ -170,10 +170,41 @@ func sanitizeAPIKeyError(err error, apiKey string) error {
 		if apiKey != "" && strings.Contains(sanitized.URL, apiKey) {
 			sanitized.URL = strings.ReplaceAll(sanitized.URL, apiKey, "[REDACTED]")
 		}
+		// url.Error.Error prints Err too, and a transport error can quote
+		// the request URL.
+		sanitized.Err = redactAPIKey(sanitized.Err, apiKey)
 		return &sanitized
 	}
-	if apiKey != "" && strings.Contains(err.Error(), apiKey) {
-		return errors.New(strings.ReplaceAll(err.Error(), apiKey, "[REDACTED]"))
+	return redactAPIKey(err, apiKey)
+}
+
+// redactedError hides an API key in a wrapped transport error's text while
+// keeping the original reachable through errors.Is/As and its timeout
+// classification, which url.Error.Timeout reads by type assertion.
+type redactedError struct {
+	err  error
+	text string
+}
+
+func (e *redactedError) Error() string { return e.text }
+func (e *redactedError) Unwrap() error { return e.err }
+func (e *redactedError) Timeout() bool {
+	t, ok := e.err.(interface{ Timeout() bool })
+	return ok && t.Timeout()
+}
+
+// redactAPIKey replaces the key, raw or query-escaped, in err's text.
+func redactAPIKey(err error, apiKey string) error {
+	if err == nil || apiKey == "" {
+		return err
 	}
-	return err
+	text := err.Error()
+	redacted := strings.ReplaceAll(text, apiKey, "[REDACTED]")
+	if escaped := url.QueryEscape(apiKey); escaped != apiKey {
+		redacted = strings.ReplaceAll(redacted, escaped, "[REDACTED]")
+	}
+	if redacted == text {
+		return err
+	}
+	return &redactedError{err: err, text: redacted}
 }

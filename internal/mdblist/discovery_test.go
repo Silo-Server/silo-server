@@ -3,6 +3,7 @@ package mdblist
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -109,5 +110,33 @@ func TestTransportErrorOmitsAPIKey(t *testing.T) {
 	}
 	if !strings.Contains(errStr, "REDACTED") {
 		t.Fatalf("expected REDACTED in sanitized transport error string: %s", errStr)
+	}
+}
+
+// urlQuotingTransport fails every request with an error that quotes the full
+// request URL, as some transports and proxies do.
+type urlQuotingTransport struct{ cause error }
+
+func (t urlQuotingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return nil, fmt.Errorf("dial %s: %w", req.URL, t.cause)
+}
+
+func TestTransportErrorRedactsAPIKeyInWrappedError(t *testing.T) {
+	secretKey := "super-secret-mdblist-key-12345"
+	cause := errors.New("connection refused")
+	c := NewClient(secretKey, &http.Client{Transport: urlQuotingTransport{cause: cause}})
+
+	_, err := c.Search(context.Background(), "test")
+	if err == nil {
+		t.Fatal("expected transport error, got nil")
+	}
+	if strings.Contains(err.Error(), secretKey) {
+		t.Fatalf("transport error leaked API key: %s", err)
+	}
+	if !strings.Contains(err.Error(), "REDACTED") {
+		t.Fatalf("expected REDACTED in sanitized transport error: %s", err)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("sanitized error no longer wraps its cause: %v", err)
 	}
 }
