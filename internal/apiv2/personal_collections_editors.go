@@ -51,6 +51,14 @@ func (reg *Registry) collectionEditors() (collectionEditors, *Problem) {
 func collectionEditorTag(ctx context.Context, kind, id string, revision int64) EntityTag {
 	return RenderETag("collections:"+kind+":"+strconv.Itoa(claimsFrom(ctx).UserID)+":"+profileFrom(ctx)+":"+viewerScopeDigest(ctx), id, revision)
 }
+
+// personalCollectionEditorTag includes the live count, which can change when
+// catalog contents or watch state change without a collection edit. The
+// collection revision still fences stored edits in the mutation transaction.
+func personalCollectionEditorTag(ctx context.Context, id string, view handlers.PersonalCollectionEditorView) EntityTag {
+	return collectionEditorTag(ctx, "collection:count:"+strconv.Itoa(view.Collection.ItemCount), id, view.Revision)
+}
+
 func collectionGuard(ctx context.Context, headers CollectionPreconditions, tag EntityTag, revision int64) (context.Context, *Problem) {
 	if p := EvaluateGuardedPreconditions(headers.IfMatch, headers.IfNoneMatch, tag); p != nil {
 		return ctx, p
@@ -142,6 +150,7 @@ func (reg *Registry) prepareCollectionGuard(ctx context.Context, kind, id string
 	u := claimsFrom(ctx).UserID
 	var rev int64
 	var err error
+	var tag EntityTag
 	switch kind {
 	case "collection":
 		var v handlers.PersonalCollectionEditorView
@@ -150,6 +159,7 @@ func (reg *Registry) prepareCollectionGuard(ctx context.Context, kind, id string
 			return ctx, EntityTag{}, NewProblem(TypePermissionDenied, "Only the creator can edit this collection.")
 		}
 		rev = v.Revision
+		tag = personalCollectionEditorTag(ctx, id, v)
 	case "items-order":
 		var v handlers.PersonalCollectionOrderView
 		v, err = s.PersonalCollectionItemsOrderEditor(ctx, u, profileFrom(ctx), id)
@@ -172,7 +182,9 @@ func (reg *Registry) prepareCollectionGuard(ctx context.Context, kind, id string
 	if err != nil {
 		return ctx, EntityTag{}, collectionProblem(err)
 	}
-	tag := collectionEditorTag(ctx, kind, id, rev)
+	if tag.IsZero() {
+		tag = collectionEditorTag(ctx, kind, id, rev)
+	}
 	next, p := collectionGuard(ctx, headers, tag, rev)
 	return next, tag, p
 }

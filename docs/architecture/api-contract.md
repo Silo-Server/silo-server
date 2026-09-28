@@ -1936,7 +1936,11 @@ canonical representation: `GET /collections/{id}`, `GET /collections/groups/{id}
 `GET /collections/{id}/items/order`. Paths in this section have the `/api/v2` prefix.
 Each response supplies a strong ETag bound to the representation, account, profile, and access
 scope. Canonical collection editors omit the volatile presigned poster URL; display listings
-continue to provide artwork. Ordering writes use PUT, group and collection partial edits use
+continue to provide artwork. Personal collection detail responses include the viewer's live
+`item_count`, so their ETag also binds that count. A catalog or watch-state change that changes
+the count invalidates an earlier tag at precondition evaluation, even without a collection edit.
+The stored collection revision continues to guard concurrent definition edits in the write
+transaction. Ordering writes use PUT, group and collection partial edits use
 PATCH, and a successful delete returns 204 without an ETag. Storage compares the version and advances it in the transaction that applies the write. Missing preconditions return 428; stale
 preconditions return 412 with the current authorized validator. Clients must not automatically retry or implicitly
 replace the observed validator with a wildcard. Web editors retain the observed validator and preserve drafts

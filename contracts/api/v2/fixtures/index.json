@@ -5504,7 +5504,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"1ccfbbd89c0c45a4c0c5565a.2yjng52toqtml\""
+        "ETag": "\"457e318bf2388a46420c6eb8.1njpabgklvmqp\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/PersonalCollection",
