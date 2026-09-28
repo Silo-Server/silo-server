@@ -82,10 +82,11 @@ func (h *AutoscanHandler) HandleItemRefresh(w http.ResponseWriter, r *http.Reque
 
 	targets := make([]scantrigger.Target, 0, len(files))
 	seen := make(map[autoscanTargetKey]struct{}, len(files))
-	// A file resolves to its directory, so one file per directory gives the
-	// same targets; a series costs one resolve per season folder, not one per
-	// episode.
-	resolvedDirs := make(map[string]struct{}, len(files))
+	// Once a file resolves to a scan of its whole directory, the directory's
+	// other files add nothing, so a series costs one resolve per season folder
+	// rather than per episode. Files that resolve to themselves (non-video
+	// libraries, files at a library root) are each resolved.
+	scannedDirs := make(map[string]struct{}, len(files))
 	for _, file := range files {
 		if file == nil {
 			continue
@@ -95,14 +96,16 @@ func (h *AutoscanHandler) HandleItemRefresh(w http.ResponseWriter, r *http.Reque
 			continue
 		}
 		dir := filepath.Dir(filepath.Clean(path))
-		if _, done := resolvedDirs[dir]; done {
+		if _, covered := scannedDirs[dir]; covered {
 			continue
 		}
-		resolvedDirs[dir] = struct{}{}
 		target, resolveErr := resolveAutoscanPath(ctx, resolver, path, itemRefreshTrigger, "item refresh", "item_id", rawID)
 		if resolveErr != nil {
 			writeScanTriggerError(w, resolveErr)
 			return
+		}
+		if target != nil && target.Mode == scantrigger.ModeSubtree && filepath.Clean(target.Path) == dir {
+			scannedDirs[dir] = struct{}{}
 		}
 		targets = appendAutoscanTarget(targets, seen, target)
 	}

@@ -341,3 +341,29 @@ func TestItemRefreshSeasonWithoutSeasonStoreIsUnavailable(t *testing.T) {
 		t.Fatalf("expected no queued scans, got %#v", queue.calls)
 	}
 }
+
+// Non-video libraries resolve each file to itself, so two files in one folder
+// are two targets: the per-directory shortcut applies only to folder scans.
+func TestItemRefreshResolvesEachFileOutsideVideoLibraries(t *testing.T) {
+	root := t.TempDir()
+	partOne := writeMediaFile(t, root, "Author", "Book", "Part 1.mp3")
+	partTwo := writeMediaFile(t, root, "Author", "Book", "Part 2.mp3")
+	queue := &fakeAutoscanQueue{}
+	files := &fakeItemRefreshFiles{byContentID: map[string][]*models.MediaFile{
+		"book-1": {
+			{ID: 1, ContentID: "book-1", FilePath: partOne},
+			{ID: 2, ContentID: "book-1", FilePath: partTwo},
+		},
+	}}
+	handler := newItemRefreshHandler(root, "audiobook", queue, files, nil)
+
+	rec := serveItemRefresh(handler, handler.codec.EncodeStringID(EncodedIDItem, "book-1"))
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertQueuedScans(t, queue, []queuedScan{
+		{libraryID: 7, mode: scantrigger.ModeFile, path: partOne, trigger: itemRefreshTrigger},
+		{libraryID: 7, mode: scantrigger.ModeFile, path: partTwo, trigger: itemRefreshTrigger},
+	})
+}
