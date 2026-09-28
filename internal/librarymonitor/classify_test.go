@@ -72,6 +72,7 @@ func TestWalkTreeSkipsWhatTheScannerSkips(t *testing.T) {
 		"Movie A/Extras",
 		"NoMedia/Inside",
 		"EmptyIgnore/Inside",
+		"InvalidIgnore/Inside",
 		"PatternIgnore/Inside",
 		"@eaDir/thumbs",
 		"Downloading.partial",
@@ -80,6 +81,8 @@ func TestWalkTreeSkipsWhatTheScannerSkips(t *testing.T) {
 	)
 	writeFile(t, filepath.Join(root, "NoMedia", ".nomedia"), "")
 	writeFile(t, filepath.Join(root, "EmptyIgnore", ".ignore"), "# only a comment\n\n")
+	// Only invalid patterns: the scanner drops them and skips the folder.
+	writeFile(t, filepath.Join(root, "InvalidIgnore", ".ignore"), "[\n")
 	writeFile(t, filepath.Join(root, "PatternIgnore", ".ignore"), "*.nfo\n")
 	// A symlinked directory is followed, and a loop back to the root is cut.
 	if err := os.Symlink(filepath.Join(root, "Target"), filepath.Join(root, "Linked")); err != nil {
@@ -111,6 +114,7 @@ func TestWalkTreeSkipsWhatTheScannerSkips(t *testing.T) {
 	want := []string{
 		".",
 		"EmptyIgnore", "skip EmptyIgnore",
+		"InvalidIgnore", "skip InvalidIgnore",
 		"Linked (link)", "Linked/Deep",
 		"Movie A", "Movie A/Extras",
 		"NoMedia", "skip NoMedia",

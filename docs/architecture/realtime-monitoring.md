@@ -208,8 +208,10 @@ directories the scanner would enter (`walkTree`). They skip:
 - The scanner's other ignored directory names, also case-insensitive:
   `@Recycle`, `.Trash`, `$RECYCLE.BIN`, `.deleted`, `.inbound`, `.downloads`.
 - A directory holding a regular `.nomedia` file, or a regular `.ignore` file
-  without a pattern, is skipped with everything below it, as in
-  [scanner-ignore-files](scanner-ignore-files.md). The directory itself stays
+  without a valid pattern, is skipped with everything below it. The decision
+  is the scanner's own (`scanner.DirSkipped`, see
+  [scanner-ignore-files](scanner-ignore-files.md)), so monitoring and scans
+  skip the same directories. The directory itself stays
   recorded (a library folder with such a marker holds one watch), so its
   markers keep being checked. Other changes in it are dropped. When a marker
   is deleted, moved away, or rewritten so it no longer excludes the directory,
@@ -217,9 +219,9 @@ directories the scanner would enter (`walkTree`). They skip:
   itself reports one change per entry in it. When a marker appears,
   everything recorded below the directory is dropped. Marker files are never
   reported as changes themselves.
-- Pattern rules inside `.ignore` and `.siloignore` are not applied: the
-  scanner's matcher is internal to its package. A pattern-ignored folder costs
-  a watch, and a change there resolves to a scan that the scanner then filters.
+- Pattern rules inside `.ignore` and `.siloignore` are not applied to the
+  walk. A pattern-ignored folder costs a watch, and a change there resolves to
+  a scan that the scanner then filters.
 - Symlinked directories are followed, as the scanner follows them. Loops are
   cut by physical path within a walk, and across walks because a directory
   already recorded for the same folder under another path is not recorded

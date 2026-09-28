@@ -2,10 +2,10 @@ package librarymonitor
 
 import (
 	"io/fs"
-	"os"
 	"path"
-	"path/filepath"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
 // ignoredNamePatterns is the fixed ignore list, matched case-insensitively
@@ -68,38 +68,12 @@ func ignoredDir(name string) bool {
 	return ignoredName(name) || ignoredDirNames[strings.ToLower(name)]
 }
 
-// dirSkipped reports whether dir's own ignore files exclude it and everything
-// under it, as the scanner decides: a regular .nomedia file, or a regular
-// .ignore file without a pattern (empty, or only blank and comment lines).
-// An unreadable .ignore is treated as absent, like the scanner does.
+// dirSkipped reports whether dir's own ignore files exclude it and
+// everything under it, decided by the scanner (scanner.DirSkipped).
 //
-// Pattern rules inside .ignore and .siloignore are not applied: the scanner's
-// matcher is internal to its package. Watching a pattern-ignored folder only
-// costs a watch; a change there resolves to a scan the scanner then filters.
+// Pattern rules inside .ignore and .siloignore are not applied: watching a
+// pattern-ignored folder only costs a watch; a change there resolves to a
+// scan the scanner then filters.
 func dirSkipped(dir string, entries []fs.DirEntry) bool {
-	for _, entry := range entries {
-		if !entry.Type().IsRegular() {
-			continue
-		}
-		switch entry.Name() {
-		case markerNoMedia:
-			return true
-		case ignoreFileName:
-			content, err := os.ReadFile(filepath.Join(dir, ignoreFileName))
-			if err == nil && !hasIgnorePattern(string(content)) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func hasIgnorePattern(content string) bool {
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" && !strings.HasPrefix(line, "#") {
-			return true
-		}
-	}
-	return false
+	return scanner.DirSkipped(dir, entries)
 }
