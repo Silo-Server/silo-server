@@ -118,6 +118,10 @@ marked 4K (the plugin's `is_4k` switch, or its older `is_default_4k`), HD
 versions only to one that is not. Saving a route that breaks this is refused,
 and so, under Advanced, is changing a server's 4K switch while a route sends it
 the other version. A server of another plugin (Seerr) takes either version.
+Changing a server's type or media types while a route sends it a media type it
+would no longer take is refused too. A route save and a server save each check
+the other again with the server row locked, so two admins saving at once
+cannot leave a route pointing at a server that no longer fits.
 
 The migration that introduced routes carried the Sonarr/Radarr plugin's routing
 over unchanged: each media type's first usable default and default-4K servers

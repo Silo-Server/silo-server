@@ -1016,11 +1016,7 @@ func (r *Repository) SaveIntegrationWithDefaults(ctx context.Context, in Integra
 		if err == nil {
 			err = defaultFirstServer(ctx, tx, out)
 		}
-	} else if !standard {
-		if err = ensureTierKeptUnderAdvanced(ctx, tx, in); err == nil {
-			out, err = r.updateIntegration(ctx, tx, in)
-		}
-	} else {
+	} else if err = ensureRoutesStillFit(ctx, tx, in, !standard); err == nil {
 		out, err = r.updateIntegration(ctx, tx, in)
 	}
 	if err == nil && standard {
