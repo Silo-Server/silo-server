@@ -21,21 +21,22 @@ func TestArtworkUpstreamFailuresAreRetryableAndOmitTheURL(t *testing.T) {
 	s := &Service{httpClient: upstream.Client()}
 	signed := upstream.URL + "/poster.jpg?X-Amz-Signature=secret"
 
+	// Every upstream error stays not-found, which the frozen v1 route answers
+	// with 404; only 429 and 5xx are also worth a retry.
 	for _, tc := range []struct {
-		status int
-		want   error
+		status      int
+		unavailable bool
 	}{
-		{http.StatusServiceUnavailable, ErrAssetUnavailable},
-		{http.StatusTooManyRequests, ErrAssetUnavailable},
-		// The frozen v1 route keeps answering an upstream error with 404.
-		{http.StatusBadGateway, ErrAssetNotFound},
-		{http.StatusNotFound, ErrAssetNotFound},
-		{http.StatusForbidden, ErrAssetNotFound},
+		{http.StatusServiceUnavailable, true},
+		{http.StatusTooManyRequests, true},
+		{http.StatusBadGateway, true},
+		{http.StatusNotFound, false},
+		{http.StatusForbidden, false},
 	} {
 		status = tc.status
 		err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, signed)
-		if !errors.Is(err, tc.want) || (tc.status < 429 && errors.Is(err, ErrAssetUnavailable)) {
-			t.Errorf("upstream %d: err = %v, want %v", tc.status, err, tc.want)
+		if !errors.Is(err, ErrAssetNotFound) || errors.Is(err, ErrAssetUnavailable) != tc.unavailable {
+			t.Errorf("upstream %d: err = %v, want unavailable %v", tc.status, err, tc.unavailable)
 		}
 	}
 
