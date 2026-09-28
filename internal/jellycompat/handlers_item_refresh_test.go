@@ -367,3 +367,29 @@ func TestItemRefreshResolvesEachFileOutsideVideoLibraries(t *testing.T) {
 		{libraryID: 7, mode: scantrigger.ModeFile, path: partTwo, trigger: itemRefreshTrigger},
 	})
 }
+
+// Video files directly under the library root resolve to themselves, so two
+// of them are two file targets, not one folder scan of the root.
+func TestItemRefreshResolvesEachFileAtALibraryRoot(t *testing.T) {
+	root := t.TempDir()
+	first := writeMediaFile(t, root, "Movie One (2020).mkv")
+	second := writeMediaFile(t, root, "Movie Two (2021).mkv")
+	queue := &fakeAutoscanQueue{}
+	files := &fakeItemRefreshFiles{byContentID: map[string][]*models.MediaFile{
+		"collection-1": {
+			{ID: 1, ContentID: "collection-1", FilePath: first},
+			{ID: 2, ContentID: "collection-1", FilePath: second},
+		},
+	}}
+	handler := newItemRefreshHandler(root, "movie", queue, files, nil)
+
+	rec := serveItemRefresh(handler, handler.codec.EncodeStringID(EncodedIDItem, "collection-1"))
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertQueuedScans(t, queue, []queuedScan{
+		{libraryID: 7, mode: scantrigger.ModeFile, path: first, trigger: itemRefreshTrigger},
+		{libraryID: 7, mode: scantrigger.ModeFile, path: second, trigger: itemRefreshTrigger},
+	})
+}
