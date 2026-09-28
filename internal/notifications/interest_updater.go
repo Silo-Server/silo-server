@@ -58,6 +58,14 @@ type InterestUpdater struct {
 	pending map[interestMutation]int
 	// deferred maps mutations to the time they join pending.
 	deferred map[interestMutation]time.Time
+	// homeChanged records each profile's latest Home removal or restore on
+	// this node, kept for progressSessionGap.
+	homeChanged map[profileKey]time.Time
+}
+
+type profileKey struct {
+	userID    int
+	profileID string
 }
 
 // NewInterestUpdater creates an InterestUpdater.
@@ -115,9 +123,40 @@ func (u *InterestUpdater) QueueItemMutationAfter(userID int, profileID, itemID s
 	u.mu.Unlock()
 }
 
-// promoteDeferred moves deferred mutations due by now into pending. The
-// caller holds u.mu.
+// noteHomeChange records a Home removal or restore of the profile, to the
+// whole second like the progress stamps it is compared with.
+func (u *InterestUpdater) noteHomeChange(userID int, profileID string, at time.Time) {
+	if u == nil {
+		return
+	}
+	u.mu.Lock()
+	if u.homeChanged == nil {
+		u.homeChanged = make(map[profileKey]time.Time)
+	}
+	u.homeChanged[profileKey{userID, profileID}] = at.Truncate(time.Second)
+	u.mu.Unlock()
+}
+
+// changedHomeSince reports whether the profile changed Home on this node
+// after the given time.
+func (u *InterestUpdater) changedHomeSince(userID int, profileID string, since time.Time) bool {
+	if u == nil {
+		return false
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	at, ok := u.homeChanged[profileKey{userID, profileID}]
+	return ok && at.After(since)
+}
+
+// promoteDeferred moves deferred mutations due by now into pending and
+// forgets Home changes older than progressSessionGap. The caller holds u.mu.
 func (u *InterestUpdater) promoteDeferred(now time.Time) {
+	for key, at := range u.homeChanged {
+		if now.Sub(at) > progressSessionGap {
+			delete(u.homeChanged, key)
+		}
+	}
 	for mutation, due := range u.deferred {
 		if due.After(now) {
 			continue
@@ -328,6 +367,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	}
 
 	var inProgress []userstore.WatchProgress
+	started := make([]string, 0, 16)
 	var completedEpisodes []completedEpisode
 	// Home anchors Next Up on the most recently completed episode, ties going
 	// to the later episode.
@@ -351,6 +391,9 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		}
 		for episodeID, entry := range progress {
 			hasProgression = true
+			if entry.Completed || entry.PositionSeconds > 0 {
+				started = append(started, episodeID)
+			}
 			if !entry.Completed && entry.PositionSeconds > 0 {
 				entry.MediaItemID = episodeID
 				inProgress = append(inProgress, entry)
@@ -430,7 +473,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		continueWatching = hides.continueWatchingVisible(inProgress)
 		nextUpCandidate = !hides.dropped
 		if nextUpCandidate && len(hides.nextUp) > 0 {
-			next, err := u.nextUpEpisode(ctx, userID, profileID, seriesID, anchorKey+1)
+			next, err := u.nextUpEpisode(ctx, userID, profileID, seriesID, anchorKey+1, started)
 			if err != nil {
 				return err
 			}

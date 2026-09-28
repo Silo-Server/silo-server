@@ -56,15 +56,17 @@ release event's episode key:
   - A per-card Next Up dismissal clears `next_up` while the dismissed episode
     is still the card Home would show: the first episode after the most
     recently completed one that has a present file and that the profile has
-    not started.
+    not started (by Home's Postgres progress test, or by the profile's own
+    store).
 
   Favorites and watchlist are unaffected. The progression cursor is kept, so
   `next_up` resumes from the right episode once a removal lapses. Every
   removal or restore queues a recompute, and a second one ten minutes later.
   Resuming playback can lift a removal without changing any progress state,
-  so a progress write that lands more than ten minutes after the stored
-  row's stamp, by its own stamp or by the clock (a new watch session, or a
-  late import), queues one too. The second
+  so a progress write queues one too when it is the row's first write since
+  the profile's last Home change on this node, or when it lands more than
+  ten minutes after the row's stamp, by its own stamp or by the clock (a new
+  watch session, or a late import). The second
   recompute is held in memory; if the node restarts first, the daily interest
   rebuild repairs the row.
 - Profile-level notification preferences are a hard gate: a reason disabled

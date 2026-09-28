@@ -323,11 +323,14 @@ func progressStateFromValues(position, duration float64, thresholds userstore.Pr
 }
 
 // queueOnTransition queues a recompute when a write changes the row's state,
-// or when it starts a new watch session (see progressSessionGap). writtenAt
-// is the stamp the write records.
+// when it starts a new watch session (see progressSessionGap), or when it is
+// the row's first write since the profile last changed Home on this node: a
+// resume right after a removal lifts it at once, before the removal's
+// deferred recompute runs. writtenAt is the stamp the write records.
 func (s *interestTrackingStore) queueOnTransition(profileID, mediaItemID string, before, after progressState, writtenAt time.Time) {
 	resumed := before.exists && !before.updatedAt.IsZero() &&
-		(writtenAt.Sub(before.updatedAt) > progressSessionGap || time.Since(before.updatedAt) > progressSessionGap)
+		(writtenAt.Sub(before.updatedAt) > progressSessionGap || time.Since(before.updatedAt) > progressSessionGap ||
+			s.updater.changedHomeSince(s.userID, profileID, before.updatedAt))
 	before.updatedAt, after.updatedAt = time.Time{}, time.Time{}
 	if before != after || resumed {
 		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)

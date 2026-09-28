@@ -85,11 +85,13 @@ func supersededInProgress(inProgress []userstore.WatchProgress, completed []comp
 
 // nextUpEpisode returns the episode Home's Next Up shows after its anchor:
 // the first episode with a key of at least from that has a present file and
-// that the profile has not started. "Started" matches the Home query's
-// next_ep lateral (catalog.buildListNextUpQuery): any progress row that is
-// completed or has a position, including rows a history hide covers. It is
-// empty when there is none.
-func (u *InterestUpdater) nextUpEpisode(ctx context.Context, userID int, profileID, seriesID string, from int) (string, error) {
+// that the profile has not started. "Started" is the Home query's test
+// (catalog.buildListNextUpQuery's next_ep lateral: any Postgres progress row
+// that is completed or has a position, including rows a history hide covers)
+// joined with the started episodes the profile's own store reports, which
+// covers stores that keep progress outside Postgres. It is empty when there
+// is none.
+func (u *InterestUpdater) nextUpEpisode(ctx context.Context, userID int, profileID, seriesID string, from int, started []string) (string, error) {
 	var episodeID string
 	err := u.pool.QueryRow(ctx, `
 		SELECT e.content_id FROM episodes e
@@ -99,13 +101,14 @@ func (u *InterestUpdater) nextUpEpisode(ctx context.Context, userID int, profile
 		  AND EXISTS (
 			SELECT 1 FROM media_files mf
 			WHERE mf.episode_id = e.content_id AND mf.missing_since IS NULL)
+		  AND NOT (e.content_id = ANY($5))
 		  AND NOT EXISTS (
 			SELECT 1 FROM user_watch_progress uwp
 			WHERE uwp.user_id = $1 AND uwp.profile_id = $2
 			  AND uwp.media_item_id = e.content_id
 			  AND (uwp.completed = TRUE OR uwp.position_seconds > 0))
 		ORDER BY e.season_number, e.episode_number, e.content_id
-		LIMIT 1`, userID, profileID, seriesID, from).Scan(&episodeID)
+		LIMIT 1`, userID, profileID, seriesID, from, started).Scan(&episodeID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
@@ -190,6 +193,7 @@ func listHomeDismissals(ctx context.Context, store userstore.UserStore, profileI
 // restore it repairs a concurrent recompute, such as the interest rebuild,
 // that read the state from before the restore and wrote after it.
 func (u *InterestUpdater) queueHomeChange(userID int, profileID, itemID string) {
+	u.noteHomeChange(userID, profileID, time.Now())
 	u.QueueItemMutation(userID, profileID, itemID)
 	u.QueueItemMutationAfter(userID, profileID, itemID, progressSessionGap)
 }

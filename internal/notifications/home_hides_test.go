@@ -358,6 +358,50 @@ func TestInterestTrackingStoreQueuesLateImports(t *testing.T) {
 	}
 }
 
+func TestInterestTrackingStoreQueuesFirstWriteAfterHomeChange(t *testing.T) {
+	ctx := context.Background()
+	updater := &InterestUpdater{pending: map[interestMutation]int{}}
+	store := &interestTrackingStore{UserStore: newSQLiteUserStore(t), userID: 1, system: &System{}, updater: updater}
+	mutation := interestMutation{userID: 1, profileID: "p1", itemID: "ep-1"}
+	queued := func() bool {
+		updater.mu.Lock()
+		defer updater.mu.Unlock()
+		_, ok := updater.pending[mutation]
+		clear(updater.pending)
+		return ok
+	}
+	thresholds := userstore.ProgressThresholds{}
+
+	// Playback a minute ago, then the card is dismissed.
+	if err := store.SetProgressAt(ctx, "p1", "ep-1", 30, 100, false, time.Now().Add(-time.Minute).UTC().Truncate(time.Second)); err != nil {
+		t.Fatalf("SetProgressAt: %v", err)
+	}
+	stamp := "unused"
+	if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
+		ProfileID: "p1", Surface: userstore.HomeSurfaceContinueWatching, MediaItemID: "ep-2",
+		ProgressUpdatedAt: &stamp, DismissedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("UpsertHomeDismissal: %v", err)
+	}
+	queued()
+
+	// Resuming inside the session gap is the row's first write since the
+	// dismissal, so it queues at once.
+	if err := store.UpdateProgress(ctx, "p1", "ep-1", 40, 100, thresholds); err != nil {
+		t.Fatalf("UpdateProgress: %v", err)
+	}
+	if !queued() {
+		t.Fatal("resuming right after a Home change queued no interest recompute")
+	}
+	// The next tick is newer than the change and stays free.
+	if err := store.UpdateProgress(ctx, "p1", "ep-1", 50, 100, thresholds); err != nil {
+		t.Fatalf("UpdateProgress: %v", err)
+	}
+	if queued() {
+		t.Fatal("a tick after the first post-change write queued an interest recompute")
+	}
+}
+
 func TestSupersededInProgress(t *testing.T) {
 	keys := map[string]int{"e2": EpisodeKey(1, 2), "e3": EpisodeKey(1, 3), "e5": EpisodeKey(1, 5)}
 	at := func(minutes int) time.Time { return time.Date(2026, 9, 1, 10, minutes, 0, 0, time.UTC) }
@@ -606,4 +650,67 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 		t.Fatalf("hide E3: %v", err)
 	}
 	recompute("E3 started and hidden", flags{favorite: true, nextUp: true}, afterE4)
+}
+
+// TestNextUpEpisodeSkipsStoreStartedEpisodes covers profiles whose progress
+// lives outside Postgres: episodes their store reports as started are skipped
+// as well.
+func TestNextUpEpisodeSkipsStoreStartedEpisodes(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	nonce := time.Now().UnixNano()
+	prefix := fmt.Sprintf("next-up-%d", nonce)
+	libraryID := 910000 + int(nonce%80000)
+	seriesID := prefix + "-series"
+	e1, e2, e3 := prefix+"-e1", prefix+"-e2", prefix+"-e3"
+	t.Cleanup(func() {
+		cleanup := context.Background()
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_files WHERE media_folder_id = $1`, libraryID)
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = $1`, libraryID)
+	})
+	for _, stmt := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO media_folders (id, type, name) VALUES ($1, 'series', $2)`, []any{libraryID, prefix}},
+		{`INSERT INTO media_items (content_id, type, title, genres) VALUES ($1, 'series', 'Series', '{}')`, []any{seriesID}},
+		{`INSERT INTO seasons (content_id, series_id, season_number) VALUES ($1 || '-s1', $1, 1)`, []any{seriesID}},
+		{`INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number, title)
+			VALUES ($1, $4, $4 || '-s1', 1, 1, 'E1'), ($2, $4, $4 || '-s1', 1, 2, 'E2'), ($3, $4, $4 || '-s1', 1, 3, 'E3')`,
+			[]any{e1, e2, e3, seriesID}},
+		{`INSERT INTO media_files (id, media_folder_id, file_path, episode_id) VALUES
+			($1, $2, $3 || '/1.mkv', $4), ($1 + 1, $2, $3 || '/2.mkv', $5), ($1 + 2, $2, $3 || '/3.mkv', $6)`,
+			[]any{nonce % 1_000_000_000_000, libraryID, "/" + prefix, e1, e2, e3}},
+	} {
+		if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	updater := &InterestUpdater{pool: pool}
+	for _, tc := range []struct {
+		started []string
+		want    string
+	}{
+		{started: []string{}, want: e1},
+		{started: []string{e1, e2}, want: e3},
+		{started: []string{e1, e2, e3}, want: ""},
+	} {
+		got, err := updater.nextUpEpisode(ctx, 1, "no-postgres-progress", seriesID, EpisodeKey(1, 1), tc.started)
+		if err != nil {
+			t.Fatalf("nextUpEpisode: %v", err)
+		}
+		if got != tc.want {
+			t.Errorf("nextUpEpisode(started=%v) = %q, want %q", tc.started, got, tc.want)
+		}
+	}
 }
