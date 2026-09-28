@@ -123,8 +123,7 @@ func (u *InterestUpdater) QueueItemMutationAfter(userID int, profileID, itemID s
 	u.mu.Unlock()
 }
 
-// noteHomeChange records a Home removal or restore of the profile, to the
-// whole second like the progress stamps it is compared with.
+// noteHomeChange records a Home removal or restore of the profile.
 func (u *InterestUpdater) noteHomeChange(userID int, profileID string, at time.Time) {
 	if u == nil {
 		return
@@ -133,7 +132,7 @@ func (u *InterestUpdater) noteHomeChange(userID int, profileID string, at time.T
 	if u.homeChanged == nil {
 		u.homeChanged = make(map[profileKey]time.Time)
 	}
-	u.homeChanged[profileKey{userID, profileID}] = at.Truncate(time.Second)
+	u.homeChanged[profileKey{userID, profileID}] = at
 	u.mu.Unlock()
 }
 

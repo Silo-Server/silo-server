@@ -66,9 +66,14 @@ release event's episode key:
   so a progress write queues one too when it is the row's first write since
   the profile's last Home change on this node, or when it lands more than
   ten minutes after the row's stamp, by its own stamp or by the clock (a new
-  watch session, or a late import). The second
-  recompute is held in memory; if the node restarts first, the daily interest
-  rebuild repairs the row.
+  watch session, or a late import).
+
+  The Home-change marker and the second recompute live in the memory of the
+  node that handled the removal. A resume handled by another node within ten
+  minutes waits for that second recompute, and if the node restarts first,
+  for the daily interest rebuild. A release fanned out in that window is
+  judged on the stale interest. Evaluating Home removals at fanout time would
+  close the gap.
 - Profile-level notification preferences are a hard gate: a reason disabled
   in preferences can never match, so no delivery row is created and no
   channel — including webhooks — ever sees the event. Per-webhook reason

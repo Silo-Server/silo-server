@@ -393,7 +393,10 @@ func TestInterestTrackingStoreQueuesFirstWriteAfterHomeChange(t *testing.T) {
 	if !queued() {
 		t.Fatal("resuming right after a Home change queued no interest recompute")
 	}
-	// The next tick is newer than the change and stays free.
+	// The next tick is newer than the change and stays free. Progress stamps
+	// are whole seconds, so date the change a second back to keep the next
+	// tick's row stamp after it.
+	updater.noteHomeChange(1, "p1", time.Now().Add(-2*time.Second))
 	if err := store.UpdateProgress(ctx, "p1", "ep-1", 50, 100, thresholds); err != nil {
 		t.Fatalf("UpdateProgress: %v", err)
 	}
@@ -457,11 +460,21 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		cleanup := context.Background()
-		_, _ = pool.Exec(cleanup, `DELETE FROM profile_series_interest WHERE series_id = $1`, seriesID)
-		_, _ = pool.Exec(cleanup, `DELETE FROM media_files WHERE media_folder_id = $1`, libraryID)
-		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
-		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = $1`, libraryID)
-		_, _ = pool.Exec(cleanup, `DELETE FROM users WHERE id = $1`, userID)
+		if _, err := pool.Exec(cleanup, `DELETE FROM profile_series_interest WHERE series_id = $1`, seriesID); err != nil {
+			t.Errorf("clean up: %v", err)
+		}
+		if _, err := pool.Exec(cleanup, `DELETE FROM media_files WHERE media_folder_id = $1`, libraryID); err != nil {
+			t.Errorf("clean up: %v", err)
+		}
+		if _, err := pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = $1`, seriesID); err != nil {
+			t.Errorf("clean up: %v", err)
+		}
+		if _, err := pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = $1`, libraryID); err != nil {
+			t.Errorf("clean up: %v", err)
+		}
+		if _, err := pool.Exec(cleanup, `DELETE FROM users WHERE id = $1`, userID); err != nil {
+			t.Errorf("clean up: %v", err)
+		}
 	})
 	for _, stmt := range []struct {
 		sql  string
@@ -673,9 +686,15 @@ func TestNextUpEpisodeSkipsStoreStartedEpisodes(t *testing.T) {
 	e1, e2, e3 := prefix+"-e1", prefix+"-e2", prefix+"-e3"
 	t.Cleanup(func() {
 		cleanup := context.Background()
-		_, _ = pool.Exec(cleanup, `DELETE FROM media_files WHERE media_folder_id = $1`, libraryID)
-		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
-		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = $1`, libraryID)
+		if _, err := pool.Exec(cleanup, `DELETE FROM media_files WHERE media_folder_id = $1`, libraryID); err != nil {
+			t.Errorf("clean up: %v", err)
+		}
+		if _, err := pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = $1`, seriesID); err != nil {
+			t.Errorf("clean up: %v", err)
+		}
+		if _, err := pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = $1`, libraryID); err != nil {
+			t.Errorf("clean up: %v", err)
+		}
 	})
 	for _, stmt := range []struct {
 		sql  string
