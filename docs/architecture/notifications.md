@@ -31,6 +31,13 @@ batch), or `stale` when the event aged past the fanout staleness horizon
 (extended downtime, fanout disabled for a stretch) — delivering it long after
 the fact would be noise.
 
+Server channels read the event feed directly, suppressed events included, and
+skip a title that a different library had made available before the event: a
+second copy (a 4K library beside an HD one) is not news for a server-wide
+post. Profile fanout keeps those events. It already deduplicates per episode
+across libraries, and it must still reach profiles that can see only the
+library that got the copy.
+
 The delivery `type` registry (`episode.available`, `webhook.auto_disabled`,
 `request.*`, …) is extensible by construction; clients must render unknown
 types with a generic fallback.
