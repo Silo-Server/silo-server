@@ -103,11 +103,11 @@ the 24-hour delay. Opening the watch page, starting playback, or the scheduled
 backfill can trigger an eligible retry without a rescan; a backfill backlog can
 delay it.
 
-Three failures pause the whole file instead of one chapter:
-`decode_invalid_data`, `ffmpeg_probe_failed`, and `tonemap_unsupported`. Silo
-logs `chapter thumbnail file marked failed` with a `retry_after` time. Until
-then, every request for the file logs `reason=file_cooldown` and the backfill
-skips it, whatever the chapter schedule says. `ffmpeg_probe_failed` and
+A single failure with `decode_invalid_data`, `ffmpeg_probe_failed`, or
+`tonemap_unsupported` pauses the whole file instead of one chapter. Silo logs
+`chapter thumbnail file marked failed` with a `retry_after` time. Until then,
+every request for the file logs `reason=file_cooldown` and the backfill skips
+it, whatever the chapter schedule says. `ffmpeg_probe_failed` and
 `tonemap_unsupported` step through the same 15-minute to 24-hour delays,
 counted per file. `decode_invalid_data` starts at 24 hours on the first
 failure, so reopening the watch page 15 minutes later does not retry it.
