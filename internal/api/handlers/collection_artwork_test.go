@@ -7,9 +7,11 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -256,10 +258,18 @@ func TestCollectionArtworkError_HidesServerFailures(t *testing.T) {
 	}
 }
 
-// failingPutStore rejects every Put so a test can fail storage after decoding.
-type failingPutStore struct{ blobstore.Store }
+// failingPutStore lets the first okPuts writes through and rejects the rest, so
+// a test can fail storage after decoding, before or partway through the writes.
+type failingPutStore struct {
+	blobstore.Store
+	okPuts int
+}
 
-func (failingPutStore) Put(context.Context, string, []byte) error {
+func (s *failingPutStore) Put(ctx context.Context, key string, data []byte) error {
+	if s.okPuts > 0 {
+		s.okPuts--
+		return s.Store.Put(ctx, key, data)
+	}
 	return errors.New("storage unavailable")
 }
 
@@ -273,7 +283,7 @@ func TestProcessCollectionPoster_StorageFailureKeepsExistingPoster(t *testing.T)
 		t.Fatalf("Put: %v", err)
 	}
 
-	h := &CollectionHandler{ArtworkStore: failingPutStore{store}}
+	h := &CollectionHandler{ArtworkStore: &failingPutStore{Store: store}}
 	_, err = h.processCollectionPoster(
 		context.Background(),
 		nil,
@@ -328,5 +338,62 @@ func TestPruneCollectionImageVariants_RemovesOnlyStaleObjects(t *testing.T) {
 	}
 	if got[stale] || !got[other] || len(got) != len(variants.Variants)+1 {
 		t.Fatalf("objects after prune = %v", got)
+	}
+}
+
+func TestProcessCollectionPoster_PartialStorageFailureKeepsEveryVariant(t *testing.T) {
+	ctx := context.Background()
+	store, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFilesystem: %v", err)
+	}
+	dir := userCollectionImagePrefix + "/collection-1/poster/"
+	want := []string{dir + "original.jpg", dir + "original.webp", dir + "w300.webp", dir + "w500.webp"}
+	for _, key := range want {
+		if err := store.Put(ctx, key, []byte("current poster")); err != nil {
+			t.Fatalf("Put %s: %v", key, err)
+		}
+	}
+
+	h := &CollectionHandler{ArtworkStore: &failingPutStore{Store: store, okPuts: 1}}
+	_, err = h.processCollectionPoster(ctx, nil, "collection-1", "profile-1",
+		func() ([]byte, error) { return testCollectionPosterJPEG(t), nil }, "")
+	if err == nil {
+		t.Fatal("processCollectionPoster succeeded, want the storage error")
+	}
+	items, _, err := store.List(ctx, dir, "", 0)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	got := make([]string, 0, len(items))
+	for _, item := range items {
+		got = append(got, item.Key)
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("stored poster objects = %v, want %v (nothing deleted before the record changes)", got, want)
+	}
+}
+
+// Linux libvips reads a truncated PNG's header and fails inside Process; other
+// builds may accept the damaged data. Either way it must not become a 500.
+func TestGenerateCollectionImageVariants_TruncatedPNGIsNotAServerError(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 600, 900))
+	for y := 0; y < 900; y++ {
+		for x := 0; x < 600; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: 99, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	data := buf.Bytes()
+
+	_, err := generateCollectionImageVariants("poster", data[:len(data)/2])
+	if err == nil {
+		return
+	}
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("err = %v, want nil or a 400 APIError", err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -119,6 +120,10 @@ func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// The client message omits the upstream status so the route does not
+		// report how an arbitrary URL answered; keep it for operators.
+		slog.InfoContext(ctx, "collection artwork source did not return an image", "component", "api",
+			"host", parsed.Host, "status", resp.StatusCode)
 		return nil, invalidCollectionImage("The image source did not return an image.", nil)
 	}
 	if resp.ContentLength > collectionImageMaxBytes {
@@ -155,8 +160,9 @@ func uploadCollectionImageVariants(
 }
 
 // generateCollectionImageVariants decodes the image and renders its resized
-// variants without touching storage. Bytes libvips cannot read fail with
-// invalidCollectionImage; an encode failure stays a server error.
+// variants without touching storage. Bytes libvips cannot read, and JPEG or
+// PNG pixel data that does not decode, fail with invalidCollectionImage; any
+// other failure stays a server error.
 func generateCollectionImageVariants(imageType string, fileData []byte) (*imageutil.VariantResult, error) {
 	var widths []int
 	switch imageType {
@@ -169,7 +175,7 @@ func generateCollectionImageVariants(imageType string, fileData []byte) (*imageu
 	}
 
 	result, err := imageutil.GenerateVariants(fileData, widths)
-	if errors.Is(err, imageutil.ErrInvalidImage) {
+	if err != nil && (errors.Is(err, imageutil.ErrInvalidImage) || imageutil.PixelDataUndecodable(fileData)) {
 		return nil, invalidCollectionImage("The file is not a supported image.", err)
 	}
 	if err != nil {
@@ -210,8 +216,14 @@ func storeCollectionImageVariants(
 	return s3Path, thumbhashStr, nil
 }
 
+// collectionImageDir is the storage prefix holding every variant of one
+// collection image type.
+func collectionImageDir(prefix, collectionID, imageType string) string {
+	return fmt.Sprintf("%s/%s/%s/", prefix, collectionID, imageType)
+}
+
 func collectionImageVariantKey(prefix, collectionID, imageType, variant, ext string) string {
-	return fmt.Sprintf("%s/%s/%s/%s%s", prefix, collectionID, imageType, variant, ext)
+	return collectionImageDir(prefix, collectionID, imageType) + variant + ext
 }
 
 // pruneCollectionImageVariants deletes stored objects for the collection /
@@ -227,23 +239,7 @@ func pruneCollectionImageVariants(
 	for _, v := range result.Variants {
 		keep[collectionImageVariantKey(prefix, collectionID, imageType, v.Key, result.Ext)] = true
 	}
-	items, _, err := store.List(ctx, fmt.Sprintf("%s/%s/%s/", prefix, collectionID, imageType), "", 0)
-	if err != nil {
-		return fmt.Errorf("listing objects: %w", err)
-	}
-	var stale []string
-	for _, item := range items {
-		if !keep[item.Key] {
-			stale = append(stale, item.Key)
-		}
-	}
-	if len(stale) == 0 {
-		return nil
-	}
-	if _, err := store.Delete(ctx, stale); err != nil {
-		return fmt.Errorf("deleting stale variants: %w", err)
-	}
-	return nil
+	return deleteCollectionImageObjects(ctx, store, prefix, collectionID, imageType, keep)
 }
 
 // removeCollectionImageVariants deletes every stored variant for the given
@@ -256,14 +252,29 @@ func removeCollectionImageVariants(
 	if store == nil {
 		return nil
 	}
-	p := fmt.Sprintf("%s/%s/%s/", prefix, collectionID, imageType)
-	items, _, err := store.List(ctx, p, "", 0)
+	return deleteCollectionImageObjects(ctx, store, prefix, collectionID, imageType, nil)
+}
+
+// deleteCollectionImageObjects deletes every object under the collection /
+// imageType prefix whose key is not in keep.
+func deleteCollectionImageObjects(
+	ctx context.Context,
+	store blobstore.Store,
+	prefix, collectionID, imageType string,
+	keep map[string]bool,
+) error {
+	items, _, err := store.List(ctx, collectionImageDir(prefix, collectionID, imageType), "", 0)
 	if err != nil {
 		return fmt.Errorf("listing objects: %w", err)
 	}
-	keys := make([]string, 0, len(items))
+	var keys []string
 	for _, item := range items {
-		keys = append(keys, item.Key)
+		if !keep[item.Key] {
+			keys = append(keys, item.Key)
+		}
+	}
+	if len(keys) == 0 {
+		return nil
 	}
 	if _, err := store.Delete(ctx, keys); err != nil {
 		return fmt.Errorf("deleting collection variants: %w", err)

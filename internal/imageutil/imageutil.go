@@ -30,35 +30,28 @@ const (
 // CPU core; see tasks.imageCacheWorkerCount. Do not raise VIPS_CONCURRENCY
 // in deployments without lowering those pools, or the host oversubscribes.
 
-// ErrInvalidImage reports source bytes that cannot be read as an image,
-// including pixel data libvips only rejects while processing. Encoder
-// failures on a readable image do not wrap it.
+// ErrInvalidImage reports source bytes that libvips cannot read as an image.
+// Failures after the header was read, such as encoding a variant, do not wrap
+// it; see PixelDataUndecodable for damaged pixel data.
 var ErrInvalidImage = errors.New("imageutil: invalid image")
 
-// maxFallbackDecodePixels bounds the raster undecodableSource lets the
-// standard library allocate. A small upload can declare huge dimensions, and
-// image.Decode allocates the whole raster before it reads the pixel data.
-const maxFallbackDecodePixels = 25_000_000
+// maxPixelCheckPixels bounds the raster PixelDataUndecodable lets the
+// standard library allocate. A few-kilobyte upload can declare large
+// dimensions, and image.Decode allocates the whole raster before it reads the
+// pixel data. 4 megapixels costs at most 32 MB, at 16 bits per channel.
+const maxPixelCheckPixels = 4_000_000
 
-// processError wraps a failed Process call on data. Source pixel data that does
-// not decode wraps ErrInvalidImage; any other failure stays a server error
-// that names the step.
-func processError(data []byte, step string, err error) error {
-	if undecodableSource(data) {
-		return fmt.Errorf("%w: %w", ErrInvalidImage, err)
-	}
-	return fmt.Errorf("imageutil: %s: %w", step, err)
-}
-
-// undecodableSource reports whether data is in a format the standard library
-// recognizes but its pixel data does not decode. libvips reads only the header
-// in Size, so a truncated PNG first fails inside Process, where the error is
-// otherwise indistinguishable from an encoder failure. Formats the standard
-// library does not know, and sources above maxFallbackDecodePixels, report
-// false, keeping those failures server errors.
-func undecodableSource(data []byte) bool {
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil || int64(cfg.Width)*int64(cfg.Height) > maxFallbackDecodePixels {
+// PixelDataUndecodable reports whether data is a JPEG or PNG whose header
+// reads but whose pixel data does not decode. libvips reads only the header in
+// Size, so such a file first fails inside Process, where the error looks like
+// an encoder failure. Callers use it after GenerateVariants fails to tell
+// damaged input from a server fault. Other formats, including those other
+// packages register with image, and sources above maxPixelCheckPixels report
+// false.
+func PixelDataUndecodable(data []byte) bool {
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || (format != "jpeg" && format != "png") ||
+		int64(cfg.Width)*int64(cfg.Height) > maxPixelCheckPixels {
 		return false
 	}
 	_, _, err = image.Decode(bytes.NewReader(data))
@@ -108,7 +101,7 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 	fitWithin(&originalOptions, size, MaxCachedOriginalDimension)
 	original, err := bimg.NewImage(data).Process(originalOptions)
 	if err != nil {
-		return nil, processError(data, "encode original", err)
+		return nil, fmt.Errorf("imageutil: encode original: %w", err)
 	}
 	variants = append(variants, Variant{Key: "original", Data: original})
 
@@ -136,7 +129,7 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 		} else {
 			out, err = bimg.NewImage(data).Process(opts)
 			if err != nil {
-				return nil, processError(data, fmt.Sprintf("resize to w%d", w), err)
+				return nil, fmt.Errorf("imageutil: resize to w%d: %w", w, err)
 			}
 		}
 		previousWidth, previousHeight, previousOutput = opts.Width, opts.Height, out

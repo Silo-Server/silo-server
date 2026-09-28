@@ -7,6 +7,8 @@ import (
 	"hash/crc32"
 	"image"
 	"image/color"
+	"image/color/palette"
+	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"runtime"
@@ -116,32 +118,32 @@ func testPNG(t *testing.T, width, height int) []byte {
 	return buf.Bytes()
 }
 
-func TestUndecodableSource(t *testing.T) {
-	full := testPNG(t, 600, 900)
+func TestPixelDataUndecodable(t *testing.T) {
+	fullPNG := testPNG(t, 600, 900)
+	fullJPEG := largeTestJPEG(t, 600, 900)
+	var gifBuf bytes.Buffer
+	if err := gif.Encode(&gifBuf, image.NewPaletted(image.Rect(0, 0, 600, 900), palette.Plan9), nil); err != nil {
+		t.Fatalf("encode gif: %v", err)
+	}
+	fullGIF := gifBuf.Bytes()
+
 	for name, tc := range map[string]struct {
 		data []byte
 		want bool
 	}{
-		"valid png":     {full, false},
-		"truncated png": {full[:len(full)/2], true},
-		"unknown":       {[]byte("not an image"), false},
-		"huge header":   {withPNGDimensions(t, full[:len(full)/2], 100_000, 100_000), false},
-		"just over cap": {withPNGDimensions(t, full[:len(full)/2], 5_001, 5_000), false},
-		"one tall row":  {withPNGDimensions(t, full[:len(full)/2], 1, maxFallbackDecodePixels+1), false},
+		"valid png":      {fullPNG, false},
+		"valid jpeg":     {fullJPEG, false},
+		"truncated png":  {fullPNG[:len(fullPNG)/2], true},
+		"truncated jpeg": {fullJPEG[:len(fullJPEG)/2], true},
+		"truncated gif":  {fullGIF[:len(fullGIF)/2], false},
+		"unknown":        {[]byte("not an image"), false},
+		"huge header":    {withPNGDimensions(t, fullPNG[:len(fullPNG)/2], 100_000, 100_000), false},
+		"just over cap":  {withPNGDimensions(t, fullPNG[:len(fullPNG)/2], 2_001, 2_000), false},
+		"one tall row":   {withPNGDimensions(t, fullPNG[:len(fullPNG)/2], 1, maxPixelCheckPixels+1), false},
 	} {
-		if got := undecodableSource(tc.data); got != tc.want {
-			t.Errorf("%s: undecodableSource = %v, want %v", name, got, tc.want)
+		if got := PixelDataUndecodable(tc.data); got != tc.want {
+			t.Errorf("%s: PixelDataUndecodable = %v, want %v", name, got, tc.want)
 		}
-	}
-}
-
-// Linux libvips reads a truncated PNG's header in Size and fails only in
-// Process; other builds may tolerate the damage and return variants.
-func TestGenerateVariantsTruncatedPNGIsInvalidWhenRejected(t *testing.T) {
-	full := testPNG(t, 600, 900)
-	_, err := GenerateVariants(full[:len(full)/2], []int{300})
-	if err != nil && !errors.Is(err, ErrInvalidImage) {
-		t.Fatalf("err = %v, want nil or ErrInvalidImage", err)
 	}
 }
 
@@ -159,17 +161,4 @@ func withPNGDimensions(t *testing.T, data []byte, width, height uint32) []byte {
 	binary.BigEndian.PutUint32(out[ihdr+8:], height)
 	binary.BigEndian.PutUint32(out[ihdr+4+13:], crc32.ChecksumIEEE(out[ihdr:ihdr+4+13]))
 	return out
-}
-
-func TestProcessErrorClassifiesUndecodableSource(t *testing.T) {
-	full := testPNG(t, 600, 900)
-	cause := errors.New("vips failure")
-
-	if err := processError(full[:len(full)/2], "resize to w300", cause); !errors.Is(err, ErrInvalidImage) {
-		t.Fatalf("truncated source: err = %v, want ErrInvalidImage", err)
-	}
-	err := processError(full, "resize to w300", cause)
-	if errors.Is(err, ErrInvalidImage) || !errors.Is(err, cause) || err.Error() != "imageutil: resize to w300: vips failure" {
-		t.Fatalf("decodable source: err = %v, want the wrapped server error", err)
-	}
 }
