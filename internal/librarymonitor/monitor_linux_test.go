@@ -4,7 +4,6 @@ package librarymonitor
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -25,7 +24,6 @@ func fakeMonitor(t *testing.T, folders *fakeFolders, mutate func(*Config)) (*Mon
 	status := newFakeStatus()
 	cfg := testConfig(folders, queue, status)
 	cfg.hooks.primary = func(BackendOptions) (Backend, error) { return b, nil }
-	cfg.hooks.noFanotify = true
 	if mutate != nil {
 		mutate(&cfg)
 	}
@@ -132,7 +130,6 @@ func TestWalksRunOneAtATimeInSortOrder(t *testing.T) {
 	queue, status := newFakeQueue(), newFakeStatus()
 	cfg := testConfig(folders, queue, status)
 	cfg.hooks.primary = func(BackendOptions) (Backend, error) { return b, nil }
-	cfg.hooks.noFanotify = true
 	startMonitor(t, cfg)
 
 	if call := <-b.calls; call != "add "+first {
@@ -209,7 +206,6 @@ func TestOverflowDuringTheFirstWalkRewalksAndRescans(t *testing.T) {
 	queue, status := newFakeQueue(), newFakeStatus()
 	cfg := testConfig(folders, queue, status)
 	cfg.hooks.primary = func(BackendOptions) (Backend, error) { return b, nil }
-	cfg.hooks.noFanotify = true
 	startMonitor(t, cfg)
 	waitCall(t, b, "add "+root)
 
@@ -223,8 +219,8 @@ func TestOverflowDuringTheFirstWalkRewalksAndRescans(t *testing.T) {
 	}
 }
 
-// RemoveRoot can hang on a dead mount (fanotify stats and marks paths). It
-// must not run under the monitor's lock, which the status loop and Stop take.
+// RemoveRoot can hang on a dead mount. It must not run under the monitor's
+// lock, which the status loop and Stop take.
 func TestHungRemoveRootDoesNotHoldTheMonitorLock(t *testing.T) {
 	rootA, rootB := t.TempDir(), t.TempDir()
 	folders := &fakeFolders{}
@@ -372,76 +368,14 @@ func TestUnsupportedAndFuseFilesystems(t *testing.T) {
 	}
 }
 
-func TestBackendSelection(t *testing.T) {
-	t.Run("no fanotify backend registered uses inotify silently", func(t *testing.T) {
-		root := t.TempDir()
-		folders := &fakeFolders{}
-		folders.set(library(1, root))
-		_, _, _, status := fakeMonitor(t, folders, func(cfg *Config) { cfg.hooks.noFanotify = true })
-		rows := waitStatus(t, status, "monitoring", onlyMonitoring(1))
-		if rows[0].Backend != "inotify" || rows[0].Detail != "" {
-			t.Fatalf("row = %+v, want inotify with no detail", rows[0])
-		}
-	})
-
-	t.Run("fanotify unavailable falls back with a reason", func(t *testing.T) {
-		root := t.TempDir()
-		folders := &fakeFolders{}
-		folders.set(library(1, root))
-		var created atomic.Int32
-		_, _, _, status := fakeMonitor(t, folders, func(cfg *Config) {
-			cfg.hooks.noFanotify = false
-			cfg.hooks.fanotify = func(BackendOptions) (Backend, error) {
-				created.Add(1)
-				return nil, fmt.Errorf("fanotify_init: %w", unix.EPERM)
-			}
-		})
-		rows := waitStatus(t, status, "monitoring", onlyMonitoring(1))
-		if rows[0].Backend != "inotify" || !strings.Contains(rows[0].Detail, "CAP_SYS_ADMIN") {
-			t.Fatalf("row = %+v, want inotify naming CAP_SYS_ADMIN", rows[0])
-		}
-		if created.Load() != 1 {
-			t.Fatalf("fanotify factory called %d times, want once", created.Load())
-		}
-	})
-
-	t.Run("a root fanotify can't mark falls back alone", func(t *testing.T) {
-		subvolume, plain := t.TempDir(), t.TempDir()
-		folders := &fakeFolders{}
-		folders.set(library(1, subvolume), library(2, plain))
-		fan := newFakeBackend("fanotify")
-		fan.addErr[subvolume] = fmt.Errorf("fanotify_mark: %w", unix.EXDEV)
-		_, _, _, status := fakeMonitor(t, folders, func(cfg *Config) {
-			cfg.hooks.noFanotify = false
-			cfg.hooks.fanotify = func(BackendOptions) (Backend, error) { return fan, nil }
-		})
-		rows := waitStatus(t, status, "monitoring", onlyMonitoring(1, 2))
-		fallback, _ := statusOf(rows, 1)
-		if fallback.Backend != "inotify" || !strings.Contains(fallback.Detail, "subvolume") {
-			t.Fatalf("fallback row = %+v", fallback)
-		}
-		marked, _ := statusOf(rows, 2)
-		if marked.Backend != "fanotify" || marked.Detail != "" {
-			t.Fatalf("fanotify row = %+v", marked)
-		}
-		waitCall(t, fan, "remove "+subvolume)
-	})
-}
-
-func TestFallbackReasonCoversEachErrorClass(t *testing.T) {
-	seen := make(map[string]bool)
-	for _, errno := range []unix.Errno{unix.EPERM, unix.EINVAL, unix.EXDEV, unix.EOPNOTSUPP, unix.ENODEV} {
-		reason := fallbackReason(fmt.Errorf("wrapped: %w", errno))
-		if !strings.HasPrefix(reason, "fanotify unavailable: ") || strings.Contains(reason, "wrapped") {
-			t.Errorf("fallbackReason(%v) = %q, want a specific reason", errno, reason)
-		}
-		seen[reason] = true
-	}
-	if len(seen) != 4 { // EOPNOTSUPP and ENODEV share "no file handles"
-		t.Errorf("got %d distinct reasons, want 4", len(seen))
-	}
-	if reason := fallbackReason(errors.New("odd")); !strings.Contains(reason, "odd") {
-		t.Errorf("generic reason = %q", reason)
+func TestMonitoredRootReportsInotify(t *testing.T) {
+	root := t.TempDir()
+	folders := &fakeFolders{}
+	folders.set(library(1, root))
+	_, _, _, status := fakeMonitor(t, folders, nil)
+	rows := waitStatus(t, status, "monitoring", onlyMonitoring(1))
+	if rows[0].Backend != "inotify" || rows[0].Detail != "" {
+		t.Fatalf("row = %+v, want inotify with no detail", rows[0])
 	}
 }
 
@@ -460,7 +394,6 @@ func TestWatchLimitReleasesOnlyThatLibrary(t *testing.T) {
 	queue, status := newFakeQueue(), newFakeStatus()
 	reconciled := make(chan struct{}, 16)
 	cfg := testConfig(folders, queue, status)
-	cfg.hooks.noFanotify = true
 	cfg.hooks.afterReconcile = func() { reconciled <- struct{}{} }
 	cfg.hooks.inotify = inotifyHooks{
 		addWatch: func(fd int, path string, mask uint32) (int, error) {
@@ -568,7 +501,6 @@ func TestRuntimeLimitDuringTheFirstWalkEndsLimitReached(t *testing.T) {
 	attempts := make(chan State, 16)
 	queue, status := newFakeQueue(), newFakeStatus()
 	cfg := testConfig(folders, queue, status)
-	cfg.hooks.noFanotify = true
 	cfg.hooks.afterAttempt = func(_ string, state State) { attempts <- state }
 	cfg.hooks.inotify = inotifyHooks{
 		addWatch: func(fd int, path string, mask uint32) (int, error) {
@@ -722,35 +654,6 @@ func TestMountChangesBelowARootWalkItAgain(t *testing.T) {
 	})
 	if row, _ := statusOf(rows, 1); !strings.Contains(row.Detail, filepath.Join(root, "nas")+" (NFS)") {
 		t.Fatalf("detail = %q, want the NFS mount named", row.Detail)
-	}
-}
-
-// checkingBackend is a fake fanotify backend that records mark checks.
-type checkingBackend struct {
-	*fakeBackend
-	checks chan struct{}
-}
-
-func (b *checkingBackend) checkMarks() { b.checks <- struct{}{} }
-
-func TestReconcileChecksFanotifyMarks(t *testing.T) {
-	root := t.TempDir()
-	folders := &fakeFolders{}
-	folders.set(library(1, root))
-	fan := &checkingBackend{fakeBackend: newFakeBackend("fanotify"), checks: make(chan struct{}, 16)}
-	m, _, _, status := fakeMonitor(t, folders, func(cfg *Config) {
-		cfg.hooks.noFanotify = false
-		cfg.hooks.fanotify = func(BackendOptions) (Backend, error) { return fan, nil }
-	})
-	waitStatus(t, status, "monitoring on fanotify", func(rows []LibraryStatus) bool {
-		return onlyMonitoring(1)(rows) && rows[0].Backend == "fanotify"
-	})
-	drain(fan.checks)
-	m.Poke()
-	select {
-	case <-fan.checks:
-	case <-time.After(waitTimeout):
-		t.Fatal("reconcile did not check the fanotify marks")
 	}
 }
 

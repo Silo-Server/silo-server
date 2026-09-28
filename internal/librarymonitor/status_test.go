@@ -65,11 +65,11 @@ func TestAggregateLibrary(t *testing.T) {
 		{
 			name: "starting beats monitoring",
 			roots: []rootView{
-				{path: "/a", state: StateMonitoring, backend: "fanotify"},
+				{path: "/a", state: StateMonitoring, backend: "inotify"},
 				{path: "/b", state: StateStarting},
 			},
 			wantOK: true,
-			want:   LibraryStatus{LibraryID: 7, State: StateStarting, Backend: "fanotify"},
+			want:   LibraryStatus{LibraryID: 7, State: StateStarting, Backend: "inotify"},
 		},
 		{
 			name: "unsupported filesystem beats starting",
@@ -81,24 +81,14 @@ func TestAggregateLibrary(t *testing.T) {
 			want:   LibraryStatus{LibraryID: 7, State: StateUnsupportedFilesystem},
 		},
 		{
-			name: "mixed backends name inotify",
-			roots: []rootView{
-				{path: "/a", state: StateMonitoring, backend: "fanotify"},
-				{path: "/b", state: StateMonitoring, backend: "inotify", detail: "fanotify unavailable: reason"},
-			},
-			wantOK:    true,
-			want:      LibraryStatus{LibraryID: 7, State: StateMonitoring, Backend: "inotify"},
-			wantInDet: []string{"/b: fanotify unavailable: reason"},
-		},
-		{
 			name: "a detail every root shares is said once, without paths",
 			roots: []rootView{
-				{path: "/a", state: StateMonitoring, backend: "inotify", detail: "fanotify unavailable: reason."},
-				{path: "/b", state: StateMonitoring, backend: "inotify", detail: "fanotify unavailable: reason."},
+				{path: "/a", state: StateMonitoring, backend: "inotify", detail: "Using a caveat."},
+				{path: "/b", state: StateMonitoring, backend: "inotify", detail: "Using a caveat."},
 			},
 			wantOK:    true,
 			want:      LibraryStatus{LibraryID: 7, State: StateMonitoring, Backend: "inotify"},
-			wantInDet: []string{"fanotify unavailable: reason."},
+			wantInDet: []string{"Using a caveat."},
 			exactDet:  true,
 		},
 		{
@@ -106,12 +96,12 @@ func TestAggregateLibrary(t *testing.T) {
 			// the detail must name the root it belongs to.
 			name: "a path without state keeps the detail's path",
 			roots: []rootView{
-				{path: "/a", state: StateMonitoring, backend: "inotify", detail: "fanotify unavailable: reason."},
+				{path: "/a", state: StateMonitoring, backend: "inotify", detail: "Using a caveat."},
 			},
 			configured: 2,
 			wantOK:     true,
 			want:       LibraryStatus{LibraryID: 7, State: StateMonitoring, Backend: "inotify"},
-			wantInDet:  []string{"/a: fanotify unavailable: reason."},
+			wantInDet:  []string{"/a: Using a caveat."},
 			exactDet:   true,
 		},
 		{
@@ -180,7 +170,7 @@ func TestStatusRowsNameThePathWhileAnotherHasNoState(t *testing.T) {
 
 func TestRootStatusDetail(t *testing.T) {
 	limit := (&rootState{state: StateLimitReached, limit: 8192, dirs: 12000}).statusDetail()
-	for _, part := range []string{"max_user_watches (8192)", "12000", "on the host", "CAP_SYS_ADMIN"} {
+	for _, part := range []string{"max_user_watches (8192)", "12000", "on the host"} {
 		if !strings.Contains(limit, part) {
 			t.Errorf("limit detail %q does not contain %q", limit, part)
 		}

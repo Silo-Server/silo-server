@@ -20080,7 +20080,7 @@ export interface components {
     };
     LibraryRealtimeMonitoringEntry: {
       /**
-       * @description Kernel notification backend of the reporting node: inotify, fanotify, or empty
+       * @description Kernel notification backend of the reporting node: inotify, or empty when none is recorded
        * @example inotify
        */
       backend: string;

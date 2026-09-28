@@ -45,8 +45,8 @@ v1 update leaves it unchanged.
 administrators only) reports whether monitoring works for each library. The body
 is `server_enabled` (the server-wide setting) and `libraries`, one entry per
 library ordered by `sort_order` then ID. Each entry carries `library_id`,
-`enabled` (the library's own switch), `state`, `backend` (`inotify`, `fanotify`,
-or empty), `detail`, and `directories`. `node_id` and `updated_at` name the
+`enabled` (the library's own switch), `state`, `backend` (`inotify`, or empty
+when the node records no folder), `detail`, and `directories`. `node_id` and `updated_at` name the
 server node whose report the state comes from, and are omitted when the state
 does not come from a node report.
 

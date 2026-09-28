@@ -3,7 +3,7 @@
 package librarymonitor
 
 import (
-	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"strconv"
@@ -20,7 +20,7 @@ const platformSupported = true
 func classifyRoot(root string) (fsClass, error) {
 	var st unix.Statfs_t
 	if err := unix.Statfs(root, &st); err != nil {
-		return fsClass{}, err
+		return fsClass{}, fmt.Errorf("statfs %s: %w", root, err)
 	}
 	return classifyFSType(int64(st.Type)), nil //nolint:unconvert // f_type is int32 on some architectures.
 }
@@ -67,24 +67,4 @@ func readMaxUserWatches() int {
 		return 0
 	}
 	return n
-}
-
-// fallbackReason explains, for the status detail, why a root uses inotify
-// after fanotify failed with err. The status already names the inotify
-// backend, so the reason only says why fanotify was not used.
-func fallbackReason(err error) string {
-	switch {
-	case err == nil:
-		return ""
-	case errors.Is(err, unix.EPERM):
-		return "fanotify unavailable: Silo doesn't have CAP_SYS_ADMIN."
-	case errors.Is(err, unix.EINVAL):
-		return "fanotify unavailable: the kernel doesn't support filesystem marks (Linux 5.9 or newer is needed)."
-	case errors.Is(err, unix.EXDEV):
-		return "fanotify unavailable: it can't mark this filesystem or subvolume."
-	case errors.Is(err, unix.EOPNOTSUPP), errors.Is(err, unix.ENODEV):
-		return "fanotify unavailable: this filesystem doesn't support file handles."
-	default:
-		return "fanotify unavailable: " + err.Error() + "."
-	}
 }

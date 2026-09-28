@@ -5,6 +5,7 @@ package librarymonitor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -553,4 +554,22 @@ func TestExpireMovesReportsExpiredAndExcessMoves(t *testing.T) {
 	if len(kept) != maxPendingMoves || !slices.Equal(out, []int{0, 1}) {
 		t.Fatalf("kept %d, moved out %v; want %d kept and the two oldest moved out", len(kept), out, maxPendingMoves)
 	}
+}
+
+func eventStrings(events []Event) []string {
+	out := make([]string, 0, len(events))
+	for _, ev := range events {
+		s := fmt.Sprintf("%s %s", ev.Kind, filepath.Join(ev.Dir, ev.Name))
+		if ev.Kind == EventRename {
+			s = fmt.Sprintf("%s %s -> %s", ev.Kind, filepath.Join(ev.OldDir, ev.OldName), filepath.Join(ev.Dir, ev.Name))
+		}
+		if ev.Root != "" {
+			s = fmt.Sprintf("%s %s", ev.Kind, ev.Root)
+		}
+		if ev.Kind == EventOverflow {
+			s = ev.Kind.String()
+		}
+		out = append(out, s)
+	}
+	return out
 }

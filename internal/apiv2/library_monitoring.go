@@ -54,7 +54,7 @@ type LibraryRealtimeMonitoringEntry struct {
 	LibraryID   ID       `json:"library_id" example:"1"`
 	Enabled     bool     `json:"enabled" doc:"The library's own realtime_monitoring switch" example:"true"`
 	State       string   `json:"state" enum:"server_disabled,library_disabled,monitoring_off,not_reporting,starting,monitoring,unsupported_filesystem,unsupported_platform,limit_reached,root_unavailable,error" doc:"server_disabled, library_disabled, monitoring_off and not_reporting are derived from settings and report freshness, checked in that order; otherwise the best state a server node reported in the last 3 minutes (monitoring, then starting, limit_reached, root_unavailable, unsupported_filesystem, unsupported_platform, error)" example:"monitoring"`
-	Backend     string   `json:"backend" doc:"Kernel notification backend of the reporting node: inotify, fanotify, or empty" example:"inotify"`
+	Backend     string   `json:"backend" doc:"Kernel notification backend of the reporting node: inotify, or empty when none is recorded" example:"inotify"`
 	Detail      string   `json:"detail" doc:"Why monitoring is not working, or a caveat about it; empty when there is nothing to say" example:""`
 	Directories int      `json:"directories" doc:"Folders the reporting node records for the library" example:"4812"`
 	NodeID      string   `json:"node_id,omitempty" doc:"The server node whose report the state comes from; absent without a fresh report" example:"node-a"`

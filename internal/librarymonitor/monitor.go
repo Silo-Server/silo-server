@@ -1,7 +1,6 @@
 // Package librarymonitor implements real-time library monitoring: it watches
-// the folders of enabled libraries with a kernel notification backend
-// (inotify, or fanotify when the process may place filesystem marks) and
-// queues the narrowest scan for each settled change.
+// the folders of enabled libraries with inotify and queues the narrowest scan
+// for each settled change.
 //
 // Monitoring is node-local. Every API or integrated node monitors the library
 // roots it can see and reports a per-library status row; scans go to the
@@ -111,15 +110,11 @@ type Config struct {
 
 // testHooks are seams for tests in this package.
 type testHooks struct {
-	// primary, when set, replaces inotify as the fallback backend.
-	primary func(BackendOptions) (Backend, error)
-	// fanotify, when set, replaces the registered fanotify factory;
-	// noFanotify disables fanotify entirely.
-	fanotify   func(BackendOptions) (Backend, error)
-	noFanotify bool
-	classify   func(string) (fsClass, error)
-	inotify    inotifyHooks
-	stat       func(string) (fileState, error)
+	// primary, when set, replaces the inotify backend.
+	primary  func(BackendOptions) (Backend, error)
+	classify func(string) (fsClass, error)
+	inotify  inotifyHooks
+	stat     func(string) (fileState, error)
 	// mounts, when set, replaces reading /proc/self/mountinfo.
 	mounts func() ([]mountEntry, error)
 	// Observation points for tests.
@@ -167,9 +162,6 @@ type Monitor struct {
 	desired      map[int]*models.MediaFolder
 	libraryScans map[int]struct{}
 	primary      Backend
-	fanotify     Backend
-	fanotifyErr  error
-	fanotifyDone bool
 	// removals counts detached roots; a limit_reached root retries when
 	// watches were freed since it hit the limit.
 	removals uint64
@@ -226,9 +218,8 @@ type rootState struct {
 }
 
 // rootRelease is a root to drop from a backend. Detaching collects them
-// under m.mu and runs them once it is unlocked: RemoveRoot can stat and
-// mark paths (fanotify), which blocks forever on a hung mount, and nothing
-// that holds m.mu may wait on a mount.
+// under m.mu and runs them once it is unlocked: releasing watches on a hung
+// mount can block, and nothing that holds m.mu may wait on a mount.
 type rootRelease struct {
 	backend Backend
 	path    string
@@ -323,12 +314,7 @@ func (m *Monitor) Stop() {
 
 		m.mu.Lock()
 		m.stopped = true
-		backends := make([]Backend, 0, 2)
-		for _, b := range []Backend{m.primary, m.fanotify} {
-			if b != nil {
-				backends = append(backends, b)
-			}
-		}
+		primary := m.primary
 		m.mu.Unlock()
 
 		// A walk blocked in a syscall on a hung mount cannot be interrupted;
@@ -343,16 +329,16 @@ func (m *Monitor) Stop() {
 		case <-time.After(m.stopWait()):
 			m.log.Warn("librarymonitor: stopping without waiting for a stuck folder walk")
 		}
-		for _, b := range backends {
+		if primary != nil {
 			closed := make(chan error, 1)
-			go func() { closed <- b.Close() }()
+			go func() { closed <- primary.Close() }()
 			select {
 			case err := <-closed:
 				if err != nil {
-					m.log.Warn("librarymonitor: closing backend failed", "backend", b.Name(), "err", err)
+					m.log.Warn("librarymonitor: closing backend failed", "backend", primary.Name(), "err", err)
 				}
 			case <-time.After(m.stopWait()):
-				m.log.Warn("librarymonitor: stopping without waiting for a stuck backend", "backend", b.Name())
+				m.log.Warn("librarymonitor: stopping without waiting for a stuck backend", "backend", primary.Name())
 			}
 		}
 		if m.cfg.Status != nil {
@@ -431,14 +417,6 @@ func (m *Monitor) run(ctx context.Context) {
 
 // reconcile diffs the desired roots against the current ones.
 func (m *Monitor) reconcile(ctx context.Context) {
-	m.mu.Lock()
-	fb := m.fanotify
-	m.mu.Unlock()
-	if c, ok := fb.(markChecker); ok {
-		// A filesystem mark dies with its superblock and says nothing; the
-		// backend asks for re-walks of the roots that need a new one.
-		c.checkMarks()
-	}
 	listCtx, cancel := context.WithTimeout(ctx, listTimeout)
 	folders, err := m.cfg.Folders.List(listCtx)
 	cancel()
@@ -751,10 +729,7 @@ func (m *Monitor) attach(ctx context.Context, rs *rootState, ticket *walkTicket,
 	if err := m.gate.wait(ctx, ticket); err != nil {
 		return outcome{canceled: true}
 	}
-	b, reason, err := m.attachBackend(ctx, rs, ticket)
-	if reason != "" {
-		notes = append([]string{reason}, notes...)
-	}
+	b, err := m.attachBackend(ctx, rs, ticket)
 	return m.walkOutcome(ctx, rs.path, b, err, notes, id, mounts)
 }
 
@@ -799,71 +774,25 @@ func (m *Monitor) walkOutcome(ctx context.Context, path string, b Backend, err e
 	return outcome{state: StateError, errText: err.Error()}
 }
 
-// attachBackend records the root with fanotify when that backend is
-// registered and accepts the root, and otherwise with inotify. The returned
-// reason explains a fallback for the status detail.
-func (m *Monitor) attachBackend(ctx context.Context, rs *rootState, ticket *walkTicket) (Backend, string, error) {
-	path := rs.path
-	reason := ""
-	if fb, ferr := m.fanotifyBackend(); fb != nil {
-		m.setAttaching(rs, fb)
-		m.gate.setProgress(ticket, func() int { return fb.Directories(path) })
-		err := fb.AddRoot(ctx, path)
-		if err == nil {
-			return fb, "", nil
-		}
-		fb.RemoveRoot(path)
-		if ctx.Err() != nil {
-			return nil, "", ctx.Err()
-		}
-		reason = fallbackReason(err)
-		m.log.InfoContext(ctx, "librarymonitor: fanotify can't monitor folder; using inotify", "path", path, "err", err)
-	} else if ferr != nil {
-		reason = fallbackReason(ferr)
-	}
+// attachBackend records the root with the inotify backend.
+func (m *Monitor) attachBackend(ctx context.Context, rs *rootState, ticket *walkTicket) (Backend, error) {
 	b, err := m.primaryBackend()
 	if err != nil {
-		return nil, reason, err
+		return nil, err
 	}
 	m.setAttaching(rs, b)
-	m.gate.setProgress(ticket, func() int { return b.Directories(path) })
-	if err := b.AddRoot(ctx, path); err != nil {
-		b.RemoveRoot(path)
-		return nil, reason, err
+	m.gate.setProgress(ticket, func() int { return b.Directories(rs.path) })
+	if err := b.AddRoot(ctx, rs.path); err != nil {
+		b.RemoveRoot(rs.path)
+		return nil, err
 	}
-	return b, reason, nil
+	return b, nil
 }
 
 func (m *Monitor) setAttaching(rs *rootState, b Backend) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	rs.attaching = b
-}
-
-// fanotifyBackend creates the fanotify backend once, when a factory is
-// registered (see newFanotifyBackend). Its creation error is remembered.
-func (m *Monitor) fanotifyBackend() (Backend, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	factory := newFanotifyBackend
-	switch {
-	case m.cfg.hooks.noFanotify:
-		factory = nil
-	case m.cfg.hooks.fanotify != nil:
-		factory = m.cfg.hooks.fanotify
-	}
-	if !m.fanotifyDone && factory != nil && !m.stopped {
-		m.fanotifyDone = true
-		b, err := factory(BackendOptions{Logger: m.log})
-		if err != nil {
-			m.fanotifyErr = err
-			m.log.Info("librarymonitor: fanotify unavailable; using inotify", "err", err)
-		} else {
-			m.fanotify = b
-			go m.forward(b)
-		}
-	}
-	return m.fanotify, m.fanotifyErr
 }
 
 // primaryBackend creates the process's inotify backend on first use. A

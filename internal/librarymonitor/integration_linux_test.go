@@ -12,9 +12,7 @@ import (
 	"time"
 )
 
-// integrationBackend is one backend the scenario table runs against. The
-// fanotify stage adds its entry (skipping when the process cannot place a
-// filesystem mark).
+// integrationBackend is one backend the scenario table runs against.
 type integrationBackend struct {
 	name      string
 	configure func(t *testing.T, cfg *Config)
@@ -23,7 +21,7 @@ type integrationBackend struct {
 var integrationBackends = []integrationBackend{
 	{
 		name:      "inotify",
-		configure: func(_ *testing.T, cfg *Config) { cfg.hooks.noFanotify = true },
+		configure: func(*testing.T, *Config) {},
 	},
 }
 

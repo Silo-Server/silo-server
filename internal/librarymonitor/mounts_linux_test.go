@@ -80,17 +80,11 @@ func hasMount(signature, point string) bool {
 // TestRemountIsRecordedAgain unmounts and mounts a filesystem again at once,
 // either the library folder itself or a disk mounted inside it, and checks
 // that changes on the new mount are still seen. The kernel sends inotify
-// IN_UNMOUNT but nothing when the filesystem comes back, and fanotify sends
-// nothing at all while its filesystem mark dies with the old superblock.
-// It runs only as root.
+// IN_UNMOUNT but nothing when the filesystem comes back. It runs only as
+// root.
 func TestRemountIsRecordedAgain(t *testing.T) {
 	backends := []integrationBackend{
-		{name: BackendInotify, configure: func(_ *testing.T, cfg *Config) { cfg.hooks.noFanotify = true }},
-		{name: BackendFanotify, configure: func(t *testing.T, cfg *Config) {
-			requireFanotifyMark(t, t.TempDir())
-			cfg.hooks.noFanotify = false
-			cfg.hooks.fanotify = nil
-		}},
+		{name: BackendInotify, configure: func(*testing.T, *Config) {}},
 	}
 	for _, backend := range backends {
 		for _, nested := range []bool{false, true} {

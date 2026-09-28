@@ -47,7 +47,7 @@ var nodeSeverity = map[State]int{
 type LibraryStatus struct {
 	LibraryID int
 	State     State
-	// Backend is "inotify", "fanotify", or empty.
+	// Backend is "inotify", or empty when no folder is recorded.
 	Backend     string
 	Detail      string
 	Directories int
@@ -89,7 +89,6 @@ func aggregateLibrary(libraryID int, roots []rootView, configured int) (LibraryS
 	}
 	var groups []*detailGroup
 	byDetail := make(map[string]*detailGroup)
-	backends := make(map[string]bool)
 	visible := 0
 	for _, root := range roots {
 		if root.state == stateInvisible {
@@ -100,7 +99,7 @@ func aggregateLibrary(libraryID int, roots []rootView, configured int) (LibraryS
 			status.State = root.state
 		}
 		if root.backend != "" {
-			backends[root.backend] = true
+			status.Backend = root.backend
 		}
 		if root.detail != "" {
 			g := byDetail[root.detail]
@@ -115,14 +114,6 @@ func aggregateLibrary(libraryID int, roots []rootView, configured int) (LibraryS
 	}
 	if visible == 0 {
 		return LibraryStatus{}, false
-	}
-	// With mixed backends, name the limited one; the detail carries each
-	// root's fallback reason.
-	switch {
-	case backends[BackendInotify]:
-		status.Backend = BackendInotify
-	case backends[BackendFanotify]:
-		status.Backend = BackendFanotify
 	}
 	details := make([]string, 0, len(groups))
 	for _, g := range groups {
@@ -219,7 +210,7 @@ func limitDetail(limit, dirs int) string {
 		limitText = fmt.Sprintf("fs.inotify.max_user_watches (%d)", limit)
 	}
 	return fmt.Sprintf("Reached the inotify watch limit %s; this folder needs %d watches. "+
-		"Raise the limit on the host (containers can't change it), or grant Silo CAP_SYS_ADMIN so it can use fanotify, which has no limit.",
+		"Raise the limit on the host (containers can't change it).",
 		limitText, dirs)
 }
 

@@ -2,9 +2,8 @@
 
 On Linux, Silo watches the folders of enabled libraries and scans only what
 changed, usually within seconds of a file being added, finished, renamed, or
-removed. It uses inotify by default and fanotify when the process has
-`CAP_SYS_ADMIN`. Network shares are not monitored. Each library reports
-whether monitoring works, which backend it uses, and why it is not working.
+removed. It uses inotify. Network shares are not monitored. Each library
+reports whether monitoring works and, when it doesn't, why.
 
 Code lives in `internal/librarymonitor`. The v2 status and capability
 operations are in `internal/apiv2/library_monitoring.go` and are described in
@@ -120,9 +119,7 @@ walked:
   checks above cannot see it. The backends catch it instead: inotify sends
   `IN_UNMOUNT` for every watch on the unmounted filesystem, and a folder with
   one below it is walked again at once (a folder that was itself unmounted is
-  lost, see [Folder loss](#folder-loss)). fanotify sends nothing, so every
-  reconcile compares the filesystem marks the kernel lists for the group in
-  `/proc/self/fdinfo` with the marks Silo holds; see [fanotify](#fanotify).
+  lost, see [Folder loss](#folder-loss)).
 
 A re-walk asked for while an attempt on the folder is running starts as soon
 as that attempt ends.
@@ -136,49 +133,18 @@ Retry behaviour by state:
   not re-walked every 30 seconds for nothing.
 - `unsupported_platform` is never retried.
 
-## Backends
+## Backend
 
-Both backends call `golang.org/x/sys/unix` directly and turn kernel events into
-one common form: directory, name, kind (create, close-write, moved from, moved
-to, rename, delete), and whether the entry is a directory, plus overflow, root
-lost, and limit reached. Everything after that is shared, so scanning behaves
-the same on either backend. Paths are always built from the configured library
-path, even when it or a directory below it is a symlink, because the scan
-resolver matches configured paths.
+The backend calls `golang.org/x/sys/unix` directly and turns kernel events
+into one common form: directory, name, kind (create, close-write, moved from,
+moved to, rename, delete), and whether the entry is a directory, plus
+overflow, root lost, and limit reached. Everything after that (quiet window,
+classification, scan resolution) works on that form. Paths are always built
+from the configured library path, even when it or a directory below it is a
+symlink, because the scan resolver matches configured paths.
 
-Neither backend subscribes to modify events (`IN_MODIFY`, `FAN_MODIFY`). A copy
-always ends in a close-write, so per-write events would only add volume.
-
-### Selection
-
-For each folder:
-
-1. A folder on an unsupported filesystem (see
-   [Filesystem support](#filesystem-support)) is not monitored.
-2. Otherwise Silo tries fanotify: it places, or reuses, a filesystem mark for
-   the folder's filesystem and records the folder's directories by file handle.
-3. If that fails, the folder uses inotify, and the reason becomes part of the
-   status detail.
-
-The fanotify group is created once per process, the first time a folder needs
-a backend. If creating it fails, every folder falls back with that reason. On
-Linux 5.13 and later an unprivileged `fanotify_init` succeeds, so without
-`CAP_SYS_ADMIN` the failure shows up as `EPERM` on each folder's first mark,
-before any walk. Inside Docker without the capability, the default seccomp
-profile makes `fanotify_init` itself return `EPERM`. Both give the same reason.
-
-| Error | Status detail |
-|---|---|
-| `EPERM` | fanotify unavailable: Silo doesn't have CAP_SYS_ADMIN. |
-| `EINVAL` | fanotify unavailable: the kernel doesn't support filesystem marks (Linux 5.9 or newer is needed). |
-| `EXDEV` | fanotify unavailable: it can't mark this filesystem or subvolume. |
-| `EOPNOTSUPP`, `ENODEV` | fanotify unavailable: this filesystem doesn't support file handles. |
-| anything else | fanotify unavailable: *error*. |
-
-There is no setting to choose a backend. Granting or withholding
-`CAP_SYS_ADMIN` is the switch.
-
-### inotify
+The backend does not subscribe to `IN_MODIFY`. A copy always ends in a
+close-write, so per-write events would only add volume.
 
 - One inotify instance per process and one watch per recorded directory, with
   the mask `IN_CREATE | IN_CLOSE_WRITE | IN_MOVED_FROM | IN_MOVED_TO |
@@ -195,11 +161,11 @@ There is no setting to choose a backend. Granting or withholding
   the tree is re-recorded under its new paths; the kernel returns the same
   watch descriptors, so no watch is re-created.
 - A symlink to a directory is followed and recorded like a directory, but the
-  kernel does not flag its events as directory events. Both backends treat a
+  kernel does not flag its events as directory events. The backend treats a
   deleted or moved entry as a directory when a directory is recorded under its
   name, and a renamed or moved-in entry as one when it resolves to a
   directory, so renaming or deleting such a symlink moves or drops its watches
-  (or handle-map entries) like a real directory's.
+  like a real directory's.
 - `IN_UNMOUNT` on a directory below a folder (a filesystem mounted inside it
   went away) asks the monitor to walk the folder again.
 - Move halves are paired by cookie. If a read ends between the two halves, the
@@ -213,65 +179,10 @@ There is no setting to choose a backend. Granting or withholding
   [Watch limit](#watch-limit-inotify). Each watch pins its directory's inode in
   kernel memory, roughly 1 KB.
 
-### fanotify
-
-- One group per process, created with `FAN_CLASS_NOTIF | FAN_REPORT_DFID_NAME
-  | FAN_CLOEXEC | FAN_NONBLOCK` and the default queue size (no
-  `FAN_UNLIMITED_QUEUE`), so a flood overflows instead of growing kernel memory
-  without bound.
-- One `FAN_MARK_FILESYSTEM` mark per filesystem (keyed by fsid), with the mask
-  `FAN_CREATE | FAN_DELETE | FAN_MOVED_FROM | FAN_MOVED_TO | FAN_CLOSE_WRITE |
-  FAN_DELETE_SELF | FAN_MOVE_SELF | FAN_ONDIR`. Marks are reference-counted by
-  folder and removed only when the last folder on that filesystem goes. No file
-  descriptors are held, so the backend never keeps a mount busy.
-- Events name their parent directory by file handle. Silo resolves handles
-  through its own map of (fsid, handle type, handle bytes) to directory paths.
-  The walk builds the map with `name_to_handle_at`, using `AT_HANDLE_FID` on
-  Linux 6.5 and later and the plain encoding on older kernels. Directory
-  create, move, and delete events keep it current. Events whose directory is
-  not in the map are dropped: downloads, the transcode directory, anything
-  outside a library.
-- Map keys use the fsid of the mark covering the directory's mount, because the
-  kernel reports every event on a superblock under the fsid the mark was placed
-  with. That is what lets btrfs subvolumes nested below a marked folder work.
-- A filesystem mounted inside a library folder gets its own mark during the
-  walk. If it cannot be marked or has no file handles, the whole folder falls
-  back to inotify. If such a directory appears at runtime, the affected folders
-  are released and reported lost; the next reconcile re-attaches them, and
-  fanotify's refusal then moves them to inotify.
-- The kernel merges queued events on the same directory entry into one mask and
-  loses their order. When one record holds both an arrival and a departure,
-  Silo checks whether the entry exists now to decide which came last.
-- Directory move halves pair by handle, which survives a rename. File halves
-  pair in order within a read, with the same 20 ms wait as inotify.
-- fanotify reports no unmount event, and a mark dies with its superblock: a
-  filesystem unmounted and mounted again at once has no mark, although it has
-  the same device, fsid, and root inode. Every reconcile counts the
-  `fanotify sdev:` lines (filesystem marks) in the group's
-  `/proc/self/fdinfo` entry. When the kernel lists fewer marks than Silo
-  holds, every mark is treated as stale and every fanotify folder is walked
-  again; the walk places the missing marks anew and confirms the live ones
-  with an idempotent `FAN_MARK_ADD`. The mount-to-fsid map is cleared at the
-  same time, because the next mount can reuse a mount ID.
-- There is no per-directory kernel state, so there is no watch limit and no
-  pinned inodes. The map costs roughly 100–200 bytes of Go heap per directory.
-
-### Never call `open_by_handle_at`
-
-Neither backend may call `open_by_handle_at`, and fanotify events are never
-turned back into open files. The call needs `CAP_DAC_READ_SEARCH`. Worse, a
-filesystem mark sees the whole filesystem, so opening handles from its events
-could reach host files outside a container's bind mount (the "Shocker"
-container-escape class). Handles are only compared with the ones
-`name_to_handle_at` returned for directories inside library folders, and the
-map only ever holds such directories. `FAN_REPORT_DFID_NAME` events carry a
-handle and a name instead of an open descriptor, so reading them opens nothing.
-
 ## Walk and ignore rules
 
 The initial walk, and the walk of any directory that appears later, record the
-directories the scanner would enter. Both backends use the same walk
-(`walkTree`), so they skip exactly the same folders:
+directories the scanner would enter (`walkTree`). They skip:
 
 - The fixed ignore list, matched case-insensitively against names:
   `*.partial`, `*.partial~` (Sonarr and Radarr copy imports), `*.part`,
@@ -328,8 +239,7 @@ directories the scanner would enter. Both backends use the same walk
 ## Event handling
 
 Events are tracked per path. A path is reported once it is **complete and
-quiet for 5 seconds**; another event on the same path restarts the window. The
-fanotify events map one to one onto the inotify names below.
+quiet for 5 seconds**; another event on the same path restarts the window.
 
 | Event | Meaning | Reported as |
 |---|---|---|
@@ -403,8 +313,7 @@ monitored with nothing recorded.
   coverage with holes. Other folders keep going.
 - The detail reports the folder's directory count and the current
   `fs.inotify.max_user_watches`, says the limit must be raised on the host
-  (containers can't change it), and names the other fix: grant
-  `CAP_SYS_ADMIN` so Silo can use fanotify, which has no limit.
+  (containers can't change it).
 - After an initial walk hits the limit, the walk keeps counting without adding
   watches, so the directory count is the full tree. After a runtime hit (a new
   subtree), the count is the watches held at that moment, a lower bound.
@@ -427,68 +336,18 @@ Each folder is classified with `statfs` `f_type`:
 | NFS, SMB, CIFS, SMB2, CephFS | `unsupported_filesystem`. Writes from other machines produce no events, and a hung network mount would stall the walk. The detail points to arr webhooks, the CephFS autoscan source, or the nightly scan. |
 | 9p (WSL `/mnt/c`, some VM shares) | `unsupported_filesystem`: host-side changes produce no events. |
 
-## Backend comparison
+## What was verified
 
-| | inotify (default) | fanotify (with `CAP_SYS_ADMIN`) |
-|---|---|---|
-| Privileges | None | `CAP_SYS_ADMIN`. This broad capability also allows mounts and namespace changes, so it noticeably weakens container isolation. |
-| Kernel | Any supported | 5.9 or newer. Many Synology kernels are older. |
-| Large libraries | One watch per folder. Since Linux 5.11 the default limit scales with RAM (about 1% of it, between 8,192 and 1,048,576 watches). A big library on a small NAS can exceed it, especially next to other apps that use inotify. | No per-folder limit |
-| Kernel memory | Each watched folder's inode stays in memory, roughly 1 KB per folder | None per folder. Silo keeps a small map in its own memory. |
-| New folders | A short gap before the new folder's watch exists; Silo closes it by listing the folder after adding the watch | No gap |
-| Filesystems | Any local filesystem and most FUSE mounts | Needs file-handle support. Filesystems without it, a btrfs folder that sits inside a subvolume, and a container's own overlayfs fall back to inotify automatically. |
-| Busy shared disks | Only library folders produce events | Every create, delete, move, and finished write on the whole filesystem reaches Silo, which discards anything outside libraries. On a busy development host this cost 0.4 to 2.9% CPU, because write progress is never reported. |
-| Network shares (NFS, SMB, CephFS) | Not supported | Not supported |
-
-### What was verified
-
-The fanotify backend was verified on Linux 6.8:
-
-- **ext4, xfs, btrfs:** directory handles in events equal the
-  `name_to_handle_at` handles byte for byte, and the full scenario table
-  (copy, hardlink, move in and out, rename, delete, bursts) passes.
-- **btrfs subvolumes:** a subvolume below a folder on a marked top-level
-  volume, existing or created at runtime, is monitored through the top-level
-  mark. A folder that is itself inside a subvolume fails with `EXDEV` and falls
-  back to inotify, unless another folder on the same mount already placed the
-  mark from the top level. Both outcomes monitor correctly; which one applies
-  depends on the order folders attach.
-- **Docker** (Ubuntu 24.04 container, default seccomp profile, AppArmor
-  `docker-default` enforcing): with `cap_add: [SYS_ADMIN]` and the media on a
-  bind mount, fanotify works end to end, so neither profile blocks
-  `fanotify_init`, `fanotify_mark`, or `name_to_handle_at` once the capability
-  is granted. On the container's own overlayfs the mark fails with
-  `EOPNOTSUPP`. Without the capability, the folder falls back with the
-  `CAP_SYS_ADMIN` reason.
-- **Unprivileged host process:** `fanotify_init` succeeds, the mark fails with
-  `EPERM`, and the folder runs on inotify with the `CAP_SYS_ADMIN` reason.
-- **Non-root container:** with `cap_add: [SYS_ADMIN]` and `user:` set to a
-  non-root UID, the capability is in the container's bounding set but not in
-  the process's effective set, so Silo stays on inotify with the
-  `CAP_SYS_ADMIN` reason. Granting the binary the file capability
-  (`setcap cap_sys_admin+ep`) under the same `cap_add` switches it to
-  fanotify.
-- **Full server, both backends:** a sandbox deployment passed copy, hardlink
-  import, a 29-second slow copy (no scan until the file closed), rename,
-  delete, temp-file-then-rename, move-in, series episodes, the library and
-  server switches, and a library folder removed and restored. With a
-  filesystem-wide mark on a busy host root filesystem, Silo used 0.4 to 2.9%
-  CPU.
-
-Not verified: ZFS (including TrueNAS SCALE), Unraid kernels, FUSE mounts under
-fanotify, Kubernetes runtimes, kernels older than 6.5 (the plain
-`name_to_handle_at` path) or older than 5.9 (the `EINVAL` fallback is exercised
-only through injected errors). On an unverified filesystem whose handles do not match, events
-would be dropped as outside every library; verify there before recommending
-fanotify.
+A sandbox deployment on Linux 6.8 with a local ext4 library passed copying a
+file, a hardlink import, a 29-second slow copy (no scan until the file
+closed), a folder rename, a deletion, a temp-file-then-rename write, a move-in,
+series episodes, both switches, and a library folder removed and restored.
 
 ## Operator guidance
 
-Use the default. If a library reports the watch limit, raise
-`fs.inotify.max_user_watches` on the host first. Grant `CAP_SYS_ADMIN` only if
-you can't raise the limit or don't want folders pinned in kernel memory, and
-you accept the weaker isolation. Keep library folders on bind mounts or host
-filesystems, not inside a container's own filesystem.
+If a library reports the watch limit, raise `fs.inotify.max_user_watches` on
+the host. Keep library folders on bind mounts or host filesystems, not inside a
+container's own filesystem.
 
 ### Raise the inotify watch limit
 
@@ -507,70 +366,16 @@ reconcile and retries libraries in `limit_reached`. On TrueNAS SCALE, add the
 same variable under System Settings → Advanced → Sysctl; on Unraid, the Tips
 and Tweaks plugin sets it.
 
-### Grant `CAP_SYS_ADMIN` for fanotify
-
-Docker Compose, with the image's default root user:
-
-```yaml
-services:
-  silo:
-    cap_add:
-      - SYS_ADMIN
-    volumes:
-      - /path/to/media:/media   # a bind mount; the container's overlayfs can't use fanotify
-```
-
-`cap_add` only reaches a process running as root. If the service sets `user:`
-to a non-root UID (common on Unraid and with PUID-style setups), the
-capability stays in the container's bounding set and Silo keeps using
-inotify. Either run the container as root, or give the Silo binary the file
-capability in your image (`setcap cap_sys_admin+ep /usr/local/bin/silo`) and
-keep `cap_add` so the bounding set allows it. The file capability does nothing
-under `security_opt: [no-new-privileges:true]`.
-
-Rootless Docker or Podman, and Docker with `userns-remap`, grant `SYS_ADMIN`
-only inside the container's user namespace. A filesystem mark on a host bind
-mount still fails with `EPERM`, so the status shows the `CAP_SYS_ADMIN` reason
-even though the capability was added; those setups stay on inotify.
-
-Kubernetes (container-level `securityContext`). The Pod Security "baseline"
-and "restricted" levels reject `SYS_ADMIN`, so the namespace needs the
-"privileged" level:
-
-```yaml
-containers:
-  - name: silo
-    securityContext:
-      capabilities:
-        add: ["SYS_ADMIN"]
-```
-
-As with Docker's `user:`, a non-root `runAsUser` keeps the added capability out
-of the process's effective set unless the binary carries the file capability.
-
-systemd, for a unit that runs Silo as a non-root user (a root service already
-has the capability). If the unit sets `CapabilityBoundingSet=`, it must include
-`CAP_SYS_ADMIN` too:
-
-```ini
-[Service]
-AmbientCapabilities=CAP_SYS_ADMIN
-```
-
-The status line shows the result: `(fanotify)` when the capability took
-effect, or `(inotify)` with a "fanotify unavailable: …" reason when it did
-not.
-
 ## Known limitations
 
 - Directories created at runtime are recorded on the backend's read loop. A
   symlink inside a library that points at a hung local or FUSE mount would
-  stall event reading for every folder on that backend. Direct links onto
+  stall event reading for every folder. Direct links onto
   network filesystems are skipped without being touched; a chain of links
   into one is resolved first.
-- The monitor's event loop stats created files, releases library folders
-  removed from the desired set (fanotify stats and unmarks paths there), and
-  the flush's resolver stats changed paths. A hung FUSE mount (a dead mergerfs
+- The monitor's event loop stats created files, releases the watches of
+  library folders removed from the desired set, and the flush's resolver stats
+  changed paths. A hung FUSE mount (a dead mergerfs
   branch) can hold that loop and delay changes for every library until the
   call returns. Releases never run under the monitor's lock, so status reports
   keep going. Shutdown does not wait for a stuck loop: `Stop` gives it 5
@@ -578,8 +383,5 @@ not.
 - The mount check only covers mounts below a folder's physical path. A local
   filesystem reached through a symlink inside a library is not re-walked when
   it is remounted, until an overflow or a restart.
-- A folder released at runtime because fanotify cannot record a new directory
-  in it is logged as "library folder disappeared" and shows
-  `root_unavailable` until the next reconcile moves it to inotify.
 - Library deletes and edits made through another node reach this node's
   monitor only on the 30-second reconcile.

@@ -23,8 +23,6 @@ func readMaxUserWatches() int { return 0 }
 
 func readMounts() ([]mountEntry, error) { return nil, nil }
 
-func fallbackReason(error) string { return "" }
-
 func newInotifyBackend(BackendOptions, inotifyHooks) (Backend, error) {
 	return nil, errUnsupportedPlatform
 }
