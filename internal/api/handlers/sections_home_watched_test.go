@@ -147,7 +147,8 @@ func TestHomeWatchedCandidateLimitCapsExpandedWindow(t *testing.T) {
 		display int
 		want    int
 	}{
-		{display: 0, want: 0},
+		// No configured limit means the fetcher's default of 20.
+		{display: 0, want: 100},
 		{display: 20, want: 100},
 		{display: 50, want: 200},
 		{display: 250, want: 250},
@@ -280,5 +281,24 @@ func TestHomePreferenceFiltersOnlyHomeResponses(t *testing.T) {
 	library := handler.buildSectionsResponse(req, sectionItems, nil)
 	if got := len(library.Sections[0].Items); got != 2 {
 		t.Fatalf("non-Home response has %d items, want 2", got)
+	}
+}
+
+// A section with no configured item limit shows the fetcher's default of 20,
+// so the widened candidate window is cut back to 20, not left unbounded.
+func TestFilterWatchedHomeSectionItemsBoundsUnsetLimitToDefault(t *testing.T) {
+	items := make([]*models.MediaItem, 0, 100)
+	for i := 0; i < 100; i++ {
+		items = append(items, &models.MediaItem{ContentID: fmt.Sprintf("item-%03d", i+1)})
+	}
+	input := []sections.SectionWithItems{{
+		ResolvedSection: sections.ResolvedSection{ID: "ordinary", SectionType: sections.SectionRecentlyAdded},
+		Items:           items,
+		TotalCount:      100,
+	}}
+
+	filtered := filterWatchedHomeSectionItems(input, nil)
+	if got := len(filtered[0].Items); got != homeSectionDefaultItemLimit {
+		t.Fatalf("filtered section has %d items, want the default %d", got, homeSectionDefaultItemLimit)
 	}
 }

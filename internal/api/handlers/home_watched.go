@@ -61,8 +61,22 @@ func homeSectionsForFetch(resolved []sections.ResolvedSection, hideWatched bool)
 	return fetch
 }
 
+// homeSectionDefaultItemLimit is the row size sections.Fetcher uses when a
+// section sets no item limit.
+const homeSectionDefaultItemLimit = 20
+
+// effectiveHomeItemLimit is the number of items a section row shows: its
+// configured limit, or the fetcher's default when none is set.
+func effectiveHomeItemLimit(itemLimit int) int {
+	if itemLimit <= 0 {
+		return homeSectionDefaultItemLimit
+	}
+	return itemLimit
+}
+
 func homeWatchedCandidateLimit(displayLimit int) int {
-	if displayLimit <= 0 || displayLimit >= homeWatchedMaxExpandedCandidates {
+	displayLimit = effectiveHomeItemLimit(displayLimit)
+	if displayLimit >= homeWatchedMaxExpandedCandidates {
 		return displayLimit
 	}
 	if displayLimit > homeWatchedMaxExpandedCandidates/homeWatchedCandidateMultiplier {
@@ -114,9 +128,10 @@ func filterWatchedHomeSectionItems(
 	copy(filtered, withItems)
 	for i := range filtered {
 		section := &filtered[i]
+		limit := effectiveHomeItemLimit(section.ItemLimit)
 		if keepsWatchedItemsOnHome(section.ResolvedSection) {
-			if section.ItemLimit > 0 && len(section.Items) > section.ItemLimit {
-				section.Items = section.Items[:section.ItemLimit]
+			if len(section.Items) > limit {
+				section.Items = section.Items[:limit]
 			}
 			continue
 		}
@@ -126,7 +141,7 @@ func filterWatchedHomeSectionItems(
 				continue
 			}
 			items = append(items, item)
-			if section.ItemLimit > 0 && len(items) == section.ItemLimit {
+			if len(items) == limit {
 				break
 			}
 		}
