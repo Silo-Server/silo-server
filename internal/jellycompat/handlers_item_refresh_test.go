@@ -143,6 +143,10 @@ func TestItemRefreshScansEachDirectoryOfSeriesOnce(t *testing.T) {
 		{libraryID: 7, mode: scantrigger.ModeSubtree, path: filepath.Dir(s2e1), trigger: itemRefreshTrigger},
 	}
 	assertQueuedScans(t, queue, want)
+	// Each List is two queries in production; one request lists libraries once.
+	if calls := handler.folders.(*fakeAutoscanFolders).listCalls; calls != 1 {
+		t.Fatalf("library list loaded %d times for one refresh, want 1", calls)
+	}
 }
 
 func TestItemRefreshScansOnlyTheRequestedSeason(t *testing.T) {

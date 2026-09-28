@@ -45,7 +45,9 @@ func (h *AutoscanHandler) HandleItemRefresh(w http.ResponseWriter, r *http.Reque
 	}
 	ctx := r.Context()
 	rawID := chi.URLParam(r, "id")
-	resolver := scantrigger.NewResolver(h.folders)
+	// A series refresh resolves every episode file; list the libraries once
+	// for the request instead of once per file.
+	resolver := scantrigger.NewResolver(&requestFolderList{FolderRepository: h.folders})
 
 	if libraryID, err := h.codec.DecodeIntID(EncodedIDLibrary, rawID); err == nil {
 		id := int(libraryID)
@@ -99,6 +101,26 @@ func (h *AutoscanHandler) HandleItemRefresh(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	h.enqueueItemRefresh(w, r, targets)
+}
+
+// requestFolderList loads the library list on first use and reuses it for the
+// rest of one request. It is not safe for concurrent use.
+type requestFolderList struct {
+	scantrigger.FolderRepository
+	folders []*models.MediaFolder
+	loaded  bool
+}
+
+func (l *requestFolderList) List(ctx context.Context) ([]*models.MediaFolder, error) {
+	if l.loaded {
+		return l.folders, nil
+	}
+	folders, err := l.FolderRepository.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	l.folders, l.loaded = folders, true
+	return folders, nil
 }
 
 func (h *AutoscanHandler) enqueueItemRefresh(w http.ResponseWriter, r *http.Request, targets []scantrigger.Target) {
