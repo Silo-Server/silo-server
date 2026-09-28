@@ -89,9 +89,11 @@ failed request tells you which case you are in:
 | `request skipped … reason=folder_disabled` | The library switch is off, or the folder itself is disabled |
 | `request skipped … reason=no_chapters` | The file has no chapter markers |
 | `request skipped … reason=no_eligible_chapters` | Every chapter has an image or is waiting for a retry |
+| `request skipped … reason=file_cooldown` | The whole file is waiting out a file-level failure; `retry_after` on the line says until when |
 | `request skipped … reason=hdr_policy_disabled` | HDR handling is set to skip, and this source needs tone mapping |
 | `extract failed … reason=tonemap_unsupported` | HDR source that could not be tone mapped with the current settings |
 | `probe failed … reason=probe_failed` | Silo could not probe the file's chapter metadata |
+| `extract failed … reason=decode_invalid_data` | FFmpeg reported invalid data in the source file |
 | `extract failed … reason=ffmpeg_probe_failed` | FFmpeg's filter probe failed during frame extraction |
 | `upload failed` | Extraction worked, but the image could not be stored. Check local artwork storage permissions and free space, or the public bucket's credentials and endpoint if using S3 |
 
@@ -100,6 +102,15 @@ A failed chapter becomes eligible for another attempt after 15 minutes, then
 the 24-hour delay. Opening the watch page, starting playback, or the scheduled
 backfill can trigger an eligible retry without a rescan; a backfill backlog can
 delay it.
+
+Three failures pause the whole file instead of one chapter:
+`decode_invalid_data`, `ffmpeg_probe_failed`, and `tonemap_unsupported`. Silo
+logs `chapter thumbnail file marked failed` with a `retry_after` time. Until
+then, every request for the file logs `reason=file_cooldown` and the backfill
+skips it, whatever the chapter schedule says. `ffmpeg_probe_failed` and
+`tonemap_unsupported` step through the same 15-minute to 24-hour delays,
+counted per file. `decode_invalid_data` starts at 24 hours on the first
+failure, so reopening the watch page 15 minutes later does not retry it.
 
 ## Source References
 
