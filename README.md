@@ -108,8 +108,7 @@ Open <http://localhost:8090> and complete onboarding.
 The [Docker deployment guide](docs/wiki/deployment/docker.md) covers the
 `SECRET_KEY` backup requirement, storage paths, GPU acceleration, Meilisearch,
 external PostgreSQL and Redis, distributed roles, PostgreSQL tuning, backups,
-and updates. Migrating from Continuum? Use the
-[cutover guide](docs/continuum-to-silo-docker-migration.md).
+and updates.
 
 ## Builds and releases
 

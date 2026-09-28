@@ -11,7 +11,6 @@ audience:
   - operator
 last_reviewed: 2026-08-20
 related:
-  - ../../continuum-to-silo-docker-migration.md
   - ../../release-versioning.md
   - ../../s3-storage-setup.md
 ---
@@ -577,13 +576,6 @@ curl -fsS http://localhost:8090/api/v1/ready
 including PostgreSQL and configured S3 storage. Both are retained operational
 probes: they keep these paths after the `/api/v1` contract is retired, so probe
 configuration does not change when the server moves to `/api/v2`.
-
-## Migrating from Continuum
-
-Follow [Continuum to Silo Docker Migration](../../continuum-to-silo-docker-migration.md).
-Keep the old in-container media path if existing library records store it, and
-keep the migration backup until scanning, metadata, users, plugins, and
-playback have all been checked.
 
 ## Source References
 
